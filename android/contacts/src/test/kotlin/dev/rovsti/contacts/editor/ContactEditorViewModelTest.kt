@@ -3,7 +3,10 @@
 package dev.rovsti.contacts.editor
 
 import androidx.lifecycle.SavedStateHandle
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.card.SampleCards
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -11,8 +14,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /** E4.4 AC1/AC3/AC4: the editor's decisions on the real Rust core (validation sentences, dirty, save, undo). */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class ContactEditorViewModelTest {
     private var rig: EditorRig? = null
 
@@ -175,7 +183,7 @@ class ContactEditorViewModelTest {
         r.stateWhere { it.draft.org == "New Co" && it.dirty }
         r.model.onAction(EditorAction.Save)
         val saved = r.effect() as EditorEffect.Saved
-        assertEquals("Saved · Company changed", saved.notice)
+        assertEquals("Saved · Company changed", (saved.notice).en())
         assertTrue(saved.undoable)
         assertEquals("New Co", r.contacts().first { it.id == 1L }.org)
         assertTrue(runBlocking { r.model.undo() })

@@ -54,6 +54,7 @@ import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.longPressMenu
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -91,10 +92,20 @@ fun EmergencyScreen(
     modifier: Modifier = Modifier,
     overlays: OverlayController? = LocalOverlayOrNull.current,
 ) {
+    val strContactsAddEmergency = stringResource(R.string.contacts_add_emergency)
+    val strFavoritesAddConfirm = stringResource(R.string.favorites_add_confirm)
+    val strFavoritesEdit = stringResource(R.string.favorites_edit)
+    val strFavoritesDone = stringResource(R.string.favorites_done)
+    val strSettingsEmergency = stringResource(R.string.settings_emergency)
     val ready = state.phase == EmergencyPhase.Ready
-    val pickTitle = "Add Emergency Contacts"
+    val pickTitle = strContactsAddEmergency
     val onAdd: () -> Unit = {
-        overlays?.presentContactPicker(pickTitle, "Add", state.pickables, emptySet()) { ids ->
+        overlays?.presentContactPicker(
+            pickTitle,
+            strFavoritesAddConfirm,
+            state.pickables,
+            emptySet(),
+        ) { ids ->
             onAction(EmergencyAction.AddAll(ids))
         }
     }
@@ -108,17 +119,22 @@ fun EmergencyScreen(
                     header.map { button ->
                         when (button) {
                             EmergencyHeaderAction.Add -> {
-                                ToolbarAction("add", RovstiIcons.Plus, "Add", onClick = onAdd)
+                                ToolbarAction(
+                                    "add",
+                                    RovstiIcons.Plus,
+                                    strFavoritesAddConfirm,
+                                    onClick = onAdd,
+                                )
                             }
 
                             EmergencyHeaderAction.Edit -> {
-                                ToolbarAction("edit", RovstiIcons.Pencil, "Edit") {
+                                ToolbarAction("edit", RovstiIcons.Pencil, strFavoritesEdit) {
                                     onAction(EmergencyAction.ToggleEdit)
                                 }
                             }
 
                             EmergencyHeaderAction.Done -> {
-                                ToolbarAction("done", RovstiIcons.Checkmark, "Done") {
+                                ToolbarAction("done", RovstiIcons.Checkmark, strFavoritesDone) {
                                     onAction(EmergencyAction.ToggleEdit)
                                 }
                             }
@@ -135,7 +151,7 @@ fun EmergencyScreen(
             onDropped = { from, to -> onAction(EmergencyAction.Move(from, to)) },
         )
     LargeTitleScaffold(
-        title = "Emergency Contacts",
+        title = strSettingsEmergency,
         state = listState,
         actions = actions,
         navigation = NavigationButton(onClick = onBack),
@@ -166,9 +182,9 @@ private fun LazyListScope.readyItems(
             ) {
                 EmptyState(
                     icon = RovstiIcons.MedicalCross,
-                    title = "No Emergency Contacts",
-                    message = "Add up to ${state.max} people to reach first. They stay in the order you choose.",
-                    actionLabel = "Add Contact",
+                    title = stringResource(R.string.contacts_no_emergency),
+                    message = stringResource(R.string.contacts_emergency_empty_message, state.max),
+                    actionLabel = stringResource(R.string.contacts_add_contact),
                     onAction = onAdd,
                 )
             }
@@ -182,7 +198,7 @@ private fun LazyListScope.readyItems(
     }
     item(key = "footer", contentType = "footer") {
         RovstiText(
-            "Up to ${state.max} people, in the order you choose.",
+            stringResource(R.string.contacts_emergency_footer, state.max),
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Spacing.gutter + Spacing.m, vertical = Spacing.m)
@@ -194,7 +210,7 @@ private fun LazyListScope.readyItems(
     if (!state.editing) {
         item(key = "share", contentType = "share") {
             RovstiText(
-                "Share List",
+                stringResource(R.string.contacts_share_list),
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = Sizes.touch)
@@ -284,7 +300,7 @@ private fun CallButton(
     tag: String,
 ) {
     if (LocalDensity.current.fontScale <= LARGE_TEXT) {
-        CapsuleButton("Call", onClick, Modifier.testTag(tag), icon = RovstiIcons.Phone)
+        CapsuleButton(stringResource(R.string.emergency_call), onClick, Modifier.testTag(tag), icon = RovstiIcons.Phone)
     } else {
         val colors = RovstiTheme.colors
         val label = stringResource(R.string.emergency_call)
@@ -332,11 +348,19 @@ private fun rowMenu(
     count: Int,
     onAction: (EmergencyAction) -> Unit,
 ): ImmutableList<MenuItem> {
-    val earlier = stringResource(R.string.favorites_move_earlier)
-    val later = stringResource(R.string.favorites_move_later)
+    val strFavoritesMoveEarlier = stringResource(R.string.favorites_move_earlier)
+    val strFavoritesMoveLater = stringResource(R.string.favorites_move_later)
+    val strEmergencyCall = stringResource(R.string.emergency_call)
+    val strContactsRemoveFromEmergency = stringResource(R.string.contacts_remove_from_emergency)
+    val earlier = strFavoritesMoveEarlier
+    val later = strFavoritesMoveLater
     return remember(id, index, count, onAction, earlier, later) {
         val items = ArrayList<MenuItem>()
-        items += MenuItem.Action("Call", RovstiIcons.Phone) { onAction(EmergencyAction.Call(id)) }
+        items +=
+            MenuItem.Action(
+                strEmergencyCall,
+                RovstiIcons.Phone,
+            ) { onAction(EmergencyAction.Call(id)) }
         if (index > 0) {
             items +=
                 MenuItem.Action(earlier, RovstiIcons.ArrowUp) { onAction(EmergencyAction.MoveStep(index, up = true)) }
@@ -347,7 +371,11 @@ private fun rowMenu(
         }
         items += MenuItem.Separator
         items +=
-            MenuItem.Action("Remove from Emergency Contacts", RovstiIcons.MedicalCross, destructive = true) {
+            MenuItem.Action(
+                strContactsRemoveFromEmergency,
+                RovstiIcons.MedicalCross,
+                destructive = true,
+            ) {
                 onAction(EmergencyAction.Remove(id))
             }
         persistentListOf<MenuItem>().addAll(items)

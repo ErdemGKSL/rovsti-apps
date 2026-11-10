@@ -1,9 +1,12 @@
 package dev.rovsti.contacts.card
 
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
 import dev.rovsti.core.model.contacts.WaLookup
 import dev.rovsti.core.model.contacts.WaLookupUser
 import dev.rovsti.core.model.contacts.WaPresence
 import dev.rovsti.core.model.phone.CallLogKind
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.system.permissions.PermissionState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -45,9 +48,9 @@ class ContactCardViewModelTest {
     @Test fun theBirthdayRowCarriesTheDateAndTheAge() {
         val r = rig(1)
         val date = r.row(r.ready(), "date-0")
-        assertEquals("Birthday · 35 years old", date.label)
-        assertTrue("the date and when: ${date.title}", date.title.startsWith("3 Oct 1990"))
-        assertTrue("and when it is next: ${date.title}", date.title.contains("days"))
+        assertEquals("Birthday · 35 years old", date.label?.en())
+        assertTrue("the date and when: ${date.title}", date.title.en().startsWith("3 Oct 1990"))
+        assertTrue("and when it is next: ${date.title}", date.title.en().contains("days"))
         assertNotNull("a birthday offers to send a wish", date.wish)
         assertTrue(date.wish!!.contains("36th"))
     }
@@ -61,11 +64,11 @@ class ContactCardViewModelTest {
                 .first { it.kind == RowKind.Number }
                 .rows
         assertEquals(2, numbers.size)
-        assertTrue("the default number is on top: ${numbers[0].title}", numbers[0].title.contains("532"))
+        assertTrue("the default number is on top: ${numbers[0].title}", numbers[0].title.en().contains("532"))
         assertTrue(numbers[0].isDefault)
         assertFalse(numbers[1].isDefault)
-        assertEquals("Mobile", numbers[0].label?.substringBefore(" ·"))
-        assertEquals("a foreign number names its country", "Work · Germany", numbers[1].label)
+        assertEquals("Mobile", numbers[0].label?.en()?.substringBefore(" ·"))
+        assertEquals("a foreign number names its country", "Work · Germany", numbers[1].label?.en())
     }
 
     @Test fun aSingleNumberHasNoDefaultTag() {
@@ -83,13 +86,13 @@ class ContactCardViewModelTest {
 
     @Test fun theNumberMenuOffersTheCopyFormsShareAndTheDefault() {
         val r = rig(1)
-        val menu = r.row(r.ready(), "number-1").menu.map { it.label }
+        val menu = r.row(r.ready(), "number-1").menu.map { it.label.en() }
         assertEquals("Call", menu.first())
         assertEquals("Message", menu[1])
         assertTrue("two or more forms to copy: $menu", menu.count { it.startsWith("Copy") } >= 2)
         assertTrue(menu.contains("Share Number"))
         assertTrue("a sibling number offers the default: $menu", menu.contains("Set as default"))
-        val first = r.row(r.ready(), "number-0").menu.map { it.label }
+        val first = r.row(r.ready(), "number-0").menu.map { it.label.en() }
         assertTrue("the default one offers to clear it: $first", first.contains("Clear default"))
     }
 
@@ -98,11 +101,13 @@ class ContactCardViewModelTest {
         val state = r.ready()
         val address = r.row(state, "address-0")
         assertTrue((address.tap as FieldOp.OpenUrl).url.startsWith("geo:"))
-        assertTrue(address.menu.map { it.label }.containsAll(listOf("Copy Address", "Share Address", "Open in Maps")))
+        assertTrue(
+            address.menu.map { it.label.en() }.containsAll(listOf("Copy Address", "Share Address", "Open in Maps")),
+        )
         val site = r.row(state, "website-0")
         assertEquals("https://acme.example/ayse", (site.tap as FieldOp.OpenUrl).url)
         assertEquals("Burak Demir", r.row(state, "relation-0").relationName)
-        assertEquals("Brother", r.row(state, "relation-0").label)
+        assertEquals("Brother", r.row(state, "relation-0").label?.en())
     }
 
     @Test fun historyIsHiddenWithoutThePermission() {
@@ -224,8 +229,14 @@ class ContactCardViewModelTest {
                 it.kind ==
                     RowKind.Whatsapp
             }
-        assertEquals(listOf("WhatsApp name", "About"), section.rows.map { it.label })
-        assertEquals("At work", section.rows.last().title)
+        assertEquals(listOf("WhatsApp name", "About"), section.rows.map { it.label?.en() })
+        assertEquals(
+            "At work",
+            section.rows
+                .last()
+                .title
+                .en(),
+        )
     }
 
     @Test fun callDialsTheDefaultNumberOrAsksWhichOne() {
@@ -252,13 +263,14 @@ class ContactCardViewModelTest {
         r.model.onAction(
             ContactCardAction.Field(FieldOp.SetDefault(emails = false, value = "+49 30 1234567", clear = false)),
         )
-        assertEquals(ContactCardEffect.Toast("Default number set"), r.effect())
+        assertEquals(ContactCardEffect.Toast(UiText.Res(R.string.contacts_default_number_set)), r.effect())
         val state =
             r.stateWhere { s ->
                 s.sections
                     .first { it.kind == RowKind.Number }
                     .rows[0]
                     .title
+                    .en()
                     .contains("30")
             }
         assertTrue(
@@ -271,14 +283,14 @@ class ContactCardViewModelTest {
         r.model.onAction(
             ContactCardAction.Field(FieldOp.SetDefault(emails = false, value = "+49 30 1234567", clear = true)),
         )
-        assertEquals(ContactCardEffect.Toast("Default cleared"), r.effect())
+        assertEquals(ContactCardEffect.Toast(UiText.Res(R.string.contacts_default_cleared)), r.effect())
     }
 
     @Test fun copyWritesTheClipboardAndAnswersWithTheNotice() {
         val r = rig(1)
         r.ready()
-        r.model.onAction(ContactCardAction.Field(FieldOp.Copy("ayse@acme.example", "Email copied")))
-        assertEquals(ContactCardEffect.Toast("Email copied"), r.effect())
+        r.model.onAction(ContactCardAction.Field(FieldOp.Copy("ayse@acme.example", UiText.Literal("Email copied"))))
+        assertEquals(ContactCardEffect.Toast(UiText.Literal("Email copied")), r.effect())
         assertEquals(listOf("ayse@acme.example" to false), r.clipboard.copies)
     }
 

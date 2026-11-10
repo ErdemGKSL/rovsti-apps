@@ -31,6 +31,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
@@ -204,6 +205,8 @@ abstract class OverlayEntry(
     val modal: Boolean,
     val title: String,
     val dismissOnBack: Boolean = true,
+    /** A string resource for the pane title when [title] is empty, so a default title follows the language. */
+    val titleRes: Int? = null,
 ) {
     val state = MutableTransitionState(false)
 
@@ -320,9 +323,10 @@ fun OverlayEntries(controller: OverlayController) {
     Box(Modifier.fillMaxSize()) {
         for (entry in controller.entries) {
             key(entry) {
+                val entryTitle = entry.title.ifEmpty { entry.titleRes?.let { stringResource(it) }.orEmpty() }
                 BoxWithConstraints(
                     Modifier.fillMaxSize().semantics {
-                        paneTitle = entry.title
+                        paneTitle = entryTitle
                         isTraversalGroup = true
                     },
                 ) {

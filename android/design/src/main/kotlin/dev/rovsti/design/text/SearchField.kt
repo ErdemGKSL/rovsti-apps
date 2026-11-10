@@ -5,8 +5,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import dev.rovsti.design.R
 
 /**
  * A [GlassTextField] for searching (glisse `SearchField`): a magnifier, a "Search" placeholder and a clear button, the
@@ -16,7 +18,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 fun SearchField(
     state: TextFieldState,
     modifier: Modifier = Modifier,
-    placeholder: String = "Search",
+    placeholder: String = stringResource(R.string.design_search),
     enabled: Boolean = true,
     onSubmit: () -> Unit = {},
 ) {

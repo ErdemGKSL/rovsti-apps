@@ -1,5 +1,8 @@
 package dev.rovsti.contacts.dupes
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.intake.draftSecondary
@@ -15,6 +18,7 @@ import dev.rovsti.core.model.contacts.DraftsRequest
 import dev.rovsti.core.model.contacts.DupGroup
 import dev.rovsti.core.model.contacts.MergeRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import kotlinx.collections.immutable.toImmutableList
@@ -76,7 +80,7 @@ class DupesViewModel(
                     }
 
                     Book.NoPermission -> {
-                        publish(emptyList(), "No duplicates found", emptyMap())
+                        publish(emptyList(), UiText.Res(R.string.contacts_no_duplicates_found), emptyMap())
                     }
 
                     is Book.Ready -> {
@@ -85,7 +89,12 @@ class DupesViewModel(
                                 (ops.dupes(DraftsRequest(next.drafts)) as? Outcome.Ok)?.value
                             }
                         val photos = next.contacts.associate { it.id to it.photoUri }
-                        publish(answer?.groups.orEmpty(), answer?.summary ?: "No duplicates found", photos)
+                        publish(
+                            answer?.groups.orEmpty(),
+                            answer?.summary?.let { UiText.Literal(it) }
+                                ?: UiText.Res(R.string.contacts_no_duplicates_found),
+                            photos,
+                        )
                     }
                 }
             }
@@ -105,7 +114,7 @@ class DupesViewModel(
 
     private fun publish(
         found: List<DupGroup>,
-        summary: String,
+        summary: UiText,
         photos: Map<Long, String?>,
     ) {
         groups = found
@@ -118,7 +127,7 @@ class DupesViewModel(
                 DupeRow(
                     key = group.ids.first(),
                     name = draftTitle(keeper),
-                    secondary = "and $more more · ${group.label}",
+                    secondary = UiText.Res(R.string.contacts_dupe_secondary, listOf(more, UiText.Literal(group.label))),
                     photoUri = photos[group.ids.first()],
                 )
             }
@@ -155,9 +164,13 @@ class DupesViewModel(
                     name = draftTitle(merged.draft),
                     subtitle = draftSubtitle(merged.draft) ?: draftSecondary(merged.draft),
                     photoUri = photo,
-                    sources = "From " + drafts.joinToString(", ") { draftTitle(it) },
+                    sources =
+                        UiText.Res(
+                            R.string.contacts_merge_sources,
+                            listOf(UiText.Literal(drafts.joinToString(", ") { draftTitle(it) })),
+                        ),
                     sections = previewSectionsOf(merged.draft),
-                    mergeLabel = "Merge ${drafts.size} Contacts",
+                    mergeLabel = UiText.Res(R.string.contacts_merge_n_contacts, listOf(drafts.size)),
                 )
             ui.update { it.copy(review = review) }
         }
@@ -173,9 +186,18 @@ class DupesViewModel(
     private fun askMergeAll() {
         val n = groups.size
         if (n == 0) return
-        val body = "Each group becomes one contact. The extra copies go to the Trash, and Undo brings everything back."
-        val title = if (n == 1) "Merge the duplicate?" else "Merge all $n duplicates?"
-        outbox.trySend(DupesEffect.Ask(title, body, "Merge All", DupesAction.ConfirmMergeAll))
+        val body: UiText = UiText.Res(R.string.contacts_merge_body)
+        val title: UiText =
+            if (n ==
+                1
+            ) {
+                UiText.Res(R.string.contacts_merge_one_title)
+            } else {
+                UiText.Plural(R.plurals.contacts_merge_all_title, n)
+            }
+        outbox.trySend(
+            DupesEffect.Ask(title, body, UiText.Res(R.string.contacts_merge_all), DupesAction.ConfirmMergeAll),
+        )
     }
 
     private fun merge(selected: List<DupGroup>) {
@@ -208,12 +230,19 @@ class DupesViewModel(
                     notice = plan.notice
                 }
                 if (undoable.isEmpty()) {
-                    outbox.trySend(DupesEffect.Toast("Couldn't merge right now"))
+                    outbox.trySend(DupesEffect.Toast(UiText.Res(R.string.contacts_cant_merge)))
                 } else {
                     val token = tokens.incrementAndGet()
                     undos[token] = undoable
                     // One group says what the core says; several say the same in the same words.
-                    val message = if (undoable.size == 1 && notice != null) notice else "Merged $people contacts"
+                    val message =
+                        if (undoable.size == 1 &&
+                            notice != null
+                        ) {
+                            UiText.Literal(notice)
+                        } else {
+                            UiText.Res(R.string.contacts_merged_n_contacts, listOf(people))
+                        }
                     outbox.trySend(DupesEffect.Undo(message, token))
                 }
             } finally {
@@ -233,9 +262,9 @@ class DupesViewModel(
             val restored = if (keys.isEmpty()) RestoreResult.Done(emptyList(), "") else trash.restore(keys)
             val text =
                 when {
-                    restored is RestoreResult.Done && !failed -> "Merge undone"
-                    restored is RestoreResult.Missing -> "They are not in the Trash any more"
-                    else -> "Couldn't undo it completely, the rest is in the Trash"
+                    restored is RestoreResult.Done && !failed -> UiText.Res(R.string.contacts_merge_undone)
+                    restored is RestoreResult.Missing -> UiText.Res(R.string.contacts_not_in_trash_many)
+                    else -> UiText.Res(R.string.contacts_undo_partial)
                 }
             outbox.trySend(DupesEffect.Toast(text))
         }

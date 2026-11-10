@@ -1,10 +1,12 @@
 package dev.rovsti.contacts.settings
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.BirthdayAlarms
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ReminderPort
 import dev.rovsti.contacts.data.WaMarks
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.favorites.NOW
 import dev.rovsti.contacts.intake.VcfExport
 import dev.rovsti.contacts.list.ContactsListViewModel
@@ -18,6 +20,7 @@ import dev.rovsti.core.model.phone.SortBy
 import dev.rovsti.core.model.search.NameFormat
 import dev.rovsti.core.ops.NativeContactsWaOps
 import dev.rovsti.core.ops.NativeSearchOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.ShortcutsRepository
 import dev.rovsti.platform.files.FakeClipboardRepository
@@ -144,7 +147,7 @@ class ContactsSettingsViewModelTest {
         assertFalse(r.store.prefs.value.birthdayReminders)
         vm.onAction(SettingsAction.NotificationsAnswered(true))
         val toast = r.next(vm) as SettingsEffect.Toast
-        assertTrue(toast.text, toast.text.startsWith("Birthday reminders on, at "))
+        assertTrue(toast.text.en(), toast.text.en().startsWith("Birthday reminders on, at "))
         assertTrue(r.wait { vm.state.first { it.reminders } }.reminders)
         assertTrue(r.store.prefs.value.birthdayReminders)
     }
@@ -166,10 +169,10 @@ class ContactsSettingsViewModelTest {
         val vm = r.settings()
         r.ready(vm)
         vm.onAction(SettingsAction.SetReminders(true))
-        assertTrue((r.next(vm) as SettingsEffect.Toast).text.startsWith("Birthday reminders on"))
+        assertTrue((r.next(vm) as SettingsEffect.Toast).text.en().startsWith("Birthday reminders on"))
         assertTrue(r.wait { vm.state.first { it.reminders } }.reminders)
         vm.onAction(SettingsAction.SetReminders(false))
-        assertEquals(SettingsEffect.Toast("Birthday reminders off"), r.next(vm))
+        assertEquals(SettingsEffect.Toast(UiText.Res(R.string.contacts_birthday_reminders_off)), r.next(vm))
     }
 
     @Test fun aPermissionOnlyAndroidSettingsCanChangeIsExplained() {

@@ -12,10 +12,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import dev.rovsti.design.R
 import dev.rovsti.design.ios.component.IosContextMenuEntry
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.channels.Channel
@@ -42,7 +44,7 @@ class ButtonMenuEntry(
 fun Modifier.menuTrigger(
     controller: OverlayController,
     items: ImmutableList<MenuItem>,
-    label: String = "Open menu",
+    label: String = stringResource(R.string.design_open_menu),
 ): Modifier {
     val holder = remember { AnchorHolder() }
     val live = remember { arrayOfNulls<ButtonMenuEntry>(1) }

@@ -9,6 +9,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rovsti.testing.ShotTest
 import org.junit.After
 import org.junit.Test
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /** E4.9 screenshots: the Share submenu floating over the card and the QR sheet, light and dark. */
@@ -61,7 +62,7 @@ class E49ShotTest : ShotTest() {
         r.model.onAction(ContactCardAction.ShowQr)
         val model = (r.effect() as ContactCardEffect.ShowQr).model
         snap("e4.9-qr-sheet", r) { h ->
-            compose.runOnUiThread { h.overlays.presentQrSheet(model) {} }
+            compose.runOnUiThread { h.overlays.presentQrSheet(RuntimeEnvironment.getApplication(), model) {} }
             advance(1_200)
         }
     }

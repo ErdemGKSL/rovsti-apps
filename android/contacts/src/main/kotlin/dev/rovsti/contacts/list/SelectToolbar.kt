@@ -12,7 +12,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.rovsti.contacts.R
 import dev.rovsti.core.model.contacts.SelectAction
 import dev.rovsti.design.chrome.ToolbarButton
 import dev.rovsti.design.icons.RovstiIcon
@@ -20,6 +22,7 @@ import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.menuTrigger
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import kotlinx.collections.immutable.persistentListOf
@@ -50,18 +53,26 @@ fun SelectToolbar(
     modifier: Modifier = Modifier,
     isInline: Boolean = true,
 ) {
+    val strContactsExportVcf = stringResource(R.string.contacts_export_vcf)
+    val strContactsCopyNumbers = stringResource(R.string.contacts_copy_numbers)
+    val strContactsCopyEmails = stringResource(R.string.contacts_copy_emails)
+    val strContactsShare = stringResource(R.string.contacts_share)
+    val strContactsAddToGroup = stringResource(R.string.contacts_add_to_group)
+    val strContactsStar = stringResource(R.string.contacts_star)
+    val strEditorDelete = stringResource(R.string.editor_delete)
+
     fun on(action: SelectAction) = action in select.actions
     val more =
         remember(onAction) {
             persistentListOf<MenuItem>(
-                MenuItem.Action("Export .vcf", RovstiIcons.Download, onClick = {
+                MenuItem.Action(strContactsExportVcf, RovstiIcons.Download, onClick = {
                     onAction(ContactsListAction.ExportSelected)
                 }),
                 MenuItem.Separator,
-                MenuItem.Action("Copy Numbers", RovstiIcons.Phone, onClick = {
+                MenuItem.Action(strContactsCopyNumbers, RovstiIcons.Phone, onClick = {
                     onAction(ContactsListAction.CopySelectedNumbers)
                 }),
-                MenuItem.Action("Copy Emails", RovstiIcons.Mail, onClick = {
+                MenuItem.Action(strContactsCopyEmails, RovstiIcons.Mail, onClick = {
                     onAction(ContactsListAction.CopySelectedEmails)
                 }),
             )
@@ -77,28 +88,28 @@ fun SelectToolbar(
     ) {
         ToolbarButton(
             RovstiIcons.Share,
-            "Share",
+            strContactsShare,
             { onAction(ContactsListAction.ShareSelected) },
             Modifier.testTag(SelectTags.Share),
             enabled = on(SelectAction.Share),
         )
         ToolbarButton(
             RovstiIcons.Folder,
-            "Add to Group",
+            strContactsAddToGroup,
             { onAction(ContactsListAction.AskAddToGroup) },
             Modifier.testTag(SelectTags.AddToGroup),
             enabled = on(SelectAction.AddToGroup),
         )
         ToolbarButton(
             RovstiIcons.Star,
-            "Star",
+            strContactsStar,
             { onAction(ContactsListAction.StarSelected) },
             Modifier.testTag(SelectTags.Star),
             enabled = on(SelectAction.Star),
         )
         ToolbarButton(
             RovstiIcons.Trash,
-            "Delete",
+            strEditorDelete,
             { onAction(ContactsListAction.AskDeleteSelected) },
             Modifier.testTag(SelectTags.Delete),
             enabled = on(SelectAction.Delete),
@@ -109,7 +120,17 @@ fun SelectToolbar(
                 .size(width = Sizes.button, height = Sizes.touch)
                 .alpha(if (canMore) 1f else 0.38f)
                 .testTag(SelectTags.More)
-                .then(if (canMore) Modifier.menuTrigger(overlays, more, "More") else Modifier),
+                .then(
+                    if (canMore) {
+                        Modifier.menuTrigger(
+                            overlays,
+                            more,
+                            stringResource(R.string.contacts_more),
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             RovstiIcon(RovstiIcons.Ellipsis, null, tint = RovstiTheme.glass.foreground, size = SelectMetrics.MoreIcon)

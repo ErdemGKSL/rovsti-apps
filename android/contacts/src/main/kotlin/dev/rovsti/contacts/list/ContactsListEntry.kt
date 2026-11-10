@@ -10,12 +10,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.R
 import dev.rovsti.design.overlay.ActionSheetAction
 import dev.rovsti.design.overlay.ActionSheetEntry
 import dev.rovsti.design.overlay.AlertAction
@@ -24,6 +26,7 @@ import dev.rovsti.design.overlay.AlertRole
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
+import dev.rovsti.design.text.resolve
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.ShareIntents
 import dev.rovsti.platform.system.Handoff
@@ -95,16 +98,16 @@ fun ContactsListEffects(
 
                 is ContactsListEffect.WhatsApp -> {
                     if (!Handoff.start(context, Handoff.ACTION_WA_CHAT, effect.jid, effect.name)) {
-                        toast("Install Rovsti Messages to chat on WhatsApp")
+                        toast(context.getString(R.string.contacts_install_messages))
                     }
                 }
 
                 is ContactsListEffect.Toast -> {
-                    toast(effect.text)
+                    toast(effect.text.resolve(context))
                 }
 
                 is ContactsListEffect.SaveVcf -> {
-                    latestSave.value?.invoke(effect) ?: toast("Can't save a file here.")
+                    latestSave.value?.invoke(effect) ?: toast(context.getString(R.string.contacts_cant_save_here))
                 }
 
                 is ContactsListEffect.ConfirmDeleteSelected -> {
@@ -114,8 +117,8 @@ fun ContactsListEffects(
                             message = effect.confirm.body.ifBlank { null },
                             actions =
                                 persistentListOf(
-                                    AlertAction("Cancel", AlertRole.Cancel),
-                                    AlertAction("Delete", AlertRole.Destructive) {
+                                    AlertAction(context.getString(R.string.contacts_cancel), AlertRole.Cancel),
+                                    AlertAction(context.getString(R.string.editor_delete), AlertRole.Destructive) {
                                         viewModel.onAction(ContactsListAction.DeleteSelected)
                                     },
                                 ),
@@ -126,7 +129,7 @@ fun ContactsListEffects(
                 is ContactsListEffect.ChooseGroup -> {
                     latestOverlays.value.present(
                         ActionSheetEntry(
-                            title = "Add to Group",
+                            title = context.getString(R.string.contacts_add_to_group),
                             actions =
                                 effect.groups
                                     .map { group ->
@@ -139,7 +142,7 @@ fun ContactsListEffects(
                 }
 
                 is ContactsListEffect.Deleted -> {
-                    latestOverlays.value.showUndo(effect.notice, onUndo = {
+                    latestOverlays.value.showUndo(effect.notice.resolve(context), onUndo = {
                         viewModel.onAction(ContactsListAction.UndoDelete(effect.keys))
                     })
                 }
@@ -147,12 +150,15 @@ fun ContactsListEffects(
                 is ContactsListEffect.ConfirmClearViewed -> {
                     latestOverlays.value.present(
                         AlertEntry(
-                            heading = effect.confirm.title,
-                            message = effect.confirm.body.ifBlank { null },
+                            heading = effect.confirm.title.resolve(context),
+                            message =
+                                effect.confirm.body
+                                    .resolve(context)
+                                    .ifBlank { null },
                             actions =
                                 persistentListOf(
-                                    AlertAction("Cancel", AlertRole.Cancel),
-                                    AlertAction("Clear", AlertRole.Destructive) {
+                                    AlertAction(context.getString(R.string.contacts_cancel), AlertRole.Cancel),
+                                    AlertAction(context.getString(R.string.contacts_clear), AlertRole.Destructive) {
                                         viewModel.onAction(ContactsListAction.ClearViewed)
                                     },
                                 ),
@@ -172,7 +178,7 @@ private fun start(
     try {
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: ActivityNotFoundException) {
-        onFailure("No app can do this.")
+        onFailure(context.getString(R.string.contacts_no_app))
     }
 }
 

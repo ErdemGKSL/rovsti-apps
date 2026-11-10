@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.controls.GlassCircleButton
 import dev.rovsti.design.glass.LocalGlassSettings
 import dev.rovsti.design.icons.RovstiIcon
@@ -104,7 +106,7 @@ fun FrostedTopBar(
     onBack: (() -> Unit)? = null,
     // Long-press-to-home on the back button: many settings screens jump straight back to the root.
     onBackLongClick: (() -> Unit)? = null,
-    backLabel: String = "Back",
+    backLabel: String = stringResource(R.string.design_back),
     title: String = "",
     titleAlpha: Float = 0f,
     // Draw-phase progress source. When supplied, the bar reads it only inside graphicsLayer/derivedStateOf so scroll

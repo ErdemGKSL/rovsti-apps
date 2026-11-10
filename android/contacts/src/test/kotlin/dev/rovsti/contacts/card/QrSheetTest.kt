@@ -25,6 +25,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.nio.file.Files
@@ -59,7 +60,10 @@ class QrSheetTest {
         compose.setContent {
             RovstiTheme(darkTheme = false) { Host() }
         }
-        compose.runOnUiThread { entry = controller.presentQrSheet(model()) { shared += it } }
+        compose.runOnUiThread {
+            entry =
+                controller.presentQrSheet(RuntimeEnvironment.getApplication(), model()) { shared += it }
+        }
         compose.mainClock.advanceTimeBy(1_200)
         compose.waitForIdle()
     }

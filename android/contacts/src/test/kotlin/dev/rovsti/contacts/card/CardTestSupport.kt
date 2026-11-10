@@ -16,10 +16,13 @@ import androidx.compose.ui.platform.testTag
 import dev.rovsti.contacts.ContactsRoots
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.ContactsTabs
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
+import dev.rovsti.contacts.en
 import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.design.transition.rovstiSharedBounds
 import dev.rovsti.shell.RovstiShell
@@ -59,7 +62,7 @@ internal fun HostedCard(
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { chromeFor(it, UiText::en) },
         overlays = harness.overlays,
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -106,3 +109,7 @@ internal fun FakeListPage(id: Long) {
         colorKey = id.toString(),
     )
 }
+
+/** The row text under "Block This Caller" when this app is not the default phone app. */
+internal val NEEDS_ROLE_TEXT: String
+    get() = UiText.Res(R.string.contacts_set_default_phone).en()

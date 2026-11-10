@@ -19,8 +19,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.editor.contactEditorExtras
 import dev.rovsti.contacts.editor.contactEditorModel
 import dev.rovsti.contacts.editor.presentContactEditor
@@ -41,6 +44,8 @@ import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.OverlayEntry
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.CapturePhoto
 import dev.rovsti.platform.files.ExportDocument
@@ -98,6 +103,7 @@ fun ContactCardPage(
     val state by model.state.collectAsState()
     val overlays = LocalOverlay.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     var pendingExport by remember { mutableStateOf<ContactCardEffect.ExportVcf?>(null) }
     val exporter =
@@ -107,7 +113,15 @@ fun ContactCardPage(
             val uri = (result as? FileResult.Ok)?.uri ?: return@rememberLauncherForActivityResult
             scope.launch {
                 val written = container.files.writeExport(uri, text = file.text)
-                overlays.showToast(if (written is FileResult.Ok) "Saved ${file.fileName}" else "Can't save the file.")
+                overlays.showToast(
+                    if (written is FileResult.Ok) {
+                        resources.getString(R.string.contacts_saved_file, file.fileName)
+                    } else {
+                        resources.getString(
+                            R.string.contacts_cant_save_file,
+                        )
+                    },
+                )
             }
         }
     ContactCardEffects(
@@ -121,6 +135,7 @@ fun ContactCardPage(
         },
         onEdit = { editId ->
             presentContactEditor(
+                context,
                 contactEditorModel(container, editId, null),
                 overlays,
                 container.scope,
@@ -192,9 +207,9 @@ fun CallOptionsEffects(
                             message = effect.confirm.body,
                             actions =
                                 persistentListOf(
-                                    AlertAction("Cancel", AlertRole.Cancel),
+                                    AlertAction(context.getString(R.string.contacts_cancel), AlertRole.Cancel),
                                     AlertAction(
-                                        "Send to Voicemail",
+                                        context.getString(R.string.contacts_send_to_voicemail),
                                     ) { model.onAction(CallOptionsAction.ConfirmVoicemail) },
                                 ),
                         ),
@@ -204,12 +219,12 @@ fun CallOptionsEffects(
                 is CallOptionsEffect.AskBlock -> {
                     latestOverlays.value.present(
                         AlertEntry(
-                            heading = effect.title,
-                            message = effect.message,
+                            heading = effect.title.resolve(context),
+                            message = effect.message.resolve(context),
                             actions =
                                 persistentListOf(
-                                    AlertAction("Cancel", AlertRole.Cancel),
-                                    AlertAction(effect.actionLabel, AlertRole.Destructive) {
+                                    AlertAction(context.getString(R.string.contacts_cancel), AlertRole.Cancel),
+                                    AlertAction(effect.actionLabel.resolve(context), AlertRole.Destructive) {
                                         model.onAction(CallOptionsAction.ConfirmBlock)
                                     },
                                 ),
@@ -225,7 +240,7 @@ fun CallOptionsEffects(
                 }
 
                 is CallOptionsEffect.Toast -> {
-                    latestOverlays.value.showToast(effect.text)
+                    latestOverlays.value.showToast(effect.text.resolve(context))
                 }
             }
         }
@@ -267,7 +282,7 @@ fun rememberCardPhotoViewer(
     LaunchedEffect(photo) {
         photo.effects.collect { effect ->
             when (effect) {
-                is PhotoEffect.Toast -> latestOverlays.value.showToast(effect.text)
+                is PhotoEffect.Toast -> latestOverlays.value.showToast(effect.text.resolve(context))
                 PhotoEffect.Changed -> open[0]?.let { latestOverlays.value.dismiss(it) }.also { open[0] = null }
             }
         }
@@ -280,6 +295,7 @@ fun rememberCardPhotoViewer(
     val scope = rememberCoroutineScope()
     return remember(container, id, pick, capture) {
         cardPhotoViewer(
+            context,
             id = id,
             files = container.files,
             scope = scope,
@@ -335,14 +351,14 @@ fun ContactCardEffects(
 
                 is ContactCardEffect.WhatsApp -> {
                     if (!Handoff.start(context, Handoff.ACTION_WA_CHAT, effect.jid, effect.name)) {
-                        toast("Install Rovsti Messages to chat on WhatsApp")
+                        toast(context.getString(R.string.contacts_install_messages))
                     }
                 }
 
                 is ContactCardEffect.PickNumber -> {
                     latestOverlays.value.present(
                         ActionSheetEntry(
-                            title = "Call",
+                            title = context.getString(R.string.emergency_call),
                             actions =
                                 effect.choices
                                     .map { choice ->
@@ -385,7 +401,7 @@ fun ContactCardEffects(
                 }
 
                 is ContactCardEffect.Toast -> {
-                    toast(effect.text)
+                    toast(effect.text.resolve(context))
                 }
 
                 is ContactCardEffect.ShareFile -> {
@@ -397,7 +413,7 @@ fun ContactCardEffects(
                 }
 
                 is ContactCardEffect.ShowQr -> {
-                    latestOverlays.value.presentQrSheet(effect.model) { uri ->
+                    latestOverlays.value.presentQrSheet(context, effect.model) { uri ->
                         start(context, ShareIntents.image(uri, QrSheetModel.MIME, effect.model.name), toast)
                     }
                 }
@@ -431,6 +447,6 @@ private fun start(
     try {
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: ActivityNotFoundException) {
-        onFailure("No app can do this.")
+        onFailure(context.getString(R.string.contacts_no_app))
     }
 }

@@ -2,6 +2,7 @@ package dev.rovsti.contacts.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
@@ -12,6 +13,7 @@ import dev.rovsti.core.model.contacts.DraftsRequest
 import dev.rovsti.core.model.contacts.ReminderAnswer
 import dev.rovsti.core.model.contacts.ReminderRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.system.permissions.NextAction
@@ -115,7 +117,18 @@ class ContactsSettingsViewModel(
             return
         }
         val label = (saved as Outcome.Ok).value.reminderHour.let { hourLabel(it) }
-        outbox.trySend(SettingsEffect.Toast(if (on) "Birthday reminders on, at $label" else "Birthday reminders off"))
+        outbox.trySend(
+            SettingsEffect.Toast(
+                if (on) {
+                    UiText.Res(
+                        R.string.contacts_birthday_reminders_on,
+                        listOf(label),
+                    )
+                } else {
+                    UiText.Res(R.string.contacts_birthday_reminders_off)
+                },
+            ),
+        )
     }
 
     private suspend fun hourLabel(hour: Int): String = reminder(emptyList(), hour)?.hourLabel.orEmpty()
@@ -168,8 +181,8 @@ class ContactsSettingsViewModel(
 
     companion object {
         const val STOP_TIMEOUT_MS = 5_000L
-        const val DENIED = "Notifications permission is off"
-        const val CANT_SAVE = "Can't save the setting."
+        val DENIED: UiText = UiText.Res(R.string.contacts_notifications_off)
+        val CANT_SAVE: UiText = UiText.Res(R.string.contacts_cant_save_setting)
         private const val LAST_HOUR = 23
     }
 }

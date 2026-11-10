@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.card
 
+import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,9 +13,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import dev.rovsti.contacts.R
 import dev.rovsti.design.controls.CapsuleButton
 import dev.rovsti.design.controls.CapsuleStyle
 import dev.rovsti.design.icons.RovstiIcons
@@ -23,6 +28,7 @@ import dev.rovsti.design.overlay.Detent
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
@@ -35,12 +41,16 @@ import kotlinx.coroutines.launch
  * with `sheetSettle` (0.86 / 380) and closes by drag, scrim tap or back like every sheet.
  */
 fun OverlayController.presentQrSheet(
+    context: Context,
     model: QrSheetModel,
     onShareImage: (Uri) -> Unit,
 ): SheetEntry {
     val controller = this
     val entry =
-        SheetEntry(title = "QR Code", detents = persistentListOf(Detent.Medium)) { _ ->
+        SheetEntry(
+            title = context.getString(R.string.contacts_qr_code),
+            detents = persistentListOf(Detent.Medium),
+        ) { _ ->
             QrSheetContent(model, toast = { controller.showToast(it) }, onShareImage = onShareImage)
         }
     present(entry)
@@ -53,6 +63,13 @@ internal fun ColumnScope.QrSheetContent(
     toast: (String) -> Unit,
     onShareImage: (Uri) -> Unit,
 ) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val strContactsScanToAdd = stringResource(R.string.contacts_scan_to_add)
+    val strContactsSaveImage = stringResource(R.string.contacts_save_image)
+    val strContactsSavedToPhotos = resources.getString(R.string.contacts_saved_to_photos)
+    val strContactsShareImage = stringResource(R.string.contacts_share_image)
+    val strContactsCantShareImage = stringResource(R.string.contacts_cant_share_image)
     val scope = rememberCoroutineScope()
     Column(
         Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(QrSheetTags.Sheet),
@@ -72,27 +89,41 @@ internal fun ColumnScope.QrSheetContent(
             overflow = TextOverflow.Ellipsis,
         )
         RovstiText(
-            "Scan to add this contact",
+            strContactsScanToAdd,
             style = RovstiTheme.type.footnote,
             color = RovstiTheme.colors.labelSecondary,
             textAlign = TextAlign.Center,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
             CapsuleButton(
-                "Save Image",
+                strContactsSaveImage,
                 onClick = {
-                    scope.launch { toast(if (model.save()) "Saved to Photos" else "Can't save the image") }
+                    scope.launch {
+                        toast(
+                            if (model.save()) {
+                                strContactsSavedToPhotos
+                            } else {
+                                resources.getString(R.string.contacts_cant_save_image)
+                            },
+                        )
+                    }
                 },
                 modifier = Modifier.weight(1f).testTag(QrSheetTags.Save),
                 icon = RovstiIcons.Download,
                 fillWidth = true,
             )
             CapsuleButton(
-                "Share Image",
+                strContactsShareImage,
                 onClick = {
                     scope.launch {
                         val uri = model.stageForShare()
-                        if (uri != null) onShareImage(uri) else toast("Can't share the image")
+                        if (uri !=
+                            null
+                        ) {
+                            onShareImage(uri)
+                        } else {
+                            toast(strContactsCantShareImage)
+                        }
                     }
                 },
                 modifier = Modifier.weight(1f).testTag(QrSheetTags.Share),

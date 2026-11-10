@@ -9,12 +9,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import dev.rovsti.contacts.R
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowSwitch
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -27,9 +31,6 @@ object CallOptionsTags {
     const val Voicemail = "card-calls-voicemail"
     const val Block = "card-calls-block"
 }
-
-/** The sentence under "Block This Caller" while this app may not use the system blocklist. */
-const val NEEDS_ROLE_TEXT = "Set Rovsti Phone as the default phone app to block callers."
 
 /**
  * The "Calls" section as one list item: Ringtone (the tone's name and a chevron), the Send Calls to Voicemail switch and
@@ -45,15 +46,15 @@ fun LazyListScope.callOptionsItem(
         Box(Modifier.padding(top = Spacing.sectionGap)) {
             InsetGroupedSection(
                 modifier = Modifier.testTag(CallOptionsTags.Section),
-                header = "Calls",
+                header = stringResource(R.string.contacts_calls),
             ) {
                 row {
                     ListRow(
-                        title = "Ringtone",
+                        title = stringResource(R.string.contacts_ringtone),
                         trailing = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 RovstiText(
-                                    state.ringtone,
+                                    state.ringtone.text(),
                                     color = RovstiTheme.colors.labelSecondary,
                                     style = RovstiTheme.type.body,
                                     maxLines = 1,
@@ -74,7 +75,7 @@ fun LazyListScope.callOptionsItem(
                 }
                 row {
                     ListRowSwitch(
-                        title = "Send Calls to Voicemail",
+                        title = stringResource(R.string.contacts_voicemail_setting),
                         checked = state.voicemail,
                         onCheckedChange = { onAction(CallOptionsAction.SetVoicemail(it)) },
                         modifier = Modifier.testTag(CallOptionsTags.Voicemail),
@@ -85,8 +86,22 @@ fun LazyListScope.callOptionsItem(
                 if (block != BlockRow.Hidden) {
                     row {
                         ListRow(
-                            title = if (unblock) "Unblock This Caller" else "Block This Caller",
-                            secondary = if (block == BlockRow.NeedsRole) NEEDS_ROLE_TEXT else null,
+                            title =
+                                if (unblock) {
+                                    stringResource(
+                                        R.string.contacts_unblock_caller,
+                                    )
+                                } else {
+                                    stringResource(R.string.contacts_block_caller)
+                                },
+                            secondary =
+                                if (block ==
+                                    BlockRow.NeedsRole
+                                ) {
+                                    stringResource(R.string.contacts_set_default_phone)
+                                } else {
+                                    null
+                                },
                             secondaryMaxLines = 2,
                             titleColor = if (unblock) Color.Unspecified else RovstiTheme.colors.destructive,
                             onClick = { onAction(CallOptionsAction.ToggleBlock) },

@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.intake
 
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,10 +25,13 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import dev.rovsti.contacts.R
 import dev.rovsti.design.controls.CapsuleButton
 import dev.rovsti.design.controls.CapsuleStyle
 import dev.rovsti.design.icons.RovstiIcon
@@ -42,6 +46,9 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.SheetState
 import dev.rovsti.design.overlay.sheetScrollConnection
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
@@ -60,7 +67,7 @@ object MappingTags {
 }
 
 /** The words of a role on a row: the chosen or guessed one, or what the file says for a column that is left alone. */
-internal fun CsvColumn.roleLabel(): String = shown?.label ?: "Automatic"
+internal fun CsvColumn.roleLabel(): UiText = shown?.label ?: UiText.Res(R.string.contacts_automatic)
 
 /**
  * The sheet "Match the Columns" in the large detent: one row per column of the file (its header and the first value),
@@ -69,12 +76,13 @@ internal fun CsvColumn.roleLabel(): String = shown?.label ?: "Automatic"
  * again after each change). Closing the sheet any way except Continue is Cancel while the page is still in the mapping.
  */
 fun OverlayController.presentMappingSheet(
+    context: Context,
     state: State<IntakeUiState>,
     onAction: (IntakeAction) -> Unit,
 ): SheetEntry {
     val entry =
         SheetEntry(
-            title = "Match the Columns",
+            title = context.getString(R.string.contacts_match_columns),
             detents = persistentListOf(Detent.Large),
             onDismissed = { if (state.value.phase == IntakePhase.Mapping) onAction(IntakeAction.Cancel) },
         ) { sheet ->
@@ -98,21 +106,21 @@ internal fun ColumnScope.MappingSheetContent(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             RovstiText(
-                "Match the Columns",
+                stringResource(R.string.contacts_match_columns),
                 style = RovstiTheme.type.title3,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             RovstiText(
-                "Choose what each column holds. A column marked Automatic is read as its name says.",
+                stringResource(R.string.contacts_match_columns_help),
                 Modifier.padding(top = Spacing.xs),
                 style = RovstiTheme.type.footnote,
                 color = RovstiTheme.colors.labelSecondary,
                 textAlign = TextAlign.Center,
             )
             RovstiText(
-                mapping.countLine,
+                mapping.countLine.text(),
                 Modifier.padding(top = Spacing.xs, bottom = Spacing.s).testTag(MappingTags.Count),
                 style = RovstiTheme.type.footnote,
                 color = if (mapping.canContinue) RovstiTheme.colors.accent else RovstiTheme.colors.labelSecondary,
@@ -138,18 +146,19 @@ private fun ColumnRow(
     overlays: OverlayController,
     onAction: (IntakeAction) -> Unit,
 ) {
+    val context = LocalContext.current
     var anchor by remember { mutableStateOf(Rect.Zero) }
     val items =
         remember(column.index, column.shown, onAction) {
             CsvRole.entries
                 .map { role ->
-                    MenuItem.Action(role.label, checked = column.shown == role) {
+                    MenuItem.Action(role.label.resolve(context), checked = column.shown == role) {
                         onAction(IntakeAction.SetRole(column.index, role))
                     }
                 }.toImmutableList<MenuItem>()
         }
     ListRow(
-        title = column.header.ifBlank { "Column ${column.index + 1}" },
+        title = column.header.ifBlank { stringResource(R.string.contacts_column_n, column.index + 1) },
         secondary = column.sample.ifBlank { null },
         trailing = {
             Row(
@@ -158,7 +167,7 @@ private fun ColumnRow(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
             ) {
                 RovstiText(
-                    column.roleLabel(),
+                    column.roleLabel().text(),
                     Modifier.widthIn(max = MappingMetrics.RoleMaxWidth),
                     style = RovstiTheme.type.body,
                     color = RovstiTheme.colors.accent,
@@ -191,7 +200,7 @@ private fun MappingButtons(
         verticalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         CapsuleButton(
-            "Continue",
+            stringResource(R.string.contacts_continue),
             onClick = { onAction(IntakeAction.ConfirmMapping) },
             modifier = Modifier.fillMaxWidth().testTag(MappingTags.Continue),
             style = CapsuleStyle.Filled,
@@ -199,7 +208,7 @@ private fun MappingButtons(
             fillWidth = true,
         )
         RovstiText(
-            "Cancel",
+            stringResource(R.string.contacts_cancel),
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = IntakeMetrics.BarButtonHeight)

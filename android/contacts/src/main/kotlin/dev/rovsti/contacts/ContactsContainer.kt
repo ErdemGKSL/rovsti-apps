@@ -84,7 +84,7 @@ open class ContactsContainer(
     val trash: ContactTrash by lazy { ContactTrash(contacts, store) }
 
     /** Deleting one contact from the card or the editor: ask, Trash, delete, Undo pill. */
-    val deletion: ContactDeletion by lazy { ContactDeletion(trash, ops, scope) }
+    val deletion: ContactDeletion by lazy { ContactDeletion(trash, ops, scope, context) }
 
     /** "Use WhatsApp Photo": the large picture of one JID from the owner's gateway. */
     val waPhotos: WaPhotoPort by lazy { createWaPhotos() }

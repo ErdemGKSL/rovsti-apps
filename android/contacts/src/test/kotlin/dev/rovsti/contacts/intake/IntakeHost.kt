@@ -19,7 +19,9 @@ import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.ContactsTabs
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
+import dev.rovsti.contacts.en
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import kotlinx.collections.immutable.toImmutableList
@@ -74,10 +76,12 @@ internal fun previewState(
 ) = IntakeUiState(
     phase = IntakePhase.Preview,
     countLine =
-        (if (count == 1) "1 new contact" else "$count new contacts") +
-            if (duplicates > 0) ", $duplicates already in your contacts" else "",
+        UiText.Literal(
+            (if (count == 1) "1 new contact" else "$count new contacts") +
+                if (duplicates > 0) ", $duplicates already in your contacts" else "",
+        ),
     rows = sampleRows(count).toImmutableList(),
-    addLabel = if (count == 1) "Add 1 Contact" else "Add $count Contacts",
+    addLabel = UiText.Literal(if (count == 1) "Add 1 Contact" else "Add $count Contacts"),
     canAddToExisting = single,
 )
 
@@ -90,7 +94,7 @@ internal fun HostedIntake(harness: IntakeHarness) {
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { chromeFor(it, UiText::en) },
         overlays = harness.overlays,
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -123,11 +127,13 @@ internal fun mappingState(found: Int = 12): IntakeUiState {
                             CsvColumn(i, name, sample, detected = null, chosen = role)
                         }.toImmutableList(),
                 countLine =
-                    when (found) {
-                        0 -> "No contacts found with these columns"
-                        1 -> "1 contact found"
-                        else -> "$found contacts found"
-                    },
+                    UiText.Literal(
+                        when (found) {
+                            0 -> "No contacts found with these columns"
+                            1 -> "1 contact found"
+                            else -> "$found contacts found"
+                        },
+                    ),
                 canContinue = found > 0,
             ),
     )

@@ -1,6 +1,8 @@
 package dev.rovsti.contacts.card
 
 import android.net.Uri
+import dev.rovsti.contacts.R
+import dev.rovsti.design.text.UiText
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -57,7 +59,7 @@ class ContactShareTest {
         val r = ready()
         r.files.staged = null
         r.model.onAction(ContactCardAction.ShareFile)
-        assertEquals(ContactCardEffect.Toast("Can't share the file."), r.effect())
+        assertEquals(ContactCardEffect.Toast(UiText.Res(R.string.contacts_cant_share_file)), r.effect())
     }
 
     @Test fun exportAsksWhereToSaveTheSameVcard() {
@@ -71,10 +73,10 @@ class ContactShareTest {
     @Test fun copyContactAndCopyAsVcardUseTheClipboardAndToast() {
         val r = ready()
         r.model.onAction(ContactCardAction.CopyContact)
-        assertEquals(ContactCardEffect.Toast("Contact copied"), r.effect())
+        assertEquals(ContactCardEffect.Toast(UiText.Res(R.string.contacts_contact_copied)), r.effect())
         assertTrue(r.clipboard.text!!.contains("Ayşe Yılmaz"))
         r.model.onAction(ContactCardAction.CopyVcard)
-        assertEquals(ContactCardEffect.Toast("vCard copied"), r.effect())
+        assertEquals(ContactCardEffect.Toast(UiText.Res(R.string.contacts_vcard_copied)), r.effect())
         assertTrue(r.clipboard.text!!.startsWith("BEGIN:VCARD"))
         assertEquals(2, r.clipboard.copies.size)
     }
@@ -82,7 +84,7 @@ class ContactShareTest {
     @Test fun addToHomePinsWithThePinShortcutAnswer() {
         val r = ready()
         r.model.onAction(ContactCardAction.AddToHome)
-        assertEquals(ContactCardEffect.Toast("Added to Home screen"), r.effect())
+        assertEquals(ContactCardEffect.Toast(UiText.Res(R.string.contacts_added_to_home_screen)), r.effect())
         val spec = r.pins.single()
         assertEquals(1L, spec.contactId)
         assertTrue("label has the name: ${spec.shortLabel}", spec.shortLabel.contains("Ayşe"))

@@ -1,7 +1,9 @@
 package dev.rovsti.contacts.groups
 
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
@@ -9,6 +11,7 @@ import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.GroupLabelsRequest
 import dev.rovsti.core.model.contacts.GroupTitleRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.saveAccount
@@ -87,7 +90,11 @@ class GroupsViewModel(
                             GroupLabelsRequest(count, group.account.takeIf { several }),
                         ) as? Outcome.Ok
                     )?.value
-                GroupItem(group.id, group.title, labels?.subtitle ?: "$count contacts")
+                GroupItem(
+                    group.id,
+                    group.title,
+                    labels?.subtitle?.let { UiText.Literal(it) } ?: UiText.Plural(R.plurals.contacts_n_contacts, count),
+                )
             }
         return GroupsUiState(GroupsPhase.Ready, rows.toImmutableList())
     }
@@ -104,7 +111,7 @@ class GroupsViewModel(
         val account = contacts.saveAccount(store.prefs.value.saveTo)
         when (val saved = contacts.saveGroup(0, title, account)) {
             is ContactResult.Ok -> {
-                outbox.trySend(GroupsEffect.Toast("Group created. Add people from its page."))
+                outbox.trySend(GroupsEffect.Toast(UiText.Res(R.string.contacts_group_created)))
                 outbox.trySend(GroupsEffect.OpenGroup(saved.value))
             }
 
@@ -119,12 +126,12 @@ class GroupsViewModel(
     }
 }
 
-internal const val GROUP_CANT_SAVE = "Can't save the group right now."
-internal const val GROUP_CANT_CHANGE = "Can't change this group right now."
-internal const val GROUP_NO_PERMISSION = "Can't change groups: Rovsti has no permission to change contacts."
+internal val GROUP_CANT_SAVE: UiText = UiText.Res(R.string.contacts_cant_save_group)
+internal val GROUP_CANT_CHANGE: UiText = UiText.Res(R.string.contacts_cant_change_group)
+internal val GROUP_NO_PERMISSION: UiText = UiText.Res(R.string.contacts_cant_change_groups_permission)
 
 /** The notice of a failed group write: the missing WRITE_CONTACTS by name, any other reason as [otherwise]. */
 internal fun groupFailure(
     reason: ContactResult.Reason,
-    otherwise: String,
-): String = if (reason == ContactResult.Reason.Permission) GROUP_NO_PERMISSION else otherwise
+    otherwise: UiText,
+): UiText = if (reason == ContactResult.Reason.Permission) GROUP_NO_PERMISSION else otherwise

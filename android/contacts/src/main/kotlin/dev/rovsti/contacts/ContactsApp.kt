@@ -6,6 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.card.ContactCardPage
 import dev.rovsti.contacts.cleanup.CleanupPage
@@ -31,6 +32,8 @@ import dev.rovsti.contacts.settings.SummaryEntry
 import dev.rovsti.contacts.settings.rememberContactsSettingsViewModel
 import dev.rovsti.contacts.trash.TrashPage
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import dev.rovsti.shell.settings.CommonSettingsPage
@@ -70,10 +73,11 @@ fun ContactsApp(
         select?.let { bar ->
             { modifier, inline -> SelectToolbar(bar, list::onAction, overlays, modifier, inline) }
         }
+    val context = LocalContext.current
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = { route -> chromeFor(route, selecting) },
+        chromeFor = { route -> chromeFor(route, selecting) { it.resolve(context) } },
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
         accessory = selectAccessory,

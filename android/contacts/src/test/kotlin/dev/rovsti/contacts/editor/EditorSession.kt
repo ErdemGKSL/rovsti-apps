@@ -4,8 +4,10 @@ import android.os.Looper
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.testing.ShotTest
 import org.junit.Assert.assertTrue
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
 /** Drives the editor sheet in the real shell for the screen tests and the shots. */
@@ -27,6 +29,7 @@ internal class EditorSession(
         rig.ready()
         test.compose.runOnUiThread {
             presentContactEditor(
+                RuntimeEnvironment.getApplication(),
                 rig.model,
                 overlays,
                 rig.scope,

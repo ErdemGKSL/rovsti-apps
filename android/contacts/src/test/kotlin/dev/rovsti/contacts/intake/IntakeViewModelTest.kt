@@ -1,6 +1,9 @@
 package dev.rovsti.contacts.intake
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.card.SampleCards
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -32,8 +35,8 @@ class IntakeViewModelTest {
         val r = open()
         val state = r.preview()
         assertEquals(listOf("Ada Lovelace", "Grace Hopper"), state.rows.map { it.name })
-        assertEquals("2 new contacts", state.countLine)
-        assertEquals("Add 2 Contacts", state.addLabel)
+        assertEquals("2 new contacts", (state.countLine).en())
+        assertEquals("Add 2 Contacts", (state.addLabel).en())
         assertEquals("one line under the name: the number", "+44 20 7946 0958", state.rows[0].secondary)
         assertEquals("a card with a company and a number lists the number", "+1 415 555 0100", state.rows[1].secondary)
         assertFalse("two cards cannot be added to one contact", state.canAddToExisting)
@@ -45,10 +48,10 @@ class IntakeViewModelTest {
         val r = open(file = TWO_AND_A_COPY)
         val state = r.preview()
         assertEquals(listOf("Ada Lovelace", "Grace Hopper"), state.rows.map { it.name })
-        assertEquals("2 new contacts, 1 already in your contacts", state.countLine)
+        assertEquals("2 new contacts, 1 already in your contacts", (state.countLine).en())
         r.model.onAction(IntakeAction.Add)
         val undo = r.effect() as IntakeEffect.Undo
-        assertEquals("Added 2 contacts", undo.message)
+        assertEquals("Added 2 contacts", (undo.message).en())
         assertEquals(SampleCards.all.size + 2, r.contacts().size)
         assertEquals("Burak is not added twice", 1, r.contacts().count { it.given == "Burak" })
     }
@@ -72,7 +75,7 @@ class IntakeViewModelTest {
                 .value,
         )
         val toast = runBlocking { undo.undo() }
-        assertEquals("2 contacts moved to the Trash", toast)
+        assertEquals("2 contacts moved to the Trash", (toast).en())
         assertEquals(SampleCards.all.size, r.contacts().size)
         val inTrash = runBlocking { r.trash.list() }
         assertEquals(2, inTrash?.entries?.size)
@@ -80,13 +83,13 @@ class IntakeViewModelTest {
 
     @Test fun aFileOfCardsTheBookAlreadyHasOnlyToasts() {
         val r = open(file = vcard("Burak Demir", "Demir", "Burak", "0532 123 45 67"))
-        assertEquals(IntakeEffect.Toast("Already in your contacts"), r.effect())
+        assertEquals(IntakeEffect.Toast(UiText.Res(R.string.contacts_already_in_contacts)), r.effect())
         assertEquals(IntakeEffect.Close, r.effect())
     }
 
     @Test fun aFileWithoutContactsToastsTheCoresWords() {
         val r = open(file = "just some words in a file")
-        assertEquals(IntakeEffect.Toast("This file has no contacts"), r.effect())
+        assertEquals(IntakeEffect.Toast(UiText.Literal("This file has no contacts")), r.effect())
         assertEquals(IntakeEffect.Close, r.effect())
     }
 
@@ -108,7 +111,7 @@ class IntakeViewModelTest {
         val open = r.stateWhere { it.preview != null }.preview!!
         assertEquals("Grace Hopper", open.name)
         assertEquals("US Navy", open.subtitle)
-        assertEquals(listOf("Phone"), open.sections.map { it.title })
+        assertEquals(listOf("Phone"), open.sections.map { it.title?.en() })
         assertEquals(
             "+1 415 555 0100",
             open.sections
@@ -145,14 +148,14 @@ class IntakeViewModelTest {
 
     @Test fun anEmptyClipboardToastsNothingToPaste() {
         val r = open(IntakeRig.paste, file = null, clip = null)
-        assertEquals(IntakeEffect.Toast("Nothing to paste"), r.effect())
+        assertEquals(IntakeEffect.Toast(UiText.Res(R.string.contacts_nothing_to_paste)), r.effect())
         assertEquals(IntakeEffect.Close, r.effect())
         assertEquals("nothing is read from a file", 0, r.files.reads.size)
     }
 
     @Test fun textThatIsNoContactToastsNothingToPaste() {
         val r = open(IntakeRig.paste, file = null, clip = "see you tomorrow at the station")
-        assertEquals(IntakeEffect.Toast("Nothing to paste"), r.effect())
+        assertEquals(IntakeEffect.Toast(UiText.Res(R.string.contacts_nothing_to_paste)), r.effect())
     }
 
     @Test fun addToExistingMergesTheNumberAndUndoPutsTheOldValuesBack() {
@@ -170,7 +173,7 @@ class IntakeViewModelTest {
         assertEquals(before.numbers.size + 1, after.numbers.size)
         assertTrue(after.numbers.any { it.value == "+44 20 7946 0958" })
         assertEquals("nothing was added as a new contact", SampleCards.all.size, r.contacts().size)
-        assertEquals("Put back", runBlocking { undo.undo() })
+        assertEquals("Put back", (runBlocking { undo.undo() }).en())
         assertEquals(
             before.numbers.map { it.value },
             r

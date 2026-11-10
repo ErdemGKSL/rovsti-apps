@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.card
 
+import dev.rovsti.contacts.en
 import dev.rovsti.platform.contacts.ContactCallOptions
 import dev.rovsti.platform.contacts.ContactResult
 import kotlinx.coroutines.Job
@@ -35,12 +36,12 @@ class CallOptionsViewModelTest {
         canBlock: Boolean = true,
     ): CardRig = CardRig(id, canBlock = canBlock).also { rig = it }
 
-    private fun toast(r: CardRig): String = (r.callEffect() as CallOptionsEffect.Toast).text
+    private fun toast(r: CardRig): String = (r.callEffect() as CallOptionsEffect.Toast).text.en()
 
     @Test fun theSectionStartsWithTheDefaultRingtoneAndNoVoicemail() {
         val r = rig()
         val state = r.callsWhere { it.loaded && it.block != BlockRow.Hidden }
-        assertEquals("Default", state.ringtone)
+        assertEquals("Default", state.ringtone.en())
         assertFalse(state.voicemail)
         assertEquals(BlockRow.Available(blocked = false), state.block)
     }
@@ -61,7 +62,7 @@ class CallOptionsViewModelTest {
         assertEquals("Ringtone set to content://media/audio/9", toast(r))
         val stored = runBlocking { r.repo.options(1) } as ContactResult.Ok
         assertEquals("content://media/audio/9", stored.value.ringtoneUri)
-        assertEquals("content://media/audio/9", r.callsWhere { it.ringtone != "Default" }.ringtone)
+        assertEquals("content://media/audio/9", r.callsWhere { it.ringtone.en() != "Default" }.ringtone.en())
     }
 
     @Test fun silentAndDefaultAreWordsNotUris() {
@@ -69,7 +70,7 @@ class CallOptionsViewModelTest {
         r.callsWhere { it.loaded }
         r.callOptions.onAction(CallOptionsAction.RingtonePicked(ContactCallOptions.Pick.Chosen("")))
         assertEquals("Ringtone set to silent", toast(r))
-        assertEquals("Silent", r.callsWhere { it.ringtone == "Silent" }.ringtone)
+        assertEquals("Silent", r.callsWhere { it.ringtone.en() == "Silent" }.ringtone.en())
         r.callOptions.onAction(CallOptionsAction.RingtonePicked(ContactCallOptions.Pick.Chosen(null)))
         assertEquals("Ringtone reset to default", toast(r))
     }
@@ -113,9 +114,9 @@ class CallOptionsViewModelTest {
         r.callsWhere { it.block == BlockRow.Available(false) }
         r.callOptions.onAction(CallOptionsAction.ToggleBlock)
         val ask = r.callEffect() as CallOptionsEffect.AskBlock
-        assertEquals("Block Ayşe Yılmaz?", ask.title)
-        assertEquals("Block Contact", ask.actionLabel)
-        assertTrue("two numbers: $ask", ask.message.contains("all their numbers"))
+        assertEquals("Block Ayşe Yılmaz?", ask.title.en())
+        assertEquals("Block Contact", ask.actionLabel.en())
+        assertTrue("two numbers: $ask", ask.message.en().contains("all their numbers"))
         assertFalse("nothing is blocked before the answer", runBlocking { r.blocklist.isBlocked("+49 30 1234567") })
         r.callOptions.onAction(CallOptionsAction.ConfirmBlock)
         assertEquals("Blocked", toast(r))

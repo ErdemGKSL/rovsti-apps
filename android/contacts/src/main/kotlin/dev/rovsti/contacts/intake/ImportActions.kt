@@ -8,11 +8,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
+import dev.rovsti.contacts.R
 import dev.rovsti.core.model.contacts.TextFileAnswer
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
@@ -42,6 +49,10 @@ fun rememberImportActions(
     navigator: TabNavigator<ContactsRoute>,
     overlays: OverlayController,
 ): ImportActions {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val strContactsCantSaveFile = stringResource(R.string.contacts_cant_save_file)
+    val strContactsNoContactsExport = stringResource(R.string.contacts_no_contacts_export)
     val scope = rememberCoroutineScope()
     val file =
         rememberLauncherForActivityResult(ImportDocument(kind = ImportKind.Contacts)) { result ->
@@ -64,7 +75,13 @@ fun rememberImportActions(
         if (file != null && uri != null) {
             scope.launch {
                 val written = container.files.writeExport(uri, text = file.text)
-                overlays.showToast(if (written is FileResult.Ok) "Saved ${file.fileName}" else "Can't save the file.")
+                overlays.showToast(
+                    if (written is FileResult.Ok) {
+                        resources.getString(R.string.contacts_saved_file, file.fileName)
+                    } else {
+                        strContactsCantSaveFile
+                    },
+                )
             }
         }
     }
@@ -76,7 +93,7 @@ fun rememberImportActions(
             // The clipboard is read on this tap and nowhere else; an empty one is answered here, without a page.
             pasteContact = {
                 if (container.clipboard.primaryText().isNullOrBlank()) {
-                    overlays.showToast(IntakeViewModel.NOTHING_TO_PASTE)
+                    overlays.showToast(IntakeViewModel.NOTHING_TO_PASTE.resolve(context))
                 } else {
                     navigator.push(ContactsRoute.Intake(paste = true))
                 }
@@ -87,7 +104,7 @@ fun rememberImportActions(
                 scope.launch {
                     val built = VcfExport(container.ops, container.book).build()
                     if (built == null) {
-                        overlays.showToast("No contacts to export")
+                        overlays.showToast(strContactsNoContactsExport)
                     } else {
                         pending = built
                         saveVcf.launch(built.fileName)
@@ -98,7 +115,7 @@ fun rememberImportActions(
                 scope.launch {
                     val built = CsvExport(container.ops, container.book).build()
                     if (built == null) {
-                        overlays.showToast("No contacts to export")
+                        overlays.showToast(strContactsNoContactsExport)
                     } else {
                         pending = built
                         save.launch(built.fileName)

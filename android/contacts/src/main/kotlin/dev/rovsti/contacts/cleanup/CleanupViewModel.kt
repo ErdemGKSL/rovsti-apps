@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.cleanup
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.intake.draftSecondary
@@ -14,6 +15,7 @@ import dev.rovsti.core.model.contacts.ContactDraft
 import dev.rovsti.core.model.contacts.SelectAction
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.design.controls.ChipModel
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.files.ClipboardRepository
 import kotlinx.collections.immutable.toImmutableList
@@ -133,7 +135,7 @@ class CleanupViewModel(
         val bar = select.bar(picked, rows.map { it.id }, hasGroups = false)
         return CleanupSelect(
             selected = picked.toImmutableSet(),
-            title = bar?.title ?: "Select contacts",
+            title = bar?.title ?: UiText.Res(R.string.contacts_select_contacts),
             allSelected = bar?.allSelected ?: false,
             canDelete = bar?.actions?.contains(SelectAction.Delete) == true,
         )

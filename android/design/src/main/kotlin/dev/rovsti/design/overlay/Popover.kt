@@ -37,6 +37,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.glass.panelGlass
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
@@ -72,9 +74,9 @@ object PopoverMetrics {
 class PopoverEntry(
     private val anchor: Rect,
     private val maxWidth: Dp = PopoverMetrics.MaxWidth,
-    title: String = "Popover",
+    title: String = "",
     private val content: @Composable () -> Unit,
-) : OverlayEntry(modal = true, title = title) {
+) : OverlayEntry(modal = true, title = title, titleRes = R.string.design_popover) {
     @Composable
     override fun Content(host: OverlayScope) {
         val reduceMotion = LocalReduceMotion.current
@@ -250,7 +252,7 @@ class PopoverEntry(
 @Composable
 fun Modifier.popoverTrigger(
     controller: OverlayController,
-    label: String = "Open popover",
+    label: String = stringResource(R.string.design_open_popover),
     content: @Composable () -> Unit,
 ): Modifier {
     val holder = remember { AnchorHolder() }

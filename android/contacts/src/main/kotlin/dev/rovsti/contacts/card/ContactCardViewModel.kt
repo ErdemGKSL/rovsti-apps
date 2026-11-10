@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.card
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
@@ -60,6 +61,7 @@ import dev.rovsti.core.ops.ContactsWaOps
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SharedOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
@@ -299,11 +301,11 @@ class ContactCardViewModel(
             }
 
             ContactCardAction.CopyContact -> {
-                base()?.let { copyText(it.card.shareText, "Contact copied") }
+                base()?.let { copyText(it.card.shareText, UiText.Res(R.string.contacts_contact_copied)) }
             }
 
             ContactCardAction.CopyVcard -> {
-                scope.launch { vcard()?.let { copyText(it.text, "vCard copied") } }
+                scope.launch { vcard()?.let { copyText(it.text, UiText.Res(R.string.contacts_vcard_copied)) } }
             }
 
             ContactCardAction.AddToHome -> {
@@ -383,7 +385,7 @@ class ContactCardViewModel(
     private suspend fun toggleStar() {
         val b = base.value?.getOrNull() ?: return
         if (repo.setStarred(id, !b.draft.starred) is ContactResult.Failed) {
-            send(ContactCardEffect.Toast("Can't change the favorite."))
+            send(ContactCardEffect.Toast(UiText.Res(R.string.contacts_cant_change_favorite)))
         }
     }
 
@@ -404,7 +406,7 @@ class ContactCardViewModel(
 
     private fun copyText(
         text: String,
-        notice: String,
+        notice: UiText,
     ) {
         if (clipboard.copy(text)) send(ContactCardEffect.Toast(notice))
     }
@@ -416,7 +418,7 @@ class ContactCardViewModel(
         val day =
             ok(ops.localYmd(LocalYmdRequest(now, TimeZone.getDefault().getOffset(now) / MS_PER_S))) ?: return null
         val file = ok(ops.vcardWrite(VcardWriteRequest(listOf(b.draft), day)))
-        if (file == null) send(ContactCardEffect.Toast("Can't make the file."))
+        if (file == null) send(ContactCardEffect.Toast(UiText.Res(R.string.contacts_cant_make_file)))
         return file
     }
 
@@ -430,7 +432,7 @@ class ContactCardViewModel(
                 files.stageForShare(source.absolutePath, file.fileName)
             }
         if (uri == null) {
-            send(ContactCardEffect.Toast("Can't share the file."))
+            send(ContactCardEffect.Toast(UiText.Res(R.string.contacts_cant_share_file)))
         } else {
             send(ContactCardEffect.ShareFile(uri, file.fileName))
         }
@@ -447,7 +449,7 @@ class ContactCardViewModel(
         val payload = ok(shared.contactQr(ContactQrRequest(name, numbers, b.homeCc)))?.payload
         val matrix = payload?.let { ok(qr.encode(QrEncodeRequest(it))) }?.let(QrMatrix::fromAnswer)
         if (matrix == null) {
-            send(ContactCardEffect.Toast("This contact is too big for a QR code."))
+            send(ContactCardEffect.Toast(UiText.Res(R.string.contacts_too_big_qr)))
             return
         }
         val fileName = ok(shared.fileName(FileNameRequest(name)))?.qrFileName ?: "contact-qr.png"
@@ -513,7 +515,7 @@ class ContactCardViewModel(
                 indexOfNumber(list, op.value)
             }
         if (index < 0) {
-            send(ContactCardEffect.Toast("That entry changed. Open the card again."))
+            send(ContactCardEffect.Toast(UiText.Res(R.string.contacts_entry_changed)))
             return
         }
         val edited =
@@ -532,16 +534,16 @@ class ContactCardViewModel(
                 send(
                     ContactCardEffect.Toast(
                         when {
-                            op.clear -> "Default cleared"
-                            op.emails -> "Default email set"
-                            else -> "Default number set"
+                            op.clear -> UiText.Res(R.string.contacts_default_cleared)
+                            op.emails -> UiText.Res(R.string.contacts_default_email_set)
+                            else -> UiText.Res(R.string.contacts_default_number_set)
                         },
                     ),
                 )
             }
 
             is ContactResult.Failed -> {
-                send(ContactCardEffect.Toast("Can't change the default."))
+                send(ContactCardEffect.Toast(UiText.Res(R.string.contacts_cant_change_default)))
             }
         }
     }
@@ -712,58 +714,103 @@ class ContactCardViewModel(
 
         fun add(
             kind: RowKind,
-            title: String?,
+            title: UiText?,
             rows: List<CardRow>,
         ) {
             if (rows.isNotEmpty()) sections += CardSection(kind, title, rows.toImmutableList())
         }
 
-        add(RowKind.Number, "Phone", numberRows(b, chips, jids))
-        add(RowKind.Email, "Email", emailRows(draft))
-        add(RowKind.Date, "Dates", dateRows(b, now))
-        add(RowKind.Address, "Address", addressRows(draft))
-        add(RowKind.Website, "Websites", websiteRows(draft))
-        add(RowKind.Relation, "Related people", relationRows(draft))
+        add(RowKind.Number, UiText.Res(R.string.contacts_phone), numberRows(b, chips, jids))
+        add(RowKind.Email, UiText.Res(R.string.contacts_email), emailRows(draft))
+        add(RowKind.Date, UiText.Res(R.string.contacts_dates), dateRows(b, now))
+        add(RowKind.Address, UiText.Res(R.string.contacts_address), addressRows(draft))
+        add(RowKind.Website, UiText.Res(R.string.contacts_websites), websiteRows(draft))
+        add(RowKind.Relation, UiText.Res(R.string.contacts_related_people_lower), relationRows(draft))
         add(
             RowKind.Group,
-            "Groups",
+            UiText.Res(R.string.tab_groups),
             draft.groups.mapNotNull { gid -> groups.firstOrNull { it.id == gid } }.map {
-                CardRow(key = "group-${it.id}", kind = RowKind.Group, title = it.title)
+                CardRow(key = "group-${it.id}", kind = RowKind.Group, title = UiText.Literal(it.title))
             },
         )
         val extras = mutableListOf<CardRow>()
         if (draft.nickname.isNotBlank()) {
             extras +=
-                textRow("nickname", RowKind.Nickname, "Nickname", draft.nickname.trim(), "Nickname copied")
+                textRow(
+                    "nickname",
+                    RowKind.Nickname,
+                    UiText.Res(R.string.contacts_nickname),
+                    draft.nickname.trim(),
+                    UiText.Res(R.string.contacts_nickname_copied),
+                )
         }
         phonetic(draft)?.let {
             extras +=
-                textRow("phonetic", RowKind.Phonetic, "Phonetic name", it, "Phonetic name copied")
+                textRow(
+                    "phonetic",
+                    RowKind.Phonetic,
+                    UiText.Res(R.string.contacts_phonetic_name),
+                    it,
+                    UiText.Res(R.string.contacts_phonetic_name_copied),
+                )
         }
         if (draft.note.isNotBlank()) {
             extras +=
-                textRow("note", RowKind.Note, "Note", draft.note.trim(), "Note copied", "Copy Note")
+                textRow(
+                    "note",
+                    RowKind.Note,
+                    UiText.Res(R.string.contacts_note),
+                    draft.note.trim(),
+                    UiText.Res(R.string.contacts_note_copied),
+                    UiText.Res(R.string.contacts_copy_note),
+                )
         }
         add(RowKind.Note, null, extras)
         if (draft.account.isNotBlank()) {
             val label = ok(ops.accountLabel(AccountLabelRequest(draft.account)))?.label ?: draft.account
-            add(RowKind.Account, null, listOf(CardRow("account", RowKind.Account, label, "Account")))
+            add(
+                RowKind.Account,
+                null,
+                listOf(
+                    CardRow("account", RowKind.Account, UiText.Literal(label), UiText.Res(R.string.contacts_account)),
+                ),
+            )
         }
         val waRows = mutableListOf<CardRow>()
-        if (jid == null) w.answer?.statusLine?.let { waRows += CardRow("wa-status", RowKind.Whatsapp, it, "Status") }
-        w.lines.forEachIndexed { i, line ->
-            waRows += textRow("wa-$i", RowKind.Whatsapp, line.label, line.value, "${line.label} copied")
+        if (jid ==
+            null
+        ) {
+            w.answer?.statusLine?.let {
+                waRows +=
+                    CardRow("wa-status", RowKind.Whatsapp, UiText.Literal(it), UiText.Res(R.string.contacts_status))
+            }
         }
-        add(RowKind.Whatsapp, "WhatsApp", waRows)
+        w.lines.forEachIndexed { i, line ->
+            waRows +=
+                textRow(
+                    "wa-$i",
+                    RowKind.Whatsapp,
+                    UiText.Literal(line.label),
+                    line.value,
+                    UiText.Res(R.string.contacts_copied_format, listOf(line.label)),
+                )
+        }
+        add(RowKind.Whatsapp, UiText.Res(R.string.settings_whatsapp), waRows)
 
         val email = emailOf(draft)
         val hasNumber = card.numbers.isNotEmpty()
         val capsules =
             buildList {
-                add(CardCapsule(CapsuleKind.Call, "Call", card.callTarget != CallTarget.Nothing))
-                add(CardCapsule(CapsuleKind.Message, "Message", hasNumber))
-                if (jid != null) add(CardCapsule(CapsuleKind.WhatsApp, "WhatsApp"))
-                if (email != null) add(CardCapsule(CapsuleKind.Email, "Email"))
+                add(
+                    CardCapsule(
+                        CapsuleKind.Call,
+                        UiText.Res(R.string.emergency_call),
+                        card.callTarget != CallTarget.Nothing,
+                    ),
+                )
+                add(CardCapsule(CapsuleKind.Message, UiText.Res(R.string.contacts_message), hasNumber))
+                if (jid != null) add(CardCapsule(CapsuleKind.WhatsApp, UiText.Res(R.string.settings_whatsapp)))
+                if (email != null) add(CardCapsule(CapsuleKind.Email, UiText.Res(R.string.contacts_email)))
             }
         return ContactCardUiState(
             phase = CardPhase.Ready,
@@ -804,23 +851,38 @@ class ContactCardViewModel(
             val action = ok(ops.fieldMenu(FieldMenuRequest(n.default, count)))?.action
             val forms = ok(shared.copyForms(FormsRequest(n.raw, b.homeCc)))?.forms.orEmpty()
             val menu = mutableListOf<FieldMenuItem>()
-            menu += FieldMenuItem("Call", FieldOp.Dial(n.raw))
-            menu += FieldMenuItem("Message", FieldOp.Sms(n.raw))
+            menu += FieldMenuItem(UiText.Res(R.string.emergency_call), FieldOp.Dial(n.raw))
+            menu += FieldMenuItem(UiText.Res(R.string.contacts_message), FieldOp.Sms(n.raw))
             if (forms.size >= 2) {
                 for (form in forms) {
-                    val notice = ok(shared.copiedNotice(CopiedNoticeRequest(form.form)))?.notice ?: "Copied"
-                    menu += FieldMenuItem("Copy ${form.label}", FieldOp.Copy(form.text, notice))
+                    val notice =
+                        ok(shared.copiedNotice(CopiedNoticeRequest(form.form)))?.notice?.let { UiText.Literal(it) }
+                            ?: UiText.Res(R.string.contacts_copied)
+                    menu +=
+                        FieldMenuItem(
+                            UiText.Res(R.string.contacts_copy_format, listOf(form.label)),
+                            FieldOp.Copy(form.text, notice),
+                        )
                 }
             } else {
-                menu += FieldMenuItem("Copy Number", FieldOp.Copy(n.raw, "Number copied"))
+                menu +=
+                    FieldMenuItem(
+                        UiText.Res(R.string.contacts_copy_number),
+                        FieldOp.Copy(n.raw, UiText.Res(R.string.contacts_number_copied)),
+                    )
             }
-            menu += FieldMenuItem("Share Number", FieldOp.ShareText(n.raw))
-            if (action != null) menu += FieldMenuItem(action.label, FieldOp.SetDefault(false, n.raw, action.clears))
+            menu += FieldMenuItem(UiText.Res(R.string.contacts_share_number), FieldOp.ShareText(n.raw))
+            if (action !=
+                null
+            ) {
+                menu +=
+                    FieldMenuItem(UiText.Literal(action.label), FieldOp.SetDefault(false, n.raw, action.clears))
+            }
             CardRow(
                 key = "number-$i",
                 kind = RowKind.Number,
-                title = n.display,
-                label = label,
+                title = UiText.Literal(n.display),
+                label = UiText.Literal(label),
                 isDefault = n.default && count > 1,
                 waJid = if (chips.getOrNull(i) == true) jids.getOrNull(i) else null,
                 tap = FieldOp.Dial(n.raw),
@@ -836,14 +898,22 @@ class ContactCardViewModel(
             val action = ok(ops.fieldMenu(FieldMenuRequest(email.primary, shown.size)))?.action
             val menu =
                 mutableListOf(
-                    FieldMenuItem("Send Email", FieldOp.Email(value)),
-                    FieldMenuItem("Copy Email", FieldOp.Copy(value, "Email copied")),
+                    FieldMenuItem(UiText.Res(R.string.contacts_send_email), FieldOp.Email(value)),
+                    FieldMenuItem(
+                        UiText.Res(R.string.contacts_copy_email),
+                        FieldOp.Copy(value, UiText.Res(R.string.contacts_email_copied)),
+                    ),
                 )
-            if (action != null) menu += FieldMenuItem(action.label, FieldOp.SetDefault(true, value, action.clears))
+            if (action !=
+                null
+            ) {
+                menu +=
+                    FieldMenuItem(UiText.Literal(action.label), FieldOp.SetDefault(true, value, action.clears))
+            }
             CardRow(
                 key = "email-$i",
                 kind = RowKind.Email,
-                title = value,
+                title = UiText.Literal(value),
                 label = fieldTitle(email.kind, email.label),
                 isDefault = email.primary && shown.size > 1,
                 tap = FieldOp.Email(value),
@@ -866,26 +936,32 @@ class ContactCardViewModel(
             val value = parts.drop(1).joinToString(" · ")
             val age = ok(ops.age(AgeRequest(event.date, now, tz)))
             val years = age?.takeIf { it.valid && event.kind == EventKind.Birthday }?.age
-            val label =
+            val label: UiText =
                 if (years != null &&
                     years >= 0
                 ) {
-                    "$caption · ${if (years == 1L) "1 year old" else "$years years old"}"
+                    UiText.Res(
+                        R.string.contacts_joined_dot,
+                        listOf(UiText.Literal(caption), UiText.Plural(R.plurals.contacts_years_old, years.toInt())),
+                    )
                 } else {
-                    caption
+                    UiText.Literal(caption)
                 }
             CardRow(
                 key = "date-$i",
                 kind = RowKind.Date,
-                title = value,
+                title = UiText.Literal(value),
                 label = label,
                 wish = if (event.kind == EventKind.Birthday && primary != null) line.wish else null,
                 wishNumber = primary,
                 menu =
                     persistentListOf(
                         FieldMenuItem(
-                            "Copy Date",
-                            FieldOp.Copy("$caption · ${parts.getOrElse(1) { value }}", "Date copied"),
+                            UiText.Res(R.string.contacts_copy_date),
+                            FieldOp.Copy(
+                                "$caption · ${parts.getOrElse(1) { value }}",
+                                UiText.Res(R.string.contacts_date_copied),
+                            ),
                         ),
                     ),
             )
@@ -898,15 +974,18 @@ class ContactCardViewModel(
             val url = ok(ops.mapsUrl(MapsUrlRequest(text)))?.url
             val menu =
                 mutableListOf(
-                    FieldMenuItem("Copy Address", FieldOp.Copy(text, "Address copied")),
-                    FieldMenuItem("Share Address", FieldOp.ShareText(text)),
+                    FieldMenuItem(
+                        UiText.Res(R.string.contacts_copy_address),
+                        FieldOp.Copy(text, UiText.Res(R.string.contacts_address_copied)),
+                    ),
+                    FieldMenuItem(UiText.Res(R.string.contacts_share_address), FieldOp.ShareText(text)),
                 )
-            if (url != null) menu += FieldMenuItem("Open in Maps", FieldOp.OpenUrl(url))
+            if (url != null) menu += FieldMenuItem(UiText.Res(R.string.contacts_open_in_maps), FieldOp.OpenUrl(url))
             CardRow(
                 key = "address-$i",
                 kind = RowKind.Address,
-                title = text,
-                label = fieldTitle(address.kind, address.label, "Address"),
+                title = UiText.Literal(text),
+                label = fieldTitle(address.kind, address.label, UiText.Res(R.string.contacts_address)),
                 tap = url?.let { FieldOp.OpenUrl(it) },
                 menu = menu.toImmutableList(),
             )
@@ -917,13 +996,17 @@ class ContactCardViewModel(
             val text = site.trim()
             val url = ok(ops.webUrl(WebUrlRequest(text)))?.url
             val menu = mutableListOf<FieldMenuItem>()
-            if (url != null) menu += FieldMenuItem("Open Link", FieldOp.OpenUrl(url))
-            menu += FieldMenuItem("Copy Link", FieldOp.Copy(text, "Link copied"))
-            menu += FieldMenuItem("Share Link", FieldOp.ShareText(text))
+            if (url != null) menu += FieldMenuItem(UiText.Res(R.string.contacts_open_link), FieldOp.OpenUrl(url))
+            menu +=
+                FieldMenuItem(
+                    UiText.Res(R.string.contacts_copy_link),
+                    FieldOp.Copy(text, UiText.Res(R.string.contacts_link_copied)),
+                )
+            menu += FieldMenuItem(UiText.Res(R.string.contacts_share_link), FieldOp.ShareText(text))
             CardRow(
                 key = "website-$i",
                 kind = RowKind.Website,
-                title = text,
+                title = UiText.Literal(text),
                 tap = url?.let { FieldOp.OpenUrl(it) },
                 menu = menu.toImmutableList(),
             )
@@ -934,24 +1017,30 @@ class ContactCardViewModel(
             CardRow(
                 key = "relation-$i",
                 kind = RowKind.Relation,
-                title = relation.name.trim(),
+                title = UiText.Literal(relation.name.trim()),
                 label = relationTitle(relation),
                 relationName = relation.name.trim(),
-                menu = persistentListOf(FieldMenuItem("Copy Name", FieldOp.Copy(relation.name.trim(), "Name copied"))),
+                menu =
+                    persistentListOf(
+                        FieldMenuItem(
+                            UiText.Res(R.string.contacts_copy_name),
+                            FieldOp.Copy(relation.name.trim(), UiText.Res(R.string.contacts_name_copied)),
+                        ),
+                    ),
             )
         }
 
     private fun textRow(
         key: String,
         kind: RowKind,
-        label: String,
+        label: UiText,
         value: String,
-        notice: String,
-        copyLabel: String = "Copy",
+        notice: UiText,
+        copyLabel: UiText = UiText.Res(R.string.contacts_copy),
     ) = CardRow(
         key = key,
         kind = kind,
-        title = value,
+        title = UiText.Literal(value),
         label = label,
         menu = persistentListOf(FieldMenuItem(copyLabel, FieldOp.Copy(value, notice))),
     )
@@ -997,18 +1086,24 @@ internal fun emailOf(draft: ContactDraft): String? =
 internal fun fieldTitle(
     kind: FieldKind,
     label: String?,
-    fallback: String = "Other",
-): String =
+    fallback: UiText = UiText.Res(R.string.contacts_other),
+): UiText =
     when (kind) {
-        FieldKind.Mobile -> "Mobile"
-        FieldKind.Home -> "Home"
-        FieldKind.Work -> "Work"
-        FieldKind.Custom -> label?.takeIf { it.isNotBlank() } ?: fallback
+        FieldKind.Mobile -> UiText.Res(R.string.contacts_mobile)
+        FieldKind.Home -> UiText.Res(R.string.contacts_home)
+        FieldKind.Work -> UiText.Res(R.string.contacts_work)
+        FieldKind.Custom -> label?.takeIf { it.isNotBlank() }?.let { UiText.Literal(it) } ?: fallback
         FieldKind.Other -> fallback
     }
 
-internal fun relationTitle(relation: DraftRelation): String =
+internal fun relationTitle(relation: DraftRelation): UiText =
     when (relation.kind) {
-        RelationKind.Custom -> relation.label.ifBlank { "Related" }
-        else -> relation.kind.name
+        RelationKind.Custom -> {
+            relation.label.takeIf { it.isNotBlank() }?.let { UiText.Literal(it) }
+                ?: UiText.Res(R.string.contacts_related)
+        }
+
+        else -> {
+            UiText.Literal(relation.kind.name)
+        }
     }

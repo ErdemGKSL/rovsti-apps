@@ -3,7 +3,9 @@ package dev.rovsti.contacts.intake
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.ImageBitmap
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.people.PersonItem
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -59,13 +61,13 @@ data class IntakeRow(
 /** One labelled value of the read-only card. */
 @Immutable
 data class PreviewLine(
-    val label: String,
+    val label: UiText,
     val value: String,
 )
 
 @Immutable
 data class PreviewSection(
-    val title: String?,
+    val title: UiText?,
     val lines: ImmutableList<PreviewLine>,
 )
 
@@ -84,12 +86,12 @@ data class CardPreview(
 @Immutable
 data class IntakeUiState(
     val phase: IntakePhase = IntakePhase.Reading,
-    val title: String = "Add these contacts?",
+    val title: UiText = UiText.Res(R.string.contacts_add_these_contacts),
     /** "2 new contacts" or "2 new, 1 already in your contacts". */
-    val countLine: String = "",
+    val countLine: UiText = UiText.Literal(""),
     val rows: ImmutableList<IntakeRow> = persistentListOf(),
     /** The label of the main button: "Add 2 Contacts". */
-    val addLabel: String = "Add Contacts",
+    val addLabel: UiText = UiText.Res(R.string.contacts_add_contacts),
     /** A single card can also go into a contact that exists ("Add to Existing Contact"). */
     val canAddToExisting: Boolean = false,
     val preview: CardPreview? = null,
@@ -127,13 +129,13 @@ sealed interface IntakeAction {
 
 sealed interface IntakeEffect {
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : IntakeEffect
 
     /** The pill "Added 12 contacts" with Undo; [undo] answers the toast that follows it. */
     class Undo(
-        val message: String,
-        val undo: suspend () -> String,
+        val message: UiText,
+        val undo: suspend () -> UiText,
     ) : IntakeEffect
 
     /** The contacts a single card can be added to. */
@@ -143,8 +145,8 @@ sealed interface IntakeEffect {
 
     /** An alert with one OK button ("No contact in this code"). The page closes with it. */
     data class Alert(
-        val title: String,
-        val message: String,
+        val title: UiText,
+        val message: UiText,
     ) : IntakeEffect
 
     /** Plain text that is only a number or an address opens the editor with it. */

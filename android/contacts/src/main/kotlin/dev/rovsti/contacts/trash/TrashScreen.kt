@@ -11,7 +11,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -34,6 +39,8 @@ import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.longPressMenu
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -64,18 +71,21 @@ fun TrashScreen(
     listState: LazyListState = rememberLazyListState(),
     overlays: OverlayController? = LocalOverlayOrNull.current,
 ) {
+    val emptyTrashLabel = stringResource(R.string.contacts_empty_trash)
     val toolbar =
         remember(state.rows.isNotEmpty(), onAction) {
             if (state.rows.isEmpty()) {
                 persistentListOf()
             } else {
                 persistentListOf(
-                    ToolbarAction("empty-trash", RovstiIcons.Trash, "Empty Trash") { onAction(TrashAction.AskEmpty) },
+                    ToolbarAction("empty-trash", RovstiIcons.Trash, emptyTrashLabel) {
+                        onAction(TrashAction.AskEmpty)
+                    },
                 )
             }
         }
     LargeTitleScaffold(
-        title = "Trash",
+        title = stringResource(R.string.settings_trash),
         state = listState,
         actions = toolbar,
         navigation = NavigationButton(onClick = onBack),
@@ -94,8 +104,13 @@ fun TrashScreen(
                 ) {
                     EmptyState(
                         icon = RovstiIcons.Trash,
-                        title = "Trash Is Empty",
-                        message = "Deleted contacts stay here for ${state.retentionDays} days.",
+                        title = stringResource(R.string.contacts_trash_empty),
+                        message =
+                            pluralStringResource(
+                                R.plurals.contacts_trash_retention_empty,
+                                state.retentionDays,
+                                state.retentionDays,
+                            ),
                     )
                 }
             }
@@ -108,7 +123,11 @@ fun TrashScreen(
             if (state.rows.isNotEmpty()) {
                 item(key = "footer", contentType = "footer") {
                     RovstiText(
-                        "Contacts stay in the Trash for ${state.retentionDays} days, then they are deleted for good.",
+                        pluralStringResource(
+                            R.plurals.contacts_trash_retention_footer,
+                            state.retentionDays,
+                            state.retentionDays,
+                        ),
                         Modifier
                             .padding(horizontal = Spacing.gutter, vertical = Spacing.m)
                             .testTag(TrashTags.Footer),
@@ -128,21 +147,28 @@ private fun TrashRowItem(
     overlays: OverlayController?,
     onAction: (TrashAction) -> Unit,
 ) {
+    val restoreLabel = stringResource(R.string.contacts_restore)
+    val deleteNowLabel = stringResource(R.string.contacts_delete_now)
     val colors = RovstiTheme.colors
     val restore = remember(row.key, onAction) { { onAction(TrashAction.Restore(row.key)) } }
     val delete = remember(row.key, onAction) { { onAction(TrashAction.AskDelete(row.key)) } }
     val swipe =
         remember(row.key, colors.accent, colors.destructive, onAction) {
             persistentListOf(
-                SwipeAction("Restore", colors.accent, onClick = restore),
-                SwipeAction("Delete Now", colors.destructive, onClick = delete),
+                SwipeAction(restoreLabel, colors.accent, onClick = restore),
+                SwipeAction(deleteNowLabel, colors.destructive, onClick = delete),
             )
         }
     val menu =
         remember(row.key, onAction) {
             persistentListOf<MenuItem>(
-                MenuItem.Action("Restore", RovstiIcons.Forward, onClick = restore),
-                MenuItem.Action("Delete Now", RovstiIcons.Trash, destructive = true, onClick = delete),
+                MenuItem.Action(restoreLabel, RovstiIcons.Forward, onClick = restore),
+                MenuItem.Action(
+                    deleteNowLabel,
+                    RovstiIcons.Trash,
+                    destructive = true,
+                    onClick = delete,
+                ),
             )
         }
     androidx.compose.foundation.layout.Column {
@@ -167,9 +193,9 @@ private fun TrashRowItem(
 @Composable
 private fun RowBody(row: TrashRow) {
     ListRow(
-        title = row.name,
-        secondary = row.detail,
-        leading = { Avatar(row.name, size = Sizes.avatar, colorKey = row.colorKey) },
+        title = row.name.text(),
+        secondary = row.detail.text(),
+        leading = { Avatar(row.name.text(), size = Sizes.avatar, colorKey = row.colorKey) },
     )
 }
 
@@ -180,6 +206,8 @@ fun TrashEffects(
     overlays: OverlayController,
     onAction: (TrashAction) -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val latestAction = rememberUpdatedState(onAction)
     LaunchedEffect(effects, overlays) {
         effects.collect { effect ->
@@ -187,12 +215,12 @@ fun TrashEffects(
                 is TrashEffect.Ask -> {
                     overlays.present(
                         AlertEntry(
-                            heading = effect.title,
-                            message = effect.body,
+                            heading = effect.title.resolve(context),
+                            message = effect.body.resolve(context),
                             actions =
                                 persistentListOf(
-                                    AlertAction("Cancel", AlertRole.Cancel),
-                                    AlertAction(effect.confirmLabel, AlertRole.Destructive) {
+                                    AlertAction(resources.getString(R.string.contacts_cancel), AlertRole.Cancel),
+                                    AlertAction(effect.confirmLabel.resolve(context), AlertRole.Destructive) {
                                         latestAction.value(effect.then)
                                     },
                                 ),
@@ -201,7 +229,7 @@ fun TrashEffects(
                 }
 
                 is TrashEffect.Toast -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(effect.text.resolve(context))
                 }
             }
         }

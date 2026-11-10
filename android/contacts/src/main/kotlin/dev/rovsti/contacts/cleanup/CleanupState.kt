@@ -1,8 +1,10 @@
 package dev.rovsti.contacts.cleanup
 
 import androidx.compose.runtime.Immutable
+import dev.rovsti.contacts.R
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.design.controls.ChipModel
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.persistentListOf
@@ -23,7 +25,7 @@ data class CleanupRow(
 @Immutable
 data class CleanupSelect(
     val selected: ImmutableSet<Long> = persistentSetOf(),
-    val title: String = "Select contacts",
+    val title: UiText = UiText.Res(R.string.contacts_select_contacts),
     val allSelected: Boolean = false,
     val canDelete: Boolean = false,
 )
@@ -79,12 +81,12 @@ sealed interface CleanupEffect {
     ) : CleanupEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : CleanupEffect
 
     /** ONE pill for the whole delete; Undo sends [CleanupAction.Undo] with [keys]. */
     data class Deleted(
-        val notice: String,
+        val notice: UiText,
         val keys: List<Long>,
     ) : CleanupEffect
 }

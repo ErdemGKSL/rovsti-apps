@@ -1,7 +1,10 @@
 package dev.rovsti.contacts.photo
 
+import android.content.Context
 import android.net.Uri
+import dev.rovsti.contacts.en
 import dev.rovsti.design.overlay.MenuItem
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.files.FakeFilesRepository
 import dev.rovsti.platform.files.FileResult
 import kotlinx.coroutines.CompletableDeferred
@@ -16,6 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /** E4.12: the viewer's Save writes the gallery once, Share stages a JPEG, and the Edit menu follows the state. */
@@ -30,7 +34,8 @@ class PhotoViewerActionsTest {
             readResult = FileResult.Ok(path = "/cache/p.jpg", mime = "image/jpeg"),
             staged = Uri.parse("content://dev.rovsti.contacts.share/zeynep.jpg"),
         )
-    private val said = mutableListOf<String>()
+    private val context: Context = RuntimeEnvironment.getApplication()
+    private val said = mutableListOf<UiText>()
     private val shared = mutableListOf<Pair<Uri, String>>()
 
     private fun actions(scope: TestScope) =
@@ -65,7 +70,7 @@ class PhotoViewerActionsTest {
             a.save() // a second tap while the first runs is ignored
             advanceUntilIdle()
             assertEquals(listOf(Triple("/cache/p.jpg", "Zeynep-Arslan.jpg", "image/jpeg")), files.gallery)
-            assertEquals(listOf("Saved to Photos"), said)
+            assertEquals(listOf("Saved to Photos"), said.map { it.en() })
             assertEquals("the full-size photo is read first", full, files.reads.first().first)
         }
 
@@ -75,11 +80,11 @@ class PhotoViewerActionsTest {
             val a = actions(this)
             a.save()
             advanceUntilIdle()
-            assertEquals(listOf("Can't save the photo"), said)
+            assertEquals(listOf("Can't save the photo"), said.map { it.en() })
             files.galleryOk = true
             a.save()
             advanceUntilIdle()
-            assertEquals("Saved to Photos", said.last())
+            assertEquals("Saved to Photos", said.last().en())
         }
 
     @Test fun anUnreadableFullPhotoFallsBackToTheThumbnail() =
@@ -90,7 +95,7 @@ class PhotoViewerActionsTest {
             a.save()
             advanceUntilIdle()
             assertEquals("both sources were tried", listOf(full, thumb), files.reads.map { it.first })
-            assertEquals(listOf("Can't save the photo"), said)
+            assertEquals(listOf("Can't save the photo"), said.map { it.en() })
             assertTrue(files.gallery.isEmpty())
             gate.complete(Unit)
         }
@@ -109,14 +114,14 @@ class PhotoViewerActionsTest {
             actions(this).share()
             advanceUntilIdle()
             assertTrue(shared.isEmpty())
-            assertEquals(listOf("Can't share the photo"), said)
+            assertEquals(listOf("Can't share the photo"), said.map { it.en() })
         }
 
     @Test fun theToolbarHasSaveShareAndAnEditMenu() =
         runTest {
             val a = actions(this)
-            val menu = a.editMenu("x@s.whatsapp.net", noop) { it() }
-            val toolbar = a.viewerActions(menu)
+            val menu = a.editMenu(context, "x@s.whatsapp.net", noop) { it() }
+            val toolbar = a.viewerActions(context, menu)
             assertEquals(listOf("save", "share", "edit"), toolbar.map { it.id })
             assertEquals(listOf("Save", "Share", "Edit"), toolbar.map { it.label })
             assertTrue("only Edit opens a menu", toolbar.map { it.menu != null } == listOf(false, false, true))
@@ -125,10 +130,10 @@ class PhotoViewerActionsTest {
     @Test fun theEditMenuFollowsTheWhatsAppState() =
         runTest {
             val a = actions(this)
-            assertEquals(listOf(CHOOSE, TAKE, REMOVE), labels(a.editMenu(null, noop) { it() }))
+            assertEquals(listOf(CHOOSE.en(), TAKE.en(), REMOVE.en()), labels(a.editMenu(context, null, noop) { it() }))
             assertEquals(
-                listOf(CHOOSE, TAKE, WHATSAPP, REMOVE),
-                labels(a.editMenu("905551112233@s.whatsapp.net", noop) { it() }),
+                listOf(CHOOSE.en(), TAKE.en(), WHATSAPP.en(), REMOVE.en()),
+                labels(a.editMenu(context, "905551112233@s.whatsapp.net", noop) { it() }),
             )
         }
 
@@ -137,8 +142,8 @@ class PhotoViewerActionsTest {
             var removed = 0
             var asked: (() -> Unit)? = null
             val a = actions(this)
-            val menu = a.editMenu(null, PhotoMenuActions({}, {}, {}, { removed++ })) { asked = it }
-            val remove = menu.filterIsInstance<MenuItem.Action>().first { it.label == REMOVE }
+            val menu = a.editMenu(context, null, PhotoMenuActions({}, {}, {}, { removed++ })) { asked = it }
+            val remove = menu.filterIsInstance<MenuItem.Action>().first { it.label == REMOVE.en() }
             assertTrue(remove.destructive)
             remove.onClick()
             assertEquals("the menu only asks", 0, removed)

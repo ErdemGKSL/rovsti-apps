@@ -17,10 +17,12 @@ import dev.rovsti.contacts.ContactsTabs
 import dev.rovsti.contacts.GroupsTab
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.haptics.RovstiHaptics
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import kotlinx.collections.immutable.persistentListOf
@@ -53,10 +55,10 @@ internal object GroupsUi {
 
     val sample =
         listOf(
-            GroupItem(10, "Family", "3 contacts"),
-            GroupItem(11, "Work", "2 contacts"),
-            GroupItem(12, "Football", "1 contact"),
-            GroupItem(13, "Neighbours", "5 contacts"),
+            GroupItem(10, "Family", UiText.Literal("3 contacts")),
+            GroupItem(11, "Work", UiText.Literal("2 contacts")),
+            GroupItem(12, "Football", UiText.Literal("1 contact")),
+            GroupItem(13, "Neighbours", UiText.Literal("5 contacts")),
         )
 
     val everyone =
@@ -77,7 +79,7 @@ internal object GroupsUi {
         GroupPageUi(
             id = 10,
             title = "Family",
-            subtitle = "${members.size} contacts",
+            subtitle = UiText.Literal("${members.size} contacts"),
             joinHint = null,
             members = members.toImmutableList(),
             canMessage = members.isNotEmpty(),
@@ -101,7 +103,7 @@ internal fun HostedGroups(
         RovstiShell(
             navigator = navigator,
             tabs = tabs,
-            chromeFor = ::chromeFor,
+            chromeFor = { chromeFor(it, UiText::en) },
             overlays = harness.overlays,
             modifier = Modifier.fillMaxSize(),
         ) {

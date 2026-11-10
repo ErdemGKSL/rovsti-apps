@@ -14,6 +14,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
@@ -27,6 +28,8 @@ import dev.rovsti.contacts.startSafely
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
@@ -55,6 +58,7 @@ fun GroupsPage(
     container: ContactsContainer,
     navigator: TabNavigator<ContactsRoute>,
 ) {
+    val context = LocalContext.current
     val listState = rememberLazyListState()
     LaunchedEffect(navigator, listState) {
         navigator.scrollToTop.collect { if (it.tab == GroupsTab) listState.animateScrollToItem(0) }
@@ -89,7 +93,7 @@ fun GroupsPage(
                 }
 
                 is GroupsEffect.Toast -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(effect.text.resolve(context))
                 }
             }
         }
@@ -117,6 +121,7 @@ fun GroupPageDestination(
     val state by model.state.collectAsState()
     val overlays = LocalOverlay.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<GroupPageEffect.SaveVcf?>(null) }
     val launcher =
@@ -126,7 +131,13 @@ fun GroupPageDestination(
             val uri = (result as? FileResult.Ok)?.uri ?: return@rememberLauncherForActivityResult
             scope.launch {
                 val written = container.files.writeExport(uri, text = file.text)
-                overlays.showToast(if (written is FileResult.Ok) "Saved ${file.fileName}" else "Can't save the file.")
+                overlays.showToast(
+                    if (written is FileResult.Ok) {
+                        resources.getString(R.string.contacts_saved_file, file.fileName)
+                    } else {
+                        resources.getString(R.string.contacts_cant_save_file)
+                    },
+                )
             }
         }
     GroupPageEffects(model, navigator, overlays, context, onBack) { effect ->
@@ -196,7 +207,7 @@ private fun GroupPageEffects(
                 }
 
                 is GroupPageEffect.Toast -> {
-                    toast(effect.text)
+                    toast(effect.text.resolve(context))
                 }
 
                 GroupPageEffect.Close -> {

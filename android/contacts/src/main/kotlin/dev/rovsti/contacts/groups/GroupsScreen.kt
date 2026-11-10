@@ -30,6 +30,7 @@ import dev.rovsti.design.overlay.AlertEntry
 import dev.rovsti.design.overlay.AlertRole
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.text.GlassTextField
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
 import kotlinx.collections.immutable.persistentListOf
@@ -86,8 +87,8 @@ fun GroupsScreen(
                 ) {
                     EmptyState(
                         icon = RovstiIcons.Folder,
-                        title = "No Groups",
-                        message = "Make a group, then add people to it from the group's page.",
+                        title = stringResource(R.string.contacts_no_groups),
+                        message = stringResource(R.string.contacts_no_groups_message),
                         actionLabel = newLabel,
                         onAction = onNew,
                     )
@@ -100,7 +101,7 @@ fun GroupsScreen(
                         row {
                             ListRow(
                                 title = group.title,
-                                secondary = group.subtitle,
+                                secondary = group.subtitle.text(),
                                 modifier = Modifier.testTag(GroupsTags.row(group.id)),
                                 leading = {
                                     RovstiIcon(

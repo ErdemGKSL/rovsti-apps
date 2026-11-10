@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.card
 
+import android.content.Context
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -39,7 +40,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -77,6 +80,9 @@ import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.longPressMenu
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -129,6 +135,8 @@ fun ContactCardScreen(
     onCalls: (CallOptionsAction) -> Unit = {},
     photoViewer: PhotoViewerLauncher? = null,
 ) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
     val header = state.header
     val colors = RovstiTheme.colors
     val insets = LocalContentInsets.current
@@ -159,18 +167,29 @@ fun ContactCardScreen(
                     val toolbar =
                         remember(header.starred, onAction) {
                             persistentListOf(
-                                ToolbarAction("edit", RovstiIcons.Pencil, "Edit") { onAction(ContactCardAction.Edit) },
+                                ToolbarAction(
+                                    "edit",
+                                    RovstiIcons.Pencil,
+                                    resources.getString(R.string.favorites_edit),
+                                ) { onAction(ContactCardAction.Edit) },
                                 ToolbarAction(
                                     id = "star",
                                     icon = if (header.starred) RovstiIcons.StarFilled else RovstiIcons.Star,
-                                    label = if (header.starred) "Remove from Favorites" else "Add to Favorites",
+                                    label =
+                                        if (header.starred) {
+                                            resources.getString(R.string.favorites_remove)
+                                        } else {
+                                            resources.getString(R.string.favorites_add_star)
+                                        },
                                 ) { onAction(ContactCardAction.ToggleStar) },
                             )
                         }
                     Toolbar(
                         actions = toolbar,
                         onOverflow = { anchor, _ ->
-                            overlays?.present(ButtonMenuEntry(anchor, overflowMenu(anchor, overlays, header, onAction)))
+                            overlays?.present(
+                                ButtonMenuEntry(anchor, overflowMenu(context, anchor, overlays, header, onAction)),
+                            )
                         },
                     )
                 }
@@ -212,7 +231,7 @@ fun ContactCardScreen(
                         InsetGroupedSection {
                             row {
                                 ListRow(
-                                    title = "Open in Android Contacts",
+                                    title = resources.getString(R.string.contacts_open_android_contacts),
                                     trailing = {
                                         RovstiIcon(
                                             RovstiIcons.ChevronRight,
@@ -260,6 +279,8 @@ private fun Hero(
     onBounds: (Rect) -> Unit,
     onPhoto: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
     val colors = RovstiTheme.colors
     val type = RovstiTheme.type
     Column(
@@ -274,10 +295,18 @@ private fun Hero(
             } else {
                 Modifier
             }
+        val avatarLabel =
+            if (header.photoUri !=
+                null
+            ) {
+                resources.getString(R.string.contacts_view_photo)
+            } else {
+                header.name
+            }
         Box(
             Modifier
                 .testTag(CardTags.Avatar)
-                .semantics { contentDescription = if (header.photoUri != null) "View photo" else header.name }
+                .semantics { contentDescription = avatarLabel }
                 .onGloballyPositioned { coordinates ->
                     val origin = coordinates.positionInWindow()
                     onBounds(Rect(origin, Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat())))
@@ -306,7 +335,7 @@ private fun Hero(
         )
         if (header.isMyCard) {
             RovstiText(
-                "My Card",
+                resources.getString(R.string.contacts_my_card),
                 style = type.footnote,
                 color = colors.accent,
                 modifier = Modifier.padding(top = Spacing.xs),
@@ -395,10 +424,11 @@ private fun CapsuleItem(
     // takes the flat Bordered fill, the same decision as CapsuleButton.
     val glass = LocalIosBackdrop.current != null
     val tint = if (capsule.kind == CapsuleKind.WhatsApp) colors.success else colors.accent
+    val capsuleLabel = capsule.label.text()
     Box(
         modifier
             .height(CardMetrics.CapsuleHeight)
-            .semantics { contentDescription = capsule.label }
+            .semantics { contentDescription = capsuleLabel }
             .testTag(CardTags.capsule(capsule.kind)),
     ) {
         IosButton(
@@ -429,7 +459,7 @@ private fun RowScope.CapsuleContent(
         RovstiIcon(capsule.kind.icon(), null, tint = tint, size = CardMetrics.CapsuleIcon)
         if (!iconsOnly) {
             RovstiText(
-                capsule.label,
+                capsule.label.text(),
                 style = RovstiTheme.type.caption1,
                 color = tint,
                 maxLines = 1,
@@ -449,7 +479,7 @@ private fun FieldSection(
     onAction: (ContactCardAction) -> Unit,
 ) {
     SectionSpacing {
-        InsetGroupedSection(header = section.title) {
+        InsetGroupedSection(header = section.title?.text()) {
             for (item in section.rows) {
                 row { FieldRow(item, overlays, onAction) }
             }
@@ -470,7 +500,7 @@ private fun LazyListScope.recentItem(
             item(key = "recent", contentType = "section") {
                 SectionSpacing {
                     InsetGroupedSection(
-                        header = "Recent",
+                        header = stringResource(R.string.contacts_recent),
                         footer = recent.text.detail,
                         modifier = Modifier.testTag(CardTags.Gate),
                     ) {
@@ -490,7 +520,7 @@ private fun LazyListScope.recentItem(
             item(key = "recent", contentType = "section") {
                 SectionSpacing {
                     InsetGroupedSection(
-                        header = "Recent",
+                        header = stringResource(R.string.contacts_recent),
                         footer = recent.summary,
                         modifier = Modifier.testTag(CardTags.Recent),
                     ) {
@@ -517,6 +547,7 @@ private fun FieldRow(
     overlays: OverlayController?,
     onAction: (ContactCardAction) -> Unit,
 ) {
+    val context = LocalContext.current
     val tap: (() -> Unit)? =
         remember(row, onAction) {
             when {
@@ -527,7 +558,7 @@ private fun FieldRow(
         }
     val items =
         remember(row.menu, onAction) {
-            row.menu.map { item -> menuItemOf(item, onAction) }.toImmutableList()
+            row.menu.map { item -> menuItemOf(item, onAction, context) }.toImmutableList()
         }
     val tag = Modifier.testTag(CardTags.row(row.key))
     if (overlays != null && items.isNotEmpty()) {
@@ -551,22 +582,48 @@ private fun FieldRow(
 private fun menuItemOf(
     item: FieldMenuItem,
     onAction: (ContactCardAction) -> Unit,
+    context: Context,
 ): MenuItem =
     MenuItem.Action(
-        label = item.label,
+        label = item.label.resolve(context),
         icon = menuIcon(item),
         onClick = { onAction(ContactCardAction.Field(item.op)) },
     )
 
 private fun menuIcon(item: FieldMenuItem): ImageVector =
     when (val op = item.op) {
-        is FieldOp.Copy -> RovstiIcons.Copy
-        is FieldOp.ShareText -> RovstiIcons.Share
-        is FieldOp.Dial -> RovstiIcons.Phone
-        is FieldOp.Sms -> RovstiIcons.Message
-        is FieldOp.Email -> RovstiIcons.Mail
-        is FieldOp.SetDefault -> if (op.clear) RovstiIcons.StarFilled else RovstiIcons.Star
-        is FieldOp.OpenUrl -> if (item.label.contains("Maps")) RovstiIcons.Map else RovstiIcons.Globe
+        is FieldOp.Copy -> {
+            RovstiIcons.Copy
+        }
+
+        is FieldOp.ShareText -> {
+            RovstiIcons.Share
+        }
+
+        is FieldOp.Dial -> {
+            RovstiIcons.Phone
+        }
+
+        is FieldOp.Sms -> {
+            RovstiIcons.Message
+        }
+
+        is FieldOp.Email -> {
+            RovstiIcons.Mail
+        }
+
+        is FieldOp.SetDefault -> {
+            if (op.clear) RovstiIcons.StarFilled else RovstiIcons.Star
+        }
+
+        is FieldOp.OpenUrl -> {
+            val labelId = (item.label as? UiText.Res)?.id
+            if (labelId == R.string.contacts_maps || labelId == R.string.contacts_open_in_maps) {
+                RovstiIcons.Map
+            } else {
+                RovstiIcons.Globe
+            }
+        }
     }
 
 /** The row itself: a small caption over the value, then the Default tag, the WhatsApp chip and the Wish chip. */
@@ -594,7 +651,7 @@ private fun FieldBody(
         Column(Modifier.weight(1f)) {
             row.label?.let {
                 RovstiText(
-                    it,
+                    it.text(),
                     style = type.footnote,
                     color = colors.labelSecondary,
                     maxLines = 1,
@@ -602,7 +659,7 @@ private fun FieldBody(
                 )
             }
             RovstiText(
-                row.title,
+                row.title.text(),
                 modifier = Modifier.padding(top = if (row.label != null) Spacing.textGap else CardMetrics.NoGap),
                 style = type.body,
                 color = if (actionable) colors.accent else colors.labelPrimary,
@@ -610,7 +667,7 @@ private fun FieldBody(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (row.isDefault) Tag("Default")
+        if (row.isDefault) Tag(stringResource(R.string.contacts_default))
         row.waJid?.let { jid ->
             Box(
                 Modifier
@@ -670,6 +727,7 @@ private fun Tag(text: String) {
  * save the file, Add to Home Screen pins the shortcut and Delete Contact asks first.
  */
 private fun overflowMenu(
+    context: Context,
     anchor: Rect,
     overlays: OverlayController,
     header: CardHeader,
@@ -678,31 +736,54 @@ private fun overflowMenu(
     fun submenu(items: ImmutableList<MenuItem>) = { overlays.present(ButtonMenuEntry(anchor, items)) }
     val share =
         persistentListOf<MenuItem>(
-            MenuItem.Action("Share as Text", RovstiIcons.Share) { onAction(ContactCardAction.ShareText) },
-            MenuItem.Action("Share as File", RovstiIcons.Document) { onAction(ContactCardAction.ShareFile) },
-            MenuItem.Action("Show QR Code", RovstiIcons.QrCode) { onAction(ContactCardAction.ShowQr) },
+            MenuItem.Action(context.getString(R.string.contacts_share_as_text), RovstiIcons.Share) {
+                onAction(ContactCardAction.ShareText)
+            },
+            MenuItem.Action(context.getString(R.string.contacts_share_as_file), RovstiIcons.Document) {
+                onAction(ContactCardAction.ShareFile)
+            },
+            MenuItem.Action(
+                context.getString(R.string.contacts_show_qr),
+                RovstiIcons.QrCode,
+            ) { onAction(ContactCardAction.ShowQr) },
         )
     val copy =
         persistentListOf<MenuItem>(
-            MenuItem.Action("Copy Contact", RovstiIcons.Copy) { onAction(ContactCardAction.CopyContact) },
-            MenuItem.Action("Copy as vCard", RovstiIcons.Document) { onAction(ContactCardAction.CopyVcard) },
+            MenuItem.Action(context.getString(R.string.contacts_copy_contact), RovstiIcons.Copy) {
+                onAction(ContactCardAction.CopyContact)
+            },
+            MenuItem.Action(context.getString(R.string.contacts_copy_vcard), RovstiIcons.Document) {
+                onAction(ContactCardAction.CopyVcard)
+            },
         )
     return persistentListOf(
-        MenuItem.Action("Share", RovstiIcons.Share) { submenu(share)() },
-        MenuItem.Action("Copy", RovstiIcons.Copy) { submenu(copy)() },
-        MenuItem.Action("Export .vcf", RovstiIcons.Download) { onAction(ContactCardAction.ExportVcf) },
-        MenuItem.Action("Add to Home Screen", RovstiIcons.AddToHome) { onAction(ContactCardAction.AddToHome) },
+        MenuItem.Action(context.getString(R.string.contacts_share), RovstiIcons.Share) { submenu(share)() },
+        MenuItem.Action(context.getString(R.string.contacts_copy), RovstiIcons.Copy) { submenu(copy)() },
+        MenuItem.Action(context.getString(R.string.contacts_export_vcf), RovstiIcons.Download) {
+            onAction(ContactCardAction.ExportVcf)
+        },
+        MenuItem.Action(context.getString(R.string.contacts_add_to_home_screen), RovstiIcons.AddToHome) {
+            onAction(ContactCardAction.AddToHome)
+        },
         MenuItem.Separator,
         MenuItem.Action(
-            if (header.isMyCard) "Not Me" else "This Is Me",
+            if (header.isMyCard) {
+                context.getString(R.string.contacts_not_me)
+            } else {
+                context.getString(R.string.contacts_this_is_me)
+            },
             RovstiIcons.Person,
         ) { onAction(ContactCardAction.ToggleMyCard) },
         MenuItem.Action(
-            if (header.isEmergency) "Remove from Emergency Contacts" else "Add to Emergency Contacts",
+            if (header.isEmergency) {
+                context.getString(R.string.contacts_remove_from_emergency)
+            } else {
+                context.getString(R.string.contacts_add_to_emergency)
+            },
             RovstiIcons.MedicalCross,
         ) { onAction(ContactCardAction.ToggleEmergency) },
         MenuItem.Separator,
-        MenuItem.Action("Delete Contact", RovstiIcons.Trash, destructive = true) {
+        MenuItem.Action(context.getString(R.string.contacts_delete_contact), RovstiIcons.Trash, destructive = true) {
             onAction(ContactCardAction.Delete)
         },
     )

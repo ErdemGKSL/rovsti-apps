@@ -1,5 +1,8 @@
 package dev.rovsti.contacts.dupes
 
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -32,12 +35,12 @@ class DupesViewModelTest {
         runBlocking<Unit> {
             val model = rig().dupes()
             val state = model.until { it.phase == DupesPhase.Ready && it.rows.isNotEmpty() }
-            assertEquals("3 possible duplicates", state.summary)
+            assertEquals("3 possible duplicates", (state.summary).en())
             assertEquals(listOf(1L, 4L, 6L), state.rows.map { it.key })
             assertEquals("Ayşe Yılmaz", state.rows[0].name)
-            assertEquals("and 2 more · Same number", state.rows[0].secondary)
-            assertEquals("and 1 more · Same number", state.rows[1].secondary)
-            assertEquals("and 1 more · Same name", state.rows[2].secondary)
+            assertEquals("and 2 more · Same number", (state.rows[0].secondary).en())
+            assertEquals("and 1 more · Same number", (state.rows[1].secondary).en())
+            assertEquals("and 1 more · Same name", (state.rows[2].secondary).en())
             assertEquals("the keeper's picture", "content://contacts/photo/1", state.rows[0].photoUri)
         }
 
@@ -46,7 +49,7 @@ class DupesViewModelTest {
             val r = TidyRig(drafts = SampleTidy.drafts().filter { it.id in setOf(1L, 4L, 8L, 9L) }).also { rig = it }
             val state = r.dupes().until { it.phase == DupesPhase.Ready }
             assertTrue(state.isEmpty)
-            assertEquals("No duplicates found", state.summary)
+            assertEquals("No duplicates found", (state.summary).en())
         }
 
     @Test fun tappingARowShowsTheMergedCardWithTheSourcesOnOneLine() =
@@ -56,15 +59,15 @@ class DupesViewModelTest {
             model.onAction(DupesAction.Open(1))
             val review = model.until { it.review != null }.review!!
             assertEquals("Ayşe Yılmaz", review.name)
-            assertEquals("From Ayşe Yılmaz, A. Yılmaz, Ayşe", review.sources)
-            assertEquals("Merge 3 Contacts", review.mergeLabel)
+            assertEquals("From Ayşe Yılmaz, A. Yılmaz, Ayşe", (review.sources).en())
+            assertEquals("Merge 3 Contacts", (review.mergeLabel).en())
             val phones =
                 review.sections
-                    .first { it.title == "Phone" }
+                    .first { it.title?.en() == "Phone" }
                     .lines
                     .map { it.value }
             assertEquals("the same number written twice is kept once", 2, phones.size)
-            assertTrue(review.sections.any { it.title == "Email" })
+            assertTrue(review.sections.any { it.title?.en() == "Email" })
             model.onAction(DupesAction.CloseReview)
             model.until { it.review == null }
         }
@@ -78,7 +81,7 @@ class DupesViewModelTest {
             model.until { it.review != null }
             model.onAction(DupesAction.MergeOpen)
             val undo = model.effect() as DupesEffect.Undo
-            assertEquals("Merged 3 contacts", undo.message)
+            assertEquals("Merged 3 contacts", (undo.message).en())
             val after = r.contacts()
             assertEquals(10, after.size)
             assertTrue(after.none { it.id == 2L || it.id == 3L })
@@ -101,7 +104,7 @@ class DupesViewModelTest {
             model.onAction(DupesAction.MergeOpen)
             val undo = model.effect() as DupesEffect.Undo
             model.onAction(DupesAction.Undo(undo.token))
-            assertEquals(DupesEffect.Toast("Merge undone"), model.effect())
+            assertEquals(DupesEffect.Toast(UiText.Res(R.string.contacts_merge_undone)), model.effect())
             val after = r.contacts()
             assertEquals(before.size, after.size)
             assertEquals("the keeper is as it was", before.single { it.id == 1L }, after.single { it.id == 1L })
@@ -122,17 +125,17 @@ class DupesViewModelTest {
             model.until { it.rows.size == 3 }
             model.onAction(DupesAction.AskMergeAll)
             val ask = model.effect() as DupesEffect.Ask
-            assertEquals("Merge All", ask.confirmLabel)
+            assertEquals("Merge All", (ask.confirmLabel).en())
             assertEquals(DupesAction.ConfirmMergeAll, ask.then)
             assertEquals("asking changes nothing", before, r.contacts())
             model.onAction(ask.then)
             val undo = model.effect() as DupesEffect.Undo
-            assertEquals("Merged 7 contacts", undo.message)
+            assertEquals("Merged 7 contacts", (undo.message).en())
             assertEquals(before.size - 4, r.contacts().size)
             model.until { it.isEmpty }
             // ONE undo brings back all four removed contacts.
             model.onAction(DupesAction.Undo(undo.token))
-            assertEquals(DupesEffect.Toast("Merge undone"), model.effect())
+            assertEquals(DupesEffect.Toast(UiText.Res(R.string.contacts_merge_undone)), model.effect())
             assertEquals(before.size, r.contacts().size)
             assertTrue(r.wait { r.trash.list()!!.entries }.isEmpty())
         }
@@ -147,7 +150,7 @@ class DupesViewModelTest {
             model.onAction(DupesAction.AskMergeAll)
             model.effect()
             model.onAction(DupesAction.ConfirmMergeAll)
-            assertEquals(DupesEffect.Toast("Couldn't merge right now"), model.effect())
+            assertEquals(DupesEffect.Toast(UiText.Res(R.string.contacts_cant_merge)), model.effect())
             r.repo.failWith = null
             assertEquals(before, r.contacts())
             assertTrue(r.wait { r.trash.list()!!.entries }.isEmpty())

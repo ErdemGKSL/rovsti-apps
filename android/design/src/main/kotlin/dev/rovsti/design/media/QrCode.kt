@@ -18,11 +18,13 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import kotlin.math.floor
 
 /**
@@ -59,12 +61,13 @@ fun QrCode(
     modules: QrModules?,
     modifier: Modifier = Modifier,
 ) {
+    val qrLabel = stringResource(R.string.design_qr_code)
     Box(
         modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(QrCardRadius))
             .background(QrPaper)
-            .semantics { contentDescription = "QR code" }
+            .semantics { contentDescription = qrLabel }
             .drawWithCache {
                 val path = if (modules != null) qrPath(modules, size.minDimension) else null
                 onDrawBehind { if (path != null) drawPath(path, QrInk) }

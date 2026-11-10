@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import dev.rovsti.design.controls.ChipTagPrefix
+import dev.rovsti.design.text.UiText
 import dev.rovsti.testing.ShotTest
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -128,7 +129,7 @@ class CleanupScreenTest : ShotTest() {
         compose.onNodeWithText("Delete").performClick()
         advance(500)
         assertTrue(CleanupAction.ConfirmDelete in h.actions)
-        effects.trySend(CleanupEffect.Deleted("1 contact deleted.", listOf(7L)))
+        effects.trySend(CleanupEffect.Deleted(UiText.Literal("1 contact deleted."), listOf(7L)))
         advance(1_000)
         compose.onNodeWithText("1 contact deleted.").assertExists()
         compose.onNodeWithText("Undo").performClick()

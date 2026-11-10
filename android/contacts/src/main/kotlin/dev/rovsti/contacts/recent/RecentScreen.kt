@@ -14,6 +14,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.favorites.PersonRow
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
@@ -78,7 +81,7 @@ fun RecentScreen(
     LaunchedEffect(state.selected) { scroll.restore(state.selected, listState) }
     val labels = remember(state.tabs) { state.tabs.map { it.label }.toImmutableList() }
     LargeTitleScaffold(
-        title = "Recent",
+        title = stringResource(R.string.contacts_recent),
         state = listState,
         actions = persistentListOf(),
         navigation = NavigationButton(onClick = onBack),
@@ -142,7 +145,7 @@ fun RecentScreen(
             if (rows.isNotEmpty()) {
                 item(key = "footer", contentType = "footer") {
                     RovstiText(
-                        "Showing the last ${state.windowDays} days.",
+                        pluralStringResource(R.plurals.contacts_recent_window, state.windowDays, state.windowDays),
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = Spacing.gutter + Spacing.m, vertical = Spacing.m)

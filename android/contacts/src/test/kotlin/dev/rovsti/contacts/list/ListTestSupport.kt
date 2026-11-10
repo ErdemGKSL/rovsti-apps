@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import dev.rovsti.contacts.ContactsRoots
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.ContactsTabs
@@ -21,6 +22,8 @@ import dev.rovsti.core.model.contacts.SelectAction
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.haptics.RovstiHaptics
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import kotlinx.collections.immutable.persistentListOf
@@ -52,7 +55,7 @@ internal class ListHarness(
         val listed = ui.rows.map { it.id }
         return SelectMode(
             selected = ids.toImmutableSet(),
-            title = if (ids.isEmpty()) "Select contacts" else "${ids.size} selected",
+            title = UiText.Literal(if (ids.isEmpty()) "Select contacts" else "${ids.size} selected"),
             actions =
                 if (ids.isEmpty()) {
                     persistentListOf()
@@ -104,6 +107,7 @@ internal fun HostedList(
     harness: ListHarness,
     haptics: RovstiHaptics? = null,
 ) {
+    val context = LocalContext.current
     val navigator = remember { TabNavigator(ContactsTabs, ContactsRoots) }
     val tabs = contactsTabItems("Contacts", "Favorites", "Groups", "Settings")
     harness.listState = rememberLazyListState()
@@ -112,7 +116,7 @@ internal fun HostedList(
         RovstiShell(
             navigator = navigator,
             tabs = tabs,
-            chromeFor = { route -> chromeFor(route, harness.ui.selectMode != null) },
+            chromeFor = { route -> chromeFor(route, harness.ui.selectMode != null) { it.resolve(context) } },
             overlays = harness.overlays,
             modifier = Modifier.fillMaxSize(),
             accessory =

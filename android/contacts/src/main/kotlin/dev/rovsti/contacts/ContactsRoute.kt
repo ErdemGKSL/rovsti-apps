@@ -2,8 +2,10 @@ package dev.rovsti.contacts
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.compose.ui.res.stringResource
 import dev.rovsti.design.chrome.TabItem
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.ChromeSpec
 import dev.rovsti.design.transition.Tab
 import dev.rovsti.design.transition.TabBarMode
@@ -156,15 +158,26 @@ internal fun contactsTabItems(
  * title; the card, the editor, the trash and the other pages that take the whole screen hide it; the settings sub-pages
  * fold it into the circle of the selected tab.
  */
-fun chromeFor(route: ContactsRoute): ChromeSpec =
+fun chromeFor(
+    route: ContactsRoute,
+    text: (UiText) -> String,
+): ChromeSpec =
     when (route) {
-        ContactsRoute.ContactsList -> ChromeSpec(TabBarMode.Visible, largeTitle = "Contacts")
+        ContactsRoute.ContactsList -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.tab_contacts)))
+        }
 
-        ContactsRoute.Favorites -> ChromeSpec(TabBarMode.Visible, largeTitle = "Favorites")
+        ContactsRoute.Favorites -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.tab_favorites)))
+        }
 
-        ContactsRoute.Groups -> ChromeSpec(TabBarMode.Visible, largeTitle = "Groups")
+        ContactsRoute.Groups -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.tab_groups)))
+        }
 
-        ContactsRoute.Settings -> ChromeSpec(TabBarMode.Visible, largeTitle = "Settings")
+        ContactsRoute.Settings -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.tab_settings)))
+        }
 
         is ContactsRoute.ContactCard,
         is ContactsRoute.ContactEditor,
@@ -176,29 +189,71 @@ fun chromeFor(route: ContactsRoute): ChromeSpec =
         ContactsRoute.Emergency,
         ContactsRoute.Recent,
         is ContactsRoute.Intake,
-        -> ChromeSpec(TabBarMode.Hidden)
+        -> {
+            ChromeSpec(TabBarMode.Hidden)
+        }
 
-        ContactsRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
+        ContactsRoute.WhatsAppSettings -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
+        }
 
-        ContactsRoute.SettingsNameFormat -> ChromeSpec(TabBarMode.Visible, largeTitle = "Name Format")
+        ContactsRoute.SettingsNameFormat -> {
+            ChromeSpec(
+                TabBarMode.Visible,
+                largeTitle = text(UiText.Res(R.string.contacts_name_format)),
+            )
+        }
 
-        ContactsRoute.SettingsSortBy -> ChromeSpec(TabBarMode.Visible, largeTitle = "Sort By")
+        ContactsRoute.SettingsSortBy -> {
+            ChromeSpec(
+                TabBarMode.Visible,
+                largeTitle = text(UiText.Res(R.string.contacts_sort_by)),
+            )
+        }
 
-        ContactsRoute.SettingsSaveTo -> ChromeSpec(TabBarMode.Visible, largeTitle = "Save To")
+        ContactsRoute.SettingsSaveTo -> {
+            ChromeSpec(
+                TabBarMode.Visible,
+                largeTitle = text(UiText.Res(R.string.settings_save_to)),
+            )
+        }
 
-        ContactsRoute.SettingsSummary -> ChromeSpec(TabBarMode.Visible, largeTitle = "Summary")
+        ContactsRoute.SettingsSummary -> {
+            ChromeSpec(
+                TabBarMode.Visible,
+                largeTitle = text(UiText.Res(R.string.contacts_summary)),
+            )
+        }
 
-        ContactsRoute.SettingsReminderTime -> ChromeSpec(TabBarMode.Visible, largeTitle = "Time")
+        ContactsRoute.SettingsReminderTime -> {
+            ChromeSpec(
+                TabBarMode.Visible,
+                largeTitle = text(UiText.Res(R.string.contacts_time)),
+            )
+        }
 
-        ContactsRoute.Appearance -> ChromeSpec(TabBarMode.Visible, largeTitle = "Appearance")
+        ContactsRoute.Appearance -> {
+            ChromeSpec(
+                TabBarMode.Visible,
+                largeTitle = text(UiText.Res(R.string.contacts_appearance)),
+            )
+        }
 
-        ContactsRoute.Haptics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Haptics")
+        ContactsRoute.Haptics -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.contacts_haptics)))
+        }
 
-        ContactsRoute.About -> ChromeSpec(TabBarMode.Visible, largeTitle = "About")
+        ContactsRoute.About -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.contacts_about)))
+        }
 
-        ContactsRoute.Licences -> ChromeSpec(TabBarMode.Visible, largeTitle = "Licences")
+        ContactsRoute.Licences -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.contacts_licences)))
+        }
 
-        is ContactsRoute.LicenceDetail -> ChromeSpec(TabBarMode.Visible)
+        is ContactsRoute.LicenceDetail -> {
+            ChromeSpec(TabBarMode.Visible)
+        }
     }
 
 /**
@@ -208,8 +263,9 @@ fun chromeFor(route: ContactsRoute): ChromeSpec =
 fun chromeFor(
     route: ContactsRoute,
     selecting: Boolean,
+    text: (UiText) -> String,
 ): ChromeSpec =
-    chromeFor(route).let {
+    chromeFor(route, text).let {
         if (selecting && route == ContactsRoute.ContactsList) it.copy(tabBar = TabBarMode.Folded) else it
     }
 

@@ -41,10 +41,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.glass.GlassPreset
 import dev.rovsti.design.glass.rovstiGlass
 import dev.rovsti.design.icons.RovstiIcon
@@ -213,14 +215,14 @@ private fun ClearButton(onClear: () -> Unit) {
                 interactionSource = null,
                 indication = null,
                 role = Role.Button,
-                onClickLabel = "Clear",
+                onClickLabel = stringResource(R.string.design_clear),
                 onClick = onClear,
             ),
         contentAlignment = Alignment.Center,
     ) {
         RovstiIcon(
             RovstiIcons.Xmark,
-            contentDescription = "Clear",
+            contentDescription = stringResource(R.string.design_clear),
             tint = RovstiTheme.colors.labelSecondary,
             size = ClearGlyph,
         )

@@ -51,6 +51,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.LocalIosContentColor
@@ -194,8 +195,9 @@ open class IosContextMenuEntry(
     private val openHaptic: Boolean = false,
     private val panelTag: String = "menu-card",
     private val debugTag: String = "menu.panel",
-    title: String = "Menu",
-) : OverlayEntry(modal = true, title = title),
+    title: String = "",
+    titleRes: Int = R.string.design_menu,
+) : OverlayEntry(modal = true, title = title, titleRes = titleRes),
     SlideTarget {
     private var slide by mutableStateOf<Flow<Offset>?>(null)
 

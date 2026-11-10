@@ -1,9 +1,12 @@
 package dev.rovsti.contacts.intake
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.card.SampleCards
 import dev.rovsti.contacts.data.Book
+import dev.rovsti.contacts.en
 import dev.rovsti.core.model.contacts.TextRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -50,7 +53,7 @@ class CsvImportViewModelTest {
         val sheet = r.mapping()
         assertEquals(listOf("Vorname", "Nachname", "Handy", "Mail"), sheet.columns.map { it.header })
         assertEquals("Ada", sheet.columns[0].sample)
-        assertEquals("No contacts found with these columns", sheet.countLine)
+        assertEquals("No contacts found with these columns", (sheet.countLine).en())
         assertFalse(sheet.canContinue)
         assertEquals("the file is read once, as it is", listOf(GERMAN), reads)
         r.model.onAction(IntakeAction.ConfirmMapping)
@@ -62,7 +65,7 @@ class CsvImportViewModelTest {
         r.mapping()
         r.model.onAction(IntakeAction.SetRole(0, CsvRole.FirstName))
         val first = r.mapping { it.columns[0].chosen == CsvRole.FirstName && it.canContinue }
-        assertEquals("2 contacts found", first.countLine)
+        assertEquals("2 contacts found", (first.countLine).en())
         assertEquals("the first read, and one more for the change", 2, reads.size)
         assertTrue(reads.last().startsWith("First Name,Nachname,Handy,Mail\r\n"))
         r.model.onAction(IntakeAction.SetRole(1, CsvRole.LastName))
@@ -88,7 +91,7 @@ class CsvImportViewModelTest {
         r.model.onAction(IntakeAction.ConfirmMapping)
         val preview = r.preview()
         assertEquals(listOf("Ada Lovelace", "Grace Hopper"), preview.rows.map { it.name })
-        assertEquals("2 new contacts", preview.countLine)
+        assertEquals("2 new contacts", (preview.countLine).en())
         assertEquals(null, preview.mapping)
         r.model.onAction(IntakeAction.Add)
         assertTrue(r.effect() is IntakeEffect.Undo)
@@ -98,12 +101,12 @@ class CsvImportViewModelTest {
     @Test fun ignoringAColumnTakesItsValuesOut() {
         val r = open("First Name,Last Name,Phone 1 - Value\r\nAda,Lovelace,+44 20 7946 0958\r\n")
         val sheet = r.mapping()
-        assertEquals("1 contact found", sheet.countLine)
+        assertEquals("1 contact found", (sheet.countLine).en())
         assertEquals(listOf(CsvRole.FirstName, CsvRole.LastName, CsvRole.Phone), sheet.columns.map { it.detected })
         r.model.onAction(IntakeAction.SetRole(0, CsvRole.Ignore))
         r.model.onAction(IntakeAction.SetRole(1, CsvRole.Ignore))
         val none = r.mapping { it.columns[1].chosen == CsvRole.Ignore && !it.canContinue }
-        assertEquals("a number alone is no card", "No contacts found with these columns", none.countLine)
+        assertEquals("a number alone is no card", "No contacts found with these columns", (none.countLine).en())
     }
 
     @Test fun cancelLeavesTheMappingAndWritesNothing() {
@@ -116,7 +119,7 @@ class CsvImportViewModelTest {
 
     @Test fun aFileWithoutAnyHeaderToastsThatItCannotBeRead() {
         val r = open("\r\n,\r\n")
-        assertEquals(IntakeEffect.Toast("Can't read this file"), r.effect())
+        assertEquals(IntakeEffect.Toast(UiText.Res(R.string.contacts_cant_read_file)), r.effect())
         assertEquals(IntakeEffect.Close, r.effect())
     }
 

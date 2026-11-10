@@ -1,11 +1,16 @@
 package dev.rovsti.contacts.photo
 
 import android.content.ContentUris
+import android.content.Context
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.media.ViewerAction
 import dev.rovsti.design.overlay.MenuItem
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.files.FileResult
 import dev.rovsti.platform.files.FilesRepository
 import kotlinx.collections.immutable.ImmutableList
@@ -33,7 +38,7 @@ class PhotoViewerActions(
     private val sources: List<Uri>,
     private val files: FilesRepository,
     private val scope: CoroutineScope,
-    private val say: (String) -> Unit,
+    private val say: (UiText) -> Unit,
     private val share: (Uri, String) -> Unit,
 ) {
     private var saving = false
@@ -60,7 +65,15 @@ class PhotoViewerActions(
             try {
                 val read = fetch()
                 val ok = read?.path?.let { files.saveToGallery(it, fileName, read.mime ?: MIME) } ?: false
-                say(if (ok) "Saved to Photos" else "Can't save the photo")
+                say(
+                    if (ok) {
+                        UiText.Res(
+                            R.string.contacts_saved_to_photos,
+                        )
+                    } else {
+                        UiText.Res(R.string.contacts_cant_save_photo)
+                    },
+                )
             } finally {
                 saving = false
             }
@@ -71,7 +84,13 @@ class PhotoViewerActions(
         scope.launch {
             val read = fetch()
             val staged = read?.path?.let { files.stageForShare(it, fileName) }
-            if (staged == null) say("Can't share the photo") else share(staged, read.mime ?: MIME)
+            if (staged ==
+                null
+            ) {
+                say(UiText.Res(R.string.contacts_cant_share_photo))
+            } else {
+                share(staged, read.mime ?: MIME)
+            }
         }
     }
 
@@ -80,11 +99,13 @@ class PhotoViewerActions(
      * first asks through [confirmRemove].
      */
     fun editMenu(
+        context: Context,
         jid: String?,
         actions: PhotoMenuActions,
         confirmRemove: (onConfirm: () -> Unit) -> Unit,
     ): ImmutableList<MenuItem> =
         photoMenuItems(
+            context = context,
             hasPhoto = true,
             jid = jid,
             actions =
@@ -97,11 +118,14 @@ class PhotoViewerActions(
         )
 
     /** Save, Share and Edit (with its [menu]) for the viewer's toolbar. */
-    fun viewerActions(menu: ImmutableList<MenuItem>): ImmutableList<ViewerAction> =
+    fun viewerActions(
+        context: Context,
+        menu: ImmutableList<MenuItem>,
+    ): ImmutableList<ViewerAction> =
         persistentListOf(
-            ViewerAction(SAVE, RovstiIcons.Download, "Save") { save() },
-            ViewerAction(SHARE, RovstiIcons.Share, "Share") { share() },
-            ViewerAction(EDIT, RovstiIcons.Pencil, "Edit", menu = menu),
+            ViewerAction(SAVE, RovstiIcons.Download, context.getString(R.string.groups_save)) { save() },
+            ViewerAction(SHARE, RovstiIcons.Share, context.getString(R.string.contacts_share)) { share() },
+            ViewerAction(EDIT, RovstiIcons.Pencil, context.getString(R.string.favorites_edit), menu = menu),
         )
 
     companion object {

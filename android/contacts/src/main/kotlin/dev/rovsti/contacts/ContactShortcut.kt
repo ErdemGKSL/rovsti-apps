@@ -3,6 +3,7 @@ package dev.rovsti.contacts
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.PinShortcutRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ShortcutsRepository
 
 /**
@@ -15,7 +16,14 @@ internal suspend fun pinContactToHome(
     id: Long,
     lookupKey: String?,
     name: String,
-): String? {
+): UiText? {
     val spec = (ops.pinShortcut(PinShortcutRequest(id, lookupKey, name)) as? Outcome.Ok)?.value ?: return null
-    return if (shortcuts.pinContact(spec.shortcut)) "Added to Home screen" else "Your launcher can't add shortcuts"
+    return if (shortcuts.pinContact(
+            spec.shortcut,
+        )
+    ) {
+        UiText.Res(R.string.contacts_added_to_home_screen)
+    } else {
+        UiText.Res(R.string.contacts_launcher_no_shortcuts)
+    }
 }

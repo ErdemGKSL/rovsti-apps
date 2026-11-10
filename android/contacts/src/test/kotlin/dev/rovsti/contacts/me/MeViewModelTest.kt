@@ -1,5 +1,8 @@
 package dev.rovsti.contacts.me
 
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -24,7 +27,7 @@ class MeViewModelTest {
     private fun PeopleRig.ready(predicate: (MeUiState) -> Boolean = { it.myCard != null }): MeUiState =
         wait { me.state.first(predicate) }
 
-    private fun PeopleRig.toast(): String = wait { (me.effects.first() as MeEffect.Toast).text }
+    private fun PeopleRig.toast(): String = wait { (me.effects.first() as MeEffect.Toast).text.en() }
 
     @Test fun withNoCardTheRowOffersToSetOneUp() {
         val r = rig()
@@ -86,7 +89,7 @@ class MeViewModelTest {
         r.toast()
         val two = r.ready { it.emergencyIds.size == 2 }
         assertEquals(setOf(2L, 7L), two.emergencyIds)
-        assertEquals("2 of 5", two.emergencyDetail)
+        assertEquals("2 of 5", (two.emergencyDetail).en())
         assertEquals(listOf("k-2", "k-7"), r.store.emergency.value)
         r.me.onAction(MeAction.ToggleEmergency(2))
         assertEquals("Removed from emergency contacts", r.toast())

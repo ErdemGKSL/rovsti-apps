@@ -7,6 +7,7 @@ import dev.rovsti.core.model.qr.QrMatrix
 import dev.rovsti.core.model.wa.SettingsInput
 import dev.rovsti.core.model.wa.SettingsView
 import dev.rovsti.core.ops.WaGateway
+import dev.rovsti.design.text.UiText
 
 /** Opens a gateway for [url]; [key] is null only to create an instance. The caller closes what it opens. */
 fun interface WaUrlOpener {
@@ -66,7 +67,7 @@ sealed interface WaSettingsAction {
 /** One-shot things the screen host does: a toast, a share sheet. */
 sealed interface WaSettingsEvent {
     data class Toast(
-        val message: String,
+        val message: UiText,
     ) : WaSettingsEvent
 
     data class ShareImage(

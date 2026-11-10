@@ -6,6 +6,7 @@ import dev.rovsti.core.model.contacts.HourChoice
 import dev.rovsti.core.model.contacts.StatRow
 import dev.rovsti.core.model.phone.SortBy
 import dev.rovsti.core.model.search.NameFormat
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -80,6 +81,6 @@ sealed interface SettingsEffect {
     data object AskNotifications : SettingsEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : SettingsEffect
 }

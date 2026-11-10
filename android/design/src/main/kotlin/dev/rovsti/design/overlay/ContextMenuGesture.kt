@@ -21,11 +21,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import dev.rovsti.design.R
 import dev.rovsti.design.motion.LocalReduceMotion
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -102,7 +104,7 @@ fun Modifier.contextMenu(
     onPreviewDrag: (Offset) -> Unit,
     onPreviewRelease: () -> Unit,
     actions: ImmutableList<MenuItem> = persistentListOf(),
-    label: String = "Show actions",
+    label: String = stringResource(R.string.design_show_actions),
     cover: () -> Float = ZeroCover,
 ): Modifier {
     val reduceMotion = LocalReduceMotion.current

@@ -51,6 +51,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
@@ -63,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import dev.rovsti.design.R
 import dev.rovsti.design.chrome.FrostedTopBar
 import dev.rovsti.design.chrome.ToolbarButton
 import dev.rovsti.design.chrome.ToolbarCapsule
@@ -171,7 +173,7 @@ class PhotoViewerEntry(
     private val actions: ImmutableList<ViewerAction>,
     private val anchorFor: (page: Int) -> Rect?,
     private val onPageChanged: (page: Int) -> Unit,
-) : OverlayEntry(modal = true, title = "Photo") {
+) : OverlayEntry(modal = true, title = "", titleRes = R.string.design_photo) {
     @Composable
     override fun Content(host: OverlayScope) {
         val scope = rememberCoroutineScope()
@@ -207,6 +209,13 @@ class PhotoViewerEntry(
         // The photo is on show against black, in light and dark: the chrome is always the dark one.
         RovstiTheme(darkTheme = true) {
             val chrome = rememberGlassScreenChrome(Color.Black)
+            val photoPosition = stringResource(R.string.design_photo_position, viewer.page + 1, viewer.count)
+            val pageOf = stringResource(R.string.design_page_of, viewer.page + 1, viewer.count)
+            val nextPhoto = stringResource(R.string.design_photo_next)
+            val previousPhoto = stringResource(R.string.design_photo_previous)
+            val zoomIn = stringResource(R.string.design_zoom_in)
+            val zoomOut = stringResource(R.string.design_zoom_out)
+            val closeLabel = stringResource(R.string.design_close)
             val dim: () -> Float = { appear * (1f - viewer.dismissProgress) }
             Box(
                 Modifier
@@ -214,8 +223,8 @@ class PhotoViewerEntry(
                     .testTag(PhotoViewerTags.Root)
                     .drawBehind { drawRect(Color.Black, alpha = dim().coerceIn(0f, 1f)) }
                     .semantics {
-                        contentDescription = "Photo ${viewer.page + 1} of ${viewer.count}"
-                        stateDescription = "${viewer.page + 1} of ${viewer.count}"
+                        contentDescription = photoPosition
+                        stateDescription = pageOf
                         viewerZoom = viewer.zoom.scale
                         viewerDim = dim()
                         viewerChrome = chromeLive
@@ -223,11 +232,11 @@ class PhotoViewerEntry(
                         viewerSettled = viewer.isSettled
                         customActions =
                             listOf(
-                                CustomAccessibilityAction("Next photo") { viewer.goTo(viewer.page + 1) },
-                                CustomAccessibilityAction("Previous photo") { viewer.goTo(viewer.page - 1) },
-                                CustomAccessibilityAction("Zoom in") { viewer.zoomStep(in_ = true) },
-                                CustomAccessibilityAction("Zoom out") { viewer.zoomStep(in_ = false) },
-                                CustomAccessibilityAction("Close") {
+                                CustomAccessibilityAction(nextPhoto) { viewer.goTo(viewer.page + 1) },
+                                CustomAccessibilityAction(previousPhoto) { viewer.goTo(viewer.page - 1) },
+                                CustomAccessibilityAction(zoomIn) { viewer.zoomStep(in_ = true) },
+                                CustomAccessibilityAction(zoomOut) { viewer.zoomStep(in_ = false) },
+                                CustomAccessibilityAction(closeLabel) {
                                     viewer.onClose()
                                     true
                                 },
@@ -279,8 +288,8 @@ class PhotoViewerEntry(
                             )
                             FrostedTopBar(
                                 onBack = viewer.onClose,
-                                backLabel = "Close",
-                                title = "${viewer.page + 1} of ${viewer.count}",
+                                backLabel = closeLabel,
+                                title = pageOf,
                                 titleAlpha = 1f,
                                 modifier = Modifier.align(Alignment.TopCenter),
                             )

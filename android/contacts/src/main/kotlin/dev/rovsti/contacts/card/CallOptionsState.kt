@@ -1,7 +1,9 @@
 package dev.rovsti.contacts.card
 
 import androidx.compose.runtime.Immutable
+import dev.rovsti.contacts.R
 import dev.rovsti.core.model.contacts.Confirm
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactCallOptions
 
 /** What the Block row of the "Calls" section does. */
@@ -25,7 +27,7 @@ data class CallOptionsUiState(
     /** False until the provider has been read; the section is drawn from then on, and never changes height. */
     val loaded: Boolean = false,
     /** "Default", "Silent" or the tone's title (words of the Rust op). */
-    val ringtone: String = "Default",
+    val ringtone: UiText = UiText.Res(R.string.contacts_default),
     val voicemail: Boolean = false,
     val block: BlockRow = BlockRow.Hidden,
 )
@@ -65,15 +67,15 @@ sealed interface CallOptionsEffect {
     ) : CallOptionsEffect
 
     data class AskBlock(
-        val title: String,
-        val message: String,
-        val actionLabel: String,
+        val title: UiText,
+        val message: UiText,
+        val actionLabel: UiText,
     ) : CallOptionsEffect
 
     /** Open the system screen where the default phone app is chosen. */
     data object OpenRoleSettings : CallOptionsEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : CallOptionsEffect
 }

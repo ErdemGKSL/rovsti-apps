@@ -4,6 +4,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import dev.rovsti.testing.ShotTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -36,11 +39,11 @@ class CardMeMenuTest : ShotTest() {
         val r = rig()
         assertFalse(r.ready().header!!.isMyCard)
         r.model.onAction(ContactCardAction.ToggleMyCard)
-        assertEquals("Set as my card", toast(r))
+        assertEquals("Set as my card", (toast(r)).en())
         assertTrue(r.stateWhere { it.header?.isMyCard == true }.header!!.isMyCard)
         assertEquals("k-1", r.store.myCard)
         r.model.onAction(ContactCardAction.ToggleMyCard)
-        assertEquals("My card removed", toast(r))
+        assertEquals("My card removed", (toast(r)).en())
         assertFalse(r.stateWhere { it.header?.isMyCard == false }.header!!.isMyCard)
     }
 
@@ -48,11 +51,11 @@ class CardMeMenuTest : ShotTest() {
         val r = rig()
         assertFalse(r.ready().header!!.isEmergency)
         r.model.onAction(ContactCardAction.ToggleEmergency)
-        assertEquals("Added to emergency contacts", toast(r))
+        assertEquals("Added to emergency contacts", (toast(r)).en())
         assertTrue(r.stateWhere { it.header?.isEmergency == true }.header!!.isEmergency)
         assertEquals(listOf("k-1"), r.store.emergency.value)
         r.model.onAction(ContactCardAction.ToggleEmergency)
-        assertEquals("Removed from emergency contacts", toast(r))
+        assertEquals("Removed from emergency contacts", (toast(r)).en())
         assertTrue(r.stateWhere { it.header?.isEmergency == false }.header != null)
         assertTrue(
             r.store.emergency.value
@@ -65,7 +68,7 @@ class CardMeMenuTest : ShotTest() {
         val r = rig(4)
         r.ready()
         r.model.onAction(ContactCardAction.ToggleEmergency)
-        assertEquals("This contact has no number", toast(r))
+        assertEquals("This contact has no number", (toast(r)).en())
         assertTrue(
             r.store.emergency.value
                 .isEmpty(),

@@ -34,6 +34,7 @@ import dev.rovsti.design.overlay.ButtonMenuEntry
 import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -117,8 +118,8 @@ fun GroupPageScreen(
                     ) {
                         EmptyState(
                             icon = RovstiIcons.People,
-                            title = "Empty Group",
-                            message = "Add people with Add Members.",
+                            title = stringResource(R.string.contacts_empty_group),
+                            message = stringResource(R.string.contacts_empty_group_message),
                             actionLabel = text.add,
                             onAction = addMembers,
                         )
@@ -128,7 +129,7 @@ fun GroupPageScreen(
                 item(key = "subtitle", contentType = "subtitle") {
                     Column(Modifier.padding(horizontal = Spacing.gutter).padding(bottom = Spacing.s)) {
                         RovstiText(
-                            page.subtitle,
+                            page.subtitle.text(),
                             Modifier.testTag(GroupPageTags.Subtitle),
                             style = RovstiTheme.type.footnote,
                             color = RovstiTheme.colors.labelSecondary,

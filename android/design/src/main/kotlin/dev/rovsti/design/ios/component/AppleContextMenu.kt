@@ -68,6 +68,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.LocalIosContentColor
@@ -332,7 +333,7 @@ internal class AppleContextMenuEntry(
     private val openHaptic: Boolean = false,
     private val panelTag: String = "menu-card",
     private val debugTag: String = "menu.panel",
-) : OverlayEntry(modal = true, title = "Preview and actions"),
+) : OverlayEntry(modal = true, title = "", titleRes = R.string.design_preview_and_actions),
     PreviewDragTarget {
     private var scope: kotlinx.coroutines.CoroutineScope? = null
     private var dismissDownPx = 0f

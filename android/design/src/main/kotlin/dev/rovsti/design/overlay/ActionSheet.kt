@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.glass.panelGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.ios.foundation.IosMenuMaterial
@@ -108,9 +110,9 @@ class ActionSheetEntry(
     title: String? = null,
     private val message: String? = null,
     private val actions: ImmutableList<ActionSheetAction>,
-    private val cancelLabel: String = "Cancel",
+    private val cancelLabel: String = "",
     private val onCancel: () -> Unit = {},
-) : OverlayEntry(modal = true, title = title ?: "Actions") {
+) : OverlayEntry(modal = true, title = title.orEmpty(), titleRes = R.string.design_actions) {
     private val header = title
 
     override fun onBack(controller: OverlayController) {
@@ -241,7 +243,13 @@ class ActionSheetEntry(
                         actions.forEachIndexed { index, action ->
                             val isArmed = armed == index
                             SheetRow(
-                                label = if (isArmed) action.armedLabel ?: action.label else action.label,
+                                label =
+                                    if (isArmed) {
+                                        action.armedLabel?.ifEmpty { stringResource(R.string.design_tap_again) }
+                                            ?: action.label
+                                    } else {
+                                        action.label
+                                    },
                                 destructive = action.destructive,
                                 bold = false,
                                 divider = header != null || message != null || index > 0,
@@ -262,7 +270,7 @@ class ActionSheetEntry(
                 }
                 SheetGroup(Modifier.onSizeChanged { cancelHeightPx = it.height }.testTag("action-cancel-group")) {
                     SheetRow(
-                        cancelLabel,
+                        cancelLabel.ifEmpty { stringResource(R.string.design_cancel) },
                         destructive = false,
                         bold = true,
                         divider = false,
@@ -303,6 +311,7 @@ private fun SheetRow(
     val source = remember { MutableInteractionSource() }
     val hairline = colors.separator
     val thickness = with(LocalDensity.current) { 0.5.dp.toPx() }
+    val tapAgain = stringResource(R.string.design_tap_again)
     Box(
         Modifier
             .fillMaxWidth()
@@ -313,7 +322,7 @@ private fun SheetRow(
             .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)
             .semantics {
                 if (armed) {
-                    stateDescription = "Tap again to confirm"
+                    stateDescription = tapAgain
                     liveRegion = LiveRegionMode.Polite
                 }
             }.padding(horizontal = Spacing.gutter, vertical = Spacing.s)
@@ -350,8 +359,8 @@ fun OverlayController.confirmDestructive(
     title: String? = null,
     message: String? = null,
     twoTap: Boolean = false,
-    armedLabel: String = "Tap again to confirm",
-    cancelLabel: String = "Cancel",
+    armedLabel: String = "",
+    cancelLabel: String = "",
     onCancel: () -> Unit = {},
 ): ActionSheetEntry =
     present(

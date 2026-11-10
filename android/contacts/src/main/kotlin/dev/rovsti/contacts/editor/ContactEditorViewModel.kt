@@ -1,7 +1,10 @@
 package dev.rovsti.contacts.editor
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.SavedStateHandle
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.Account
@@ -23,6 +26,7 @@ import dev.rovsti.core.model.contacts.Group
 import dev.rovsti.core.model.contacts.RecentCreatedRequest
 import dev.rovsti.core.model.contacts.RelationKind
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.SaveAccount
@@ -482,14 +486,13 @@ class ContactEditorViewModel(
     }
 
     // ---- save and undo
-
     private suspend fun save() {
         val before = edit.value
         if (before.saving || before.phase != EditorPhase.Ready || !derived.value.dirty) return
         edit.update { it.copy(saving = true) }
         val validated = (ops.draftValidate(DraftRequest(before.draft)) as? Outcome.Ok)?.value
         if (validated == null) {
-            fail("Can't save this contact.")
+            fail(UiText.Res(R.string.contacts_cant_save_this))
             return
         }
         val issue = validated.error
@@ -504,9 +507,9 @@ class ContactEditorViewModel(
             is ContactResult.Failed -> {
                 fail(
                     when (result.reason) {
-                        ContactResult.Reason.Permission -> "Can't save: Rovsti has no permission to change contacts."
-                        ContactResult.Reason.NotFound -> "Can't save: this contact is gone."
-                        else -> "Can't save this contact."
+                        ContactResult.Reason.Permission -> UiText.Res(R.string.contacts_cant_save_permission)
+                        ContactResult.Reason.NotFound -> UiText.Res(R.string.contacts_cant_save_gone)
+                        else -> UiText.Res(R.string.contacts_cant_save_this)
                     },
                 )
             }
@@ -515,13 +518,19 @@ class ContactEditorViewModel(
                 val newId = result.value
                 if (id == null) remember(newId, cleaned.account)
                 lastUndo = diff?.undo?.copy(id = newId)
-                outbox.trySend(EditorEffect.Saved(newId, diff?.notice ?: "Saved.", lastUndo != null))
+                outbox.trySend(
+                    EditorEffect.Saved(
+                        newId,
+                        diff?.notice?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_saved),
+                        lastUndo != null,
+                    ),
+                )
                 outbox.trySend(EditorEffect.Close)
             }
         }
     }
 
-    private fun fail(text: String) {
+    private fun fail(text: UiText) {
         edit.update { it.copy(saving = false) }
         outbox.trySend(EditorEffect.Toast(text))
     }

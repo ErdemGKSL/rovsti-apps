@@ -1,9 +1,12 @@
 package dev.rovsti.contacts.groups
 
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.favorites.FavRig
 import dev.rovsti.contacts.favorites.FavSample
 import dev.rovsti.core.model.contacts.Account
 import dev.rovsti.core.model.contacts.Group
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -53,7 +56,7 @@ class GroupsViewModelTest {
         groupState(model = model)
         model.onAction(GroupsAction.Create(name))
         val toast = wait { model.effects.first() } as GroupsEffect.Toast
-        assertTrue(toast.text, toast.text.startsWith("Group created"))
+        assertTrue(toast.text.en(), toast.text.en().startsWith("Group created"))
         val open = wait { model.effects.first() } as GroupsEffect.OpenGroup
         return wait { fake.groups().first().first { it.id == open.id } }
     }
@@ -80,11 +83,18 @@ class GroupsViewModelTest {
         val r = rig()
         val state = r.groupState(model = r.groupsModel())
         assertEquals(listOf("Family", "Work", "Empty"), state.groups.map { it.title })
-        assertEquals("3 contacts", state.groups[0].subtitle)
-        assertEquals("2 contacts", state.groups[1].subtitle)
+        assertEquals("3 contacts", state.groups[0].subtitle.en())
+        assertEquals("2 contacts", state.groups[1].subtitle.en())
         assertTrue(
-            state.groups[2].subtitle,
-            state.groups[2].subtitle.startsWith("0") || state.groups[2].subtitle.startsWith("No"),
+            state.groups[2].subtitle.en(),
+            state.groups[2]
+                .subtitle
+                .en()
+                .startsWith("0") ||
+                state.groups[2]
+                    .subtitle
+                    .en()
+                    .startsWith("No"),
         )
     }
 
@@ -94,7 +104,7 @@ class GroupsViewModelTest {
         r.groupState(model = model)
         model.onAction(GroupsAction.Create("  Friends "))
         val toast = r.wait { model.effects.first() } as GroupsEffect.Toast
-        assertTrue(toast.text, toast.text.startsWith("Group created"))
+        assertTrue(toast.text.en(), toast.text.en().startsWith("Group created"))
         val open = r.wait { model.effects.first() } as GroupsEffect.OpenGroup
         val state = r.groupState({ s -> s.groups.any { it.title == "Friends" } }, model)
         assertEquals(open.id, state.groups.first { it.title == "Friends" }.id)
@@ -129,11 +139,14 @@ class GroupsViewModelTest {
         r.groupState(model = model)
         r.fake.failWith = ContactResult.Reason.Refused
         model.onAction(GroupsAction.Create("Friends"))
-        assertEquals(GroupsEffect.Toast("Can't save the group right now."), r.wait { model.effects.first() })
+        assertEquals(
+            GroupsEffect.Toast(UiText.Res(R.string.contacts_cant_save_group)),
+            r.wait { model.effects.first() },
+        )
         r.fake.failWith = ContactResult.Reason.Permission
         model.onAction(GroupsAction.Create("Friends"))
         assertEquals(
-            GroupsEffect.Toast("Can't change groups: Rovsti has no permission to change contacts."),
+            GroupsEffect.Toast(UiText.Res(R.string.contacts_cant_change_groups_permission)),
             r.wait { model.effects.first() },
         )
     }
@@ -166,7 +179,7 @@ class GroupsViewModelTest {
         val page = r.ready(r.page(10))
         assertEquals("Family", page.title)
         assertEquals(listOf("Ayşe Yılmaz", "Elif Kaya", "Özgür Şahin"), page.members.map { it.name })
-        assertEquals("3 contacts", page.subtitle)
+        assertEquals("3 contacts", page.subtitle.en())
         assertTrue(page.canMessage)
         assertTrue("two members have an e-mail", page.canEmail)
         assertEquals(40, page.everyone.size)
@@ -191,7 +204,10 @@ class GroupsViewModelTest {
         assertEquals("Work", taken.initial)
         assertNotNull(taken.error)
         model.onAction(GroupPageAction.Rename("Relatives"))
-        assertEquals(GroupPageEffect.Toast("Group renamed"), r.wait { model.effects.first() })
+        assertEquals(
+            GroupPageEffect.Toast(UiText.Res(R.string.contacts_group_renamed)),
+            r.wait { model.effects.first() },
+        )
         assertEquals("Relatives", r.ready(model) { it.title == "Relatives" }.title)
     }
 
@@ -200,16 +216,22 @@ class GroupsViewModelTest {
         val model = r.page(10)
         r.ready(model)
         r.fake.failWith = ContactResult.Reason.Permission
-        val denied = GroupPageEffect.Toast("Can't change groups: Rovsti has no permission to change contacts.")
+        val denied = GroupPageEffect.Toast(UiText.Res(R.string.contacts_cant_change_groups_permission))
         model.onAction(GroupPageAction.Rename("Relatives"))
         assertEquals(denied, r.wait { model.effects.first() })
         model.onAction(GroupPageAction.RemoveMember(3))
         assertEquals(denied, r.wait { model.effects.first() })
         r.fake.failWith = ContactResult.Reason.Unknown
         model.onAction(GroupPageAction.Rename("Relatives"))
-        assertEquals(GroupPageEffect.Toast("Can't save the group right now."), r.wait { model.effects.first() })
+        assertEquals(
+            GroupPageEffect.Toast(UiText.Res(R.string.contacts_cant_save_group)),
+            r.wait { model.effects.first() },
+        )
         model.onAction(GroupPageAction.RemoveMember(3))
-        assertEquals(GroupPageEffect.Toast("Can't change this group right now."), r.wait { model.effects.first() })
+        assertEquals(
+            GroupPageEffect.Toast(UiText.Res(R.string.contacts_cant_change_group)),
+            r.wait { model.effects.first() },
+        )
     }
 
     @Test fun addMembersAddsAndRemovesTheDifference() {
@@ -218,7 +240,7 @@ class GroupsViewModelTest {
         r.ready(model)
         model.onAction(GroupPageAction.SetMembers(setOf(1L, 3L, 2L, 4L)))
         val toast = r.wait { model.effects.first() } as GroupPageEffect.Toast
-        assertTrue(toast.text, toast.text.isNotBlank())
+        assertTrue(toast.text.en(), toast.text.en().isNotBlank())
         val page = r.ready(model) { it.members.size == 4 }
         assertEquals(setOf(1L, 2L, 3L, 4L), page.memberIds)
         // Nothing changed: no write, no toast.
@@ -231,7 +253,7 @@ class GroupsViewModelTest {
         val model = r.page(10)
         r.ready(model)
         model.onAction(GroupPageAction.RemoveMember(3))
-        assertTrue((r.wait { model.effects.first() } as GroupPageEffect.Toast).text.isNotBlank())
+        assertTrue((r.wait { model.effects.first() } as GroupPageEffect.Toast).text.en().isNotBlank())
         val page = r.ready(model) { it.members.size == 2 }
         assertEquals(setOf(1L, 5L), page.memberIds)
         assertEquals(
@@ -270,7 +292,7 @@ class GroupsViewModelTest {
                 .joinToString(","),
         )
         val notice = r.wait { model.effects.first() } as GroupPageEffect.Toast
-        assertTrue(notice.text, notice.text.contains("1"))
+        assertTrue(notice.text.en(), notice.text.en().contains("1"))
     }
 
     @Test fun emailGroupOfPeopleWithoutAddressesSaysSo() {
@@ -279,7 +301,7 @@ class GroupsViewModelTest {
         r.ready(model)
         model.onAction(GroupPageAction.EmailGroup)
         val toast = r.wait { model.effects.first() } as GroupPageEffect.Toast
-        assertTrue(toast.text, toast.text.contains("email", ignoreCase = true))
+        assertTrue(toast.text.en(), toast.text.en().contains("email", ignoreCase = true))
     }
 
     @Test fun exportGroupWritesTheMembersUnderTheGroupName() {
@@ -299,7 +321,10 @@ class GroupsViewModelTest {
         val model = r.page(12)
         r.ready(model)
         model.onAction(GroupPageAction.ExportGroup)
-        assertEquals(GroupPageEffect.Toast("Nothing to share."), r.wait { model.effects.first() })
+        assertEquals(
+            GroupPageEffect.Toast(UiText.Res(R.string.contacts_nothing_to_share)),
+            r.wait { model.effects.first() },
+        )
     }
 
     @Test fun deletingTheGroupKeepsItsPeopleAndClosesThePage() {
@@ -307,7 +332,10 @@ class GroupsViewModelTest {
         val model = r.page(10)
         r.ready(model)
         model.onAction(GroupPageAction.ConfirmDelete)
-        assertEquals(GroupPageEffect.Toast("Group deleted"), r.wait { model.effects.first() })
+        assertEquals(
+            GroupPageEffect.Toast(UiText.Res(R.string.contacts_group_deleted)),
+            r.wait { model.effects.first() },
+        )
         r.wait { model.state.first { it is GroupPageState.Gone } }
         assertEquals(
             40,

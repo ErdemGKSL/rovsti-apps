@@ -19,6 +19,7 @@ import dev.rovsti.contacts.findComponentActivity
 import dev.rovsti.contacts.startSafely
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.resolve
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.ShareIntents
 
@@ -55,7 +56,7 @@ fun EmergencyPage(
                 is EmergencyEffect.OpenCard -> navigator.push(ContactsRoute.ContactCard(effect.id))
                 is EmergencyEffect.Dial -> startSafely(context, dialIntent(effect.number), toast)
                 is EmergencyEffect.Share -> startSafely(context, ShareIntents.text(effect.text), toast)
-                is EmergencyEffect.Toast -> toast(effect.text)
+                is EmergencyEffect.Toast -> toast(effect.text.resolve(context))
             }
         }
     }

@@ -1,5 +1,7 @@
 package dev.rovsti.contacts.list
 
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.trash.ContactTrash
@@ -18,6 +20,7 @@ import dev.rovsti.core.model.contacts.SelectBarRequest
 import dev.rovsti.core.model.contacts.SelectExportRequest
 import dev.rovsti.core.model.contacts.SelectedContact
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.files.ClipboardRepository
@@ -72,7 +75,7 @@ internal class SelectController(
         }
     }
 
-    private var capNotice = "You can select up to $FALLBACK_CAP contacts"
+    private var capNotice: UiText = UiText.Res(R.string.contacts_cap_notice, listOf(FALLBACK_CAP))
 
     /** Selects [listed] (up to the cap), or clears the selection when all of [listed] are selected already. */
     fun toggleAll(listed: List<Long>) {
@@ -102,11 +105,13 @@ internal class SelectController(
         val answer = barAnswer(selected.size, hasGroups)
         if (answer != null) {
             cap = answer.cap
-            capNotice = answer.capNotice
+            capNotice = UiText.Literal(answer.capNotice)
         }
         return SelectMode(
             selected = selected.toImmutableSet(),
-            title = answer?.title ?: "${selected.size} selected",
+            title =
+                answer?.title?.let { UiText.Literal(it) }
+                    ?: UiText.Res(R.string.contacts_n_selected, listOf(selected.size)),
             actions = answer?.actions.orEmpty().toImmutableList(),
             allSelected = listed.isNotEmpty() && selected.containsAll(listed),
         )
@@ -140,7 +145,7 @@ internal class SelectController(
                 ) as? Outcome.Ok
             )?.value
         if (answer == null || answer.count == 0) {
-            send(ContactsListEffect.Toast("Nothing to share."))
+            send(ContactsListEffect.Toast(UiText.Res(R.string.contacts_nothing_to_share)))
             return null
         }
         return answer
@@ -150,18 +155,39 @@ internal class SelectController(
         val picked = picked()
         val day = today() ?: return
         val answer =
-            (ops.groupsRecipients(RecipientsRequest(picked, kind, "Selected", day)) as? Outcome.Ok)?.value ?: return
+            (
+                ops.groupsRecipients(
+                    RecipientsRequest(picked, kind, "Selected", day),
+                ) as? Outcome.Ok
+            )?.value
+                ?: return
         if (answer.addresses.isEmpty()) {
             val what = if (kind == "sms") "a number" else "an email"
-            send(ContactsListEffect.Toast(answer.notice ?: "None of them has $what."))
+            send(
+                ContactsListEffect.Toast(
+                    answer.notice?.let { UiText.Literal(it) }
+                        ?: UiText.Res(R.string.contacts_none_of_them_has, listOf(what)),
+                ),
+            )
             return
         }
         val done = clipboard.copy(answer.addresses.joinToString("\n"))
-        val noun = if (kind == "sms") "number" else "email"
         val count = answer.addresses.size
         send(
             ContactsListEffect.Toast(
-                if (done) "Copied $count ${if (count == 1) noun else noun + "s"}" else "Can't copy right now.",
+                if (done) {
+                    if (kind ==
+                        "sms"
+                    ) {
+                        UiText.Plural(R.plurals.contacts_copied_numbers, count)
+                    } else {
+                        UiText.Plural(R.plurals.contacts_copied_emails, count)
+                    }
+                } else {
+                    UiText.Res(
+                        R.string.contacts_cant_copy,
+                    )
+                },
             ),
         )
     }
@@ -195,7 +221,13 @@ internal class SelectController(
         val notice = if (on) answer?.starredNotice else answer?.unstarredNotice
         send(
             ContactsListEffect.Toast(
-                if (failed == listed.size) "Can't change these contacts right now." else notice.orEmpty(),
+                if (failed ==
+                    listed.size
+                ) {
+                    UiText.Res(R.string.contacts_cant_change_contacts)
+                } else {
+                    UiText.Literal(notice.orEmpty())
+                },
             ),
         )
         exit()
@@ -211,7 +243,7 @@ internal class SelectController(
         val targets =
             (ops.groupsTargets(GroupTargetsRequest(groups, selected)) as? Outcome.Ok)?.value?.targets.orEmpty()
         if (targets.isEmpty()) {
-            send(ContactsListEffect.Toast("No group fits the selected contacts."))
+            send(ContactsListEffect.Toast(UiText.Res(R.string.contacts_no_group_fits)))
             return
         }
         send(
@@ -246,14 +278,18 @@ internal class SelectController(
                     }
 
                     is ContactResult.Failed -> {
-                        send(ContactsListEffect.Toast("Can't change this group right now."))
+                        send(ContactsListEffect.Toast(UiText.Res(R.string.contacts_cant_change_group)))
                         return
                     }
                 }
             }
         val text =
             (ops.groupsSummary(GroupSummaryRequest(group.title, added, 0, target.skipped)) as? Outcome.Ok)?.value?.text
-        send(ContactsListEffect.Toast(text?.takeIf { it.isNotBlank() } ?: target.notice))
+        send(
+            ContactsListEffect.Toast(
+                text?.takeIf { it.isNotBlank() }?.let { UiText.Literal(it) } ?: UiText.Literal(target.notice),
+            ),
+        )
         exit()
     }
 
@@ -289,20 +325,22 @@ internal class SelectController(
         }
         hidden.value = hidden.value - ids.toSet()
         if (keys.isNotEmpty()) {
-            val notice = barAnswer(keys.size, hasGroups = false)?.deletedNotice ?: "${keys.size} contacts deleted."
+            val notice =
+                barAnswer(keys.size, hasGroups = false)?.deletedNotice?.let { UiText.Literal(it) }
+                    ?: UiText.Plural(R.plurals.contacts_n_contacts_deleted, keys.size)
             send(ContactsListEffect.Deleted(notice, keys))
         }
         if (failed.isNotEmpty()) {
-            send(ContactsListEffect.Toast("Couldn't delete ${failed.size} of them, so they were kept."))
+            send(ContactsListEffect.Toast(UiText.Res(R.string.contacts_cant_delete_some, listOf(failed.size))))
         }
     }
 
     suspend fun undo(keys: List<Long>) {
         val text =
             when (val restored = trash.restore(keys)) {
-                is RestoreResult.Done -> restored.notice
-                RestoreResult.Missing -> "They are not in the Trash any more"
-                RestoreResult.Refused -> "Couldn't bring them back, they are in the Trash"
+                is RestoreResult.Done -> UiText.Literal(restored.notice)
+                RestoreResult.Missing -> UiText.Res(R.string.contacts_not_in_trash_many)
+                RestoreResult.Refused -> UiText.Res(R.string.contacts_cant_restore_many)
             }
         send(ContactsListEffect.Toast(text))
     }

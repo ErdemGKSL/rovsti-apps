@@ -1,12 +1,15 @@
 package dev.rovsti.contacts.photo
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.CropView
 import dev.rovsti.core.model.contacts.PhotoAcceptsRequest
 import dev.rovsti.core.model.contacts.PhotoPlan
 import dev.rovsti.core.model.contacts.PhotoPlanRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.files.FileResult
@@ -46,7 +49,7 @@ data class PhotoUiState(
 
 sealed interface PhotoEffect {
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : PhotoEffect
 
     /** The contact's stored photo changed (the book follows by itself). */
@@ -79,7 +82,7 @@ class ContactPhotoModel(
 
     private var pendingPlan: PhotoPlan? = null
 
-    private fun say(text: String) {
+    private fun say(text: UiText) {
         outbox.trySend(PhotoEffect.Toast(text))
     }
 
@@ -87,10 +90,23 @@ class ContactPhotoModel(
     fun picked(result: FileResult) {
         scope.launch {
             when (result) {
-                FileResult.Cancelled -> Unit
-                FileResult.TooLarge -> say("That picture is too large")
-                is FileResult.Failed -> say("Can't change the photo: ${words(result.reason)}")
-                is FileResult.Ok -> open(result)
+                FileResult.Cancelled -> {
+                    Unit
+                }
+
+                FileResult.TooLarge -> {
+                    say(UiText.Res(R.string.contacts_picture_too_large))
+                }
+
+                is FileResult.Failed -> {
+                    say(
+                        UiText.Res(R.string.contacts_cant_change_photo_reason, listOf(words(result.reason))),
+                    )
+                }
+
+                is FileResult.Ok -> {
+                    open(result)
+                }
             }
         }
     }
@@ -109,11 +125,11 @@ class ContactPhotoModel(
                 }
 
                 FileResult.TooLarge -> {
-                    return say("That picture is too large")
+                    return say(UiText.Res(R.string.contacts_picture_too_large))
                 }
 
                 is FileResult.Failed -> {
-                    return say("Can't change the photo: ${words(read.reason)}")
+                    return say(UiText.Res(R.string.contacts_cant_change_photo_reason, listOf(words(read.reason))))
                 }
 
                 FileResult.Cancelled -> {
@@ -121,7 +137,7 @@ class ContactPhotoModel(
                 }
             }
         }
-        if (path == null) return say("Can't change the photo: the picture is not available")
+        if (path == null) return say(UiText.Res(R.string.contacts_photo_not_available))
         begin(path, mime)
     }
 
@@ -133,17 +149,17 @@ class ContactPhotoModel(
         val accepts = (ops.photoAccepts(PhotoAcceptsRequest(mime, clock())) as? Outcome.Ok)?.value?.accepts ?: false
         if (!accepts) {
             discard(path)
-            return say("That file is not a picture")
+            return say(UiText.Res(R.string.contacts_not_picture))
         }
         val size = repo.photoSize(path)
         if (size.width <= 0 || size.height <= 0) {
             discard(path)
-            return say("That picture can't be read")
+            return say(UiText.Res(R.string.contacts_picture_unreadable))
         }
         val plan = (ops.photoPlan(PhotoPlanRequest(size.width, size.height)) as? Outcome.Ok)?.value
         if (plan == null || plan.plan == null) {
             discard(path)
-            return say(plan?.error ?: "That picture can't be used")
+            return say(plan?.error?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_picture_unusable))
         }
         ui.update { it.copy(crop = CropSession(path, size.width, size.height, plan.maxZoom)) }
     }
@@ -158,9 +174,9 @@ class ContactPhotoModel(
             ui.update { it.copy(busy = false) }
             when (fetched) {
                 is WaPhotoResult.Saved -> begin(fetched.path, "image/jpeg")
-                WaPhotoResult.NoPicture -> say("They have no WhatsApp photo you can see")
-                WaPhotoResult.Unreachable -> say("WhatsApp can't be reached right now")
-                WaPhotoResult.CannotStore -> say("The photo can't be stored on this phone")
+                WaPhotoResult.NoPicture -> say(UiText.Res(R.string.contacts_no_whatsapp_photo))
+                WaPhotoResult.Unreachable -> say(UiText.Res(R.string.contacts_wa_unreachable))
+                WaPhotoResult.CannotStore -> say(UiText.Res(R.string.contacts_photo_not_stored))
             }
         }
     }
@@ -175,7 +191,9 @@ class ContactPhotoModel(
             val plan = answer?.plan
             if (plan == null) {
                 discard(session.path)
-                return@launch say(answer?.error ?: "That picture can't be used")
+                return@launch say(
+                    answer?.error?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_picture_unusable),
+                )
             }
             val id = contactId
             if (id == null) {
@@ -185,7 +203,7 @@ class ContactPhotoModel(
             }
             when (repo.setPhoto(id, session.path, plan)) {
                 is ContactResult.Ok -> outbox.trySend(PhotoEffect.Changed)
-                is ContactResult.Failed -> say("Can't change the photo")
+                is ContactResult.Failed -> say(UiText.Res(R.string.contacts_cant_change_photo))
             }
         }
     }
@@ -209,7 +227,7 @@ class ContactPhotoModel(
             }
             when (repo.removePhoto(id)) {
                 is ContactResult.Ok -> outbox.trySend(PhotoEffect.Changed)
-                is ContactResult.Failed -> say("Can't remove the photo")
+                is ContactResult.Failed -> say(UiText.Res(R.string.contacts_cant_remove_photo))
             }
         }
     }
@@ -222,7 +240,7 @@ class ContactPhotoModel(
         ui.update { it.copy(pendingPath = null) }
         when (repo.setPhoto(id, path, plan)) {
             is ContactResult.Ok -> outbox.trySend(PhotoEffect.Changed)
-            is ContactResult.Failed -> say("The contact was saved, but its photo was not")
+            is ContactResult.Failed -> say(UiText.Res(R.string.contacts_saved_photo_not))
         }
     }
 
@@ -230,12 +248,14 @@ class ContactPhotoModel(
         withContext(io) { File(path).delete() }
     }
 
-    private fun words(reason: String): String =
-        when (reason) {
-            "permission" -> "no permission"
-            "unavailable" -> "the picture is not available"
-            else -> "something went wrong"
-        }
+    private fun words(reason: String): UiText =
+        UiText.Res(
+            when (reason) {
+                "permission" -> R.string.contacts_reason_permission
+                "unavailable" -> R.string.contacts_reason_unavailable
+                else -> R.string.contacts_reason_other
+            },
+        )
 
     private companion object {
         const val DEFAULT_CAP = 20L * 1024 * 1024

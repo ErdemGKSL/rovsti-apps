@@ -1,6 +1,9 @@
 package dev.rovsti.contacts.favorites
 
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
 import dev.rovsti.core.model.contacts.EventKind
+import dev.rovsti.design.text.UiText
 import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -98,6 +101,6 @@ class UpcomingTest {
         r.stateWhere { it.upcoming.isEmpty() && it.phase == FavoritesPhase.Ready && it.pickables.isNotEmpty() }
         r.model.onAction(FavoritesAction.SaveCalendar)
         val toast = r.wait { r.model.pageEffects.first() } as FavoritesEffect.Toast
-        assertEquals("No birthdays or anniversaries to save.", toast.text)
+        assertEquals("No birthdays or anniversaries to save.", (toast.text).en())
     }
 }

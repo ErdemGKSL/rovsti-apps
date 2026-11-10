@@ -1,6 +1,8 @@
 package dev.rovsti.contacts.photo
 
+import android.content.Context
 import dev.rovsti.contacts.HostRust
+import dev.rovsti.contacts.en
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.RustError
 import dev.rovsti.core.model.contacts.CropView
@@ -8,6 +10,7 @@ import dev.rovsti.core.model.contacts.PhotoPlan
 import dev.rovsti.core.model.contacts.PhotoSize
 import dev.rovsti.core.model.wa.PictureAnswer
 import dev.rovsti.design.overlay.MenuItem
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.FakeContactsRepository
 import dev.rovsti.platform.files.FakeFilesRepository
@@ -23,6 +26,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 import java.io.File
 import java.nio.file.Files
 import java.util.Base64
@@ -31,7 +38,10 @@ import java.util.Base64
  * E4.4 AC2: the avatar menu (which rows, in which order, which are conditional) and the photo flow behind it - picked
  * or captured file, WhatsApp picture, the crop result, the picture a new contact holds until its first Save.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class PhotoMenuTest {
+    private val context: Context = RuntimeEnvironment.getApplication()
     private val noActions = PhotoMenuActions({}, {}, {}, {})
 
     private fun labels(items: List<MenuItem>) = items.map { if (it is MenuItem.Action) it.label else "-" }
@@ -39,31 +49,36 @@ class PhotoMenuTest {
     // ---- the menu
 
     @Test fun aContactWithoutPhotoOrWhatsAppOffersChooseAndTake() {
-        assertEquals(listOf(CHOOSE, TAKE), labels(photoMenuItems(false, null, noActions)))
+        assertEquals(listOf(CHOOSE.en(), TAKE.en()), labels(photoMenuItems(context, false, null, noActions)))
     }
 
     @Test fun theWhatsAppRowNeedsAJid() {
-        assertFalse(WHATSAPP in labels(photoMenuItems(false, null, noActions)))
-        assertFalse(WHATSAPP in labels(photoMenuItems(false, "  ", noActions)))
+        assertFalse(WHATSAPP.en() in labels(photoMenuItems(context, false, null, noActions)))
+        assertFalse(WHATSAPP.en() in labels(photoMenuItems(context, false, "  ", noActions)))
         assertEquals(
-            listOf(CHOOSE, TAKE, WHATSAPP),
-            labels(photoMenuItems(false, "905551112233@s.whatsapp.net", noActions)),
+            listOf(CHOOSE.en(), TAKE.en(), WHATSAPP.en()),
+            labels(photoMenuItems(context, false, "905551112233@s.whatsapp.net", noActions)),
         )
     }
 
     @Test fun removeIsDestructiveSeparatedAndOnlyWithAPhoto() {
-        val items = photoMenuItems(true, "905551112233@s.whatsapp.net", noActions)
-        assertEquals(listOf(CHOOSE, TAKE, WHATSAPP, "-", REMOVE), labels(items))
+        val items = photoMenuItems(context, true, "905551112233@s.whatsapp.net", noActions)
+        assertEquals(listOf(CHOOSE.en(), TAKE.en(), WHATSAPP.en(), "-", REMOVE.en()), labels(items))
         val remove = items.last() as MenuItem.Action
         assertTrue(remove.destructive)
         assertTrue(items.filterIsInstance<MenuItem.Action>().dropLast(1).none { it.destructive })
-        assertFalse(REMOVE in labels(photoMenuItems(false, "x@s.whatsapp.net", noActions)))
+        assertFalse(REMOVE.en() in labels(photoMenuItems(context, false, "x@s.whatsapp.net", noActions)))
     }
 
     @Test fun everyRowRunsItsOwnAction() {
         val seen = mutableListOf<String>()
         val actions = PhotoMenuActions({ seen += "choose" }, { seen += "take" }, { seen += "wa" }, { seen += "remove" })
-        photoMenuItems(true, "j@s.whatsapp.net", actions).filterIsInstance<MenuItem.Action>().forEach { it.onClick() }
+        photoMenuItems(
+            context,
+            true,
+            "j@s.whatsapp.net",
+            actions,
+        ).filterIsInstance<MenuItem.Action>().forEach { it.onClick() }
         assertEquals(listOf("choose", "take", "wa", "remove"), seen)
     }
 
@@ -154,7 +169,7 @@ class PhotoMenuTest {
                 scope = scope,
             )
 
-        fun toast(): String = (effect() as PhotoEffect.Toast).text
+        fun toast(): String = (effect() as PhotoEffect.Toast).text.en()
 
         fun effect(): PhotoEffect = runBlocking { withTimeout(15_000) { model.effects.first() } }
 

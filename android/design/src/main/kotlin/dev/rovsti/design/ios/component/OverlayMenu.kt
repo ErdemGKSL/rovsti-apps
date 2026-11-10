@@ -56,6 +56,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.backdrop.Backdrop
 import dev.rovsti.design.backdrop.catalog.utils.InteractiveHighlight
 import dev.rovsti.design.glass.LocalAppBackdrop
@@ -312,7 +313,7 @@ class OverlayMenuEntry(
     private val menu: MenuState,
     private val glass: Boolean = true,
     private val liquid: Boolean = true,
-) : OverlayEntry(modal = false, title = "Menu") {
+) : OverlayEntry(modal = false, title = "", titleRes = R.string.design_menu) {
     override val isRemovable: Boolean get() = !menu.isVisible && !menu.shown
 
     override fun onBack(controller: dev.rovsti.design.overlay.OverlayController) {

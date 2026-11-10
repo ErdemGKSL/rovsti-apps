@@ -1,7 +1,10 @@
 package dev.rovsti.contacts.cleanup
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.dupes.SampleTidy
 import dev.rovsti.contacts.dupes.TidyRig
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -72,11 +75,11 @@ class CleanupViewModelTest {
             assertNull(model.state.value.select)
             model.onAction(CleanupAction.EnterSelect(null))
             val empty = model.until { it.select != null }.select!!
-            assertEquals("Select contacts", empty.title)
+            assertEquals("Select contacts", (empty.title).en())
             assertTrue(!empty.canDelete)
             model.onAction(CleanupAction.Toggle(6))
             val one = model.until { it.select?.selected == setOf(6L) }.select!!
-            assertEquals("1 selected", one.title)
+            assertEquals("1 selected", (one.title).en())
             assertTrue(one.canDelete)
             model.onAction(CleanupAction.ToggleAll)
             val all = model.until { it.select?.allSelected == true }.select!!

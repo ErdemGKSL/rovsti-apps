@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shared controls: buttons, placeholders and the labels screen readers announce. -->
+    <string name="design_cancel">Cancel</string>
+    <string name="design_send">Send</string>
+    <string name="design_message">Message</string>
+    <string name="design_search">Search</string>
+    <string name="design_clear">Clear</string>
+    <string name="design_undo">Undo</string>
+    <string name="design_close">Close</string>
+    <string name="design_dismiss">Dismiss</string>
+    <string name="design_back">Back</string>
+    <string name="design_more">More</string>
+    <string name="design_selected">Selected</string>
+    <string name="design_index">Index</string>
+    <string name="design_qr_code">QR code</string>
+    <string name="design_tap_again">Tap again to confirm</string>
+    <string name="design_sheet_handle">Sheet handle</string>
+    <string name="design_change_sheet_size">Change sheet size</string>
+
+    <!-- Menus, sheets and popovers: the pane titles and the triggers' labels. -->
+    <string name="design_popover">Popover</string>
+    <string name="design_open_popover">Open popover</string>
+    <string name="design_actions">Actions</string>
+    <string name="design_show_actions">Show actions</string>
+    <string name="design_open_menu">Open menu</string>
+    <string name="design_menu">Menu</string>
+    <string name="design_preview_and_actions">Preview and actions</string>
+
+    <!-- Photo viewer. -->
+    <string name="design_photo">Photo</string>
+    <string name="design_page_of">%1$d of %2$d</string>
+    <string name="design_photo_position">Photo %1$d of %2$d</string>
+    <string name="design_photo_next">Next photo</string>
+    <string name="design_photo_previous">Previous photo</string>
+    <string name="design_zoom_in">Zoom in</string>
+    <string name="design_zoom_out">Zoom out</string>
+</resources>

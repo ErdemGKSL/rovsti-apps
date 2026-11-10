@@ -1,6 +1,9 @@
 package dev.rovsti.contacts.trash
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.card.SampleCards
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import kotlinx.coroutines.flow.first
 import org.junit.After
@@ -27,7 +30,7 @@ class TrashViewModelTest {
     @Test fun deleteKeepsACopyInTheTrashAndRemovesTheContact() {
         val r = rig()
         val moved = r.wait { r.trash.delete(1) }
-        assertEquals("Ayşe Yılmaz", (moved as MoveResult.Done).name)
+        assertEquals(UiText.Literal("Ayşe Yılmaz"), (moved as MoveResult.Done).name)
         assertTrue(r.contacts().none { it.id == 1L })
         val entries = r.wait { r.trash.list()!!.entries }
         assertEquals(1, entries.size)
@@ -83,7 +86,7 @@ class TrashViewModelTest {
             }
         }
         val id = r.contacts().last().id!!
-        assertEquals("Contact", (r.wait { r.trash.delete(id) } as MoveResult.Done).name)
+        assertEquals(UiText.Res(R.string.contacts_contact), (r.wait { r.trash.delete(id) } as MoveResult.Done).name)
     }
 
     // ---- the page
@@ -96,9 +99,9 @@ class TrashViewModelTest {
         r.wait { r.trash.delete(2) }
         val model = r.model()
         val state = r.wait { model.state.first { it.phase == TrashPhase.Ready } }
-        assertEquals(listOf("Burak Demir", "Ayşe Yılmaz"), state.rows.map { it.name })
-        assertEquals("Deleted today", state.rows[0].detail)
-        assertEquals("Deleted 3 days ago · 27 days left", state.rows[1].detail)
+        assertEquals(listOf("Burak Demir", "Ayşe Yılmaz"), state.rows.map { it.name.en() })
+        assertEquals("Deleted today", (state.rows[0].detail).en())
+        assertEquals("Deleted 3 days ago · 27 days left", (state.rows[1].detail).en())
         assertEquals(30, state.retentionDays)
     }
 
@@ -108,7 +111,7 @@ class TrashViewModelTest {
         r.wait { r.trash.delete(1) }
         r.now = SampleCards.NOW
         val state = r.wait { r.model().state.first { it.phase == TrashPhase.Ready } }
-        assertEquals("Deleted 1 day ago · 29 days left", state.rows.single().detail)
+        assertEquals("Deleted 1 day ago · 29 days left", (state.rows.single().detail).en())
     }
 
     @Test fun entriesPastThirtyDaysAreHiddenAndDroppedFromTheFile() {
@@ -119,8 +122,8 @@ class TrashViewModelTest {
         r.wait { r.trash.delete(2) }
         r.now = SampleCards.NOW
         val state = r.wait { r.model().state.first { it.phase == TrashPhase.Ready } }
-        assertEquals(listOf("Burak Demir"), state.rows.map { it.name })
-        assertEquals("Deleted 29 days ago · 1 day left", state.rows.single().detail)
+        assertEquals(listOf("Burak Demir"), state.rows.map { it.name.en() })
+        assertEquals("Deleted 29 days ago · 1 day left", (state.rows.single().detail).en())
         // The pruning rewrote the file: even a store that ignores the clock sees one entry.
         r.now = SampleCards.NOW - 50 * DAY_MS
         assertEquals(1, r.wait { r.trash.list()!!.entries }.size)
@@ -138,7 +141,7 @@ class TrashViewModelTest {
         val model = r.model()
         r.wait { model.state.first { it.rows.isNotEmpty() } }
         model.onAction(TrashAction.Restore(key))
-        assertEquals(TrashEffect.Toast("Contact restored"), r.wait { model.effects.first() })
+        assertEquals(TrashEffect.Toast(UiText.Literal("Contact restored")), r.wait { model.effects.first() })
         assertTrue(r.wait { model.state.first { it.rows.isEmpty() } }.isEmpty)
         assertTrue(r.contacts().any { it.given == "Ayşe" })
     }
@@ -150,9 +153,9 @@ class TrashViewModelTest {
         r.wait { model.state.first { it.rows.isNotEmpty() } }
         model.onAction(TrashAction.AskDelete(key))
         val ask = r.wait { model.effects.first() } as TrashEffect.Ask
-        assertEquals("Delete forever?", ask.title)
-        assertEquals("1 contact will be deleted for good. This can't be undone.", ask.body)
-        assertEquals("Delete Now", ask.confirmLabel)
+        assertEquals("Delete forever?", (ask.title).en())
+        assertEquals("1 contact will be deleted for good. This can't be undone.", (ask.body).en())
+        assertEquals("Delete Now", (ask.confirmLabel).en())
         assertEquals(TrashAction.ConfirmDelete(listOf(key)), ask.then)
         assertEquals("nothing is deleted before the answer", 1, r.wait { r.trash.list()!!.entries }.size)
         model.onAction(ask.then)
@@ -168,8 +171,8 @@ class TrashViewModelTest {
         r.wait { model.state.first { it.rows.size == 2 } }
         model.onAction(TrashAction.AskEmpty)
         val ask = r.wait { model.effects.first() } as TrashEffect.Ask
-        assertEquals("Empty Trash?", ask.title)
-        assertEquals("2 contacts will be deleted for good. This can't be undone.", ask.body)
+        assertEquals("Empty Trash?", (ask.title).en())
+        assertEquals("2 contacts will be deleted for good. This can't be undone.", (ask.body).en())
         assertEquals(TrashAction.ConfirmEmpty, ask.then)
         assertEquals(2, r.wait { r.trash.list()!!.entries }.size)
         model.onAction(ask.then)

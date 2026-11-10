@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.dupes
 
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,10 +24,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.orNoName
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -53,6 +58,9 @@ import dev.rovsti.design.overlay.SheetState
 import dev.rovsti.design.overlay.sheetScrollConnection
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -91,7 +99,7 @@ fun DupesScreen(
 ) {
     ReviewSheetHost(state, onAction, overlays)
     LargeTitleScaffold(
-        title = "Duplicates",
+        title = stringResource(R.string.contacts_duplicates),
         state = listState,
         actions = persistentListOf(),
         navigation = NavigationButton(onClick = onBack),
@@ -103,7 +111,7 @@ fun DupesScreen(
                 {
                     ToolbarCapsule {
                         ToolbarTextButton(
-                            "Merge All",
+                            stringResource(R.string.contacts_merge_all),
                             { onAction(DupesAction.AskMergeAll) },
                             Modifier.testTag(DupesTags.MergeAll),
                             bold = true,
@@ -125,15 +133,15 @@ fun DupesScreen(
                 ) {
                     EmptyState(
                         icon = RovstiIcons.People,
-                        title = "No Duplicates",
-                        message = "Contacts that share a number, an email or a name show up here.",
+                        title = stringResource(R.string.contacts_no_duplicates),
+                        message = stringResource(R.string.contacts_no_duplicates_message),
                     )
                 }
             }
         } else if (state.phase == DupesPhase.Ready) {
             item(key = "summary", contentType = "summary") {
                 RovstiText(
-                    state.summary,
+                    state.summary.text(),
                     Modifier
                         .padding(horizontal = Spacing.gutter, vertical = Spacing.s)
                         .testTag(DupesTags.Summary),
@@ -146,11 +154,11 @@ fun DupesScreen(
                     Column {
                         if (index > 0) RowSeparator(inset = TextStartWithLeading)
                         ListRow(
-                            title = row.name,
-                            secondary = row.secondary,
+                            title = row.name.orNoName(),
+                            secondary = row.secondary.text(),
                             leading = {
                                 Avatar(
-                                    row.name,
+                                    row.name.orNoName(),
                                     size = Sizes.avatar,
                                     photoModel = row.photoUri,
                                     colorKey = row.colorKey,
@@ -174,13 +182,14 @@ private fun ReviewSheetHost(
     onAction: (DupesAction) -> Unit,
     overlays: OverlayController,
 ) {
+    val context = LocalContext.current
     val holder = rememberUpdatedState(state)
     val actions = rememberUpdatedState(onAction)
     var entry by remember { mutableStateOf<SheetEntry?>(null) }
     val open = state.review != null
     LaunchedEffect(open) {
         if (open && entry == null) {
-            entry = overlays.presentMergeReview({ holder.value }) { actions.value(it) }
+            entry = overlays.presentMergeReview(context, { holder.value }) { actions.value(it) }
         } else if (!open) {
             entry?.let(overlays::dismiss)
             entry = null
@@ -195,12 +204,13 @@ private fun ReviewSheetHost(
  * away is Cancel. [state] is read inside the sheet, so it follows the model without being presented again.
  */
 fun OverlayController.presentMergeReview(
+    context: Context,
     state: () -> DupesUiState,
     onAction: (DupesAction) -> Unit,
 ): SheetEntry {
     val entry =
         SheetEntry(
-            title = "Merge",
+            title = context.getString(R.string.contacts_merge),
             detents = persistentListOf(Detent.Large),
             onDismissed = { onAction(DupesAction.CloseReview) },
         ) { sheet ->
@@ -229,13 +239,13 @@ internal fun ColumnScope.MergeReviewContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Avatar(
-                        review.name,
+                        review.name.orNoName(),
                         size = DupesMetrics.Avatar,
                         photoModel = review.photoUri,
                         colorKey = review.colorKey,
                     )
                     RovstiText(
-                        review.name,
+                        review.name.orNoName(),
                         Modifier.padding(top = Spacing.m),
                         style = RovstiTheme.type.title2,
                         textAlign = TextAlign.Center,
@@ -254,7 +264,7 @@ internal fun ColumnScope.MergeReviewContent(
                     }
                     // Where the fields come from: ONE line of plain text, not a pill per source.
                     RovstiText(
-                        review.sources,
+                        review.sources.text(),
                         Modifier.padding(top = Spacing.xs).testTag(DupesTags.Sources),
                         style = RovstiTheme.type.footnote,
                         color = colors.labelSecondary,
@@ -264,8 +274,8 @@ internal fun ColumnScope.MergeReviewContent(
                     )
                 }
             }
-            items(review.sections, key = { it.title.orEmpty() }, contentType = { "section" }) { section ->
-                InsetGroupedSection(header = section.title) {
+            items(review.sections, key = { it.title.toString() }, contentType = { "section" }) { section ->
+                InsetGroupedSection(header = section.title?.text()) {
                     for (line in section.lines) {
                         row {
                             Column(
@@ -275,7 +285,7 @@ internal fun ColumnScope.MergeReviewContent(
                                 verticalArrangement = Arrangement.spacedBy(DupesMetrics.LineGap),
                             ) {
                                 RovstiText(
-                                    line.label,
+                                    line.label.text(),
                                     style = RovstiTheme.type.footnote,
                                     color = colors.labelSecondary,
                                     maxLines = 1,
@@ -295,7 +305,7 @@ internal fun ColumnScope.MergeReviewContent(
             verticalArrangement = Arrangement.spacedBy(Spacing.s),
         ) {
             CapsuleButton(
-                if (busy) "Merging…" else review.mergeLabel,
+                if (busy) stringResource(R.string.contacts_merging) else review.mergeLabel.text(),
                 onClick = { onAction(DupesAction.MergeOpen) },
                 modifier = Modifier.fillMaxWidth().testTag(DupesTags.Merge),
                 style = CapsuleStyle.Filled,
@@ -304,7 +314,7 @@ internal fun ColumnScope.MergeReviewContent(
             )
             // Plain accent text, as in an iOS sheet (a glass capsule at the very bottom of a sheet smears).
             RovstiText(
-                "Cancel",
+                stringResource(R.string.contacts_cancel),
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = DupesMetrics.BarButtonHeight)
@@ -326,6 +336,8 @@ fun DupesEffects(
     overlays: OverlayController,
     onAction: (DupesAction) -> Unit,
 ) {
+    val context = LocalContext.current
+    val strContactsCancel = stringResource(R.string.contacts_cancel)
     val latest = rememberUpdatedState(onAction)
     LaunchedEffect(effects, overlays) {
         effects.collect { effect ->
@@ -333,23 +345,29 @@ fun DupesEffects(
                 is DupesEffect.Ask -> {
                     overlays.present(
                         AlertEntry(
-                            heading = effect.title,
-                            message = effect.body,
+                            heading = effect.title.resolve(context),
+                            message = effect.body.resolve(context),
                             actions =
                                 persistentListOf(
-                                    AlertAction("Cancel", AlertRole.Cancel),
-                                    AlertAction(effect.confirmLabel, AlertRole.Default) { latest.value(effect.then) },
+                                    AlertAction(strContactsCancel, AlertRole.Cancel),
+                                    AlertAction(
+                                        effect.confirmLabel.resolve(context),
+                                        AlertRole.Default,
+                                    ) { latest.value(effect.then) },
                                 ),
                         ),
                     )
                 }
 
                 is DupesEffect.Toast -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(effect.text.resolve(context))
                 }
 
                 is DupesEffect.Undo -> {
-                    overlays.showUndo(effect.message, onUndo = { latest.value(DupesAction.Undo(effect.token)) })
+                    overlays.showUndo(
+                        effect.message.resolve(context),
+                        onUndo = { latest.value(DupesAction.Undo(effect.token)) },
+                    )
                 }
             }
         }

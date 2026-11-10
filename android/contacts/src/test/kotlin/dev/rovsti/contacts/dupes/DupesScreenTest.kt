@@ -5,6 +5,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import dev.rovsti.testing.ShotTest
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -29,7 +31,7 @@ class DupesScreenTest : ShotTest() {
         for (row in SampleDupes.rows) {
             compose.onNodeWithTag(DupesTags.row(row.key)).assertExists()
             compose.onNodeWithText(row.name).assertExists()
-            compose.onNodeWithText(row.secondary).assertExists()
+            compose.onNodeWithText(row.secondary.en()).assertExists()
         }
         // One row, one title: the other members of a group are never named in the row.
         compose.onAllNodesWithTextCount("Yılmaz").let { assertEquals(1, it) }
@@ -46,7 +48,7 @@ class DupesScreenTest : ShotTest() {
     }
 
     @Test fun noDuplicatesIsAnEmptyStateWithoutMergeAll() {
-        show(DupesUiState(phase = DupesPhase.Ready, summary = "No duplicates found"))
+        show(DupesUiState(phase = DupesPhase.Ready, summary = UiText.Literal("No duplicates found")))
         compose.onNodeWithText("No Duplicates").assertExists()
         compose.onNodeWithTag(DupesTags.MergeAll).assertDoesNotExist()
     }
@@ -93,15 +95,15 @@ class DupesScreenTest : ShotTest() {
         advance(1_200)
         effects.trySend(
             DupesEffect.Ask(
-                "Merge all 4 duplicates?",
-                "Each group becomes one contact.",
-                "Merge All",
+                UiText.Literal("Merge all 4 duplicates?"),
+                UiText.Literal("Each group becomes one contact."),
+                UiText.Literal("Merge All"),
                 DupesAction.ConfirmMergeAll,
             ),
         )
         advance(1_000)
         compose.onNodeWithText("Merge all 4 duplicates?").assertExists()
-        effects.trySend(DupesEffect.Undo("Merged 7 contacts", token = 3))
+        effects.trySend(DupesEffect.Undo(UiText.Literal("Merged 7 contacts"), token = 3))
         advance(1_000)
         compose.onNodeWithText("Merged 7 contacts").assertExists()
         compose.onNodeWithText("Undo").performClick()

@@ -18,6 +18,8 @@ import dev.rovsti.contacts.findComponentActivity
 import dev.rovsti.core.model.contacts.HourChoice
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
 import dev.rovsti.platform.system.permissions.PermissionGroup
 
 /** The settings view model, owned by the activity so a choice page and the root share one state. */
@@ -53,6 +55,7 @@ fun ContactsSettingsEntry(
     links: SettingsLinks,
     viewModel: ContactsSettingsViewModel = rememberContactsSettingsViewModel(container),
 ) {
+    val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val overlays = LocalOverlay.current
     val latest = rememberUpdatedState(overlays)
@@ -66,7 +69,7 @@ fun ContactsSettingsEntry(
         viewModel.effects.collect { effect ->
             when (effect) {
                 SettingsEffect.AskNotifications -> ask.launch(Unit)
-                is SettingsEffect.Toast -> latest.value.showToast(effect.text)
+                is SettingsEffect.Toast -> latest.value.showToast(effect.text.resolve(context))
             }
         }
     }

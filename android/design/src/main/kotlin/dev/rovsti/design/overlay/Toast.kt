@@ -48,6 +48,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.dismiss
@@ -57,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.chrome.ChromeMetrics
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.ios.foundation.IosGlassSpec
@@ -319,7 +321,7 @@ class ToastEntry internal constructor(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RovstiText(
-                            action.label,
+                            action.label.ifEmpty { stringResource(R.string.design_undo) },
                             style = RovstiTheme.type.subheadline.copy(fontWeight = FontWeight.SemiBold),
                             color = actionColor,
                         )
@@ -380,7 +382,7 @@ fun OverlayController.showToast(
 fun OverlayController.showUndo(
     message: String,
     onUndo: () -> Unit,
-    actionLabel: String = "Undo",
+    actionLabel: String = "",
     durationMs: Long = ToastMetrics.UndoMs,
 ): ToastEntry = presentToast(ToastEntry(message, durationMs, ToastAction(actionLabel, onUndo)))
 

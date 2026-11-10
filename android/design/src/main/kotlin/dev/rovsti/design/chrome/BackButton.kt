@@ -8,10 +8,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.controls.GlassCircleButton
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
@@ -27,7 +29,7 @@ import dev.rovsti.design.theme.Sizes
 fun BackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    label: String = "Back",
+    label: String = stringResource(R.string.design_back),
     onLongClick: (() -> Unit)? = null,
 ) {
     val mirrored = LocalLayoutDirection.current == LayoutDirection.Rtl

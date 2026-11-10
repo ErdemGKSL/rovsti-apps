@@ -14,6 +14,7 @@ import dev.rovsti.contacts.card.SampleCards
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
 import dev.rovsti.contacts.data.ContactsStore
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.photo.ContactPhotoModel
 import dev.rovsti.contacts.photo.WaPhotoResult
 import dev.rovsti.contacts.trash.ContactDeletion
@@ -25,6 +26,7 @@ import dev.rovsti.core.model.contacts.ContactDraft
 import dev.rovsti.core.model.contacts.Group
 import dev.rovsti.core.ops.NativeContactsOps
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.contacts.FakeContactsRepository
@@ -38,6 +40,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
+import org.robolectric.RuntimeEnvironment
 import java.io.File
 import java.nio.file.Files
 
@@ -110,7 +113,14 @@ internal class EditorRig(
                 clock = { SampleCards.NOW },
                 scope = scope,
             )
-        extras = EditorExtras(id, photo, photoUri, waJid, ContactDeletion(ContactTrash(repo, store), ops, scope))
+        extras =
+            EditorExtras(
+                id,
+                photo,
+                photoUri,
+                waJid,
+                ContactDeletion(ContactTrash(repo, store), ops, scope, RuntimeEnvironment.getApplication()),
+            )
     }
 
     fun stop() {
@@ -147,7 +157,7 @@ internal fun EditorHost(overlays: OverlayController) {
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { chromeFor(it, UiText::en) },
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
     ) {

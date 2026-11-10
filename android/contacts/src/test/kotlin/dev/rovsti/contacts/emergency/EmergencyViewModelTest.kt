@@ -1,8 +1,11 @@
 package dev.rovsti.contacts.emergency
 
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.me.PeopleRig
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.CardRequest
+import dev.rovsti.design.text.UiText
 import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -88,7 +91,7 @@ class EmergencyViewModelTest {
         val r = rig(listOf("k-1", "k-2"))
         r.stateWhere { it.people.size == 2 }
         r.emergency.onAction(EmergencyAction.Remove(1))
-        assertEquals(EmergencyEffect.Toast("Removed from emergency contacts"), r.effect())
+        assertEquals(EmergencyEffect.Toast(UiText.Literal("Removed from emergency contacts")), r.effect())
         assertEquals(listOf(2L), r.stateWhere { it.people.size == 1 }.people.map { it.id })
     }
 
@@ -96,7 +99,7 @@ class EmergencyViewModelTest {
         val r = rig(listOf("k-1", "k-2", "k-3"))
         r.stateWhere { it.people.size == 3 }
         r.emergency.onAction(EmergencyAction.AddAll(setOf(4, 5, 6)))
-        assertEquals(EmergencyEffect.Toast("Up to 5 emergency contacts"), r.effect())
+        assertEquals(EmergencyEffect.Toast(UiText.Literal("Up to 5 emergency contacts")), r.effect())
         val state = r.stateWhere { it.people.size == 5 }
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L), state.people.map { it.id })
         assertFalse(state.canAdd)
@@ -115,7 +118,7 @@ class EmergencyViewModelTest {
         r.emergency.onAction(EmergencyAction.Call(2))
         assertEquals(EmergencyEffect.Dial("0532 123 45 67"), r.effect())
         r.emergency.onAction(EmergencyAction.Call(99))
-        assertEquals(EmergencyEffect.Toast("This contact has no number."), r.effect())
+        assertEquals(EmergencyEffect.Toast(UiText.Res(R.string.contacts_no_number)), r.effect())
     }
 
     @Test fun shareHandsOverRustsNumberedList() {

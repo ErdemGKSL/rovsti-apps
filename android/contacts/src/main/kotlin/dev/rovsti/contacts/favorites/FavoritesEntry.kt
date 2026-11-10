@@ -14,19 +14,23 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.FavoritesTab
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.findComponentActivity
 import dev.rovsti.contacts.startSafely
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.resolve
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
@@ -99,6 +103,7 @@ fun UpcomingPage(
     val state by viewModel.state.collectAsState()
     val overlays = LocalOverlay.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<FavoritesEffect.SaveCalendar?>(null) }
     val launcher =
@@ -108,7 +113,15 @@ fun UpcomingPage(
             if (result is FileResult.Ok && result.uri != null) {
                 scope.launch {
                     val written = container.files.writeExport(result.uri!!, text = file.text)
-                    overlays.showToast(if (written is FileResult.Ok) file.notice else "Can't save the file.")
+                    overlays.showToast(
+                        if (written is FileResult.Ok) {
+                            file.notice
+                        } else {
+                            resources.getString(
+                                R.string.contacts_cant_save_file,
+                            )
+                        },
+                    )
                 }
             }
         }
@@ -125,7 +138,7 @@ fun UpcomingPage(
                 }
 
                 is FavoritesEffect.Toast -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(effect.text.resolve(context))
                 }
 
                 is FavoritesEffect.OpenCard -> {
@@ -171,7 +184,7 @@ fun FavoritesEffects(
                 }
 
                 is FavoritesEffect.Toast -> {
-                    toast(effect.text)
+                    toast(effect.text.resolve(context))
                 }
 
                 is FavoritesEffect.SaveCalendar -> {

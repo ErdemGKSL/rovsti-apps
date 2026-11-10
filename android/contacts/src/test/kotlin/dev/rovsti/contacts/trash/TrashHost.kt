@@ -13,7 +13,9 @@ import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.ContactsTabs
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
+import dev.rovsti.contacts.en
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import kotlinx.collections.immutable.toImmutableList
@@ -33,10 +35,10 @@ internal val SampleTrash =
         phase = TrashPhase.Ready,
         rows =
             listOf(
-                TrashRow(1, "Ayşe Yılmaz", "Deleted today", "1"),
-                TrashRow(2, "Burak Demir", "Deleted 3 days ago · 27 days left", "2"),
-                TrashRow(3, "Elif Kaya", "Deleted 12 days ago · 18 days left", "3"),
-                TrashRow(4, "Mehmet Öz", "Deleted 29 days ago · 1 day left", "4"),
+                TrashRow(1, UiText.Literal("Ayşe Yılmaz"), UiText.Literal("Deleted today"), "1"),
+                TrashRow(2, UiText.Literal("Burak Demir"), UiText.Literal("Deleted 3 days ago · 27 days left"), "2"),
+                TrashRow(3, UiText.Literal("Elif Kaya"), UiText.Literal("Deleted 12 days ago · 18 days left"), "3"),
+                TrashRow(4, UiText.Literal("Mehmet Öz"), UiText.Literal("Deleted 29 days ago · 1 day left"), "4"),
             ).toImmutableList(),
     )
 
@@ -49,7 +51,7 @@ internal fun HostedTrash(harness: TrashHarness) {
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { chromeFor(it, UiText::en) },
         overlays = harness.overlays,
         modifier = Modifier.fillMaxSize(),
     ) {

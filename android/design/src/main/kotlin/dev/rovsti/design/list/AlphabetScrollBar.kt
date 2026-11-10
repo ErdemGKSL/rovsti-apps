@@ -57,6 +57,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.rovsti.design.R
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.shapes.ContinuousRoundedRectangle
@@ -217,6 +219,7 @@ fun AlphabetScrollBar(
         lastSelectedIndex = -1
     }
 
+    val indexLabel = stringResource(R.string.design_index)
     BoxWithConstraints(modifier = modifier) {
         if (railItems.isEmpty() || maxHeight <= 0.dp) return@BoxWithConstraints
 
@@ -270,7 +273,7 @@ fun AlphabetScrollBar(
                         // Rovsti: one adjustable control instead of Convx's empty semantics. Announcing every letter
                         // would bury the list in the accessibility tree; swiping up/down changes the letter.
                         .semantics {
-                            contentDescription = "Index"
+                            contentDescription = indexLabel
                             val spoken = railItems[spokenIndex.coerceIn(0, lastIndex)]
                             stateDescription = if (spoken == ScrollTopSection) ScrollTopSpoken else labelOf(spoken)
                             progressBarRangeInfo =

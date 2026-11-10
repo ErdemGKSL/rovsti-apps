@@ -37,6 +37,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -46,6 +47,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.glass.sheetGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.ios.foundation.TopRoundedShape
@@ -256,15 +258,18 @@ class SheetEntry(
     private fun Grabber(sheet: SheetState) {
         val reference =
             with(androidx.compose.ui.platform.LocalDensity.current) { SheetMetrics.GrabberStretchReference.toPx() }
+        val handleLabel = stringResource(R.string.design_sheet_handle)
+        val changeSizeLabel = stringResource(R.string.design_change_sheet_size)
+        val dismissLabel = stringResource(R.string.design_dismiss)
         val color = RovstiTheme.colors.labelTertiary
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(SheetMetrics.GrabberTop + SheetMetrics.GrabberHeight + SheetMetrics.GrabberBottom)
                 .semantics {
-                    contentDescription = "Sheet handle"
+                    contentDescription = handleLabel
                     role = Role.Button
-                    onClick(label = "Change sheet size") {
+                    onClick(label = changeSizeLabel) {
                         val offsets = sheet.detentOffsets
                         val here = offsets.indices.minByOrNull { abs(offsets[it] - sheet.settledOffset) } ?: 0
                         sheet.animateToDetent(if (here == 0) offsets.lastIndex else here - 1)
@@ -273,7 +278,7 @@ class SheetEntry(
                     if (dismissible) {
                         customActions =
                             listOf(
-                                CustomAccessibilityAction("Dismiss") {
+                                CustomAccessibilityAction(dismissLabel) {
                                     sheet.dismiss()
                                     true
                                 },

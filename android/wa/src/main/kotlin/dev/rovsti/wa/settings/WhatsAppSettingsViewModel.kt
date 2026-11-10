@@ -27,8 +27,10 @@ import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.WaGateway
 import dev.rovsti.core.ops.WaOps
 import dev.rovsti.core.ops.WaSettingsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.files.ClipboardRepository
 import dev.rovsti.platform.files.FilesRepository
+import dev.rovsti.wa.R
 import dev.rovsti.wa.WaLinkStore
 import dev.rovsti.wa.WaRepository
 import kotlinx.coroutines.CoroutineDispatcher
@@ -207,7 +209,7 @@ class WhatsAppSettingsViewModel(
             }
 
             is Outcome.Err -> {
-                mutableEvents.tryEmit(WaSettingsEvent.Toast(FAILED))
+                mutableEvents.tryEmit(WaSettingsEvent.Toast(UiText.Res(R.string.wa_error_generic)))
                 null
             }
         }
@@ -316,7 +318,13 @@ class WhatsAppSettingsViewModel(
             "copy_to_clipboard" -> {
                 val text = (value as? JsonPrimitive)?.contentOrNull.orEmpty()
                 // A connect key is a bearer secret: keep it out of the paste preview.
-                if (clipboard.copy(text, sensitive = true)) mutableEvents.tryEmit(WaSettingsEvent.Toast(COPIED))
+                if (clipboard.copy(
+                        text,
+                        sensitive = true,
+                    )
+                ) {
+                    mutableEvents.tryEmit(WaSettingsEvent.Toast(UiText.Res(R.string.wa_copied)))
+                }
                 null
             }
 
@@ -408,14 +416,14 @@ class WhatsAppSettingsViewModel(
         ) {
             mutableEvents.tryEmit(WaSettingsEvent.ShareImage(staged))
         } else {
-            mutableEvents.tryEmit(WaSettingsEvent.Toast(FAILED))
+            mutableEvents.tryEmit(WaSettingsEvent.Toast(UiText.Res(R.string.wa_error_generic)))
         }
     }
 
     private fun paste() {
         val text = clipboard.primaryText()
         if (text.isNullOrEmpty()) {
-            mutableEvents.tryEmit(WaSettingsEvent.Toast(NOTHING_TO_PASTE))
+            mutableEvents.tryEmit(WaSettingsEvent.Toast(UiText.Res(R.string.wa_nothing_to_paste)))
         } else {
             mutableState.value = mutableState.value.copy(paste = PasteRequest(++pasteCounter, text))
         }
@@ -442,9 +450,6 @@ class WhatsAppSettingsViewModel(
 
     companion object {
         const val MODEL_KEY = "wa_settings_model"
-        const val COPIED = "Copied"
-        private const val FAILED = "Something went wrong"
-        private const val NOTHING_TO_PASTE = "Nothing to paste"
         private const val CONFIRM_PREFIX = "confirm_"
         private const val SHARE_KEY = "share_key"
         private const val QR_FILE = "wa-qr.png"

@@ -1,6 +1,9 @@
 package dev.rovsti.contacts.intake
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 
@@ -10,13 +13,13 @@ import kotlinx.collections.immutable.toImmutableList
  * it does not know.
  */
 enum class CsvRole(
-    val label: String,
+    val label: UiText,
 ) {
-    FirstName("First name"),
-    LastName("Last name"),
-    Phone("Phone"),
-    Email("Email"),
-    Ignore("Ignore"),
+    FirstName(UiText.Res(R.string.contacts_first_name_field)),
+    LastName(UiText.Res(R.string.contacts_last_name_field)),
+    Phone(UiText.Res(R.string.contacts_phone)),
+    Email(UiText.Res(R.string.contacts_email)),
+    Ignore(UiText.Res(R.string.contacts_ignore)),
 }
 
 /**
@@ -41,7 +44,7 @@ data class CsvColumn(
 data class CsvMappingUi(
     val columns: ImmutableList<CsvColumn>,
     /** "12 contacts found" for the mapping as it stands now. */
-    val countLine: String,
+    val countLine: UiText,
     val canContinue: Boolean,
 )
 

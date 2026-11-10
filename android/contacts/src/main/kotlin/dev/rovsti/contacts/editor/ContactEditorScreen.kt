@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.editor
 
+import android.content.Context
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -90,7 +92,9 @@ import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.menuTrigger
 import dev.rovsti.design.overlay.popoverTrigger
 import dev.rovsti.design.text.GlassTextField
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.text.imeOverlapPadding
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -213,18 +217,24 @@ private fun Header(
             .padding(horizontal = Spacing.s),
     ) {
         TextButton(
-            "Cancel",
+            stringResource(R.string.contacts_cancel),
             onClick = { onAction(EditorAction.RequestClose) },
             modifier = Modifier.align(Alignment.CenterStart).testTag(EditorTags.Cancel),
         )
         RovstiText(
-            if (state.isNew) "New Contact" else "Edit Contact",
+            if (state.isNew) {
+                stringResource(
+                    R.string.contacts_new_contact,
+                )
+            } else {
+                stringResource(R.string.contacts_edit_contact)
+            },
             style = RovstiTheme.type.headline,
             modifier = Modifier.align(Alignment.Center).testTag(EditorTags.Title).semantics { heading() },
             maxLines = 1,
         )
         TextButton(
-            "Done",
+            stringResource(R.string.favorites_done),
             onClick = { onAction(EditorAction.Save) },
             enabled = state.canSave,
             modifier = Modifier.align(Alignment.CenterEnd).testTag(EditorTags.Done),
@@ -259,32 +269,78 @@ private fun ColumnScope.Form(
             PhotoHead(draft, photo, overlays)
             NameSection(state, onAction)
             CompanySection(state, onAction)
-            RepeatSection(EditorList.Numbers, "Phone", "add phone", state, onAction, initialKeys, Phone)
-            RepeatSection(EditorList.Emails, "Email", "add email", state, onAction, initialKeys, Email)
-            RepeatSection(EditorList.Addresses, "Address", "add address", state, onAction, initialKeys, Address)
-            RepeatSection(EditorList.Events, "Dates", "add date", state, onAction, initialKeys, Dates)
-            RepeatSection(EditorList.Websites, "Websites", "add website", state, onAction, initialKeys, Web)
+            RepeatSection(
+                EditorList.Numbers,
+                stringResource(R.string.contacts_phone),
+                "add phone",
+                state,
+                onAction,
+                initialKeys,
+                Phone,
+            )
+            RepeatSection(
+                EditorList.Emails,
+                stringResource(R.string.contacts_email),
+                "add email",
+                state,
+                onAction,
+                initialKeys,
+                Email,
+            )
+            RepeatSection(
+                EditorList.Addresses,
+                stringResource(R.string.contacts_address),
+                "add address",
+                state,
+                onAction,
+                initialKeys,
+                Address,
+            )
+            RepeatSection(
+                EditorList.Events,
+                stringResource(R.string.contacts_dates),
+                "add date",
+                state,
+                onAction,
+                initialKeys,
+                Dates,
+            )
+            RepeatSection(
+                EditorList.Websites,
+                stringResource(R.string.contacts_websites),
+                "add website",
+                state,
+                onAction,
+                initialKeys,
+                Web,
+            )
             RepeatSection(
                 EditorList.Relations,
-                "Related People",
+                stringResource(R.string.contacts_related_people),
                 "add related person",
                 state,
                 onAction,
                 initialKeys,
                 Related,
             )
-            InsetGroupedSection(header = "Nickname") {
+            InsetGroupedSection(header = stringResource(R.string.contacts_nickname)) {
                 row {
-                    TextRow(draft.nickname, "Nickname", state.external, last = false, tag = "nickname") {
+                    TextRow(
+                        draft.nickname,
+                        stringResource(R.string.contacts_nickname),
+                        state.external,
+                        last = false,
+                        tag = "nickname",
+                    ) {
                         onAction(EditorAction.Text(EditorText.Nickname, it))
                     }
                 }
             }
-            InsetGroupedSection(header = "Notes") {
+            InsetGroupedSection(header = stringResource(R.string.contacts_notes)) {
                 row {
                     TextRow(
                         draft.note,
-                        "Notes",
+                        stringResource(R.string.contacts_notes),
                         state.external,
                         last = true,
                         tag = "note",
@@ -321,11 +377,16 @@ private fun PhotoHead(
     photo: EditorPhoto?,
     overlays: OverlayController,
 ) {
+    val strPhotoMenu = stringResource(R.string.photo_menu)
     val name = draft.displayName()
     val model = photo?.pendingPath?.let { File(it) } ?: photo?.photoModel
     val items =
-        remember(photo?.hasPhoto, photo?.waJid, photo?.actions) {
-            if (photo == null) persistentListOf() else photoMenuItems(photo.hasPhoto, photo.waJid, photo.actions)
+        if (photo ==
+            null
+        ) {
+            persistentListOf()
+        } else {
+            photoMenuItems(LocalContext.current, photo.hasPhoto, photo.waJid, photo.actions)
         }
     Column(
         Modifier.fillMaxWidth().padding(top = Spacing.s),
@@ -339,7 +400,7 @@ private fun PhotoHead(
                 } else {
                     Modifier
                         .heightIn(min = Sizes.touch)
-                        .menuTrigger(overlays, items, stringResource(R.string.photo_menu))
+                        .menuTrigger(overlays, items, strPhotoMenu)
                         .testTag(EditorTags.Photo)
                 },
         ) {
@@ -381,7 +442,7 @@ private fun NameSection(
         row {
             TextRow(
                 d.given,
-                "First name",
+                stringResource(R.string.contacts_first_name_field),
                 state.external,
                 tag = "given",
                 issueKey = EditorIssueKey.NAME,
@@ -391,17 +452,27 @@ private fun NameSection(
             }
         }
         row {
-            TextRow(d.family, "Last name", state.external, tag = "family") {
+            TextRow(d.family, stringResource(R.string.contacts_last_name_field), state.external, tag = "family") {
                 onAction(EditorAction.Text(EditorText.Family, it))
             }
         }
         row {
-            TextRow(d.phoneticGiven, "Phonetic first name", state.external, tag = "phonetic-given") {
+            TextRow(
+                d.phoneticGiven,
+                stringResource(R.string.contacts_phonetic_first_name),
+                state.external,
+                tag = "phonetic-given",
+            ) {
                 onAction(EditorAction.Text(EditorText.PhoneticGiven, it))
             }
         }
         row {
-            TextRow(d.phoneticFamily, "Phonetic last name", state.external, tag = "phonetic-family") {
+            TextRow(
+                d.phoneticFamily,
+                stringResource(R.string.contacts_phonetic_last_name),
+                state.external,
+                tag = "phonetic-family",
+            ) {
                 onAction(EditorAction.Text(EditorText.PhoneticFamily, it))
             }
         }
@@ -413,13 +484,17 @@ private fun CompanySection(
     state: EditorUiState,
     onAction: (EditorAction) -> Unit,
 ) {
+    val strContactsCompany = stringResource(R.string.contacts_company)
+    val strContactsJobTitle = stringResource(R.string.contacts_job_title)
     val d = state.draft
     InsetGroupedSection {
         row {
-            TextRow(d.org, "Company", state.external, tag = "org") { onAction(EditorAction.Text(EditorText.Org, it)) }
+            TextRow(d.org, strContactsCompany, state.external, tag = "org") {
+                onAction(EditorAction.Text(EditorText.Org, it))
+            }
         }
         row {
-            TextRow(d.title, "Job title", state.external, tag = "title") {
+            TextRow(d.title, strContactsJobTitle, state.external, tag = "title") {
                 onAction(EditorAction.Text(EditorText.Title, it))
             }
         }
@@ -428,22 +503,25 @@ private fun CompanySection(
 
 /** What differs between the repeatable lists. */
 private class ListKind(
-    val placeholder: String,
+    val placeholder: UiText,
     val keyboard: KeyboardOptions,
     val maxLines: Int = 1,
 )
 
-private val Phone = ListKind("Phone", KeyboardOptions(keyboardType = KeyboardType.Phone))
-private val Email = ListKind("Email", KeyboardOptions(keyboardType = KeyboardType.Email))
+private val Phone =
+    ListKind(UiText.Res(R.string.contacts_phone), KeyboardOptions(keyboardType = KeyboardType.Phone))
+private val Email =
+    ListKind(UiText.Res(R.string.contacts_email), KeyboardOptions(keyboardType = KeyboardType.Email))
 private val Address =
     ListKind(
-        "Address",
+        UiText.Res(R.string.contacts_address),
         KeyboardOptions(capitalization = KeyboardCapitalization.Words, keyboardType = KeyboardType.Text),
         maxLines = 3,
     )
-private val Dates = ListKind("YYYY-MM-DD or MM-DD", KeyboardOptions(keyboardType = KeyboardType.Text))
-private val Web = ListKind("Website", KeyboardOptions(keyboardType = KeyboardType.Uri))
-private val Related = ListKind("Name", KeyboardOptions(capitalization = KeyboardCapitalization.Words))
+private val Dates = ListKind(UiText.Res(R.string.contacts_date_hint), KeyboardOptions(keyboardType = KeyboardType.Text))
+private val Web = ListKind(UiText.Res(R.string.contacts_website), KeyboardOptions(keyboardType = KeyboardType.Uri))
+private val Related =
+    ListKind(UiText.Res(R.string.contacts_name), KeyboardOptions(capitalization = KeyboardCapitalization.Words))
 
 @Composable
 private fun RepeatSection(
@@ -523,7 +601,7 @@ private fun RepeatRow(
             MinusButton(list, index) { onAction(EditorAction.RemoveRow(list, rowKey)) }
             EditorField(
                 value = value,
-                placeholder = kind.placeholder,
+                placeholder = kind.placeholder.text(),
                 external = state.external,
                 modifier = Modifier.weight(1f).testTag(EditorTags.rowField(list, index)),
                 keyboard = kind.keyboard,
@@ -545,7 +623,7 @@ private fun RepeatRow(
             ) {
                 EditorField(
                     value = custom,
-                    placeholder = "Label",
+                    placeholder = stringResource(R.string.contacts_label),
                     external = state.external,
                     modifier = Modifier.weight(1f).testTag("editor-${list.name.lowercase()}-custom-$index"),
                 ) { onAction(EditorAction.CustomLabel(list, rowKey, it)) }
@@ -624,6 +702,7 @@ private class LabelOption(
     val label: RowLabel,
 )
 
+@Composable
 private fun optionsFor(list: EditorList): List<LabelOption> =
     when (list) {
         EditorList.Numbers -> {
@@ -665,21 +744,23 @@ private fun customLabel(list: EditorList): RowLabel? =
         EditorList.Websites -> null
     }
 
+@Composable
 private fun fieldTitle(kind: FieldKind) =
     when (kind) {
-        FieldKind.Mobile -> "Mobile"
-        FieldKind.Home -> "Home"
-        FieldKind.Work -> "Work"
-        FieldKind.Custom -> "Custom"
-        FieldKind.Other -> "Other"
+        FieldKind.Mobile -> stringResource(R.string.contacts_mobile)
+        FieldKind.Home -> stringResource(R.string.contacts_home)
+        FieldKind.Work -> stringResource(R.string.contacts_work)
+        FieldKind.Custom -> stringResource(R.string.contacts_custom)
+        FieldKind.Other -> stringResource(R.string.contacts_other)
     }
 
+@Composable
 private fun eventTitle(kind: EventKind) =
     when (kind) {
-        EventKind.Birthday -> "Birthday"
-        EventKind.Anniversary -> "Anniversary"
-        EventKind.Custom -> "Custom"
-        EventKind.Other -> "Other"
+        EventKind.Birthday -> stringResource(R.string.contacts_birthday)
+        EventKind.Anniversary -> stringResource(R.string.contacts_anniversary)
+        EventKind.Custom -> stringResource(R.string.contacts_custom)
+        EventKind.Other -> stringResource(R.string.contacts_other)
     }
 
 private fun relationTitle(kind: RelationKind) = kind.name
@@ -769,6 +850,7 @@ private fun RowLabel?.isCustom() =
         (this is RowLabel.Event && kind == EventKind.Custom) ||
         (this is RowLabel.Relation && kind == RelationKind.Custom)
 
+@Composable
 private fun buttonTitle(
     d: ContactDraft,
     list: EditorList,
@@ -777,7 +859,7 @@ private fun buttonTitle(
     val label = currentLabel(d, list, index)
     val custom = customText(d, list, index)
     return when {
-        custom != null -> custom.ifBlank { "Custom" }
+        custom != null -> custom.ifBlank { stringResource(R.string.contacts_custom) }
         label is RowLabel.Field -> fieldTitle(label.kind)
         label is RowLabel.Event -> eventTitle(label.kind)
         label is RowLabel.Relation -> relationTitle(label.kind)
@@ -812,7 +894,7 @@ private fun LabelButton(
     val primary = isDefault(draft, list, index)
     val showDefault = canDefault && list in DefaultLists
     val trigger =
-        Modifier.popoverTrigger(overlays, label = "Label") {
+        Modifier.popoverTrigger(overlays, label = stringResource(R.string.contacts_label)) {
             LabelPopover(
                 options = optionsFor(list),
                 current = current,
@@ -865,10 +947,24 @@ private fun LabelPopover(
         options.forEach { option ->
             PopoverRow(option.title, selected = current == option.label) { onPick(option.label) }
         }
-        if (custom != null) PopoverRow("Custom", selected = current.isCustom()) { onPick(custom) }
+        if (custom !=
+            null
+        ) {
+            PopoverRow(stringResource(R.string.contacts_custom), selected = current.isCustom()) { onPick(custom) }
+        }
         if (primary != null) {
             Box(Modifier.fillMaxWidth().height(Spacing.xs).background(RovstiTheme.colors.separator.copy(alpha = 0.3f)))
-            PopoverRow(if (primary) "Clear Default" else "Set as Default", selected = false, onClick = onDefault)
+            PopoverRow(
+                if (primary) {
+                    stringResource(
+                        R.string.contacts_clear_default,
+                    )
+                } else {
+                    stringResource(R.string.contacts_set_as_default)
+                },
+                selected = false,
+                onClick = onDefault,
+            )
         }
     }
 }
@@ -888,7 +984,14 @@ private fun PopoverRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RovstiText(title, style = RovstiTheme.type.body, modifier = Modifier.weight(1f), maxLines = 1)
-        if (selected) RovstiIcon(RovstiIcons.Checkmark, "Selected", tint = RovstiTheme.colors.accent, size = Spacing.l)
+        if (selected) {
+            RovstiIcon(
+                RovstiIcons.Checkmark,
+                stringResource(R.string.contacts_selected),
+                tint = RovstiTheme.colors.accent,
+                size = Spacing.l,
+            )
+        }
     }
 }
 
@@ -1042,6 +1145,10 @@ private fun AccountAndGroups(
     overlays: OverlayController,
     latest: State<EditorUiState>,
 ) {
+    val context = LocalContext.current
+    val strTabGroups = stringResource(R.string.tab_groups)
+    val strContactsSaveTo = stringResource(R.string.contacts_save_to)
+    val strContactsAccount = stringResource(R.string.contacts_account)
     val showAccount = state.accounts.size > 1
     val showGroups = state.groups.isNotEmpty()
     if (!showAccount && !showGroups) return
@@ -1049,10 +1156,10 @@ private fun AccountAndGroups(
         if (showGroups) {
             row {
                 ListRow(
-                    title = "Groups",
-                    meta = state.groupsLabel,
+                    title = strTabGroups,
+                    meta = state.groupsLabel.text(),
                     trailing = { ListRowChevron() },
-                    onClick = { overlays.present(groupsSheet(latest, onAction)) },
+                    onClick = { overlays.present(groupsSheet(context, latest, onAction)) },
                     modifier = Modifier.testTag(EditorTags.Groups),
                 )
             }
@@ -1069,9 +1176,16 @@ private fun AccountAndGroups(
                                     onClick = { onAction(EditorAction.SetAccount(account.key)) },
                                 )
                             }.toImmutableList()
-                    Box(Modifier.menuTrigger(overlays, items, label = "Save to").testTag(EditorTags.Account)) {
+                    Box(
+                        Modifier
+                            .menuTrigger(
+                                overlays,
+                                items,
+                                label = strContactsSaveTo,
+                            ).testTag(EditorTags.Account),
+                    ) {
                         ListRow(
-                            title = "Save to",
+                            title = strContactsSaveTo,
                             meta = state.accountLabel,
                             trailing = { ListRowChevron() },
                             titleMaxLines = 1,
@@ -1079,7 +1193,7 @@ private fun AccountAndGroups(
                     }
                 } else {
                     ListRow(
-                        title = "Account",
+                        title = strContactsAccount,
                         meta = state.accountLabel,
                         modifier = Modifier.testTag(EditorTags.Account),
                     )
@@ -1090,10 +1204,11 @@ private fun AccountAndGroups(
 }
 
 private fun groupsSheet(
+    context: Context,
     latest: State<EditorUiState>,
     onAction: (EditorAction) -> Unit,
 ) = SheetEntry(
-    title = "Groups",
+    title = context.getString(R.string.tab_groups),
     detents = persistentListOf(Detent.Medium),
     initialDetent = Detent.Medium,
 ) { sheet ->
@@ -1101,11 +1216,13 @@ private fun groupsSheet(
     Column(Modifier.fillMaxWidth().testTag(EditorTags.GroupsSheet)) {
         Box(Modifier.fillMaxWidth().height(EditorMetrics.HeaderHeight).padding(horizontal = Spacing.s)) {
             RovstiText(
-                "Groups",
+                context.getString(R.string.tab_groups),
                 style = RovstiTheme.type.headline,
                 modifier = Modifier.align(Alignment.Center).semantics { heading() },
             )
-            TextButton("Done", onClick = { sheet.dismiss() }, modifier = Modifier.align(Alignment.CenterEnd))
+            TextButton(context.getString(R.string.favorites_done), onClick = {
+                sheet.dismiss()
+            }, modifier = Modifier.align(Alignment.CenterEnd))
         }
         Column(Modifier.verticalScroll(rememberScrollState())) {
             InsetGroupedSection {
@@ -1115,7 +1232,11 @@ private fun groupsSheet(
                             title = group.title,
                             trailing = {
                                 if (group.id in state.draft.groups) {
-                                    RovstiIcon(RovstiIcons.Checkmark, "Selected", tint = RovstiTheme.colors.accent)
+                                    RovstiIcon(
+                                        RovstiIcons.Checkmark,
+                                        context.getString(R.string.contacts_selected),
+                                        tint = RovstiTheme.colors.accent,
+                                    )
                                 }
                             },
                             onClick = { onAction(EditorAction.ToggleGroup(group.id)) },

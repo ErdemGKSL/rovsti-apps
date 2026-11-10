@@ -20,8 +20,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.editor.EditorOutcome
 import dev.rovsti.contacts.editor.contactEditorExtras
 import dev.rovsti.contacts.editor.contactEditorModel
@@ -44,6 +46,8 @@ import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.transition.Tab
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.ExportDocument
@@ -98,6 +102,7 @@ fun ContactsListPage(
     }
     val overlays = LocalOverlay.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     var pendingVcf by remember { mutableStateOf<ContactsListEffect.SaveVcf?>(null) }
     val saveVcf =
@@ -107,7 +112,13 @@ fun ContactsListPage(
             val uri = (result as? FileResult.Ok)?.uri ?: return@rememberLauncherForActivityResult
             scope.launch {
                 val written = container.files.writeExport(uri, text = file.text)
-                overlays.showToast(if (written is FileResult.Ok) "Saved ${file.fileName}" else "Can't save the file.")
+                overlays.showToast(
+                    if (written is FileResult.Ok) {
+                        resources.getString(R.string.contacts_saved_file, file.fileName)
+                    } else {
+                        resources.getString(R.string.contacts_cant_save_file)
+                    },
+                )
             }
         }
     ContactsListEffects(
@@ -117,6 +128,7 @@ fun ContactsListPage(
         context,
         onEdit = { id, seed ->
             presentContactEditor(
+                context,
                 contactEditorModel(container, id, seed),
                 overlays,
                 container.scope,
@@ -136,7 +148,7 @@ fun ContactsListPage(
     // My card and the emergency row come from the Me model (E4.14); a book without contacts has nothing to point at.
     val me = rememberMeViewModel(container)
     val meState by me.state.collectAsState()
-    LaunchedEffect(me) { me.effects.collect { if (it is MeEffect.Toast) overlays.showToast(it.text) } }
+    LaunchedEffect(me) { me.effects.collect { if (it is MeEffect.Toast) overlays.showToast(it.text.resolve(context)) } }
     val shown =
         remember(state, meState) {
             if (state.rows.isEmpty()) {
@@ -144,7 +156,7 @@ fun ContactsListPage(
             } else {
                 state.copy(
                     myCard = meState.myCard,
-                    emergencyDetail = meState.myCard?.let { meState.emergencyDetail },
+                    emergencyDetail = meState.myCard?.let { meState.emergencyDetail.resolve(context) },
                 )
             }
         }
@@ -156,7 +168,10 @@ fun ContactsListPage(
                     navigator.push(ContactsRoute.ContactCard(mine))
                 } else {
                     scope.launch {
-                        overlays.presentContactChooser("Set My Card", me.choices()) { id ->
+                        overlays.presentContactChooser(
+                            resources.getString(R.string.contacts_set_my_card),
+                            me.choices(),
+                        ) { id ->
                             me.onAction(MeAction.SetMyCard(id))
                         }
                     }

@@ -1,5 +1,7 @@
 package dev.rovsti.contacts.groups
 
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
@@ -21,6 +23,7 @@ import dev.rovsti.core.model.contacts.VcardWriteRequest
 import dev.rovsti.core.model.contacts.ViewRequest
 import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import kotlinx.collections.immutable.toImmutableList
@@ -116,7 +119,9 @@ class GroupPageViewModel(
             GroupPageUi(
                 id = group.id,
                 title = group.title,
-                subtitle = labels?.subtitle ?: "${inGroup.size} contacts",
+                subtitle =
+                    labels?.subtitle?.let { UiText.Literal(it) }
+                        ?: UiText.Plural(R.plurals.contacts_n_contacts, inGroup.size),
                 joinHint = if (several) labels?.joinHint else null,
                 members = rows(inGroup, prefs),
                 canMessage = drafts.any { it.numbers.isNotEmpty() },
@@ -159,7 +164,7 @@ class GroupPageViewModel(
         if (title == group.title) return
         val said =
             when (val saved = contacts.saveGroup(groupId, title, group.account)) {
-                is ContactResult.Ok -> "Group renamed"
+                is ContactResult.Ok -> UiText.Res(R.string.contacts_group_renamed)
                 is ContactResult.Failed -> groupFailure(saved.reason, GROUP_CANT_SAVE)
             }
         outbox.trySend(GroupPageEffect.Toast(said))
@@ -183,7 +188,7 @@ class GroupPageViewModel(
                 val r = result.value
                 val notice = ops.groupsSummary(GroupSummaryRequest(group.title, r.added, r.removed, r.skipped))
                 (notice as? Outcome.Ok)?.value?.text?.takeIf { it.isNotBlank() }?.let {
-                    outbox.trySend(GroupPageEffect.Toast(it))
+                    outbox.trySend(GroupPageEffect.Toast(UiText.Literal(it)))
                 }
             }
 
@@ -220,7 +225,12 @@ class GroupPageViewModel(
         val answer = recipients(kind, members()) ?: return
         if (answer.addresses.isEmpty()) {
             val what = if (kind == "sms") "a number" else "an email"
-            outbox.trySend(GroupPageEffect.Toast(answer.notice ?: "No one in this group has $what."))
+            outbox.trySend(
+                GroupPageEffect.Toast(
+                    answer.notice?.let { UiText.Literal(it) }
+                        ?: UiText.Res(R.string.contacts_no_one_in_group_has, listOf(what)),
+                ),
+            )
             return
         }
         outbox.trySend(
@@ -232,13 +242,13 @@ class GroupPageViewModel(
                 GroupPageEffect.Email(answer.address)
             },
         )
-        answer.notice?.takeIf { it.isNotBlank() }?.let { outbox.trySend(GroupPageEffect.Toast(it)) }
+        answer.notice?.takeIf { it.isNotBlank() }?.let { outbox.trySend(GroupPageEffect.Toast(UiText.Literal(it))) }
     }
 
     private suspend fun export() {
         val drafts = members()
         if (drafts.isEmpty()) {
-            outbox.trySend(GroupPageEffect.Toast("Nothing to share."))
+            outbox.trySend(GroupPageEffect.Toast(UiText.Res(R.string.contacts_nothing_to_share)))
             return
         }
         val day = today() ?: return
@@ -250,9 +260,9 @@ class GroupPageViewModel(
     private suspend fun delete() {
         val said =
             if (contacts.deleteGroup(groupId) is ContactResult.Ok) {
-                "Group deleted"
+                UiText.Res(R.string.contacts_group_deleted)
             } else {
-                "Can't delete the group right now."
+                UiText.Res(R.string.contacts_cant_delete_group)
             }
         outbox.trySend(GroupPageEffect.Toast(said))
     }

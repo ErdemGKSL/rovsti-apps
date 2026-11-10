@@ -69,8 +69,8 @@ fun UpcomingScreen(
                 ) {
                     EmptyState(
                         icon = RovstiIcons.CalendarPlus,
-                        title = "No Upcoming Dates",
-                        message = "Add a birthday or anniversary to a contact to see it here.",
+                        title = stringResource(R.string.contacts_no_upcoming_title),
+                        message = stringResource(R.string.contacts_no_upcoming_message),
                     )
                 }
             }

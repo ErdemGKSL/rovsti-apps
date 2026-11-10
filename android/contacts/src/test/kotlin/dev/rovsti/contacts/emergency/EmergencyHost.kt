@@ -15,10 +15,12 @@ import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.ContactsTabs
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.haptics.RovstiHaptics
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import kotlinx.collections.immutable.toImmutableList
@@ -99,7 +101,7 @@ internal fun HostedEmergency(
         RovstiShell(
             navigator = navigator,
             tabs = tabs,
-            chromeFor = ::chromeFor,
+            chromeFor = { chromeFor(it, UiText::en) },
             overlays = harness.overlays,
             modifier = Modifier.fillMaxSize(),
         ) {

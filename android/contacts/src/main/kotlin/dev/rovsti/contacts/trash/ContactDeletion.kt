@@ -1,5 +1,10 @@
 package dev.rovsti.contacts.trash
 
+import android.content.Context
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.UiConfirm
+import dev.rovsti.contacts.toUi
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.core.model.contacts.SelectBarRequest
@@ -10,6 +15,9 @@ import dev.rovsti.design.overlay.AlertRole
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,11 +33,15 @@ class ContactDeletion(
     private val trash: ContactTrash,
     private val ops: ContactsOps,
     private val scope: CoroutineScope,
+    private val context: Context,
 ) {
     /** The confirmation words of the Rust core (`contacts.select_bar` `delete_confirm` for one contact). */
-    suspend fun confirmText(): Confirm =
-        (ops.selectBar(SelectBarRequest(count = 1, hasGroups = false)) as? Outcome.Ok)?.value?.deleteConfirm
-            ?: Confirm("Delete this contact?", "It is removed from the phone and from its accounts.")
+    suspend fun confirmText(): UiConfirm =
+        (ops.selectBar(SelectBarRequest(count = 1, hasGroups = false)) as? Outcome.Ok)?.value?.deleteConfirm?.toUi()
+            ?: UiConfirm(
+                UiText.Res(R.string.contacts_delete_this_contact),
+                UiText.Res(R.string.contacts_delete_contact_body),
+            )
 
     /**
      * Asks "Delete this contact?" in an alert. Delete runs the delete; [onDeleted] then closes the page that showed the
@@ -45,12 +57,15 @@ class ContactDeletion(
             onMain {
                 overlays.present(
                     AlertEntry(
-                        heading = confirm.title,
-                        message = confirm.body,
+                        heading = confirm.title.resolve(context),
+                        message = confirm.body.resolve(context),
                         actions =
                             persistentListOf(
-                                AlertAction("Cancel", AlertRole.Cancel),
-                                AlertAction("Delete", AlertRole.Destructive) { delete(overlays, id, onDeleted) },
+                                AlertAction(context.getString(R.string.contacts_cancel), AlertRole.Cancel),
+                                AlertAction(
+                                    context.getString(R.string.editor_delete),
+                                    AlertRole.Destructive,
+                                ) { delete(overlays, id, onDeleted) },
                             ),
                     ),
                 )
@@ -70,7 +85,10 @@ class ContactDeletion(
                 when (moved) {
                     is MoveResult.Done -> {
                         onDeleted()
-                        overlays.showUndo("Deleted ${moved.name}", onUndo = { undo(overlays, moved.key) })
+                        overlays.showUndo(
+                            context.getString(R.string.contacts_deleted_name, moved.name.resolve(context)),
+                            onUndo = { undo(overlays, moved.key) },
+                        )
                     }
 
                     MoveResult.Gone -> {
@@ -78,11 +96,11 @@ class ContactDeletion(
                     }
 
                     MoveResult.NoCopy -> {
-                        overlays.showToast("Couldn't move it to the Trash, so it was not deleted")
+                        overlays.showToast(context.getString(R.string.contacts_cant_trash))
                     }
 
                     MoveResult.Refused -> {
-                        overlays.showToast("Couldn't delete this contact")
+                        overlays.showToast(context.getString(R.string.contacts_cant_delete))
                     }
                 }
             }
@@ -98,8 +116,8 @@ class ContactDeletion(
             onMain {
                 when (restored) {
                     is RestoreResult.Done -> overlays.showToast(restored.notice)
-                    RestoreResult.Missing -> overlays.showToast("It is not in the Trash any more")
-                    RestoreResult.Refused -> overlays.showToast("Couldn't bring it back, it is in the Trash")
+                    RestoreResult.Missing -> overlays.showToast(context.getString(R.string.contacts_not_in_trash))
+                    RestoreResult.Refused -> overlays.showToast(context.getString(R.string.contacts_cant_restore_trash))
                 }
             }
         }

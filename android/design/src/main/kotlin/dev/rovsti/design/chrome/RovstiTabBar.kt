@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.rovsti.design.R
 import dev.rovsti.design.chrome.floatingtabbar.FloatingTabBarDefaults
 import dev.rovsti.design.chrome.floatingtabbar.FloatingTabBarScrollConnection
 import dev.rovsti.design.chrome.floatingtabbar.FoldingTabBar
@@ -130,7 +132,7 @@ fun RovstiTabBar(
     onFoldedClick: () -> Unit = {},
     chrome: ChromeMetrics? = LocalChromeMetrics.current,
     imeVisible: @Composable () -> Boolean = { WindowInsets.isImeVisible },
-    selectedDescription: String = "Selected",
+    selectedDescription: String = stringResource(R.string.design_selected),
     accessory: (@Composable (modifier: Modifier, isInline: Boolean) -> Unit)? = null,
 ) {
     val hidden = imeVisible()

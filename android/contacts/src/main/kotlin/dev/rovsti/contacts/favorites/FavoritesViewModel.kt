@@ -1,7 +1,9 @@
 package dev.rovsti.contacts.favorites
 
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
@@ -24,6 +26,7 @@ import dev.rovsti.core.model.phone.StatCall
 import dev.rovsti.core.model.phone.StatDir
 import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
@@ -135,11 +138,23 @@ class FavoritesViewModel(
             }
 
             is FavoritesAction.Remove -> {
-                viewModelScope.launch { star(action.id, on = false, said = "Removed from Favorites") }
+                viewModelScope.launch {
+                    star(
+                        action.id,
+                        on = false,
+                        said = UiText.Res(R.string.contacts_removed_from_favorites),
+                    )
+                }
             }
 
             is FavoritesAction.Star -> {
-                viewModelScope.launch { star(action.id, on = true, said = "Added to Favorites") }
+                viewModelScope.launch {
+                    star(
+                        action.id,
+                        on = true,
+                        said = UiText.Res(R.string.contacts_added_to_favorite),
+                    )
+                }
             }
 
             is FavoritesAction.AddAll -> {
@@ -254,11 +269,13 @@ class FavoritesViewModel(
     private suspend fun star(
         id: Long,
         on: Boolean,
-        said: String,
+        said: UiText,
     ) {
         val result = contacts.setStarred(id, on)
         outbox.trySend(
-            FavoritesEffect.Toast(if (result is ContactResult.Failed) "Can't change this contact right now." else said),
+            FavoritesEffect.Toast(
+                if (result is ContactResult.Failed) UiText.Res(R.string.contacts_cant_change_contact) else said,
+            ),
         )
     }
 
@@ -267,9 +284,8 @@ class FavoritesViewModel(
         for (id in ids) if (contacts.setStarred(id, true) is ContactResult.Ok) added++
         val said =
             when {
-                added == 0 -> "Can't change these contacts right now."
-                added == 1 -> "1 contact added to Favorites"
-                else -> "$added contacts added to Favorites"
+                added == 0 -> UiText.Res(R.string.contacts_cant_change_contacts)
+                else -> UiText.Plural(R.plurals.contacts_added_to_favorites, added)
             }
         outbox.trySend(FavoritesEffect.Toast(said))
     }
@@ -279,7 +295,7 @@ class FavoritesViewModel(
         val to = if (action.onPage) pageOutbox else outbox
         val number = draft.numbers.firstOrNull()?.value
         if (number == null) {
-            to.trySend(FavoritesEffect.Toast("This contact has no number."))
+            to.trySend(FavoritesEffect.Toast(UiText.Res(R.string.contacts_no_number)))
             return
         }
         val event = draft.events.firstOrNull { it.kind == action.kind } ?: draft.events.firstOrNull() ?: return
@@ -297,7 +313,7 @@ class FavoritesViewModel(
         val file = ok(ops.ics(IcsRequest(ready.drafts, today, now))) ?: return
         pageOutbox.trySend(
             if (file.count == 0) {
-                FavoritesEffect.Toast(NO_DATES)
+                FavoritesEffect.Toast(UiText.Res(R.string.contacts_no_dates_to_save))
             } else {
                 FavoritesEffect.SaveCalendar(file.fileName, file.text, file.count, file.notice)
             },
@@ -320,7 +336,6 @@ class FavoritesViewModel(
         const val PAGE_DAYS = 365L
 
         /** The toast when there is nothing to put in a calendar file. */
-        const val NO_DATES = "No birthdays or anniversaries to save."
         private const val STOP_TIMEOUT_MS = 5_000L
         private const val MS_PER_S = 1_000
     }

@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.testing.ShotTest
 import org.junit.Assert.assertEquals
@@ -30,7 +31,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class CallOptionsSectionTest : ShotTest() {
     private var calls by mutableStateOf(
-        CallOptionsUiState(loaded = true, ringtone = "Beacon", block = BlockRow.Available(false)),
+        CallOptionsUiState(loaded = true, ringtone = UiText.Literal("Beacon"), block = BlockRow.Available(false)),
     )
     private val actions = mutableListOf<CallOptionsAction>()
 

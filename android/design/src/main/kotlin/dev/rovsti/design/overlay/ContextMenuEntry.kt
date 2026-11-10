@@ -15,9 +15,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.ios.component.AppleContextMenuEntry
 import dev.rovsti.design.ios.component.AppleContextMenuState
 import dev.rovsti.design.ios.component.IosContextMenuEntry
@@ -70,7 +72,7 @@ fun Modifier.longPressMenu(
     items: ImmutableList<MenuItem>,
     style: ContextMenuStyle,
     onTap: (() -> Unit)? = null,
-    label: String = "Show actions",
+    label: String = stringResource(R.string.design_show_actions),
 ): Modifier {
     val target = remember { ContextMenuTarget() }
     val press = rememberPressRamp()
@@ -142,7 +144,7 @@ class ContextMenuEntry(
         openHaptic = true,
         panelTag = "context-panel",
         debugTag = "context.panel",
-        title = "Actions",
+        titleRes = R.string.design_actions,
     )
 
 /**

@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.list
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateDpAsState
@@ -33,12 +34,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.rovsti.contacts.R
 import dev.rovsti.core.model.contacts.QuickAction
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.ToolbarAction
@@ -73,6 +77,8 @@ import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.longPressMenu
 import dev.rovsti.design.overlay.sheetScrollConnection
 import dev.rovsti.design.text.SearchField
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -132,6 +138,8 @@ fun ContactsListScreen(
     onPasteContact: () -> Unit = {},
     onScanQr: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val strTabContacts = stringResource(R.string.tab_contacts)
     val latestAction = rememberUpdatedState(onAction)
     LaunchedEffect(searchState) {
         snapshotFlow { searchState.text.toString() }.collect { latestAction.value(ContactsListAction.QueryChanged(it)) }
@@ -145,11 +153,11 @@ fun ContactsListScreen(
     val railShown = ready && state.showScrubber && !searching
     val endInset = if (railShown) ListScrollRailWidth else Dp(0f)
     val onPick: () -> Unit = {
-        showAddPicker(overlays, state.pickables, onAction)
+        showAddPicker(context, overlays, state.pickables, onAction)
     }
     Box(modifier.testTag("contacts-list-screen")) {
         LargeTitleScaffold(
-            title = select?.title ?: "Contacts",
+            title = select?.title?.text() ?: strTabContacts,
             state = listState,
             actions = actions,
             modifier = Modifier.testTag("contacts-list-page"),
@@ -192,24 +200,37 @@ private fun rememberToolbar(
     onAction: (ContactsListAction) -> Unit,
     onPasteContact: () -> Unit,
     onScanQr: () -> Unit,
-): ImmutableList<ToolbarAction> =
-    remember(ready, hasRows, onAction, onPasteContact, onScanQr) {
+): ImmutableList<ToolbarAction> {
+    val strContactsNewContact = stringResource(R.string.contacts_new_contact)
+    val strContactsPasteContact = stringResource(R.string.contacts_paste_contact)
+    val strContactsScanQr = stringResource(R.string.contacts_scan_qr)
+    val strContactsNewContactLower = stringResource(R.string.contacts_new_contact_lower)
+    val strContactsSelect = stringResource(R.string.contacts_select)
+    return remember(ready, hasRows, onAction, onPasteContact, onScanQr) {
         if (!ready) {
             persistentListOf()
         } else {
             // "+" opens a menu over the page: New Contact, then the ways to bring one in (E4.10).
             val menu =
                 persistentListOf<MenuItem>(
-                    MenuItem.Action("New Contact", RovstiIcons.PersonAdd) { onAction(ContactsListAction.NewContact) },
+                    MenuItem.Action(strContactsNewContact, RovstiIcons.PersonAdd) {
+                        onAction(ContactsListAction.NewContact)
+                    },
                     MenuItem.Separator,
-                    MenuItem.Action("Paste Contact", RovstiIcons.Copy, onClick = onPasteContact),
-                    MenuItem.Action("Scan QR Code", RovstiIcons.QrCode, onClick = onScanQr),
+                    MenuItem.Action(
+                        strContactsPasteContact,
+                        RovstiIcons.Copy,
+                        onClick = onPasteContact,
+                    ),
+                    MenuItem.Action(strContactsScanQr, RovstiIcons.QrCode, onClick = onScanQr),
                 )
             val add =
-                ToolbarAction("add", RovstiIcons.Plus, "New contact", menu) { onAction(ContactsListAction.NewContact) }
+                ToolbarAction("add", RovstiIcons.Plus, strContactsNewContactLower, menu) {
+                    onAction(ContactsListAction.NewContact)
+                }
             if (hasRows) {
                 persistentListOf(
-                    ToolbarAction("select", RovstiIcons.Checkmark, "Select") {
+                    ToolbarAction("select", RovstiIcons.Checkmark, strContactsSelect) {
                         onAction(ContactsListAction.EnterSelect(null))
                     },
                     add,
@@ -219,6 +240,7 @@ private fun rememberToolbar(
             }
         }
     }
+}
 
 private fun LazyListScope.readyItems(
     state: ContactsListUiState,
@@ -266,7 +288,7 @@ private fun LazyListScope.readyItems(
     }
     if (state.deepRows.isNotEmpty()) {
         item(key = "deep-title", contentType = "header") {
-            SectionHeader(state.deepTitle, Modifier.testTag(ListTags.DeepTitle))
+            SectionHeader(state.deepTitle.text(), Modifier.testTag(ListTags.DeepTitle))
         }
         var firstDeep = true
         for (row in state.deepRows) {
@@ -299,7 +321,7 @@ private fun ContactRowItem(
     checked: Boolean? = null,
 ) {
     SideEffect { ListProbe.onRowComposed?.invoke(item.id) }
-    val menu = remember(item.id, quick, onAction) { menuFor(item.id, quick, onAction) }
+    val menu = menuFor(item.id, quick, onAction)
     val open = remember(item.id, onAction) { { onAction(ContactsListAction.Open(item.id)) } }
     val rowActions = remember(menu) { accessibilityActionsOf(menu) }
     val toggle = remember(item.id, onAction) { { onAction(ContactsListAction.ToggleSelected(item.id)) } }
@@ -426,6 +448,7 @@ private fun iconOf(id: String): ImageVector? =
     }
 
 /** The row menu: the quick actions of `contacts.quick`, then "Select". */
+@Composable
 private fun menuFor(
     id: Long,
     quick: ImmutableList<QuickAction>?,
@@ -443,7 +466,9 @@ private fun menuFor(
     }
     items += MenuItem.Separator
     items +=
-        MenuItem.Action("Select", RovstiIcons.Checkmark, onClick = { onAction(ContactsListAction.EnterSelect(id)) })
+        MenuItem.Action(stringResource(R.string.contacts_select), RovstiIcons.Checkmark, onClick = {
+            onAction(ContactsListAction.EnterSelect(id))
+        })
     return kotlinx.collections.immutable
         .persistentListOf<MenuItem>()
         .addAll(items)
@@ -496,7 +521,7 @@ private fun TopLinksSection(
             state.emergencyDetail?.let { detail ->
                 row {
                     ListRow(
-                        title = "Emergency Contacts",
+                        title = stringResource(R.string.settings_emergency),
                         secondary = detail,
                         leading = { TileIcon(RovstiIcons.MedicalCross) },
                         trailing = { ListRowChevron() },
@@ -540,19 +565,21 @@ private fun ViewedSection(
     overlays: OverlayController?,
     onAction: (ContactsListAction) -> Unit,
 ) {
+    val strContactsRecentlyViewed = stringResource(R.string.contacts_recently_viewed)
+    val strContactsClear = stringResource(R.string.contacts_clear)
     Column(Modifier.padding(bottom = Spacing.s, end = endInset).testTag(ListTags.Viewed)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter + Spacing.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RovstiText(
-                "Recently viewed",
+                strContactsRecentlyViewed,
                 Modifier.weight(1f),
                 style = RovstiTheme.type.footnote,
                 color = RovstiTheme.colors.labelSecondary,
             )
             RovstiText(
-                "Clear",
+                strContactsClear,
                 Modifier
                     .heightIn(min = Sizes.touch)
                     .clickable(role = Role.Button) { onAction(ContactsListAction.AskClearViewed) }
@@ -565,12 +592,7 @@ private fun ViewedSection(
         InsetGroupedSection {
             for (item in state.viewed) {
                 row {
-                    val menu =
-                        remember(
-                            item.id,
-                            state.quick,
-                            onAction,
-                        ) { menuFor(item.id, state.quick[item.menuKey], onAction) }
+                    val menu = menuFor(item.id, state.quick[item.menuKey], onAction)
                     val open = { onAction(ContactsListAction.Open(item.id)) }
                     if (overlays != null && menu.isNotEmpty()) {
                         Box(
@@ -627,8 +649,8 @@ private fun EmptyBlock(
             EmptyKind.NoContacts -> {
                 EmptyState(
                     icon = RovstiIcons.People,
-                    title = "No Contacts",
-                    message = "Tap + to add someone, or import a .vcf file in Settings.",
+                    title = stringResource(R.string.empty_contacts_title),
+                    message = stringResource(R.string.empty_contacts_message),
                     modifier = Modifier.testTag("contacts-empty-book"),
                 )
             }
@@ -636,20 +658,24 @@ private fun EmptyBlock(
             EmptyKind.NoResults -> {
                 EmptyState(
                     icon = RovstiIcons.Search,
-                    title = "No Results",
-                    message = "No contact matches “${state.queryEcho}”.",
+                    title = stringResource(R.string.contacts_no_results),
+                    message = stringResource(R.string.contacts_no_match, state.queryEcho),
                     modifier = Modifier.testTag(ListTags.NoResults),
                 )
                 if (state.offer.create != null) {
                     CapsuleButton(
-                        "Create Contact",
+                        stringResource(R.string.contacts_create_contact),
                         { onAction(ContactsListAction.CreateFromQuery) },
                         Modifier.testTag(ListTags.CreateFromSearch),
                         style = CapsuleStyle.Filled,
                     )
                 }
                 if (state.offer.addition != null) {
-                    CapsuleButton("Add to a Contact", onPick, Modifier.testTag(ListTags.AddFromSearch))
+                    CapsuleButton(
+                        stringResource(R.string.contacts_add_to_a_contact),
+                        onPick,
+                        Modifier.testTag(ListTags.AddFromSearch),
+                    )
                 }
             }
 
@@ -662,6 +688,7 @@ private fun EmptyBlock(
 
 /** "Add to a Contact": a sheet listing the book; the choice goes back as [ContactsListAction.AddToContact]. */
 private fun showAddPicker(
+    context: Context,
     overlays: OverlayController?,
     pickables: ImmutableList<ContactItem>,
     onAction: (ContactsListAction) -> Unit,
@@ -669,11 +696,11 @@ private fun showAddPicker(
     overlays ?: return
     overlays.present(
         SheetEntry(
-            title = "Add to a Contact",
+            title = context.getString(R.string.contacts_add_to_a_contact),
             detents = persistentListOf(Detent.Medium, Detent.Large),
         ) { sheet ->
             RovstiText(
-                "Add to a Contact",
+                context.getString(R.string.contacts_add_to_a_contact),
                 Modifier.padding(horizontal = Spacing.gutter, vertical = Spacing.s),
                 style = RovstiTheme.type.title3,
             )
@@ -709,12 +736,18 @@ private fun SelectTitleButtons(
 ) {
     ToolbarCapsule {
         ToolbarTextButton(
-            if (select.allSelected) "Deselect All" else "Select All",
+            if (select.allSelected) {
+                stringResource(
+                    R.string.contacts_deselect_all,
+                )
+            } else {
+                stringResource(R.string.contacts_select_all)
+            },
             { onAction(ContactsListAction.ToggleSelectAll) },
             Modifier.testTag(SelectTags.SelectAll),
         )
         ToolbarTextButton(
-            "Cancel",
+            stringResource(R.string.contacts_cancel),
             { onAction(ContactsListAction.ExitSelect) },
             Modifier.testTag(SelectTags.Cancel),
             bold = true,

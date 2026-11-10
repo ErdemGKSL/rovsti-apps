@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.editor
 
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,11 +11,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.SavedStateHandle
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.photo.ContactPhotoModel
 import dev.rovsti.contacts.photo.PhotoEffect
@@ -30,6 +34,8 @@ import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.SheetState
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
 import dev.rovsti.platform.files.CapturePhoto
 import dev.rovsti.platform.files.PickPhoto
 import kotlinx.collections.immutable.persistentListOf
@@ -120,6 +126,7 @@ fun contactEditorModel(
  * sheet rubber-bands back) and asks "Discard Changes" / "Keep Editing" instead.
  */
 fun presentContactEditor(
+    context: Context,
     model: ContactEditorViewModel,
     overlays: OverlayController,
     undoScope: CoroutineScope,
@@ -129,7 +136,7 @@ fun presentContactEditor(
 ): SheetEntry {
     val entry =
         SheetEntry(
-            title = "Contact editor",
+            title = context.getString(R.string.contacts_contact_editor),
             detents = persistentListOf(Detent.Large),
             initialDetent = Detent.Large,
             onDismissed = onClosed,
@@ -151,6 +158,12 @@ private fun ContactEditorSheet(
     outcome: EditorOutcome,
     extras: EditorExtras?,
 ) {
+    val context = LocalContext.current
+    val strContactsChangesLost = stringResource(R.string.contacts_changes_lost)
+    val strContactsDiscardChanges = stringResource(R.string.contacts_discard_changes)
+    val strContactsKeepEditing = stringResource(R.string.contacts_keep_editing)
+    val strContactsChangeUndone = stringResource(R.string.contacts_change_undone)
+    val strContactsCantUndoChange = stringResource(R.string.contacts_cant_undo_change)
     val state by model.state.collectAsState()
     val overlays = LocalOverlay.current
     val focus = LocalFocusManager.current
@@ -168,14 +181,17 @@ private fun ContactEditorSheet(
                     focus.clearFocus()
                     overlays.present(
                         ActionSheetEntry(
-                            message = "Your changes will be lost.",
+                            message = strContactsChangesLost,
                             actions =
                                 persistentListOf(
-                                    ActionSheetAction("Discard Changes", destructive = true) {
+                                    ActionSheetAction(
+                                        strContactsDiscardChanges,
+                                        destructive = true,
+                                    ) {
                                         model.onAction(EditorAction.Discard)
                                     },
                                 ),
-                            cancelLabel = "Keep Editing",
+                            cancelLabel = strContactsKeepEditing,
                         ),
                     )
                 }
@@ -185,14 +201,20 @@ private fun ContactEditorSheet(
                     extras?.let { held -> undoScope.launch { held.photo.applyPending(effect.id) } }
                     latestOutcome.value.saved(effect.id, created = model.state.value.isNew)
                     if (effect.undoable) {
-                        overlays.showUndo(effect.notice, onUndo = {
+                        overlays.showUndo(effect.notice.resolve(context), onUndo = {
                             undoScope.launch {
                                 val done = model.undo()
-                                overlays.showToast(if (done) "Change undone" else "Can't undo this change")
+                                overlays.showToast(
+                                    if (done) {
+                                        strContactsChangeUndone
+                                    } else {
+                                        strContactsCantUndoChange
+                                    },
+                                )
                             }
                         })
                     } else {
-                        overlays.showToast(effect.notice)
+                        overlays.showToast(effect.notice.resolve(context))
                     }
                 }
 
@@ -201,7 +223,7 @@ private fun ContactEditorSheet(
                 }
 
                 is EditorEffect.Toast -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(effect.text.resolve(context))
                 }
             }
         }
@@ -228,6 +250,7 @@ private fun rememberEditorPhoto(
     extras: EditorExtras,
     overlays: OverlayController,
 ): EditorPhoto {
+    val context = LocalContext.current
     val photo = extras.photo
     val ui by photo.state.collectAsState()
     val stored by extras.photoUri.collectAsState()
@@ -246,7 +269,7 @@ private fun rememberEditorPhoto(
         }
     LaunchedEffect(photo) {
         photo.effects.collect { effect ->
-            if (effect is PhotoEffect.Toast) overlays.showToast(effect.text)
+            if (effect is PhotoEffect.Toast) overlays.showToast(effect.text.resolve(context))
         }
     }
     LaunchedEffect(ui.crop) {
@@ -269,10 +292,12 @@ fun ContactEditorPage(
     outcome: EditorOutcome,
     onClosed: () -> Unit,
 ) {
+    val context = LocalContext.current
     val overlays = LocalOverlay.current
     val model = remember(route) { contactEditorModel(container, route.id, route.seed) }
     LaunchedEffect(model) {
         presentContactEditor(
+            context,
             model,
             overlays,
             container.scope,

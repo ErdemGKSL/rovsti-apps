@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings page: actions, menus and the cancel of a confirmation. -->
+    <string name="wa_share_key">Anahtarı paylaş…</string>
+    <string name="wa_show_qr">QR kodu olarak göster</string>
+    <string name="wa_hide_qr">QR kodunu gizle</string>
+    <string name="wa_paste">Yapıştır</string>
+    <string name="wa_revoke">Geçersiz Kıl</string>
+    <string name="wa_more_for">%1$s için daha fazla</string>
+    <string name="wa_cancel">Vazgeç</string>
+
+    <!-- Toasts. -->
+    <string name="wa_copied">Kopyalandı</string>
+    <string name="wa_error_generic">Bir şeyler ters gitti</string>
+    <string name="wa_nothing_to_paste">Yapıştırılacak bir şey yok</string>
+    <string name="wa_nothing_to_share">Bu paylaşılamaz</string>
+</resources>

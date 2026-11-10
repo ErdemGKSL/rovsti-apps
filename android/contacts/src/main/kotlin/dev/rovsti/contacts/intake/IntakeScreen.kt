@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.intake
 
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,10 +27,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.orNoName
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -49,6 +54,7 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.SheetState
 import dev.rovsti.design.overlay.sheetScrollConnection
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -82,6 +88,8 @@ fun IntakeScreen(
     onAction: (IntakeAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val strContactsImport = stringResource(R.string.contacts_import)
     val overlays = LocalOverlay.current
     val holder = rememberUpdatedState(state)
     val actions = rememberUpdatedState(onAction)
@@ -90,13 +98,13 @@ fun IntakeScreen(
     val phase = state.phase
     LaunchedEffect(phase) {
         if (phase == IntakePhase.Mapping && mappingEntry == null) {
-            mappingEntry = overlays.presentMappingSheet(holder) { actions.value(it) }
+            mappingEntry = overlays.presentMappingSheet(context, holder) { actions.value(it) }
         }
         if (phase == IntakePhase.Preview || phase == IntakePhase.Importing) {
             // The mapping sheet gives way to the preview (its own dismissal is not a Cancel once the phase moved on).
             mappingEntry?.let(overlays::dismiss)
             mappingEntry = null
-            if (entry == null) entry = overlays.presentIntakeSheet(holder) { actions.value(it) }
+            if (entry == null) entry = overlays.presentIntakeSheet(context, holder) { actions.value(it) }
         }
     }
     DisposableEffect(overlays) {
@@ -107,7 +115,7 @@ fun IntakeScreen(
     }
     val listState = rememberLazyListState()
     LargeTitleScaffold(
-        title = "Import",
+        title = strContactsImport,
         state = listState,
         actions = persistentListOf(),
         navigation = NavigationButton(onClick = { onAction(IntakeAction.Cancel) }),
@@ -129,11 +137,23 @@ private fun LazyListScope.statusItem(phase: IntakePhase) {
             contentAlignment = Alignment.Center,
         ) {
             if (phase == IntakePhase.Reading) {
-                EmptyState(RovstiIcons.Download, "Reading Contacts", "Looking for people in the file.")
+                EmptyState(
+                    RovstiIcons.Download,
+                    stringResource(R.string.contacts_reading),
+                    stringResource(R.string.contacts_looking_in_file),
+                )
             } else if (phase == IntakePhase.Mapping) {
-                EmptyState(RovstiIcons.Document, "Import CSV", "Match the columns in the sheet.")
+                EmptyState(
+                    RovstiIcons.Document,
+                    stringResource(R.string.contacts_import_csv),
+                    stringResource(R.string.contacts_match_columns_body),
+                )
             } else {
-                EmptyState(RovstiIcons.Download, "Import Contacts", "Choose what to add in the sheet.")
+                EmptyState(
+                    RovstiIcons.Download,
+                    stringResource(R.string.contacts_import_contacts),
+                    stringResource(R.string.contacts_choose_what_to_add),
+                )
             }
         }
     }
@@ -145,12 +165,13 @@ private fun LazyListScope.statusItem(phase: IntakePhase) {
  * [state] is read inside the sheet, so it follows the model without the sheet being presented again.
  */
 fun OverlayController.presentIntakeSheet(
+    context: Context,
     state: State<IntakeUiState>,
     onAction: (IntakeAction) -> Unit,
 ): SheetEntry {
     val entry =
         SheetEntry(
-            title = "Add these contacts?",
+            title = context.getString(R.string.contacts_add_these_contacts),
             detents = persistentListOf(Detent.Large),
             onDismissed = { onAction(IntakeAction.Cancel) },
             canDismiss = { state.value.phase != IntakePhase.Importing },
@@ -178,14 +199,14 @@ internal fun ColumnScope.IntakeSheetContent(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             RovstiText(
-                state.title,
+                state.title.text(),
                 style = RovstiTheme.type.title3,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             RovstiText(
-                state.countLine,
+                state.countLine.text(),
                 Modifier.padding(top = Spacing.xs, bottom = Spacing.s),
                 style = RovstiTheme.type.footnote,
                 color = RovstiTheme.colors.labelSecondary,
@@ -197,9 +218,16 @@ internal fun ColumnScope.IntakeSheetContent(
             items(state.rows, key = { it.index }, contentType = { "card" }) { row ->
                 Column {
                     ListRow(
-                        title = row.name,
+                        title = row.name.orNoName(),
                         secondary = row.secondary,
-                        leading = { Avatar(row.name, size = Sizes.avatar, photo = row.photo, colorKey = row.colorKey) },
+                        leading = {
+                            Avatar(
+                                row.name.orNoName(),
+                                size = Sizes.avatar,
+                                photo = row.photo,
+                                colorKey = row.colorKey,
+                            )
+                        },
                         trailing = { ListRowChevron() },
                         onClick = { onAction(IntakeAction.OpenCard(row.index)) },
                         modifier = Modifier.testTag(IntakeTags.row(row.index)),
@@ -224,7 +252,7 @@ private fun ButtonBar(
         verticalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         CapsuleButton(
-            if (importing) "Adding…" else state.addLabel,
+            if (importing) stringResource(R.string.contacts_adding) else state.addLabel.text(),
             onClick = { onAction(IntakeAction.Add) },
             modifier = Modifier.fillMaxWidth().testTag(IntakeTags.Add),
             style = CapsuleStyle.Filled,
@@ -233,7 +261,7 @@ private fun ButtonBar(
         )
         if (state.canAddToExisting) {
             CapsuleButton(
-                "Add to Existing Contact",
+                stringResource(R.string.contacts_add_to_existing),
                 onClick = { onAction(IntakeAction.AddToExisting) },
                 modifier = Modifier.fillMaxWidth().testTag(IntakeTags.AddToExisting),
                 enabled = state.canAdd,
@@ -243,7 +271,7 @@ private fun ButtonBar(
         // Cancel is plain accent text, as in an iOS sheet: a glass capsule at the very bottom of a sheet samples the
         // sheet's own rim and draws a dark smear there.
         RovstiText(
-            "Cancel",
+            stringResource(R.string.contacts_cancel),
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = IntakeMetrics.BarButtonHeight)
@@ -271,7 +299,7 @@ internal fun ColumnScope.CardPreviewContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RovstiText(
-                "Back",
+                stringResource(R.string.contacts_back),
                 Modifier
                     .heightIn(min = IntakeMetrics.BarButtonHeight)
                     .clickable(role = Role.Button, onClick = onBack)
@@ -289,13 +317,13 @@ internal fun ColumnScope.CardPreviewContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Avatar(
-                        preview.name,
+                        preview.name.orNoName(),
                         size = IntakeCardMetrics.Avatar,
                         photo = preview.photo,
                         colorKey = preview.colorKey,
                     )
                     RovstiText(
-                        preview.name,
+                        preview.name.orNoName(),
                         Modifier.padding(top = Spacing.m),
                         style = RovstiTheme.type.title2,
                         textAlign = TextAlign.Center,
@@ -314,8 +342,8 @@ internal fun ColumnScope.CardPreviewContent(
                     }
                 }
             }
-            items(preview.sections, key = { it.title.orEmpty() }, contentType = { "section" }) { section ->
-                InsetGroupedSection(header = section.title) {
+            items(preview.sections, key = { it.title.toString() }, contentType = { "section" }) { section ->
+                InsetGroupedSection(header = section.title?.text()) {
                     for (line in section.lines) {
                         row {
                             Column(
@@ -325,7 +353,7 @@ internal fun ColumnScope.CardPreviewContent(
                                 verticalArrangement = Arrangement.spacedBy(IntakeCardMetrics.LineGap),
                             ) {
                                 RovstiText(
-                                    line.label,
+                                    line.label.text(),
                                     style = RovstiTheme.type.footnote,
                                     color = colors.labelSecondary,
                                     maxLines = 1,

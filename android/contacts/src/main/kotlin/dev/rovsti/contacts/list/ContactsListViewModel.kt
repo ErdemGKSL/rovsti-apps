@@ -1,13 +1,17 @@
 package dev.rovsti.contacts.list
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
 import dev.rovsti.contacts.pinContactToHome
+import dev.rovsti.contacts.toUi
 import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.CallTarget
@@ -27,6 +31,8 @@ import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.ContactIndexHandle
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.DeepIndexHandle
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.text
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.ShortcutsRepository
@@ -235,7 +241,7 @@ class ContactsListViewModel(
         if (!searching) {
             val lists = (ops.recentLists(recentRequest(b, i)) as? Outcome.Ok)?.value
             if (lists != null) {
-                viewedClear = lists.clearViewed
+                viewedClear = lists.clearViewed.toUi()
                 if (lists.showEntry) recent = RecentEntry(lists.entryTitle, lists.entryDetail)
                 val byId = b.contacts.associateBy { it.id }
                 viewed = itemsOf(lists.viewed.mapNotNull { byId[it] }, i.prefs, i.order, i.marks, lists.viewed)
@@ -359,15 +365,19 @@ class ContactsListViewModel(
         val contact = contactOf(id) ?: return
         when (action) {
             "call" -> {
-                numberFor(contact, "Choose a number to call.")?.let { outbox.trySend(ContactsListEffect.Dial(it)) }
+                numberFor(contact, UiText.Res(R.string.contacts_choose_number_call))?.let {
+                    outbox.trySend(ContactsListEffect.Dial(it))
+                }
             }
 
             "message" -> {
-                numberFor(contact, "Choose a number to message.")?.let { outbox.trySend(ContactsListEffect.Sms(it)) }
+                numberFor(contact, UiText.Res(R.string.contacts_choose_number_message))?.let {
+                    outbox.trySend(ContactsListEffect.Sms(it))
+                }
             }
 
             "copy_number" -> {
-                numberFor(contact, "Tap a number to copy it.")?.let { copy(it) }
+                numberFor(contact, UiText.Res(R.string.contacts_tap_number_copy))?.let { copy(it) }
             }
 
             "whatsapp" -> {
@@ -376,7 +386,7 @@ class ContactsListViewModel(
                     if (jid != null) {
                         ContactsListEffect.WhatsApp(jid, contact.displayName)
                     } else {
-                        ContactsListEffect.Toast("This contact isn't on WhatsApp.")
+                        ContactsListEffect.Toast(UiText.Res(R.string.contacts_not_on_whatsapp))
                     },
                 )
             }
@@ -401,7 +411,7 @@ class ContactsListViewModel(
     /** The number Call, Message and Copy use: the default or only one; with several and no default the card opens. */
     private suspend fun numberFor(
         contact: WireContact,
-        hint: String,
+        hint: UiText,
     ): String? {
         val card = card(contact) ?: return null
         return when (card.callTarget) {
@@ -416,7 +426,7 @@ class ContactsListViewModel(
             }
 
             CallTarget.Nothing -> {
-                outbox.trySend(ContactsListEffect.Toast("This contact has no number."))
+                outbox.trySend(ContactsListEffect.Toast(UiText.Res(R.string.contacts_no_number)))
                 null
             }
         }
@@ -424,7 +434,11 @@ class ContactsListViewModel(
 
     private fun copy(number: String) {
         val done = clipboard.copy(number)
-        outbox.trySend(ContactsListEffect.Toast(if (done) "Number copied." else "Can't copy right now."))
+        outbox.trySend(
+            ContactsListEffect.Toast(
+                if (done) UiText.Res(R.string.contacts_number_copied_dot) else UiText.Res(R.string.contacts_cant_copy),
+            ),
+        )
     }
 
     private suspend fun star(
@@ -432,7 +446,7 @@ class ContactsListViewModel(
         on: Boolean,
     ) {
         if (contacts.setStarred(id, on) is ContactResult.Failed) {
-            outbox.trySend(ContactsListEffect.Toast("Can't change this contact right now."))
+            outbox.trySend(ContactsListEffect.Toast(UiText.Res(R.string.contacts_cant_change_contact)))
         }
     }
 
@@ -451,7 +465,7 @@ class ContactsListViewModel(
         val target = (book.book.value as? Book.Ready)?.drafts?.firstOrNull { it.id == id } ?: return
         val answer = (ops.draftAdd(DraftAddRequest(target, addition)) as? Outcome.Ok)?.value ?: return
         if (answer.refused || answer.draft == null) {
-            outbox.trySend(ContactsListEffect.Toast(answer.notice))
+            outbox.trySend(ContactsListEffect.Toast(UiText.Literal(answer.notice)))
             return
         }
         val seed =
@@ -468,7 +482,7 @@ class ContactsListViewModel(
 
     private suspend fun clearViewed() {
         store.update { it.copy(viewed = emptyList()) }
-        outbox.trySend(ContactsListEffect.Toast("Recently viewed cleared"))
+        outbox.trySend(ContactsListEffect.Toast(UiText.Res(R.string.contacts_recently_viewed_cleared)))
     }
 
     private fun contactOf(id: Long): WireContact? =

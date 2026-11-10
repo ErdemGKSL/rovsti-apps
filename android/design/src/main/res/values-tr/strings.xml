@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shared controls: buttons, placeholders and the labels screen readers announce. -->
+    <string name="design_cancel">Vazgeç</string>
+    <string name="design_send">Gönder</string>
+    <string name="design_message">Mesaj</string>
+    <string name="design_search">Ara</string>
+    <string name="design_clear">Temizle</string>
+    <string name="design_undo">Geri Al</string>
+    <string name="design_close">Kapat</string>
+    <string name="design_dismiss">Kapat</string>
+    <string name="design_back">Geri</string>
+    <string name="design_more">Daha Fazla</string>
+    <string name="design_selected">Seçili</string>
+    <string name="design_index">Dizin</string>
+    <string name="design_qr_code">QR kodu</string>
+    <string name="design_tap_again">Onaylamak için yeniden dokunun</string>
+    <string name="design_sheet_handle">Sayfa tutamacı</string>
+    <string name="design_change_sheet_size">Sayfa boyutunu değiştir</string>
+
+    <!-- Menus, sheets and popovers: the pane titles and the triggers' labels. -->
+    <string name="design_popover">Açılır pencere</string>
+    <string name="design_open_popover">Açılır pencereyi aç</string>
+    <string name="design_actions">İşlemler</string>
+    <string name="design_show_actions">İşlemleri göster</string>
+    <string name="design_open_menu">Menüyü aç</string>
+    <string name="design_menu">Menü</string>
+    <string name="design_preview_and_actions">Önizleme ve işlemler</string>
+
+    <!-- Photo viewer. -->
+    <string name="design_photo">Fotoğraf</string>
+    <string name="design_page_of">%1$d / %2$d</string>
+    <string name="design_photo_position">Fotoğraf %1$d / %2$d</string>
+    <string name="design_photo_next">Sonraki fotoğraf</string>
+    <string name="design_photo_previous">Önceki fotoğraf</string>
+    <string name="design_zoom_in">Yakınlaştır</string>
+    <string name="design_zoom_out">Uzaklaştır</string>
+</resources>

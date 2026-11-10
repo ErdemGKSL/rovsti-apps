@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -76,11 +77,13 @@ import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.menuTrigger
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.text.GlassTextField
+import dev.rovsti.design.text.resolve
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.platform.files.ShareIntents
+import dev.rovsti.wa.R
 import kotlinx.collections.immutable.persistentListOf
 import kotlin.math.floor
 
@@ -113,7 +116,7 @@ fun WhatsAppSettingsRoute(
             try {
                 when (event) {
                     is WaSettingsEvent.Toast -> {
-                        overlay?.showToast(event.message)
+                        overlay?.showToast(event.message.resolve(context))
                     }
 
                     is WaSettingsEvent.ShareImage -> {
@@ -127,7 +130,7 @@ fun WhatsAppSettingsRoute(
                     }
                 }
             } catch (_: ActivityNotFoundException) {
-                overlay?.showToast("Nothing can share this")
+                overlay?.showToast(context.getString(R.string.wa_nothing_to_share))
             }
         }
     }
@@ -322,15 +325,21 @@ private fun KeyBlock(
             }
         }
         InsetGroupedSection(Modifier.padding(top = BlockGap)) {
-            row { ActionRow("Share key…", { onAction(WaSettingsAction.ShareKey) }, "wa-share-key") }
+            row {
+                ActionRow(
+                    stringResource(R.string.wa_share_key),
+                    { onAction(WaSettingsAction.ShareKey) },
+                    "wa-share-key",
+                )
+            }
             row {
                 ActionRow(
                     if (keyQr ==
                         null
                     ) {
-                        "Show as QR code"
+                        stringResource(R.string.wa_show_qr)
                     } else {
-                        "Hide QR code"
+                        stringResource(R.string.wa_hide_qr)
                     },
                     { onAction(WaSettingsAction.ToggleKeyQr) },
                     "wa-key-qr-toggle",
@@ -364,7 +373,7 @@ private fun FieldBlock(
         )
         if (field.keyboard == "key") {
             TextButton(
-                "Paste",
+                stringResource(R.string.wa_paste),
                 onClick = { onAction(WaSettingsAction.PasteClipboard) },
                 modifier = Modifier.testTag("wa-paste"),
             )
@@ -422,11 +431,12 @@ private fun KeyMenuButton(
     onAction: (WaSettingsAction) -> Unit,
 ) {
     val overlay = LocalOverlayOrNull.current ?: return
+    val revokeLabel = stringResource(R.string.wa_revoke)
     val items =
         remember(key) {
             persistentListOf<MenuItem>(
                 MenuItem.Action(
-                    "Revoke",
+                    revokeLabel,
                     destructive = true,
                     onClick = { onAction(WaSettingsAction.Press(key.revoke)) },
                 ),
@@ -435,7 +445,7 @@ private fun KeyMenuButton(
     Box(
         Modifier
             .size(Sizes.touch)
-            .menuTrigger(overlay, items, label = "More for ${key.label}")
+            .menuTrigger(overlay, items, label = stringResource(R.string.wa_more_for, key.label))
             .testTag("wa-key-menu-${key.keyId}"),
         contentAlignment = Alignment.Center,
     ) {
@@ -637,6 +647,7 @@ private fun ConfirmAlert(
 ) {
     val overlay = LocalOverlayOrNull.current ?: return
     val latest by rememberUpdatedState(onAction)
+    val cancelLabel = stringResource(R.string.wa_cancel)
     LaunchedEffect(view.kind, view.title) {
         if (!view.kind.startsWith("confirm_")) return@LaunchedEffect
         val confirm = view.buttons.firstOrNull { it.destructive }?.input ?: return@LaunchedEffect
@@ -647,7 +658,10 @@ private fun ConfirmAlert(
                 message = view.notes.joinToString("\n\n").ifEmpty { null },
                 actions =
                     persistentListOf(
-                        AlertAction("Cancel", AlertRole.Cancel) { cancel?.let { latest(WaSettingsAction.Press(it)) } },
+                        AlertAction(
+                            cancelLabel,
+                            AlertRole.Cancel,
+                        ) { cancel?.let { latest(WaSettingsAction.Press(it)) } },
                         AlertAction(
                             view.buttons.first { it.destructive }.label,
                             AlertRole.Destructive,

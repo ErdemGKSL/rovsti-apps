@@ -13,9 +13,11 @@ import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.ContactsTabs
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.intake.PreviewLine
 import dev.rovsti.contacts.intake.PreviewSection
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import kotlinx.collections.immutable.persistentListOf
@@ -42,32 +44,38 @@ internal val SampleReview =
         name = "Ayşe Yılmaz",
         subtitle = "Acme Yazılım",
         photoUri = "content://contacts/photo/1",
-        sources = "From Ayşe Yılmaz, A. Yılmaz, Ayşe",
+        sources = UiText.Literal("From Ayşe Yılmaz, A. Yılmaz, Ayşe"),
         sections =
             persistentListOf(
                 PreviewSection(
-                    "Phone",
+                    UiText.Literal("Phone"),
                     persistentListOf(
-                        PreviewLine("Mobile", "+90 555 111 22 33"),
-                        PreviewLine("Work", "0212 000 00 01"),
+                        PreviewLine(UiText.Literal("Mobile"), "+90 555 111 22 33"),
+                        PreviewLine(UiText.Literal("Work"), "0212 000 00 01"),
                     ),
                 ),
-                PreviewSection("Email", persistentListOf(PreviewLine("Work", "ayse@acme.example"))),
-                PreviewSection("Notes", persistentListOf(PreviewLine("Notes", "Met at the 2023 conference."))),
+                PreviewSection(
+                    UiText.Literal("Email"),
+                    persistentListOf(PreviewLine(UiText.Literal("Work"), "ayse@acme.example")),
+                ),
+                PreviewSection(
+                    UiText.Literal("Notes"),
+                    persistentListOf(PreviewLine(UiText.Literal("Notes"), "Met at the 2023 conference.")),
+                ),
             ),
-        mergeLabel = "Merge 3 Contacts",
+        mergeLabel = UiText.Literal("Merge 3 Contacts"),
     )
 
 internal val SampleDupes =
     DupesUiState(
         phase = DupesPhase.Ready,
-        summary = "4 possible duplicates",
+        summary = UiText.Literal("4 possible duplicates"),
         rows =
             listOf(
-                DupeRow(1, "Ayşe Yılmaz", "and 2 more · Same number", "content://contacts/photo/1"),
-                DupeRow(4, "Burak Demir", "and 1 more · Same number", null),
-                DupeRow(6, "Elif Kaya", "and 1 more · Same name", null),
-                DupeRow(9, "Mehmet Öz", "and 3 more · Same email", "content://contacts/photo/9"),
+                DupeRow(1, "Ayşe Yılmaz", UiText.Literal("and 2 more · Same number"), "content://contacts/photo/1"),
+                DupeRow(4, "Burak Demir", UiText.Literal("and 1 more · Same number"), null),
+                DupeRow(6, "Elif Kaya", UiText.Literal("and 1 more · Same name"), null),
+                DupeRow(9, "Mehmet Öz", UiText.Literal("and 3 more · Same email"), "content://contacts/photo/9"),
             ).toImmutableList(),
     )
 
@@ -80,7 +88,7 @@ internal fun HostedDupes(harness: DupesHarness) {
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { chromeFor(it, UiText::en) },
         overlays = harness.overlays,
         modifier = Modifier.fillMaxSize(),
     ) {

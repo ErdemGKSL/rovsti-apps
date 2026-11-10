@@ -1,11 +1,16 @@
 package dev.rovsti.contacts.list
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.UiConfirm
 import dev.rovsti.core.model.contacts.Addition
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.core.model.contacts.QuickAction
 import dev.rovsti.core.model.contacts.SelectAction
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.ImmutableSet
@@ -73,7 +78,7 @@ data class RecentEntry(
 @Immutable
 data class SelectMode(
     val selected: ImmutableSet<Long> = persistentSetOf(),
-    val title: String = "Select contacts",
+    val title: UiText = UiText.Res(R.string.contacts_select_contacts),
     val actions: ImmutableList<SelectAction> = persistentListOf(),
     val allSelected: Boolean = false,
 )
@@ -100,7 +105,7 @@ data class ContactsListUiState(
     val rows: ImmutableList<ContactItem> = persistentListOf(),
     /** The "In details" rows under a search, each with "Company - Acme" as its [ContactItem.secondary]. */
     val deepRows: ImmutableList<ContactItem> = persistentListOf(),
-    val deepTitle: String = "In details",
+    val deepTitle: UiText = UiText.Res(R.string.contacts_in_details),
     val scrubberLetters: ImmutableList<Char> = persistentListOf(),
     val showScrubber: Boolean = false,
     /** Letter to the index of its header among the scrubbable items (headers and rows, in list order). */
@@ -114,7 +119,7 @@ data class ContactsListUiState(
     /** Contacts the "Add to a Contact" sheet offers. */
     val pickables: ImmutableList<ContactItem> = persistentListOf(),
     val viewed: ImmutableList<ContactItem> = persistentListOf(),
-    val viewedClear: Confirm = Confirm("Clear Recently Viewed?", ""),
+    val viewedClear: UiConfirm = UiConfirm(UiText.Res(R.string.contacts_clear_recently_viewed), UiText.Literal("")),
     val myCard: MyCardItem? = null,
     val recentEntry: RecentEntry? = null,
     /** The detail of the "Emergency Contacts" row ("2 of 5", "Not set up"); null hides the row (the model has not answered). */
@@ -227,11 +232,11 @@ sealed interface ContactsListEffect {
     ) : ContactsListEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : ContactsListEffect
 
     data class ConfirmClearViewed(
-        val confirm: Confirm,
+        val confirm: UiConfirm,
     ) : ContactsListEffect
 
     data class ConfirmDeleteSelected(
@@ -251,7 +256,7 @@ sealed interface ContactsListEffect {
 
     /** The one pill after a multi-delete; Undo sends [ContactsListAction.UndoDelete] with [keys]. */
     data class Deleted(
-        val notice: String,
+        val notice: UiText,
         val keys: List<Long>,
     ) : ContactsListEffect
 }

@@ -1,27 +1,32 @@
 package dev.rovsti.contacts.trash
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.Account
 import dev.rovsti.core.model.contacts.ContactDraft
 import dev.rovsti.core.model.contacts.TrashListAnswer
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import kotlinx.coroutines.flow.first
 
 /** The words under a contact that has no name: the Trash and the undo pill never print an empty line. */
-fun ContactDraft.trashName(): String =
+fun ContactDraft.trashName(): String? =
     listOf(given, family)
         .filter { it.isNotBlank() }
         .joinToString(" ")
-        .ifEmpty { org.ifBlank { nickname.ifBlank { "Contact" } } }
+        .ifEmpty { org.ifBlank { nickname.ifBlank { null } } }
+
+/** [trashName], or the word "Contact" in the user's language when the contact has no name at all. */
+fun ContactDraft.trashLabel(): UiText = trashName()?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_contact)
 
 /** What moving a contact to the Trash came to. */
 sealed interface MoveResult {
     /** The contact is in the Trash under [key] and gone from the address book. */
     data class Done(
         val key: Long,
-        val name: String,
+        val name: UiText,
     ) : MoveResult
 
     /** The contact is not in the address book (any more). */
@@ -68,7 +73,7 @@ class ContactTrash(
         val key = pushed?.keys?.firstOrNull() ?: return MoveResult.NoCopy
         return when (repo.delete(id)) {
             is ContactResult.Ok -> {
-                MoveResult.Done(key, draft.trashName())
+                MoveResult.Done(key, draft.trashLabel())
             }
 
             is ContactResult.Failed -> {

@@ -14,6 +14,7 @@ import dev.rovsti.design.media.PhotoViewerTags
 import dev.rovsti.testing.ShotTest
 import org.junit.After
 import org.junit.Test
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
@@ -59,6 +60,7 @@ class E413ShotTest : ShotTest() {
         r: CardRig,
         h: CardHarness,
     ) = cardPhotoViewer(
+        context = RuntimeEnvironment.getApplication(),
         id = 5,
         files = r.files,
         scope = r.scope,

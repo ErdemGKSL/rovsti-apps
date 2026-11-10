@@ -31,11 +31,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.glass.LocalGlassSettings
 import dev.rovsti.design.motion.IosOverscrollEffect
 import dev.rovsti.design.motion.rememberIosOverscrollFactory
@@ -56,7 +58,7 @@ object ScaffoldSpec {
 
 /** A back button on the leading edge of a pushed page. */
 class NavigationButton(
-    val label: String = "Back",
+    val label: String = "",
     val onClick: () -> Unit,
 )
 
@@ -130,7 +132,7 @@ fun LargeTitleScaffold(
             modifier = modifier.fillMaxSize().testTag("large-title-scaffold"),
             onBack = navigation?.onClick,
             onBackLongClick = pageBack?.onLongClick,
-            backLabel = navigation?.label ?: "Back",
+            backLabel = navigation?.label.orEmpty().ifEmpty { stringResource(R.string.design_back) },
             pageColor = colors.page,
             contentPadding = contentPadding,
             listState = state,

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings page: actions, menus and the cancel of a confirmation. -->
+    <string name="wa_share_key">Share key…</string>
+    <string name="wa_show_qr">Show as QR code</string>
+    <string name="wa_hide_qr">Hide QR code</string>
+    <string name="wa_paste">Paste</string>
+    <string name="wa_revoke">Revoke</string>
+    <string name="wa_more_for">More for %1$s</string>
+    <string name="wa_cancel">Cancel</string>
+
+    <!-- Toasts. -->
+    <string name="wa_copied">Copied</string>
+    <string name="wa_error_generic">Something went wrong</string>
+    <string name="wa_nothing_to_paste">Nothing to paste</string>
+    <string name="wa_nothing_to_share">Nothing can share this</string>
+</resources>

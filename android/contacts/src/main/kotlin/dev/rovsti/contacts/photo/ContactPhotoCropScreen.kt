@@ -105,7 +105,7 @@ class PhotoCropEntry(
     private val session: CropSession,
     private val onChosen: (CropView) -> Unit,
     private val onCancel: () -> Unit,
-) : OverlayEntry(modal = true, title = "Move and Scale") {
+) : OverlayEntry(modal = true, title = "", titleRes = R.string.contacts_move_and_scale) {
     private var answered = false
 
     override fun onBack(controller: OverlayController) {

@@ -2,6 +2,7 @@ package dev.rovsti.contacts.dupes
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.contacts.intake.PreviewSection
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -13,7 +14,7 @@ import kotlinx.collections.immutable.persistentListOf
 data class DupeRow(
     val key: Long,
     val name: String,
-    val secondary: String,
+    val secondary: UiText,
     val photoUri: String?,
 ) {
     val colorKey: String get() = key.toString()
@@ -29,9 +30,9 @@ data class MergeReview(
     val name: String,
     val subtitle: String?,
     val photoUri: String?,
-    val sources: String,
+    val sources: UiText,
     val sections: ImmutableList<PreviewSection>,
-    val mergeLabel: String,
+    val mergeLabel: UiText,
 ) {
     val colorKey: String get() = key.toString()
 }
@@ -42,7 +43,7 @@ enum class DupesPhase { Loading, Ready }
 data class DupesUiState(
     val phase: DupesPhase = DupesPhase.Loading,
     /** The line above the list from the Rust core ("2 possible duplicates"). */
-    val summary: String = "",
+    val summary: UiText = UiText.Literal(""),
     val rows: ImmutableList<DupeRow> = persistentListOf(),
     val review: MergeReview? = null,
     /** A merge is being written; its buttons wait. */
@@ -75,19 +76,19 @@ sealed interface DupesAction {
 
 sealed interface DupesEffect {
     data class Ask(
-        val title: String,
-        val body: String,
-        val confirmLabel: String,
+        val title: UiText,
+        val body: UiText,
+        val confirmLabel: UiText,
         val then: DupesAction,
     ) : DupesEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : DupesEffect
 
     /** ONE undo pill for a whole merge; Undo sends [DupesAction.Undo] with [token]. */
     data class Undo(
-        val message: String,
+        val message: UiText,
         val token: Long,
     ) : DupesEffect
 }

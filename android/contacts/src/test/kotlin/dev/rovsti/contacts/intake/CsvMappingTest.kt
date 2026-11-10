@@ -1,5 +1,7 @@
 package dev.rovsti.contacts.intake
 
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -30,7 +32,7 @@ class CsvMappingTest {
         )
         assertEquals("a guess is not a choice", null, map.columns[0].chosen)
         assertNull(map.columns[4].shown)
-        assertEquals("Automatic", map.columns[4].roleLabel())
+        assertEquals("Automatic", map.columns[4].roleLabel().en())
     }
 
     @Test fun aChosenRoleGetsTheGoogleHeaderAndTheRowsAreKept() {

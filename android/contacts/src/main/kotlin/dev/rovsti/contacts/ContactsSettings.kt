@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.SavedStateHandle
@@ -107,7 +108,8 @@ fun AboutEntry(
     onBackLongClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    val appName = stringResource(R.string.app_name)
+    val resources = LocalResources.current
+    val appName = resources.getString(R.string.app_name)
     val coreVersion = rememberCoreVersion(container.rust).value
     val info = remember(context, appName, coreVersion) { context.aboutInfo(appName, coreVersion) }
     AboutPage(info, onOpenLicences = onOpenLicences, onBack = onBack, onBackLongClick = onBackLongClick)

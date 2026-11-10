@@ -1,12 +1,14 @@
 package dev.rovsti.contacts.editor
 
 import androidx.compose.runtime.Immutable
+import dev.rovsti.contacts.R
 import dev.rovsti.core.model.contacts.ContactDraft
 import dev.rovsti.core.model.contacts.DraftIssueKind
 import dev.rovsti.core.model.contacts.EventKind
 import dev.rovsti.core.model.contacts.FieldKind
 import dev.rovsti.core.model.contacts.Group
 import dev.rovsti.core.model.contacts.RelationKind
+import dev.rovsti.design.text.UiText
 
 /** The repeatable lists of the editor; each row has a stable key so a field keeps its text when a row above goes. */
 enum class EditorList { Numbers, Emails, Addresses, Websites, Events, Relations }
@@ -106,13 +108,13 @@ data class EditorUiState(
     val canSave: Boolean get() = phase == EditorPhase.Ready && dirty && !saving
 
     /** The words of the Groups row: the chosen titles. */
-    val groupsLabel: String
+    val groupsLabel: UiText
         get() {
             val chosen = groups.filter { it.id in draft.groups }.map { it.title }
             return when (chosen.size) {
-                0 -> "None"
-                1, 2 -> chosen.joinToString(", ")
-                else -> "${chosen.size} groups"
+                0 -> UiText.Res(R.string.contacts_none)
+                1, 2 -> UiText.Literal(chosen.joinToString(", "))
+                else -> UiText.Plural(R.plurals.contacts_groups_count, chosen.size)
             }
         }
 }
@@ -188,7 +190,7 @@ sealed interface EditorEffect {
     /** Saved as [id]; [notice] is the words of the pill and [undoable] whether it carries Undo. */
     data class Saved(
         val id: Long,
-        val notice: String,
+        val notice: UiText,
         val undoable: Boolean,
     ) : EditorEffect
 
@@ -198,7 +200,7 @@ sealed interface EditorEffect {
     ) : EditorEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : EditorEffect
 }
 

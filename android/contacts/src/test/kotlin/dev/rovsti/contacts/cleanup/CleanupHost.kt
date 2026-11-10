@@ -13,8 +13,10 @@ import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.ContactsTabs
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
+import dev.rovsti.contacts.en
 import dev.rovsti.design.controls.ChipModel
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
 import kotlinx.collections.immutable.persistentListOf
@@ -77,7 +79,7 @@ internal fun cleanupState(
         picked?.let {
             CleanupSelect(
                 selected = it.toImmutableSet(),
-                title = if (it.isEmpty()) "Select contacts" else "${it.size} selected",
+                title = UiText.Literal(if (it.isEmpty()) "Select contacts" else "${it.size} selected"),
                 allSelected = it.size == rows.size && rows.isNotEmpty(),
                 canDelete = it.isNotEmpty(),
             )
@@ -93,7 +95,7 @@ internal fun HostedCleanup(harness: CleanupHarness) {
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { chromeFor(it, UiText::en) },
         overlays = harness.overlays,
         modifier = Modifier.fillMaxSize(),
     ) {

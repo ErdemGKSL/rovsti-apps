@@ -2,6 +2,7 @@ package dev.rovsti.contacts.card
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.core.model.contacts.TitleDetail
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -30,7 +31,7 @@ enum class CapsuleKind { Call, Message, WhatsApp, Email }
 @Immutable
 data class CardCapsule(
     val kind: CapsuleKind,
-    val label: String,
+    val label: UiText,
     val enabled: Boolean = true,
 )
 
@@ -40,7 +41,7 @@ sealed interface FieldOp {
     /** Copies [text]; [notice] is the toast ("Number copied"). */
     data class Copy(
         val text: String,
-        val notice: String,
+        val notice: UiText,
     ) : FieldOp
 
     data class ShareText(
@@ -73,7 +74,7 @@ sealed interface FieldOp {
 
 @Immutable
 data class FieldMenuItem(
-    val label: String,
+    val label: UiText,
     val op: FieldOp,
 )
 
@@ -82,8 +83,8 @@ data class FieldMenuItem(
 data class CardRow(
     val key: String,
     val kind: RowKind,
-    val title: String,
-    val label: String? = null,
+    val title: UiText,
+    val label: UiText? = null,
     /** The "Default" tag: only on a list with more than one entry. */
     val isDefault: Boolean = false,
     /** The JID whose WhatsApp chip this row carries (one chip per WhatsApp number, C17). */
@@ -101,7 +102,7 @@ data class CardRow(
 @Immutable
 data class CardSection(
     val kind: RowKind,
-    val title: String?,
+    val title: UiText?,
     val rows: ImmutableList<CardRow>,
 )
 
@@ -278,7 +279,7 @@ sealed interface ContactCardEffect {
     ) : ContactCardEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : ContactCardEffect
 
     /** The staged vCard file to send with `text/x-vcard`. */

@@ -1,8 +1,10 @@
 package dev.rovsti.contacts.list
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.Rust
@@ -12,6 +14,7 @@ import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.NativeContactsOps
 import dev.rovsti.core.ops.NativeContactsWaOps
 import dev.rovsti.core.ops.NativeSearchOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.FakeContactsRepository
 import dev.rovsti.platform.contacts.ShortcutsRepository
@@ -124,7 +127,7 @@ class SelectModeViewModelTest {
             assertNull(model.state.value.selectMode)
             model.onAction(ContactsListAction.EnterSelect(7))
             val select = stateWhere { it.selectMode?.selected == setOf(7L) }.selectMode!!
-            assertEquals("1 selected", select.title)
+            assertEquals("1 selected", (select.title).en())
             assertTrue(SelectAction.Share in select.actions && SelectAction.Delete in select.actions)
             assertTrue("the phone has a group", SelectAction.AddToGroup in select.actions)
             assertFalse(select.allSelected)
@@ -134,7 +137,7 @@ class SelectModeViewModelTest {
         runBlocking<Unit> {
             model.onAction(ContactsListAction.EnterSelect(null))
             val select = stateWhere { it.selectMode != null }.selectMode!!
-            assertEquals("Select contacts", select.title)
+            assertEquals("Select contacts", (select.title).en())
             assertTrue(select.actions.isEmpty())
         }
 
@@ -143,13 +146,13 @@ class SelectModeViewModelTest {
             model.onAction(ContactsListAction.EnterSelect(null))
             model.onAction(ContactsListAction.ToggleSelected(1))
             model.onAction(ContactsListAction.ToggleSelected(2))
-            assertEquals("2 selected", stateWhere { it.selectMode?.selected?.size == 2 }.selectMode!!.title)
+            assertEquals("2 selected", (stateWhere { it.selectMode?.selected?.size == 2 }.selectMode!!.title).en())
             model.onAction(ContactsListAction.ToggleSelected(1))
             assertEquals(setOf(2L), stateWhere { it.selectMode?.selected?.size == 1 }.selectMode!!.selected)
             model.onAction(ContactsListAction.ToggleSelectAll)
             val all = stateWhere { it.selectMode?.allSelected == true }
             assertEquals(40, all.selectMode!!.selected.size)
-            assertEquals("40 selected", all.selectMode!!.title)
+            assertEquals("40 selected", (all.selectMode!!.title).en())
             model.onAction(ContactsListAction.ToggleSelectAll)
             assertEquals(0, stateWhere { it.selectMode?.selected?.isEmpty() == true }.selectMode!!.selected.size)
             model.onAction(ContactsListAction.ExitSelect)
@@ -186,7 +189,7 @@ class SelectModeViewModelTest {
             stateWhere { it.selectMode?.selected?.size == 2 }
             model.onAction(ContactsListAction.CopySelectedNumbers)
             val toast = effect() as ContactsListEffect.Toast
-            assertTrue(toast.text, toast.text.startsWith("Copied"))
+            assertTrue(toast.text.en(), toast.text.en().startsWith("Copied"))
             val copied = clipboard.primaryText().orEmpty()
             assertTrue(copied, SampleBook.people.first { it.id == 1L }.number in copied)
         }
@@ -197,7 +200,7 @@ class SelectModeViewModelTest {
             stateWhere { it.selectMode != null }
             model.onAction(ContactsListAction.CopySelectedEmails)
             val toast = effect() as ContactsListEffect.Toast
-            assertTrue(toast.text, toast.text.isNotBlank())
+            assertTrue(toast.text.en(), toast.text.en().isNotBlank())
         }
 
     @Test fun starStarsThemAllThenUnstarsWhenAllAreStarred() =
@@ -207,7 +210,7 @@ class SelectModeViewModelTest {
             model.onAction(ContactsListAction.ToggleSelected(2))
             stateWhere { it.selectMode?.selected?.size == 2 }
             model.onAction(ContactsListAction.StarSelected)
-            assertTrue((effect() as ContactsListEffect.Toast).text.startsWith("Starred"))
+            assertTrue((effect() as ContactsListEffect.Toast).text.en().startsWith("Starred"))
             assertTrue(
                 repo
                     .full()
@@ -221,7 +224,7 @@ class SelectModeViewModelTest {
             model.onAction(ContactsListAction.ToggleSelected(2))
             stateWhere { it.selectMode?.selected?.size == 2 }
             model.onAction(ContactsListAction.StarSelected)
-            assertTrue((effect() as ContactsListEffect.Toast).text.startsWith("Unstarred"))
+            assertTrue((effect() as ContactsListEffect.Toast).text.en().startsWith("Unstarred"))
             assertTrue(
                 repo
                     .full()
@@ -241,7 +244,7 @@ class SelectModeViewModelTest {
             assertEquals(listOf("Family"), choose.groups.map { it.title })
             model.onAction(ContactsListAction.AddSelectedToGroup(choose.groups.single().id))
             val toast = effect() as ContactsListEffect.Toast
-            assertTrue(toast.text, "Family" in toast.text)
+            assertTrue(toast.text.en(), "Family" in toast.text.en())
             assertEquals(
                 setOf(4L, 5L),
                 repo
@@ -265,13 +268,13 @@ class SelectModeViewModelTest {
             assertEquals("Delete 3 contacts?", ask.confirm.title)
             model.onAction(ContactsListAction.DeleteSelected)
             val deleted = effect() as ContactsListEffect.Deleted
-            assertEquals("3 contacts deleted.", deleted.notice)
+            assertEquals("3 contacts deleted.", (deleted.notice).en())
             assertEquals(3, deleted.keys.size)
             val after = stateWhere { s -> s.rows.none { it.id in setOf(3L, 6L, 9L) } && s.selectMode == null }
             assertEquals(37, after.rows.size)
             model.onAction(ContactsListAction.UndoDelete(deleted.keys))
             val restored = effect() as ContactsListEffect.Toast
-            assertTrue(restored.text, restored.text.isNotBlank())
+            assertTrue(restored.text.en(), restored.text.en().isNotBlank())
             val back = stateWhere { it.rows.size == 40 }
             val names = SampleBook.people.filter { it.id in setOf(3L, 6L, 9L) }.map { it.name }
             assertTrue(names.all { name -> back.rows.any { it.name.contains(name.substringBefore(' ')) } })

@@ -12,6 +12,7 @@ import dev.rovsti.contacts.ContactsTags
 import dev.rovsti.contacts.SettingsTab
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.contacts.people.presentContactChooser
+import dev.rovsti.design.text.UiText
 import dev.rovsti.testing.ShotTest
 import kotlinx.collections.immutable.persistentListOf
 import org.junit.Test
@@ -75,15 +76,24 @@ class E410ShotTest : ShotTest() {
                             h.ui.rows[0].photo,
                             persistentListOf(
                                 PreviewSection(
-                                    "Phone",
+                                    UiText.Literal("Phone"),
                                     persistentListOf(
-                                        PreviewLine("Mobile", "+44 20 7946 0958"),
-                                        PreviewLine("Work", "+44 20 7946 0100"),
+                                        PreviewLine(UiText.Literal("Mobile"), "+44 20 7946 0958"),
+                                        PreviewLine(UiText.Literal("Work"), "+44 20 7946 0100"),
                                     ),
                                 ),
-                                PreviewSection("Email", persistentListOf(PreviewLine("Home", "ada@example.org"))),
-                                PreviewSection("Dates", persistentListOf(PreviewLine("Birthday", "1815-12-10"))),
-                                PreviewSection("Notes", persistentListOf(PreviewLine("Notes", "First programmer."))),
+                                PreviewSection(
+                                    UiText.Literal("Email"),
+                                    persistentListOf(PreviewLine(UiText.Literal("Home"), "ada@example.org")),
+                                ),
+                                PreviewSection(
+                                    UiText.Literal("Dates"),
+                                    persistentListOf(PreviewLine(UiText.Literal("Birthday"), "1815-12-10")),
+                                ),
+                                PreviewSection(
+                                    UiText.Literal("Notes"),
+                                    persistentListOf(PreviewLine(UiText.Literal("Notes"), "First programmer.")),
+                                ),
                             ),
                         ),
                 )

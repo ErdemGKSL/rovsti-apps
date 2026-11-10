@@ -1,7 +1,13 @@
 package dev.rovsti.contacts.photo
 
+import android.content.Context
+import androidx.compose.runtime.Composable
+import dev.rovsti.contacts.R
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.overlay.MenuItem
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -19,22 +25,27 @@ class PhotoMenuActions(
  * after a separator, the destructive Remove Photo, only when there is a photo to remove.
  */
 fun photoMenuItems(
+    context: Context,
     hasPhoto: Boolean,
     jid: String?,
     actions: PhotoMenuActions,
 ): ImmutableList<MenuItem> {
     val items = ArrayList<MenuItem>()
-    items += MenuItem.Action(CHOOSE, RovstiIcons.Photo, onClick = actions.choose)
-    items += MenuItem.Action(TAKE, RovstiIcons.Camera, onClick = actions.take)
-    if (!jid.isNullOrBlank()) items += MenuItem.Action(WHATSAPP, RovstiIcons.WhatsApp, onClick = actions.whatsApp)
+    items += MenuItem.Action(CHOOSE.resolve(context), RovstiIcons.Photo, onClick = actions.choose)
+    items += MenuItem.Action(TAKE.resolve(context), RovstiIcons.Camera, onClick = actions.take)
+    if (!jid.isNullOrBlank()) {
+        items +=
+            MenuItem.Action(WHATSAPP.resolve(context), RovstiIcons.WhatsApp, onClick = actions.whatsApp)
+    }
     if (hasPhoto) {
         items += MenuItem.Separator
-        items += MenuItem.Action(REMOVE, RovstiIcons.Trash, destructive = true, onClick = actions.remove)
+        items +=
+            MenuItem.Action(REMOVE.resolve(context), RovstiIcons.Trash, destructive = true, onClick = actions.remove)
     }
     return persistentListOf<MenuItem>().addAll(items)
 }
 
-const val CHOOSE = "Choose Photo"
-const val TAKE = "Take Photo"
-const val WHATSAPP = "Use WhatsApp Photo"
-const val REMOVE = "Remove Photo"
+val CHOOSE: UiText = UiText.Res(R.string.contacts_choose_photo)
+val TAKE: UiText = UiText.Res(R.string.contacts_take_photo)
+val WHATSAPP: UiText = UiText.Res(R.string.contacts_use_whatsapp_photo)
+val REMOVE: UiText = UiText.Res(R.string.contacts_remove_photo)

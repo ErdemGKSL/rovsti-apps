@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import dev.rovsti.design.text.UiText
 import dev.rovsti.testing.ShotTest
 import kotlinx.collections.immutable.persistentListOf
 import org.junit.Assert.assertEquals
@@ -118,7 +119,10 @@ class IntakeScreenTest : ShotTest() {
                         "Analytical Engines",
                         null,
                         persistentListOf(
-                            PreviewSection("Phone", persistentListOf(PreviewLine("Mobile", "+44 20 7946 0958"))),
+                            PreviewSection(
+                                UiText.Literal("Phone"),
+                                persistentListOf(PreviewLine(UiText.Literal("Mobile"), "+44 20 7946 0958")),
+                            ),
                         ),
                     ),
             )

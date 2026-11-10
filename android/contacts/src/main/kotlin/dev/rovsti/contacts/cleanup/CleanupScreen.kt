@@ -20,10 +20,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.orNoName
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -48,6 +52,9 @@ import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.resolve
+import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
 import kotlinx.collections.immutable.persistentListOf
@@ -81,6 +88,9 @@ fun CleanupScreen(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
+    val strContactsSelect = stringResource(R.string.contacts_select)
+    val strContactsCleanUp = stringResource(R.string.contacts_clean_up)
+    val strContactsAllClear = stringResource(R.string.contacts_all_clear)
     val select = state.select
     BackHandler(enabled = select != null) { onAction(CleanupAction.ExitSelect) }
     val toolbar =
@@ -89,14 +99,14 @@ fun CleanupScreen(
                 persistentListOf()
             } else {
                 persistentListOf(
-                    ToolbarAction("select", RovstiIcons.Checkmark, "Select") {
+                    ToolbarAction("select", RovstiIcons.Checkmark, strContactsSelect) {
                         onAction(CleanupAction.EnterSelect(null))
                     },
                 )
             }
         }
     LargeTitleScaffold(
-        title = select?.title ?: "Clean Up",
+        title = select?.title?.text() ?: strContactsCleanUp,
         state = listState,
         actions = toolbar,
         navigation = NavigationButton(onClick = onBack),
@@ -126,7 +136,7 @@ fun CleanupScreen(
                 ) {
                     EmptyState(
                         icon = RovstiIcons.Checkmark,
-                        title = "All Clear",
+                        title = strContactsAllClear,
                         message = state.emptyText,
                     )
                 }
@@ -177,11 +187,11 @@ private fun CleanupRowItem(
             }
             Box(Modifier.weight(1f)) {
                 ListRow(
-                    title = row.name,
+                    title = row.name.orNoName(),
                     secondary = row.secondary,
                     leading = {
                         Avatar(
-                            row.name,
+                            row.name.orNoName(),
                             size = Sizes.avatar,
                             photoModel = row.photoUri,
                             colorKey = row.colorKey,
@@ -204,18 +214,24 @@ private fun SelectButtons(
     ToolbarCapsule {
         ToolbarButton(
             RovstiIcons.Trash,
-            "Delete",
+            stringResource(R.string.editor_delete),
             { onAction(CleanupAction.AskDelete) },
             Modifier.testTag(CleanupTags.Delete),
             enabled = select.canDelete,
         )
         ToolbarTextButton(
-            if (select.allSelected) "Deselect All" else "Select All",
+            if (select.allSelected) {
+                stringResource(
+                    R.string.contacts_deselect_all,
+                )
+            } else {
+                stringResource(R.string.contacts_select_all)
+            },
             { onAction(CleanupAction.ToggleAll) },
             Modifier.testTag(CleanupTags.SelectAll),
         )
         ToolbarTextButton(
-            "Cancel",
+            stringResource(R.string.contacts_cancel),
             { onAction(CleanupAction.ExitSelect) },
             Modifier.testTag(CleanupTags.Cancel),
             bold = true,
@@ -230,6 +246,9 @@ fun CleanupEffects(
     overlays: OverlayController,
     onAction: (CleanupAction) -> Unit,
 ) {
+    val context = LocalContext.current
+    val strContactsCancel = stringResource(R.string.contacts_cancel)
+    val strEditorDelete = stringResource(R.string.editor_delete)
     val latest = rememberUpdatedState(onAction)
     LaunchedEffect(effects, overlays) {
         effects.collect { effect ->
@@ -241,8 +260,8 @@ fun CleanupEffects(
                             message = effect.confirm.body.ifBlank { null },
                             actions =
                                 persistentListOf(
-                                    AlertAction("Cancel", AlertRole.Cancel),
-                                    AlertAction("Delete", AlertRole.Destructive) {
+                                    AlertAction(strContactsCancel, AlertRole.Cancel),
+                                    AlertAction(strEditorDelete, AlertRole.Destructive) {
                                         latest.value(CleanupAction.ConfirmDelete)
                                     },
                                 ),
@@ -251,11 +270,14 @@ fun CleanupEffects(
                 }
 
                 is CleanupEffect.Toast -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(effect.text.resolve(context))
                 }
 
                 is CleanupEffect.Deleted -> {
-                    overlays.showUndo(effect.notice, onUndo = { latest.value(CleanupAction.Undo(effect.keys)) })
+                    overlays.showUndo(
+                        effect.notice.resolve(context),
+                        onUndo = { latest.value(CleanupAction.Undo(effect.keys)) },
+                    )
                 }
             }
         }

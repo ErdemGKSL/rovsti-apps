@@ -1,7 +1,9 @@
 package dev.rovsti.contacts.emergency
 
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
@@ -14,6 +16,7 @@ import dev.rovsti.core.model.contacts.FavoritesMoveRequest
 import dev.rovsti.core.model.contacts.ViewRequest
 import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineDispatcher
@@ -178,7 +181,7 @@ class EmergencyViewModel(
             ) {
                 EmergencyEffect.Dial(number)
             } else {
-                EmergencyEffect.Toast("This contact has no number.")
+                EmergencyEffect.Toast(UiText.Res(R.string.contacts_no_number))
             },
         )
     }
@@ -205,7 +208,7 @@ class EmergencyViewModel(
     private suspend fun addAll(ids: Set<Long>) {
         val ready = book.book.value as? Book.Ready ?: return
         val order = ready.contacts.filter { it.id in ids }
-        var said: String? = null
+        var said: UiText? = null
         for (contact in order) {
             val result = me.toggleEmergency(contact)
             said = result.notice

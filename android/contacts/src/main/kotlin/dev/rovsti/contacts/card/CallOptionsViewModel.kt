@@ -1,10 +1,14 @@
 package dev.rovsti.contacts.card
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.R
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.ContactOptions
 import dev.rovsti.core.model.contacts.OptionsAnswer
 import dev.rovsti.core.model.contacts.OptionsRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.calllog.Blocklist
 import dev.rovsti.platform.calllog.BlocklistRepository
 import dev.rovsti.platform.contacts.ContactCallOptions
@@ -64,7 +68,7 @@ class CallOptionsViewModel(
         ui.update {
             it.copy(
                 loaded = true,
-                ringtone = said?.ringtoneText ?: "Default",
+                ringtone = said?.ringtoneText?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_default),
                 voicemail = options.toVoicemail,
             )
         }
@@ -117,17 +121,23 @@ class CallOptionsViewModel(
         }
     }
 
-    private fun say(text: String) {
+    private fun say(text: UiText) {
         outbox.trySend(CallOptionsEffect.Toast(text))
     }
 
     private suspend fun setRingtone(uri: String?) {
-        if (repo.setRingtone(id, uri) !is ContactResult.Ok) return say("Can't change the ringtone")
+        if (repo.setRingtone(
+                id,
+                uri,
+            ) !is ContactResult.Ok
+        ) {
+            return say(UiText.Res(R.string.contacts_cant_change_ringtone))
+        }
         // The picked tone's title is read back from the provider.
         (repo.options(id) as? ContactResult.Ok)?.value?.let { options = it }
         val said = answer() ?: return
-        ui.update { it.copy(ringtone = said.ringtoneText) }
-        say(said.ringtoneNotice)
+        ui.update { it.copy(ringtone = UiText.Literal(said.ringtoneText)) }
+        say(UiText.Literal(said.ringtoneNotice))
     }
 
     private suspend fun askVoicemail() {
@@ -136,11 +146,17 @@ class CallOptionsViewModel(
     }
 
     private suspend fun setVoicemail(on: Boolean) {
-        if (repo.setVoicemail(id, on) !is ContactResult.Ok) return say("Can't change this setting")
+        if (repo.setVoicemail(
+                id,
+                on,
+            ) !is ContactResult.Ok
+        ) {
+            return say(UiText.Res(R.string.contacts_cant_change_setting))
+        }
         options = options.copy(toVoicemail = on)
         ui.update { it.copy(voicemail = on) }
         val said = answer() ?: return
-        say(if (on) said.voicemailOnNotice else said.voicemailOffNotice)
+        say(UiText.Literal(if (on) said.voicemailOnNotice else said.voicemailOffNotice))
     }
 
     private suspend fun toggleBlock() {
@@ -152,13 +168,27 @@ class CallOptionsViewModel(
     }
 
     private fun askBlock() {
-        val who = name().trim().ifEmpty { "this contact" }
-        val which = if (numbers.size > 1) "all their numbers" else "this number"
+        val who =
+            name().trim().let {
+                if (it.isEmpty()) {
+                    UiText.Res(
+                        R.string.contacts_this_contact,
+                    )
+                } else {
+                    UiText.Literal(it)
+                }
+            }
+        val message =
+            if (numbers.size > 1) {
+                R.string.contacts_block_all_numbers_message
+            } else {
+                R.string.contacts_block_this_number_message
+            }
         outbox.trySend(
             CallOptionsEffect.AskBlock(
-                title = "Block $who?",
-                message = "Calls from $which won't ring this phone.",
-                actionLabel = "Block Contact",
+                title = UiText.Res(R.string.contacts_block_who_title, listOf(who)),
+                message = UiText.Res(message),
+                actionLabel = UiText.Res(R.string.contacts_block_contact),
             ),
         )
     }
@@ -173,15 +203,15 @@ class CallOptionsViewModel(
                 Blocklist.Result.REFUSED -> refused++
 
                 Blocklist.Result.UNAVAILABLE, Blocklist.Result.PERMISSION -> return say(
-                    "Can't block: allow it in settings",
+                    UiText.Res(R.string.contacts_cant_block_settings),
                 )
             }
         }
         loadBlock()
         say(
             when {
-                done == 0 && refused > 0 -> "This number can't be blocked"
-                else -> "Blocked"
+                done == 0 && refused > 0 -> UiText.Res(R.string.contacts_number_cant_block)
+                else -> UiText.Res(R.string.contacts_blocked)
             },
         )
     }
@@ -192,6 +222,6 @@ class CallOptionsViewModel(
             if (blocklist.isBlocked(number) && blocklist.unblock(number) != Blocklist.Result.OK) failed = true
         }
         loadBlock()
-        say(if (failed) "Can't unblock this contact" else "Unblocked")
+        say(if (failed) UiText.Res(R.string.contacts_cant_unblock) else UiText.Res(R.string.contacts_unblocked))
     }
 }

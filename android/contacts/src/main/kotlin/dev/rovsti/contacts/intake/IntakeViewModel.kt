@@ -2,9 +2,11 @@ package dev.rovsti.contacts.intake
 
 import android.graphics.BitmapFactory
 import android.net.Uri
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.people.PersonItem
@@ -28,6 +30,8 @@ import dev.rovsti.core.model.contacts.TextRequest
 import dev.rovsti.core.model.qr.QrDecodeRequest
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.QrOps
+import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.text
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.files.ClipboardRepository
@@ -190,21 +194,21 @@ class IntakeViewModel(
             }
 
             IntakeKind.TooBig -> {
-                finish(answer.notice ?: TOO_BIG)
+                finish(answer.notice?.let { UiText.Literal(it) } ?: TOO_BIG)
             }
 
             IntakeKind.Unreadable -> {
-                finish(answer.notice ?: UNREADABLE)
+                finish(answer.notice?.let { UiText.Literal(it) } ?: UNREADABLE)
             }
         }
     }
 
     /** The words for a source that holds no contact: a paste is not "a file". */
-    private fun nothing(notice: String?): String =
+    private fun nothing(notice: String?): UiText =
         if (source is IntakeSource.Paste) {
             NOTHING_TO_PASTE
         } else {
-            notice
+            notice?.let { UiText.Literal(it) }
                 ?: NO_CONTACTS
         }
 
@@ -298,9 +302,9 @@ class IntakeViewModel(
                 if (incoming.size ==
                     1
                 ) {
-                    "Already in your contacts"
+                    UiText.Res(R.string.contacts_already_in_contacts)
                 } else {
-                    "All ${incoming.size} are already in your contacts"
+                    UiText.Res(R.string.contacts_all_already, listOf(incoming.size))
                 },
             )
             return
@@ -319,7 +323,7 @@ class IntakeViewModel(
                 phase = IntakePhase.Preview,
                 countLine = countLine(n, answer.duplicates),
                 rows = rows.toImmutableList(),
-                addLabel = if (n == 1) "Add 1 Contact" else "Add $n Contacts",
+                addLabel = UiText.Plural(R.plurals.contacts_add_contacts, n),
                 canAddToExisting = incoming.size == 1,
             )
     }
@@ -327,9 +331,13 @@ class IntakeViewModel(
     private fun countLine(
         added: Int,
         duplicates: Int,
-    ): String {
-        val head = if (added == 1) "1 new contact" else "$added new contacts"
-        return if (duplicates > 0) "$head, $duplicates already in your contacts" else head
+    ): UiText {
+        val head = UiText.Plural(R.plurals.contacts_new_contacts, added)
+        return if (duplicates > 0) {
+            UiText.Res(R.string.contacts_new_with_duplicates, listOf(head, duplicates))
+        } else {
+            head
+        }
     }
 
     // ---- scanning a picture (C19) ----
@@ -342,7 +350,7 @@ class IntakeViewModel(
     private suspend fun scan(uri: String) {
         val gray = luma.read(uri)
         if (gray == null) {
-            finish("Can't read this picture")
+            finish(UiText.Res(R.string.contacts_cant_read_picture))
             return
         }
         val texts =
@@ -384,7 +392,13 @@ class IntakeViewModel(
         outbox.trySend(
             IntakeEffect.Alert(
                 NO_CONTACT_IN_CODE,
-                if (texts.isEmpty()) "No QR code was found in this picture." else "This QR code holds no contact.",
+                if (texts.isEmpty()) {
+                    UiText.Res(
+                        R.string.contacts_no_qr_in_picture,
+                    )
+                } else {
+                    UiText.Res(R.string.contacts_qr_no_contact)
+                },
             ),
         )
         close()
@@ -455,13 +469,21 @@ class IntakeViewModel(
         csvCards = parsed?.contacts.orEmpty()
         val n = csvCards.size
         val skipped = parsed?.skipped ?: 0
-        val line =
+        val found: UiText =
             when {
-                parsed == null -> "Can't read this file"
-                n == 0 -> "No contacts found with these columns"
-                n == 1 -> "1 contact found"
-                else -> "$n contacts found"
-            } + if (n > 0 && skipped > 0) ", $skipped rows left out" else ""
+                parsed == null -> UiText.Res(R.string.contacts_cant_read_file)
+                n == 0 -> UiText.Res(R.string.contacts_no_contacts_columns)
+                else -> UiText.Plural(R.plurals.contacts_csv_found, n)
+            }
+        val line =
+            if (n > 0 && skipped > 0) {
+                UiText.Res(
+                    R.string.contacts_csv_line,
+                    listOf(found, UiText.Plural(R.plurals.contacts_csv_skipped, skipped)),
+                )
+            } else {
+                found
+            }
         ui.update {
             it.copy(mapping = CsvMappingUi(map.columns, line, n > 0))
         }
@@ -498,16 +520,16 @@ class IntakeViewModel(
         val result = (saved as? ContactResult.Ok)?.value
         if (result == null || result.ids.isEmpty()) {
             ui.update { it.copy(phase = IntakePhase.Preview) }
-            outbox.trySend(IntakeEffect.Toast("Can't add contacts right now."))
+            outbox.trySend(IntakeEffect.Toast(UiText.Res(R.string.contacts_cant_add_contacts)))
             return
         }
         withContext(io) { putPhotos(result.ids) }
         val ids = result.ids.filter { it > 0 }
         val n = result.added
         outbox.trySend(
-            IntakeEffect.Undo(if (n == 1) "Added 1 contact" else "Added $n contacts") {
+            IntakeEffect.Undo(UiText.Plural(R.plurals.contacts_added_contacts, n)) {
                 val moved = ids.count { trash.delete(it) is dev.rovsti.contacts.trash.MoveResult.Done }
-                if (moved == 1) "1 contact moved to the Trash" else "$moved contacts moved to the Trash"
+                UiText.Plural(R.plurals.contacts_moved_to_trash, moved)
             },
         )
         close()
@@ -545,7 +567,7 @@ class IntakeViewModel(
                 .map { PersonItem(it.id, it.displayName, it.numbers.firstOrNull()?.raw, it.photoUri) }
                 .toImmutableList()
         if (people.isEmpty()) {
-            outbox.trySend(IntakeEffect.Toast("You have no contacts to add this to."))
+            outbox.trySend(IntakeEffect.Toast(UiText.Res(R.string.contacts_no_contact_to_add_to)))
         } else {
             outbox.trySend(IntakeEffect.ChooseExisting(people))
         }
@@ -562,16 +584,29 @@ class IntakeViewModel(
         val answer = (ops.draftAdd(DraftAddRequest(target, addition)) as? Outcome.Ok)?.value
         val merged = answer?.draft
         if (answer == null || answer.refused || merged == null) {
-            outbox.trySend(IntakeEffect.Toast(answer?.notice ?: "Can't add to this contact."))
+            outbox.trySend(
+                IntakeEffect.Toast(
+                    answer?.notice?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_cant_add_to_contact),
+                ),
+            )
             return
         }
         if (repo.save(merged) is ContactResult.Failed) {
-            outbox.trySend(IntakeEffect.Toast("Can't save this contact right now."))
+            outbox.trySend(IntakeEffect.Toast(UiText.Res(R.string.contacts_cant_save_contact)))
             return
         }
         outbox.trySend(
-            IntakeEffect.Undo(answer.notice) {
-                if (repo.save(target) is ContactResult.Ok) "Put back" else "Can't undo right now."
+            IntakeEffect.Undo(UiText.Literal(answer.notice)) {
+                if (repo.save(
+                        target,
+                    ) is ContactResult.Ok
+                ) {
+                    UiText.Res(
+                        R.string.contacts_put_back,
+                    )
+                } else {
+                    UiText.Res(R.string.contacts_cant_undo_now)
+                }
             },
         )
         close()
@@ -579,7 +614,7 @@ class IntakeViewModel(
 
     // ---- ending ----
 
-    private fun finish(toast: String) {
+    private fun finish(toast: UiText) {
         outbox.trySend(IntakeEffect.Toast(toast))
         close()
     }
@@ -592,11 +627,11 @@ class IntakeViewModel(
     }
 
     companion object {
-        const val NOTHING_TO_PASTE = "Nothing to paste"
-        const val NO_CONTACT_IN_CODE = "No contact in this code"
-        private const val NO_CONTACTS = "This file has no contacts"
-        private const val TOO_BIG = "This file is too big to open"
-        private const val UNREADABLE = "Can't read this file"
+        val NOTHING_TO_PASTE: UiText = UiText.Res(R.string.contacts_nothing_to_paste)
+        val NO_CONTACT_IN_CODE: UiText = UiText.Res(R.string.contacts_no_contact_in_code)
+        private val NO_CONTACTS: UiText = UiText.Res(R.string.contacts_file_no_contacts)
+        private val TOO_BIG: UiText = UiText.Res(R.string.contacts_file_too_big)
+        private val UNREADABLE: UiText = UiText.Res(R.string.contacts_cant_read_file)
         private const val BOOK_WAIT_MS = 3_000L
         private const val MAX_PHOTO_SIDE = 256
     }
@@ -648,7 +683,7 @@ internal fun draftTitle(draft: ContactDraft): String =
                 draft.nickname.ifBlank {
                     draft.numbers.firstOrNull { it.value.isNotBlank() }?.value
                         ?: draft.emails.firstOrNull { it.value.isNotBlank() }?.value
-                        ?: "No Name"
+                        ?: ""
                 }
             }
         }
@@ -671,27 +706,42 @@ internal fun previewSectionsOf(draft: ContactDraft): ImmutableList<PreviewSectio
     val sections = ArrayList<PreviewSection>()
 
     fun fields(
-        title: String,
+        title: UiText,
         list: List<DraftField>,
     ) {
-        val lines = list.filter { it.value.isNotBlank() }.map { PreviewLine(it.label ?: it.kind.name, it.value) }
+        val lines =
+            list
+                .filter {
+                    it.value.isNotBlank()
+                }.map { PreviewLine(UiText.Literal(it.label ?: it.kind.name), it.value) }
         if (lines.isNotEmpty()) sections += PreviewSection(title, lines.toImmutableList())
     }
-    fields("Phone", draft.numbers)
-    fields("Email", draft.emails)
-    fields("Address", draft.addresses)
+    fields(UiText.Res(R.string.contacts_phone), draft.numbers)
+    fields(UiText.Res(R.string.contacts_email), draft.emails)
+    fields(UiText.Res(R.string.contacts_address), draft.addresses)
     if (draft.websites.isNotEmpty()) {
-        sections += PreviewSection("Website", draft.websites.map { PreviewLine("Website", it) }.toImmutableList())
+        sections +=
+            PreviewSection(
+                UiText.Res(R.string.contacts_website),
+                draft.websites
+                    .map {
+                        PreviewLine(UiText.Res(R.string.contacts_website), it)
+                    }.toImmutableList(),
+            )
     }
     if (draft.events.isNotEmpty()) {
         sections +=
             PreviewSection(
-                "Dates",
-                draft.events.map { PreviewLine(it.label ?: it.kind.name, it.date) }.toImmutableList(),
+                UiText.Res(R.string.contacts_dates),
+                draft.events.map { PreviewLine(UiText.Literal(it.label ?: it.kind.name), it.date) }.toImmutableList(),
             )
     }
     if (draft.note.isNotBlank()) {
-        sections += PreviewSection("Notes", persistentListOf(PreviewLine("Notes", draft.note)))
+        sections +=
+            PreviewSection(
+                UiText.Res(R.string.contacts_notes),
+                persistentListOf(PreviewLine(UiText.Res(R.string.contacts_notes), draft.note)),
+            )
     }
     return sections.toImmutableList()
 }

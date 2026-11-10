@@ -51,11 +51,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import dev.rovsti.design.R
 import dev.rovsti.design.backdrop.backdrops.BackdropFreeze
 import dev.rovsti.design.backdrop.backdrops.LayerBackdrop
 import dev.rovsti.design.backdrop.backdrops.layerBackdrop
@@ -138,7 +140,7 @@ fun ScreenChromeBox(
     barModifier: Modifier = Modifier,
     // false: the page never shows a back button, not even the pushed-page default from LocalPageBack.
     showBack: Boolean = true,
-    backLabel: String = "Back",
+    backLabel: String = stringResource(R.string.design_back),
     titleSideReserve: Dp = 96.dp,
     titleEndReserve: Dp = titleSideReserve,
     titleAlphaProvider: (() -> Float)? = null,
@@ -263,7 +265,7 @@ fun ScreenScaffold(
     titleAlphaProvider: (() -> Float)? = null,
     modifier: Modifier = Modifier,
     barModifier: Modifier = Modifier,
-    backLabel: String = "Back",
+    backLabel: String = stringResource(R.string.design_back),
     titleSideReserve: Dp = 96.dp,
     titleEndReserve: Dp = titleSideReserve,
     content: @Composable BoxScope.(GlassScreenChrome) -> Unit,
@@ -430,7 +432,7 @@ fun ScreenLazyPage(
     titleProgress: State<Float>? = null,
     titleAlphaProvider: ((progress: Float) -> Float)? = null,
     barModifier: Modifier = Modifier,
-    backLabel: String = "Back",
+    backLabel: String = stringResource(R.string.design_back),
     titleSideReserve: Dp = 96.dp,
     titleEndReserve: Dp = titleSideReserve,
     listModifier: Modifier = Modifier,

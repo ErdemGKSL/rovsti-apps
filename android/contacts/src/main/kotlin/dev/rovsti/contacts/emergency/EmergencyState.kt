@@ -2,6 +2,7 @@ package dev.rovsti.contacts.emergency
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.contacts.people.PersonItem
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -91,6 +92,6 @@ sealed interface EmergencyEffect {
     ) : EmergencyEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : EmergencyEffect
 }

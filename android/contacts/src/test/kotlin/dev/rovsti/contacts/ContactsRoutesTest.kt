@@ -2,6 +2,8 @@ package dev.rovsti.contacts
 
 import android.content.Intent
 import android.os.Bundle
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import dev.rovsti.design.transition.TabBarMode
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.contacts.Shortcuts
@@ -50,8 +52,8 @@ class ContactsRoutesTest {
         val nav = TabNavigator(ContactsTabs, ContactsRoots)
         nav.resetTo(tab, routes)
         assertEquals(listOf(ContactsRoute.ContactsList, route), nav.stack(ContactsTab))
-        assertEquals(TabBarMode.Hidden, chromeFor(route).tabBar)
-        assertEquals(TabBarMode.Hidden, chromeFor(ContactsRoute.Intake(paste = true)).tabBar)
+        assertEquals(TabBarMode.Hidden, chromeFor(route, UiText::en).tabBar)
+        assertEquals(TabBarMode.Hidden, chromeFor(ContactsRoute.Intake(paste = true), UiText::en).tabBar)
     }
 
     @Test fun aContactLinkBeatsAVcard() {
@@ -84,10 +86,10 @@ class ContactsRoutesTest {
     }
 
     @Test fun chromeOfEveryRoute() {
-        fun mode(route: ContactsRoute) = chromeFor(route).tabBar
+        fun mode(route: ContactsRoute) = chromeFor(route, UiText::en).tabBar
         for (root in ContactsRoots.values) {
             assertEquals("$root", TabBarMode.Visible, mode(root))
-            assertNotNull("$root has a large title", chromeFor(root).largeTitle)
+            assertNotNull("$root has a large title", chromeFor(root, UiText::en).largeTitle)
         }
         val hidden =
             listOf(
@@ -149,10 +151,13 @@ class ContactsRoutesTest {
         for (route in pushed) {
             if (route in roots) continue
             for (selecting in listOf(false, true)) {
-                assertNotEquals("$route", TabBarMode.Folded, chromeFor(route, selecting).tabBar)
+                assertNotEquals("$route", TabBarMode.Folded, chromeFor(route, selecting, UiText::en).tabBar)
             }
         }
-        assertEquals(TabBarMode.Folded, chromeFor(ContactsRoute.ContactsList, selecting = true).tabBar)
+        assertEquals(
+            TabBarMode.Folded,
+            chromeFor(ContactsRoute.ContactsList, selecting = true, text = UiText::en).tabBar,
+        )
     }
 
     @Test fun everyRouteSurvivesSaveAndRestore() {

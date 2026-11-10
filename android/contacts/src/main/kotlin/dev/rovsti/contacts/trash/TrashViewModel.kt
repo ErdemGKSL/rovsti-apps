@@ -1,8 +1,11 @@
 package dev.rovsti.contacts.trash
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.ContactsStore
+import dev.rovsti.contacts.toUi
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.TrashEntry
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
@@ -68,22 +71,40 @@ class TrashViewModel(
     private fun rowOf(entry: TrashEntry): TrashRow {
         val draft = entry.draft
         val gone = retention.coerceAtLeast(entry.daysLeft) - entry.daysLeft
-        val ago =
-            when {
-                entry.leftText == TODAY -> "Deleted today"
-                gone == 1 -> "Deleted 1 day ago"
-                else -> "Deleted $gone days ago"
+        val ago: UiText =
+            if (entry.leftText == TODAY) {
+                UiText.Res(R.string.contacts_deleted_today)
+            } else {
+                UiText.Plural(R.plurals.contacts_deleted_days_ago, gone)
             }
-        val detail = if (entry.leftText == TODAY) ago else "$ago · ${entry.leftText}"
-        return TrashRow(entry.key, draft.trashName(), detail, entry.key.toString())
+        val detail: UiText =
+            if (entry.leftText ==
+                TODAY
+            ) {
+                ago
+            } else {
+                UiText.Res(R.string.contacts_trash_detail, listOf(ago, UiText.Literal(entry.leftText)))
+            }
+        val name: UiText = draft.trashLabel()
+        return TrashRow(entry.key, name, detail, entry.key.toString())
     }
 
     private fun restore(key: Long) {
         scope.launch {
             when (val result = trash.restore(listOf(key))) {
-                is RestoreResult.Done -> outbox.trySend(TrashEffect.Toast(result.notice))
-                RestoreResult.Missing -> outbox.trySend(TrashEffect.Toast("It is not in the Trash any more"))
-                RestoreResult.Refused -> outbox.trySend(TrashEffect.Toast("Couldn't restore it, it stays in the Trash"))
+                is RestoreResult.Done -> {
+                    outbox.trySend(TrashEffect.Toast(UiText.Literal(result.notice)))
+                }
+
+                RestoreResult.Missing -> {
+                    outbox.trySend(TrashEffect.Toast(UiText.Res(R.string.contacts_not_in_trash)))
+                }
+
+                RestoreResult.Refused -> {
+                    outbox.trySend(
+                        TrashEffect.Toast(UiText.Res(R.string.contacts_cant_restore_stays)),
+                    )
+                }
             }
             load()
         }
@@ -96,10 +117,21 @@ class TrashViewModel(
         scope.launch {
             val count = if (forever) keys.size else ui.value.rows.size
             if (count == 0) return@launch
-            val confirm = (store.trashConfirm(count, forever) as? Outcome.Ok)?.value ?: return@launch
+            val confirm = (store.trashConfirm(count, forever) as? Outcome.Ok)?.value?.toUi() ?: return@launch
             val then = if (forever) TrashAction.ConfirmDelete(keys) else TrashAction.ConfirmEmpty
             outbox.trySend(
-                TrashEffect.Ask(confirm.title, confirm.body, if (forever) "Delete Now" else "Empty Trash", then),
+                TrashEffect.Ask(
+                    confirm.title,
+                    confirm.body,
+                    if (forever) {
+                        UiText.Res(
+                            R.string.contacts_delete_now,
+                        )
+                    } else {
+                        UiText.Res(R.string.contacts_empty_trash)
+                    },
+                    then,
+                ),
             )
         }
     }
@@ -119,6 +151,7 @@ class TrashViewModel(
     }
 
     private companion object {
+        /** The Rust core's words for a trash entry deleted today; the row shows [R.string.contacts_deleted_today]. */
         const val TODAY = "Deleted today"
     }
 }

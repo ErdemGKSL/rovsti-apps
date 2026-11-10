@@ -2,6 +2,7 @@ package dev.rovsti.contacts.groups
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.contacts.people.PersonItem
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -12,7 +13,7 @@ enum class GroupsPhase { Loading, NoPermission, Ready }
 data class GroupItem(
     val id: Long,
     val title: String,
-    val subtitle: String,
+    val subtitle: UiText,
 )
 
 @Immutable
@@ -45,7 +46,7 @@ sealed interface GroupsEffect {
     ) : GroupsEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : GroupsEffect
 }
 
@@ -54,7 +55,7 @@ sealed interface GroupsEffect {
 data class GroupPageUi(
     val id: Long,
     val title: String,
-    val subtitle: String,
+    val subtitle: UiText,
     /** "Contacts added here sync with ..." when the phone has more than one account; null otherwise. */
     val joinHint: String?,
     val members: ImmutableList<PersonItem>,
@@ -132,7 +133,7 @@ sealed interface GroupPageEffect {
     ) : GroupPageEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : GroupPageEffect
 
     /** The group is gone: pop the page. */

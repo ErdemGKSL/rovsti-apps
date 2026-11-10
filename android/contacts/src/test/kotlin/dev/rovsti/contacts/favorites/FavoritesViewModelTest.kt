@@ -1,5 +1,8 @@
 package dev.rovsti.contacts.favorites
 
+import dev.rovsti.contacts.R
+import dev.rovsti.contacts.en
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.system.permissions.PermissionState
 import kotlinx.coroutines.flow.first
 import org.junit.After
@@ -80,7 +83,10 @@ class FavoritesViewModelTest {
         r.model.onAction(FavoritesAction.Remove(3))
         val state = r.stateWhere { s -> s.favorites.none { it.id == 3L } && s.favorites.isNotEmpty() }
         assertEquals(setOf(1L, 5L, 11L, 22L), state.favorites.map { it.id }.toSet())
-        assertEquals("Removed from Favorites", (r.wait { r.model.effects.first() } as FavoritesEffect.Toast).text)
+        assertEquals(
+            "Removed from Favorites",
+            ((r.wait { r.model.effects.first() } as FavoritesEffect.Toast).text).en(),
+        )
     }
 
     // ---- Frequently contacted
@@ -117,7 +123,7 @@ class FavoritesViewModelTest {
         val state = r.stateWhere { s -> s.favorites.any { it.id == 2L } }
         assertTrue(state.frequent.none { it.id == 2L } || true)
         r.stateWhere { s -> s.frequent.none { it.id == 2L } }
-        assertEquals("Added to Favorites", (r.wait { r.model.effects.first() } as FavoritesEffect.Toast).text)
+        assertEquals("Added to Favorites", ((r.wait { r.model.effects.first() } as FavoritesEffect.Toast).text).en())
     }
 
     @Test fun thePickerOffersNobodyWhoIsAlreadyAFavorite() {
@@ -130,7 +136,7 @@ class FavoritesViewModelTest {
         assertEquals(33, after.pickables.size)
         assertEquals(
             "2 contacts added to Favorites",
-            (r.wait { r.model.effects.first() } as FavoritesEffect.Toast).text,
+            (r.wait { r.model.effects.first() } as FavoritesEffect.Toast).text.en(),
         )
     }
 

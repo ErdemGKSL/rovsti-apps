@@ -1,8 +1,10 @@
 package dev.rovsti.contacts.list
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
+import dev.rovsti.contacts.en
 import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.Rust
@@ -13,6 +15,7 @@ import dev.rovsti.core.model.wa.RichChat
 import dev.rovsti.core.ops.NativeContactsOps
 import dev.rovsti.core.ops.NativeContactsWaOps
 import dev.rovsti.core.ops.NativeSearchOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.FakeContactsRepository
 import dev.rovsti.platform.contacts.ShortcutsRepository
@@ -173,7 +176,7 @@ class ContactsListViewModelTest {
         runBlocking<Unit> {
             val state = search("acme")
             assertTrue("nobody is named Acme", state.rows.isEmpty())
-            assertEquals("In details", state.deepTitle)
+            assertEquals("In details", (state.deepTitle).en())
             val hit = state.deepRows.single()
             assertEquals("Zeynep Arslan", hit.name)
             assertTrue(hit.secondary.orEmpty().contains("Acme"))
@@ -210,9 +213,13 @@ class ContactsListViewModelTest {
             // Searching hides the section; clearing asks first, then empties it.
             model.onAction(ContactsListAction.AskClearViewed)
             val ask = effect() as ContactsListEffect.ConfirmClearViewed
-            assertTrue(ask.confirm.title.isNotBlank())
+            assertTrue(
+                ask.confirm.title
+                    .en()
+                    .isNotBlank(),
+            )
             model.onAction(ContactsListAction.ClearViewed)
-            assertEquals(ContactsListEffect.Toast("Recently viewed cleared"), effect())
+            assertEquals(ContactsListEffect.Toast(UiText.Res(R.string.contacts_recently_viewed_cleared)), effect())
             stateWhere { it.viewed.isEmpty() }
             assertEquals(emptyList<String>(), store.viewed)
         }
@@ -234,7 +241,7 @@ class ContactsListViewModelTest {
             model.onAction(ContactsListAction.Quick(2, "message"))
             assertEquals(ContactsListEffect.Sms("0532 123 45 67"), effect())
             model.onAction(ContactsListAction.Quick(2, "copy_number"))
-            assertEquals(ContactsListEffect.Toast("Number copied."), effect())
+            assertEquals(ContactsListEffect.Toast(UiText.Res(R.string.contacts_number_copied_dot)), effect())
             assertEquals(listOf("0532 123 45 67" to false), clipboard.copies)
             model.onAction(ContactsListAction.Quick(2, "share"))
             val share = effect() as ContactsListEffect.Share
@@ -245,7 +252,7 @@ class ContactsListViewModelTest {
         runBlocking<Unit> {
             model.onAction(ContactsListAction.Quick(3, "call"))
             assertEquals(ContactsListEffect.OpenCard(3), effect())
-            assertEquals(ContactsListEffect.Toast("Choose a number to call."), effect())
+            assertEquals(ContactsListEffect.Toast(UiText.Res(R.string.contacts_choose_number_call)), effect())
         }
 
     @Test fun starAndAddToHomeActOnTheProviderAndTheLauncher() =
@@ -253,7 +260,7 @@ class ContactsListViewModelTest {
             model.onAction(ContactsListAction.Quick(2, "star"))
             withTimeout(TIMEOUT_MS) { repo.all().first { list -> list.first { it.id == 2L }.starred } }
             model.onAction(ContactsListAction.Quick(2, "add_to_home"))
-            assertEquals(ContactsListEffect.Toast("Added to Home screen"), effect())
+            assertEquals(ContactsListEffect.Toast(UiText.Res(R.string.contacts_added_to_home_screen)), effect())
             assertEquals(2L, pinned.single().contactId)
         }
 
@@ -267,7 +274,7 @@ class ContactsListViewModelTest {
             model.onAction(ContactsListAction.Quick(1, "whatsapp"))
             assertEquals(ContactsListEffect.WhatsApp("905551112233@s.whatsapp.net", "Ayşe Yılmaz"), effect())
             model.onAction(ContactsListAction.Quick(2, "whatsapp"))
-            assertEquals(ContactsListEffect.Toast("This contact isn't on WhatsApp."), effect())
+            assertEquals(ContactsListEffect.Toast(UiText.Res(R.string.contacts_not_on_whatsapp)), effect())
         }
 
     private companion object {

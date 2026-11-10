@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Buttons -->
+    <string name="permission_continue">Devam</string>
+    <string name="permission_not_now">Şimdi Değil</string>
+    <string name="permission_allow">İzin Ver</string>
+    <string name="permission_open_settings">Ayarları Aç</string>
+
+    <!-- Row status -->
+    <string name="permission_status_never_asked">Henüz izin verilmedi</string>
+    <string name="permission_status_denied">İzin verilmedi</string>
+    <string name="permission_status_denied_for_good">Kapalı</string>
+    <string name="permission_status_revoked">Ayarlarda kapatıldı</string>
+    <string name="permission_status_granted">İzin verildi</string>
+
+    <!-- Group names (the row title) -->
+    <string name="permission_group_phone">Telefon</string>
+    <string name="permission_group_contacts">Kişiler</string>
+    <string name="permission_group_notifications">Bildirimler</string>
+    <string name="permission_group_call_log">Arama geçmişi</string>
+    <string name="permission_group_bluetooth">Bluetooth</string>
+    <string name="permission_group_location">Konum</string>
+    <string name="permission_group_background_location">Arka planda konum</string>
+    <string name="permission_group_microphone">Mikrofon</string>
+
+    <!-- Rationale sheet: title and body per group -->
+    <string name="permission_rationale_phone_title">Buradan arama yapın</string>
+    <string name="permission_rationale_phone_body">Rovsti, arama yapabilmek ve bir aramanın ne zaman başlayıp bittiğini bilebilmek için telefon iznine ihtiyaç duyar. Aramalar hiçbir zaman telefonunuzdan çıkmaz.</string>
+    <string name="permission_rationale_contacts_title">Kişilerinizi görün</string>
+    <string name="permission_rationale_contacts_body">Kişiler, Rovsti\'nin numaralar yerine ad ve fotoğrafları göstermesini sağlar. Kişileriniz bu telefonda kalır.</string>
+    <string name="permission_rationale_notifications_title">Gelişmelerden haberdar olun</string>
+    <string name="permission_rationale_notifications_body">Bildirimler cevapsız aramalar ve yeni mesajlar hakkında sizi bilgilendirir. İstediğiniz zaman kapatabilirsiniz.</string>
+    <string name="permission_rationale_call_log_title">Arama geçmişinizi gösterin</string>
+    <string name="permission_rationale_call_log_body">Rovsti, son aramaları listelemek için bu telefondaki arama geçmişini okur. Hiçbir şey karşıya yüklenmez.</string>
+    <string name="permission_rationale_bluetooth_title">Bluetooth ses kullanın</string>
+    <string name="permission_rationale_bluetooth_body">Bluetooth, bir aramanın kulaklığınıza veya arabanıza geçmesini sağlar. Rovsti yalnızca daha önce eşleştirdiğiniz cihazlarla iletişim kurar.</string>
+    <string name="permission_rationale_location_title">Bulunduğunuz yeri bulun</string>
+    <string name="permission_rationale_location_body">Konumunuz, sizi haritada göstermek ve durağınızdan önce uyandırmak için kullanılır. Paylaşılmaz.</string>
+    <string name="permission_rationale_background_location_title">Yolculuğunuzu takip etmeye devam edin</string>
+    <string name="permission_rationale_background_location_body">Ekran kapalıyken sizi durağınızdan önce uyandırmak için Rovsti\'nin yolculuk boyunca her zaman konum erişimine ihtiyacı vardır.</string>
+    <string name="permission_rationale_microphone_title">Konuşun ve sesli not gönderin</string>
+    <string name="permission_rationale_microphone_body">Mikrofon yalnızca kullandığınız sırada WhatsApp aramaları ve sesli notlar için kullanılır.</string>
+
+    <!-- Special access -->
+    <string name="special_exact_alarms">Alarmlar ve hatırlatıcılar</string>
+    <string name="special_full_screen">Tam ekran aramalar</string>
+    <string name="special_battery">Pil</string>
+    <string name="special_background">Arka plan etkinliği</string>
+    <string name="special_exact_alarms_on">Hatırlatıcılar zamanında çalar</string>
+    <string name="special_exact_alarms_off">Hatırlatıcılar geç gelebilir</string>
+    <string name="special_full_screen_on">Aramalar ekranı kaplayabilir</string>
+    <string name="special_full_screen_off">Aramalar yalnızca bildirim olarak görünür</string>
+    <string name="special_battery_on">Kısıtlı değil</string>
+    <string name="special_battery_off">Android, Rovsti\'yi arka planda durdurabilir</string>
+    <string name="special_background_unknown">Aramaların ve mesajların gelmesi için otomatik başlatmaya izin verin</string>
+    <!-- Common settings pages -->
+    <string name="settings_appearance">Görünüm</string>
+    <string name="settings_appearance_auto">Otomatik</string>
+    <string name="settings_appearance_light">Açık</string>
+    <string name="settings_appearance_dark">Koyu</string>
+    <string name="settings_appearance_footer">Otomatik, sistem ayarını izler. Açık ve Koyu seçtiğiniz gibi kalır.</string>
+    <string name="settings_appearance_summary_auto">Sistemi izler</string>
+    <string name="settings_appearance_summary_light">Açık</string>
+    <string name="settings_appearance_summary_dark">Koyu</string>
+
+    <string name="settings_haptics">Dokunsal geri bildirim</string>
+    <string name="settings_haptics_off">Kapalı</string>
+    <string name="settings_haptics_off_desc">Uygulamanın hiçbir yerinde titreşim yok</string>
+    <string name="settings_haptics_light">Hafif</string>
+    <string name="settings_haptics_light_desc">Sistemin izin verdiği ölçüde yumuşak tıklamalar</string>
+    <string name="settings_haptics_normal">Normal</string>
+    <string name="settings_haptics_normal_desc">Cepte bile hissedeceğiniz tam tıklamalar</string>
+    <string name="settings_haptics_level_header">Şiddet</string>
+    <string name="settings_haptics_try">Deneyin</string>
+    <string name="settings_haptics_try_desc">Seçilen şiddette tek bir dokunuşu oynatır</string>
+    <string name="settings_haptics_footer">Dokunsal geri bildirim yalnızca anları işaretler: bir geçiş, uzun basma, bir sayfanın yerine oturması.</string>
+
+    <string name="settings_about">Hakkında</string>
+    <string name="settings_about_info_header">Uygulama bilgileri</string>
+    <string name="settings_about_installed">Yüklendi</string>
+    <string name="settings_about_version">Sürüm</string>
+    <string name="settings_about_build">Derleme</string>
+    <string name="settings_about_core">Rust çekirdeği</string>
+    <string name="settings_about_core_unknown">Yüklenmedi</string>
+    <string name="settings_about_unknown">Bilinmiyor</string>
+    <string name="settings_about_legal_header">Yasal</string>
+    <string name="settings_about_licences_desc">GPL-3.0 veya üstü ve üçüncü taraf bildirimleri</string>
+
+    <string name="settings_licences">Lisanslar</string>
+    <string name="settings_licences_app_header">Bu uygulama</string>
+    <string name="settings_licences_third_party_header">Kullanılan</string>
+    <string name="settings_licences_loading">Lisanslar yükleniyor</string>
+    <string name="settings_licences_app_desc">GPL-3.0 veya üstü</string>
+    <string name="settings_licences_app_body">Rovsti özgür bir yazılımdır: Free Software Foundation tarafından yayımlanan GNU Genel Kamu Lisansı\'nın 3. sürümünün veya (isteğinize bağlı olarak) daha sonraki bir sürümünün koşulları altında yeniden dağıtabilir ve değiştirebilirsiniz.</string>
+    <string name="settings_licences_text_header">Lisans metni</string>
+    <plurals name="settings_licences_sources">
+        <item quantity="one">%1$d kaynak</item>
+        <item quantity="other">%1$d kaynak</item>
+    </plurals>
+</resources>

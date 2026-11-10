@@ -17,12 +17,14 @@ import dev.rovsti.core.model.wa.SettingsLink
 import dev.rovsti.core.model.wa.StoredLink
 import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeWaSettingsOps
+import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.files.FakeClipboardRepository
 import dev.rovsti.platform.files.FakeFilesRepository
 import dev.rovsti.wa.DemoSettingsMachine
 import dev.rovsti.wa.FakeQr
 import dev.rovsti.wa.FakeWaGateway
 import dev.rovsti.wa.FakeWaRepository
+import dev.rovsti.wa.R
 import dev.rovsti.wa.WaLinkStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -224,7 +226,7 @@ class WhatsAppSettingsViewModelTest {
             assertEquals("share_key", vm.view.kind)
             assertEquals(FakeWaGateway.MINTED_KEY, vm.view.keyLines.joinToString(""))
             assertEquals(listOf(FakeWaGateway.MINTED_KEY to true), clipboard.copies)
-            assertEquals(WaSettingsEvent.Toast("Copied"), toasts.single())
+            assertEquals(WaSettingsEvent.Toast(UiText.Res(R.string.wa_copied)), toasts.single())
 
             vm.tap("copy_key")
             assertEquals(2, clipboard.copies.size)
@@ -407,7 +409,7 @@ class WhatsAppSettingsViewModelTest {
             val events = mutableListOf<WaSettingsEvent>()
             val collector = launchCollect(vm, events)
             vm.onAction(WaSettingsAction.PasteClipboard)
-            assertEquals(WaSettingsEvent.Toast("Nothing to paste"), events.single())
+            assertEquals(WaSettingsEvent.Toast(UiText.Res(R.string.wa_nothing_to_paste)), events.single())
             collector.cancel()
         }
 

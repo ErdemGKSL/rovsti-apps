@@ -48,10 +48,12 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.R
 import dev.rovsti.design.glass.GlassPreset
 import dev.rovsti.design.glass.rovstiGlass
 import dev.rovsti.design.icons.RovstiIcon
@@ -93,8 +95,8 @@ fun ComposerField(
     onSend: (String) -> Unit,
     modifier: Modifier = Modifier,
     fieldModifier: Modifier = Modifier,
-    placeholder: String = "Message",
-    sendLabel: String = "Send",
+    placeholder: String = stringResource(R.string.design_message),
+    sendLabel: String = stringResource(R.string.design_send),
     enabled: Boolean = true,
     imeAction: ImeAction = ImeAction.Default,
 ) {

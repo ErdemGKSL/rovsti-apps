@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.me
 
+import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.MeStateAnswer
@@ -7,10 +8,11 @@ import dev.rovsti.core.model.contacts.MeStateRequest
 import dev.rovsti.core.model.contacts.MeToggleRequest
 import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.text.UiText
 
 /** The sentence to show after a change and whether the change was made (a refusal such as "Up to 5" is not). */
 data class MeResult(
-    val notice: String,
+    val notice: UiText,
     val done: Boolean,
 )
 
@@ -46,7 +48,7 @@ class MeOps(
         val texts = state(all) ?: return MeResult(CANT_SAVE, false)
         val saved = store.update { it.copy(myCard = if (on) key else null) }
         if (saved is Outcome.Err) return MeResult(CANT_SAVE, false)
-        return MeResult(if (on) texts.myCardSetNotice else texts.myCardRemovedNotice, true)
+        return MeResult(UiText.Literal(if (on) texts.myCardSetNotice else texts.myCardRemovedNotice), true)
     }
 
     /**
@@ -58,14 +60,14 @@ class MeOps(
         val answer =
             (ops.meToggle(MeToggleRequest(store.emergency.value, contact)) as? Outcome.Ok)?.value
                 ?: return MeResult(CANT_SAVE, false)
-        if (answer.added == null) return MeResult(answer.notice, false)
+        if (answer.added == null) return MeResult(UiText.Literal(answer.notice), false)
         val saved = store.update { it.copy(emergency = answer.keys) }
         if (saved is Outcome.Err) return MeResult(CANT_SAVE, false)
-        return MeResult(answer.notice, true)
+        return MeResult(UiText.Literal(answer.notice), true)
     }
 
     companion object {
-        const val CANT_SAVE = "Can't save this right now."
-        const val NO_KEY = "This contact can't be used as My Card yet."
+        val CANT_SAVE: UiText = UiText.Res(R.string.contacts_cant_save_right_now)
+        val NO_KEY: UiText = UiText.Res(R.string.contacts_cant_be_my_card)
     }
 }

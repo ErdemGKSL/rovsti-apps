@@ -1,6 +1,7 @@
 package dev.rovsti.contacts.trash
 
 import androidx.compose.runtime.Immutable
+import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -8,8 +9,8 @@ import kotlinx.collections.immutable.persistentListOf
 @Immutable
 data class TrashRow(
     val key: Long,
-    val name: String,
-    val detail: String,
+    val name: UiText,
+    val detail: UiText,
     val colorKey: String,
 )
 
@@ -50,13 +51,13 @@ sealed interface TrashAction {
 sealed interface TrashEffect {
     /** A confirmation: [title] and [body] are the Rust core's words, [confirmLabel] runs [then]. */
     data class Ask(
-        val title: String,
-        val body: String,
-        val confirmLabel: String,
+        val title: UiText,
+        val body: UiText,
+        val confirmLabel: UiText,
         val then: TrashAction,
     ) : TrashEffect
 
     data class Toast(
-        val text: String,
+        val text: UiText,
     ) : TrashEffect
 }

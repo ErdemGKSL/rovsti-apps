@@ -1349,6 +1349,14 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   background clipped to the panel instead.
 - **Formats:** PNG (lossless, transparency), JPEG (quality ~88), WebP, and **animated GIF / APNG / animated WebP**
   (Takumi's animation encoders). Offer JPEG for photos, PNG for cards with transparency, **GIF for animated cards**.
+- **Light bending as the GIFs' signature (owner, 2026-11-10: "use the refraction to give the GIFs extra motion and
+  taste"):** animate the glass optics, not just the content: (1) a glass lens or droplet that drifts slowly across the
+  card and bends the background, text and photo under it (`feDisplacementMap` with an animated displacement map per
+  frame); (2) a specular highlight that sweeps along the panel rim as if a light source moves (`feSpecularLighting`
+  light position keyframed); (3) a faint chromatic dispersion fringe that blooms at the lens edge at the loop's peak;
+  (4) the panel's refraction breathing slightly (scale of the displacement eased in and out) so the frosted panel
+  looks liquid. Easing with springs/ease-in-out, seamless loops (first frame == last frame), restrained (one hero
+  effect per card, never all at full strength). Prototype the birthday GIF first, look at it frame by frame, then tune.
 - **Animated cards (owner: "design nice GIFs"):** birthday card with falling confetti and a glass shimmer sweeping
   across the panel, candle flicker; contact card with a soft gradient drift. 2-3 s loops, 24-30 frames, 540-720 px wide,
   palette chosen per card, target under ~3 MB; render frames in the Rust core on a background thread with progress.

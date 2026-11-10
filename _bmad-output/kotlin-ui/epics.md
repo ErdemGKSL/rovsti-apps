@@ -1177,6 +1177,14 @@ unchanged (E5.2-E5.7a).
   number format op, F14). (F18) Answer and Decline use stroked handsets; use the filled white handset the keypad call
   button uses (owner: call icons are filled), Decline rotated 135 deg. (F19) The initials avatar is green on the green
   background and nearly vanishes; give it a contrasting fill or a light ring.
+- **Owner request (2026-11-10): slide to answer when the phone is locked.** When the incoming call shows over the lock
+  screen (screen was off or keyguard locked: `KeyguardManager.isKeyguardLocked`), replace the Answer/Decline buttons
+  with an iOS-style "slide to answer" track: a glass capsule with a green handle (filled white handset) that follows the
+  finger, answers when dragged past ~80% (spring back below that, haptic tick at the threshold), fling-aware, works for
+  accessibility (a double-tap action "Answer" plus TalkBack hint), RTL mirrored. Remind me / Message stay above it;
+  decline on the locked screen is the power/volume key (silence, then decline on second press) plus a small "Decline"
+  under the track. Unlocked phones keep the two buttons. Screenshots: `e5.6-locked-slide-rest`, `e5.6-locked-slide-mid`
+  (light and dark). Compose test with `mainClock.autoAdvance = false` for threshold and spring-back.
 - AC1 The notification path works without the UI (JVM test of `CallRegistry`); the Compose screen shows from the same
   snapshot; first-frame report logged; native fallback kept.
 - Screenshots: `e5.6-incoming`, `e5.6-incoming-lockscreen-variant`, `e5.6-decline-with-message-sheet`,

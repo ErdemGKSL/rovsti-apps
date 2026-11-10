@@ -9,6 +9,16 @@ import dev.rovsti.core.ops.NativeSearchOps
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
+import dev.rovsti.phone.data.AndroidCallLauncher
+import dev.rovsti.phone.data.BlockRepo
+import dev.rovsti.phone.data.CallLauncher
+import dev.rovsti.phone.data.CallPlacer
+import dev.rovsti.phone.data.DeviceLocaleTime
+import dev.rovsti.phone.data.PeopleIndex
+import dev.rovsti.phone.data.PhoneStore
+import dev.rovsti.phone.data.RecentsRepository
+import dev.rovsti.phone.data.SimState
+import dev.rovsti.phone.data.SpeedDial
 import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
 import dev.rovsti.phone.setup.SetupFactsSource
@@ -31,6 +41,7 @@ import dev.rovsti.wa.calls.CallAudioPump
 import dev.rovsti.wa.calls.WaCalls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /** A number the Keypad is asked to show: a `tel:` link decoded by `dial.fromTelUri`, or a WhatsApp hand-off. */
@@ -73,6 +84,26 @@ open class PhoneContainer(
     /** The WhatsApp calls of the linked instance; started by the screens that show them (E5.8). */
     val waCalls: WaCalls by lazy { createWaCalls() }
 
+    /** The preferences (`prefs.json`) and the call notes; loaded by the first screen that needs them. */
+    val store: PhoneStore by lazy { createStore() }
+
+    /** The call log and the WhatsApp calls as Recents rows; started by the Recents screen. */
+    val recents: RecentsRepository by lazy { createRecents() }
+
+    /** The contacts with a number, their search index and T9; follows READ_CONTACTS. */
+    val people: PeopleIndex by lazy { createPeople() }
+
+    /** The SIMs as chips and the "ask every time" state. */
+    val simState: SimState by lazy { SimState(sims, ops, scope) }
+
+    /** The system blocklist with the core's rules and Undo snapshots. */
+    val block: BlockRepo by lazy { BlockRepo(blocklist, ops, scope) }
+
+    val speedDial: SpeedDial by lazy { SpeedDial(store, ops) }
+
+    /** Validation, the SIM choice and the call itself (`dial.validate`, `TelecomManager.placeCall`). */
+    val placer: CallPlacer by lazy { CallPlacer(ops, simState.sims, createCallLauncher()) }
+
     /** What Android says about the Setup checklist rows. */
     val setupFacts: SetupFactsSource by lazy { createSetupFacts() }
 
@@ -89,6 +120,9 @@ open class PhoneContainer(
     val pendingWaCallAction: MutableStateFlow<String?> = MutableStateFlow(null)
 
     private var dialSerial = 0L
+
+    /** The wall clock in ms; one seam for the data layer. */
+    protected open val clock: () -> Long = System::currentTimeMillis
 
     /** Sets [text] as the next [pendingDial]. */
     fun offerDial(
@@ -128,6 +162,31 @@ open class PhoneContainer(
 
     protected open fun createWaCalls(): WaCalls =
         WaCalls(wa, permissions.state(PermissionGroup.MICROPHONE), createCallPump(), scope)
+
+    protected open fun createStore(): PhoneStore = PhoneStore(ops, scope)
+
+    protected open fun createRecents(): RecentsRepository =
+        RecentsRepository(
+            callLog = callLog,
+            ops = ops,
+            scope = scope,
+            clock = clock,
+            extras = waCalls.calls.map { RecentsRepository.extraCalls(it) },
+            locale = { DeviceLocaleTime.now(context, clock()) },
+            lastSeenMs = { store.prefs.value.ui.missedSeenMs },
+        ).also { it.start() }
+
+    protected open fun createPeople(): PeopleIndex =
+        PeopleIndex(
+            contacts = contacts,
+            permission = permissions.state(PermissionGroup.CONTACTS),
+            search = search,
+            ops = ops,
+            scope = scope,
+            nameFormat = { store.prefs.value.settings.nameFormat },
+        )
+
+    protected open fun createCallLauncher(): CallLauncher = AndroidCallLauncher(context)
 
     protected open fun createSetupFacts(): SetupFactsSource = AndroidSetupFacts(context, permissions, specialAccess)
 

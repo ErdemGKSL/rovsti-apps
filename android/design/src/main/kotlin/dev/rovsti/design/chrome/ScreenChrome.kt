@@ -68,6 +68,7 @@ import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.ios.foundation.LocalIosBackdrop
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.design.transition.LocalPageBack
 
 /**
  * Provides attached backdrop and Haze wiring for flat screens. Keep [FrostedTopBar] a sibling of the captured scrolling
@@ -135,6 +136,8 @@ fun ScreenChromeBox(
     actions: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     barModifier: Modifier = Modifier,
+    // false: the page never shows a back button, not even the pushed-page default from LocalPageBack.
+    showBack: Boolean = true,
     backLabel: String = "Back",
     titleSideReserve: Dp = 96.dp,
     titleEndReserve: Dp = titleSideReserve,
@@ -146,6 +149,10 @@ fun ScreenChromeBox(
 ) {
     val settings = LocalGlassSettings.current
     val solidBar = settings.reduceDynamicBlur || settings.reduceTransparency
+    // A pushed page gets the host's back action unless it wires its own (an explicit onBack wins) or opts out.
+    val pageBack = if (showBack) LocalPageBack.current else null
+    val resolvedBack = if (showBack) onBack ?: pageBack?.onBack else null
+    val resolvedLongClick = if (showBack) onBackLongClick ?: pageBack?.onLongClick else null
     Box(
         modifier =
             modifier
@@ -186,8 +193,8 @@ fun ScreenChromeBox(
             }
 
             FrostedTopBar(
-                onBack = onBack,
-                onBackLongClick = onBackLongClick,
+                onBack = resolvedBack,
+                onBackLongClick = resolvedLongClick,
                 backLabel = backLabel,
                 title = title,
                 titleAlpha = titleAlpha,
@@ -250,6 +257,7 @@ fun ScreenScaffold(
     titleAlpha: Float,
     onBack: (() -> Unit)? = null,
     onBackLongClick: (() -> Unit)? = null,
+    showBack: Boolean = true,
     pageColor: Color = RovstiTheme.colors.page,
     actions: @Composable () -> Unit = {},
     titleAlphaProvider: (() -> Float)? = null,
@@ -269,6 +277,7 @@ fun ScreenScaffold(
         chrome = chrome,
         onBack = onBack,
         onBackLongClick = onBackLongClick,
+        showBack = showBack,
         actions = actions,
         modifier = modifier,
         barModifier = barModifier,
@@ -323,6 +332,7 @@ fun ScreenPage(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     onBackLongClick: (() -> Unit)? = null,
+    showBack: Boolean = true,
     pageColor: Color = RovstiTheme.colors.page,
     horizontalPadding: Dp = 0.dp,
     actions: @Composable () -> Unit = {},
@@ -348,6 +358,7 @@ fun ScreenPage(
         chrome = chrome,
         onBack = onBack,
         onBackLongClick = onBackLongClick,
+        showBack = showBack,
         actions = actions,
         // The strip under the bar stays sharp while the large title is on screen, as in ScreenLazyPage.
         collapse = { (scrollState.value / titleBlockHeight.toFloat()).coerceIn(0f, 1f) },
@@ -411,6 +422,7 @@ fun ScreenLazyPage(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     onBackLongClick: (() -> Unit)? = null,
+    showBack: Boolean = true,
     pageColor: Color = RovstiTheme.colors.page,
     contentPadding: PaddingValues = PaddingValues(),
     actions: @Composable () -> Unit = {},
@@ -436,6 +448,7 @@ fun ScreenLazyPage(
         chrome = chrome,
         onBack = onBack,
         onBackLongClick = onBackLongClick,
+        showBack = showBack,
         actions = actions,
         modifier = modifier,
         barModifier = barModifier,

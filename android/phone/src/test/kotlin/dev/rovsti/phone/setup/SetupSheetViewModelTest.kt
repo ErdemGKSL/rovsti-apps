@@ -271,8 +271,12 @@ class SetupSheetViewModelTest {
                     1 shl SetupItem.ShowOnLockScreen.ordinal,
             )
         wait { memory.saveConfirmations(old) }
-        val state = vm.refresh { true }
+        // The refresh runs after the first emission: wait for the dropped confirmation to be saved, not just a state.
+        val state = vm.refresh { it.row(SetupItem.ShowOnLockScreen).state == ItemState.Unverifiable }
         assertEquals(ItemState.Unverifiable, state.row(SetupItem.ShowOnLockScreen).state)
+        wait {
+            while (memory.confirmations().appVersion == "0.9.0") kotlinx.coroutines.delay(20)
+        }
         assertEquals("1.0.0", wait { memory.confirmations() }.appVersion.ifEmpty { "1.0.0" })
     }
 

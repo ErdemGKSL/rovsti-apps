@@ -37,6 +37,7 @@ dependencies {
     api(libs.androidx.activity)
     testFixturesApi(project(":core-bridge"))
     testFixturesApi(libs.coroutines.core)
+    testFixturesImplementation(libs.robolectric)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.coroutines.test)

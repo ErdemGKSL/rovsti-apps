@@ -175,13 +175,27 @@ fun <R : Any> RovstiNavHost(
                 remember(sharedTransition) {
                     { key: StackKey<R> ->
                         NavEntry(key, metadata = mapOf(StackKeyMetadata to key)) {
-                            RovstiPage(
-                                key = key,
-                                sharedTransition = sharedTransition,
-                                spec = chromeForNow(key.route),
-                                hostMetrics = hostMetrics,
-                                minimizer = minimizer,
-                            ) { registryNow.Render(key.route) }
+                            val pageBack =
+                                if (key.depth > 0) {
+                                    PageBack(
+                                        onBack = { navigator.pop() },
+                                        onLongClick = { navigator.select(navigator.currentTab) },
+                                    )
+                                } else {
+                                    null
+                                }
+                            check(pageBack == null || chromeForNow(key.route).tabBar != TabBarMode.Folded) {
+                                "TabBarMode.Folded is for tab roots only, but ${key.route} is pushed (depth ${key.depth})"
+                            }
+                            CompositionLocalProvider(LocalPageBack provides pageBack) {
+                                RovstiPage(
+                                    key = key,
+                                    sharedTransition = sharedTransition,
+                                    spec = chromeForNow(key.route),
+                                    hostMetrics = hostMetrics,
+                                    minimizer = minimizer,
+                                ) { registryNow.Render(key.route) }
+                            }
                         }
                     }
                 }

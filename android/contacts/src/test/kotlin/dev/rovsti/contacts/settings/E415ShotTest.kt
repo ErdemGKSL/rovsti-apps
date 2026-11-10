@@ -48,7 +48,7 @@ class E415ShotTest : ShotTest() {
 
     @Test fun nameFormat() {
         val h = SettingsHarness()
-        shot("e4.15-name-format") {
+        shot("e4.15-name-format", variants = setOf(ShotVariant.Rtl)) {
             HostedSettings(h, ContactsRoute.SettingsNameFormat) {
                 ChoicePage(
                     title = "Name Format",

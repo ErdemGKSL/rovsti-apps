@@ -178,27 +178,27 @@ fun chromeFor(route: ContactsRoute): ChromeSpec =
         is ContactsRoute.Intake,
         -> ChromeSpec(TabBarMode.Hidden)
 
-        ContactsRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Folded, largeTitle = "WhatsApp")
+        ContactsRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
 
-        ContactsRoute.SettingsNameFormat -> ChromeSpec(TabBarMode.Folded, largeTitle = "Name Format")
+        ContactsRoute.SettingsNameFormat -> ChromeSpec(TabBarMode.Visible, largeTitle = "Name Format")
 
-        ContactsRoute.SettingsSortBy -> ChromeSpec(TabBarMode.Folded, largeTitle = "Sort By")
+        ContactsRoute.SettingsSortBy -> ChromeSpec(TabBarMode.Visible, largeTitle = "Sort By")
 
-        ContactsRoute.SettingsSaveTo -> ChromeSpec(TabBarMode.Folded, largeTitle = "Save To")
+        ContactsRoute.SettingsSaveTo -> ChromeSpec(TabBarMode.Visible, largeTitle = "Save To")
 
-        ContactsRoute.SettingsSummary -> ChromeSpec(TabBarMode.Folded, largeTitle = "Summary")
+        ContactsRoute.SettingsSummary -> ChromeSpec(TabBarMode.Visible, largeTitle = "Summary")
 
-        ContactsRoute.SettingsReminderTime -> ChromeSpec(TabBarMode.Folded, largeTitle = "Time")
+        ContactsRoute.SettingsReminderTime -> ChromeSpec(TabBarMode.Visible, largeTitle = "Time")
 
-        ContactsRoute.Appearance -> ChromeSpec(TabBarMode.Folded, largeTitle = "Appearance")
+        ContactsRoute.Appearance -> ChromeSpec(TabBarMode.Visible, largeTitle = "Appearance")
 
-        ContactsRoute.Haptics -> ChromeSpec(TabBarMode.Folded, largeTitle = "Haptics")
+        ContactsRoute.Haptics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Haptics")
 
-        ContactsRoute.About -> ChromeSpec(TabBarMode.Folded, largeTitle = "About")
+        ContactsRoute.About -> ChromeSpec(TabBarMode.Visible, largeTitle = "About")
 
-        ContactsRoute.Licences -> ChromeSpec(TabBarMode.Folded, largeTitle = "Licences")
+        ContactsRoute.Licences -> ChromeSpec(TabBarMode.Visible, largeTitle = "Licences")
 
-        is ContactsRoute.LicenceDetail -> ChromeSpec(TabBarMode.Folded)
+        is ContactsRoute.LicenceDetail -> ChromeSpec(TabBarMode.Visible)
     }
 
 /**

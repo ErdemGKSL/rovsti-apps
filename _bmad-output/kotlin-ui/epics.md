@@ -900,6 +900,22 @@ My card, emergency, recently added/edited; full Settings with appearance/haptics
 Also fixes from the R1 goldens: **F12** menu items without glyphs (`e4.2-row-context-menu`), **F13** settings groups
 touching (`e4.1-settings`), **F14** card numbers in mixed display formats (`e4.3-card-full`).
 
+**F16 Evidence (round-12 rev 2 step 1, owner fix a):** `design/transition/PageBack.kt` (`PageBack`, `LocalPageBack`);
+`RovstiNavHost` provides it around every entry with `StackKey.depth > 0` (pop / `select(currentTab)` for the long press, null
+on tab roots) and `check`s that a pushed route is never `TabBarMode.Folded`. The fallback lives in `ScreenChromeBox`
+(not `FrostedTopBar`, so `PhotoViewer`'s own bar is unaffected): explicit `onBack` wins, `showBack = false` (new on
+`ScreenPage` / `ScreenLazyPage` / `ScreenScaffold` / `ScreenChromeBox`) hides it; `LargeTitleScaffold` takes the host's button as
+its `navigation` so the title starts below it, and `SettingsPage` / `SettingsLazyPage` start the large title below the button
+row (it used to run under the circle). `ContactsRoute.kt` / `PhoneRoute.kt`: every pushed page is `Visible`; only select mode on the
+Contacts root stays `Folded`. Tests: `PageBackTest` (:design, 6: root none, pushed shows one and click pops, long press to root,
+explicit wins, `showBack=false`, Folded on a pushed page fails), `ContactsRoutesTest` / `PhoneRoutesTest`
+(`noNonRootRouteMapsToFolded`), `PushedPagesBackTest` in :contacts (11 pushed routes) and :phone (7) on the real `RovstiShell`
+host: one `back-button` and all four tab labels. Goldens opened: `e4.15-name-format` (+ new `-rtl`), `e4.15-accounts-summary`
+(+fs2), `e4.15-whatsapp`, `e5.1-settings`, `e5.1-diagnostics`: glass back circle top-left at the 16 dp gutter (mirrored chevron
+at the right in RTL), large title below it, full four-tab bar in the first (light) frame of each test. Known harness
+artifact (also in the committed `e4.15-settings-dark`): from the second frame of one test on, only the selected cell of the
+Convx folding tab bar is drawn; the semantics tree still holds all four tabs. Not a product issue, left for the harness.
+
 ### Parity table (feature -> story)
 
 | Features | Story |

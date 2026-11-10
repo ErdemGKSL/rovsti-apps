@@ -7,7 +7,11 @@ enum class TabBarMode {
     /** The full bar, and the page leaves room for it (`LocalContentInsets.bottom`). */
     Visible,
 
-    /** The bar folded into the circle of the selected tab, and the page leaves room for it. */
+    /**
+     * The bar folded into the circle of the selected tab, and the page leaves room for it. For tab roots only (a list in
+     * select mode): a pushed page must keep the full bar, because the folded circle alone reads as a lone gear. The
+     * host rejects it on any page deeper than the root.
+     */
     Folded,
 
     /** No bar; the page uses the whole height. */

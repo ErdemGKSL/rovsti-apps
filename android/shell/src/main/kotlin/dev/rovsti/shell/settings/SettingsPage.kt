@@ -34,12 +34,14 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.chrome.GlassScreenChrome
+import dev.rovsti.design.chrome.ScaffoldSpec
 import dev.rovsti.design.chrome.ScreenLazyPage
 import dev.rovsti.design.chrome.ScreenPage
 import dev.rovsti.design.chrome.ScreenScaffold
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.LocalIosContentColor
+import dev.rovsti.design.transition.LocalPageBack
 
 /**
  * The settings dialect of ScreenPage and friends: iOS grouped background, iOS large-title type, and the back button
@@ -51,6 +53,7 @@ import dev.rovsti.design.ios.foundation.LocalIosContentColor
 private fun settingsLargeTitle(
     title: String,
     gutter: Dp,
+    hasBack: Boolean,
 ): @Composable () -> Unit =
     {
         IosText(
@@ -61,7 +64,8 @@ private fun settingsLargeTitle(
             modifier =
                 Modifier.padding(
                     start = (SettingsTitleInset - gutter).coerceAtLeast(SettingsMetrics.S0),
-                    top = SettingsMetrics.S24,
+                    // With a back button the bar row belongs to it and the title starts below (as LargeTitleScaffold).
+                    top = if (hasBack) ScaffoldSpec.BarHeight else SettingsMetrics.S24,
                     bottom = SettingsMetrics.S14,
                 ),
         )
@@ -112,7 +116,7 @@ fun SettingsPage(
             horizontalPadding = gutter,
             actions = actions,
             scrollState = scrollState,
-            largeTitle = settingsLargeTitle(title, gutter),
+            largeTitle = settingsLargeTitle(title, gutter, onBack != null || LocalPageBack.current != null),
             content = {
                 content()
                 Spacer(Modifier.height(SettingsMetrics.S32))
@@ -145,7 +149,7 @@ fun SettingsLazyPage(
             contentPadding = PaddingValues(start = gutter, end = gutter, bottom = SettingsMetrics.S112),
             actions = actions,
             listState = listState,
-            largeTitle = settingsLargeTitle(title, gutter),
+            largeTitle = settingsLargeTitle(title, gutter, onBack != null || LocalPageBack.current != null),
             content = content,
         )
     }

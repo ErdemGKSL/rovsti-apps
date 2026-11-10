@@ -169,6 +169,8 @@ internal fun HostedPhone(
     setup: SetupUiState,
     tab: Tab = RecentsTab,
     push: PhoneRoute? = null,
+    // The body of the pushed pages that have no fixture of their own (WhatsApp, Appearance, About, Licences ...).
+    extra: @Composable () -> Unit = {},
 ) {
     val navigator =
         remember {
@@ -220,6 +222,12 @@ internal fun HostedPhone(
         entry<PhoneRoute.Settings> {
             PhoneSettingsPage(setup, harness.common, "0.1.0", harness.settingsLinks())
         }
+        entry<PhoneRoute.WhatsAppSettings> { extra() }
+        entry<PhoneRoute.Appearance> { extra() }
+        entry<PhoneRoute.Haptics> { extra() }
+        entry<PhoneRoute.About> { extra() }
+        entry<PhoneRoute.Licences> { extra() }
+        entry<PhoneRoute.LicenceDetail> { extra() }
         entry<PhoneRoute.Diagnostics> {
             DiagnosticsScreen(PhoneSample.diagnostics(), onCopyAll = {
                 harness.opened +=

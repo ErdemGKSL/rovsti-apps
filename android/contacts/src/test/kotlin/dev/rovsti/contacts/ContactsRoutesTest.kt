@@ -7,6 +7,7 @@ import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.contacts.Shortcuts
 import dev.rovsti.platform.notify.BirthdayReminders
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -103,16 +104,55 @@ class ContactsRoutesTest {
                 ContactsRoute.Intake("content://x"),
             )
         for (route in hidden) assertEquals("$route", TabBarMode.Hidden, mode(route))
-        val folded =
+        val pushedSettings =
             listOf(
                 ContactsRoute.WhatsAppSettings,
+                ContactsRoute.SettingsNameFormat,
+                ContactsRoute.SettingsSortBy,
+                ContactsRoute.SettingsSaveTo,
+                ContactsRoute.SettingsSummary,
+                ContactsRoute.SettingsReminderTime,
                 ContactsRoute.Appearance,
                 ContactsRoute.Haptics,
                 ContactsRoute.About,
                 ContactsRoute.Licences,
                 ContactsRoute.LicenceDetail("rovsti"),
             )
-        for (route in folded) assertEquals("$route", TabBarMode.Folded, mode(route))
+        for (route in pushedSettings) assertEquals("$route", TabBarMode.Visible, mode(route))
+    }
+
+    /** Folded is for tab roots only (and only in select mode): a pushed page keeps the full bar and a back button. */
+    @Test fun noNonRootRouteMapsToFolded() {
+        val roots = ContactsRoots.values.toSet()
+        val pushed =
+            listOf(
+                ContactsRoute.WhatsAppSettings,
+                ContactsRoute.SettingsNameFormat,
+                ContactsRoute.SettingsSortBy,
+                ContactsRoute.SettingsSaveTo,
+                ContactsRoute.SettingsSummary,
+                ContactsRoute.SettingsReminderTime,
+                ContactsRoute.Appearance,
+                ContactsRoute.Haptics,
+                ContactsRoute.About,
+                ContactsRoute.Licences,
+                ContactsRoute.LicenceDetail("rovsti"),
+                ContactsRoute.ContactCard(1),
+                ContactsRoute.Trash,
+                ContactsRoute.GroupPage(2),
+                ContactsRoute.UpcomingBirthdays,
+                ContactsRoute.Duplicates,
+                ContactsRoute.Cleanup,
+                ContactsRoute.Emergency,
+                ContactsRoute.Recent,
+            )
+        for (route in pushed) {
+            if (route in roots) continue
+            for (selecting in listOf(false, true)) {
+                assertNotEquals("$route", TabBarMode.Folded, chromeFor(route, selecting).tabBar)
+            }
+        }
+        assertEquals(TabBarMode.Folded, chromeFor(ContactsRoute.ContactsList, selecting = true).tabBar)
     }
 
     @Test fun everyRouteSurvivesSaveAndRestore() {

@@ -109,14 +109,14 @@ fun chromeFor(route: PhoneRoute): ChromeSpec =
         PhoneRoute.Contacts -> ChromeSpec(TabBarMode.Visible, largeTitle = "Contacts")
         PhoneRoute.Keypad -> ChromeSpec(TabBarMode.Visible)
         is PhoneRoute.Incoming, PhoneRoute.InCall -> ChromeSpec(TabBarMode.Hidden)
-        PhoneRoute.Settings -> ChromeSpec(TabBarMode.Folded, largeTitle = "Settings")
-        PhoneRoute.Diagnostics -> ChromeSpec(TabBarMode.Folded, largeTitle = "Diagnostics")
-        PhoneRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Folded, largeTitle = "WhatsApp")
-        PhoneRoute.Appearance -> ChromeSpec(TabBarMode.Folded, largeTitle = "Appearance")
-        PhoneRoute.Haptics -> ChromeSpec(TabBarMode.Folded, largeTitle = "Haptics")
-        PhoneRoute.About -> ChromeSpec(TabBarMode.Folded, largeTitle = "About")
-        PhoneRoute.Licences -> ChromeSpec(TabBarMode.Folded, largeTitle = "Licences")
-        is PhoneRoute.LicenceDetail -> ChromeSpec(TabBarMode.Folded)
+        PhoneRoute.Settings -> ChromeSpec(TabBarMode.Visible, largeTitle = "Settings")
+        PhoneRoute.Diagnostics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Diagnostics")
+        PhoneRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
+        PhoneRoute.Appearance -> ChromeSpec(TabBarMode.Visible, largeTitle = "Appearance")
+        PhoneRoute.Haptics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Haptics")
+        PhoneRoute.About -> ChromeSpec(TabBarMode.Visible, largeTitle = "About")
+        PhoneRoute.Licences -> ChromeSpec(TabBarMode.Visible, largeTitle = "Licences")
+        is PhoneRoute.LicenceDetail -> ChromeSpec(TabBarMode.Visible)
     }
 
 /** What an intent asks of the app, as plain data (so [phoneLinkFor] is tested without an activity). */

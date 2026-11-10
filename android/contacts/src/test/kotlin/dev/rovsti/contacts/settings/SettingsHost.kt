@@ -187,6 +187,11 @@ internal fun HostedSettings(
             entry<ContactsRoute.SettingsSummary> { content() }
             entry<ContactsRoute.SettingsReminderTime> { content() }
             entry<ContactsRoute.WhatsAppSettings> { content() }
+            entry<ContactsRoute.Appearance> { content() }
+            entry<ContactsRoute.Haptics> { content() }
+            entry<ContactsRoute.About> { content() }
+            entry<ContactsRoute.Licences> { content() }
+            entry<ContactsRoute.LicenceDetail> { content() }
         }
     }
     if (haptics != null) CompositionLocalProvider(LocalRovstiHaptics provides haptics) { body() } else body()

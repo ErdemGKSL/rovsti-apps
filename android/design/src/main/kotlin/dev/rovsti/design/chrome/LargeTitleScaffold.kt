@@ -42,6 +42,7 @@ import dev.rovsti.design.motion.rememberIosOverscrollFactory
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.design.transition.LocalPageBack
 import kotlinx.collections.immutable.ImmutableList
 
 /** Numbers of the large-title scaffold (SKILL navigation-layout.md 10). */
@@ -91,6 +92,9 @@ fun LargeTitleScaffold(
     actionsContent: (@Composable () -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
+    // A pushed page without its own button takes the host's, so the title block makes room for it.
+    val pageBack = LocalPageBack.current
+    val navigation = navigation ?: pageBack?.let { NavigationButton(onClick = it.onBack) }
     val colors = RovstiTheme.colors
     val density = LocalDensity.current
     val root = LocalChromeMetrics.current
@@ -125,6 +129,7 @@ fun LargeTitleScaffold(
             title = title,
             modifier = modifier.fillMaxSize().testTag("large-title-scaffold"),
             onBack = navigation?.onClick,
+            onBackLongClick = pageBack?.onLongClick,
             backLabel = navigation?.label ?: "Back",
             pageColor = colors.page,
             contentPadding = contentPadding,

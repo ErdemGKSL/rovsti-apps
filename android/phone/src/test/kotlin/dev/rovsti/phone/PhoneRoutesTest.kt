@@ -8,6 +8,7 @@ import dev.rovsti.platform.system.Handoff
 import dev.rovsti.platform.telephony.CallNotifications
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -53,7 +54,7 @@ class PhoneRoutesTest {
         }
     }
 
-    @Test fun settingsAndItsPagesFoldTheBar() {
+    @Test fun settingsAndItsPagesKeepTheFullBar() {
         for (
         route in
         listOf(
@@ -67,7 +68,27 @@ class PhoneRoutesTest {
             PhoneRoute.LicenceDetail("x"),
         )
         ) {
-            assertEquals(route.toString(), TabBarMode.Folded, chromeFor(route).tabBar)
+            assertEquals(route.toString(), TabBarMode.Visible, chromeFor(route).tabBar)
+        }
+    }
+
+    /** Folded is for tab roots only: no pushed phone route maps to it. */
+    @Test fun noNonRootRouteMapsToFolded() {
+        val roots = PhoneRoots.values.toSet()
+        val pushed =
+            listOf(
+                PhoneRoute.Settings,
+                PhoneRoute.Diagnostics,
+                PhoneRoute.WhatsAppSettings,
+                PhoneRoute.Appearance,
+                PhoneRoute.Haptics,
+                PhoneRoute.About,
+                PhoneRoute.Licences,
+                PhoneRoute.LicenceDetail("x"),
+            )
+        for (route in pushed) {
+            if (route in roots) continue
+            assertNotEquals(route.toString(), TabBarMode.Folded, chromeFor(route).tabBar)
         }
     }
 

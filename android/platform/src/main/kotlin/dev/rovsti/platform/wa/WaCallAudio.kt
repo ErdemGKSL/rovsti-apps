@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -42,6 +43,10 @@ fun CallAudio.asFrames(): CallFrames =
  * `audioPush`), `wa-speaker` calls [CallFrames.pull] (`audioPull`) and writes the [AudioTrack]. Nothing crosses JNI as
  * base64 any more, and neither thread is the main thread. Needs `RECORD_AUDIO`.
  *
+ * `docs/kotlin-ui/wa-call-audio.md` traces every hop and format. Callers open the audio only once the call is
+ * connected (`WaCalls`: phase Active), because [start] switches the whole phone to `MODE_IN_COMMUNICATION` and takes
+ * audio focus.
+ *
  * Ported from crates/rovsti_android/kotlin/dev/rovsti/bridge/WaCallAudio.kt
  */
 object WaCallAudio {
@@ -52,7 +57,31 @@ object WaCallAudio {
     /** How long the speaker thread waits before asking again when no peer frame is ready. */
     const val IDLE_POLL_MS = 10L
 
+    /** Where the voice of the peer comes out. */
+    enum class Route { Earpiece, Speaker, Bluetooth }
+
+    /** Pure: the attributes of the playback track: a voice call, so the system routes and ducks it like one. */
+    fun trackAttributes(): AudioAttributes =
+        AudioAttributes
+            .Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+
+    /** Pure: PCM16 at [SAMPLE_RATE] with the given channel mask (mono in and out). */
+    fun format(channelMask: Int): AudioFormat =
+        AudioFormat
+            .Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(SAMPLE_RATE)
+            .setChannelMask(channelMask)
+            .build()
+
+    /** Pure: the microphone source with the platform echo canceller and noise suppression of a voice call. */
+    const val RECORD_SOURCE = MediaRecorder.AudioSource.VOICE_COMMUNICATION
+
     private val lock = Any()
+    private var focus: AudioFocusRequest? = null
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
     private var reader: Thread? = null
@@ -76,11 +105,6 @@ object WaCallAudio {
             }
             val audio = context.getSystemService(AudioManager::class.java) ?: return false
             try {
-                val format =
-                    AudioFormat
-                        .Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(SAMPLE_RATE)
                 val recordMin =
                     AudioRecord.getMinBufferSize(
                         SAMPLE_RATE,
@@ -97,20 +121,15 @@ object WaCallAudio {
                 val rec =
                     AudioRecord
                         .Builder()
-                        .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
-                        .setAudioFormat(format.setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
+                        .setAudioSource(RECORD_SOURCE)
+                        .setAudioFormat(format(AudioFormat.CHANNEL_IN_MONO))
                         .setBufferSizeInBytes(bufferBytes(recordMin))
                         .build()
                 val out =
                     AudioTrack
                         .Builder()
-                        .setAudioAttributes(
-                            AudioAttributes
-                                .Builder()
-                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build(),
-                        ).setAudioFormat(format.setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                        .setAudioAttributes(trackAttributes())
+                        .setAudioFormat(format(AudioFormat.CHANNEL_OUT_MONO))
                         .setBufferSizeInBytes(bufferBytes(trackMin))
                         .setTransferMode(AudioTrack.MODE_STREAM)
                         .build()
@@ -121,6 +140,8 @@ object WaCallAudio {
                 }
                 previousMode = audio.mode
                 audio.mode = AudioManager.MODE_IN_COMMUNICATION
+                requestFocus(audio)
+                preferHeadset(audio)
                 rec.startRecording()
                 out.play()
                 record = rec
@@ -168,44 +189,98 @@ object WaCallAudio {
         track = null
         context.getSystemService(AudioManager::class.java)?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) it.clearCommunicationDevice()
+            @Suppress("DEPRECATION")
+            it.isSpeakerphoneOn = false
+            focus?.let(it::abandonAudioFocusRequest)
             it.mode = previousMode
         }
+        focus = null
     }
 
-    /** Pure: the communication-device type to look for. */
-    fun wantedType(speaker: Boolean): Int =
-        if (speaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+    /** Transient exclusive focus as a voice call: music pauses and comes back when the call ends. */
+    private fun requestFocus(audio: AudioManager) {
+        val request =
+            AudioFocusRequest
+                .Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(trackAttributes())
+                .setAcceptsDelayedFocusGain(false)
+                .setOnAudioFocusChangeListener { }
+                .build()
+        if (audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focus = request
+    }
 
-    /** Pure: the index in [types] of the built-in speaker or earpiece, or -1. */
+    /** A paired headset wins over the earpiece when the call starts (API 31+; older releases route SCO themselves). */
+    private fun preferHeadset(audio: AudioManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val devices = audio.availableCommunicationDevices
+        val index = pickDevice(devices.map { it.type }, Route.Bluetooth)
+        if (index >= 0) audio.setCommunicationDevice(devices[index])
+    }
+
+    /** Pure: the communication-device types that serve [route], best first. */
+    fun wantedTypes(route: Route): List<Int> =
+        when (route) {
+            Route.Speaker -> {
+                listOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+            }
+
+            Route.Earpiece -> {
+                listOf(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+            }
+
+            Route.Bluetooth -> {
+                listOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET)
+            }
+        }
+
+    /** Pure: the index in [types] of the device for [route], or -1. */
     fun pickDevice(
         types: List<Int>,
-        speaker: Boolean,
-    ): Int = types.indexOf(wantedType(speaker))
+        route: Route,
+    ): Int {
+        for (wanted in wantedTypes(route)) {
+            val at = types.indexOf(wanted)
+            if (at >= 0) return at
+        }
+        return -1
+    }
 
-    /**
-     * Loudspeaker or earpiece. API 31+ picks the built-in device from `availableCommunicationDevices`;
-     * older releases use `isSpeakerphoneOn`. False when the device has no such route.
-     */
+    /** Loudspeaker or earpiece; see [setRoute]. */
     fun setSpeaker(
         context: Context,
         speaker: Boolean,
+    ): Boolean = setRoute(context, if (speaker) Route.Speaker else Route.Earpiece)
+
+    /**
+     * Moves the voice to [route]. API 31+ picks the device from `availableCommunicationDevices` (a Bluetooth headset
+     * is a SCO or BLE device there); older releases use `isSpeakerphoneOn` and cannot choose Bluetooth. False when
+     * the device has no such route.
+     */
+    fun setRoute(
+        context: Context,
+        route: Route,
     ): Boolean {
         val audio = context.getSystemService(AudioManager::class.java) ?: return false
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val devices = audio.availableCommunicationDevices
-                val index = pickDevice(devices.map { it.type }, speaker)
+                val index = pickDevice(devices.map { it.type }, route)
                 if (index < 0) return false
                 audio.setCommunicationDevice(devices[index])
+            } else if (route == Route.Bluetooth) {
+                false
             } else {
                 @Suppress("DEPRECATION")
-                audio.isSpeakerphoneOn = speaker
+                audio.isSpeakerphoneOn = route == Route.Speaker
                 true
             }
         } catch (_: RuntimeException) {
             false
         }
     }
+
+    /** Whether a call is being captured and played right now. */
+    val running: Boolean get() = synchronized(lock) { record != null }
 
     /** Reads PCM in whole frames from the microphone and pushes each one to the handle. */
     private fun pumpMic(

@@ -891,6 +891,41 @@ async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
     assert!(end.is_none());
 }
 
+/// The engine hands the speaker 20 ms (320 sample) frames; the app must still
+/// get whole 60 ms (960 sample, 1 920 byte) ones, with every sample in order.
+#[tokio::test]
+async fn call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames() {
+    let server = start(4).await;
+    server.driver.calls().set_speaker_chunk(320);
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let g = gateway.clone();
+    let call_id = blocking(move || g.place_call(PEER)).await.unwrap().call_id;
+    assert_eq!(next_call_phase(&mut events).await, CallPhase::Ringing);
+    let key = ConnectKey::parse(&created.key).unwrap();
+    let (url, id) = (server.url.clone(), call_id.clone());
+    let mut audio = blocking(move || call_audio(url, key, &id)).await.unwrap();
+
+    let frames = [frame(4), frame(5), frame(6), frame(7)];
+    for want in &frames {
+        audio.mic.send(want.clone()).await.unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(10), audio.speaker.next())
+            .await
+            .expect("timed out waiting for a rechunked frame")
+            .expect("audio ended");
+        assert_eq!(got.len(), 960);
+        assert_eq!(&got, want);
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), audio.speaker.next())
+            .await
+            .is_err(),
+        "no partial frame may reach the app"
+    );
+}
+
 #[tokio::test]
 async fn ending_a_ringing_outgoing_call_cancels_it_on_whatsapp() {
     let server = start(4).await;

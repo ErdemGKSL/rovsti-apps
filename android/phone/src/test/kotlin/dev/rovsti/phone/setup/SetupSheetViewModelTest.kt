@@ -9,13 +9,10 @@ import dev.rovsti.phone.HostRust
 import dev.rovsti.platform.system.permissions.PermissionGroup
 import dev.rovsti.platform.system.permissions.PermissionState
 import dev.rovsti.platform.system.permissions.SettingsKind
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -54,10 +51,12 @@ class SetupSheetViewModelTest {
     private val created = mutableListOf<SetupSheetViewModel>()
     private var permissions = mutableMapOf<PermissionGroup, PermissionState>()
 
-    @Before fun mainDispatcher() = Dispatchers.setMain(Dispatchers.Unconfined)
+    @Before fun mainDispatcher() =
+        dev.rovsti.phone.UnconfinedMain
+            .install()
 
     @After fun resetMainDispatcher() {
-        // A refresh may still be on its way back to Main from the Rust call; let it finish before Main is reset.
+        // A refresh may still be on its way back to Main from the Rust call; let it finish before Main is released.
         runBlocking {
             withTimeout(TIMEOUT_MS) {
                 created.forEach { vm ->
@@ -66,7 +65,6 @@ class SetupSheetViewModelTest {
                 }
             }
         }
-        Dispatchers.resetMain()
     }
 
     private fun viewModel(

@@ -12,7 +12,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -26,7 +25,9 @@ class KeypadViewModelTest {
     private val host by lazy { HostRust("rovsti-keypad") }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @Before fun mainDispatcher() = Dispatchers.setMain(Dispatchers.Unconfined)
+    @Before fun mainDispatcher() =
+        dev.rovsti.phone.UnconfinedMain
+            .install()
 
     @After fun stop() {
         // Main stays set: the view models of this class still have coroutines that end after the test body.

@@ -76,6 +76,8 @@ class AppPermissions(
                     setOf(
                         Manifest.permission.FOREGROUND_SERVICE,
                         "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
+                        // WaCallService: background microphone during a WhatsApp call (docs/kotlin-ui/wa-call-audio.md).
+                        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
                         Manifest.permission.VIBRATE,
                         Manifest.permission.WAKE_LOCK,
                         Manifest.permission.INTERNET,

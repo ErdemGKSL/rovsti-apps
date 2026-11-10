@@ -22,5 +22,8 @@ webpki-roots = "1"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots", "json"] }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "rt", "time", "macros"] }
+
 [lints]
 workspace = true

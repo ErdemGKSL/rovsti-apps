@@ -2,14 +2,10 @@ package dev.rovsti.phone.diagnostics
 
 import dev.rovsti.platform.files.FakeClipboardRepository
 import dev.rovsti.platform.telephony.CallsApi
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -57,9 +53,9 @@ private class StubCalls(
 /** E5.1 Diagnostics: the counters, the ring timeline, the event ring and one copyable report. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class DiagnosticsViewModelTest {
-    @Before fun main() = Dispatchers.setMain(Dispatchers.Unconfined)
-
-    @After fun reset() = Dispatchers.resetMain()
+    @Before fun main() =
+        dev.rovsti.phone.UnconfinedMain
+            .install()
 
     private val clipboard = FakeClipboardRepository()
 

@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -29,7 +28,9 @@ class PhoneContactsViewModelTest {
     private val host by lazy { HostRust("rovsti-people-vm") }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @Before fun mainDispatcher() = Dispatchers.setMain(Dispatchers.Unconfined)
+    @Before fun mainDispatcher() =
+        dev.rovsti.phone.UnconfinedMain
+            .install()
 
     @After fun stop() = scope.cancel()
 

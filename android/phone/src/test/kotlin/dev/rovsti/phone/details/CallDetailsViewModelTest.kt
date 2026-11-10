@@ -10,7 +10,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,7 +26,9 @@ class CallDetailsViewModelTest {
     private val host by lazy { HostRust("rovsti-call-vm") }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @Before fun mainDispatcher() = Dispatchers.setMain(Dispatchers.Unconfined)
+    @Before fun mainDispatcher() =
+        dev.rovsti.phone.UnconfinedMain
+            .install()
 
     @After fun stop() = scope.cancel()
 

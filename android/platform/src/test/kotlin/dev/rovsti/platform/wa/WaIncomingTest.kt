@@ -81,10 +81,10 @@ class WaIncomingTest {
                 AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
                 AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
             )
-        assertEquals(2, WaCallAudio.pickDevice(types, true))
-        assertEquals(1, WaCallAudio.pickDevice(types, false))
-        assertEquals(-1, WaCallAudio.pickDevice(listOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO), true))
-        assertEquals(-1, WaCallAudio.pickDevice(emptyList(), false))
+        assertEquals(2, WaCallAudio.pickDevice(types, WaCallAudio.Route.Speaker))
+        assertEquals(1, WaCallAudio.pickDevice(types, WaCallAudio.Route.Earpiece))
+        assertEquals(-1, WaCallAudio.pickDevice(listOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO), WaCallAudio.Route.Speaker))
+        assertEquals(-1, WaCallAudio.pickDevice(emptyList(), WaCallAudio.Route.Earpiece))
     }
 
     @Test fun frameSizeMatchesTheCoreBridgeHandle() {

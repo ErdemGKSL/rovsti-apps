@@ -20,6 +20,10 @@ class HandoffPermissionsTest {
     private fun committed(app: String) =
         File("src/test/resources/manifest/$app.permissions.txt").readLines().filter { it.isNotBlank() }
 
+    /** What the Kotlin apps added to the GPUI manifests (the GPUI app is deprecated and no longer changes). */
+    private val addedSinceGpui =
+        mapOf("phone" to listOf("uses-permission android.permission.FOREGROUND_SERVICE_MICROPHONE"))
+
     private fun fromManifest(app: String): List<String> {
         val file = File("../../apps/$app/platforms/android/app/src/main/AndroidManifest.xml")
         val doc =
@@ -48,7 +52,7 @@ class HandoffPermissionsTest {
                 .filter { it.attr("permission") == HANDOFF }
                 .map { "protects ${it.tagName} ${it.attr("name")} $HANDOFF" }
                 .sorted()
-        return uses + declares + protects
+        return (uses + addedSinceGpui[app].orEmpty()).sorted() + declares + protects
     }
 
     @Test fun everyAppManifestEqualsItsCommittedList() {

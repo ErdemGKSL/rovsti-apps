@@ -3,7 +3,6 @@ package dev.rovsti.wa.calls
 import android.content.Context
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.RustError
-import dev.rovsti.core.model.phone.CallDirection
 import dev.rovsti.core.model.phone.CallPhase
 import dev.rovsti.core.model.wa.CallSummary
 import dev.rovsti.core.model.wa.GatewayEvent
@@ -12,6 +11,7 @@ import dev.rovsti.core.ops.WaGateway
 import dev.rovsti.platform.system.permissions.PermissionState
 import dev.rovsti.platform.wa.CallFrames
 import dev.rovsti.platform.wa.WaCallAudio
+import dev.rovsti.platform.wa.WaCallService
 import dev.rovsti.platform.wa.asFrames
 import dev.rovsti.wa.WaRepository
 import kotlinx.coroutines.CoroutineScope
@@ -40,9 +40,17 @@ class AndroidCallAudioPump(
 ) : CallAudioPump {
     private val context = context.applicationContext
 
-    override fun start(frames: CallFrames): Boolean = WaCallAudio.start(context, frames)
+    override fun start(frames: CallFrames): Boolean {
+        if (!WaCallAudio.start(context, frames)) return false
+        // After the audio runs: the foreground service keeps the microphone usable once the app is in the background.
+        WaCallService.start(context)
+        return true
+    }
 
-    override fun stop(): Boolean = WaCallAudio.stop(context)
+    override fun stop(): Boolean {
+        WaCallService.stop(context)
+        return WaCallAudio.stop(context)
+    }
 
     override fun setSpeaker(on: Boolean): Boolean = WaCallAudio.setSpeaker(context, on)
 }
@@ -72,7 +80,7 @@ sealed interface CallResult {
  *   until the next reload). It reloads on a `resync`.
  * - [place] and [accept] need `RECORD_AUDIO` ([microphone] is the `microphone` group of the `PermissionController`);
  *   without it they answer [CallResult.NeedsMicrophone] and nothing starts.
- * - The pump runs for one call at a time: it opens `gateway.openCallAudio(id)`, hands its [asFrames] to [pump] and
+ * - The pump runs for one call at a time and only once the call is connected (phase `Active`, both directions): it opens `gateway.openCallAudio(id)`, hands its [asFrames] to [pump] and
  *   stops, closing the handle, on [end], [reject], when the call's phase is `Ended`, or on [close].
  */
 class WaCalls(
@@ -139,7 +147,9 @@ class WaCalls(
             }
 
             is Outcome.Ok -> {
-                startPump(gateway, id)
+                // The audio opens when the media is up (phase Active), not when the answer is sent: until then the
+                // gateway has no media to carry and a recorder would only fill the queue with stale frames.
+                if (list.value.firstOrNull { it.callId == id }?.phase == CallPhase.Active) startPump(gateway, id)
                 CallResult.Started(id)
             }
         }
@@ -245,8 +255,8 @@ class WaCalls(
         if (ended) {
             lock.withLock { if (pumped == event.callId) stopPumpLocked() }
             muted.value = muted.value - event.callId
-        } else if (event.phase == CallPhase.Active && event.direction == CallDirection.Out) {
-            // An outgoing call is answered: the audio starts now.
+        } else if (event.phase == CallPhase.Active) {
+            // The media is up (outgoing: the peer picked up; incoming: our answer connected): the audio starts now.
             val gateway = repo.gateway()
             if (gateway != null && microphone.value == PermissionState.Granted) startPump(gateway, event.callId)
         }

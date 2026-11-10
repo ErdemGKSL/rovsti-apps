@@ -1183,11 +1183,18 @@ pub mod fake {
 
     /// Echoes microphone frames to the speaker, like a peer repeating what
     /// it hears.
-    fn echo(io: CallIo) {
+    ///
+    /// `chunk` is the size the engine hands the speaker in: 0 repeats the
+    /// whole frame, 320 mimics the decoder's 20 ms frames (the gateway must
+    /// rechunk those into 60 ms ones before the socket).
+    fn echo(io: CallIo, chunk: usize) {
         tokio::spawn(async move {
             while let Ok(frame) = io.mic_rx.recv().await {
-                if io.spk_tx.try_send(frame).is_err() && io.spk_tx.is_closed() {
-                    break;
+                let step = if chunk == 0 { frame.len() } else { chunk };
+                for part in frame.chunks(step) {
+                    if io.spk_tx.try_send(part.to_vec()).is_err() && io.spk_tx.is_closed() {
+                        return;
+                    }
                 }
             }
         });
@@ -1199,6 +1206,7 @@ pub mod fake {
         lives: Mutex<Vec<Arc<FakeLive>>>,
         fail_start: Mutex<Option<StartError>>,
         counter: AtomicU64,
+        chunk: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeCalls {
@@ -1215,6 +1223,11 @@ pub mod fake {
         /// Every live call started so far, oldest first.
         pub fn lives(&self) -> Vec<Arc<FakeLive>> {
             self.lives.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+
+        /// Makes the echo hand the speaker `samples` at a time (0: whole frames).
+        pub fn set_speaker_chunk(&self, samples: usize) {
+            self.chunk.store(samples, Ordering::Relaxed);
         }
 
         /// Makes the next `accept` or `place` fail with `error`.
@@ -1246,7 +1259,7 @@ pub mod fake {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(Arc::clone(&live));
-            echo(io);
+            echo(io, self.chunk.load(Ordering::Relaxed));
             Ok(live)
         }
     }

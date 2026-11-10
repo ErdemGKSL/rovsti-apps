@@ -112,6 +112,17 @@ class PhoneManifestTest {
         assertEquals(setOf("android.telecom.InCallService"), service.filters.single().actions)
     }
 
+    @Test fun theWhatsAppCallServiceHoldsTheMicrophoneInTheBackground() {
+        val service = manifest.component("dev.rovsti.platform.wa.WaCallService")
+        assertEquals("service", service.kind)
+        assertEquals(false, service.exported)
+        // Android 14 stops background capture without a foreground service of type microphone.
+        assertEquals("microphone|phoneCall", service.attributes["foregroundServiceType"])
+        assertTrue("android.permission.FOREGROUND_SERVICE_MICROPHONE" in manifest.usesPermissions)
+        assertTrue("android.permission.FOREGROUND_SERVICE_PHONE_CALL" in manifest.usesPermissions)
+        assertTrue("android.permission.RECORD_AUDIO" in manifest.usesPermissions)
+    }
+
     @Test fun receiversAndTheShareProviderKeepTheirNames() {
         val action = manifest.component("$pkg.CallActionReceiver")
         assertEquals(false, action.exported)
@@ -193,6 +204,7 @@ class PhoneManifestTest {
                 "$pkg.MainActivity",
                 "$pkg.WaHandoff",
                 "$pkg.RovstiInCallService",
+                "dev.rovsti.platform.wa.WaCallService",
                 "$pkg.CallActionReceiver",
                 "$pkg.VoicemailReceiver",
                 "dev.rovsti.bridge.CallReminderReceiver",

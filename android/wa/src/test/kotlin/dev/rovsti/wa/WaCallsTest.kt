@@ -70,11 +70,17 @@ class WaCallsTest {
 
     private fun joined(): Boolean = pump.threads.all { it.apply { join(1_000) }.isAlive.not() }
 
-    @Test fun acceptStartsThePumpAndEndStopsAndJoinsTheThreads() =
+    @Test fun acceptOpensTheAudioOnlyWhenTheCallIsConnectedThenEndStopsAndJoinsTheThreads() =
         runTest(UnconfinedTestDispatcher()) {
             val r = rig()
+            r.fake.emitEvent("inst1", 1, call("c1", CallPhase.Ringing))
             val result = r.calls.accept("c1")
             assertEquals(CallResult.Started("c1"), result)
+            assertEquals("answered but not connected: no recorder, no audio socket", 0, pump.starts.get())
+            assertEquals(0, r.fake.count("wa.call_audio_open"))
+            r.fake.emitEvent("inst1", 2, call("c1", CallPhase.Connecting))
+            assertEquals(0, pump.starts.get())
+            r.fake.emitEvent("inst1", 3, call("c1", CallPhase.Active))
             assertEquals(1, pump.starts.get())
             assertEquals(2, pump.threads.size)
             assertTrue("both threads run", pump.threads.all { it.isAlive })
@@ -148,6 +154,7 @@ class WaCallsTest {
         runTest(UnconfinedTestDispatcher()) {
             val r = rig()
             r.calls.accept("c1")
+            r.fake.emitEvent("inst1", 1, call("c1", CallPhase.Active))
             r.fake.callErrors["wa.end_call"] = RustError.Network("down")
             assertTrue(r.calls.end("c1") is Outcome.Err)
             assertEquals(1, pump.stops.get())

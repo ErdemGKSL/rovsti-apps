@@ -1293,9 +1293,13 @@ the thread (E6.4a): both read WhatsApp **only from the local store**; the networ
   services/wa_gateway/src/routes.rs, 50-200 per page) until they overlap what is stored; never drop stored history.
 - **Older history on demand:** scrolling a thread past the oldest stored message fetches the next page `before` it and
   stores it; once stored it is readable offline.
-- **Outbox:** sending while offline queues the message locally (client id, shown as pending), retries with backoff when
-  the gateway is reachable, and reconciles with the echo so it never doubles. Edits, deletes, reactions and read marks
-  queue the same way.
+- **Outbox (owner confirmed 2026-11-10):** sending without internet puts the message in a persistent local queue and
+  it **waits until the connection is back**, then goes out by itself: shown at once in the thread with a clock icon
+  ("Waiting for connection" / "Bağlantı bekleniyor"), kept across app kills and phone restarts (stored in the same
+  database), sent in the order written per chat, triggered by a network-available callback (WorkManager job with a
+  CONNECTED constraint plus the live connection) rather than polling, retried with backoff on gateway errors, and
+  reconciled with the echo by client id so it never doubles. The owner can cancel or edit a waiting message. Media
+  sends queue the same way (file copied into app storage first). Edits, deletes, reactions and read marks queue too.
 - **Deleted messages are never erased (owner request, 2026-11-10):** a message deleted by its sender ("delete for
   everyone") or by the owner is only **marked** deleted (`deleted_at`, `deleted_by`), with its text, quote and media
   kept in the store. The thread shows it as a "This message was deleted" bubble (Turkish: "Bu mesaj silindi") with the

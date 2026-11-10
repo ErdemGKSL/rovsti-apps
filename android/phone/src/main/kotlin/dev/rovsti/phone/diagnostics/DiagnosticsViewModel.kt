@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.rovsti.core.getOrNull
+import dev.rovsti.phone.R
 import dev.rovsti.platform.files.ClipboardRepository
 import dev.rovsti.platform.telephony.CallsApi
 import kotlinx.collections.immutable.ImmutableList
@@ -50,6 +51,49 @@ sealed interface DiagnosticsEffect {
     ) : DiagnosticsEffect
 }
 
+/** The words of the Diagnostics page, read from resources so the page is translated like the rest of the app. */
+@Immutable
+data class DiagnosticsLabels(
+    val reportTitle: String = "Rovsti Phone diagnostics",
+    val app: String = "App",
+    val version: String = "Version",
+    val rustCore: String = "Rust core",
+    val notLoaded: String = "not loaded",
+    val counters: String = "Counters",
+    val blockGuard: String = "Block guard",
+    val blockGuardHits: String = "Calls rejected by the block guard",
+    val silenceCallbacks: String = "Silence-ringer callbacks",
+    val routeChange: String = "Audio route change",
+    val notMeasured: String = "not measured",
+    val on: String = "on",
+    val off: String = "off",
+    val lastRing: String = "Last ring",
+    val callEvents: String = "Call events",
+    val none: String = "none",
+) {
+    companion object {
+        fun from(resources: android.content.res.Resources) =
+            DiagnosticsLabels(
+                reportTitle = resources.getString(R.string.diag_report_title),
+                app = resources.getString(R.string.diag_section_app),
+                version = resources.getString(R.string.settings_version),
+                rustCore = resources.getString(R.string.diag_rust_core),
+                notLoaded = resources.getString(R.string.diag_not_loaded),
+                counters = resources.getString(R.string.diag_section_counters),
+                blockGuard = resources.getString(R.string.diag_block_guard),
+                blockGuardHits = resources.getString(R.string.diag_block_guard_hits),
+                silenceCallbacks = resources.getString(R.string.diag_silence_callbacks),
+                routeChange = resources.getString(R.string.diag_route_change),
+                notMeasured = resources.getString(R.string.diag_not_measured),
+                on = resources.getString(R.string.diag_on),
+                off = resources.getString(R.string.diag_off),
+                lastRing = resources.getString(R.string.diag_last_ring),
+                callEvents = resources.getString(R.string.diag_call_events),
+                none = resources.getString(R.string.diag_report_none),
+            )
+    }
+}
+
 /**
  * The hidden Diagnostics page (story 14.0f, AD-36): what the call owner knows about itself (the event ring, the block
  * guard, the silence callbacks, the audio route latency), the ring-latency timeline and the Rust core version, with a
@@ -61,6 +105,7 @@ class DiagnosticsViewModel(
     private val ringTimeline: () -> List<String>,
     private val clipboard: ClipboardRepository,
     private val appVersion: String,
+    private val labels: DiagnosticsLabels = DiagnosticsLabels(),
 ) : ViewModel() {
     private val mutable = MutableStateFlow(DiagnosticsUi())
     val state: StateFlow<DiagnosticsUi> = mutable.asStateFlow()
@@ -84,32 +129,32 @@ class DiagnosticsViewModel(
         val sections =
             listOf(
                 DiagSection(
-                    title = "App",
+                    title = labels.app,
                     rows =
                         persistentListOf(
-                            DiagRow("Version", appVersion),
-                            DiagRow("Rust core", core ?: "not loaded"),
+                            DiagRow(labels.version, appVersion),
+                            DiagRow(labels.rustCore, core ?: labels.notLoaded),
                         ),
                 ),
                 DiagSection(
-                    title = "Counters",
+                    title = labels.counters,
                     rows =
                         persistentListOf(
-                            DiagRow("Block guard", if (calls.blockGuardOn()) "on" else "off"),
-                            DiagRow("Calls rejected by the block guard", calls.blockGuardHits().toString()),
-                            DiagRow("Silence-ringer callbacks", calls.silenceCallbacks().toString()),
-                            DiagRow("Audio route change", if (latency >= 0) "$latency ms" else "not measured"),
+                            DiagRow(labels.blockGuard, if (calls.blockGuardOn()) labels.on else labels.off),
+                            DiagRow(labels.blockGuardHits, calls.blockGuardHits().toString()),
+                            DiagRow(labels.silenceCallbacks, calls.silenceCallbacks().toString()),
+                            DiagRow(labels.routeChange, if (latency >= 0) "$latency ms" else labels.notMeasured),
                         ),
                 ),
-                DiagSection("Last ring", persistentListOf(), ringTimeline().toImmutableList()),
-                DiagSection("Call events", persistentListOf(), calls.eventDump().toImmutableList()),
+                DiagSection(labels.lastRing, persistentListOf(), ringTimeline().toImmutableList()),
+                DiagSection(labels.callEvents, persistentListOf(), calls.eventDump().toImmutableList()),
             )
         return DiagnosticsUi(sections.toImmutableList(), report(sections))
     }
 
     private fun report(sections: List<DiagSection>): String =
         buildString {
-            append("Rovsti Phone diagnostics\n")
+            append(labels.reportTitle).append('\n')
             for (section in sections) {
                 append('\n').append(section.title).append('\n')
                 for (row in section.rows) {
@@ -120,7 +165,7 @@ class DiagnosticsViewModel(
                         .append('\n')
                 }
                 for (line in section.lines) append("  ").append(line).append('\n')
-                if (section.rows.isEmpty() && section.lines.isEmpty()) append("  none\n")
+                if (section.rows.isEmpty() && section.lines.isEmpty()) append("  ").append(labels.none).append('\n')
             }
         }
 

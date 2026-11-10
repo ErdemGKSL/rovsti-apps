@@ -1124,12 +1124,12 @@ round close. E5.9-E5.14 follow in round 14.
 | E5.2 | Keypad | R1 | done (round-12 step 3; Evidence: `KeypadLayoutTest`, `KeypadViewModelTest`, `KeypadScreenTest`, `e5.2-*` goldens) |
 | E5.3 | Recents | R1 | done (round-12 step 4) |
 | E5.4 | Contact, Number and Call details sheets | R1 | done (round-12 step 5; Evidence: `PersonSheetViewModelTest`, `CallDetailsViewModelTest`, `e5.4-*` goldens) |
-| E5.5 | Favorites and Contacts tabs | R1 | in-progress (round-12 step 6 stashed, see recovery note; verified absent from the tree at `ca993e6`; recovered by round-13 step 1) |
+| E5.5 | Favorites and Contacts tabs | R1 | done (recovered from `stash@{0}` in round-13 step 1; Evidence: `FavoritesViewModelTest`, `FavoritesScreenTest`, `PhoneContactsViewModelTest`, `PhoneContactsScreenTest`, `PhoneStringsTest`, `e5.5-*` goldens incl. `e5.5-favorites-tr`) |
 | E5.6 | Incoming call | R1 | done (round-12 step 7; Evidence: `IncomingViewModelTest`, `IncomingScreenTest`, `CallRegistryIncomingTest`, `e5.6-*` goldens). Open owner follow-ups F17-F20, photo background, slide to answer: round-13 steps 3-5 |
 | E5.7a | In-call: single call | R1 | done (F20 in-call frosted controls and photo background: round-13 step 4; round-12 step 8; Evidence: `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`, `e5.7-*` goldens, `docs/kotlin-ui/checklist-e5.md`) |
 | E5.8 | WhatsApp calls | R2 | todo (moved from R1 in round-12; planned in round-13 steps 6-7) |
 
-> **Recovery note for the next planner (2026-11-10, coordinator):** round-12 step 6 (E5.4 sheets wiring / E5.5
+> **Recovery note (RECOVERED in round-13 step 1; branch `wip-r12-s6` deleted, `stash@{0}` kept until the round closes):** round-12 step 6 (E5.4 sheets wiring / E5.5
 > Favorites and Contacts tabs) was implemented but stashed as `stash@{0}` "blocked: kotlin-ui r12 S6" (also kept as
 > local branch `wip-r12-s6`). It was blocked only because the old debug check took 40-70 min and the haiku test agents
 > returned before it finished, not because of failing code. The stash also captured another agent's edits that are
@@ -1178,7 +1178,8 @@ round close. E5.9-E5.14 follow in round 14.
   `e5.4-person-stats`, `e5.4-qr`.
 
 ### E5.5 Favorites and Contacts tabs
-- Screenshots: `e5.5-favorites`, `e5.5-favorites-reorder`, `e5.5-contacts-tab`, `e5.5-contacts-search`.
+- Screenshots: `e5.5-favorites`, `e5.5-favorites-empty`, `e5.5-favorites-reorder`, `e5.5-favorites-tr`, `e5.5-contacts-tab`, `e5.5-contacts-search`.
+- **Done (round-13 step 1).** Evidence: the tests above, Phone `values-tr/strings.xml` (all strings, `PhoneStringsTest` checks keys, placeholders and untranslated copies), Diagnostics labels moved to `@StringRes` (`DiagnosticsLabels`), goldens opened: last row above the bar, 16 dp gutters, Turkish labels unclipped.
 
 ### E5.6 Incoming
 - **Owner direction (2026-11-10): take the call screens' design from iOS freely.** For the incoming, locked-incoming

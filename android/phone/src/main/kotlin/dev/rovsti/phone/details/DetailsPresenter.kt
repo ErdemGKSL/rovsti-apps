@@ -43,6 +43,14 @@ fun personTarget(
     )
 }
 
+/** The sheet of a person from the book (the Contacts tab and the Favorites): every number the contact has. */
+fun personTarget(contact: WireContact): PersonTarget =
+    PersonTarget(
+        name = contact.displayName.ifBlank { null },
+        numbers = contact.numbers.map { TargetNumber(it.raw, it.label) }.toImmutableList(),
+        contactId = contact.id,
+    )
+
 /** The last digits of a number: enough to tell "0532 123 45 67" from "+90 532 123 45 67" as one line. */
 private fun tail(raw: String): String = raw.filter { it.isDigit() }.takeLast(TAIL_DIGITS)
 

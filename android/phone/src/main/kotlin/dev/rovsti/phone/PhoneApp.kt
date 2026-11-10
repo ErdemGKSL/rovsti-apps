@@ -28,15 +28,23 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.transition.TabNavigator
+import dev.rovsti.phone.contacts.PhoneContactsScreen
+import dev.rovsti.phone.contacts.PhoneContactsViewModel
 import dev.rovsti.phone.data.People
 import dev.rovsti.phone.details.DetailsHost
 import dev.rovsti.phone.details.DetailsPresenter
 import dev.rovsti.phone.details.DetailsStrings
+import dev.rovsti.phone.details.PersonTarget
+import dev.rovsti.phone.details.TargetNumber
 import dev.rovsti.phone.details.personTarget
+import dev.rovsti.phone.diagnostics.DiagnosticsLabels
 import dev.rovsti.phone.diagnostics.DiagnosticsPage
 import dev.rovsti.phone.diagnostics.DiagnosticsViewModel
 import dev.rovsti.phone.diagnostics.SevenTaps
 import dev.rovsti.phone.diagnostics.versionText
+import dev.rovsti.phone.favorites.FavPerson
+import dev.rovsti.phone.favorites.FavoritesScreen
+import dev.rovsti.phone.favorites.FavoritesViewModel
 import dev.rovsti.phone.incall.InCallAction
 import dev.rovsti.phone.incall.InCallEffects
 import dev.rovsti.phone.incall.InCallHost
@@ -66,6 +74,7 @@ import dev.rovsti.phone.setup.SetupSheetViewModel
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
 import dev.rovsti.platform.files.ShareIntents
+import dev.rovsti.platform.system.permissions.PermissionGroup
 import dev.rovsti.platform.telephony.KeypadTone
 import dev.rovsti.shell.RovstiShell
 import dev.rovsti.shell.settings.CommonSettingsPage
@@ -116,6 +125,47 @@ private fun rememberKeypadViewModel(container: PhoneContainer): KeypadViewModel 
                 }
             }
         ViewModelProvider(owner, factory)[KeypadViewModel::class.java]
+    }
+}
+
+@Composable
+private fun rememberFavoritesViewModel(container: PhoneContainer): FavoritesViewModel {
+    val owner = LocalContext.current.findComponentActivity()
+    return remember(owner, container) {
+        val factory =
+            viewModelFactory {
+                initializer {
+                    FavoritesViewModel(
+                        people = container.people,
+                        store = container.store,
+                        contactsOps = container.contactsOps,
+                        phoneOps = container.ops,
+                        contacts = container.contacts,
+                        callLog = container.callLog,
+                        callLogPermission = container.permissions.state(PermissionGroup.CALL_LOG),
+                        placer = container.placer,
+                    )
+                }
+            }
+        ViewModelProvider(owner, factory)[FavoritesViewModel::class.java]
+    }
+}
+
+@Composable
+private fun rememberContactsViewModel(container: PhoneContainer): PhoneContactsViewModel {
+    val owner = LocalContext.current.findComponentActivity()
+    return remember(owner, container) {
+        val factory =
+            viewModelFactory {
+                initializer {
+                    PhoneContactsViewModel(
+                        people = container.people,
+                        store = container.store,
+                        ops = container.contactsOps,
+                    )
+                }
+            }
+        ViewModelProvider(owner, factory)[PhoneContactsViewModel::class.java]
     }
 }
 
@@ -252,6 +302,7 @@ private fun rememberDiagnosticsViewModel(container: PhoneContainer): Diagnostics
                         ringTimeline = IncomingPerf::report,
                         clipboard = container.clipboard,
                         appVersion = container.setupFacts.appVersion,
+                        labels = DiagnosticsLabels.from(owner.resources),
                     )
                 }
             }
@@ -406,6 +457,40 @@ fun PhoneApp(
         }
     }
     val miniTimer = rememberCallTimer(inCallUi.call, inCall::now, inCall::elapsed)
+    val favoritesModel = rememberFavoritesViewModel(container)
+    val contactsModel = rememberContactsViewModel(container)
+    val openContact: (Long) -> Unit =
+        remember(details, container) {
+            { id ->
+                val book = (container.people.people.value as? People.Ready)?.contacts
+                book?.firstOrNull { it.id == id }?.let { details.presentPerson(personTarget(it)) }
+            }
+        }
+    val openFavorite: (FavPerson) -> Unit =
+        remember(details, openContact) {
+            { person ->
+                val id = person.contactId
+                if (id != null) {
+                    openContact(id)
+                } else {
+                    val number = person.number.orEmpty()
+                    details.presentPerson(
+                        PersonTarget(person.name, persistentListOf(TargetNumber(number, person.label))),
+                    )
+                }
+            }
+        }
+    val newContact: () -> Unit =
+        remember(context) {
+            {
+                try {
+                    context.startActivity(addContactIntent("", create = true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: ActivityNotFoundException) {
+                    // No contacts app handles it: nothing to show.
+                }
+            }
+        }
+
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
@@ -438,14 +523,7 @@ fun PhoneApp(
             },
     ) {
         entry<PhoneRoute.Favorites> {
-            PhoneRootPlaceholder(
-                route = "favorites",
-                title = stringResource(R.string.tab_favorites),
-                icon = RovstiIcons.Star,
-                message = stringResource(R.string.coming_message),
-                setup = setup,
-                links = links,
-            )
+            FavoritesScreen(favoritesModel, links, setup, openFavorite)
         }
         entry<PhoneRoute.Recents> {
             val host = remember(context, openDetails) { AndroidRecentsHost(context, openDetails) }
@@ -457,14 +535,7 @@ fun PhoneApp(
             )
         }
         entry<PhoneRoute.Contacts> {
-            PhoneRootPlaceholder(
-                route = "contacts",
-                title = stringResource(R.string.tab_contacts),
-                icon = RovstiIcons.People,
-                message = stringResource(R.string.coming_message),
-                setup = setup,
-                links = links,
-            )
+            PhoneContactsScreen(contactsModel, links, setup, onOpen = openContact, onNew = newContact)
         }
         entry<PhoneRoute.Keypad> {
             val model = rememberKeypadViewModel(container)

@@ -10,6 +10,34 @@
     <string name="coming_message">This screen arrives in a later update.</string>
     <string name="keypad_coming_message">The number field and the keys arrive with the next update.</string>
 
+    <!-- Favorites and Contacts tabs (E5.5) -->
+    <string name="fav_edit">Edit favorites</string>
+    <string name="fav_done">Done</string>
+    <string name="fav_add">Add favorite</string>
+    <string name="fav_add_title">Add Favorite</string>
+    <string name="fav_info">Contact info</string>
+    <string name="fav_reorder">Reorder</string>
+    <string name="fav_move_earlier">Move Earlier</string>
+    <string name="fav_move_later">Move Later</string>
+    <string name="fav_remove">Remove from Favorites</string>
+    <string name="fav_frequent">Frequently Called</string>
+    <string name="fav_empty_title">No favorites yet</string>
+    <string name="fav_empty_message">Add the people you call most to reach them in one tap.</string>
+    <string name="fav_added">Added to Favorites</string>
+    <string name="fav_removed">Removed from Favorites</string>
+    <string name="fav_failed">Can\'t change this contact right now.</string>
+    <string name="fav_picker_search">Search contacts</string>
+    <string name="fav_picker_none">No contacts to add</string>
+    <string name="fav_picker_cancel">Cancel</string>
+    <string name="people_gate_title">Contacts are off</string>
+    <string name="people_gate_message">Allow contacts to see the people you call.</string>
+    <string name="people_search">Search contacts</string>
+    <string name="people_new">New contact</string>
+    <string name="people_empty_title">No contacts</string>
+    <string name="people_empty_message">People with a phone number show up here.</string>
+    <string name="people_no_results">No contact matches \"%1$s\"</string>
+    <string name="people_info">Contact info</string>
+
     <!-- Setup sheet and the notice line (apps/phone/src/setup_ui.rs) -->
     <string name="setup_open">Setup</string>
     <string name="setup_title">Finish setup</string>
@@ -47,6 +75,21 @@
     <string name="diag_copy_all">Copy all</string>
     <string name="diag_copied">Report copied</string>
     <string name="diag_copy_failed">Couldn\'t copy the report</string>
+    <string name="diag_report_title">Rovsti Phone diagnostics</string>
+    <string name="diag_section_app">App</string>
+    <string name="diag_rust_core">Rust core</string>
+    <string name="diag_not_loaded">not loaded</string>
+    <string name="diag_section_counters">Counters</string>
+    <string name="diag_block_guard">Block guard</string>
+    <string name="diag_block_guard_hits">Calls rejected by the block guard</string>
+    <string name="diag_silence_callbacks">Silence-ringer callbacks</string>
+    <string name="diag_route_change">Audio route change</string>
+    <string name="diag_not_measured">not measured</string>
+    <string name="diag_on">on</string>
+    <string name="diag_off">off</string>
+    <string name="diag_last_ring">Last ring</string>
+    <string name="diag_call_events">Call events</string>
+    <string name="diag_report_none">none</string>
     <string name="diag_none">Nothing recorded yet</string>
     <string name="fallback_stopped">Rovsti Phone\'s screen stopped.\nYour call is not affected.</string>
     <string name="fallback_end_call">End call</string>

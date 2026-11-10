@@ -11,7 +11,9 @@ import dev.rovsti.core.model.shared.InferHomeCcRequest
 import dev.rovsti.core.model.shared.NumberForm
 import dev.rovsti.core.model.shared.RenderRequest
 import dev.rovsti.core.ops.ChatOps
+import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.NativeChatOps
+import dev.rovsti.core.ops.NativeContactsOps
 import dev.rovsti.core.ops.NativePhoneOps
 import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
@@ -115,6 +117,9 @@ open class PhoneContainer(
     val search: SearchOps by lazy { createSearch() }
 
     val qr: QrOps by lazy { createQr() }
+
+    /** The contact list view (sections, favorites order and moves) of the Favorites and Contacts tabs. */
+    val contactsOps: ContactsOps by lazy { createContactsOps() }
 
     /** The call-back reminders (`call_reminder.*`, `message_reminder.slots`). */
     val chat: ChatOps by lazy { createChat() }
@@ -310,6 +315,8 @@ open class PhoneContainer(
     protected open fun createSearch(): SearchOps = NativeSearchOps(rust)
 
     protected open fun createQr(): QrOps = NativeQrOps(rust)
+
+    protected open fun createContactsOps(): ContactsOps = NativeContactsOps(rust)
 
     protected open fun createChat(): ChatOps = NativeChatOps(rust)
 

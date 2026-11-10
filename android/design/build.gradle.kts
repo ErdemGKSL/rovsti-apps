@@ -33,6 +33,8 @@ dependencies {
     implementation(libs.haze)
     implementation(libs.haze.materials)
     // Image loading (Apache-2.0, THIRD_PARTY_NOTICES.md). No network fetcher: apps load content:// and file URIs.
+    // The reorderable list (Convx port, list/Reorder.kt); apps use its ReorderableItem and draggableHandle.
+    api(libs.compose.reorderable)
     api(libs.coil.core)
     implementation(libs.coil.compose)
     testImplementation(libs.junit)

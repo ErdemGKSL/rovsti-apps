@@ -666,6 +666,9 @@ class RecentsViewModel(
         }
     }
 
+    /** The grouped row behind [key] (the list the user sees right now); the details sheet opens on it. */
+    fun rowOf(key: String): RecentsRow? = byKey[key]?.first
+
     /** Copies [text] (a number in the form the user picked). */
     fun copyText(text: String) {
         clipboard.copy(text)

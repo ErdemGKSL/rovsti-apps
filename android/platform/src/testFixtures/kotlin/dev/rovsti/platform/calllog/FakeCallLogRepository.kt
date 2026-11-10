@@ -27,6 +27,9 @@ class FakeCallLogRepository(
     /** Unseen missed calls the badge shows. */
     val missed = MutableStateFlow(0)
 
+    /** The rows now in the log (blocked ones included), newest first. */
+    fun snapshot(): List<CallLogEntry> = all.value
+
     override fun entries(limit: Int): Flow<List<CallLogEntry>> =
         all.map { rows -> rows.filter { it.kind != CallLogKind.Blocked }.take(limit) }
 

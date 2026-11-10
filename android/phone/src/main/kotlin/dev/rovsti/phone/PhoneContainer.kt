@@ -5,6 +5,7 @@ import android.content.Context
 import android.telephony.TelephonyManager
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.getOrNull
+import dev.rovsti.core.model.phone.LocaleTime
 import dev.rovsti.core.model.phone.TelUriRequest
 import dev.rovsti.core.model.shared.InferHomeCcRequest
 import dev.rovsti.core.model.shared.NumberForm
@@ -30,6 +31,10 @@ import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.RecentsRepository
 import dev.rovsti.phone.data.SimState
 import dev.rovsti.phone.data.SpeedDial
+import dev.rovsti.phone.details.CallDetailsTarget
+import dev.rovsti.phone.details.CallDetailsViewModel
+import dev.rovsti.phone.details.PersonSheetViewModel
+import dev.rovsti.phone.details.PersonTarget
 import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
 import dev.rovsti.phone.setup.SetupFactsSource
@@ -54,6 +59,7 @@ import dev.rovsti.shell.ShellContainer
 import dev.rovsti.wa.calls.AndroidCallAudioPump
 import dev.rovsti.wa.calls.CallAudioPump
 import dev.rovsti.wa.calls.WaCalls
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -165,6 +171,52 @@ open class PhoneContainer(
                 ?.let { offerDial(it.text) }
         }
     }
+
+    /** What the device says about local time now (the time zone and 12/24 h can change while the app runs). */
+    fun localeNow(): LocaleTime = DeviceLocaleTime.now(context, clock())
+
+    /** The model of one Contact / Number sheet (E5.4); [scope] belongs to the sheet and ends with it. */
+    open fun personModel(
+        target: PersonTarget,
+        scope: CoroutineScope,
+    ): PersonSheetViewModel =
+        PersonSheetViewModel(
+            target = target,
+            recents = recents,
+            callLog = callLog,
+            ops = ops,
+            shared = sharedOps,
+            qr = qr,
+            placer = placer,
+            block = block,
+            sims = simState.sims,
+            store = store,
+            clipboard = clipboard,
+            homeCc = ::homeCc,
+            locale = ::localeNow,
+            scope = scope,
+            clock = clock,
+        )
+
+    /** The model of one Call details sheet (E5.4). */
+    open fun callModel(
+        target: CallDetailsTarget,
+        scope: CoroutineScope,
+    ): CallDetailsViewModel =
+        CallDetailsViewModel(
+            target = target,
+            recents = recents,
+            callLog = callLog,
+            ops = ops,
+            chat = chat,
+            store = store,
+            clipboard = clipboard,
+            reminders = callReminders,
+            sims = simState.sims,
+            locale = ::localeNow,
+            scope = scope,
+            clock = clock,
+        )
 
     protected open fun createCalls(): CallsApi = CallRegistry
 

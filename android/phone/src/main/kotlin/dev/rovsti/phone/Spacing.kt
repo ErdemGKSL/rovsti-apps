@@ -103,3 +103,11 @@ internal object RecentsMetrics {
     val ToolbarExpanded = 54.dp
     val ToolbarSide = 4.dp
 }
+
+/** The details sheets (E5.4): the header avatar, the glyph sizes of their rows and the QR code. */
+internal object DetailsMetrics {
+    val HeaderAvatar = 72.dp
+    val RowGlyph = 22.dp
+    val SmallGlyph = 20.dp
+    val QrSize = 224.dp
+}

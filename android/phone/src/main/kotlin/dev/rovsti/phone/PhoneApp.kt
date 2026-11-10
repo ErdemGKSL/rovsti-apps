@@ -3,12 +3,16 @@ package dev.rovsti.phone
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -21,6 +25,11 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.transition.TabNavigator
+import dev.rovsti.phone.data.People
+import dev.rovsti.phone.details.DetailsHost
+import dev.rovsti.phone.details.DetailsPresenter
+import dev.rovsti.phone.details.DetailsStrings
+import dev.rovsti.phone.details.personTarget
 import dev.rovsti.phone.diagnostics.DiagnosticsPage
 import dev.rovsti.phone.diagnostics.DiagnosticsViewModel
 import dev.rovsti.phone.diagnostics.SevenTaps
@@ -39,12 +48,15 @@ import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupSheetContent
 import dev.rovsti.phone.setup.SetupSheetViewModel
+import dev.rovsti.platform.files.ExportDocument
+import dev.rovsti.platform.files.FileResult
 import dev.rovsti.platform.files.ShareIntents
 import dev.rovsti.platform.telephony.KeypadTone
 import dev.rovsti.shell.RovstiShell
 import dev.rovsti.shell.settings.CommonSettingsPage
 import dev.rovsti.shell.settings.aboutInfo
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.launch
 
 /** The setup sheet's view model, on the activity so the sheet, the notice line and Settings read one checklist. */
 @Composable
@@ -122,7 +134,7 @@ private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewMode
 /** Recents' Android side: the SMS composer, the contact editor, the share sheet. */
 private class AndroidRecentsHost(
     private val context: Context,
-    private val comingSoon: () -> Unit,
+    private val details: (String) -> Unit,
 ) : RecentsHost {
     override fun message(
         number: String,
@@ -133,7 +145,35 @@ private class AndroidRecentsHost(
 
     override fun share(text: String) = launch(Intent.createChooser(ShareIntents.text(text), null))
 
-    override fun openDetails(key: String) = comingSoon()
+    override fun openDetails(key: String) = details(key)
+
+    private fun launch(intent: Intent) {
+        try {
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: ActivityNotFoundException) {
+            // No app handles it: nothing to show.
+        }
+    }
+}
+
+/** The details sheets' Android side: the SMS composer, the contact editor, the share sheet and the CSV picker. */
+private class AndroidDetailsHost(
+    private val context: Context,
+    private val export: (String, String) -> Unit,
+) : DetailsHost {
+    override fun message(
+        number: String,
+        body: String?,
+    ) = launch(ShareIntents.sendSmsTo(number, body))
+
+    override fun addContact(number: String) = launch(addContactIntent(number, create = false))
+
+    override fun share(text: String) = launch(Intent.createChooser(ShareIntents.text(text), null))
+
+    override fun saveCsv(
+        fileName: String,
+        csv: String,
+    ) = export(fileName, csv)
 
     private fun launch(intent: Intent) {
         try {
@@ -271,6 +311,49 @@ fun PhoneApp(
         }
     }
 
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val detailsStrings = DetailsStrings.current()
+    var pendingCsv by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val exporter =
+        rememberLauncherForActivityResult(ExportDocument("text/csv")) { result ->
+            val csv = pendingCsv ?: return@rememberLauncherForActivityResult
+            pendingCsv = null
+            val uri = (result as? FileResult.Ok)?.uri ?: return@rememberLauncherForActivityResult
+            scope.launch {
+                val written = container.files.writeExport(uri, text = csv.second)
+                overlays.showToast(
+                    if (written is FileResult.Ok) detailsStrings.saved(csv.first) else detailsStrings.saveFailed,
+                )
+            }
+        }
+    val detailsHost =
+        remember(context, exporter) {
+            AndroidDetailsHost(context) { name, csv ->
+                pendingCsv = name to csv
+                exporter.launch(name)
+            }
+        }
+    val details =
+        remember(overlays, container, detailsHost, context) {
+            DetailsPresenter(
+                overlays = overlays,
+                host = detailsHost,
+                resources = { context.resources },
+                person = container::personModel,
+                call = container::callModel,
+            )
+        }
+    val openDetails: (String) -> Unit =
+        remember(details, recentsModel, container) {
+            { key ->
+                recentsModel.rowOf(key)?.let { row ->
+                    val book = (container.people.people.value as? People.Ready)?.contacts
+                    details.presentPerson(personTarget(row, book))
+                }
+            }
+        }
+
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
@@ -295,9 +378,7 @@ fun PhoneApp(
             )
         }
         entry<PhoneRoute.Recents> {
-            val context = LocalContext.current
-            val soon = stringResource(R.string.coming_message)
-            val host = remember(context, overlays) { AndroidRecentsHost(context) { overlays.showToast(soon) } }
+            val host = remember(context, openDetails) { AndroidRecentsHost(context, openDetails) }
             RecentsScreen(
                 model = recentsModel,
                 host = host,

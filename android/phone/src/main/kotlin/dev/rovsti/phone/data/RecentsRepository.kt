@@ -83,6 +83,9 @@ class RecentsRepository(
     val callEntries: List<CallLogEntry> get() = entries
 
     @Volatile private var wa: List<ExtraCall> = emptyList()
+
+    /** The WhatsApp calls of the last build's source, newest first (the details sheets read their history from it). */
+    val extraCalls: List<ExtraCall> get() = wa
     private var delayed: Job? = null
 
     private val coalescer =

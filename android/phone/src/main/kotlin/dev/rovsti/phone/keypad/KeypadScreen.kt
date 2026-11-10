@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import dev.rovsti.core.model.phone.FieldAction
 import dev.rovsti.core.model.phone.SimAccount
 import dev.rovsti.design.chrome.LocalContentInsets
+import dev.rovsti.design.chrome.Toolbar
+import dev.rovsti.design.chrome.ToolbarAction
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
@@ -77,8 +79,6 @@ import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RootLinks
 import kotlinx.collections.immutable.ImmutableList
-import dev.rovsti.design.chrome.Toolbar
-import dev.rovsti.design.chrome.ToolbarAction
 import kotlinx.collections.immutable.persistentListOf
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -288,7 +288,9 @@ internal fun KeypadContent(
                 val settingsLabel = strings.settings
                 val toolbar =
                     remember(settingsLabel, onSettings) {
-                        persistentListOf(ToolbarAction("settings", RovstiIcons.Gear, settingsLabel, onClick = onSettings))
+                        persistentListOf(
+                            ToolbarAction("settings", RovstiIcons.Gear, settingsLabel, onClick = onSettings),
+                        )
                     }
                 Toolbar(
                     actions = toolbar,

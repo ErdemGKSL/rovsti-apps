@@ -1217,6 +1217,7 @@ AD-MSG9, AD-WA11), then polish.
 | E6.1 | App module, SMS role, manifest parity, tabs, permissions, migration test | R1 | todo |
 | E6.2 | Unified inbox | R1 | todo |
 | E6.3 | SMS and MMS conversation | R1 | todo |
+| E6.4s | WhatsApp offline store and per-device sync engine (owner request 2026-11-10; before E6.2 and E6.4a) | R1 | todo |
 | E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | todo |
 | E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | todo |
 | E6.5 | Message context menu, select mode, detection pills | R2 | todo |
@@ -1251,6 +1252,37 @@ AD-MSG9, AD-WA11), then polish.
   long-press Send opens the schedule sheet (E6.10 fills it).
 - Screenshots: `e6.3-sms-thread`, `e6.3-sms-keyboard-open`, `e6.3-composer-multiline-selection`, `e6.3-undo-send-pill`,
   `e6.3-failed-message-menu`, `e6.3-mms-bubble`, `e6.3-dual-sim-chooser`.
+
+### E6.4s WhatsApp offline store and per-device sync engine (owner request, 2026-11-10)
+Owner: "the old app fetched WhatsApp live from the server every time; I want to read WhatsApp messages even without
+internet: cache old messages on the device and only ask the gateway for new ones." Do this before the inbox (E6.2) and
+the thread (E6.4a): both read WhatsApp **only from the local store**; the network only fills the store.
+- **Store (platform-free, Rust, `rovsti_app_core::wa_sync`):** SQLite on the device (rusqlite, bundled) with chats,
+  messages (gateway id, chat JID, sender, timestamp, kind, text, quoted id, reactions, ticks/status, edit/delete flags),
+  media metadata (thumbnail bytes inline, full media as a cached file path), contacts/names/avatars refs, and a
+  `sync_state` row per linked instance. Schema versioned with migrations and tests. One store per app install; it is
+  keyed by the connect key's instance, so re-linking another instance never mixes data.
+- **Per-device sync cursor:** each install keeps its own last event `seq` (the gateway `EventLog`, crates/rovsti_wa_proto
+  `log.rs` `since()`), plus per chat the newest and oldest stored message. On (re)connect: ask the gateway for events
+  `since(seq)` and apply them in order (idempotent upserts by gateway message id; the timeline echo/confirm dedupe in
+  `timeline.rs` must hold). On `Since::Gap` (gateway restarted or ring trimmed) run a **resync**: refresh the chat list,
+  then for each chat fetch pages newer than the newest stored message (`GET .../messages?before=` paging,
+  services/wa_gateway/src/routes.rs, 50-200 per page) until they overlap what is stored; never drop stored history.
+- **Older history on demand:** scrolling a thread past the oldest stored message fetches the next page `before` it and
+  stores it; once stored it is readable offline.
+- **Outbox:** sending while offline queues the message locally (client id, shown as pending), retries with backoff when
+  the gateway is reachable, and reconciles with the echo so it never doubles. Edits, deletes, reactions and read marks
+  queue the same way.
+- **Media:** thumbnails stored with the message; full media downloaded on open (and optionally prefetched on Wi-Fi),
+  kept in an LRU cache with a size cap set in Settings; a message stays readable when its media is evicted.
+- **Live updates:** the event stream (E2.14) writes to the store; the UI observes the store (Flow), so live and offline
+  are the same code path. Sync runs in a foreground-safe worker on connectivity change and app start; no polling loop.
+- **Gateway:** prefer the existing API. If a needed call is missing (for example "messages after id" for gap repair,
+  or event replay beyond the ring), add it in `services/wa_gateway` with tests, keep the API backward compatible for
+  the deployed apps, and list the deploy step in the story evidence; deploying needs the owner's go.
+- **Tests:** Rust unit tests for ordering, idempotent upsert, gap -> resync, outbox reconcile, edits/deletes, migration;
+  Kotlin tests that the inbox and a thread render from the store with the network off (fake gateway down), and a
+  screenshot `e6.4s-offline-thread` with an "offline" indicator.
 
 ### E6.4a / E6.4b WhatsApp conversation
 - E6.4a shots: `e6.4-wa-thread`, `e6.4-wa-group-thread`, `e6.4-wa-keyboard-open`. E6.4b shots: the rest below.

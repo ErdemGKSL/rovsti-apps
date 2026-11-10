@@ -1178,6 +1178,11 @@ round close. E5.9-E5.14 follow in round 14.
   `e5.4-person-stats`, `e5.4-qr`.
 
 ### E5.5 Favorites and Contacts tabs
+- **(F24) Owner, Phone search focus:** tapping a search result opens its sheet (good), but the search field stays
+  focused and the keyboard stays up behind the sheet. When a result's sheet opens, clear focus and hide the keyboard;
+  when that sheet closes (dismissed back to the results), give the field focus again and bring the keyboard back with
+  the caret at the end, so the owner can keep typing. Same rule for the Recents search and any search that opens a sheet.
+  Compose test: type, tap result -> IME hidden and field unfocused; dismiss -> field focused and IME shown.
 - Screenshots: `e5.5-favorites`, `e5.5-favorites-empty`, `e5.5-favorites-reorder`, `e5.5-favorites-tr`, `e5.5-contacts-tab`, `e5.5-contacts-search`.
 - **Done (round-13 step 1).** Evidence: the tests above, Phone `values-tr/strings.xml` (all strings, `PhoneStringsTest` checks keys, placeholders and untranslated copies), Diagnostics labels moved to `@StringRes` (`DiagnosticsLabels`), goldens opened: last row above the bar, 16 dp gutters, Turkish labels unclipped.
 
@@ -1300,6 +1305,40 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   keypad typing and Recents scroll; contact sheet `docs/kotlin-ui/screenshots/phone.png`.
 
 ---
+
+## X. Cross-app owner requests (2026-11-10): plan these right after round 13, before E6
+
+| Story | Title | Round | Status |
+|---|---|---|---|
+| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | next | todo |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | next | todo |
+
+### X.1 WhatsApp photo fallback avatar
+- When a contact has **no photo of its own**, Contacts and Phone show the WhatsApp profile photo of the contact's
+  WhatsApp number instead of the initials (lists, card, favorites, recents, call screens incl. the photo background).
+- It is a **fallback only**: never written into the Android contact (the existing editor action "Use WhatsApp Photo"
+  stays the explicit way to adopt it). Stored in a separate app-private cache shared by both apps through the Rust core
+  (`rovsti_app_core`, reuse `wa_link` avatar plan / names from E2.4): keyed by WhatsApp JID and picture id, with the
+  picture id from the gateway's profile events so a changed photo refreshes and a removed one is dropped; size-capped
+  (LRU), readable offline, refreshed in the background (never blocks a list or the ringing screen).
+- Only for numbers that resolve to a WhatsApp account the linked instance can see; no lookups when WhatsApp is not
+  linked. A small WhatsApp glyph is not added on top (keep the avatar clean).
+- Tests: Rust cache (insert, refresh on picture-id change, eviction, offline read); Kotlin: contact with photo keeps it,
+  without photo shows the WA image, unlinked shows initials. Screenshots `x1-wa-avatar-list`, `x1-wa-avatar-card`.
+
+### X.2 Share cards with Takumi
+- Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least
+  two weeks old, check its current API on docs.rs) inside the Rust core to render designed cards from node trees to
+  **JPEG** (and PNG where transparency matters). New module `rovsti_app_core::cards`, ops exposed through `rovsti_ffi`
+  (`cards.render`), general-purpose so Phone/Messages/Stops can add templates later.
+- First templates in Contacts: **birthday card** ("Happy birthday, <name>!", age if known, photo or WA fallback avatar,
+  date), **contact card** (name, numbers, QR of the vCard), maybe **new number** announcement. Liquid-glass look in the
+  app's style: soft gradient, frosted panel, clean type. Turkish and English text by locale. Bundle the fonts they need
+  (licence noted in THIRD_PARTY_NOTICES) so rendering is deterministic.
+- UI: from the contact card's menu and the Upcoming Birthdays "Wish" action -> a preview sheet (template switcher,
+  colour choice) -> Share (Android share sheet with the JPEG) or Save to gallery.
+- Tests: Rust golden renders (hash or pixel-diff tolerance), size/time budget (render under ~300 ms on the phone),
+  Kotlin flow tests; screenshots `x2-card-preview-birthday`, `x2-card-preview-contact`.
 
 ## E6. Messages including WhatsApp (`:messages`)
 

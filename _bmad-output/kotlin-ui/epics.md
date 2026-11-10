@@ -1540,3 +1540,18 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 ### E8.8 targetSdk 37
 - AC1 Behaviour changes of API 37 reviewed against foreground services, exact alarms, full-screen intents, predictive
   back; bump or keep 36 with the reason written in ARCH 3.
+
+---
+
+## Future (not scheduled): Stops on iOS
+
+**Planners: do not pick this up.** Owner note 2026-11-10: if Rovsti ever goes to iOS, only **Stops** goes (Phone and
+SMS cannot be default apps on iOS). Kept here as a future plan, not part of this rewrite.
+- Reuse the platform-free Rust core (`rovsti_app_core` Stops store/pick/snap/trip, `rovsti_geo`, `rovsti_tiles`) via a
+  Swift binding (UniFFI or a thin C ABI next to `rovsti_ffi`), built for `aarch64-apple-ios` and the simulator.
+- UI in SwiftUI with the system Liquid Glass (iOS 26) rather than porting the Compose glass engine.
+- iOS replacements: Core Location region monitoring and significant-change updates for the arrival alarm (no
+  foreground service), critical or time-sensitive notifications for the alarm, MapLibre iOS with the same tile cache
+  and user-chosen tile server.
+- Open questions for then: background location limits, alarm reliability with the phone locked, App Store vs
+  sideloading (personal use).

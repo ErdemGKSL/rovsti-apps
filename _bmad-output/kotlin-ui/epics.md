@@ -1273,6 +1273,13 @@ the thread (E6.4a): both read WhatsApp **only from the local store**; the networ
 - **Outbox:** sending while offline queues the message locally (client id, shown as pending), retries with backoff when
   the gateway is reachable, and reconciles with the echo so it never doubles. Edits, deletes, reactions and read marks
   queue the same way.
+- **Deleted messages are never erased (owner request, 2026-11-10):** a message deleted by its sender ("delete for
+  everyone") or by the owner is only **marked** deleted (`deleted_at`, `deleted_by`), with its text, quote and media
+  kept in the store. The thread shows it as a "This message was deleted" bubble (Turkish: "Bu mesaj silindi") with the
+  time; **long-press** opens the normal message menu with a "Show content" preview that reveals the original text/media
+  (no other action changes it). Search, export and backups keep it. The gateway does the same server side (see the
+  gateway change "soft delete"), so a resync never removes it either. Applies to the `MessageDeleted` event and to
+  edits (keep the previous text as edit history, shown the same way).
 - **Media:** thumbnails stored with the message; full media downloaded on open (and optionally prefetched on Wi-Fi),
   kept in an LRU cache with a size cap set in Settings; a message stays readable when its media is evicted.
 - **Live updates:** the event stream (E2.14) writes to the store; the UI observes the store (Flow), so live and offline

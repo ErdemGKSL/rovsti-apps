@@ -1,2 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest />
+<!-- PlatformHaptics calls Vibrator.vibrate (Strong mode) and View.performHapticFeedback, which on Android 15+ may vibrate
+     in-process. VIBRATE is a normal (install-time) permission; declaring it here merges it into every app that uses
+     :design, so no app can crash with a SecurityException on a haptic tick. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.VIBRATE" />
+</manifest>

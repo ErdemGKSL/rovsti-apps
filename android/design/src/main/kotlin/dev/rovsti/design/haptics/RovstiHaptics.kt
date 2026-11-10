@@ -87,8 +87,14 @@ object NoHaptics : RovstiHaptics {
     override fun play(event: HapticEvent) = Unit
 }
 
-/** The device implementation: [mode] is read on every event, so changing the preference needs no recreation. */
-@SuppressLint("MissingPermission") // The app manifest holds VIBRATE; libraries declare no permissions.
+/**
+ * The device implementation: [mode] is read on every event, so changing the preference needs no recreation.
+ *
+ * Haptics are never worth a crash: both paths run through [guardHaptic], so a missing `VIBRATE` grant (a
+ * `SecurityException` from `Vibrator.vibrate`, also reachable from `View.performHapticFeedback` on Android 15+) or a
+ * vibrator service in a bad state (`IllegalStateException`) just plays nothing.
+ */
+@SuppressLint("MissingPermission") // :design's manifest declares VIBRATE, so every app that uses it merges the grant.
 class PlatformHaptics(
     private val view: View,
     private val vibrator: Vibrator?,
@@ -97,15 +103,26 @@ class PlatformHaptics(
     override fun play(event: HapticEvent) {
         when (mode()) {
             HapticMode.Off -> Unit
-            HapticMode.System -> view.performHapticFeedback(event.constant)
-            HapticMode.Strong -> vibrator?.vibrate(VibrationEffect.createPredefined(event.effect))
+            HapticMode.System -> guardHaptic { view.performHapticFeedback(event.constant) }
+            HapticMode.Strong -> guardHaptic { vibrator?.vibrate(VibrationEffect.createPredefined(event.effect)) }
         }
     }
 }
 
+/** Runs [block], swallowing the exceptions a vibrator call throws without the grant or service; true when it ran. */
+fun guardHaptic(block: () -> Unit): Boolean =
+    try {
+        block()
+        true
+    } catch (_: SecurityException) {
+        false
+    } catch (_: IllegalStateException) {
+        false
+    }
+
 val LocalRovstiHaptics = staticCompositionLocalOf<RovstiHaptics> { NoHaptics }
 
-/** A [PlatformHaptics] for the current window. Strong mode needs the VIBRATE permission in the app manifest. */
+/** A [PlatformHaptics] for the current window. VIBRATE comes from :design's manifest by manifest merge. */
 @Composable
 fun rememberRovstiHaptics(mode: HapticMode): RovstiHaptics {
     val view = LocalView.current

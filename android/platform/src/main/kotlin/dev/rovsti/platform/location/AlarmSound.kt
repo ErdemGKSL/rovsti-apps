@@ -155,16 +155,25 @@ internal class AlarmSound(
         val vibrator = app.getSystemService(VibratorManager::class.java)?.defaultVibrator ?: return
         if (!vibrator.hasVibrator()) return
         val effect = VibrationEffect.createWaveform(plan.vibratePatternMs, 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(effect, ALARM_ATTRS)
+        // A missing VIBRATE grant or a vibrator service in a bad state must not take the alarm down with it.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(effect, ALARM_ATTRS)
+            }
+        } catch (_: SecurityException) {
+        } catch (_: IllegalStateException) {
         }
     }
 
     fun cancelVibration() {
-        app.getSystemService(VibratorManager::class.java)?.cancel()
+        try {
+            app.getSystemService(VibratorManager::class.java)?.cancel()
+        } catch (_: SecurityException) {
+        } catch (_: IllegalStateException) {
+        }
     }
 
     private fun requestFocus() {

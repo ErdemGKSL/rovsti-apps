@@ -107,12 +107,19 @@ object AlarmOptions {
             context.applicationContext.getSystemService(VibratorManager::class.java)?.defaultVibrator ?: return false
         if (!vibrator.hasVibrator()) return false
         val effect = VibrationEffect.createWaveform(pattern, -1)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(effect, AlarmSound.ALARM_ATTRS)
+        // A missing VIBRATE grant or a vibrator service in a bad state reports "no preview" instead of crashing.
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(effect, AlarmSound.ALARM_ATTRS)
+            }
+            true
+        } catch (_: SecurityException) {
+            false
+        } catch (_: IllegalStateException) {
+            false
         }
-        return true
     }
 }

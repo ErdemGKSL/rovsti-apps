@@ -123,7 +123,7 @@ class AppPermissions(
                     ),
                 groups = listOf(PermissionGroup.CONTACTS, PermissionGroup.CALL_LOG, PermissionGroup.NOTIFICATIONS),
                 special = emptySet(),
-                installTime = setOf(Manifest.permission.INTERNET),
+                installTime = setOf(Manifest.permission.VIBRATE, Manifest.permission.INTERNET),
                 specialPermissions = emptySet(),
                 handoffUses = true,
             )

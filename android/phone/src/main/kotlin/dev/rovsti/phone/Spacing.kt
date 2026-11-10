@@ -163,3 +163,55 @@ internal const val DECLINE_RED = 0xFFFF3B30
 
 /** A screenshot draws the aura at this phase (radians), so a golden never shows a half-moved frame. */
 internal const val AURA_SHOT_PHASE = 2.4f
+
+/** Dimensions of the In-Call screen, the tone keypad, the route list and the mini pill (E5.7a). */
+internal object InCallMetrics {
+    val Avatar = 112.dp
+    val AvatarGap = 20.dp
+    val LabelTop = 16.dp
+    val NameGap = 6.dp
+    val SidePad = 24.dp
+
+    /** The control circles (Mute, Keypad, Audio, Add call, Hold, Note) and their grid. */
+    val Control = 72.dp
+    val ControlGap = 20.dp
+    val RowGap = 16.dp
+    val ControlIcon = 28.dp
+    val CaptionGap = 6.dp
+
+    /** The End button. */
+    val End = 76.dp
+    val EndIcon = 32.dp
+    val EndTop = 28.dp
+    val BottomPad = 80.dp
+
+    /** The collapse button at the top-start. */
+    val TopBar = 44.dp
+    val TopIcon = 24.dp
+
+    /** The SIM chip. */
+    val ChipHeight = 28.dp
+    val ChipDot = 10.dp
+    val ChipPadX = 12.dp
+
+    /** The tone keys. */
+    val Key = 68.dp
+    val KeyGap = 14.dp
+    val DigitLine = 48.dp
+
+    /** The route list rows in the popover. */
+    val RouteRow = 48.dp
+    val RouteGlyph = 22.dp
+    val RouteWidth = 260.dp
+
+    /** The mini pill over the app. */
+    val PillHeight = 56.dp
+    val PillSide = 12.dp
+    val PillTop = 8.dp
+    val PillAvatar = 36.dp
+    val PillEnd = 40.dp
+    val PillRadius = 28.dp
+
+    /** The aura's chrome mesh at the top. */
+    val MeshHeight = 320.dp
+}

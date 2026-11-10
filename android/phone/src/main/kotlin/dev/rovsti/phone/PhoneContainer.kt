@@ -35,6 +35,12 @@ import dev.rovsti.phone.details.CallDetailsTarget
 import dev.rovsti.phone.details.CallDetailsViewModel
 import dev.rovsti.phone.details.PersonSheetViewModel
 import dev.rovsti.phone.details.PersonTarget
+import dev.rovsti.phone.incall.CoreInCallBackend
+import dev.rovsti.phone.incall.InCallBackend
+import dev.rovsti.phone.incall.InCallViewModel
+import dev.rovsti.phone.incall.RepoInCallBlocker
+import dev.rovsti.phone.incall.StoreInCallNotes
+import dev.rovsti.phone.incall.ToneMemory
 import dev.rovsti.phone.incoming.CallSource
 import dev.rovsti.phone.incoming.CoreIncomingBackend
 import dev.rovsti.phone.incoming.IncomingBackend
@@ -56,6 +62,7 @@ import dev.rovsti.platform.notify.RemindersRepository
 import dev.rovsti.platform.system.SettingsMirror
 import dev.rovsti.platform.system.permissions.AppPermissions
 import dev.rovsti.platform.system.permissions.PermissionGroup
+import dev.rovsti.platform.system.permissions.PermissionState
 import dev.rovsti.platform.telephony.AndroidSimRepository
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.platform.telephony.CallsApi
@@ -67,7 +74,9 @@ import dev.rovsti.wa.calls.WaCalls
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** A number the Keypad is asked to show: a `tel:` link decoded by `dial.fromTelUri`, or a WhatsApp hand-off. */
@@ -203,6 +212,40 @@ open class PhoneContainer(
             clock = clock,
         )
 
+    /** The reasons the In-Call screen asks the core (words, route rows, tone plans). */
+    val inCallBackend: InCallBackend by lazy { createInCallBackend() }
+
+    /** The tones pasted per number, offered again when that number next connects (U51); lives as long as the process. */
+    val toneMemory: ToneMemory = ToneMemory()
+
+    /** The model of the single-call In-Call screen (E5.7a); [scope] is the app's, [unknown] its word. */
+    open fun inCallModel(
+        scope: CoroutineScope,
+        unknown: String,
+    ): InCallViewModel =
+        InCallViewModel(
+            source = callSource,
+            calls = calls,
+            backend = inCallBackend,
+            notes = StoreInCallNotes(store, ops, clock),
+            blocker = RepoInCallBlocker(block),
+            clipboard = clipboard,
+            tones = toneMemory,
+            sims = simState.sims,
+            bluetoothGranted =
+                permissions
+                    .state(PermissionGroup.BLUETOOTH)
+                    .map { it is PermissionState.Granted }
+                    .stateIn(
+                        scope,
+                        SharingStarted.Eagerly,
+                        permissions.state(PermissionGroup.BLUETOOTH).value is PermissionState.Granted,
+                    ),
+            unknownLabel = unknown,
+            scope = scope,
+            clock = clock,
+        )
+
     /** The model of one Contact / Number sheet (E5.4); [scope] belongs to the sheet and ends with it. */
     open fun personModel(
         target: PersonTarget,
@@ -251,6 +294,8 @@ open class PhoneContainer(
     protected open fun createCallSource(): CallSource = RegistryCallSource(calls, CallRegistry.state, scope)
 
     protected open fun createIncomingBackend(): IncomingBackend = CoreIncomingBackend(ops, chat)
+
+    protected open fun createInCallBackend(): InCallBackend = CoreInCallBackend(ops)
 
     protected open fun createCallLog(): CallLogRepository = AndroidCallLogRepository(context, Dispatchers.IO)
 

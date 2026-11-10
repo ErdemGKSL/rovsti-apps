@@ -45,7 +45,7 @@ class MainActivity :
     override val navSpec: NavSpec<PhoneRoute> = NavSpec(PhoneTabs, PhoneRoots, PhoneRoute.serializer())
 
     private val main = Handler(Looper.getMainLooper())
-    private val clearLockScreenFlags = Runnable { setLockScreenFlags(false) }
+    private val lockScreen = LockScreenGate(::setLockScreenFlags, main::postDelayed, main::removeCallbacks)
     private var uiFailed = false
 
     /** The error boundary of the Incoming screen: no first frame in time shows [NativeIncoming] (AD-17). */
@@ -112,7 +112,7 @@ class MainActivity :
     }
 
     override fun onDestroy() {
-        main.removeCallbacks(clearLockScreenFlags)
+        lockScreen.cancel()
         watchdog.disarm()
         if (CallRegistry.surface === this) CallRegistry.surface = null
         super.onDestroy()
@@ -170,8 +170,7 @@ class MainActivity :
     // ---- Calls over the lock screen (AD-1) -------------------------------------------------------------------
 
     override fun onLiveCallChanged(live: Boolean) {
-        main.removeCallbacks(clearLockScreenFlags)
-        if (live) setLockScreenFlags(true) else main.postDelayed(clearLockScreenFlags, LOCK_SCREEN_LINGER_MS)
+        lockScreen.onLiveCallChanged(live)
     }
 
     private fun setLockScreenFlags(on: Boolean) {
@@ -228,7 +227,6 @@ class MainActivity :
         )
 
     private companion object {
-        const val LOCK_SCREEN_LINGER_MS = 3_500L
         const val FALLBACK_PADDING_DP = 24
         const val FALLBACK_TEXT_SP = 18f
 

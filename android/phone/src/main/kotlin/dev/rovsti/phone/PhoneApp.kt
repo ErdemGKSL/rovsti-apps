@@ -4,11 +4,13 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,6 +37,14 @@ import dev.rovsti.phone.diagnostics.DiagnosticsPage
 import dev.rovsti.phone.diagnostics.DiagnosticsViewModel
 import dev.rovsti.phone.diagnostics.SevenTaps
 import dev.rovsti.phone.diagnostics.versionText
+import dev.rovsti.phone.incall.InCallAction
+import dev.rovsti.phone.incall.InCallEffects
+import dev.rovsti.phone.incall.InCallHost
+import dev.rovsti.phone.incall.InCallScreen
+import dev.rovsti.phone.incall.InCallSheets
+import dev.rovsti.phone.incall.InCallStrings
+import dev.rovsti.phone.incall.MiniCallPill
+import dev.rovsti.phone.incall.rememberCallTimer
 import dev.rovsti.phone.incoming.IncomingEffects
 import dev.rovsti.phone.incoming.IncomingScreen
 import dev.rovsti.phone.incoming.IncomingStrings
@@ -370,6 +380,32 @@ fun PhoneApp(
             if (toCall) navigator.push(PhoneRoute.InCall)
         }
     }
+    val inCall =
+        remember(container, incomingStrings) { container.inCallModel(container.scope, incomingStrings.unknown) }
+    val inCallUi by inCall.state.collectAsState()
+    val inCallStrings = InCallStrings.current()
+    val inCallSheets =
+        remember(overlays, inCallStrings, inCall, context) {
+            InCallSheets(overlays, inCallStrings, inCall, AndroidInCallHost(context), container.scope)
+        }
+    InCallEffects(inCall, inCallSheets, overlays, inCallStrings) {
+        // The ended summary has been shown: close the page (a collapsed call has nothing to close).
+        if (navigator.current == PhoneRoute.InCall) navigator.pop()
+    }
+    // A call that was placed or arrived by itself opens its page once; collapsing it keeps it down until the user asks.
+    var openedCall by remember { mutableIntStateOf(NO_CALL) }
+    val liveCallId = inCallUi.call?.takeIf { inCallUi.live }?.callId
+    LaunchedEffect(liveCallId) {
+        val id = liveCallId ?: return@LaunchedEffect
+        val here = navigator.current
+        if (here is PhoneRoute.Incoming || here == PhoneRoute.InCall) {
+            openedCall = id
+        } else if (id != openedCall) {
+            openedCall = id
+            navigator.push(PhoneRoute.InCall)
+        }
+    }
+    val miniTimer = rememberCallTimer(inCallUi.call, inCall::now, inCall::elapsed)
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
@@ -379,13 +415,19 @@ fun PhoneApp(
         chrome = {
             // A second caller while a call is live: the card over the call (the Incoming screen has its own buttons).
             val waiting = incomingUi.waiting
-            if (waiting != null && navigator.current !is PhoneRoute.Incoming) {
-                WaitingCallCard(
-                    waiting,
-                    incomingStrings,
-                    incoming::onAction,
-                    Modifier.align(Alignment.TopCenter),
+            val onCallPage = navigator.current.let { it is PhoneRoute.Incoming || it == PhoneRoute.InCall }
+            Column(Modifier.align(Alignment.TopCenter)) {
+                MiniCallPill(
+                    ui = inCallUi,
+                    strings = inCallStrings,
+                    timer = miniTimer,
+                    visible = !onCallPage && inCallUi.call != null,
+                    onExpand = { navigator.push(PhoneRoute.InCall) },
+                    onEnd = { inCall.onAction(InCallAction.End) },
                 )
+                if (waiting != null && navigator.current !is PhoneRoute.Incoming) {
+                    WaitingCallCard(waiting, incomingStrings, incoming::onAction)
+                }
             }
         },
         accessory =
@@ -487,20 +529,27 @@ fun PhoneApp(
         entry<PhoneRoute.LicenceDetail> { route -> PhoneLicenceDetailEntry(route.id, pop, popToRoot) }
         // Incoming (E5.6): the full-screen call screen. Its sheets, toasts and leaving run in IncomingEffects above.
         entry<PhoneRoute.Incoming> { IncomingScreen(incoming) }
-        // InCall (E5.7a) arrives in the next step; until then the route a notification can reach shows an honest
-        // placeholder, and the notification itself still ends the call (AD-2).
-        entry<PhoneRoute.InCall> {
-            PhoneRootPlaceholder(
-                route = "incall",
-                title = stringResource(R.string.tab_recents),
-                icon = RovstiIcons.Phone,
-                message = stringResource(R.string.coming_message),
-                setup = setup,
-                links = links,
+        // InCall (E5.7a): the page of the single call. Back and the chevron collapse it into the mini pill.
+        entry<PhoneRoute.InCall> { InCallScreen(inCall, inCallSheets, onCollapse = pop) }
+    }
+}
+
+/** The In-Call screen's Android side: the share sheet for the call summary. */
+private class AndroidInCallHost(
+    private val context: Context,
+) : InCallHost {
+    override fun share(text: String) {
+        try {
+            context.startActivity(
+                Intent.createChooser(ShareIntents.text(text), null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
+        } catch (_: ActivityNotFoundException) {
+            // No app handles it: nothing to show.
         }
     }
 }
+
+private const val NO_CALL = -1
 
 /** Presents the Setup sheet, one at a time. */
 class SetupSheetPresenter(

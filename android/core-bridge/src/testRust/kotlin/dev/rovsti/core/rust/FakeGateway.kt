@@ -122,13 +122,14 @@ internal class FakeGateway : AutoCloseable {
         output: OutputStream,
         reply: Reply,
     ) {
+        // One write: a client that reads the head (tungstenite's handshake does) only sees the
+        // body bytes that arrived with it, so head and body must leave in the same segment.
         output.write(
             (
                 "HTTP/1.1 ${reply.status} X\r\nContent-Type: ${reply.contentType}\r\n" +
                     "Content-Length: ${reply.body.size}\r\nConnection: close\r\n\r\n"
-            ).encodeToByteArray(),
+            ).encodeToByteArray() + reply.body,
         )
-        output.write(reply.body)
         output.flush()
     }
 

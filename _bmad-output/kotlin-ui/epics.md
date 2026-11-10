@@ -36,6 +36,19 @@ Branch: `ui-overhaul` (never push to `main`).
   5. Licence (R3 owner decision: Rovsti is GPL-3.0-or-later): Convx code is ported close to verbatim with its original
      header plus the "Ported from Convx" line; glisse-derived files carry the glisse header; `android/THIRD_PARTY_NOTICES.md`
      updated for any new third-party code.
+  6. Owner rules from 2026-11-10 (apply to every app, Phone included from round 12 on, and to Messages and Stops):
+     - **Turkish:** every user-visible string lives in `res/values/strings.xml` (no hard-coded UI text in Kotlin) and has
+       a natural Turkish entry in `res/values-tr/strings.xml`; Android lint `MissingTranslation` must pass. English stays
+       the default; a Turkish phone shows Turkish automatically.
+     - **Launcher name and icon:** the manifest label is `@string/launcher_name` (`res/values/launcher.xml`), plain
+       "Phone"/"Messages"/"Stops" in English and "Telefon"/"Mesajlar"/"Duraklar" in `values-tr` (no "Rovsti").
+       The icon is the same scheme as Contacts and Phone: a liquid-glass glyph art from the image-gen skill
+       (`drawable-nodpi/ic_launcher_art.webp`, inset 20%) over a vector gradient background, with a flat white vector
+       glyph as the monochrome layer.
+     - **Notifications:** every notification uses its kind's monochrome small icon, accent colour and coloured glass
+       large icon from `:platform` (NotificationIcon); a contact photo, when there is one, stays the large icon.
+     - **Never crash on platform calls:** declare every permission a call needs (VIBRATE crashed Contacts), keep R8 keep
+       rules for anything reached by name, and wait for `Rust.init` before native calls.
 - Screenshot names: `<story>-<what>[-dark|-light][-fs2|-rtl]`, for example `e1.9-menu-open-below-dark.png`.
 
 ---

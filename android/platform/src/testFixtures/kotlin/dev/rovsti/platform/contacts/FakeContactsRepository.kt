@@ -139,6 +139,10 @@ class FakeContactsRepository(
 
     override suspend fun accounts(): ContactResult<List<Account>> = write { ContactResult.Ok(accountList.value) }
 
+    /** One raw contact per draft, in the draft's account. */
+    override suspend fun rawContactCounts(): ContactResult<Map<String, Int>> =
+        write { ContactResult.Ok(contacts.value.groupingBy { it.account }.eachCount()) }
+
     override suspend fun photoSize(path: String): PhotoSize = photoSizes[path] ?: PhotoSize(0, 0)
 
     override suspend fun setPhoto(

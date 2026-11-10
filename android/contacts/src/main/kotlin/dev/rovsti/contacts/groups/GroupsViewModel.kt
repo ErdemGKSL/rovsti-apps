@@ -4,12 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
+import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.GroupLabelsRequest
 import dev.rovsti.core.model.contacts.GroupTitleRequest
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.contacts.saveAccount
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -30,13 +32,15 @@ import kotlinx.coroutines.launch
 /**
  * The Groups tab (E4.7). The groups come from [ContactsRepository.groups]; the subtitle of a row ("3 contacts", with the
  * account when the phone has several) is `contacts.groups_labels` over the members that are in the address book, a new
- * name is checked by `contacts.groups_title` (empty, too long, taken) before the group is saved.
+ * name is checked by `contacts.groups_title` (empty, too long, taken) before the group is saved, in the account new
+ * contacts go to ([saveAccount]: the Save To preference, else the account with the most contacts, else the phone).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class GroupsViewModel(
     private val book: BookRepository,
     private val contacts: ContactsRepository,
     private val ops: ContactsOps,
+    private val store: ContactsStore,
     private val worker: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
     private val outbox = Channel<GroupsEffect>(Channel.UNLIMITED)
@@ -96,14 +100,16 @@ class GroupsViewModel(
             outbox.trySend(GroupsEffect.AskName(name, checked.error))
             return
         }
-        when (val saved = contacts.saveGroup(0, title, "")) {
+        store.load()
+        val account = contacts.saveAccount(store.prefs.value.saveTo)
+        when (val saved = contacts.saveGroup(0, title, account)) {
             is ContactResult.Ok -> {
                 outbox.trySend(GroupsEffect.Toast("Group created. Add people from its page."))
                 outbox.trySend(GroupsEffect.OpenGroup(saved.value))
             }
 
             is ContactResult.Failed -> {
-                outbox.trySend(GroupsEffect.Toast("Can't save the group right now."))
+                outbox.trySend(GroupsEffect.Toast(groupFailure(saved.reason, GROUP_CANT_SAVE)))
             }
         }
     }
@@ -112,3 +118,13 @@ class GroupsViewModel(
         const val STOP_TIMEOUT_MS = 5_000L
     }
 }
+
+internal const val GROUP_CANT_SAVE = "Can't save the group right now."
+internal const val GROUP_CANT_CHANGE = "Can't change this group right now."
+internal const val GROUP_NO_PERMISSION = "Can't change groups: Rovsti has no permission to change contacts."
+
+/** The notice of a failed group write: the missing WRITE_CONTACTS by name, any other reason as [otherwise]. */
+internal fun groupFailure(
+    reason: ContactResult.Reason,
+    otherwise: String,
+): String = if (reason == ContactResult.Reason.Permission) GROUP_NO_PERMISSION else otherwise

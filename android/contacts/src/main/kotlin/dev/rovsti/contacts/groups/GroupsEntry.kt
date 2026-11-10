@@ -43,7 +43,7 @@ fun rememberGroupsViewModel(container: ContactsContainer): GroupsViewModel {
     return remember(owner, container) {
         val factory =
             viewModelFactory {
-                initializer { GroupsViewModel(container.book, container.contacts, container.ops) }
+                initializer { GroupsViewModel(container.book, container.contacts, container.ops, container.store) }
             }
         ViewModelProvider(owner, factory)[GroupsViewModel::class.java]
     }

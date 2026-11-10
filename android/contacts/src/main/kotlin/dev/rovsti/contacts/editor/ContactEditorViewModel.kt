@@ -25,6 +25,7 @@ import dev.rovsti.core.model.contacts.RelationKind
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.contacts.SaveAccount
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -170,10 +171,13 @@ class ContactEditorViewModel(
     private suspend fun labelOf(account: Account): String =
         (ops.accountLabel(AccountLabelRequest(account.key)) as? Outcome.Ok)?.value?.label ?: account.name
 
-    /** A new contact's draft: the seed, and the account of `prefs.save_to` when that account still exists (AD-CT3). */
-    private fun newDraft(list: List<Account>): ContactDraft {
-        val preferred = store.prefs.value.saveTo
-        val account = list.firstOrNull { it.key == preferred }?.key ?: list.firstOrNull { it.key.isEmpty() }?.key ?: ""
+    /**
+     * A new contact's draft: the seed, in the account [SaveAccount] picks (AD-CT3: `prefs.save_to` when that account
+     * still exists; the Groups tab creates groups in the same one).
+     */
+    private suspend fun newDraft(list: List<Account>): ContactDraft {
+        val counts = (repo.rawContactCounts() as? ContactResult.Ok)?.value.orEmpty()
+        val account = SaveAccount.choose(store.prefs.value.saveTo, list, counts)
         val name = seed?.name?.trim().orEmpty()
         val given = name.substringBeforeLast(' ', name)
         val family = if (name.contains(' ')) name.substringAfterLast(' ') else ""

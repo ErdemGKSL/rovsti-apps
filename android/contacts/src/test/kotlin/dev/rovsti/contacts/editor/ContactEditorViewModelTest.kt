@@ -3,6 +3,7 @@
 package dev.rovsti.contacts.editor
 
 import androidx.lifecycle.SavedStateHandle
+import dev.rovsti.contacts.card.SampleCards
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -160,6 +161,11 @@ class ContactEditorViewModelTest {
             r.model.state.value.accountLabel
                 .substringAfter(", "),
         )
+    }
+
+    @Test fun withoutSaveToANewContactStartsInTheAccountWithTheMostContacts() {
+        val r = rig { EditorRig(drafts = SampleCards.all.map { it.copy(account = GOOGLE.key) }) }
+        assertEquals("the same account a new group goes to", GOOGLE.key, r.ready().draft.account)
     }
 
     @Test fun savingAnEditNamesTheChangeAndUndoPutsTheOldValuesBack() {

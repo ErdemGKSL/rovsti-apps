@@ -48,6 +48,9 @@ class RecordingProvider : ContentProvider() {
     /** When set, every `query`, `insert`, `update` and `delete` throws it (a `SecurityException` for a denied app). */
     var failWith: RuntimeException? = null
 
+    /** When true, every `insert` answers null, like a provider that refuses the row (MIUI and a group with no account). */
+    var refuseInserts = false
+
     val queries = ArrayList<QueryCall>()
 
     /** Every `applyBatch`, in order, each with its operations. */
@@ -112,9 +115,10 @@ class RecordingProvider : ContentProvider() {
     override fun insert(
         uri: Uri,
         values: ContentValues?,
-    ): Uri {
+    ): Uri? {
         failWith?.let { throw it }
         inserts += Op(Kind.Insert, uri, ContentValues(values ?: ContentValues()), null, null)
+        if (refuseInserts) return null
         return ContentUris.withAppendedId(uri, nextId++)
     }
 

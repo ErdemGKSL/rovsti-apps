@@ -45,6 +45,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -434,6 +435,81 @@ class AndroidContactsRepositoryTest {
             assertEquals("com.google", made.string(Groups.ACCOUNT_TYPE))
             assertEquals(ContactResult.Ok(3L), repository.saveGroup(3, "Relatives", ""))
             assertEquals("Relatives", provider.updates.single().string(Groups.TITLE))
+        }
+
+    @Test
+    fun aPhoneGroupHasNoAccountWhereTheDeviceNamesNoLocalAccount() =
+        runTest {
+            assertEquals(ContactResult.Ok(100L), repository().saveGroup(0, "Family", ""))
+            val made = provider.inserts.single()
+            assertEquals(null, made.string(Groups.ACCOUNT_TYPE))
+            assertEquals(null, made.string(Groups.ACCOUNT_NAME))
+        }
+
+    @Test
+    fun aRefusedGroupInsertIsRefusedAndLogged() =
+        runTest {
+            ShadowLog.clear()
+            provider.refuseInserts = true
+            assertEquals(
+                ContactResult.failed(ContactResult.Reason.Refused),
+                repository().saveGroup(0, "Family", ""),
+            )
+            val logged = ShadowLog.getLogsForTag(CONTACTS_TAG).single()
+            assertEquals(android.util.Log.WARN, logged.type)
+            assertTrue(logged.msg, logged.msg.contains("group insert"))
+        }
+
+    @Test
+    fun aGroupWriteWithoutWriteContactsIsAPermissionFailureAndLogsTheException() =
+        runTest {
+            ShadowLog.clear()
+            val denied = SecurityException("Permission Denial: requires android.permission.WRITE_CONTACTS")
+            provider.failWith = denied
+            val repository = repository()
+            assertEquals(ContactResult.failed(ContactResult.Reason.Permission), repository.saveGroup(0, "Family", ""))
+            assertEquals(
+                ContactResult.failed(ContactResult.Reason.Permission),
+                repository.setMembers(3, listOf(1), emptyList()),
+            )
+            val logged = ShadowLog.getLogsForTag(CONTACTS_TAG)
+            assertEquals(2, logged.size)
+            assertTrue(logged.all { it.type == android.util.Log.WARN && it.throwable === denied })
+        }
+
+    @Test
+    fun aFailedMemberChangeLogsItsException() =
+        runTest {
+            ShadowLog.clear()
+            provider.failWith = IllegalStateException("provider broke")
+            assertEquals(
+                ContactResult.failed(ContactResult.Reason.Unknown),
+                repository().setMembers(3, listOf(1), emptyList()),
+            )
+            assertEquals(
+                "provider broke",
+                ShadowLog
+                    .getLogsForTag(CONTACTS_TAG)
+                    .single()
+                    .throwable
+                    ?.message,
+            )
+        }
+
+    @Test
+    fun rawContactCountsAreLiveRawContactsPerAccount() =
+        runTest {
+            provider.seed(
+                RawContacts.CONTENT_URI,
+                mapOf(RawContacts.ACCOUNT_TYPE to "com.google", RawContacts.ACCOUNT_NAME to "ada@example.org"),
+                mapOf(RawContacts.ACCOUNT_TYPE to "com.google", RawContacts.ACCOUNT_NAME to "ada@example.org"),
+                mapOf(RawContacts.ACCOUNT_TYPE to null, RawContacts.ACCOUNT_NAME to null),
+            )
+            assertEquals(
+                ContactResult.Ok(mapOf("com.google|ada@example.org" to 2, "" to 1)),
+                repository().rawContactCounts(),
+            )
+            assertEquals("${RawContacts.DELETED} = 0", provider.queriesTo(RawContacts.CONTENT_URI).single().selection)
         }
 
     @Test

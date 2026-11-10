@@ -784,7 +784,30 @@ object ContactsEdit {
         }
     }
 
-    /** Creates a group in [account] (`type|name`, empty for the phone) when [groupId] is 0, or renames one. */
+    /**
+     * The device's own account for phone-only contacts (Android 15+, `config_rawContactsLocalAccount*`): OEM providers
+     * such as MIUI/HyperOS name one instead of the null account. Null when there is none (AOSP: the null account).
+     */
+    private fun localAccount(context: Context): Pair<String, String>? {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.VANILLA_ICE_CREAM) return null
+        return runCatching {
+            val type = RawContacts.getLocalAccountType(context)
+            val name = RawContacts.getLocalAccountName(context)
+            if (type.isNullOrEmpty()) null else type to name.orEmpty()
+        }.getOrNull()
+    }
+
+    /** True when [a] and [b] are the same account, the null account and the device's local account being one. */
+    private fun sameAccount(
+        a: String,
+        b: String,
+        local: String?,
+    ): Boolean = a == b || (local != null && (a.isEmpty() || a == local) && (b.isEmpty() || b == local))
+
+    /**
+     * Creates a group in [account] (`type|name`, empty for the phone, written to the device's local account when it has
+     * one) when [groupId] is 0, or renames one. A refusal is logged under [CONTACTS_TAG].
+     */
     fun saveGroup(
         context: Context,
         groupId: Long,
@@ -796,9 +819,15 @@ object ContactsEdit {
             if (groupId > 0) {
                 val values = ContentValues().apply { put(Groups.TITLE, title) }
                 val n = resolver.update(ContentUris.withAppendedId(Groups.CONTENT_URI, groupId), values, null, null)
-                if (n > 0) ContactResult.Ok(groupId) else ContactResult.failed(ContactResult.Reason.NotFound)
+                if (n > 0) {
+                    ContactResult.Ok(groupId)
+                } else {
+                    logContacts("group rename: group $groupId not found")
+                    ContactResult.failed(ContactResult.Reason.NotFound)
+                }
             } else {
-                val (accountType, accountName) = splitAccount(account)
+                val (accountType, accountName) =
+                    splitAccount(account).takeUnless { account.isEmpty() } ?: localAccount(context) ?: (null to null)
                 val values =
                     ContentValues().apply {
                         put(Groups.ACCOUNT_TYPE, accountType)
@@ -807,11 +836,10 @@ object ContactsEdit {
                         put(Groups.GROUP_VISIBLE, 1)
                     }
                 val uri = resolver.insert(Groups.CONTENT_URI, values)
-                if (uri !=
-                    null
-                ) {
+                if (uri != null) {
                     ContactResult.Ok(ContentUris.parseId(uri))
                 } else {
+                    logContacts("group insert into account type=$accountType answered null: the provider refused it")
                     ContactResult.failed(ContactResult.Reason.Refused)
                 }
             }
@@ -838,7 +866,11 @@ object ContactsEdit {
                         arrayOf(groupId.toString()),
                         null,
                     )?.use { if (it.moveToFirst()) accountKey(it.getString(0), it.getString(1)) else null }
-                    ?: return@guarded ContactResult.failed(ContactResult.Reason.NotFound)
+            if (account == null) {
+                logContacts("group members: group $groupId not found")
+                return@guarded ContactResult.failed(ContactResult.Reason.NotFound)
+            }
+            val local = localAccount(context)?.let { (type, name) -> accountKey(type, name) }
             val ops = ArrayList<ContentProviderOperation>()
             var added = 0
             var skipped = 0
@@ -854,7 +886,7 @@ object ContactsEdit {
                     )?.use { c ->
                         while (c.moveToNext()) {
                             if (target == null &&
-                                accountKey(c.getString(1), c.getString(2)) == account
+                                sameAccount(accountKey(c.getString(1), c.getString(2)), account, local)
                             ) {
                                 target = c.getLong(0)
                             }
@@ -937,6 +969,22 @@ object ContactsEdit {
         collect(Groups.CONTENT_URI, Groups.ACCOUNT_TYPE, Groups.ACCOUNT_NAME)
         collect(RawContacts.CONTENT_URI, RawContacts.ACCOUNT_TYPE, RawContacts.ACCOUNT_NAME)
         return found.toList()
+    }
+
+    /** Live raw contacts per account key (empty: the null account). */
+    fun rawContactCounts(context: Context): Map<String, Int> {
+        val counts = HashMap<String, Int>()
+        context.contentResolver
+            .query(
+                RawContacts.CONTENT_URI,
+                arrayOf(RawContacts.ACCOUNT_TYPE, RawContacts.ACCOUNT_NAME),
+                "${RawContacts.DELETED} = 0",
+                null,
+                null,
+            )?.use { c ->
+                while (c.moveToNext()) counts.merge(accountKey(c.getString(0), c.getString(1)), 1, Int::plus)
+            }
+        return counts
     }
 
     /**

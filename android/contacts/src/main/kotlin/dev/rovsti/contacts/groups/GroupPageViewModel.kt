@@ -158,10 +158,9 @@ class GroupPageViewModel(
         }
         if (title == group.title) return
         val said =
-            if (contacts.saveGroup(groupId, title, group.account) is ContactResult.Ok) {
-                "Group renamed"
-            } else {
-                "Can't save the group right now."
+            when (val saved = contacts.saveGroup(groupId, title, group.account)) {
+                is ContactResult.Ok -> "Group renamed"
+                is ContactResult.Failed -> groupFailure(saved.reason, GROUP_CANT_SAVE)
             }
         outbox.trySend(GroupPageEffect.Toast(said))
     }
@@ -189,7 +188,7 @@ class GroupPageViewModel(
             }
 
             is ContactResult.Failed -> {
-                outbox.trySend(GroupPageEffect.Toast("Can't change this group right now."))
+                outbox.trySend(GroupPageEffect.Toast(groupFailure(result.reason, GROUP_CANT_CHANGE)))
             }
         }
     }

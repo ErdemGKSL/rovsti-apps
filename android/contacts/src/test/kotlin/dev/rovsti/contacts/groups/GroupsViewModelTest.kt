@@ -1,6 +1,10 @@
 package dev.rovsti.contacts.groups
 
 import dev.rovsti.contacts.favorites.FavRig
+import dev.rovsti.contacts.favorites.FavSample
+import dev.rovsti.core.model.contacts.Account
+import dev.rovsti.core.model.contacts.Group
+import dev.rovsti.platform.contacts.ContactResult
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import org.junit.After
@@ -25,7 +29,34 @@ class GroupsViewModelTest {
 
     private fun rig() = FavRig().also { rig = it }
 
-    private fun FavRig.groupsModel() = GroupsViewModel(book, repo, host.ops).also { groups = it }
+    /** The Favorites people with the first [inGoogle] of them in [GOOGLE], and the phone, [GOOGLE], [WORK] and [SIM]. */
+    private fun accountsRig(inGoogle: Int) =
+        FavRig(
+            drafts =
+                FavSample.drafts().mapIndexed { i, d ->
+                    when {
+                        i < inGoogle -> d.copy(account = GOOGLE.key)
+                        i < inGoogle + 2 -> d.copy(account = WORK.key)
+                        else -> d.copy(account = SIM.key)
+                    }
+                },
+            accounts = listOf(Account(), SIM, GOOGLE, WORK),
+        ).also { rig = it }
+
+    private fun FavRig.groupsModel() = GroupsViewModel(book, repo, host.ops, store).also { groups = it }
+
+    /** Creates [name] on the tab and answers the new group as the provider holds it. */
+    private fun FavRig.create(
+        model: GroupsViewModel,
+        name: String,
+    ): Group {
+        groupState(model = model)
+        model.onAction(GroupsAction.Create(name))
+        val toast = wait { model.effects.first() } as GroupsEffect.Toast
+        assertTrue(toast.text, toast.text.startsWith("Group created"))
+        val open = wait { model.effects.first() } as GroupsEffect.OpenGroup
+        return wait { fake.groups().first().first { it.id == open.id } }
+    }
 
     private fun FavRig.page(id: Long) =
         GroupPageViewModel(id, book, repo, host.ops, store, scope, clock = {
@@ -67,6 +98,44 @@ class GroupsViewModelTest {
         val open = r.wait { model.effects.first() } as GroupsEffect.OpenGroup
         val state = r.groupState({ s -> s.groups.any { it.title == "Friends" } }, model)
         assertEquals(open.id, state.groups.first { it.title == "Friends" }.id)
+    }
+
+    @Test fun aNewGroupOnAPhoneWithoutAccountsIsAPhoneGroup() {
+        val r = rig()
+        assertEquals("", r.create(r.groupsModel(), "Friends").account)
+    }
+
+    @Test fun aNewGroupGoesToTheSaveToAccountLikeANewContact() {
+        val r = accountsRig(inGoogle = 30)
+        r.wait { r.store.update { it.copy(saveTo = WORK.key) } }
+        assertEquals(WORK.key, r.create(r.groupsModel(), "Friends").account)
+    }
+
+    @Test fun withoutSaveToANewGroupGoesToTheAccountWithTheMostContactsNeverTheSim() {
+        // 3 people in Google, 2 in Work, 35 on the SIM: the SIM holds the most but cannot hold groups.
+        val r = accountsRig(inGoogle = 3)
+        assertEquals(GOOGLE.key, r.create(r.groupsModel(), "Friends").account)
+    }
+
+    @Test fun aSaveToAccountThatIsGoneFallsBackToTheMostContacts() {
+        val r = accountsRig(inGoogle = 30)
+        r.wait { r.store.update { it.copy(saveTo = "com.google|gone@example.org") } }
+        assertEquals(GOOGLE.key, r.create(r.groupsModel(), "Friends").account)
+    }
+
+    @Test fun aRefusedNewGroupSaysSoAndAMissingPermissionSaysWhy() {
+        val r = rig()
+        val model = r.groupsModel()
+        r.groupState(model = model)
+        r.fake.failWith = ContactResult.Reason.Refused
+        model.onAction(GroupsAction.Create("Friends"))
+        assertEquals(GroupsEffect.Toast("Can't save the group right now."), r.wait { model.effects.first() })
+        r.fake.failWith = ContactResult.Reason.Permission
+        model.onAction(GroupsAction.Create("Friends"))
+        assertEquals(
+            GroupsEffect.Toast("Can't change groups: Rovsti has no permission to change contacts."),
+            r.wait { model.effects.first() },
+        )
     }
 
     @Test fun aTakenOrEmptyNameComesBackWithTheCoresWords() {
@@ -124,6 +193,23 @@ class GroupsViewModelTest {
         model.onAction(GroupPageAction.Rename("Relatives"))
         assertEquals(GroupPageEffect.Toast("Group renamed"), r.wait { model.effects.first() })
         assertEquals("Relatives", r.ready(model) { it.title == "Relatives" }.title)
+    }
+
+    @Test fun aFailedRenameOrMemberChangeSaysWhyWhenThePermissionIsMissing() {
+        val r = rig()
+        val model = r.page(10)
+        r.ready(model)
+        r.fake.failWith = ContactResult.Reason.Permission
+        val denied = GroupPageEffect.Toast("Can't change groups: Rovsti has no permission to change contacts.")
+        model.onAction(GroupPageAction.Rename("Relatives"))
+        assertEquals(denied, r.wait { model.effects.first() })
+        model.onAction(GroupPageAction.RemoveMember(3))
+        assertEquals(denied, r.wait { model.effects.first() })
+        r.fake.failWith = ContactResult.Reason.Unknown
+        model.onAction(GroupPageAction.Rename("Relatives"))
+        assertEquals(GroupPageEffect.Toast("Can't save the group right now."), r.wait { model.effects.first() })
+        model.onAction(GroupPageAction.RemoveMember(3))
+        assertEquals(GroupPageEffect.Toast("Can't change this group right now."), r.wait { model.effects.first() })
     }
 
     @Test fun addMembersAddsAndRemovesTheDifference() {
@@ -243,3 +329,7 @@ class GroupsViewModelTest {
         )
     }
 }
+
+private val GOOGLE = Account("com.google|ayse@example.org", "ayse@example.org", "com.google")
+private val WORK = Account("com.google|ayse@work.example", "ayse@work.example", "com.google")
+private val SIM = Account("com.android.contacts.sim|SIM1", "SIM1", "com.android.contacts.sim")

@@ -22,16 +22,38 @@ sealed interface ContactResult<out T> {
     }
 }
 
-/** Runs a provider write: a `SecurityException` is [ContactResult.Reason.Permission], any other failure `Unknown`. */
+/** The log tag of contacts provider failures (`adb logcat -s RovstiContacts`). */
+internal const val CONTACTS_TAG = "RovstiContacts"
+
+/**
+ * Runs a provider write: a `SecurityException` is [ContactResult.Reason.Permission], any other failure `Unknown`. The
+ * exception is logged at warn level under [CONTACTS_TAG], since the screens only show a short notice.
+ */
 internal inline fun <T> guarded(block: () -> ContactResult<T>): ContactResult<T> =
     try {
         block()
-    } catch (_: SecurityException) {
+    } catch (e: SecurityException) {
+        logContacts("contacts write refused: no permission", e)
         ContactResult.failed(ContactResult.Reason.Permission)
-    } catch (_: RuntimeException) {
+    } catch (e: RuntimeException) {
+        logContacts("contacts write failed", e)
         ContactResult.failed(ContactResult.Reason.Unknown)
-    } catch (_: android.os.RemoteException) {
+    } catch (e: android.os.RemoteException) {
+        logContacts("contacts provider died", e)
         ContactResult.failed(ContactResult.Reason.Unknown)
-    } catch (_: android.content.OperationApplicationException) {
+    } catch (e: android.content.OperationApplicationException) {
+        logContacts("contacts batch failed", e)
         ContactResult.failed(ContactResult.Reason.Unknown)
     }
+
+/** A warning under [CONTACTS_TAG]; never throws (the plain-JVM `android.util.Log` is a stub). */
+internal fun logContacts(
+    message: String,
+    error: Throwable? = null,
+) {
+    try {
+        android.util.Log.w(CONTACTS_TAG, message, error)
+    } catch (_: RuntimeException) {
+        // No logcat here (a unit test without Robolectric): nothing to do.
+    }
+}

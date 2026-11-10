@@ -73,6 +73,9 @@ interface ContactsRepository {
 
     suspend fun accounts(): ContactResult<List<Account>>
 
+    /** Live raw contacts per account key (`type|name`, empty: the phone): what [saveAccount] weighs. */
+    suspend fun rawContactCounts(): ContactResult<Map<String, Int>>
+
     /** The pixel size of the picture at [path]; 0 x 0 when unreadable. */
     suspend fun photoSize(path: String): PhotoSize
 
@@ -183,6 +186,8 @@ class AndroidContactsRepository(
     ) = write { ContactsEdit.setGroupMembers(context, groupId, add, remove) }
 
     override suspend fun accounts() = write { ContactResult.Ok(ContactsEdit.accounts(context)) }
+
+    override suspend fun rawContactCounts() = write { ContactResult.Ok(ContactsEdit.rawContactCounts(context)) }
 
     override suspend fun photoSize(path: String): PhotoSize = withContext(io) { ContactPhotos.size(path) }
 

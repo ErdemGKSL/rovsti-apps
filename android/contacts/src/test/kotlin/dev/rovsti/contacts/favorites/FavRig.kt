@@ -5,6 +5,7 @@ import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.list.SampleBook
 import dev.rovsti.core.Rust
+import dev.rovsti.core.model.contacts.Account
 import dev.rovsti.core.model.contacts.ContactDraft
 import dev.rovsti.core.model.contacts.DraftEvent
 import dev.rovsti.core.model.contacts.DraftField
@@ -113,10 +114,12 @@ internal class FavRig(
     permission: PermissionState = PermissionState.Granted,
     calls: List<CallLogEntry> = FavSample.calls(),
     groups: List<Group> = FavSample.groups,
+    drafts: List<ContactDraft> = FavSample.drafts(),
+    accounts: List<Account> = listOf(Account()),
 ) {
     val host = HostRust("rovsti-fav")
     val scope = CoroutineScope(Dispatchers.Default)
-    val fake = FakeContactsRepository(FavSample.drafts(), groups)
+    val fake = FakeContactsRepository(drafts, groups, accounts)
     val repo = KeyedContacts(fake)
     val callPermission = MutableStateFlow(permission)
     val callLog = FakeCallLogRepository(calls)

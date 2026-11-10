@@ -17,8 +17,8 @@ use rovsti_wa_proto::{
     SendText, TypingState,
 };
 use rovsti_wa_proto::{
-    ChatAction, ChatActionKind, DeleteForMe, DeliveryStatus, EditMessage, MediaOptions,
-    MessageMeta, RevokeMessage, StarMessage, WaMessage,
+    ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
+    MediaOptions, MessageMeta, RevokeMessage, StarMessage, WaMessage,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wa_gateway::config::Config;
@@ -1451,7 +1451,12 @@ async fn replies_edits_and_deletes_reach_meta_and_events() {
         GatewayEvent::MessageMeta { id, body, meta, .. } => {
             assert_eq!(id, reply);
             assert_eq!(body, Some(MessageBody::Unsupported));
+            // Old apps see it as before; the content is kept for new ones.
             assert!(meta.revoked && meta.quoted.is_none());
+            assert!(meta.deleted && meta.deleted_at.is_some());
+            assert_eq!(meta.deleted_by.as_deref(), Some(DELETED_BY_ME));
+            let original = meta.original.expect("the content is kept");
+            assert_eq!(original.meta.quoted.unwrap().id, first);
         }
         other => panic!("expected MessageMeta, got {other:?}"),
     }
@@ -1480,19 +1485,44 @@ async fn replies_edits_and_deletes_reach_meta_and_events() {
     })
     .await
     .unwrap();
-    assert_eq!(
-        next_non_message(&mut events).await,
+    match next_non_message(&mut events).await {
         GatewayEvent::MessageDeleted {
-            chat: DM.into(),
-            id: first.clone()
+            chat,
+            id,
+            deleted_at,
+            deleted_by,
+        } => {
+            assert_eq!((chat.as_str(), id), (DM, first.clone()));
+            assert!(deleted_at.is_some());
+            assert_eq!(deleted_by.as_deref(), Some(DELETED_BY_ME));
         }
-    );
+        other => panic!("expected MessageDeleted, got {other:?}"),
+    }
+    // Both deleted messages are still listed, marked, with their content.
     let g = gateway.clone();
     let left = blocking(move || g.messages_with_meta(DM, None, 10))
         .await
         .unwrap();
-    assert_eq!(left.len(), 1);
-    assert!(left[0].meta.revoked);
+    assert_eq!(left.len(), 2);
+    assert!(left.iter().all(|m| m.meta.revoked && m.meta.deleted));
+    assert!(
+        left.iter()
+            .all(|m| m.message.body == MessageBody::Unsupported)
+    );
+    let kept = left.iter().find(|m| m.message.id == first).unwrap();
+    let original = kept.meta.original.as_ref().unwrap();
+    assert_eq!(original.body, MessageBody::Text("first!".into()));
+    assert_eq!(
+        original.meta.edit_history.len(),
+        1,
+        "the edit is remembered"
+    );
+    assert!(kept.meta.starred);
+    // The plain list, as old apps read it, shows them as unsupported.
+    let g = gateway.clone();
+    let plain = blocking(move || g.messages(DM, None, 10)).await.unwrap();
+    assert_eq!(plain.len(), 2);
+    assert!(plain.iter().all(|m| m.body == MessageBody::Unsupported));
 }
 
 #[tokio::test]
@@ -1509,7 +1539,7 @@ async fn edits_and_deletes_are_checked() {
         )
         .await;
 
-    let g = gateway.clone();
+    let (g, own) = (gateway.clone(), mine.clone());
     let results = blocking(move || {
         let edit = |id: &str, text: &str| {
             g.edit_message(&EditMessage {
@@ -1520,7 +1550,7 @@ async fn edits_and_deletes_are_checked() {
         };
         (
             edit("THEIRS", "x"),
-            edit(&mine, " "),
+            edit(&own, " "),
             edit("NOPE", "x"),
             g.revoke_message(&RevokeMessage {
                 chat: DM.into(),
@@ -1541,6 +1571,24 @@ async fn edits_and_deletes_are_checked() {
     assert!(is_code(&results.3.unwrap_err(), ErrorCode::BadRequest));
     // An admin delete needs a group.
     assert!(is_code(&results.4.unwrap_err(), ErrorCode::BadRequest));
+    assert!(!server.driver.ops().iter().any(|op| op.starts_with("edit")));
+
+    // A deleted message is kept but can no longer be edited.
+    let (g, id) = (gateway.clone(), mine.clone());
+    let edited = blocking(move || {
+        g.revoke_message(&RevokeMessage {
+            chat: DM.into(),
+            message_id: id.clone(),
+            sender: None,
+        })?;
+        g.edit_message(&EditMessage {
+            chat: DM.into(),
+            message_id: id,
+            text: "changed my mind".into(),
+        })
+    })
+    .await;
+    assert!(is_code(&edited.unwrap_err(), ErrorCode::BadRequest));
     assert!(!server.driver.ops().iter().any(|op| op.starts_with("edit")));
 }
 

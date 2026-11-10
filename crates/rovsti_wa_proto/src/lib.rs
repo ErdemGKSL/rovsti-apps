@@ -35,9 +35,10 @@ pub use log::{EventLog, Since};
 pub use lookup::{LookupCache, LookupUsers, MAX_LOOKUP, WaTarget, WaUser, chat_users, wa_target};
 pub use media::{MAX_SEND_BYTES, MediaTooLarge, check_size, classify};
 pub use meta::{
-    ChatAction, ChatActionKind, ChatMeta, DeleteForMe, DeliveryStatus, EditMessage, Location,
-    MAX_PROFILES, MUTED_FOREVER, MediaMeta, MediaOptions, MessageMeta, ProfilesRequest, Quoted,
-    RevokeMessage, RichChat, RichMessage, SharedContact, StarMessage, WaProfile,
+    ChatAction, ChatActionKind, ChatMeta, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
+    EditRecord, KeptContent, Location, MAX_PROFILES, MUTED_FOREVER, MediaMeta, MediaOptions,
+    MessageMeta, ProfilesRequest, Quoted, RevokeMessage, RichChat, RichMessage, SharedContact,
+    StarMessage, WaProfile,
 };
 pub use presence::{PresenceBook, presence_label};
 pub use push::{Wake, parse_wake};

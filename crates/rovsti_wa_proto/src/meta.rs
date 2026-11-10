@@ -125,7 +125,10 @@ pub struct MessageMeta {
     /// When the message was last edited (unix ms); the body is the new text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_ms: Option<i64>,
-    /// Deleted for everyone: the body is gone, show "This message was deleted".
+    /// Deleted: show "This message was deleted". The body reads as
+    /// `unsupported` and the content fields are empty, as they always did; a
+    /// gateway that keeps deleted messages also sets [`Self::deleted`] and
+    /// puts what the message said in [`Self::original`].
     #[serde(default, skip_serializing_if = "is_false")]
     pub revoked: bool,
     /// Ticks of a message I sent.
@@ -146,6 +149,49 @@ pub struct MessageMeta {
     pub mentions: Vec<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub starred: bool,
+    /// The message was deleted (for everyone, or for me on this account) and
+    /// the gateway kept it, marked. `revoked` is set too, so older clients
+    /// show it as deleted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub deleted: bool,
+    /// When it was deleted (unix ms); `None` when unknown (deleted before the
+    /// gateway kept deleted messages).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Who deleted it: [`DELETED_BY_ME`] or the JID of the sender (or group
+    /// admin) who deleted it for everyone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_by: Option<String>,
+    /// What a deleted message said ("show content" on long-press); `None`
+    /// when nothing of it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<Box<KeptContent>>,
+    /// Earlier texts of an edited message, oldest first. The body holds the
+    /// current text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edit_history: Vec<EditRecord>,
+}
+
+/// [`MessageMeta::deleted_by`] of a message this account deleted.
+pub const DELETED_BY_ME: &str = "me";
+
+/// One earlier version of an edited message.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EditRecord {
+    /// The text (or caption) before the edit.
+    pub text: String,
+    /// When this text was replaced (unix ms).
+    pub edited_at: i64,
+}
+
+/// The content of a deleted message, kept for "show content".
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct KeptContent {
+    pub body: MessageBody,
+    /// Its reply context, media details, location, contact card, mentions,
+    /// edit time and edit history.
+    #[serde(default, skip_serializing_if = "MessageMeta::is_empty")]
+    pub meta: MessageMeta,
 }
 
 impl MessageMeta {
@@ -446,6 +492,57 @@ mod tests {
             serde_json::from_str::<WaMessage>(&json).unwrap(),
             text("hi")
         );
+    }
+
+    #[test]
+    fn kept_deletes_and_edit_history_are_additive() {
+        let rich = RichMessage {
+            message: WaMessage {
+                body: MessageBody::Unsupported,
+                ..text("x")
+            },
+            meta: MessageMeta {
+                revoked: true,
+                deleted: true,
+                deleted_at: Some(9),
+                deleted_by: Some(DELETED_BY_ME.into()),
+                original: Some(Box::new(KeptContent {
+                    body: MessageBody::Text("hi".into()),
+                    meta: MessageMeta::default(),
+                })),
+                ..Default::default()
+            },
+        };
+        let json = serde_json::to_string(&rich).unwrap();
+        assert!(
+            json.contains(r#""meta":{"revoked":true,"deleted":true,"deleted_at":9,"deleted_by":"me","original":{"body":{"text":"hi"}}}"#),
+            "{json}"
+        );
+        assert_eq!(serde_json::from_str::<RichMessage>(&json).unwrap(), rich);
+        // An old reader sees what an older gateway sent: a revoked message
+        // whose body is gone.
+        assert_eq!(
+            serde_json::from_str::<WaMessage>(&json).unwrap().body,
+            MessageBody::Unsupported
+        );
+
+        let edited = MessageMeta {
+            edited_ms: Some(5),
+            edit_history: vec![EditRecord {
+                text: "frist".into(),
+                edited_at: 5,
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&edited).unwrap();
+        assert_eq!(
+            json,
+            r#"{"edited_ms":5,"edit_history":[{"text":"frist","edited_at":5}]}"#
+        );
+        assert_eq!(serde_json::from_str::<MessageMeta>(&json).unwrap(), edited);
+        // An older gateway's meta reads with nothing deleted and no history.
+        let old: MessageMeta = serde_json::from_str(r#"{"revoked":true}"#).unwrap();
+        assert!(old.revoked && !old.deleted && old.edit_history.is_empty());
     }
 
     #[test]

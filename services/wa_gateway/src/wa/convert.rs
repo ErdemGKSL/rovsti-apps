@@ -91,8 +91,14 @@ pub enum Converted {
         body: MessageBody,
         edited_ms: i64,
     },
-    /// An earlier message was deleted for everyone.
-    Revoke { chat: String, target_id: String },
+    /// An earlier message was deleted for everyone, at `at_ms` by `by`
+    /// ([`rovsti_wa_proto::DELETED_BY_ME`] or the JID of who deleted it).
+    Revoke {
+        chat: String,
+        target_id: String,
+        by: String,
+        at_ms: i64,
+    },
     /// Protocol plumbing that is not a message the user sees.
     Ignore,
 }
@@ -409,6 +415,16 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
     }
 }
 
+/// Who deleted a message for everyone: me, the group member (sender or
+/// admin) or the other person of a one-to-one chat.
+fn revoked_by<'a>(origin: &Origin<'a>) -> &'a str {
+    if origin.from_me {
+        rovsti_wa_proto::DELETED_BY_ME
+    } else {
+        origin.sender.unwrap_or(origin.chat)
+    }
+}
+
 /// Converts one WhatsApp message.
 pub fn convert(origin: Origin<'_>, message: &wa::Message) -> Converted {
     match content(message) {
@@ -449,6 +465,8 @@ pub fn convert(origin: Origin<'_>, message: &wa::Message) -> Converted {
         Content::Revoke { target_id } => Converted::Revoke {
             chat: origin.chat.to_owned(),
             target_id,
+            by: revoked_by(&origin).to_owned(),
+            at_ms: origin.timestamp_ms,
         },
         Content::Reaction { target_id, emoji } => Converted::Reaction {
             chat: origin.chat.to_owned(),
@@ -714,6 +732,33 @@ mod tests {
             Converted::Revoke {
                 chat: CHAT.into(),
                 target_id: "T".into(),
+                by: CHAT.into(),
+                at_ms: 1_700_000_000_000,
+            }
+        );
+        // My own revoke (from another device) and a group admin's.
+        assert_eq!(
+            convert(
+                origin(true, None, CHAT),
+                &protocol(ProtocolType::REVOKE, None)
+            ),
+            Converted::Revoke {
+                chat: CHAT.into(),
+                target_id: "T".into(),
+                by: rovsti_wa_proto::DELETED_BY_ME.into(),
+                at_ms: 1_700_000_000_000,
+            }
+        );
+        assert_eq!(
+            convert(
+                origin(false, Some("1@s.whatsapp.net"), "g@g.us"),
+                &protocol(ProtocolType::REVOKE, None)
+            ),
+            Converted::Revoke {
+                chat: "g@g.us".into(),
+                target_id: "T".into(),
+                by: "1@s.whatsapp.net".into(),
+                at_ms: 1_700_000_000_000,
             }
         );
         // An edit without content and other protocol messages are plumbing.

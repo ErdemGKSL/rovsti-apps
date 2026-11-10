@@ -1,8 +1,11 @@
-//! Message meta, chat settings and profiles (schema v3).
+//! Message meta, chat settings and profiles (schema v3), and deleted
+//! messages kept marked with their edit history (schema v6).
+
+use std::collections::HashMap;
 
 use rovsti_wa_proto::{
-    ChatMeta, DeliveryStatus, MessageBody, MessageMeta, RichChat, RichMessage, WaProfile,
-    is_status_chat,
+    ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, KeptContent, MessageBody, MessageMeta,
+    Reaction, RichChat, RichMessage, WaMessage, WaProfile, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -31,8 +34,12 @@ pub enum MessageChange {
         body: MessageBody,
         edited_ms: i64,
     },
-    /// Deleted for everyone.
-    Revoke,
+    /// Deleted for everyone at `at_ms` by `by` ([`DELETED_BY_ME`] or the
+    /// JID that deleted it). The content is kept; apps see it as deleted.
+    Revoke {
+        by: String,
+        at_ms: i64,
+    },
     Star(bool),
     /// A receipt for a message I sent.
     Status(DeliveryStatus),
@@ -109,7 +116,8 @@ pub fn merge_edit(old: &MessageBody, new: MessageBody) -> MessageBody {
     }
 }
 
-/// Applies `change` to a message. Returns whether the body changed and
+/// Applies `change` to a message. Returns whether the body apps see changed
+/// (a revoke turns it into "deleted" without touching the stored body) and
 /// whether anything changed at all.
 pub fn apply_change(
     body: &mut MessageBody,
@@ -134,18 +142,12 @@ pub fn apply_change(
             }
             (body_changed, body_changed || newer)
         }
-        MessageChange::Revoke => {
+        MessageChange::Revoke { .. } => {
             if meta.revoked {
                 return (false, false);
             }
-            *body = MessageBody::Unsupported;
+            // Nothing of the content goes: [`present`] hides it from apps.
             meta.revoked = true;
-            meta.quoted = None;
-            meta.media = None;
-            meta.location = None;
-            meta.contact = None;
-            meta.mentions.clear();
-            meta.edited_ms = None;
             (true, true)
         }
         MessageChange::Star(starred) => {
@@ -217,6 +219,170 @@ fn meta_json(meta: &MessageMeta) -> Result<Option<String>, StoreError> {
     } else {
         Ok(Some(serde_json::to_string(meta)?))
     }
+}
+
+/// The text an edit history keeps of `body`: its text or caption.
+fn text_of(body: &MessageBody) -> String {
+    match body {
+        MessageBody::Text(text) => text.clone(),
+        MessageBody::Media { caption, .. } => caption.clone().unwrap_or_default(),
+        MessageBody::Unsupported => String::new(),
+    }
+}
+
+/// Whether a stored message is deleted: marked by this gateway, or revoked
+/// by an older one (which kept no deletion time).
+fn is_deleted(deleted_at: Option<i64>, meta: &MessageMeta) -> bool {
+    deleted_at.is_some() || meta.revoked
+}
+
+/// What apps see of a stored message. A deleted one reads as older gateways
+/// sent it (body `unsupported`, `revoked`, no content in the meta), so older
+/// apps show "This message was deleted"; it also carries `deleted`,
+/// `deleted_at`, `deleted_by` and the kept content in `original`.
+pub fn present(
+    body: MessageBody,
+    mut meta: MessageMeta,
+    deleted_at: Option<i64>,
+    deleted_by: Option<String>,
+    edits: Vec<EditRecord>,
+) -> (MessageBody, MessageMeta) {
+    meta.edit_history = edits;
+    if !is_deleted(deleted_at, &meta) {
+        return (body, meta);
+    }
+    let kept = MessageMeta {
+        quoted: meta.quoted.take(),
+        edited_ms: meta.edited_ms.take(),
+        media: meta.media.take(),
+        location: meta.location.take(),
+        contact: meta.contact.take(),
+        mentions: std::mem::take(&mut meta.mentions),
+        edit_history: std::mem::take(&mut meta.edit_history),
+        ..MessageMeta::default()
+    };
+    // An older gateway's revoke kept nothing.
+    let original = (body != MessageBody::Unsupported || !kept.is_empty())
+        .then(|| Box::new(KeptContent { body, meta: kept }));
+    let meta = MessageMeta {
+        revoked: true,
+        deleted: true,
+        deleted_at,
+        deleted_by,
+        original,
+        ..meta
+    };
+    (MessageBody::Unsupported, meta)
+}
+
+/// Edit histories of `chat` by message id (only message `id` when given),
+/// oldest first.
+pub(super) fn edits_of(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+    id: Option<&str>,
+) -> Result<HashMap<String, Vec<EditRecord>>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, previous_text, edited_at FROM message_edits
+         WHERE instance_id = ?1 AND chat = ?2 AND (?3 IS NULL OR id = ?3)
+         ORDER BY id, edited_at",
+    )?;
+    let rows = stmt.query_map(params![instance.as_str(), chat, id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            EditRecord {
+                text: r.get(1)?,
+                edited_at: r.get(2)?,
+            },
+        ))
+    })?;
+    let mut map: HashMap<String, Vec<EditRecord>> = HashMap::new();
+    for row in rows {
+        let (id, record) = row?;
+        map.entry(id).or_default().push(record);
+    }
+    Ok(map)
+}
+
+/// The columns [`StoredRow::read`] reads, in order.
+pub(super) const ROW_COLUMNS: &str =
+    "id, sender, from_me, ts_ms, body_json, meta_json, deleted_at, deleted_by";
+
+/// A message row as stored, before [`present`].
+pub(super) struct StoredRow {
+    id: String,
+    sender: Option<String>,
+    from_me: bool,
+    timestamp_ms: i64,
+    body: String,
+    meta: Option<String>,
+    deleted_at: Option<i64>,
+    deleted_by: Option<String>,
+}
+
+impl StoredRow {
+    pub(super) fn read(r: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: r.get(0)?,
+            sender: r.get(1)?,
+            from_me: r.get(2)?,
+            timestamp_ms: r.get(3)?,
+            body: r.get(4)?,
+            meta: r.get(5)?,
+            deleted_at: r.get(6)?,
+            deleted_by: r.get(7)?,
+        })
+    }
+
+    /// The message of `chat` as apps see it, taking its reactions and edits
+    /// out of the chat's maps. A deleted message shows no reactions.
+    pub(super) fn into_rich(
+        self,
+        chat: &str,
+        reactions: &mut HashMap<String, Vec<Reaction>>,
+        edits: &mut HashMap<String, Vec<EditRecord>>,
+    ) -> Result<RichMessage, StoreError> {
+        let mut reactions = reactions.remove(&self.id).unwrap_or_default();
+        let (body, meta) = present(
+            serde_json::from_str(&self.body)?,
+            meta_from(self.meta)?,
+            self.deleted_at,
+            self.deleted_by,
+            edits.remove(&self.id).unwrap_or_default(),
+        );
+        if meta.deleted {
+            reactions.clear();
+        }
+        Ok(RichMessage {
+            message: WaMessage {
+                id: self.id,
+                chat: chat.to_owned(),
+                sender: self.sender,
+                from_me: self.from_me,
+                timestamp_ms: self.timestamp_ms,
+                body,
+                reactions,
+            },
+            meta,
+        })
+    }
+}
+
+/// The meta apps see of message `id` after a change, with its edit history.
+fn shown_meta(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+    id: &str,
+    body: MessageBody,
+    meta: MessageMeta,
+    deleted: (Option<i64>, Option<String>),
+) -> Result<(MessageBody, MessageMeta), StoreError> {
+    let edits = edits_of(conn, instance, chat, Some(id))?
+        .remove(id)
+        .unwrap_or_default();
+    Ok(present(body, meta, deleted.0, deleted.1, edits))
 }
 
 fn clean_name(name: Option<String>) -> Option<String> {
@@ -381,18 +547,49 @@ fn profile_of(
         .optional()?)
 }
 
-/// One message row with its meta, newest first.
-type RichRow = (String, Option<String>, bool, i64, String, Option<String>);
+/// The parts of a message row a change needs: from me, body and meta JSON,
+/// deletion time and author.
+type ChangeRow = (bool, String, Option<String>, Option<i64>, Option<String>);
 
-fn rich_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RichRow> {
-    Ok((
-        r.get(0)?,
-        r.get(1)?,
-        r.get(2)?,
-        r.get(3)?,
-        r.get(4)?,
-        r.get(5)?,
-    ))
+fn change_row(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+    id: &str,
+) -> Result<Option<ChangeRow>, StoreError> {
+    Ok(conn
+        .query_row(
+            "SELECT from_me, body_json, meta_json, deleted_at, deleted_by FROM messages
+             WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+            params![instance.as_str(), chat, id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?)
+}
+
+/// Message `id` of `chat` as apps see it ([`present`]).
+pub(super) fn message_row(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+    id: &str,
+) -> Result<Option<RichMessage>, StoreError> {
+    let row = conn
+        .query_row(
+            &format!(
+                "SELECT {ROW_COLUMNS} FROM messages
+                 WHERE instance_id = ?1 AND chat = ?2 AND id = ?3"
+            ),
+            params![instance.as_str(), chat, id],
+            StoredRow::read,
+        )
+        .optional()?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let mut reactions = reactions_of(conn, instance, chat)?;
+    let mut edits = edits_of(conn, instance, chat, Some(id))?;
+    row.into_rich(chat, &mut reactions, &mut edits).map(Some)
 }
 
 impl Store {
@@ -438,11 +635,11 @@ impl Store {
         limit: u32,
     ) -> Result<Vec<RichMessage>, StoreError> {
         self.run(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, sender, from_me, ts_ms, body_json, meta_json FROM messages
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {ROW_COLUMNS} FROM messages
                  WHERE instance_id = ?1 AND chat = ?2 AND ts_ms < ?3
-                 ORDER BY ts_ms DESC, id DESC LIMIT ?4",
-            )?;
+                 ORDER BY ts_ms DESC, id DESC LIMIT ?4"
+            ))?;
             let rows = stmt
                 .query_map(
                     params![
@@ -451,25 +648,13 @@ impl Store {
                         before_ms.unwrap_or(i64::MAX),
                         limit
                     ],
-                    rich_row,
+                    StoredRow::read,
                 )?
                 .collect::<Result<Vec<_>, _>>()?;
             let mut reactions = reactions_of(conn, &instance, &chat)?;
+            let mut edits = edits_of(conn, &instance, &chat, None)?;
             rows.into_iter()
-                .map(|(id, sender, from_me, timestamp_ms, body, meta)| {
-                    Ok(RichMessage {
-                        message: rovsti_wa_proto::WaMessage {
-                            reactions: reactions.remove(&id).unwrap_or_default(),
-                            id,
-                            chat: chat.clone(),
-                            sender,
-                            from_me,
-                            timestamp_ms,
-                            body: serde_json::from_str(&body)?,
-                        },
-                        meta: meta_from(meta)?,
-                    })
-                })
+                .map(|row| row.into_rich(&chat, &mut reactions, &mut edits))
                 .collect()
         })
         .await
@@ -482,33 +667,8 @@ impl Store {
         chat: String,
         id: String,
     ) -> Result<Option<RichMessage>, StoreError> {
-        self.run(move |conn| {
-            let row = conn
-                .query_row(
-                    "SELECT id, sender, from_me, ts_ms, body_json, meta_json FROM messages
-                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                    params![instance.as_str(), chat, id],
-                    rich_row,
-                )
-                .optional()?;
-            let Some((id, sender, from_me, timestamp_ms, body, meta)) = row else {
-                return Ok(None);
-            };
-            let mut reactions = reactions_of(conn, &instance, &chat)?;
-            Ok(Some(RichMessage {
-                message: rovsti_wa_proto::WaMessage {
-                    reactions: reactions.remove(&id).unwrap_or_default(),
-                    id,
-                    chat,
-                    sender,
-                    from_me,
-                    timestamp_ms,
-                    body: serde_json::from_str(&body)?,
-                },
-                meta: meta_from(meta)?,
-            }))
-        })
-        .await
+        self.run(move |conn| message_row(conn, &instance, &chat, &id))
+            .await
     }
 
     /// Chats with their settings, picture id and the newest message's meta,
@@ -532,9 +692,8 @@ impl Store {
                 .collect::<Result<Vec<_>, _>>()?;
             let mut out = Vec::with_capacity(rows.len());
             for (jid, name, is_group, unread) in rows {
-                let last = last_message_row(conn, &instance, &jid)?;
-                let (last, last_meta) = match last {
-                    Some((message, meta)) => (Some(message), Some(meta_from(meta)?)),
+                let (last, last_meta) = match last_message_row(conn, &instance, &jid)? {
+                    Some(rich) => (Some(rich.message), Some(rich.meta)),
                     None => (None, None),
                 };
                 out.push(RichChat {
@@ -566,26 +725,32 @@ impl Store {
     ) -> Result<Option<(Option<MessageBody>, MessageMeta)>, StoreError> {
         self.run(move |conn| {
             let tx = conn.transaction()?;
-            let row = tx
-                .query_row(
-                    "SELECT from_me, body_json, meta_json FROM messages
-                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                    params![instance.as_str(), chat, id],
-                    |r| {
-                        Ok((
-                            r.get::<_, bool>(0)?,
-                            r.get::<_, String>(1)?,
-                            r.get::<_, Option<String>>(2)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            let Some((from_me, body, meta)) = row else {
+            let Some((from_me, body, meta, deleted_at, deleted_by)) =
+                change_row(&tx, &instance, &chat, &id)?
+            else {
                 return Ok(None);
             };
             let mut body: MessageBody = serde_json::from_str(&body)?;
             let mut meta = meta_from(meta)?;
-            let revoke = change == MessageChange::Revoke;
+            // A deleted message keeps its content as it was deleted: it is
+            // neither edited nor deleted again.
+            if is_deleted(deleted_at, &meta)
+                && matches!(
+                    change,
+                    MessageChange::Edit { .. } | MessageChange::Revoke { .. }
+                )
+            {
+                return Ok(None);
+            }
+            let before = body.clone();
+            let edited_at = match &change {
+                MessageChange::Edit { edited_ms, .. } => Some(*edited_ms),
+                _ => None,
+            };
+            let revoked = match &change {
+                MessageChange::Revoke { by, at_ms } => Some((*at_ms, by.clone())),
+                _ => None,
+            };
             let (body_changed, changed) = apply_change(&mut body, &mut meta, from_me, change);
             if !changed {
                 return Ok(None);
@@ -601,24 +766,28 @@ impl Store {
                     meta_json(&meta)?
                 ],
             )?;
-            if revoke {
-                // Nothing of a deleted message is kept.
+            if let Some(edited_at) = edited_at.filter(|_| body_changed) {
                 tx.execute(
-                    "UPDATE messages SET raw_proto = NULL, thumb = NULL, secret = NULL
-                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                    params![instance.as_str(), chat, id],
-                )?;
-                tx.execute(
-                    "DELETE FROM reactions WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                    params![instance.as_str(), chat, id],
-                )?;
-                tx.execute(
-                    "DELETE FROM receipts WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                    params![instance.as_str(), chat, id],
+                    "INSERT OR IGNORE INTO message_edits
+                     (instance_id, chat, id, edited_at, previous_text)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![instance.as_str(), chat, id, edited_at, text_of(&before)],
                 )?;
             }
+            let deleted = match revoked {
+                Some((at_ms, by)) => {
+                    tx.execute(
+                        "UPDATE messages SET deleted_at = ?4, deleted_by = ?5
+                         WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                        params![instance.as_str(), chat, id, at_ms, by],
+                    )?;
+                    (Some(at_ms), Some(by))
+                }
+                None => (deleted_at, deleted_by),
+            };
+            let (shown, meta) = shown_meta(&tx, &instance, &chat, &id, body, meta, deleted)?;
             tx.commit()?;
-            Ok(Some((body_changed.then_some(body), meta)))
+            Ok(Some((body_changed.then_some(shown), meta)))
         })
         .await
     }
@@ -671,21 +840,9 @@ impl Store {
             let tx = conn.transaction()?;
             let mut changed = Vec::new();
             for id in ids {
-                let row = tx
-                    .query_row(
-                        "SELECT from_me, body_json, meta_json FROM messages
-                         WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                        params![instance.as_str(), chat, id],
-                        |r| {
-                            Ok((
-                                r.get::<_, bool>(0)?,
-                                r.get::<_, String>(1)?,
-                                r.get::<_, Option<String>>(2)?,
-                            ))
-                        },
-                    )
-                    .optional()?;
-                let Some((true, body, meta)) = row else {
+                let Some((true, body, meta, deleted_at, deleted_by)) =
+                    change_row(&tx, &instance, &chat, &id)?
+                else {
                     continue;
                 };
                 tx.execute(
@@ -723,6 +880,8 @@ impl Store {
                          WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
                         params![instance.as_str(), chat, id, meta_json(&meta)?],
                     )?;
+                    let deleted = (deleted_at, deleted_by);
+                    let (_, meta) = shown_meta(&tx, &instance, &chat, &id, body, meta, deleted)?;
                     changed.push((id, meta));
                 }
             }
@@ -772,29 +931,31 @@ impl Store {
         .await
     }
 
-    /// Deletes one message and its reactions. False when it was not stored.
+    /// Marks one message deleted for me at `at_ms`, keeping its content,
+    /// media, reactions and receipts. False when it was not stored or was
+    /// already deleted.
     pub async fn delete_message(
         &self,
         instance: InstanceId,
         chat: String,
         id: String,
+        at_ms: i64,
     ) -> Result<bool, StoreError> {
         self.run(move |conn| {
             let tx = conn.transaction()?;
-            let n = tx.execute(
-                "DELETE FROM messages WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                params![instance.as_str(), chat, id],
-            )?;
+            let Some((_, _, meta, deleted_at, _)) = change_row(&tx, &instance, &chat, &id)? else {
+                return Ok(false);
+            };
+            if is_deleted(deleted_at, &meta_from(meta)?) {
+                return Ok(false);
+            }
             tx.execute(
-                "DELETE FROM reactions WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                params![instance.as_str(), chat, id],
-            )?;
-            tx.execute(
-                "DELETE FROM receipts WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                params![instance.as_str(), chat, id],
+                "UPDATE messages SET deleted_at = ?4, deleted_by = ?5
+                 WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                params![instance.as_str(), chat, id, at_ms, DELETED_BY_ME],
             )?;
             tx.commit()?;
-            Ok(n > 0)
+            Ok(true)
         })
         .await
     }
@@ -819,6 +980,10 @@ impl Store {
             )?;
             tx.execute(
                 "DELETE FROM receipts WHERE instance_id = ?1 AND chat = ?2",
+                params![instance.as_str(), jid],
+            )?;
+            tx.execute(
+                "DELETE FROM message_edits WHERE instance_id = ?1 AND chat = ?2",
                 params![instance.as_str(), jid],
             )?;
             if keep_chat {
@@ -1124,20 +1289,101 @@ mod tests {
             apply_change(&mut body, &mut meta, true, MessageChange::Star(true)),
             (false, true)
         );
+        let revoke = || MessageChange::Revoke {
+            by: DELETED_BY_ME.into(),
+            at_ms: 8,
+        };
         assert_eq!(
-            apply_change(&mut body, &mut meta, true, MessageChange::Revoke),
+            apply_change(&mut body, &mut meta, true, revoke()),
             (true, true)
         );
-        assert_eq!(body, MessageBody::Unsupported);
-        assert!(meta.revoked && meta.edited_ms.is_none());
+        // The content is kept, only marked.
+        assert_eq!(body, MessageBody::Text("b".into()));
+        assert!(meta.revoked && meta.edited_ms == Some(5));
         // A deleted message cannot be edited or deleted again.
         assert_eq!(
             apply_change(&mut body, &mut meta, true, edit("x", 9)),
             (false, false)
         );
         assert_eq!(
-            apply_change(&mut body, &mut meta, true, MessageChange::Revoke),
+            apply_change(&mut body, &mut meta, true, revoke()),
             (false, false)
         );
+        assert_eq!(body, MessageBody::Text("b".into()));
+    }
+
+    #[test]
+    fn deleted_messages_read_as_deleted_with_their_content_kept() {
+        use rovsti_wa_proto::{MediaMeta, Quoted};
+        let history = vec![EditRecord {
+            text: "frist".into(),
+            edited_at: 4,
+        }];
+        let meta = MessageMeta {
+            quoted: Some(Quoted {
+                id: "q".into(),
+                sender: None,
+                preview: Some("earlier".into()),
+            }),
+            edited_ms: Some(4),
+            media: Some(MediaMeta {
+                thumbnail: true,
+                ..Default::default()
+            }),
+            mentions: vec!["1@s.whatsapp.net".into()],
+            starred: true,
+            status: Some(DeliveryStatus::Read),
+            ..Default::default()
+        };
+        // Not deleted: as stored, with the edit history.
+        let (body, shown) = present(photo(Some("a")), meta.clone(), None, None, history.clone());
+        assert_eq!(body, photo(Some("a")));
+        assert_eq!(shown.edit_history, history);
+        assert!(!shown.deleted && !shown.revoked);
+
+        let (body, shown) = present(
+            photo(Some("a")),
+            meta.clone(),
+            Some(9),
+            Some("s@s.whatsapp.net".into()),
+            history.clone(),
+        );
+        // What an older app reads: deleted, nothing of the content.
+        assert_eq!(body, MessageBody::Unsupported);
+        assert!(shown.revoked && shown.deleted);
+        assert_eq!(
+            (shown.deleted_at, shown.deleted_by.as_deref()),
+            (Some(9), Some("s@s.whatsapp.net"))
+        );
+        assert!(shown.quoted.is_none() && shown.media.is_none() && shown.mentions.is_empty());
+        assert!(shown.edited_ms.is_none() && shown.edit_history.is_empty());
+        // Ticks and star stay on the bubble.
+        assert!(shown.starred && shown.status == Some(DeliveryStatus::Read));
+        // The kept content.
+        let original = shown.original.unwrap();
+        assert_eq!(original.body, photo(Some("a")));
+        assert_eq!(original.meta.quoted, meta.quoted);
+        assert_eq!(original.meta.media, meta.media);
+        assert_eq!(original.meta.mentions, meta.mentions);
+        assert_eq!(original.meta.edited_ms, Some(4));
+        assert_eq!(original.meta.edit_history, history);
+        assert!(!original.meta.starred && original.meta.status.is_none());
+
+        // An older gateway's revoke: deleted, at an unknown time, nothing kept.
+        let old = MessageMeta {
+            revoked: true,
+            ..Default::default()
+        };
+        let (body, shown) = present(MessageBody::Unsupported, old, None, None, Vec::new());
+        assert_eq!(body, MessageBody::Unsupported);
+        assert!(shown.deleted && shown.deleted_at.is_none() && shown.original.is_none());
+    }
+
+    #[test]
+    fn edit_history_keeps_texts_and_captions() {
+        assert_eq!(text_of(&MessageBody::Text("a".into())), "a");
+        assert_eq!(text_of(&photo(Some("c"))), "c");
+        assert_eq!(text_of(&photo(None)), "");
+        assert_eq!(text_of(&MessageBody::Unsupported), "");
     }
 }

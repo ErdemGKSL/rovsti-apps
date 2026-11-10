@@ -10,8 +10,9 @@ use axum::{Json, Router};
 use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::meta::picture_etag;
 use rovsti_wa_proto::{
-    ChatAction, ChatActionKind, DeleteForMe, EditMessage, ErrorCode, MAX_PROFILES, MUTED_FOREVER,
-    MarkRead, MessageBody, ProfilesRequest, RevokeMessage, StarMessage, WaMessage, WaProfile,
+    ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, EditMessage, ErrorCode, MAX_PROFILES,
+    MUTED_FOREVER, MarkRead, MessageBody, ProfilesRequest, RevokeMessage, StarMessage, WaMessage,
+    WaProfile,
 };
 use serde::Deserialize;
 
@@ -177,7 +178,14 @@ async fn revoke(
     state.driver().revoke_message(&auth.instance, req).await?;
     state
         .sink(&auth.instance)
-        .change_message(&message.chat, &message.id, MessageChange::Revoke)
+        .change_message(
+            &message.chat,
+            &message.id,
+            MessageChange::Revoke {
+                by: DELETED_BY_ME.to_owned(),
+                at_ms: now_ms(),
+            },
+        )
         .await;
     Ok(StatusCode::NO_CONTENT)
 }

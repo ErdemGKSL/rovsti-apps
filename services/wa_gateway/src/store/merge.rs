@@ -80,9 +80,9 @@ fn merge(
     let moved = tx.execute(
         "INSERT OR IGNORE INTO messages
             (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto,
-             meta_json, secret, thumb)
+             meta_json, secret, thumb, deleted_at, deleted_by)
          SELECT instance_id, ?3, id, sender, from_me, ts_ms, body_json, raw_proto,
-                meta_json, secret, thumb
+                meta_json, secret, thumb, deleted_at, deleted_by
          FROM messages WHERE instance_id = ?1 AND chat = ?2",
         params![i, from, into],
     )?;
@@ -111,10 +111,24 @@ fn merge(
         "DELETE FROM receipts WHERE instance_id = ?1 AND chat = ?2",
         params![i, from],
     )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO message_edits (instance_id, chat, id, edited_at, previous_text)
+         SELECT instance_id, ?3, id, edited_at, previous_text
+         FROM message_edits WHERE instance_id = ?1 AND chat = ?2",
+        params![i, from, into],
+    )?;
+    tx.execute(
+        "DELETE FROM message_edits WHERE instance_id = ?1 AND chat = ?2",
+        params![i, from],
+    )?;
 
     // Group authors: the same person may appear as a LID in any chat.
     tx.execute(
         "UPDATE messages SET sender = ?3 WHERE instance_id = ?1 AND sender = ?2",
+        params![i, from, into],
+    )?;
+    tx.execute(
+        "UPDATE messages SET deleted_by = ?3 WHERE instance_id = ?1 AND deleted_by = ?2",
         params![i, from, into],
     )?;
     tx.execute(
@@ -251,6 +265,38 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn deleted_marks_and_edit_history_move_with_the_messages() {
+        use crate::store::MessageChange;
+        let s = store().await;
+        add(&s, LID, "a", 100).await;
+        add(&s, LID, "b", 200).await;
+        let edit = MessageChange::Edit {
+            body: MessageBody::Text("edited".into()),
+            edited_ms: 150,
+        };
+        s.change_message(id(), LID.into(), "a".into(), edit)
+            .await
+            .unwrap();
+        let revoke = MessageChange::Revoke {
+            by: LID.into(),
+            at_ms: 250,
+        };
+        s.change_message(id(), LID.into(), "b".into(), revoke)
+            .await
+            .unwrap();
+        s.merge_chat(id(), LID.into(), PN.into()).await.unwrap();
+        let page = s.messages_rich(id(), PN.into(), None, 10).await.unwrap();
+        let (b, a) = (&page[0], &page[1]);
+        assert!(b.meta.deleted);
+        assert_eq!(
+            (b.meta.deleted_at, b.meta.deleted_by.as_deref()),
+            (Some(250), Some(PN))
+        );
+        assert_eq!(a.meta.edit_history.len(), 1);
+        assert_eq!(a.meta.edit_history[0].text, "hi a");
     }
 
     #[tokio::test]

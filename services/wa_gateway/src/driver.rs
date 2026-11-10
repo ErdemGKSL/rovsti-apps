@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
-    ChatAction, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo, LinkRequest,
-    MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage, SendReaction, SendText, Sent,
-    WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
+    ChatAction, ChatState, DELETED_BY_ME, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
+    LinkRequest, MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage, SendReaction, SendText,
+    Sent, WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
 };
 
 use crate::hub::Hub;
@@ -523,16 +523,20 @@ impl EventSink {
         out
     }
 
-    /// Deletes a message on this account's devices and tells the apps.
+    /// Marks a message deleted on this account's devices (its content is
+    /// kept) and tells the apps.
     pub async fn delete_message(&self, chat: &str, id: &str) {
+        let at_ms = now_ms();
         match self
             .store
-            .delete_message(self.instance.clone(), chat.to_owned(), id.to_owned())
+            .delete_message(self.instance.clone(), chat.to_owned(), id.to_owned(), at_ms)
             .await
         {
             Ok(true) => self.publish(GatewayEvent::MessageDeleted {
                 chat: chat.to_owned(),
                 id: id.to_owned(),
+                deleted_at: Some(at_ms),
+                deleted_by: Some(DELETED_BY_ME.to_owned()),
             }),
             Ok(false) => {}
             Err(e) => log::warn!("{}: deleting a message failed: {e}", self.instance),

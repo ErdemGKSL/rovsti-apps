@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rovsti_wa_proto::{
-    AppId, ChatSummary, InstanceState, InstanceStatus, KeyHash, KeyId, KeyInfo, MessageBody,
-    Reaction, ScheduledState, ScheduledText, WaMessage, is_status_chat,
+    AppId, ChatSummary, InstanceState, InstanceStatus, KeyHash, KeyId, KeyInfo, Reaction,
+    RichMessage, ScheduledState, ScheduledText, WaMessage, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -19,7 +19,7 @@ mod status;
 pub use merge::MergeReport;
 pub use rich::{
     ChatChange, ChatSettings, FetchedProfile, MAX_THUMBNAIL_BYTES, MessageChange, MessageExtras,
-    ProfileChange, ReceiptCounts, apply_change, group_status, merge_edit,
+    ProfileChange, ReceiptCounts, apply_change, group_status, merge_edit, present,
 };
 pub use status::{StatusTarget, StoredStatus};
 
@@ -272,6 +272,22 @@ const MIGRATIONS: &[&str] = &[
     DELETE FROM messages WHERE chat = 'status@broadcast';
     DELETE FROM chat_settings WHERE jid = 'status@broadcast';
     DELETE FROM chats WHERE jid = 'status@broadcast';
+    ",
+    // v6: deleted messages are kept, marked: when and by whom ('me' or the
+    // JID that deleted it for everyone). Edits keep the text they replaced.
+    // Rows an older gateway revoked keep `meta_json.revoked`; their content
+    // is already gone and their deletion time unknown.
+    "
+    ALTER TABLE messages ADD COLUMN deleted_at INTEGER;
+    ALTER TABLE messages ADD COLUMN deleted_by TEXT;
+    CREATE TABLE message_edits (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        id TEXT NOT NULL,
+        edited_at INTEGER NOT NULL,
+        previous_text TEXT NOT NULL,
+        PRIMARY KEY (instance_id, chat, id, edited_at)
+    );
     ",
 ];
 
@@ -899,7 +915,8 @@ impl Store {
         .await
     }
 
-    /// One message of a chat, with its reactions.
+    /// One message of a chat, with its reactions. A deleted message reads as
+    /// `unsupported`, so it is neither quoted nor edited.
     pub async fn message(
         &self,
         instance: InstanceId,
@@ -907,34 +924,7 @@ impl Store {
         id: String,
     ) -> Result<Option<WaMessage>, StoreError> {
         self.run(move |conn| {
-            let row = conn
-                .query_row(
-                    "SELECT sender, from_me, ts_ms, body_json FROM messages
-                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                    params![instance.as_str(), chat, id],
-                    |r| {
-                        Ok((
-                            r.get::<_, Option<String>>(0)?,
-                            r.get::<_, bool>(1)?,
-                            r.get::<_, i64>(2)?,
-                            r.get::<_, String>(3)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            let Some((sender, from_me, timestamp_ms, body)) = row else {
-                return Ok(None);
-            };
-            let mut reactions = reactions_of(conn, &instance, &chat)?;
-            Ok(Some(WaMessage {
-                reactions: reactions.remove(&id).unwrap_or_default(),
-                id,
-                chat,
-                sender,
-                from_me,
-                timestamp_ms,
-                body: serde_json::from_str(&body)?,
-            }))
+            Ok(rich::message_row(conn, &instance, &chat, &id)?.map(|rich| rich.message))
         })
         .await
     }
@@ -1006,46 +996,12 @@ impl Store {
         before_ms: Option<i64>,
         limit: u32,
     ) -> Result<Vec<WaMessage>, StoreError> {
-        self.run(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, sender, from_me, ts_ms, body_json FROM messages
-                 WHERE instance_id = ?1 AND chat = ?2 AND ts_ms < ?3
-                 ORDER BY ts_ms DESC, id DESC LIMIT ?4",
-            )?;
-            let rows = stmt.query_map(
-                params![
-                    instance.as_str(),
-                    chat,
-                    before_ms.unwrap_or(i64::MAX),
-                    limit
-                ],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, Option<String>>(1)?,
-                        r.get::<_, bool>(2)?,
-                        r.get::<_, i64>(3)?,
-                        r.get::<_, String>(4)?,
-                    ))
-                },
-            )?;
-            let mut reactions = reactions_of(conn, &instance, &chat)?;
-            let mut out = Vec::new();
-            for row in rows {
-                let (id, sender, from_me, timestamp_ms, body) = row?;
-                out.push(WaMessage {
-                    reactions: reactions.remove(&id).unwrap_or_default(),
-                    id,
-                    chat: chat.clone(),
-                    sender,
-                    from_me,
-                    timestamp_ms,
-                    body: serde_json::from_str::<MessageBody>(&body)?,
-                });
-            }
-            Ok(out)
-        })
-        .await
+        Ok(self
+            .messages_rich(instance, chat, before_ms, limit)
+            .await?
+            .into_iter()
+            .map(|rich| rich.message)
+            .collect())
     }
 
     /// Chats, most recently active first, each with its newest message.
@@ -1210,54 +1166,39 @@ fn last_message(
     instance: &InstanceId,
     chat: &str,
 ) -> Result<Option<WaMessage>, StoreError> {
-    Ok(last_message_row(conn, instance, chat)?.map(|(message, _)| message))
+    Ok(last_message_row(conn, instance, chat)?.map(|rich| rich.message))
 }
 
-/// The newest message of `chat` and its raw `meta_json`.
+/// The newest message of `chat` with its meta, as apps see it (without its
+/// edit history: a chat list does not show it).
 fn last_message_row(
     conn: &Connection,
     instance: &InstanceId,
     chat: &str,
-) -> Result<Option<(WaMessage, Option<String>)>, StoreError> {
+) -> Result<Option<RichMessage>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT id, sender, from_me, ts_ms, body_json, meta_json FROM messages
-             WHERE instance_id = ?1 AND chat = ?2 ORDER BY ts_ms DESC, id DESC LIMIT 1",
+            &format!(
+                "SELECT {} FROM messages
+                 WHERE instance_id = ?1 AND chat = ?2 ORDER BY ts_ms DESC, id DESC LIMIT 1",
+                rich::ROW_COLUMNS
+            ),
             params![instance.as_str(), chat],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, Option<String>>(1)?,
-                    r.get::<_, bool>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                ))
-            },
+            rich::StoredRow::read,
         )
         .optional()?;
-    let Some((id, sender, from_me, timestamp_ms, body, meta)) = row else {
+    let Some(row) = row else {
         return Ok(None);
     };
     let mut reactions = reactions_of(conn, instance, chat)?;
-    Ok(Some((
-        WaMessage {
-            reactions: reactions.remove(&id).unwrap_or_default(),
-            id,
-            chat: chat.to_owned(),
-            sender,
-            from_me,
-            timestamp_ms,
-            body: serde_json::from_str(&body)?,
-        },
-        meta,
-    )))
+    let mut edits = HashMap::new();
+    row.into_rich(chat, &mut reactions, &mut edits).map(Some)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::ConnectKey;
+    use rovsti_wa_proto::{ConnectKey, MessageBody};
 
     fn new_key(seed: u8, label: &str) -> (ConnectKey, NewKey) {
         let key = ConnectKey::from_bytes(&[seed; 32]);
@@ -1324,6 +1265,7 @@ mod tests {
             "profiles",
             "receipts",
             "statuses",
+            "message_edits",
         ] {
             assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
         }
@@ -2172,10 +2114,21 @@ mod tests {
 
     #[tokio::test]
     async fn edits_revokes_and_deletes() {
+        use rovsti_wa_proto::{DELETED_BY_ME, EditRecord};
         let store = store_with_instance().await;
         let chat = "c@s.whatsapp.net";
+        let thumb = vec![0xff, 0xd8, 1];
         store
-            .insert_message(id(1), text(chat, "m", 1, true), Some(vec![1, 2]))
+            .insert_message_full(
+                id(1),
+                text(chat, "m", 1, true),
+                MessageExtras {
+                    raw_proto: Some(vec![1, 2]),
+                    secret: Some(vec![3]),
+                    thumbnail: Some(thumb.clone()),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         store
@@ -2202,6 +2155,12 @@ mod tests {
             .unwrap();
         assert_eq!(body, Some(MessageBody::Text("new".into())));
         assert_eq!(meta.edited_ms, Some(5));
+        let first_edit = vec![EditRecord {
+            text: "hello m".into(),
+            edited_at: 5,
+        }];
+        assert_eq!(meta.edit_history, first_edit, "the edit keeps the old text");
+        // A replayed edit changes nothing and records nothing.
         assert_eq!(
             store
                 .change_message(id(1), chat.into(), "m".into(), edit)
@@ -2209,56 +2168,296 @@ mod tests {
                 .unwrap(),
             None
         );
+        let edit = MessageChange::Edit {
+            body: MessageBody::Text("newer".into()),
+            edited_ms: 6,
+        };
+        store
+            .change_message(id(1), chat.into(), "m".into(), edit)
+            .await
+            .unwrap()
+            .unwrap();
+        let history = vec![
+            first_edit[0].clone(),
+            EditRecord {
+                text: "new".into(),
+                edited_at: 6,
+            },
+        ];
+        let rich = |store: Store| async move {
+            store
+                .message_rich(id(1), chat.into(), "m".into())
+                .await
+                .unwrap()
+                .unwrap()
+        };
+        assert_eq!(rich(store.clone()).await.meta.edit_history, history);
+
+        let revoke = |at_ms| MessageChange::Revoke {
+            by: DELETED_BY_ME.into(),
+            at_ms,
+        };
         assert_eq!(
             store
-                .change_message(id(1), chat.into(), "nope".into(), MessageChange::Revoke)
+                .change_message(id(1), chat.into(), "nope".into(), revoke(7))
                 .await
                 .unwrap(),
             None
         );
         let (body, meta) = store
-            .change_message(id(1), chat.into(), "m".into(), MessageChange::Revoke)
+            .change_message(id(1), chat.into(), "m".into(), revoke(7))
             .await
             .unwrap()
             .unwrap();
+        // Apps see a deleted message, as before ...
         assert_eq!(body, Some(MessageBody::Unsupported));
-        assert!(meta.revoked);
-        let stored = store
+        assert!(meta.revoked && meta.deleted);
+        assert_eq!(
+            (meta.deleted_at, meta.deleted_by.as_deref()),
+            (Some(7), Some(DELETED_BY_ME))
+        );
+        // ... and its content is kept, flagged.
+        let original = meta.original.as_deref().unwrap();
+        assert_eq!(original.body, MessageBody::Text("newer".into()));
+        assert_eq!(original.meta.edit_history, history);
+
+        let listed = rich(store.clone()).await;
+        assert_eq!(listed.message.body, MessageBody::Unsupported);
+        assert!(listed.meta.deleted);
+        assert_eq!(listed.meta.original, meta.original);
+        assert!(
+            listed.message.reactions.is_empty(),
+            "a deleted message shows no reactions"
+        );
+        let plain = store
             .message(id(1), chat.into(), "m".into())
             .await
             .unwrap()
             .unwrap();
-        assert!(stored.reactions.is_empty(), "reactions go with the message");
-        let (_, raw) = store
+        assert_eq!(plain.body, MessageBody::Unsupported, "nothing quotes it");
+        let (source, raw) = store
             .media_source(id(1), "m".into())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(raw, None, "the media of a deleted message is not kept");
+        assert_eq!(
+            raw,
+            Some(vec![1, 2]),
+            "the media of a deleted message is kept"
+        );
+        assert_eq!(source.body, MessageBody::Text("newer".into()));
+        assert_eq!(
+            store.thumbnail(id(1), "m".into()).await.unwrap(),
+            Some(thumb)
+        );
+        assert_eq!(
+            store
+                .message_secret(id(1), chat.into(), "m".into())
+                .await
+                .unwrap(),
+            Some(vec![3])
+        );
 
+        // Deleting it again, either way, and editing it are no-ops.
+        assert_eq!(
+            store
+                .change_message(id(1), chat.into(), "m".into(), revoke(8))
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            !store
+                .delete_message(id(1), chat.into(), "m".into(), 8)
+                .await
+                .unwrap()
+        );
+        let late = MessageChange::Edit {
+            body: MessageBody::Text("too late".into()),
+            edited_ms: 9,
+        };
+        assert_eq!(
+            store
+                .change_message(id(1), chat.into(), "m".into(), late)
+                .await
+                .unwrap(),
+            None
+        );
+        let after = rich(store.clone()).await;
+        assert_eq!(after.meta.deleted_at, Some(7));
+        assert_eq!(after.meta.original, meta.original);
+        // A star still applies to the deleted bubble.
+        let (_, starred) = store
+            .change_message(id(1), chat.into(), "m".into(), MessageChange::Star(true))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(starred.starred && starred.deleted);
+
+        // Delete for me marks too, keeping everything.
+        store
+            .insert_message(id(1), text(chat, "d", 2, false), Some(vec![4]))
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .delete_message(id(1), chat.into(), "nope".into(), 10)
+                .await
+                .unwrap()
+        );
         assert!(
             store
-                .delete_message(id(1), chat.into(), "m".into())
+                .delete_message(id(1), chat.into(), "d".into(), 10)
                 .await
                 .unwrap()
         );
         assert!(
             !store
-                .delete_message(id(1), chat.into(), "m".into())
+                .delete_message(id(1), chat.into(), "d".into(), 11)
                 .await
-                .unwrap()
+                .unwrap(),
+            "a second delete is a no-op"
         );
+        assert_eq!(
+            store
+                .change_message(id(1), chat.into(), "d".into(), revoke(12))
+                .await
+                .unwrap(),
+            None
+        );
+        let page = store
+            .messages_rich(id(1), chat.into(), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(page.len(), 2, "deleted messages are still listed");
+        let d = &page[0];
+        assert_eq!(d.message.id, "d");
+        assert!(d.meta.deleted && d.meta.revoked);
+        assert_eq!(
+            (d.meta.deleted_at, d.meta.deleted_by.as_deref()),
+            (Some(10), Some(DELETED_BY_ME))
+        );
+        assert_eq!(
+            d.meta.original.as_ref().unwrap().body,
+            MessageBody::Text("hello d".into())
+        );
+        let (_, raw) = store
+            .media_source(id(1), "d".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(raw, Some(vec![4]));
+        // The chat list shows the newest message as deleted.
+        let chats = store.chats_rich(id(1)).await.unwrap();
+        assert_eq!(
+            chats[0].chat.last.as_ref().unwrap().body,
+            MessageBody::Unsupported
+        );
+        assert!(chats[0].last_meta.as_ref().unwrap().deleted);
 
+        // Deleting a whole chat still removes it (edits included).
         store
-            .insert_message(id(1), text(chat, "n", 2, false), None)
+            .insert_message(id(1), text(chat, "n", 3, false), None)
             .await
             .unwrap();
         assert!(store.delete_chat(id(1), chat.into(), true).await.unwrap());
         let chats = store.chats(id(1)).await.unwrap();
         assert_eq!(chats.len(), 1, "a cleared chat stays");
         assert_eq!((chats[0].unread, chats[0].last.clone()), (0, None));
+        store
+            .insert_message(id(1), text(chat, "m", 1, true), None)
+            .await
+            .unwrap();
+        assert!(
+            rich(store.clone()).await.meta.edit_history.is_empty(),
+            "a cleared chat forgets its edits"
+        );
         assert!(store.delete_chat(id(1), chat.into(), false).await.unwrap());
         assert!(store.chats(id(1)).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn v5_database_upgrades_to_soft_deletes_and_keeps_its_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            let tx = conn.transaction().unwrap();
+            for sql in &MIGRATIONS[..5] {
+                tx.execute_batch(sql).unwrap();
+            }
+            tx.execute_batch("PRAGMA user_version = 5").unwrap();
+            // A live message, and one an older gateway revoked (its content
+            // already wiped).
+            tx.execute_batch(
+                "INSERT INTO instances (id, created_ms, state) VALUES ('old', 1, 'connected');
+                 INSERT INTO chats (instance_id, jid, unread, last_ms)
+                     VALUES ('old', '1@s.whatsapp.net', 0, 6);
+                 INSERT INTO messages (instance_id, chat, id, from_me, ts_ms, body_json, meta_json)
+                     VALUES ('old', '1@s.whatsapp.net', 'M1', 1, 5, '{\"text\":\"hi\"}', NULL),
+                            ('old', '1@s.whatsapp.net', 'M2', 0, 6, '\"unsupported\"',
+                             '{\"revoked\":true}');",
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let old = InstanceId::new("old");
+        let chat = "1@s.whatsapp.net";
+        for _ in 0..2 {
+            // Opening twice migrates once and keeps everything.
+            let store = Store::open(&path).unwrap();
+            let page = store
+                .messages_rich(old.clone(), chat.into(), None, 10)
+                .await
+                .unwrap();
+            assert_eq!(page.len(), 2);
+            let (revoked, live) = (&page[0], &page[1]);
+            assert_eq!(live.message.body, MessageBody::Text("hi".into()));
+            assert!(!live.meta.deleted);
+            assert!(revoked.meta.deleted && revoked.meta.revoked);
+            assert_eq!(
+                revoked.meta.deleted_at, None,
+                "the old delete time is unknown"
+            );
+            assert_eq!(revoked.meta.original, None, "nothing of it was kept");
+        }
+        let store = Store::open(&path).unwrap();
+        let edit = MessageChange::Edit {
+            body: MessageBody::Text("hey".into()),
+            edited_ms: 7,
+        };
+        let (_, meta) = store
+            .change_message(old.clone(), chat.into(), "M1".into(), edit)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(meta.edit_history.len(), 1);
+        assert!(
+            store
+                .delete_message(old.clone(), chat.into(), "M1".into(), 8)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .delete_message(old.clone(), chat.into(), "M2".into(), 8)
+                .await
+                .unwrap(),
+            "an old revoke counts as deleted"
+        );
+        let conn = Connection::open(&path).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as u32);
+        let (at, by): (Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT deleted_at, deleted_by FROM messages WHERE id = 'M1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((at, by.as_deref()), (Some(8), Some("me")));
     }
 
     #[tokio::test]

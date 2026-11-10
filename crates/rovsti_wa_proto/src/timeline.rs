@@ -139,7 +139,7 @@ impl Timeline {
                 }
                 changed | self.set_meta(id, (**meta).clone())
             }
-            GatewayEvent::MessageDeleted { chat, id } if *chat == self.chat => {
+            GatewayEvent::MessageDeleted { chat, id, .. } if *chat == self.chat => {
                 self.metas.remove(id);
                 let before = self.items.len();
                 self.items.retain(|i| i.message.id != *id);
@@ -583,11 +583,15 @@ mod tests {
         let other = GatewayEvent::MessageDeleted {
             chat: "x".into(),
             id: "a".into(),
+            deleted_at: None,
+            deleted_by: None,
         };
         assert!(!t.apply_event(&other));
         assert!(t.apply_event(&GatewayEvent::MessageDeleted {
             chat: CHAT.into(),
             id: "a".into(),
+            deleted_at: Some(1),
+            deleted_by: Some(crate::DELETED_BY_ME.into()),
         }));
         assert_eq!(t.items().len(), 1);
         assert!(t.meta("a").is_none());

@@ -86,8 +86,10 @@ pub enum GatewayEvent {
     /// A scheduled text was added, sent or failed. Older clients skip it.
     Scheduled(ScheduledText),
     /// The meta of a message is new or changed: a reply, ticks, an edit
-    /// (`body` holds the new body), a delete for everyone (`meta.revoked`,
-    /// `body` is `unsupported`), a star. Follows the `message` event of a new
+    /// (`body` holds the new body, `meta.edit_history` the earlier texts), a
+    /// delete for everyone (`meta.revoked`, `body` is `unsupported`; a gateway
+    /// that keeps deleted messages adds `meta.deleted`, `deleted_at`,
+    /// `deleted_by` and the kept content in `meta.original`), a star. Follows the `message` event of a new
     /// message whose meta is not empty. Older clients skip it.
     MessageMeta {
         chat: String,
@@ -96,10 +98,18 @@ pub enum GatewayEvent {
         body: Option<MessageBody>,
         meta: Box<MessageMeta>,
     },
-    /// A message was deleted on my devices only: drop it.
+    /// A message was deleted on my devices only. Older clients drop it; a
+    /// gateway that keeps deleted messages still lists it, marked
+    /// [`MessageMeta::deleted`], and says when and by whom here.
     MessageDeleted {
         chat: String,
         id: String,
+        /// When it was deleted (unix ms). Older gateways leave it out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deleted_at: Option<i64>,
+        /// Who deleted it ([`crate::DELETED_BY_ME`]). Older gateways leave it out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deleted_by: Option<String>,
     },
     /// Archive, pin, mute, unread mark or picture of a chat changed.
     ChatMeta {
@@ -291,8 +301,19 @@ mod tests {
                 GatewayEvent::MessageDeleted {
                     chat: "c".into(),
                     id: "m".into(),
+                    deleted_at: None,
+                    deleted_by: None,
                 },
                 r#"{"type":"message_deleted","chat":"c","id":"m"}"#,
+            ),
+            (
+                GatewayEvent::MessageDeleted {
+                    chat: "c".into(),
+                    id: "m".into(),
+                    deleted_at: Some(7),
+                    deleted_by: Some("me".into()),
+                },
+                r#"{"type":"message_deleted","chat":"c","id":"m","deleted_at":7,"deleted_by":"me"}"#,
             ),
             (
                 GatewayEvent::ChatMeta {
@@ -368,6 +389,89 @@ mod tests {
             r#"{"seq":4,"at_ms":10,"event":{"type":"message","id":"m1","chat":"c@s.whatsapp.net","sender":null,"from_me":true,"timestamp_ms":9,"body":{"text":"hi"},"reactions":[]}}"#
         );
         assert_eq!(serde_json::from_str::<EventEnvelope>(&text).unwrap(), env);
+    }
+
+    /// The events as a client built before deleted messages were kept
+    /// knew them.
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum OldEvent {
+        MessageMeta {
+            chat: String,
+            id: String,
+            #[serde(default)]
+            body: Option<MessageBody>,
+            meta: OldMeta,
+        },
+        MessageDeleted {
+            chat: String,
+            id: String,
+        },
+    }
+
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    struct OldMeta {
+        #[serde(default)]
+        revoked: bool,
+        #[serde(default)]
+        edited_ms: Option<i64>,
+    }
+
+    #[test]
+    fn old_clients_read_the_kept_delete_and_edit_fields() {
+        let deleted = GatewayEvent::MessageDeleted {
+            chat: "c".into(),
+            id: "m".into(),
+            deleted_at: Some(7),
+            deleted_by: Some(crate::DELETED_BY_ME.into()),
+        };
+        assert_eq!(
+            serde_json::from_str::<OldEvent>(&json(&deleted)).unwrap(),
+            OldEvent::MessageDeleted {
+                chat: "c".into(),
+                id: "m".into(),
+            }
+        );
+        let revoked = GatewayEvent::MessageMeta {
+            chat: "c".into(),
+            id: "m".into(),
+            body: Some(MessageBody::Unsupported),
+            meta: Box::new(MessageMeta {
+                revoked: true,
+                deleted: true,
+                deleted_at: Some(7),
+                deleted_by: Some("s@s.whatsapp.net".into()),
+                original: Some(Box::new(crate::KeptContent {
+                    body: MessageBody::Text("secret".into()),
+                    meta: MessageMeta {
+                        edited_ms: Some(5),
+                        edit_history: vec![crate::EditRecord {
+                            text: "first".into(),
+                            edited_at: 5,
+                        }],
+                        ..Default::default()
+                    },
+                })),
+                ..Default::default()
+            }),
+        };
+        let text = json(&revoked);
+        assert_eq!(
+            serde_json::from_str::<GatewayEvent>(&text).unwrap(),
+            revoked
+        );
+        assert_eq!(
+            serde_json::from_str::<OldEvent>(&text).unwrap(),
+            OldEvent::MessageMeta {
+                chat: "c".into(),
+                id: "m".into(),
+                body: Some(MessageBody::Unsupported),
+                meta: OldMeta {
+                    revoked: true,
+                    edited_ms: None,
+                },
+            }
+        );
     }
 
     #[test]

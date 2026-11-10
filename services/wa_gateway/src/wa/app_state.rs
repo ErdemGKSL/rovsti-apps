@@ -29,8 +29,13 @@ pub async fn apply_converted(sink: &EventSink, converted: Converted) {
             sink.change_message(&chat, &target_id, MessageChange::Edit { body, edited_ms })
                 .await;
         }
-        Converted::Revoke { chat, target_id } => {
-            sink.change_message(&chat, &target_id, MessageChange::Revoke)
+        Converted::Revoke {
+            chat,
+            target_id,
+            by,
+            at_ms,
+        } => {
+            sink.change_message(&chat, &target_id, MessageChange::Revoke { by, at_ms })
                 .await;
         }
         Converted::Ignore => {}

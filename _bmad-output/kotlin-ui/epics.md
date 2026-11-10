@@ -1172,6 +1172,12 @@ unchanged (E5.2-E5.7a).
 - Screenshots: `e5.5-favorites`, `e5.5-favorites-reorder`, `e5.5-contacts-tab`, `e5.5-contacts-search`.
 
 ### E5.6 Incoming
+- **Owner direction (2026-11-10): take the call screens' design from iOS freely.** For the incoming, locked-incoming
+  and in-call screens, use the iOS 26 Phone call UI as the reference for layout, spacing, type scale (large thin name,
+  small secondary line), control grid, slide to answer, frosted controls over the caller photo or gradient, and the
+  transitions (ringing -> answered morph, controls fading in, end-call shrink). Build it with our own Compose code and
+  icons (no Apple assets or SF Symbols), and keep Android behaviour where it matters (notification heads-up, foreground
+  service, audio routes, Bluetooth).
 - **Screenshot fixes from the coordinator (2026-11-10, e5.6 goldens of f7023e1), plan them first:** (F17) the number
   under the name is raw E.164 (`+905551112233`); show it formatted like everywhere else (`+90 555 111 22 33`, the shared
   number format op, F14). (F18) Answer and Decline use stroked handsets; use the filled white handset the keypad call

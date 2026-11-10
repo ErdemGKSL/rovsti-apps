@@ -179,6 +179,10 @@ sealed interface GatewayEvent {
     data class MessageDeleted(
         val chat: String,
         val id: String,
+        /** When it was deleted (unix ms); older gateways leave it out. */
+        @SerialName("deleted_at") @EncodeDefault(NEVER) val deletedAt: Long? = null,
+        /** Who deleted it ([DELETED_BY_ME] or a JID); older gateways leave it out. */
+        @SerialName("deleted_by") @EncodeDefault(NEVER) val deletedBy: String? = null,
     ) : GatewayEvent
 
     @Serializable

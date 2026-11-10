@@ -388,6 +388,33 @@ data class MessageMeta(
     @EncodeDefault(NEVER) val contact: SharedContact? = null,
     @EncodeDefault(NEVER) val mentions: List<String> = emptyList(),
     @EncodeDefault(NEVER) val starred: Boolean = false,
+    /** Deleted (for everyone or for me) and kept by the gateway; `revoked` is set too. */
+    @EncodeDefault(NEVER) val deleted: Boolean = false,
+    /** When it was deleted (unix ms); null when unknown. */
+    @SerialName("deleted_at") @EncodeDefault(NEVER) val deletedAt: Long? = null,
+    /** Who deleted it: [DELETED_BY_ME] or the JID of the sender or group admin. */
+    @SerialName("deleted_by") @EncodeDefault(NEVER) val deletedBy: String? = null,
+    /** What a deleted message said, for "show content" (`rovsti_wa_proto::KeptContent`). */
+    @EncodeDefault(NEVER) val original: KeptContent? = null,
+    /** Earlier texts of an edited message, oldest first. */
+    @SerialName("edit_history") @EncodeDefault(NEVER) val editHistory: List<EditRecord> = emptyList(),
+)
+
+/** `rovsti_wa_proto::DELETED_BY_ME`. */
+const val DELETED_BY_ME: String = "me"
+
+/** The content of a deleted message the gateway kept (`rovsti_wa_proto::KeptContent`). */
+@Serializable
+data class KeptContent(
+    val body: MessageBody,
+    @EncodeDefault(NEVER) val meta: MessageMeta = MessageMeta(),
+)
+
+/** One earlier text of an edited message (`rovsti_wa_proto::EditRecord`). */
+@Serializable
+data class EditRecord(
+    val text: String,
+    @SerialName("edited_at") val editedAt: Long,
 )
 
 /** A message with its meta (`rovsti_wa_proto::RichMessage`, whose message fields are flat). */

@@ -18,6 +18,7 @@ class IncomingStrings(
     val unknown: String = res.getString(R.string.incoming_unknown)
     val answer: String = res.getString(R.string.incoming_answer)
     val decline: String = res.getString(R.string.incoming_decline)
+    val slideAnswer: String = res.getString(R.string.incoming_slide_answer)
     val message: String = res.getString(R.string.incoming_message)
     val remind: String = res.getString(R.string.incoming_remind)
     val silence: String = res.getString(R.string.incoming_silence)

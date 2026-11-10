@@ -1,9 +1,14 @@
 package dev.rovsti.phone.incoming
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rovsti.core.model.phone.SimAccount
+import dev.rovsti.design.controls.SlideToAnswerTags
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.testing.ShotTest
 import kotlinx.collections.immutable.persistentListOf
@@ -61,6 +66,52 @@ class E56ShotTest : ShotTest() {
             "e5.6-incoming-lockscreen-variant",
             ringingUi(ringing(name = null, number = "+905550001122", contactId = null, account = null), locked = true),
         )
+
+    private fun lockedUi() =
+        ringingUi(ringing(name = null, number = "+905550001122", contactId = null, account = null), locked = true)
+
+    /** The locked screen with the handle dragged to [progress] of the travel and held there (no release). */
+    private fun slideShot(
+        name: String,
+        progress: Float,
+        rtl: Boolean = false,
+    ) {
+        for (dark in listOf(false, true)) {
+            val harness = IncomingShotHarness(lockedUi())
+            composeFrame(dark = dark, rtl = rtl) { HostedIncoming(harness) }
+            advance(1_900)
+            if (progress > 0f) {
+                val track = compose.onNodeWithTag(IncomingTags.Answer).fetchSemanticsNode().boundsInRoot
+                val handle = compose.onNodeWithTag(SlideToAnswerTags.Handle, useUnmergedTree = true)
+                val travel =
+                    track.width - 2 * (track.height - with(compose.density) { 68.dp.toPx() }) / 2 -
+                        with(compose.density) { 68.dp.toPx() }
+                handle.performTouchInput { down(center) }
+                repeat(3) {
+                    val b = handle.fetchSemanticsNode().boundsInRoot
+                    val inset = (track.height - b.width) / 2
+                    val moved = if (rtl) track.right - inset - b.right else b.left - track.left - inset
+                    val missing = progress * travel - moved
+                    handle.performTouchInput { moveBy(Offset(if (rtl) -missing else missing, 0f)) }
+                    advance(64)
+                }
+            }
+            compose.onRoot().captureRoboImage(
+                filePath = "screenshots/$name-${if (dark) "dark" else "light"}.png",
+                roborazziOptions = options,
+            )
+            if (progress > 0f) {
+                compose.onNodeWithTag(SlideToAnswerTags.Handle, useUnmergedTree = true).performTouchInput { up() }
+                advance(1_500)
+            }
+        }
+    }
+
+    @Test fun lockedSlideRest() = slideShot("e5.6-locked-slide-rest", 0f)
+
+    @Test fun lockedSlideMid() = slideShot("e5.6-locked-slide-mid", 0.5f)
+
+    @Test fun lockedSlideRtl() = slideShot("e5.6-locked-slide-rtl", 0.35f, rtl = true)
 
     @Test fun declineWithMessageSheet() =
         snap("e5.6-decline-with-message-sheet", ringingUi()) { h ->

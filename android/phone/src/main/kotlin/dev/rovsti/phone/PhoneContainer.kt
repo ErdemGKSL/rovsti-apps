@@ -211,6 +211,10 @@ open class PhoneContainer(
     /** Numbers as people read them (`+90 555 111 22 33`), shared by the call screens. */
     val numberDisplay: NumberDisplay by lazy { NumberDisplay(sharedOps, ::homeCc) }
 
+    /** Set by the app while the Incoming model lives: a power or volume key press; true when it was consumed. */
+    @Volatile
+    var ringKey: (() -> Boolean)? = null
+
     /** The model of the Incoming screen and the waiting-call card (E5.6); [scope] is the app's, [unknown] its word. */
     open fun incomingModel(
         scope: CoroutineScope,

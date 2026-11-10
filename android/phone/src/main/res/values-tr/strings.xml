@@ -284,6 +284,7 @@
     <string name="incoming_from">%1$s numarasından gelen arama</string>
     <string name="incoming_answer">Cevapla</string>
     <string name="incoming_decline">Reddet</string>
+    <string name="incoming_slide_answer">cevaplamak için kaydır</string>
     <string name="incoming_message">Mesaj</string>
     <string name="incoming_remind">Hatırlat</string>
     <string name="incoming_silence">Sessiz</string>

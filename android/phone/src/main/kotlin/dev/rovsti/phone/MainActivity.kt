@@ -1,11 +1,13 @@
 package dev.rovsti.phone
 
+import android.app.KeyguardManager
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
@@ -45,7 +47,13 @@ class MainActivity :
     override val navSpec: NavSpec<PhoneRoute> = NavSpec(PhoneTabs, PhoneRoots, PhoneRoute.serializer())
 
     private val main = Handler(Looper.getMainLooper())
-    private val lockScreen = LockScreenGate(::setLockScreenFlags, main::postDelayed, main::removeCallbacks)
+    private val lockScreen =
+        LockScreenGate(
+            ::setLockScreenFlags,
+            main::postDelayed,
+            main::removeCallbacks,
+            isKeyguardLocked = { getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true },
+        )
     private var uiFailed = false
 
     /** The error boundary of the Incoming screen: no first frame in time shows [NativeIncoming] (AD-17). */
@@ -89,6 +97,7 @@ class MainActivity :
         super.onResume()
         IncomingPerf.mark(IncomingTimeline.ACTIVITY_RESUMED)
         CallRegistry.refreshKeyguard()
+        lockScreen.refreshLocked()
         armWatchdog()
     }
 
@@ -98,6 +107,18 @@ class MainActivity :
         if (!uiFailed && (navigator.current as? PhoneRoute.Incoming)?.callId == ringing.callId) {
             watchdog.arm(ringing.callId)
         }
+    }
+
+    /**
+     * Power and volume while a call rings over the lock screen: the first press silences the ringer, the second declines
+     * (the model decides; it is registered by the Incoming screen's host).
+     */
+    override fun onKeyDown(
+        keyCode: Int,
+        event: KeyEvent,
+    ): Boolean {
+        if (event.repeatCount == 0 && keyCode in RING_KEYS && container.ringKey?.invoke() == true) return true
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onIncomingFrame(callId: Int) = watchdog.frame(callId)
@@ -227,6 +248,7 @@ class MainActivity :
         )
 
     private companion object {
+        val RING_KEYS = setOf(KeyEvent.KEYCODE_POWER, KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN)
         const val FALLBACK_PADDING_DP = 24
         const val FALLBACK_TEXT_SP = 18f
 

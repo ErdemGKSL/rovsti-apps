@@ -1,12 +1,14 @@
 package dev.rovsti.phone.incoming
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +38,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -48,6 +51,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import dev.rovsti.design.controls.GlassCircleButton
 import dev.rovsti.design.controls.PlainIconAction
+import dev.rovsti.design.controls.SlideToAnswer
+import dev.rovsti.design.controls.SlideToAnswerDefaults
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
@@ -178,15 +183,38 @@ fun IncomingContent(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
-                    .padding(horizontal = IncomingMetrics.SidePad),
+                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CallerBlock(ui, caller, strings, photoState, Modifier.weight(1f))
-                SecondaryRow(ui, strings, onAction)
-                Spacer(Modifier.height(IncomingMetrics.SecondaryLift))
-                PrimaryRow(strings, onAction)
-                Spacer(Modifier.height(IncomingMetrics.BottomPad))
+                CallerBlock(
+                    ui,
+                    caller,
+                    strings,
+                    photoState,
+                    Modifier.weight(1f).padding(horizontal = IncomingMetrics.SidePad),
+                )
+                if (ui.locked) {
+                    // Locked: slide to answer, with a small Decline under the track (a stray touch cannot answer).
+                    SecondaryRow(ui, strings, onAction, Modifier.padding(horizontal = IncomingMetrics.SidePad))
+                    Spacer(Modifier.height(IncomingMetrics.SecondaryLift))
+                    SlideToAnswer(
+                        label = strings.slideAnswer,
+                        onAnswer = { onAction(IncomingAction.Answer) },
+                        modifier =
+                            Modifier
+                                .padding(
+                                    horizontal = SlideToAnswerDefaults.Gutter,
+                                ).testTag(IncomingTags.Answer),
+                        handleColor = Color(ANSWER_GREEN),
+                    )
+                    DeclineText(strings, onAction)
+                    Spacer(Modifier.height(IncomingMetrics.LockedBottomPad))
+                } else {
+                    SecondaryRow(ui, strings, onAction, Modifier.padding(horizontal = IncomingMetrics.SidePad))
+                    Spacer(Modifier.height(IncomingMetrics.SecondaryLift))
+                    PrimaryRow(strings, onAction, Modifier.padding(horizontal = IncomingMetrics.SidePad))
+                    Spacer(Modifier.height(IncomingMetrics.BottomPad))
+                }
             }
         }
     }
@@ -295,8 +323,9 @@ private fun SecondaryRow(
     ui: IncomingUi,
     strings: IncomingStrings,
     onAction: (IncomingAction) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Cell(Modifier.weight(1f)) {
             PlainIconAction(
                 RovstiIcons.Bell,
@@ -317,15 +346,17 @@ private fun SecondaryRow(
                 )
             }
         }
-        Cell(Modifier.weight(1f)) {
-            PlainIconAction(
-                RovstiIcons.BellSlash,
-                if (ui.silenced) strings.silenced else strings.silence,
-                { onAction(IncomingAction.Silence) },
-                Modifier.testTag(IncomingTags.Silence),
-                color = OnAura,
-                enabled = !ui.silenced,
-            )
+        if (!ui.locked) {
+            Cell(Modifier.weight(1f)) {
+                PlainIconAction(
+                    RovstiIcons.BellSlash,
+                    if (ui.silenced) strings.silenced else strings.silence,
+                    { onAction(IncomingAction.Silence) },
+                    Modifier.testTag(IncomingTags.Silence),
+                    color = OnAura,
+                    enabled = !ui.silenced,
+                )
+            }
         }
     }
 }
@@ -343,8 +374,9 @@ private fun Cell(
 private fun PrimaryRow(
     strings: IncomingStrings,
     onAction: (IncomingAction) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Cell(Modifier.weight(1f)) {
             CallDisc(
                 strings.decline,
@@ -356,6 +388,25 @@ private fun PrimaryRow(
         Cell(Modifier.weight(1f)) {
             CallDisc(strings.answer, IncomingTags.Answer, Color(ANSWER_GREEN), 0f) { onAction(IncomingAction.Answer) }
         }
+    }
+}
+
+/** The small "Decline" under the slide track: plain text, a 48 dp high target, acts when the finger lifts. */
+@Composable
+private fun DeclineText(
+    strings: IncomingStrings,
+    onAction: (IncomingAction) -> Unit,
+) {
+    Box(
+        Modifier
+            .height(IncomingMetrics.DeclineTarget)
+            .defaultMinSize(minWidth = IncomingMetrics.DeclineTarget)
+            .testTag(IncomingTags.Decline)
+            .clickable(role = Role.Button, onClickLabel = strings.decline) { onAction(IncomingAction.Decline) }
+            .padding(horizontal = Spacing.l),
+        contentAlignment = Alignment.Center,
+    ) {
+        RovstiText(strings.decline, style = RovstiTheme.type.callout, color = OnAura, maxLines = 1)
     }
 }
 

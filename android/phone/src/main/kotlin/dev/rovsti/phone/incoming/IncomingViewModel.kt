@@ -53,6 +53,7 @@ class IncomingViewModel(
     private val framed = HashSet<Int>()
     private var lastRinging: Int? = null
     private var seen = false
+    private var keySilenced: Int? = null
 
     init {
         scope.launch { source.snapshot.collect { display.warm(it.calls.map { c -> c.numberRaw }) } }
@@ -113,6 +114,23 @@ class IncomingViewModel(
                 waitingId()?.let { openReplies(it) } ?: stale()
             }
         }
+    }
+
+    /**
+     * A power or volume press while the phone is locked and a call rings: the first silences the ringer, the second
+     * declines. True when the press was used (the activity then swallows it); false leaves it to the system.
+     */
+    fun onRingKey(): Boolean {
+        val ui = state.value
+        val caller = ui.caller ?: return false
+        if (!ui.locked) return false
+        if (ui.silenced || keySilenced == caller.callId) {
+            decline(caller.callId)
+        } else {
+            keySilenced = caller.callId
+            calls.silenceRinger()
+        }
+        return true
     }
 
     // ---- The snapshot -------------------------------------------------------------------------------------------

@@ -2,6 +2,7 @@ package dev.rovsti.design.haptics
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.HapticFeedbackConstants
@@ -56,6 +57,16 @@ enum class HapticEvent(
 
     /** A key of the dial pad going down. */
     KeyboardTap(HapticFeedbackConstants.KEYBOARD_TAP, VibrationEffect.EFFECT_CLICK),
+
+    /** A drag crossing the point where releasing commits it (slide to answer). */
+    ThresholdTick(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE
+        } else {
+            HapticFeedbackConstants.CLOCK_TICK
+        },
+        VibrationEffect.EFFECT_CLICK,
+    ),
 }
 
 /**

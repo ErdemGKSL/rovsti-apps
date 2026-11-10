@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -424,6 +425,10 @@ fun PhoneApp(
     val incoming =
         remember(container, incomingStrings) { container.incomingModel(container.scope, incomingStrings.unknown) }
     val incomingUi by incoming.state.collectAsState()
+    DisposableEffect(container, incoming) {
+        container.ringKey = incoming::onRingKey
+        onDispose { if (container.ringKey != null) container.ringKey = null }
+    }
     IncomingEffects(incoming, overlays) { toCall ->
         // The ringing call is gone: close its screen, and open In-Call when it was answered.
         if (navigator.current is PhoneRoute.Incoming) {

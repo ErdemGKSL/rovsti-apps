@@ -76,6 +76,35 @@ class IncomingViewModelTest {
         assertTrue(ui.silenced)
     }
 
+    // ---- Slide to answer: the locked layout and the keys -----------------------------------------------------------------
+
+    @Test fun lockedStateMeansTheSlideLayoutAndUnlockedKeepsTheDiscs() {
+        assertTrue(IncomingHarness(ringingSnapshot(locked = true)).ui.locked)
+        assertFalse(IncomingHarness(ringingSnapshot(locked = false)).ui.locked)
+    }
+
+    @Test fun whileLockedTheFirstKeyPressSilencesAndTheSecondDeclines() {
+        val h = IncomingHarness(ringingSnapshot(locked = true))
+        assertTrue(h.model.onRingKey())
+        assertEquals(listOf("silence"), h.calls.log)
+        assertTrue(h.model.onRingKey())
+        assertEquals(listOf("silence", "reject 1"), h.calls.log)
+    }
+
+    @Test fun aRingerAlreadySilencedIsDeclinedByTheFirstKey() {
+        val h = IncomingHarness(ringingSnapshot(locked = true, silenced = true))
+        assertTrue(h.model.onRingKey())
+        assertEquals(listOf("reject 1"), h.calls.log)
+    }
+
+    @Test fun theKeysAreLeftToTheSystemWhenUnlockedOrNotRinging() {
+        val unlocked = IncomingHarness(ringingSnapshot(locked = false))
+        assertFalse(unlocked.model.onRingKey())
+        val idle = IncomingHarness(CallSnapshot())
+        assertFalse(idle.model.onRingKey())
+        assertTrue(unlocked.calls.log.isEmpty() && idle.calls.log.isEmpty())
+    }
+
     @Test fun theSimChipShowsOnlyWithTwoSimsAndOnlyForTheCallsAccount() {
         val chip = SimAccount("tel/svc#2", "Vodafone", "Vodafone", "Vodafone", 0xFFFF453A.toInt(), 1, true)
         val sims = Sims(visible = true, chips = persistentListOf(chip))

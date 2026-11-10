@@ -77,6 +77,30 @@ class IncomingScreenTest : ShotTest() {
         compose.onNodeWithTag(IncomingTags.Lock).assertIsDisplayed()
     }
 
+    @Test fun lockedShowsTheSlideTrackAndASmallDeclineInsteadOfTheDiscs() {
+        show(ui.copy(locked = true))
+        compose.onNodeWithTag(IncomingTags.Answer).assertIsDisplayed()
+        compose.onNodeWithTag(IncomingTags.Decline).assertIsDisplayed()
+        compose.onNodeWithTag(IncomingTags.Remind).assertIsDisplayed()
+        compose.onNodeWithTag(IncomingTags.Message).assertIsDisplayed()
+        compose.onNodeWithTag(IncomingTags.Silence).assertDoesNotExist()
+        val track = compose.onNodeWithTag(IncomingTags.Answer).fetchSemanticsNode().boundsInRoot
+        val decline = compose.onNodeWithTag(IncomingTags.Decline).fetchSemanticsNode().boundsInRoot
+        val remind = compose.onNodeWithTag(IncomingTags.Remind).fetchSemanticsNode().boundsInRoot
+        assertTrue("Decline is under the track", decline.top >= track.bottom)
+        assertTrue("Remind me is above the track", remind.bottom <= track.top)
+        assertEquals(with(compose.density) { 76.dp.toPx() }, track.height, 1f)
+    }
+
+    @Test fun declineUnderTheTrackDeclinesAndTheTrackItselfAnswersOnAccessibilityClick() {
+        show(ui.copy(locked = true))
+        compose.onNodeWithTag(IncomingTags.Decline).performClick()
+        assertEquals(
+            listOf<IncomingAction>(IncomingAction.Decline),
+            actions.filterNot { it is IncomingAction.FirstFrame },
+        )
+    }
+
     @Test fun withoutANumberThereIsNoMessageCircle() {
         show(ui.copy(canMessage = false))
         compose.onNodeWithTag(IncomingTags.Message).assertDoesNotExist()

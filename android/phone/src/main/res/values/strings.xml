@@ -284,6 +284,7 @@
     <string name="incoming_from">Incoming call from %1$s</string>
     <string name="incoming_answer">Answer</string>
     <string name="incoming_decline">Decline</string>
+    <string name="incoming_slide_answer">slide to answer</string>
     <string name="incoming_message">Message</string>
     <string name="incoming_remind">Remind me</string>
     <string name="incoming_silence">Silence</string>

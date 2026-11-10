@@ -129,6 +129,10 @@ internal object IncomingMetrics {
     val CaptionGap = 8.dp
     val SecondaryLift = 32.dp
     val BottomPad = 48.dp
+
+    /** The locked variant: under the Decline text. */
+    val LockedBottomPad = 24.dp
+    val DeclineTarget = 48.dp
     val SidePad = 24.dp
 
     /** The SIM chip under the number. */

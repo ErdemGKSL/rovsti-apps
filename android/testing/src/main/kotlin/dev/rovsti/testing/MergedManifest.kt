@@ -8,7 +8,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 /**
  * A merged `AndroidManifest.xml` read as plain data, for the manifest tests of every app module (ARCH 7.2). It is a
  * JVM-only parser (no Android classes), so the tests run without Robolectric. The app build hands the file to the test
- * as a system property (the merged manifest of the debug variant); see `:contacts` `build.gradle.kts`.
+ * as a system property (the merged manifest of the release variant); see `:contacts` `build.gradle.kts`.
  */
 class MergedManifest private constructor(
     private val root: Element,

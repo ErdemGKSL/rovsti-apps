@@ -103,7 +103,7 @@ private fun Project.ndkHomeDir(): String? =
 /**
  * `rovsti.cargo`: `cargoBuildAndroid` (debug) and `cargoBuildAndroid<Variant>` per variant build `rovsti_ffi` for
  * arm64-v8a (plus x86_64 for debug) with cargo-ndk and feed the result to the variant's `jniLibs`; `cargoBuildHost` builds the
- * host library (with the `test-ops` feature) for the plain-JVM `testRustBridge` task.
+ * host library (checks profile: optimised, no LTO; with the `test-ops` feature) for the plain-JVM `testRustBridge` task.
  *
  * Platform 26 and not [RovstiSdk.MIN]: a library linked against a newer platform refuses to load on older devices,
  * and `scripts/android-env.sh` links for 26 too (docs/kotlin-ui/api-notes.md).
@@ -118,11 +118,11 @@ class CargoConventionPlugin : Plugin<Project> {
                 tasks.register("cargoBuildHost", CargoBuildTask::class.java) {
                     group = "rust"
                     description =
-                        "cargo build -p rovsti_ffi --features test-ops, copies the host .so to build/rustHostLib."
+                        "cargo build --profile checks -p rovsti_ffi --features test-ops, copies the host .so to build/rustHostLib."
                     rustSources.from(sources)
                     workspaceDir.set(root.absolutePath)
-                    cargoArgs.set(listOf("build", "-p", "rovsti_ffi", "--features", "test-ops"))
-                    copyFrom.set("target/debug/librovsti_ffi.so")
+                    cargoArgs.set(listOf("build", "--profile", "checks", "-p", "rovsti_ffi", "--features", "test-ops"))
+                    copyFrom.set("target/checks/librovsti_ffi.so")
                     outputDir.set(layout.buildDirectory.dir("rustHostLib"))
                 }
             extensions.extraProperties["rustHostLibDir"] = host.flatMap { it.outputDir }

@@ -26,7 +26,7 @@ compileSdk must be 37 because Compose BOM 2026.09 libraries require it.
 - Convention plugins live in the included build `android/build-logic` (`rovsti.android.library`,
   `rovsti.android.app`, `rovsti.compose`, `rovsti.screenshots`). SDK levels (compileSdk 37, minSdk 34, targetSdk 36)
   are the `RovstiSdk` object there. `-PcomposeReports` writes Compose compiler reports and metrics to
-  `<module>/build/compose_reports` (run `./gradlew :design:compileDebugKotlin --no-build-cache --rerun -PcomposeReports`; a build-cache hit writes no reports); stability overrides go in `android/compose_stability.conf` (`//` comments only).
+  `<module>/build/compose_reports` (run `./gradlew :design:compileReleaseKotlin --no-build-cache --rerun -PcomposeReports`; a build-cache hit writes no reports); stability overrides go in `android/compose_stability.conf` (`//` comments only).
   Roborazzi writes goldens to `<module>/screenshots/`.
 - Modules so far: `:design` (library), `:testing` (test-only library with `ShotTest`, `FixedClock`),
   `:catalog` (demo app, `dev.rovsti.catalog`). Compose API checks are in [api-notes.md](api-notes.md).
@@ -56,9 +56,17 @@ RECORD=1 scripts/kotlin-ui-check.sh        # re-record screenshots instead of ve
 ```
 
 Order (fail fast, prints `FAILED: <step>` and the command): `cargo fmt --all --check`,
-`cargo test -p rovsti_core -p rovsti_geo -p rovsti_tiles -p rovsti_wa_proto -p rovsti_wa_client -p rovsti_android`,
-`cargo build -p rovsti_android --target aarch64-linux-android`, then in `android/`:
-`spotlessCheck lintDebug testDebugUnitTest assembleDebug verifyRoborazziDebug`
+`cargo test --profile checks -p rovsti_core -p rovsti_app_core -p rovsti_geo -p rovsti_tiles -p rovsti_wa_proto -p rovsti_wa_client -p rovsti_android -p rovsti_ffi`,
+`cargo check --release --target aarch64-linux-android -p rovsti_android` (and `-p rovsti_ffi`), then in `android/`:
+`spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :core-bridge:testRustBridge assembleRelease verifyRoborazziRelease :phone:verifyRoborazziPlainRelease`,
+then `scripts/check-catalog-apk.sh` (release APKs: arm64-v8a `librovsti_ffi.so` with the eight JNI exports) and the orphan-golden check
 (only `spotlessCheck` while no Android module exists). GPUI crates are excluded.
 
-Disk: keep 6 GB free; `rm -rf target android/**/build ~/.gradle/caches/build-cache-1` when needed.
+**Release builds only.** The checks never build debug Rust or debug APKs: a debug `librovsti_ffi` is 90 MB per ABI and debug builds filled the disk,
+which made agents delete `target/` and rebuild everything (40 to 70 minutes). Host Rust (tests, `cargoBuildHost`, which copies `target/checks/librovsti_ffi.so`)
+uses `[profile.checks]` in the root `Cargo.toml` (inherits release, `lto = false`, `codegen-units = 16`, `incremental = false` because incremental caches cost gigabytes of the small disk; unchanged crates are still not rebuilt, and fat LTO is not paid per test binary).
+Android Rust is only type-checked with `cargo check --release`; Gradle builds the real arm64-v8a release library (`cargoBuildAndroidRelease`).
+Unit tests and Roborazzi run on the release unit-test variant (`testReleaseUnitTest`, `verifyRoborazziRelease`; R8 does not run for unit tests, so results and goldens equal the debug ones).
+
+**Never `cargo clean`, never delete `target/` or run `rm -rf android/**/build`.** Incremental release builds are fast; a clean one is not. If disk is low,
+delete only `target/checks` or the `build/` of one Android module, never all of them.

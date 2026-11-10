@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fails when a golden PNG exists that no screenshot test compared in the last Gradle run.
-# Roborazzi 1.77.0 writes <module>/build/test-results/roborazzi/debug/results-summary.json, whose
-# results[].golden_file_path lists every image the run compared. Run it after verify/recordRoborazziDebug.
+# Roborazzi 1.77.0 writes <module>/build/test-results/roborazzi/release/results-summary.json, whose
+# results[].golden_file_path lists every image the run compared. Run it after verify/recordRoborazziRelease.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/android"
@@ -13,9 +13,9 @@ for dir in */screenshots; do
   module="${dir%/screenshots}"
   # Roborazzi creates an empty screenshots/ for a module whose tests record nothing yet (:wa before its screens).
   compgen -G "$dir/*.png" > /dev/null || continue
-  summary="$module/build/test-results/roborazzi/debug/results-summary.json"
-  # A module with product flavors (:phone) writes <flavor>Debug instead of debug.
-  [[ -f "$summary" ]] || summary="$(ls "$module"/build/test-results/roborazzi/plainDebug/results-summary.json 2>/dev/null | head -1)"
+  summary="$module/build/test-results/roborazzi/release/results-summary.json"
+  # A module with product flavors (:phone) writes <flavor>Release instead of release.
+  [[ -f "$summary" ]] || summary="$(ls "$module"/build/test-results/roborazzi/plainRelease/results-summary.json 2>/dev/null | head -1)"
   if [[ -z "$summary" || ! -f "$summary" ]]; then
     echo "orphan-goldens: $module roborazzi summary is missing; run the Roborazzi task first" >&2
     status=1

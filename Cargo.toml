@@ -105,6 +105,17 @@ strip = "symbols"
 debug = false
 incremental = false
 
+# Verification (scripts/kotlin-ui-check.sh): release code generation without the link-time cost. Fat LTO per test
+# binary would take far too long and debug builds fill the disk, so tests and the Gradle host library use this
+# profile (`cargo test --profile checks`, target/checks). Never `cargo clean`; to free space delete target/checks only.
+[profile.checks]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = false
+strip = false
+debug = false
+
 # Rendering, layout and our own per-frame code keep full optimisation.
 [profile.release.package.gpui]
 opt-level = 3

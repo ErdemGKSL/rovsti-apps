@@ -48,9 +48,9 @@ android {
                 val cap = flavor.replaceFirstChar { c -> c.uppercase() }
                 val merged =
                     layout.buildDirectory.dir(
-                        "intermediates/merged_manifests/${flavor}Debug/process${cap}DebugManifest",
+                        "intermediates/merged_manifests/${flavor}Release/process${cap}ReleaseManifest",
                     )
-                it.dependsOn("process${cap}DebugManifest")
+                it.dependsOn("process${cap}ReleaseManifest")
                 it.systemProperty("rovsti.flavor", flavor)
                 it.systemProperty(
                     "rovsti.mergedManifest",

@@ -32,13 +32,13 @@ class ComposeConventionPlugin : Plugin<Project> {
                 group = "verification"
                 description = "Fails if a named hot composable is not restartable skippable (needs -PcomposeReports)."
                 reports.set(layout.buildDirectory.dir("compose_reports"))
-                dependsOn("compileDebugKotlin")
+                dependsOn("compileReleaseKotlin")
             }
 
             // The report destination is a compiler argument, not a tracked input, so a cached or up-to-date compile
-            // would leave compose_reports unwritten. Re-run debug compilation whenever reports are requested.
+            // would leave compose_reports unwritten. Re-run release compilation whenever reports are requested.
             if (providers.gradleProperty("composeReports").isPresent) {
-                tasks.matching { it.name == "compileDebugKotlin" }.configureEach {
+                tasks.matching { it.name == "compileReleaseKotlin" }.configureEach {
                     outputs.upToDateWhen { false }
                     outputs.cacheIf { false }
                 }
@@ -53,6 +53,13 @@ class ComposeConventionPlugin : Plugin<Project> {
                 add("implementation", libs.findLibrary("compose-ui-tooling-preview").get())
                 add("debugImplementation", libs.findLibrary("compose-ui-tooling").get())
                 add("debugImplementation", libs.findLibrary("compose-ui-test-manifest").get())
+                // The checks run release unit tests only. A library's unit-test manifest merges its test classpath;
+                // an app's is its own variant manifest, so apps take the test ComponentActivity declaration in release
+                // (an inert entry, no intent filter), as they do in debug.
+                add("testImplementation", libs.findLibrary("compose-ui-test-manifest").get())
+                pluginManager.withPlugin("com.android.application") {
+                    add("releaseImplementation", libs.findLibrary("compose-ui-test-manifest").get())
+                }
             }
         }
     }

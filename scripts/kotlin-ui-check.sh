@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Everything a Kotlin UI step must keep green. Fails fast and names the failing step.
+# RELEASE BUILDS ONLY: no debug cargo build, no debug APK, never `cargo clean` or `rm -rf target` (docs/kotlin-ui/toolchain.md).
+# Host Rust (tests, the Gradle host library) uses the `checks` profile (release code generation, no LTO, target/checks);
+# Android Rust is type-checked with `cargo check --release` and built by Gradle in release (arm64-v8a, R8 on the apps).
 # Env: SKIP_RUST=1 (Gradle only), SKIP_GRADLE=1 (Rust only), RECORD=1 (re-record screenshots).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,26 +40,31 @@ gradle() {
 
 if [[ -z "${SKIP_RUST:-}" ]]; then
   step "cargo fmt --check" cargo fmt --all --check
-  step "cargo test (Kotlin-facing crates)" cargo test "${RUST_PKGS[@]}"
+  step "cargo test --profile checks (Kotlin-facing crates)" cargo test --profile checks "${RUST_PKGS[@]}"
   if [[ -f crates/rovsti_android/Cargo.toml ]]; then
-    step "cargo build rovsti_android aarch64-linux-android" \
-      cargo build -p rovsti_android --target aarch64-linux-android
+    step "cargo check --release rovsti_android aarch64-linux-android" \
+      cargo check --release --target aarch64-linux-android -p rovsti_android
   fi
-  step "cargo build rovsti_ffi aarch64-linux-android" \
-    cargo build -p rovsti_ffi --target aarch64-linux-android
-  step "ffi exports (nm -D)" bash scripts/check-ffi-exports.sh
+  step "cargo check --release rovsti_ffi aarch64-linux-android" \
+    cargo check --release --target aarch64-linux-android -p rovsti_ffi
+  # With Gradle the exports are checked on the packaged release APK libraries (check-catalog-apk.sh); Rust-only runs
+  # check the release .so directly (builds it in release when missing).
+  if [[ -n "${SKIP_GRADLE:-}" ]]; then
+    step "ffi exports (nm -D)" bash scripts/check-ffi-exports.sh
+  fi
 fi
 
 if [[ -z "${SKIP_GRADLE:-}" ]]; then
   # Gradle tasks that exist only once an Android module is included.
   if (cd android && ./gradlew --no-daemon -q projects 2>/dev/null | grep -q "Project ':"); then
-    shot=verifyRoborazziDebug
-    [[ -n "${RECORD:-}" ]] && shot=recordRoborazziDebug
+    shot=verifyRoborazziRelease
+    [[ -n "${RECORD:-}" ]] && shot=recordRoborazziRelease
     # :phone has product flavors (plain, firebase): its tasks carry the flavor, and the firebase flavor's own tests run too.
-    phone_shot="${shot/Debug/PlainDebug}"
-    step "gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug $shot :phone:$phone_shot :phone:testFirebaseDebugUnitTest" \
-      gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug "$shot" ":phone:$phone_shot" :phone:testFirebaseDebugUnitTest
-    step "debug APKs have librovsti_ffi.so (both ABIs)" bash scripts/check-catalog-apk.sh
+    phone_shot="${shot/Release/PlainRelease}"
+    # :phone has no plain testReleaseUnitTest (flavors): :phone:testPlainReleaseUnitTest is named explicitly.
+    step "gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :core-bridge:testRustBridge assembleRelease $shot :phone:$phone_shot" \
+      gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :core-bridge:testRustBridge assembleRelease "$shot" ":phone:$phone_shot"
+    step "release APKs have librovsti_ffi.so (arm64-v8a) with the JNI exports" bash scripts/check-catalog-apk.sh
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck
   fi

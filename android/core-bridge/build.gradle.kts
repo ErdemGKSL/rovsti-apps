@@ -23,7 +23,7 @@ dependencies {
 
 // The real-library tests: plain JUnit on the host JVM against the host build of librovsti_ffi (no Robolectric, so
 // System.loadLibrary is the JDK's). Sources are in src/testRust/kotlin and compile with the unit tests; the Robolectric
-// run (testDebugUnitTest) skips them. One JVM for all classes: the library keeps process-wide state.
+// run (testReleaseUnitTest) skips them. One JVM for all classes: the library keeps process-wide state.
 val rustTestPackage = "dev.rovsti.core.rust"
 
 // The contract fixtures E2.7 (crates/rovsti_ffi/fixtures): ContractFixturesTest reads them as a plain directory.
@@ -51,8 +51,8 @@ val rustHostLib = tasks.named("cargoBuildHost").flatMap { (it as CargoBuildTask)
 tasks.register<Test>("testRustBridge") {
     group = "verification"
     description = "Plain JUnit tests against the real host librovsti_ffi (E2.6)."
-    val unit = tasks.named<Test>("testDebugUnitTest")
-    dependsOn("cargoBuildHost", "compileDebugUnitTestKotlin")
+    val unit = tasks.named<Test>("testReleaseUnitTest")
+    dependsOn("cargoBuildHost", "compileReleaseUnitTestKotlin")
     testClassesDirs = files(unit.map { it.testClassesDirs })
     classpath = files(unit.map { it.classpath })
     filter.includeTestsMatching("$rustTestPackage.*")

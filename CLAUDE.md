@@ -34,5 +34,9 @@ Checks before you finish:
 
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
+cargo check --release -p rovsti_android --target aarch64-linux-android
 ```
+
+`scripts/kotlin-ui-check.sh` is the full gate and runs **release builds only** (host Rust uses `--profile checks`, Gradle
+uses the `*Release*` tasks). Never build debug (Rust or APK), never `cargo clean`, never delete `target/`. If disk is low
+delete only `target/checks` or one module's `android/<module>/build`, never all of them.

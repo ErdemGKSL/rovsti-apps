@@ -7,7 +7,12 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
             pluginManager.apply("com.android.library")
-            extensions.configure<LibraryExtension> { configureCommon() }
+            extensions.configure<LibraryExtension> {
+                configureCommon()
+                // Libraries build unit tests only for testBuildType (debug by default). The checks run release only
+                // (no debug builds, docs/kotlin-ui/toolchain.md), so testReleaseUnitTest must be the one that exists.
+                testBuildType = "release"
+            }
         }
     }
 }

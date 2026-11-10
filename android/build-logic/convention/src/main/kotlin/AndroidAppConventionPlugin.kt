@@ -15,6 +15,8 @@ class AndroidAppConventionPlugin : Plugin<Project> {
             pluginManager.apply("com.android.application")
             extensions.configure<ApplicationExtension> {
                 configureCommon()
+                // Unit tests exist only for testBuildType (debug by default); the checks run release only.
+                testBuildType = "release"
                 defaultConfig.targetSdk = RovstiSdk.TARGET
 
                 // Release: R8 shrinks, optimises and obfuscates the dex (43 MB APK without it, mostly unused library

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Kotlin object dev.rovsti.core.RustNative declares eight external funs; the library
-# must export all eight JNI symbols. Checks the aarch64 Android build (builds it if missing).
+# must export all eight JNI symbols. Checks the aarch64 Android release build (builds it if missing).
 # Usage: scripts/check-ffi-exports.sh [path/to/librovsti_ffi.so]
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,9 +8,9 @@ cd "$ROOT"
 # shellcheck source=android-env.sh
 source scripts/android-env.sh
 
-LIB="${1:-target/aarch64-linux-android/debug/librovsti_ffi.so}"
+LIB="${1:-target/aarch64-linux-android/release/librovsti_ffi.so}"
 if [[ ! -f "$LIB" ]]; then
-  cargo build -p rovsti_ffi --target aarch64-linux-android
+  cargo build --release -p rovsti_ffi --target aarch64-linux-android
 fi
 
 NM="nm"

@@ -30,6 +30,7 @@ import dev.rovsti.phone.PhoneTabs
 import dev.rovsti.phone.RecentsTab
 import dev.rovsti.phone.chromeFor
 import dev.rovsti.phone.data.BlockUndo
+import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.phone.incoming.AuraMode
 import dev.rovsti.phone.incoming.FakeSource
@@ -234,6 +235,7 @@ internal class InCallHarness(
     bluetooth: Boolean = true,
     val backend: FakeInCallBackend = FakeInCallBackend(),
     val tones: ToneMemory = ToneMemory(),
+    display: NumberDisplay = NumberDisplay.AsIs,
 ) {
     val testScope = TestScope(UnconfinedTestDispatcher())
     val source = FakeSource(first)
@@ -252,6 +254,7 @@ internal class InCallHarness(
             blocker = blocker,
             clipboard = clipboard,
             tones = tones,
+            display = display,
             sims = MutableStateFlow(sims),
             bluetoothGranted = grant,
             unknownLabel = "Unknown",

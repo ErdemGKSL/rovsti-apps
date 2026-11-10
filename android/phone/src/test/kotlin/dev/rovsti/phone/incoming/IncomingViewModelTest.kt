@@ -4,9 +4,15 @@ import dev.rovsti.core.model.chat.ReminderSlot
 import dev.rovsti.core.model.phone.CallSnapshot
 import dev.rovsti.core.model.phone.SimAccount
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.core.ops.NativeSharedOps
+import dev.rovsti.phone.HostRust
+import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.platform.telephony.RejectPolicy
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -18,6 +24,35 @@ class IncomingViewModelTest {
     private fun notices(h: IncomingHarness) = h.effects.filterIsInstance<IncomingEffect.Notice>()
 
     // ---- What is drawn ---------------------------------------------------------------------------------------------
+
+    /** The Rust core's Display form, with home "90" (the host library; skipped when it is not built). */
+    private fun realDisplay() = NumberDisplay(NativeSharedOps(HostRust("rovsti-incoming-display").core)) { "90" }
+
+    private fun settled(
+        h: IncomingHarness,
+        done: (IncomingUi) -> Boolean,
+    ) = runBlocking {
+        withTimeout(10_000) {
+            while (!done(h.ui)) delay(10)
+        }
+    }
+
+    @Test fun theNumberUnderTheNameIsFormattedAndAnUnnamedCallTitlesWithIt() {
+        val display = realDisplay()
+        val named = IncomingHarness(display = display)
+        settled(named) { it.caller?.subtitle == "+90 555 111 22 33" }
+        assertEquals("+90 555 111 22 33", named.ui.caller!!.subtitle)
+        assertEquals("the avatar key does not follow the number's text", "7", named.ui.caller!!.avatarKey)
+        val bare = IncomingHarness(ringingSnapshot(ringing(name = null, contactId = null)), display = display)
+        settled(bare) { it.caller?.title == "+90 555 111 22 33" }
+        assertNull(bare.ui.caller!!.subtitle)
+    }
+
+    @Test fun theWaitingCardNumberIsFormattedToo() {
+        val h = IncomingHarness(waitingSnapshot(), display = realDisplay())
+        settled(h) { it.waiting?.subtitle == "+90 555 333 44 55" }
+        assertEquals("+90 555 333 44 55", h.ui.waiting!!.subtitle)
+    }
 
     @Test fun theRingingCallBecomesTheCallerWithNameNumberAndKey() {
         val caller = IncomingHarness().ui.caller!!

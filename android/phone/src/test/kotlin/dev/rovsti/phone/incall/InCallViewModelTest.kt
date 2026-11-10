@@ -6,8 +6,14 @@ import dev.rovsti.core.model.phone.RowKind
 import dev.rovsti.core.model.phone.SimAccount
 import dev.rovsti.core.model.phone.ToneStep
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.core.ops.NativeSharedOps
+import dev.rovsti.phone.HostRust
+import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.Sims
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -40,6 +46,34 @@ class InCallViewModelTest {
     @Test fun aPrivateCallerShowsTheUnknownWord() {
         val h = InCallHarness(liveSnapshot(liveCall(name = null, number = "", contactId = null)))
         assertEquals("Unknown", h.ui.call!!.title)
+    }
+
+    private fun realDisplay() = NumberDisplay(NativeSharedOps(HostRust("rovsti-incall-display").core)) { "90" }
+
+    private fun eventually(check: () -> Boolean) =
+        runBlocking {
+            withTimeout(10_000) {
+                while (!check()) delay(10)
+            }
+        }
+
+    @Test fun theNumberIsFormattedInTheNameTheSubtitleAndThePostCallPill() {
+        val display = realDisplay()
+        val named = InCallHarness(liveSnapshot(liveCall(number = "+905551112233")), display = display)
+        eventually { named.ui.call?.subtitle == "+90 555 111 22 33" }
+        assertEquals("+90 555 111 22 33", named.ui.call!!.subtitle)
+        assertEquals("the raw number still keys the notes", "+905551112233", named.ui.call!!.number)
+        val bare =
+            InCallHarness(
+                liveSnapshot(liveCall(name = null, number = "+905551112233", contactId = null)),
+                display = display,
+            )
+        eventually { bare.ui.call?.title == "+90 555 111 22 33" }
+        ended(bare)
+        eventually { bare.effects.any { it is InCallEffect.PostCall } }
+        val post = bare.effects.filterIsInstance<InCallEffect.PostCall>().single()
+        assertEquals("+90 555 111 22 33", post.title)
+        assertEquals("+905551112233", post.number)
     }
 
     @Test fun aHeldCallReadsAsHeld() {

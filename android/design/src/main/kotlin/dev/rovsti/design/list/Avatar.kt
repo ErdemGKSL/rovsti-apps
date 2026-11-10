@@ -2,6 +2,7 @@ package dev.rovsti.design.list
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -16,6 +17,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
@@ -79,6 +81,9 @@ fun initialsOf(name: String): String {
     }
 }
 
+private val AuraFill = Color.White.copy(alpha = 0.22f)
+private val AuraRim = Color.White.copy(alpha = 0.40f)
+private val AuraRimWidth = 0.5.dp
 private const val FNV_OFFSET = -2128831035
 private const val FNV_PRIME = 16777619
 private const val INITIALS_RATIO = 0.4f
@@ -102,13 +107,16 @@ fun Avatar(
     // A Coil model (content:// or file URI): decoded at the avatar's own pixels over the initials, which stay when
     // the model is empty or fails to load. No SubcomposeAsyncImage: the initials are always the layer below.
     photoModel: Any? = null,
+    // On a call's aura the palette colour can match the backdrop: the initials sit on a 22 % white disc with a 0.5 dp
+    // white 40 % rim instead (photos are unchanged).
+    onAura: Boolean = false,
 ) {
     if (photoModel == null) {
-        AvatarFace(name, modifier, size, photo, colorKey, contentDescription)
+        AvatarFace(name, modifier, size, photo, colorKey, contentDescription, onAura)
         return
     }
     Box(modifier.size(size).clip(CircleShape)) {
-        AvatarFace(name, Modifier, size, photo, colorKey, contentDescription)
+        AvatarFace(name, Modifier, size, photo, colorKey, contentDescription, onAura)
         RowImage(photoModel, size)
     }
 }
@@ -121,6 +129,7 @@ private fun AvatarFace(
     photo: ImageBitmap?,
     colorKey: String,
     contentDescription: String?,
+    onAura: Boolean = false,
 ) {
     val described =
         if (contentDescription !=
@@ -147,7 +156,8 @@ private fun AvatarFace(
                 .size(size)
                 .then(described)
                 .clip(CircleShape)
-                .background(color),
+                .background(if (onAura) AuraFill else color)
+                .then(if (onAura) Modifier.border(AuraRimWidth, AuraRim, CircleShape) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             RovstiIcon(RovstiIcons.Person, null, tint = Color.White, size = size * GLYPH_RATIO)
@@ -163,7 +173,16 @@ private fun AvatarFace(
                 val layout = measurer.measureInitials(initials, size.toPx() * INITIALS_RATIO, this)
                 val topLeft = layout.centeredAt(Offset(this.size.width / 2f, this.size.height / 2f))
                 onDrawBehind {
-                    drawCircle(color)
+                    if (onAura) {
+                        drawCircle(AuraFill)
+                        drawCircle(
+                            AuraRim,
+                            radius = this.size.minDimension / 2f - AuraRimWidth.toPx() / 2f,
+                            style = Stroke(AuraRimWidth.toPx()),
+                        )
+                    } else {
+                        drawCircle(color)
+                    }
                     drawText(layout, topLeft = topLeft)
                 }
             },

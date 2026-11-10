@@ -7,6 +7,9 @@ import dev.rovsti.core.model.chat.ReminderSlotOption
 import dev.rovsti.core.model.phone.CallSnapshot
 import dev.rovsti.core.model.phone.WireCall
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.core.ops.NativeSharedOps
+import dev.rovsti.phone.HostRust
+import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.platform.notify.ReminderItem
 import dev.rovsti.platform.notify.RemindersRepository
@@ -203,6 +206,7 @@ internal class IncomingHarness(
     first: CallSnapshot = ringingSnapshot(),
     sims: Sims = Sims(),
     keepInitial: Boolean = false,
+    display: NumberDisplay = NumberDisplay.AsIs,
 ) {
     val source = FakeSource(first)
     val calls = RecordingCalls()
@@ -216,6 +220,7 @@ internal class IncomingHarness(
             calls = calls,
             backend = backend,
             reminders = reminders,
+            display = display,
             sims = MutableStateFlow(sims),
             savedReplies = { listOf("saved") },
             unknownLabel = "Unknown",
@@ -234,4 +239,11 @@ internal class IncomingHarness(
     companion object {
         const val NOW = 1_700_000_000_000L
     }
+}
+
+/** The Rust core's Display form with home "90", learned for every number in [snapshot] (so a built state is formatted). */
+internal fun hostDisplay(snapshot: CallSnapshot): NumberDisplay {
+    val display = NumberDisplay(NativeSharedOps(HostRust("rovsti-incoming-shot").core)) { "90" }
+    kotlinx.coroutines.runBlocking { display.warm(snapshot.calls.map { it.numberRaw }) }
+    return display
 }

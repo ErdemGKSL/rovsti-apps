@@ -27,6 +27,7 @@ import dev.rovsti.phone.data.BlockRepo
 import dev.rovsti.phone.data.CallLauncher
 import dev.rovsti.phone.data.CallPlacer
 import dev.rovsti.phone.data.DeviceLocaleTime
+import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.People
 import dev.rovsti.phone.data.PeopleIndex
 import dev.rovsti.phone.data.PhoneStore
@@ -200,6 +201,9 @@ open class PhoneContainer(
     /** The reply choices and the reminder slots of the Incoming screen (the Rust core). */
     val incomingBackend: IncomingBackend by lazy { createIncomingBackend() }
 
+    /** Numbers as people read them (`+90 555 111 22 33`), shared by the call screens. */
+    val numberDisplay: NumberDisplay by lazy { NumberDisplay(sharedOps, ::homeCc) }
+
     /** The model of the Incoming screen and the waiting-call card (E5.6); [scope] is the app's, [unknown] its word. */
     open fun incomingModel(
         scope: CoroutineScope,
@@ -210,6 +214,7 @@ open class PhoneContainer(
             calls = calls,
             backend = incomingBackend,
             reminders = callReminders,
+            display = numberDisplay,
             sims = simState.sims,
             savedReplies = { store.prefs.value.quickReplies },
             unknownLabel = unknown,
@@ -236,6 +241,7 @@ open class PhoneContainer(
             blocker = RepoInCallBlocker(block),
             clipboard = clipboard,
             tones = toneMemory,
+            display = numberDisplay,
             sims = simState.sims,
             bluetoothGranted =
                 permissions

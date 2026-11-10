@@ -15,10 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,18 +33,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
 import dev.rovsti.design.controls.GlassCircleButton
+import dev.rovsti.design.controls.PlainIconAction
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
@@ -212,28 +215,23 @@ private fun CallerBlock(
             )
         }
         Spacer(Modifier.height(IncomingMetrics.AvatarGap))
-        Avatar(
-            name = caller.title,
-            modifier = Modifier.rovstiSharedBounds(AvatarKey),
-            size = IncomingMetrics.Avatar,
-            colorKey = caller.avatarKey,
-        )
+        CallAvatar(caller, Modifier.rovstiSharedBounds(AvatarKey), IncomingMetrics.Avatar)
         Spacer(Modifier.height(IncomingMetrics.AvatarGap))
-        RovstiText(
+        // Light 36 sp, centred, two lines at most; a longer name shrinks to fit instead of cutting.
+        BasicText(
             caller.title,
-            modifier = Modifier.testTag(IncomingTags.Name).semantics { heading() },
-            style = RovstiTheme.type.largeTitle,
-            color = OnAura,
-            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().testTag(IncomingTags.Name).semantics { heading() },
+            style = NameStyle.merge(TextStyle(color = OnAura, textAlign = TextAlign.Center)),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            autoSize = TextAutoSize.StepBased(minFontSize = NameMinSize, maxFontSize = NameSize, stepSize = 1.sp),
         )
         caller.subtitle?.let {
             Spacer(Modifier.height(IncomingMetrics.NameGap))
             RovstiText(
                 it,
                 modifier = Modifier.testTag(IncomingTags.Number),
-                style = RovstiTheme.type.body,
+                style = RovstiTheme.type.callout,
                 color = OnAuraSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -274,119 +272,117 @@ private fun SecondaryRow(
     strings: IncomingStrings,
     onAction: (IncomingAction) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(IncomingMetrics.SecondaryGap), verticalAlignment = Alignment.Top) {
-        CircleAction(
-            RovstiIcons.Bell,
-            strings.remind,
-            IncomingTags.Remind,
-            IncomingMetrics.Secondary,
-        ) { onAction(IncomingAction.OpenReminders) }
-        if (ui.canMessage) {
-            CircleAction(
-                RovstiIcons.Message,
-                strings.message,
-                IncomingTags.Message,
-                IncomingMetrics.Secondary,
-            ) { onAction(IncomingAction.OpenReplies) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Cell(Modifier.weight(1f)) {
+            PlainIconAction(
+                RovstiIcons.Bell,
+                strings.remind,
+                { onAction(IncomingAction.OpenReminders) },
+                Modifier.testTag(IncomingTags.Remind),
+                color = OnAura,
+            )
         }
-        CircleAction(
-            RovstiIcons.BellSlash,
-            if (ui.silenced) strings.silenced else strings.silence,
-            IncomingTags.Silence,
-            IncomingMetrics.Secondary,
-            enabled = !ui.silenced,
-        ) { onAction(IncomingAction.Silence) }
+        if (ui.canMessage) {
+            Cell(Modifier.weight(1f)) {
+                PlainIconAction(
+                    RovstiIcons.Message,
+                    strings.message,
+                    { onAction(IncomingAction.OpenReplies) },
+                    Modifier.testTag(IncomingTags.Message),
+                    color = OnAura,
+                )
+            }
+        }
+        Cell(Modifier.weight(1f)) {
+            PlainIconAction(
+                RovstiIcons.BellSlash,
+                if (ui.silenced) strings.silenced else strings.silence,
+                { onAction(IncomingAction.Silence) },
+                Modifier.testTag(IncomingTags.Silence),
+                color = OnAura,
+                enabled = !ui.silenced,
+            )
+        }
     }
 }
 
+@Composable
+private fun Cell(
+    modifier: Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(modifier, contentAlignment = Alignment.TopCenter) { content() }
+}
+
+/** Decline and Answer: the disc centres sit at 1/4 and 3/4 of the width, as on iOS. */
 @Composable
 private fun PrimaryRow(
     strings: IncomingStrings,
     onAction: (IncomingAction) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(IncomingMetrics.ButtonGap), verticalAlignment = Alignment.Top) {
-        CircleAction(
-            RovstiIcons.Phone,
-            strings.decline,
-            IncomingTags.Decline,
-            IncomingMetrics.Button,
-            fill = Color(DECLINE_RED),
-            iconRotation = DECLINE_ROTATION,
-        ) { onAction(IncomingAction.Decline) }
-        CircleAction(
-            RovstiIcons.Phone,
-            strings.answer,
-            IncomingTags.Answer,
-            IncomingMetrics.Button,
-            fill = Color(ANSWER_GREEN),
-        ) { onAction(IncomingAction.Answer) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Cell(Modifier.weight(1f)) {
+            CallDisc(
+                strings.decline,
+                IncomingTags.Decline,
+                Color(DECLINE_RED),
+                DECLINE_ROTATION,
+            ) { onAction(IncomingAction.Decline) }
+        }
+        Cell(Modifier.weight(1f)) {
+            CallDisc(strings.answer, IncomingTags.Answer, Color(ANSWER_GREEN), 0f) { onAction(IncomingAction.Answer) }
+        }
     }
 }
 
-/**
- * A glass circle with a caption under it. [fill] paints the call colour inside the circle (Answer, Decline); without
- * it the glass shows. Both act when the finger lifts (the button's click), so a stray touch never answers.
- */
+/** A solid call disc (white filled handset on [fill]) with its caption; it acts when the finger lifts. */
 @Composable
-private fun CircleAction(
-    icon: ImageVector,
+private fun CallDisc(
     label: String,
     tag: String,
-    size: Dp,
-    fill: Color = Color.Unspecified,
-    iconRotation: Float = 0f,
-    enabled: Boolean = true,
+    fill: Color,
+    rotation: Float,
     onClick: () -> Unit,
 ) {
-    Column(
-        Modifier.width(size + Spacing.xl),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         GlassCircleButton(
             onClick = onClick,
-            enabled = enabled,
-            size = size,
-            alpha = if (enabled) 1f else DISABLED_ALPHA,
-            modifier =
-                Modifier
-                    .testTag(tag)
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = label
-                        if (!enabled) stateDescription = label
-                    },
+            size = IncomingMetrics.Button,
+            forceFlat = true,
+            modifier = Modifier.testTag(tag).semantics(mergeDescendants = true) { contentDescription = label },
         ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .then(if (fill != Color.Unspecified) Modifier.background(fill) else Modifier),
-                contentAlignment = Alignment.Center,
-            ) {
+            Box(Modifier.fillMaxSize().background(fill), contentAlignment = Alignment.Center) {
                 RovstiIcon(
-                    icon,
+                    RovstiIcons.PhoneFill,
                     null,
-                    modifier = Modifier.rotate(iconRotation),
-                    tint = if (fill != Color.Unspecified) Color.White else OnAura,
-                    size =
-                        if (size ==
-                            IncomingMetrics.Button
-                        ) {
-                            IncomingMetrics.PrimaryIcon
-                        } else {
-                            IncomingMetrics.SecondaryIcon
-                        },
+                    modifier = Modifier.rotate(rotation),
+                    tint = Color.White,
+                    size = IncomingMetrics.PrimaryIcon,
                 )
             }
         }
         Spacer(Modifier.height(IncomingMetrics.CaptionGap))
-        RovstiText(
-            label,
-            style = RovstiTheme.type.footnote,
-            color = if (enabled) OnAura else OnAuraSecondary,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        RovstiText(label, style = RovstiTheme.type.footnote, color = OnAura, textAlign = TextAlign.Center, maxLines = 1)
     }
+}
+
+/**
+ * The caller's picture on the aura: a photo as it is, else white initials on a 22 % white disc with a hairline white
+ * rim (the palette colour could match the aura and vanish into it).
+ */
+@Composable
+private fun CallAvatar(
+    caller: IncomingCaller,
+    modifier: Modifier,
+    size: Dp,
+) {
+    Avatar(
+        name = caller.title,
+        modifier = modifier,
+        size = size,
+        colorKey = caller.avatarKey,
+        onAura = true,
+    )
 }
 
 /** The key of the avatar that flies to the In-Call screen (S3). */
@@ -397,5 +393,7 @@ private val OnAuraSecondary = Color.White.copy(alpha = 0.78f)
 private const val INDIGO = 0xFF5E5CE6
 private const val MESH_ALPHA = 0.28f
 private const val LOCK_CHIP_ALPHA = 0.18f
-private const val DISABLED_ALPHA = 0.55f
 private const val DECLINE_ROTATION = 135f
+private val NameSize = 36.sp
+private val NameMinSize = 22.sp
+private val NameStyle = TextStyle(fontSize = NameSize, fontWeight = FontWeight.Light, letterSpacing = (-0.4).sp)

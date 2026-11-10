@@ -252,6 +252,24 @@ object RovstiIcons {
         }
     }
 
+    /** The handset of [Phone], filled: the keypad's call button and the Answer / Decline / End discs. */
+    val PhoneFill: ImageVector by lazy {
+        filled("PhoneFill") {
+            moveTo(5f, 3.5f)
+            horizontalLineTo(9f)
+            lineTo(10.6f, 8f)
+            lineTo(8.6f, 9.6f)
+            curveTo(9.6f, 11.9f, 11.6f, 13.9f, 14.4f, 15.4f)
+            lineTo(16f, 13.4f)
+            lineTo(20.5f, 15f)
+            verticalLineTo(19f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 19f, 20.5f)
+            curveTo(10.7f, 20.5f, 3.5f, 13.3f, 3.5f, 5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 5f, 3.5f)
+            close()
+        }
+    }
+
     val Message: ImageVector by lazy { stroked("Message") { bubble() } }
 
     /** A bell with a slash: "Silence" on the Incoming Call screen. */

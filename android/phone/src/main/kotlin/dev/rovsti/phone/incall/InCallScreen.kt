@@ -269,6 +269,7 @@ private fun CallerBlock(
             modifier = Modifier.testTag(InCallTags.Avatar).rovstiSharedBounds(AvatarKey),
             size = InCallMetrics.Avatar,
             colorKey = call.avatarKey,
+            onAura = true,
         )
         Spacer(Modifier.height(InCallMetrics.AvatarGap))
         // Touch and hold on the name block copies the number (U17).
@@ -534,7 +535,7 @@ private fun EndButton(
     ) {
         Box(Modifier.fillMaxSize().background(Color(DECLINE_RED)), contentAlignment = Alignment.Center) {
             RovstiIcon(
-                RovstiIcons.Phone,
+                RovstiIcons.PhoneFill,
                 null,
                 modifier = Modifier.rotate(HANG_UP),
                 tint = Color.White,

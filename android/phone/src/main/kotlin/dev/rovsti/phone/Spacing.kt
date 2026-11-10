@@ -118,22 +118,17 @@ internal object DetailsMetrics {
 /** Dimensions of the Incoming Call screen and the waiting-call card (E5.6). */
 internal object IncomingMetrics {
     val LabelTop = 28.dp
-    val Avatar = 120.dp
+    val Avatar = 96.dp
     val AvatarGap = 24.dp
     val NameGap = 8.dp
 
     /** Answer and Decline. */
     val Button = 76.dp
-    val ButtonGap = 96.dp
 
-    /** Remind me, Message and Silence. */
-    val Secondary = 56.dp
-    val SecondaryGap = 28.dp
     val PrimaryIcon = 32.dp
-    val SecondaryIcon = 24.dp
     val CaptionGap = 8.dp
     val SecondaryLift = 32.dp
-    val BottomPad = 40.dp
+    val BottomPad = 48.dp
     val SidePad = 24.dp
 
     /** The SIM chip under the number. */

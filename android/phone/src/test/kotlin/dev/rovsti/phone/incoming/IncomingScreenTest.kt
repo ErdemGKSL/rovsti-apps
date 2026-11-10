@@ -4,14 +4,22 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.down
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.up
+import androidx.compose.ui.unit.dp
 import dev.rovsti.design.media.AuraAnimating
 import dev.rovsti.design.media.AuraStill
 import dev.rovsti.design.motion.LocalReduceMotion
@@ -77,6 +85,63 @@ class IncomingScreenTest : ShotTest() {
     @Test fun theSimChipNamesTheLine() {
         show(ui.copy(caller = caller.copy(sim = SimChip("Vodafone", 0xFFFF453A.toInt()))))
         compose.onNodeWithTag(IncomingTags.Sim).assertIsDisplayed()
+    }
+
+    // ---- F20: plain secondary actions ------------------------------------------------------------------------------
+
+    private fun luminance(argb: Int): Int = ((argb shr 16) and 0xFF) + ((argb shr 8) and 0xFF) + (argb and 0xFF)
+
+    private fun nodeLuminance(tag: String): Long {
+        val bmp = compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
+        var sum = 0L
+        for (y in 0 until bmp.height) for (x in 0 until bmp.width) sum += luminance(bmp.getPixel(x, y))
+        return sum
+    }
+
+    @Test fun theSecondaryActionsHaveNoDiscBehindThem() {
+        show(aura = AuraMode.Shot)
+        val root = compose.onRoot().captureToImage().asAndroidBitmap()
+        val density = compose.density
+        for (tag in listOf(IncomingTags.Remind, IncomingTags.Message, IncomingTags.Silence)) {
+            val b = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+            val y = (b.top + with(density) { 22.dp.toPx() }).toInt()
+            val inside = root.getPixel((b.center.x - with(density) { 20.dp.toPx() }).toInt(), y)
+            val outside = root.getPixel((b.center.x - with(density) { 70.dp.toPx() }).toInt(), y)
+            for (shift in listOf(16, 8, 0)) {
+                val d = kotlin.math.abs(((inside shr shift) and 0xFF) - ((outside shr shift) and 0xFF))
+                assertTrue("$tag: a disc would show here (channel diff $d)", d < 30)
+            }
+        }
+    }
+
+    @Test fun theSecondaryTargetsAreAtLeastFortyEightDpAndButtons() {
+        show()
+        val min = with(compose.density) { 48.dp.toPx() } - 1f
+        for (tag in listOf(IncomingTags.Remind, IncomingTags.Message, IncomingTags.Silence)) {
+            val node = compose.onNodeWithTag(tag)
+            val b = node.fetchSemanticsNode().boundsInRoot
+            assertTrue("$tag width", b.width >= min)
+            assertTrue("$tag height", b.height >= min)
+            assertEquals(Role.Button, node.fetchSemanticsNode().config.getOrNull(SemanticsProperties.Role))
+        }
+    }
+
+    @Test fun aPressedSecondaryActionDims() {
+        show(aura = AuraMode.Shot)
+        val rest = nodeLuminance(IncomingTags.Remind)
+        compose.onNodeWithTag(IncomingTags.Remind).performTouchInput { down(center) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        val pressed = nodeLuminance(IncomingTags.Remind)
+        assertTrue("pressed $pressed < rest $rest", pressed < rest)
+        compose.onNodeWithTag(IncomingTags.Remind).performTouchInput { up() }
+        advance(400)
+        assertEquals(rest, nodeLuminance(IncomingTags.Remind))
+    }
+
+    @Test fun theNumberLineIsTheOneTheModelGaveAndTheNameIsLight() {
+        show(ui.copy(caller = caller.copy(title = "A very long caller name that needs two lines and then some more")))
+        compose.onNodeWithTag(IncomingTags.Name).assertIsDisplayed()
     }
 
     // ---- Actions -----------------------------------------------------------------------------------------------------

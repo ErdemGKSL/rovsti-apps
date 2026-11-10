@@ -42,7 +42,10 @@ class E56ShotTest : ShotTest() {
     private fun ringingUi(
         call: dev.rovsti.core.model.phone.WireCall = ringing(account = "tel/svc#2"),
         locked: Boolean = false,
-    ) = IncomingHarness(ringingSnapshot(call, locked = locked), twoSims).ui
+    ) = ringingSnapshot(call, locked = locked).let { IncomingHarness(it, twoSims, display = hostDisplay(it)).ui }
+
+    private fun waitingUi(held: Boolean = false) =
+        waitingSnapshot(held = held).let { IncomingHarness(it, display = hostDisplay(it)).ui }
 
     @Test fun incoming() = snap("e5.6-incoming", ringingUi())
 
@@ -88,8 +91,7 @@ class E56ShotTest : ShotTest() {
                 )
         }
 
-    @Test fun waitingCall() = snap("e5.6-waiting-call-card", IncomingHarness(waitingSnapshot()).ui, inCall = true)
+    @Test fun waitingCall() = snap("e5.6-waiting-call-card", waitingUi(), inCall = true)
 
-    @Test fun waitingCallWithHeldCall() =
-        snap("e5.6-waiting-call-card-held", IncomingHarness(waitingSnapshot(held = true)).ui, inCall = true)
+    @Test fun waitingCallWithHeldCall() = snap("e5.6-waiting-call-card-held", waitingUi(held = true), inCall = true)
 }

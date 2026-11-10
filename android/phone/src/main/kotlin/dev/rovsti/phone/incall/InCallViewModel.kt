@@ -7,6 +7,7 @@ import dev.rovsti.core.model.phone.RowKind
 import dev.rovsti.core.model.phone.ToneStep
 import dev.rovsti.core.model.phone.WireCall
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.phone.incoming.CallSource
 import dev.rovsti.phone.incoming.SimChip
@@ -55,6 +56,7 @@ class InCallViewModel(
     private val blocker: InCallBlocker,
     private val clipboard: ClipboardRepository,
     private val tones: ToneMemory,
+    private val display: NumberDisplay,
     private val sims: StateFlow<Sims>,
     private val bluetoothGranted: StateFlow<Boolean>,
     private val unknownLabel: String,
@@ -95,12 +97,17 @@ class InCallViewModel(
             this.sims,
             keypad,
             combine(rows, bluetoothGranted) { r, bt -> filtered(r, bt) },
-            combine(ended, noted) { e, _ -> e },
+            combine(ended, noted, display.version) { e, _, _ -> e },
         ) { snapshot, simList, pad, routes, held -> build(snapshot, simList, pad, routes, held) }
             .stateIn(scope, SharingStarted.Eagerly, InCallUi())
 
     init {
-        scope.launch { source.snapshot.collect(::observe) }
+        scope.launch {
+            source.snapshot.collect {
+                display.warm(it.calls.map { c -> c.numberRaw })
+                observe(it)
+            }
+        }
     }
 
     fun onAction(action: InCallAction) {
@@ -218,7 +225,7 @@ class InCallViewModel(
     ): InCallCall {
         val title =
             wire.displayName?.trim()?.takeIf { it.isNotEmpty() }
-                ?: wire.numberRaw.trim().takeIf { it.isNotEmpty() }
+                ?: display.peek(wire.numberRaw.trim()).takeIf { it.isNotEmpty() }
                 ?: unknownLabel
         val chip =
             wire.accountKey?.let { key ->
@@ -236,9 +243,15 @@ class InCallViewModel(
         return InCallCall(
             callId = wire.id,
             title = title,
-            subtitle = wire.numberRaw.trim().takeIf { it.isNotEmpty() && !wire.displayName.isNullOrBlank() },
+            subtitle =
+                display
+                    .peek(
+                        wire.numberRaw.trim(),
+                    ).takeIf { it.isNotEmpty() && !wire.displayName.isNullOrBlank() },
             number = wire.numberRaw.trim(),
-            avatarKey = wire.contactId?.toString() ?: title,
+            avatarKey =
+                wire.contactId?.toString() ?: wire.displayName?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: wire.numberRaw.trim().ifEmpty { unknownLabel },
             contactId = wire.contactId,
             phase =
                 when (wire.state) {

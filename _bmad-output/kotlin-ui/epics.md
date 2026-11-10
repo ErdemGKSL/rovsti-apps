@@ -1193,6 +1193,13 @@ round close. E5.9-E5.14 follow in round 14.
   number format op, F14). (F18) Answer and Decline use stroked handsets; use the filled white handset the keypad call
   button uses (owner: call icons are filled), Decline rotated 135 deg. (F19) The initials avatar is green on the green
   background and nearly vanishes; give it a contrasting fill or a light ring.
+- **Evidence (round-13 step 3, F17-F19, F20 ringing: done):** F17 `phone/.../data/NumberDisplay.kt` (Rust `NumberForm.Display`, used by
+  `IncomingViewModel`, `InCallViewModel`, the waiting card and the post-call pill; `IncomingViewModelTest`,
+  `InCallViewModelTest` assert `+905551112233` -> `+90 555 111 22 33`). F18 `RovstiIcons.PhoneFill` (`:design`), Answer, Decline
+  and End on solid 76 dp green/red discs. F19 `Avatar(onAura = true)`: white 22 % fill, 0.5 dp white 40 % rim. F20 ringing
+  `:design` `controls/PlainIconAction.kt` (`PlainIconActionTest`, `IncomingScreenTest` no disc / 0.5 press / >= 48 dp);
+  iOS 26 layout (Light 36 sp name shrinking after two lines, 96 dp avatar, discs at 1/4 and 3/4). Goldens `e5.6-*` re-recorded
+  and opened.
 - **(F20) Owner: call-screen secondary buttons, as on iOS (revised 2026-11-10).**
   - **Ringing (incoming) screen:** Remind me / Message / Silence get **no background at all**: just the white glyph with
     its label under it, the whole icon+label area is the touch target (min 48 dp), pressed state dims to 50%. Answer and

@@ -4,6 +4,7 @@ import dev.rovsti.core.model.chat.ReminderSlot
 import dev.rovsti.core.model.phone.CallSnapshot
 import dev.rovsti.core.model.phone.WireCall
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.platform.notify.ReminderItem
 import dev.rovsti.platform.notify.RemindersRepository
@@ -31,6 +32,7 @@ class IncomingViewModel(
     private val calls: CallsApi,
     private val backend: IncomingBackend,
     private val reminders: RemindersRepository<ReminderItem>,
+    private val display: NumberDisplay,
     sims: StateFlow<Sims>,
     private val savedReplies: () -> List<String>,
     private val unknownLabel: String,
@@ -44,7 +46,7 @@ class IncomingViewModel(
     val effect = effects.receiveAsFlow()
 
     val state: StateFlow<IncomingUi> =
-        combine(source.snapshot, sims) { snapshot, sims -> build(snapshot, sims) }
+        combine(source.snapshot, sims, display.version) { snapshot, sims, _ -> build(snapshot, sims) }
             .stateIn(scope, SharingStarted.Eagerly, build(source.snapshot.value, sims.value))
 
     private val answered = HashSet<Int>()
@@ -53,6 +55,7 @@ class IncomingViewModel(
     private var seen = false
 
     init {
+        scope.launch { source.snapshot.collect { display.warm(it.calls.map { c -> c.numberRaw }) } }
         scope.launch { source.snapshot.collect(::observe) }
     }
 
@@ -162,13 +165,18 @@ class IncomingViewModel(
 
     private fun titleOf(call: WireCall): String =
         call.displayName?.trim()?.takeIf { it.isNotEmpty() }
-            ?: call.numberRaw.trim().takeIf { it.isNotEmpty() }
+            ?: display.peek(call.numberRaw.trim()).takeIf { it.isNotEmpty() }
             ?: unknownLabel
 
     private fun subtitleOf(call: WireCall): String? =
-        call.numberRaw.trim().takeIf { it.isNotEmpty() && !call.displayName.isNullOrBlank() }
+        display.peek(call.numberRaw.trim()).takeIf { it.isNotEmpty() && !call.displayName.isNullOrBlank() }
 
-    private fun keyOf(call: WireCall): String = call.contactId?.toString() ?: titleOf(call)
+    /** Stable while the number's text arrives: the contact, else the name, else the raw number. */
+    private fun keyOf(call: WireCall): String =
+        call.contactId?.toString()
+            ?: call.displayName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: call.numberRaw.trim().takeIf { it.isNotEmpty() }
+            ?: unknownLabel
 
     private fun ringingOf(snapshot: CallSnapshot): WireCall? =
         snapshot.calls.firstOrNull {

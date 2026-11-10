@@ -151,7 +151,7 @@ fun MiniCallPill(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
-        Avatar(name = call.title, size = InCallMetrics.PillAvatar, colorKey = call.avatarKey)
+        Avatar(name = call.title, size = InCallMetrics.PillAvatar, colorKey = call.avatarKey, onAura = true)
         Column(Modifier.weight(1f)) {
             RovstiText(
                 call.title,
@@ -189,7 +189,7 @@ fun MiniCallPill(
             contentAlignment = Alignment.Center,
         ) {
             RovstiIcon(
-                RovstiIcons.Phone,
+                RovstiIcons.PhoneFill,
                 null,
                 modifier = Modifier.rotate(HANG_UP),
                 tint = Color.White,

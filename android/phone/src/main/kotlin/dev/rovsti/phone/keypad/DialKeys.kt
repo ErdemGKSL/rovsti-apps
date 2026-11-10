@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import dev.rovsti.design.icons.RovstiIcon
+import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.press.glassPress
 import dev.rovsti.design.theme.RovstiTheme
@@ -220,7 +221,7 @@ internal fun CallKey(
         contentAlignment = Alignment.Center,
     ) {
         // A filled white handset in both themes, as on iOS (the theme's onAccent is dark in dark mode).
-        RovstiIcon(DialColors.FilledHandset, null, tint = Color.White, size = KeypadMetrics.CallGlyph)
+        RovstiIcon(RovstiIcons.PhoneFill, null, tint = Color.White, size = KeypadMetrics.CallGlyph)
     }
 }
 
@@ -293,24 +294,4 @@ private object DialColors {
     val KeyDark = Color(0xFF333336)
     val CallLight = Color(0xFF34C759)
     val CallDark = Color(0xFF30D158)
-
-    /** The handset glyph of `RovstiIcons.Phone`, filled instead of stroked. */
-    val FilledHandset: ImageVector by lazy {
-        ImageVector
-            .Builder("FilledHandset", KeypadMetrics.IconViewport, KeypadMetrics.IconViewport, 24f, 24f)
-            .path(fill = SolidColor(Color.Black)) {
-                moveTo(5f, 3.5f)
-                horizontalLineTo(9f)
-                lineTo(10.6f, 8f)
-                lineTo(8.6f, 9.6f)
-                curveTo(9.6f, 11.9f, 11.6f, 13.9f, 14.4f, 15.4f)
-                lineTo(16f, 13.4f)
-                lineTo(20.5f, 15f)
-                verticalLineTo(19f)
-                arcTo(1.5f, 1.5f, 0f, false, true, 19f, 20.5f)
-                curveTo(10.7f, 20.5f, 3.5f, 13.3f, 3.5f, 5f)
-                arcTo(1.5f, 1.5f, 0f, false, true, 5f, 3.5f)
-                close()
-            }.build()
-    }
 }

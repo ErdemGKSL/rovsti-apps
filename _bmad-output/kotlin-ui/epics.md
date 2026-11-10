@@ -1337,8 +1337,26 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   (licence noted in THIRD_PARTY_NOTICES) so rendering is deterministic.
 - UI: from the contact card's menu and the Upcoming Birthdays "Wish" action -> a preview sheet (template switcher,
   colour choice) -> Share (Android share sheet with the JPEG) or Save to gallery.
-- Tests: Rust golden renders (hash or pixel-diff tolerance), size/time budget (render under ~300 ms on the phone),
-  Kotlin flow tests; screenshots `x2-card-preview-birthday`, `x2-card-preview-contact`.
+- **What Takumi can do (checked in its source, 2026-11-10):** CSS `backdrop-filter` (blur, saturate, brightness,
+  contrast, hue-rotate, drop-shadow and `url()`), `filter`, `mix-blend-mode`, `mask-image`, `clip-path`, gradients and
+  `box-shadow`, plus SVG filter primitives including `feDisplacementMap`, `feTurbulence`, `feSpecularLighting`,
+  `feGaussianBlur`, `feColorMatrix`, `feComposite`, `feImage`. It is a CPU rasterizer: **no custom GPU shaders**
+  (no AGSL/WGSL). So **liquid glass is doable without shaders**: frosted panel = `backdrop-filter: blur() saturate()`
+  + a white tint + a 1 px light rim (gradient border) + inner highlight; the lens/refraction edge = an SVG filter with a
+  radial displacement map (`feImage`/`feTurbulence` -> `feDisplacementMap`) and a `feSpecularLighting` rim, the same
+  technique as glisse's SVG glass (port its constants, MIT, with the glisse header). Prototype first and compare with
+  the app's glass; if `backdrop-filter: url()` does not apply the displacement, apply the filter to a copy of the
+  background clipped to the panel instead.
+- **Formats:** PNG (lossless, transparency), JPEG (quality ~88), WebP, and **animated GIF / APNG / animated WebP**
+  (Takumi's animation encoders). Offer JPEG for photos, PNG for cards with transparency, **GIF for animated cards**.
+- **Animated cards (owner: "design nice GIFs"):** birthday card with falling confetti and a glass shimmer sweeping
+  across the panel, candle flicker; contact card with a soft gradient drift. 2-3 s loops, 24-30 frames, 540-720 px wide,
+  palette chosen per card, target under ~3 MB; render frames in the Rust core on a background thread with progress.
+  Share GIF where the target app supports it (WhatsApp sends GIFs as video: also offer MP4 only if Takumi's encoder is
+  available in our build, otherwise animated WebP).
+- Tests: Rust golden renders (hash or pixel-diff tolerance) for static frames and the first/last GIF frame, size/time
+  budget (static card under ~300 ms, GIF under ~3 s on the phone), Kotlin flow tests; screenshots
+  `x2-card-preview-birthday`, `x2-card-preview-contact`, `x2-card-preview-gif`.
 
 ## E6. Messages including WhatsApp (`:messages`)
 

@@ -1,5 +1,8 @@
 package dev.rovsti.phone.data
 
+import dev.rovsti.core.Outcome
+import dev.rovsti.core.RustCore
+import dev.rovsti.core.RustError
 import dev.rovsti.core.model.phone.CallDirection
 import dev.rovsti.core.model.phone.CallLogKind
 import dev.rovsti.core.model.phone.CallPhase
@@ -19,6 +22,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonElement
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -41,6 +45,23 @@ class RecentsRepositoryTest {
             logEntry(3, "+905559998877", CallLogKind.Outgoing, ago = 60, name = "Mert Kaya"),
             logEntry(4, "+905553334455", CallLogKind.Incoming, ago = 300),
         )
+
+    /** The real core, except that `recents.group` fails while [failing] is set. */
+    private class FlakyCore(
+        private val inner: RustCore,
+    ) : RustCore by inner {
+        @Volatile var failing = false
+
+        override suspend fun call(
+            op: String,
+            request: JsonElement,
+        ): Outcome<JsonElement> =
+            if (failing && op == "recents.group") {
+                Outcome.Err(RustError.Io("disk on fire"))
+            } else {
+                inner.call(op, request)
+            }
+    }
 
     private fun repo(
         callLog: FakeCallLogRepository,
@@ -145,4 +166,56 @@ class RecentsRepositoryTest {
         assertTrue("an unanswered incoming call is missed", extras[1].missed)
         assertNull(RecentsRepository.dialNumber("abc@s.whatsapp.net"))
     }
+
+    @Test fun aFailedBuildKeepsTheRowsAndSaysWhy() =
+        runBlocking {
+            val flaky = FlakyCore(host.core)
+            val callLog = FakeCallLogRepository(log)
+            val recents =
+                RecentsRepository(
+                    callLog,
+                    NativePhoneOps(flaky),
+                    scope,
+                    locale = { locale },
+                    clock = { T0 + 60_000 },
+                    windowMs = 12,
+                ).also { it.start() }
+            eventually("first model") { recents.model.value.ready }
+            assertNull(recents.model.value.error)
+            val rows = recents.model.value.rows
+            flaky.failing = true
+            callLog.restore(listOf(logEntry(0, "+905550001111", CallLogKind.Incoming, ago = 0)))
+            eventually("error shown") { recents.model.value.error != null }
+            assertEquals(
+                "disk on fire",
+                recents.model.value.error
+                    ?.message,
+            )
+            assertEquals("the old rows stay", rows, recents.model.value.rows)
+            flaky.failing = false
+            recents.refreshNow()
+            eventually("recovered") {
+                recents.model.value.error == null &&
+                    recents.model.value.rows.size == rows.size + 1
+            }
+        }
+
+    @Test fun theBuildRunsOffTheMainThread() =
+        runBlocking {
+            val threads = java.util.concurrent.ConcurrentLinkedQueue<String>()
+            val recents =
+                RecentsRepository(
+                    FakeCallLogRepository(log),
+                    NativePhoneOps(counting),
+                    scope,
+                    locale = {
+                        threads += Thread.currentThread().name
+                        locale
+                    },
+                    clock = { T0 + 60_000 },
+                ).also { it.start() }
+            eventually("first model") { recents.model.value.ready }
+            assertTrue(threads.isNotEmpty())
+            assertTrue(threads.toString(), threads.none { it == "main" })
+        }
 }

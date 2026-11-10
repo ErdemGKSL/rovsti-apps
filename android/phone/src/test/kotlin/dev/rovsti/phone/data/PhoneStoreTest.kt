@@ -106,6 +106,42 @@ class PhoneStoreTest {
             )
         }
 
+    @Test fun concurrentEditsAreOneDebouncedWrite() =
+        runBlocking {
+            val s = store(debounce = 400)
+            s.load()
+            val before = counting.count("phone.prefs_save")
+            val n = 32
+            (0 until n)
+                .map { i ->
+                    async(Dispatchers.Default) { s.updatePrefs { it.copy(favoritesOrder = it.favoritesOrder + "c$i") } }
+                }.awaitAll()
+            assertEquals("nothing is written inside the window", before, counting.count("phone.prefs_save"))
+            delay(1_200)
+            assertEquals("one write for all of them", before + 1, counting.count("phone.prefs_save"))
+            val again = store()
+            again.load()
+            assertEquals(
+                "nothing lost",
+                n,
+                again.prefs.value.favoritesOrder
+                    .toSet()
+                    .size,
+            )
+        }
+
+    @Test fun aFlushWritesAtOnceAndTheDebouncedWriteDoesNotRepeatIt() =
+        runBlocking {
+            val s = store(debounce = 300)
+            s.load()
+            val before = counting.count("phone.prefs_save")
+            s.updatePrefs { it.copy(quickReplies = listOf("bye")) }
+            assertTrue(s.flush())
+            assertEquals(before + 1, counting.count("phone.prefs_save"))
+            delay(800)
+            assertEquals("the cancelled timer wrote nothing more", before + 1, counting.count("phone.prefs_save"))
+        }
+
     @Test fun aFileFromANewerAppIsNeverOverwritten() =
         runBlocking {
             val file = File(dir, "prefs.json")

@@ -110,6 +110,7 @@ class PeopleIndexTest {
             eventually("selin found") { (people.people.value as? People.Ready)?.contacts?.size == 4 }
             eventually("index follows") { runBlocking { people.search("selin").isNotEmpty() } }
             assertTrue("same handle, replaced in place", people.index.value === handle)
+            assertEquals("a replace releases nothing", 0, released.get())
         }
 
     @Test fun withoutPermissionThereIsNoIndexAndTheHandleIsReleased() =
@@ -142,5 +143,22 @@ class PeopleIndexTest {
                     logEntry(9, "+905551112233", CallLogKind.Outgoing, ago = 4, contactId = 1)
             people.rankByCalls(log, T0 + 60_000)
             assertEquals("Mert Kaya", people.t9("555").first().name)
+        }
+
+    @Test fun grantingAgainBuildsANewHandleAndEachOldOneIsReleasedOnce() =
+        runBlocking {
+            val people = index()
+            eventually("index built") { people.index.value != null }
+            val first = people.index.value
+            permission.value = PermissionState.DeniedForGood
+            eventually("dropped") { people.index.value == null }
+            assertEquals(1, released.get())
+            permission.value = PermissionState.Granted
+            eventually("rebuilt") { people.index.value != null }
+            assertTrue("a new handle, not the closed one", people.index.value !== first)
+            assertEquals(listOf("Ayse Yilmaz"), people.search("ayse").map { it.displayName })
+            permission.value = PermissionState.DeniedForGood
+            eventually("dropped again") { people.index.value == null }
+            assertEquals(2, released.get())
         }
 }

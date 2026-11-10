@@ -793,6 +793,10 @@ at the end of its settings page. The apps get the whole platform through `:shell
 
 Next planner: **E4 R2** (E4.9-E4.16: share and shortcuts, import paths, duplicates and Clean up, photo viewer on the card, ringtone/voicemail/block, My card/emergency/recent, settings, polish). Known carry-overs: share as a staged .vcf file in the share sheet (E4.9), row separators under the alphabet rail (E4.16), custom accessibility actions on the row menu (E4.16).
 
+#### Evidence, E5 R1 (E5.1 done, round-12 step 2)
+
+- E5.1 data layer (`447ee0d` files, step 2 tests and gaps): `dev.rovsti.phone.data` `PhoneStore` (debounced single write, `flush` from `MainActivity.onStop`), `RecentsRepository` (builds on the scope's Default dispatcher, bursts coalesced by `RebuildCoalescer`, `RecentsModel.error` set when an op fails and cleared by the next good build; the default `extras` is `flowOf(emptyList())`, the first version's `emptyFlow()` never emitted), `PeopleIndex` (handle released on READ_CONTACTS revoke, new handle on re-grant), `SimState`, `BlockRepo`, `SpeedDial`, `CallPlacer`. `FakeCalls` lives only in `platform/src/testFixtures`. Tests: `PhoneStoreTest` (concurrent edits are one write, nothing lost), `RecentsRepositoryTest` (failed build keeps rows and says why, off the main thread), `PeopleIndexTest`, `SimStateTest`, `CallPlacerTest` (emergency never asks for a SIM, two SIMs without default NeedsSim, default Placed with its handle, invalid carries the core sentence), `SpeedDialTest`, `BlockRepoTest`, `PhoneContainerTest` (owner rule b: store, recents, people and the rest issue no core call until the gate, standing for `Rust.init`, opens).
+
 #### Evidence, E4 R2 (E4.9-E4.16 done, round-11)
 
 - E4.9 (commit 4aa2099): `ContactShareTest`, `QrSheetTest`, `QrCodeTest` (`QrCode` in `:design`); `e4.9-share-menu`, `e4.9-qr-sheet` opened.
@@ -1094,7 +1098,7 @@ unchanged (E5.2-E5.7a).
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | in-progress (rev-1 step 1 done `36760c7`: module, manifest, components, container, routes, setup sheet, diagnostics, migration; open: F16 back button/full bar on Settings and Diagnostics = rev-2 step 1; data layer (uncommitted, kept) = rev-2 step 2) |
+| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | done (`36760c7` module, manifest, components, container, routes, setup sheet, diagnostics, migration; `447ee0d` F16 back button/full bar; round-12 step 2 data layer) |
 | E5.2 | Keypad | R1 | in-progress (round-12 step 3) |
 | E5.3 | Recents | R1 | in-progress (round-12 step 4) |
 | E5.4 | Contact, Number and Call details sheets | R1 | in-progress (round-12 step 5) |

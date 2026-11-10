@@ -10,7 +10,10 @@ import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.platform.system.permissions.AppPermissions
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.platform.telephony.CallsApi
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonElement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -72,5 +75,50 @@ class PhoneContainerTest {
         val second = container.pendingDial.value
         assertEquals(first?.text, second?.text)
         assertEquals(false, first == second)
+    }
+
+    /** A core whose calls wait for [gate], the way `NativeRustCore.call` waits for `Rust.init`. */
+    private class GatedCore(
+        val inner: FakeRustCore = FakeRustCore(),
+    ) : RustCore by inner {
+        val gate = CompletableDeferred<Unit>()
+
+        override suspend fun call(
+            op: String,
+            request: JsonElement,
+        ): Outcome<JsonElement> {
+            gate.await()
+            return inner.call(op, request)
+        }
+    }
+
+    /** Owner rule (b): nothing reaches the native side before `Rust.init` is done. */
+    @Test fun touchingTheDataLayerBeforeRustIsReadyIssuesNoNativeCall() {
+        val gated = GatedCore()
+        val container =
+            object : PhoneContainer(RuntimeEnvironment.getApplication()) {
+                override fun createRust(): RustCore = gated
+            }
+        try {
+            container.store
+            container.recents
+            container.people
+            container.simState
+            container.speedDial
+            container.block
+            container.placer
+            // Give the collectors time to reach their first call (they park on the gate).
+            Thread.sleep(500)
+            assertEquals(emptyList<String>(), gated.inner.calls.map { it.op })
+            assertEquals(false, container.recents.model.value.ready)
+
+            gated.gate.complete(Unit)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (gated.inner.calls.isEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals(true, gated.inner.calls.isNotEmpty())
+        } finally {
+            gated.gate.complete(Unit)
+            container.scope.cancel()
+        }
     }
 }

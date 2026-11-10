@@ -21,6 +21,7 @@ import dev.rovsti.platform.wa.WaIncoming
 import dev.rovsti.shell.NavSpec
 import dev.rovsti.shell.RovstiShellActivity
 import dev.rovsti.shell.shellContainer
+import kotlinx.coroutines.launch
 
 /**
  * The one activity of Rovsti Phone (FQCN kept, singleTop). Edge to edge, back order, refresh rate and permission refresh
@@ -81,6 +82,8 @@ class MainActivity :
     override fun onStop() {
         // Nothing left to show over the lock screen: put the flags back at once.
         if (!CallRegistry.hasLiveCall()) setLockScreenFlags(false)
+        // The preferences and notes are written a moment after the last edit; the process may be killed after this.
+        container.scope.launch { container.store.flush() }
         super.onStop()
     }
 

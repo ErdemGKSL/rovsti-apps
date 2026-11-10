@@ -1,6 +1,7 @@
 package dev.rovsti.phone.data
 
 import dev.rovsti.core.Outcome
+import dev.rovsti.core.RustError
 import dev.rovsti.core.model.phone.BuildRowsRequest
 import dev.rovsti.core.model.phone.CallDirection
 import dev.rovsti.core.model.phone.CallLogEntry
@@ -30,7 +31,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -47,13 +49,16 @@ data class RecentsModel(
     val missedLabel: String? = null,
     /** False until the first build has finished. */
     val ready: Boolean = false,
+    /** Set when the last build failed (the rows are then the previous build's); null after a good build. */
+    val error: RustError? = null,
 )
 
 /**
  * The Recents model, rebuilt from the system call log and the WhatsApp calls (`recents.group`, `merge_extras`,
  * `build`, `refresh_delta`, `missed_extras`). Source changes call [RebuildCoalescer.schedule], so a burst (the log
  * observer fires several times for one call) is one rebuild after [windowMs]; builds run one at a time on the newest
- * inputs. A failed op keeps the previous model.
+ * inputs. A failed op keeps the previous rows and sets [RecentsModel.error]
+ * (the next good build clears it). Builds run on [scope] (not the main thread); the ops themselves run on the Rust dispatcher.
  *
  * [lastSeenMs] is the time the user last opened Recents (the missed badge counts calls after it). [locale] and [clock]
  * are read at each build (time zone and 12/24 h can change while the app runs).
@@ -62,7 +67,7 @@ class RecentsRepository(
     private val callLog: CallLogRepository,
     private val ops: PhoneOps,
     private val scope: CoroutineScope,
-    private val extras: Flow<List<ExtraCall>> = emptyFlow(),
+    private val extras: Flow<List<ExtraCall>> = flowOf(emptyList()),
     private val locale: () -> LocaleTime,
     private val clock: () -> Long = System::currentTimeMillis,
     private val lastSeenMs: () -> Long = { 0L },
@@ -117,15 +122,14 @@ class RecentsRepository(
     private suspend fun build() {
         val log = entries
         val extra = wa
-        val grouped = ok(ops.recentsGroup(GroupRequest(log))) ?: return
+        val grouped = ops.recentsGroup(GroupRequest(log)).orFail() ?: return
         val merged =
             if (extra.isEmpty()) {
                 grouped.rows
             } else {
-                ok(ops.mergeExtras(MergeExtrasRequest(grouped.rows, extra)))?.rows
-                    ?: return
+                ops.mergeExtras(MergeExtrasRequest(grouped.rows, extra)).orFail()?.rows ?: return
             }
-        val views = ok(ops.recentsBuild(BuildRowsRequest(merged, clock(), locale())))?.views ?: return
+        val views = ops.recentsBuild(BuildRowsRequest(merged, clock(), locale())).orFail()?.views ?: return
         val old = state.value.rows
         val delta = ok(ops.refreshDelta(RefreshDeltaRequest(old, merged))) ?: RefreshDelta(0, 0)
         val missed = ok(ops.missedExtras(MissedExtrasRequest(log, extra, lastSeenMs())))
@@ -139,6 +143,19 @@ class RecentsRepository(
                 ready = true,
             )
     }
+
+    /** The value of a good answer; a failed one keeps the previous model and records the error. */
+    private fun <T> Outcome<T>.orFail(): T? =
+        when (this) {
+            is Outcome.Ok -> {
+                value
+            }
+
+            is Outcome.Err -> {
+                state.update { it.copy(error = error) }
+                null
+            }
+        }
 
     private fun <T> ok(out: Outcome<T>): T? = (out as? Outcome.Ok)?.value
 

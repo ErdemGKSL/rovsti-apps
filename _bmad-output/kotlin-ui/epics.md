@@ -1164,6 +1164,16 @@ unchanged (E5.2-E5.7a).
 - Screenshots: `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`.
 
 ### E5.8 WhatsApp calls
+- **Owner-reported bug in the GPUI app (2026-11-10), must not come back:** WhatsApp calls could be answered, declined
+  and ended, but **no audio flowed either way** (the owner heard nothing and was not heard), while normal calls worked.
+  Before building the UI, trace the whole audio path and prove it end to end: mic capture (AudioRecord, VOICE_COMMUNICATION,
+  sample rate/frames the gateway expects) -> `RustNative.audioPush` -> `rovsti_wa_client` call audio socket -> gateway
+  (services/wa_gateway call audio, the 20 ms frame rechunk of commit 457ac0f) -> WhatsApp; and back: gateway ->
+  `audioPull` -> AudioTrack (USAGE_VOICE_COMMUNICATION) with the audio mode/route set (MODE_IN_COMMUNICATION, speaker
+  and earpiece, Bluetooth SCO). Check sample format and rate on every hop, the start order (audio session opened only
+  after the call is connected), mic permission and audio focus, and that the foreground service type includes
+  microphone. Acceptance: an automated loopback test with the fake gateway that pushes a tone in and gets it out on the
+  far side (both directions), plus a manual check on the owner's phone listed in the evidence with gateway logs.
 - Screenshots: `e5.8-wa-incoming`, `e5.8-wa-incall-dimmed-controls`, `e5.8-wa-waiting-during-cellular`.
 
 ### E5.9 Settings

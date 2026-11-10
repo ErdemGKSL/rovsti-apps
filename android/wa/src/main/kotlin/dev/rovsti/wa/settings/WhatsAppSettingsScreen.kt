@@ -111,6 +111,7 @@ fun WhatsAppSettingsRoute(
     val state by viewModel.state.collectAsState()
     val overlay = LocalOverlayOrNull.current
     val context = LocalContext.current
+    val nothingToShare by rememberUpdatedState(stringResource(R.string.wa_nothing_to_share))
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             try {
@@ -130,7 +131,7 @@ fun WhatsAppSettingsRoute(
                     }
                 }
             } catch (_: ActivityNotFoundException) {
-                overlay?.showToast(context.getString(R.string.wa_nothing_to_share))
+                overlay?.showToast(nothingToShare)
             }
         }
     }

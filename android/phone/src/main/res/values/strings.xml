@@ -234,4 +234,29 @@
     <string name="details_reminder_failed">Couldn\'t set the reminder</string>
     <string name="details_delete_call">Delete this call</string>
     <string name="details_call_deleted">Call deleted</string>
+    <!-- Incoming call (E5.6) -->
+    <string name="incoming_title">Incoming call</string>
+    <string name="incoming_locked">Phone is locked</string>
+    <string name="incoming_unknown">Unknown</string>
+    <string name="incoming_from">Incoming call from %1$s</string>
+    <string name="incoming_answer">Answer</string>
+    <string name="incoming_decline">Decline</string>
+    <string name="incoming_message">Message</string>
+    <string name="incoming_remind">Remind me</string>
+    <string name="incoming_silence">Silence</string>
+    <string name="incoming_silenced">Silenced</string>
+    <string name="incoming_sim">Calling on %1$s</string>
+    <string name="incoming_replies_title">Decline with message</string>
+    <string name="incoming_reply_custom">Custom…</string>
+    <string name="incoming_remind_title">Remind me to call back</string>
+    <string name="incoming_notice_stale">That call has ended.</string>
+    <string name="incoming_notice_declined_only">Declined. The message could not be sent.</string>
+    <string name="incoming_notice_reminder_failed">The reminder could not be set.</string>
+    <string name="incoming_notice_reminder_set">Reminder set.</string>
+    <string name="waiting_title">%1$s is calling</string>
+    <string name="waiting_end_answer">End &amp; Answer</string>
+    <string name="waiting_hold_answer">Hold &amp; Answer</string>
+    <string name="waiting_end_held_answer">End held call &amp; Answer</string>
+    <string name="waiting_decline">Decline</string>
+    <string name="waiting_message">Message</string>
 </resources>

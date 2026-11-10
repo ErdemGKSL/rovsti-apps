@@ -49,6 +49,7 @@ class LicenceHeaderTest {
             p.endsWith("/design/glass/GlassEffect.kt") ||
             p.endsWith("/design/glass/TopFadeBlur.kt") ||
             p.endsWith("/design/list/AlphabetScrollBar.kt") ||
+            p.endsWith("/design/media/CallAura.kt") ||
             p.endsWith("/design/transition/NavTransitions.kt") ||
             p.endsWith("/design/transition/SharedBounds.kt") ||
             p.endsWith("/design/transition/ArtworkMotion.kt")

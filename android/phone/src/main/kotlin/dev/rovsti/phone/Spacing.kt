@@ -38,6 +38,9 @@ internal const val DONE_CARD_ALPHA = 0.6f
 
 /** Dimensions of the Keypad (E5.2); the sizes that depend on the screen come from `KeypadLayout`. */
 internal object KeypadMetrics {
+    /** Viewport of the 24-unit vector icons. */
+    val IconViewport = 24.dp
+
     /** One suggestion row. */
     val SuggestionRow = 56.dp
     val SuggestionAvatar = 40.dp
@@ -111,3 +114,52 @@ internal object DetailsMetrics {
     val SmallGlyph = 20.dp
     val QrSize = 224.dp
 }
+
+/** Dimensions of the Incoming Call screen and the waiting-call card (E5.6). */
+internal object IncomingMetrics {
+    val LabelTop = 28.dp
+    val Avatar = 120.dp
+    val AvatarGap = 24.dp
+    val NameGap = 8.dp
+
+    /** Answer and Decline. */
+    val Button = 76.dp
+    val ButtonGap = 96.dp
+
+    /** Remind me, Message and Silence. */
+    val Secondary = 56.dp
+    val SecondaryGap = 28.dp
+    val PrimaryIcon = 32.dp
+    val SecondaryIcon = 24.dp
+    val CaptionGap = 8.dp
+    val SecondaryLift = 32.dp
+    val BottomPad = 40.dp
+    val SidePad = 24.dp
+
+    /** The SIM chip under the number. */
+    val ChipHeight = 28.dp
+    val ChipDot = 10.dp
+    val ChipPadX = 12.dp
+
+    /** The lock chip at the top of the lock-screen variant. */
+    val LockChipGap = 6.dp
+
+    /** The waiting-call card: 12 dp under the status bar, 2 x 2 pills. */
+    val CardTop = 12.dp
+    val CardSide = 16.dp
+    val CardPad = 16.dp
+    val CardGap = 12.dp
+    val CardRadius = 28.dp
+    val CardShadow = 16.dp
+    val CardAvatar = 40.dp
+
+    /** The aura's chrome mesh at the top of the screen. */
+    val MeshHeight = 320.dp
+}
+
+/** The answer-button green and the decline-button red (the iOS system colours the call screens use). */
+internal const val ANSWER_GREEN = 0xFF34C759
+internal const val DECLINE_RED = 0xFFFF3B30
+
+/** A screenshot draws the aura at this phase (radians), so a golden never shows a half-moved frame. */
+internal const val AURA_SHOT_PHASE = 2.4f

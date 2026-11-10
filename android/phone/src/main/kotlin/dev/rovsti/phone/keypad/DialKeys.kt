@@ -38,7 +38,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
-import androidx.compose.ui.unit.dp
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.press.glassPress
@@ -298,7 +297,7 @@ private object DialColors {
     /** The handset glyph of `RovstiIcons.Phone`, filled instead of stroked. */
     val FilledHandset: ImageVector by lazy {
         ImageVector
-            .Builder("FilledHandset", 24.dp, 24.dp, 24f, 24f)
+            .Builder("FilledHandset", KeypadMetrics.IconViewport, KeypadMetrics.IconViewport, 24f, 24f)
             .path(fill = SolidColor(Color.Black)) {
                 moveTo(5f, 3.5f)
                 horizontalLineTo(9f)

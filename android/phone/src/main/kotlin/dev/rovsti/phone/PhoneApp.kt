@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -34,6 +35,10 @@ import dev.rovsti.phone.diagnostics.DiagnosticsPage
 import dev.rovsti.phone.diagnostics.DiagnosticsViewModel
 import dev.rovsti.phone.diagnostics.SevenTaps
 import dev.rovsti.phone.diagnostics.versionText
+import dev.rovsti.phone.incoming.IncomingEffects
+import dev.rovsti.phone.incoming.IncomingScreen
+import dev.rovsti.phone.incoming.IncomingStrings
+import dev.rovsti.phone.incoming.WaitingCallCard
 import dev.rovsti.phone.keypad.KeypadAction
 import dev.rovsti.phone.keypad.KeypadHost
 import dev.rovsti.phone.keypad.KeypadScreen
@@ -354,12 +359,35 @@ fun PhoneApp(
             }
         }
 
+    val incomingStrings = IncomingStrings.current()
+    val incoming =
+        remember(container, incomingStrings) { container.incomingModel(container.scope, incomingStrings.unknown) }
+    val incomingUi by incoming.state.collectAsState()
+    IncomingEffects(incoming, overlays) { toCall ->
+        // The ringing call is gone: close its screen, and open In-Call when it was answered.
+        if (navigator.current is PhoneRoute.Incoming) {
+            navigator.pop()
+            if (toCall) navigator.push(PhoneRoute.InCall)
+        }
+    }
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
         chromeFor = { route -> chromeFor(route, selecting = selection != null) },
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
+        chrome = {
+            // A second caller while a call is live: the card over the call (the Incoming screen has its own buttons).
+            val waiting = incomingUi.waiting
+            if (waiting != null && navigator.current !is PhoneRoute.Incoming) {
+                WaitingCallCard(
+                    waiting,
+                    incomingStrings,
+                    incoming::onAction,
+                    Modifier.align(Alignment.TopCenter),
+                )
+            }
+        },
         accessory =
             selection?.let { chosen ->
                 { modifier, inline ->
@@ -457,18 +485,10 @@ fun PhoneApp(
             PhoneLicencesEntry(onOpen = { navigator.push(PhoneRoute.LicenceDetail(it)) }, pop, popToRoot)
         }
         entry<PhoneRoute.LicenceDetail> { route -> PhoneLicenceDetailEntry(route.id, pop, popToRoot) }
-        // Incoming (E5.6) and InCall (E5.7a) arrive in later steps; until then the route a notification can reach
-        // shows an honest placeholder, and the notification itself still rings, answers and declines (AD-2).
-        entry<PhoneRoute.Incoming> {
-            PhoneRootPlaceholder(
-                route = "incoming",
-                title = stringResource(R.string.tab_recents),
-                icon = RovstiIcons.Phone,
-                message = stringResource(R.string.coming_message),
-                setup = setup,
-                links = links,
-            )
-        }
+        // Incoming (E5.6): the full-screen call screen. Its sheets, toasts and leaving run in IncomingEffects above.
+        entry<PhoneRoute.Incoming> { IncomingScreen(incoming) }
+        // InCall (E5.7a) arrives in the next step; until then the route a notification can reach shows an honest
+        // placeholder, and the notification itself still ends the call (AD-2).
         entry<PhoneRoute.InCall> {
             PhoneRootPlaceholder(
                 route = "incall",

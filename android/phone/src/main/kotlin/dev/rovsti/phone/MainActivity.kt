@@ -48,6 +48,18 @@ class MainActivity :
     private val clearLockScreenFlags = Runnable { setLockScreenFlags(false) }
     private var uiFailed = false
 
+    /** The error boundary of the Incoming screen: no first frame in time shows [NativeIncoming] (AD-17). */
+    private val watchdog =
+        IncomingWatchdog(
+            post = { r, delay -> main.postDelayed(r, delay) },
+            cancel = { r -> main.removeCallbacks(r) },
+            onStuck = { id ->
+                Log.e("Rovsti", "The Incoming screen of call $id drew nothing; showing the native screen")
+                uiFailed = true
+                showNativeFallback()
+            },
+        )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         IncomingPerf.mark(IncomingTimeline.ACTIVITY_CREATED)
         // The registry tells this activity about live calls; the lock-screen flags must be right before the first frame.
@@ -77,9 +89,21 @@ class MainActivity :
         super.onResume()
         IncomingPerf.mark(IncomingTimeline.ACTIVITY_RESUMED)
         CallRegistry.refreshKeyguard()
+        armWatchdog()
     }
 
+    /** Watches the first frame while the Incoming screen is the page and its call rings. */
+    private fun armWatchdog() {
+        val ringing = CallRegistry.incomingNow ?: return
+        if (!uiFailed && (navigator.current as? PhoneRoute.Incoming)?.callId == ringing.callId) {
+            watchdog.arm(ringing.callId)
+        }
+    }
+
+    override fun onIncomingFrame(callId: Int) = watchdog.frame(callId)
+
     override fun onStop() {
+        watchdog.disarm()
         // Nothing left to show over the lock screen: put the flags back at once.
         if (!CallRegistry.hasLiveCall()) setLockScreenFlags(false)
         // The preferences and notes are written a moment after the last edit; the process may be killed after this.
@@ -89,6 +113,7 @@ class MainActivity :
 
     override fun onDestroy() {
         main.removeCallbacks(clearLockScreenFlags)
+        watchdog.disarm()
         if (CallRegistry.surface === this) CallRegistry.surface = null
         super.onDestroy()
     }
@@ -96,6 +121,7 @@ class MainActivity :
     override fun onNewIntent(intent: Intent) {
         setLockScreenFlags(CallRegistry.hasLiveCall())
         super.onNewIntent(intent)
+        armWatchdog()
     }
 
     @Composable
@@ -157,6 +183,7 @@ class MainActivity :
 
     /** The native view follows the call: Answer and Decline while it rings, then the message. */
     override fun onIncomingChanged(call: IncomingCall?) {
+        if (call == null) watchdog.disarm()
         if (uiFailed) showNativeFallback()
     }
 

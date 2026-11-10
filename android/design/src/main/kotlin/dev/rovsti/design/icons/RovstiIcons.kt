@@ -254,6 +254,42 @@ object RovstiIcons {
 
     val Message: ImageVector by lazy { stroked("Message") { bubble() } }
 
+    /** A bell with a slash: "Silence" on the Incoming Call screen. */
+    val BellSlash: ImageVector by lazy {
+        stroked("BellSlash") {
+            moveTo(6f, 10f)
+            curveTo(6f, 6.7f, 8.7f, 4.5f, 12f, 4.5f)
+            curveTo(15.3f, 4.5f, 18f, 6.7f, 18f, 10f)
+            verticalLineTo(14f)
+            lineTo(19.5f, 17f)
+            horizontalLineTo(4.5f)
+            lineTo(6f, 14f)
+            close()
+            moveTo(10f, 19.5f)
+            curveTo(10.4f, 20.4f, 11.1f, 21f, 12f, 21f)
+            curveTo(12.9f, 21f, 13.6f, 20.4f, 14f, 19.5f)
+            moveTo(4f, 4f)
+            lineTo(20f, 20f)
+        }
+    }
+
+    /** A bell: "Remind me" on the Incoming Call screen. */
+    val Bell: ImageVector by lazy {
+        stroked("Bell") {
+            moveTo(6f, 10f)
+            curveTo(6f, 6.7f, 8.7f, 4.5f, 12f, 4.5f)
+            curveTo(15.3f, 4.5f, 18f, 6.7f, 18f, 10f)
+            verticalLineTo(14f)
+            lineTo(19.5f, 17f)
+            horizontalLineTo(4.5f)
+            lineTo(6f, 14f)
+            close()
+            moveTo(10f, 19.5f)
+            curveTo(10.4f, 20.4f, 11.1f, 21f, 12f, 21f)
+            curveTo(12.9f, 21f, 13.6f, 20.4f, 14f, 19.5f)
+        }
+    }
+
     /** The delete key of the dial pad: a tag pointing left with a cross in it. */
     val Backspace: ImageVector by lazy {
         stroked("Backspace") {

@@ -35,6 +35,11 @@ import dev.rovsti.phone.details.CallDetailsTarget
 import dev.rovsti.phone.details.CallDetailsViewModel
 import dev.rovsti.phone.details.PersonSheetViewModel
 import dev.rovsti.phone.details.PersonTarget
+import dev.rovsti.phone.incoming.CallSource
+import dev.rovsti.phone.incoming.CoreIncomingBackend
+import dev.rovsti.phone.incoming.IncomingBackend
+import dev.rovsti.phone.incoming.IncomingViewModel
+import dev.rovsti.phone.incoming.RegistryCallSource
 import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
 import dev.rovsti.phone.setup.SetupFactsSource
@@ -175,6 +180,29 @@ open class PhoneContainer(
     /** What the device says about local time now (the time zone and 12/24 h can change while the app runs). */
     fun localeNow(): LocaleTime = DeviceLocaleTime.now(context, clock())
 
+    /** The calls as the screens read them (the registry's last snapshot); lazy so a cold path pays nothing. */
+    val callSource: CallSource by lazy { createCallSource() }
+
+    /** The reply choices and the reminder slots of the Incoming screen (the Rust core). */
+    val incomingBackend: IncomingBackend by lazy { createIncomingBackend() }
+
+    /** The model of the Incoming screen and the waiting-call card (E5.6); [scope] is the app's, [unknown] its word. */
+    open fun incomingModel(
+        scope: CoroutineScope,
+        unknown: String,
+    ): IncomingViewModel =
+        IncomingViewModel(
+            source = callSource,
+            calls = calls,
+            backend = incomingBackend,
+            reminders = callReminders,
+            sims = simState.sims,
+            savedReplies = { store.prefs.value.quickReplies },
+            unknownLabel = unknown,
+            scope = scope,
+            clock = clock,
+        )
+
     /** The model of one Contact / Number sheet (E5.4); [scope] belongs to the sheet and ends with it. */
     open fun personModel(
         target: PersonTarget,
@@ -219,6 +247,10 @@ open class PhoneContainer(
         )
 
     protected open fun createCalls(): CallsApi = CallRegistry
+
+    protected open fun createCallSource(): CallSource = RegistryCallSource(calls, CallRegistry.state, scope)
+
+    protected open fun createIncomingBackend(): IncomingBackend = CoreIncomingBackend(ops, chat)
 
     protected open fun createCallLog(): CallLogRepository = AndroidCallLogRepository(context, Dispatchers.IO)
 

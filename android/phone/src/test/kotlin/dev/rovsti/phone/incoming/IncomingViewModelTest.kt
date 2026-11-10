@@ -1,7 +1,10 @@
 package dev.rovsti.phone.incoming
 
 import dev.rovsti.core.model.chat.ReminderSlot
+import dev.rovsti.core.model.phone.CallDirection
+import dev.rovsti.core.model.phone.CallPhase
 import dev.rovsti.core.model.phone.CallSnapshot
+import dev.rovsti.core.model.phone.CallUpdate
 import dev.rovsti.core.model.phone.SimAccount
 import dev.rovsti.core.model.phone.WireCallState
 import dev.rovsti.core.ops.NativeSharedOps
@@ -351,5 +354,66 @@ class IncomingViewModelTest {
         val h = IncomingHarness()
         h.source.set(ringingSnapshot(silenced = true))
         assertTrue(h.effects.isEmpty())
+    }
+
+    // ---- WhatsApp calls (E5.8b) ------------------------------------------------------------------------------------
+
+    private val waJid = "905551112233@s.whatsapp.net"
+
+    private fun waMeta(callId: String = "c1") =
+        WaCallMeta(
+            callId,
+            waJid,
+            CallUpdate(callId, waJid, "Ada", CallDirection.In, CallPhase.Ringing, false),
+            speaker = false,
+            muted = false,
+        )
+
+    @Test fun aWhatsAppCallKeepsItsJidForThePhotoAndHasNoMessageReply() {
+        val h = IncomingHarness()
+        h.source.setWhatsApp(mapOf(1 to waMeta()))
+        val caller = h.ui.caller!!
+        assertTrue(caller.whatsapp)
+        assertEquals(waJid, caller.photoJid)
+        assertFalse("a WhatsApp call has no SMS reply", h.ui.canMessage)
+        val cellular = IncomingHarness().ui.caller!!
+        assertFalse(cellular.whatsapp)
+        assertNull(cellular.photoJid)
+    }
+
+    @Test fun aWaitingWhatsAppOfferOnlyOffersEndAndAnswerAndDecline() {
+        val h = IncomingHarness(waitingSnapshot(canHold = true))
+        h.source.setWhatsApp(mapOf(3 to waMeta()))
+        val waiting = h.ui.waiting!!
+        assertTrue(waiting.whatsapp)
+        assertFalse("a WhatsApp call cannot be held", waiting.canHold)
+        assertFalse(waiting.canMessage)
+        h.model.onAction(IncomingAction.EndAndAnswer)
+        h.model.onAction(IncomingAction.DeclineWaiting)
+        assertEquals(listOf("answerReplacing 3", "reject 3"), h.calls.log)
+    }
+
+    @Test fun aWaitingCellularCallDuringAWhatsAppCallCannotBeHeldEither() {
+        // The WhatsApp call is the live (foreground) call: nothing can hold it, so Hold & Answer stays off.
+        val snap =
+            waitingSnapshot(canHold = false).let {
+                it.copy(
+                    calls =
+                        it.calls.map { c ->
+                            if (c.id ==
+                                2
+                            ) {
+                                c.copy(canHold = false)
+                            } else {
+                                c
+                            }
+                        },
+                )
+            }
+        val h = IncomingHarness(snap)
+        h.source.setWhatsApp(mapOf(2 to waMeta()))
+        val waiting = h.ui.waiting!!
+        assertFalse(waiting.whatsapp)
+        assertFalse(waiting.canHold)
     }
 }

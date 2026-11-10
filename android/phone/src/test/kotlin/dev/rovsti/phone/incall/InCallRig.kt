@@ -14,6 +14,7 @@ import dev.rovsti.core.model.phone.AudioRow
 import dev.rovsti.core.model.phone.AudioRowsAnswer
 import dev.rovsti.core.model.phone.AudioState
 import dev.rovsti.core.model.phone.CallSnapshot
+import dev.rovsti.core.model.phone.CallUpdate
 import dev.rovsti.core.model.phone.Endpoint
 import dev.rovsti.core.model.phone.EndpointType
 import dev.rovsti.core.model.phone.RouteDecision
@@ -132,6 +133,15 @@ internal open class FakeInCallBackend(
     override suspend fun pasteLabel(clip: String?): String? = pasteLabel
 
     override suspend fun tonePlan(text: String): List<ToneStep> = plan
+
+    /** What `phone.wa_screen` answers for a WhatsApp call: Mute, Speaker, End work; the rest is dimmed. */
+    var waControls: WaControls? = WaControls(note = "Not available on WhatsApp calls")
+
+    override suspend fun waControls(
+        update: CallUpdate,
+        speaker: Boolean,
+        muted: Boolean,
+    ): WaControls? = waControls
 }
 
 internal class FakeNotes : InCallNotes {

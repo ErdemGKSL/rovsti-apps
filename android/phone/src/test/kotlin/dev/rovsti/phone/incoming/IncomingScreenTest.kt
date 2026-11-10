@@ -8,12 +8,14 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.down
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -310,5 +312,45 @@ class IncomingScreenTest : ShotTest() {
         advance(100)
         assertEquals(listOf("Call you later."), picked)
         assertEquals(1, custom)
+    }
+
+    // ---- WhatsApp calls (E5.8b) ------------------------------------------------------------------------------------------
+
+    private fun whatsAppUi(): IncomingUi =
+        ui.copy(caller = caller.copy(whatsapp = true, photoJid = "905551112233@s.whatsapp.net"), canMessage = false)
+
+    @Test fun aWhatsAppCallReplacesTheIncomingLabelWithWhatsAppAudioAndTheGlyph() {
+        show(whatsAppUi())
+        compose.onNodeWithTag(IncomingTags.WaAudio).assertIsDisplayed()
+        compose.onNodeWithTag(IncomingTags.Answer).assertIsDisplayed()
+        compose.onAllNodesWithTag(IncomingTags.Message).assertCountEquals(0)
+    }
+
+    @Test fun aCellularCallHasNoWhatsAppLine() {
+        show()
+        compose.onAllNodesWithTag(IncomingTags.WaAudio).assertCountEquals(0)
+    }
+
+    @Test fun aWaitingWhatsAppOfferHasEndAndAnswerAndDeclineOnly() {
+        showCard(
+            WaitingUi(
+                3,
+                "Ada Lovelace",
+                "+905551112233",
+                "k",
+                relabelled = false,
+                canHold = false,
+                canMessage = false,
+                whatsapp = true,
+            ),
+        )
+        compose.onNodeWithTag(IncomingTags.WaitingEnd).assertIsDisplayed()
+        compose.onNodeWithTag(IncomingTags.WaitingDecline).assertIsDisplayed()
+        compose.onNodeWithTag(IncomingTags.WaAudio).assertIsDisplayed()
+        compose.onAllNodesWithTag(IncomingTags.WaitingHold).assertCountEquals(0)
+        compose.onAllNodesWithTag(IncomingTags.WaitingMessage).assertCountEquals(0)
+        compose.onNodeWithTag(IncomingTags.WaitingEnd).performClick()
+        compose.onNodeWithTag(IncomingTags.WaitingDecline).performClick()
+        assertEquals(listOf(IncomingAction.EndAndAnswer, IncomingAction.DeclineWaiting), actions)
     }
 }

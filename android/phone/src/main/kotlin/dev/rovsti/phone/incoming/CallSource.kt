@@ -2,9 +2,11 @@ package dev.rovsti.phone.incoming
 
 import dev.rovsti.core.Envelope
 import dev.rovsti.core.model.phone.CallSnapshot
+import dev.rovsti.core.model.phone.CallUpdate
 import dev.rovsti.core.model.phone.WireCall
 import dev.rovsti.platform.telephony.CallsApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -17,7 +19,25 @@ import kotlinx.coroutines.flow.stateIn
  */
 interface CallSource {
     val snapshot: StateFlow<CallSnapshot>
+
+    /**
+     * Which calls of [snapshot] are WhatsApp calls, by their id there (AD-WA5); empty for cellular calls only. The
+     * screens read it to draw the "WhatsApp audio" line, dim what a WhatsApp call cannot do and load the profile photo.
+     */
+    val whatsapp: StateFlow<Map<Int, WaCallMeta>> get() = NoWhatsApp
 }
+
+private val NoWhatsApp: StateFlow<Map<Int, WaCallMeta>> = MutableStateFlow(emptyMap())
+
+/** What the screens know about one WhatsApp call beyond its [WireCall]: its gateway id, peer JID and phase. */
+data class WaCallMeta(
+    val callId: String,
+    /** The peer's JID: the key of its profile picture. */
+    val jid: String,
+    val update: CallUpdate,
+    val speaker: Boolean,
+    val muted: Boolean,
+)
 
 /**
  * [CallSource] over `CallsApi.snapshot()` (the JSON the registry built, AD-4), re-read each time the registry's typed

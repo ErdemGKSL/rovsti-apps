@@ -66,6 +66,12 @@ internal class RecentsRig(
     val clipboard = FakeClipboardRepository()
     val launcher = Launched()
     val reminders = FakeReminders()
+
+    /** The WhatsApp calls Recents merges in (what `WaCalls` would emit), and what the WhatsApp actions did. */
+    val waExtras = MutableStateFlow<List<dev.rovsti.core.model.phone.ExtraCall>>(emptyList())
+    val whatsAppPlaced = mutableListOf<String>()
+    val whatsAppForgotten = mutableListOf<List<String>>()
+    val whatsAppAvailable = MutableStateFlow(true)
     val store = PhoneStore(ops, scope, tempDir("rovsti-recents"), Dispatchers.IO, debounceMs = 20)
     val simState = SimState(FakeSimRepository(accounts, defaultKey), ops, scope)
     private val locale = LocaleTime(0, TimeFormat(hour12 = false, dateOrder = DateOrder.DayMonthYear))
@@ -74,6 +80,7 @@ internal class RecentsRig(
             callLog = callLog,
             ops = ops,
             scope = scope,
+            extras = waExtras,
             locale = { locale },
             clock = { T0 + 60_000 },
             lastSeenMs = { store.prefs.value.ui.missedSeenMs },
@@ -97,6 +104,9 @@ internal class RecentsRig(
             clock = { T0 + 60_000 },
             tzOffsetS = { 0 },
             compute = Dispatchers.Default,
+            placeWhatsApp = { whatsAppPlaced += it },
+            forgetWhatsApp = { whatsAppForgotten += it },
+            whatsAppAvailable = whatsAppAvailable,
         )
 
     suspend fun ready() {

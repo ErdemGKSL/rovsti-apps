@@ -49,7 +49,7 @@ private const val KickScale = 0.9f
  * A circular control of the call screens: frosted glass ([GlassPreset.CallControl]) over the call background, white
  * glyph. [active] (mute on, speaker on, hold on) cross-fades in 180 ms to a solid white disc whose glyph turns
  * `#1C1C1E`, with a 0.8 / 300 spring on the scale; a disabled control is drawn at 45 % alpha. [solid] (the End
- * button) paints a solid colour instead of glass. The content lambda receives the glyph colour to draw with.
+ * button) paints a solid colour instead of glass. A [dimmed] control is drawn like a disabled one but keeps taking taps. The content lambda receives the glyph colour to draw with.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -62,6 +62,8 @@ fun CallControlButton(
     enabled: Boolean = true,
     solid: Color? = null,
     debugTag: String = "call.control",
+    /** Drawn at the disabled 45 % but still tappable: a control this call does not have, which says so on a tap. */
+    dimmed: Boolean = false,
     content: @Composable (glyph: Color) -> Unit,
 ) {
     val reduce = LocalReduceMotion.current
@@ -114,7 +116,7 @@ fun CallControlButton(
                     .graphicsLayer {
                         scaleX = scale.value
                         scaleY = scale.value
-                        alpha = if (enabled) 1f else CallDisabledAlpha
+                        alpha = if (enabled && !dimmed) 1f else CallDisabledAlpha
                     }.clip(CallDisc)
                     .then(
                         if (solid != null) {

@@ -26,6 +26,7 @@ class IncomingStrings(
     val repliesTitle: String = res.getString(R.string.incoming_replies_title)
     val replyCustom: String = res.getString(R.string.incoming_reply_custom)
     val remindTitle: String = res.getString(R.string.incoming_remind_title)
+    val waAudio: String = res.getString(R.string.wa_audio)
     val endAnswer: String = res.getString(R.string.waiting_end_answer)
     val holdAnswer: String = res.getString(R.string.waiting_hold_answer)
     val endHeldAnswer: String = res.getString(R.string.waiting_end_held_answer)

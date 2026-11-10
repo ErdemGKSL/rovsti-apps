@@ -121,10 +121,15 @@ fun personMenu(
     ui: PersonUi,
     strings: DetailsStrings,
     onAction: (PersonAction) -> Unit,
+    whatsApp: Boolean = false,
 ): ImmutableList<MenuItem> {
     val callable = ui.numbers.isNotEmpty()
     val multiple = ui.numbers.size > 1
     val items = mutableListOf<MenuItem>()
+    items +=
+        MenuItem.Action(strings.menuWhatsApp, RovstiIcons.WhatsApp, enabled = callable && whatsApp) {
+            onAction(PersonAction.WhatsAppCall)
+        }
     items +=
         MenuItem.Action(strings.menuReply, RovstiIcons.Forward, enabled = callable) {
             onAction(PersonAction.AskQuickReply)
@@ -478,7 +483,8 @@ fun ColumnScope.PersonSheet(
     val overlays = LocalOverlayOrNull.current
     DisposableEffect(model) { onDispose { model.close() } }
     PersonEffects(model, host, strings, onOpenCall, onShowQr)
-    val menu = remember(ui, strings, model) { personMenu(ui, strings, model::onAction) }
+    val whatsApp by model.whatsAppAvailable.collectAsState()
+    val menu = remember(ui, strings, model, whatsApp) { personMenu(ui, strings, model::onAction, whatsApp) }
     PersonSheetContent(ui, strings, menu, model::onAction, overlays)
 }
 

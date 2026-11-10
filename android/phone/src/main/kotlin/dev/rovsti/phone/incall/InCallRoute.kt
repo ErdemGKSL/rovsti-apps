@@ -58,7 +58,7 @@ fun InCallScreen(
     photos: CallPhotos = CallPhotos.None,
 ) {
     val ui by model.state.collectAsState()
-    val photo = rememberCallPhoto(photos, ui.call?.contactId)
+    val photo = rememberCallPhoto(photos, ui.call?.contactId, ui.call?.photoJid)
     val strings = InCallStrings.current()
     val timer = rememberCallTimer(ui.call, model::now, model::elapsed)
     InCallContent(

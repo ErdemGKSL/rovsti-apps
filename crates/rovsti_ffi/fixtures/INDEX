@@ -476,6 +476,16 @@ phone.prefs_load.missing
 phone.prefs_save
 phone.reply_choices
 phone.reply_choices.defaults
+phone.wa_arbitrate
+phone.wa_arbitrate.busy
+phone.wa_arbitrate.in_progress
+phone.wa_arbitrate.no_wa
+phone.wa_arbitrate.waiting
+phone.wa_handoff_number
+phone.wa_handoff_number.chat
+phone.wa_handoff_number.lid
+phone.wa_screen
+phone.wa_screen.ringing
 phone.wa_tracker_can_place
 phone.wa_tracker_can_place.busy
 phone.wa_tracker_can_place.no_number

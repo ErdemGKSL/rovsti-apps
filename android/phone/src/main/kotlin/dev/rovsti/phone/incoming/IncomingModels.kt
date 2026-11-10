@@ -23,6 +23,9 @@ data class IncomingCaller(
     val avatarKey: String,
     val contactId: Long?,
     val sim: SimChip?,
+    /** A WhatsApp call (AD-WA5): the screen says "WhatsApp audio" and shows the profile picture of [photoJid]. */
+    val whatsapp: Boolean = false,
+    val photoJid: String? = null,
 )
 
 /** A second caller while a call is live: the card with four ways to handle it. */
@@ -37,6 +40,8 @@ data class WaitingUi(
     /** "Hold & Answer" works: the live call can be held and no call is held yet. */
     val canHold: Boolean,
     val canMessage: Boolean,
+    /** The waiting call is a WhatsApp call: End & Answer and Decline only. */
+    val whatsapp: Boolean = false,
 )
 
 @Immutable

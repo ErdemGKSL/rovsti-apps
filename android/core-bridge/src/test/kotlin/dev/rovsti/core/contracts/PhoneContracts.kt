@@ -132,6 +132,12 @@ import dev.rovsti.core.model.phone.TrackerViewAnswer
 import dev.rovsti.core.model.phone.TrackerViewRequest
 import dev.rovsti.core.model.phone.UnassignAnswer
 import dev.rovsti.core.model.phone.UnassignRequest
+import dev.rovsti.core.model.phone.WaArbitrateAnswer
+import dev.rovsti.core.model.phone.WaArbitrateRequest
+import dev.rovsti.core.model.phone.WaHandoffAnswer
+import dev.rovsti.core.model.phone.WaHandoffRequest
+import dev.rovsti.core.model.phone.WaScreenAnswer
+import dev.rovsti.core.model.phone.WaScreenRequest
 import dev.rovsti.core.model.phone.XiaomiAnswer
 import dev.rovsti.core.model.phone.XiaomiRequest
 import kotlinx.serialization.KSerializer
@@ -226,6 +232,12 @@ object PhoneContracts : ContractModels {
             op<TrackerHandleRequest, Empty>("phone.wa_tracker_clear")
             op<CanPlaceRequest, Empty>("phone.wa_tracker_can_place", err = listOf("busy", "no_number", "not_connected"))
             op<ElapsedRequest, ElapsedAnswer>("phone.wa_tracker_format_elapsed", ok = listOf("hour"))
+            op<WaArbitrateRequest, WaArbitrateAnswer>(
+                "phone.wa_arbitrate",
+                ok = listOf("waiting", "busy", "in_progress", "no_wa"),
+            )
+            op<WaScreenRequest, WaScreenAnswer>("phone.wa_screen", ok = listOf("ringing"))
+            op<WaHandoffRequest, WaHandoffAnswer>("phone.wa_handoff_number", ok = listOf("chat", "lid"))
             op<BackupExportRequest, BackupExportAnswer>("phone.backup_export")
             op<BackupImportRequest, BackupImportAnswer>(
                 "phone.backup_import",

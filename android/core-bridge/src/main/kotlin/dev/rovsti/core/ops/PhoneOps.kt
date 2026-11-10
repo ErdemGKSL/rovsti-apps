@@ -134,6 +134,12 @@ import dev.rovsti.core.model.phone.TrackerViewAnswer
 import dev.rovsti.core.model.phone.TrackerViewRequest
 import dev.rovsti.core.model.phone.UnassignAnswer
 import dev.rovsti.core.model.phone.UnassignRequest
+import dev.rovsti.core.model.phone.WaArbitrateAnswer
+import dev.rovsti.core.model.phone.WaArbitrateRequest
+import dev.rovsti.core.model.phone.WaHandoffAnswer
+import dev.rovsti.core.model.phone.WaHandoffRequest
+import dev.rovsti.core.model.phone.WaScreenAnswer
+import dev.rovsti.core.model.phone.WaScreenRequest
 import dev.rovsti.core.model.phone.XiaomiAnswer
 import dev.rovsti.core.model.phone.XiaomiRequest
 
@@ -366,6 +372,15 @@ interface PhoneOps {
     /** `m:ss` or `h:mm:ss`. */
     suspend fun formatElapsed(req: ElapsedRequest): Outcome<ElapsedAnswer>
 
+    /** Which call owns the screen when a WhatsApp call meets a cellular one (AD-WA5). */
+    suspend fun waArbitrate(req: WaArbitrateRequest): Outcome<WaArbitrateAnswer>
+
+    /** The enabled buttons and the "not on WhatsApp" sentence of a WhatsApp call. */
+    suspend fun waScreen(req: WaScreenRequest): Outcome<WaScreenAnswer>
+
+    /** The number a WhatsApp hand-off dials (AD-WA10). */
+    suspend fun waHandoffNumber(req: WaHandoffRequest): Outcome<WaHandoffAnswer>
+
     /** The backup file's name and text for the preferences; Kotlin writes the file. */
     suspend fun backupExport(req: BackupExportRequest): Outcome<BackupExportAnswer>
 
@@ -453,6 +468,9 @@ interface PhoneOps {
                 "phone.wa_tracker_clear",
                 "phone.wa_tracker_can_place",
                 "phone.wa_tracker_format_elapsed",
+                "phone.wa_arbitrate",
+                "phone.wa_screen",
+                "phone.wa_handoff_number",
                 "phone.backup_export",
                 "phone.backup_import",
                 "phone.display_name",
@@ -683,6 +701,15 @@ class NativePhoneOps(
 
     override suspend fun formatElapsed(req: ElapsedRequest) =
         core.call("phone.wa_tracker_format_elapsed", req, ElapsedRequest.serializer(), ElapsedAnswer.serializer())
+
+    override suspend fun waArbitrate(req: WaArbitrateRequest) =
+        core.call("phone.wa_arbitrate", req, WaArbitrateRequest.serializer(), WaArbitrateAnswer.serializer())
+
+    override suspend fun waScreen(req: WaScreenRequest) =
+        core.call("phone.wa_screen", req, WaScreenRequest.serializer(), WaScreenAnswer.serializer())
+
+    override suspend fun waHandoffNumber(req: WaHandoffRequest) =
+        core.call("phone.wa_handoff_number", req, WaHandoffRequest.serializer(), WaHandoffAnswer.serializer())
 
     override suspend fun backupExport(req: BackupExportRequest) =
         core.call("phone.backup_export", req, BackupExportRequest.serializer(), BackupExportAnswer.serializer())

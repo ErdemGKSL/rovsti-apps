@@ -78,10 +78,17 @@ internal class FakeSource(
     first: CallSnapshot = CallSnapshot(),
 ) : CallSource {
     private val flow = MutableStateFlow(first)
+    private val wa = MutableStateFlow<Map<Int, WaCallMeta>>(emptyMap())
     override val snapshot: StateFlow<CallSnapshot> = flow.asStateFlow()
+    override val whatsapp: StateFlow<Map<Int, WaCallMeta>> = wa.asStateFlow()
 
     fun set(snapshot: CallSnapshot) {
         flow.value = snapshot
+    }
+
+    /** Marks calls of the snapshot as WhatsApp calls (what the merged source would say). */
+    fun setWhatsApp(meta: Map<Int, WaCallMeta>) {
+        wa.value = meta
     }
 }
 
@@ -121,6 +128,8 @@ internal class RecordingCalls : CallsApi {
     override fun incomingFrame(callId: Int) = record("incomingFrame $callId")
 
     override fun silenceRinger() = record("silence")
+
+    override fun endAll() = record("endAll")
 
     override fun rejectAndCompose(callId: Int) = record("compose $callId")
 

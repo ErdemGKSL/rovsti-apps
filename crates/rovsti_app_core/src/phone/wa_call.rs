@@ -19,6 +19,10 @@ use crate::storage;
 /// Shown when a WhatsApp call is wanted but no gateway link exists.
 pub const NOT_CONNECTED: &str = "WhatsApp is not connected";
 
+/// The sentence shown when Keypad, Hold, Add call or Note is tapped on a WhatsApp call: the gateway carries one
+/// audio stream per call, so these have no WhatsApp equivalent (they are drawn dimmed, never hidden).
+pub const UNAVAILABLE_NOTE: &str = "Not available on WhatsApp calls";
+
 /// The local WhatsApp call history, next to `prefs.json`.
 pub const HISTORY_FILE: &str = "wa-calls.json";
 /// Ids of deleted calls, so a gateway snapshot does not bring them back.

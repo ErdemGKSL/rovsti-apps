@@ -23,6 +23,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import dev.rovsti.core.Outcome
+import dev.rovsti.core.model.phone.WaHandoffRequest
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.overlay.Detent
 import dev.rovsti.design.overlay.OverlayController
@@ -72,6 +74,7 @@ import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupSheetContent
 import dev.rovsti.phone.setup.SetupSheetViewModel
+import dev.rovsti.phone.wa.WaNotice
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
 import dev.rovsti.platform.files.ShareIntents
@@ -122,6 +125,8 @@ private fun rememberKeypadViewModel(container: PhoneContainer): KeypadViewModel 
                         toneSetting = { container.store.prefs.value.settings.keypadTones },
                         systemTones = container::systemKeypadTones,
                         e164 = container::e164,
+                        whatsAppAvailable = { container.waLauncher.available.value },
+                        placeWhatsApp = container.waLauncher::place,
                     )
                 }
             }
@@ -190,6 +195,9 @@ private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewMode
                         clipboard = container.clipboard,
                         reminders = container.callReminders,
                         homeCc = container::homeCc,
+                        placeWhatsApp = container.waLauncher::place,
+                        forgetWhatsApp = container.waCalls::forget,
+                        whatsAppAvailable = container.waLauncher.available,
                     )
                 }
             }
@@ -371,10 +379,39 @@ fun PhoneApp(
     val whatsAppToast = stringResource(R.string.wa_handoff_toast)
     val pending by container.pendingHandoff.collectAsState()
     LaunchedEffect(pending) {
-        // A WhatsApp call handed over by a sibling app: the number shows on the Keypad; WhatsApp calls come with E5.8.
-        if (pending != null) {
-            overlays.showToast(whatsAppToast)
-            container.pendingHandoff.value = null
+        // A WhatsApp call handed over by a sibling app (AD-WA10): the core says which number it dials, and it is placed.
+        val jid = pending ?: return@LaunchedEffect
+        container.pendingHandoff.value = null
+        val number =
+            (container.ops.waHandoffNumber(WaHandoffRequest("wa_call", jid)) as? Outcome.Ok)?.value?.number
+        if (number != null) container.waLauncher.place(number) else overlays.showToast(whatsAppToast)
+    }
+    // Answer or Decline tapped on a WhatsApp call notification: taken once, after the core is ready (waActions waits).
+    val waAction by container.pendingWaCallAction.collectAsState()
+    LaunchedEffect(waAction) {
+        val payload = waAction ?: return@LaunchedEffect
+        container.pendingWaCallAction.value = null
+        container.waActions.offer(payload)
+    }
+    val waMissing = stringResource(R.string.wa_notice_microphone)
+    val waFailed = stringResource(R.string.wa_notice_failed)
+    val activity = LocalContext.current.findComponentActivity()
+    val microphone =
+        rememberLauncherForActivityResult(container.permissions.contract(PermissionGroup.MICROPHONE)) { granted ->
+            if (granted.values.all { it }) {
+                container.permissions.refresh(activity)
+                container.waLauncher.retry()
+            } else {
+                overlays.showToast(waMissing)
+            }
+        }
+    LaunchedEffect(container) {
+        container.waNotices.flow.collect { notice ->
+            when (notice) {
+                WaNotice.NeedsMicrophone -> microphone.launch(Unit)
+                WaNotice.Failed -> overlays.showToast(waFailed)
+                is WaNotice.Refused -> overlays.showToast(notice.text)
+            }
         }
     }
 
@@ -435,6 +472,12 @@ fun PhoneApp(
             navigator.pop()
             if (toCall) navigator.push(PhoneRoute.InCall)
         }
+    }
+    // A WhatsApp call that rings (the gateway event or the FCM wake brought it): its Incoming page opens once.
+    val ringingWa = incomingUi.caller?.takeIf { it.whatsapp }?.callId
+    LaunchedEffect(ringingWa) {
+        val id = ringingWa ?: return@LaunchedEffect
+        if ((navigator.current as? PhoneRoute.Incoming)?.callId != id) navigator.push(PhoneRoute.Incoming(id))
     }
     val inCall =
         remember(container, incomingStrings) { container.inCallModel(container.scope, incomingStrings.unknown) }

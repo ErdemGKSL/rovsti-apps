@@ -599,13 +599,16 @@ fun recentsMenu(
     row: RecentsRowUi,
     strings: RecentsStrings,
     onAction: (RecentsAction) -> Unit,
+    whatsApp: Boolean = false,
 ): ImmutableList<MenuItem> {
     val key = row.key
     val call = row.callable
     return persistentListOf<MenuItem>(
         MenuItem.Action(strings.callBack, RovstiIcons.Phone, enabled = call) { onAction(RecentsAction.CallBack(key)) },
         MenuItem.Action(strings.message, RovstiIcons.Message, enabled = call) { onAction(RecentsAction.Message(key)) },
-        MenuItem.Action(strings.whatsApp, RovstiIcons.WhatsApp, enabled = false) {},
+        MenuItem.Action(strings.whatsApp, RovstiIcons.WhatsApp, enabled = call && whatsApp) {
+            onAction(RecentsAction.WhatsAppCall(key))
+        },
         MenuItem.Separator,
         MenuItem.Action(strings.quickReply, RovstiIcons.Forward, enabled = call) {
             onAction(RecentsAction.AskQuickReply(key))
@@ -796,8 +799,9 @@ fun RecentsScreen(
     // The tab is on screen: the missed calls count as seen (U39).
     LaunchedEffect(model) { model.onAction(RecentsAction.Opened) }
     RecentsEffects(model, host, strings)
+    val whatsApp by model.whatsAppAvailable.collectAsState()
     val menuFor: (RecentsRowUi) -> ImmutableList<MenuItem> =
-        remember(strings, model) { { row -> recentsMenu(row, strings, model::onAction) } }
+        remember(strings, model, whatsApp) { { row -> recentsMenu(row, strings, model::onAction, whatsApp) } }
     SwipeRowGroup {
         RecentsContent(
             ui = ui,

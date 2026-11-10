@@ -3,6 +3,7 @@ package dev.rovsti.wa.calls
 import android.content.Context
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.RustError
+import dev.rovsti.core.model.phone.CallDirection
 import dev.rovsti.core.model.phone.CallPhase
 import dev.rovsti.core.model.wa.CallSummary
 import dev.rovsti.core.model.wa.GatewayEvent
@@ -13,11 +14,15 @@ import dev.rovsti.platform.wa.CallFrames
 import dev.rovsti.platform.wa.WaCallAudio
 import dev.rovsti.platform.wa.WaCallService
 import dev.rovsti.platform.wa.asFrames
+import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.WaRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -55,6 +60,29 @@ class AndroidCallAudioPump(
     override fun setSpeaker(on: Boolean): Boolean = WaCallAudio.setSpeaker(context, on)
 }
 
+/** The ids of deleted calls, so a reload from the gateway does not bring them back (`wa-calls-forgotten.json` in Rust). */
+interface ForgottenCalls {
+    fun ids(): Set<String>
+
+    fun add(ids: Collection<String>)
+
+    companion object {
+        /** Forgets nothing across restarts: tests and the catalog. */
+        fun inMemory(): ForgottenCalls =
+            object : ForgottenCalls {
+                private val kept = HashSet<String>()
+
+                @Synchronized
+                override fun ids(): Set<String> = kept.toSet()
+
+                @Synchronized
+                override fun add(ids: Collection<String>) {
+                    kept += ids
+                }
+            }
+    }
+}
+
 /** What [WaCalls.place] and [WaCalls.accept] answer. */
 sealed interface CallResult {
     /** The call is placed or accepted; the pump starts now (accept) or when the call becomes active (place). */
@@ -89,6 +117,7 @@ class WaCalls(
     private val pump: CallAudioPump,
     private val scope: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val forgotten: ForgottenCalls = ForgottenCalls.inMemory(),
 ) {
     private val list = MutableStateFlow<List<CallSummary>>(emptyList())
 
@@ -115,10 +144,24 @@ class WaCalls(
         started = true
         scope.launch { repo.events.collect(::onEvent) }
         scope.launch { reload() }
+        // The link came back (a reconnect, a relink): the calls that rang or ended meanwhile are read again.
+        scope.launch {
+            repo.linkState
+                .map { it is WaLinkState.Connected }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { if (it) reload() }
+        }
+    }
+
+    /** Deletes [ids] from the list and remembers them, so the next reload keeps them away (Recents Delete). */
+    fun forget(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        forgotten.add(ids)
+        list.value = list.value.filterNot { it.callId in ids }
     }
 
     /** Places a call to [jid]. */
-    @Suppress("UNUSED_PARAMETER")
     suspend fun place(
         jid: String,
         video: Boolean = false,
@@ -132,7 +175,14 @@ class WaCalls(
 
             is Outcome.Ok -> {
                 // The pump starts when the peer picks up (phase Active); `video` is only the screen's business.
-                CallResult.Started(out.value.callId)
+                // The call shows as ringing at once, before the gateway's first `call` event (the core tracker's `on_placed`).
+                val id = out.value.callId
+                if (list.value.none { it.callId == id }) {
+                    val placed =
+                        CallSummary(id, jid, null, CallDirection.Out, CallPhase.Ringing, video, clock(), null)
+                    list.value = listOf(placed) + list.value
+                }
+                CallResult.Started(id)
             }
         }
     }
@@ -223,7 +273,8 @@ class WaCalls(
     private suspend fun reload() {
         val gateway = repo.gateway() ?: return
         val loaded = (gateway.calls() as? Outcome.Ok)?.value ?: return
-        list.value = loaded.sortedByDescending { it.startedMs }
+        val gone = forgotten.ids()
+        list.value = loaded.filterNot { it.callId in gone }.sortedByDescending { it.startedMs }
     }
 
     private suspend fun onEvent(event: GatewayEvent) {

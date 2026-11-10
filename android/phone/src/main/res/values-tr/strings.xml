@@ -98,7 +98,7 @@
     <string name="native_incoming_from">%1$s numarasından gelen arama</string>
     <string name="native_answer">Cevapla</string>
     <string name="native_decline">Reddet</string>
-    <string name="wa_handoff_toast">WhatsApp aramaları sonraki bir güncellemeyle gelecek</string>
+    <string name="wa_handoff_toast">Bu kişinin WhatsApp\'ta aranacak numarası yok</string>
 
     <!-- Keypad -->
     <string name="keypad_field_description">Telefon numarası</string>
@@ -354,4 +354,9 @@
     <string name="postcall_block_failed">Bu numara engellenemedi.</string>
     <string name="postcall_add_note">Not ekle</string>
     <string name="mini_call_title">%1$s, %2$s</string>
+    <string name="wa_audio">WhatsApp sesli arama</string>
+    <string name="incall_notice_wa_unavailable">WhatsApp aramalarında kullanılamaz</string>
+    <string name="wa_notice_microphone">WhatsApp araması için mikrofona izin verin</string>
+    <string name="wa_notice_failed">WhatsApp araması başlatılamadı</string>
+    <string name="details_menu_whatsapp">WhatsApp araması</string>
 </resources>

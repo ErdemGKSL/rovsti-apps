@@ -75,6 +75,7 @@ import dev.rovsti.phone.DECLINE_RED
 import dev.rovsti.phone.InCallMetrics
 import dev.rovsti.phone.incoming.AuraMode
 import dev.rovsti.phone.incoming.AvatarKey
+import dev.rovsti.phone.wa.WaAudioLabel
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -86,6 +87,7 @@ object InCallTags {
     const val Name = "incall-name"
     const val Number = "incall-number"
     const val Status = "incall-status"
+    const val WaAudio = "incall-wa-audio"
     const val Timer = "incall-timer"
     const val Sim = "incall-sim"
     const val Collapse = "incall-collapse"
@@ -332,6 +334,10 @@ private fun CallerBlock(
                 )
             }
         }
+        if (call.whatsapp) {
+            Spacer(Modifier.height(InCallMetrics.NameGap))
+            WaAudioLabel(strings.waAudio, OnAuraSecondary, Modifier.testTag(InCallTags.WaAudio))
+        }
         Spacer(Modifier.height(InCallMetrics.NameGap))
         StatusLine(ui, call, strings, timer, anchor, onTimerMenu)
         call.sim?.let {
@@ -430,7 +436,11 @@ private fun ControlGrid(
     onAudio: (Rect) -> Unit,
 ) {
     val enabled = ui.live
+    val wa = ui.whatsapp
     val audioAnchor = remember { AnchorHolder() }
+    // On a WhatsApp call the core says what works: Keypad, Hold, Add call and Note are dimmed and answer a tap with a toast.
+    val noWa = wa == null
+    val unavailable = { onAction(InCallAction.Unavailable) }
     Column(verticalArrangement = Arrangement.spacedBy(InCallMetrics.RowGap)) {
         Row(horizontalArrangement = Arrangement.spacedBy(InCallMetrics.ControlGap)) {
             ControlButton(
@@ -438,20 +448,23 @@ private fun ControlGrid(
                 label = if (ui.muted) strings.unmute else strings.mute,
                 tag = InCallTags.Mute,
                 active = ui.muted,
-                enabled = enabled,
+                enabled = enabled && (wa?.mute ?: true),
             ) { onAction(InCallAction.ToggleMute) }
             ControlButton(
                 icon = RovstiIcons.Keypad,
                 label = strings.keypad,
                 tag = InCallTags.Keypad,
-                enabled = enabled,
+                enabled = enabled && (wa?.keypad ?: true),
+                disabledReason = strings.waUnavailable,
+                dimmed = !noWa && wa?.keypad != true,
+                onDimmedTap = unavailable,
             ) { onAction(InCallAction.ToggleKeypad) }
             ControlButton(
                 icon = audioIcon(ui.route),
                 label = strings.audio,
                 tag = InCallTags.Audio,
                 active = ui.route == AudioRoute.Speaker,
-                enabled = enabled,
+                enabled = enabled && (wa?.speaker ?: true),
                 anchor = audioAnchor,
             ) { if (ui.routeOpensList) onAudio(audioAnchor.rect) else onAction(InCallAction.ToggleRoute) }
         }
@@ -461,21 +474,29 @@ private fun ControlGrid(
                 label = strings.addCall,
                 tag = InCallTags.AddCall,
                 enabled = false,
-                disabledReason = strings.addCallLater,
+                disabledReason = if (noWa) strings.addCallLater else strings.waUnavailable,
+                dimmed = !noWa,
+                onDimmedTap = unavailable,
             ) {}
             ControlButton(
                 icon = RovstiIcons.Pause,
                 label = if (ui.held) strings.resume else strings.hold,
                 tag = InCallTags.Hold,
                 active = ui.held,
-                enabled = enabled && (ui.canHold || ui.held),
+                enabled = enabled && (ui.canHold || ui.held) && (wa?.hold ?: true),
+                disabledReason = strings.waUnavailable,
+                dimmed = !noWa && wa?.hold != true,
+                onDimmedTap = unavailable,
             ) { onAction(InCallAction.ToggleHold) }
             ControlButton(
                 icon = RovstiIcons.Pencil,
                 label = if (ui.hasNote) strings.noteSaved else strings.note,
                 tag = InCallTags.Note,
                 active = ui.hasNote,
-                enabled = enabled && ui.call?.number?.isNotBlank() == true,
+                enabled = enabled && ui.call?.number?.isNotBlank() == true && noWa,
+                disabledReason = strings.waUnavailable,
+                dimmed = !noWa,
+                onDimmedTap = unavailable,
             ) { onAction(InCallAction.OpenNote) }
         }
     }
@@ -503,6 +524,9 @@ private fun ControlButton(
     enabled: Boolean = true,
     disabledReason: String? = null,
     anchor: AnchorHolder? = null,
+    /** A control the call does not have (WhatsApp): dimmed like a disabled one, but a tap runs [onDimmedTap]. */
+    dimmed: Boolean = false,
+    onDimmedTap: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     Column(
@@ -510,9 +534,10 @@ private fun ControlButton(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         CallControlButton(
-            onClick = onClick,
-            enabled = enabled,
+            onClick = if (dimmed) onDimmedTap else onClick,
+            enabled = enabled || dimmed,
             active = active,
+            dimmed = dimmed,
             size = InCallMetrics.Control,
             debugTag = "call.control",
             modifier =
@@ -522,7 +547,7 @@ private fun ControlButton(
                     .semantics(mergeDescendants = true) {
                         contentDescription = label
                         if (active) stateDescription = label
-                        if (!enabled && disabledReason != null) stateDescription = disabledReason
+                        if ((!enabled || dimmed) && disabledReason != null) stateDescription = disabledReason
                     },
         ) { glyph ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -533,7 +558,7 @@ private fun ControlButton(
         RovstiText(
             label,
             style = RovstiTheme.type.footnote,
-            color = if (enabled) OnAura else OnAuraSecondary,
+            color = if (enabled && !dimmed) OnAura else OnAuraSecondary,
             textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

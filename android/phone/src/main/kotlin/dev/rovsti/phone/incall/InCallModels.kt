@@ -30,6 +30,24 @@ data class InCallCall(
     val startedMs: Long,
     val sim: SimChip?,
     val incoming: Boolean,
+    /** A WhatsApp call (AD-WA5): "WhatsApp audio" under the name; [photoJid] keys its profile picture. */
+    val whatsapp: Boolean = false,
+    val photoJid: String? = null,
+)
+
+/**
+ * What the core says a WhatsApp call can do (`phone.wa_screen`): Mute, Speaker and End work, Keypad, Hold, Add call and
+ * Note do not and are drawn dimmed. [note] is the core's sentence for a tap on a dimmed one.
+ */
+@Immutable
+data class WaControls(
+    val mute: Boolean = true,
+    val speaker: Boolean = true,
+    val keypad: Boolean = false,
+    val hold: Boolean = false,
+    val addCall: Boolean = false,
+    val end: Boolean = true,
+    val note: String = "",
 )
 
 /** One line of the audio route list, already filtered for the grants the app holds. */
@@ -80,6 +98,8 @@ data class InCallUi(
     val ended: EndedUi? = null,
     /** The keyguard is up: the screen shows over the lock screen. */
     val locked: Boolean = false,
+    /** Set while the shown call is a WhatsApp call: which controls work. */
+    val whatsapp: WaControls? = null,
 ) {
     val live: Boolean get() = call != null && call.phase != CallPhase.Ended
     val held: Boolean get() = call?.phase == CallPhase.Holding
@@ -100,6 +120,9 @@ sealed interface InCallAction {
     ) : InCallAction
 
     data object End : InCallAction
+
+    /** A tap on a dimmed control of a WhatsApp call (Keypad, Hold, Add call, Note): says why nothing happens. */
+    data object Unavailable : InCallAction
 
     // The tone keypad.
     data class Digit(
@@ -144,6 +167,9 @@ enum class InCallNotice {
     NoteFailed,
     RouteFailed,
     CommandFailed,
+
+    /** The core's sentence for a control a WhatsApp call does not have (Keypad, Hold, Add call, Note). */
+    WaUnavailable,
 }
 
 /** What the post-call pill offers. */

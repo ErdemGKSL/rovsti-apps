@@ -182,6 +182,11 @@ sealed interface RecentsAction {
         val simKey: String,
     ) : RecentsAction
 
+    /** The row menu's WhatsApp call item. */
+    data class WhatsAppCall(
+        val key: String,
+    ) : RecentsAction
+
     data class Message(
         val key: String,
     ) : RecentsAction
@@ -387,6 +392,12 @@ class RecentsViewModel(
             .getOffset(clock()) / MS_PER_S
     },
     private val compute: CoroutineDispatcher = Dispatchers.Default,
+    /** Places a WhatsApp call to a number (the row menu's WhatsApp item). */
+    private val placeWhatsApp: (String) -> Unit = {},
+    /** Deletes WhatsApp calls by their gateway ids (Delete on a WhatsApp row). */
+    private val forgetWhatsApp: (List<String>) -> Unit = {},
+    /** WhatsApp calls can be placed (the link is connected): enables the menu item. */
+    val whatsAppAvailable: StateFlow<Boolean> = MutableStateFlow(false),
 ) : ViewModel() {
     private val filter = MutableStateFlow(RecentsFilter.All)
     private val query = MutableStateFlow("")
@@ -572,6 +583,10 @@ class RecentsViewModel(
 
             is RecentsAction.CallOn -> {
                 viewModelScope.launch { place(action.number, action.simKey) }
+            }
+
+            is RecentsAction.WhatsAppCall -> {
+                withRow(action.key) { placeWhatsApp(it.numberRaw) }
             }
 
             is RecentsAction.Message -> {
@@ -896,8 +911,16 @@ class RecentsViewModel(
     private fun delete(keys: List<String>) {
         val rows = keys.mapNotNull { byKey[it]?.first }
         val ids = rows.flatMap { r -> r.refs.mapNotNull { (it as? EntryRef.Log)?.id } }.distinct()
+        val waIds = rows.flatMap { r -> r.refs.mapNotNull { (it as? EntryRef.WhatsApp)?.callId } }.distinct()
+        if (ids.isEmpty() && waIds.isEmpty()) {
+            notice(RecentsNotice.NothingToDelete)
+            return
+        }
+        if (waIds.isNotEmpty()) forgetWhatsApp(waIds)
         if (ids.isEmpty()) {
-            notice(if (rows.any { it.whatsapp }) RecentsNotice.WhatsAppSoon else RecentsNotice.NothingToDelete)
+            // WhatsApp calls only: they are gone from the list; the log has nothing to restore, so no Undo.
+            selecting.update { it?.let { emptySet() } }
+            recents.refreshNow()
             return
         }
         viewModelScope.launch {

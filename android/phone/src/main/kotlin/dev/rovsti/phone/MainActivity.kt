@@ -178,7 +178,7 @@ class MainActivity :
 
     /**
      * Answer and Decline on a WhatsApp call notification: [WaIncoming.takeAction] cancels the notification and hands the
-     * payload to the container (E5.8 acts on it once). Decline sends the task straight back so it does not open the UI,
+     * payload to the container (`WaCallActions` acts on it once). Decline sends the task straight back so it does not open the UI,
      * like a telephony Decline.
      */
     private fun handleWaCallIntent(intent: Intent) {

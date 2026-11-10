@@ -562,12 +562,11 @@ internal fun callMenuSections(
         }
     val others =
         listOf(
-            // WhatsApp calls come with E5.8; the row is there and says so.
             IosMenuItem(
                 title = strings.whatsApp,
-                description = strings.comingSoon,
                 icon = glyph(RovstiIcons.WhatsApp),
-                enabled = false,
+                enabled = menu.whatsApp,
+                onClick = { act(KeypadAction.WhatsAppCall) },
             ),
             IosMenuItem(
                 title = strings.message,

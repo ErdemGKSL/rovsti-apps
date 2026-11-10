@@ -154,8 +154,8 @@ data class PhoneLink(
  * - DIAL and VIEW of `tel:` (the `#` and `,` of USSD codes arrive escaped, `dial.fromTelUri` decodes them) open the
  *   Keypad on that number; a DIAL without data opens it empty (`DialIntents.forwardedUri`);
  * - the call notifications' intents open Incoming (Show, Answer, Message) with the call id;
- * - the WhatsApp hand-off (`dev.rovsti.action.WA_CALL` through `.WaHandoff`) opens the Keypad; the WhatsApp chip is
- *   disabled there until E5.8;
+ * - the WhatsApp hand-off (`dev.rovsti.action.WA_CALL` through `.WaHandoff`) opens the Keypad; the number is dialled over WhatsApp
+ *   (`phone.wa_handoff_number` decides the number);
  * - a plain launch while a call is live (the ongoing notification's tap) opens the In-Call screen.
  *
  * Calls open on the Recents tab (they belong to its history), numbers on the Keypad. Anything else leaves the stacks

@@ -46,8 +46,9 @@ class IncomingViewModel(
     val effect = effects.receiveAsFlow()
 
     val state: StateFlow<IncomingUi> =
-        combine(source.snapshot, sims, display.version) { snapshot, sims, _ -> build(snapshot, sims) }
-            .stateIn(scope, SharingStarted.Eagerly, build(source.snapshot.value, sims.value))
+        combine(source.snapshot, sims, display.version, source.whatsapp) { snapshot, sims, _, wa ->
+            build(snapshot, sims, wa)
+        }.stateIn(scope, SharingStarted.Eagerly, build(source.snapshot.value, sims.value, source.whatsapp.value))
 
     private val answered = HashSet<Int>()
     private val framed = HashSet<Int>()
@@ -138,6 +139,7 @@ class IncomingViewModel(
     private fun build(
         snapshot: CallSnapshot,
         sims: Sims,
+        wa: Map<Int, WaCallMeta>,
     ): IncomingUi {
         val ringing = ringingOf(snapshot)
         val waiting = waitingOf(snapshot)
@@ -157,7 +159,7 @@ class IncomingViewModel(
         val relabelled = snapshot.backgroundCallId != null
         val live = snapshot.calls.firstOrNull { it.id == snapshot.foregroundCallId }
         return IncomingUi(
-            caller = ringing?.let { caller(it, chip) },
+            caller = ringing?.let { caller(it, chip, wa[it.id]) },
             waiting =
                 waiting?.let {
                     WaitingUi(
@@ -166,20 +168,32 @@ class IncomingViewModel(
                         subtitle = subtitleOf(it),
                         avatarKey = keyOf(it),
                         relabelled = relabelled,
-                        canHold = relabelled || live?.canHold == true,
-                        canMessage = it.numberRaw.isNotBlank(),
+                        // A WhatsApp call cannot be held (one audio stream per call), and nobody can hold one.
+                        canHold = it.id !in wa && (relabelled || live?.canHold == true),
+                        canMessage = it.numberRaw.isNotBlank() && it.id !in wa,
+                        whatsapp = it.id in wa,
                     )
                 },
             locked = snapshot.keyguardLocked,
             silenced = snapshot.ringerSilenced,
-            canMessage = ringing?.numberRaw?.isNotBlank() == true,
+            canMessage = ringing?.numberRaw?.isNotBlank() == true && ringing.id !in wa,
         )
     }
 
     private fun caller(
         call: WireCall,
         sim: SimChip?,
-    ) = IncomingCaller(call.id, titleOf(call), subtitleOf(call), keyOf(call), call.contactId, sim)
+        wa: WaCallMeta?,
+    ) = IncomingCaller(
+        call.id,
+        titleOf(call),
+        subtitleOf(call),
+        keyOf(call),
+        call.contactId,
+        sim,
+        whatsapp = wa != null,
+        photoJid = wa?.jid,
+    )
 
     private fun titleOf(call: WireCall): String =
         call.displayName?.trim()?.takeIf { it.isNotEmpty() }

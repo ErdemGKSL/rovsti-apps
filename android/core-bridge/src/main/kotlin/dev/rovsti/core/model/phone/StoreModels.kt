@@ -337,3 +337,59 @@ data class ElapsedRequest(
 data class ElapsedAnswer(
     val text: String,
 )
+
+// `phone.wa_arbitrate`, `phone.wa_screen`, `phone.wa_handoff_number` (`crates/rovsti_ffi/src/ops/phone/wa_screen.rs`).
+
+/** The facts of the arbitration: a cellular call is live, one is ringing, and the newest WhatsApp call if any. */
+@Serializable
+data class WaArbitrateRequest(
+    @SerialName("telecom_live") val telecomLive: Boolean,
+    @SerialName("telecom_ringing") val telecomRinging: Boolean,
+    @EncodeDefault(NEVER) val wa: CallUpdate? = null,
+)
+
+/** [decision] is `show_wa`, `wa_waiting`, `reject_wa_busy` or `telecom`. */
+@Serializable
+data class WaArbitrateAnswer(
+    val decision: String,
+)
+
+@Serializable
+data class WaScreenRequest(
+    val update: CallUpdate,
+    @EncodeDefault(NEVER) val speaker: Boolean = false,
+    @EncodeDefault(NEVER) val muted: Boolean = false,
+)
+
+/** Which buttons of the WhatsApp call screen work. */
+@Serializable
+data class WaEnabled(
+    val mute: Boolean,
+    val speaker: Boolean,
+    val keypad: Boolean,
+    val hold: Boolean,
+    @SerialName("add_call") val addCall: Boolean,
+    val end: Boolean,
+)
+
+/** [phase] is `ringing`, `calling`, `connecting`, `active` or `ended`; [note] is the core's sentence for a dimmed control. */
+@Serializable
+data class WaScreenAnswer(
+    val phase: String,
+    val enabled: WaEnabled,
+    val note: String,
+)
+
+/** A hand-off from a sibling app (`dev.rovsti.action.WA_CALL`): [action] is `wa_call`, `wa_chat` or anything else. */
+@Serializable
+data class WaHandoffRequest(
+    val action: String,
+    val jid: String,
+    @EncodeDefault(NEVER) val name: String? = null,
+)
+
+/** The number to dial (`+<digits>`), null when the hand-off is no call to a phone JID. */
+@Serializable
+data class WaHandoffAnswer(
+    val number: String?,
+)

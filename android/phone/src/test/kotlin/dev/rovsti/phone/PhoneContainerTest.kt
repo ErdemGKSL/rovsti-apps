@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonElement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -48,10 +49,11 @@ class PhoneContainerTest {
         assertEquals(AppPermissions.phone.app, container.appPermissions.app)
     }
 
-    @Test fun theCallOwnerIsTheRegistry() {
+    @Test fun theCallOwnerIsTheRegistryAndTheCommandsRouteWhatsAppCallsToWaCalls() {
         val container = Fakes()
+        assertSame(CallRegistry, container.registryCalls)
         val calls: CallsApi = container.calls
-        assertSame(CallRegistry, calls)
+        assertTrue("the screens' commands go through the router (AD-WA5)", calls is dev.rovsti.phone.wa.WaCallsRouter)
     }
 
     @Test fun aTelLinkIsDecodedByTheCoreAndOfferedToTheKeypad() {

@@ -44,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOn
@@ -155,6 +156,9 @@ sealed interface PersonAction {
     ) : PersonAction
 
     data object Message : PersonAction
+
+    /** The More menu's WhatsApp call item: calls the first number over WhatsApp. */
+    data object WhatsAppCall : PersonAction
 
     data class CopyNumber(
         val number: String,
@@ -315,6 +319,10 @@ class PersonSheetViewModel(
             .getOffset(clock()) / MS_PER_S
     },
     private val compute: CoroutineDispatcher = Dispatchers.Default,
+    /** Places a WhatsApp call to a number (the More menu's WhatsApp item). */
+    private val placeWhatsApp: (String) -> Unit = {},
+    /** WhatsApp calls can be placed (the link is connected): enables the menu item. */
+    val whatsAppAvailable: StateFlow<Boolean> = MutableStateFlow(false),
 ) {
     private val effects = Channel<PersonEffect>(Channel.BUFFERED)
     val effect = effects.receiveAsFlow()
@@ -426,6 +434,7 @@ class PersonSheetViewModel(
             is PersonAction.AskSim -> askSim(action.number)
             is PersonAction.CallOn -> scope.launch { place(action.number, action.simKey) }
             PersonAction.Message -> primary()?.let { say(PersonEffect.SendMessage(it, null)) }
+            PersonAction.WhatsAppCall -> primary()?.let(placeWhatsApp)
             is PersonAction.CopyNumber -> copy(action.number)
             PersonAction.CopyAll -> copyAll()
             PersonAction.ShareDetails -> shareDetails()

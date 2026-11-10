@@ -1127,7 +1127,7 @@ round close. E5.9-E5.14 follow in round 14.
 | E5.5 | Favorites and Contacts tabs | R1 | done (recovered from `stash@{0}` in round-13 step 1; Evidence: `FavoritesViewModelTest`, `FavoritesScreenTest`, `PhoneContactsViewModelTest`, `PhoneContactsScreenTest`, `PhoneStringsTest`, `e5.5-*` goldens incl. `e5.5-favorites-tr`) |
 | E5.6 | Incoming call | R1 | done (round-12 step 7; Evidence: `IncomingViewModelTest`, `IncomingScreenTest`, `CallRegistryIncomingTest`, `e5.6-*` goldens). Open owner follow-ups F17-F20, photo background, slide to answer: round-13 steps 3-5 |
 | E5.7a | In-call: single call | R1 | done (F20 in-call frosted controls and photo background: round-13 step 4; round-12 step 8; Evidence: `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`, `e5.7-*` goldens, `docs/kotlin-ui/checklist-e5.md`) |
-| E5.8 | WhatsApp calls | R2 | in-progress (E5.8a audio proven in software, round-13 step 6; E5.8b call UI todo, step 7) |
+| E5.8 | WhatsApp calls | R2 | done (E5.8a audio proven in software, round-13 step 6; E5.8b call UI, round-13 step 7; owner acceptance item: the manual audio check on the real phone) |
 
 > **Recovery note (RECOVERED in round-13 step 1; branch `wip-r12-s6` deleted, `stash@{0}` kept until the round closes):** round-12 step 6 (E5.4 sheets wiring / E5.5
 > Favorites and Contacts tabs) was implemented but stashed as `stash@{0}` "blocked: kotlin-ui r12 S6" (also kept as
@@ -1154,7 +1154,7 @@ round close. E5.9-E5.14 follow in round 14.
 - AC2 Migration test with fixture `prefs.json` (PrefsV2), `wa-calls.json`, `call-notes.json`, `whatsapp-link.json`
   (Phone has no `sim-choices.json`: that is the Messages legacy SIM file, `rovsti_app_core/src/messages/prefs.rs:22`).
 - Screenshots: `e5.1-setup-sheet`, `e5.1-diagnostics`, `e5.1-notice-line`, `e5.1-tabs` (+ `e5.1-settings`, `e5.1-setup-sheet-fs2`).
-- Evidence (step 1): `PhoneManifestTest` (both flavors), `PhoneRoutesTest`, `PhoneMigrationTest`, `InCallServiceTest`, `SetupSheetViewModelTest` (real core) pass. Setup sheet scrolls and stacks buttons at 2x font; notice line sits in its own card under the Recents title. Open item: WA hand-off JID to number needs a `rovsti_ffi` op (`wa_call::handoff_number`); until E5.8 the hand-off opens the Keypad and shows the "later update" toast.
+- Evidence (step 1): `PhoneManifestTest` (both flavors), `PhoneRoutesTest`, `PhoneMigrationTest`, `InCallServiceTest`, `SetupSheetViewModelTest` (real core) pass. Setup sheet scrolls and stacks buttons at 2x font; notice line sits in its own card under the Recents title. Open item (closed in round-13 step 7: `phone.wa_handoff_number`): WA hand-off JID to number needs a `rovsti_ffi` op (`wa_call::handoff_number`).
 
 ### E5.2 Keypad
 - AC1 Keypad layout from Kotlin pure layout maths (not `rovsti_core::keypad_layout`), sized to the viewport; digits are
@@ -1282,7 +1282,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   after the call is connected), mic permission and audio focus, and that the foreground service type includes
   microphone. Acceptance: an automated loopback test with the fake gateway that pushes a tone in and gets it out on the
   far side (both directions), plus a manual check on the owner's phone listed in the evidence with gateway logs.
-- **Status: in-progress.** E5.8a (audio chain, no UI) is done in software; E5.8b (call screens) is open.
+- **Status: done** (round-13 step 7; the manual audio check below stays an owner acceptance item). E5.8a (audio chain, no UI) is done in software; E5.8b (call screens) is done.
 - **Evidence (E5.8a, round-13 step 6):** `docs/kotlin-ui/wa-call-audio.md` lists every hop and format (16 kHz mono PCM16,
   960 samples / 1 920 bytes / 60 ms; the gateway rechunks the engine's 20 ms frames). Tests: `rovsti_wa_client/tests/call_audio.rs`
   (fake gateway WebSocket, 1 kHz tone both directions, frame size and Goertzel energy), `wa_gateway` `call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames`,
@@ -1292,7 +1292,21 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 - **Owner item (manual, real phone):** place and answer a WhatsApp call between two accounts; check both directions
   of audio, earpiece / speaker / Bluetooth, music pausing, background and screen-off operation, and gateway logs
   (checklist at the end of `wa-call-audio.md`).
-- Screenshots: `e5.8-wa-incoming`, `e5.8-wa-incall-dimmed-controls`, `e5.8-wa-waiting-during-cellular`.
+- **Evidence (E5.8b, round-13 step 7):** the core ops `phone.wa_arbitrate`, `phone.wa_screen` (enabled controls and the
+  sentence "Not available on WhatsApp calls") and `phone.wa_handoff_number` (`rovsti_ffi/src/ops/phone/wa_screen.rs`, fixtures
+  `phone.wa_*`, `OPS.md`). Kotlin: `phone/.../wa/WaCallSource.kt` folds the WhatsApp call into the registry snapshot (id from `WaIdBook`,
+  the core's arbitration decides who owns the screen), `WaCallsRouter` routes the screens' commands (answer, decline, end, mute,
+  speaker, "End & Answer" both ways) to `WaCalls`, `WaCallLauncher` places calls (Recents row menu, More menu of the person sheet,
+  keypad long-press Call menu, sibling-app hand-off), `WaCallActions` takes Answer/Decline from the notification once and only after
+  the core is ready. `WaCalls` re-reads the calls when the link reconnects and keeps deleted calls away (`ForgottenCalls`).
+  Screens: "WhatsApp audio" with the 14 dp `SourceGlyph` on Incoming, In-Call and the waiting card; Keypad, Hold, Add call, Note dimmed
+  at 45 % with the core's sentence as a toast; the WhatsApp profile picture as the call background through `WaAvatars`.
+  Tests: `WaCallFlowTest` (real core arbitration; ring, answer, audio opened, end; decline; arbitration both ways; busy decline once;
+  cold-start answer waits), `WaCallActionsTest`, WA cases in `IncomingViewModelTest`, `InCallViewModelTest`, `RecentsViewModelTest`,
+  `IncomingScreenTest`, `InCallScreenTest`, `PhoneContainerTest`. Goldens `e5.8-*`. R8: no new class is reached by name (FCM service
+  is a manifest component, `WaPush` reflects Firebase classes that its consumer rules keep); checked with `dexdump` on the firebase
+  release APK (see the step summary).
+- Screenshots: `e5.8-wa-incoming`, `e5.8-wa-incoming-photo`, `e5.8-wa-incall-dimmed-controls`, `e5.8-wa-waiting-during-cellular`.
 
 ### E5.9 Settings
 - Screenshots: `e5.9-settings`, `e5.9-blocked-list`, `e5.9-block-paste-many`, `e5.9-quick-replies`, `e5.9-speed-dial`,

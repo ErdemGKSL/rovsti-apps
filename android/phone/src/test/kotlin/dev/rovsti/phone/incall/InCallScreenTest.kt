@@ -8,12 +8,15 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertContentDescriptionContains
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -399,5 +402,80 @@ class InCallScreenTest : ShotTest() {
         gate.onLiveCallChanged(true)
         assertTrue(pending.isEmpty())
         assertEquals(listOf(true, true), flags)
+    }
+
+    // ---- WhatsApp calls (E5.8b) ------------------------------------------------------------------------------------------
+
+    private fun whatsAppUi(): InCallUi {
+        val call = liveCall(name = "Ada Lovelace", contactId = null, canHold = false)
+        val h = InCallHarness(liveSnapshot(call, endpoints = emptyList()))
+        val jid = "905559990000@s.whatsapp.net"
+        h.source.setWhatsApp(
+            mapOf(
+                call.id to
+                    dev.rovsti.phone.incoming.WaCallMeta(
+                        "c1",
+                        jid,
+                        dev.rovsti.core.model.phone.CallUpdate(
+                            "c1",
+                            jid,
+                            "Ada Lovelace",
+                            dev.rovsti.core.model.phone.CallDirection.Out,
+                            dev.rovsti.core.model.phone.CallPhase.Active,
+                            false,
+                        ),
+                        speaker = false,
+                        muted = false,
+                    ),
+            ),
+        )
+        return h.ui
+    }
+
+    @Test fun aWhatsAppCallSaysWhatsAppAudioWithTheGlyphAndMuteSpeakerEndWork() {
+        show(whatsAppUi())
+        compose.onNodeWithTag(InCallTags.WaAudio).assertIsDisplayed()
+        compose.onNodeWithTag(InCallTags.Mute).assertIsEnabled()
+        compose.onNodeWithTag(InCallTags.Audio).assertIsEnabled()
+        compose.onNodeWithTag(InCallTags.End).assertIsEnabled()
+        compose.onNodeWithTag(InCallTags.Mute).performClick()
+        compose.onNodeWithTag(InCallTags.End).performClick()
+        assertEquals(listOf(InCallAction.ToggleMute, InCallAction.End), actions)
+    }
+
+    @Test fun aCellularCallShowsNoWhatsAppLine() {
+        show()
+        compose.onAllNodesWithTag(InCallTags.WaAudio).assertCountEquals(0)
+    }
+
+    @Test fun keypadHoldAddCallAndNoteAreDimmedOnAWhatsAppCallAndATapSaysWhy() {
+        show(whatsAppUi())
+        val dimmed = listOf(InCallTags.Keypad, InCallTags.Hold, InCallTags.AddCall, InCallTags.Note)
+        for (tag in dimmed) {
+            compose.onNodeWithTag(tag).assertIsEnabled()
+            compose.onNodeWithTag(tag).performClick()
+        }
+        assertEquals(
+            "every dimmed control answers a tap with the sentence",
+            dimmed.map { InCallAction.Unavailable },
+            actions,
+        )
+        compose.onNodeWithTag(InCallTags.Keypad).assertContentDescriptionContains("Keypad")
+        val state =
+            compose
+                .onNodeWithTag(
+                    InCallTags.Hold,
+                ).fetchSemanticsNode()
+                .config
+                .getOrNull(SemanticsProperties.StateDescription)
+        assertEquals("Not available on WhatsApp calls", state)
+    }
+
+    @Test fun theDimmedControlsAreDrawnAtFortyFivePercent() {
+        show(whatsAppUi())
+        val dim = pixel(InCallTags.Hold, 0.5f, 0.5f)
+        show(InCallHarness().ui)
+        val full = pixel(InCallTags.Hold, 0.5f, 0.5f)
+        assertTrue("a dimmed disc is darker than a live one: $dim vs $full", dim != full)
     }
 }

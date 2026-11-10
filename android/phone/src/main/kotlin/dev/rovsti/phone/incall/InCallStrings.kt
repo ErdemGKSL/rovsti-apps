@@ -45,6 +45,8 @@ class InCallStrings(
     val postCallBlockAction: String = res.getString(R.string.postcall_block_action)
     val postCallUndo: String = res.getString(R.string.postcall_undo)
     val postCallBlockFailed: String = res.getString(R.string.postcall_block_failed)
+    val waAudio: String = res.getString(R.string.wa_audio)
+    val waUnavailable: String = res.getString(R.string.incall_notice_wa_unavailable)
     val postCallAddNote: String = res.getString(R.string.postcall_add_note)
 
     fun sendTones(tones: String): String = res.getString(R.string.incall_tones_send, tones)
@@ -91,6 +93,7 @@ class InCallStrings(
                 InCallNotice.NoteFailed -> R.string.incall_notice_note_failed
                 InCallNotice.RouteFailed -> R.string.incall_notice_route_failed
                 InCallNotice.CommandFailed -> R.string.incall_notice_command_failed
+                InCallNotice.WaUnavailable -> R.string.incall_notice_wa_unavailable
             },
         )
 

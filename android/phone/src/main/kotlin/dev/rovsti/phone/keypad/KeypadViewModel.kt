@@ -132,6 +132,9 @@ sealed interface KeypadAction {
 
     data object Message : KeypadAction
 
+    /** The call menu's WhatsApp item: calls the typed number over WhatsApp. */
+    data object WhatsAppCall : KeypadAction
+
     /** The typed number was changed from outside the view model (a hardware key, the system toolbar). */
     data object TextChanged : KeypadAction
 }
@@ -180,6 +183,8 @@ sealed interface KeypadEffect {
     data class CallMenu(
         val sims: ImmutableList<SimAccount>,
         val number: String,
+        /** WhatsApp calls can be placed: the menu's WhatsApp row works. */
+        val whatsApp: Boolean = false,
     ) : KeypadEffect
 
     /** [old] is what Clear removed: the pill's Undo restores it. [message] null: the screen's own words. */
@@ -234,6 +239,9 @@ class KeypadViewModel(
     private val e164: suspend (String) -> String?,
     private val compute: CoroutineDispatcher = Dispatchers.Default,
     private val debounceMs: Long = FRAME_MS,
+    /** WhatsApp calls can be placed now (the instance is linked). */
+    private val whatsAppAvailable: () -> Boolean = { false },
+    private val placeWhatsApp: (String) -> Unit = {},
 ) : ViewModel() {
     /** The number field's text; the screen hands it to `DialField`. */
     val field = TextFieldState()
@@ -336,6 +344,10 @@ class KeypadViewModel(
 
             KeypadAction.Message -> {
                 send(KeypadEffect.SendMessage(text()))
+            }
+
+            KeypadAction.WhatsAppCall -> {
+                text().takeIf { it.isNotEmpty() }?.let(placeWhatsApp)
             }
 
             KeypadAction.TextChanged -> {
@@ -457,7 +469,7 @@ class KeypadViewModel(
 
     private fun openCallMenu() {
         // Nothing typed: the held call key is just the call key (redial).
-        if (text().isEmpty()) call() else send(KeypadEffect.CallMenu(ui.value.sims, text()))
+        if (text().isEmpty()) call() else send(KeypadEffect.CallMenu(ui.value.sims, text(), whatsAppAvailable()))
     }
 
     private fun openFieldMenu() {

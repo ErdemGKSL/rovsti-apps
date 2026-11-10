@@ -12,6 +12,7 @@ mod dial;
 mod log;
 mod people;
 mod store;
+mod wa_screen;
 
 use super::registry::OpSpec;
 use serde_json::{Value, json};
@@ -23,6 +24,7 @@ pub(super) const TABLES: &[&[OpSpec]] = &[
     dial::OPS,
     calls::OPS,
     store::OPS,
+    wa_screen::OPS,
     backup::OPS,
 ];
 

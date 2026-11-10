@@ -11,6 +11,7 @@ import dev.rovsti.phone.data.NumberDisplay
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.phone.incoming.CallSource
 import dev.rovsti.phone.incoming.SimChip
+import dev.rovsti.phone.incoming.WaCallMeta
 import dev.rovsti.platform.files.ClipboardRepository
 import dev.rovsti.platform.telephony.CallsApi
 import kotlinx.collections.immutable.toImmutableList
@@ -84,6 +85,16 @@ class InCallViewModel(
         val ui: EndedUi,
     )
 
+    private val waFacts = MutableStateFlow<WaControls?>(null)
+    private var waKey: Any? = null
+
+    /** The parts of the state that are not the snapshot itself: the ended summary and the WhatsApp facts. */
+    private class Extra(
+        val held: Held?,
+        val whatsapp: Map<Int, WaCallMeta>,
+        val controls: WaControls?,
+    )
+
     private var tracked: InCallCall? = null
     private var lastEndpoints: List<Endpoint>? = null
     private var endpointsKey: List<Endpoint>? = null
@@ -97,8 +108,10 @@ class InCallViewModel(
             this.sims,
             keypad,
             combine(rows, bluetoothGranted) { r, bt -> filtered(r, bt) },
-            combine(ended, noted, display.version) { e, _, _ -> e },
-        ) { snapshot, simList, pad, routes, held -> build(snapshot, simList, pad, routes, held) }
+            combine(ended, noted, display.version, source.whatsapp, waFacts) { e, _, _, wa, facts ->
+                Extra(e, wa, facts)
+            },
+        ) { snapshot, simList, pad, routes, extra -> build(snapshot, simList, pad, routes, extra) }
             .stateIn(scope, SharingStarted.Eagerly, InCallUi())
 
     init {
@@ -106,6 +119,14 @@ class InCallViewModel(
             source.snapshot.collect {
                 display.warm(it.calls.map { c -> c.numberRaw })
                 observe(it)
+            }
+        }
+        // The WhatsApp facts of the tracked call can arrive after (or change without) a snapshot.
+        scope.launch {
+            source.whatsapp.collect { meta ->
+                // A call stays a WhatsApp call after its facts are gone (the ended summary and the post-call pill ask).
+                tracked = tracked?.let { t -> meta[t.callId]?.let { t.copy(whatsapp = true, photoJid = it.jid) } ?: t }
+                askWaControls(tracked?.let { meta[it.callId] })
             }
         }
     }
@@ -134,6 +155,10 @@ class InCallViewModel(
 
             InCallAction.End -> {
                 end()
+            }
+
+            InCallAction.Unavailable -> {
+                notice(InCallNotice.WaUnavailable)
             }
 
             is InCallAction.Digit -> {
@@ -201,19 +226,23 @@ class InCallViewModel(
         sims: Sims,
         pad: ToneKeypad,
         routes: RouteRows,
-        held: Held?,
+        extra: Extra,
     ): InCallUi {
+        val held = extra.held
         val wire = liveOf(snapshot)
-        val call = wire?.let { callOf(it, sims) } ?: held?.call
+        val meta = wire?.let { extra.whatsapp[it.id] }
+        val call = wire?.let { callOf(it, sims, meta) } ?: held?.call
+        val whatsapp = if (call?.whatsapp == true) extra.controls ?: WaControls() else null
         return InCallUi(
             call = call,
             muted = snapshot.audio.muted,
             canHold = wire?.canHold == true,
+            whatsapp = whatsapp,
             route = snapshot.audio.route,
             routeRows = routes.rows.toImmutableList(),
             routeOpensList = routes.opensList,
             keypad = if (call != null) pad else ToneKeypad(),
-            hasNote = call != null && notes.current(call.number, call.startedMs).isNotEmpty(),
+            hasNote = call != null && !call.whatsapp && notes.current(call.number, call.startedMs).isNotEmpty(),
             ended = held?.ui,
             locked = snapshot.keyguardLocked,
         )
@@ -222,6 +251,7 @@ class InCallViewModel(
     private fun callOf(
         wire: WireCall,
         sims: Sims,
+        wa: WaCallMeta?,
     ): InCallCall {
         val title =
             wire.displayName?.trim()?.takeIf { it.isNotEmpty() }
@@ -263,6 +293,8 @@ class InCallViewModel(
             startedMs = wire.startedMs.takeIf { it > 0 } ?: wire.connectTimeMs,
             sim = chip,
             incoming = wire.isIncoming,
+            whatsapp = wa != null,
+            photoJid = wa?.jid,
         )
     }
 
@@ -270,7 +302,9 @@ class InCallViewModel(
         val wire = liveOf(snapshot)
         if (wire != null) {
             val previous = tracked
-            tracked = callOf(wire, sims.value)
+            val meta = source.whatsapp.value[wire.id]
+            tracked = callOf(wire, sims.value, meta)
+            askWaControls(meta)
             if (previous?.callId != wire.id) {
                 keypad.value = ToneKeypad()
                 finished.clear()
@@ -282,6 +316,18 @@ class InCallViewModel(
         tracked = null
         if (!finished.add(gone.callId)) return
         finish(gone)
+    }
+
+    /** Asks the core what the WhatsApp call can do, again only when its phase, speaker or mute changed. */
+    private fun askWaControls(meta: WaCallMeta?) {
+        if (meta == null) {
+            waKey = null
+            return
+        }
+        val key = Triple(meta.update.phase, meta.speaker, meta.muted)
+        if (key == waKey) return
+        waKey = key
+        scope.launch { backend.waControls(meta.update, meta.speaker, meta.muted)?.let { waFacts.value = it } }
     }
 
     private fun routesFor(snapshot: CallSnapshot) {
@@ -324,7 +370,7 @@ class InCallViewModel(
             val elapsed = if (connected) backend.elapsed(talkS) else ""
             val summary = EndedUi(call.callId, connected, talkS, elapsed)
             ended.value = Held(call.copy(phase = CallPhase.Ended), summary)
-            postCall(call, summary)
+            if (!call.whatsapp) postCall(call, summary)
             delay(ENDED_DWELL_MS)
             ended.value = null
             effects.trySend(InCallEffect.Leave)

@@ -14,21 +14,31 @@ import kotlinx.coroutines.flow.emptyFlow
 fun interface CallPhotos {
     fun photoOf(contactId: Long): Flow<String?>
 
+    /** The profile picture of a WhatsApp peer ([jid]), as the Coil model `WaAvatar(jid)`; absent until it is stored. */
+    fun photoOfJid(jid: String): Flow<Any?> = emptyFlow()
+
     companion object {
         val None = CallPhotos { emptyFlow() }
     }
 }
 
-/** The photo model of [contactId], null until it is known and for a caller without one. */
+/**
+ * The photo model of a caller, null until it is known and for a caller without one: the contacts photo of [contactId],
+ * else (a WhatsApp call) the profile picture of [jid].
+ */
 @Composable
 fun rememberCallPhoto(
     photos: CallPhotos,
     contactId: Long?,
-): String? {
-    val photo by produceState<String?>(null, photos, contactId) {
+    jid: String? = null,
+): Any? {
+    val photo by produceState<Any?>(null, photos, contactId, jid) {
         value = null
-        val id = contactId ?: return@produceState
-        photos.photoOf(id).collect { value = it?.takeIf(String::isNotBlank) }
+        if (contactId != null) {
+            photos.photoOf(contactId).collect { value = it?.takeIf(String::isNotBlank) }
+        } else if (jid != null) {
+            photos.photoOfJid(jid).collect { value = it }
+        }
     }
     return photo
 }

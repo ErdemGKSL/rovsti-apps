@@ -4,9 +4,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.telephony.TelephonyManager
 import dev.rovsti.core.Outcome
+import dev.rovsti.core.Rust
 import dev.rovsti.core.getOrNull
 import dev.rovsti.core.model.phone.LocaleTime
 import dev.rovsti.core.model.phone.TelUriRequest
+import dev.rovsti.core.model.phone.WireCallState
 import dev.rovsti.core.model.shared.InferHomeCcRequest
 import dev.rovsti.core.model.shared.NumberForm
 import dev.rovsti.core.model.shared.RenderRequest
@@ -53,6 +55,13 @@ import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
 import dev.rovsti.phone.setup.SetupFactsSource
 import dev.rovsti.phone.setup.SetupMemory
+import dev.rovsti.phone.wa.CoreWaArbiter
+import dev.rovsti.phone.wa.PrefsForgottenCalls
+import dev.rovsti.phone.wa.WaCallLauncher
+import dev.rovsti.phone.wa.WaCallsRouter
+import dev.rovsti.phone.wa.WaIdBook
+import dev.rovsti.phone.wa.WaMergedCallSource
+import dev.rovsti.phone.wa.WaNotices
 import dev.rovsti.platform.calllog.AndroidBlocklistRepository
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
 import dev.rovsti.platform.calllog.BlocklistRepository
@@ -71,13 +80,19 @@ import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.platform.telephony.CallsApi
 import dev.rovsti.platform.telephony.SimRepository
 import dev.rovsti.shell.ShellContainer
+import dev.rovsti.wa.avatars.WaAvatar
 import dev.rovsti.wa.calls.AndroidCallAudioPump
 import dev.rovsti.wa.calls.CallAudioPump
+import dev.rovsti.wa.calls.ForgottenCalls
+import dev.rovsti.wa.calls.WaCallActions
 import dev.rovsti.wa.calls.WaCalls
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -85,7 +100,7 @@ import kotlinx.coroutines.launch
 /** A number the Keypad is asked to show: a `tel:` link decoded by `dial.fromTelUri`, or a WhatsApp hand-off. */
 data class DialRequest(
     val text: String,
-    /** The WhatsApp chip stays disabled for a hand-off until the WhatsApp calls land (E5.8). */
+    /** The number came from a sibling app's WhatsApp hand-off. */
     val fromHandoff: Boolean = false,
     /** Makes two requests for the same number two values, so the Keypad takes the second one too. */
     val serial: Long = 0,
@@ -99,8 +114,42 @@ data class DialRequest(
 open class PhoneContainer(
     context: Context,
 ) : ShellContainer(context, AppPermissions.phone) {
-    /** The call owner (`CallRegistry`, the process-wide singleton the `InCallService` feeds). */
-    val calls: CallsApi by lazy { createCalls() }
+    /**
+     * The commands of the call screens: the registry's (`CallRegistry`, the process-wide singleton the `InCallService`
+     * feeds), with the WhatsApp call's commands routed to [waCalls] (AD-WA5) once the calls are merged ([callSource]).
+     */
+    val calls: CallsApi by lazy {
+        val registry = registryCalls
+        (callSource as? WaMergedCallSource)?.let { WaCallsRouter(registry, waCalls, it, waNotices, scope) } ?: registry
+    }
+
+    /** The cellular calls alone. */
+    val registryCalls: CallsApi by lazy { createCalls() }
+
+    /** Where WhatsApp calls tell the user something (microphone missing, the gateway refused). */
+    val waNotices: WaNotices = WaNotices()
+
+    /** The ids of WhatsApp calls inside the merged call snapshot. */
+    val waIds: WaIdBook = WaIdBook()
+
+    /** Places WhatsApp calls: the Recents row menu, the person sheets, the keypad's call menu, a sibling app's hand-off. */
+    val waLauncher: WaCallLauncher by lazy {
+        WaCallLauncher(
+            waCalls = waCalls,
+            link = wa.linkState,
+            ops = ops,
+            busy = {
+                callSource.snapshot.value.calls
+                    .any { it.state != WireCallState.Unknown }
+            },
+            e164 = ::e164,
+            notices = waNotices,
+            scope = scope,
+        )
+    }
+
+    /** Answer and Decline tapped on the WhatsApp call notification: once per call, after the core is ready (rule b). */
+    val waActions: WaCallActions by lazy { WaCallActions(waCalls, ready = ::awaitRustReady, scope = scope) }
 
     val callLog: CallLogRepository by lazy { createCallLog() }
 
@@ -122,10 +171,22 @@ open class PhoneContainer(
     /** The contact list view (sections, favorites order and moves) of the Favorites and Contacts tabs. */
     val contactsOps: ContactsOps by lazy { createContactsOps() }
 
-    /** The photo of a caller for the call screens' background. */
+    /** The photo of a caller for the call screens' background: the contacts photo, or a WhatsApp profile picture. */
     val callPhotos: dev.rovsti.phone.incoming.CallPhotos by lazy {
-        dev.rovsti.phone.incoming.CallPhotos { id ->
-            contacts.all().map { list -> list.firstOrNull { it.id == id }?.photoUri }
+        object : dev.rovsti.phone.incoming.CallPhotos {
+            override fun photoOf(contactId: Long) =
+                contacts.all().map { list -> list.firstOrNull { it.id == contactId }?.photoUri }
+
+            override fun photoOfJid(jid: String) =
+                kotlinx.coroutines.flow.flow {
+                    avatars.start()
+                    avatars.want(jid)
+                    emitAll(
+                        avatars.revision
+                            .map { if (avatars.file(jid) != null) WaAvatar(jid) else null }
+                            .distinctUntilChanged(),
+                    )
+                }
         }
     }
 
@@ -138,7 +199,7 @@ open class PhoneContainer(
     /** The number formats (`format.render`, `format.infer_home_cc`) for "Copy as +E.164". */
     val sharedOps: SharedOps by lazy { createSharedOps() }
 
-    /** The WhatsApp calls of the linked instance; started by the screens that show them (E5.8). */
+    /** The WhatsApp calls of the linked instance; started with the container (the merged call source and Recents read it). */
     val waCalls: WaCalls by lazy { createWaCalls() }
 
     /** The preferences (`prefs.json`) and the call notes; loaded by the first screen that needs them. */
@@ -170,10 +231,10 @@ open class PhoneContainer(
     /** A number for the Keypad from a `tel:` link or a hand-off; the Keypad consumes it (sets it back to null). */
     val pendingDial: MutableStateFlow<DialRequest?> = MutableStateFlow(null)
 
-    /** The JID of a WhatsApp call handed over by a sibling app; the app shows a toast and clears it (E5.8 places it). */
+    /** The JID of a WhatsApp call handed over by a sibling app; the app places the call and clears it. */
     val pendingHandoff: MutableStateFlow<String?> = MutableStateFlow(null)
 
-    /** The payload of an Answer or Decline tapped on a WhatsApp call notification, until E5.8 acts on it once. */
+    /** The payload of an Answer or Decline tapped on a WhatsApp call notification, until [waActions] has taken it. */
     val pendingWaCallAction: MutableStateFlow<String?> = MutableStateFlow(null)
 
     private var dialSerial = 0L
@@ -313,7 +374,25 @@ open class PhoneContainer(
 
     protected open fun createCalls(): CallsApi = CallRegistry
 
-    protected open fun createCallSource(): CallSource = RegistryCallSource(calls, CallRegistry.state, scope)
+    protected open fun createCallSource(): CallSource =
+        WaMergedCallSource(
+            base = RegistryCallSource(registryCalls, CallRegistry.state, scope),
+            waCalls = waCalls.calls,
+            muted = waCalls.mutedCalls,
+            speaker = waCalls.speakerOn,
+            arbiter = CoreWaArbiter(ops),
+            ids = waIds,
+            // A cellular call rings: the WhatsApp offer is declined, once per call (the core's RejectWaBusy).
+            onBusy = { id -> scope.launch { waCalls.reject(id) } },
+            scope = scope,
+            clock = clock,
+        )
+
+    /** Waits until the Rust core is initialised: nothing WhatsApp-related may touch it before (start-up crash, rule b). */
+    protected open suspend fun awaitRustReady() {
+        rust
+        Rust.ready.first { it }
+    }
 
     protected open fun createIncomingBackend(): IncomingBackend = CoreIncomingBackend(ops, chat)
 
@@ -376,7 +455,16 @@ open class PhoneContainer(
     protected open fun createCallPump(): CallAudioPump = AndroidCallAudioPump(context)
 
     protected open fun createWaCalls(): WaCalls =
-        WaCalls(wa, permissions.state(PermissionGroup.MICROPHONE), createCallPump(), scope)
+        WaCalls(
+            wa,
+            permissions.state(PermissionGroup.MICROPHONE),
+            createCallPump(),
+            scope,
+            forgotten = createForgottenCalls(),
+        ).also { it.start() }
+
+    /** The deleted WhatsApp calls, kept across restarts. */
+    protected open fun createForgottenCalls(): ForgottenCalls = PrefsForgottenCalls(context)
 
     protected open fun createStore(): PhoneStore = PhoneStore(ops, scope)
 

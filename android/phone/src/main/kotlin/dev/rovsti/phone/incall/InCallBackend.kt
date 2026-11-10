@@ -3,6 +3,7 @@ package dev.rovsti.phone.incall
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.phone.AudioRowsAnswer
 import dev.rovsti.core.model.phone.AudioRowsRequest
+import dev.rovsti.core.model.phone.CallUpdate
 import dev.rovsti.core.model.phone.DialTextRequest
 import dev.rovsti.core.model.phone.ElapsedRequest
 import dev.rovsti.core.model.phone.Endpoint
@@ -10,6 +11,7 @@ import dev.rovsti.core.model.phone.NoteRemoveRequest
 import dev.rovsti.core.model.phone.NoteSetRequest
 import dev.rovsti.core.model.phone.PasteTonesRequest
 import dev.rovsti.core.model.phone.ToneStep
+import dev.rovsti.core.model.phone.WaScreenRequest
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.phone.data.BlockRepo
 import dev.rovsti.phone.data.BlockResult
@@ -32,6 +34,13 @@ interface InCallBackend {
 
     /** The tones and pauses of [text]. */
     suspend fun tonePlan(text: String): List<ToneStep>
+
+    /** Which controls a WhatsApp call has, and the core's sentence for the ones it has not; null when the core failed. */
+    suspend fun waControls(
+        update: CallUpdate,
+        speaker: Boolean,
+        muted: Boolean,
+    ): WaControls? = null
 }
 
 class CoreInCallBackend(
@@ -50,6 +59,23 @@ class CoreInCallBackend(
 
     override suspend fun tonePlan(text: String): List<ToneStep> =
         (ops.tonePlan(DialTextRequest(text)) as? Outcome.Ok)?.value?.steps.orEmpty()
+
+    override suspend fun waControls(
+        update: CallUpdate,
+        speaker: Boolean,
+        muted: Boolean,
+    ): WaControls? =
+        (ops.waScreen(WaScreenRequest(update, speaker, muted)) as? Outcome.Ok)?.value?.let {
+            WaControls(
+                mute = it.enabled.mute,
+                speaker = it.enabled.speaker,
+                keypad = it.enabled.keypad,
+                hold = it.enabled.hold,
+                addCall = it.enabled.addCall,
+                end = it.enabled.end,
+                note = it.note,
+            )
+        }
 }
 
 /** The call notes: stored under the number and the time the call started, so the log finds them afterwards (U17). */

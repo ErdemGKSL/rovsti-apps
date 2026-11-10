@@ -325,4 +325,54 @@ class RecentsViewModelTest {
             assertEquals(RecentsNotice.CopiedWithCountry, model.nextEffect<RecentsEffect.Say>().notice)
             assertTrue(rig.clipboard.text!!.startsWith("+90"))
         }
+
+    // ---- WhatsApp calls (E5.8b) ------------------------------------------------------------------------------------
+
+    private fun waCall(
+        id: String = "c9",
+        missed: Boolean = true,
+    ) = dev.rovsti.core.model.phone.ExtraCall(
+        numberRaw = "+905550001122",
+        startedMs = T0 - 10_000,
+        durationS = 0,
+        missed = missed,
+        outgoing = false,
+        label = "Wa Person",
+        callId = id,
+    )
+
+    @Test fun aMissedWhatsAppCallIsARowWithTheWhatsAppFlagAndCallsBackOverWhatsApp() =
+        runBlocking {
+            val rig = rig()
+            val model = rig.model().also { it.watch() }
+            model.loaded()
+            rig.waExtras.value = listOf(waCall())
+            val ui = model.loaded { it.rows.any { r -> r.title == "Wa Person" } }
+            val row = ui.rows.first { it.title == "Wa Person" }
+            assertTrue("missed WhatsApp calls show in Recents", row.missed)
+            assertEquals(1, ui.counts.whatsapp)
+            model.onAction(RecentsAction.WhatsAppCall(row.key))
+            assertEquals(listOf("+905550001122"), rig.whatsAppPlaced)
+            assertTrue("the model says WhatsApp can be placed", model.whatsAppAvailable.value)
+        }
+
+    @Test fun deletingAWhatsAppRowForgetsItsCallAndLeavesTheLogAlone() =
+        runBlocking {
+            val rig = rig()
+            val model = rig.model().also { it.watch() }
+            model.loaded()
+            rig.waExtras.value = listOf(waCall())
+            val ui = model.loaded { it.rows.any { r -> r.title == "Wa Person" } }
+            val row = ui.rows.first { it.title == "Wa Person" }
+            model.onAction(RecentsAction.Delete(listOf(row.key)))
+            assertEquals(listOf(listOf("c9")), rig.whatsAppForgotten)
+            assertEquals(
+                "no log rows were deleted",
+                5,
+                rig.callLog
+                    .entries()
+                    .first()
+                    .size,
+            )
+        }
 }

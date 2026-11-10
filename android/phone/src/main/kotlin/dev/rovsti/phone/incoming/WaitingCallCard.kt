@@ -35,6 +35,7 @@ import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.ANSWER_GREEN
 import dev.rovsti.phone.DECLINE_RED
 import dev.rovsti.phone.IncomingMetrics
+import dev.rovsti.phone.wa.WaAudioLabel
 
 /**
  * The waiting-call card (story 15.8): a second caller while a call is live. A flat card at the top of the screen over
@@ -84,6 +85,9 @@ private fun CardBody(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (ui.whatsapp) {
+                    WaAudioLabel(strings.waAudio, colors.labelSecondary, Modifier.testTag(IncomingTags.WaAudio))
+                }
                 ui.subtitle?.let {
                     RovstiText(
                         it,
@@ -95,41 +99,68 @@ private fun CardBody(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(IncomingMetrics.CardGap)) {
-            CapsuleButton(
-                strings.endAnswer,
-                onClick = { onAction(IncomingAction.EndAndAnswer) },
-                modifier = Modifier.weight(1f).testTag(IncomingTags.WaitingEnd),
-                tint = colors.destructive,
-                fillWidth = true,
-            )
-            CapsuleButton(
-                if (ui.relabelled) strings.endHeldAnswer else strings.holdAnswer,
-                onClick = { onAction(IncomingAction.HoldAndAnswer) },
-                modifier = Modifier.weight(1f).testTag(IncomingTags.WaitingHold),
-                style = CapsuleStyle.Filled,
-                tint = Color(ANSWER_GREEN),
-                enabled = ui.canHold,
-                fillWidth = true,
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(IncomingMetrics.CardGap)) {
-            CapsuleButton(
-                strings.message,
-                onClick = { onAction(IncomingAction.OpenWaitingReplies) },
-                modifier = Modifier.weight(1f).testTag(IncomingTags.WaitingMessage),
-                icon = RovstiIcons.Message,
-                enabled = ui.canMessage,
-                fillWidth = true,
-            )
-            CapsuleButton(
-                strings.decline,
-                onClick = { onAction(IncomingAction.DeclineWaiting) },
-                modifier = Modifier.weight(1f).testTag(IncomingTags.WaitingDecline),
-                style = CapsuleStyle.Filled,
-                tint = Color(DECLINE_RED),
-                fillWidth = true,
-            )
+        if (ui.whatsapp) {
+            // A WhatsApp offer cannot be held or answered with a message: End & Answer or Decline.
+            Row(horizontalArrangement = Arrangement.spacedBy(IncomingMetrics.CardGap)) {
+                EndAnswerButton(ui, strings, onAction, Modifier.weight(1f))
+                DeclineButton(strings, onAction, Modifier.weight(1f))
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(IncomingMetrics.CardGap)) {
+                EndAnswerButton(ui, strings, onAction, Modifier.weight(1f))
+                CapsuleButton(
+                    if (ui.relabelled) strings.endHeldAnswer else strings.holdAnswer,
+                    onClick = { onAction(IncomingAction.HoldAndAnswer) },
+                    modifier = Modifier.weight(1f).testTag(IncomingTags.WaitingHold),
+                    style = CapsuleStyle.Filled,
+                    tint = Color(ANSWER_GREEN),
+                    enabled = ui.canHold,
+                    fillWidth = true,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(IncomingMetrics.CardGap)) {
+                CapsuleButton(
+                    strings.message,
+                    onClick = { onAction(IncomingAction.OpenWaitingReplies) },
+                    modifier = Modifier.weight(1f).testTag(IncomingTags.WaitingMessage),
+                    icon = RovstiIcons.Message,
+                    enabled = ui.canMessage,
+                    fillWidth = true,
+                )
+                DeclineButton(strings, onAction, Modifier.weight(1f))
+            }
         }
     }
+}
+
+@Composable
+private fun EndAnswerButton(
+    ui: WaitingUi,
+    strings: IncomingStrings,
+    onAction: (IncomingAction) -> Unit,
+    modifier: Modifier,
+) {
+    CapsuleButton(
+        strings.endAnswer,
+        onClick = { onAction(IncomingAction.EndAndAnswer) },
+        modifier = modifier.testTag(IncomingTags.WaitingEnd),
+        tint = RovstiTheme.colors.destructive,
+        fillWidth = true,
+    )
+}
+
+@Composable
+private fun DeclineButton(
+    strings: IncomingStrings,
+    onAction: (IncomingAction) -> Unit,
+    modifier: Modifier,
+) {
+    CapsuleButton(
+        strings.decline,
+        onClick = { onAction(IncomingAction.DeclineWaiting) },
+        modifier = modifier.testTag(IncomingTags.WaitingDecline),
+        style = CapsuleStyle.Filled,
+        tint = Color(DECLINE_RED),
+        fillWidth = true,
+    )
 }

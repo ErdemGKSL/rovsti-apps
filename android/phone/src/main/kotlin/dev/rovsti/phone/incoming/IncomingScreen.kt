@@ -72,9 +72,11 @@ import dev.rovsti.phone.ANSWER_GREEN
 import dev.rovsti.phone.AURA_SHOT_PHASE
 import dev.rovsti.phone.DECLINE_RED
 import dev.rovsti.phone.IncomingMetrics
+import dev.rovsti.phone.wa.WaAudioLabel
 
 /** The nodes the tests and the accessibility checks find. */
 object IncomingTags {
+    const val WaAudio = "incoming-wa-audio"
     const val Screen = "incoming-screen"
     const val Aura = "incoming-aura"
     const val Name = "incoming-name"
@@ -120,7 +122,7 @@ fun IncomingScreen(
     photos: CallPhotos = CallPhotos.None,
 ) {
     val ui by model.state.collectAsState()
-    val photo = rememberCallPhoto(photos, ui.caller?.contactId)
+    val photo = rememberCallPhoto(photos, ui.caller?.contactId, ui.caller?.photoJid)
     IncomingContent(ui, IncomingStrings.current(), model::onAction, modifier, aura, photo)
 }
 
@@ -233,12 +235,16 @@ private fun CallerBlock(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(IncomingMetrics.LabelTop))
-        RovstiText(
-            strings.title,
-            style = RovstiTheme.type.subheadline,
-            color = OnAuraSecondary,
-            maxLines = 1,
-        )
+        if (caller.whatsapp) {
+            WaAudioLabel(strings.waAudio, OnAuraSecondary, Modifier.testTag(IncomingTags.WaAudio))
+        } else {
+            RovstiText(
+                strings.title,
+                style = RovstiTheme.type.subheadline,
+                color = OnAuraSecondary,
+                maxLines = 1,
+            )
+        }
         if (ui.locked) {
             Spacer(Modifier.height(IncomingMetrics.LockChipGap))
             RovstiText(

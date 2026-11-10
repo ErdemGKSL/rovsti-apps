@@ -98,7 +98,7 @@
     <string name="native_incoming_from">Incoming call from %1$s</string>
     <string name="native_answer">Answer</string>
     <string name="native_decline">Decline</string>
-    <string name="wa_handoff_toast">WhatsApp calls arrive in a later update</string>
+    <string name="wa_handoff_toast">This contact has no number to call on WhatsApp</string>
 
     <!-- Keypad (apps/phone/src/keypad.rs, E5.2) -->
     <string name="keypad_field_description">Phone number</string>
@@ -354,4 +354,9 @@
     <string name="postcall_block_failed">Could not block this number.</string>
     <string name="postcall_add_note">Add note</string>
     <string name="mini_call_title">%1$s, %2$s</string>
+    <string name="wa_audio">WhatsApp audio</string>
+    <string name="incall_notice_wa_unavailable">Not available on WhatsApp calls</string>
+    <string name="wa_notice_microphone">Allow the microphone to make WhatsApp calls</string>
+    <string name="wa_notice_failed">The WhatsApp call could not be started</string>
+    <string name="details_menu_whatsapp">WhatsApp call</string>
 </resources>

@@ -426,4 +426,68 @@ class InCallViewModelTest {
             assertTrue(h.model.undoBlock(undo))
             assertEquals(listOf(undo), h.blocker.undone)
         }
+
+    // ---- WhatsApp calls (E5.8b) ------------------------------------------------------------------------------------
+
+    private fun waHarness(
+        wa: Boolean = true,
+        call: dev.rovsti.core.model.phone.WireCall = liveCall(contactId = null, canHold = false),
+    ): InCallHarness {
+        val h = InCallHarness(liveSnapshot(call, endpoints = emptyList()))
+        if (wa) {
+            val jid = "905559990000@s.whatsapp.net"
+            h.source.setWhatsApp(
+                mapOf(
+                    call.id to
+                        dev.rovsti.phone.incoming.WaCallMeta(
+                            "c1",
+                            jid,
+                            dev.rovsti.core.model.phone.CallUpdate(
+                                "c1",
+                                jid,
+                                "Mert Kaya",
+                                dev.rovsti.core.model.phone.CallDirection.Out,
+                                dev.rovsti.core.model.phone.CallPhase.Active,
+                                false,
+                            ),
+                            speaker = false,
+                            muted = false,
+                        ),
+                ),
+            )
+        }
+        return h
+    }
+
+    @Test fun aWhatsAppCallIsMarkedAndTheCoreSaysWhichControlsWork() {
+        val ui = waHarness().ui
+        assertTrue(ui.call!!.whatsapp)
+        assertEquals("905559990000@s.whatsapp.net", ui.call!!.photoJid)
+        val wa = ui.whatsapp!!
+        assertTrue(wa.mute && wa.speaker && wa.end)
+        assertFalse(wa.keypad || wa.hold || wa.addCall)
+        assertEquals("the sentence is the core's", "Not available on WhatsApp calls", wa.note)
+        assertNull("a cellular call has no WhatsApp facts", waHarness(wa = false).ui.whatsapp)
+    }
+
+    @Test fun aTapOnADimmedControlSaysWhyAndDoesNothingElse() {
+        val h = waHarness()
+        h.model.onAction(InCallAction.Unavailable)
+        assertEquals(listOf<InCallEffect>(InCallEffect.Notice(InCallNotice.WaUnavailable)), h.effects)
+        assertTrue(h.calls.log.isEmpty())
+    }
+
+    @Test fun muteAndEndOnAWhatsAppCallGoToTheCallsApiWithItsId() {
+        val h = waHarness()
+        h.model.onAction(InCallAction.ToggleMute)
+        h.model.onAction(InCallAction.End)
+        assertEquals(listOf("mute true", "disconnect 2"), h.calls.log)
+    }
+
+    @Test fun theNoteAndTheBlockPillAreNotOfferedAfterAWhatsAppCall() {
+        val h = waHarness(call = liveCall(contactId = null, incoming = true, connectedAgoS = 300, canHold = false))
+        h.source.set(CallSnapshot())
+        h.advance(100)
+        assertTrue(h.effects.none { it is InCallEffect.PostCall })
+    }
 }

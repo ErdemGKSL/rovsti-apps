@@ -25,11 +25,13 @@ fun SourceGlyph(
     source: MessageSource,
     modifier: Modifier = Modifier,
     contentDescription: String? = source.label,
+    /** Overrides the source colour: on a coloured call background the green glyph would vanish, so it is drawn white. */
+    tint: androidx.compose.ui.graphics.Color? = null,
 ) {
     val colors = RovstiTheme.colors
     when (source) {
         MessageSource.Sms -> {
-            RovstiIcon(RovstiIcons.Sms, contentDescription, modifier, colors.accent, Sizes.sourceGlyph)
+            RovstiIcon(RovstiIcons.Sms, contentDescription, modifier, tint ?: colors.accent, Sizes.sourceGlyph)
         }
 
         MessageSource.WhatsApp -> {
@@ -37,7 +39,7 @@ fun SourceGlyph(
                 RovstiIcons.WhatsApp,
                 contentDescription,
                 modifier,
-                colors.success,
+                tint ?: colors.success,
                 Sizes.sourceGlyph,
             )
         }

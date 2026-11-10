@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -56,6 +57,7 @@ import dev.rovsti.design.chrome.floatingtabbar.FloatingTabBarScrollConnection
 import dev.rovsti.design.chrome.floatingtabbar.FoldingTabBar
 import dev.rovsti.design.chrome.floatingtabbar.FoldingTabCell
 import dev.rovsti.design.chrome.floatingtabbar.FoldingTabGroup
+import dev.rovsti.design.controls.Badge
 import dev.rovsti.design.glass.GlassEffectConfig
 import dev.rovsti.design.glass.GlassPreset
 import dev.rovsti.design.glass.LocalGlassEffectConfig
@@ -79,6 +81,8 @@ data class TabItem(
     val id: String,
     val label: String,
     val icon: ImageVector,
+    /** An unread count drawn on the glyph (0: none). The label announced for the tab then ends with the count. */
+    val badge: Int = 0,
 )
 
 /** Labels are dropped (icons only) from this system font scale, so they never clip. */
@@ -92,6 +96,9 @@ internal val TabBarGroupPadding = 4.dp
 
 private val GlyphSlot = 32.dp
 private val GlyphSize = 26.dp
+
+/** How far the unread badge sits out of the glyph slot's top-right corner. */
+private val BadgeShift = 6.dp
 private val LabelStyle = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
 
 /**
@@ -275,6 +282,15 @@ fun RovstiTabBar(
                         Box(Modifier.size(GlyphSlot), contentAlignment = Alignment.Center) {
                             // The glyph names the tab for the cell and for the folded circle; the drawn label is hidden from services.
                             RovstiIcon(item.icon, item.label, tint = ink, size = GlyphSize)
+                            if (item.badge > 0) {
+                                Badge(
+                                    item.badge,
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = BadgeShift, y = -BadgeShift)
+                                        .testTag("tab-badge-${item.id}"),
+                                )
+                            }
                         }
                     },
                     onClick = { pick(index) },

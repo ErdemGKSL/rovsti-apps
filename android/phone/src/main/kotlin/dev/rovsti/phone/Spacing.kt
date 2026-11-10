@@ -81,3 +81,25 @@ internal const val KEY_HOLD_MS = 450L
 
 /** The Keypad font does not follow the system font scale past this factor (keys keep their shape). */
 internal const val KEYPAD_FONT_SCALE_CAP = 1.3f
+
+/** Dimensions of Recents (E5.3). */
+internal object RecentsMetrics {
+    /** The info glyph in its 48 dp touch target. */
+    val InfoGlyph = 22.dp
+    val SwipeGlyph = 22.dp
+
+    /** No width: the select slot while not selecting, no gap before the time. */
+    val None = 0.dp
+
+    /** The SIM chip beside the time: a dot and the short label. */
+    val SimDot = 8.dp
+    val SimChipVertical = 2.dp
+
+    /** The share of the viewport the empty state takes (it sits above the tab bar). */
+    const val EmptyShare = 0.5f
+
+    /** The select toolbar beside the folded tab-bar circle (the accessory's inline height) and in the expanded bar. */
+    val ToolbarInline = 48.dp
+    val ToolbarExpanded = 54.dp
+    val ToolbarSide = 4.dp
+}

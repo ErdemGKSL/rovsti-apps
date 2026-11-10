@@ -388,22 +388,35 @@ struct SectionReq {
     rows: Vec<RecentsRow>,
     visible: Vec<usize>,
     tz_offset_s: i32,
+    /// With the time now, `labels` holds the day label of every section ("Today", "Yesterday", "Wednesday", "30 Oct").
+    #[serde(default)]
+    now_ms: Option<i64>,
 }
 
 #[derive(Serialize)]
 struct SectionAns {
     starts: Vec<usize>,
+    /// The label of each section in `starts`, newest call of its first row; empty without `now_ms`.
+    labels: Vec<String>,
 }
 
 fn section_starts(req: SectionReq) -> Result<SectionAns, FfiError> {
-    Ok(SectionAns {
-        starts: recents::section_starts(&req.rows, &req.visible, req.tz_offset_s),
-    })
+    let starts = recents::section_starts(&req.rows, &req.visible, req.tz_offset_s);
+    let labels = match req.now_ms {
+        Some(now_ms) => starts
+            .iter()
+            .filter_map(|&first| {
+                recents::section_for(&req.rows, &req.visible, first, now_ms, req.tz_offset_s)
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    Ok(SectionAns { starts, labels })
 }
 
 fn section_cases() -> Vec<Case> {
     vec![Case::new(
-        json!({"rows": sample_rows(), "visible": [0, 1, 2, 3], "tz_offset_s": 10800}),
+        json!({"rows": sample_rows(), "visible": [0, 1, 2, 3], "tz_offset_s": 10800, "now_ms": 1_790_000_000_000_i64}),
     )]
 }
 

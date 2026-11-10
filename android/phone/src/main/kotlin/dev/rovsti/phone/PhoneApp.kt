@@ -30,6 +30,11 @@ import dev.rovsti.phone.keypad.KeypadHost
 import dev.rovsti.phone.keypad.KeypadScreen
 import dev.rovsti.phone.keypad.KeypadViewModel
 import dev.rovsti.phone.keypad.addContactIntent
+import dev.rovsti.phone.recents.RecentsHost
+import dev.rovsti.phone.recents.RecentsScreen
+import dev.rovsti.phone.recents.RecentsSelectToolbar
+import dev.rovsti.phone.recents.RecentsStrings
+import dev.rovsti.phone.recents.RecentsViewModel
 import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupSheetContent
@@ -84,6 +89,58 @@ private fun rememberKeypadViewModel(container: PhoneContainer): KeypadViewModel 
                 }
             }
         ViewModelProvider(owner, factory)[KeypadViewModel::class.java]
+    }
+}
+
+@Composable
+private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewModel {
+    val owner = LocalContext.current.findComponentActivity()
+    return remember(owner, container) {
+        val factory =
+            viewModelFactory {
+                initializer {
+                    RecentsViewModel(
+                        recents = container.recents,
+                        callLog = container.callLog,
+                        ops = container.ops,
+                        shared = container.sharedOps,
+                        chat = container.chat,
+                        placer = container.placer,
+                        block = container.block,
+                        sims = container.simState.sims,
+                        store = container.store,
+                        clipboard = container.clipboard,
+                        reminders = container.callReminders,
+                        homeCc = container::homeCc,
+                    )
+                }
+            }
+        ViewModelProvider(owner, factory)[RecentsViewModel::class.java]
+    }
+}
+
+/** Recents' Android side: the SMS composer, the contact editor, the share sheet. */
+private class AndroidRecentsHost(
+    private val context: Context,
+    private val comingSoon: () -> Unit,
+) : RecentsHost {
+    override fun message(
+        number: String,
+        body: String?,
+    ) = launch(ShareIntents.sendSmsTo(number, body))
+
+    override fun addContact(number: String) = launch(addContactIntent(number, create = false))
+
+    override fun share(text: String) = launch(Intent.createChooser(ShareIntents.text(text), null))
+
+    override fun openDetails(key: String) = comingSoon()
+
+    private fun launch(intent: Intent) {
+        try {
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: ActivityNotFoundException) {
+            // No app handles it: nothing to show.
+        }
     }
 }
 
@@ -161,12 +218,17 @@ fun PhoneApp(
     navigator: TabNavigator<PhoneRoute>,
     overlays: OverlayController = remember { OverlayController() },
 ) {
+    val recentsModel = rememberRecentsViewModel(container)
+    val missed by recentsModel.missedCount.collectAsState()
+    val selection by recentsModel.selection.collectAsState()
+    val recentsStrings = RecentsStrings.current()
     val tabs =
         phoneTabItems(
             favorites = stringResource(R.string.tab_favorites),
             recents = stringResource(R.string.tab_recents),
             contacts = stringResource(R.string.tab_contacts),
             keypad = stringResource(R.string.tab_keypad),
+            missed = missed,
         )
     val pop: () -> Unit =
         remember(navigator) {
@@ -212,9 +274,15 @@ fun PhoneApp(
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { route -> chromeFor(route, selecting = selection != null) },
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
+        accessory =
+            selection?.let { chosen ->
+                { modifier, inline ->
+                    RecentsSelectToolbar(chosen, recentsStrings, recentsModel::onAction, modifier, inline)
+                }
+            },
     ) {
         entry<PhoneRoute.Favorites> {
             PhoneRootPlaceholder(
@@ -227,14 +295,14 @@ fun PhoneApp(
             )
         }
         entry<PhoneRoute.Recents> {
-            PhoneRootPlaceholder(
-                route = "recents",
-                title = stringResource(R.string.tab_recents),
-                icon = RovstiIcons.Clock,
-                message = stringResource(R.string.coming_message),
-                setup = setup,
+            val context = LocalContext.current
+            val soon = stringResource(R.string.coming_message)
+            val host = remember(context, overlays) { AndroidRecentsHost(context) { overlays.showToast(soon) } }
+            RecentsScreen(
+                model = recentsModel,
+                host = host,
                 links = links,
-                showNotice = true,
+                showNotice = setup.loaded && !setup.roleHeld,
             )
         }
         entry<PhoneRoute.Contacts> {

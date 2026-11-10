@@ -109,11 +109,15 @@ data class SectionStartsRequest(
     val rows: List<RecentsRow>,
     val visible: List<Int>,
     @SerialName("tz_offset_s") val tzOffsetS: Int,
+    /** With the time now the answer also holds the day label of each section. */
+    @SerialName("now_ms") @EncodeDefault(NEVER) val nowMs: Long? = null,
 )
 
 @Serializable
 data class SectionStartsAnswer(
     val starts: List<Int>,
+    /** "Today", "Yesterday", a weekday or a date for each of [starts]; empty when the request had no `now_ms`. */
+    val labels: List<String> = emptyList(),
 )
 
 // ---- call_log.*

@@ -9,6 +9,8 @@ import dev.rovsti.core.model.phone.TelUriRequest
 import dev.rovsti.core.model.shared.InferHomeCcRequest
 import dev.rovsti.core.model.shared.NumberForm
 import dev.rovsti.core.model.shared.RenderRequest
+import dev.rovsti.core.ops.ChatOps
+import dev.rovsti.core.ops.NativeChatOps
 import dev.rovsti.core.ops.NativePhoneOps
 import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
@@ -38,6 +40,9 @@ import dev.rovsti.platform.calllog.BlocklistRepository
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.AndroidContactsRepository
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.notify.ReminderItem
+import dev.rovsti.platform.notify.ReminderRepositories
+import dev.rovsti.platform.notify.RemindersRepository
 import dev.rovsti.platform.system.SettingsMirror
 import dev.rovsti.platform.system.permissions.AppPermissions
 import dev.rovsti.platform.system.permissions.PermissionGroup
@@ -90,6 +95,12 @@ open class PhoneContainer(
     val search: SearchOps by lazy { createSearch() }
 
     val qr: QrOps by lazy { createQr() }
+
+    /** The call-back reminders (`call_reminder.*`, `message_reminder.slots`). */
+    val chat: ChatOps by lazy { createChat() }
+
+    /** The armed call-back reminders and their alarms. */
+    val callReminders: RemindersRepository<ReminderItem> by lazy { createCallReminders() }
 
     /** The number formats (`format.render`, `format.infer_home_cc`) for "Copy as +E.164". */
     val sharedOps: SharedOps by lazy { createSharedOps() }
@@ -171,6 +182,10 @@ open class PhoneContainer(
 
     protected open fun createQr(): QrOps = NativeQrOps(rust)
 
+    protected open fun createChat(): ChatOps = NativeChatOps(rust)
+
+    protected open fun createCallReminders(): RemindersRepository<ReminderItem> = ReminderRepositories.calls(context)
+
     protected open fun createSharedOps(): SharedOps = NativeSharedOps(rust)
 
     /** The voicemail number the SIM reports, null when it has none or may not be read. */
@@ -184,6 +199,13 @@ open class PhoneContainer(
 
     /** The system's "dial pad tones" setting (default on). */
     open fun systemKeypadTones(): Boolean = SettingsMirror.systemKeypadTones(context)
+
+    /** The calling code of home ("90"), guessed from the contacts' own numbers; null when there is nothing to guess from. */
+    open suspend fun homeCc(): String? {
+        val numbers =
+            (people.people.value as? People.Ready)?.contacts?.flatMap { c -> c.numbers.map { it.raw } }.orEmpty()
+        return (sharedOps.inferHomeCc(InferHomeCcRequest(numbers.take(HOME_CC_SAMPLE))) as? Outcome.Ok)?.value?.homeCc
+    }
 
     /** [typed] in `+` form, null when it has none. The home country comes from the contacts' own numbers. */
     open suspend fun e164(typed: String): String? {

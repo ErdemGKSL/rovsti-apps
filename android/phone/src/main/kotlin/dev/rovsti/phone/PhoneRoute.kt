@@ -90,9 +90,11 @@ internal fun phoneTabItems(
     recents: String,
     contacts: String,
     keypad: String,
+    /** Unseen missed calls: the badge on the Recents tab. */
+    missed: Int = 0,
 ) = persistentListOf(
     TabItem(FavoritesTab.id, favorites, RovstiIcons.Star),
-    TabItem(RecentsTab.id, recents, RovstiIcons.Clock),
+    TabItem(RecentsTab.id, recents, RovstiIcons.Clock, badge = missed),
     TabItem(ContactsTab.id, contacts, RovstiIcons.People),
     TabItem(KeypadTab.id, keypad, RovstiIcons.Keypad),
 )
@@ -117,6 +119,15 @@ fun chromeFor(route: PhoneRoute): ChromeSpec =
         PhoneRoute.About -> ChromeSpec(TabBarMode.Visible, largeTitle = "About")
         PhoneRoute.Licences -> ChromeSpec(TabBarMode.Visible, largeTitle = "Licences")
         is PhoneRoute.LicenceDetail -> ChromeSpec(TabBarMode.Visible)
+    }
+
+/** [chromeFor] while Recents is in select mode: the tab bar folds beside the select toolbar (tab roots only). */
+fun chromeFor(
+    route: PhoneRoute,
+    selecting: Boolean,
+): ChromeSpec =
+    chromeFor(route).let {
+        if (selecting && route == PhoneRoute.Recents) it.copy(tabBar = TabBarMode.Folded) else it
     }
 
 /** What an intent asks of the app, as plain data (so [phoneLinkFor] is tested without an activity). */

@@ -1100,7 +1100,7 @@ unchanged (E5.2-E5.7a).
 |---|---|---|---|
 | E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | done (`36760c7` module, manifest, components, container, routes, setup sheet, diagnostics, migration; `447ee0d` F16 back button/full bar; round-12 step 2 data layer) |
 | E5.2 | Keypad | R1 | in-progress (round-12 step 3) |
-| E5.3 | Recents | R1 | in-progress (round-12 step 4) |
+| E5.3 | Recents | R1 | done (round-12 step 4) |
 | E5.4 | Contact, Number and Call details sheets | R1 | in-progress (round-12 step 5) |
 | E5.5 | Favorites and Contacts tabs | R1 | in-progress (round-12 step 6) |
 | E5.6 | Incoming call | R1 | in-progress (round-12 step 7) |
@@ -1136,6 +1136,7 @@ unchanged (E5.2-E5.7a).
   `e5.2-call-longpress-menu`, `e5.2-smart-paste-chooser`, `e5.2-keypad-fs2`, `e5.2-keypad-small-screen`.
 
 ### E5.3 Recents
+- Evidence (round-12 step 4): `RecentsViewModelTest` (13, real core), `RecentsScreenTest` (13), `E53ShotTest` (11 shots, light and dark, opened). Added `recents.section_starts` `labels` (`now_ms`) in the core, `TabItem.badge`. Delete is log-only until E5.8 (WhatsApp rows disabled); "Remind me later" is an action sheet, not a submenu.
 - Screenshots: `e5.3-recents-dual-sim-chip`, `e5.3-block-confirm`, `e5.3-recents`, `e5.3-recents-end-above-bar`, `e5.3-recents-missed-filter`, `e5.3-recents-chips-scrolled`,
   `e5.3-recents-row-menu`, `e5.3-recents-select-mode`, `e5.3-recents-search`, `e5.3-recents-whatsapp-badge`.
 

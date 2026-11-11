@@ -12,6 +12,7 @@
 //! so the table is tested with fakes (see [`fake`]).
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -29,7 +30,7 @@ use rovsti_wa_proto::{
     ErrorCode, GatewayEvent, PlaceCall, SetMuted,
 };
 use whatsapp_rust::CallError as WaCallError;
-use whatsapp_rust::voip::{CallEvent, CallHandle};
+use whatsapp_rust::voip::{AcceptCall, CallEvent, CallHandle, EncodedAudioFrame, OutgoingCall};
 use whatsapp_rust::wacore::stanza::call::REJECT_REASON_BUSY;
 use whatsapp_rust::wacore::types::call::{CallAction, IncomingCall};
 
@@ -41,6 +42,10 @@ use crate::hub::Hub;
 use crate::now_ms;
 use crate::push::{PushKind, Pusher};
 use crate::store::InstanceId;
+use crate::wa::call_audio::{
+    self, CALL_AUDIO_MODE, CallAudioMode, CallAudioStats, ForeignAudio, Frame, InboundDecoder,
+    bump, mask_peer,
+};
 use crate::wa::convert::parse_jid;
 use crate::wa::lid::{self, LidMap};
 
@@ -48,13 +53,13 @@ use crate::wa::lid::{self, LidMap};
 pub const RING_TIMEOUT: Duration = Duration::from_secs(60);
 /// Frames each audio channel holds (about half a second).
 pub const AUDIO_QUEUE: usize = 8;
+/// How often a live call logs its audio counters.
+const AUDIO_LOG_EVERY: Duration = Duration::from_secs(10);
 /// Ended calls stay queryable this long.
 const KEEP_ENDED: Duration = Duration::from_secs(24 * 60 * 60);
 /// Calls (live and recently ended) one instance may hold.
 const MAX_CALLS: usize = 64;
 const MAX_CALL_ID_LEN: usize = 128;
-
-type Frame = Vec<i16>;
 
 /// What a live call reports besides its end.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,6 +96,8 @@ pub trait LiveCall: Send + Sync + 'static {
 pub struct CallIo {
     pub mic_rx: Receiver<Frame>,
     pub spk_tx: Sender<Frame>,
+    /// The call's audio counters (see [`call_audio`]).
+    pub stats: Arc<CallAudioStats>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -232,6 +239,7 @@ struct CallEntry {
     spk_tx: Sender<Frame>,
     spk_rx: Receiver<Frame>,
     audio_attached: bool,
+    stats: Arc<CallAudioStats>,
     /// The relay is up. An outgoing call gets it from the offer's ack, while
     /// the callee still rings, so it only counts once the callee accepts.
     media_up: bool,
@@ -262,6 +270,7 @@ impl CallEntry {
             spk_tx,
             spk_rx,
             audio_attached: false,
+            stats: Arc::default(),
             media_up: false,
             started_ms: now_ms(),
             ended_ms: None,
@@ -285,6 +294,7 @@ impl CallEntry {
         CallIo {
             mic_rx: self.mic_rx.clone(),
             spk_tx: self.spk_tx.clone(),
+            stats: Arc::clone(&self.stats),
         }
     }
 }
@@ -309,6 +319,7 @@ impl std::fmt::Debug for CallTable {
 pub struct AudioPorts {
     pub mic_tx: Sender<Frame>,
     pub spk_rx: Receiver<Frame>,
+    pub stats: Arc<CallAudioStats>,
     _lease: AudioLease,
 }
 
@@ -522,10 +533,37 @@ impl CallTable {
         }
     }
 
-    /// Turns the engine's events into phases until the call is over.
+    /// The call's audio counters so far.
+    pub fn audio_summary(&self, call_id: &str) -> Option<call_audio::AudioSummary> {
+        self.lock().get(call_id).map(|e| e.stats.summary())
+    }
+
+    /// Logs the call's audio counters (one line; the peer masked).
+    fn log_audio(&self, call_id: &str, when: &str) {
+        let Some((peer, summary)) = self
+            .lock()
+            .get(call_id)
+            .map(|e| (mask_peer(&e.peer), e.stats.summary()))
+        else {
+            return;
+        };
+        log::info!(
+            "{}: call audio {call_id} peer={peer} {when}: {summary}",
+            self.instance
+        );
+    }
+
+    /// Turns the engine's events into phases until the call is over, and
+    /// logs the audio counters every [`AUDIO_LOG_EVERY`] while it is active
+    /// and once at the end.
     async fn follow(self: Arc<Self>, call_id: String, handle: Arc<dyn LiveCall>) {
+        let started = Instant::now();
         let ended = handle.wait_ended();
         tokio::pin!(ended);
+        let mut report = tokio::time::interval_at(
+            tokio::time::Instant::now() + AUDIO_LOG_EVERY,
+            AUDIO_LOG_EVERY,
+        );
         loop {
             tokio::select! {
                 // Events first: a failure just before the end is the reason.
@@ -547,9 +585,17 @@ impl CallTable {
                     }
                 },
                 () = &mut ended => break,
+                _ = report.tick() => {
+                    if self.phase(&call_id) == Some(CallPhase::Active) {
+                        let when = format!("live {}s", started.elapsed().as_secs());
+                        self.log_audio(&call_id, &when);
+                    }
+                }
             }
         }
         self.transition(&call_id, CallInput::RemoteTerminate);
+        let when = format!("ended after {}s", started.elapsed().as_secs());
+        self.log_audio(&call_id, &when);
     }
 
     /// An `IncomingCall` event: a new offer, or the peer's answer to ours.
@@ -758,6 +804,7 @@ impl CallTable {
         Ok(AudioPorts {
             mic_tx: entry.mic_tx.clone(),
             spk_rx: entry.spk_rx.clone(),
+            stats: Arc::clone(&entry.stats),
             _lease: AudioLease {
                 table: Arc::clone(self),
                 call_id: call_id.to_owned(),
@@ -771,6 +818,7 @@ async fn audio_socket(mut socket: WebSocket, ports: AudioPorts) {
     // The decoder hands over frames of any length (20 ms ones are common);
     // the apps take whole 60 ms frames.
     let mut speaker = Rechunker::new();
+    let stats = &ports.stats;
     'shuttle: loop {
         tokio::select! {
             frame = ports.spk_rx.recv() => match frame {
@@ -781,6 +829,8 @@ async fn audio_socket(mut socket: WebSocket, ports: AudioPorts) {
                                 if socket.send(Message::Binary(bytes.into())).await.is_err() {
                                     break 'shuttle;
                                 }
+                                bump(&stats.spk_to_app);
+                                stats.spk_level.add(&whole);
                             }
                             Err(e) => log::warn!("call audio: dropping speaker frame: {e}"),
                         }
@@ -790,11 +840,15 @@ async fn audio_socket(mut socket: WebSocket, ports: AudioPorts) {
                 Err(_) => break,
             },
             message = socket.recv() => match message {
-                Some(Ok(Message::Binary(bytes))) => {
-                    if feed_mic(&bytes, &ports.mic_tx) == MicOutcome::Closed {
-                        break;
+                Some(Ok(Message::Binary(bytes))) => match feed_mic(&bytes, &ports.mic_tx) {
+                    MicOutcome::Sent => bump(&stats.mic_from_app),
+                    MicOutcome::Dropped => bump(&stats.mic_bad_size),
+                    MicOutcome::Lagging => {
+                        bump(&stats.mic_from_app);
+                        bump(&stats.mic_lagging);
                     }
-                }
+                    MicOutcome::Closed => break,
+                },
                 Some(Ok(Message::Close(_)) | Err(_)) | None => break,
                 Some(Ok(_)) => {}
             },
@@ -916,6 +970,157 @@ async fn audio(
 struct WaLiveCall {
     handle: CallHandle,
     client: Arc<whatsapp_rust::Client>,
+    media: LiveMedia,
+}
+
+/// What the gateway runs next to the engine for one call's audio.
+struct LiveMedia {
+    /// Mute flag of an encoded mode's uplink (the engine's own mute only
+    /// covers PCM).
+    muted: Option<Arc<AtomicBool>>,
+    /// PCM mode: decodes `CallEvent::ForeignAudio` into the speaker.
+    foreign: Option<Arc<ForeignAudio>>,
+    stats: Arc<CallAudioStats>,
+}
+
+/// The engine ends of a call's audio in the chosen [`CallAudioMode`], before
+/// the call starts.
+enum MediaEnds {
+    Pcm {
+        mic_rx: Receiver<Frame>,
+        spk_tx: Sender<Frame>,
+    },
+    Encoded {
+        format: whatsapp_rust::voip::AudioFormat,
+        packets_rx: Receiver<bytes::Bytes>,
+        inbound_tx: Sender<EncodedAudioFrame>,
+    },
+}
+
+/// The gateway's half of a call's audio: the codec tasks between the call's
+/// channels ([`CallIo`]) and the engine, started once the call is.
+struct MediaPlan {
+    ends: MediaEnds,
+    tasks: Vec<BoxFuture<'static, ()>>,
+    media: LiveMedia,
+}
+
+impl MediaPlan {
+    fn new(mode: CallAudioMode, io: CallIo) -> Result<Self, StartError> {
+        let CallIo {
+            mic_rx,
+            spk_tx,
+            stats,
+        } = io;
+        stats.set_format(mode.label());
+        let Some(format) = mode.encoded_format() else {
+            let (eng_mic_tx, eng_mic_rx) = async_channel::bounded(AUDIO_QUEUE);
+            let (eng_spk_tx, eng_spk_rx) = async_channel::bounded(AUDIO_QUEUE);
+            let foreign = Arc::new(ForeignAudio::new(spk_tx.clone(), Arc::clone(&stats)));
+            return Ok(Self {
+                ends: MediaEnds::Pcm {
+                    mic_rx: eng_mic_rx,
+                    spk_tx: eng_spk_tx,
+                },
+                tasks: vec![
+                    Box::pin(call_audio::run_pcm_uplink(
+                        mic_rx,
+                        eng_mic_tx,
+                        Arc::clone(&stats),
+                    )),
+                    Box::pin(call_audio::run_pcm_downlink(
+                        eng_spk_rx,
+                        spk_tx,
+                        Arc::clone(&foreign),
+                        Arc::clone(&stats),
+                    )),
+                ],
+                media: LiveMedia {
+                    muted: None,
+                    foreign: Some(foreign),
+                    stats,
+                },
+            });
+        };
+        let encoder = mode
+            .encoder()
+            .map_err(|e| StartError::Driver(DriverError::Failed(format!("opus encoder: {e}"))))?;
+        let (packets_tx, packets_rx) = async_channel::bounded(call_audio::ENCODED_QUEUE);
+        let (inbound_tx, inbound_rx) = async_channel::bounded(call_audio::INBOUND_QUEUE);
+        let muted = Arc::new(AtomicBool::new(false));
+        Ok(Self {
+            ends: MediaEnds::Encoded {
+                format,
+                packets_rx,
+                inbound_tx,
+            },
+            tasks: vec![
+                Box::pin(call_audio::run_uplink(
+                    mic_rx,
+                    packets_tx,
+                    encoder,
+                    Arc::clone(&muted),
+                    Arc::clone(&stats),
+                )),
+                Box::pin(call_audio::run_downlink(
+                    inbound_rx,
+                    spk_tx,
+                    InboundDecoder::new(),
+                    Arc::clone(&stats),
+                )),
+            ],
+            media: LiveMedia {
+                muted: Some(muted),
+                foreign: None,
+                stats,
+            },
+        })
+    }
+
+    /// Starts the codec tasks. They end with the call's channels, and at the
+    /// latest when the engine stops.
+    fn spawn(tasks: Vec<BoxFuture<'static, ()>>, handle: &CallHandle) {
+        for task in tasks {
+            let handle = handle.clone();
+            tokio::spawn(async move {
+                tokio::select! {
+                    () = task => {}
+                    () = handle.wait_ended() => {}
+                }
+            });
+        }
+    }
+}
+
+/// The two whatsapp-rust call builders take audio the same way.
+trait WithAudio: Sized {
+    fn with_audio(self, ends: MediaEnds) -> Self;
+}
+
+impl WithAudio for AcceptCall<'_> {
+    fn with_audio(self, ends: MediaEnds) -> Self {
+        match ends {
+            MediaEnds::Pcm { mic_rx, spk_tx } => self.audio(mic_rx, spk_tx),
+            MediaEnds::Encoded {
+                format,
+                packets_rx,
+                inbound_tx,
+            } => self.encoded_audio(format, packets_rx, inbound_tx),
+        }
+    }
+}
+
+impl WithAudio for OutgoingCall<'_> {
+    fn with_audio(self, ends: MediaEnds) -> Self {
+        match ends {
+            MediaEnds::Pcm { mic_rx, spk_tx } => self.audio(mic_rx, spk_tx),
+            MediaEnds::Encoded {
+                format,
+                packets_rx,
+                inbound_tx,
+            } => self.encoded_audio(format, packets_rx, inbound_tx),
+        }
+    }
 }
 
 /// The engine event the apps care about, if it is one.
@@ -968,13 +1173,26 @@ impl LiveCall for WaLiveCall {
 
     fn set_muted(&self, muted: bool) {
         self.handle.set_muted(muted);
+        if let Some(flag) = &self.media.muted {
+            flag.store(muted, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     fn next_event(&self) -> BoxFuture<'_, Option<LiveEvent>> {
+        // `events()` is one shared queue (each event reaches one receiver),
+        // so this loop, run by `CallTable::follow`, is its only reader and
+        // also plays the PCM engine's foreign audio.
         let events = self.handle.events();
         Box::pin(async move {
             loop {
                 let event = events.recv().await.ok()?;
+                if let CallEvent::ForeignAudio(packet) = &event {
+                    match &self.media.foreign {
+                        Some(foreign) => foreign.deliver(packet),
+                        None => bump(&self.media.stats.foreign_failed),
+                    }
+                    continue;
+                }
                 if let Some(event) = live_event(&event) {
                     return Some(event);
                 }
@@ -1004,10 +1222,11 @@ impl WaCalls {
         Self { client }
     }
 
-    fn live(&self, handle: CallHandle) -> Arc<dyn LiveCall> {
+    fn live(&self, handle: CallHandle, media: LiveMedia) -> Arc<dyn LiveCall> {
         Arc::new(WaLiveCall {
             handle,
             client: Arc::clone(&self.client),
+            media,
         })
     }
 }
@@ -1023,15 +1242,17 @@ impl CallBackend for WaCalls {
         io: CallIo,
     ) -> BoxFuture<'_, Result<Arc<dyn LiveCall>, StartError>> {
         Box::pin(async move {
+            let plan = MediaPlan::new(CALL_AUDIO_MODE, io)?;
             let handle = self
                 .client
                 .voip()
                 .accept(&incoming)
-                .audio(io.mic_rx, io.spk_tx)
+                .with_audio(plan.ends)
                 .start()
                 .await
                 .map_err(start_error)?;
-            Ok(self.live(handle))
+            MediaPlan::spawn(plan.tasks, &handle);
+            Ok(self.live(handle, plan.media))
         })
     }
 
@@ -1042,15 +1263,17 @@ impl CallBackend for WaCalls {
     ) -> BoxFuture<'_, Result<Arc<dyn LiveCall>, StartError>> {
         Box::pin(async move {
             let peer = parse_jid(&peer).map_err(StartError::Driver)?;
+            let plan = MediaPlan::new(CALL_AUDIO_MODE, io)?;
             let handle = self
                 .client
                 .voip()
                 .call(&peer)
-                .audio(io.mic_rx, io.spk_tx)
+                .with_audio(plan.ends)
                 .start()
                 .await
                 .map_err(start_error)?;
-            Ok(self.live(handle))
+            MediaPlan::spawn(plan.tasks, &handle);
+            Ok(self.live(handle, plan.media))
         })
     }
 

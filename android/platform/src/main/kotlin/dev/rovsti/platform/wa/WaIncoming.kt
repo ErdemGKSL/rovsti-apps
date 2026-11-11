@@ -14,13 +14,14 @@ import dev.rovsti.platform.notify.PlatformChannels
 import org.json.JSONObject
 
 /**
- * Pure: the caller title for an FCM data message: `name`, else the user part of `from`
- * (`123:4@s.whatsapp.net` gives `123`), else [WaIncomingNotice.FALLBACK_TITLE].
+ * Pure: the caller title for an FCM data message: `name`, else the user part of `sender`
+ * (`123:4@s.whatsapp.net` gives `123`), else [WaIncomingNotice.FALLBACK_TITLE]. Gateways before
+ * the rename sent `from`, which FCM reserves (it refused those pushes); it is still read.
  */
 internal fun waCallerTitle(data: Map<String, String>): String {
     val name = data["name"]?.trim().orEmpty()
     val user =
-        data["from"]
+        (data["sender"] ?: data["from"])
             .orEmpty()
             .substringBefore('@')
             .substringBefore(':')

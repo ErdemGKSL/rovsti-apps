@@ -22,21 +22,29 @@ class WaIncomingTest {
     private fun call(vararg pairs: Pair<String, String>) = mapOf("kind" to "call", "call_id" to "c1") + pairs
 
     @Test fun nameWins() {
-        val n = WaIncomingNotice.of(call("name" to "Ayse", "from" to "905551234567@s.whatsapp.net"))
+        val n = WaIncomingNotice.of(call("name" to "Ayse", "sender" to "905551234567@s.whatsapp.net"))
         assertEquals(WaIncomingNotice("c1", "Ayse"), n)
     }
 
-    @Test fun fallsBackToTheUserPartOfFrom() {
+    @Test fun fallsBackToTheUserPartOfSender() {
+        assertEquals("905551234567", WaIncomingNotice.of(call("sender" to "905551234567@s.whatsapp.net"))?.title)
+        assertEquals(
+            "905551234567",
+            WaIncomingNotice.of(call("sender" to "905551234567:4@s.whatsapp.net", "name" to " "))?.title,
+        )
+    }
+
+    @Test fun stillReadsTheOldFromKey() {
         assertEquals("905551234567", WaIncomingNotice.of(call("from" to "905551234567@s.whatsapp.net"))?.title)
         assertEquals(
             "905551234567",
-            WaIncomingNotice.of(call("from" to "905551234567:4@s.whatsapp.net", "name" to " "))?.title,
+            WaIncomingNotice.of(call("sender" to "905551234567@s.whatsapp.net", "from" to "1@s.whatsapp.net"))?.title,
         )
     }
 
     @Test fun fallsBackToTheGenericTitle() {
         assertEquals("WhatsApp call", WaIncomingNotice.of(call())?.title)
-        assertEquals("WhatsApp call", WaIncomingNotice.of(call("from" to "@lid"))?.title)
+        assertEquals("WhatsApp call", WaIncomingNotice.of(call("sender" to "@lid"))?.title)
     }
 
     @Test fun onlyCallsWithAnIdQualify() {
@@ -58,7 +66,7 @@ class WaIncomingTest {
     }
 
     @Test fun missedTitleFollowsTheSameFallbacks() {
-        assertEquals("905551234567", WaMissedNotice.of(end("from" to "905551234567:4@s.whatsapp.net"))?.title)
+        assertEquals("905551234567", WaMissedNotice.of(end("sender" to "905551234567:4@s.whatsapp.net"))?.title)
         assertEquals("WhatsApp call", WaMissedNotice.of(end())?.title)
     }
 

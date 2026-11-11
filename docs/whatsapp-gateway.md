@@ -116,9 +116,11 @@ Push wakes the phone for incoming calls and messages. It is off unless
 `fcm_project_id` and `fcm_service_account` (the path of a Firebase service-account
 JSON) are both set. The gateway then sends FCM HTTP v1 data-only, high-priority
 messages with no message text:
-`{"kind":"call","call_id","from","name"}`, `{"kind":"message","chat","count"}` or, when
+`{"kind":"call","call_id","sender","name"}`, `{"kind":"message","chat","count"}` or, when
 a ring that was pushed ends unanswered here,
-`{"kind":"call_end","call_id","missed","from","name"}` (`missed` is `"1"` or `"0"`).
+`{"kind":"call_end","call_id","missed","sender","name"}` (`missed` is `"1"` or `"0"`).
+The caller is under `sender`, not `from`: FCM reserves `from` and refused those pushes
+with 400 "Invalid data payload key: from". The apps still read `from` from older gateways.
 The apps must be built with Firebase for this; see
 [android.md](android.md#whatsapp-push-and-call-audio). An app registers its token
 with the gateway on connect (`POST /v1/push`); apps built without Firebase register

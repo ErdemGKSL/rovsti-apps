@@ -878,6 +878,17 @@ async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
         "wrong-size frames must not come back"
     );
 
+    // The diagnostics counted both directions at the socket (the fake
+    // backend runs no codec, so the engine-side counters stay at zero).
+    let audio_stats = server
+        .state
+        .calls(&instance(&created))
+        .audio_summary(&call_id)
+        .unwrap();
+    assert_eq!((audio_stats.mic_from_app, audio_stats.mic_bad_size), (3, 0));
+    assert_eq!(audio_stats.spk_to_app, 3);
+    assert_eq!(audio_stats.spk_level.voiced_frames, 3, "{audio_stats}");
+
     // Hanging up ends the call and closes the audio socket.
     let (g, id) = (gateway.clone(), call_id.clone());
     blocking(move || g.end_call(&id)).await.unwrap();

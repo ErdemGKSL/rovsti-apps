@@ -6,6 +6,11 @@
 
 use serde::Deserialize;
 
+/// The data key of a call push that names the caller. Not `from`: FCM
+/// reserves that key and refuses the message ("Invalid data payload key:
+/// from"). Older gateways sent `from`, which is still read.
+pub const SENDER_KEY: &str = "sender";
+
 /// Why the gateway woke the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Wake {
@@ -29,7 +34,7 @@ pub enum Wake {
 enum Payload {
     Call {
         call_id: String,
-        #[serde(default)]
+        #[serde(default, rename = "sender", alias = "from")]
         from: Option<String>,
         #[serde(default)]
         name: Option<String>,
@@ -78,6 +83,20 @@ mod tests {
                 call_id: "abc".into(),
                 from: Some("1@s.whatsapp.net".into()),
                 name: Some("Ann".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn call_payload_names_the_caller_under_sender() {
+        let json =
+            format!(r#"{{"kind":"call","call_id":"abc","{SENDER_KEY}":"1@s.whatsapp.net"}}"#);
+        assert_eq!(
+            parse_wake(&json),
+            Some(Wake::Call {
+                call_id: "abc".into(),
+                from: Some("1@s.whatsapp.net".into()),
+                name: None,
             })
         );
     }

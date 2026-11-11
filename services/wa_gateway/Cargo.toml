@@ -12,6 +12,7 @@ fake = []
 
 [dependencies]
 async-channel.workspace = true
+bytes = "1"
 base64.workspace = true
 axum.workspace = true
 env_logger.workspace = true
@@ -29,8 +30,10 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 ureq = { version = "3", features = ["json"] }
-# `voip-mlow` is pure Rust; `voip` and `voip-libopus` would need C libopus.
-whatsapp-rust = { workspace = true, features = ["voip-mlow"] }
+# `voip-mlow`: the pure-Rust MLOW codec. `voip-libopus`: libopus (the `opus` crate) for native
+# Opus calls and for the Opus packets a peer sends inside MLOW. Without a system libopus
+# (pkg-config) `audiopus_sys` builds the bundled copy with cmake, so the build host needs cmake.
+whatsapp-rust = { workspace = true, features = ["voip-mlow", "voip-libopus"] }
 
 [dev-dependencies]
 rovsti_wa_client.workspace = true

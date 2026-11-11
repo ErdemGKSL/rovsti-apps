@@ -16,13 +16,13 @@ The only hop that uses another size is inside the gateway: WhatsApp's decoder ha
 | 4 | `Java_dev_rovsti_core_RustNative_audioPush` -> `ops::audio_push`: `decode_frame` (other sizes are dropped with a debug log), `mic.try_send` (a full queue drops the frame, no added latency) | 960 `i16` | `crates/rovsti_ffi/src/jni_exports.rs`, `ops/wa/live.rs` |
 | 5 | `rovsti_wa_client::audio::call_audio`: `pump` encodes with `encode_frame` and sends one **binary WebSocket message** per frame to `wss://<gateway>/v1/calls/<id>/audio` with `Authorization: Bearer <connect key>` | 1 920 bytes per message | `crates/rovsti_wa_client/src/audio.rs` |
 | 6 | Gateway `audio_socket` -> `feed_mic`: `decode_frame` (wrong sizes dropped), `try_send` into the call's `mic_tx` (`Lagging` frames are dropped) | 960 `i16` | `services/wa_gateway/src/wa/calls.rs` |
-| 7 | Engine end `mic_rx` of the whatsapp-rust call (`.audio(io.mic_rx, io.spk_tx)`), encoded and sent to WhatsApp | 960 `i16` frames | `calls.rs`, `CallIo` |
+| 7 | `MediaPlan` (gateway): in the default mode `call_audio::run_uplink` encodes each frame with libopus (`WaOpusEncoder`, 24 kb/s, DTX) and hands the packet to the engine (`encoded_audio`), which wraps it in RTP/SRTP. See "Codec mode" below | 960 `i16` frames in, one Opus packet out | `calls.rs`, `call_audio.rs` |
 
 ## Speaker: WhatsApp to phone
 
 | # | Hop | Format | Code |
 |---|-----|--------|------|
-| 1 | Engine decodes the peer's voice into `spk_tx` | **20 ms, 320 samples** (any length is handled) | `calls.rs` (`CallIo`) |
+| 1 | Default mode: the engine hands each decrypted packet to `call_audio::run_downlink`, which decodes it (libopus, or the MLOW decoder for an MLOW packet) into `spk_tx`. PCM mode: the engine's own decoder writes **20 ms, 320 sample** frames (any length is handled) | 960 samples per packet (default), 320 (PCM mode) | `calls.rs`, `call_audio.rs` |
 | 2 | `audio_socket` rechunks with `Rechunker` (commit 457ac0f) and sends only whole frames; leftover samples wait for the next chunk | 1 920-byte binary messages | `rovsti_wa_proto::audio::Rechunker`, `audio_socket` |
 | 3 | Client `pump` decodes each message (wrong size: dropped) and `try_send`s it to `speaker`; a full queue (8 frames, about half a second) drops the frame instead of adding latency | 960 `i16` | `audio.rs` |
 | 4 | `RustNative.audioPull(handle, out)`: 1 920 = a frame, 0 = none ready, -1 = call ended or handle gone | 1 920 bytes | `ops::audio_pull`, `jni_exports.rs` |
@@ -75,6 +75,103 @@ No mismatch in format: Kotlin, JNI, client, protocol and gateway all use 960 sam
 - `android/wa/.../WaCallAudioTest` (Robolectric): rate, format, usage, source, buffer, routes, mode and focus taken
   and given back, service types, and that the real pump records only after `Active` (incoming and outgoing).
 - `android/wa/.../WaCallsTest`: the pump logic with a fake pump. `PhoneManifestTest`: the service and its type.
+
+## No audio in either direction on a real phone (E5.8a follow-up)
+
+Symptom: WhatsApp calls through the gateway rang, connected and hung up, but neither side heard
+anything (also in the old app). Cellular calls were fine.
+
+### What was wrong: the peer's audio (inbound)
+
+The gateway used whatsapp-rust 0.7 with only `voip-mlow` and `.audio(mic, speaker)`, which is
+`AudioConfig::MLOW_PCM`: the engine encodes and decodes Meta's MLOW codec itself. Real WhatsApp
+peers in that RTP profile often send **standard Opus/CELT through MLOW's escape** (TOC with the top
+two bits set). In PCM mode wacore does not decode those
+(`wacore-0.7.0/src/voip/engine.rs`, `on_rtp`: `AudioIo::Pcm && codec == Opus` becomes
+`CallEvent::ForeignAudio(bytes)` and returns), its MLOW decoder answers an Opus TOC with silence
+(`mlow/decoder.rs`, `toc.std_opus`), and `WaLiveCall::next_event` ignored `ForeignAudio`. So every
+such packet was dropped and the engine kept emitting silent 20 ms playout frames.
+
+### The peer hearing nothing (outbound)
+
+There was no log evidence (the engine logs voip details at debug only, the server runs at info).
+The pure-Rust MLOW encoder is the library's own reimplementation; the library documents a
+different path as the verified one: `agent_docs/voip_audio_codecs.md` in whatsapp-rust 0.7 says
+"The PT120 native-Opus path was verified against Android/Web implementations and with a live
+full-duplex Android call. MLOW remains the compatibility default." Native Opus clears MLOW
+capability bit 31 (`CAPABILITY_STANDARD_OPUS_*` in `wacore/src/stanza/call.rs`, "selecting
+WhatsApp's standard Opus fallback instead of MLOW") and, when answering, sends the
+`use_mlow_codec_v1=false` settings, so both directions use Opus. That removes the unproven encoder
+and the inbound escape problem at once.
+
+### Codec mode (changed)
+
+`call_audio::CALL_AUDIO_MODE` selects one of three modes (one constant, so the owner can switch
+back without code changes elsewhere):
+
+| Mode | whatsapp-rust | Microphone | Peer audio |
+|------|---------------|------------|------------|
+| `NativeOpus` (**default**) | `encoded_audio(AudioFormat::OPUS_16KHZ_60MS, ..)` | `WaOpusEncoder::new()` (libopus, VoIP, 16 kHz, 60 ms, 24 kb/s, DTX) | `WaOpusDecoder::decode` |
+| `OpusInMlow` | `encoded_audio(AudioFormat::OPUS_MLOW_16KHZ_60MS, ..)` | `WaOpusEncoder::new_mlow_escape()` (CELT in MLOW's escape, SID for silence) | escape: `decode_mlow_escape`; MLOW: wacore `MlowDecoder` (PT 121 = redundancy) |
+| `MlowPcm` (the old path) | `.audio(mic, speaker)` | engine's MLOW encoder | engine's MLOW decoder, plus `CallEvent::ForeignAudio` decoded with `decode_mlow_escape` |
+
+In `MlowPcm` the engine keeps sending silent 20 ms playout frames while the peer talks Opus, so
+`run_pcm_downlink` holds back all-zero engine frames for 500 ms after the last foreign packet
+(`FOREIGN_HOLD`); otherwise the app would get twice the samples per second, half of them silence.
+`CallHandle::events()` is one shared queue (each event reaches one receiver), so the foreign audio
+is decoded in the existing event loop (`WaLiveCall::next_event`, driven by `CallTable::follow`),
+not by a second reader. Decoder state is per call. In the encoded modes the gateway does mute
+itself (it encodes silence), because `CallHandle::set_muted` only covers PCM audio.
+
+The decoded PCM goes into the same `spk_tx` as before, so `Rechunker` and the app socket are
+unchanged. libopus comes from `whatsapp-rust`'s `voip-libopus` feature (the `opus` 0.3 crate,
+`audiopus_sys`): with no system libopus found by pkg-config it builds the bundled copy with
+**cmake** and links it statically, so the build host needs cmake and a C compiler (the Raspberry
+Pi has cmake 3.31; libopus-dev is not needed).
+
+### Diagnostics (added)
+
+`call_audio::CallAudioStats` counts every hop; `CallTable::follow` logs one info line every 10 s
+while the call is active and one when it ends (`journalctl -u wa-gateway | grep 'call audio'`):
+
+```
+<instance>: call audio <call id> peer=90…67@s.whatsapp.net ended after 42s: format=native-opus pt120 16k/60ms | mic: app=650 bad=0 lag=0 engine=650 engine_drop=0 enc_fail=0 rms=-31.2dBFS peak=9120 voiced=410 | spk: engine=640 opus=640 mlow=0 dec_fail=0 foreign=0 foreign_ok=0 foreign_fail=0 gated=0 queue_drop=0 app=640 rms=-27.9dBFS peak=14011 voiced=380
+```
+
+- `mic: app` whole frames from the app socket, `bad` wrong-size messages, `lag` dropped on a full
+  queue, `engine` frames (PCM) or packets (encoded) handed to the engine, `engine_drop` refused by
+  a full engine queue, `enc_fail` encoder errors; `rms`/`peak`/`voiced` (frames peaking above about
+  -40 dBFS) of the microphone PCM after mute.
+- `spk: engine` playout frames (PCM) or packets (encoded) from the engine, `opus`/`mlow` the codec
+  of each packet, `dec_fail` decoder errors, `foreign*` the `ForeignAudio` packets (PCM mode),
+  `gated` silent engine frames held back, `queue_drop` frames lost to a full socket queue, `app`
+  whole 60 ms frames sent to the app; the level of what the app got.
+- The peer is masked (first two and last two digits); no full number or JID is logged.
+
+Reading one test call: `mic app=0` means the phone never sent audio (socket or recorder);
+`mic voiced=0` with frames means the phone sent silence (permission, route, mute); `engine` close
+to `app` with sound means the gateway did its part outbound. `spk engine=0` means WhatsApp sent no
+media; `dec_fail` or `foreign_fail` growing means a codec mismatch; `spk app` with `voiced=0`
+means the peer's audio decoded to silence.
+
+### Tests
+
+- `services/wa_gateway/src/wa/call_audio.rs`: a 1 kHz tone encoded with
+  `WaOpusEncoder::new_mlow_escape` goes through `ForeignAudio::deliver` into the speaker channel
+  and comes out as 1 kHz (Goertzel, as in `crates/rovsti_wa_client/tests/call_audio.rs`); the same
+  for native and escaped packets through `InboundDecoder::decode_packet`; an MLOW SID decodes to
+  60 ms of silence; the uplink encodes the tone and it decodes back; mute sends MLOW SID; the PCM
+  downlink gate; levels; the exact summary line; peer masking; garbage counted as failed.
+- `services/wa_gateway/tests/api.rs` `call_audio_echoes_frames_and_drops_wrong_sizes` also checks
+  the socket counters.
+
+### Also fixed in this deploy: FCM refused every call push
+
+The call pushes carried the caller under the data key `from`, which FCM reserves: every `call` and
+`call_end` push failed with `FCM answered 400: Invalid data payload key: from`. The key is now
+`sender` (`rovsti_wa_proto::push::SENDER_KEY`); the apps (`android/platform` `waCallerTitle`, the
+old bridge's `WaIncoming.kt`, and `rovsti_wa_proto::push::parse_wake`) read `sender` and still
+accept `from`.
 
 ## Owner item: check on a real phone
 

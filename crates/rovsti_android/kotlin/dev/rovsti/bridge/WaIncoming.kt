@@ -12,12 +12,13 @@ import android.os.Build
 import org.json.JSONObject
 
 /**
- * Pure: the caller title for an FCM data message: `name`, else the user part of `from`
- * (`123:4@s.whatsapp.net` gives `123`), else [WaIncomingNotice.FALLBACK_TITLE].
+ * Pure: the caller title for an FCM data message: `name`, else the user part of `sender` (older
+ * gateways: `from`, which FCM reserves) (`123:4@s.whatsapp.net` gives `123`), else
+ * [WaIncomingNotice.FALLBACK_TITLE].
  */
 internal fun waCallerTitle(data: Map<String, String>): String {
     val name = data["name"]?.trim().orEmpty()
-    val user = data["from"].orEmpty().substringBefore('@').substringBefore(':').trim()
+    val user = (data["sender"] ?: data["from"]).orEmpty().substringBefore('@').substringBefore(':').trim()
     return name.ifEmpty { user.ifEmpty { WaIncomingNotice.FALLBACK_TITLE } }
 }
 

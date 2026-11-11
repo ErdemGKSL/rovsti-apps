@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use rovsti_wa_proto::WaMessage;
+use rovsti_wa_proto::push::SENDER_KEY;
 
 use crate::config::FcmConfig;
 use crate::now_ms;
@@ -63,7 +64,7 @@ impl PushKind {
             } => BTreeMap::from([
                 ("kind".to_owned(), "call".to_owned()),
                 ("call_id".to_owned(), call_id.clone()),
-                ("from".to_owned(), from.clone()),
+                (SENDER_KEY.to_owned(), from.clone()),
                 ("name".to_owned(), name.clone()),
             ]),
             Self::CallEnd {
@@ -78,7 +79,7 @@ impl PushKind {
                     "missed".to_owned(),
                     if *missed { "1" } else { "0" }.to_owned(),
                 ),
-                ("from".to_owned(), from.clone()),
+                (SENDER_KEY.to_owned(), from.clone()),
                 ("name".to_owned(), name.clone()),
             ]),
         }
@@ -351,7 +352,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&kind.data()).unwrap(),
-            r#"{"call_id":"ABC","from":"905321234567@s.whatsapp.net","kind":"call","name":"Ayse"}"#
+            r#"{"call_id":"ABC","kind":"call","name":"Ayse","sender":"905321234567@s.whatsapp.net"}"#
         );
         assert!(kind.high_priority());
     }
@@ -366,13 +367,46 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_string(&kind.data()).unwrap(),
-            r#"{"call_id":"ABC","from":"905321234567@s.whatsapp.net","kind":"call_end","missed":"1","name":"Ayse"}"#
+            r#"{"call_id":"ABC","kind":"call_end","missed":"1","name":"Ayse","sender":"905321234567@s.whatsapp.net"}"#
         );
         assert!(kind.high_priority());
         if let PushKind::CallEnd { missed, .. } = &mut kind {
             *missed = false;
         }
         assert_eq!(kind.data()["missed"], "0");
+    }
+
+    #[test]
+    fn no_push_uses_a_key_fcm_reserves() {
+        // FCM rejects `from`, `notification`, `message_type` and anything
+        // starting with `google` or `gcm` in the data map.
+        let kinds = [
+            PushKind::Message {
+                chat: "c".into(),
+                count: 1,
+            },
+            PushKind::Call {
+                call_id: "A".into(),
+                from: "f".into(),
+                name: "n".into(),
+            },
+            PushKind::CallEnd {
+                call_id: "A".into(),
+                missed: false,
+                from: "f".into(),
+                name: "n".into(),
+            },
+        ];
+        for kind in kinds {
+            for key in kind.data().keys() {
+                assert!(
+                    !matches!(key.as_str(), "from" | "notification" | "message_type")
+                        && !key.starts_with("google")
+                        && !key.starts_with("gcm"),
+                    "{key} in {kind:?}"
+                );
+            }
+        }
     }
 
     #[test]

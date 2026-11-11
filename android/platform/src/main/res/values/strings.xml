@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The user-visible words of :platform's WhatsApp call notifications. Turkish in values-tr (TurkishCoverageTest). -->
+<resources>
+    <string name="wa_call_title">WhatsApp call</string>
+    <string name="wa_call_missed">Missed WhatsApp call</string>
+    <string name="wa_call_ongoing">Ongoing WhatsApp call</string>
+    <string name="wa_call_answering">Answering…</string>
+    <string name="wa_call_hang_up">Hang up</string>
+</resources>

@@ -7,10 +7,10 @@ import android.app.PendingIntent
 import android.app.Person
 import android.content.Context
 import android.content.Intent
-import android.graphics.drawable.Icon
-import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import dev.rovsti.platform.PlatformComponents
+import dev.rovsti.platform.R
 import dev.rovsti.platform.notify.NotificationIcon
 import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
@@ -38,6 +38,7 @@ data class WaIncomingNotice(
     val title: String,
 ) {
     companion object {
+        /** The title when the push names nobody; the notifications show `R.string.wa_call_title` in its place. */
         const val FALLBACK_TITLE = "WhatsApp call"
 
         /** Pure: the notice for [data], or null when it is not a call or has no `call_id`. */
@@ -66,8 +67,13 @@ data class WaMissedNotice(
 
 /**
  * The incoming WhatsApp call notification: `CallStyle.forIncomingCall` on channel `wa_calls`, a full-screen
- * intent to the launch activity, and Answer and Decline actions. All three open the launch activity with
- * `wa_call_id` (and `wa_call_action`); the activity hands that intent to [takeAction].
+ * intent to the launch activity, and Answer and Decline actions. The full-screen and body intents open the launch
+ * activity with `wa_call_id`. Answer and Decline are broadcasts to the app's receiver (`PlatformComponents.waCallAction`)
+ * so they work on the lock screen without unlocking (the system unlocks first for an activity action); the receiver
+ * hands the intent to [takeAction] and, for Answer, calls [openAnswered]. Without a receiver they open the activity,
+ * which hands the intent to [takeAction] itself.
+ *
+ * Showing the notification starts the ring ([WaRinger]); [cancel] stops it.
  *
  * Ported from crates/rovsti_android/kotlin/dev/rovsti/bridge/WaIncoming.kt
  */
@@ -78,6 +84,16 @@ object WaIncoming {
     const val EXTRA_ACTION = "wa_call_action"
     const val ANSWER = "answer"
     const val DECLINE = "decline"
+
+    /** The broadcast action of Answer and Decline (to `PlatformComponents.waCallAction`). */
+    const val ACTION_CALL = "dev.rovsti.wa.CALL_ACTION"
+
+    /** On the activity intent [openAnswered] starts: the call was answered on the notification, show it over the keyguard. */
+    const val EXTRA_ANSWERED = "wa_call_answered"
+
+    /** How long the "Answering…" notice of [openAnswered] stays at most. */
+    private const val ANSWERING_TIMEOUT_MS = 15_000L
+    private const val ANSWERING_ID_MASK = 0x3C3C3C3C
 
     /**
      * The calls whose ring is over here (answered, declined, ended): a late or repeated `call` push for one of them
@@ -117,6 +133,15 @@ object WaIncoming {
     /** Pure: the missed-call notification id, distinct from [notificationId] for the same call. */
     fun missedNotificationId(callId: String): Int = notificationId(callId) xor MISSED_ID_MASK
 
+    /** Pure: the id of the "Answering…" notice of [openAnswered], distinct from the other two. */
+    fun answeringNotificationId(callId: String): Int = notificationId(callId) xor ANSWERING_ID_MASK
+
+    /** The caller's title, with the generic one in the phone's language. */
+    private fun displayTitle(
+        context: Context,
+        title: String,
+    ): String = if (title == WaIncomingNotice.FALLBACK_TITLE) context.getString(R.string.wa_call_title) else title
+
     fun show(
         context: Context,
         callId: String,
@@ -140,12 +165,12 @@ object WaIncoming {
             }
             PlatformChannels.ensure(context, CHANNEL)
             val open = pending(context, notice.callId, null, 0)
-            val answer = pending(context, notice.callId, ANSWER, 1)
-            val decline = pending(context, notice.callId, DECLINE, 2)
+            val answer = actionPending(context, notice.callId, ANSWER)
+            val decline = actionPending(context, notice.callId, DECLINE)
             val caller =
                 Person
                     .Builder()
-                    .setName(notice.title)
+                    .setName(displayTitle(context, notice.title))
                     .setImportant(true)
                     .build()
             val builder =
@@ -159,18 +184,12 @@ object WaIncoming {
                     .setOnlyAlertOnce(true)
                     .setContentIntent(open)
                     .setFullScreenIntent(open, true)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                builder.setStyle(Notification.CallStyle.forIncomingCall(caller, decline, answer))
-            } else {
-                builder
-                    .setContentTitle(notice.title)
-                    .setContentText("Incoming WhatsApp call")
-                    .addAction(Notification.Action.Builder(null as Icon?, "Decline", decline).build())
-                    .addAction(Notification.Action.Builder(null as Icon?, "Answer", answer).build())
-            }
+                    .setStyle(Notification.CallStyle.forIncomingCall(caller, decline, answer))
             // The FCM push and the live event both post it: the call screen opens for the first one only.
             val already = manager.activeNotifications.any { it.id == notificationId(notice.callId) }
             manager.notify(notificationId(notice.callId), builder.build())
+            // The channel is silent: the ring is ours, so every way the ring ends can stop it. Once per call.
+            WaRinger.start(context, notice.callId)
             if (!already) openWhileInUse(context, notice.callId)
             true
         } catch (_: RuntimeException) {
@@ -229,8 +248,8 @@ object WaIncoming {
                     .Builder(context, MISSED_CHANNEL)
                     .let { NotificationIcon.apply(it, context, NotificationKind.CALL_MISSED) }
                     .setCategory(Notification.CATEGORY_MISSED_CALL)
-                    .setContentTitle(notice.title)
-                    .setContentText("Missed WhatsApp call")
+                    .setContentTitle(displayTitle(context, notice.title))
+                    .setContentText(context.getString(R.string.wa_call_missed))
                     .setAutoCancel(true)
                     .setContentIntent(open)
                     .build()
@@ -263,6 +282,7 @@ object WaIncoming {
         callId: String,
     ): Boolean {
         markOver(callId)
+        WaRinger.stop(callId)
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         val id = notificationId(callId)
         // Called from an FCM push and from Rust over JNI: never throws.
@@ -272,6 +292,65 @@ object WaIncoming {
             shown
         } catch (_: RuntimeException) {
             false
+        }
+    }
+
+    /**
+     * After Answer on the notification (the receiver took the action): opens the call screen. On an unlocked phone in
+     * use the activity is started directly. Locked or with the screen off, Android 12+ refuses an activity start from a
+     * notification's broadcast (the "trampoline" rule) unless the app has a background-start exemption (HyperOS: "Display
+     * pop-up windows while running in the background"), so it is tried and a short "Answering…" notice with a full-screen
+     * intent is posted as well: the system starts that over the keyguard, and `LockScreenGate` keeps it there.
+     */
+    fun openAnswered(
+        context: Context,
+        callId: String,
+    ) {
+        val launch = launchIntent(context, callId, null).putExtra(EXTRA_ANSWERED, true)
+        try {
+            context.startActivity(launch)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "WA call: could not open the answered call", e)
+        }
+        val interactive = context.getSystemService(PowerManager::class.java)?.isInteractive == true
+        val locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != false
+        if (shouldOpenDirectly(interactive, locked)) return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        try {
+            PlatformChannels.ensure(context, CHANNEL)
+            val open =
+                PendingIntent.getActivity(
+                    context,
+                    answeringNotificationId(callId),
+                    launch,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            val notice =
+                Notification
+                    .Builder(context, CHANNEL)
+                    .let { NotificationIcon.apply(it, context, NotificationKind.WA_CALL) }
+                    .setCategory(Notification.CATEGORY_CALL)
+                    .setContentTitle(context.getString(R.string.wa_call_title))
+                    .setContentText(context.getString(R.string.wa_call_answering))
+                    .setTimeoutAfter(ANSWERING_TIMEOUT_MS)
+                    .setOnlyAlertOnce(true)
+                    .setContentIntent(open)
+                    .setFullScreenIntent(open, true)
+                    .build()
+            manager.notify(answeringNotificationId(callId), notice)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "WA call: no answering notice", e)
+        }
+    }
+
+    /** Removes the "Answering…" notice of [openAnswered] (the activity got the call). Never throws. */
+    fun cancelAnswering(
+        context: Context,
+        callId: String,
+    ) {
+        try {
+            context.getSystemService(NotificationManager::class.java)?.cancel(answeringNotificationId(callId))
+        } catch (_: RuntimeException) {
         }
     }
 
@@ -287,6 +366,37 @@ object WaIncoming {
         return launch
     }
 
+    /**
+     * The PendingIntent of Answer or Decline: a broadcast to the app's receiver when it installed one (works on the lock
+     * screen), else the launch activity.
+     */
+    internal fun actionPending(
+        context: Context,
+        callId: String,
+        action: String,
+    ): PendingIntent {
+        val slot = if (action == ANSWER) 1 else 2
+        val receiver =
+            PlatformComponents.getOrNull()?.waCallAction ?: return pending(context, callId, action, slot)
+        val intent =
+            Intent(context, receiver)
+                .setAction(ACTION_CALL)
+                .putExtra(EXTRA_CALL_ID, callId)
+                .putExtra(EXTRA_ACTION, action)
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode(callId, slot),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /** Distinct request codes per call and slot, or the system reuses one PendingIntent for all three. */
+    private fun requestCode(
+        callId: String,
+        slot: Int,
+    ): Int = notificationId(callId) * 3 + slot
+
     private fun pending(
         context: Context,
         callId: String,
@@ -294,8 +404,7 @@ object WaIncoming {
         slot: Int,
     ): PendingIntent {
         val launch = launchIntent(context, callId, action)
-        // Distinct request codes per call and slot, or the system reuses one PendingIntent for all three.
-        val code = notificationId(callId) * 3 + slot
+        val code = requestCode(callId, slot)
         return PendingIntent.getActivity(
             context,
             code,

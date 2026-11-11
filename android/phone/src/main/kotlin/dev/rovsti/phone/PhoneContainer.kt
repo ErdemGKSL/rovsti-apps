@@ -60,6 +60,7 @@ import dev.rovsti.phone.wa.PrefsForgottenCalls
 import dev.rovsti.phone.wa.WaCallLauncher
 import dev.rovsti.phone.wa.WaCallsRouter
 import dev.rovsti.phone.wa.WaIdBook
+import dev.rovsti.phone.wa.WaInCallEffects
 import dev.rovsti.phone.wa.WaMergedCallSource
 import dev.rovsti.phone.wa.WaNotices
 import dev.rovsti.phone.wa.WaRingNotifier
@@ -80,7 +81,11 @@ import dev.rovsti.platform.telephony.AndroidSimRepository
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.platform.telephony.CallsApi
 import dev.rovsti.platform.telephony.SimRepository
+import dev.rovsti.platform.wa.AndroidProximityLock
+import dev.rovsti.platform.wa.WaCallService
 import dev.rovsti.platform.wa.WaIncoming
+import dev.rovsti.platform.wa.WaProximity
+import dev.rovsti.platform.wa.communicationOnEarpiece
 import dev.rovsti.shell.ShellContainer
 import dev.rovsti.wa.avatars.WaAvatar
 import dev.rovsti.wa.calls.AndroidCallAudioPump
@@ -484,6 +489,17 @@ open class PhoneContainer(
         ).also {
             it.start()
             WaRingNotifier(it.calls, scope, clock) { id, title -> WaIncoming.show(context, id, title) }.start()
+            // The screen goes dark at the ear, and the ongoing notification names the call and leads back to it.
+            WaInCallEffects(
+                calls = it.calls,
+                muted = it.mutedCalls,
+                speaker = it.speakerOn,
+                earpiece = communicationOnEarpiece(context),
+                proximity = WaProximity(AndroidProximityLock(context)),
+                describe = WaCallService::describe,
+                scope = scope,
+                clock = clock,
+            ).start()
         }
 
     /** The deleted WhatsApp calls, kept across restarts. */

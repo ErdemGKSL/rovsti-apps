@@ -118,6 +118,11 @@
             android:name=".CallActionReceiver"
             android:exported="false" />
 
+        <!-- Answer, Decline and Hang up of the WhatsApp call notifications: broadcasts work on the lock screen. -->
+        <receiver
+            android:name=".wa.WaCallActionReceiver"
+            android:exported="false" />
+
         <!-- Voicemail count (AD-33, AD-34). Ships disabled; spike S9 enables it with setComponentEnabledSetting. The
              system sends this broadcast and holds READ_PHONE_STATE, which keeps other apps from spoofing it. -->
         <receiver

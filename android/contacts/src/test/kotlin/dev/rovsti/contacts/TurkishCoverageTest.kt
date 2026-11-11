@@ -7,13 +7,13 @@ import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
- * English is the default language and a Turkish phone shows Turkish: every `<string>` and `<plurals>` of the four
+ * English is the default language and a Turkish phone shows Turkish: every `<string>` and `<plurals>` of the five
  * modules that carry user-visible text (`res/values/strings.xml`) has an entry in `res/values-tr/strings.xml`, with
  * the same format placeholders, and the Turkish file names nothing English does not. Entries marked
  * `translatable="false"` (brand names, codes) are exempt. Plain JUnit: it reads the XML files, no Android.
  */
 class TurkishCoverageTest {
-    private val modules = listOf("contacts", "design", "shell", "wa")
+    private val modules = listOf("contacts", "design", "platform", "shell", "wa")
 
     private class Entry(
         val kind: String,

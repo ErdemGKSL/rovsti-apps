@@ -139,6 +139,29 @@ class WaCallActionsTest {
             assertEquals(0, r.fake.count("wa.accept_call"))
         }
 
+    @Test fun submitHandsTheReceiverAJobThatEndsOnceTheGatewayWasTold() =
+        runTest(UnconfinedTestDispatcher()) {
+            val r = rig(ringing = true)
+            val job = r.actions.submit(json("c1", "decline"))!!
+            assertFalse("a cold process waits for Rust.init", job.isCompleted)
+            r.ready.complete(Unit)
+            assertTrue(job.isCompleted)
+            assertEquals(1, r.fake.count("wa.reject_call"))
+            assertEquals("a repeat gets no job", null, r.actions.submit(json("c1", "answer")))
+            assertEquals(null, r.actions.submit("junk"))
+        }
+
+    @Test fun hangUpFromTheOngoingNotificationEndsTheCallAfterTheCore() =
+        runTest(UnconfinedTestDispatcher()) {
+            val r = rig()
+            val job = r.actions.hangUp("c1")!!
+            assertEquals(0, r.fake.count("wa.end_call"))
+            r.ready.complete(Unit)
+            assertTrue(job.isCompleted)
+            assertEquals(1, r.fake.count("wa.end_call"))
+            assertEquals(null, r.actions.hangUp(""))
+        }
+
     @Test fun junkPayloadsAreIgnored() =
         runTest(UnconfinedTestDispatcher()) {
             val r = rig()

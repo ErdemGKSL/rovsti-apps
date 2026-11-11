@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.os.StrictMode
 import android.util.Log
 import dev.rovsti.design.time.SystemRovstiClock
+import dev.rovsti.phone.wa.WaCallActionReceiver
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.contacts.ContactPhotos
 import dev.rovsti.platform.telephony.CallRegistry
@@ -30,6 +31,7 @@ class RovstiPhoneApp :
                 PlatformComponents(
                     mainActivity = MainActivity::class.java,
                     callAction = CallActionReceiver::class.java,
+                    waCallAction = WaCallActionReceiver::class.java,
                 ),
             )
         }

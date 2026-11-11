@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wa_call_title">WhatsApp araması</string>
+    <string name="wa_call_missed">Cevapsız WhatsApp araması</string>
+    <string name="wa_call_ongoing">Devam eden WhatsApp araması</string>
+    <string name="wa_call_answering">Yanıtlanıyor…</string>
+    <string name="wa_call_hang_up">Kapat</string>
+</resources>

@@ -228,3 +228,46 @@ opus=83 ... queue_drop=1 app=15 rms=-17.3dBFS`.
 - **Slide to answer on an unlocked phone.** The Incoming screen read `CallSnapshot.keyguardLocked` from the registry,
   which refreshes it only while a telecom call runs (its default is `true`). `WaMergedCallSource` now takes the keyguard
   from `PhoneContainer.keyguardLocked`, which the activity keeps current (resume, unlock, screen on/off, a call).
+
+## Lock-screen Answer, proximity, ringtone, localized in-call notice (E5.8a follow-up 3)
+
+Four owner items, all in the app (the gateway is unchanged).
+
+- **Answer and Decline without unlocking.** SystemUI asks for the unlock before it runs an *activity* action from a
+  lock-screen notification. The incoming `CallStyle`'s Answer and Decline are now broadcasts to
+  `dev.rovsti.phone.wa.WaCallActionReceiver` (not exported, `FLAG_IMMUTABLE`, installed as
+  `PlatformComponents.waCallAction`); the full-screen and body intents stay the activity. The receiver runs
+  `WaIncoming.takeAction` (cancels the notification, stops the ring) and hands the payload to
+  `WaCallActions.submit`, which waits for `awaitRustReady` (a cold process woken by the FCM push) and for the call to
+  ring, as before; `goAsync` keeps the process up to 9 s. Answer then calls `WaIncoming.openAnswered`: it starts
+  `MainActivity` with `wa_call_id` + `wa_call_answered` (`LockScreenGate` holds the flags until the list has the call
+  as `Connecting`), and, because Android 12+ refuses an activity start from a notification broadcast ("trampoline")
+  unless the app has a background-start exemption, it also posts a short "Answering…" notice with a full-screen intent
+  while the phone is locked or the screen is off; the activity cancels it. Without the receiver installed (other apps)
+  the actions fall back to the activity intents.
+- **Proximity.** `WaProximity` holds `PROXIMITY_SCREEN_OFF_WAKE_LOCK` (if `isWakeLockLevelSupported`) while a WhatsApp
+  call is `Active`, the communication device is the earpiece (`communicationOnEarpiece`, and the loudspeaker was not
+  asked for) and the call is not muted; it releases with `RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY` on a route change,
+  mute, the end of the call and when the container scope ends. `WaInCallEffects` (phone) drives it from `WaCalls`.
+- **Ringtone.** `WaRinger` (process-wide, `WaRing` is the testable policy) rings with the default ringtone
+  (`USAGE_NOTIFICATION_RINGTONE`, looping) plus vibration (`USAGE_RINGTONE`). Silent ringer: nothing; vibrate:
+  vibration only; another call live (`CallRegistry` or the audio mode is in-call/in-communication): the
+  `TONE_SUP_CALL_WAITING` beep. Do Not Disturb: off rings; total silence and alarms-only do not; priority-only rings
+  when calls from anyone are allowed or the `wa_calls` channel may override DND (calls from contacts/starred only stay
+  silent: the app cannot tell). `WaIncoming.show` starts it (both the FCM push and the gateway event go there; one
+  ring per call), `WaIncoming.cancel` stops it (accept, decline, `ringOver`, a non-Ringing event, `call_end` push), it
+  stops by itself after `RING_TIMEOUT_MS`, and the call screen's volume/power keys silence it
+  (`WaCallsRouter.silenceRinger`). The `wa_calls` channel stays silent.
+- **In-call notification.** `WaCallService` shows `CallStyle.forOngoingCall` with Hang up (a broadcast to the same
+  receiver, `WaCallActions.hangUp`) once `WaInCallEffects` named the call (`WaCallService.describe`), with the
+  chronometer from when the call went `Active`; its body opens the In-Call screen (`wa_open_call` in `phoneLinkFor`).
+  Its texts and the missed-call text are string resources in `:platform` (English, Turkish; `TurkishCoverageTest`
+  now covers `platform`).
+
+Tests: `WaRingTest`, `WaProximityTest`, `WaCallNotificationsTest` (platform), `WaCallActionsTest` (submit, hang up),
+`WaCallActionReceiverTest`, `WaInCallEffectsTest`, `PhoneManifestTest` (phone).
+
+On the phone: Answer and Decline from the lock screen, ringtone and vibration in each ringer mode, volume key while the
+call screen shows, the screen going dark at the ear (and back on speaker), Hang up and the body of the ongoing
+notification. HyperOS: "Display pop-up windows while running in the background" and "Show on lock screen" for Rovsti
+Phone let the call screen open directly; full-screen notifications must be allowed (Android 14).

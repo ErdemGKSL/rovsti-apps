@@ -44,7 +44,8 @@ import kotlinx.coroutines.plus
  *   full-screen intent is waiting for its call, see [LockScreenGate]), and they stay a few seconds after the last call
  *   goes so the "Call ended" hold is still seen.
  * - **Notification intents.** Answer is honoured exactly once, before any UI exists (AD-2, story 5.3); Message opens
- *   Incoming; a WhatsApp Decline sends the task straight back.
+ *   Incoming; a WhatsApp Decline sends the task straight back. The WhatsApp notification's Answer and Decline are
+ *   broadcasts (`WaCallActionReceiver`); the activity still takes them from intents of older notifications.
  * - **Dial links.** DIAL and VIEW of `tel:` put the number on the Keypad (`dial.fromTelUri` decodes it).
  * - **Back** at a tab root sends the task to the background and keeps the session warm, and does nothing while a call
  *   rings (it must not look like a decline).
@@ -197,6 +198,7 @@ class MainActivity :
         // the lock-screen flags for a WhatsApp ring that is long over).
         intent.consumePhoneExtras()
         intent.removeExtra(WaIncoming.EXTRA_CALL_ID)
+        intent.removeExtra(WaIncoming.EXTRA_ANSWERED)
         return link?.route
     }
 
@@ -230,12 +232,18 @@ class MainActivity :
         lockScreen.onLiveCallChanged(live)
     }
 
-    /** The intent of a WhatsApp ring (not its Decline) holds the flags until the call list has the call. */
+    /**
+     * The intent of a WhatsApp ring (not its Decline) holds the flags until the call list has the call. So does the
+     * intent of an Answer taken on the lock-screen notification (`WaIncoming.openAnswered`): its ring is over, the call
+     * is not live in the list yet.
+     */
     private fun holdForWaRing(intent: Intent?) {
         val id = intent?.getStringExtra(WaIncoming.EXTRA_CALL_ID)?.takeIf { it.isNotEmpty() } ?: return
         if (intent.getStringExtra(WaIncoming.EXTRA_ACTION) == WaIncoming.DECLINE) return
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
-        if (WaIncoming.isOver(id)) return
+        val answered = intent.getBooleanExtra(WaIncoming.EXTRA_ANSWERED, false)
+        if (answered) WaIncoming.cancelAnswering(this, id)
+        if (WaIncoming.isOver(id) && !answered) return
         lockScreen.holdForWaIntent(id)
     }
 

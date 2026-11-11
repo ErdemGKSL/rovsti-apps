@@ -5,6 +5,7 @@ import dev.rovsti.core.model.phone.CanPlaceRequest
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.platform.telephony.CallsApi
 import dev.rovsti.platform.telephony.RejectPolicy
+import dev.rovsti.platform.wa.WaRinger
 import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.calls.CallResult
 import dev.rovsti.wa.calls.WaCalls
@@ -139,7 +140,11 @@ class WaCallsRouter(
             reject(callId)
         }
 
-    override fun silenceRinger(): Boolean = registry.silenceRinger()
+    /** A volume or power key while a call rings: the WhatsApp ring is ours ([WaRinger]), a cellular one Telecom's. */
+    override fun silenceRinger(): Boolean {
+        val wa = WaRinger.silence()
+        return registry.silenceRinger() || wa
+    }
 
     override fun incomingFrame(callId: Int): Boolean = waId(callId) == null && registry.incomingFrame(callId)
 

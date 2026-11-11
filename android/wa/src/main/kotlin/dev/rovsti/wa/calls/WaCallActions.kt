@@ -4,6 +4,7 @@ import dev.rovsti.core.model.phone.CallDirection
 import dev.rovsti.core.model.phone.CallPhase
 import dev.rovsti.platform.wa.WaIncoming
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -13,8 +14,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Answer and Decline tapped on the incoming WhatsApp call notification (AD-WA5, AD-WA6). The activity hands the payload
- * of `WaIncoming.takeAction` to [offer]; this class makes it take effect exactly once per call:
+ * Answer and Decline tapped on the incoming WhatsApp call notification (AD-WA5, AD-WA6). The app's action receiver (or
+ * the activity, for an intent of an older notification) hands the payload of `WaIncoming.takeAction` to [submit]; this
+ * class makes it take effect exactly once per call:
  *
  * - nothing runs before [ready] says the Rust core is initialised (a cold start from the notification reaches this
  *   code before `Rust.init` is done; every op would wait anyway, and the gateway must not be opened early);
@@ -31,16 +33,30 @@ class WaCallActions(
     private val handled = LinkedHashSet<String>()
 
     /** True when the payload is a new action for a call and is now running; false for junk and repeats. */
+    fun offer(payload: String): Boolean = submit(payload) != null
+
+    /**
+     * Like [offer], but returns the job that carries the action out (null for junk and repeats), so a broadcast
+     * receiver can keep its process alive until the gateway has been told.
+     */
     @Synchronized
-    fun offer(payload: String): Boolean {
-        val (id, action) = parse(payload) ?: return false
-        if (!handled.add(id)) return false
+    fun submit(payload: String): Job? {
+        val (id, action) = parse(payload) ?: return null
+        if (!handled.add(id)) return null
         if (handled.size > MEMORY) handled.remove(handled.first())
-        scope.launch {
+        return scope.launch {
             ready()
             if (action == WaIncoming.DECLINE) calls.reject(id) else answer(id)
         }
-        return true
+    }
+
+    /** Hang up tapped on the ongoing WhatsApp call notification: ends [callId] once the core is ready. */
+    fun hangUp(callId: String): Job? {
+        if (callId.isEmpty()) return null
+        return scope.launch {
+            ready()
+            calls.end(callId)
+        }
     }
 
     /** True when an action for [callId] already ran or is running (a snapshot must not show that call again). */

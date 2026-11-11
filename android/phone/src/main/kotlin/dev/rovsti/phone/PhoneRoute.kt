@@ -10,6 +10,7 @@ import dev.rovsti.design.transition.TabBarMode
 import dev.rovsti.platform.system.Handoff
 import dev.rovsti.platform.telephony.CallNotifications
 import dev.rovsti.platform.telephony.DialIntents
+import dev.rovsti.platform.wa.WaCallService
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.serialization.Serializable
 
@@ -156,7 +157,8 @@ data class PhoneLink(
  * - the call notifications' intents open Incoming (Show, Answer, Message) with the call id;
  * - the WhatsApp hand-off (`dev.rovsti.action.WA_CALL` through `.WaHandoff`) opens the Keypad; the number is dialled over WhatsApp
  *   (`phone.wa_handoff_number` decides the number);
- * - a plain launch while a call is live (the ongoing notification's tap) opens the In-Call screen.
+ * - a plain launch while a call is live (the ongoing notification's tap) opens the In-Call screen, and so does the
+ *   ongoing WhatsApp call notification's tap (`WaCallService.EXTRA_OPEN_CALL`).
  *
  * Calls open on the Recents tab (they belong to its history), numbers on the Keypad. Anything else leaves the stacks
  * alone (null).
@@ -199,6 +201,11 @@ fun phoneLinkFor(
             PhoneLink(KeypadTab, emptyList(), telUri = uri)
         }
 
+        // The ongoing WhatsApp call notification's body: back to that call.
+        !extras?.getString(WaCallService.EXTRA_OPEN_CALL).isNullOrEmpty() -> {
+            PhoneLink(RecentsTab, listOf(PhoneRoute.InCall))
+        }
+
         liveCall && (action == null || action == Intent.ACTION_MAIN) -> {
             PhoneLink(RecentsTab, listOf(PhoneRoute.InCall))
         }
@@ -221,4 +228,5 @@ fun Intent.consumePhoneExtras() {
     removeExtra(CallNotifications.EXTRA_REPLY_CALL_ID)
     removeExtra(Handoff.EXTRA_JID)
     removeExtra(Handoff.EXTRA_NAME)
+    removeExtra(WaCallService.EXTRA_OPEN_CALL)
 }

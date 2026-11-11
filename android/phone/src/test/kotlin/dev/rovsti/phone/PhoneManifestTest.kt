@@ -127,6 +127,12 @@ class PhoneManifestTest {
         val action = manifest.component("$pkg.CallActionReceiver")
         assertEquals(false, action.exported)
 
+        // The WhatsApp call actions (Answer, Decline, Hang up): only the app's own PendingIntents reach it.
+        val waAction = manifest.component("$pkg.wa.WaCallActionReceiver")
+        assertEquals("receiver", waAction.kind)
+        assertEquals(false, waAction.exported)
+        assertTrue(waAction.filters.isEmpty())
+
         val voicemail = manifest.component("$pkg.VoicemailReceiver")
         assertEquals("false", voicemail.attributes["enabled"])
         assertEquals(true, voicemail.exported)
@@ -206,6 +212,7 @@ class PhoneManifestTest {
                 "$pkg.RovstiInCallService",
                 "dev.rovsti.platform.wa.WaCallService",
                 "$pkg.CallActionReceiver",
+                "$pkg.wa.WaCallActionReceiver",
                 "$pkg.VoicemailReceiver",
                 "dev.rovsti.bridge.CallReminderReceiver",
                 "dev.rovsti.bridge.RovstiShareProvider",

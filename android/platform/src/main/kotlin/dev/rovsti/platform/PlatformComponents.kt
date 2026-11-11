@@ -12,6 +12,11 @@ data class PlatformComponents(
     val mainActivity: Class<out Activity>,
     /** The call-notification action receiver (Phone only). */
     val callAction: Class<out BroadcastReceiver>? = null,
+    /**
+     * The WhatsApp call-notification action receiver (Answer, Decline, Hang up; Phone only). Without it the actions
+     * fall back to activity intents, which the system runs only after the phone is unlocked.
+     */
+    val waCallAction: Class<out BroadcastReceiver>? = null,
 ) {
     companion object {
         @Volatile private var current: PlatformComponents? = null

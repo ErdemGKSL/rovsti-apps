@@ -1,5 +1,7 @@
 package dev.rovsti.phone.incall
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -75,6 +77,7 @@ import dev.rovsti.phone.DECLINE_RED
 import dev.rovsti.phone.InCallMetrics
 import dev.rovsti.phone.incoming.AuraMode
 import dev.rovsti.phone.incoming.AvatarKey
+import dev.rovsti.phone.incoming.CallNameText
 import dev.rovsti.phone.wa.WaAudioLabel
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicInteger
@@ -206,7 +209,11 @@ fun InCallContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     TopRow(ui, strings, onAction, onCollapse)
-                    CallerBlock(ui, call, strings, timer, photoState, onAction, onTimerMenu, Modifier.weight(1f))
+                    if (ui.keypad.open) {
+                        KeypadHeader(ui, call, strings, onAction, Modifier.weight(1f))
+                    } else {
+                        CallerBlock(ui, call, strings, timer, photoState, onAction, onTimerMenu, Modifier.weight(1f))
+                    }
                     if (ui.keypad.open) {
                         TonePanel(ui, strings, onAction)
                     } else {
@@ -364,14 +371,10 @@ private fun Identity(
                 },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            RovstiText(
+            CallNameText(
                 call.title,
-                modifier = Modifier.testTag(InCallTags.Name).semantics { heading() },
-                style = RovstiTheme.type.largeTitle,
+                modifier = Modifier.fillMaxWidth().testTag(InCallTags.Name).semantics { heading() },
                 color = OnAura,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
             )
             call.subtitle?.let {
                 Spacer(Modifier.height(InCallMetrics.NameGap))
@@ -389,6 +392,34 @@ private fun Identity(
             Spacer(Modifier.height(InCallMetrics.NameGap))
             WaAudioLabel(strings.waAudio, OnAuraSecondary, Modifier.testTag(InCallTags.WaAudio))
         }
+    }
+}
+
+/**
+ * With the tone keypad open (F23) the header shrinks to a compact block at the top: the name on one Light 22 sp line and
+ * the digits sent so far in their own row under it, 8 dp apart. No fixed heights: the rows size to their text, and the
+ * block eases to its new size with the standard spring.
+ */
+@Composable
+private fun KeypadHeader(
+    ui: InCallUi,
+    call: InCallCall,
+    strings: InCallStrings,
+    onAction: (InCallAction) -> Unit,
+    modifier: Modifier,
+) {
+    Column(
+        modifier.fillMaxWidth().animateContentSize(spring(dampingRatio = 0.85f, stiffness = 400f)),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CallNameText(
+            call.title,
+            modifier = Modifier.fillMaxWidth().testTag(InCallTags.Name).semantics { heading() },
+            color = OnAura,
+            compact = true,
+        )
+        DigitLine(ui.keypad.digits, strings) { onAction(InCallAction.CopyDigits) }
     }
 }
 
@@ -572,12 +603,16 @@ private fun ControlGrid(
     }
 }
 
-private fun audioIcon(route: AudioRoute): ImageVector =
+internal fun audioIcon(route: AudioRoute): ImageVector =
     when (route) {
         AudioRoute.Speaker -> RovstiIcons.Speaker
+
         AudioRoute.Bluetooth -> RovstiIcons.Bluetooth
+
         AudioRoute.WiredHeadset -> RovstiIcons.Headphones
-        else -> RovstiIcons.Phone
+
+        // Earpiece and speaker share the speaker glyph (iOS); the active state alone tells them apart (F26).
+        else -> RovstiIcons.Speaker
     }
 
 /**

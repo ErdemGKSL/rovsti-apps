@@ -312,7 +312,10 @@ internal class InCallHarness(
     bluetooth: Boolean = true,
     val backend: FakeInCallBackend = FakeInCallBackend(),
     val tones: ToneMemory = ToneMemory(),
-    display: NumberDisplay = NumberDisplay.AsIs,
+    /** The real Rust Display form by default (what the owner sees); `NumberDisplay.AsIs` only where a test says why. */
+    display: NumberDisplay =
+        dev.rovsti.phone.incoming
+            .hostDisplay(first),
     placer: dev.rovsti.phone.data.CallPlacer? = null,
 ) {
     val testScope = TestScope(UnconfinedTestDispatcher())

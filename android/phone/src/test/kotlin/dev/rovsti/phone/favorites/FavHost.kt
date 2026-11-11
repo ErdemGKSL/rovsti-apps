@@ -172,6 +172,9 @@ internal class PeopleHarness(
     val actions = mutableListOf<PeopleAction>()
     val opened = mutableListOf<Long>()
     var created = 0
+
+    /** Presents the sheet a tapped person opens, as the app does (F24); null records the tap only. */
+    var onOpenSheet: ((Long, () -> Unit) -> Unit)? = null
     val overlays = OverlayController()
     lateinit var listState: LazyListState
     lateinit var searchState: TextFieldState
@@ -285,7 +288,10 @@ internal fun HostedContacts(
                 searchState = harness.searchState,
                 listState = harness.listState,
                 onAction = harness::on,
-                onOpen = { harness.opened += it },
+                onOpen = { id, dismissed ->
+                    harness.opened += id
+                    harness.onOpenSheet?.invoke(id, dismissed)
+                },
                 onNew = { harness.created++ },
                 links = links,
                 setup = setup,

@@ -215,7 +215,8 @@ internal class IncomingHarness(
     first: CallSnapshot = ringingSnapshot(),
     sims: Sims = Sims(),
     keepInitial: Boolean = false,
-    display: NumberDisplay = NumberDisplay.AsIs,
+    /** The real Rust Display form by default (what the owner sees); `NumberDisplay.AsIs` only where a test says why. */
+    display: NumberDisplay = hostDisplay(first),
 ) {
     val source = FakeSource(first)
     val calls = RecordingCalls()
@@ -250,9 +251,11 @@ internal class IncomingHarness(
     }
 }
 
+private val sharedHost by lazy { HostRust("rovsti-display") }
+
 /** The Rust core's Display form with home "90", learned for every number in [snapshot] (so a built state is formatted). */
 internal fun hostDisplay(snapshot: CallSnapshot): NumberDisplay {
-    val display = NumberDisplay(NativeSharedOps(HostRust("rovsti-incoming-shot").core)) { "90" }
+    val display = NumberDisplay(NativeSharedOps(sharedHost.core)) { "90" }
     kotlinx.coroutines.runBlocking { display.warm(snapshot.calls.map { it.numberRaw }) }
     return display
 }

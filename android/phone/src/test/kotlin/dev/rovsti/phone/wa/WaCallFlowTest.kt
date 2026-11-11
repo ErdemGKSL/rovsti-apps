@@ -101,6 +101,7 @@ class WaCallFlowTest {
             calls = router,
             backend = FakeBackend(),
             reminders = FakeReminders(),
+            // AsIs on purpose: this flow test asserts the wire numbers, the formatting has its own tests.
             display = NumberDisplay.AsIs,
             sims = MutableStateFlow(Sims()),
             savedReplies = { emptyList() },
@@ -119,6 +120,7 @@ class WaCallFlowTest {
             blocker = FakeBlocker(),
             clipboard = FakeClipboard(),
             tones = ToneMemory(),
+            // AsIs on purpose: this flow test asserts the wire numbers, the formatting has its own tests.
             display = NumberDisplay.AsIs,
             sims = MutableStateFlow(Sims()),
             bluetoothGranted = MutableStateFlow(true),

@@ -151,7 +151,7 @@ class InCallScreenTest : ShotTest() {
     @Test fun nameNumberTimerAndTheSixControlsAreDrawn() {
         show()
         compose.onNodeWithTag(InCallTags.Name).assertTextEquals("Mert Kaya")
-        compose.onNodeWithTag(InCallTags.Number).assertTextEquals("+905559990000")
+        compose.onNodeWithTag(InCallTags.Number).assertTextEquals("+90 555 999 00 00")
         compose.onNodeWithTag(InCallTags.Timer).assertIsDisplayed()
         for (tag in listOf(
             InCallTags.Mute,
@@ -580,5 +580,43 @@ class InCallScreenTest : ShotTest() {
         show()
         compose.onNodeWithTag(InCallTags.End).performTouchInput { longClick() }
         assertTrue(endMenus.isEmpty())
+    }
+
+    // ---- F23: the compact header over the keypad --------------------------------------------------------------------------
+
+    @Test fun withTheKeypadOpenTheNameAndTheDigitsDoNotTouch() {
+        show(ui.copy(keypad = ToneKeypad(open = true, digits = "4821", pasteLabel = "4821#")))
+        advance(600)
+        val name = compose.onNodeWithTag(InCallTags.Name).fetchSemanticsNode()
+        val digits = compose.onNodeWithTag(InCallTags.Digits).fetchSemanticsNode()
+        assertFalse(
+            "name ${name.boundsInRoot} digits ${digits.boundsInRoot}",
+            name.boundsInRoot.overlaps(digits.boundsInRoot),
+        )
+        val layout = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        name.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(layout)
+        assertFalse("the name is cut", layout.single().hasVisualOverflow)
+        assertEquals("one line", 1, layout.single().lineCount)
+    }
+
+    @Test fun aLongNameStaysOnOneLineWithAnEllipsisOverTheKeypad() {
+        val long = InCallHarness(liveSnapshot(liveCall(name = "Muhammed Abdurrahman Karaoglanoglu-Yildirimoglu"))).ui
+        show(long.copy(keypad = ToneKeypad(open = true, digits = "4821")))
+        advance(600)
+        val name = compose.onNodeWithTag(InCallTags.Name).fetchSemanticsNode()
+        val digits = compose.onNodeWithTag(InCallTags.Digits).fetchSemanticsNode()
+        assertFalse(name.boundsInRoot.overlaps(digits.boundsInRoot))
+        val layout = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        name.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(layout)
+        assertEquals(1, layout.single().lineCount)
+    }
+
+    // ---- F26: the Audio glyph ---------------------------------------------------------------------------------------------
+
+    @Test fun theAudioGlyphIsASpeakerForEarpieceAndSpeakerBluetoothForBluetoothHeadphonesForWired() {
+        assertEquals(dev.rovsti.design.icons.RovstiIcons.Speaker, audioIcon(AudioRoute.Earpiece))
+        assertEquals(dev.rovsti.design.icons.RovstiIcons.Speaker, audioIcon(AudioRoute.Speaker))
+        assertEquals(dev.rovsti.design.icons.RovstiIcons.Bluetooth, audioIcon(AudioRoute.Bluetooth))
+        assertEquals(dev.rovsti.design.icons.RovstiIcons.Headphones, audioIcon(AudioRoute.WiredHeadset))
     }
 }

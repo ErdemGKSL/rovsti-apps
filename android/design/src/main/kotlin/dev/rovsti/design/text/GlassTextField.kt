@@ -99,6 +99,8 @@ fun GlassTextField(
     onSubmit: () -> Unit = {},
     maxLines: Int = 1,
     minLines: Int = 1,
+    /** A requester the caller owns (a search field handing focus back after a sheet); else the field's own. */
+    focusRequester: FocusRequester? = null,
 ) {
     val multiline = maxLines > 1
     val tokens = RovstiTheme.glass
@@ -110,7 +112,7 @@ fun GlassTextField(
         tween(FILL_MS),
         label = "fieldFill",
     )
-    val focus = remember { FocusRequester() }
+    val focus = focusRequester ?: remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     BasicTextField(
         state = state,

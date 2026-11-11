@@ -1,13 +1,23 @@
 package dev.rovsti.phone
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
+import dev.rovsti.design.overlay.Detent
+import dev.rovsti.design.overlay.SheetEntry
+import dev.rovsti.design.theme.RovstiText
+import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.contacts.PeopleEmpty
+import dev.rovsti.phone.contacts.PeopleTags
 import dev.rovsti.phone.favorites.FavHarness
 import dev.rovsti.phone.favorites.FavTags
 import dev.rovsti.phone.favorites.FavUi
@@ -17,6 +27,7 @@ import dev.rovsti.phone.favorites.PeopleHarness
 import dev.rovsti.phone.favorites.PeopleUiSample
 import dev.rovsti.testing.RecordingHaptics
 import dev.rovsti.testing.ShotTest
+import kotlinx.collections.immutable.persistentListOf
 import org.junit.Test
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -114,6 +125,39 @@ class E55ShotTest : ShotTest() {
             composeFrame(dark = dark) { HostedContacts(h, initialQuery = "ay") }
             advance(1200)
             capture("e5.5-contacts-search", dark)
+        }
+    }
+
+    /** F24: a result opened from the search lets the field go and drops the keyboard before the sheet rises over it. */
+    @Test fun contactsSearchSheetOpen() {
+        for (dark in listOf(false, true)) {
+            val rows =
+                PeopleUiSample.rows(
+                    listOf("Ayse Yilmaz", "Kerem Aydin", "Aylin Bulut", "Ada Lovelace"),
+                    sections = false,
+                )
+            val h = PeopleHarness(PeopleUiSample.ui(rows, query = "ay"))
+            h.onOpenSheet = { _, dismissed ->
+                h.overlays.present(
+                    SheetEntry(
+                        "Ayse Yilmaz",
+                        persistentListOf(Detent.Medium, Detent.Large),
+                        initialDetent = Detent.Medium,
+                        onDismissed = dismissed,
+                    ) { _ ->
+                        RovstiText("Ayse Yilmaz", Modifier.padding(Spacing.gutter).testTag("sheet-body"))
+                    },
+                )
+            }
+            composeFrame(dark = dark) { HostedContacts(h, initialQuery = "ay") }
+            advance(600)
+            compose.onNodeWithTag(PeopleTags.Search).performClick()
+            advance(300)
+            compose.onNodeWithTag(PeopleTags.Search, useUnmergedTree = true).assertIsFocused()
+            compose.onNodeWithTag(PeopleTags.row(1)).performClick()
+            advance(1_400)
+            compose.onNodeWithTag(PeopleTags.Search, useUnmergedTree = true).assertIsNotFocused()
+            capture("e5.5-contacts-search-sheet-open", dark)
         }
     }
 }

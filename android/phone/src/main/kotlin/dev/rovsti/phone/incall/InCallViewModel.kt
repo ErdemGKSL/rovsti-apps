@@ -319,7 +319,8 @@ class InCallViewModel(
                 val child = snapshot.calls.firstOrNull { it.id == p.id }
                 ParticipantUi(
                     id = p.id,
-                    label = p.label,
+                    // The core labels an unnamed leg with its raw number; the owner sees it in Display form (F22).
+                    label = display.peek(p.label.trim()).ifEmpty { p.label },
                     avatarKey =
                         child?.contactId?.toString() ?: child?.displayName?.trim()?.takeIf { it.isNotEmpty() }
                             ?: p.label,

@@ -1260,6 +1260,14 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
   (name descenders clipped). New from the same review: **(F25)** the in-call name is bold `largeTitle` while Incoming uses
   Light 36 sp; use the same thin name in call. **(F26)** the Audio control shows a phone handset on earpiece; use a
   speaker glyph (Bluetooth/headphones glyph for those routes). All four: round-14 step 1.
+- **Evidence F22-F26 (round-14 step 1):** F22 `IncomingHarness`/`InCallHarness` default to the real `hostDisplay(...)`
+  (AsIs only where a test says why), `InCallScreenTest` expects `+90 555 999 00 00`, `InCallViewModelTest` held card and
+  conference row formatted; F23 `KeypadHeader` (name Light 22 sp one line + digits row, `spacedBy(8 dp)`,
+  `animateContentSize(spring 0.85/400)`), `InCallScreenTest` bounds + no visual overflow; F25 `incoming/CallHeader.kt`
+  `CallNameText` used by Incoming and In-call (WA calls use both); F26 `audioIcon` (earpiece/speaker = Speaker, Bluetooth,
+  Headphones), mapping test; F24 `:design` `text/SearchFocusHandoff.kt` + `SearchFocusHandoffTest`, used by the Phone
+  Contacts and Recents searches and the Contacts app list. Goldens `e5.7-*`, `e5.8-*`, `e5.6-waiting-call-card*`,
+  `e5.7-incall-keypad`, new `e5.5-contacts-search-sheet-open`.
 - AC1 Aura is an ambient animation obeying ARCH 10 rule 5; route picker lists endpoints and tolerates a missing
   `BLUETOOTH_CONNECT` grant (ARCH 7.5); the screen is shown over the lock screen only while a call is live.
 - Screenshots: `e5.7-incall-active`, `e5.7-incall-keypad`, `e5.7-route-picker-popover`, `e5.7-incall-sim-chip`,

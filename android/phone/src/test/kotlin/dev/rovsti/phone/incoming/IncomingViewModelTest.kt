@@ -60,13 +60,13 @@ class IncomingViewModelTest {
     @Test fun theRingingCallBecomesTheCallerWithNameNumberAndKey() {
         val caller = IncomingHarness().ui.caller!!
         assertEquals("Ayse Yilmaz", caller.title)
-        assertEquals("+905551112233", caller.subtitle)
+        assertEquals("+90 555 111 22 33", caller.subtitle)
         assertEquals("7", caller.avatarKey)
     }
 
     @Test fun anUnnamedCallShowsTheNumberAloneAndABlankOneUnknown() {
         val bare = IncomingHarness(ringingSnapshot(ringing(name = null, contactId = null))).ui.caller!!
-        assertEquals("+905551112233", bare.title)
+        assertEquals("+90 555 111 22 33", bare.title)
         assertNull(bare.subtitle)
         val blank = IncomingHarness(ringingSnapshot(ringing(name = null, number = "", contactId = null))).ui
         assertEquals("Unknown", blank.caller!!.title)

@@ -72,12 +72,20 @@ class DetailsPresenter(
     private val call: (CallDetailsTarget, CoroutineScope) -> CallDetailsViewModel,
     private val scope: () -> CoroutineScope = { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) },
 ) {
-    fun presentPerson(target: PersonTarget): SheetEntry {
+    fun presentPerson(
+        target: PersonTarget,
+        onDismissed: () -> Unit = {},
+    ): SheetEntry {
         val strings = DetailsStrings(resources())
         val model = person(target, scope())
         val title = if (target.name != null) strings.sheetPerson else strings.sheetNumber
         val entry =
-            SheetEntry(title = title, detents = PersonDetents, initialDetent = Detent.Medium) { _ ->
+            SheetEntry(
+                title = title,
+                detents = PersonDetents,
+                initialDetent = Detent.Medium,
+                onDismissed = onDismissed,
+            ) { _ ->
                 PersonSheet(model, host, onOpenCall = ::presentCall, onShowQr = ::presentQr)
             }
         overlays.present(entry)

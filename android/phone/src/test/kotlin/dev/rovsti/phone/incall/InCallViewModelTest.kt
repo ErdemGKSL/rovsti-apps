@@ -6,6 +6,7 @@ import dev.rovsti.core.model.phone.RowKind
 import dev.rovsti.core.model.phone.SimAccount
 import dev.rovsti.core.model.phone.ToneStep
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.core.ops.NativePhoneOps
 import dev.rovsti.core.ops.NativeSharedOps
 import dev.rovsti.phone.HostRust
 import dev.rovsti.phone.data.NumberDisplay
@@ -31,7 +32,7 @@ class InCallViewModelTest {
         val h = InCallHarness()
         val call = h.ui.call!!
         assertEquals("Mert Kaya", call.title)
-        assertEquals(NUMBER, call.subtitle)
+        assertEquals("+90 555 999 00 00", call.subtitle)
         assertEquals(CallPhase.Active, call.phase)
         assertTrue(h.ui.live)
         assertTrue(h.ui.canHold)
@@ -39,7 +40,7 @@ class InCallViewModelTest {
 
     @Test fun anUnnamedCallShowsTheNumberAndNoSubtitle() {
         val h = InCallHarness(liveSnapshot(liveCall(name = null, contactId = null)))
-        assertEquals(NUMBER, h.ui.call!!.title)
+        assertEquals("+90 555 999 00 00", h.ui.call!!.title)
         assertNull(h.ui.call!!.subtitle)
     }
 
@@ -74,6 +75,59 @@ class InCallViewModelTest {
         val post = bare.effects.filterIsInstance<InCallEffect.PostCall>().single()
         assertEquals("+90 555 111 22 33", post.title)
         assertEquals("+905551112233", post.number)
+    }
+
+    @Test fun theHeldCardOfAnUnnamedCallReadsTheFormattedNumber() {
+        val display = realDisplay()
+        val snapshot =
+            twoCalls().let { two ->
+                two.copy(
+                    calls =
+                        two.calls.map {
+                            if (it.id ==
+                                3
+                            ) {
+                                it.copy(displayName = null, contactId = null, numberRaw = "+905558887766")
+                            } else {
+                                it
+                            }
+                        },
+                )
+            }
+        val h =
+            InCallHarness(
+                snapshot,
+                display = display,
+                backend = CoreSceneBackend(NativePhoneOps(HostRust("rovsti-held").core)),
+            )
+        eventually { h.ui.multi.held != null }
+        assertEquals(
+            "+90 555 888 77 66",
+            h.ui.multi.held!!
+                .title,
+        )
+    }
+
+    @Test fun aConferenceRowOfAnUnnamedLegReadsTheFormattedNumber() {
+        val display = realDisplay()
+        val snapshot =
+            conferenceCall().let { conf ->
+                conf.copy(
+                    calls = conf.calls.map { if (it.id == 7) it.copy(displayName = null, contactId = null) else it },
+                )
+            }
+        val h =
+            InCallHarness(
+                snapshot,
+                display = display,
+                backend = CoreSceneBackend(NativePhoneOps(HostRust("rovsti-conf").core)),
+            )
+        eventually { h.ui.multi.participants.size == 2 }
+        val labels =
+            h.ui.multi.participants
+                .map { it.label }
+        assertTrue("$labels", labels.none { it.startsWith("+9055") && !it.contains(' ') })
+        assertTrue("$labels", labels.contains("+90 555 888 77 66"))
     }
 
     @Test fun aHeldCallReadsAsHeld() {

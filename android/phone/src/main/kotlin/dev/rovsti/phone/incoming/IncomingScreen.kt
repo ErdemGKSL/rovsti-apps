@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,12 +41,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.sp
 import dev.rovsti.design.controls.GlassCircleButton
 import dev.rovsti.design.controls.PlainIconAction
 import dev.rovsti.design.controls.SlideToAnswer
@@ -275,14 +270,10 @@ private fun CallerBlock(
             )
         }
         Spacer(Modifier.height(IncomingMetrics.AvatarGap))
-        // Light 36 sp, centred, two lines at most; a longer name shrinks to fit instead of cutting.
-        BasicText(
+        CallNameText(
             caller.title,
             modifier = Modifier.fillMaxWidth().testTag(IncomingTags.Name).semantics { heading() },
-            style = NameStyle.merge(TextStyle(color = OnAura, textAlign = TextAlign.Center)),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            autoSize = TextAutoSize.StepBased(minFontSize = NameMinSize, maxFontSize = NameSize, stepSize = 1.sp),
+            color = OnAura,
         )
         caller.subtitle?.let {
             Spacer(Modifier.height(IncomingMetrics.NameGap))
@@ -475,6 +466,3 @@ private const val INDIGO = 0xFF5E5CE6
 private const val MESH_ALPHA = 0.28f
 private const val LOCK_CHIP_ALPHA = 0.18f
 private const val DECLINE_ROTATION = 135f
-private val NameSize = 36.sp
-private val NameMinSize = 22.sp
-private val NameStyle = TextStyle(fontSize = NameSize, fontWeight = FontWeight.Light, letterSpacing = (-0.4).sp)

@@ -34,6 +34,7 @@ import dev.rovsti.design.list.RowSeparator
 import dev.rovsti.design.list.SectionHeader
 import dev.rovsti.design.list.TextStartWithLeading
 import dev.rovsti.design.text.SearchField
+import dev.rovsti.design.text.rememberSearchFocusHandoff
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
@@ -70,13 +71,21 @@ fun PhoneContactsContent(
     searchState: TextFieldState,
     listState: LazyListState,
     onAction: (PeopleAction) -> Unit,
-    onOpen: (Long) -> Unit,
+    onOpen: (Long, () -> Unit) -> Unit,
     onNew: () -> Unit,
     links: RootLinks,
     setup: SetupUiState,
     modifier: Modifier = Modifier,
 ) {
     val latest = rememberUpdatedState(onAction)
+    val handoff = rememberSearchFocusHandoff(searchState)
+    val openResult: (Long) -> Unit =
+        remember(onOpen, handoff) {
+            { id ->
+                handoff.onResultOpened()
+                onOpen(id, handoff::onSheetDismissed)
+            }
+        }
     LaunchedEffect(searchState) {
         snapshotFlow { searchState.text.toString() }.collect { latest.value(PeopleAction.SetQuery(it)) }
     }
@@ -99,6 +108,7 @@ fun PhoneContactsContent(
                     SearchField(
                         state = searchState,
                         placeholder = stringResource(R.string.people_search),
+                        focusRequester = handoff.requester,
                         modifier =
                             Modifier
                                 .padding(
@@ -113,7 +123,7 @@ fun PhoneContactsContent(
             when (ui.phase) {
                 PeoplePhase.Loading -> Unit
                 PeoplePhase.NoPermission -> item(key = "gate", contentType = "gate") { Gate(links) }
-                PeoplePhase.Ready -> readyItems(ui, endInset, onOpen)
+                PeoplePhase.Ready -> readyItems(ui, endInset, openResult)
             }
         }
         if (ready && ui.showRail) {
@@ -256,7 +266,7 @@ fun PhoneContactsScreen(
     model: PhoneContactsViewModel,
     links: RootLinks,
     setup: SetupUiState,
-    onOpen: (Long) -> Unit,
+    onOpen: (Long, () -> Unit) -> Unit,
     onNew: () -> Unit,
     modifier: Modifier = Modifier,
 ) {

@@ -5,6 +5,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -21,6 +22,7 @@ fun SearchField(
     placeholder: String = stringResource(R.string.design_search),
     enabled: Boolean = true,
     onSubmit: () -> Unit = {},
+    focusRequester: FocusRequester? = null,
 ) {
     GlassTextField(
         state = state,
@@ -31,5 +33,6 @@ fun SearchField(
         imeAction = ImeAction.Search,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None),
         onSubmit = onSubmit,
+        focusRequester = focusRequester,
     )
 }

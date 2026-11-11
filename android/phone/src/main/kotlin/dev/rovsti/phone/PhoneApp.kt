@@ -208,7 +208,7 @@ private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewMode
 /** Recents' Android side: the SMS composer, the contact editor, the share sheet. */
 private class AndroidRecentsHost(
     private val context: Context,
-    private val details: (String) -> Unit,
+    private val details: (String, () -> Unit) -> Unit,
 ) : RecentsHost {
     override fun message(
         number: String,
@@ -219,7 +219,10 @@ private class AndroidRecentsHost(
 
     override fun share(text: String) = launch(Intent.createChooser(ShareIntents.text(text), null))
 
-    override fun openDetails(key: String) = details(key)
+    override fun openDetails(
+        key: String,
+        onDismissed: () -> Unit,
+    ) = details(key, onDismissed)
 
     private fun launch(intent: Intent) {
         try {
@@ -448,12 +451,12 @@ fun PhoneApp(
                 call = container::callModel,
             )
         }
-    val openDetails: (String) -> Unit =
+    val openDetails: (String, () -> Unit) -> Unit =
         remember(details, recentsModel, container) {
-            { key ->
+            { key, onDismissed ->
                 recentsModel.rowOf(key)?.let { row ->
                     val book = (container.people.people.value as? People.Ready)?.contacts
-                    details.presentPerson(personTarget(row, book))
+                    details.presentPerson(personTarget(row, book), onDismissed)
                 }
             }
         }
@@ -516,11 +519,11 @@ fun PhoneApp(
     }
     val miniTimer = rememberCallTimer(inCallUi.call, inCall::now, inCall::elapsed)
     val contactsModel = rememberContactsViewModel(container)
-    val openContact: (Long) -> Unit =
+    val openContact: (Long, () -> Unit) -> Unit =
         remember(details, container) {
-            { id ->
+            { id, onDismissed ->
                 val book = (container.people.people.value as? People.Ready)?.contacts
-                book?.firstOrNull { it.id == id }?.let { details.presentPerson(personTarget(it)) }
+                book?.firstOrNull { it.id == id }?.let { details.presentPerson(personTarget(it), onDismissed) }
             }
         }
     val openFavorite: (FavPerson) -> Unit =
@@ -528,7 +531,7 @@ fun PhoneApp(
             { person ->
                 val id = person.contactId
                 if (id != null) {
-                    openContact(id)
+                    openContact(id) {}
                 } else {
                     val number = person.number.orEmpty()
                     details.presentPerson(

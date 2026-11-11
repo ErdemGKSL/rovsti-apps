@@ -81,6 +81,7 @@ import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
 import dev.rovsti.design.press.rowPress
 import dev.rovsti.design.text.SearchField
+import dev.rovsti.design.text.rememberSearchFocusHandoff
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -142,7 +143,10 @@ interface RecentsHost {
     fun share(text: String)
 
     /** The details sheet of a call (E5.4); until it lands the app says so. */
-    fun openDetails(key: String)
+    fun openDetails(
+        key: String,
+        onDismissed: () -> Unit,
+    )
 }
 
 private val FilterOrder =
@@ -174,9 +178,17 @@ fun RecentsContent(
     modifier: Modifier = Modifier,
     showNotice: Boolean = false,
     menuFor: (RecentsRowUi) -> ImmutableList<MenuItem> = { persistentListOf() },
-    onInfo: (String) -> Unit = {},
+    onInfo: (String, () -> Unit) -> Unit = { _, _ -> },
 ) {
     val latest = rememberUpdatedState(onAction)
+    val handoff = rememberSearchFocusHandoff(searchState)
+    val openInfo: (String) -> Unit =
+        remember(onInfo, handoff) {
+            { key ->
+                handoff.onResultOpened()
+                onInfo(key, handoff::onSheetDismissed)
+            }
+        }
     LaunchedEffect(searchState) {
         snapshotFlow { searchState.text.toString() }.collect { latest.value(RecentsAction.SetQuery(it)) }
     }
@@ -216,6 +228,7 @@ fun RecentsContent(
                 SearchField(
                     state = searchState,
                     placeholder = strings.search,
+                    focusRequester = handoff.requester,
                     modifier =
                         Modifier
                             .padding(horizontal = Spacing.gutter, vertical = Spacing.s)
@@ -231,7 +244,7 @@ fun RecentsContent(
                 )
             }
             if (ui.ready) {
-                body(ui, strings, overlays, onAction, menuFor, onInfo)
+                body(ui, strings, overlays, onAction, menuFor, openInfo)
             }
         }
     }

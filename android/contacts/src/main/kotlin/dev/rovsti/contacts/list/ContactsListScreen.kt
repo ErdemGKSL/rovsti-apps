@@ -80,6 +80,7 @@ import dev.rovsti.design.overlay.longPressMenu
 import dev.rovsti.design.overlay.sheetScrollConnection
 import dev.rovsti.design.text.SearchField
 import dev.rovsti.design.text.UiText
+import dev.rovsti.design.text.rememberSearchFocusHandoff
 import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
@@ -157,11 +158,12 @@ fun ContactsListScreen(
     val focus = LocalFocusManager.current
     // Back (or the keyboard's dismissal) leaves the focused search before anything else pops.
     BackHandler(enabled = state.searchFocused && select == null) { focus.clearFocus() }
+    val handoff = rememberSearchFocusHandoff(searchState)
     val dispatch: (ContactsListAction) -> Unit =
-        remember(onAction, focus, searching) {
+        remember(onAction, handoff) {
             { action ->
-                // Opening a recent contact ends the search, so the list is back when the card closes.
-                if (action is ContactsListAction.Open && !searching) focus.clearFocus()
+                // Opening a contact lets the search go and hides the keyboard, so the card does not open over it (F24).
+                if (action is ContactsListAction.Open) handoff.onResultOpened()
                 onAction(action)
             }
         }
@@ -180,6 +182,7 @@ fun ContactsListScreen(
             item(key = "search", contentType = "search") {
                 SearchField(
                     state = searchState,
+                    focusRequester = handoff.requester,
                     modifier =
                         Modifier
                             .padding(

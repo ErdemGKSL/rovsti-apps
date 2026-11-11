@@ -65,7 +65,7 @@ class IncomingScreenTest : ShotTest() {
     @Test fun nameNumberAndLabelsAreDrawn() {
         show()
         compose.onNodeWithTag(IncomingTags.Name).assertTextEquals("Ayse Yilmaz")
-        compose.onNodeWithTag(IncomingTags.Number).assertTextEquals("+905551112233")
+        compose.onNodeWithTag(IncomingTags.Number).assertTextEquals("+90 555 111 22 33")
         compose.onNodeWithTag(IncomingTags.Answer).assertIsDisplayed()
         compose.onNodeWithTag(IncomingTags.Decline).assertIsDisplayed()
         compose.onNodeWithTag(IncomingTags.Message).assertIsDisplayed()

@@ -58,7 +58,6 @@ internal fun TonePanel(
     val pad = ui.keypad
     val latest by rememberUpdatedState(onAction)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        DigitLine(pad.digits, strings) { latest(InCallAction.CopyDigits) }
         Column(verticalArrangement = Arrangement.spacedBy(InCallMetrics.KeyGap)) {
             for (row in KeyRows) {
                 Row(horizontalArrangement = Arrangement.spacedBy(InCallMetrics.KeyGap)) {
@@ -95,15 +94,14 @@ internal fun TonePanel(
 }
 
 @Composable
-private fun DigitLine(
+internal fun DigitLine(
     digits: String,
     strings: InCallStrings,
     onCopy: () -> Unit,
 ) {
     Box(
         Modifier
-            .height(InCallMetrics.DigitLine)
-            .sizeIn(minWidth = Sizes.touch)
+            .sizeIn(minWidth = Sizes.touch, minHeight = Sizes.touch)
             .testTag(InCallTags.Digits)
             .pointerInput(digits) { detectTapGestures(onLongPress = { onCopy() }) }
             .semantics {

@@ -3,13 +3,16 @@
 //! The apps speak 16 kHz mono PCM (`rovsti_wa_proto::audio`). How that PCM
 //! meets WhatsApp is [`CALL_AUDIO_MODE`]:
 //!
-//! - [`CallAudioMode::NativeOpus`] (default): whatsapp-rust's encoded audio
+//! - [`CallAudioMode::NativeOpus`]: whatsapp-rust's encoded audio
 //!   with `AudioFormat::OPUS_16KHZ_60MS`. The gateway encodes the microphone
 //!   with libopus and decodes the peer's packets itself. The signaling clears
 //!   the MLOW capability, so the peer sends standard Opus too. whatsapp-rust
 //!   documents this as the profile verified on a live full-duplex Android call
-//!   (`agent_docs/voip_audio_codecs.md` in the crate).
-//! - [`CallAudioMode::OpusInMlow`]: encoded audio in the MLOW RTP profile.
+//!   (`agent_docs/voip_audio_codecs.md` in the crate). On the owner's phone the
+//!   caller never took this answer: their phone rang on and the call ended as
+//!   missed. The MLOW answer below is whatsapp-rust's compatibility default.
+//! - [`CallAudioMode::OpusInMlow`] (default): encoded audio in the MLOW RTP
+//!   profile, answered with the same MLOW signaling as the engine's default.
 //!   The microphone goes out as Opus/CELT through MLOW's escape; the peer may
 //!   answer with MLOW or with the escape, and both are decoded here.
 //! - [`CallAudioMode::MlowPcm`]: the engine's built-in pure-Rust MLOW codec
@@ -45,7 +48,7 @@ pub enum CallAudioMode {
 }
 
 /// The mode every new call uses.
-pub const CALL_AUDIO_MODE: CallAudioMode = CallAudioMode::NativeOpus;
+pub const CALL_AUDIO_MODE: CallAudioMode = CallAudioMode::OpusInMlow;
 
 /// Encoded packets queued towards the engine (about 180 ms).
 pub const ENCODED_QUEUE: usize = 3;

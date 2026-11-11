@@ -479,13 +479,23 @@ fun PhoneApp(
         val id = ringingWa ?: return@LaunchedEffect
         if ((navigator.current as? PhoneRoute.Incoming)?.callId != id) navigator.push(PhoneRoute.Incoming(id))
     }
-    val inCall =
-        remember(container, incomingStrings) { container.inCallModel(container.scope, incomingStrings.unknown) }
-    val inCallUi by inCall.state.collectAsState()
     val inCallStrings = InCallStrings.current()
+    val inCall =
+        remember(container, incomingStrings, inCallStrings) {
+            container.inCallModel(container.scope, incomingStrings.unknown, inCallStrings.conference)
+        }
+    val inCallUi by inCall.state.collectAsState()
+    val favoritesModel = rememberFavoritesViewModel(container)
     val inCallSheets =
-        remember(overlays, inCallStrings, inCall, context) {
-            InCallSheets(overlays, inCallStrings, inCall, AndroidInCallHost(context), container.scope)
+        remember(overlays, inCallStrings, inCall, context, favoritesModel) {
+            InCallSheets(
+                overlays,
+                inCallStrings,
+                inCall,
+                AndroidInCallHost(context),
+                container.scope,
+                favoritesModel.state,
+            )
         }
     InCallEffects(inCall, inCallSheets, overlays, inCallStrings) {
         // The ended summary has been shown: close the page (a collapsed call has nothing to close).
@@ -505,7 +515,6 @@ fun PhoneApp(
         }
     }
     val miniTimer = rememberCallTimer(inCallUi.call, inCall::now, inCall::elapsed)
-    val favoritesModel = rememberFavoritesViewModel(container)
     val contactsModel = rememberContactsViewModel(container)
     val openContact: (Long) -> Unit =
         remember(details, container) {

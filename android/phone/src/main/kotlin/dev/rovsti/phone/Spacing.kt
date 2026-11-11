@@ -165,6 +165,20 @@ internal const val AURA_SHOT_PHASE = 2.4f
 
 /** Dimensions of the In-Call screen, the tone keypad, the route list and the mini pill (E5.7a). */
 internal object InCallMetrics {
+    /** Multi-call (E5.7b): the Held card, the conference avatars, the swap rise, the Add call sheet. */
+    val HeldAvatar = 32.dp
+    val ClusterAvatar = 64.dp
+    val ClusterStepFar = 132.dp
+    val ClusterStepNear = 76.dp
+    val SwapRise = 72.dp
+    val SmallGlyph = 20.dp
+    val PillGlyph = 16.dp
+    val AddKey = 60.dp
+    val AddKeyGapX = 20.dp
+    val AddKeyGapY = 10.dp
+    val AddNumberHeight = 56.dp
+    val PersonAvatar = 40.dp
+
     val Avatar = 112.dp
     val AvatarGap = 20.dp
     val LabelTop = 16.dp

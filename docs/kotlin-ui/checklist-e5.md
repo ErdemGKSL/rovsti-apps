@@ -51,3 +51,43 @@ Favorites and Contacts tabs (E5.5) are NOT part of this pass: that step was stas
 
 ## H. Tests
 - `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`, `E57ShotTest` (light and dark goldens, all opened).
+
+# E5 R2 part 1 checklist record (Phone, round-13 step 8)
+
+Screens touched this round: Favorites / Contacts tabs (E5.5), Incoming and the waiting card (E5.6), In-Call and the multi-call
+faces (E5.7b), WhatsApp calls (E5.8), the tab bar (F21). Goldens opened: `e5.5-*`, `e5.6-*`, `e5.7-*` (incl.
+`e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`, `-favorites`, `e5.7-conference-panel`), `e5.8-*`; the
+contact sheet `docs/kotlin-ui/screenshots/phone.png` was regenerated and opened.
+
+## A. Licence and provenance
+- pass: new files are original (Rovsti GPL-3.0-or-later); nothing new was ported this step. `SegmentedControl`, `IosSheet`
+  and the keys (`DigitKey`, `CallKey`, `DeleteKey`) are the existing design-system pieces.
+
+## B. Layout
+- pass: the Held card sits in the collapse button's row; with or without it the name, controls and End never move
+  (`theHeldCardDoesNotMoveAnythingBelowIt`, frame by frame; `aSwapSettlesWithTheOtherCallOnStageAndNothingJumps`).
+- pass: two calls = Mute, Keypad, Audio / Add call (dimmed), Swap, Merge; conference = avatars side by side (never stacked),
+  name, timer and a "n people" pill; `e5.7-incall-hold-two-calls-fs2` shows no clipping at 2.0.
+- deviation: with two calls Merge takes the Note slot (Note returns when one call remains).
+
+## C. Overlays
+- pass: Add call is a large `SheetEntry` (keypad / Favorites / Contacts tabs) over the call, the call stays; the conference
+  panel is a sheet (Split / End per row, End all); End-all is also a context menu on a long press of End.
+
+## D. Motion
+- pass: S19 hold-away 0.86/380 (`RovstiMotion.holdAway`), S20 swap 0.8/420 (`swapCross`), S21 merge 0.75/500 (`mergePull`); all
+  are layer transforms (no layout), snap under reduce motion. S22 = split/drop rows leave through the sheet's list motion.
+- deviation: the swap moves the identity block by a graphics layer; the avatars are not shared-bounds elements of two layouts.
+
+## E. Input
+- pass: Add call keypad uses the Keypad's keys (0 held = +, delete repeats); no text field is added, so no IME rule applies.
+
+## F. Accessibility
+- pass: the Held card reads "name, on hold" and "Swap calls"; dimmed controls keep taking taps and say the core's sentence.
+
+## G. Platform
+- pass: `scene.of` goes through `PhoneOps.sceneOf` (already in `rovsti_ffi`; "zone" ops of the plan are `scene.*`); the model
+  never calls Rust before `Rust.init`. Add call places on the live call's SIM. No class is reached by name (no new keep rules).
+
+## H. Tests
+- `MultiCallViewModelTest` (fake and REAL core), `AddCallSheetTest`, `InCallScreenTest` multi-call cases, `E57bShotTest`.

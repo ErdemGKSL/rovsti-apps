@@ -47,7 +47,28 @@ class InCallStrings(
     val postCallBlockFailed: String = res.getString(R.string.postcall_block_failed)
     val waAudio: String = res.getString(R.string.wa_audio)
     val waUnavailable: String = res.getString(R.string.incall_notice_wa_unavailable)
+    val swap: String = res.getString(R.string.incall_swap)
+    val merge: String = res.getString(R.string.incall_merge)
+    val conference: String = res.getString(R.string.incall_conference)
+    val heldCardHint: String = res.getString(R.string.incall_held_card_hint)
+    val endAll: String = res.getString(R.string.incall_end_all)
+    val confTitle: String = res.getString(R.string.incall_conf_title)
+    val confSplit: String = res.getString(R.string.incall_conf_split)
+    val confDrop: String = res.getString(R.string.incall_conf_drop)
+    val confOpen: String = res.getString(R.string.incall_conf_open)
+    val addTitle: String = res.getString(R.string.incall_add_title)
+    val addTabKeypad: String = res.getString(R.string.incall_add_tab_keypad)
+    val addTabFavorites: String = res.getString(R.string.incall_add_tab_favorites)
+    val addTabContacts: String = res.getString(R.string.incall_add_tab_contacts)
+    val addNumberHint: String = res.getString(R.string.incall_add_number_hint)
+    val addDial: String = res.getString(R.string.incall_add_dial)
+    val addNone: String = res.getString(R.string.incall_add_none)
+    val addDelete: String = res.getString(R.string.incall_add_delete)
     val postCallAddNote: String = res.getString(R.string.postcall_add_note)
+
+    fun people(count: Int): String = res.getString(R.string.incall_people, count)
+
+    fun heldCard(who: String): String = res.getString(R.string.incall_held_card_desc, who)
 
     fun sendTones(tones: String): String = res.getString(R.string.incall_tones_send, tones)
 

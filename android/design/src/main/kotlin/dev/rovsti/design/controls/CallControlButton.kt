@@ -64,6 +64,8 @@ fun CallControlButton(
     debugTag: String = "call.control",
     /** Drawn at the disabled 45 % but still tappable: a control this call does not have, which says so on a tap. */
     dimmed: Boolean = false,
+    /** A touch and hold (the End button's "End all" menu); null for a button with no second function. */
+    onLongClick: (() -> Unit)? = null,
     content: @Composable (glyph: Color) -> Unit,
 ) {
     val reduce = LocalReduceMotion.current
@@ -102,6 +104,7 @@ fun CallControlButton(
                 .combinedClickable(
                     enabled = enabled,
                     onClick = onClick,
+                    onLongClick = onLongClick,
                     role = Role.Button,
                     indication = null,
                     interactionSource = interactionSource,

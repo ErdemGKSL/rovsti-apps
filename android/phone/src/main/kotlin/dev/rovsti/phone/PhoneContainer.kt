@@ -304,6 +304,7 @@ open class PhoneContainer(
     open fun inCallModel(
         scope: CoroutineScope,
         unknown: String,
+        conference: String = "Conference call",
     ): InCallViewModel =
         InCallViewModel(
             source = callSource,
@@ -327,6 +328,8 @@ open class PhoneContainer(
             unknownLabel = unknown,
             scope = scope,
             clock = clock,
+            placer = placer,
+            conferenceLabel = conference,
         )
 
     /** The model of one Contact / Number sheet (E5.4); [scope] belongs to the sheet and ends with it. */

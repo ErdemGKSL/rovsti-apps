@@ -1139,7 +1139,7 @@ round close. E5.9-E5.14 follow in round 14.
 > `android/design/build.gradle.kts`, `android/contacts/.../favorites/FavoritesReorder.kt` and
 > `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
 > (definition of done item 6).
-| E5.7b | In-call: multi-call, Add call, conference | R2 | todo (planned in round-13 step 8) |
+| E5.7b | In-call: multi-call, Add call, conference | R2 | done (round-13 step 8) |
 | E5.9 | Settings | R2 | todo |
 | E5.10 | Statistics | R2 | todo |
 | E5.11 | Notes page | R2 | todo |
@@ -1253,6 +1253,7 @@ round close. E5.9-E5.14 follow in round 14.
   `e5.7-incall-ended-summary`, `e5.7-post-call-block-pill`.
 
 ### E5.7b In-call (multi-call)
+- **Status: done** (round-13 step 8). Evidence: `MultiCallViewModelTest`, `AddCallSheetTest`, `InCallScreenTest` multi-call cases, goldens `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`; next planner = E5 R2 part 2 (E5.9-E5.14).
 - AC1 Multi-call scenes from `rovsti_core::scene` through the bridge; springs of hold-away, swap, merge.
 - Screenshots: `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`.
 

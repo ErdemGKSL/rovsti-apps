@@ -4,16 +4,22 @@ import dev.rovsti.core.model.phone.AudioRoute
 import dev.rovsti.core.model.phone.CallSnapshot
 import dev.rovsti.core.model.phone.Endpoint
 import dev.rovsti.core.model.phone.RowKind
+import dev.rovsti.core.model.phone.SceneAnswer
+import dev.rovsti.core.model.phone.SceneControl
+import dev.rovsti.core.model.phone.SceneLayout
 import dev.rovsti.core.model.phone.ToneStep
 import dev.rovsti.core.model.phone.WireCall
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.phone.data.CallPlacer
 import dev.rovsti.phone.data.NumberDisplay
+import dev.rovsti.phone.data.PlaceResult
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.phone.incoming.CallSource
 import dev.rovsti.phone.incoming.SimChip
 import dev.rovsti.phone.incoming.WaCallMeta
 import dev.rovsti.platform.files.ClipboardRepository
 import dev.rovsti.platform.telephony.CallsApi
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -63,6 +69,10 @@ class InCallViewModel(
     private val unknownLabel: String,
     private val scope: CoroutineScope,
     private val clock: () -> Long,
+    /** Places the second call of the Add call sheet; null where no call may be placed (the sheet is then not offered). */
+    private val placer: CallPlacer? = null,
+    /** The name a conference call goes by. */
+    private val conferenceLabel: String = "Conference call",
 ) {
     private val effects = Channel<InCallEffect>(Channel.BUFFERED)
 
@@ -85,6 +95,8 @@ class InCallViewModel(
         val ui: EndedUi,
     )
 
+    private val scene = MutableStateFlow<SceneAnswer?>(null)
+    private var sceneJob: Job? = null
     private val waFacts = MutableStateFlow<WaControls?>(null)
     private var waKey: Any? = null
 
@@ -93,6 +105,7 @@ class InCallViewModel(
         val held: Held?,
         val whatsapp: Map<Int, WaCallMeta>,
         val controls: WaControls?,
+        val scene: SceneAnswer?,
     )
 
     private var tracked: InCallCall? = null
@@ -108,9 +121,12 @@ class InCallViewModel(
             this.sims,
             keypad,
             combine(rows, bluetoothGranted) { r, bt -> filtered(r, bt) },
-            combine(ended, noted, display.version, source.whatsapp, waFacts) { e, _, _, wa, facts ->
-                Extra(e, wa, facts)
-            },
+            combine(
+                combine(ended, noted, display.version) { e, _, _ -> e },
+                source.whatsapp,
+                waFacts,
+                scene,
+            ) { e, wa, facts, sc -> Extra(e, wa, facts, sc) },
         ) { snapshot, simList, pad, routes, extra -> build(snapshot, simList, pad, routes, extra) }
             .stateIn(scope, SharingStarted.Eagerly, InCallUi())
 
@@ -119,6 +135,7 @@ class InCallViewModel(
             source.snapshot.collect {
                 display.warm(it.calls.map { c -> c.numberRaw })
                 observe(it)
+                askScene(it)
             }
         }
         // The WhatsApp facts of the tracked call can arrive after (or change without) a snapshot.
@@ -155,6 +172,42 @@ class InCallViewModel(
 
             InCallAction.End -> {
                 end()
+            }
+
+            InCallAction.Swap -> {
+                command { calls.swap() }
+            }
+
+            InCallAction.Merge -> {
+                command { calls.merge() }
+            }
+
+            is InCallAction.Split -> {
+                command { calls.split(action.id) }
+            }
+
+            is InCallAction.Drop -> {
+                command { calls.disconnect(action.id) }
+            }
+
+            InCallAction.EndAll -> {
+                endAll()
+            }
+
+            InCallAction.OpenAddCall -> {
+                openAddCall()
+            }
+
+            InCallAction.OpenConference -> {
+                effects.trySend(InCallEffect.ShowConference)
+            }
+
+            is InCallAction.Dial -> {
+                dial(action.number)
+            }
+
+            is InCallAction.Dimmed -> {
+                effects.trySend(InCallEffect.Say(action.text))
             }
 
             InCallAction.Unavailable -> {
@@ -237,6 +290,7 @@ class InCallViewModel(
             call = call,
             muted = snapshot.audio.muted,
             canHold = wire?.canHold == true,
+            multi = multiOf(snapshot, wire, sims, extra),
             whatsapp = whatsapp,
             route = snapshot.audio.route,
             routeRows = routes.rows.toImmutableList(),
@@ -248,13 +302,64 @@ class InCallViewModel(
         )
     }
 
+    /** The Held card and the conference rows from the core's scene; the one-call face while it has not answered. */
+    private fun multiOf(
+        snapshot: CallSnapshot,
+        wire: WireCall?,
+        sims: Sims,
+        extra: Extra,
+    ): MultiCallUi {
+        val answer = extra.scene
+        if (answer == null || wire == null || answer.primary?.id != wire.id) return MultiCallUi()
+        val heldWire = answer.held?.let { h -> snapshot.calls.firstOrNull { it.id == h.id && it.state in LIVE } }
+        val conference = answer.layout == SceneLayout.Conference
+        val reason = { control: SceneControl -> answer.disabled.firstOrNull { it.control == control }?.text }
+        val people =
+            answer.participants.map { p ->
+                val child = snapshot.calls.firstOrNull { it.id == p.id }
+                ParticipantUi(
+                    id = p.id,
+                    label = p.label,
+                    avatarKey =
+                        child?.contactId?.toString() ?: child?.displayName?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: p.label,
+                    canSplit = p.canSplit,
+                    canDrop = p.canDrop,
+                )
+            }
+        return MultiCallUi(
+            held =
+                heldWire?.let {
+                    val call = callOf(it, sims, extra.whatsapp[it.id])
+                    HeldCardUi(
+                        it.id,
+                        if (isConference(it)) conferenceLabel else call.title,
+                        call.avatarKey,
+                        isConference(it),
+                    )
+                },
+            conference = conference,
+            participants = people.toImmutableList(),
+            summary = answer.participantsSummary,
+            addCall = ControlFact(reason(SceneControl.AddCall)),
+            merge = ControlFact(reason(SceneControl.Merge)),
+            swap = ControlFact(reason(SceneControl.HoldSwap)),
+        )
+    }
+
+    private fun isConference(call: WireCall) = call.children.isNotEmpty()
+
     private fun callOf(
         wire: WireCall,
         sims: Sims,
         wa: WaCallMeta?,
     ): InCallCall {
         val title =
-            wire.displayName?.trim()?.takeIf { it.isNotEmpty() }
+            if (isConference(wire)) {
+                conferenceLabel
+            } else {
+                wire.displayName?.trim()?.takeIf { it.isNotEmpty() }
+            }
                 ?: display.peek(wire.numberRaw.trim()).takeIf { it.isNotEmpty() }
                 ?: unknownLabel
         val chip =
@@ -328,6 +433,15 @@ class InCallViewModel(
         if (key == waKey) return
         waKey = key
         scope.launch { backend.waControls(meta.update, meta.speaker, meta.muted)?.let { waFacts.value = it } }
+    }
+
+    /** Asks the core for the scene of [snapshot]; an older answer still in flight is dropped. */
+    private fun askScene(snapshot: CallSnapshot) {
+        sceneJob?.cancel()
+        sceneJob =
+            scope.launch {
+                scene.value = if (snapshot.calls.any { it.state in LIVE }) backend.scene(snapshot) else null
+            }
     }
 
     private fun routesFor(snapshot: CallSnapshot) {
@@ -410,6 +524,8 @@ class InCallViewModel(
     }
 
     private fun toggleHold() {
+        // With a second call the Hold slot is Swap.
+        if (state.value.multi.twoCalls) return onAction(InCallAction.Swap)
         val call = state.value.call ?: return
         if (!state.value.canHold && !state.value.held) return
         command { calls.hold(call.callId, !state.value.held) }
@@ -419,6 +535,29 @@ class InCallViewModel(
         val call = state.value.call ?: return
         if (!state.value.live) return
         if (calls.disconnect(call.callId)) effects.trySend(InCallEffect.Reject) else notice(InCallNotice.CommandFailed)
+    }
+
+    private fun endAll() {
+        if (!state.value.live) return
+        if (calls.endAll()) effects.trySend(InCallEffect.Reject) else notice(InCallNotice.CommandFailed)
+    }
+
+    private fun openAddCall() {
+        val reason = state.value.multi.addCall.reason
+        if (reason != null) return onAction(InCallAction.Dimmed(reason))
+        if (state.value.live && placer != null) effects.trySend(InCallEffect.ShowAddCall)
+    }
+
+    /** Places [number] as the next call, on the SIM the live call runs on (so "ask every time" never interrupts). */
+    private fun dial(number: String) {
+        val placer = placer ?: return
+        val account = liveOf(source.snapshot.value)?.accountKey
+        scope.launch {
+            when (placer.place(number, account)) {
+                is PlaceResult.Placed, is PlaceResult.HandedToDialer -> effects.trySend(InCallEffect.Confirm)
+                else -> notice(InCallNotice.CommandFailed)
+            }
+        }
     }
 
     private fun toggleRoute() {

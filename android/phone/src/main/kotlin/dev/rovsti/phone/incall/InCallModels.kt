@@ -83,6 +83,53 @@ data class EndedUi(
     val elapsed: String,
 )
 
+/** The second call, shown as the Held card above the live one (tap to swap). [conference] when it is a conference. */
+@Immutable
+data class HeldCardUi(
+    val callId: Int,
+    val title: String,
+    val avatarKey: String,
+    val conference: Boolean = false,
+)
+
+/** One person of a conference; [canSplit] / [canDrop] are the carrier's capabilities (the core reads them). */
+@Immutable
+data class ParticipantUi(
+    val id: Int,
+    val label: String,
+    val avatarKey: String,
+    val canSplit: Boolean,
+    val canDrop: Boolean,
+)
+
+/** A control the core may dim: [reason] is its sentence (`scene.of` `disabled`), null while the control works. */
+@Immutable
+data class ControlFact(
+    val reason: String? = null,
+) {
+    val enabled: Boolean get() = reason == null
+}
+
+/**
+ * What `scene.of` says beyond the single call (E5.7b): the Held card, the conference rows, and why Add call, Merge and
+ * Swap are dimmed. Empty (the one-call face) until the core answered or when it failed.
+ */
+@Immutable
+data class MultiCallUi(
+    val held: HeldCardUi? = null,
+    /** The live call is a conference; its rows. */
+    val conference: Boolean = false,
+    val participants: ImmutableList<ParticipantUi> = persistentListOf(),
+    /** "n people" when the carrier named children the snapshot lacks. */
+    val summary: String? = null,
+    val addCall: ControlFact = ControlFact(),
+    val merge: ControlFact = ControlFact(),
+    val swap: ControlFact = ControlFact(),
+) {
+    /** Two separate calls: the Hold slot reads Swap and Merge takes the Note slot. */
+    val twoCalls: Boolean get() = held != null
+}
+
 @Immutable
 data class InCallUi(
     val call: InCallCall? = null,
@@ -100,6 +147,8 @@ data class InCallUi(
     val locked: Boolean = false,
     /** Set while the shown call is a WhatsApp call: which controls work. */
     val whatsapp: WaControls? = null,
+    /** The Held card, the conference rows and the multi-call facts. */
+    val multi: MultiCallUi = MultiCallUi(),
 ) {
     val live: Boolean get() = call != null && call.phase != CallPhase.Ended
     val held: Boolean get() = call?.phase == CallPhase.Holding
@@ -120,6 +169,41 @@ sealed interface InCallAction {
     ) : InCallAction
 
     data object End : InCallAction
+
+    // Multi-call (E5.7b).
+
+    /** Swaps the live and the held call. */
+    data object Swap : InCallAction
+
+    data object Merge : InCallAction
+
+    /** Takes [id] out of the conference into a private call. */
+    data class Split(
+        val id: Int,
+    ) : InCallAction
+
+    /** Drops [id] from the conference. */
+    data class Drop(
+        val id: Int,
+    ) : InCallAction
+
+    /** Ends every call. */
+    data object EndAll : InCallAction
+
+    /** The Add call button: opens the sheet, or says why not. */
+    data object OpenAddCall : InCallAction
+
+    data object OpenConference : InCallAction
+
+    /** Places [number] as the second call (from the Add call sheet). */
+    data class Dial(
+        val number: String,
+    ) : InCallAction
+
+    /** A tap on a control the core dimmed: shows its [text]. */
+    data class Dimmed(
+        val text: String,
+    ) : InCallAction
 
     /** A tap on a dimmed control of a WhatsApp call (Keypad, Hold, Add call, Note): says why nothing happens. */
     data object Unavailable : InCallAction
@@ -204,6 +288,17 @@ sealed interface InCallEffect {
 
     /** The ended summary has been shown; the screen closes. */
     data object Leave : InCallEffect
+
+    /** The Add call sheet (keypad, Favorites, Contacts) over the call. */
+    data object ShowAddCall : InCallEffect
+
+    /** The conference panel: who is on the call, Split / End per row. */
+    data object ShowConference : InCallEffect
+
+    /** A sentence the core wrote (why a control is dimmed). */
+    data class Say(
+        val text: String,
+    ) : InCallEffect
 
     data object Confirm : InCallEffect
 

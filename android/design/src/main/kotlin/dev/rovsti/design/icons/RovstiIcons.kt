@@ -122,6 +122,37 @@ object RovstiIcons {
         }
     }
 
+    /** Two arrows, one down and one up: swap the live call and the held one. */
+    val Swap: ImageVector by lazy {
+        stroked("Swap") {
+            moveTo(7f, 4f)
+            lineTo(7f, 20f)
+            moveTo(3.5f, 16.5f)
+            lineTo(7f, 20f)
+            lineTo(10.5f, 16.5f)
+            moveTo(17f, 20f)
+            lineTo(17f, 4f)
+            moveTo(13.5f, 7.5f)
+            lineTo(17f, 4f)
+            lineTo(20.5f, 7.5f)
+        }
+    }
+
+    /** Two branches that run into one: merge two calls into a conference. */
+    val Merge: ImageVector by lazy {
+        stroked("Merge") {
+            moveTo(6f, 4f)
+            curveTo(6f, 10f, 12f, 9f, 12f, 15f)
+            moveTo(18f, 4f)
+            curveTo(18f, 10f, 12f, 9f, 12f, 15f)
+            moveTo(12f, 15f)
+            lineTo(12f, 20f)
+            moveTo(9f, 17f)
+            lineTo(12f, 20f)
+            lineTo(15f, 17f)
+        }
+    }
+
     val Checkmark: ImageVector by lazy {
         stroked("Checkmark") {
             moveTo(5f, 12.5f)

@@ -43,6 +43,7 @@ import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.data.BlockUndo
+import dev.rovsti.phone.favorites.FavoritesUi
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.launch
 
@@ -58,6 +59,9 @@ class InCallSheets(
     private val model: InCallViewModel,
     private val host: InCallHost,
     private val scope: kotlinx.coroutines.CoroutineScope,
+    /** The Favorites model's state: the Add call sheet's Favorites and Contacts tabs. */
+    private val people: kotlinx.coroutines.flow.StateFlow<FavoritesUi> =
+        kotlinx.coroutines.flow.MutableStateFlow(FavoritesUi()),
 ) {
     private var popover: PopoverEntry? = null
 
@@ -103,6 +107,49 @@ class InCallSheets(
                             IosMenuItem(
                                 strings.timerShare,
                                 onClick = { model.onAction(InCallAction.ShareSummary(summary)) },
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    /** The Add call sheet: a large sheet over the call; a number picked places the second call and closes it. */
+    fun addCall(): SheetEntry {
+        val entry =
+            SheetEntry(title = strings.addTitle, detents = persistentListOf(Detent.Large)) { sheet ->
+                AddCallSheetBody(people, strings, sheet, onDial = { number ->
+                    sheet.dismiss()
+                    model.onAction(InCallAction.Dial(number))
+                })
+            }
+        overlays.present(entry)
+        return entry
+    }
+
+    /** The conference panel: who is on the call, Split and End per row, End all. */
+    fun conference(): SheetEntry {
+        val entry =
+            SheetEntry(title = strings.confTitle, detents = persistentListOf(Detent.Medium, Detent.Large)) { sheet ->
+                ConferenceSheetBody(model.state, strings, model::onAction, onGone = { sheet.dismiss() })
+            }
+        overlays.present(entry)
+        return entry
+    }
+
+    /** The menu on the End button while two calls (or a conference) run: End all. */
+    fun endMenu(anchor: Rect) {
+        overlays.present(
+            IosContextMenuEntry(
+                anchor,
+                listOf(
+                    IosMenuSection(
+                        listOf(
+                            IosMenuItem(
+                                strings.endAll,
+                                role = dev.rovsti.design.ios.component.IosButtonRole.Destructive,
+                                onClick = { model.onAction(InCallAction.EndAll) },
                             ),
                         ),
                     ),
@@ -242,6 +289,9 @@ fun InCallEffects(
             when (effect) {
                 is InCallEffect.Notice -> overlays.showToast(strings.say(effect.notice))
                 is InCallEffect.ShowNote -> sheets.note(effect)
+                InCallEffect.ShowAddCall -> sheets.addCall()
+                InCallEffect.ShowConference -> sheets.conference()
+                is InCallEffect.Say -> overlays.showToast(effect.text)
                 is InCallEffect.Share -> sheets.share(effect.text)
                 is InCallEffect.PostCall -> sheets.postCall(effect)
                 InCallEffect.Leave -> leave()

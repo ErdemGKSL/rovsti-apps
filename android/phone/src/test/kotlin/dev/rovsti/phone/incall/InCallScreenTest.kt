@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertContentDescriptionContains
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -42,6 +43,7 @@ import org.robolectric.annotation.Config
 class InCallScreenTest : ShotTest() {
     private val actions = mutableListOf<InCallAction>()
     private val audioAnchors = mutableListOf<Rect>()
+    private val endMenus = mutableListOf<Rect>()
     private var ui by mutableStateOf(InCallHarness().ui)
     private val timer = mutableStateOf("4:32")
 
@@ -62,6 +64,7 @@ class InCallScreenTest : ShotTest() {
                 onTimerMenu = {},
                 onCollapse = { actions += InCallAction.StopTones },
                 aura = aura,
+                onEndMenu = { endMenus += it },
             )
         }
         advance(100)
@@ -110,10 +113,10 @@ class InCallScreenTest : ShotTest() {
     }
 
     @Test fun aDisabledControlIsDimmed() {
-        show()
+        show(ui.copy(canHold = false))
         advance(300)
         val on = grey(pixel(InCallTags.Keypad, 0.13f, 0.5f))
-        val off = grey(pixel(InCallTags.AddCall, 0.13f, 0.5f))
+        val off = grey(pixel(InCallTags.Hold, 0.13f, 0.5f))
         assertTrue("enabled $on, disabled $off", off < on)
     }
 
@@ -163,16 +166,10 @@ class InCallScreenTest : ShotTest() {
         }
     }
 
-    @Test fun addCallIsDimmedUntilE57b() {
+    @Test fun addCallOpensTheSheetOnATap() {
         show()
-        compose.onNodeWithTag(InCallTags.AddCall).assertIsNotEnabled()
-        compose
-            .onNodeWithTag(
-                InCallTags.AddCall,
-            ).fetchSemanticsNode()
-            .config
-            .getOrNull(SemanticsProperties.StateDescription)
-            .let { assertEquals(inCallStrings.addCallLater, it) }
+        compose.onNodeWithTag(InCallTags.AddCall).assertIsEnabled().performClick()
+        assertEquals(listOf<InCallAction>(InCallAction.OpenAddCall), actions)
     }
 
     @Test fun aCallThatCannotBeHeldHasAnInertHoldButton() {
@@ -477,5 +474,111 @@ class InCallScreenTest : ShotTest() {
         show(InCallHarness().ui)
         val full = pixel(InCallTags.Hold, 0.5f, 0.5f)
         assertTrue("a dimmed disc is darker than a live one: $dim vs $full", dim != full)
+    }
+
+    // ---- E5.7b: two calls and a conference ---------------------------------------------------------------------------
+
+    private fun twoUi(snapshot: dev.rovsti.core.model.phone.CallSnapshot = twoCalls()) = InCallHarness(snapshot).ui
+
+    private fun top(tag: String) =
+        compose
+            .onNodeWithTag(tag)
+            .fetchSemanticsNode()
+            .boundsInRoot.top
+
+    @Test fun theHeldCardShowsTheWaitingCallAndATapSwaps() {
+        show(twoUi())
+        advance(600)
+        compose
+            .onNodeWithTag(
+                MultiCallTags.Held,
+            ).assertIsDisplayed()
+            .assertContentDescriptionEquals("Ayşe Yılmaz, on hold")
+        compose.onNodeWithTag(MultiCallTags.Held).performClick()
+        assertEquals(listOf<InCallAction>(InCallAction.Swap), actions)
+    }
+
+    @Test fun twoCallsTurnHoldIntoSwapAndNoteIntoMerge() {
+        show(twoUi())
+        advance(600)
+        compose.onAllNodesWithTag(InCallTags.Hold).assertCountEquals(0)
+        compose.onAllNodesWithTag(InCallTags.Note).assertCountEquals(0)
+        compose.onNodeWithTag(MultiCallTags.Swap).assertIsEnabled().performClick()
+        compose.onNodeWithTag(MultiCallTags.Merge).assertIsEnabled().performClick()
+        assertEquals(listOf(InCallAction.Swap, InCallAction.Merge), actions)
+    }
+
+    @Test fun addCallIsDimmedWithTwoCallsAndATapShowsTheCoresReason() {
+        show(twoUi())
+        advance(600)
+        compose.onNodeWithTag(InCallTags.AddCall).performClick()
+        assertEquals(listOf<InCallAction>(InCallAction.Dimmed("Two calls are already in progress")), actions)
+    }
+
+    @Test fun mergeIsDimmedWhenTheCarrierSaysNo() {
+        show(twoUi(twoCalls(canMerge = false)))
+        advance(600)
+        compose.onNodeWithTag(MultiCallTags.Merge).performClick()
+        assertEquals(
+            listOf<InCallAction>(InCallAction.Dimmed("Your carrier doesn't allow merging")),
+            actions,
+        )
+    }
+
+    @Test fun theHeldCardDoesNotMoveAnythingBelowIt() {
+        show(InCallHarness().ui)
+        advance(600)
+        val name = top(InCallTags.Name)
+        val end = top(InCallTags.End)
+        val mute = top(InCallTags.Mute)
+        ui = twoUi()
+        // Frame by frame while the hold-away spring runs, and settled: the layout is the same in every one.
+        for (ms in listOf(16L, 60L, 200L, 900L)) {
+            advance(ms)
+            assertEquals("name at +$ms", name, top(InCallTags.Name), 0.5f)
+            assertEquals("end at +$ms", end, top(InCallTags.End), 0.5f)
+            assertEquals("mute at +$ms", mute, top(InCallTags.Mute), 0.5f)
+        }
+    }
+
+    @Test fun aSwapSettlesWithTheOtherCallOnStageAndNothingJumps() {
+        show(twoUi())
+        advance(900)
+        val name = top(InCallTags.Name)
+        val end = top(InCallTags.End)
+        // The other call takes the stage; the first one is the card now.
+        val swapped =
+            twoCalls().let { it.copy(foregroundCallId = 3, backgroundCallId = 2) }
+        ui = InCallHarness(swapped).ui
+        advance(16)
+        compose.onNodeWithTag(MultiCallTags.Held).assertIsDisplayed()
+        advance(1_200)
+        compose.onNodeWithTag(InCallTags.Name).assertTextEquals("Ayşe Yılmaz")
+        compose.onNodeWithTag(MultiCallTags.Held).assertContentDescriptionEquals("Mert Kaya, on hold")
+        assertEquals(end, top(InCallTags.End), 0.5f)
+        assertEquals("the stage is back where it was", name, top(InCallTags.Name), 1f)
+    }
+
+    @Test fun aConferenceShowsItsPeopleAndThePillOpensThePanel() {
+        show(twoUi(conferenceCall()))
+        advance(900)
+        compose.onNodeWithTag(InCallTags.Name).assertTextEquals("Conference call")
+        compose.onNodeWithTag(MultiCallTags.People).assertIsDisplayed()
+        compose.onNodeWithTag(MultiCallTags.People).performClick()
+        assertEquals(listOf<InCallAction>(InCallAction.OpenConference), actions)
+    }
+
+    @Test fun holdingTheEndButtonWithTwoCallsOpensTheEndAllMenu() {
+        show(twoUi())
+        advance(600)
+        compose.onNodeWithTag(InCallTags.End).performTouchInput { longClick() }
+        assertEquals(1, endMenus.size)
+        assertTrue(actions.isEmpty())
+    }
+
+    @Test fun holdingTheEndButtonWithOneCallDoesNothingSpecial() {
+        show()
+        compose.onNodeWithTag(InCallTags.End).performTouchInput { longClick() }
+        assertTrue(endMenus.isEmpty())
     }
 }

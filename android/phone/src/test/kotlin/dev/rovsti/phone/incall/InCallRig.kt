@@ -15,11 +15,19 @@ import dev.rovsti.core.model.phone.AudioRowsAnswer
 import dev.rovsti.core.model.phone.AudioState
 import dev.rovsti.core.model.phone.CallSnapshot
 import dev.rovsti.core.model.phone.CallUpdate
+import dev.rovsti.core.model.phone.DisabledControl
+import dev.rovsti.core.model.phone.DisabledReason
 import dev.rovsti.core.model.phone.Endpoint
 import dev.rovsti.core.model.phone.EndpointType
+import dev.rovsti.core.model.phone.HoldSlot
 import dev.rovsti.core.model.phone.RouteDecision
 import dev.rovsti.core.model.phone.RouteDiff
 import dev.rovsti.core.model.phone.RowKind
+import dev.rovsti.core.model.phone.SceneAnswer
+import dev.rovsti.core.model.phone.SceneCall
+import dev.rovsti.core.model.phone.SceneControl
+import dev.rovsti.core.model.phone.SceneLayout
+import dev.rovsti.core.model.phone.SceneParticipant
 import dev.rovsti.core.model.phone.ToneStep
 import dev.rovsti.core.model.phone.WireCall
 import dev.rovsti.core.model.phone.WireCallState
@@ -88,6 +96,7 @@ internal fun liveSnapshot(
     calls = listOf(call),
     foregroundCallId = call.id,
     keyguardLocked = false,
+    canAddCall = true,
     audio = AudioState(muted = muted, route = route, endpoints = endpoints),
 )
 
@@ -134,6 +143,9 @@ internal open class FakeInCallBackend(
 
     override suspend fun tonePlan(text: String): List<ToneStep> = plan
 
+    /** A hand-written mirror of the roles of `scene.of`; [CoreSceneBackend] asks the real core instead. */
+    override suspend fun scene(snapshot: CallSnapshot): SceneAnswer? = fakeScene(snapshot)
+
     /** What `phone.wa_screen` answers for a WhatsApp call: Mute, Speaker, End work; the rest is dimmed. */
     var waControls: WaControls? = WaControls(note = "Not available on WhatsApp calls")
 
@@ -142,6 +154,53 @@ internal open class FakeInCallBackend(
         speaker: Boolean,
         muted: Boolean,
     ): WaControls? = waControls
+}
+
+private fun sceneCall(c: WireCall) = SceneCall(c.id, c.state, c.displayName ?: c.numberRaw, "", null, missed = false)
+
+/** The layout, the held call, the rows and the dimmed controls of [s], by the rules of `rovsti_core::scene`. */
+internal fun fakeScene(s: CallSnapshot): SceneAnswer? {
+    val fg = s.calls.firstOrNull { it.id == s.foregroundCallId } ?: return null
+    val bg = s.calls.firstOrNull { it.id == s.backgroundCallId && it.id != fg.id }
+    val conference = fg.children.isNotEmpty()
+    val rows =
+        fg.children.mapIndexedNotNull { i, id ->
+            s.calls
+                .firstOrNull { it.id == id }
+                ?.let { SceneParticipant(id, i + 1, it.displayName ?: it.numberRaw, canSplit = true, canDrop = true) }
+        }
+    val dim = mutableListOf<DisabledControl>()
+
+    fun off(
+        control: SceneControl,
+        reason: DisabledReason,
+        text: String,
+    ) = dim.add(DisabledControl(control, reason, text))
+    if (bg != null) {
+        off(SceneControl.AddCall, DisabledReason.TwoCalls, "Two calls are already in progress")
+        if (!s.canMerge) off(SceneControl.Merge, DisabledReason.MergeCarrier, "Your carrier doesn't allow merging")
+        if (!s.canSwap) off(SceneControl.HoldSwap, DisabledReason.SwapUnsupported, "Your carrier doesn't allow swaps")
+    } else {
+        off(SceneControl.Merge, DisabledReason.NeedsTwoCalls, "Merge needs two calls")
+        if (!s.canAddCall) off(SceneControl.AddCall, DisabledReason.AddCallCarrier, "Your carrier says no")
+    }
+    return SceneAnswer(
+        layout =
+            when {
+                conference -> SceneLayout.Conference
+                bg != null -> SceneLayout.Two
+                else -> SceneLayout.Single
+            },
+        primary = sceneCall(fg),
+        held = bg?.let(::sceneCall),
+        waiting = null,
+        ended = null,
+        holdSlot = if (bg != null) HoldSlot.Swap else HoldSlot.Hold,
+        participants = rows,
+        skipped = 0,
+        participantsSummary = null,
+        disabled = dim,
+    )
 }
 
 internal class FakeNotes : InCallNotes {
@@ -231,6 +290,14 @@ internal class InCallCalls : CallsApi {
 
     override fun answerReplacing(callId: Int) = record("answerReplacing $callId")
 
+    override fun swap() = record("swap")
+
+    override fun merge() = record("merge")
+
+    override fun split(childId: Int) = record("split $childId")
+
+    override fun endAll() = record("endAll")
+
     private fun record(line: String): Boolean {
         log += line
         return accept
@@ -246,6 +313,7 @@ internal class InCallHarness(
     val backend: FakeInCallBackend = FakeInCallBackend(),
     val tones: ToneMemory = ToneMemory(),
     display: NumberDisplay = NumberDisplay.AsIs,
+    placer: dev.rovsti.phone.data.CallPlacer? = null,
 ) {
     val testScope = TestScope(UnconfinedTestDispatcher())
     val source = FakeSource(first)
@@ -270,6 +338,7 @@ internal class InCallHarness(
             unknownLabel = "Unknown",
             scope = testScope.backgroundScope,
             clock = { NOW },
+            placer = placer,
         )
 
     init {

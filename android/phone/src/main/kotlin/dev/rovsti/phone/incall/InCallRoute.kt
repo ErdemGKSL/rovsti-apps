@@ -82,6 +82,7 @@ fun InCallScreen(
         modifier = modifier,
         aura = aura,
         photo = photo,
+        onEndMenu = sheets::endMenu,
     )
 }
 

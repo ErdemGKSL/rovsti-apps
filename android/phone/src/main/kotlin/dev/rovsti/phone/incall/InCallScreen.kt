@@ -178,6 +178,8 @@ fun InCallContent(
     aura: AuraMode = AuraMode(),
     /** The caller's photo model (a contacts URI); null shows the aura alone. */
     photo: Any? = null,
+    /** A touch and hold on End with two calls or a conference: the "End all" menu. */
+    onEndMenu: (Rect) -> Unit = {},
 ) {
     SideEffect { InCallProbe.content.incrementAndGet() }
     val call = ui.call
@@ -203,7 +205,7 @@ fun InCallContent(
                         .padding(horizontal = InCallMetrics.SidePad),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    CollapseRow(strings, onCollapse)
+                    TopRow(ui, strings, onAction, onCollapse)
                     CallerBlock(ui, call, strings, timer, photoState, onAction, onTimerMenu, Modifier.weight(1f))
                     if (ui.keypad.open) {
                         TonePanel(ui, strings, onAction)
@@ -211,7 +213,7 @@ fun InCallContent(
                         ControlGrid(ui, strings, onAction, onAudio)
                     }
                     Spacer(Modifier.height(InCallMetrics.EndTop))
-                    EndButton(ui, strings, onAction)
+                    EndButton(ui, strings, onAction, onEndMenu)
                     Spacer(Modifier.height(InCallMetrics.BottomPad))
                 }
             }
@@ -237,12 +239,19 @@ fun InCallContent(
     }
 }
 
+/** The collapse button; with a second call the Held card fills the rest of the row (the row's height never changes). */
 @Composable
-private fun CollapseRow(
+private fun TopRow(
+    ui: InCallUi,
     strings: InCallStrings,
+    onAction: (InCallAction) -> Unit,
     onCollapse: () -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().padding(top = Spacing.s), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
         CallControlButton(
             onClick = onCollapse,
             size = InCallMetrics.TopBar,
@@ -263,6 +272,15 @@ private fun CollapseRow(
                 )
             }
         }
+        ui.multi.held?.let { held ->
+            HeldCard(
+                held,
+                strings,
+                enabled = ui.multi.swap.enabled,
+                onSwap = { onAction(InCallAction.Swap) },
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -278,14 +296,47 @@ private fun CallerBlock(
     modifier: Modifier,
 ) {
     val anchor = remember { AnchorHolder() }
+    val swap = rememberSwapProgress(call.callId, ui.multi.twoCalls)
     Column(
         modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(InCallMetrics.LabelTop))
+        Identity(ui, call, strings, photoState, onAction, Modifier.swapCross(swap))
+        Spacer(Modifier.height(InCallMetrics.NameGap))
+        StatusLine(ui, call, strings, timer, anchor, onTimerMenu)
+        if (ui.multi.conference) {
+            Spacer(Modifier.height(InCallMetrics.NameGap * 2))
+            val count = ui.multi.participants.size
+            PeoplePill(
+                ui.multi.summary ?: strings.people(count),
+                strings,
+                onClick = { onAction(InCallAction.OpenConference) },
+            )
+        }
+        call.sim?.let {
+            Spacer(Modifier.height(InCallMetrics.NameGap * 2))
+            SimPill(it.label, it.colorArgb)
+        }
+    }
+}
+
+/** The avatar (or the conference's avatars), the name, the number and the WhatsApp line: the block a swap carries. */
+@Composable
+private fun Identity(
+    ui: InCallUi,
+    call: InCallCall,
+    strings: InCallStrings,
+    photoState: CallPhotoState,
+    onAction: (InCallAction) -> Unit,
+    modifier: Modifier,
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         // The avatar fades out as the photo fades in and is gone once the photo shows; its space stays.
         val avatarGone by photoState.avatarGone
-        if (avatarGone) {
+        if (ui.multi.conference) {
+            ConferenceAvatars(ui.multi.participants, call.title)
+        } else if (avatarGone) {
             Spacer(Modifier.size(InCallMetrics.Avatar))
         } else {
             Avatar(
@@ -337,12 +388,6 @@ private fun CallerBlock(
         if (call.whatsapp) {
             Spacer(Modifier.height(InCallMetrics.NameGap))
             WaAudioLabel(strings.waAudio, OnAuraSecondary, Modifier.testTag(InCallTags.WaAudio))
-        }
-        Spacer(Modifier.height(InCallMetrics.NameGap))
-        StatusLine(ui, call, strings, timer, anchor, onTimerMenu)
-        call.sim?.let {
-            Spacer(Modifier.height(InCallMetrics.NameGap * 2))
-            SimPill(it.label, it.colorArgb)
         }
     }
 }
@@ -469,35 +514,60 @@ private fun ControlGrid(
             ) { if (ui.routeOpensList) onAudio(audioAnchor.rect) else onAction(InCallAction.ToggleRoute) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(InCallMetrics.ControlGap)) {
+            val multi = ui.multi
+            // Add call: the core dims it with its reason (two calls, carrier, emergency...); a tap then says why.
+            val addReason = if (noWa) multi.addCall.reason else strings.waUnavailable
             ControlButton(
                 icon = RovstiIcons.Plus,
                 label = strings.addCall,
                 tag = InCallTags.AddCall,
-                enabled = false,
-                disabledReason = if (noWa) strings.addCallLater else strings.waUnavailable,
-                dimmed = !noWa,
-                onDimmedTap = unavailable,
-            ) {}
-            ControlButton(
-                icon = RovstiIcons.Pause,
-                label = if (ui.held) strings.resume else strings.hold,
-                tag = InCallTags.Hold,
-                active = ui.held,
-                enabled = enabled && (ui.canHold || ui.held) && (wa?.hold ?: true),
-                disabledReason = strings.waUnavailable,
-                dimmed = !noWa && wa?.hold != true,
-                onDimmedTap = unavailable,
-            ) { onAction(InCallAction.ToggleHold) }
-            ControlButton(
-                icon = RovstiIcons.Pencil,
-                label = if (ui.hasNote) strings.noteSaved else strings.note,
-                tag = InCallTags.Note,
-                active = ui.hasNote,
-                enabled = enabled && ui.call?.number?.isNotBlank() == true && noWa,
-                disabledReason = strings.waUnavailable,
-                dimmed = !noWa,
-                onDimmedTap = unavailable,
-            ) { onAction(InCallAction.OpenNote) }
+                enabled = enabled && addReason == null,
+                disabledReason = addReason,
+                dimmed = addReason != null,
+                onDimmedTap = { if (noWa) onAction(InCallAction.Dimmed(addReason.orEmpty())) else unavailable() },
+            ) { onAction(InCallAction.OpenAddCall) }
+            if (noWa && multi.twoCalls) {
+                // Two calls: Hold becomes Swap, and Merge takes the Note slot.
+                ControlButton(
+                    icon = RovstiIcons.Swap,
+                    label = strings.swap,
+                    tag = MultiCallTags.Swap,
+                    enabled = enabled && multi.swap.enabled,
+                    disabledReason = multi.swap.reason,
+                    dimmed = !multi.swap.enabled,
+                    onDimmedTap = { onAction(InCallAction.Dimmed(multi.swap.reason.orEmpty())) },
+                ) { onAction(InCallAction.Swap) }
+                ControlButton(
+                    icon = RovstiIcons.Merge,
+                    label = strings.merge,
+                    tag = MultiCallTags.Merge,
+                    enabled = enabled && multi.merge.enabled,
+                    disabledReason = multi.merge.reason,
+                    dimmed = !multi.merge.enabled,
+                    onDimmedTap = { onAction(InCallAction.Dimmed(multi.merge.reason.orEmpty())) },
+                ) { onAction(InCallAction.Merge) }
+            } else {
+                ControlButton(
+                    icon = RovstiIcons.Pause,
+                    label = if (ui.held) strings.resume else strings.hold,
+                    tag = InCallTags.Hold,
+                    active = ui.held,
+                    enabled = enabled && (ui.canHold || ui.held) && (wa?.hold ?: true),
+                    disabledReason = strings.waUnavailable,
+                    dimmed = !noWa && wa?.hold != true,
+                    onDimmedTap = unavailable,
+                ) { onAction(InCallAction.ToggleHold) }
+                ControlButton(
+                    icon = RovstiIcons.Pencil,
+                    label = if (ui.hasNote) strings.noteSaved else strings.note,
+                    tag = InCallTags.Note,
+                    active = ui.hasNote,
+                    enabled = enabled && ui.call?.number?.isNotBlank() == true && noWa,
+                    disabledReason = strings.waUnavailable,
+                    dimmed = !noWa,
+                    onDimmedTap = unavailable,
+                ) { onAction(InCallAction.OpenNote) }
+            }
         }
     }
 }
@@ -571,14 +641,19 @@ private fun EndButton(
     ui: InCallUi,
     strings: InCallStrings,
     onAction: (InCallAction) -> Unit,
+    onEndMenu: (Rect) -> Unit,
 ) {
+    val anchor = remember { AnchorHolder() }
+    val several = ui.multi.twoCalls || ui.multi.conference
     CallControlButton(
         onClick = { onAction(InCallAction.End) },
+        onLongClick = if (several) ({ onEndMenu(anchor.rect) }) else null,
         enabled = ui.live,
         size = InCallMetrics.End,
         solid = Color(DECLINE_RED),
         modifier =
             Modifier
+                .captureAnchor(anchor)
                 .testTag(InCallTags.End)
                 .semantics(mergeDescendants = true) { contentDescription = strings.end },
     ) { glyph ->

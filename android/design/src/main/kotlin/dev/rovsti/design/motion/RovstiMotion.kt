@@ -86,6 +86,15 @@ object RovstiMotion {
     /** A call-screen toggle landing on or off: damping 0.8, stiffness 300 (scale kick when it turns solid white). */
     fun <T : Any> callToggle(t: T): SpringSpec<T> = spring(0.8f, 300f, t)
 
+    /** S19, a call put on hold shrinks away into the Held card: damping 0.86, stiffness 380. */
+    fun <T : Any> holdAway(t: T): SpringSpec<T> = spring(0.86f, 380f, t)
+
+    /** S20, swapping two calls: the avatars cross between the stage and the card, damping 0.8, stiffness 420. */
+    fun <T : Any> swapCross(t: T): SpringSpec<T> = spring(0.8f, 420f, t)
+
+    /** S21, two calls pulling together into a conference: damping 0.75, stiffness 500. */
+    fun <T : Any> mergePull(t: T): SpringSpec<T> = spring(0.75f, 500f, t)
+
     /** Decay of the velocity that drives squash and stretch after release. */
     fun <T : Any> squashDecay(t: T): SpringSpec<T> = spring(0.5f, 300f, t)
 

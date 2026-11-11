@@ -196,6 +196,52 @@ class WaCallFlowTest {
             assertTrue(inCallEffects.none { it is InCallEffect.PostCall })
         }
 
+    @Test fun answeringInTheAppLeavesTheRingingScreenBeforeTheGatewayConnects() =
+        runBlocking {
+            event("c1", CallPhase.Ringing)
+            eventually("rings") { incoming.state.value.caller != null }
+            incoming.onAction(IncomingAction.Answer)
+            eventually("the gateway got the answer") { fake.count("wa.accept_call") == 1 }
+            // No Connecting or Active event yet: the ring is over all the same.
+            eventually("Incoming hands over to In-Call at once") {
+                incomingEffects.any {
+                    it ==
+                        IncomingEffect.Leave(true)
+                }
+            }
+            assertEquals(dev.rovsti.core.model.phone.WireCallState.Active, waCall()?.state)
+            assertEquals("the microphone service was started while answering", 1, pump.prepares.get())
+            assertEquals("no capture before the call connects", 0, pump.starts.get())
+        }
+
+    @Test fun aWhatsAppRingUsesTheRealKeyguardNotTheRegistrysStaleOne() =
+        runBlocking {
+            // The registry's snapshot is the default (locked) while no cellular call ever ran.
+            val stale = FakeSource(CallSnapshot(keyguardLocked = true))
+            val keyguard = MutableStateFlow(false)
+            val merged =
+                WaMergedCallSource(
+                    base = stale,
+                    waCalls = waCalls.calls,
+                    muted = waCalls.mutedCalls,
+                    speaker = waCalls.speakerOn,
+                    arbiter = CoreWaArbiter(host.ops),
+                    ids = WaIdBook(),
+                    onBusy = {},
+                    scope = scope,
+                    clock = { NOW },
+                    keyguardLocked = keyguard,
+                )
+            event("c1", CallPhase.Ringing)
+            eventually("rings") {
+                merged.snapshot.value.calls
+                    .any { WaIdBook.isWa(it.id) }
+            }
+            eventually("unlocked phone: buttons, not slide to answer") { !merged.snapshot.value.keyguardLocked }
+            keyguard.value = true
+            eventually("locked again: slide to answer") { merged.snapshot.value.keyguardLocked }
+        }
+
     @Test fun declineRejectsOnTheGatewayAndTheScreenCloses() =
         runBlocking {
             event("c2", CallPhase.Ringing)

@@ -7,9 +7,10 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * A [CallAudioPump] that does what [dev.rovsti.platform.wa.WaCallAudio] does with real threads and no hardware: a
  * microphone thread pushes silent frames and a speaker thread pulls until it is interrupted or the call ends.
- * [starts] and [stops] count the calls, [threads] are the two threads of the running pump.
+ * [prepares], [starts] and [stops] count the calls, [threads] are the two threads of the running pump.
  */
 class FakeCallPump : CallAudioPump {
+    val prepares = AtomicInteger()
     val starts = AtomicInteger()
     val stops = AtomicInteger()
     val speakerRequests = mutableListOf<Boolean>()
@@ -20,6 +21,10 @@ class FakeCallPump : CallAudioPump {
 
     @Volatile var pushed = 0
         private set
+
+    override fun prepare() {
+        prepares.incrementAndGet()
+    }
 
     override fun start(frames: CallFrames): Boolean {
         starts.incrementAndGet()

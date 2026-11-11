@@ -1,7 +1,10 @@
 package dev.rovsti.phone
 
 import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -14,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.compose.runtime.Composable
+import dev.rovsti.core.model.phone.CallPhase
 import dev.rovsti.design.transition.Tab
 import dev.rovsti.platform.telephony.AnswerOnce
 import dev.rovsti.platform.telephony.CallNotifications
@@ -23,15 +27,22 @@ import dev.rovsti.platform.wa.WaIncoming
 import dev.rovsti.shell.NavSpec
 import dev.rovsti.shell.RovstiShellActivity
 import dev.rovsti.shell.shellContainer
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 
 /**
  * The one activity of Rovsti Phone (FQCN kept, singleTop). Edge to edge, back order, refresh rate and permission refresh
  * come from [RovstiShellActivity]; this class adds what only a phone app needs:
  *
  * - **Calls over the lock screen (AD-1).** `setShowWhenLocked` and `setTurnScreenOn` are dynamic, never in the manifest:
- *   they hold only while `CallRegistry` reports a live call, and they stay a few seconds after the last call goes so the
- *   "Call ended" hold is still seen.
+ *   they hold only while `CallRegistry` reports a live call or `WaCalls` a live WhatsApp call (or a WhatsApp ring's
+ *   full-screen intent is waiting for its call, see [LockScreenGate]), and they stay a few seconds after the last call
+ *   goes so the "Call ended" hold is still seen.
  * - **Notification intents.** Answer is honoured exactly once, before any UI exists (AD-2, story 5.3); Message opens
  *   Incoming; a WhatsApp Decline sends the task straight back.
  * - **Dial links.** DIAL and VIEW of `tel:` put the number on the Keypad (`dial.fromTelUri` decodes it).
@@ -59,6 +70,20 @@ class MainActivity :
     }
     private var uiFailed = false
 
+    /** Main-thread jobs of this activity instance (the WhatsApp call list, the keyguard). */
+    private val jobs =
+        MainScope() +
+            CoroutineExceptionHandler { _, e -> Log.e("Rovsti", "Following the WhatsApp calls failed", e) }
+
+    /** Unlocking or the screen going off changes the Incoming screen (slide or buttons) while no cellular call runs. */
+    private val keyguardReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) = lockScreen.refreshLocked()
+        }
+
     /** The error boundary of the Incoming screen: no first frame in time shows [NativeIncoming] (AD-17). */
     private val watchdog =
         IncomingWatchdog(
@@ -75,7 +100,10 @@ class MainActivity :
         IncomingPerf.mark(IncomingTimeline.ACTIVITY_CREATED)
         // The registry tells this activity about live calls; the lock-screen flags must be right before the first frame.
         CallRegistry.surface = this
-        setLockScreenFlags(CallRegistry.hasLiveCall())
+        // A fresh launch by a WhatsApp ring (its full-screen intent): the call list may not have the call yet.
+        if (savedInstanceState == null) holdForWaRing(intent)
+        lockScreen.onLiveCallChanged(CallRegistry.hasLiveCall())
+        followWhatsAppCalls()
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
@@ -129,13 +157,15 @@ class MainActivity :
     override fun onStop() {
         watchdog.disarm()
         // Nothing left to show over the lock screen: put the flags back at once.
-        if (!CallRegistry.hasLiveCall()) setLockScreenFlags(false)
+        if (!lockScreen.wanted) setLockScreenFlags(false)
         // The preferences and notes are written a moment after the last edit; the process may be killed after this.
         container.scope.launch { container.store.flush() }
         super.onStop()
     }
 
     override fun onDestroy() {
+        jobs.cancel()
+        runCatching { unregisterReceiver(keyguardReceiver) }
         lockScreen.cancel()
         watchdog.disarm()
         if (CallRegistry.surface === this) CallRegistry.surface = null
@@ -143,7 +173,8 @@ class MainActivity :
     }
 
     override fun onNewIntent(intent: Intent) {
-        setLockScreenFlags(CallRegistry.hasLiveCall())
+        holdForWaRing(intent)
+        lockScreen.onLiveCallChanged(CallRegistry.hasLiveCall())
         super.onNewIntent(intent)
         armWatchdog()
     }
@@ -162,8 +193,10 @@ class MainActivity :
         handleWaCallIntent(intent)
         val link = phoneLinkFor(intent.action, intent.dataString, intent.extras, CallRegistry.hasLiveCall())
         if (link != null) apply(link)
-        // A link is used once: a rotation or a restart must not answer, reply or open the same call again.
+        // A link is used once: a rotation or a restart must not answer, reply or open the same call again (nor hold
+        // the lock-screen flags for a WhatsApp ring that is long over).
         intent.consumePhoneExtras()
+        intent.removeExtra(WaIncoming.EXTRA_CALL_ID)
         return link?.route
     }
 
@@ -195,6 +228,41 @@ class MainActivity :
 
     override fun onLiveCallChanged(live: Boolean) {
         lockScreen.onLiveCallChanged(live)
+    }
+
+    /** The intent of a WhatsApp ring (not its Decline) holds the flags until the call list has the call. */
+    private fun holdForWaRing(intent: Intent?) {
+        val id = intent?.getStringExtra(WaIncoming.EXTRA_CALL_ID)?.takeIf { it.isNotEmpty() } ?: return
+        if (intent.getStringExtra(WaIncoming.EXTRA_ACTION) == WaIncoming.DECLINE) return
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        if (WaIncoming.isOver(id)) return
+        lockScreen.holdForWaIntent(id)
+    }
+
+    /**
+     * WhatsApp calls are not in `CallRegistry`: their list drives the lock-screen flags too, and the keyguard state the
+     * Incoming screen reads (slide to answer only while locked).
+     */
+    private fun followWhatsAppCalls() {
+        registerReceiver(
+            keyguardReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_USER_PRESENT)
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            },
+            RECEIVER_NOT_EXPORTED,
+        )
+        jobs.launch { lockScreen.locked.collect { container.keyguardLocked.value = it } }
+        jobs.launch {
+            container.waCalls.calls
+                .map { calls ->
+                    val now = System.currentTimeMillis()
+                    calls.any { LockScreenGate.holdsScreen(it, now) } to
+                        calls.filter { it.phase is CallPhase.Ended }.mapTo(HashSet()) { it.callId }
+                }.distinctUntilChanged()
+                .collect { (live, ended) -> lockScreen.onWaCalls(live, ended) }
+        }
     }
 
     private fun setLockScreenFlags(on: Boolean) {

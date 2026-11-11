@@ -62,6 +62,7 @@ import dev.rovsti.phone.wa.WaCallsRouter
 import dev.rovsti.phone.wa.WaIdBook
 import dev.rovsti.phone.wa.WaMergedCallSource
 import dev.rovsti.phone.wa.WaNotices
+import dev.rovsti.phone.wa.WaRingNotifier
 import dev.rovsti.platform.calllog.AndroidBlocklistRepository
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
 import dev.rovsti.platform.calllog.BlocklistRepository
@@ -79,6 +80,7 @@ import dev.rovsti.platform.telephony.AndroidSimRepository
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.platform.telephony.CallsApi
 import dev.rovsti.platform.telephony.SimRepository
+import dev.rovsti.platform.wa.WaIncoming
 import dev.rovsti.shell.ShellContainer
 import dev.rovsti.wa.avatars.WaAvatar
 import dev.rovsti.wa.calls.AndroidCallAudioPump
@@ -237,6 +239,12 @@ open class PhoneContainer(
     /** The payload of an Answer or Decline tapped on a WhatsApp call notification, until [waActions] has taken it. */
     val pendingWaCallAction: MutableStateFlow<String?> = MutableStateFlow(null)
 
+    /**
+     * Whether the keyguard is up, as the activity last read it (resume, unlock, screen off, a call). The merged call
+     * snapshot uses it for WhatsApp calls: the registry's snapshot only refreshes the keyguard while a cellular call runs.
+     */
+    val keyguardLocked: MutableStateFlow<Boolean> by lazy { MutableStateFlow(readKeyguardLocked()) }
+
     private var dialSerial = 0L
 
     /** The wall clock in ms; one seam for the data layer. */
@@ -391,7 +399,12 @@ open class PhoneContainer(
             onBusy = { id -> scope.launch { waCalls.reject(id) } },
             scope = scope,
             clock = clock,
+            keyguardLocked = keyguardLocked,
         )
+
+    /** `KeyguardManager.isKeyguardLocked`; locked when it cannot be read (slide to answer is the safe side). */
+    protected open fun readKeyguardLocked(): Boolean =
+        context.getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked != false
 
     /** Waits until the Rust core is initialised: nothing WhatsApp-related may touch it before (start-up crash, rule b). */
     protected open suspend fun awaitRustReady() {
@@ -466,7 +479,12 @@ open class PhoneContainer(
             createCallPump(),
             scope,
             forgotten = createForgottenCalls(),
-        ).also { it.start() }
+            // Answered, declined or over: the ringing notification goes, and a late push cannot post it again.
+            ringOver = { id -> WaIncoming.cancel(context, id) },
+        ).also {
+            it.start()
+            WaRingNotifier(it.calls, scope, clock) { id, title -> WaIncoming.show(context, id, title) }.start()
+        }
 
     /** The deleted WhatsApp calls, kept across restarts. */
     protected open fun createForgottenCalls(): ForgottenCalls = PrefsForgottenCalls(context)

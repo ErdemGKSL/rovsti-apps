@@ -186,6 +186,14 @@ pub struct CallAudioStats {
     pub spk_gated: AtomicU64,
     /// Speaker frames dropped because the socket side was full.
     pub spk_queue_dropped: AtomicU64,
+    /// Decoded packets that gave no samples (nothing reached the speaker).
+    pub spk_empty: AtomicU64,
+    /// Samples handed to the speaker queue (16 kHz), to compare with the
+    /// call's length and with `app` (60 ms each).
+    pub spk_samples: AtomicU64,
+    /// Queued speaker frames thrown away when the app's socket attached
+    /// (stale audio from before it listened).
+    pub spk_stale: AtomicU64,
     /// Whole 60 ms frames sent to the app.
     pub spk_to_app: AtomicU64,
     /// Level of the microphone PCM on its way to the engine.
@@ -227,6 +235,10 @@ impl CallAudioStats {
             foreign_failed: load(&self.foreign_failed),
             spk_gated: load(&self.spk_gated),
             spk_queue_dropped: load(&self.spk_queue_dropped),
+            spk_empty: load(&self.spk_empty),
+            spk_ms: load(&self.spk_samples) * 1_000
+                / u64::from(rovsti_wa_proto::audio::SAMPLE_RATE),
+            spk_stale: load(&self.spk_stale),
             spk_to_app: load(&self.spk_to_app),
             spk_level: self.spk_level.snapshot(),
         }
@@ -253,6 +265,10 @@ pub struct AudioSummary {
     pub foreign_failed: u64,
     pub spk_gated: u64,
     pub spk_queue_dropped: u64,
+    pub spk_empty: u64,
+    /// Milliseconds of decoded audio handed to the speaker queue.
+    pub spk_ms: u64,
+    pub spk_stale: u64,
     pub spk_to_app: u64,
     pub spk_level: LevelSnapshot,
 }
@@ -263,7 +279,7 @@ impl fmt::Display for AudioSummary {
             f,
             "format={} | mic: app={} bad={} lag={} engine={} engine_drop={} enc_fail={} {} | \
              spk: engine={} opus={} mlow={} dec_fail={} foreign={} foreign_ok={} \
-             foreign_fail={} gated={} queue_drop={} app={} {}",
+             foreign_fail={} gated={} queue_drop={} empty={} pcm_ms={} stale={} app={} {}",
             self.format,
             self.mic_from_app,
             self.mic_bad_size,
@@ -281,6 +297,9 @@ impl fmt::Display for AudioSummary {
             self.foreign_failed,
             self.spk_gated,
             self.spk_queue_dropped,
+            self.spk_empty,
+            self.spk_ms,
+            self.spk_stale,
             self.spk_to_app,
             self.spk_level,
         )
@@ -378,10 +397,15 @@ impl InboundDecoder {
 /// Hands a decoded frame to the socket side; a full queue drops it.
 fn to_speaker(spk: &Sender<Frame>, pcm: Frame, stats: &CallAudioStats) -> bool {
     if pcm.is_empty() {
+        bump(&stats.spk_empty);
         return true;
     }
+    let samples = pcm.len() as u64;
     match spk.try_send(pcm) {
-        Ok(()) => true,
+        Ok(()) => {
+            stats.spk_samples.fetch_add(samples, Ordering::Relaxed);
+            true
+        }
         Err(TrySendError::Full(_)) => {
             bump(&stats.spk_queue_dropped);
             true
@@ -787,9 +811,25 @@ mod tests {
             line,
             "format=native-opus pt120 16k/60ms | mic: app=2 bad=1 lag=0 engine=0 engine_drop=0 \
              enc_fail=0 rms=none peak=0 voiced=0 | spk: engine=0 opus=0 mlow=0 dec_fail=0 \
-             foreign=0 foreign_ok=0 foreign_fail=1 gated=0 queue_drop=0 app=1 \
+             foreign=0 foreign_ok=0 foreign_fail=1 gated=0 queue_drop=0 empty=0 pcm_ms=0 stale=0 app=1 \
              rms=-30.3dBFS peak=1000 voiced=1"
         );
+    }
+
+    #[test]
+    fn the_speaker_counts_decoded_time_and_empty_packets() {
+        let stats = CallAudioStats::default();
+        let (tx, rx) = async_channel::bounded(1);
+        assert!(to_speaker(&tx, vec![0; 960], &stats));
+        assert!(to_speaker(&tx, Vec::new(), &stats));
+        // Full: dropped, and not counted as audio that reached the queue.
+        assert!(to_speaker(&tx, vec![0; 960], &stats));
+        let summary = stats.summary();
+        assert_eq!(
+            (summary.spk_ms, summary.spk_empty, summary.spk_queue_dropped),
+            (60, 1, 1)
+        );
+        drop(rx);
     }
 
     #[test]

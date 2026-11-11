@@ -51,13 +51,16 @@ class WaCallsTest {
         val calls: WaCalls,
     )
 
+    /** The ids `ringOver` was told about, in order. */
+    private val ringsOver = mutableListOf<String>()
+
     private fun TestScope.rig(
         fake: FakeWaGateway = fake(),
         clockMs: Long = 1_000,
     ): Rig {
         val repo = DefaultWaRepository(WaLinkStore(fake.ops), backgroundScope, fake.opener, fake.waEvents, push)
         repo.start()
-        val calls = WaCalls(repo, mic, pump, backgroundScope, clock = { clockMs })
+        val calls = WaCalls(repo, mic, pump, backgroundScope, clock = { clockMs }, ringOver = { ringsOver += it })
         calls.start()
         return Rig(fake, calls)
     }
@@ -237,6 +240,102 @@ class WaCallsTest {
             val r = rig(fake)
             assertTrue(r.calls.place(peer) is CallResult.Failed)
         }
+
+    private fun WaCalls.phaseOf(id: String) = calls.value.single { it.callId == id }.phase
+
+    @Test fun acceptStopsTheRingAtOnceAndShowsTheCallConnecting() =
+        runTest(UnconfinedTestDispatcher()) {
+            val r = rig()
+            r.fake.emitEvent("inst1", 1, call("c1", CallPhase.Ringing))
+            assertTrue(ringsOver.isEmpty())
+            assertEquals(CallResult.Started("c1"), r.calls.accept("c1"))
+            assertEquals("the ringing notification goes on answer", listOf("c1"), ringsOver.distinct())
+            assertEquals(
+                "the screen leaves Ringing without waiting for the gateway",
+                CallPhase.Connecting,
+                r.calls.phaseOf("c1"),
+            )
+            // A Ringing event the gateway sent before it saw the answer must not ring the screen again.
+            r.fake.emitEvent("inst1", 2, call("c1", CallPhase.Ringing))
+            assertEquals(CallPhase.Connecting, r.calls.phaseOf("c1"))
+            r.fake.emitEvent("inst1", 3, call("c1", CallPhase.Active))
+            assertEquals(CallPhase.Active, r.calls.phaseOf("c1"))
+        }
+
+    @Test fun aFailedAcceptRingsAgainAndReleasesTheMicrophoneService() =
+        runTest(UnconfinedTestDispatcher()) {
+            val fake = fake().apply { callErrors["wa.accept_call"] = RustError.Network("down") }
+            val r = rig(fake)
+            fake.emitEvent("inst1", 1, call("c1", CallPhase.Ringing))
+            assertTrue(r.calls.accept("c1") is CallResult.Failed)
+            assertEquals(CallPhase.Ringing, r.calls.phaseOf("c1"))
+            assertEquals(1, pump.prepares.get())
+            assertEquals("the service started for the answer is stopped", 1, pump.stops.get())
+        }
+
+    @Test fun theMicrophoneServiceStartsAtTheAnswerBeforeTheRecorder() =
+        runTest(UnconfinedTestDispatcher()) {
+            val r = rig()
+            r.fake.emitEvent("inst1", 1, call("c1", CallPhase.Ringing))
+            r.calls.accept("c1")
+            assertEquals("prepared while the user answers (app in front)", 1, pump.prepares.get())
+            assertEquals(0, pump.starts.get())
+            r.fake.emitEvent("inst1", 2, call("c1", CallPhase.Active))
+            assertEquals(1, pump.starts.get())
+            assertEquals("the prepared service is not stopped and restarted from the background", 0, pump.stops.get())
+            r.calls.end("c1")
+            assertEquals(1, pump.stops.get())
+        }
+
+    @Test fun aCallThatEndsBeforeConnectingStopsThePreparedService() =
+        runTest(UnconfinedTestDispatcher()) {
+            val r = rig()
+            assertEquals(CallResult.Started("call-1"), r.calls.place(peer))
+            assertEquals(1, pump.prepares.get())
+            r.fake.emitEvent("inst1", 1, call("call-1", CallPhase.Ended("no_answer"), CallDirection.Out))
+            assertEquals(1, pump.stops.get())
+            assertEquals(0, pump.starts.get())
+        }
+
+    @Test fun declineAndAnyNonRingingPhaseStopTheRing() =
+        runTest(UnconfinedTestDispatcher()) {
+            val r = rig()
+            r.fake.emitEvent("inst1", 1, call("c1", CallPhase.Ringing))
+            r.calls.reject("c1")
+            assertEquals(listOf("c1"), ringsOver.distinct())
+            // Answered on another device, or the caller gave up: the event ends the ring too.
+            r.fake.emitEvent("inst1", 2, call("c2", CallPhase.Ringing))
+            r.fake.emitEvent("inst1", 3, call("c2", CallPhase.Ended("elsewhere_answered")))
+            assertEquals(listOf("c1", "c2"), ringsOver.distinct())
+            // An outgoing call never had a ringing notification here.
+            r.fake.emitEvent("inst1", 4, call("o1", CallPhase.Active, CallDirection.Out))
+            assertFalse("o1" in ringsOver)
+        }
+
+    @Test fun theRealPumpStartsTheServiceBeforeTheRecorderAndStopsItAfter() {
+        val order = mutableListOf<String>()
+        val real =
+            AndroidCallAudioPump(
+                RuntimeEnvironment.getApplication(),
+                startService = {
+                    order += "service.start"
+                    true
+                },
+                stopService = { order += "service.stop" },
+                startAudio = { _, _ ->
+                    order += "audio.start"
+                    true
+                },
+                stopAudio = {
+                    order += "audio.stop"
+                    true
+                },
+            )
+        real.prepare()
+        assertTrue(real.start(FakeFrames))
+        assertTrue(real.stop())
+        assertEquals(listOf("service.start", "service.start", "audio.start", "audio.stop", "service.stop"), order)
+    }
 
     private object FakeFrames : dev.rovsti.platform.wa.CallFrames {
         override fun push(pcm: ByteArray) = Unit

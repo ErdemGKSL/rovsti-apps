@@ -26,7 +26,7 @@ The only hop that uses another size is inside the gateway: WhatsApp's decoder ha
 | 2 | `audio_socket` rechunks with `Rechunker` (commit 457ac0f) and sends only whole frames; leftover samples wait for the next chunk | 1 920-byte binary messages | `rovsti_wa_proto::audio::Rechunker`, `audio_socket` |
 | 3 | Client `pump` decodes each message (wrong size: dropped) and `try_send`s it to `speaker`; a full queue (8 frames, about half a second) drops the frame instead of adding latency | 960 `i16` | `audio.rs` |
 | 4 | `RustNative.audioPull(handle, out)`: 1 920 = a frame, 0 = none ready, -1 = call ended or handle gone | 1 920 bytes | `ops::audio_pull`, `jni_exports.rs` |
-| 5 | Thread `wa-speaker`: frame -> `AudioTrack.write(WRITE_NON_BLOCKING)`; 0 -> parks 10 ms; -1 -> thread ends | 1 920 bytes | `WaCallAudio.pumpSpeaker` |
+| 5 | Thread `wa-speaker`: frame -> `AudioTrack.write(WRITE_BLOCKING)` (the track paces the thread; a non-blocking write used to cut a burst off at the track buffer); 0 -> parks 10 ms; -1 -> thread ends | 1 920 bytes | `WaCallAudio.pumpSpeaker` |
 | 6 | `AudioTrack`: `USAGE_VOICE_COMMUNICATION`, `CONTENT_TYPE_SPEECH`, `CHANNEL_OUT_MONO`, `ENCODING_PCM_16BIT`, 16 kHz, `MODE_STREAM`, buffer at least 4 frames | PCM16 mono | `WaCallAudio.trackAttributes`, `format` |
 
 ## Platform state while a call runs
@@ -45,8 +45,10 @@ The only hop that uses another size is inside the gateway: WhatsApp's decoder ha
   `android/phone/src/main/AndroidManifest.xml` as `foregroundServiceType="microphone|phoneCall"` with
   `FOREGROUND_SERVICE_MICROPHONE`. Android 14 stops background capture without a microphone service. At run time it
   claims `microphone`, plus `phoneCall` only when the app holds the dialer role (the system refuses the type
-  otherwise). `AndroidCallAudioPump` starts it after the audio runs and stops it first. `RovstiInCallService` keeps
-  `phoneCall` for telecom calls. No R8 rule is needed: manifest components are kept by the aapt2 rules.
+  otherwise). `RovstiInCallService` keeps `phoneCall` for telecom calls. **Order (changed, see "Silent microphone"
+  below):** `WaCalls` starts the service when the user answers or places the call (`CallAudioPump.prepare`, the app is
+  in front), `AndroidCallAudioPump.start` starts it again (a no-op) **before** the recorder, and `stop` stops the
+  recorder first and the service after. No R8 rule is needed: manifest components are kept by the aapt2 rules.
 - **Opened only after connected** (changed in this step): `WaCalls` starts the pump when the gateway reports phase
   `Active`, for outgoing **and** incoming calls. Before, an incoming call opened the recorder and the audio socket
   at the moment the answer was sent, while the media was still connecting. Hanging up, rejecting, an `Ended` event
@@ -179,3 +181,45 @@ Software cannot hear. On a phone, place a WhatsApp call from the Phone app to an
 side hears you, you hear them, earpiece / speaker / Bluetooth headset switch, music pauses and resumes, the call keeps
 working with the screen off or the app in the background (the microphone notification shows), and no audio is
 captured before the other side answers.
+
+## Silent microphone, short speaker, ringing after answer (E5.8a follow-up 2)
+
+Owner's call (HyperOS, Android 14+), gateway line: `mic: app=71 ... rms=-120.0dBFS peak=0 voiced=0 | spk: engine=83
+opus=83 ... queue_drop=1 app=15 rms=-17.3dBFS`.
+
+- **Microphone all zeros.** Android gives an app digital silence when it captures while counted as background. Three
+  causes in the app: (1) a WhatsApp ring never showed over the lock screen: `MainActivity` turned
+  `setShowWhenLocked`/`setTurnScreenOn` on only for `CallRegistry` (telecom) calls, so the full-screen intent's
+  activity stayed behind the keyguard; (2) the microphone foreground service started **after** the recorder, at
+  `Active`, possibly from the background, where Android 14 refuses a while-in-use type; (3) the service was started
+  at all only after capture began. Fixed: `LockScreenGate` also follows `WaCalls.calls` and holds the flags from the
+  ring's intent (`wa_call_id`) until the list has the call, the list says it ended, or `WaIncoming.RING_TIMEOUT_MS`
+  passed (never longer without a call; `LockScreenGateTest`); the service starts at answer/place and before the
+  recorder (`WaCallsTest`, `theRealPumpStartsTheServiceBeforeTheRecorderAndStopsItAfter`).
+- **Zero-run warning.** `SilenceWatch` in `wa-mic` logs one `Log.w` (tag `Rovsti`) after 2 s of exact zeros, naming the
+  likely causes: `adb logcat -s Rovsti | grep 'exact digital silence'`.
+- **15 of 83 speaker frames.** Not explained by the counters (only 1 queue drop, no decode failure; the socket was open
+  for about 4 s judging by `mic app=71`). The gateway line now has three more speaker counters to settle it on the next
+  call: `empty` (decoded packets with no samples), `pcm_ms` (decoded audio that reached the socket queue, in ms) and
+  `stale` (queued frames thrown away when the app's socket attached). `pcm_ms` close to `app x 60` and far below the
+  call length means the peer's packets decode to less audio than 60 ms each; `stale` large means the socket attached
+  late. On the phone, the speaker write is now blocking (above).
+- **"Keeps ringing" after answer.** Rovsti has no ringtone, vibrator or sound for WhatsApp calls (the `wa_calls`
+  channel has no sound since its first version), so the ring is the incoming-call notification and the Incoming
+  screen: the notification was cancelled only by its own Answer/Decline buttons or a `call_end` push (sent only for a
+  ring that ended unanswered), so answering in the app left the ringing `CallStyle` notification up for 60 s, and the
+  screen stayed on Incoming until the gateway's `Active` event. Fixed: `WaCalls` calls `ringOver` (the container cancels
+  the notification) on accept, reject and every incoming event that is not `Ringing`; accept moves the call to
+  `Connecting` at once (a late `Ringing` event cannot undo it); `WaIncoming` remembers rings that are over so a late or
+  repeated `call` push cannot post the notification again. (Separately, the official WhatsApp app on the primary phone
+  is dismissed by the **caller** with `<terminate reason="accepted_elsewhere">`, per whatsapp-rust
+  `handlers/call.rs::dismiss_outgoing_siblings`; a companion never dismisses its siblings, so the gateway has nothing
+  to send.)
+- **Screen on, unlocked: no call screen.** The system turns a full-screen intent into a heads-up while the phone is
+  unlocked and in use. `WaIncoming.show` now also starts the call screen itself in that case (allowed on HyperOS with
+  "Display pop-up windows while running in the background"; refused quietly elsewhere, the heads-up stays) and logs a
+  warning when `canUseFullScreenIntent()` is false. The live gateway event posts the ringing notification too
+  (`WaRingNotifier`), not only the FCM push.
+- **Slide to answer on an unlocked phone.** The Incoming screen read `CallSnapshot.keyguardLocked` from the registry,
+  which refreshes it only while a telecom call runs (its default is `true`). `WaMergedCallSource` now takes the keyguard
+  from `PhoneContainer.keyguardLocked`, which the activity keeps current (resume, unlock, screen on/off, a call).

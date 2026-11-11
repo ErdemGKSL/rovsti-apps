@@ -7,6 +7,7 @@ import dev.rovsti.platform.PlatformEvents
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -138,5 +139,39 @@ class WaIncomingTest {
         assertEquals("x", JSONObject(event.json).getString("chat"))
         assertEquals("", WaPush.token())
         assertTrue(WaPush.payload(emptyMap()) == "{}")
+    }
+
+    @Test fun aRingThatIsOverIsNeverPostedAgain() {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        assertTrue(WaIncoming.show(context, "over-1", "Ayse"))
+        assertTrue(manager.activeNotifications.any { it.id == WaIncoming.notificationId("over-1") })
+        // Answered (in the app or on the notification): the notification goes...
+        WaIncoming.cancel(context, "over-1")
+        assertTrue(manager.activeNotifications.none { it.id == WaIncoming.notificationId("over-1") })
+        assertTrue(WaIncoming.isOver("over-1"))
+        // ...and a late or repeated `call` push for the same call does not ring it again.
+        assertFalse(WaIncoming.show(context, "over-1", "Ayse"))
+        WaPush.onMessage(context, mapOf("kind" to "call", "call_id" to "over-1"))
+        assertTrue(manager.activeNotifications.none { it.id == WaIncoming.notificationId("over-1") })
+    }
+
+    @Test fun theAppOpensTheCallScreenItselfOnlyOnAnUnlockedPhoneInUse() {
+        assertTrue(WaIncoming.shouldOpenDirectly(interactive = true, locked = false))
+        assertFalse("locked: the full-screen intent does it", WaIncoming.shouldOpenDirectly(true, locked = true))
+        assertFalse("screen off: the full-screen intent does it", WaIncoming.shouldOpenDirectly(false, locked = false))
+    }
+
+    @Test fun silenceWatchWarnsOnceAfterTwoSecondsOfExactZeros() {
+        val watch = SilenceWatch()
+        val zero = ByteArray(WaCallAudio.FRAME_BYTES)
+        val quiet = ByteArray(WaCallAudio.FRAME_BYTES).also { it[100] = 1 }
+        val fired = (1..SilenceWatch.LIMIT_FRAMES * 2).count { watch.frame(zero) }
+        assertEquals("one warning per run", 1, fired)
+        assertTrue("about 2 s of 60 ms frames", SilenceWatch.LIMIT_FRAMES * 60 in 1_900..2_100)
+        assertFalse(watch.frame(quiet))
+        val again = (1..SilenceWatch.LIMIT_FRAMES).map { watch.frame(zero) }
+        assertEquals("a sound re-arms it", listOf(true), again.filter { it })
+        assertTrue(again.last())
     }
 }

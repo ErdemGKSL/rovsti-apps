@@ -12,6 +12,7 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.os.Build
+import android.util.Log
 import dev.rovsti.core.ops.CallAudio
 import java.util.concurrent.locks.LockSupport
 
@@ -36,6 +37,36 @@ fun CallAudio.asFrames(): CallFrames =
     }
 
 /**
+ * Watches the microphone for digital silence: Android hands an app exact zeros when it captures while it counts as in
+ * the background (no visible activity and no microphone foreground service started while it was in the foreground) or
+ * when audio policy silences the capture. A real microphone never gives exact zeros for long, even in a quiet room.
+ *
+ * [frame] answers true once per run, when the run of all-zero frames reaches [limitFrames]; a frame with any sound
+ * re-arms it. Pure, so a JVM test drives it.
+ */
+class SilenceWatch(
+    private val limitFrames: Int = LIMIT_FRAMES,
+) {
+    private var run = 0
+
+    /** True exactly when this frame makes the run of all-zero frames [limitFrames] long. */
+    fun frame(pcm: ByteArray): Boolean {
+        if (pcm.any { it != ZERO }) {
+            run = 0
+            return false
+        }
+        run++
+        return run == limitFrames
+    }
+
+    companion object {
+        /** About two seconds of 60 ms frames. */
+        const val LIMIT_FRAMES = 34
+        private const val ZERO: Byte = 0
+    }
+}
+
+/**
  * Microphone and speaker of a WhatsApp call (AD-WA5). The gateway runs the call; the phone only captures and plays
  * 16 kHz mono PCM16 in 960-sample (60 ms) frames.
  *
@@ -53,6 +84,8 @@ object WaCallAudio {
     const val SAMPLE_RATE = 16_000
     const val FRAME_SAMPLES = 960
     const val FRAME_BYTES = FRAME_SAMPLES * 2
+
+    private const val TAG = "Rovsti"
 
     /** How long the speaker thread waits before asking again when no peer frame is ready. */
     const val IDLE_POLL_MS = 10L
@@ -287,6 +320,7 @@ object WaCallAudio {
         rec: AudioRecord,
         frames: CallFrames,
     ) {
+        val silence = SilenceWatch()
         while (!Thread.currentThread().isInterrupted) {
             val frame = ByteArray(FRAME_BYTES)
             var filled = 0
@@ -295,11 +329,20 @@ object WaCallAudio {
                 if (n <= 0) return
                 filled += n
             }
+            if (silence.frame(frame)) {
+                Log.w(
+                    TAG,
+                    "WA call microphone: 2 s of exact digital silence. Android silences capture for an app it counts " +
+                        "as background (no visible activity, or the microphone foreground service was not started " +
+                        "while the app was in the foreground), or audio policy muted the source " +
+                        "(another app holds the microphone). The peer hears nothing.",
+                )
+            }
             frames.push(frame)
         }
     }
 
-    /** Pulls peer frames and plays them; writes never block (a full buffer drops the frame). Ends with the call. */
+    /** Pulls peer frames and plays them, paced by the track (blocking writes). Ends with the call. */
     private fun pumpSpeaker(
         out: AudioTrack,
         frames: CallFrames,
@@ -313,7 +356,10 @@ object WaCallAudio {
                 }
 
                 n == FRAME_BYTES -> {
-                    out.write(frame, 0, FRAME_BYTES, AudioTrack.WRITE_NON_BLOCKING)
+                    // Blocking: the track drains in real time and paces this thread, so a burst of frames from the
+                    // network waits in the client queue instead of being cut off at the track's buffer (a
+                    // non-blocking write dropped the rest of a frame there). `stop` releases a waiting write.
+                    out.write(frame, 0, FRAME_BYTES, AudioTrack.WRITE_BLOCKING)
                 }
 
                 else -> {

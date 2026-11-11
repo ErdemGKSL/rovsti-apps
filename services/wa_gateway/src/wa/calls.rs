@@ -799,7 +799,9 @@ impl CallTable {
         }
         entry.audio_attached = true;
         // Frames queued while nobody listened are stale.
-        while entry.spk_rx.try_recv().is_ok() {}
+        while entry.spk_rx.try_recv().is_ok() {
+            bump(&entry.stats.spk_stale);
+        }
         while entry.mic_rx.try_recv().is_ok() {}
         Ok(AudioPorts {
             mic_tx: entry.mic_tx.clone(),
@@ -1901,6 +1903,8 @@ mod tests {
             rig.table.attach_audio("C1").unwrap()
         };
         assert!(ports.spk_rx.try_recv().is_err());
+        // The diagnostics line says how much was thrown away.
+        assert_eq!(ports.stats.summary().spk_stale, 1);
     }
 
     #[test]

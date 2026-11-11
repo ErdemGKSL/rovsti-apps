@@ -1,5 +1,6 @@
 package dev.rovsti.platform.wa
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.PowerManager
+import android.util.Log
 import dev.rovsti.platform.notify.NotificationIcon
 import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
@@ -76,6 +79,25 @@ object WaIncoming {
     const val ANSWER = "answer"
     const val DECLINE = "decline"
 
+    /**
+     * The calls whose ring is over here (answered, declined, ended): a late or repeated `call` push for one of them
+     * must not post the ringing notification again (it would ring and pop the call screen over an answered call).
+     */
+    private val over = LinkedHashSet<String>()
+    private const val OVER_MEMORY = 32
+    private const val TAG = "Rovsti"
+
+    /** True when the ring of [callId] was already dealt with in this process. */
+    fun isOver(callId: String): Boolean = synchronized(over) { callId in over }
+
+    private fun markOver(callId: String) {
+        synchronized(over) {
+            over.remove(callId)
+            over.add(callId)
+            if (over.size > OVER_MEMORY) over.remove(over.first())
+        }
+    }
+
     /** How long a ring notice stays: the gateway gives up on an unanswered call after 60 s (`wa::calls::RING_TIMEOUT`). */
     const val RING_TIMEOUT_MS = 60_000L
     private const val MISSED_ID_MASK = 0x5A5A5A5A
@@ -105,9 +127,17 @@ object WaIncoming {
         context: Context,
         notice: WaIncomingNotice,
     ): Boolean {
+        if (isOver(notice.callId)) return false
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         if (!manager.areNotificationsEnabled()) return false
         return try {
+            if (!manager.canUseFullScreenIntent()) {
+                // Android 14+: without "full screen notifications" the call is only a heads-up, never over the lock screen.
+                Log.w(
+                    TAG,
+                    "WA call: full-screen intents are not allowed for this app; the call screen cannot open itself",
+                )
+            }
             PlatformChannels.ensure(context, CHANNEL)
             val open = pending(context, notice.callId, null, 0)
             val answer = pending(context, notice.callId, ANSWER, 1)
@@ -138,10 +168,41 @@ object WaIncoming {
                     .addAction(Notification.Action.Builder(null as Icon?, "Decline", decline).build())
                     .addAction(Notification.Action.Builder(null as Icon?, "Answer", answer).build())
             }
+            // The FCM push and the live event both post it: the call screen opens for the first one only.
+            val already = manager.activeNotifications.any { it.id == notificationId(notice.callId) }
             manager.notify(notificationId(notice.callId), builder.build())
+            if (!already) openWhileInUse(context, notice.callId)
             true
         } catch (_: RuntimeException) {
             false
+        }
+    }
+
+    /**
+     * Pure: whether the app should open the call screen itself. The system shows the full-screen intent only while the
+     * screen is off or locked; on an unlocked phone in use it becomes a heads-up, so the app starts the screen itself.
+     */
+    fun shouldOpenDirectly(
+        interactive: Boolean,
+        locked: Boolean,
+    ): Boolean = interactive && !locked
+
+    /**
+     * On an unlocked phone in use, starts the launch activity with the ringing call (see [shouldOpenDirectly]). Android
+     * lets an app do that only with an exemption (on HyperOS: "Display pop-up windows while running in the
+     * background"); without one the start is refused quietly and the heads-up stays the way in.
+     */
+    private fun openWhileInUse(
+        context: Context,
+        callId: String,
+    ) {
+        val interactive = context.getSystemService(PowerManager::class.java)?.isInteractive == true
+        val locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != false
+        if (!shouldOpenDirectly(interactive, locked)) return
+        try {
+            context.startActivity(launchIntent(context, callId, null))
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "WA call: could not open the call screen", e)
         }
     }
 
@@ -201,6 +262,7 @@ object WaIncoming {
         context: Context,
         callId: String,
     ): Boolean {
+        markOver(callId)
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         val id = notificationId(callId)
         // Called from an FCM push and from Rust over JNI: never throws.
@@ -213,16 +275,25 @@ object WaIncoming {
         }
     }
 
+    private fun launchIntent(
+        context: Context,
+        callId: String,
+        action: String?,
+    ): Intent {
+        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        launch.putExtra(EXTRA_CALL_ID, callId)
+        action?.let { launch.putExtra(EXTRA_ACTION, it) }
+        return launch
+    }
+
     private fun pending(
         context: Context,
         callId: String,
         action: String?,
         slot: Int,
     ): PendingIntent {
-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        launch.putExtra(EXTRA_CALL_ID, callId)
-        action?.let { launch.putExtra(EXTRA_ACTION, it) }
+        val launch = launchIntent(context, callId, action)
         // Distinct request codes per call and slot, or the system reuses one PendingIntent for all three.
         val code = notificationId(callId) * 3 + slot
         return PendingIntent.getActivity(

@@ -95,6 +95,12 @@ class WaMergedCallSource(
     private val onBusy: (String) -> Unit,
     scope: CoroutineScope,
     private val clock: () -> Long,
+    /**
+     * The keyguard as the activity reads it; null keeps the registry's. The registry refreshes its keyguard flag only
+     * while a cellular call runs, so a WhatsApp ring read a stale (or the default, locked) value and the Incoming screen
+     * showed slide-to-answer on an unlocked phone.
+     */
+    keyguardLocked: StateFlow<Boolean>? = null,
 ) : CallSource {
     private val meta = MutableStateFlow<Map<Int, WaCallMeta>>(emptyMap())
     private val activeAt = HashMap<String, Long>()
@@ -103,8 +109,15 @@ class WaMergedCallSource(
     override val whatsapp: StateFlow<Map<Int, WaCallMeta>> = meta.asStateFlow()
 
     override val snapshot: StateFlow<CallSnapshot> =
-        combine(base.snapshot, waCalls, muted, speaker) { snap, list, mute, loud -> Inputs(snap, list, mute, loud) }
-            .mapLatest { merge(it) }
+        combine(base.snapshot, waCalls, muted, speaker, keyguardLocked ?: MutableStateFlow(null)) {
+            snap,
+            list,
+            mute,
+            loud,
+            locked,
+            ->
+            Inputs(snap, list, mute, loud, locked)
+        }.mapLatest { merge(it) }
             .stateIn(scope, SharingStarted.Eagerly, base.snapshot.value)
 
     private class Inputs(
@@ -112,6 +125,7 @@ class WaMergedCallSource(
         val calls: List<CallSummary>,
         val muted: Set<String>,
         val speaker: Boolean,
+        val locked: Boolean?,
     )
 
     /** The WhatsApp call id that is the foreground call right now, if any. */
@@ -140,14 +154,16 @@ class WaMergedCallSource(
         }
         val id = ids.idOf(wa.callId)
         val call = wireOf(id, wa)
+        val locked = input.locked ?: snap.keyguardLocked
         val info = WaCallMeta(wa.callId, wa.peer, wa.toUpdate(), input.speaker, wa.callId in input.muted)
         meta.value = mapOf(id to info)
         val calls = snap.calls + call
         return if (decision == WaDecision.WaWaiting) {
-            snap.copy(calls = calls, waitingCallId = id)
+            snap.copy(calls = calls, waitingCallId = id, keyguardLocked = locked)
         } else {
             snap.copy(
                 calls = calls,
+                keyguardLocked = locked,
                 foregroundCallId = id,
                 waitingCallId = snap.waitingCallId ?: ringing?.id,
                 audio =

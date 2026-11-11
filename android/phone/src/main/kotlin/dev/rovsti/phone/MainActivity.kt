@@ -47,13 +47,16 @@ class MainActivity :
     override val navSpec: NavSpec<PhoneRoute> = NavSpec(PhoneTabs, PhoneRoots, PhoneRoute.serializer())
 
     private val main = Handler(Looper.getMainLooper())
-    private val lockScreen =
+    // Lazy: the gate reads the keyguard when built, and an activity has no context while it is being constructed
+    // (getSystemService then throws and the app crashes on open).
+    private val lockScreen by lazy {
         LockScreenGate(
             ::setLockScreenFlags,
             main::postDelayed,
             main::removeCallbacks,
             isKeyguardLocked = { getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true },
         )
+    }
     private var uiFailed = false
 
     /** The error boundary of the Incoming screen: no first frame in time shows [NativeIncoming] (AD-17). */

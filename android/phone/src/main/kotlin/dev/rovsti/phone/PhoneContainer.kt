@@ -351,6 +351,8 @@ open class PhoneContainer(
             clipboard = clipboard,
             homeCc = ::homeCc,
             locale = ::localeNow,
+            placeWhatsApp = waLauncher::place,
+            whatsAppAvailable = waLauncher.available,
             scope = scope,
             clock = clock,
         )

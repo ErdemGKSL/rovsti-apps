@@ -163,7 +163,7 @@ class WaCallsRouter(
  */
 class WaCallLauncher(
     private val waCalls: WaCalls,
-    link: StateFlow<WaLinkState>,
+    private val link: StateFlow<WaLinkState>,
     private val ops: PhoneOps,
     private val busy: () -> Boolean,
     private val e164: suspend (String) -> String?,
@@ -192,10 +192,15 @@ class WaCallLauncher(
     }
 
     private suspend fun run(number: String) {
-        val full = e164(number)?.takeIf { it.isNotBlank() } ?: number
-        val check = ops.canPlace(CanPlaceRequest(available.value, busy(), full))
+        val full = e164(number)?.takeIf { it.startsWith('+') } ?: withOwnCountry(number, ownUser())
+        val check = ops.canPlace(CanPlaceRequest(available.value, busy(), full ?: number))
         if (check is Outcome.Err) {
             notices.say(WaNotice.Refused(check.error.message.orEmpty()))
+            return
+        }
+        if (full == null) {
+            // A national number whose country is unknown: its digits are not a WhatsApp user, so nothing is placed.
+            notices.say(WaNotice.Refused(NEEDS_COUNTRY_CODE))
             return
         }
         when (val result = waCalls.place(jidOf(full))) {
@@ -214,8 +219,49 @@ class WaCallLauncher(
         }
     }
 
+    /** The user part of the linked instance's own JID (`905550000000`), null while it is not known. */
+    private fun ownUser(): String? =
+        (link.value as? WaLinkState.Connected)
+            ?.status
+            ?.ownJid
+            ?.substringBefore('@')
+            ?.substringBefore(':')
+            ?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+
     companion object {
-        /** The JID of a phone number: its digits at the WhatsApp server. */
+        /** What the user is told when a national number cannot be turned into a WhatsApp number. */
+        const val NEEDS_COUNTRY_CODE = "Add the country code to call this number on WhatsApp"
+
+        private const val MAX_CC = 3
+        private const val MIN_DIGITS = 7
+
+        /**
+         * The JID of an international number: its digits only (no `+`, spaces or brackets) at the WhatsApp server. The
+         * gateway refuses `+90…@s.whatsapp.net` with a 400, so the `+` must never reach it.
+         */
         fun jidOf(number: String): String = number.filter { it in '0'..'9' } + "@s.whatsapp.net"
+
+        /**
+         * [number] in `+` form when [e164] could not say (the home country was not inferred from the contacts), using
+         * the country of the linked WhatsApp number [own] (its user part, `905550000000`): `0532 123 45 67` and
+         * `532 123 45 67` become `+905321234567`, `00…` and a number as long as [own] (`905321234567`) are already
+         * international. Null when nothing fits: the call must not go to `05321234567@s.whatsapp.net`.
+         */
+        fun withOwnCountry(
+            number: String,
+            own: String?,
+        ): String? {
+            val trimmed = number.trim()
+            val digits = trimmed.filter { it in '0'..'9' }
+            if (trimmed.startsWith('+')) return "+$digits".takeIf { digits.length >= MIN_DIGITS }
+            if (digits.length < MIN_DIGITS) return null
+            if (digits.startsWith("00")) return "+" + digits.drop(2)
+            if (own == null) return null
+            if (!digits.startsWith('0') && digits.length == own.length) return "+$digits"
+            val nsn = digits.removePrefix("0")
+            val cc = own.dropLast(nsn.length)
+            val valid = own.length > nsn.length && cc.length <= MAX_CC && !cc.startsWith('0')
+            return if (valid) "+$cc$nsn" else null
+        }
     }
 }

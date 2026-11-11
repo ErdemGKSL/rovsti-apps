@@ -113,13 +113,18 @@ back without code changes elsewhere):
 
 | Mode | whatsapp-rust | Microphone | Peer audio |
 |------|---------------|------------|------------|
-| `NativeOpus` (**default**) | `encoded_audio(AudioFormat::OPUS_16KHZ_60MS, ..)` | `WaOpusEncoder::new()` (libopus, VoIP, 16 kHz, 60 ms, 24 kb/s, DTX) | `WaOpusDecoder::decode` |
-| `OpusInMlow` | `encoded_audio(AudioFormat::OPUS_MLOW_16KHZ_60MS, ..)` | `WaOpusEncoder::new_mlow_escape()` (CELT in MLOW's escape, SID for silence) | escape: `decode_mlow_escape`; MLOW: wacore `MlowDecoder` (PT 121 = redundancy) |
+| `NativeOpus` | `encoded_audio(AudioFormat::OPUS_16KHZ_60MS, ..)` | `WaOpusEncoder::new()` (libopus, VoIP, 16 kHz, 60 ms, 24 kb/s, DTX) | `WaOpusDecoder::decode` |
+| `OpusInMlow` (**default**) | `encoded_audio(AudioFormat::OPUS_MLOW_16KHZ_60MS, ..)` | `WaOpusEncoder::new_mlow_escape()` (CELT in MLOW's escape, SID for silence) | escape: `decode_mlow_escape`; MLOW: wacore `MlowDecoder` (PT 121 = redundancy) |
 | `MlowPcm` (the old path) | `.audio(mic, speaker)` | engine's MLOW encoder | engine's MLOW decoder, plus `CallEvent::ForeignAudio` decoded with `decode_mlow_escape` |
 
 In `MlowPcm` the engine keeps sending silent 20 ms playout frames while the peer talks Opus, so
 `run_pcm_downlink` holds back all-zero engine frames for 500 ms after the last foreign packet
 (`FOREIGN_HOLD`); otherwise the app would get twice the samples per second, half of them silence.
+
+**Owner test, 2026-11-11.** With `NativeOpus` the caller never took the answer: their phone rang on, the call ended as
+missed after about 45 s, and the peer heard nothing although audio flowed both ways at the gateway (the debug log showed
+only the `offer`, never anything back). With `OpusInMlow` (commit 879b821) the call connected and audio worked in both
+directions: a 70 s call, the peer sending MLOW (`spk: mlow=956`) and the microphone voiced (`mic: voiced=38`).
 `CallHandle::events()` is one shared queue (each event reaches one receiver), so the foreign audio
 is decoded in the existing event loop (`WaLiveCall::next_event`, driven by `CallTable::follow`),
 not by a second reader. Decoder state is per call. In the encoded modes the gateway does mute

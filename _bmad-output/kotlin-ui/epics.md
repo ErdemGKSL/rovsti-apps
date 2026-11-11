@@ -1098,6 +1098,14 @@ in-call frosted controls (still dark opaque discs in `e5.7-incall-active-dark`) 
 slide to answer when locked; E5.8a WhatsApp call audio loopback proof; E5.8b WhatsApp call UI; E5.7b multi-call and
 round close. E5.9-E5.14 follow in round 14.
 
+**R2 part 2** -> `_bmad-output/kotlin-ui/plans/round-14.md` (planned 2026-11-11 at base `50c6204`; round 13 re-verified in
+code: E5.5, E5.6/E5.7a follow-ups, E5.7b, E5.8 done). 8 steps: Step 1 fixes **F22** (in-call goldens still show raw
+`+905559990000`: the shot rigs pass `NumberDisplay.AsIs`, `InCallScreenTest.kt:154` asserts the raw text), **F23**
+(`e5.7-incall-keypad-dark`: name clipped by the digits line), **F24** (search focus/IME hand-off), **F25** (new: in-call
+name is bold `largeTitle`, Incoming is Light 36 sp; the answer morph jumps weight), **F26** (new: the in-call Audio control
+shows a handset on earpiece; use a speaker glyph); Steps 2-3 E5.9; Step 4 E5.10; Step 5 E5.11; Step 6 E5.12; Step 7
+E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before E6.
+
 ### Parity table
 
 | Features | Story |
@@ -1140,12 +1148,12 @@ round close. E5.9-E5.14 follow in round 14.
 > `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
 > (definition of done item 6).
 | E5.7b | In-call: multi-call, Add call, conference | R2 | done (round-13 step 8) |
-| E5.9 | Settings | R2 | todo |
-| E5.10 | Statistics | R2 | todo |
-| E5.11 | Notes page | R2 | todo |
-| E5.12 | Reminders, notifications, setup flows | R2 | todo |
-| E5.13 | Photo viewer and photo edit | R2 | todo |
-| E5.14 | Polish | R2 | todo |
+| E5.9 | Settings | R2 | todo (round 14 steps 2-3) |
+| E5.10 | Statistics | R2 | todo (round 14 step 4) |
+| E5.11 | Notes page | R2 | todo (round 14 step 5) |
+| E5.12 | Reminders, notifications, setup flows | R2 | todo (round 14 step 6) |
+| E5.13 | Photo viewer and photo edit | R2 | todo (round 14 step 7) |
+| E5.14 | Polish | R2 | todo (round 14 step 8) |
 
 ### E5.1 App module
 - AC1 `dev.rovsti.phone`, arm64-v8a release, every component FQCN of the GPUI manifest (`MainActivity` with DIAL/VIEW
@@ -1247,6 +1255,11 @@ round close. E5.9-E5.14 follow in round 14.
   with the in-call keypad open, the name ("Mert Kaya") is clipped at the bottom by the dialled digits line; give the
   digits line its own row under the name with the standard gap, or shrink the name to the compact style while the keypad
   is open.
+- **Status of F22/F23 (checked 2026-11-11 at `50c6204`): still open** in `e5.7-incall-active-light`,
+  `e5.7-incall-hold-two-calls-dark`, `e5.8-wa-incall-dimmed-controls-light` (raw number) and `e5.7-incall-keypad-dark`
+  (name descenders clipped). New from the same review: **(F25)** the in-call name is bold `largeTitle` while Incoming uses
+  Light 36 sp; use the same thin name in call. **(F26)** the Audio control shows a phone handset on earpiece; use a
+  speaker glyph (Bluetooth/headphones glyph for those routes). All four: round-14 step 1.
 - AC1 Aura is an ambient animation obeying ARCH 10 rule 5; route picker lists endpoints and tolerates a missing
   `BLUETOOTH_CONNECT` grant (ARCH 7.5); the screen is shown over the lock screen only while a call is live.
 - Screenshots: `e5.7-incall-active`, `e5.7-incall-keypad`, `e5.7-route-picker-popover`, `e5.7-incall-sim-chip`,
@@ -1335,8 +1348,8 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | next | todo |
-| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | next | todo |
+| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 | todo |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 15 | todo |
 
 ### X.1 WhatsApp photo fallback avatar
 - When a contact has **no photo of its own**, Contacts and Phone show the WhatsApp profile photo of the contact's

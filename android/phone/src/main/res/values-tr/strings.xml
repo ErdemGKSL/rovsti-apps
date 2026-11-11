@@ -378,4 +378,36 @@
     <string name="wa_notice_microphone">WhatsApp araması için mikrofona izin verin</string>
     <string name="wa_notice_failed">WhatsApp araması başlatılamadı</string>
     <string name="details_menu_whatsapp">WhatsApp araması</string>
+
+    <!-- E5.10 Arama istatistikleri -->
+    <string name="settings_stats">Arama istatistikleri</string>
+    <string name="stats_title">Arama istatistikleri</string>
+    <string name="stats_range_week">Bu hafta</string>
+    <string name="stats_range_days7">Son 7 gün</string>
+    <string name="stats_range_weeks8">Son 8 hafta</string>
+    <string name="stats_range_week_short">Hafta</string>
+    <string name="stats_range_days7_short">7 gün</string>
+    <string name="stats_range_weeks8_short">8 hafta</string>
+    <string name="stats_cell_calls">Aramalar</string>
+    <string name="stats_cell_talk">Konuşma süresi</string>
+    <string name="stats_cell_incoming">Gelen</string>
+    <string name="stats_cell_outgoing">Giden</string>
+    <string name="stats_cell_missed">Cevapsız</string>
+    <string name="stats_chart_days">Günlük aramalar</string>
+    <string name="stats_chart_weeks">Haftalık aramalar</string>
+    <string name="stats_week_of">%1$s haftası</string>
+    <string name="stats_bar_desc">%1$s, %2$s</string>
+    <string name="stats_people">En çok konuşulanlar</string>
+    <string name="stats_records">Rekorlar</string>
+    <string name="stats_record_busiest_day">En yoğun gün</string>
+    <string name="stats_record_busiest_week">En yoğun hafta</string>
+    <string name="stats_record_longest">En uzun arama</string>
+    <string name="stats_share">Özeti paylaş</string>
+    <string name="stats_export">CSV olarak dışa aktar</string>
+    <string name="stats_empty_title">Bu dönemde arama yok</string>
+    <string name="stats_empty_message">Yaptığın ve aldığın aramalar burada görünür.</string>
+    <plurals name="stats_calls">
+        <item quantity="one">%d arama</item>
+        <item quantity="other">%d arama</item>
+    </plurals>
 </resources>

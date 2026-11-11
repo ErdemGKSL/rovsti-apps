@@ -60,6 +60,7 @@ class PhoneRoutesTest {
         listOf(
             PhoneRoute.Settings,
             PhoneRoute.Diagnostics,
+            PhoneRoute.Stats,
             PhoneRoute.WhatsAppSettings,
             PhoneRoute.Appearance,
             PhoneRoute.Haptics,
@@ -79,6 +80,7 @@ class PhoneRoutesTest {
             listOf(
                 PhoneRoute.Settings,
                 PhoneRoute.Diagnostics,
+                PhoneRoute.Stats,
                 PhoneRoute.WhatsAppSettings,
                 PhoneRoute.Appearance,
                 PhoneRoute.Haptics,

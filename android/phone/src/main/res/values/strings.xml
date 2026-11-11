@@ -378,4 +378,36 @@
     <string name="wa_notice_microphone">Allow the microphone to make WhatsApp calls</string>
     <string name="wa_notice_failed">The WhatsApp call could not be started</string>
     <string name="details_menu_whatsapp">WhatsApp call</string>
+
+    <!-- E5.10 Call statistics -->
+    <string name="settings_stats">Call statistics</string>
+    <string name="stats_title">Call statistics</string>
+    <string name="stats_range_week">This week</string>
+    <string name="stats_range_days7">Last 7 days</string>
+    <string name="stats_range_weeks8">Last 8 weeks</string>
+    <string name="stats_range_week_short">Week</string>
+    <string name="stats_range_days7_short">7 days</string>
+    <string name="stats_range_weeks8_short">8 weeks</string>
+    <string name="stats_cell_calls">Calls</string>
+    <string name="stats_cell_talk">Talk time</string>
+    <string name="stats_cell_incoming">Incoming</string>
+    <string name="stats_cell_outgoing">Outgoing</string>
+    <string name="stats_cell_missed">Missed</string>
+    <string name="stats_chart_days">Calls per day</string>
+    <string name="stats_chart_weeks">Calls per week</string>
+    <string name="stats_week_of">Week of %1$s</string>
+    <string name="stats_bar_desc">%1$s, %2$s</string>
+    <string name="stats_people">Most talked to</string>
+    <string name="stats_records">Records</string>
+    <string name="stats_record_busiest_day">Busiest day</string>
+    <string name="stats_record_busiest_week">Busiest week</string>
+    <string name="stats_record_longest">Longest call</string>
+    <string name="stats_share">Share summary</string>
+    <string name="stats_export">Export as CSV</string>
+    <string name="stats_empty_title">No calls in this period</string>
+    <string name="stats_empty_message">The calls you make and receive show up here.</string>
+    <plurals name="stats_calls">
+        <item quantity="one">%d call</item>
+        <item quantity="other">%d calls</item>
+    </plurals>
 </resources>

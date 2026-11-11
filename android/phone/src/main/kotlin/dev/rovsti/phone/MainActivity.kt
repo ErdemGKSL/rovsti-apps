@@ -18,6 +18,7 @@ import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.compose.runtime.Composable
 import dev.rovsti.core.model.phone.CallPhase
+import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.design.transition.Tab
 import dev.rovsti.platform.telephony.AnswerOnce
 import dev.rovsti.platform.telephony.CallNotifications
@@ -59,6 +60,7 @@ class MainActivity :
     override val navSpec: NavSpec<PhoneRoute> = NavSpec(PhoneTabs, PhoneRoots, PhoneRoute.serializer())
 
     private val main = Handler(Looper.getMainLooper())
+
     // Lazy: the gate reads the keyguard when built, and an activity has no context while it is being constructed
     // (getSystemService then throws and the app crashes on open).
     private val lockScreen by lazy {
@@ -265,7 +267,7 @@ class MainActivity :
         jobs.launch {
             container.waCalls.calls
                 .map { calls ->
-                    val now = System.currentTimeMillis()
+                    val now = SystemRovstiClock.nowMillis()
                     calls.any { LockScreenGate.holdsScreen(it, now) } to
                         calls.filter { it.phase is CallPhase.Ended }.mapTo(HashSet()) { it.callId }
                 }.distinctUntilChanged()

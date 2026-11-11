@@ -74,6 +74,9 @@ import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupSheetContent
 import dev.rovsti.phone.setup.SetupSheetViewModel
+import dev.rovsti.phone.stats.StatsHost
+import dev.rovsti.phone.stats.StatsPage
+import dev.rovsti.phone.stats.StatsViewModel
 import dev.rovsti.phone.wa.WaNotice
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
@@ -84,6 +87,9 @@ import dev.rovsti.shell.RovstiShell
 import dev.rovsti.shell.settings.CommonSettingsPage
 import dev.rovsti.shell.settings.aboutInfo
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /** The setup sheet's view model, on the activity so the sheet, the notice line and Settings read one checklist. */
@@ -299,6 +305,15 @@ private class AndroidKeypadHost(
         const val STAR_TONE = 10
         const val HASH_TONE = 11
     }
+}
+
+/** A Statistics model for each visit of the page: it rebuilds from the call log and ends with the page. */
+@Composable
+private fun rememberStatsViewModel(container: PhoneContainer): StatsViewModel {
+    val scope = remember(container) { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    val model = remember(container, scope) { container.statsModel(scope) }
+    DisposableEffect(model) { onDispose { model.close() } }
+    return model
 }
 
 @Composable
@@ -622,6 +637,7 @@ fun PhoneApp(
                     SettingsLinks(
                         openSetup = sheets::present,
                         openWhatsApp = { navigator.push(PhoneRoute.WhatsAppSettings) },
+                        openStats = { navigator.push(PhoneRoute.Stats) },
                         openCommon = { page ->
                             navigator.push(
                                 when (page) {
@@ -647,6 +663,29 @@ fun PhoneApp(
         }
         entry<PhoneRoute.Diagnostics> {
             DiagnosticsPage(rememberDiagnosticsViewModel(container), onBack = pop, onBackLongClick = popToRoot)
+        }
+        entry<PhoneRoute.Stats> {
+            val model = rememberStatsViewModel(container)
+            val statsHost =
+                remember(detailsHost) {
+                    object : StatsHost {
+                        override fun share(text: String) = detailsHost.share(text)
+
+                        override fun saveCsv(
+                            fileName: String,
+                            csv: String,
+                        ) = detailsHost.saveCsv(fileName, csv)
+                    }
+                }
+            StatsPage(
+                viewModel = model,
+                host = statsHost,
+                onOpenNumber = { name, number ->
+                    details.presentPerson(PersonTarget(name, persistentListOf(TargetNumber(number))))
+                },
+                onBack = pop,
+                onBackLongClick = popToRoot,
+            )
         }
         entry<PhoneRoute.WhatsAppSettings> { PhoneWhatsAppSettings(container) }
         entry<PhoneRoute.Appearance> { PhoneAppearanceEntry(container.commonSettings, pop, popToRoot) }

@@ -39,6 +39,7 @@ internal class PhoneHarness(
         SettingsLinks(
             openSetup = { opened += "setup" },
             openWhatsApp = { opened += "whatsapp" },
+            openStats = { opened += "stats" },
             openCommon = { opened += "common-$it" },
             versionTapped = { taps++ },
         )
@@ -173,6 +174,8 @@ internal fun HostedPhone(
     extra: @Composable () -> Unit = {},
     // The Keypad tab; the placeholder until a test brings the real screen.
     keypad: @Composable () -> Unit = { KeypadPlaceholder(harness.links()) },
+    // The Statistics page (E5.10).
+    stats: @Composable () -> Unit = {},
 ) {
     val navigator =
         remember {
@@ -224,6 +227,7 @@ internal fun HostedPhone(
         entry<PhoneRoute.Settings> {
             PhoneSettingsPage(setup, harness.common, "0.1.0", harness.settingsLinks())
         }
+        entry<PhoneRoute.Stats> { stats() }
         entry<PhoneRoute.WhatsAppSettings> { extra() }
         entry<PhoneRoute.Appearance> { extra() }
         entry<PhoneRoute.Haptics> { extra() }

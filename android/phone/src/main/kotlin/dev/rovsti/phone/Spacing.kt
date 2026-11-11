@@ -228,3 +228,35 @@ internal object InCallMetrics {
     /** The aura's chrome mesh at the top. */
     val MeshHeight = 320.dp
 }
+
+/** Dimensions of the Statistics page (E5.10). */
+internal object StatsMetrics {
+    /** The plot area of the bar chart, count labels and bars. */
+    val ChartHeight = 176.dp
+
+    /** The widest a bar gets; the narrowest slot of eight bars is about 40 dp. */
+    val BarMaxWidth = 28.dp
+
+    /** A bar with no calls still shows this stub, so the day is visible. */
+    val BarStub = 3.dp
+    val BarRadius = 6.dp
+
+    /** The gap between a bar and its count. */
+    val CountGap = 3.dp
+
+    /** The month-day label row under the plot. */
+    val LabelGap = 6.dp
+
+    /** The avatar of a people row. */
+    val PersonAvatar = 36.dp
+
+    /** The direction glyph of a bucket row. */
+    val Glyph = 20.dp
+}
+
+/** Spring of a growing bar, and the delay between neighbours. */
+internal object StatsMotion {
+    const val DAMPING = 0.8f
+    const val STIFFNESS = 300f
+    const val STAGGER_MS = 30L
+}

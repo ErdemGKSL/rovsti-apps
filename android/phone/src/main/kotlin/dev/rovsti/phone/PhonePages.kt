@@ -41,6 +41,7 @@ object PhoneTags {
     const val SetupButton = "phone-setup-button"
     const val SettingsButton = "phone-settings-button"
     const val SettingsPage = "phone-settings-page"
+    const val StatsRow = "phone-settings-stats"
     const val SetupRow = "phone-settings-setup-row"
     const val VersionRow = "phone-settings-version-row"
     const val WhatsAppRow = "phone-settings-whatsapp-row"
@@ -186,6 +187,7 @@ fun KeypadPlaceholder(
 data class SettingsLinks(
     val openSetup: () -> Unit,
     val openWhatsApp: () -> Unit,
+    val openStats: () -> Unit,
     val openCommon: (CommonSettingsPage) -> Unit,
     /** A tap on the version row; the seventh in a row opens Diagnostics. */
     val versionTapped: () -> Unit,
@@ -245,6 +247,13 @@ fun PhoneSettingsPage(
                             IosText(stringResource(R.string.settings_whatsapp), Modifier.testTag(PhoneTags.WhatsAppRow))
                         },
                         onClick = links.openWhatsApp,
+                    ),
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.Clock),
+                        title = {
+                            IosText(stringResource(R.string.settings_stats), Modifier.testTag(PhoneTags.StatsRow))
+                        },
+                        onClick = links.openStats,
                     ),
                 ),
         )

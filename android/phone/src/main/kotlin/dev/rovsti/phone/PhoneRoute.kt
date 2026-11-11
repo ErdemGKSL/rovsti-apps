@@ -47,6 +47,10 @@ sealed interface PhoneRoute {
     @Serializable
     data object InCall : PhoneRoute
 
+    /** Call statistics (E5.10), pushed from Settings. */
+    @Serializable
+    data object Stats : PhoneRoute
+
     @Serializable
     data object WhatsAppSettings : PhoneRoute
 
@@ -114,6 +118,7 @@ fun chromeFor(route: PhoneRoute): ChromeSpec =
         is PhoneRoute.Incoming, PhoneRoute.InCall -> ChromeSpec(TabBarMode.Hidden)
         PhoneRoute.Settings -> ChromeSpec(TabBarMode.Visible, largeTitle = "Settings")
         PhoneRoute.Diagnostics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Diagnostics")
+        PhoneRoute.Stats -> ChromeSpec(TabBarMode.Visible, largeTitle = "Call statistics")
         PhoneRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
         PhoneRoute.Appearance -> ChromeSpec(TabBarMode.Visible, largeTitle = "Appearance")
         PhoneRoute.Haptics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Haptics")

@@ -1149,7 +1149,7 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
 > (definition of done item 6).
 | E5.7b | In-call: multi-call, Add call, conference | R2 | done (round-13 step 8) |
 | E5.9 | Settings | R2 | todo (round 14 steps 2-3) |
-| E5.10 | Statistics | R2 | todo (round 14 step 4) |
+| E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
 | E5.11 | Notes page | R2 | todo (round 14 step 5) |
 | E5.12 | Reminders, notifications, setup flows | R2 | todo (round 14 step 6) |
 | E5.13 | Photo viewer and photo edit | R2 | todo (round 14 step 7) |
@@ -1335,7 +1335,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   `e5.9-data-delete-older`, `e5.9-settings-fs2`.
 
 ### E5.10 Statistics
-- Screenshots: `e5.10-stats-week`, `e5.10-stats-day-tapped`, `e5.10-records`.
+- Screenshots: `e5.10-stats-week`, `e5.10-stats-8-weeks`, `e5.10-stats-day-tapped`, `e5.10-records`, `e5.10-stats-empty`, `e5.10-stats-week-fs2` (done).
 
 ### E5.11 Notes page
 - Screenshots: `e5.11-notes`, `e5.11-notes-search`.

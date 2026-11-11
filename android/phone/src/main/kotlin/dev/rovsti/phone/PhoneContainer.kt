@@ -55,6 +55,7 @@ import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
 import dev.rovsti.phone.setup.SetupFactsSource
 import dev.rovsti.phone.setup.SetupMemory
+import dev.rovsti.phone.stats.StatsViewModel
 import dev.rovsti.phone.wa.CoreWaArbiter
 import dev.rovsti.phone.wa.PrefsForgottenCalls
 import dev.rovsti.phone.wa.WaCallLauncher
@@ -366,6 +367,18 @@ open class PhoneContainer(
             locale = ::localeNow,
             placeWhatsApp = waLauncher::place,
             whatsAppAvailable = waLauncher.available,
+            scope = scope,
+            clock = clock,
+        )
+
+    /** The model of the Statistics page (E5.10); [scope] belongs to the page and ends with it. */
+    open fun statsModel(scope: CoroutineScope): StatsViewModel =
+        StatsViewModel(
+            recents = recents,
+            ops = ops,
+            shared = sharedOps,
+            homeCc = ::homeCc,
+            locale = ::localeNow,
             scope = scope,
             clock = clock,
         )

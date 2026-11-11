@@ -413,7 +413,7 @@ class IntakeViewModel(
 
     // ---- CSV (C39) ----
 
-    private var mapping: CsvMapping? = null
+    @Volatile private var mapping: CsvMapping? = null
     private var csvJob: Job? = null
     private var csvCards: List<ContactDraft> = emptyList()
 
@@ -466,6 +466,9 @@ class IntakeViewModel(
     /** `contacts.csv_import` for the mapping as it stands; the sheet follows the answer. */
     private suspend fun readCsv(map: CsvMapping) {
         val parsed = (ops.csvImport(TextRequest(map.rewritten())) as? Outcome.Ok)?.value
+        // A read that was replaced while the core was busy must not overwrite the newer answer, whichever thread
+        // finishes last (the cancel above only lands at a suspension point, and the core call may not have one).
+        if (mapping !== map) return
         csvCards = parsed?.contacts.orEmpty()
         val n = csvCards.size
         val skipped = parsed?.skipped ?: 0
@@ -485,7 +488,7 @@ class IntakeViewModel(
                 found
             }
         ui.update {
-            it.copy(mapping = CsvMappingUi(map.columns, line, n > 0))
+            if (mapping !== map) it else it.copy(mapping = CsvMappingUi(map.columns, line, n > 0))
         }
     }
 

@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import dev.rovsti.platform.PlatformEvents
+import dev.rovsti.platform.location.exactAllowed
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -63,13 +64,27 @@ class ReminderStore<T>(
 /** The request code of a reminder's alarm and tap intent: what the GPUI build used, so old alarms are cancellable. */
 internal fun reminderCode(id: Long): Int = (id xor (id ushr 32)).toInt()
 
-/** The one inexact alarm every reminder kind uses (`setAndAllowWhileIdle`, so no exact-alarm permission). */
+/**
+ * The alarm every reminder kind uses: inexact (`setAndAllowWhileIdle`, no permission) unless [exact] is asked for and
+ * the app may schedule exact alarms (`canScheduleExactAlarms`, Android 12 and up), then `setExactAndAllowWhileIdle`. A
+ * revoked exact-alarm grant (a `SecurityException`) falls back to the inexact alarm too, so a reminder is never lost.
+ */
+@android.annotation.SuppressLint("ScheduleExactAlarm")
 internal fun setReminderAlarm(
     context: Context,
     atMs: Long,
     operation: PendingIntent,
+    exact: Boolean = false,
 ): Boolean {
     val alarms = context.getSystemService(AlarmManager::class.java) ?: return false
+    if (exact && alarms.exactAllowed()) {
+        try {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
+            return true
+        } catch (_: SecurityException) {
+            // The grant went away between the check and the call: the inexact alarm below is the fallback.
+        }
+    }
     alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
     return true
 }

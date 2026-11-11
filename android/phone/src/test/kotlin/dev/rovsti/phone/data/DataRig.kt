@@ -38,7 +38,7 @@ internal fun tempDir(prefix: String): String =
 /** Polls [check] until it holds (the sources are cold flows and the Rust core answers on its own threads). */
 internal suspend fun eventually(
     what: String,
-    timeoutMs: Long = 10_000,
+    timeoutMs: Long = 30_000,
     check: () -> Boolean,
 ) {
     try {

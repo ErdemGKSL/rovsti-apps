@@ -89,6 +89,8 @@ data class SetupUiState(
     val fraction: Float = 0f,
     val rows: ImmutableList<SetupRowUi> = persistentListOf(),
     val note: SetupNote? = null,
+    /** Reminders cannot be exact: the exact-alarm grant is missing (E5.12). Shown as an extra row, not counted. */
+    val exactAlarmMissing: Boolean = false,
 )
 
 sealed interface SetupAction {
@@ -106,6 +108,9 @@ sealed interface SetupAction {
         val opened: Boolean,
         val fellBack: Boolean,
     ) : SetupAction
+
+    /** The "Exact reminders" row: opens the system page of the exact-alarm grant. */
+    data object OpenExactAlarms : SetupAction
 
     /** The role dialog answered. A refusal offers the Settings route too. */
     data class RoleAnswered(
@@ -129,6 +134,9 @@ sealed interface SetupEffect {
 
     /** The system dialog that exempts the app from battery optimisation. */
     data object BatteryDialog : SetupEffect
+
+    /** The page where "Alarms and reminders" is granted. */
+    data object OpenExactAlarms : SetupEffect
 }
 
 /**
@@ -175,6 +183,10 @@ class SetupSheetViewModel(
                 if (action.fellBack) fellBack = fellBack + action.item
                 note = if (action.opened) null else SetupNote.CouldNotOpen
                 viewModelScope.launch { refresh() }
+            }
+
+            SetupAction.OpenExactAlarms -> {
+                outbox.trySend(SetupEffect.OpenExactAlarms)
             }
 
             is SetupAction.RoleAnswered -> {
@@ -302,6 +314,7 @@ class SetupSheetViewModel(
                 fraction = if (list.progress.total == 0) 1f else list.progress.done.toFloat() / list.progress.total,
                 rows = rows.toImmutableList(),
                 note = note,
+                exactAlarmMissing = !facts.exactAlarmsAllowed(),
             )
     }
 

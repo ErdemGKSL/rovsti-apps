@@ -21,6 +21,12 @@ interface SetupFactsSource {
 
     /** The app version a hand confirmation is valid for. */
     val appVersion: String
+
+    /**
+     * Whether call-back reminders can be exact (Android 12 and up needs the "Alarms and reminders" grant). Without it
+     * they still arrive, a few minutes late, and Setup shows a row that opens the page (E5.12).
+     */
+    fun exactAlarmsAllowed(): Boolean = true
 }
 
 /** The state the sheet keeps between visits: the Xiaomi rows confirmed by hand, and whether the sheet was offered. */
@@ -72,6 +78,8 @@ class AndroidSetupFacts(
             lockScreen = reading("lock_screen"),
             backgroundPopups = reading("popups"),
         )
+
+    override fun exactAlarmsAllowed(): Boolean = special.exactAlarms()
 
     override val xiaomi: Boolean by lazy {
         !xiaomiProperty("ro.mi.os.version.name").isNullOrEmpty() ||

@@ -22,7 +22,15 @@ class HandoffPermissionsTest {
 
     /** What the Kotlin apps added to the GPUI manifests (the GPUI app is deprecated and no longer changes). */
     private val addedSinceGpui =
-        mapOf("phone" to listOf("uses-permission android.permission.FOREGROUND_SERVICE_MICROPHONE"))
+        mapOf(
+            "phone" to
+                listOf(
+                    "uses-permission android.permission.FOREGROUND_SERVICE_MICROPHONE",
+                    // E5.12: BootReceiver re-arms the call-back reminders; they are exact while this is granted.
+                    "uses-permission android.permission.RECEIVE_BOOT_COMPLETED",
+                    "uses-permission android.permission.SCHEDULE_EXACT_ALARM",
+                ),
+        )
 
     private fun fromManifest(app: String): List<String> {
         val file = File("../../apps/$app/platforms/android/app/src/main/AndroidManifest.xml")

@@ -209,6 +209,12 @@ sealed interface RecentsAction {
         val slot: ReminderSlot,
     ) : RecentsAction
 
+    /** "Pick a time...": the reminder for [atMs] (the time the owner chose). */
+    data class RemindAtTime(
+        val key: String,
+        val atMs: Long,
+    ) : RecentsAction
+
     data class CopyNumber(
         val key: String,
         val withCountry: Boolean,
@@ -352,6 +358,11 @@ sealed interface RecentsEffect {
     /** A reminder was set: the core's "Reminder at 18:05". */
     data class Reminded(
         val text: String,
+    ) : RecentsEffect
+
+    /** A reminder was set for a time the owner picked: the screen words it in the phone's clock style. */
+    data class RemindedAt(
+        val atMs: Long,
     ) : RecentsEffect
 
     /** An action failed: the screen plays the reject haptic. */
@@ -609,6 +620,10 @@ class RecentsViewModel(
                 remind(action.key, action.slot)
             }
 
+            is RecentsAction.RemindAtTime -> {
+                remind(action.key, ReminderSlot.In15Min, action.atMs)
+            }
+
             is RecentsAction.CopyNumber -> {
                 copyNumber(action.key, action.withCountry)
             }
@@ -790,9 +805,11 @@ class RecentsViewModel(
         }
     }
 
+    /** [atMs] is set for "Pick a time": the core makes the reminder, its alarm is moved to the chosen moment. */
     private fun remind(
         key: String,
         slot: ReminderSlot,
+        atMs: Long? = null,
     ) {
         val row = byKey[key]?.first ?: return
         viewModelScope.launch {
@@ -807,8 +824,9 @@ class RecentsViewModel(
                     ),
                 )
             val made = (out as? Outcome.Ok)?.value
-            if (made != null && reminders.arm(made.armJson)) {
-                say(RecentsEffect.Reminded(made.setText))
+            val json = made?.armJson?.let { if (atMs == null) it else ReminderItem.retime(it, atMs) }
+            if (made != null && json != null && reminders.arm(json)) {
+                say(if (atMs == null) RecentsEffect.Reminded(made.setText) else RecentsEffect.RemindedAt(atMs))
             } else {
                 say(RecentsEffect.Reject)
                 notice(RecentsNotice.ReminderFailed)

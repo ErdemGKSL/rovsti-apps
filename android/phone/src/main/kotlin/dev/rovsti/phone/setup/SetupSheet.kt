@@ -67,6 +67,8 @@ import dev.rovsti.platform.system.permissions.SpecialAccess
 object SetupTags {
     const val Sheet = "setup-sheet"
     const val Progress = "setup-progress"
+    const val ExactAlarmRow = "setup-row-exact-alarm"
+    const val ExactAlarmButton = "setup-button-exact-alarm"
 
     fun row(item: SetupItem) = "setup-row-${item.name}"
 
@@ -100,6 +102,7 @@ fun SetupSheetScreen(
         for (row in state.rows) {
             SetupRowCard(row, onAction)
         }
+        if (state.exactAlarmMissing) ExactAlarmCard(onAction)
         state.note?.let {
             RovstiText(
                 stringResource(it.text()),
@@ -232,6 +235,45 @@ private fun SetupRowCard(
     }
 }
 
+/** The extra row of E5.12: reminders are inexact until "Alarms and reminders" is allowed. It is not a checklist item. */
+@Composable
+private fun ExactAlarmCard(onAction: (SetupAction) -> Unit) {
+    val colors = RovstiTheme.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(PhoneMetrics.CardRadius))
+            .background(colors.groupedSurface)
+            .padding(PhoneMetrics.CardPad)
+            .testTag(SetupTags.ExactAlarmRow),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
+            RovstiIcon(
+                RovstiIcons.Circle,
+                null,
+                tint = IosTheme.colors.systemOrange,
+                size = PhoneMetrics.StatusIcon,
+                modifier = Modifier.size(PhoneMetrics.StatusIcon),
+            )
+            Column(Modifier.weight(1f)) {
+                RovstiText(stringResource(R.string.settings_exact_alarm_title), style = RovstiTheme.type.headline)
+                RovstiText(
+                    stringResource(R.string.settings_exact_alarm_reason),
+                    style = RovstiTheme.type.footnote,
+                    color = colors.labelSecondary,
+                )
+            }
+        }
+        CapsuleButton(
+            text = stringResource(R.string.settings_exact_alarm_action),
+            onClick = { onAction(SetupAction.OpenExactAlarms) },
+            style = CapsuleStyle.Filled,
+            modifier = Modifier.testTag(SetupTags.ExactAlarmButton),
+        )
+    }
+}
+
 @Composable
 private fun ItemState.status(): Pair<ImageVector, Color> =
     when (this) {
@@ -262,7 +304,7 @@ private fun stepsText(
     }
 }
 
-private fun SetupAct.label(): Int =
+internal fun SetupAct.label(): Int =
     when (this) {
         SetupAct.AppInfo -> R.string.setup_act_app_info
 
@@ -296,6 +338,20 @@ fun SetupSheetContent(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsState()
+    SetupEffectsRunner(viewModel, special, permissions)
+    SetupSheetScreen(state, viewModel::onAction, modifier)
+}
+
+/**
+ * Carries out what the setup view model asks (the role dialog, the permission dialogs, the settings pages). The sheet and
+ * the Setup section of Settings both host it, so a row works wherever it is pressed.
+ */
+@Composable
+fun SetupEffectsRunner(
+    viewModel: SetupSheetViewModel,
+    special: SpecialAccess,
+    permissions: PermissionController,
+) {
     val context = LocalContext.current
     val role =
         rememberLauncherForActivityResult(
@@ -339,10 +395,13 @@ fun SetupSheetContent(
                 SetupEffect.BatteryDialog -> {
                     context.startChain(special.settingsChain(SettingsKind.Battery))
                 }
+
+                SetupEffect.OpenExactAlarms -> {
+                    context.startChain(special.settingsChain(SettingsKind.ExactAlarms))
+                }
             }
         }
     }
-    SetupSheetScreen(state, viewModel::onAction, modifier)
 }
 
 private fun SettingsKind.isXiaomi() =

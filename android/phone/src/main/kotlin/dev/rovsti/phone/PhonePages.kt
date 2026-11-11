@@ -26,7 +26,9 @@ import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowChevron
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupUiState
+import dev.rovsti.phone.setup.setupSettingsItems
 import dev.rovsti.shell.settings.CommonSettings
 import dev.rovsti.shell.settings.CommonSettingsGroup
 import dev.rovsti.shell.settings.CommonSettingsPage
@@ -207,7 +209,9 @@ fun PhoneSettingsPage(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     onBackLongClick: (() -> Unit)? = null,
+    onSetupAction: (SetupAction) -> Unit = {},
 ) {
+    val setupRows = setupSettingsItems(setup, onSetupAction)
     SettingsPage(
         title = stringResource(R.string.settings_title),
         modifier = modifier.testTag(PhoneTags.SettingsPage),
@@ -236,7 +240,7 @@ fun PhoneSettingsPage(
                         },
                         onClick = links.openSetup,
                     ),
-                ),
+                ) + setupRows,
         )
         IosSettingsGroup(
             items =

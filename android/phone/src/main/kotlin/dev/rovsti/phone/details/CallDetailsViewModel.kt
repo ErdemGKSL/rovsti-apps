@@ -85,6 +85,11 @@ sealed interface CallDetailsAction {
         val slot: ReminderSlot,
     ) : CallDetailsAction
 
+    /** "Pick a time...": the reminder for [atMs] (the time the owner chose). */
+    data class RemindAtTime(
+        val atMs: Long,
+    ) : CallDetailsAction
+
     data class Undo(
         val undo: CallDetailsUndo,
     ) : CallDetailsAction
@@ -127,6 +132,11 @@ sealed interface CallDetailsEffect {
 
     data class Reminded(
         val text: String,
+    ) : CallDetailsEffect
+
+    /** A reminder was set for a time the owner picked: the screen words it in the phone's clock style. */
+    data class RemindedAt(
+        val atMs: Long,
     ) : CallDetailsEffect
 
     data class ShareText(
@@ -236,6 +246,7 @@ class CallDetailsViewModel(
             CallDetailsAction.DeleteCall -> scope.launch { deleteCall() }
             CallDetailsAction.AskRemind -> scope.launch { askRemind() }
             is CallDetailsAction.Remind -> scope.launch { remind(action.slot) }
+            is CallDetailsAction.RemindAtTime -> scope.launch { remind(ReminderSlot.In15Min, action.atMs) }
             is CallDetailsAction.Undo -> scope.launch { undo(action.undo) }
         }
     }
@@ -313,15 +324,19 @@ class CallDetailsViewModel(
         }
     }
 
-    private suspend fun remind(slot: ReminderSlot) {
+    private suspend fun remind(
+        slot: ReminderSlot,
+        atMs: Long? = null,
+    ) {
         val made =
             (
                 chat.callReminder(
                     CallReminderRequest(line.number, target.who, slot, clock(), tzOffsetS()),
                 ) as? Outcome.Ok
             )?.value
-        if (made != null && reminders.arm(made.armJson)) {
-            say(CallDetailsEffect.Reminded(made.setText))
+        val json = made?.armJson?.let { if (atMs == null) it else ReminderItem.retime(it, atMs) }
+        if (made != null && json != null && reminders.arm(json)) {
+            say(if (atMs == null) CallDetailsEffect.Reminded(made.setText) else CallDetailsEffect.RemindedAt(atMs))
         } else {
             say(CallDetailsEffect.Reject)
             notice(CallDetailsNotice.ReminderFailed)

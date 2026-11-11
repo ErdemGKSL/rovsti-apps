@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import dev.rovsti.core.model.phone.ItemState
 import dev.rovsti.core.model.phone.SetupItem
 import dev.rovsti.phone.setup.SetupAct
@@ -135,11 +137,16 @@ class PhoneScreenTest : ShotTest() {
             val h = PhoneHarness()
             composeFrame { HostedPhone(h, PhoneSample.setup(), push = PhoneRoute.Settings) }
             advance(600)
-            repeat(3) { compose.onNodeWithTag(PhoneTags.VersionRow, useUnmergedTree = true).performClick() }
-            assertEquals(3, h.taps)
             compose.onNodeWithTag(PhoneTags.SetupRow, useUnmergedTree = true).performClick()
             compose.onNodeWithTag(PhoneTags.WhatsAppRow, useUnmergedTree = true).performClick()
             assertTrue(h.opened.containsAll(listOf("setup", "whatsapp")))
+            // The setup rows (E5.12) push the version row under the tab bar: swipe it up into the clear, like a finger.
+            compose.onNodeWithTag(PhoneTags.SettingsPage).performTouchInput {
+                swipeUp(startY = bottom * 0.8f, endY = top, durationMillis = 120)
+            }
+            advance(900)
+            repeat(3) { compose.onNodeWithTag(PhoneTags.VersionRow, useUnmergedTree = true).performClick() }
+            assertEquals(3, h.taps)
         }
 
     @Test fun diagnosticsListsEverySectionAndCopyAllWorks() =

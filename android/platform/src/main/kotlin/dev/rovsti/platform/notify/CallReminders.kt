@@ -8,6 +8,8 @@ import android.content.Intent
 import android.net.Uri
 import dev.rovsti.bridge.CallReminderReceiver
 import dev.rovsti.platform.PlatformPrefs
+import dev.rovsti.platform.R
+import dev.rovsti.platform.location.exactAllowed
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -22,9 +24,24 @@ data class ReminderItem(
     val atMs: Long,
     val title: String,
     val body: String,
+    /** The contact's name when the reminder was made from one, else null. */
+    val name: String?,
+    /** Set from a missed call, so the notification can say so. */
+    val missed: Boolean,
     val raw: JSONObject,
 ) {
     companion object {
+        /** Pure: the same payload with its alarm moved to [atMs] ("Pick a time"); bad JSON comes back unchanged. */
+        fun retime(
+            json: String,
+            atMs: Long,
+        ): String =
+            try {
+                JSONObject(json).put("at_ms", atMs).toString()
+            } catch (_: org.json.JSONException) {
+                json
+            }
+
         /** Pure: null for malformed JSON, a non-positive id or an empty number. */
         fun parse(json: String): ReminderItem? =
             try {
@@ -43,6 +60,8 @@ data class ReminderItem(
                 o.optLong("at_ms", 0),
                 o.optString("title", number),
                 o.optString("body", ""),
+                if (o.isNull("name")) null else o.optString("name").takeIf { it.isNotBlank() },
+                o.optBoolean("missed", false),
                 o,
             )
         }
@@ -50,10 +69,12 @@ data class ReminderItem(
 }
 
 /**
- * Call-back reminders: one inexact alarm per item (`setAndAllowWhileIdle`, so no exact-alarm permission). The receiver
- * posts the notification cold; the tap and the "Call back" action open this app's own dialer with the number
- * (`ACTION_DIAL tel:`), and nothing is dialled without a tap. There is no boot receiver: the app calls [rearmAll] at
- * launch.
+ * Call-back reminders: one alarm per item, exact (`setExactAndAllowWhileIdle`) while the app may schedule exact alarms
+ * and inexact (`setAndAllowWhileIdle`) otherwise; [exactAllowed] tells the Settings row which one it is. The receiver
+ * posts the notification cold: the kind's small icon and accent, the contact's photo as the large icon, and two
+ * actions, Call (this app's own dialer with the number, `ACTION_DIAL tel:`, nothing is dialled without a tap) and
+ * Message (`ACTION_SENDTO sms:`). A reboot or an update clears the alarms: the phone app's `BootReceiver` calls
+ * [rearmAll] from the stored items, and the app calls it at launch too.
  */
 object CallReminders {
     const val ACTION_FIRE = "dev.rovsti.bridge.CALL_REMINDER_FIRE"
@@ -81,7 +102,11 @@ object CallReminders {
     private fun set(
         context: Context,
         item: ReminderItem,
-    ): Boolean = setReminderAlarm(context, item.atMs, pending(context, item.id))
+    ): Boolean = setReminderAlarm(context, item.atMs, pending(context, item.id), exact = true)
+
+    /** Whether reminders are exact now: false when the exact-alarm grant is missing (they then land a little late). */
+    fun exactAllowed(context: Context): Boolean =
+        context.getSystemService(android.app.AlarmManager::class.java)?.exactAllowed() == true
 
     /** Stores the payload and sets the alarm. False for a malformed item. */
     fun arm(
@@ -132,6 +157,22 @@ object CallReminders {
         )
     }
 
+    private fun message(
+        context: Context,
+        item: ReminderItem,
+        code: Int,
+    ): PendingIntent {
+        val intent =
+            Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", item.number, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return PendingIntent.getActivity(
+            context,
+            code + reminderCode(item.id),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     /** Posts the notification, forgets the item and tells the app. Runs on the receiver's async thread. */
     fun fire(
         context: Context,
@@ -141,16 +182,24 @@ object CallReminders {
         val item = store.get(id) ?: return
         val manager = context.getSystemService(NotificationManager::class.java)
         if (manager != null && PlatformChannels.ensure(context, PlatformChannels.CALL_REMINDERS)) {
+            val photo = NotifyPhotos.person(context, item.number).photo
             val notification =
                 Notification
                     .Builder(context, PlatformChannels.CALL_REMINDERS)
-                    .let { NotificationIcon.apply(it, context, NotificationKind.REMINDER) }
+                    .let { NotificationIcon.apply(it, context, NotificationKind.REMINDER, photo) }
                     .setContentTitle(item.title)
                     .setContentText(item.body)
                     .setCategory(Notification.CATEGORY_REMINDER)
                     .setContentIntent(dial(context, item, 0))
-                    .addAction(Notification.Action.Builder(null, "Call back", dial(context, item, 1)).build())
-                    .setAutoCancel(true)
+                    .addAction(
+                        Notification.Action
+                            .Builder(null, context.getString(R.string.notif_call), dial(context, item, 1))
+                            .build(),
+                    ).addAction(
+                        Notification.Action
+                            .Builder(null, context.getString(R.string.notif_message), message(context, item, 2))
+                            .build(),
+                    ).setAutoCancel(true)
                     .build()
             try {
                 manager.notify(NOTIFICATION_TAG, reminderCode(id), notification)

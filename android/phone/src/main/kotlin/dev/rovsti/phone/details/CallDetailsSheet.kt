@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -41,8 +43,6 @@ import dev.rovsti.design.ios.foundation.LocalIosBackdrop
 import dev.rovsti.design.list.GroupedSectionScope
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
-import dev.rovsti.design.overlay.ActionSheetAction
-import dev.rovsti.design.overlay.ActionSheetEntry
 import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.overlay.SheetState
 import dev.rovsti.design.overlay.showToast
@@ -52,8 +52,14 @@ import dev.rovsti.design.text.imeOverlapPadding
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.design.time.LocalRovstiClock
 import dev.rovsti.phone.DetailsMetrics
-import kotlinx.collections.immutable.toImmutableList
+import dev.rovsti.phone.remind.RemindStrings
+import dev.rovsti.phone.remind.RemindTime
+import dev.rovsti.phone.remind.menuAnchor
+import dev.rovsti.phone.remind.presentRemindMenu
+import dev.rovsti.phone.remind.remindMenuItems
+import dev.rovsti.phone.remind.showTimePicker
 
 /** Test tags of the Call details sheet. */
 object CallDetailsTags {
@@ -285,6 +291,9 @@ fun ColumnScope.CallDetailsSheet(
     )
 }
 
+/** Where the remind menu opens, as a fraction of the window height (the Remind row of the sheet is near there). */
+private const val REMIND_MENU_AT = 0.6f
+
 /** Runs the model's one-shot results. */
 @Composable
 fun CallDetailsEffects(
@@ -295,6 +304,10 @@ fun CallDetailsEffects(
 ) {
     val overlays = LocalOverlayOrNull.current ?: return
     val haptics = LocalRovstiHaptics.current
+    val context = LocalContext.current
+    val clock = LocalRovstiClock.current
+    val windowSize = LocalWindowInfo.current.containerSize
+    val remindStrings = remember(context) { RemindStrings(context.resources) }
     val currentHost by rememberUpdatedState(host)
     val close by rememberUpdatedState(onClose)
     LaunchedEffect(model, overlays, strings) {
@@ -321,19 +334,23 @@ fun CallDetailsEffects(
                 }
 
                 is CallDetailsEffect.ChooseRemind -> {
-                    overlays.present(
-                        ActionSheetEntry(
-                            title = strings.remindTitle,
-                            actions =
-                                effect.slots
-                                    .map { slot ->
-                                        ActionSheetAction(slot.label) {
-                                            model.onAction(CallDetailsAction.Remind(slot.key))
-                                        }
-                                    }.toImmutableList(),
-                            cancelLabel = strings.cancel,
+                    overlays.presentRemindMenu(
+                        menuAnchor(windowSize, REMIND_MENU_AT),
+                        remindMenuItems(
+                            effect.slots,
+                            remindStrings.pickTime,
+                            onSlot = { model.onAction(CallDetailsAction.Remind(it)) },
+                            onPickTime = {
+                                showTimePicker(context, clock.nowMillis()) { at ->
+                                    model.onAction(CallDetailsAction.RemindAtTime(at))
+                                }
+                            },
                         ),
                     )
+                }
+
+                is CallDetailsEffect.RemindedAt -> {
+                    overlays.showToast(remindStrings.setAt(RemindTime.clock(context, effect.atMs)))
                 }
 
                 is CallDetailsEffect.Undoable -> {

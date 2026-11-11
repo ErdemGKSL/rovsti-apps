@@ -145,6 +145,18 @@ class PhoneManifestTest {
         val reminders = manifest.component("dev.rovsti.bridge.CallReminderReceiver")
         assertEquals(false, reminders.exported)
 
+        // E5.12: the boot receiver puts the reminders back after a reboot, an update or an exact-alarm change.
+        val boot = manifest.component("$pkg.BootReceiver")
+        assertEquals(false, boot.exported)
+        assertEquals(
+            setOf(
+                "android.intent.action.BOOT_COMPLETED",
+                "android.intent.action.MY_PACKAGE_REPLACED",
+                "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED",
+            ),
+            boot.filters.single().actions,
+        )
+
         val provider = manifest.component("dev.rovsti.bridge.RovstiShareProvider")
         assertEquals("provider", provider.kind)
         assertEquals(false, provider.exported)
@@ -215,6 +227,7 @@ class PhoneManifestTest {
                 "$pkg.wa.WaCallActionReceiver",
                 "$pkg.VoicemailReceiver",
                 "dev.rovsti.bridge.CallReminderReceiver",
+                "$pkg.BootReceiver",
                 "dev.rovsti.bridge.RovstiShareProvider",
             )
         assertEquals(if (flavor == "firebase") expected + "$pkg.RovstiMessagingService" else expected, ours)

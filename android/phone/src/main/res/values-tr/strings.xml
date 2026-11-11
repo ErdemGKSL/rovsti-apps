@@ -410,4 +410,9 @@
         <item quantity="one">%d arama</item>
         <item quantity="other">%d arama</item>
     </plurals>
+    <string name="remind_pick_time">Saat seç…</string>
+    <string name="remind_set_at">Hatırlatma: %1$s</string>
+    <string name="settings_exact_alarm_title">Tam zamanlı hatırlatmalar</string>
+    <string name="settings_exact_alarm_reason">Bu izin olmadan arama hatırlatması birkaç dakika geç gelebilir.</string>
+    <string name="settings_exact_alarm_action">İzin ver</string>
 </resources>

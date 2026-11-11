@@ -71,9 +71,13 @@ class AppPermissions(
                         SpecialKind.FullScreenIntent,
                         SpecialKind.BatteryOptimisation,
                         SpecialKind.XiaomiBackground,
+                        // Call-back reminders are exact while this is granted (E5.12).
+                        SpecialKind.ExactAlarms,
                     ),
                 installTime =
                     setOf(
+                        // BootReceiver puts the call-back reminders back after a reboot (E5.12).
+                        Manifest.permission.RECEIVE_BOOT_COMPLETED,
                         Manifest.permission.FOREGROUND_SERVICE,
                         "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
                         // WaCallService: background microphone during a WhatsApp call (docs/kotlin-ui/wa-call-audio.md).
@@ -82,7 +86,7 @@ class AppPermissions(
                         Manifest.permission.WAKE_LOCK,
                         Manifest.permission.INTERNET,
                     ),
-                specialPermissions = setOf(FSI, BATTERY),
+                specialPermissions = setOf(FSI, BATTERY, "android.permission.SCHEDULE_EXACT_ALARM"),
             )
 
         val messages =

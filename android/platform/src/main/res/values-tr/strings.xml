@@ -5,4 +5,13 @@
     <string name="wa_call_ongoing">Devam eden WhatsApp araması</string>
     <string name="wa_call_answering">Yanıtlanıyor…</string>
     <string name="wa_call_hang_up">Kapat</string>
+    <string name="notif_call">Ara</string>
+    <string name="notif_message">Mesaj</string>
+    <string name="notif_call_back">Geri ara</string>
+    <string name="notif_remind_me">Hatırlat</string>
+    <string name="notif_missed_call">Cevapsız arama</string>
+    <string name="notif_missed_calls">%1$d cevapsız arama</string>
+    <string name="notif_missed_from">%1$s ve %2$d kişi daha</string>
+    <string name="notif_missed_channel">Cevapsız aramalar</string>
+    <string name="notif_missed_channel_desc">Yanıtlanmayan aramalar</string>
 </resources>

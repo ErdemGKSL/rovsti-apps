@@ -14,6 +14,19 @@ object PlatformPrefs {
     const val PHONE_SETTINGS = "rovsti_phone_settings"
     const val TRIP = "rovsti_trip"
 
+    /** New in E5.12: the unseen missed calls the digest notification lists. */
+    const val MISSED_CALLS = "rovsti_missed_calls"
+
     val ALL: Set<String> =
-        setOf(BRIDGE, SCHEDULED_SMS, BIRTHDAY_REMINDERS, ALARM, CALL_REMINDERS, MESSAGE_REMINDERS, PHONE_SETTINGS, TRIP)
+        setOf(
+            BRIDGE,
+            SCHEDULED_SMS,
+            BIRTHDAY_REMINDERS,
+            ALARM,
+            CALL_REMINDERS,
+            MESSAGE_REMINDERS,
+            PHONE_SETTINGS,
+            TRIP,
+            MISSED_CALLS,
+        )
 }

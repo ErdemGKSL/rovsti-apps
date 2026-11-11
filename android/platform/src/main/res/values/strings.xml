@@ -6,4 +6,13 @@
     <string name="wa_call_ongoing">Ongoing WhatsApp call</string>
     <string name="wa_call_answering">Answering…</string>
     <string name="wa_call_hang_up">Hang up</string>
+    <string name="notif_call">Call</string>
+    <string name="notif_message">Message</string>
+    <string name="notif_call_back">Call back</string>
+    <string name="notif_remind_me">Remind me</string>
+    <string name="notif_missed_call">Missed call</string>
+    <string name="notif_missed_calls">%1$d missed calls</string>
+    <string name="notif_missed_from">%1$s and %2$d more</string>
+    <string name="notif_missed_channel">Missed calls</string>
+    <string name="notif_missed_channel_desc">Calls that were not answered</string>
 </resources>

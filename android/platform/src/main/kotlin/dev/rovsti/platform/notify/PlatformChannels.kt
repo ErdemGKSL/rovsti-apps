@@ -24,6 +24,7 @@ object PlatformChannels {
     const val TRIP_ALARM = "trip_alarm_v2"
     const val ONGOING_CALL = "ongoing"
     const val INCOMING_CALL = "incoming"
+    const val MISSED_CALLS = "missed_calls"
 
     /** The channel the destination alarm used before `trip_alarm_v2`; `TripAlarm` deletes it. */
     const val TRIP_ALARM_OLD = "trip_alarm"
@@ -85,6 +86,9 @@ object PlatformChannels {
                 enableVibration(false)
                 enableLights(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            },
+            Spec(MISSED_CALLS, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT) {
+                description = "Calls that were not answered"
             },
         )
 

@@ -35,7 +35,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -86,12 +88,19 @@ import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.design.time.LocalRovstiClock
 import dev.rovsti.phone.NoticeLine
 import dev.rovsti.phone.PhoneMetrics
 import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RecentsMetrics
 import dev.rovsti.phone.RootLinks
+import dev.rovsti.phone.remind.RemindStrings
+import dev.rovsti.phone.remind.RemindTime
+import dev.rovsti.phone.remind.menuAnchor
+import dev.rovsti.phone.remind.presentRemindMenu
+import dev.rovsti.phone.remind.remindMenuItems
+import dev.rovsti.phone.remind.showTimePicker
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -605,6 +614,9 @@ fun RecentsSelectToolbar(
     }
 }
 
+/** Where the remind menu opens, as a fraction of the window height (a row's menu has just closed there). */
+private const val REMIND_MENU_AT = 0.42f
+
 // ---- menus and sheets (what the effects present)
 
 /** The long-press menu of a row: the core words the row, this lists what can be done with it. */
@@ -678,6 +690,10 @@ fun RecentsEffects(
 ) {
     val overlays = LocalOverlayOrNull.current ?: return
     val haptics = LocalRovstiHaptics.current
+    val context = LocalContext.current
+    val clock = LocalRovstiClock.current
+    val windowSize = LocalWindowInfo.current.containerSize
+    val remindStrings = remember(context) { RemindStrings(context.resources) }
     val currentHost by rememberUpdatedState(host)
     LaunchedEffect(model, overlays, strings) {
         model.effect.collect { effect ->
@@ -729,19 +745,23 @@ fun RecentsEffects(
                 }
 
                 is RecentsEffect.ChooseRemind -> {
-                    overlays.present(
-                        ActionSheetEntry(
-                            title = strings.remindTitle,
-                            actions =
-                                effect.slots
-                                    .map { slot ->
-                                        ActionSheetAction(slot.label) {
-                                            model.onAction(RecentsAction.Remind(effect.key, slot.key))
-                                        }
-                                    }.toImmutableList(),
-                            cancelLabel = strings.cancel,
+                    overlays.presentRemindMenu(
+                        menuAnchor(windowSize, REMIND_MENU_AT),
+                        remindMenuItems(
+                            effect.slots,
+                            remindStrings.pickTime,
+                            onSlot = { model.onAction(RecentsAction.Remind(effect.key, it)) },
+                            onPickTime = {
+                                showTimePicker(context, clock.nowMillis()) { at ->
+                                    model.onAction(RecentsAction.RemindAtTime(effect.key, at))
+                                }
+                            },
                         ),
                     )
+                }
+
+                is RecentsEffect.RemindedAt -> {
+                    overlays.showToast(remindStrings.setAt(RemindTime.clock(context, effect.atMs)))
                 }
 
                 is RecentsEffect.ChooseFormat -> {

@@ -20,6 +20,12 @@ object MissedCalls {
      */
     @SuppressLint("MissingPermission")
     fun markRead(context: Context): Boolean {
+        // Our own missed-call notifications and the digest go too (E5.12).
+        try {
+            dev.rovsti.platform.telephony.MissedCallNotifications
+                .clear(context)
+        } catch (_: RuntimeException) {
+        }
         try {
             val values = ContentValues().apply { put(CallLog.Calls.NEW, 0) }
             context.contentResolver.update(

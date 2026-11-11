@@ -7,7 +7,7 @@ import java.io.File
 
 /** E3.1 AC5 (ARCH 7.1): the SharedPreferences names are the ones the GPUI apps wrote; renaming one loses user data. */
 class PrefsNamesTest {
-    @Test fun allHoldsTheEightNames() {
+    @Test fun allHoldsTheNineNames() {
         assertEquals(
             setOf(
                 "rovsti_bridge",
@@ -18,6 +18,7 @@ class PrefsNamesTest {
                 "rovsti_message_reminders",
                 "rovsti_phone_settings",
                 "rovsti_trip",
+                "rovsti_missed_calls",
             ),
             PlatformPrefs.ALL,
         )
@@ -42,7 +43,7 @@ class PrefsNamesTest {
     }
 
     @Test fun constantsAreUniqueAndPrefixed() {
-        assertEquals(8, PlatformPrefs.ALL.size)
+        assertEquals(9, PlatformPrefs.ALL.size)
         assertTrue(PlatformPrefs.ALL.all { it.startsWith("rovsti_") })
     }
 
@@ -56,5 +57,6 @@ class PrefsNamesTest {
             "MESSAGE_REMINDERS",
             "PHONE_SETTINGS",
             "TRIP",
+            "MISSED_CALLS",
         )
 }

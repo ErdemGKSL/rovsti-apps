@@ -1151,7 +1151,7 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
 | E5.9 | Settings | R2 | todo (round 14 steps 2-3) |
 | E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
 | E5.11 | Notes page | R2 | todo (round 14 step 5) |
-| E5.12 | Reminders, notifications, setup flows | R2 | todo (round 14 step 6) |
+| E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
 | E5.13 | Photo viewer and photo edit | R2 | todo (round 14 step 7) |
 | E5.14 | Polish | R2 | todo (round 14 step 8) |
 
@@ -1341,7 +1341,19 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 - Screenshots: `e5.11-notes`, `e5.11-notes-search`.
 
 ### E5.12 Reminders and setup flows
-- Screenshots: `e5.12-remind-later-menu`, `e5.12-xiaomi-setup-rows`, `e5.12-full-screen-intent-revoked-row`.
+- Screenshots: `e5.12-remind-later-menu`, `e5.12-xiaomi-setup-rows`, `e5.12-full-screen-intent-revoked-row`,
+  `e5.12-settings-setup-section`, `e5.12-setup-tr` (light and dark, real core rows).
+- Built (round 14 step 6): `phone/.../remind/RemindMenu.kt` (`remindMenuItems`, `presentRemindMenu`, `RemindTime`,
+  system time picker for "Pick a time", the arm JSON is retimed with `ReminderItem.retime` because the core has no custom
+  slot); Recents and Call details present the menu instead of the action sheet. `:platform` `CallReminders`: exact
+  alarm when `canScheduleExactAlarms()` else inexact (`setReminderAlarm(exact = true)`), notification with the kind's
+  small icon and accent, the contact photo (`NotifyPhotos`) as large icon, Call and Message actions; `phone/.../BootReceiver`
+  (BOOT_COMPLETED, MY_PACKAGE_REPLACED, SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED) calls `rearmAll`; manifest +
+  `phone.permissions.txt` gain RECEIVE_BOOT_COMPLETED and SCHEDULE_EXACT_ALARM. `MissedCallNotifications` (channel
+  `missed_calls`, group digest, cleared by `MissedCalls.markRead` when Recents opens, posted from `CallRegistry.onCallRemoved`
+  on `DisconnectCause.MISSED`); Call back and Remind me go through `CallActionReceiver` (Remind arms +1 h after `Rust.init`),
+  Message is an activity PendingIntent (Android 12 trampoline rule). Setup: `setupSettingsItems` rows in the Settings Setup
+  group, `SetupEffectsRunner` shared by sheet and Settings, `SetupFactsSource.exactAlarmsAllowed` and the exact-alarm row.
 
 ### E5.13 Photo viewer
 - Screenshots: `e5.13-viewer`, `e5.13-photo-edit-menu`.

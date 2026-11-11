@@ -6,6 +6,8 @@ import android.telephony.TelephonyManager
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.Rust
 import dev.rovsti.core.getOrNull
+import dev.rovsti.core.model.chat.CallReminderRequest
+import dev.rovsti.core.model.chat.ReminderSlot
 import dev.rovsti.core.model.phone.LocaleTime
 import dev.rovsti.core.model.phone.TelUriRequest
 import dev.rovsti.core.model.phone.WireCallState
@@ -196,6 +198,25 @@ open class PhoneContainer(
                     )
                 }
         }
+    }
+
+    /**
+     * "Remind me" on a missed-call notification: the core makes the reminder one hour from now (`call_reminder.make`,
+     * after `Rust.init`, rule b) and the store arms its alarm. False when either step failed.
+     */
+    suspend fun remindInOneHour(
+        number: String,
+        name: String?,
+    ): Boolean {
+        awaitRustReady()
+        val now = clock()
+        val tz =
+            java.util.TimeZone
+                .getDefault()
+                .getOffset(now) / 1_000
+        val made =
+            (chat.callReminder(CallReminderRequest(number, name, ReminderSlot.In1Hour, now, tz)) as? Outcome.Ok)?.value
+        return made != null && callReminders.arm(made.armJson)
     }
 
     /** The call-back reminders (`call_reminder.*`, `message_reminder.slots`). */

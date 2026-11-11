@@ -699,9 +699,39 @@ object CallRegistry : CallsApi {
         val entry = entries.values.firstOrNull { it.call === call } ?: return
         entries.remove(entry.id)
         record("onCallRemoved", entry.id, "none")
+        notifyIfMissed(call)
         call.unregisterCallback(entry.callback)
         observeHoldAnswer(entry.id, Call.STATE_DISCONNECTED)
         rebuild()
+    }
+
+    /** A call nobody answered ends with `DisconnectCause.MISSED`: post its notification (E5.12), off the main thread. */
+    private fun notifyIfMissed(call: Call) {
+        val context = app ?: return
+        val missed =
+            try {
+                call.details?.disconnectCause?.code == android.telecom.DisconnectCause.MISSED
+            } catch (_: RuntimeException) {
+                false
+            }
+        if (!missed) return
+        val number =
+            try {
+                call.details
+                    ?.handle
+                    ?.schemeSpecificPart
+                    .orEmpty()
+            } catch (_: RuntimeException) {
+                ""
+            }
+        val now = clock.nowMillis()
+        Thread({
+            try {
+                MissedCallNotifications.post(context, number, now)
+            } catch (_: RuntimeException) {
+                // A notification that cannot be posted must never take the call service down.
+            }
+        }, "missed-call").start()
     }
 
     fun onMuteChanged(isMuted: Boolean) {

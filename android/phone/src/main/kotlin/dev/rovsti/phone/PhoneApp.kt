@@ -72,6 +72,7 @@ import dev.rovsti.phone.recents.RecentsStrings
 import dev.rovsti.phone.recents.RecentsViewModel
 import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
+import dev.rovsti.phone.setup.SetupEffectsRunner
 import dev.rovsti.phone.setup.SetupSheetContent
 import dev.rovsti.phone.setup.SetupSheetViewModel
 import dev.rovsti.phone.stats.StatsHost
@@ -629,7 +630,10 @@ fun PhoneApp(
         entry<PhoneRoute.Settings> {
             val context = LocalContext.current
             val version = remember(context) { context.aboutInfo(context.getString(R.string.app_name)).versionName }
+            // The rows of the Setup section carry out their own effects (role dialog, permission dialogs, system pages).
+            SetupEffectsRunner(setupModel, container.specialAccess, container.permissions)
             PhoneSettingsPage(
+                onSetupAction = setupModel::onAction,
                 setup = setup,
                 settings = container.commonSettings,
                 versionName = version,

@@ -410,4 +410,9 @@
         <item quantity="one">%d call</item>
         <item quantity="other">%d calls</item>
     </plurals>
+    <string name="remind_pick_time">Pick a time…</string>
+    <string name="remind_set_at">Reminder at %1$s</string>
+    <string name="settings_exact_alarm_title">Exact reminders</string>
+    <string name="settings_exact_alarm_reason">Without this, a call-back reminder can arrive a few minutes late.</string>
+    <string name="settings_exact_alarm_action">Allow</string>
 </resources>

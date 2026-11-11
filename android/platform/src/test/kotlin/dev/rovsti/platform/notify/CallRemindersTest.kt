@@ -39,7 +39,7 @@ class CallRemindersTest : RemindersTestBase() {
 
     private fun repository() = ReminderRepositories.calls(context)
 
-    @Test fun armSetsAnInexactAlarmWithTheSameRequestCodeAndExtras() {
+    @Test fun armSetsAnAllowWhileIdleAlarmWithTheSameRequestCodeAndExtras() {
         assertTrue(repository().arm(json))
 
         val alarm = alarms.peekNextScheduledAlarm()!!
@@ -84,13 +84,7 @@ class CallRemindersTest : RemindersTestBase() {
         assertNotNull(posted)
         assertEquals(PlatformChannels.CALL_REMINDERS, posted.channelId)
         assertEquals("Call Ayse", posted.extras.getCharSequence("android.title").toString())
-        assertEquals(
-            "Call back",
-            posted.actions
-                .single()
-                .title
-                .toString(),
-        )
+        assertEquals(listOf("Call", "Message"), posted.actions.map { it.title.toString() })
         assertTrue(CallReminders.armed(context).isEmpty())
     }
 

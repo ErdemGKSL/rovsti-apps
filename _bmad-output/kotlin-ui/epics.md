@@ -1268,6 +1268,11 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
   Headphones), mapping test; F24 `:design` `text/SearchFocusHandoff.kt` + `SearchFocusHandoffTest`, used by the Phone
   Contacts and Recents searches and the Contacts app list. Goldens `e5.7-*`, `e5.8-*`, `e5.6-waiting-call-card*`,
   `e5.7-incall-keypad`, new `e5.5-contacts-search-sheet-open`.
+- **(F27, owner review 2026-11-12, `e5.12-setup-tr-*`): the Turkish setup sheet is half English.** The row titles and
+  subtitles ("Default phone app", "Lets Rovsti Phone place and answer calls", "Phone and call log", "Autostart",
+  "Battery saver", …) and the "4 of 9" counter stay English while the help texts and buttons are Turkish; translate them
+  (and every other `SetupItem`/special-access string) and extend `TurkishCoverageTest` to the setup rows. Also a missing
+  space: "Kısıtlama yok seçeneğini seçin.Önce ayarları açın" (two sentences joined without a space). Do it before E5 closes.
 - AC1 Aura is an ambient animation obeying ARCH 10 rule 5; route picker lists endpoints and tolerates a missing
   `BLUETOOTH_CONNECT` grant (ARCH 7.5); the screen is shown over the lock screen only while a call is live.
 - Screenshots: `e5.7-incall-active`, `e5.7-incall-keypad`, `e5.7-route-picker-popover`, `e5.7-incall-sim-chip`,

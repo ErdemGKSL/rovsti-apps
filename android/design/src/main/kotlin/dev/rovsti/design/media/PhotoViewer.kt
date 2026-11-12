@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -112,7 +113,22 @@ class ViewerAction(
 data class ViewerPhoto(
     val full: Any?,
     val thumb: Any?,
+    val source: PhotoSource = PhotoSource.Contact,
+    /** The thumbnail it flies out of is a circle (an avatar): the flight turns the circle into the photo's rectangle. */
+    val circular: Boolean = false,
 )
+
+/**
+ * Where a photo on show comes from (E5.13). A [Contact] photo is the contact's own and can be set, replaced or removed
+ * from the toolbar; a [WhatsApp] photo is the read-only fallback of a contact without one (X.1): it can be saved and
+ * shared but never edited, so the viewer's caller leaves the Edit button out when [editable] is false.
+ */
+enum class PhotoSource(
+    val editable: Boolean,
+) {
+    Contact(editable = true),
+    WhatsApp(editable = false),
+}
 
 /**
  * What the viewer publishes for tests and accessibility services: the zoom scale, the dim of the background (0..1) and
@@ -137,6 +153,9 @@ object PhotoViewerTags {
     const val Root = "photo-viewer"
     const val Toolbar = "photo-viewer-toolbar"
 
+    /** The photo of the current page, at the rectangle it flies through (before the zoom of the finger). */
+    const val Photo = "photo-viewer-photo"
+
     fun action(id: String) = "viewer-action-$id"
 }
 
@@ -145,6 +164,10 @@ private val PageGap = 20.dp
 private const val DismissShrink = 0.25f
 private const val FadeScaleFrom = 0.92f
 private const val ChromeFadeMs = 200
+
+/** The shared-bounds spring of the flight out of and back into the avatar (motion.md): damping 0.85, stiffness 380. */
+private const val SharedBoundsDamping = 0.85f
+private const val SharedBoundsStiffness = 380f
 
 /**
  * Opens the viewer on [photos] (Coil models) at [initialPage]. [anchorFor] gives the window rectangle in px of the
@@ -164,7 +187,7 @@ fun OverlayController.showPhotoViewer(
  * projection. The background is black at `appear * (1 - dismissProgress)`, so it clears as the photo is dragged away.
  *
  * Shared bounds: an overlay lives outside the `NavDisplay`, so the `SharedTransitionScope` cannot carry the flight.
- * The viewer runs the same 500 ms [Motion.sharedArtwork] spec itself, between the thumbnail rectangle the caller
+ * The viewer runs the shared-bounds spring (damping 0.85, stiffness 380) itself, between the thumbnail rectangle the caller
  * passes ([anchorFor], which a grid reads from its thumbnail with `onGloballyPositioned`) and the letterboxed photo.
  */
 class PhotoViewerEntry(
@@ -189,13 +212,22 @@ class PhotoViewerEntry(
                     viewport = host.windowSize,
                     onClose = { host.controller.dismiss(this) },
                     onPage = onPageChanged,
+                    hasAnchor = { anchorFor(it) != null },
                 )
             }
         SideEffect { viewer.viewport = host.windowSize }
 
         val transition = rememberTransition(state, label = "photo-viewer")
         val appear by transition.animateFloat(
-            transitionSpec = { if (reduce) tween(150) else Motion.sharedArtwork() },
+            transitionSpec = {
+                if (reduce) {
+                    tween(
+                        150,
+                    )
+                } else {
+                    spring(dampingRatio = SharedBoundsDamping, stiffness = SharedBoundsStiffness)
+                }
+            },
             label = "photo-viewer-appear",
         ) { if (it) 1f else 0f }
 
@@ -216,7 +248,7 @@ class PhotoViewerEntry(
             val zoomIn = stringResource(R.string.design_zoom_in)
             val zoomOut = stringResource(R.string.design_zoom_out)
             val closeLabel = stringResource(R.string.design_close)
-            val dim: () -> Float = { appear * (1f - viewer.dismissProgress) }
+            val dim: () -> Float = { appear * (1f - viewer.dimProgress) }
             Box(
                 Modifier
                     .fillMaxSize()
@@ -278,7 +310,7 @@ class PhotoViewerEntry(
                     if (chromeLive) {
                         Box(
                             Modifier.fillMaxSize().graphicsLayer {
-                                alpha = chromeAlpha * (1f - viewer.dismissProgress) * appear.coerceIn(0f, 1f)
+                                alpha = chromeAlpha * (1f - viewer.dimProgress) * appear.coerceIn(0f, 1f)
                             },
                         ) {
                             TopFadeBlur(
@@ -357,6 +389,7 @@ private fun ViewerPage(
             .coerceAtLeast(1)
     val full = (model as? ViewerPhoto)?.full ?: model
     val thumb = (model as? ViewerPhoto)?.thumb
+    val circular = (model as? ViewerPhoto)?.circular == true
     val request =
         remember(full, vw, vh, context) {
             ImageRequest
@@ -413,7 +446,15 @@ private fun ViewerPage(
                         layout(constraints.maxWidth, constraints.maxHeight) {
                             placeable.place(rect.left.roundToInt(), rect.top.roundToInt())
                         }
-                    }.graphicsLayer {
+                    }.testTag(PhotoViewerTags.Photo)
+                    .graphicsLayer {
+                        // An avatar is a circle: the flight starts as that circle and opens into the photo's rectangle.
+                        val t = appear().coerceIn(0f, 1f)
+                        if (circular && index == viewer.page && t < 1f && anchorFor(index) != null) {
+                            val radius = minOf(size.width, size.height) / 2f * (1f - t)
+                            clip = true
+                            shape = CircleToRect(radius)
+                        }
                         if (index == viewer.page) {
                             val z = viewer.zoom
                             scaleX = z.scale
@@ -474,6 +515,8 @@ internal class ViewerState(
     viewport: Size,
     val onClose: () -> Unit,
     private val onPage: (Int) -> Unit,
+    /** The photo on show has a thumbnail to fly back into: a dismissing drag then carries on to it. */
+    private val hasAnchor: (page: Int) -> Boolean = { false },
 ) {
     var page by mutableIntStateOf(initial)
         private set
@@ -495,6 +538,13 @@ internal class ViewerState(
 
     val stride: Float get() = viewport.width + gapPx
     val dismissProgress: Float get() = ZoomMath.dismissProgress(dismissY, viewport.height)
+
+    /** True from the release that closes the viewer: the dim then follows the exit flight alone. */
+    private var closing by mutableStateOf(false)
+    private var releasedProgress = 0f
+
+    /** How far the background has cleared: the drag while it lasts, the value at the release once the viewer closes. */
+    val dimProgress: Float get() = if (closing) releasedProgress else dismissProgress
     val isSettled: Boolean get() = running?.isActive != true
 
     fun fitted(index: Int): Size = ZoomMath.fit(natural[index] ?: viewport, viewport)
@@ -624,7 +674,26 @@ internal class ViewerState(
     fun releaseDismiss(velocityY: Float) {
         if (ZoomMath.shouldDismiss(dismissY, velocityY, viewport.height)) {
             running?.cancel()
+            releasedProgress = dismissProgress
+            closing = true
             onClose()
+            if (hasAnchor(page)) {
+                // The photo does not carry on down the screen: it keeps the speed of the finger and the exit flight
+                // brings it, on the same spring, into the thumbnail's rectangle.
+                val fromX = dismissX
+                val fromY = dismissY
+                running =
+                    scope.launch {
+                        launch {
+                            animate(fromX, 0f, 0f, spring(SharedBoundsDamping, SharedBoundsStiffness)) { v, _ ->
+                                dismissX = v
+                            }
+                        }
+                        animate(fromY, 0f, velocityY, spring(SharedBoundsDamping, SharedBoundsStiffness)) { v, _ ->
+                            dismissY = v
+                        }
+                    }
+            }
             return
         }
         val fromX = dismissX
@@ -745,4 +814,24 @@ private fun applySingle(
         Mode.Dismiss -> viewer.dragDismiss(delta)
         else -> Unit
     }
+}
+
+/** A rectangle with all four corners [radius] px round: half the short side is a circle, 0 the plain rectangle. */
+private class CircleToRect(
+    private val radius: Float,
+) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density,
+    ) = androidx.compose.ui.graphics.Outline.Rounded(
+        androidx.compose.ui.geometry.RoundRect(
+            0f,
+            0f,
+            size.width,
+            size.height,
+            androidx.compose.ui.geometry
+                .CornerRadius(radius),
+        ),
+    )
 }

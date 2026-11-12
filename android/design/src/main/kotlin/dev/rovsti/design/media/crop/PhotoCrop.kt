@@ -1,4 +1,4 @@
-package dev.rovsti.contacts.photo
+package dev.rovsti.design.media.crop
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -54,8 +55,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import dev.rovsti.contacts.R
-import dev.rovsti.core.model.contacts.CropView
+import dev.rovsti.design.R
 import dev.rovsti.design.chrome.rememberGlassScreenChrome
 import dev.rovsti.design.controls.CapsuleButton
 import dev.rovsti.design.controls.CapsuleStyle
@@ -80,6 +80,24 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+/** A picture on its way to being cropped: the file, its size after EXIF rotation and how far it may be zoomed. */
+@Immutable
+data class CropSession(
+    val path: String,
+    val width: Int,
+    val height: Int,
+    val maxZoom: Double,
+)
+
+/** What the owner saw on the crop page: quarter turns, zoom and the centre as 0..1 of the rotated picture. */
+@Immutable
+data class CropFrame(
+    val turns: Int,
+    val zoom: Double,
+    val cx: Double,
+    val cy: Double,
+)
+
 /** Test tags of the crop page. */
 object CropTags {
     const val Root = "photo-crop"
@@ -93,19 +111,19 @@ object CropTags {
 /**
  * Opens the crop page for [session] over everything: a dark full-screen page (the picture is on show against black, in
  * light and dark, so its chrome is always the dark one). Cancel and Back call [onCancel]; Choose calls [onChosen] with
- * the [CropView] the owner saw. Either way the page leaves.
+ * the [CropFrame] the owner saw. Either way the page leaves.
  */
 fun OverlayController.showPhotoCrop(
     session: CropSession,
-    onChosen: (CropView) -> Unit,
+    onChosen: (CropFrame) -> Unit,
     onCancel: () -> Unit,
 ): OverlayEntry = present(PhotoCropEntry(session, onChosen, onCancel))
 
 class PhotoCropEntry(
     private val session: CropSession,
-    private val onChosen: (CropView) -> Unit,
+    private val onChosen: (CropFrame) -> Unit,
     private val onCancel: () -> Unit,
-) : OverlayEntry(modal = true, title = "", titleRes = R.string.contacts_move_and_scale) {
+) : OverlayEntry(modal = true, title = "", titleRes = R.string.design_crop_title) {
     private var answered = false
 
     override fun onBack(controller: OverlayController) {
@@ -114,7 +132,7 @@ class PhotoCropEntry(
 
     private fun answer(
         controller: OverlayController,
-        view: CropView?,
+        view: CropFrame?,
     ) {
         if (answered) return
         answered = true
@@ -158,7 +176,7 @@ private fun CropBody(
     screenModifier: Modifier,
     backdrop: dev.rovsti.design.backdrop.backdrops.LayerBackdrop,
     onCancel: () -> Unit,
-    onChosen: (CropView) -> Unit,
+    onChosen: (CropFrame) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -305,7 +323,7 @@ private fun CropBody(
             }
 
             RovstiText(
-                stringResource(R.string.crop_title),
+                stringResource(R.string.design_crop_title),
                 Modifier
                     .align(Alignment.TopCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -326,14 +344,14 @@ private fun CropBody(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(
-                        stringResource(R.string.crop_cancel),
+                        stringResource(R.string.design_crop_cancel),
                         onClick = onCancel,
                         tint = Color.White,
                         modifier = Modifier.testTag(CropTags.Cancel),
                     )
                     GlassIconButton(
                         icon = RovstiIcons.Rotate,
-                        contentDescription = stringResource(R.string.crop_rotate),
+                        contentDescription = stringResource(R.string.design_crop_rotate),
                         onClick = {
                             quarterTurns += 1
                             scope.launch {
@@ -346,7 +364,7 @@ private fun CropBody(
                         modifier = Modifier.testTag(CropTags.Rotate),
                     )
                     CapsuleButton(
-                        stringResource(R.string.crop_choose),
+                        stringResource(R.string.design_crop_choose),
                         onClick = {
                             onChosen(
                                 PhotoCropMath.viewOf(

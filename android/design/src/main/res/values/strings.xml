@@ -35,4 +35,9 @@
     <string name="design_photo_previous">Previous photo</string>
     <string name="design_zoom_in">Zoom in</string>
     <string name="design_zoom_out">Zoom out</string>
+    <!-- The crop page (move and scale a picture into a circle). -->
+    <string name="design_crop_title">Move and Scale</string>
+    <string name="design_crop_cancel">Cancel</string>
+    <string name="design_crop_choose">Choose</string>
+    <string name="design_crop_rotate">Rotate</string>
 </resources>

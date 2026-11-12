@@ -415,4 +415,27 @@
     <string name="settings_exact_alarm_title">Exact reminders</string>
     <string name="settings_exact_alarm_reason">Without this, a call-back reminder can arrive a few minutes late.</string>
     <string name="settings_exact_alarm_action">Allow</string>
+    <!-- The photo viewer and photo edit of the sheets (E5.13). -->
+    <string name="photo_open">Show photo</string>
+    <string name="photo_of">Photo of %1$s</string>
+    <string name="photo_save">Save</string>
+    <string name="photo_share">Share</string>
+    <string name="photo_edit">Edit</string>
+    <string name="photo_choose">Choose Photo</string>
+    <string name="photo_take">Take Photo</string>
+    <string name="photo_remove">Remove Photo</string>
+    <string name="photo_cancel">Cancel</string>
+    <string name="photo_remove_question">Remove photo?</string>
+    <string name="photo_remove_message">%1$s will go back to their initials.</string>
+    <string name="photo_saved">Saved to Photos</string>
+    <string name="photo_cant_save">Could not save the photo</string>
+    <string name="photo_cant_share">Could not share the photo</string>
+    <string name="photo_updated">Photo updated</string>
+    <string name="photo_cant_change">Could not change the photo</string>
+    <string name="photo_cant_remove">Could not remove the photo</string>
+    <string name="photo_too_large">That picture is too large</string>
+    <string name="photo_not_picture">That is not a picture</string>
+    <string name="photo_unreadable">That picture cannot be read</string>
+    <string name="photo_unusable">That picture cannot be used</string>
+    <string name="photo_handoff">Opening Contacts to change the photo</string>
 </resources>

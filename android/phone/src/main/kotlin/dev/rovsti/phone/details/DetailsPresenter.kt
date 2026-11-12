@@ -31,6 +31,7 @@ fun personTarget(
             name = row.name,
             numbers = persistentListOf(TargetNumber(row.numberRaw, row.label)),
             contactId = row.contactId,
+            photoUri = null,
         )
     }
     val book = contact.numbers.map { TargetNumber(it.raw, it.label) }
@@ -40,6 +41,7 @@ fun personTarget(
         name = row.name ?: contact.displayName.ifBlank { null },
         numbers = all.toImmutableList(),
         contactId = contact.id,
+        photoUri = contact.photoUri,
     )
 }
 
@@ -49,6 +51,7 @@ fun personTarget(contact: WireContact): PersonTarget =
         name = contact.displayName.ifBlank { null },
         numbers = contact.numbers.map { TargetNumber(it.raw, it.label) }.toImmutableList(),
         contactId = contact.id,
+        photoUri = contact.photoUri,
     )
 
 /** The last digits of a number: enough to tell "0532 123 45 67" from "+90 532 123 45 67" as one line. */

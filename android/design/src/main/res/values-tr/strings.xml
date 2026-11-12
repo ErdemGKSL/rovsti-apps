@@ -35,4 +35,9 @@
     <string name="design_photo_previous">Önceki fotoğraf</string>
     <string name="design_zoom_in">Yakınlaştır</string>
     <string name="design_zoom_out">Uzaklaştır</string>
+    <!-- The crop page (move and scale a picture into a circle). -->
+    <string name="design_crop_title">Taşı ve Ölçekle</string>
+    <string name="design_crop_cancel">Vazgeç</string>
+    <string name="design_crop_choose">Seç</string>
+    <string name="design_crop_rotate">Döndür</string>
 </resources>

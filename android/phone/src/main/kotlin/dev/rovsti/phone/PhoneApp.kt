@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -40,6 +41,8 @@ import dev.rovsti.phone.details.DetailsStrings
 import dev.rovsti.phone.details.PersonTarget
 import dev.rovsti.phone.details.TargetNumber
 import dev.rovsti.phone.details.personTarget
+import dev.rovsti.phone.details.photo.LocalPersonPhotoOpener
+import dev.rovsti.phone.details.photo.rememberPersonPhotoOpener
 import dev.rovsti.phone.diagnostics.DiagnosticsLabels
 import dev.rovsti.phone.diagnostics.DiagnosticsPage
 import dev.rovsti.phone.diagnostics.DiagnosticsViewModel
@@ -251,6 +254,17 @@ private class AndroidDetailsHost(
     ) = launch(ShareIntents.sendSmsTo(number, body))
 
     override fun addContact(number: String) = launch(addContactIntent(number, create = false))
+
+    override fun editContact(contactId: Long) =
+        launch(
+            Intent(Intent.ACTION_EDIT).setDataAndType(
+                android.content.ContentUris.withAppendedId(
+                    android.provider.ContactsContract.Contacts.CONTENT_URI,
+                    contactId,
+                ),
+                android.provider.ContactsContract.Contacts.CONTENT_ITEM_TYPE,
+            ),
+        )
 
     override fun share(text: String) = launch(Intent.createChooser(ShareIntents.text(text), null))
 
@@ -567,144 +581,155 @@ fun PhoneApp(
             }
         }
 
-    RovstiShell(
-        navigator = navigator,
-        tabs = tabs,
-        chromeFor = { route -> chromeFor(route, selecting = selection != null) },
-        overlays = overlays,
-        modifier = Modifier.fillMaxSize(),
-        chrome = {
-            // A second caller while a call is live: the card over the call (the Incoming screen has its own buttons).
-            val waiting = incomingUi.waiting
-            val onCallPage = navigator.current.let { it is PhoneRoute.Incoming || it == PhoneRoute.InCall }
-            Column(Modifier.align(Alignment.TopCenter)) {
-                MiniCallPill(
-                    ui = inCallUi,
-                    strings = inCallStrings,
-                    timer = miniTimer,
-                    visible = !onCallPage && inCallUi.call != null,
-                    onExpand = { navigator.push(PhoneRoute.InCall) },
-                    onEnd = { inCall.onAction(InCallAction.End) },
-                )
-                if (waiting != null && navigator.current !is PhoneRoute.Incoming) {
-                    WaitingCallCard(waiting, incomingStrings, incoming::onAction)
-                }
-            }
-        },
-        accessory =
-            selection?.let { chosen ->
-                { modifier, inline ->
-                    RecentsSelectToolbar(chosen, recentsStrings, recentsModel::onAction, modifier, inline)
-                }
-            },
-    ) {
-        entry<PhoneRoute.Favorites> {
-            FavoritesScreen(favoritesModel, links, setup, openFavorite)
-        }
-        entry<PhoneRoute.Recents> {
-            val host = remember(context, openDetails) { AndroidRecentsHost(context, openDetails) }
-            RecentsScreen(
-                model = recentsModel,
-                host = host,
-                links = links,
-                showNotice = setup.loaded && !setup.roleHeld,
-            )
-        }
-        entry<PhoneRoute.Contacts> {
-            PhoneContactsScreen(contactsModel, links, setup, onOpen = openContact, onNew = newContact)
-        }
-        entry<PhoneRoute.Keypad> {
-            val model = rememberKeypadViewModel(container)
-            val context = LocalContext.current
-            val host = remember(context, navigator) { AndroidKeypadHost(context) { navigator.select(ContactsTab) } }
-            val dial by container.pendingDial.collectAsState()
-            LaunchedEffect(dial) {
-                // A number from a `tel:` link: it lands in the field, once.
-                dial?.let {
-                    model.onAction(KeypadAction.Restore(it.text))
-                    container.pendingDial.value = null
-                }
-            }
-            KeypadScreen(model, host, links)
-        }
-        entry<PhoneRoute.Settings> {
-            val context = LocalContext.current
-            val version = remember(context) { context.aboutInfo(context.getString(R.string.app_name)).versionName }
-            // The rows of the Setup section carry out their own effects (role dialog, permission dialogs, system pages).
-            SetupEffectsRunner(setupModel, container.specialAccess, container.permissions)
-            PhoneSettingsPage(
-                onSetupAction = setupModel::onAction,
-                setup = setup,
-                settings = container.commonSettings,
-                versionName = version,
-                links =
-                    SettingsLinks(
-                        openSetup = sheets::present,
-                        openWhatsApp = { navigator.push(PhoneRoute.WhatsAppSettings) },
-                        openStats = { navigator.push(PhoneRoute.Stats) },
-                        openCommon = { page ->
-                            navigator.push(
-                                when (page) {
-                                    CommonSettingsPage.Appearance -> PhoneRoute.Appearance
-                                    CommonSettingsPage.Haptics -> PhoneRoute.Haptics
-                                    CommonSettingsPage.About -> PhoneRoute.About
-                                    CommonSettingsPage.Licences -> PhoneRoute.Licences
-                                },
-                            )
-                        },
-                        versionTapped = {
-                            if (taps.tap(
-                                    android.os.SystemClock.elapsedRealtime(),
-                                )
-                            ) {
-                                navigator.push(PhoneRoute.Diagnostics)
-                            }
-                        },
-                    ),
-                onBack = pop,
-                onBackLongClick = popToRoot,
-            )
-        }
-        entry<PhoneRoute.Diagnostics> {
-            DiagnosticsPage(rememberDiagnosticsViewModel(container), onBack = pop, onBackLongClick = popToRoot)
-        }
-        entry<PhoneRoute.Stats> {
-            val model = rememberStatsViewModel(container)
-            val statsHost =
-                remember(detailsHost) {
-                    object : StatsHost {
-                        override fun share(text: String) = detailsHost.share(text)
-
-                        override fun saveCsv(
-                            fileName: String,
-                            csv: String,
-                        ) = detailsHost.saveCsv(fileName, csv)
+    val photoOpener =
+        rememberPersonPhotoOpener(container, overlays) { id -> detailsHost.editContact(id) }
+    CompositionLocalProvider(LocalPersonPhotoOpener provides photoOpener) {
+        RovstiShell(
+            navigator = navigator,
+            tabs = tabs,
+            chromeFor = { route -> chromeFor(route, selecting = selection != null) },
+            overlays = overlays,
+            modifier = Modifier.fillMaxSize(),
+            chrome = {
+                // A second caller while a call is live: the card over the call (the Incoming screen has its own buttons).
+                val waiting = incomingUi.waiting
+                val onCallPage = navigator.current.let { it is PhoneRoute.Incoming || it == PhoneRoute.InCall }
+                Column(Modifier.align(Alignment.TopCenter)) {
+                    MiniCallPill(
+                        ui = inCallUi,
+                        strings = inCallStrings,
+                        timer = miniTimer,
+                        visible = !onCallPage && inCallUi.call != null,
+                        onExpand = { navigator.push(PhoneRoute.InCall) },
+                        onEnd = { inCall.onAction(InCallAction.End) },
+                    )
+                    if (waiting != null && navigator.current !is PhoneRoute.Incoming) {
+                        WaitingCallCard(waiting, incomingStrings, incoming::onAction)
                     }
                 }
-            StatsPage(
-                viewModel = model,
-                host = statsHost,
-                onOpenNumber = { name, number ->
-                    details.presentPerson(PersonTarget(name, persistentListOf(TargetNumber(number))))
+            },
+            accessory =
+                selection?.let { chosen ->
+                    { modifier, inline ->
+                        RecentsSelectToolbar(chosen, recentsStrings, recentsModel::onAction, modifier, inline)
+                    }
                 },
-                onBack = pop,
-                onBackLongClick = popToRoot,
-            )
+        ) {
+            entry<PhoneRoute.Favorites> {
+                FavoritesScreen(favoritesModel, links, setup, openFavorite)
+            }
+            entry<PhoneRoute.Recents> {
+                val host = remember(context, openDetails) { AndroidRecentsHost(context, openDetails) }
+                RecentsScreen(
+                    model = recentsModel,
+                    host = host,
+                    links = links,
+                    showNotice = setup.loaded && !setup.roleHeld,
+                )
+            }
+            entry<PhoneRoute.Contacts> {
+                PhoneContactsScreen(contactsModel, links, setup, onOpen = openContact, onNew = newContact)
+            }
+            entry<PhoneRoute.Keypad> {
+                val model = rememberKeypadViewModel(container)
+                val context = LocalContext.current
+                val host = remember(context, navigator) { AndroidKeypadHost(context) { navigator.select(ContactsTab) } }
+                val dial by container.pendingDial.collectAsState()
+                LaunchedEffect(dial) {
+                    // A number from a `tel:` link: it lands in the field, once.
+                    dial?.let {
+                        model.onAction(KeypadAction.Restore(it.text))
+                        container.pendingDial.value = null
+                    }
+                }
+                KeypadScreen(model, host, links)
+            }
+            entry<PhoneRoute.Settings> {
+                val context = LocalContext.current
+                val version = remember(context) { context.aboutInfo(context.getString(R.string.app_name)).versionName }
+                // The rows of the Setup section carry out their own effects (role dialog, permission dialogs, system pages).
+                SetupEffectsRunner(setupModel, container.specialAccess, container.permissions)
+                PhoneSettingsPage(
+                    onSetupAction = setupModel::onAction,
+                    setup = setup,
+                    settings = container.commonSettings,
+                    versionName = version,
+                    links =
+                        SettingsLinks(
+                            openSetup = sheets::present,
+                            openWhatsApp = { navigator.push(PhoneRoute.WhatsAppSettings) },
+                            openStats = { navigator.push(PhoneRoute.Stats) },
+                            openCommon = { page ->
+                                navigator.push(
+                                    when (page) {
+                                        CommonSettingsPage.Appearance -> PhoneRoute.Appearance
+                                        CommonSettingsPage.Haptics -> PhoneRoute.Haptics
+                                        CommonSettingsPage.About -> PhoneRoute.About
+                                        CommonSettingsPage.Licences -> PhoneRoute.Licences
+                                    },
+                                )
+                            },
+                            versionTapped = {
+                                if (taps.tap(
+                                        android.os.SystemClock.elapsedRealtime(),
+                                    )
+                                ) {
+                                    navigator.push(PhoneRoute.Diagnostics)
+                                }
+                            },
+                        ),
+                    onBack = pop,
+                    onBackLongClick = popToRoot,
+                )
+            }
+            entry<PhoneRoute.Diagnostics> {
+                DiagnosticsPage(rememberDiagnosticsViewModel(container), onBack = pop, onBackLongClick = popToRoot)
+            }
+            entry<PhoneRoute.Stats> {
+                val model = rememberStatsViewModel(container)
+                val statsHost =
+                    remember(detailsHost) {
+                        object : StatsHost {
+                            override fun share(text: String) = detailsHost.share(text)
+
+                            override fun saveCsv(
+                                fileName: String,
+                                csv: String,
+                            ) = detailsHost.saveCsv(fileName, csv)
+                        }
+                    }
+                StatsPage(
+                    viewModel = model,
+                    host = statsHost,
+                    onOpenNumber = { name, number ->
+                        details.presentPerson(PersonTarget(name, persistentListOf(TargetNumber(number))))
+                    },
+                    onBack = pop,
+                    onBackLongClick = popToRoot,
+                )
+            }
+            entry<PhoneRoute.WhatsAppSettings> { PhoneWhatsAppSettings(container) }
+            entry<PhoneRoute.Appearance> { PhoneAppearanceEntry(container.commonSettings, pop, popToRoot) }
+            entry<PhoneRoute.Haptics> { PhoneHapticsEntry(container.commonSettings, pop, popToRoot) }
+            entry<PhoneRoute.About> {
+                PhoneAboutEntry(container, onOpenLicences = { navigator.push(PhoneRoute.Licences) }, pop, popToRoot)
+            }
+            entry<PhoneRoute.Licences> {
+                PhoneLicencesEntry(onOpen = { navigator.push(PhoneRoute.LicenceDetail(it)) }, pop, popToRoot)
+            }
+            entry<PhoneRoute.LicenceDetail> { route -> PhoneLicenceDetailEntry(route.id, pop, popToRoot) }
+            // Incoming (E5.6): the full-screen call screen. Its sheets, toasts and leaving run in IncomingEffects above.
+            entry<PhoneRoute.Incoming> { IncomingScreen(incoming, photos = container.callPhotos) }
+            // InCall (E5.7a): the page of the single call. Back and the chevron collapse it into the mini pill.
+            entry<PhoneRoute.InCall> {
+                InCallScreen(
+                    inCall,
+                    inCallSheets,
+                    onCollapse = pop,
+                    photos = container.callPhotos,
+                )
+            }
         }
-        entry<PhoneRoute.WhatsAppSettings> { PhoneWhatsAppSettings(container) }
-        entry<PhoneRoute.Appearance> { PhoneAppearanceEntry(container.commonSettings, pop, popToRoot) }
-        entry<PhoneRoute.Haptics> { PhoneHapticsEntry(container.commonSettings, pop, popToRoot) }
-        entry<PhoneRoute.About> {
-            PhoneAboutEntry(container, onOpenLicences = { navigator.push(PhoneRoute.Licences) }, pop, popToRoot)
-        }
-        entry<PhoneRoute.Licences> {
-            PhoneLicencesEntry(onOpen = { navigator.push(PhoneRoute.LicenceDetail(it)) }, pop, popToRoot)
-        }
-        entry<PhoneRoute.LicenceDetail> { route -> PhoneLicenceDetailEntry(route.id, pop, popToRoot) }
-        // Incoming (E5.6): the full-screen call screen. Its sheets, toasts and leaving run in IncomingEffects above.
-        entry<PhoneRoute.Incoming> { IncomingScreen(incoming, photos = container.callPhotos) }
-        // InCall (E5.7a): the page of the single call. Back and the chevron collapse it into the mini pill.
-        entry<PhoneRoute.InCall> { InCallScreen(inCall, inCallSheets, onCollapse = pop, photos = container.callPhotos) }
     }
 }
 

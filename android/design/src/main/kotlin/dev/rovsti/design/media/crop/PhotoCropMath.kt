@@ -1,8 +1,7 @@
-package dev.rovsti.contacts.photo
+package dev.rovsti.design.media.crop
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import dev.rovsti.core.model.contacts.CropView
 import dev.rovsti.design.media.ZoomMath
 import dev.rovsti.design.media.ZoomState
 
@@ -11,8 +10,8 @@ import dev.rovsti.design.media.ZoomState
  * SHORT side fills the window at zoom 1, whatever the turn (`cover`), and the owner pans and pinches it. The state is
  * the photo's [ZoomState] in px of the window: [ZoomState.scale] is the zoom (1 to the core's `max_zoom`) and
  * [ZoomState.offset] the distance of the picture's centre from the window's centre. Converting to and from the core's
- * [CropView] (turns, zoom, centre as 0..1 of the rotated picture) is exact, so the Rust `photo_plan` cuts what the
- * owner saw; the bounds are the same ones the core's `CropView::clamped` keeps.
+ * [CropFrame] (turns, zoom, centre as 0..1 of the rotated picture) is exact, so the Rust `photo_plan` cuts what the
+ * owner saw; the bounds are the same ones the core's `CropFrame::clamped` keeps.
  */
 object PhotoCropMath {
     /** The size of a [width] x [height] picture after [turns] clockwise quarter turns. */
@@ -85,19 +84,19 @@ object PhotoCropMath {
         )
     }
 
-    /** What the owner sees, as the core's [CropView]. */
+    /** What the owner sees, as the core's [CropFrame]. */
     fun viewOf(
         state: ZoomState,
         turns: Int,
         rotated: Size,
         side: Float,
         maxZoom: Float,
-    ): CropView {
+    ): CropFrame {
         val fixed = settled(state, rotated, side, maxZoom)
         val fitted = cover(rotated, side)
         val across = fitted.width * fixed.scale
         val down = fitted.height * fixed.scale
-        return CropView(
+        return CropFrame(
             turns = Math.floorMod(turns, 4),
             zoom = fixed.scale.toDouble(),
             cx = if (across > 0f) (0.5 - fixed.offset.x / across) else 0.5,
@@ -105,9 +104,9 @@ object PhotoCropMath {
         )
     }
 
-    /** The inverse of [viewOf]: where the picture sits for a [CropView]. */
+    /** The inverse of [viewOf]: where the picture sits for a [CropFrame]. */
     fun stateOf(
-        view: CropView,
+        view: CropFrame,
         rotated: Size,
         side: Float,
     ): ZoomState {

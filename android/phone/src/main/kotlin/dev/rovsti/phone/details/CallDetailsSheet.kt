@@ -54,6 +54,8 @@ import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.design.time.LocalRovstiClock
 import dev.rovsti.phone.DetailsMetrics
+import dev.rovsti.phone.details.photo.PersonPhoto
+import dev.rovsti.phone.details.photo.PersonPhotoAvatar
 import dev.rovsti.phone.remind.RemindStrings
 import dev.rovsti.phone.remind.RemindTime
 import dev.rovsti.phone.remind.menuAnchor
@@ -96,6 +98,7 @@ fun ColumnScope.CallDetailsContent(
     who: String?,
     strings: DetailsStrings,
     note: TextFieldState,
+    photo: PersonPhoto? = null,
     onAction: (CallDetailsAction) -> Unit,
     onEditStart: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -122,6 +125,15 @@ fun ColumnScope.CallDetailsContent(
                 Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).padding(top = Spacing.s),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                if (photo != null) {
+                    PersonPhotoAvatar(
+                        name = who.orEmpty(),
+                        size = DetailsMetrics.CallAvatar,
+                        colorKey = ui.number.ifEmpty { ui.title },
+                        photo = photo,
+                        modifier = Modifier.padding(bottom = Spacing.m),
+                    )
+                }
                 RovstiText(
                     ui.title,
                     modifier = Modifier.testTag(CallDetailsTags.Title).semantics { heading() },
@@ -286,6 +298,7 @@ fun ColumnScope.CallDetailsSheet(
         who = model.target.who,
         strings = strings,
         note = note,
+        photo = model.target.photo,
         onAction = model::onAction,
         onEditStart = { sheet.animateToDetent(sheet.detentOffsets.lastIndex) },
     )

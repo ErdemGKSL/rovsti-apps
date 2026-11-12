@@ -48,6 +48,7 @@ internal object DetailsSample {
     fun person(
         named: Boolean = true,
         stats: Boolean = true,
+        photo: dev.rovsti.phone.details.photo.PersonPhoto? = null,
     ): PersonUi {
         val number = if (named) "+90 555 111 22 33" else "+49 30 1234567"
         return PersonUi(
@@ -56,6 +57,7 @@ internal object DetailsSample {
             subtitle = if (named) null else "Germany",
             named = named,
             colorKey = number,
+            photo = photo,
             numbers =
                 if (named) {
                     persistentListOf(
@@ -137,6 +139,7 @@ internal class CallHarness(
     var ui by mutableStateOf(ui)
     val actions = mutableListOf<CallDetailsAction>()
     var editStarts = 0
+    var photo: dev.rovsti.phone.details.photo.PersonPhoto? = null
     lateinit var note: TextFieldState
 }
 
@@ -152,6 +155,7 @@ internal fun OverlayController.presentCall(
                 who = "Mehmet Demir",
                 strings = strings,
                 note = h.note,
+                photo = h.photo,
                 onAction = { h.actions += it },
                 onEditStart = { h.editStarts++ },
             )

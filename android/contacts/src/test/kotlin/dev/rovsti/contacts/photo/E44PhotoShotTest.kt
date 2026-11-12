@@ -10,6 +10,7 @@ import dev.rovsti.contacts.editor.EditorRig
 import dev.rovsti.contacts.editor.EditorSession
 import dev.rovsti.contacts.editor.EditorTags
 import dev.rovsti.core.model.contacts.PhotoSize
+import dev.rovsti.design.media.crop.CropTags
 import dev.rovsti.platform.files.FileResult
 import dev.rovsti.testing.ShotTest
 import org.junit.After

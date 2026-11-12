@@ -110,6 +110,7 @@ internal object RecentsMetrics {
 /** The details sheets (E5.4): the header avatar, the glyph sizes of their rows and the QR code. */
 internal object DetailsMetrics {
     val HeaderAvatar = 72.dp
+    val CallAvatar = 56.dp
     val RowGlyph = 22.dp
     val SmallGlyph = 20.dp
     val QrSize = 224.dp

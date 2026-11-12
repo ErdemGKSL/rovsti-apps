@@ -31,6 +31,7 @@ import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.PlaceResult
 import dev.rovsti.phone.data.RecentsRepository
 import dev.rovsti.phone.data.Sims
+import dev.rovsti.phone.details.photo.PersonPhoto
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.calllog.CallLogResult
 import dev.rovsti.platform.calllog.Restorable
@@ -69,6 +70,8 @@ data class PersonTarget(
     val name: String?,
     val numbers: ImmutableList<TargetNumber>,
     val contactId: Long? = null,
+    /** The contact's thumbnail URI (null for none): the avatar of the sheet and the viewer behind it (E5.13). */
+    val photoUri: String? = null,
 )
 
 /** A number row of the sheet. */
@@ -120,6 +123,8 @@ data class PersonUi(
     val numbers: ImmutableList<NumberRowUi> = persistentListOf(),
     val history: ImmutableList<HistoryLineUi> = persistentListOf(),
     val stats: StatsUi? = null,
+    /** The picture behind the avatar; null for a number that is not in the book. */
+    val photo: PersonPhoto? = null,
 )
 
 /** The QR code of a person: the vCard text the core fitted and the modules of its code. */
@@ -407,6 +412,7 @@ class PersonSheetViewModel(
                 named = target.name != null,
                 colorKey = target.numbers.firstOrNull()?.raw ?: title,
                 numbers = rows.toImmutableList(),
+                photo = target.contactId?.let { PersonPhoto(it, target.photoUri) },
                 history = lineUi.toImmutableList(),
                 stats =
                     stats?.let {

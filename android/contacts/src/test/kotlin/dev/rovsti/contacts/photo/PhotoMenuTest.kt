@@ -9,6 +9,7 @@ import dev.rovsti.core.model.contacts.CropView
 import dev.rovsti.core.model.contacts.PhotoPlan
 import dev.rovsti.core.model.contacts.PhotoSize
 import dev.rovsti.core.model.wa.PictureAnswer
+import dev.rovsti.design.media.crop.CropSession
 import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult

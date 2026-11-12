@@ -9,6 +9,7 @@ import dev.rovsti.core.model.contacts.PhotoAcceptsRequest
 import dev.rovsti.core.model.contacts.PhotoPlan
 import dev.rovsti.core.model.contacts.PhotoPlanRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.design.media.crop.CropSession
 import dev.rovsti.design.text.UiText
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
@@ -27,15 +28,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-
-/** A picture on its way to being a contact photo: the file, its size after EXIF rotation and how far it may be zoomed. */
-@Immutable
-data class CropSession(
-    val path: String,
-    val width: Int,
-    val height: Int,
-    val maxZoom: Double,
-)
 
 @Immutable
 data class PhotoUiState(

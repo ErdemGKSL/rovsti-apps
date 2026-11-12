@@ -32,8 +32,9 @@ import dev.rovsti.contacts.photo.PhotoEffect
 import dev.rovsti.contacts.photo.PhotoMenuActions
 import dev.rovsti.contacts.photo.PhotoViewerActions
 import dev.rovsti.contacts.photo.fullPhotoUri
-import dev.rovsti.contacts.photo.showPhotoCrop
+import dev.rovsti.contacts.photo.toView
 import dev.rovsti.design.media.ViewerPhoto
+import dev.rovsti.design.media.crop.showPhotoCrop
 import dev.rovsti.design.media.showPhotoViewer
 import dev.rovsti.design.overlay.ActionSheetAction
 import dev.rovsti.design.overlay.ActionSheetEntry
@@ -289,7 +290,11 @@ fun rememberCardPhotoViewer(
     }
     LaunchedEffect(ui.crop) {
         ui.crop?.let { session ->
-            overlays.showPhotoCrop(session, onChosen = photo::cropChosen, onCancel = photo::cropCancelled)
+            overlays.showPhotoCrop(
+                session,
+                onChosen = { photo.cropChosen(it.toView()) },
+                onCancel = photo::cropCancelled,
+            )
         }
     }
     val scope = rememberCoroutineScope()

@@ -68,7 +68,10 @@ fun cardPhotoViewer(
             }
         onOpened(
             overlays().showPhotoViewer(
-                photos = persistentListOf(ViewerPhoto(full = fullPhotoUri(id), thumb = header.photoUri)),
+                photos =
+                    persistentListOf(
+                        ViewerPhoto(full = fullPhotoUri(id), thumb = header.photoUri, circular = true),
+                    ),
                 initialPage = 0,
                 actions = actions.viewerActions(context, edit),
                 anchorFor = { anchorFor() },

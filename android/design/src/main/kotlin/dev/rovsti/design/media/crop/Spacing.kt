@@ -1,4 +1,4 @@
-package dev.rovsti.contacts.photo
+package dev.rovsti.design.media.crop
 
 import androidx.compose.ui.unit.dp
 

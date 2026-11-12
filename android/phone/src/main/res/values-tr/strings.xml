@@ -415,4 +415,27 @@
     <string name="settings_exact_alarm_title">Tam zamanlı hatırlatmalar</string>
     <string name="settings_exact_alarm_reason">Bu izin olmadan arama hatırlatması birkaç dakika geç gelebilir.</string>
     <string name="settings_exact_alarm_action">İzin ver</string>
+    <!-- The photo viewer and photo edit of the sheets (E5.13). -->
+    <string name="photo_open">Fotoğrafı göster</string>
+    <string name="photo_of">%1$s fotoğrafı</string>
+    <string name="photo_save">Kaydet</string>
+    <string name="photo_share">Paylaş</string>
+    <string name="photo_edit">Düzenle</string>
+    <string name="photo_choose">Fotoğraf Seç</string>
+    <string name="photo_take">Fotoğraf Çek</string>
+    <string name="photo_remove">Fotoğrafı Kaldır</string>
+    <string name="photo_cancel">Vazgeç</string>
+    <string name="photo_remove_question">Fotoğraf kaldırılsın mı?</string>
+    <string name="photo_remove_message">%1$s yeniden baş harfleriyle görünecek.</string>
+    <string name="photo_saved">Fotoğraflara kaydedildi</string>
+    <string name="photo_cant_save">Fotoğraf kaydedilemedi</string>
+    <string name="photo_cant_share">Fotoğraf paylaşılamadı</string>
+    <string name="photo_updated">Fotoğraf güncellendi</string>
+    <string name="photo_cant_change">Fotoğraf değiştirilemedi</string>
+    <string name="photo_cant_remove">Fotoğraf kaldırılamadı</string>
+    <string name="photo_too_large">Bu resim çok büyük</string>
+    <string name="photo_not_picture">Bu bir resim değil</string>
+    <string name="photo_unreadable">Bu resim okunamıyor</string>
+    <string name="photo_unusable">Bu resim kullanılamıyor</string>
+    <string name="photo_handoff">Fotoğrafı değiştirmek için Kişiler açılıyor</string>
 </resources>

@@ -19,6 +19,7 @@ import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.RecentsRepository
 import dev.rovsti.phone.data.Sims
+import dev.rovsti.phone.details.photo.PersonPhoto
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.calllog.CallLogResult
 import dev.rovsti.platform.calllog.Restorable
@@ -47,6 +48,8 @@ import kotlinx.coroutines.launch
 data class CallDetailsTarget(
     val line: HistoryLine,
     val who: String?,
+    /** The person's photo for the avatar of the sheet (null for a number that is not in the book). */
+    val photo: PersonPhoto? = null,
 )
 
 /** What the Call details sheet draws. */

@@ -38,7 +38,6 @@ import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.ios.foundation.LocalIosBackdrop
-import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowChevron
@@ -62,6 +61,7 @@ import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.DetailsMetrics
+import dev.rovsti.phone.details.photo.PersonPhotoAvatar
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -93,6 +93,12 @@ interface DetailsHost {
     )
 
     fun addContact(number: String)
+
+    /**
+     * Opens the Contacts editor of [contactId]: the hand-off of the photo menu when the app holds no write grant
+     * (E5.13). Hosts that cannot do it ignore the call.
+     */
+    fun editContact(contactId: Long) {}
 
     fun share(text: String)
 
@@ -255,10 +261,11 @@ private fun Header(ui: PersonUi) {
             .testTag(PersonTags.Header),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Avatar(
+        PersonPhotoAvatar(
             name = if (ui.named) ui.title else "",
             size = DetailsMetrics.HeaderAvatar,
             colorKey = ui.colorKey.ifEmpty { ui.title },
+            photo = ui.photo,
         )
         RovstiText(
             ui.title,
@@ -596,7 +603,7 @@ fun PersonEffects(
                 }
 
                 is PersonEffect.OpenCall -> {
-                    openCall(CallDetailsTarget(effect.line, effect.who))
+                    openCall(CallDetailsTarget(effect.line, effect.who, model.state.value.photo))
                 }
             }
         }

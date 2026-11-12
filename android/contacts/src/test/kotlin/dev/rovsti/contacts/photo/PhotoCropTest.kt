@@ -9,6 +9,7 @@ import dev.rovsti.core.model.contacts.PhotoAcceptsRequest
 import dev.rovsti.core.model.contacts.PhotoCropRequest
 import dev.rovsti.core.model.contacts.PhotoPlanRequest
 import dev.rovsti.design.media.ZoomState
+import dev.rovsti.design.media.crop.PhotoCropMath
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -24,6 +25,20 @@ import org.junit.Test
 class PhotoCropTest {
     private val side = 300f
     private val maxZoom = 3000f / 96f
+
+    private fun viewOf(
+        state: ZoomState,
+        turns: Int,
+        rotated: Size,
+        side: Float,
+        maxZoom: Float,
+    ): CropView = PhotoCropMath.viewOf(state, turns, rotated, side, maxZoom).toView()
+
+    private fun stateOf(
+        view: CropView,
+        rotated: Size,
+        side: Float,
+    ) = PhotoCropMath.stateOf(view.toFrame(), rotated, side)
 
     private fun size(
         w: Int,
@@ -45,7 +60,7 @@ class PhotoCropTest {
     }
 
     @Test fun theUntouchedPictureIsTheCentredSquareOfTheShortSide() {
-        val view = PhotoCropMath.viewOf(ZoomState.Fit, 0, size(4000, 3000), side, maxZoom)
+        val view = viewOf(ZoomState.Fit, 0, size(4000, 3000), side, maxZoom)
         assertEquals(CropView(0, 1.0, 0.5, 0.5), view)
     }
 
@@ -81,10 +96,10 @@ class PhotoCropTest {
     @Test fun theViewAndTheStateConvertBothWays() {
         val rotated = size(4000, 3000, 1)
         val state = ZoomState(2.5f, Offset(40f, -75f))
-        val view = PhotoCropMath.viewOf(state, 1, rotated, side, maxZoom)
+        val view = viewOf(state, 1, rotated, side, maxZoom)
         assertEquals(1, view.turns)
         assertEquals(2.5, view.zoom, 0.0001)
-        val back = PhotoCropMath.stateOf(view, rotated, side)
+        val back = stateOf(view, rotated, side)
         assertEquals(state.scale, back.scale, 0.0001f)
         assertEquals(state.offset.x, back.offset.x, 0.01f)
         assertEquals(state.offset.y, back.offset.y, 0.01f)
@@ -92,7 +107,7 @@ class PhotoCropTest {
 
     @Test fun anOutOfRangeStateIsBroughtBackBeforeItBecomesAView() {
         val rotated = size(4000, 3000)
-        val view = PhotoCropMath.viewOf(ZoomState(9_999f, Offset(1e6f, -1e6f)), 4, rotated, side, maxZoom)
+        val view = viewOf(ZoomState(9_999f, Offset(1e6f, -1e6f)), 4, rotated, side, maxZoom)
         assertEquals(0, view.turns)
         assertEquals(maxZoom.toDouble(), view.zoom, 0.001)
         assertTrue(view.cx in 0.0..1.0 && view.cy in 0.0..1.0)
@@ -106,7 +121,7 @@ class PhotoCropTest {
         val rotated = size(w, h)
         var state = PhotoCropMath.pinch(ZoomState.Fit, 2f, Offset.Zero, Offset.Zero, rotated, side, maxZoom)
         state = PhotoCropMath.pan(state, Offset(30f, -20f), rotated, side)
-        val ours = PhotoCropMath.viewOf(state, 0, rotated, side, maxZoom)
+        val ours = viewOf(state, 0, rotated, side, maxZoom)
 
         var theirs = CropView(0, 1.0, 0.5, 0.5)
         runBlocking {
@@ -130,7 +145,7 @@ class PhotoCropTest {
         val rotated = size(w, h)
         val zoomed = PhotoCropMath.pinch(ZoomState.Fit, 3f, Offset.Zero, Offset.Zero, rotated, side, maxZoom)
         val ours =
-            PhotoCropMath.viewOf(
+            viewOf(
                 PhotoCropMath.pan(zoomed, Offset(5_000f, 5_000f), rotated, side),
                 0,
                 rotated,
@@ -162,7 +177,7 @@ class PhotoCropTest {
             }
         assertEquals(CropView(1, 1.0, 0.5, 0.5), turned)
         // After a turn our page is back at zoom 1, centred: the same view.
-        assertEquals(turned, PhotoCropMath.viewOf(ZoomState.Fit, 1, size(4000, 3000, 1), side, maxZoom))
+        assertEquals(turned, viewOf(ZoomState.Fit, 1, size(4000, 3000, 1), side, maxZoom))
     }
 
     @Test fun theChosenViewBecomesTheSquareTheCoreCuts() {
@@ -170,7 +185,7 @@ class PhotoCropTest {
         val (w, h) = 4000 to 3000
         val rotated = size(w, h)
         val state = PhotoCropMath.pinch(ZoomState.Fit, 2f, Offset.Zero, Offset.Zero, rotated, side, maxZoom)
-        val view = PhotoCropMath.viewOf(state, 0, rotated, side, maxZoom)
+        val view = viewOf(state, 0, rotated, side, maxZoom)
         val answer = runBlocking { (host.ops.photoPlan(PhotoPlanRequest(w, h, view)) as Outcome.Ok).value }
         val plan = answer.plan
         assertNotNull(plan)

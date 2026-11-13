@@ -1,7 +1,5 @@
 package dev.rovsti.phone
 
-import android.content.ActivityNotFoundException
-import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Column
@@ -218,7 +216,7 @@ private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewMode
 
 /** Recents' Android side: the SMS composer, the contact editor, the share sheet. */
 private class AndroidRecentsHost(
-    private val context: Context,
+    private val starter: SystemStarter,
     private val details: (String, () -> Unit) -> Unit,
     private val onLeave: () -> Unit = {},
 ) : RecentsHost {
@@ -236,23 +234,18 @@ private class AndroidRecentsHost(
         onDismissed: () -> Unit,
     ) = details(key, onDismissed)
 
-    /** Starts [intent]; [opened] runs when an app took it. */
+    /** Starts [intent]; [opened] runs when an app took it, a toast says so when none did (F34). */
     private fun launch(
         intent: Intent,
         opened: () -> Unit = {},
     ) {
-        try {
-            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            opened()
-        } catch (_: ActivityNotFoundException) {
-            // No app handles it: nothing to show.
-        }
+        starter.start(intent, opened)
     }
 }
 
 /** The details sheets' Android side: the SMS composer, the contact editor, the share sheet and the CSV picker. */
 private class AndroidDetailsHost(
-    private val context: Context,
+    private val starter: SystemStarter,
     private val export: (String, String) -> Unit,
     private val onLeave: () -> Unit = {},
 ) : DetailsHost {
@@ -281,23 +274,18 @@ private class AndroidDetailsHost(
         csv: String,
     ) = export(fileName, csv)
 
-    /** Starts [intent]; [opened] runs when an app took it. */
+    /** Starts [intent]; [opened] runs when an app took it, a toast says so when none did (F34). */
     private fun launch(
         intent: Intent,
         opened: () -> Unit = {},
     ) {
-        try {
-            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            opened()
-        } catch (_: ActivityNotFoundException) {
-            // No app handles it: nothing to show.
-        }
+        starter.start(intent, opened)
     }
 }
 
 /** The Keypad's Android side: the DTMF tone, the contact editor, the share sheet and the SMS app. */
 private class AndroidKeypadHost(
-    private val context: Context,
+    private val starter: SystemStarter,
     private val openContacts: (Int) -> Unit,
     private val onLeave: () -> Unit = {},
 ) : KeypadHost {
@@ -322,17 +310,12 @@ private class AndroidKeypadHost(
 
     override fun chooseSpeedDialContact(digit: Int) = openContacts(digit)
 
-    /** Starts [intent]; [opened] runs when an app took it. */
+    /** Starts [intent]; [opened] runs when an app took it, a toast says so when none did (F34). */
     private fun launch(
         intent: Intent,
         opened: () -> Unit = {},
     ) {
-        try {
-            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            opened()
-        } catch (_: ActivityNotFoundException) {
-            // No app handles it: nothing to show.
-        }
+        starter.start(intent, opened)
     }
 
     private companion object {
@@ -481,6 +464,8 @@ fun PhoneApp(
     }
 
     val context = LocalContext.current
+    // Other apps' screens; "no app handles it" is a toast, never silence (F34).
+    val starter = remember(context, overlays) { SystemStarter(context) { overlays.showToast(it) } }
     val scope = rememberCoroutineScope()
     val detailsStrings = DetailsStrings.current()
     var pendingCsv by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -497,9 +482,9 @@ fun PhoneApp(
             }
         }
     val detailsHost =
-        remember(context, exporter, container) {
+        remember(starter, exporter, container) {
             AndroidDetailsHost(
-                context,
+                starter,
                 export = { name, csv ->
                     pendingCsv = name to csv
                     exporter.launch(name)
@@ -556,12 +541,12 @@ fun PhoneApp(
     val inCallUi by inCall.state.collectAsState()
     val favoritesModel = rememberFavoritesViewModel(container)
     val inCallSheets =
-        remember(overlays, inCallStrings, inCall, context, favoritesModel) {
+        remember(overlays, inCallStrings, inCall, starter, favoritesModel) {
             InCallSheets(
                 overlays,
                 inCallStrings,
                 inCall,
-                AndroidInCallHost(context),
+                AndroidInCallHost(starter),
                 container.scope,
                 favoritesModel.state,
             )
@@ -613,13 +598,10 @@ fun PhoneApp(
             }
         }
     val newContact: () -> Unit =
-        remember(context) {
+        remember(starter) {
             {
-                try {
-                    context.startActivity(addContactIntent("", create = true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } catch (_: ActivityNotFoundException) {
-                    // No contacts app handles it: nothing to show.
-                }
+                starter.start(addContactIntent("", create = true))
+                Unit
             }
         }
 
@@ -662,8 +644,8 @@ fun PhoneApp(
             }
             entry<PhoneRoute.Recents> {
                 val host =
-                    remember(context, openDetails) {
-                        AndroidRecentsHost(context, openDetails, container.leaves::leave)
+                    remember(starter, openDetails) {
+                        AndroidRecentsHost(starter, openDetails, container.leaves::leave)
                     }
                 RecentsScreen(
                     model = recentsModel,
@@ -677,10 +659,9 @@ fun PhoneApp(
             }
             entry<PhoneRoute.Keypad> {
                 val model = rememberKeypadViewModel(container)
-                val context = LocalContext.current
                 val host =
-                    remember(context, navigator) {
-                        AndroidKeypadHost(context, { navigator.select(ContactsTab) }, container.leaves::leave)
+                    remember(starter, navigator) {
+                        AndroidKeypadHost(starter, { navigator.select(ContactsTab) }, container.leaves::leave)
                     }
                 val dial by container.pendingDial.collectAsState()
                 LaunchedEffect(dial) {
@@ -783,16 +764,10 @@ fun PhoneApp(
 
 /** The In-Call screen's Android side: the share sheet for the call summary. */
 private class AndroidInCallHost(
-    private val context: Context,
+    private val starter: SystemStarter,
 ) : InCallHost {
     override fun share(text: String) {
-        try {
-            context.startActivity(
-                Intent.createChooser(ShareIntents.text(text), null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        } catch (_: ActivityNotFoundException) {
-            // No app handles it: nothing to show.
-        }
+        starter.start(Intent.createChooser(ShareIntents.text(text), null))
     }
 }
 

@@ -99,6 +99,8 @@
     <string name="native_answer">Cevapla</string>
     <string name="native_decline">Reddet</string>
     <string name="wa_handoff_toast">Bu kişinin WhatsApp\'ta aranacak numarası yok</string>
+    <!-- Mesaj, Kişi ekle veya Paylaş isteğini alan uygulama yok (SystemStarter, F34). -->
+    <string name="phone_no_app">Bunu yapabilecek bir uygulama yok.</string>
 
     <!-- Keypad -->
     <string name="keypad_field_description">Telefon numarası</string>

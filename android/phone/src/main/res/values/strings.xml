@@ -99,6 +99,8 @@
     <string name="native_answer">Answer</string>
     <string name="native_decline">Decline</string>
     <string name="wa_handoff_toast">This contact has no number to call on WhatsApp</string>
+    <!-- No app took a Message, Add contact or Share intent (SystemStarter, F34). -->
+    <string name="phone_no_app">No app can do this.</string>
 
     <!-- Keypad (apps/phone/src/keypad.rs, E5.2) -->
     <string name="keypad_field_description">Phone number</string>

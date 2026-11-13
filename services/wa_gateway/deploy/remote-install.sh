@@ -7,7 +7,9 @@
 # Usage: remote-install.sh <command>
 #   build-start     unpack bundle.tgz and start the cargo build in the background
 #   build-log N     print build.log from byte N, then "@@STATUS=<RUNNING|OK|FAIL> @@SIZE=<bytes>"
-#   install         install the built binary, config, unit; restart; health check
+#   install         wait until no call is live, then install the built binary, config, unit; restart;
+#                   health check
+#   live            how many calls the running gateway has live (0 when it is not running)
 #   status          show the service, the listener and the health answer
 #   logs            the last journal lines
 #   rollback        put the previous binary back and restart
@@ -15,6 +17,7 @@
 # Settings come from the environment (the local script sets them):
 #   REMOTE_WORK BUILD_JOBS GATEWAY_BIND GATEWAY_MAX_INSTANCES
 #   GATEWAY_TRUST_PROXY FCM_PROJECT FORCE_CONFIG HAVE_SERVICE_ACCOUNT LINES
+#   CALL_WAIT       seconds a restart waits for live calls to end before it gives up (default 1800)
 set -euo pipefail
 
 WORK="$HOME/${REMOTE_WORK:-wa-gateway-build}"
@@ -29,6 +32,38 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 health() {
   curl -fsS --max-time 3 "http://${BIND}/healthz" 2>/dev/null
+}
+
+# Calls the running gateway has live (ringing, connecting or active). The gateway keeps the number
+# in <data_dir>/live-calls; a gateway from before that file is judged by its journal (it logs a
+# "call audio ... live" line every 10 s while a call is active).
+live_calls() {
+  if ! systemctl is-active --quiet wa-gateway; then
+    echo 0
+    return
+  fi
+  local dir count
+  dir="$(sudo sed -n 's/^data_dir *= *"\(.*\)"/\1/p' "$ETC/config.toml" 2>/dev/null | head -n 1)"
+  count="$(sudo cat "${dir:-/var/lib/wa-gateway}/live-calls" 2>/dev/null | tr -dc 0-9 || true)"
+  if [ -n "$count" ]; then
+    echo "$count"
+    return
+  fi
+  sudo journalctl -u wa-gateway --since "-25s" --no-pager -o cat 2>/dev/null \
+    | grep -c ': call audio .* live [0-9]*s:' || true
+}
+
+# Waits until no call is live, so a restart never cuts one; gives up after CALL_WAIT seconds.
+wait_for_calls() {
+  local waited=0 limit="${CALL_WAIT:-1800}" live
+  while :; do
+    live="$(live_calls)"
+    [ "${live:-0}" = 0 ] && return 0
+    [ "$waited" -lt "$limit" ] || die "$live call(s) still live after ${limit} s; not restarting the gateway (try again later)"
+    if [ $((waited % 60)) = 0 ]; then say "$live call(s) live on the gateway: waiting for them to end before the restart"; fi
+    sleep 5
+    waited=$((waited + 5))
+  done
 }
 
 ensure_cargo() {
@@ -64,7 +99,8 @@ export CARGO_PROFILE_RELEASE_LTO=off
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=8
 export CARGO_PROFILE_RELEASE_OPT_LEVEL=2
 cd "$WORK/src"
-if cargo build -p wa_gateway --release && cp "$WORK/cache/target/release/wa_gateway" "$WORK/out/wa_gateway"; then
+# Lowest CPU priority: the gateway on the same box may be carrying a call.
+if nice -n 19 cargo build -p wa_gateway --release && cp "$WORK/cache/target/release/wa_gateway" "$WORK/out/wa_gateway"; then
   echo OK > "$WORK/build.status"
 else
   echo FAIL > "$WORK/build.status"
@@ -121,6 +157,7 @@ install_all() {
   [ -x "$WORK/out/wa_gateway" ] || die "no built binary at $WORK/out/wa_gateway; run the build first"
   "$WORK/out/wa_gateway" --help >/dev/null 2>&1 || die "the built binary does not run on this machine"
   sudo -n true 2>/dev/null || die "sudo needs a password for this user; the deploy cannot continue"
+  wait_for_calls
 
   sudo install -d -m 0755 "$ETC"
   if [ -f "$WORK/service-account.json" ]; then
@@ -139,6 +176,8 @@ install_all() {
   write_dropin
 
   say "starting the service"
+  # Again, right before the restart: a call may have started while the files went in.
+  wait_for_calls
   sudo systemctl daemon-reload
   sudo systemctl enable wa-gateway >/dev/null 2>&1
   sudo systemctl restart wa-gateway
@@ -166,6 +205,7 @@ show_status() {
   ss -ltn 2>/dev/null | grep ":${BIND##*:}\b" || echo "nothing listens on ${BIND}"
   echo "--- health"
   health || echo "no answer from http://${BIND}/healthz"
+  echo "--- live calls: $(live_calls)"
   echo "--- config ($ETC/config.toml)"
   sudo cat "$ETC/config.toml" 2>/dev/null || echo "none"
   echo "--- binary"
@@ -177,10 +217,12 @@ case "${1:-}" in
   build-start) build_start ;;
   build-log) build_log "${2:-0}" ;;
   install) install_all ;;
+  live) live_calls ;;
   status) show_status ;;
   logs) sudo journalctl -u wa-gateway -n "${LINES:-100}" --no-pager ;;
   rollback)
     [ -f "$BIN.prev" ] || die "no previous binary to go back to"
+    wait_for_calls
     sudo cp -p "$BIN.prev" "$BIN"
     sudo systemctl restart wa-gateway
     say "rolled back"

@@ -26,6 +26,8 @@
 #   FORCE_CONFIG=1                replace /etc/wa-gateway/config.toml (kept otherwise)
 #   BUILD_JOBS=3                  cargo jobs on the server (the box is shared)
 #   SKIP_LOCAL_CHECK=1            skip the local `cargo metadata` check of the bundle
+#   CALL_WAIT=1800                a restart (deploy, rollback) first waits this many seconds at most
+#                                 for live calls to end, and gives up rather than cut one
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,6 +45,7 @@ BUILD_JOBS="${BUILD_JOBS:-3}"
 REMOTE_WORK="${REMOTE_WORK:-wa-gateway-build}"
 SKIP_LOCAL_CHECK="${SKIP_LOCAL_CHECK:-0}"
 LINES="${LINES:-100}"
+CALL_WAIT="${CALL_WAIT:-1800}"
 
 # The workspace crates the gateway needs (its path dependencies, direct and indirect).
 # `cargo metadata` on the bundle (below) fails if this list falls behind.
@@ -71,7 +74,8 @@ done
 # Values go into a remote command line: keep them to plain characters.
 for pair in "DEPLOY_HOST=$DEPLOY_HOST" "DEPLOY_USER=$DEPLOY_USER" "GATEWAY_BIND=$GATEWAY_BIND" \
             "FCM_PROJECT=$FCM_PROJECT" "REMOTE_WORK=$REMOTE_WORK" "BUILD_JOBS=$BUILD_JOBS" \
-            "GATEWAY_MAX_INSTANCES=$GATEWAY_MAX_INSTANCES" "GATEWAY_TRUST_PROXY=$GATEWAY_TRUST_PROXY"; do
+            "GATEWAY_MAX_INSTANCES=$GATEWAY_MAX_INSTANCES" "GATEWAY_TRUST_PROXY=$GATEWAY_TRUST_PROXY" \
+            "CALL_WAIT=$CALL_WAIT"; do
   case "${pair#*=}" in
     *[!A-Za-z0-9._:/-]*) die "${pair%%=*} has a character that is not allowed: ${pair#*=}" ;;
   esac
@@ -130,7 +134,7 @@ REMOTE_ENV=""
 build_remote_env() {
   REMOTE_ENV="REMOTE_WORK=$REMOTE_WORK BUILD_JOBS=$BUILD_JOBS GATEWAY_BIND=$GATEWAY_BIND"
   REMOTE_ENV="$REMOTE_ENV GATEWAY_MAX_INSTANCES=$GATEWAY_MAX_INSTANCES GATEWAY_TRUST_PROXY=$GATEWAY_TRUST_PROXY"
-  REMOTE_ENV="$REMOTE_ENV FCM_PROJECT=$FCM_PROJECT FORCE_CONFIG=$FORCE_CONFIG LINES=$LINES"
+  REMOTE_ENV="$REMOTE_ENV FCM_PROJECT=$FCM_PROJECT FORCE_CONFIG=$FORCE_CONFIG LINES=$LINES CALL_WAIT=$CALL_WAIT"
   if [ -f "$FCM_SERVICE_ACCOUNT" ]; then REMOTE_ENV="$REMOTE_ENV HAVE_SERVICE_ACCOUNT=1"; fi
 }
 
@@ -239,7 +243,7 @@ cmd_deploy() {
     sleep 20
   done
 
-  say "installing"
+  say "installing (waits while a call is live, so the restart never cuts one)"
   remote install
   ssh_run "echo $BUNDLE_HASH > \"\$HOME/$REMOTE_WORK/deployed.sha256\""
   cat <<EOF

@@ -11,10 +11,12 @@ pub mod audio;
 pub mod error;
 pub mod events;
 pub mod http;
+pub mod queue;
 
 pub mod tls;
 
-pub use audio::{CallAudio, call_audio};
+pub use audio::{CallAudio, call_audio, call_audio_with};
 pub use error::ClientError;
 pub use events::{ClientEvent, EventStream, subscribe};
 pub use http::{Gateway, Picture};
+pub use queue::{Closed, Mic, QueueStats, RecvError, Speaker};

@@ -21,7 +21,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use futures::{FutureExt, StreamExt, channel::mpsc::TrySendError, select_biased};
+use futures::{FutureExt, StreamExt, select_biased};
 use gpui::{
     AnyElement, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Role,
     SharedString, StatefulInteractiveElement, Styled, Task, Window, div, px,
@@ -156,10 +156,9 @@ async fn pump(mut audio: CallAudio, muted: Arc<AtomicBool>, timer: impl Fn(Durat
                             if muted.load(Ordering::Relaxed) {
                                 continue;
                             }
-                            // A full queue drops the frame: late audio is worse than none.
-                            if let Err(TrySendError { .. }) = audio.mic.try_send(frame)
-                                && audio.mic.is_closed()
-                            {
+                            // The queue drops its oldest frames when the socket is
+                            // behind; an error means the audio is over.
+                            if audio.mic.try_send(frame).is_err() {
                                 return;
                             }
                         }

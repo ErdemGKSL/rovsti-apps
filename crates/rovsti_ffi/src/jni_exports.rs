@@ -102,7 +102,8 @@ pub extern "system" fn Java_dev_rovsti_core_RustNative_tile<'l>(
 }
 
 /// One microphone frame (1 920 bytes of little-endian 16-bit PCM, 60 ms at 16 kHz) for the `wa.call_audio_open`
-/// handle `call`. Any other size, a full queue or a closed call drops the frame.
+/// handle `call`. Any other size or a closed call drops the frame; when the socket is behind, the oldest queued
+/// frames go instead.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_rovsti_core_RustNative_audioPush<'l>(
     env: JNIEnv<'l>,
@@ -116,8 +117,9 @@ pub extern "system" fn Java_dev_rovsti_core_RustNative_audioPush<'l>(
     });
 }
 
-/// Fills `out` with the next frame of the peer's voice. Answers 1 920 (a frame), 0 (none ready yet) or -1 (the
-/// call ended or the handle is gone).
+/// Fills `out` (at least 1 920 bytes) with the next frame of the peer's voice, waiting up to 20 ms for it. Answers
+/// the frame's bytes (640 for a 20 ms frame, 1 920 for the whole frame of an older gateway), 0 (none came) or -1
+/// (the call ended or the handle is gone).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_rovsti_core_RustNative_audioPull<'l>(
     env: JNIEnv<'l>,

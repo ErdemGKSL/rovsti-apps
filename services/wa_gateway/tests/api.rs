@@ -6,10 +6,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
-use futures::{SinkExt, StreamExt};
 use rovsti_wa_client::Picture;
-use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, call_audio, subscribe};
+use rovsti_wa_client::{
+    ClientError, ClientEvent, EventStream, Gateway, call_audio, call_audio_with, subscribe,
+};
+use rovsti_wa_proto::audio::SpeakerFrames;
 use rovsti_wa_proto::{
     AppId, CallPhase, ChatState, ConnectKey, CreateInstance, CreatedInstance, EndReason, ErrorCode,
     EventEnvelope, GatewayEvent, GatewayUrl, GroupInfo, InstanceState, LinkRequest, MarkRead,
@@ -860,18 +863,17 @@ async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
     let mut audio = second;
 
     // The wrong size never leaves the client; the fake echoes the rest.
+    // One frame at a time, like a microphone: the queues keep only the
+    // newest audio when frames come faster than they are taken.
     let frames = [frame(1), frame(2), frame(3)];
-    audio.mic.send(frames[0].clone()).await.unwrap();
-    audio.mic.send(vec![0; 959]).await.unwrap();
-    audio.mic.send(frames[1].clone()).await.unwrap();
-    audio.mic.send(vec![0; 961]).await.unwrap();
-    audio.mic.send(frames[2].clone()).await.unwrap();
-    for want in &frames {
+    for (want, wrong) in frames.iter().zip([959, 961, 320]) {
+        audio.mic.try_send(want.clone()).unwrap();
         let got = tokio::time::timeout(Duration::from_secs(10), audio.speaker.next())
             .await
             .expect("timed out waiting for an echoed frame")
             .expect("audio ended");
         assert_eq!(&got, want);
+        audio.mic.try_send(vec![0; wrong]).unwrap();
     }
     assert!(
         tokio::time::timeout(Duration::from_millis(200), audio.speaker.next())
@@ -905,8 +907,10 @@ async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
     assert!(end.is_none());
 }
 
-/// The engine hands the speaker 20 ms (320 sample) frames; the app must still
-/// get whole 60 ms (960 sample, 1 920 byte) ones, with every sample in order.
+/// An app from before 20 ms frames (it asks for nothing) with this gateway:
+/// the engine hands the speaker 20 ms (320 sample) frames, and that app
+/// still gets whole 60 ms (960 sample, 1 920 byte) ones, with every sample
+/// in order.
 #[tokio::test]
 async fn call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames() {
     let server = start(4).await;
@@ -924,7 +928,7 @@ async fn call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames() {
 
     let frames = [frame(4), frame(5), frame(6), frame(7)];
     for want in &frames {
-        audio.mic.send(want.clone()).await.unwrap();
+        audio.mic.try_send(want.clone()).unwrap();
         let got = tokio::time::timeout(Duration::from_secs(10), audio.speaker.next())
             .await
             .expect("timed out waiting for a rechunked frame")
@@ -938,6 +942,49 @@ async fn call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames() {
             .is_err(),
         "no partial frame may reach the app"
     );
+}
+
+/// An app that asks for 20 ms frames (`?spk_ms=20`) gets them: three per
+/// 60 ms of audio, each sent on as it comes, whether the engine hands over
+/// 20 ms frames (the PCM engine) or whole decoded ones.
+#[tokio::test]
+async fn an_app_that_asks_for_20_ms_frames_gets_20_ms_frames() {
+    for chunk in [320, 0] {
+        let server = start(4).await;
+        server.driver.calls().set_speaker_chunk(chunk);
+        let (gateway, created) = create(&server).await;
+        let mut events = watch(&server, &created, None);
+        assert_eq!(events.next().await, ClientEvent::Connected);
+
+        let g = gateway.clone();
+        let call_id = blocking(move || g.place_call(PEER)).await.unwrap().call_id;
+        assert_eq!(next_call_phase(&mut events).await, CallPhase::Ringing);
+        let key = ConnectKey::parse(&created.key).unwrap();
+        let (url, id) = (server.url.clone(), call_id.clone());
+        let mut audio = blocking(move || call_audio_with(url, key, &id, SpeakerFrames::Step))
+            .await
+            .unwrap();
+
+        for want in [frame(4), frame(5), frame(6)] {
+            audio.mic.try_send(want.clone()).unwrap();
+            let mut got = Vec::new();
+            for step in 0..3 {
+                let part = tokio::time::timeout(Duration::from_secs(10), audio.speaker.next())
+                    .await
+                    .expect("timed out waiting for a 20 ms frame")
+                    .expect("audio ended");
+                assert_eq!(part.len(), 320, "chunk {chunk} step {step}");
+                got.extend(part);
+            }
+            assert_eq!(got, want, "chunk {chunk}");
+        }
+        let stats = server
+            .state
+            .calls(&instance(&created))
+            .audio_summary(&call_id)
+            .unwrap();
+        assert_eq!((stats.spk_to_app, stats.spk_app_ms), (9, 180), "{stats}");
+    }
 }
 
 #[tokio::test]

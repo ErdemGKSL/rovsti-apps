@@ -14,7 +14,7 @@ mod tiles;
 mod wa;
 
 pub use tiles::tile_export;
-pub use wa::{audio_pull, audio_push};
+pub use wa::{PULL_WAIT, audio_pull, audio_pull_within, audio_push};
 
 use crate::envelope::FfiError;
 use crate::guard::guarded;

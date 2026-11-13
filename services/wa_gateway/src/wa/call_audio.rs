@@ -12,9 +12,10 @@
 //!   through MLOW's escape still needs libopus: the engine hands those packets
 //!   over as `CallEvent::ForeignAudio`, which [`ForeignAudio`] decodes into the
 //!   speaker. The engine keeps ticking silent 20 ms playout frames meanwhile,
-//!   so [`run_pcm_downlink`] holds those back while foreign audio plays, and
-//!   joins the engine's 20 ms frames into 60 ms ones so every queue counts
-//!   the same time per slot.
+//!   so [`run_pcm_downlink`] holds those back while foreign audio plays. The
+//!   engine's 20 ms frames go to the speaker queue as they are, and every
+//!   other source is cut to 20 ms too ([`to_speaker`]), so one slot of that
+//!   queue is always 20 ms.
 //! - [`CallAudioMode::OpusInMlow`]: encoded audio in the MLOW RTP profile,
 //!   answered with the same MLOW signaling. The microphone goes out as
 //!   Opus/CELT through MLOW's escape (libopus); the peer may answer with MLOW
@@ -27,6 +28,10 @@
 //!   phone the caller never took this answer: their phone rang on and the
 //!   call ended as missed. Kept only to compare.
 //!
+//! The queues between the socket and the engine are [`FreshQueue`]s: short,
+//! and when one overflows the oldest audio goes, never the newest, so a
+//! stall ends with the audio of now and not with a standing delay.
+//!
 //! [`CallAudioStats`] counts every hop and measures the levels, and
 //! [`AudioSummary`] turns that into the one log line per call.
 
@@ -37,7 +42,7 @@ use std::time::{Duration, Instant};
 
 use async_channel::{Receiver, Sender, TrySendError};
 use bytes::Bytes;
-use rovsti_wa_proto::audio::Rechunker;
+use rovsti_wa_proto::audio::{STEP_SAMPLES, samples_ms};
 use whatsapp_rust::voip::audio::{WaOpusDecoder, WaOpusEncoder};
 use whatsapp_rust::voip::{AudioCodec, AudioFormat, AudioRtpProfile, EncodedAudioFrame};
 use whatsapp_rust::wacore::voip::rtp::RTP_PAYLOAD_TYPE_MLOW_RED;
@@ -56,6 +61,20 @@ pub enum CallAudioMode {
 /// The mode every new call uses.
 pub const CALL_AUDIO_MODE: CallAudioMode = CallAudioMode::MlowPcm;
 
+/// Slots of the speaker queue (decoder to socket), 20 ms each: 200 ms. The
+/// socket takes a frame the moment it can write, so the queue is empty while
+/// the connection moves and fills only while it does not.
+pub const SPK_QUEUE: usize = 10;
+/// What the speaker queue keeps when it overflowed: the newest 40 ms.
+pub const SPK_TARGET: usize = 2;
+/// Slots of the microphone queues (socket to codec task to engine), 60 ms
+/// each: 240 ms.
+pub const MIC_QUEUE: usize = 4;
+/// What a microphone queue keeps when it overflowed: the newest 60 ms.
+pub const MIC_TARGET: usize = 1;
+/// Playout frames the PCM engine may have waiting for the gateway's task
+/// (20 ms each). The task forwards at once, so this only covers scheduling.
+pub const ENGINE_PLAYOUT_QUEUE: usize = 24;
 /// Encoded packets queued towards the engine (about 180 ms).
 pub const ENCODED_QUEUE: usize = 3;
 /// Decrypted packets queued from the engine (about one second).
@@ -101,6 +120,87 @@ impl CallAudioMode {
             Self::MlowPcm => return Err("PCM mode has no gateway encoder".to_owned()),
         };
         encoder.map_err(|e| e.to_string())
+    }
+}
+
+// ------------------------------------------------------------------ queues
+
+/// The call is over: the queue is closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueueClosed;
+
+/// A short bounded queue that keeps the newest audio. A push never waits
+/// and never refuses the new frame: when the queue is full, the **oldest**
+/// frames are dropped until `target` are left (the new one included). So
+/// after a stall the reader finds the audio of now, and at most `target`
+/// frames of delay, instead of a full queue that stays one.
+#[derive(Clone, Debug)]
+pub struct FreshQueue {
+    tx: Sender<Frame>,
+    rx: Receiver<Frame>,
+    target: usize,
+}
+
+impl FreshQueue {
+    /// A queue of `capacity` frames that falls back to `target` (at least
+    /// one, at most the capacity) when it overflows.
+    pub fn new(capacity: usize, target: usize) -> Self {
+        let capacity = capacity.max(1);
+        let (tx, rx) = async_channel::bounded(capacity);
+        Self {
+            tx,
+            rx,
+            target: target.clamp(1, capacity),
+        }
+    }
+
+    /// Queues `frame`. Answers how many of the oldest frames were dropped
+    /// to make room.
+    pub fn push(&self, frame: Frame) -> Result<usize, QueueClosed> {
+        let mut dropped = 0;
+        if self.tx.is_full() {
+            while self.rx.len() >= self.target && self.rx.try_recv().is_ok() {
+                dropped += 1;
+            }
+        }
+        let mut frame = frame;
+        loop {
+            match self.tx.try_send(frame) {
+                Ok(()) => return Ok(dropped),
+                Err(TrySendError::Closed(_)) => return Err(QueueClosed),
+                // Another sender got in between: make room for one more.
+                Err(TrySendError::Full(back)) => {
+                    frame = back;
+                    if self.rx.try_recv().is_ok() {
+                        dropped += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The reading end. Clones share the queue.
+    pub fn receiver(&self) -> Receiver<Frame> {
+        self.rx.clone()
+    }
+
+    /// Frames waiting.
+    pub fn len(&self) -> usize {
+        self.rx.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rx.is_empty()
+    }
+
+    /// Throws away everything waiting; answers how many frames.
+    pub fn clear(&self) -> usize {
+        std::iter::from_fn(|| self.rx.try_recv().ok()).count()
+    }
+
+    /// Ends the queue for both sides.
+    pub fn close(&self) {
+        self.tx.close();
     }
 }
 
@@ -184,11 +284,13 @@ pub struct CallAudioStats {
     pub mic_from_app: AtomicU64,
     /// Socket messages that were not one frame long.
     pub mic_bad_size: AtomicU64,
-    /// Frames dropped because the gateway's microphone queue was full.
+    /// The gateway's microphone queue was full when a frame came: its
+    /// oldest frames were dropped.
     pub mic_lagging: AtomicU64,
     /// Frames (PCM mode) or packets (encoded modes) handed to the engine.
     pub mic_to_engine: AtomicU64,
-    /// Dropped because the engine's queue was full or closed.
+    /// Dropped because the engine's queue was full (PCM mode: the oldest
+    /// frames; encoded modes: the new packet).
     pub mic_engine_dropped: AtomicU64,
     pub mic_encode_failed: AtomicU64,
     /// Playout frames (PCM mode) or packets (encoded modes) from the engine.
@@ -202,18 +304,29 @@ pub struct CallAudioStats {
     pub foreign_failed: AtomicU64,
     /// Silent engine frames held back while foreign audio played.
     pub spk_gated: AtomicU64,
-    /// Speaker frames dropped because the socket side was full.
+    /// Speaker frames (20 ms each) dropped, oldest first, because the
+    /// socket was behind and the queue full.
     pub spk_queue_dropped: AtomicU64,
+    /// The speaker queue's depth when a frame came: the sum over all
+    /// frames, in slots of 20 ms, ...
+    pub spk_depth_sum: AtomicU64,
+    /// ... how many frames that was, ...
+    pub spk_depth_frames: AtomicU64,
+    /// ... and the deepest it was.
+    pub spk_depth_max: AtomicU64,
     /// Decoded packets that gave no samples (nothing reached the speaker).
     pub spk_empty: AtomicU64,
     /// Samples handed to the speaker queue (16 kHz), to compare with the
-    /// call's length and with `app` (60 ms each).
+    /// call's length and with `app_ms`.
     pub spk_samples: AtomicU64,
     /// Queued speaker frames thrown away when the app's socket attached
     /// (stale audio from before it listened).
     pub spk_stale: AtomicU64,
-    /// Whole 60 ms frames sent to the app.
+    /// Frames sent to the app (20 ms each, or 60 ms for an app that did not
+    /// ask for 20 ms frames).
     pub spk_to_app: AtomicU64,
+    /// Samples sent to the app.
+    pub spk_app_samples: AtomicU64,
     /// Audio sockets the app opened (more than one: it reopened a stuck one).
     pub sockets: AtomicU64,
     /// Level of the microphone PCM on its way to the engine.
@@ -256,10 +369,13 @@ impl CallAudioStats {
             spk_gated: load(&self.spk_gated),
             spk_queue_dropped: load(&self.spk_queue_dropped),
             spk_empty: load(&self.spk_empty),
-            spk_ms: load(&self.spk_samples) * 1_000
-                / u64::from(rovsti_wa_proto::audio::SAMPLE_RATE),
+            spk_ms: samples_ms(load(&self.spk_samples) as usize),
+            spk_queue_mean_ms: samples_ms(STEP_SAMPLES) * load(&self.spk_depth_sum)
+                / load(&self.spk_depth_frames).max(1),
+            spk_queue_max_ms: samples_ms(STEP_SAMPLES) * load(&self.spk_depth_max),
             spk_stale: load(&self.spk_stale),
             spk_to_app: load(&self.spk_to_app),
+            spk_app_ms: samples_ms(load(&self.spk_app_samples) as usize),
             spk_level: self.spk_level.snapshot(),
             sockets: load(&self.sockets),
         }
@@ -289,8 +405,14 @@ pub struct AudioSummary {
     pub spk_empty: u64,
     /// Milliseconds of decoded audio handed to the speaker queue.
     pub spk_ms: u64,
+    /// Mean depth of the speaker queue when a frame came, in milliseconds.
+    pub spk_queue_mean_ms: u64,
+    /// The deepest the speaker queue was when a frame came, in milliseconds.
+    pub spk_queue_max_ms: u64,
     pub spk_stale: u64,
     pub spk_to_app: u64,
+    /// Milliseconds of audio sent to the app.
+    pub spk_app_ms: u64,
     pub spk_level: LevelSnapshot,
     pub sockets: u64,
 }
@@ -301,8 +423,8 @@ impl fmt::Display for AudioSummary {
             f,
             "format={} | mic: app={} bad={} lag={} engine={} engine_drop={} enc_fail={} {} | \
              spk: engine={} opus={} mlow={} dec_fail={} foreign={} foreign_ok={} \
-             foreign_fail={} gated={} queue_drop={} empty={} pcm_ms={} stale={} app={} {} | \
-             sockets={}",
+             foreign_fail={} gated={} queue_drop={} queue_mean={}ms queue_max={}ms empty={} \
+             pcm_ms={} stale={} app={} app_ms={} {} | sockets={}",
             self.format,
             self.mic_from_app,
             self.mic_bad_size,
@@ -320,10 +442,13 @@ impl fmt::Display for AudioSummary {
             self.foreign_failed,
             self.spk_gated,
             self.spk_queue_dropped,
+            self.spk_queue_mean_ms,
+            self.spk_queue_max_ms,
             self.spk_empty,
             self.spk_ms,
             self.spk_stale,
             self.spk_to_app,
+            self.spk_app_ms,
             self.spk_level,
             self.sockets,
         )
@@ -418,23 +543,37 @@ impl InboundDecoder {
     }
 }
 
-/// Hands a decoded frame to the socket side; a full queue drops it.
-fn to_speaker(spk: &Sender<Frame>, pcm: Frame, stats: &CallAudioStats) -> bool {
+/// Hands decoded audio to the socket side in slots of 20 ms: the engine's
+/// playout frames as they are, a longer frame (60 ms of decoded Opus) cut
+/// up. A full queue drops its oldest slots, never these. `false`: the call
+/// is over.
+pub fn to_speaker(spk: &FreshQueue, pcm: Frame, stats: &CallAudioStats) -> bool {
     if pcm.is_empty() {
         bump(&stats.spk_empty);
         return true;
     }
-    let samples = pcm.len() as u64;
-    match spk.try_send(pcm) {
-        Ok(()) => {
+    if pcm.len() <= STEP_SAMPLES {
+        return slot_to_speaker(spk, pcm, stats);
+    }
+    pcm.chunks(STEP_SAMPLES)
+        .all(|slot| slot_to_speaker(spk, slot.to_vec(), stats))
+}
+
+fn slot_to_speaker(spk: &FreshQueue, slot: Frame, stats: &CallAudioStats) -> bool {
+    let samples = slot.len() as u64;
+    let depth = spk.len() as u64;
+    match spk.push(slot) {
+        Ok(dropped) => {
             stats.spk_samples.fetch_add(samples, Ordering::Relaxed);
+            stats.spk_depth_sum.fetch_add(depth, Ordering::Relaxed);
+            bump(&stats.spk_depth_frames);
+            stats.spk_depth_max.fetch_max(depth, Ordering::Relaxed);
+            stats
+                .spk_queue_dropped
+                .fetch_add(dropped as u64, Ordering::Relaxed);
             true
         }
-        Err(TrySendError::Full(_)) => {
-            bump(&stats.spk_queue_dropped);
-            true
-        }
-        Err(TrySendError::Closed(_)) => false,
+        Err(QueueClosed) => false,
     }
 }
 
@@ -476,7 +615,7 @@ pub async fn run_uplink(
 /// The engine's decrypted packets to speaker PCM, until the engine ends.
 pub async fn run_downlink(
     engine: Receiver<EncodedAudioFrame>,
-    spk: Sender<Frame>,
+    spk: FreshQueue,
     mut decoder: InboundDecoder,
     stats: Arc<CallAudioStats>,
 ) {
@@ -510,13 +649,13 @@ pub async fn run_downlink(
 /// Opus packets the PCM engine handed over as `CallEvent::ForeignAudio`.
 pub struct ForeignAudio {
     decoder: Mutex<InboundDecoder>,
-    spk: Sender<Frame>,
+    spk: FreshQueue,
     stats: Arc<CallAudioStats>,
     last: Mutex<Option<Instant>>,
 }
 
 impl ForeignAudio {
-    pub fn new(spk: Sender<Frame>, stats: Arc<CallAudioStats>) -> Self {
+    pub fn new(spk: FreshQueue, stats: Arc<CallAudioStats>) -> Self {
         Self {
             decoder: Mutex::new(InboundDecoder::new()),
             spk,
@@ -560,44 +699,41 @@ impl ForeignAudio {
     }
 }
 
-/// Microphone frames to the PCM engine, counted.
-pub async fn run_pcm_uplink(
-    mic: Receiver<Frame>,
-    engine: Sender<Frame>,
-    stats: Arc<CallAudioStats>,
-) {
+/// Microphone frames to the PCM engine, counted. When the engine is behind,
+/// its queue drops the oldest frames.
+pub async fn run_pcm_uplink(mic: Receiver<Frame>, engine: FreshQueue, stats: Arc<CallAudioStats>) {
     while let Ok(frame) = mic.recv().await {
         stats.mic_level.add(&frame);
-        match engine.try_send(frame) {
-            Ok(()) => bump(&stats.mic_to_engine),
-            Err(TrySendError::Full(_)) => bump(&stats.mic_engine_dropped),
-            Err(TrySendError::Closed(_)) => break,
+        match engine.push(frame) {
+            Ok(dropped) => {
+                bump(&stats.mic_to_engine);
+                stats
+                    .mic_engine_dropped
+                    .fetch_add(dropped as u64, Ordering::Relaxed);
+            }
+            Err(QueueClosed) => break,
         }
     }
 }
 
 /// The PCM engine's playout to the speaker, counted. Its silent frames are
 /// held back while foreign audio plays. The engine plays out 20 ms (320
-/// sample) frames; they are joined into whole 60 ms frames here, so the
-/// speaker queue holds [`AUDIO_QUEUE`](crate::wa::calls::AUDIO_QUEUE) x 60 ms
-/// like in the other modes, not a third of that.
+/// sample) frames and they go on as they are: joining them into 60 ms
+/// frames (as before) made the first sample of each wait 40 ms for the last.
 pub async fn run_pcm_downlink(
     engine: Receiver<Frame>,
-    spk: Sender<Frame>,
+    spk: FreshQueue,
     foreign: Arc<ForeignAudio>,
     stats: Arc<CallAudioStats>,
 ) {
-    let mut whole = Rechunker::new();
     while let Ok(frame) = engine.recv().await {
         bump(&stats.spk_from_engine);
         if foreign.playing() && frame.iter().all(|&s| s == 0) {
             bump(&stats.spk_gated);
             continue;
         }
-        for pcm in whole.push(&frame) {
-            if !to_speaker(&spk, pcm, &stats) {
-                return;
-            }
+        if !to_speaker(&spk, frame, &stats) {
+            return;
         }
     }
 }
@@ -658,9 +794,10 @@ mod tests {
     #[test]
     fn foreign_mlow_escape_opus_reaches_the_speaker_as_the_tone() {
         let mut encoder = WaOpusEncoder::new_mlow_escape().unwrap();
-        let (spk_tx, spk_rx) = async_channel::bounded(64);
+        let spk = FreshQueue::new(64, 64);
+        let spk_rx = spk.receiver();
         let stats = Arc::new(CallAudioStats::default());
-        let foreign = ForeignAudio::new(spk_tx, Arc::clone(&stats));
+        let foreign = ForeignAudio::new(spk, Arc::clone(&stats));
         for i in 0..10 {
             let packet = encoder.encode(&tone(1_000.0, i * FRAME_SAMPLES)).unwrap();
             // What the engine reports: the escape TOC.
@@ -677,9 +814,10 @@ mod tests {
 
     #[test]
     fn foreign_garbage_counts_as_failed_and_stays_silent() {
-        let (spk_tx, spk_rx) = async_channel::bounded(4);
+        let spk = FreshQueue::new(4, 4);
+        let spk_rx = spk.receiver();
         let stats = Arc::new(CallAudioStats::default());
-        let foreign = ForeignAudio::new(spk_tx, Arc::clone(&stats));
+        let foreign = ForeignAudio::new(spk, Arc::clone(&stats));
         // Escape TOC with a multi-frame flag but no frame count byte.
         foreign.deliver(&[0xC1]);
         // A plain Opus code-3 TOC without its frame count byte.
@@ -777,61 +915,149 @@ mod tests {
     #[tokio::test]
     async fn pcm_downlink_holds_back_engine_silence_while_foreign_audio_plays() {
         let stats = Arc::new(CallAudioStats::default());
-        let (spk_tx, spk_rx) = async_channel::bounded(64);
+        let spk = FreshQueue::new(64, 64);
+        let spk_rx = spk.receiver();
         let (eng_tx, eng_rx) = async_channel::bounded(64);
-        let foreign = Arc::new(ForeignAudio::new(spk_tx.clone(), Arc::clone(&stats)));
+        let foreign = Arc::new(ForeignAudio::new(spk.clone(), Arc::clone(&stats)));
         let task = tokio::spawn(run_pcm_downlink(
             eng_rx,
-            spk_tx,
+            spk,
             Arc::clone(&foreign),
             Arc::clone(&stats),
         ));
-        // Nothing foreign yet: three 20 ms frames of engine silence pass, as
-        // one 60 ms frame.
-        for _ in 0..3 {
-            eng_tx.send(vec![0; 320]).await.unwrap();
-        }
-        assert_eq!(spk_rx.recv().await.unwrap(), vec![0; FRAME_SAMPLES]);
+        // Nothing foreign yet: a 20 ms frame of engine silence passes as it is.
+        eng_tx.send(vec![0; STEP_SAMPLES]).await.unwrap();
+        assert_eq!(spk_rx.recv().await.unwrap(), vec![0; STEP_SAMPLES]);
 
+        // A decoded 60 ms Opus frame goes on as three 20 ms slots.
         let mut encoder = WaOpusEncoder::new_mlow_escape().unwrap();
         foreign.deliver(&encoder.encode(&tone(1_000.0, 0)).unwrap());
-        assert_eq!(spk_rx.recv().await.unwrap().len(), FRAME_SAMPLES);
-        // Silence is held back now; real engine sound still passes.
-        eng_tx.send(vec![0; 320]).await.unwrap();
         for _ in 0..3 {
-            eng_tx.send(vec![5; 320]).await.unwrap();
+            assert_eq!(spk_rx.recv().await.unwrap().len(), STEP_SAMPLES);
+        }
+        // Silence is held back now; real engine sound still passes.
+        eng_tx.send(vec![0; STEP_SAMPLES]).await.unwrap();
+        eng_tx.send(vec![5; STEP_SAMPLES]).await.unwrap();
+        eng_tx.close();
+        task.await.unwrap();
+        assert_eq!(spk_rx.try_recv().unwrap(), vec![5; STEP_SAMPLES]);
+        assert!(spk_rx.is_empty());
+        let s = stats.summary();
+        assert_eq!((s.spk_from_engine, s.spk_gated), (3, 1));
+        assert_eq!((s.foreign, s.foreign_ok), (1, 1));
+        assert_eq!(s.spk_ms, 20 + 60 + 20);
+    }
+
+    /// The engine plays out 20 ms frames and they reach the speaker queue as
+    /// 20 ms frames, each the moment it comes: nothing waits for two more to
+    /// make 60 ms (which cost up to 40 ms).
+    #[tokio::test]
+    async fn pcm_downlink_passes_20_ms_frames_on_without_joining_them() {
+        let stats = Arc::new(CallAudioStats::default());
+        let spk = FreshQueue::new(SPK_QUEUE, SPK_TARGET);
+        let spk_rx = spk.receiver();
+        let (eng_tx, eng_rx) = async_channel::bounded(64);
+        let foreign = Arc::new(ForeignAudio::new(spk.clone(), Arc::clone(&stats)));
+        let task = tokio::spawn(run_pcm_downlink(eng_rx, spk, foreign, Arc::clone(&stats)));
+        for i in 0..5 {
+            eng_tx.send(vec![i; STEP_SAMPLES]).await.unwrap();
+            // One frame in, one frame out, before the next one exists.
+            assert_eq!(spk_rx.recv().await.unwrap(), vec![i; STEP_SAMPLES]);
         }
         eng_tx.close();
         task.await.unwrap();
-        assert_eq!(spk_rx.try_recv().unwrap(), vec![5; FRAME_SAMPLES]);
-        assert!(spk_rx.is_empty());
         let s = stats.summary();
-        assert_eq!((s.spk_from_engine, s.spk_gated), (7, 1));
-        assert_eq!((s.foreign, s.foreign_ok), (1, 1));
+        assert_eq!((s.spk_queue_dropped, s.spk_ms), (0, 100));
+        assert_eq!((s.spk_queue_mean_ms, s.spk_queue_max_ms), (0, 0));
     }
 
-    /// The engine plays out 20 ms frames. Before, each took one slot of the
-    /// eight-frame speaker queue (160 ms in all), so a socket write that waited
-    /// a little dropped audio; now the queue holds 60 ms frames like the
-    /// other modes.
+    /// The socket stalls for half a second while the peer talks on. Before,
+    /// the queue kept the oldest 480 ms and threw the newest away, and the
+    /// app got that old audio first. Now the oldest goes: what waits is the
+    /// newest audio and no more than the queue holds.
     #[tokio::test]
-    async fn pcm_downlink_fills_the_speaker_queue_with_60_ms_frames() {
+    async fn a_stalled_socket_leaves_the_newest_audio_in_the_speaker_queue() {
         let stats = Arc::new(CallAudioStats::default());
-        let (spk_tx, spk_rx) = async_channel::bounded(8);
+        let spk = FreshQueue::new(SPK_QUEUE, SPK_TARGET);
+        let spk_rx = spk.receiver();
         let (eng_tx, eng_rx) = async_channel::bounded(64);
-        let foreign = Arc::new(ForeignAudio::new(spk_tx.clone(), Arc::clone(&stats)));
-        // 480 ms of playout while nobody reads the speaker queue.
-        for i in 0..24 {
-            eng_tx.send(vec![i; 320]).await.unwrap();
+        let foreign = Arc::new(ForeignAudio::new(spk.clone(), Arc::clone(&stats)));
+        // 500 ms of playout while nobody reads the speaker queue.
+        for i in 0..25 {
+            eng_tx.send(vec![i; STEP_SAMPLES]).await.unwrap();
         }
         eng_tx.close();
-        run_pcm_downlink(eng_rx, spk_tx, foreign, Arc::clone(&stats)).await;
-        let frames: Vec<Frame> = std::iter::from_fn(|| spk_rx.try_recv().ok()).collect();
-        assert_eq!(frames.len(), 8);
-        assert!(frames.iter().all(|f| f.len() == FRAME_SAMPLES));
-        assert_eq!(frames[1][..320], [3; 320]);
+        run_pcm_downlink(eng_rx, spk, foreign, Arc::clone(&stats)).await;
+        let left: Vec<i16> = std::iter::from_fn(|| spk_rx.try_recv().ok())
+            .map(|f| f[0])
+            .collect();
+        assert!(left.len() <= SPK_QUEUE, "{left:?}");
+        assert_eq!(left.last(), Some(&24), "the newest frame is there");
+        assert!(left.windows(2).all(|w| w[1] == w[0] + 1), "{left:?}");
         let s = stats.summary();
-        assert_eq!((s.spk_queue_dropped, s.spk_ms), (0, 480));
+        assert_eq!(s.spk_queue_dropped as usize, 25 - left.len());
+        // Every frame was counted as decoded audio; the depth was measured.
+        assert_eq!(s.spk_ms, 500);
+        assert_eq!(s.spk_queue_max_ms, 200);
+        assert!(s.spk_queue_mean_ms > 40, "{s}");
+    }
+
+    #[test]
+    fn a_fresh_queue_drops_the_oldest_and_falls_back_to_the_target() {
+        let queue = FreshQueue::new(10, 2);
+        for i in 0..10 {
+            assert_eq!(queue.push(vec![i]), Ok(0));
+        }
+        assert_eq!(queue.len(), 10);
+        // Full: the eleventh frame goes in, and all but the newest two
+        // (this one included) go out, oldest first.
+        assert_eq!(queue.push(vec![10]), Ok(9));
+        let rx = queue.receiver();
+        assert_eq!(rx.try_recv().unwrap(), vec![9]);
+        assert_eq!(rx.try_recv().unwrap(), vec![10]);
+        assert!(queue.is_empty());
+        // A reader that keeps up never loses a frame.
+        for i in 0..100 {
+            assert_eq!(queue.push(vec![i]), Ok(0));
+            assert_eq!(rx.try_recv().unwrap(), vec![i]);
+        }
+        assert_eq!(queue.push(vec![1]), Ok(0));
+        assert_eq!(queue.clear(), 1);
+        queue.close();
+        assert_eq!(queue.push(vec![1]), Err(QueueClosed));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_fresh_queue_of_microphone_frames_keeps_the_newest_one() {
+        let queue = FreshQueue::new(MIC_QUEUE, MIC_TARGET);
+        let dropped: usize = (0..9).map(|i| queue.push(vec![i]).unwrap()).sum();
+        let rx = queue.receiver();
+        let left: Vec<Frame> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert_eq!(left.last(), Some(&vec![8]));
+        assert_eq!(dropped + left.len(), 9);
+        assert!(left.len() <= MIC_QUEUE);
+    }
+
+    #[tokio::test]
+    async fn the_pcm_uplink_drops_the_oldest_frames_when_the_engine_is_behind() {
+        let stats = Arc::new(CallAudioStats::default());
+        let (mic_tx, mic_rx) = async_channel::bounded(16);
+        let engine = FreshQueue::new(MIC_QUEUE, MIC_TARGET);
+        let engine_rx = engine.receiver();
+        for i in 0..6 {
+            mic_tx.try_send(vec![i; FRAME_SAMPLES]).unwrap();
+        }
+        mic_tx.close();
+        run_pcm_uplink(mic_rx, engine, Arc::clone(&stats)).await;
+        let left: Vec<i16> = std::iter::from_fn(|| engine_rx.try_recv().ok())
+            .map(|f| f[0])
+            .collect();
+        assert_eq!(left.last(), Some(&5));
+        let s = stats.summary();
+        assert_eq!(s.mic_to_engine, 6);
+        assert_eq!(s.mic_engine_dropped as usize, 6 - left.len());
+        assert!(s.mic_engine_dropped > 0);
     }
 
     #[test]
@@ -907,32 +1133,49 @@ mod tests {
         bump(&stats.mic_bad_size);
         bump(&stats.foreign_failed);
         bump(&stats.spk_to_app);
+        stats.spk_app_samples.fetch_add(320, Ordering::Relaxed);
         bump(&stats.sockets);
         stats.spk_level.add(&[1_000; 960]);
+        // 60 ms into an empty speaker queue: three slots, which found 0,
+        // 20 and 40 ms waiting.
+        let spk = FreshQueue::new(SPK_QUEUE, SPK_TARGET);
+        assert!(to_speaker(&spk, vec![0; FRAME_SAMPLES], &stats));
         let line = stats.summary().to_string();
         assert_eq!(
             line,
             "format=native-opus pt120 16k/60ms | mic: app=2 bad=1 lag=0 engine=0 engine_drop=0 \
              enc_fail=0 rms=none peak=0 voiced=0 | spk: engine=0 opus=0 mlow=0 dec_fail=0 \
-             foreign=0 foreign_ok=0 foreign_fail=1 gated=0 queue_drop=0 empty=0 pcm_ms=0 stale=0 app=1 \
-             rms=-30.3dBFS peak=1000 voiced=1 | sockets=1"
+             foreign=0 foreign_ok=0 foreign_fail=1 gated=0 queue_drop=0 queue_mean=20ms \
+             queue_max=40ms empty=0 pcm_ms=60 stale=0 app=1 app_ms=20 rms=-30.3dBFS peak=1000 \
+             voiced=1 | sockets=1"
         );
     }
 
     #[test]
     fn the_speaker_counts_decoded_time_and_empty_packets() {
         let stats = CallAudioStats::default();
-        let (tx, rx) = async_channel::bounded(1);
-        assert!(to_speaker(&tx, vec![0; 960], &stats));
-        assert!(to_speaker(&tx, Vec::new(), &stats));
-        // Full: dropped, and not counted as audio that reached the queue.
-        assert!(to_speaker(&tx, vec![0; 960], &stats));
+        let spk = FreshQueue::new(2, 1);
+        assert!(to_speaker(&spk, vec![0; STEP_SAMPLES], &stats));
+        assert!(to_speaker(&spk, Vec::new(), &stats));
+        assert!(to_speaker(&spk, vec![0; STEP_SAMPLES], &stats));
+        // Full: the oldest two go for this one, and it still counts as audio
+        // that reached the queue.
+        assert!(to_speaker(&spk, vec![7; STEP_SAMPLES], &stats));
         let summary = stats.summary();
         assert_eq!(
             (summary.spk_ms, summary.spk_empty, summary.spk_queue_dropped),
-            (60, 1, 1)
+            (60, 1, 2)
         );
-        drop(rx);
+        assert_eq!(spk.receiver().try_recv().unwrap(), vec![7; STEP_SAMPLES]);
+        // A frame that is not a multiple of 20 ms keeps every sample.
+        let odd = FreshQueue::new(8, 8);
+        assert!(to_speaker(&odd, vec![1; STEP_SAMPLES + 5], &stats));
+        let rx = odd.receiver();
+        assert_eq!(rx.try_recv().unwrap().len(), STEP_SAMPLES);
+        assert_eq!(rx.try_recv().unwrap().len(), 5);
+        // The call is over: the queue is closed.
+        spk.close();
+        assert!(!to_speaker(&spk, vec![0; STEP_SAMPLES], &stats));
     }
 
     #[test]

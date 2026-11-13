@@ -3,10 +3,11 @@
 //!
 //! The table owns one [`CallEntry`] per call: the whatsapp-rust offer (for an
 //! incoming call), a [`CallMachine`], the live handle once the call is
-//! answered or placed, and two bounded audio channel pairs. whatsapp-rust
-//! sees only the engine ends (`mic_rx`, `spk_tx`); the audio socket sees the
-//! other two (`mic_tx`, `spk_rx`). A full channel drops frames, so a lagging
-//! side never adds latency.
+//! answered or placed, and two short audio queues ([`FreshQueue`]): the
+//! microphone's and the speaker's. The engine side reads the one and fills
+//! the other; the audio socket does the reverse. A full queue drops its
+//! oldest frames, so a lagging side never adds latency and never keeps old
+//! audio in front of new.
 //!
 //! The audio socket reads and writes side by side ([`shuttle`]): a write
 //! stuck on the network never stops the microphone from being read. A socket
@@ -23,16 +24,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use async_channel::{Receiver, Sender, TrySendError};
+use async_channel::{Receiver, Sender};
 use axum::extract::ws::{Message, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt};
 use rovsti_wa_proto::api::routes as r;
-use rovsti_wa_proto::audio::{Rechunker, decode_frame, encode_frame};
+use rovsti_wa_proto::audio::{Rechunker, SpeakerFrames, decode_frame, encode_speaker_frame};
 use rovsti_wa_proto::{
     CallDirection, CallInput, CallMachine, CallPhase, CallStarted, CallSummary, CallUpdate,
     ErrorCode, GatewayEvent, PlaceCall, SetMuted,
@@ -52,18 +53,16 @@ use crate::now_ms;
 use crate::push::{PushKind, Pusher};
 use crate::store::InstanceId;
 use crate::wa::call_audio::{
-    self, CALL_AUDIO_MODE, CallAudioMode, CallAudioStats, ForeignAudio, Frame, InboundDecoder,
-    bump, mask_peer,
+    self, CALL_AUDIO_MODE, CallAudioMode, CallAudioStats, ForeignAudio, Frame, FreshQueue,
+    InboundDecoder, MIC_QUEUE, MIC_TARGET, SPK_QUEUE, SPK_TARGET, bump, mask_peer,
 };
 use crate::wa::convert::parse_jid;
 use crate::wa::lid::{self, LidMap};
 
 /// A ringing call that nobody answers ends as missed after this long.
 pub const RING_TIMEOUT: Duration = Duration::from_secs(60);
-/// Frames each audio channel holds: 60 ms frames, so about half a second.
-/// (The PCM engine's 20 ms playout is joined into 60 ms frames first, see
-/// [`call_audio::run_pcm_downlink`].)
-pub const AUDIO_QUEUE: usize = 8;
+/// Longest report line of the app that is logged (see [`clean_report`]).
+pub const APP_REPORT_MAX: usize = 200;
 /// The audio socket pings this often (the app answers with a pong).
 pub const SOCKET_PING_EVERY: Duration = Duration::from_secs(1);
 /// An audio socket that sends nothing (no frame, no pong) for this long is
@@ -160,10 +159,10 @@ pub trait LiveCall: Send + Sync + 'static {
     fn wait_ended(&self) -> BoxFuture<'_, ()>;
 }
 
-/// The engine's ends of a call's audio channels.
+/// The engine's ends of a call's audio queues.
 pub struct CallIo {
     pub mic_rx: Receiver<Frame>,
-    pub spk_tx: Sender<Frame>,
+    pub spk: FreshQueue,
     /// The call's audio counters (see [`call_audio`]).
     pub stats: Arc<CallAudioStats>,
 }
@@ -272,22 +271,32 @@ pub enum MicOutcome {
     Sent,
     /// Not exactly one frame long.
     Dropped,
-    /// The engine is behind; the frame was dropped.
+    /// The engine is behind; older frames were dropped for this one.
     Lagging,
     /// The call is over.
     Closed,
 }
 
-/// Hands a binary socket message to the engine.
-pub fn feed_mic(bytes: &[u8], mic: &Sender<Frame>) -> MicOutcome {
+/// Hands a binary socket message to the engine. The frame always goes in;
+/// when the queue was full its oldest frames went instead.
+pub fn feed_mic(bytes: &[u8], mic: &FreshQueue) -> MicOutcome {
     let Ok(samples) = decode_frame(bytes) else {
         return MicOutcome::Dropped;
     };
-    match mic.try_send(samples) {
-        Ok(()) => MicOutcome::Sent,
-        Err(TrySendError::Full(_)) => MicOutcome::Lagging,
-        Err(TrySendError::Closed(_)) => MicOutcome::Closed,
+    match mic.push(samples) {
+        Ok(0) => MicOutcome::Sent,
+        Ok(_) => MicOutcome::Lagging,
+        Err(_) => MicOutcome::Closed,
     }
+}
+
+/// A report line of the app (its queue depths, see `rovsti_wa_client`) made
+/// safe to log: printable ASCII only, at most [`APP_REPORT_MAX`] characters.
+pub fn clean_report(text: &str) -> String {
+    text.chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .take(APP_REPORT_MAX)
+        .collect()
 }
 
 /// One call. See the module docs.
@@ -302,10 +311,10 @@ struct CallEntry {
     creator: String,
     peer_name: Option<String>,
     is_video: bool,
-    mic_tx: Sender<Frame>,
-    mic_rx: Receiver<Frame>,
-    spk_tx: Sender<Frame>,
-    spk_rx: Receiver<Frame>,
+    /// Microphone frames (60 ms) from the socket to the engine side.
+    mic: FreshQueue,
+    /// Speaker slots (20 ms) from the engine side to the socket.
+    spk: FreshQueue,
     /// The audio socket that has the call's audio now, if any.
     audio_socket: Option<SocketSlot>,
     stats: Arc<CallAudioStats>,
@@ -323,8 +332,6 @@ struct CallEntry {
 
 impl CallEntry {
     fn new(direction: CallDirection, peer: String) -> Self {
-        let (mic_tx, mic_rx) = async_channel::bounded(AUDIO_QUEUE);
-        let (spk_tx, spk_rx) = async_channel::bounded(AUDIO_QUEUE);
         Self {
             incoming: None,
             machine: CallMachine::new(direction),
@@ -334,10 +341,8 @@ impl CallEntry {
             creator: String::new(),
             peer_name: None,
             is_video: false,
-            mic_tx,
-            mic_rx,
-            spk_tx,
-            spk_rx,
+            mic: FreshQueue::new(MIC_QUEUE, MIC_TARGET),
+            spk: FreshQueue::new(SPK_QUEUE, SPK_TARGET),
             audio_socket: None,
             stats: Arc::default(),
             media_up: false,
@@ -361,8 +366,8 @@ impl CallEntry {
 
     fn io(&self) -> CallIo {
         CallIo {
-            mic_rx: self.mic_rx.clone(),
-            spk_tx: self.spk_tx.clone(),
+            mic_rx: self.mic.receiver(),
+            spk: self.spk.clone(),
             stats: Arc::clone(&self.stats),
         }
     }
@@ -395,8 +400,10 @@ struct SocketSlot {
 /// The audio socket's side of a call. Dropping it frees the call's audio
 /// slot, unless a newer socket took it over.
 pub struct AudioPorts {
-    pub mic_tx: Sender<Frame>,
+    pub mic: FreshQueue,
     pub spk_rx: Receiver<Frame>,
+    /// The speaker frame length this socket's app asked for.
+    pub frames: SpeakerFrames,
     pub stats: Arc<CallAudioStats>,
     /// Notified when a newer socket of the same call took over.
     pub replaced: Arc<Notify>,
@@ -502,8 +509,8 @@ impl CallTable {
         if phase.is_ended() {
             entry.ended_at = Some(Instant::now());
             entry.ended_ms = Some(now_ms());
-            entry.mic_tx.close();
-            entry.spk_tx.close();
+            entry.mic.close();
+            entry.spk.close();
             if was_ringing && entry.pushed && entry.machine.direction() == CallDirection::In {
                 self.push_call_end(call_id, entry, &input);
             }
@@ -898,8 +905,14 @@ impl CallTable {
     /// Claims the call's audio slot. A socket that has it already is told to
     /// step down: the app opens a new socket when its old one got stuck, and
     /// the stuck one may not notice for a while. The slot is free again when
-    /// the returned ports are dropped.
-    pub fn attach_audio(self: &Arc<Self>, call_id: &str) -> Result<AudioPorts, CallError> {
+    /// the returned ports are dropped. `frames` is the speaker frame length
+    /// the app asked for (an app from before 20 ms frames asks for nothing
+    /// and gets whole 60 ms frames).
+    pub fn attach_audio(
+        self: &Arc<Self>,
+        call_id: &str,
+        frames: SpeakerFrames,
+    ) -> Result<AudioPorts, CallError> {
         let mut calls = self.lock();
         let entry = calls.get_mut(call_id).ok_or(CallError::NotFound)?;
         if entry.machine.phase().is_ended() {
@@ -918,13 +931,16 @@ impl CallTable {
         });
         bump(&entry.stats.sockets);
         // Frames queued while nobody listened are stale.
-        while entry.spk_rx.try_recv().is_ok() {
-            bump(&entry.stats.spk_stale);
-        }
-        while entry.mic_rx.try_recv().is_ok() {}
+        let stale = entry.spk.clear();
+        entry
+            .stats
+            .spk_stale
+            .fetch_add(stale as u64, Ordering::Relaxed);
+        entry.mic.clear();
         Ok(AudioPorts {
-            mic_tx: entry.mic_tx.clone(),
-            spk_rx: entry.spk_rx.clone(),
+            mic: entry.mic.clone(),
+            spk_rx: entry.spk.receiver(),
+            frames,
             stats: Arc::clone(&entry.stats),
             replaced,
             label,
@@ -981,12 +997,18 @@ where
         stats.spk_to_app.load(Ordering::Relaxed),
         stats.mic_from_app.load(Ordering::Relaxed),
     );
-    log::info!("{}: attached", ports.label);
+    log::info!(
+        "{}: attached, {} ms speaker frames",
+        ports.label,
+        rovsti_wa_proto::audio::samples_ms(ports.frames.samples())
+    );
     let (mut sink, mut stream) = socket.split();
     let writer = async {
-        // The decoder may hand over frames of any length; the apps take whole
-        // 60 ms frames.
-        let mut speaker = Rechunker::new();
+        // The queue holds 20 ms slots (the decoder may hand over other
+        // lengths too). An app that asked for 20 ms frames gets them as they
+        // are; an older app takes only whole 60 ms frames, so for it three
+        // are joined.
+        let mut speaker = Rechunker::with_frame(ports.frames.samples());
         let mut ping = tokio::time::interval(SOCKET_PING_EVERY);
         ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         ping.tick().await;
@@ -996,12 +1018,15 @@ where
                     // The call ended and closed the channel.
                     let Ok(samples) = frame else { return SocketEnd::CallEnded };
                     for whole in speaker.push(&samples) {
-                        match encode_frame(&whole) {
+                        match encode_speaker_frame(&whole) {
                             Ok(bytes) => {
                                 if sink.send(Message::Binary(bytes.into())).await.is_err() {
                                     return SocketEnd::Broken;
                                 }
                                 bump(&stats.spk_to_app);
+                                stats
+                                    .spk_app_samples
+                                    .fetch_add(whole.len() as u64, Ordering::Relaxed);
                                 stats.spk_level.add(&whole);
                             }
                             Err(e) => log::warn!("call audio: dropping speaker frame: {e}"),
@@ -1025,7 +1050,7 @@ where
                 Ok(None) => return SocketEnd::AppClosed,
             };
             match message {
-                Message::Binary(bytes) => match feed_mic(&bytes, &ports.mic_tx) {
+                Message::Binary(bytes) => match feed_mic(&bytes, &ports.mic) {
                     MicOutcome::Sent => bump(&stats.mic_from_app),
                     MicOutcome::Dropped => bump(&stats.mic_bad_size),
                     MicOutcome::Lagging => {
@@ -1035,6 +1060,10 @@ where
                     MicOutcome::Closed => return SocketEnd::CallEnded,
                 },
                 Message::Close(_) => return SocketEnd::AppClosed,
+                // The app's own measurements (its queue depths), for the log.
+                Message::Text(text) => {
+                    log::info!("{}: app: {}", ports.label, clean_report(&text));
+                }
                 // Pings are answered by the socket itself; a pong only shows
                 // the connection moves.
                 _ => {}
@@ -1160,10 +1189,12 @@ async fn audio(
     State(state): State<AppState>,
     auth: Authed,
     Path(call_id): Path<String>,
+    RawQuery(query): RawQuery,
     ws: WebSocketUpgrade,
 ) -> ApiResult<Response> {
     check_call_id(&call_id)?;
-    let ports = state.calls(&auth.instance).attach_audio(&call_id)?;
+    let frames = SpeakerFrames::from_query(query.as_deref());
+    let ports = state.calls(&auth.instance).attach_audio(&call_id, frames)?;
     Ok(ws.on_upgrade(move |socket| async move {
         shuttle(socket, ports, CLIENT_SILENCE).await;
     }))
@@ -1213,31 +1244,26 @@ struct MediaPlan {
 
 impl MediaPlan {
     fn new(mode: CallAudioMode, io: CallIo) -> Result<Self, StartError> {
-        let CallIo {
-            mic_rx,
-            spk_tx,
-            stats,
-        } = io;
+        let CallIo { mic_rx, spk, stats } = io;
         stats.set_format(mode.label());
         let Some(format) = mode.encoded_format() else {
-            let (eng_mic_tx, eng_mic_rx) = async_channel::bounded(AUDIO_QUEUE);
-            // The engine plays out 20 ms frames: three per 60 ms slot.
-            let (eng_spk_tx, eng_spk_rx) = async_channel::bounded(AUDIO_QUEUE * 3);
-            let foreign = Arc::new(ForeignAudio::new(spk_tx.clone(), Arc::clone(&stats)));
+            let eng_mic = FreshQueue::new(MIC_QUEUE, MIC_TARGET);
+            let (eng_spk_tx, eng_spk_rx) = async_channel::bounded(call_audio::ENGINE_PLAYOUT_QUEUE);
+            let foreign = Arc::new(ForeignAudio::new(spk.clone(), Arc::clone(&stats)));
             return Ok(Self {
                 ends: MediaEnds::Pcm {
-                    mic_rx: eng_mic_rx,
+                    mic_rx: eng_mic.receiver(),
                     spk_tx: eng_spk_tx,
                 },
                 tasks: vec![
                     Box::pin(call_audio::run_pcm_uplink(
                         mic_rx,
-                        eng_mic_tx,
+                        eng_mic,
                         Arc::clone(&stats),
                     )),
                     Box::pin(call_audio::run_pcm_downlink(
                         eng_spk_rx,
-                        spk_tx,
+                        spk,
                         Arc::clone(&foreign),
                         Arc::clone(&stats),
                     )),
@@ -1271,7 +1297,7 @@ impl MediaPlan {
                 )),
                 Box::pin(call_audio::run_downlink(
                     inbound_rx,
-                    spk_tx,
+                    spk,
                     InboundDecoder::new(),
                     Arc::clone(&stats),
                 )),
@@ -1622,7 +1648,7 @@ pub mod fake {
             while let Ok(frame) = io.mic_rx.recv().await {
                 let step = if chunk == 0 { frame.len() } else { chunk };
                 for part in frame.chunks(step) {
-                    if io.spk_tx.try_send(part.to_vec()).is_err() && io.spk_tx.is_closed() {
+                    if io.spk.push(part.to_vec()).is_err() {
                         return;
                     }
                 }
@@ -1761,7 +1787,7 @@ pub mod fake {
 mod tests {
     use super::fake::{FakeCalls, offer};
     use super::*;
-    use rovsti_wa_proto::audio::FRAME_SAMPLES;
+    use rovsti_wa_proto::audio::{FRAME_SAMPLES, encode_frame};
     use rovsti_wa_proto::{EndReason, ErrorCode, GatewayEvent};
 
     const FROM: &str = "905321234567@s.whatsapp.net";
@@ -2108,14 +2134,14 @@ mod tests {
     async fn a_second_audio_socket_takes_over_from_the_first() {
         let rig = rig();
         ring(&rig, "C1");
-        let first = rig.table.attach_audio("C1").unwrap();
-        let second = rig.table.attach_audio("C1").unwrap();
+        let first = rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap();
+        let second = rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap();
         // The first socket is told to step down.
         tokio::time::timeout(Duration::from_secs(1), first.replaced.notified())
             .await
             .expect("the first socket was not told");
         assert!(matches!(
-            rig.table.attach_audio("nope"),
+            rig.table.attach_audio("nope", SpeakerFrames::Whole),
             Err(CallError::NotFound)
         ));
         // The old socket leaving does not free the slot of the new one.
@@ -2123,18 +2149,18 @@ mod tests {
         assert!(rig.table.lock().get("C1").unwrap().audio_socket.is_some());
         drop(second);
         assert!(rig.table.lock().get("C1").unwrap().audio_socket.is_none());
-        let again = rig.table.attach_audio("C1").unwrap();
+        let again = rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap();
         assert_eq!(again.stats.summary().sockets, 3);
 
         // The end of the call closes both directions.
         rig.table.on_missed("C1");
         assert!(again.spk_rx.recv().await.is_err());
         assert_eq!(
-            feed_mic(&vec![0u8; FRAME_SAMPLES * 2], &again.mic_tx),
+            feed_mic(&vec![0u8; FRAME_SAMPLES * 2], &again.mic),
             MicOutcome::Closed
         );
         assert!(matches!(
-            rig.table.attach_audio("C1"),
+            rig.table.attach_audio("C1", SpeakerFrames::Whole),
             Err(CallError::Conflict(_))
         ));
     }
@@ -2224,17 +2250,17 @@ mod tests {
     async fn stuck_speaker_writes_do_not_stop_the_microphone() {
         let rig = rig();
         ring(&rig, "C1");
-        let (mic_rx, spk_tx) = {
+        let (mic_rx, spk) = {
             let calls = rig.table.lock();
             let entry = calls.get("C1").unwrap();
-            (entry.mic_rx.clone(), entry.spk_tx.clone())
+            (entry.mic.receiver(), entry.spk.clone())
         };
-        let ports = rig.table.attach_audio("C1").unwrap();
+        let ports = rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap();
         // Nobody reads the app side: after one frame every write waits.
         let (socket, (mut app_tx, _app_rx)) = fake_socket(0);
         let task = tokio::spawn(shuttle(socket, ports, Duration::from_secs(5)));
         for i in 0..4 {
-            spk_tx.send(vec![i; FRAME_SAMPLES]).await.unwrap();
+            spk.push(vec![i; FRAME_SAMPLES]).unwrap();
         }
         for i in 0..6 {
             app_tx.send(mic_message(10 + i)).await.unwrap();
@@ -2256,7 +2282,7 @@ mod tests {
     async fn a_silent_app_socket_is_closed_and_frees_the_call() {
         let rig = rig();
         ring(&rig, "C1");
-        let ports = rig.table.attach_audio("C1").unwrap();
+        let ports = rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap();
         let (socket, (_app_tx, _app_rx)) = fake_socket(64);
         let ended = shuttle(socket, ports, Duration::from_millis(100)).await;
         assert_eq!(ended, SocketEnd::AppSilent);
@@ -2267,10 +2293,10 @@ mod tests {
     async fn a_replaced_socket_steps_down_and_the_call_end_closes_the_new_one() {
         let rig = rig();
         ring(&rig, "C1");
-        let first = rig.table.attach_audio("C1").unwrap();
+        let first = rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap();
         let (socket, (_keep_tx, mut first_rx)) = fake_socket(64);
         let first_task = tokio::spawn(shuttle(socket, first, Duration::from_secs(5)));
-        let second = rig.table.attach_audio("C1").unwrap();
+        let second = rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap();
         assert_eq!(first_task.await.unwrap(), SocketEnd::Replaced);
         assert!(matches!(first_rx.next().await, Some(Message::Close(_))));
 
@@ -2316,10 +2342,10 @@ mod tests {
         let ports = {
             let calls = rig.table.lock();
             let entry = calls.get("C1").unwrap();
-            entry.spk_tx.try_send(vec![1; FRAME_SAMPLES]).unwrap();
-            entry.mic_tx.try_send(vec![2; FRAME_SAMPLES]).unwrap();
+            entry.spk.push(vec![1; FRAME_SAMPLES]).unwrap();
+            entry.mic.push(vec![2; FRAME_SAMPLES]).unwrap();
             drop(calls);
-            rig.table.attach_audio("C1").unwrap()
+            rig.table.attach_audio("C1", SpeakerFrames::Whole).unwrap()
         };
         assert!(ports.spk_rx.try_recv().is_err());
         // The diagnostics line says how much was thrown away.
@@ -2327,20 +2353,81 @@ mod tests {
     }
 
     #[test]
-    fn feed_mic_drops_wrong_sizes_and_reports_lag() {
-        let (tx, rx) = async_channel::bounded(2);
-        let frame = encode_frame(&vec![7i16; FRAME_SAMPLES]).unwrap();
-        assert_eq!(feed_mic(&frame, &tx), MicOutcome::Sent);
+    fn feed_mic_drops_wrong_sizes_and_keeps_the_newest_frame_when_lagging() {
+        let mic = FreshQueue::new(2, 1);
+        let rx = mic.receiver();
+        let frame = |v: i16| encode_frame(&vec![v; FRAME_SAMPLES]).unwrap();
+        assert_eq!(feed_mic(&frame(7), &mic), MicOutcome::Sent);
         assert_eq!(rx.try_recv().unwrap(), vec![7i16; FRAME_SAMPLES]);
-        for bad in [0usize, 1, 1919, 1921, 3840] {
-            assert_eq!(feed_mic(&vec![0; bad], &tx), MicOutcome::Dropped, "{bad}");
+        // 20 ms frames are for the speaker only: the microphone is 60 ms.
+        for bad in [0usize, 1, 640, 1919, 1921, 3840] {
+            assert_eq!(feed_mic(&vec![0; bad], &mic), MicOutcome::Dropped, "{bad}");
         }
         assert!(rx.is_empty());
-        assert_eq!(feed_mic(&frame, &tx), MicOutcome::Sent);
-        assert_eq!(feed_mic(&frame, &tx), MicOutcome::Sent);
-        assert_eq!(feed_mic(&frame, &tx), MicOutcome::Lagging);
-        tx.close();
-        assert_eq!(feed_mic(&frame, &tx), MicOutcome::Closed);
+        assert_eq!(feed_mic(&frame(1), &mic), MicOutcome::Sent);
+        assert_eq!(feed_mic(&frame(2), &mic), MicOutcome::Sent);
+        // Full: the new frame goes in and the old ones go out.
+        assert_eq!(feed_mic(&frame(3), &mic), MicOutcome::Lagging);
+        assert_eq!(rx.try_recv().unwrap()[0], 3);
+        assert!(rx.is_empty());
+        mic.close();
+        assert_eq!(feed_mic(&frame(4), &mic), MicOutcome::Closed);
+    }
+
+    /// What `shuttle` writes to an app that asked for `frames`, for the
+    /// 20 ms slots `slots` in the speaker queue.
+    async fn sent_to_app(frames: SpeakerFrames, slots: &[Frame]) -> Vec<Vec<u8>> {
+        let rig = rig();
+        ring(&rig, "C1");
+        let spk = rig.table.lock().get("C1").unwrap().spk.clone();
+        let ports = rig.table.attach_audio("C1", frames).unwrap();
+        let (socket, (_app_tx, mut app_rx)) = fake_socket(64);
+        let task = tokio::spawn(shuttle(socket, ports, Duration::from_secs(5)));
+        for slot in slots {
+            spk.push(slot.clone()).unwrap();
+            tokio::task::yield_now().await;
+        }
+        rig.table.on_missed("C1");
+        assert_eq!(task.await.unwrap(), SocketEnd::CallEnded);
+        let mut sent = Vec::new();
+        while let Some(message) = app_rx.next().await {
+            if let Message::Binary(bytes) = message {
+                sent.push(bytes.to_vec());
+            }
+        }
+        sent
+    }
+
+    /// Old and new apps on this gateway. The speaker queue holds 20 ms
+    /// slots. An app that asked for 20 ms frames gets each as its own 640
+    /// byte message; an app from before (it asks for nothing) gets the same
+    /// samples joined into the whole 1 920 byte frames it has always taken.
+    #[tokio::test]
+    async fn the_socket_sends_20_ms_frames_only_to_an_app_that_asked_for_them() {
+        let slots: Vec<Frame> = (0..6).map(|i| vec![i; 320]).collect();
+        let all: Vec<u8> = slots
+            .concat()
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+
+        let new = sent_to_app(SpeakerFrames::Step, &slots).await;
+        assert_eq!(new.iter().map(Vec::len).collect::<Vec<_>>(), vec![640; 6]);
+        assert_eq!(new.concat(), all);
+
+        let old = sent_to_app(SpeakerFrames::Whole, &slots).await;
+        assert_eq!(old.iter().map(Vec::len).collect::<Vec<_>>(), vec![1920; 2]);
+        assert_eq!(old.concat(), all);
+        // What the old app's decoder (exactly 1 920 bytes) takes.
+        assert!(old.iter().all(|m| decode_frame(m).is_ok()));
+    }
+
+    #[test]
+    fn the_apps_report_is_made_safe_for_the_log() {
+        let line = "spk_q mean=20ms max=40ms cut=0ms frames=500 | mic_q mean=0ms max=0ms cut=0ms frames=166";
+        assert_eq!(clean_report(line), line);
+        assert_eq!(clean_report("a\nb\u{1b}[31m \u{e9}x"), "ab[31m x");
+        assert_eq!(clean_report(&"x".repeat(5_000)).len(), APP_REPORT_MAX);
     }
 
     #[test]

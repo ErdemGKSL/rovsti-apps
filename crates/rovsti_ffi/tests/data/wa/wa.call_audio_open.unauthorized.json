@@ -1,7 +1,7 @@
 {
  "expect": {
   "method": "GET",
-  "path": "/v1/calls/call1/audio"
+  "path": "/v1/calls/call1/audio?spk_ms=20"
  },
  "status": 401,
  "body": {

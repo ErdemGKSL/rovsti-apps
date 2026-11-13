@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used)]
+// The handshake callback returns tungstenite's own (large) error response.
+#![allow(clippy::result_large_err)]
 
 //! Call audio against an in-process fake gateway: a plain WebSocket server on
 //! loopback that pushes a 1 kHz tone to the app and checks the tone the app
@@ -9,8 +11,11 @@ use std::thread;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use rovsti_wa_client::call_audio;
-use rovsti_wa_proto::audio::{FRAME_BYTES, FRAME_SAMPLES, SAMPLE_RATE, decode_frame, encode_frame};
+use rovsti_wa_client::{RecvError, call_audio, call_audio_with};
+use rovsti_wa_proto::audio::{
+    FRAME_BYTES, FRAME_SAMPLES, SAMPLE_RATE, STEP_SAMPLES, SpeakerFrames, decode_frame,
+    encode_frame, encode_speaker_frame,
+};
 use rovsti_wa_proto::{ConnectKey, GatewayUrl};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
@@ -128,36 +133,31 @@ fn fake_gateway() -> (GatewayUrl, thread::JoinHandle<Seen>) {
 fn a_1_khz_tone_crosses_the_audio_socket_both_ways() {
     let (url, server) = fake_gateway();
     let key = ConnectKey::from_bytes(&[3; 32]);
-    let mut audio = call_audio(url, key.clone(), "CALL1").unwrap();
+    let audio = call_audio(url, key.clone(), "CALL1").unwrap();
+
+    // Gateway to app: six 960-sample frames of 1 kHz arrive on the speaker.
+    // They are taken as they come, like the player does: the queue keeps
+    // only the newest audio when nobody reads it.
+    let speaker = audio.speaker.clone();
+    let listening = thread::spawn(move || {
+        (0..FRAMES)
+            .map(|i| {
+                speaker
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap_or_else(|e| panic!("speaker frame {i}: {e:?}"))
+            })
+            .collect::<Vec<_>>()
+    });
 
     // App to gateway: the microphone side sends a 1 kHz tone, one frame at a time.
     let sent: Vec<Vec<i16>> = (0..FRAMES)
         .map(|i| tone(TONE_HZ, i * FRAME_SAMPLES))
         .collect();
     for frame in &sent {
-        futures::executor::block_on(audio.mic.send(frame.clone())).unwrap();
+        audio.mic.try_send(frame.clone()).unwrap();
         thread::sleep(Duration::from_millis(15));
     }
-
-    // Gateway to app: six 960-sample frames of 1 kHz arrive on the speaker.
-    let mut heard = Vec::new();
-    for _ in 0..FRAMES {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        let next = loop {
-            match audio.speaker.try_recv() {
-                Ok(frame) => break frame,
-                Err(futures::channel::mpsc::TryRecvError::Closed) => panic!("audio ended early"),
-                Err(_) => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "timed out waiting for a speaker frame"
-                    );
-                    thread::sleep(Duration::from_millis(5));
-                }
-            }
-        };
-        heard.push(next);
-    }
+    let heard = listening.join().unwrap();
     drop(audio);
 
     for (i, frame) in heard.iter().enumerate() {
@@ -220,6 +220,7 @@ fn a_stuck_socket_is_reopened_and_the_audio_resumes() {
             for i in 0..3 {
                 let bytes = encode_frame(&tone(TONE_HZ, i * FRAME_SAMPLES)).unwrap();
                 socket.send(Message::Binary(bytes.into())).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(40)).await;
             }
             // Wait for the client to leave, then let go of both sockets.
             while let Some(Ok(message)) = socket.next().await {
@@ -231,14 +232,14 @@ fn a_stuck_socket_is_reopened_and_the_audio_resumes() {
         });
     });
     let url = GatewayUrl::parse(&format!("http://127.0.0.1:{port}")).unwrap();
-    let mut audio = call_audio(url, ConnectKey::from_bytes(&[3; 32]), "CALL1").unwrap();
+    let audio = call_audio(url, ConnectKey::from_bytes(&[3; 32]), "CALL1").unwrap();
     let started = std::time::Instant::now();
     let mut heard = Vec::new();
     let deadline = started + rovsti_wa_client::audio::STALL_LIMIT + Duration::from_secs(10);
     while heard.len() < 3 {
         match audio.speaker.try_recv() {
             Ok(frame) => heard.push(frame),
-            Err(futures::channel::mpsc::TryRecvError::Closed) => panic!("audio ended"),
+            Err(RecvError::Closed) => panic!("audio ended"),
             Err(_) => {
                 assert!(
                     std::time::Instant::now() < deadline,
@@ -252,4 +253,69 @@ fn a_stuck_socket_is_reopened_and_the_audio_resumes() {
     assert_eq!(heard[0], tone(TONE_HZ, 0));
     drop(audio);
     server.join().unwrap();
+}
+
+/// A client that asks for 20 ms frames says so in the query, and plays what
+/// comes: 20 ms frames from a gateway that knows them, and the whole 60 ms
+/// frames an older gateway keeps sending. The blocking read hands each frame
+/// over without polling.
+#[test]
+fn a_client_that_asks_for_20_ms_frames_plays_20_ms_and_whole_frames() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = runtime.block_on(TcpListener::bind("127.0.0.1:0")).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let whole = tone(TONE_HZ, 0);
+    let sent: Vec<Vec<i16>> = vec![
+        whole[..STEP_SAMPLES].to_vec(),
+        whole[STEP_SAMPLES..2 * STEP_SAMPLES].to_vec(),
+        whole.clone(),
+    ];
+    let frames = sent.clone();
+    let server = thread::spawn(move || {
+        runtime.block_on(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut query = None;
+            let mut socket = tokio_tungstenite::accept_hdr_async(
+                stream,
+                |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+                    query = request.uri().query().map(str::to_owned);
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            for frame in &frames {
+                let bytes = encode_speaker_frame(frame).unwrap();
+                socket.send(Message::Binary(bytes.into())).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(30)).await;
+            }
+            while let Some(Ok(message)) = socket.next().await {
+                if message.is_close() {
+                    break;
+                }
+            }
+            query
+        })
+    });
+    let url = GatewayUrl::parse(&format!("http://127.0.0.1:{port}")).unwrap();
+    let key = ConnectKey::from_bytes(&[3; 32]);
+    let audio = call_audio_with(url, key, "CALL1", SpeakerFrames::Step).unwrap();
+    let heard: Vec<Vec<i16>> = (0..sent.len())
+        .map(|i| {
+            audio
+                .speaker
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|e| panic!("speaker frame {i}: {e:?}"))
+        })
+        .collect();
+    assert_eq!(heard, sent);
+    assert_eq!(
+        audio.speaker.recv_timeout(Duration::from_millis(20)),
+        Err(RecvError::Empty)
+    );
+    drop(audio);
+    assert_eq!(server.join().unwrap().as_deref(), Some("spk_ms=20"));
 }

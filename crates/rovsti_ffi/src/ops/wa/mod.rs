@@ -42,7 +42,7 @@ mod pure;
 mod rest;
 mod settings;
 
-pub use live::{audio_pull, audio_push};
+pub use live::{PULL_WAIT, audio_pull, audio_pull_within, audio_push};
 
 use super::registry::{Case, OpSpec};
 use crate::envelope::{ErrorKind, FfiError};

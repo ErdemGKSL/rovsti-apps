@@ -9,7 +9,7 @@ mod support;
 use rovsti_ffi::envelope::{Answer, decode};
 use rovsti_ffi::events::{self, EventSink};
 use rovsti_ffi::handles;
-use rovsti_ffi::ops::{audio_pull, audio_push, call};
+use rovsti_ffi::ops::{PULL_WAIT, audio_pull, audio_pull_within, audio_push, call};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -154,6 +154,31 @@ fn frame(seed: i16) -> Vec<u8> {
         .collect()
 }
 
+/// Pushes `sent` one frame at a time and pulls what comes back before the next one, like the two audio threads
+/// do (the speaker queue keeps only the newest audio when nobody takes it). Answers the size of every pull and
+/// all the bytes.
+fn loop_frames(audio: i64, sent: &[Vec<u8>]) -> (Vec<i32>, Vec<u8>) {
+    let (mut sizes, mut bytes) = (Vec::new(), Vec::new());
+    let mut out = vec![0u8; 1920];
+    for (n, pcm) in sent.iter().enumerate() {
+        audio_push(audio, pcm);
+        wait_until("the frame to come back", || {
+            match audio_pull(audio, &mut out) {
+                0 => {}
+                pulled if pulled > 0 => {
+                    sizes.push(pulled);
+                    bytes.extend_from_slice(&out[..pulled as usize]);
+                }
+                other => panic!("pull answered {other}"),
+            }
+            bytes.len() >= (n + 1) * 1920
+        });
+    }
+    (sizes, bytes)
+}
+
+/// A gateway from before 20 ms frames: it ignores the `spk_ms` ask and sends whole frames, which the same pull
+/// hands out as 1 920 bytes.
 #[test]
 fn audio_frames_loop_through_the_socket_unchanged() {
     let stub = start(Some(route(json!({"ws": true}))));
@@ -164,31 +189,19 @@ fn audio_frames_loop_through_the_socket_unchanged() {
     )["handle"]
         .as_i64()
         .unwrap();
-    assert_eq!(stub.seen()[0].path, "/v1/calls/call1/audio");
+    // The app asks for 20 ms speaker frames.
+    assert_eq!(stub.seen()[0].path, "/v1/calls/call1/audio?spk_ms=20");
 
     // Wrong sizes are dropped: nothing comes back for them.
     audio_push(audio, &[1, 2, 3]);
     audio_push(audio, &vec![0; 1921]);
+    audio_push(audio, &vec![0; 640]);
     let sent: Vec<Vec<u8>> = (0..6).map(|n| frame(n + 1)).collect();
-    for pcm in &sent {
-        audio_push(audio, pcm);
-        // The queue holds half a second; pace the pushes like the 60 ms microphone does.
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let mut received: Vec<Vec<u8>> = Vec::new();
-    let mut out = vec![0u8; 1920];
-    wait_until("six frames", || {
-        loop {
-            match audio_pull(audio, &mut out) {
-                1920 => received.push(out.clone()),
-                0 => break,
-                other => panic!("pull answered {other}"),
-            }
-        }
-        received.len() >= sent.len()
-    });
+    let (sizes, received) = loop_frames(audio, &sent);
+    assert_eq!(sizes, vec![1920; 6]);
     assert_eq!(
-        received, sent,
+        received,
+        sent.concat(),
         "N frames in, N identical frames out, in order"
     );
 
@@ -196,9 +209,62 @@ fn audio_frames_loop_through_the_socket_unchanged() {
     assert_eq!(audio_pull(audio, &mut [0u8; 100]), 0);
 
     // Released: the handle ends.
+    let mut out = vec![0u8; 1920];
     assert!(handles::global().release(audio));
     assert_eq!(audio_pull(audio, &mut out), -1);
     audio_push(audio, &sent[0]);
+    handles::global().release(gateway);
+}
+
+/// A gateway that sends 20 ms frames: every pull answers 640 bytes, and the samples are the same.
+#[test]
+fn speaker_frames_of_20_ms_are_pulled_one_at_a_time() {
+    let stub = start(Some(route(json!({"ws": true, "ws_echo_bytes": 640}))));
+    let gateway = open(&stub.url);
+    let audio = ok(
+        "wa.call_audio_open",
+        json!({"handle": gateway, "call_id": "call1"}),
+    )["handle"]
+        .as_i64()
+        .unwrap();
+    let sent: Vec<Vec<u8>> = (0..6).map(|n| frame(n + 1)).collect();
+    let (sizes, received) = loop_frames(audio, &sent);
+    assert_eq!(sizes, vec![640; 18]);
+    assert_eq!(received, sent.concat());
+    handles::global().release(audio);
+    handles::global().release(gateway);
+}
+
+/// The pull waits for a frame instead of answering 0 at once, so the player needs no polling sleep; with
+/// nothing coming it gives up after the wait.
+#[test]
+fn the_pull_waits_for_a_frame() {
+    let stub = start(Some(route(json!({"ws": true}))));
+    let gateway = open(&stub.url);
+    let audio = ok(
+        "wa.call_audio_open",
+        json!({"handle": gateway, "call_id": "call1"}),
+    )["handle"]
+        .as_i64()
+        .unwrap();
+    let mut out = vec![0u8; 1920];
+    let started = Instant::now();
+    assert_eq!(audio_pull(audio, &mut out), 0);
+    assert!(started.elapsed() >= PULL_WAIT);
+    assert_eq!(audio_pull_within(audio, &mut out, Duration::ZERO), 0);
+
+    let pusher = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        audio_push(audio, &frame(3));
+    });
+    // One call returns the echoed frame although it was not there yet when the call began.
+    assert_eq!(
+        audio_pull_within(audio, &mut out, Duration::from_secs(10)),
+        1920
+    );
+    assert_eq!(out, frame(3));
+    pusher.join().unwrap();
+    handles::global().release(audio);
     handles::global().release(gateway);
 }
 

@@ -45,6 +45,9 @@ pub struct Route {
     pub ws: bool,
     /// Text frames a WebSocket route sends right after the upgrade (`ws_send`).
     pub ws_send: Vec<String>,
+    /// Echo binary frames in pieces of this many bytes (`ws_echo_bytes`), like a gateway that sends 20 ms speaker
+    /// frames. `None`: echo them whole, like a gateway from before that.
+    pub ws_echo_bytes: Option<usize>,
     pub drop: bool,
     pub authed: bool,
     /// `None`: nothing to check. `Some(None)`: no request expected.
@@ -105,6 +108,10 @@ impl Route {
                 .and_then(Value::as_array)
                 .map(|a| a.iter().map(|t| t.to_string()).collect())
                 .unwrap_or_default(),
+            ws_echo_bytes: v
+                .get("ws_echo_bytes")
+                .and_then(Value::as_u64)
+                .map(|n| (n as usize).max(1)),
             drop: v.get("drop").and_then(Value::as_bool).unwrap_or(false),
             authed: v.get("authed").and_then(Value::as_bool).unwrap_or(true),
             expect,
@@ -289,10 +296,18 @@ fn serve(mut stream: TcpStream, seen: &Mutex<Vec<Seen>>, route: Option<&Route>, 
             }
         }
         // Echo binary frames (the audio loopback) and hold the socket until the client or the test ends.
+        let piece = route.and_then(|r| r.ws_echo_bytes);
         while !stop.load(Ordering::Relaxed) {
             match socket.read() {
                 Ok(tungstenite::Message::Binary(bytes)) => {
-                    if socket.send(tungstenite::Message::Binary(bytes)).is_err() {
+                    let sent = bytes
+                        .chunks(piece.unwrap_or(bytes.len().max(1)))
+                        .all(|part| {
+                            socket
+                                .send(tungstenite::Message::Binary(part.to_vec().into()))
+                                .is_ok()
+                        });
+                    if !sent {
                         break;
                     }
                 }

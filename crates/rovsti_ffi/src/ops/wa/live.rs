@@ -5,8 +5,12 @@
 //! socket. Releasing the stream handle stops the socket; the forwarding thread then sees the channel close and
 //! ends. Kotlin's `WaEvents` turns a sink overflow into a synthetic `resync`.
 //!
-//! `wa.call_audio_open` opens the audio socket of a call. The `audioPush` / `audioPull` exports talk to it with
-//! whole frames of 1 920 bytes (960 `i16`, 60 ms, AD-WA5); anything else is dropped with a debug log.
+//! `wa.call_audio_open` opens the audio socket of a call and asks the gateway for 20 ms speaker frames. `audioPush`
+//! takes whole microphone frames of 1 920 bytes (960 `i16`, 60 ms, AD-WA5); anything else is dropped with a debug
+//! log. `audioPull` hands out the peer's voice one frame at a time: 640 bytes (20 ms) from a gateway that knows
+//! 20 ms frames, 1 920 bytes from an older one (1 280 is valid too). It waits up to [`PULL_WAIT`] for a frame, so the
+//! player thread gets it the moment it arrives instead of polling. Both queues drop their oldest audio, never the
+//! newest, and do not let a delay stand (`rovsti_wa_client::queue`).
 
 use super::fixture::{case, named};
 use super::{Call, Empty, HandleAns, ctx, map_error, not_found};
@@ -14,13 +18,19 @@ use crate::envelope::FfiError;
 use crate::ops::registry::{Case, OpSpec};
 use crate::{events, handles};
 use futures::StreamExt;
-use futures::channel::mpsc::TryRecvError;
-use rovsti_wa_client::{CallAudio, ClientEvent, EventStream, call_audio, subscribe};
+use rovsti_wa_client::{
+    CallAudio, ClientEvent, EventStream, RecvError, call_audio_with, subscribe,
+};
 use rovsti_wa_proto::EventEnvelope;
-use rovsti_wa_proto::audio::{FRAME_BYTES, decode_frame, encode_frame};
+use rovsti_wa_proto::audio::{FRAME_BYTES, SpeakerFrames, decode_frame, encode_speaker_frame};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::thread;
+use std::time::Duration;
+
+/// How long `audioPull` waits for a frame before it answers 0. Short, so the player thread still notices that it
+/// was stopped; a frame that arrives meanwhile is handed over at once.
+pub const PULL_WAIT: Duration = Duration::from_millis(20);
 
 pub(super) const OPS: &[OpSpec] = &[
     wa_op!(
@@ -149,13 +159,16 @@ fn call_audio_open(req: Call<CallRef>) -> Result<HandleAns, FfiError> {
         .key
         .clone()
         .ok_or_else(|| map_error(rovsti_wa_client::ClientError::Unauthorized))?;
-    let audio = call_audio(g.url.clone(), key, &req.body.call_id).map_err(map_error)?;
+    // Kotlin's player writes whatever length comes, so 20 ms frames are asked for.
+    let audio = call_audio_with(g.url.clone(), key, &req.body.call_id, SpeakerFrames::Step)
+        .map_err(map_error)?;
     Ok(HandleAns {
         handle: handles::global().insert(Audio { audio }),
     })
 }
 
-/// Sends one microphone frame. A wrong size, a full queue (the socket is behind) or a closed call drops it.
+/// Sends one microphone frame. A wrong size or a closed call drops it. When the socket is behind, the oldest queued
+/// frames go instead of this one.
 pub fn audio_push(handle: i64, pcm: &[u8]) {
     let Ok(samples) = decode_frame(pcm) else {
         log::debug!(
@@ -174,10 +187,15 @@ pub fn audio_push(handle: i64, pcm: &[u8]) {
     }
 }
 
-/// Copies the next frame of the peer's voice into `out`. Answers the bytes written: `FRAME_BYTES` (1 920), `0`
-/// when no frame is ready yet (or `out` is too small, which is logged) and `-1` when the call has ended or the
-/// handle is gone.
+/// Copies the next frame of the peer's voice into `out`. Answers the bytes written (640, 1 280 or 1 920: 20, 40
+/// or 60 ms), `0` when no frame came within [`PULL_WAIT`] (or `out` is smaller than `FRAME_BYTES`, which is
+/// logged) and `-1` when the call has ended or the handle is gone.
 pub fn audio_pull(handle: i64, out: &mut [u8]) -> i32 {
+    audio_pull_within(handle, out, PULL_WAIT)
+}
+
+/// [`audio_pull`] with its wait given; `Duration::ZERO` does not wait.
+pub fn audio_pull_within(handle: i64, out: &mut [u8], wait: Duration) -> i32 {
     if out.len() < FRAME_BYTES {
         log::debug!(
             "audioPull: buffer of {} bytes is smaller than a frame",
@@ -185,22 +203,26 @@ pub fn audio_pull(handle: i64, out: &mut [u8]) -> i32 {
         );
         return 0;
     }
-    let pulled = handles::global().with(handle, |audio: &mut Audio| audio.audio.speaker.try_recv());
-    match pulled {
-        Some(Ok(samples)) => match encode_frame(&samples) {
+    // The wait happens outside the handle table, so the microphone thread's `audioPush` is never held up.
+    let speaker = handles::global().with(handle, |audio: &mut Audio| audio.audio.speaker.clone());
+    let Some(speaker) = speaker else {
+        return -1;
+    };
+    match speaker.recv_timeout(wait) {
+        Ok(samples) => match encode_speaker_frame(&samples) {
             Ok(bytes) => {
-                out[..FRAME_BYTES].copy_from_slice(&bytes);
-                FRAME_BYTES as i32
+                out[..bytes.len()].copy_from_slice(&bytes);
+                bytes.len() as i32
             }
             Err(error) => {
                 log::debug!("audioPull: dropped a frame: {error}");
                 0
             }
         },
-        // Nothing queued yet.
-        Some(Err(TryRecvError::Empty)) => 0,
-        // The socket closed, or the handle is gone.
-        Some(Err(TryRecvError::Closed)) | None => -1,
+        // Nothing came in time.
+        Err(RecvError::Empty) => 0,
+        // The socket closed.
+        Err(RecvError::Closed) => -1,
     }
 }
 
@@ -251,5 +273,11 @@ mod tests {
         assert_eq!(audio_pull(1, &mut small), 0);
         let mut out = [0u8; FRAME_BYTES];
         assert_eq!(audio_pull(1, &mut out), -1);
+    }
+
+    /// A short wait: the player thread must notice soon that it was stopped.
+    #[test]
+    fn the_pull_wait_is_one_20_ms_frame() {
+        assert_eq!(PULL_WAIT, Duration::from_millis(20));
     }
 }

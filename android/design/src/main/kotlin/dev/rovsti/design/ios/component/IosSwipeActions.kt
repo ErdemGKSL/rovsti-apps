@@ -3,7 +3,7 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/component/IosSwipeActions.kt
- * Changes for Rovsti: package and imports; the rest of the row is Convx's (velocity now tracks summed drag, action height). Added: custom accessibility actions (one per
+ * Changes for Rovsti: package and imports; the rest of the row is Convx's (velocity now tracks summed drag, action height, a drag must be within 25° of horizontal). Added: custom accessibility actions (one per
  * swipe action, so TalkBack users reach them without a swipe), one haptic when a full swipe fires, test tags
  * `swipe-row`, `swipe-action-<n>`, and `close()` on a semantics action. E1.19: an optional [SwipeRowGroup] keeps one row
  * open per list and turns a tap on a resting-open list into "close".
@@ -17,7 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -37,7 +37,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -52,6 +55,7 @@ import dev.rovsti.design.ios.foundation.projectedEndpoint
 import dev.rovsti.design.list.SwipeRowGroup
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.tan
 
 /** One button revealed by swiping an [IosSwipeableRow]. */
 data class IosSwipeAction(
@@ -165,7 +169,7 @@ fun IosSwipeableRow(
                     // Rovsti fix: the layer translation moves this node's own coordinates with the finger, so
                     // change.position stays put and the tracker saw no velocity; track the summed drag instead.
                     var travelled = 0f
-                    detectHorizontalDragGestures(
+                    detectSidewaysDrag(
                         onDragStart = {
                             if (group != null && rowKey != null) group.opened(rowKey)
                             tracker.resetTracking()
@@ -287,3 +291,56 @@ private fun Modifier.tapClosesGroup(group: SwipeRowGroup?): Modifier =
             }
         }
     }
+
+/**
+ * Rovsti: the widest angle from horizontal at which a drag still swipes the row. A steeper drag is left to the list, so
+ * a quick, slightly slanted scroll no longer opens Delete. `detectHorizontalDragGestures` took any drag whose sideways
+ * travel passed the touch slop first, which a fast vertical flick often does.
+ */
+internal const val SWIPE_MAX_ANGLE_DEGREES = 25.0
+
+private val SWIPE_MAX_SLOPE = tan(Math.toRadians(SWIPE_MAX_ANGLE_DEGREES)).toFloat()
+
+/** True when a drag of ([dx], [dy]) is within [SWIPE_MAX_ANGLE_DEGREES] of horizontal. */
+internal fun isSidewaysDrag(
+    dx: Float,
+    dy: Float,
+): Boolean = dx != 0f && abs(dy) <= abs(dx) * SWIPE_MAX_SLOPE
+
+/**
+ * Rovsti: [detectHorizontalDragGestures][androidx.compose.foundation.gestures.detectHorizontalDragGestures] with an
+ * angle gate. The gesture is decided once the finger has moved past the touch slop: within [SWIPE_MAX_ANGLE_DEGREES]
+ * of horizontal it becomes a row swipe, anything steeper (or a move a parent already consumed) is left alone.
+ */
+private suspend fun PointerInputScope.detectSidewaysDrag(
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+    onHorizontalDrag: (change: PointerInputChange, dragAmount: Float) -> Unit,
+) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        val slop = viewConfiguration.touchSlop
+        var total = Offset.Zero
+        var start: PointerInputChange? = null
+        while (start == null) {
+            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+            if (!change.pressed || change.isConsumed) return@awaitEachGesture
+            total += change.positionChange()
+            val distance = total.getDistance()
+            if (distance > slop) {
+                if (!isSidewaysDrag(total.x, total.y)) return@awaitEachGesture
+                start = change
+            }
+        }
+        val first = start
+        onDragStart()
+        val distance = total.getDistance()
+        onHorizontalDrag(first, total.x * (distance - slop) / distance)
+        val finished =
+            horizontalDrag(first.id) { change ->
+                onHorizontalDrag(change, change.positionChange().x)
+            }
+        if (finished) onDragEnd() else onDragCancel()
+    }
+}

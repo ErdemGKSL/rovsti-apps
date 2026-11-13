@@ -1415,6 +1415,11 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   in late. If Contacts is not installed, each app falls back to its own cache with the same API. One shared Kotlin
   client module (resolver + provider contract) is used by all apps. Tests: provider contract and permission, the
   fallback path, change notification refresh, and that a list renders the WA photo on its first frame when cached.
+  **Sync (owner: "of course it syncs now and then"):** a periodic WorkManager job in Contacts (about every 6 h, network
+  required, battery-not-low, unique work so it never stacks) pulls names, picture ids and "on WhatsApp" flags for all
+  device contacts and recent callers in batches from the gateway, downloads only changed photos, and drops removed ones.
+  Live gateway events (profile picture / push name changes) and Contacts coming to the foreground with data older than
+  the period also trigger a sync. The last sync time and result are visible in Contacts settings with a "Sync now" row.
 
 ### X.1b Who is this? one identity resolver (owner, 2026-11-13; do together with X.1, before X.2)
 - **(F28) WhatsApp calls show a bare number.** Incoming/in-call screens, the ringing notification, the ongoing and

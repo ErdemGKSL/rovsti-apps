@@ -108,7 +108,7 @@ fun PhoneContactsContent(
                     SearchField(
                         state = searchState,
                         placeholder = stringResource(R.string.people_search),
-                        focusRequester = handoff.requester,
+                        handoff = handoff,
                         modifier =
                             Modifier
                                 .padding(

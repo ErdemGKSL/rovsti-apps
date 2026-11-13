@@ -237,7 +237,7 @@ fun RecentsContent(
                 SearchField(
                     state = searchState,
                     placeholder = strings.search,
-                    focusRequester = handoff.requester,
+                    handoff = handoff,
                     modifier =
                         Modifier
                             .padding(horizontal = Spacing.gutter, vertical = Spacing.s)

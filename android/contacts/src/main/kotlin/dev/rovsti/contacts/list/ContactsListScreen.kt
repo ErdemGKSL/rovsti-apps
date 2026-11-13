@@ -182,7 +182,7 @@ fun ContactsListScreen(
             item(key = "search", contentType = "search") {
                 SearchField(
                     state = searchState,
-                    focusRequester = handoff.requester,
+                    handoff = handoff,
                     modifier =
                         Modifier
                             .padding(

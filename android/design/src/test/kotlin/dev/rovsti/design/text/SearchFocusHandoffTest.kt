@@ -16,6 +16,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.TextRange
 import androidx.test.core.app.ApplicationProvider
+import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.overlay.OverlayProvider
 import dev.rovsti.design.theme.RovstiTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,15 +39,18 @@ class SearchFocusHandoffTest {
     val compose = createComposeRule()
 
     private val state = TextFieldState()
+    private val overlays = OverlayController()
 
     private fun show() {
         compose.setContent {
             RovstiTheme {
-                val handoff = rememberSearchFocusHandoff(state)
-                Column {
-                    SearchField(state, modifier = Modifier.testTag("search"), focusRequester = handoff.requester)
-                    BasicText("Result", Modifier.testTag("result").clickable { handoff.onResultOpened() })
-                    BasicText("Close sheet", Modifier.testTag("close").clickable { handoff.onSheetDismissed() })
+                OverlayProvider(overlays) {
+                    val handoff = rememberSearchFocusHandoff(state)
+                    Column {
+                        SearchField(state, modifier = Modifier.testTag("search"), handoff = handoff)
+                        BasicText("Result", Modifier.testTag("result").clickable { handoff.onResultOpened() })
+                        BasicText("Close sheet", Modifier.testTag("close").clickable { handoff.onSheetDismissed() })
+                    }
                 }
             }
         }
@@ -84,5 +89,31 @@ class SearchFocusHandoffTest {
         compose.onNodeWithTag("search").assertIsFocused()
         assertTrue("the keyboard is shown again", keyboardUp())
         assertEquals(TextRange(4), state.selection)
+    }
+
+    /** Owner bug: a row opened without searching popped the keyboard up when its sheet closed. */
+    @Test fun aResultOpenedWithoutTheSearchFocusedLeavesTheKeyboardDownWhenTheSheetCloses() {
+        show()
+        compose.onNodeWithTag("result").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("close").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("search").assertIsNotFocused()
+        assertFalse("no keyboard after a plain row", keyboardUp())
+    }
+
+    /** Owner bug: a call placed from a search result's sheet brought the keyboard back over the call. */
+    @Test fun aSheetClosedBecauseTheUserLeftDoesNotBringTheKeyboardBack() {
+        show()
+        compose.onNodeWithTag("search").performClick()
+        compose.onNodeWithTag("search").performTextInput("mert")
+        compose.onNodeWithTag("result").performClick()
+        compose.waitForIdle()
+        compose.runOnUiThread { overlays.dismissAll() }
+        compose.onNodeWithTag("close").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("search").assertIsNotFocused()
+        assertFalse("the keyboard stays down", keyboardUp())
+        assertEquals("the query is kept", "mert", state.text.toString())
     }
 }

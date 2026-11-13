@@ -219,11 +219,12 @@ private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewMode
 private class AndroidRecentsHost(
     private val context: Context,
     private val details: (String, () -> Unit) -> Unit,
+    private val onLeave: () -> Unit = {},
 ) : RecentsHost {
     override fun message(
         number: String,
         body: String?,
-    ) = launch(ShareIntents.sendSmsTo(number, body))
+    ) = launch(ShareIntents.sendSmsTo(number, body), onLeave)
 
     override fun addContact(number: String) = launch(addContactIntent(number, create = false))
 
@@ -234,9 +235,14 @@ private class AndroidRecentsHost(
         onDismissed: () -> Unit,
     ) = details(key, onDismissed)
 
-    private fun launch(intent: Intent) {
+    /** Starts [intent]; [opened] runs when an app took it. */
+    private fun launch(
+        intent: Intent,
+        opened: () -> Unit = {},
+    ) {
         try {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            opened()
         } catch (_: ActivityNotFoundException) {
             // No app handles it: nothing to show.
         }
@@ -247,11 +253,12 @@ private class AndroidRecentsHost(
 private class AndroidDetailsHost(
     private val context: Context,
     private val export: (String, String) -> Unit,
+    private val onLeave: () -> Unit = {},
 ) : DetailsHost {
     override fun message(
         number: String,
         body: String?,
-    ) = launch(ShareIntents.sendSmsTo(number, body))
+    ) = launch(ShareIntents.sendSmsTo(number, body), onLeave)
 
     override fun addContact(number: String) = launch(addContactIntent(number, create = false))
 
@@ -273,9 +280,14 @@ private class AndroidDetailsHost(
         csv: String,
     ) = export(fileName, csv)
 
-    private fun launch(intent: Intent) {
+    /** Starts [intent]; [opened] runs when an app took it. */
+    private fun launch(
+        intent: Intent,
+        opened: () -> Unit = {},
+    ) {
         try {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            opened()
         } catch (_: ActivityNotFoundException) {
             // No app handles it: nothing to show.
         }
@@ -286,6 +298,7 @@ private class AndroidDetailsHost(
 private class AndroidKeypadHost(
     private val context: Context,
     private val openContacts: (Int) -> Unit,
+    private val onLeave: () -> Unit = {},
 ) : KeypadHost {
     override fun tone(char: Char) {
         val index =
@@ -304,13 +317,18 @@ private class AndroidKeypadHost(
 
     override fun share(text: String) = launch(Intent.createChooser(ShareIntents.text(text), null))
 
-    override fun message(number: String) = launch(ShareIntents.sendSmsTo(number))
+    override fun message(number: String) = launch(ShareIntents.sendSmsTo(number), onLeave)
 
     override fun chooseSpeedDialContact(digit: Int) = openContacts(digit)
 
-    private fun launch(intent: Intent) {
+    /** Starts [intent]; [opened] runs when an app took it. */
+    private fun launch(
+        intent: Intent,
+        opened: () -> Unit = {},
+    ) {
         try {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            opened()
         } catch (_: ActivityNotFoundException) {
             // No app handles it: nothing to show.
         }
@@ -465,11 +483,15 @@ fun PhoneApp(
             }
         }
     val detailsHost =
-        remember(context, exporter) {
-            AndroidDetailsHost(context) { name, csv ->
-                pendingCsv = name to csv
-                exporter.launch(name)
-            }
+        remember(context, exporter, container) {
+            AndroidDetailsHost(
+                context,
+                export = { name, csv ->
+                    pendingCsv = name to csv
+                    exporter.launch(name)
+                },
+                onLeave = container.leaves::leave,
+            )
         }
     val details =
         remember(overlays, container, detailsHost, context) {
@@ -534,6 +556,12 @@ fun PhoneApp(
         // The ended summary has been shown: close the page (a collapsed call has nothing to close).
         if (navigator.current == PhoneRoute.InCall) navigator.pop()
     }
+    // A call placed from anywhere (or an SMS opened) and a call page opening close every sheet, menu and the keyboard.
+    CloseOverlaysOnLeave(
+        leaves = container.leaves.flow,
+        overlays = overlays,
+        onCallPage = navigator.current.let { it is PhoneRoute.Incoming || it == PhoneRoute.InCall },
+    )
     // A call that was placed or arrived by itself opens its page once; collapsing it keeps it down until the user asks.
     var openedCall by remember { mutableIntStateOf(NO_CALL) }
     val liveCallId = inCallUi.call?.takeIf { inCallUi.live }?.callId
@@ -619,7 +647,10 @@ fun PhoneApp(
                 FavoritesScreen(favoritesModel, links, setup, openFavorite)
             }
             entry<PhoneRoute.Recents> {
-                val host = remember(context, openDetails) { AndroidRecentsHost(context, openDetails) }
+                val host =
+                    remember(context, openDetails) {
+                        AndroidRecentsHost(context, openDetails, container.leaves::leave)
+                    }
                 RecentsScreen(
                     model = recentsModel,
                     host = host,
@@ -633,7 +664,10 @@ fun PhoneApp(
             entry<PhoneRoute.Keypad> {
                 val model = rememberKeypadViewModel(container)
                 val context = LocalContext.current
-                val host = remember(context, navigator) { AndroidKeypadHost(context) { navigator.select(ContactsTab) } }
+                val host =
+                    remember(context, navigator) {
+                        AndroidKeypadHost(context, { navigator.select(ContactsTab) }, container.leaves::leave)
+                    }
                 val dial by container.pendingDial.collectAsState()
                 LaunchedEffect(dial) {
                     // A number from a `tel:` link: it lands in the field, once.

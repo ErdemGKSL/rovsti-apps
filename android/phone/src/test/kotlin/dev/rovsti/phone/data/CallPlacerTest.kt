@@ -7,6 +7,7 @@ import dev.rovsti.platform.telephony.FakeSimRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -40,11 +41,13 @@ class CallPlacerTest {
     private suspend fun placer(
         repo: FakeSimRepository,
         launcher: Launched,
+        onLeave: () -> Unit = {},
+        nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
     ): CallPlacer {
         val ops = NativePhoneOps(host.core)
         val state = SimState(repo, ops, scope)
         eventually("sims built") { state.sims.value.accounts.accounts.size == repo.current.value.accounts.size }
-        return CallPlacer(ops, state.sims, launcher)
+        return CallPlacer(ops, state.sims, launcher, onLeave, nowMs)
     }
 
     @Test fun anEmergencyNumberNeverAsksForASim() =
@@ -117,5 +120,55 @@ class CallPlacerTest {
             assertTrue(placer.isEmergency("112"))
             assertTrue(placer.isEmergency("911"))
             assertTrue(!placer.isEmergency("+905551112233"))
+        }
+
+    /** Owner bug 2026-11-13: a call placed from a sheet left the sheet open over the call. The app leaves the screen. */
+    @Test fun aPlacedCallOrTheOpenedDialerLeavesTheScreenAndNothingElseDoes() =
+        runBlocking {
+            var leaves = 0
+            var clock = 0L
+            val launcher = Launched()
+            val one = placer(FakeSimRepository(listOf(sim1)), launcher, { leaves++ }) { clock }
+            one.place("+905551112233")
+            assertEquals("placed", 1, leaves)
+            clock += 10_000
+            launcher.result = CallLauncher.Launch.DIALER_OPENED
+            one.place("+905551112233")
+            assertEquals("the system dialer opened", 2, leaves)
+            clock += 10_000
+            launcher.result = CallLauncher.Launch.FAILED
+            one.place("+905551112233")
+            one.place("call me")
+            assertEquals("a failure or an invalid number stays on the screen", 2, leaves)
+            val two = placer(FakeSimRepository(listOf(sim1, sim2)), Launched(), { leaves++ }) { clock }
+            assertTrue(two.place("+905551112233") is PlaceResult.NeedsSim)
+            assertEquals("the SIM chooser stays on the screen", 2, leaves)
+        }
+
+    /** A double tap on a row or a call button placed two calls. */
+    @Test fun aSecondTapOnTheSameNumberRightAfterPlacesNoSecondCall() =
+        runBlocking {
+            var clock = 0L
+            val launcher = Launched()
+            val placer = placer(FakeSimRepository(listOf(sim1)), launcher) { clock }
+            val first = placer.place("+905551112233")
+            clock += 400
+            assertEquals("the second tap answers the first call", first, placer.place("+90 555 111 22 33"))
+            assertEquals(1, launcher.placed.size)
+            placer.place("+905554445566")
+            assertEquals("another number goes through", 2, launcher.placed.size)
+            clock += 2_000
+            placer.place("+905551112233")
+            assertEquals("later the same number is a new call", 3, launcher.placed.size)
+        }
+
+    @Test fun twoTapsAtOnceRunOneAtATime() =
+        runBlocking {
+            val launcher = Launched()
+            val placer = placer(FakeSimRepository(listOf(sim1)), launcher)
+            val a = async(Dispatchers.Default) { placer.place("+905551112233") }
+            val b = async(Dispatchers.Default) { placer.place("+905551112233") }
+            assertEquals(a.await(), b.await())
+            assertEquals(1, launcher.placed.size)
         }
 }

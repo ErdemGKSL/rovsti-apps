@@ -174,6 +174,8 @@ class WaCallLauncher(
     private val e164: suspend (String) -> String?,
     private val notices: WaNotices,
     private val scope: CoroutineScope,
+    /** The call started: the screen it was placed from is left (see `ScreenLeaves`). */
+    private val onStarted: () -> Unit = {},
 ) {
     /** WhatsApp calls can be placed: the instance is linked. The menus enable their WhatsApp row from this. */
     val available: StateFlow<Boolean> =
@@ -211,6 +213,7 @@ class WaCallLauncher(
         when (val result = waCalls.place(jidOf(full))) {
             is CallResult.Started -> {
                 waiting = null
+                onStarted()
             }
 
             CallResult.NeedsMicrophone -> {

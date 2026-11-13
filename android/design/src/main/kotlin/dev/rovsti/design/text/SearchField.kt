@@ -23,16 +23,18 @@ fun SearchField(
     enabled: Boolean = true,
     onSubmit: () -> Unit = {},
     focusRequester: FocusRequester? = null,
+    /** The search's [SearchFocusHandoff]: the field takes its requester and reports its focus to it. */
+    handoff: SearchFocusHandoff? = null,
 ) {
     GlassTextField(
         state = state,
         placeholder = placeholder,
-        modifier = modifier,
+        modifier = if (handoff != null) modifier.then(handoff.tracker) else modifier,
         search = true,
         enabled = enabled,
         imeAction = ImeAction.Search,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None),
         onSubmit = onSubmit,
-        focusRequester = focusRequester,
+        focusRequester = handoff?.requester ?: focusRequester,
     )
 }

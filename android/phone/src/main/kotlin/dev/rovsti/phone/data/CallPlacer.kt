@@ -15,6 +15,8 @@ import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.platform.telephony.SimAccounts
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** The system side of placing a cellular call, behind a seam so the decision logic runs on the JVM. */
 fun interface CallLauncher {
@@ -104,16 +106,33 @@ sealed interface PlaceResult {
  * `dial.is_emergency`. The SIM rule is the GPUI app's (`apps/phone/src/sim_ui.rs` `sim_needs_choice`): an emergency
  * number never asks for a SIM and never gets an account; otherwise a chosen [simKey] wins, "ask every time" (two or
  * more SIMs, no system default) needs the chooser, and any other case places on the system default, which the app never
- * changes.
+ * changes. [onLeave] runs once the call went to Telecom or the system dialer: the app then leaves the screen it was
+ * placed from (its sheets, menus and keyboard close, see `ScreenLeaves`).
+ *
+ * One call per tap: places run one at a time, and the same number asked again within [repeatMs] of being placed (a
+ * double tap on a row or a call button, a second tap while the sheet is leaving) answers the first result without a
+ * second call.
  */
 class CallPlacer(
     private val ops: PhoneOps,
     private val sims: StateFlow<Sims>,
     private val launcher: CallLauncher,
+    private val onLeave: () -> Unit = {},
+    private val nowMs: () -> Long = { System.nanoTime() / NANOS_PER_MS },
+    private val repeatMs: Long = REPEAT_MS,
 ) {
+    private val oneAtATime = Mutex()
+    private var last: PlaceResult? = null
+    private var lastAtMs = 0L
+
     suspend fun place(
         typed: String,
         simKey: String? = null,
+    ): PlaceResult = oneAtATime.withLock { placeNow(typed, simKey) }
+
+    private suspend fun placeNow(
+        typed: String,
+        simKey: String?,
     ): PlaceResult {
         val number =
             when (val valid = ops.validate(DialTextRequest(typed))) {
@@ -129,14 +148,39 @@ class CallPlacer(
                 now.ask -> return PlaceResult.NeedsSim(number, now.chips)
                 else -> now.defaultKey
             }
-        return when (launcher.place(number, key)) {
-            CallLauncher.Launch.PLACED -> PlaceResult.Placed(number, key)
-            CallLauncher.Launch.DIALER_OPENED -> PlaceResult.HandedToDialer(number)
-            CallLauncher.Launch.FAILED -> PlaceResult.Failed(number)
+        val previous = last
+        val previousNumber =
+            when (previous) {
+                is PlaceResult.Placed -> previous.number
+                is PlaceResult.HandedToDialer -> previous.number
+                else -> null
+            }
+        val same = previousNumber != null && dialKey(previousNumber) == dialKey(number)
+        if (previous != null && same && nowMs() - lastAtMs < repeatMs) return previous
+        val result =
+            when (launcher.place(number, key)) {
+                CallLauncher.Launch.PLACED -> PlaceResult.Placed(number, key)
+                CallLauncher.Launch.DIALER_OPENED -> PlaceResult.HandedToDialer(number)
+                CallLauncher.Launch.FAILED -> PlaceResult.Failed(number)
+            }
+        if (result !is PlaceResult.Failed) {
+            last = result
+            lastAtMs = nowMs()
+            onLeave()
         }
+        return result
     }
 
     /** Whether [typed] is an emergency number (the core's list: 112 and 911 always). */
     suspend fun isEmergency(typed: String): Boolean =
         (ops.isEmergency(IsEmergencyRequest(typed)) as? Outcome.Ok)?.value?.emergency ?: false
+
+    private companion object {
+        /** The characters that are dialed: `+90 555 111 22 33` and `+905551112233` are one number. */
+        fun dialKey(number: String): String = number.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+
+        /** A second tap on the same number this soon after it was placed is the same tap. */
+        const val REPEAT_MS = 1_500L
+        const val NANOS_PER_MS = 1_000_000L
+    }
 }

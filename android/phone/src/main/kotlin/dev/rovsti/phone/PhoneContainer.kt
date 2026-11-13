@@ -155,8 +155,12 @@ open class PhoneContainer(
             e164 = ::e164,
             notices = waNotices,
             scope = scope,
+            onStarted = leaves::leave,
         )
     }
+
+    /** "The user leaves the screen" (a call was placed, the SMS composer opened): the app closes its overlays. */
+    val leaves: ScreenLeaves = ScreenLeaves()
 
     /** Answer and Decline tapped on the WhatsApp call notification: once per call, after the core is ready (rule b). */
     val waActions: WaCallActions by lazy { WaCallActions(waCalls, ready = ::awaitRustReady, scope = scope) }
@@ -249,7 +253,7 @@ open class PhoneContainer(
     val speedDial: SpeedDial by lazy { SpeedDial(store, ops) }
 
     /** Validation, the SIM choice and the call itself (`dial.validate`, `TelecomManager.placeCall`). */
-    val placer: CallPlacer by lazy { CallPlacer(ops, simState.sims, createCallLauncher()) }
+    val placer: CallPlacer by lazy { CallPlacer(ops, simState.sims, createCallLauncher(), onLeave = leaves::leave) }
 
     /** What Android says about the Setup checklist rows. */
     val setupFacts: SetupFactsSource by lazy { createSetupFacts() }

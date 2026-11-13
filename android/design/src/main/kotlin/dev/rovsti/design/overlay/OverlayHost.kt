@@ -182,6 +182,26 @@ class OverlayController {
         return true
     }
 
+    /**
+     * How many times [dismissAll] ran (a plain count, not state). A page that hands something back when its sheet
+     * closes (the search focus, see `SearchFocusHandoff`) compares it with the count it saw when the sheet opened, so
+     * nothing comes back over a screen the user has left.
+     */
+    var leaveCount: Int = 0
+        private set
+
+    /**
+     * The user leaves the screen (a call was placed, a message or another app opens): every entry that is open closes
+     * as if Back had been pressed on it, so cancel callbacks run and sheets report their dismissal. Toasts and the undo
+     * pill ([OverlayEntry.passesBack]) stay: they still say what happened.
+     */
+    fun dismissAll() {
+        leaveCount++
+        for (entry in entries.toList()) {
+            if (entry.state.targetState && !entry.passesBack) entry.onBack(this)
+        }
+    }
+
     /** True while at least one entry is present or leaving. */
     val hasEntries: Boolean get() = entries.isNotEmpty()
 

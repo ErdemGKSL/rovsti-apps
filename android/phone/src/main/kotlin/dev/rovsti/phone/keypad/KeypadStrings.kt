@@ -6,7 +6,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import dev.rovsti.core.model.phone.FieldAction
 import dev.rovsti.phone.R
+import dev.rovsti.phone.data.DialRefusal
 
 /** Every word of the Keypad, read once per configuration (the screens and the tests share it). */
 @Immutable
@@ -43,6 +45,18 @@ class KeypadStrings(
     fun callWith(sim: String): String = res.getString(R.string.keypad_call_with, sim)
 
     fun speedMessage(digit: Int): String = res.getString(R.string.keypad_speed_message, digit)
+
+    /** A field-menu entry in the phone's language (the core's `label` is English). */
+    fun field(action: FieldAction): String =
+        res.getString(
+            when (action) {
+                FieldAction.Copy -> R.string.keypad_field_copy
+                FieldAction.Paste -> R.string.keypad_field_paste
+                FieldAction.Clear -> R.string.keypad_field_clear
+            },
+        )
+
+    fun refused(refusal: DialRefusal): String = res.getString(refusal.text)
 
     fun say(notice: Notice): String =
         res.getString(

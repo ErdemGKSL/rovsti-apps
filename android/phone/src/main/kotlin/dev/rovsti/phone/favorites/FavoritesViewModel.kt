@@ -15,6 +15,7 @@ import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.phone.data.CallPlacer
+import dev.rovsti.phone.data.DialRefusal
 import dev.rovsti.phone.data.People
 import dev.rovsti.phone.data.PeopleIndex
 import dev.rovsti.phone.data.PhoneStore
@@ -133,9 +134,9 @@ sealed interface FavoritesEffect {
     /** The call, the star or the order could not be changed. */
     data object Failed : FavoritesEffect
 
-    /** The core refused the number; [text] is its sentence. */
+    /** The core refused the number; the screen words [refusal] from resources (F30). */
     data class Core(
-        val text: String,
+        val refusal: DialRefusal,
     ) : FavoritesEffect
 }
 
@@ -333,7 +334,7 @@ class FavoritesViewModel(
         when (val result = placer.place(number, simKey)) {
             is PlaceResult.Placed, is PlaceResult.HandedToDialer -> Unit
             is PlaceResult.NeedsSim -> effects.trySend(FavoritesEffect.ChooseSim(result.number, result.choices))
-            is PlaceResult.Invalid -> effects.trySend(FavoritesEffect.Core(result.reason))
+            is PlaceResult.Invalid -> effects.trySend(FavoritesEffect.Core(result.refusal))
             is PlaceResult.Failed -> effects.trySend(FavoritesEffect.Failed)
         }
     }

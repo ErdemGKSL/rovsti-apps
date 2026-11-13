@@ -132,6 +132,14 @@
     <string name="keypad_speed_title">Hızlı Arama Ata</string>
     <string name="keypad_speed_message">%1$d tuşuna henüz hızlı arama atanmamış.</string>
     <string name="keypad_speed_choose">Kişi Seç</string>
+    <string name="keypad_field_copy">Kopyala</string>
+    <string name="keypad_field_paste">Yapıştır</string>
+    <string name="keypad_field_clear">Temizle</string>
+
+    <!-- dial.validate'in detail.reason kodları (F30) -->
+    <string name="dial_refused_empty">Aranacak numara yok</string>
+    <string name="dial_refused_no_dialable">Bunda aranacak bir numara yok</string>
+    <string name="dial_refused_other">Bu numara aranamıyor</string>
 
     <!-- Recents -->
     <string name="recents_search_placeholder">Aramalarda ve notlarda ara</string>

@@ -25,6 +25,22 @@ pub enum DialError {
     NoDialable,
 }
 
+impl DialError {
+    /// Every refusal, in declaration order.
+    pub const ALL: [DialError; 2] = [DialError::Empty, DialError::NoDialable];
+
+    /// The stable code of the refusal (`detail.reason` on the FFI). The English
+    /// sentence is for logs; the apps word the code in the phone's language, so
+    /// a code never changes once shipped.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            DialError::Empty => "empty",
+            DialError::NoDialable => "no_dialable",
+        }
+    }
+}
+
 /// Characters kept when a number is pasted.
 fn is_dial_char(c: char) -> bool {
     matches!(c, '0'..='9' | '*' | '#' | '+' | ',' | ';')
@@ -542,6 +558,21 @@ mod tests {
         assert_eq!(Copy.label(), "Copy");
         assert_eq!(Paste.label(), "Paste");
         assert_eq!(Clear.label(), "Clear");
+    }
+
+    #[test]
+    fn dial_error_codes_are_stable_and_distinct() {
+        assert_eq!(DialError::Empty.code(), "empty");
+        assert_eq!(DialError::NoDialable.code(), "no_dialable");
+        let mut codes: Vec<_> = DialError::ALL.iter().map(|e| e.code()).collect();
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(codes.len(), DialError::ALL.len());
+        assert_eq!(validate("").err().map(DialError::code), Some("empty"));
+        assert_eq!(
+            validate("call me").err().map(DialError::code),
+            Some("no_dialable")
+        );
     }
 
     #[test]

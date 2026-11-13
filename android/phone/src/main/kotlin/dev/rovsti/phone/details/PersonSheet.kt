@@ -521,7 +521,7 @@ fun PersonEffects(
                 }
 
                 is PersonEffect.Core -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(strings.refused(effect.refusal))
                 }
 
                 is PersonEffect.ChooseSim -> {

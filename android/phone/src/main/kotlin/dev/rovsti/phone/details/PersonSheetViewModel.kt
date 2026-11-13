@@ -27,6 +27,7 @@ import dev.rovsti.phone.data.BlockRepo
 import dev.rovsti.phone.data.BlockResult
 import dev.rovsti.phone.data.BlockUndo
 import dev.rovsti.phone.data.CallPlacer
+import dev.rovsti.phone.data.DialRefusal
 import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.PlaceResult
 import dev.rovsti.phone.data.RecentsRepository
@@ -229,9 +230,9 @@ sealed interface PersonEffect {
         val notice: PersonNotice,
     ) : PersonEffect
 
-    /** A sentence the core wrote. */
+    /** The core refused the number; the sheet words [refusal] from resources (F30). */
     data class Core(
-        val text: String,
+        val refusal: DialRefusal,
     ) : PersonEffect
 
     data object Reject : PersonEffect
@@ -487,7 +488,7 @@ class PersonSheetViewModel(
             }
 
             is PlaceResult.Invalid -> {
-                say(PersonEffect.Core(result.reason))
+                say(PersonEffect.Core(result.refusal))
             }
 
             is PlaceResult.Failed -> {

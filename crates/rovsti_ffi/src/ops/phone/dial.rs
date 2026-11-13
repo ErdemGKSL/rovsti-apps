@@ -7,7 +7,7 @@ use super::entries;
 use crate::envelope::FfiError;
 use crate::op;
 use crate::ops::registry::{Case, OpSpec};
-use rovsti_core::dial::{self, DialError, FieldAction, PastePlan, TonePlan};
+use rovsti_core::dial::{self, FieldAction, PastePlan, TonePlan};
 use rovsti_core::wire::{CallLogEntry, EmergencyList};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -121,11 +121,7 @@ fn validate(req: TextReq) -> Result<TextAns, FfiError> {
     match dial::validate(&req.text) {
         Ok(ok) => text(ok),
         Err(error) => {
-            let reason = match error {
-                DialError::Empty => "empty",
-                DialError::NoDialable => "no_dialable",
-            };
-            Err(FfiError::invalid(error.to_string()).with_detail(json!({"reason": reason})))
+            Err(FfiError::invalid(error.to_string()).with_detail(json!({"reason": error.code()})))
         }
     }
 }

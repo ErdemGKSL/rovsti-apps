@@ -27,6 +27,7 @@ import dev.rovsti.phone.data.BlockRepo
 import dev.rovsti.phone.data.BlockResult
 import dev.rovsti.phone.data.BlockUndo
 import dev.rovsti.phone.data.CallPlacer
+import dev.rovsti.phone.data.DialRefusal
 import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.PlaceResult
 import dev.rovsti.phone.data.RecentsModel
@@ -302,9 +303,9 @@ sealed interface RecentsEffect {
         val notice: RecentsNotice,
     ) : RecentsEffect
 
-    /** A sentence the core wrote. */
+    /** The core refused the number; the screen words [refusal] from resources (F30). */
     data class Core(
-        val text: String,
+        val refusal: DialRefusal,
     ) : RecentsEffect
 
     data class ChooseSim(
@@ -767,7 +768,7 @@ class RecentsViewModel(
             }
 
             is PlaceResult.Invalid -> {
-                say(RecentsEffect.Core(result.reason))
+                say(RecentsEffect.Core(result.refusal))
             }
 
             is PlaceResult.Failed -> {

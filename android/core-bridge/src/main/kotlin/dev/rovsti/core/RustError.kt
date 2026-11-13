@@ -16,6 +16,13 @@ sealed class RustError(
     message: String,
     val detail: JsonElement? = null,
 ) : Exception(message) {
+    /**
+     * The stable code Rust sends next to its English [message] (`detail.reason`, e.g. `"empty"` from `dial.validate`),
+     * or null when it sent none. The UI words the code from its own resources (en + tr); [message] is for logs only.
+     */
+    val reason: String?
+        get() = ((detail as? JsonObject)?.get("reason") as? JsonPrimitive)?.takeIf { it.isString }?.content
+
     class Invalid(
         message: String,
         detail: JsonElement? = null,

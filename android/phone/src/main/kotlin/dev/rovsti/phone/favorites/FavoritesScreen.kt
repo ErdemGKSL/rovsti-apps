@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -493,6 +494,7 @@ fun FavoritesEffects(model: FavoritesViewModel) {
     val added = stringResource(R.string.fav_added)
     val removed = stringResource(R.string.fav_removed)
     val failed = stringResource(R.string.fav_failed)
+    val resources = LocalContext.current.resources
     LaunchedEffect(model, overlays, added, removed, failed) {
         model.effect.collect { effect ->
             when (effect) {
@@ -510,7 +512,7 @@ fun FavoritesEffects(model: FavoritesViewModel) {
                 }
 
                 is FavoritesEffect.Core -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(resources.getString(effect.refusal.text))
                 }
 
                 is FavoritesEffect.ChooseSim -> {

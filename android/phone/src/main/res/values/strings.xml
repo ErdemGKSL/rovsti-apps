@@ -132,6 +132,14 @@
     <string name="keypad_speed_title">Assign Speed Dial</string>
     <string name="keypad_speed_message">Key %1$d has no speed dial yet.</string>
     <string name="keypad_speed_choose">Choose a Contact</string>
+    <string name="keypad_field_copy">Copy</string>
+    <string name="keypad_field_paste">Paste</string>
+    <string name="keypad_field_clear">Clear</string>
+
+    <!-- Why the core would not dial a text (dial.validate's detail.reason, F30) -->
+    <string name="dial_refused_empty">Nothing to dial</string>
+    <string name="dial_refused_no_dialable">There is no number to dial in that</string>
+    <string name="dial_refused_other">That number can\'t be dialed</string>
 
     <!-- Recents (E5.3) -->
     <string name="recents_search_placeholder">Search calls and notes</string>

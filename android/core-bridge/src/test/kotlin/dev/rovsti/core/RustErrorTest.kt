@@ -43,6 +43,23 @@ class RustErrorTest {
     }
 
     @Test
+    fun reasonIsTheStableCodeOfTheDetail() {
+        val dial =
+            (Envelope.decode(envelope("invalid", ""","detail":{"reason":"empty"}""")) as Outcome.Err).error
+        assertEquals("empty", dial.reason)
+        assertNull((Envelope.decode(envelope("invalid")) as Outcome.Err).error.reason)
+        assertNull(
+            "a detail without a reason",
+            RustError.Io("m", JsonObject(mapOf("path" to JsonPrimitive("x")))).reason,
+        )
+        assertNull(
+            "a reason that is no string",
+            RustError.Invalid("m", JsonObject(mapOf("reason" to JsonPrimitive(1)))).reason,
+        )
+        assertNull("a detail that is no object", RustError.Invalid("m", JsonPrimitive("empty")).reason)
+    }
+
+    @Test
     fun unknownKindIsUnknownNotACrash() {
         val error = (Envelope.decode(envelope("from_the_future")) as Outcome.Err).error
         assertTrue(error is RustError.Unknown)

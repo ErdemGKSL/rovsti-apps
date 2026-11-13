@@ -91,9 +91,9 @@ sealed interface PlaceResult {
         val number: String,
     ) : PlaceResult
 
-    /** The text is not a number the core can dial. */
+    /** The text is not a number the core can dial; the screens word [refusal] from resources (F30). */
     data class Invalid(
-        val reason: String,
+        val refusal: DialRefusal,
     ) : PlaceResult
 
     data class Failed(
@@ -137,7 +137,7 @@ class CallPlacer(
         val number =
             when (val valid = ops.validate(DialTextRequest(typed))) {
                 is Outcome.Ok -> valid.value.text
-                is Outcome.Err -> return PlaceResult.Invalid(valid.error.message.orEmpty())
+                is Outcome.Err -> return PlaceResult.Invalid(DialRefusal.of(valid.error))
             }
         val emergency = isEmergency(number)
         val now = sims.value

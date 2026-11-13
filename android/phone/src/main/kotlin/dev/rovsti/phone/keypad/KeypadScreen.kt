@@ -147,12 +147,12 @@ fun KeypadScreen(
                 }
 
                 is KeypadEffect.Core -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(strings.refused(effect.refusal))
                 }
 
                 is KeypadEffect.Undo -> {
                     overlays.showUndo(
-                        message = effect.message ?: strings.say(Notice.Cleared),
+                        message = strings.say(Notice.Cleared),
                         onUndo = { model.onAction(KeypadAction.Restore(effect.old)) },
                         actionLabel = strings.undo,
                     )
@@ -496,7 +496,7 @@ internal fun fieldMenuSections(
             when (entry) {
                 is FieldEntry.Core -> {
                     IosMenuItem(
-                        title = entry.item.label,
+                        title = strings.field(entry.item.action),
                         icon =
                             glyph(
                                 when (entry.item.action) {
@@ -513,7 +513,7 @@ internal fun fieldMenuSections(
                             } else {
                                 null
                             },
-                        onClick = { act(KeypadAction.Field(entry.item.action, entry.item.doneText)) },
+                        onClick = { act(KeypadAction.Field(entry.item.action)) },
                     )
                 }
 

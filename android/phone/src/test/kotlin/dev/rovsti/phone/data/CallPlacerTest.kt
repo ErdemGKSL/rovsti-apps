@@ -99,9 +99,9 @@ class CallPlacerTest {
         runBlocking {
             val launcher = Launched()
             val placer = placer(FakeSimRepository(listOf(sim1)), launcher)
-            assertEquals(PlaceResult.Invalid("nothing to dial"), placer.place(""))
+            assertEquals(PlaceResult.Invalid(DialRefusal.Empty), placer.place(""))
             assertEquals(
-                PlaceResult.Invalid("no digit, '*' or '#' in the number"),
+                PlaceResult.Invalid(DialRefusal.NoDialable),
                 placer.place("call me"),
             )
             assertTrue(launcher.placed.isEmpty())

@@ -23,6 +23,7 @@ import dev.rovsti.design.text.backspace
 import dev.rovsti.design.text.insertAtCaret
 import dev.rovsti.design.text.setDialText
 import dev.rovsti.phone.data.CallPlacer
+import dev.rovsti.phone.data.DialRefusal
 import dev.rovsti.phone.data.People
 import dev.rovsti.phone.data.PeopleIndex
 import dev.rovsti.phone.data.PlaceResult
@@ -102,10 +103,9 @@ sealed interface KeypadAction {
 
     data object OpenFieldMenu : KeypadAction
 
+    /** A field-menu entry; the app words the pill after it itself (F30: the core's `done_text` is English). */
     data class Field(
         val action: FieldAction,
-        /** The pill the core wants after the action (`dial.field_menu`'s `done_text`). */
-        val doneText: String?,
     ) : KeypadAction
 
     data object Paste : KeypadAction
@@ -162,9 +162,9 @@ sealed interface KeypadEffect {
         val notice: Notice,
     ) : KeypadEffect
 
-    /** A sentence the core wrote (an invalid number). */
+    /** The core refused the number; the screen words [refusal] from resources (F30). */
     data class Core(
-        val text: String,
+        val refusal: DialRefusal,
     ) : KeypadEffect
 
     data class ChooseSim(
@@ -187,9 +187,8 @@ sealed interface KeypadEffect {
         val whatsApp: Boolean = false,
     ) : KeypadEffect
 
-    /** [old] is what Clear removed: the pill's Undo restores it. [message] null: the screen's own words. */
+    /** [old] is what Clear removed: the pill's Undo restores it. */
     data class Undo(
-        val message: String?,
         val old: String,
     ) : KeypadEffect
 
@@ -307,7 +306,7 @@ class KeypadViewModel(
             }
 
             is KeypadAction.Field -> {
-                fieldAction(action.action, action.doneText)
+                fieldAction(action.action)
             }
 
             KeypadAction.Paste -> {
@@ -406,12 +405,12 @@ class KeypadViewModel(
         }
     }
 
-    private fun clear(doneText: String? = null) {
+    private fun clear() {
         val old = text()
         if (old.isEmpty()) return
         field.setDialText("")
         changed()
-        send(KeypadEffect.Undo(doneText, old))
+        send(KeypadEffect.Undo(old))
     }
 
     private fun call() {
@@ -458,7 +457,7 @@ class KeypadViewModel(
 
             is PlaceResult.Invalid -> {
                 send(KeypadEffect.Reject)
-                if (result.reason.isNotBlank()) send(KeypadEffect.Core(result.reason))
+                send(KeypadEffect.Core(result.refusal))
             }
 
             is PlaceResult.Failed -> {
@@ -488,15 +487,10 @@ class KeypadViewModel(
         }
     }
 
-    private fun fieldAction(
-        action: FieldAction,
-        doneText: String?,
-    ) {
+    private fun fieldAction(action: FieldAction) {
         when (action) {
             FieldAction.Copy -> {
-                if (clipboard.copy(text())) {
-                    send(doneText?.let { KeypadEffect.Core(it) } ?: KeypadEffect.Say(Notice.Copied))
-                }
+                if (clipboard.copy(text())) send(KeypadEffect.Say(Notice.Copied))
             }
 
             FieldAction.Paste -> {
@@ -504,7 +498,7 @@ class KeypadViewModel(
             }
 
             FieldAction.Clear -> {
-                clear(doneText)
+                clear()
             }
         }
     }

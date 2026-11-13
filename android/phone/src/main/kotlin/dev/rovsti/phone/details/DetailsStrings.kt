@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import dev.rovsti.phone.R
+import dev.rovsti.phone.data.DialRefusal
 
 /** Every word of the details sheets that the app (not the core) says, read once per configuration. */
 @Immutable
@@ -101,6 +102,8 @@ class DetailsStrings(
             CallDetailsUndoKind.NoteDeleted -> noteDeleted
             CallDetailsUndoKind.CallDeleted -> callDeleted
         }
+
+    fun refused(refusal: DialRefusal): String = res.getString(refusal.text)
 
     fun say(notice: PersonNotice): String =
         res.getString(

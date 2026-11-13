@@ -707,7 +707,7 @@ fun RecentsEffects(
                 }
 
                 is RecentsEffect.Core -> {
-                    overlays.showToast(effect.text)
+                    overlays.showToast(strings.refused(effect.refusal))
                 }
 
                 is RecentsEffect.Reminded -> {

@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalContext
 import dev.rovsti.core.model.phone.RecentsFilter
 import dev.rovsti.core.model.shared.NumberForm
 import dev.rovsti.phone.R
+import dev.rovsti.phone.data.DialRefusal
 
 /** Every word of Recents that the app (not the core) says, read once per configuration. */
 @Immutable
@@ -105,6 +106,8 @@ class RecentsStrings(
                 }
             }
         }
+
+    fun refused(refusal: DialRefusal): String = res.getString(refusal.text)
 
     fun say(notice: RecentsNotice): String =
         res.getString(

@@ -1152,7 +1152,7 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
 | E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
 | E5.11 | Notes page | R2 | todo (round 14 step 5) |
 | E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
-| E5.13 | Photo viewer and photo edit | R2 | done (round 14 step 7) |
+| E5.13 | Photo viewer and photo edit | R2 | todo (round 14 step 7) |
 | E5.14 | Polish | R2 | todo (round 14 step 8) |
 
 ### E5.1 App module
@@ -1361,15 +1361,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   group, `SetupEffectsRunner` shared by sheet and Settings, `SetupFactsSource.exactAlarmsAllowed` and the exact-alarm row.
 
 ### E5.13 Photo viewer
-- Screenshots: `e5.13-viewer`, `e5.13-photo-edit-menu`, `e5.13-viewer-zoomed`, `e5.13-person-sheet`, `e5.13-call-details`.
-- Built (round 14 step 7): the avatar of the Person sheet and of Call details (`PersonPhotoAvatar`, `phone/.../details/photo/`)
-  opens `:design` `PhotoViewer` out of its own rectangle; the flight runs on the shared-bounds spring 0.85/380, turns the
-  avatar circle into the photo rectangle (`ViewerPhoto.circular`) and a dismissing drag keeps the finger's velocity and
-  lands in the avatar. `PhotoSource` (Contact, WhatsApp read-only) is on `ViewerPhoto` for X.1. Toolbar: Save
-  (`FilesRepository.saveToGallery`, MediaStore), Share, Edit menu (Choose, Take, Remove after a question).
-  `PersonPhotoViewModel` writes through `ContactsRepository.setPhoto/removePhoto`; without the contacts grant (or a
-  provider refusal) `DetailsHost.editContact` opens the system Contacts editor. The crop/rotate page moved from `:contacts`
-  to `:design` `media/crop` (`CropFrame`, `CropSession`), shared by both apps.
+- Screenshots: `e5.13-viewer`, `e5.13-photo-edit-menu`.
 
 ### E5.14 Polish
 - AC1 Every utility has a pill and a haptic (U23 audit table in the story notes); checklist pass; recomposition tests for

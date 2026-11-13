@@ -1404,6 +1404,17 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   One shared avatar resolver (own photo, else WA fallback, else initials) is used by every one of these, so no surface
   can be missed; a test enumerates the surfaces. Unknown numbers (not in contacts) that are on WhatsApp get the picture
   too. When the WA photo arrives later the avatar crossfades in without a layout change.
+- **Owner, 2026-11-13: the Contacts app owns the local person cache; the other apps read it instantly.** Each Rovsti app
+  is its own APK with its own Rust core data dir, so a cache "shared through the Rust core" is not shared at all. Instead:
+  Contacts keeps everything about people that Android's contacts provider does not hold (WhatsApp push/verified names,
+  WhatsApp photos and their picture ids, JID/LID -> number maps, "on WhatsApp" flags, later what Messages needs) in its
+  own store, keeps it fresh in the background from the gateway (only while WhatsApp is linked), and exposes it through a
+  read-only `ContentProvider` guarded by a **signature** permission (only Rovsti apps signed with the same key can read
+  it; photos served as file descriptors via `openFile`). Phone and Messages keep an in-memory index warmed at process
+  start and refreshed on the provider's change notifications, so rows, call screens and notifications never wait or pop
+  in late. If Contacts is not installed, each app falls back to its own cache with the same API. One shared Kotlin
+  client module (resolver + provider contract) is used by all apps. Tests: provider contract and permission, the
+  fallback path, change notification refresh, and that a list renders the WA photo on its first frame when cached.
 
 ### X.1b Who is this? one identity resolver (owner, 2026-11-13; do together with X.1, before X.2)
 - **(F28) WhatsApp calls show a bare number.** Incoming/in-call screens, the ringing notification, the ongoing and

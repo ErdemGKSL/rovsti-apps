@@ -71,6 +71,7 @@ import dev.rovsti.phone.recents.RecentsScreen
 import dev.rovsti.phone.recents.RecentsSelectToolbar
 import dev.rovsti.phone.recents.RecentsStrings
 import dev.rovsti.phone.recents.RecentsViewModel
+import dev.rovsti.phone.settings.blocked.PhoneBlockedEntry
 import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupCompleteMoment
@@ -681,16 +682,19 @@ fun PhoneApp(
                 val version = remember(context) { context.aboutInfo(context.getString(R.string.app_name)).versionName }
                 // The rows of the Setup section carry out their own effects (role dialog, permission dialogs, system pages).
                 SetupEffectsRunner(setupModel, container.specialAccess, container.permissions)
+                val blockList by container.block.list.collectAsState()
                 PhoneSettingsPage(
                     onSetupAction = setupModel::onAction,
                     setup = setup,
                     settings = container.commonSettings,
                     versionName = version,
+                    blockedCount = blockList.rows.size.takeIf { blockList.ready },
                     links =
                         SettingsLinks(
                             openSetup = sheets::present,
                             openWhatsApp = { navigator.push(PhoneRoute.WhatsAppSettings) },
                             openStats = { navigator.push(PhoneRoute.Stats) },
+                            openRoute = { navigator.push(it) },
                             openCommon = { page ->
                                 navigator.push(
                                     when (page) {
@@ -739,6 +743,11 @@ fun PhoneApp(
                     onBack = pop,
                     onBackLongClick = popToRoot,
                 )
+            }
+            entry<PhoneRoute.Blocked> {
+                PhoneBlockedEntry(container) { number ->
+                    details.presentPerson(PersonTarget(null, persistentListOf(TargetNumber(number))))
+                }
             }
             entry<PhoneRoute.WhatsAppSettings> { PhoneWhatsAppSettings(container) }
             entry<PhoneRoute.Appearance> { PhoneAppearanceEntry(container.commonSettings, pop, popToRoot) }

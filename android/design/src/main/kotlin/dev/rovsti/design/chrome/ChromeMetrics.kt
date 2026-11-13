@@ -3,6 +3,7 @@ package dev.rovsti.design.chrome
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -89,3 +90,19 @@ val LocalContentInsets = compositionLocalOf { PaddingValues() }
 
 /** The metrics object of the screen root, for the bars to write into. */
 val LocalChromeMetrics = compositionLocalOf<ChromeMetrics?> { null }
+
+/** The clear space between the last card of a page and the floating tab bar (or the navigation bar when there is none). */
+val SettingsEndGap: Dp = 16.dp
+
+/**
+ * F37: the one end padding of every settings page. The page ends [SettingsEndGap] above the tab bar: the tab bar height,
+ * the navigation-bar inset and the bar's margin all come from [LocalContentInsets], and the system inset alone covers a
+ * page shown without the bar (or without a host, as in tests). The top of a page is its title block, which the page
+ * scaffold lays out itself.
+ */
+@Composable
+fun settingsPageEndPadding(): Dp {
+    val insets = LocalContentInsets.current.calculateBottomPadding()
+    val system = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    return maxOf(insets, system) + SettingsEndGap
+}

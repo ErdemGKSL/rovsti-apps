@@ -934,6 +934,48 @@ object RovstiIcons {
         r: Float,
     ) = ring(cx, cy, r)
 
+    /** A circle with a diagonal bar: blocked numbers. */
+    val Block: ImageVector by lazy {
+        stroked("Block") {
+            ring(12f, 12f, 8.5f)
+            moveTo(6f, 6f)
+            lineTo(18f, 18f)
+        }
+    }
+
+    /** A SIM card with its cut corner: SIM choices. */
+    val Sim: ImageVector by lazy {
+        stroked("Sim") {
+            moveTo(8f, 3.5f)
+            lineTo(14.5f, 3.5f)
+            lineTo(18.5f, 7.5f)
+            verticalLineTo(19f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 17f, 20.5f)
+            lineTo(8f, 20.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 6.5f, 19f)
+            lineTo(6.5f, 5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 8f, 3.5f)
+            close()
+            moveTo(10f, 12f)
+            lineTo(15f, 12f)
+            lineTo(15f, 17f)
+            lineTo(10f, 17f)
+            close()
+        }
+    }
+
+    /** Three bars of different height: Statistics. */
+    val BarChart: ImageVector by lazy {
+        stroked("BarChart") {
+            moveTo(6f, 19f)
+            lineTo(6f, 12f)
+            moveTo(12f, 19f)
+            lineTo(12f, 5f)
+            moveTo(18f, 19f)
+            lineTo(18f, 9f)
+        }
+    }
+
     private fun stroked(
         name: String,
         block: PathBuilder.() -> Unit,

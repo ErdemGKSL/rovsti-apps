@@ -33,6 +33,8 @@ import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.platform.PlatformEvents
 import dev.rovsti.platform.calllog.BlockGuard
 import dev.rovsti.platform.calllog.Blocklist
+import dev.rovsti.platform.calllog.PrefsPrefixStore
+import dev.rovsti.platform.calllog.covers
 import dev.rovsti.platform.identity.CallerLookup
 import dev.rovsti.platform.identity.PhoneNumbers
 import dev.rovsti.platform.notify.NotifyPhotos
@@ -167,7 +169,11 @@ object CallRegistry : CallsApi {
         BlockGuard(
             lookup = lookupExecutor,
             main = { r -> main.post(r) },
-            isBlocked = { number -> app?.let { Blocklist.isBlocked(Blocklist.System(it), number) } ?: false },
+            isBlocked = { number ->
+                app?.let {
+                    Blocklist.isBlocked(Blocklist.System(it), number) || PrefsPrefixStore(it).covers(number)
+                } ?: false
+            },
         )
     }
 

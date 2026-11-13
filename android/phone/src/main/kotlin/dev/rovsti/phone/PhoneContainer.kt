@@ -74,6 +74,8 @@ import dev.rovsti.platform.calllog.AndroidBlocklistRepository
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
 import dev.rovsti.platform.calllog.BlocklistRepository
 import dev.rovsti.platform.calllog.CallLogRepository
+import dev.rovsti.platform.calllog.PrefixStore
+import dev.rovsti.platform.calllog.PrefsPrefixStore
 import dev.rovsti.platform.contacts.AndroidContactsRepository
 import dev.rovsti.platform.contacts.ContactsQuery
 import dev.rovsti.platform.contacts.ContactsRepository
@@ -304,7 +306,7 @@ open class PhoneContainer(
     val simState: SimState by lazy { SimState(sims, ops, scope) }
 
     /** The system blocklist with the core's rules and Undo snapshots. */
-    val block: BlockRepo by lazy { BlockRepo(blocklist, ops, scope) }
+    val block: BlockRepo by lazy { BlockRepo(blocklist, ops, scope, prefixStore = createPrefixStore()) }
 
     val speedDial: SpeedDial by lazy { SpeedDial(store, ops) }
 
@@ -520,6 +522,8 @@ open class PhoneContainer(
     protected open fun createInCallBackend(): InCallBackend = CoreInCallBackend(ops)
 
     protected open fun createCallLog(): CallLogRepository = AndroidCallLogRepository(context, Dispatchers.IO)
+
+    protected open fun createPrefixStore(): PrefixStore = PrefsPrefixStore(context)
 
     protected open fun createBlocklist(): BlocklistRepository = AndroidBlocklistRepository(context, Dispatchers.IO)
 

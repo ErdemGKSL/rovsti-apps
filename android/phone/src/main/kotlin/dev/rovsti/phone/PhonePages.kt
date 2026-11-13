@@ -1,6 +1,8 @@
 package dev.rovsti.phone
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -20,6 +22,7 @@ import dev.rovsti.design.chrome.ToolbarAction
 import dev.rovsti.design.controls.EmptyState
 import dev.rovsti.design.controls.GlassIconButton
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.ios.component.IosChevron
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
@@ -47,6 +50,7 @@ object PhoneTags {
     const val SetupRow = "phone-settings-setup-row"
     const val VersionRow = "phone-settings-version-row"
     const val WhatsAppRow = "phone-settings-whatsapp-row"
+    const val BlockedRow = "phone-settings-blocked-row"
     const val Placeholder = "phone-placeholder"
 
     fun root(route: String) = "phone-root-$route"
@@ -193,12 +197,14 @@ data class SettingsLinks(
     val openCommon: (CommonSettingsPage) -> Unit,
     /** A tap on the version row; the seventh in a row opens Diagnostics. */
     val versionTapped: () -> Unit,
+    /** Pushes one of the pages Settings opens (Blocked numbers, Quick replies, ...). */
+    val openRoute: (PhoneRoute) -> Unit = {},
 )
 
 /**
- * Settings (E5.1 starts it; E5.9 adds the rest). The groups, top to bottom: Setup (progress), WhatsApp, the rows every
- * app shares (Appearance, Haptics when the preference exists, About) and the version row, which counts taps for the
- * hidden Diagnostics page.
+ * Settings (E5.9a): the inset-grouped iOS page. The groups, top to bottom: Setup (progress), Calls (Blocked numbers,
+ * Statistics), WhatsApp, the rows every app shares (Appearance, Haptics, About) and the version row, which
+ * counts taps for the hidden Diagnostics page. [blockedCount] is the value on the Blocked numbers row (null hides it).
  */
 @Composable
 fun PhoneSettingsPage(
@@ -207,6 +213,7 @@ fun PhoneSettingsPage(
     versionName: String,
     links: SettingsLinks,
     modifier: Modifier = Modifier,
+    blockedCount: Int? = null,
     onBack: (() -> Unit)? = null,
     onBackLongClick: (() -> Unit)? = null,
     onSetupAction: (SetupAction) -> Unit = {},
@@ -243,6 +250,24 @@ fun PhoneSettingsPage(
                 ) + setupRows,
         )
         IosSettingsGroup(
+            title = stringResource(R.string.settings_group_calls),
+            items =
+                listOf(
+                    pageRow(
+                        RovstiIcons.Block,
+                        R.string.settings_blocked,
+                        PhoneTags.BlockedRow,
+                        value = blockedCount?.takeIf { it > 0 }?.toString(),
+                    ) { links.openRoute(PhoneRoute.Blocked) },
+                    pageRow(
+                        RovstiIcons.BarChart,
+                        R.string.settings_stats,
+                        PhoneTags.StatsRow,
+                        onClick = links.openStats,
+                    ),
+                ),
+        )
+        IosSettingsGroup(
             items =
                 listOf(
                     IosSettingsItem(
@@ -251,13 +276,6 @@ fun PhoneSettingsPage(
                             IosText(stringResource(R.string.settings_whatsapp), Modifier.testTag(PhoneTags.WhatsAppRow))
                         },
                         onClick = links.openWhatsApp,
-                    ),
-                    IosSettingsItem(
-                        icon = rememberVectorPainter(RovstiIcons.Clock),
-                        title = {
-                            IosText(stringResource(R.string.settings_stats), Modifier.testTag(PhoneTags.StatsRow))
-                        },
-                        onClick = links.openStats,
                     ),
                 ),
         )
@@ -279,3 +297,30 @@ fun PhoneSettingsPage(
         )
     }
 }
+
+/** A Settings row that pushes a page: a tinted glyph tile, the title, an optional value and the chevron. */
+@Composable
+private fun pageRow(
+    icon: ImageVector,
+    title: Int,
+    tag: String,
+    value: String? = null,
+    onClick: () -> Unit,
+): IosSettingsItem =
+    IosSettingsItem(
+        icon = rememberVectorPainter(icon),
+        title = { IosText(stringResource(title), Modifier.testTag(tag)) },
+        trailingContent =
+            value?.let { shown ->
+                {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(PhoneMetrics.ValueGap),
+                    ) {
+                        IosText(shown)
+                        IosChevron()
+                    }
+                }
+            },
+        onClick = onClick,
+    )

@@ -8,8 +8,11 @@ import dev.rovsti.core.model.phone.BlockedLine
 import dev.rovsti.core.model.phone.BlockedNumber
 import dev.rovsti.core.model.phone.NamesByNumber
 import dev.rovsti.core.ops.PhoneOps
+import dev.rovsti.platform.calllog.BlockPrefix
 import dev.rovsti.platform.calllog.Blocklist
 import dev.rovsti.platform.calllog.BlocklistRepository
+import dev.rovsti.platform.calllog.MemoryPrefixStore
+import dev.rovsti.platform.calllog.PrefixStore
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -56,7 +59,30 @@ sealed interface BlockResult {
 data class BlockUndo(
     val unblock: List<String> = emptyList(),
     val block: List<String> = emptyList(),
+    /** Prefix ranges (U55) that Undo takes off the list again. */
+    val removePrefixes: List<String> = emptyList(),
+    /** Prefix ranges that Undo puts back. */
+    val addPrefixes: List<String> = emptyList(),
 )
+
+/** What [BlockRepo.addPrefix] did. */
+sealed interface PrefixResult {
+    data class Added(
+        val undo: BlockUndo,
+        val display: String,
+    ) : PrefixResult
+
+    /** Letters or dial codes. */
+    data object Invalid : PrefixResult
+
+    /** Fewer than [BlockPrefix.MIN_DIGITS] digits. */
+    data object TooShort : PrefixResult
+
+    /** The range is itself an emergency number. */
+    data object Emergency : PrefixResult
+
+    data object AlreadyBlocked : PrefixResult
+}
 
 /**
  * The blocklist: [BlocklistRepository] (the system provider, shared with the SMS app) plus the core's rules.
@@ -71,11 +97,17 @@ class BlockRepo(
     /** Contact names for the list rows, by number as stored. */
     private val names: () -> NamesByNumber = { emptyMap() },
     private val clock: () -> Long = System::currentTimeMillis,
+    /** The prefix ranges (U55); the system blocklist cannot hold them. */
+    private val prefixStore: PrefixStore = MemoryPrefixStore(),
 ) {
     private val state = MutableStateFlow(BlockList())
+    private val prefixState = MutableStateFlow<ImmutableList<String>>(prefixStore.all().toImmutableList())
     private var current: List<BlockedNumber> = emptyList()
 
     val list: StateFlow<BlockList> = state.asStateFlow()
+
+    /** The prefix ranges as typed ("+90 850"), oldest first. */
+    val prefixes: StateFlow<ImmutableList<String>> = prefixState.asStateFlow()
 
     init {
         scope.launch {
@@ -126,11 +158,54 @@ class BlockRepo(
         return BlockResult.Done(BlockUndo(block = done))
     }
 
+    /** Blocks every number of [numbers] (already parsed by the core); the snapshot lists what was new. */
+    suspend fun blockAll(numbers: List<String>): BlockResult {
+        val added = mutableListOf<String>()
+        var failure: BlockResult? = null
+        for (raw in numbers) {
+            if (check(raw) != null) continue
+            when (repository.block(raw)) {
+                Blocklist.Result.OK -> added += raw
+                Blocklist.Result.UNAVAILABLE -> failure = failure ?: BlockResult.Unavailable
+                else -> failure = failure ?: BlockResult.Failed
+            }
+        }
+        if (added.isEmpty() && failure != null) return failure
+        return BlockResult.Done(BlockUndo(unblock = added))
+    }
+
+    /** Adds the range [typed] (U55): the core refuses an emergency number, [BlockPrefix] the rest. */
+    suspend fun addPrefix(typed: String): PrefixResult {
+        val parsed =
+            when (val p = BlockPrefix.parse(typed)) {
+                BlockPrefix.Parsed.Invalid -> return PrefixResult.Invalid
+                BlockPrefix.Parsed.TooShort -> return PrefixResult.TooShort
+                is BlockPrefix.Parsed.Valid -> p
+            }
+        val verdict = (ops.blockCheck(BlockCheckRequest(raw = parsed.key)) as? Outcome.Ok)?.value
+        if (verdict?.refusal == BlockRefusal.Emergency) return PrefixResult.Emergency
+        if (!prefixStore.add(parsed.display)) return PrefixResult.AlreadyBlocked
+        prefixState.value = prefixStore.all().toImmutableList()
+        return PrefixResult.Added(BlockUndo(removePrefixes = listOf(parsed.display)), parsed.display)
+    }
+
+    /** Removes the range [display]; the snapshot puts it back. */
+    fun removePrefix(display: String): BlockUndo? {
+        if (!prefixStore.remove(display)) return null
+        prefixState.value = prefixStore.all().toImmutableList()
+        return BlockUndo(addPrefixes = listOf(display))
+    }
+
     /** Takes one change back; true when everything went through. */
     suspend fun undo(undo: BlockUndo): Boolean {
         var ok = true
         for (n in undo.unblock) ok = repository.unblock(n) == Blocklist.Result.OK && ok
         for (n in undo.block) ok = repository.block(n) == Blocklist.Result.OK && ok
+        for (p in undo.removePrefixes) prefixStore.remove(p)
+        for (p in undo.addPrefixes) prefixStore.add(p)
+        if (undo.removePrefixes.isNotEmpty() || undo.addPrefixes.isNotEmpty()) {
+            prefixState.value = prefixStore.all().toImmutableList()
+        }
         return ok
     }
 

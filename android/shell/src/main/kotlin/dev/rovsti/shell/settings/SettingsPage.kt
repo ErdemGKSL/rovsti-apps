@@ -16,9 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -38,6 +36,7 @@ import dev.rovsti.design.chrome.ScaffoldSpec
 import dev.rovsti.design.chrome.ScreenLazyPage
 import dev.rovsti.design.chrome.ScreenPage
 import dev.rovsti.design.chrome.ScreenScaffold
+import dev.rovsti.design.chrome.settingsPageEndPadding
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.LocalIosContentColor
@@ -117,10 +116,7 @@ fun SettingsPage(
             actions = actions,
             scrollState = scrollState,
             largeTitle = settingsLargeTitle(title, gutter, onBack != null || LocalPageBack.current != null),
-            content = {
-                content()
-                Spacer(Modifier.height(SettingsMetrics.S32))
-            },
+            content = content,
         )
     }
 }
@@ -146,7 +142,7 @@ fun SettingsLazyPage(
             onBack = onBack,
             onBackLongClick = onBackLongClick,
             pageColor = IosTheme.colors.systemGroupedBackground,
-            contentPadding = PaddingValues(start = gutter, end = gutter, bottom = SettingsMetrics.S112),
+            contentPadding = PaddingValues(start = gutter, end = gutter, bottom = settingsPageEndPadding()),
             actions = actions,
             listState = listState,
             largeTitle = settingsLargeTitle(title, gutter, onBack != null || LocalPageBack.current != null),

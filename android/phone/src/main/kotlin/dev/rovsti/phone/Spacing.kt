@@ -28,6 +28,9 @@ internal object PhoneMetrics {
 
     /** The gear button of the Keypad placeholder keeps the status bar clear by this margin. */
     val CornerInset = 8.dp
+
+    /** Gap between a Settings row's value and its chevron. */
+    val ValueGap = 8.dp
 }
 
 /** Font scale above which the Setup buttons stack instead of sitting in one row. */
@@ -260,4 +263,12 @@ internal object StatsMotion {
     const val DAMPING = 0.8f
     const val STIFFNESS = 300f
     const val STAGGER_MS = 30L
+}
+
+/** The Blocked numbers page (E5.9a): the glyph in front of an action row. */
+internal object BlockedMetrics {
+    val Glyph = 22.dp
+
+    /** The cards bring their own gutters, so the page behind them has none. */
+    val NoGutter = 0.dp
 }

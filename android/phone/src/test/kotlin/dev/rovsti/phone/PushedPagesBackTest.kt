@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
 import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.core.model.stops.Appearance
+import dev.rovsti.phone.settings.blocked.BlockedContent
+import dev.rovsti.phone.settings.blocked.BlockedSample
 import dev.rovsti.shell.settings.AboutInfo
 import dev.rovsti.shell.settings.AboutPage
 import dev.rovsti.shell.settings.AppearancePage
@@ -47,6 +49,10 @@ class PushedPagesBackTest : ShotTest() {
             PhoneRoute.About to { AboutPage(about, onOpenLicences = {}) },
             PhoneRoute.Licences to { LicencesPage(licences, onOpen = {}) },
             PhoneRoute.LicenceDetail(OwnLicenceId) to { LicenceDetailPage(OwnLicenceId, licences) },
+            // E5.9: the pages Settings opens (the others join with their steps).
+            PhoneRoute.Blocked to {
+                BlockedContent(BlockedSample.ui(), onAction = {}, onPaste = {}, onPrefix = {}, onImport = {})
+            },
         )
 
     @Test fun everyPushedPhonePageHasOneBackButtonAndTheFullTabBar() {

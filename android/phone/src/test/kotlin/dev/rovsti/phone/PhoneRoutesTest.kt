@@ -67,9 +67,54 @@ class PhoneRoutesTest {
             PhoneRoute.About,
             PhoneRoute.Licences,
             PhoneRoute.LicenceDetail("x"),
+            PhoneRoute.Blocked,
+            PhoneRoute.QuickReplies,
+            PhoneRoute.SpeedDialPage,
+            PhoneRoute.SimChoices,
+            PhoneRoute.Data,
+            PhoneRoute.Backup,
+            PhoneRoute.Stats,
+            PhoneRoute.Notes,
         )
         ) {
             assertEquals(route.toString(), TabBarMode.Visible, chromeFor(route).tabBar)
+        }
+    }
+
+    @Test fun theSettingsPagesAreTitledAndNeverTabRoots() {
+        val pages =
+            listOf(
+                PhoneRoute.Blocked to "Blocked numbers",
+                PhoneRoute.QuickReplies to "Quick replies",
+                PhoneRoute.SpeedDialPage to "Speed dial",
+                PhoneRoute.SimChoices to "SIM choices",
+                PhoneRoute.Data to "Call history",
+                PhoneRoute.Backup to "Backup and restore",
+                PhoneRoute.Stats to "Call statistics",
+                PhoneRoute.Notes to "Notes",
+            )
+        for ((route, title) in pages) {
+            assertEquals(route.toString(), title, chromeFor(route).largeTitle)
+            assertFalse(route.toString(), route in PhoneRoots.values)
+        }
+    }
+
+    @Test fun theNewRoutesSurviveASaveAndRestore() {
+        val all =
+            listOf(
+                PhoneRoute.Blocked,
+                PhoneRoute.QuickReplies,
+                PhoneRoute.SpeedDialPage,
+                PhoneRoute.SimChoices,
+                PhoneRoute.Data,
+                PhoneRoute.Backup,
+                PhoneRoute.Stats,
+                PhoneRoute.Notes,
+            )
+        val json = kotlinx.serialization.json.Json
+        for (route in all) {
+            val text = json.encodeToString(PhoneRoute.serializer(), route)
+            assertEquals(route, json.decodeFromString(PhoneRoute.serializer(), text))
         }
     }
 
@@ -87,6 +132,14 @@ class PhoneRoutesTest {
                 PhoneRoute.About,
                 PhoneRoute.Licences,
                 PhoneRoute.LicenceDetail("x"),
+                PhoneRoute.Blocked,
+                PhoneRoute.QuickReplies,
+                PhoneRoute.SpeedDialPage,
+                PhoneRoute.SimChoices,
+                PhoneRoute.Data,
+                PhoneRoute.Backup,
+                PhoneRoute.Stats,
+                PhoneRoute.Notes,
             )
         for (route in pushed) {
             if (route in roots) continue

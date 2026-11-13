@@ -71,6 +71,29 @@ sealed interface PhoneRoute {
     data class LicenceDetail(
         val id: String,
     ) : PhoneRoute
+
+    // The pages Settings opens (E5.9): each is pushed with the glass back button and the full tab bar.
+    @Serializable
+    data object Blocked : PhoneRoute
+
+    @Serializable
+    data object QuickReplies : PhoneRoute
+
+    @Serializable
+    data object SpeedDialPage : PhoneRoute
+
+    @Serializable
+    data object SimChoices : PhoneRoute
+
+    /** Call history: export, delete older than, delete all. */
+    @Serializable
+    data object Data : PhoneRoute
+
+    @Serializable
+    data object Backup : PhoneRoute
+
+    @Serializable
+    data object Notes : PhoneRoute
 }
 
 internal val FavoritesTab = Tab("favorites")
@@ -125,6 +148,13 @@ fun chromeFor(route: PhoneRoute): ChromeSpec =
         PhoneRoute.About -> ChromeSpec(TabBarMode.Visible, largeTitle = "About")
         PhoneRoute.Licences -> ChromeSpec(TabBarMode.Visible, largeTitle = "Licences")
         is PhoneRoute.LicenceDetail -> ChromeSpec(TabBarMode.Visible)
+        PhoneRoute.Blocked -> ChromeSpec(TabBarMode.Visible, largeTitle = "Blocked numbers")
+        PhoneRoute.QuickReplies -> ChromeSpec(TabBarMode.Visible, largeTitle = "Quick replies")
+        PhoneRoute.SpeedDialPage -> ChromeSpec(TabBarMode.Visible, largeTitle = "Speed dial")
+        PhoneRoute.SimChoices -> ChromeSpec(TabBarMode.Visible, largeTitle = "SIM choices")
+        PhoneRoute.Data -> ChromeSpec(TabBarMode.Visible, largeTitle = "Call history")
+        PhoneRoute.Backup -> ChromeSpec(TabBarMode.Visible, largeTitle = "Backup and restore")
+        PhoneRoute.Notes -> ChromeSpec(TabBarMode.Visible, largeTitle = "Notes")
     }
 
 /** [chromeFor] while Recents is in select mode: the tab bar folds beside the select toolbar (tab roots only). */

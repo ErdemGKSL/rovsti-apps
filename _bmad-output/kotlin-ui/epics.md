@@ -1156,7 +1156,7 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
 > `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
 > (definition of done item 6).
 | E5.7b | In-call: multi-call, Add call, conference | R2 | done (round-13 step 8) |
-| E5.9 | Settings | R2 | todo (not in HEAD, verified 2026-11-13: work in `stash@{2}` r14-s2 and `stash@{1}` r14-s3; recovery = round 15 steps 1-2, with F37 bar end padding) |
+| E5.9 | Settings | R2 | in-progress (round 15 step 1: E5.9a Settings root + Blocked numbers recovered from `stash@{2}`, F37 shared end padding `settingsPageEndPadding()`; E5.9b Quick replies, Speed dial, SIM choices, Data, Backup next, `stash@{1}`) |
 | E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
 | E5.11 | Notes page | R2 | todo (not in HEAD: `stash@{0}` r14-s5; recovery = round 15 step 3, with F38 raw number in unnamed rows) |
 | E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
@@ -1344,6 +1344,8 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 - Screenshots: `e5.8-wa-incoming`, `e5.8-wa-incoming-photo`, `e5.8-wa-incall-dimmed-controls`, `e5.8-wa-waiting-during-cellular`.
 
 ### E5.9 Settings
+- **Status: in-progress** (round 15 step 1 = E5.9a Settings root and Blocked numbers, recovered from `stash@{2}`; E5.9b Quick replies, Speed dial, SIM choices, Data, Backup follow from `stash@{1}`).
+- **Evidence (E5.9a, round 15 step 1):** Settings root = Setup section (HEAD), Calls group (Blocked numbers with the count, Call statistics), WhatsApp, Appearance/Haptics/About, version row. New pushed routes `Blocked` (E5.9a) and placeholders for the E5.9b routes. `settings/blocked/BlockedViewModel` + `BlockedScreen` over `BlockRepo` and the core blocklist ops: swipe Unblock + Undo, paste-many sheet (multi-line field, `imeOverlapPadding`, golden `e5.9-block-paste-many-ime`), prefix ranges (`platform/calllog/BlockPrefixes.kt`, matched through `identity/PhoneNumbers`, checked next to the system list in `CallRegistry`'s block guard), share/unblock all, CSV export/import, blocked calls. F37: every settings page ends `settingsPageEndPadding()` (bar height + navigation bars + 16 dp) above the tab bar; `SettingsEndPaddingTest`. Tests: `BlockedViewModelTest`, `BlockedScreenTest`, `BlockPrefixTest`, `PhoneRoutesTest`, `PushedPagesBackTest`, `SettingsEndPaddingTest`.
 - Screenshots: `e5.9-settings`, `e5.9-blocked-list`, `e5.9-block-paste-many`, `e5.9-quick-replies`, `e5.9-speed-dial`,
   `e5.9-data-delete-older`, `e5.9-settings-fs2`.
 

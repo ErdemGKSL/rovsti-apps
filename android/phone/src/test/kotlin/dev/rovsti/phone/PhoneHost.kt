@@ -42,6 +42,7 @@ internal class PhoneHarness(
             openStats = { opened += "stats" },
             openCommon = { opened += "common-$it" },
             versionTapped = { taps++ },
+            openRoute = { opened += "route-$it" },
         )
 }
 
@@ -176,6 +177,8 @@ internal fun HostedPhone(
     keypad: @Composable () -> Unit = { KeypadPlaceholder(harness.links()) },
     // The Statistics page (E5.10).
     stats: @Composable () -> Unit = {},
+    // The value on the Blocked numbers row of Settings and .
+    blockedCount: Int? = 12,
 ) {
     val navigator =
         remember {
@@ -225,7 +228,13 @@ internal fun HostedPhone(
         }
         entry<PhoneRoute.Keypad> { keypad() }
         entry<PhoneRoute.Settings> {
-            PhoneSettingsPage(setup, harness.common, "0.1.0", harness.settingsLinks())
+            PhoneSettingsPage(
+                setup,
+                harness.common,
+                "0.1.0",
+                harness.settingsLinks(),
+                blockedCount = blockedCount,
+            )
         }
         entry<PhoneRoute.Stats> { stats() }
         entry<PhoneRoute.WhatsAppSettings> { extra() }
@@ -234,6 +243,13 @@ internal fun HostedPhone(
         entry<PhoneRoute.About> { extra() }
         entry<PhoneRoute.Licences> { extra() }
         entry<PhoneRoute.LicenceDetail> { extra() }
+        entry<PhoneRoute.Blocked> { extra() }
+        entry<PhoneRoute.QuickReplies> { extra() }
+        entry<PhoneRoute.SpeedDialPage> { extra() }
+        entry<PhoneRoute.SimChoices> { extra() }
+        entry<PhoneRoute.Data> { extra() }
+        entry<PhoneRoute.Backup> { extra() }
+        entry<PhoneRoute.Notes> { extra() }
         entry<PhoneRoute.Diagnostics> {
             DiagnosticsScreen(PhoneSample.diagnostics(), onCopyAll = {
                 harness.opened +=

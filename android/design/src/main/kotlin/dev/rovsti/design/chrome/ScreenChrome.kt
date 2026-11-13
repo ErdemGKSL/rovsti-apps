@@ -385,7 +385,7 @@ fun ScreenPage(
 
             content()
 
-            Spacer(Modifier.height(80.dp))
+            Spacer(Modifier.height(settingsPageEndPadding()))
         }
     }
 }

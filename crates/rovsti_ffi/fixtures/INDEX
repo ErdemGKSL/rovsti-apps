@@ -568,6 +568,8 @@ search.index_replace.stale_handle
 search.match_number
 search.match_number.unknown
 search.match_number.unparsable
+search.match_numbers
+search.match_numbers.stale_handle
 search.query
 search.query.cyrillic
 search.query.digits

@@ -143,6 +143,7 @@ mod tests {
                 raw: number.to_owned(),
                 label: None,
                 default: false,
+                normalized: None,
             }],
             ..WireContact::default()
         }

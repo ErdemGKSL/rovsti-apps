@@ -426,6 +426,7 @@ mod tests {
                 raw: raw.into(),
                 label: None,
                 default: false,
+                normalized: None,
             })
         };
         assert_eq!(n("+49 30 1234567").display, "+49 30 1234567");
@@ -493,6 +494,7 @@ mod tests {
             raw: raw.to_owned(),
             label: label.map(str::to_owned),
             default,
+            normalized: None,
         }
     }
 

@@ -304,6 +304,7 @@ mod tests {
                 raw: number.into(),
                 label: None,
                 default: false,
+                normalized: None,
             }],
             ..Default::default()
         }

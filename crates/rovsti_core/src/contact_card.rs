@@ -65,6 +65,7 @@ mod tests {
             raw: raw.to_owned(),
             label: label.map(str::to_owned),
             default,
+            normalized: None,
         }
     }
 

@@ -491,7 +491,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rovsti_core::schedule::ScheduleQueue` | messages | messages | op | schedule.add, schedule.cancel, schedule.load, schedule.due_soon |
 | `rovsti_core::schedule::ScheduleTarget` | messages | messages | op | schedule.add |
 | `rovsti_core::schedule::ScheduledSms` | messages | messages | op | schedule.add |
-| `rovsti_core::search::ContactIndex` | contacts,messages,phone | search | op | search.index_new, search.index_replace, search.set_call_counts, search.query, search.query_loose, search.match_number |
+| `rovsti_core::search::ContactIndex` | contacts,messages,phone | search | op | search.index_new, search.index_replace, search.set_call_counts, search.query, search.query_loose, search.match_number, search.match_numbers |
 | `rovsti_core::search::fold` | contacts,phone,stops | search | op | search.fold |
 | `rovsti_core::settings::BACKUP_KIND` | phone | platform | op | phone.backup_export, phone.backup_import |
 | `rovsti_core::settings::DEFAULT_REPLIES` | phone | phone | op | phone.reply_choices |

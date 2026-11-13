@@ -684,6 +684,9 @@ pub struct WireNumber {
         skip_serializing_if = "is_false"
     )]
     pub default: bool,
+    /// `Phone.NORMALIZED_NUMBER`: the provider's E.164 form, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized: Option<String>,
 }
 
 /// A contact as pulled from `ContactsContract`.

@@ -376,6 +376,7 @@ mod tests {
                     raw: (*n).into(),
                     label: None,
                     default: false,
+                    normalized: None,
                 })
                 .collect(),
             ..Default::default()

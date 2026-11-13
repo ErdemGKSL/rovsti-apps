@@ -28,6 +28,8 @@ data class WireNumber(
     @EncodeDefault(NEVER) val label: String? = null,
     /** The contact's default (super-primary) number. */
     @EncodeDefault(NEVER) val default: Boolean = false,
+    /** `Phone.NORMALIZED_NUMBER`: the provider's E.164 form, when it has one. */
+    @EncodeDefault(NEVER) val normalized: String? = null,
 )
 
 /** A contact as pulled from `ContactsContract` (`rovsti_core::wire::WireContact`). */
@@ -100,6 +102,27 @@ data class QueryAnswer(
 data class MatchNumberRequest(
     val handle: Long,
     val number: String,
+)
+
+/** One number to resolve and the E.164 form the platform found for it (`PhoneNumberUtils.formatNumberToE164`). */
+@Serializable
+data class WantedNumber(
+    val raw: String,
+    @EncodeDefault(NEVER) val e164: String? = null,
+)
+
+/** `search.match_numbers`: who owns each of [numbers]; [homeCc] (`"90"`) is the country of national numbers. */
+@Serializable
+data class MatchNumbersRequest(
+    val handle: Long,
+    val numbers: List<WantedNumber>,
+    @SerialName("home_cc") @EncodeDefault(NEVER) val homeCc: String? = null,
+)
+
+/** The contact id per wanted number, in request order; null for a stranger or a withheld number. */
+@Serializable
+data class MatchNumbersAnswer(
+    val ids: List<Long?>,
 )
 
 /** The contact owning a number, or both null. */

@@ -17,11 +17,14 @@ import dev.rovsti.core.model.search.IndexNewRequest
 import dev.rovsti.core.model.search.IndexReplaceRequest
 import dev.rovsti.core.model.search.MatchNumberAnswer
 import dev.rovsti.core.model.search.MatchNumberRequest
+import dev.rovsti.core.model.search.MatchNumbersAnswer
+import dev.rovsti.core.model.search.MatchNumbersRequest
 import dev.rovsti.core.model.search.NameFormat
 import dev.rovsti.core.model.search.QueryAnswer
 import dev.rovsti.core.model.search.QueryRequest
 import dev.rovsti.core.model.search.T9Answer
 import dev.rovsti.core.model.search.T9Request
+import dev.rovsti.core.model.search.WantedNumber
 import dev.rovsti.core.model.search.WireContact
 
 /**
@@ -47,6 +50,9 @@ interface SearchOps {
     /** The contact that owns a number. */
     suspend fun matchNumber(req: MatchNumberRequest): Outcome<MatchNumberAnswer>
 
+    /** The contact id behind each number (`rovsti_core::caller_id`), in request order. */
+    suspend fun matchNumbers(req: MatchNumbersRequest): Outcome<MatchNumbersAnswer>
+
     /** Case- and accent-folds text the way the index does. */
     suspend fun fold(req: FoldRequest): Outcome<FoldAnswer>
 
@@ -63,6 +69,7 @@ interface SearchOps {
                 "search.query",
                 "search.query_loose",
                 "search.match_number",
+                "search.match_numbers",
                 "search.fold",
                 "t9.query",
             )
@@ -90,6 +97,9 @@ class NativeSearchOps(
 
     override suspend fun matchNumber(req: MatchNumberRequest) =
         core.call("search.match_number", req, MatchNumberRequest.serializer(), MatchNumberAnswer.serializer())
+
+    override suspend fun matchNumbers(req: MatchNumbersRequest) =
+        core.call("search.match_numbers", req, MatchNumbersRequest.serializer(), MatchNumbersAnswer.serializer())
 
     override suspend fun fold(req: FoldRequest) =
         core.call("search.fold", req, FoldRequest.serializer(), FoldAnswer.serializer())
@@ -126,6 +136,12 @@ class ContactIndexHandle internal constructor(
 
     suspend fun matchNumber(number: String): Outcome<MatchNumberAnswer> =
         guarded { ops.matchNumber(MatchNumberRequest(id, number)) }()
+
+    /** The contact id behind each of [numbers] (null: nobody), in order. */
+    suspend fun matchNumbers(
+        numbers: List<WantedNumber>,
+        homeCc: String?,
+    ): Outcome<MatchNumbersAnswer> = guarded { ops.matchNumbers(MatchNumbersRequest(id, numbers, homeCc)) }()
 
     suspend fun replace(contacts: List<WireContact>): Outcome<IndexAnswer> =
         guarded { ops.indexReplace(IndexReplaceRequest(id, contacts)) }()

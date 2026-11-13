@@ -173,6 +173,7 @@ mod tests {
                 raw: raw.into(),
                 label: None,
                 default: false,
+                normalized: None,
             }],
             ..WireContact::default()
         }

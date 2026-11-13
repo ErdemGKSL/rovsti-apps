@@ -59,6 +59,13 @@ pub(super) const OPS: &[OpSpec] = &[
         match_number,
         match_cases
     ),
+    op!(
+        "search.match_numbers",
+        MatchManyReq,
+        MatchManyAns,
+        match_numbers,
+        match_many_cases
+    ),
     op!("search.fold", FoldReq, FoldAns, fold, fold_cases),
     op!("t9.query", T9Req, T9Ans, t9_query, t9_cases),
 ];
@@ -300,6 +307,65 @@ fn match_cases() -> Vec<Case> {
         Case::named("unknown", json!({"handle": H, "number": "+49 151 2345678"}))
             .after(op, req.clone()),
         Case::named("unparsable", json!({"handle": H, "number": "abc"})).after(op, req),
+    ]
+}
+
+// ---- match_numbers ----
+
+/// One number to resolve, with the E.164 form the platform found for it.
+#[derive(Deserialize)]
+struct Wanted {
+    raw: String,
+    #[serde(default)]
+    e164: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MatchManyReq {
+    handle: i64,
+    numbers: Vec<Wanted>,
+    /// The home calling code (`"90"`) national numbers belong to.
+    #[serde(default)]
+    home_cc: Option<String>,
+}
+
+/// The contact id per wanted number, in order; `None` for a stranger.
+#[derive(Serialize)]
+struct MatchManyAns {
+    ids: Vec<Option<i64>>,
+}
+
+fn match_numbers(req: MatchManyReq) -> Result<MatchManyAns, FfiError> {
+    with_contacts(req.handle, |c| {
+        c.index.set_home_cc(req.home_cc.as_deref());
+        let ids = req
+            .numbers
+            .iter()
+            .map(|w| {
+                c.index
+                    .match_number_e164(&w.raw, w.e164.as_deref())
+                    .map(|row| row.id)
+            })
+            .collect();
+        Ok(MatchManyAns { ids })
+    })
+}
+
+fn match_many_cases() -> Vec<Case> {
+    let (op, req) = setup();
+    vec![
+        Case::new(json!({"handle": H, "home_cc": "90", "numbers": [
+            {"raw": "05321234567"},
+            {"raw": "905321234567"},
+            {"raw": "532-123-4567", "e164": "+905321234567"},
+            {"raw": "-2"},
+            {"raw": "+49 151 2345678"}
+        ]}))
+        .after(op, req.clone()),
+        Case::named(
+            "stale_handle",
+            json!({"handle": H, "numbers": [{"raw": "112"}]}),
+        ),
     ]
 }
 

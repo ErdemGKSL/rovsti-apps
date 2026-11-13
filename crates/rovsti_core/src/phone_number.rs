@@ -13,6 +13,11 @@ use std::fmt;
 /// uses 7; 9 avoids most false positives on mobile numbers).
 const MATCH_TAIL: usize = 9;
 
+/// The fewest national digits a number needs to have an E.164 form; shorter
+/// ones are short codes and service numbers (`112`, `4440123`) that only ever
+/// match exactly.
+pub const MIN_E164_NSN: usize = 8;
+
 /// Invisible direction and format marks that contact apps paste around
 /// numbers (LRM, RLM, embeddings, isolates, zero-width, BOM). They carry no
 /// digit and are ignored everywhere a number is read.
@@ -52,6 +57,43 @@ pub(crate) fn search_digits(raw: &str) -> String {
         .chars()
         .filter(char::is_ascii_digit)
         .collect()
+}
+
+/// True for what a call log or a caller-ID writes for a caller nobody can
+/// name: an empty number, Android's presentation placeholders (`-1` unknown,
+/// `-2` private, `-3` payphone) and the words some phones store instead.
+/// Such a number never matches a contact.
+pub fn is_withheld(raw: &str) -> bool {
+    let text = raw.trim_matches(|c: char| c.is_whitespace() || is_format_char(c));
+    if text.is_empty() || matches!(text, "-1" | "-2" | "-3" | "-4") {
+        return true;
+    }
+    let lower = text.to_lowercase();
+    matches!(
+        lower.as_str(),
+        "unknown" | "private" | "anonymous" | "payphone" | "restricted" | "withheld"
+    )
+}
+
+/// `raw` without an extension or a dial string after the number:
+/// `+90 212 555 00 00 ext. 12`, `x12`, `;ext=12`, `,12` (pause) and `;12`
+/// (wait) all give `+90 212 555 00 00`. A service code (`*`, `#`) is kept
+/// whole: `*#06#` is not a number with an extension.
+pub fn strip_extension(raw: &str) -> &str {
+    if raw.contains(['*', '#']) && !raw.trim_start().starts_with('+') {
+        return raw;
+    }
+    let lower = raw.to_ascii_lowercase();
+    let mut cut = raw.len();
+    for marker in [",", ";", "#", "ext", "x", "p", "w"] {
+        if let Some(at) = lower.find(marker) {
+            // Only after some digits: a leading marker is not an extension.
+            if raw[..at].bytes().any(|b| b.is_ascii_digit()) {
+                cut = cut.min(at);
+            }
+        }
+    }
+    raw[..cut].trim_end_matches(|c: char| c.is_whitespace() || c == '.' || c == ':')
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -116,8 +158,37 @@ impl PhoneNumber {
         self.canonical.starts_with('+')
     }
 
-    fn digits(&self) -> &str {
+    /// The digits without the `+`.
+    pub fn digits(&self) -> &str {
         self.canonical.trim_start_matches('+')
+    }
+
+    /// The number in E.164 (`+905321234567`) with `home_cc` (`"90"`) as the
+    /// country of a national number: one trunk `0` is dropped, `00` was read
+    /// as `+` by [`Self::parse`], and a number that already starts with the
+    /// home code and is too long to be national (`905321234567`) only lacks
+    /// its `+`. `None` for short codes (under [`MIN_E164_NSN`] digits), and
+    /// for a national number when the home country is unknown.
+    pub fn to_e164(&self, home_cc: Option<&str>) -> Option<String> {
+        let digits = self.digits();
+        if self.is_international() {
+            return (digits.len() >= MIN_E164_NSN).then(|| self.canonical.clone());
+        }
+        let cc = home_cc
+            .map(|c| c.trim().trim_start_matches('+'))
+            .filter(|c| (1..=3).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_digit()))
+            .filter(|c| !c.starts_with('0'))?;
+        if let Some(nsn) = digits.strip_prefix('0') {
+            return (nsn.len() >= MIN_E164_NSN && !nsn.starts_with('0'))
+                .then(|| format!("+{cc}{nsn}"));
+        }
+        if digits.len() < MIN_E164_NSN {
+            return None;
+        }
+        if digits.starts_with(cc) && digits.len() > cc.len() + MIN_E164_NSN && digits.len() >= 11 {
+            return Some(format!("+{digits}"));
+        }
+        Some(format!("+{cc}{digits}"))
     }
 
     /// True when both numbers very likely reach the same line, e.g.
@@ -208,6 +279,88 @@ mod tests {
     fn short_codes_match_exactly() {
         assert!(n("112").matches(&n("112")));
         assert!(!n("112").matches(&n("0112")));
+    }
+
+    #[test]
+    fn e164_with_the_home_country() {
+        let tr = Some("90");
+        assert_eq!(
+            n("+90 532 123 45 67").to_e164(tr).as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(
+            n("0532 123 45 67").to_e164(tr).as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(
+            n("(532) 123-45-67").to_e164(tr).as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(
+            n("0090 532 123 45 67").to_e164(tr).as_deref(),
+            Some("+905321234567")
+        );
+        // The `+` is missing, the country code is not.
+        assert_eq!(
+            n("905321234567").to_e164(tr).as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(
+            n("+1 555 123 4567").to_e164(tr).as_deref(),
+            Some("+15551234567")
+        );
+        assert_eq!(
+            n("555 123 4567").to_e164(Some("+1")).as_deref(),
+            Some("+15551234567")
+        );
+        assert_eq!(
+            n("15551234567").to_e164(Some("1")).as_deref(),
+            Some("+15551234567")
+        );
+    }
+
+    #[test]
+    fn e164_needs_a_country_and_a_full_number() {
+        assert_eq!(n("0532 123 45 67").to_e164(None), None);
+        assert_eq!(n("0532 123 45 67").to_e164(Some("0")), None);
+        assert_eq!(n("112").to_e164(Some("90")), None);
+        assert_eq!(n("444 0 123").to_e164(Some("90")), None);
+        assert_eq!(n("+90 112").to_e164(Some("90")), None);
+    }
+
+    #[test]
+    fn withheld_numbers() {
+        for raw in [
+            "",
+            "  ",
+            "-1",
+            "-2",
+            "-3",
+            "Unknown",
+            "PRIVATE",
+            "Anonymous",
+            "payphone",
+        ] {
+            assert!(is_withheld(raw), "{raw:?}");
+        }
+        for raw in ["112", "+905321234567", "0", "-12"] {
+            assert!(!is_withheld(raw), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn extensions_are_cut() {
+        assert_eq!(
+            strip_extension("+90 212 555 00 00 ext. 12"),
+            "+90 212 555 00 00"
+        );
+        assert_eq!(strip_extension("+902125550000x12"), "+902125550000");
+        assert_eq!(strip_extension("02125550000;ext=12"), "02125550000");
+        assert_eq!(strip_extension("02125550000,,12"), "02125550000");
+        assert_eq!(strip_extension("02125550000;12"), "02125550000");
+        assert_eq!(strip_extension("+902125550000#12"), "+902125550000");
+        assert_eq!(strip_extension("*#06#"), "*#06#");
+        assert_eq!(strip_extension("0532 123 45 67"), "0532 123 45 67");
     }
 
     #[test]

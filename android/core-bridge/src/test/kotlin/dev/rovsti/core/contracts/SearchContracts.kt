@@ -11,6 +11,8 @@ import dev.rovsti.core.model.search.IndexNewRequest
 import dev.rovsti.core.model.search.IndexReplaceRequest
 import dev.rovsti.core.model.search.MatchNumberAnswer
 import dev.rovsti.core.model.search.MatchNumberRequest
+import dev.rovsti.core.model.search.MatchNumbersAnswer
+import dev.rovsti.core.model.search.MatchNumbersRequest
 import dev.rovsti.core.model.search.QueryAnswer
 import dev.rovsti.core.model.search.QueryRequest
 import dev.rovsti.core.model.search.T9Answer
@@ -32,6 +34,7 @@ object SearchContracts : ContractModels {
             )
             op<QueryRequest, QueryAnswer>("search.query_loose", ok = listOf("words"))
             op<MatchNumberRequest, MatchNumberAnswer>("search.match_number", ok = listOf("unknown", "unparsable"))
+            op<MatchNumbersRequest, MatchNumbersAnswer>("search.match_numbers", err = listOf("stale_handle"))
             op<FoldRequest, FoldAnswer>("search.fold")
             op<T9Request, T9Answer>("t9.query", ok = listOf("by_number", "not_digits", "last_first"))
         }

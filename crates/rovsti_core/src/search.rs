@@ -6,7 +6,7 @@
 //! [`ContactIndex`] is built once per contacts payload and then queried with
 //! `&self`, so typing never rebuilds anything.
 
-use crate::phone_number::{PhoneNumber, is_format_char, search_digits};
+use crate::phone_number::{is_format_char, search_digits};
 use crate::wire::WireContact;
 
 /// Folds one character for comparison, appending to `out`. Turkish letters
@@ -131,7 +131,6 @@ pub(crate) struct Entry {
     folded_email: Option<String>,
     /// Digits only, per number.
     pub(crate) digits: Vec<String>,
-    parsed: Vec<Option<PhoneNumber>>,
     /// T9 codes of the primary name, and of the alternative when it differs.
     pub(crate) t9: crate::t9::NameCodes,
     pub(crate) t9_alt: Option<crate::t9::NameCodes>,
@@ -145,6 +144,8 @@ pub(crate) struct Entry {
 #[derive(Default)]
 pub struct ContactIndex {
     pub(crate) entries: Vec<Entry>,
+    /// Who owns which number ([`crate::caller_id`]), for the home country set last.
+    book: crate::caller_id::NumberBook,
     /// Unique per built index, so a `T9Scratch` never trusts another index.
     pub(crate) id: u64,
 }
@@ -181,11 +182,6 @@ impl ContactIndex {
                     .iter()
                     .map(|n| search_digits(&n.raw))
                     .collect();
-                let parsed = contact
-                    .numbers
-                    .iter()
-                    .map(|n| PhoneNumber::parse(&n.raw).ok())
-                    .collect();
                 let alt = contact
                     .display_name_alt
                     .as_deref()
@@ -210,7 +206,6 @@ impl ContactIndex {
                     initials_alt,
                     folded_email,
                     digits,
-                    parsed,
                     t9,
                     t9_alt,
                     calls: 0,
@@ -227,8 +222,10 @@ impl ContactIndex {
         for (rank, i) in by_name.into_iter().enumerate() {
             entries[i as usize].name_rank = rank as u32;
         }
+        let book = Self::book_of(&entries, None);
         Self {
             entries,
+            book,
             id: crate::t9::next_index_id(),
         }
     }
@@ -350,19 +347,33 @@ impl ContactIndex {
         out
     }
 
+    fn book_of(entries: &[Entry], home_cc: Option<&str>) -> crate::caller_id::NumberBook {
+        let contacts: Vec<WireContact> = entries.iter().map(|e| e.contact.clone()).collect();
+        crate::caller_id::NumberBook::new(&contacts, home_cc)
+    }
+
+    /// The home calling code (`"90"`) national numbers belong to; the number
+    /// book is rebuilt only when it changes.
+    pub fn set_home_cc(&mut self, home_cc: Option<&str>) {
+        let home_cc = home_cc.map(str::trim).filter(|c| !c.is_empty());
+        if self.book.home_cc() != home_cc {
+            self.book = Self::book_of(&self.entries, home_cc);
+        }
+    }
+
     /// The contact owning `number` (typed or from a call), by
-    /// [`PhoneNumber::matches`]. `None` for unparsable numbers.
+    /// [`crate::caller_id::NumberBook`]. `None` for withheld or unparsable
+    /// numbers and strangers.
     pub fn match_number(&self, number: &str) -> Option<&WireContact> {
-        let wanted = PhoneNumber::parse(number).ok()?;
-        self.entries
-            .iter()
-            .find(|e| {
-                e.parsed
-                    .iter()
-                    .flatten()
-                    .any(|candidate| candidate.matches(&wanted))
-            })
-            .map(|e| &e.contact)
+        self.match_number_e164(number, None)
+    }
+
+    /// [`Self::match_number`] with the E.164 form the platform worked out
+    /// for `number` (`PhoneNumberUtils.formatNumberToE164`), when it has one.
+    pub fn match_number_e164(&self, number: &str, e164: Option<&str>) -> Option<&WireContact> {
+        self.book
+            .lookup(number, e164)
+            .map(|at| &self.entries[at].contact)
     }
 }
 
@@ -381,6 +392,7 @@ mod tests {
                     raw: (*n).to_owned(),
                     label: None,
                     default: false,
+                    normalized: None,
                 })
                 .collect(),
             starred: false,
@@ -551,6 +563,22 @@ mod tests {
         );
         assert_eq!(idx.match_number("905321234567").map(|c| c.id), Some(2));
         assert!(idx.match_number("05551112234").is_none());
+    }
+
+    #[test]
+    fn match_number_with_the_home_country_and_the_platform_e164() {
+        let mut idx = ContactIndex::new(vec![contact(1, "Bora", &["0 212 555 00 00"])]);
+        // No home country: a different country with the same tail is not ruled out, the tail decides.
+        assert_eq!(idx.match_number("+902125550000").map(|c| c.id), Some(1));
+        idx.set_home_cc(Some("90"));
+        assert_eq!(idx.match_number("+902125550000").map(|c| c.id), Some(1));
+        assert!(idx.match_number("+12125550000").is_none());
+        assert_eq!(
+            idx.match_number_e164("212 555 00 00", Some("+902125550000"))
+                .map(|c| c.id),
+            Some(1)
+        );
+        assert!(idx.match_number("-2").is_none());
     }
 
     #[test]

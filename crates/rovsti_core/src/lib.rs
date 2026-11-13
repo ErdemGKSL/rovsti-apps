@@ -14,6 +14,7 @@ pub mod call_log;
 pub mod call_log_query;
 pub mod call_notes;
 pub mod call_stats;
+pub mod caller_id;
 pub mod calling_code;
 pub mod chat_export;
 pub mod chat_find;

@@ -604,6 +604,7 @@ impl CallTable {
             CallAction::Offer {
                 call_id,
                 call_creator,
+                caller_pn,
                 is_video,
                 group_jid,
                 ..
@@ -612,7 +613,9 @@ impl CallTable {
                     log::info!("{}: ignoring a group call", self.instance);
                     return;
                 }
-                let from = lid::resolve(&call.from, None, map).to_string();
+                // A LID caller: the mapping store, else the phone JID the offer
+                // carries (`caller_pn`), so the phone can match a contact.
+                let from = lid::resolve(&call.from, caller_pn.as_ref(), map).to_string();
                 let mut entry = CallEntry::new(CallDirection::In, from.clone());
                 entry.wire_peer = call.from.to_string();
                 entry.creator = call_creator.to_string();
@@ -1644,6 +1647,47 @@ mod tests {
         // The same offer again is not a second ring.
         ring(&rig, "C1");
         assert_eq!(rig.pushes.0.lock().unwrap().len(), 1);
+    }
+
+    /// An offer from a LID with the caller's phone JID next to it (`caller_pn`).
+    fn lid_offer(id: &str, pn: Option<&str>) -> IncomingCall {
+        let mut call = offer(id, "4242@lid", Some("Ayse"));
+        if let CallAction::Offer { caller_pn, .. } = &mut call.action {
+            *caller_pn = pn.map(|p| p.parse().expect("pn jid"));
+        }
+        call
+    }
+
+    #[tokio::test]
+    async fn a_lid_caller_is_named_by_the_phone_jid_of_the_offer() {
+        let rig = rig();
+        rig.table
+            .on_incoming(&lid_offer("C1", Some(FROM)), &LidMap::default());
+        assert_eq!(rig.table.list()[0].update.peer, FROM);
+        assert_eq!(
+            *rig.pushes.0.lock().unwrap(),
+            [PushKind::Call {
+                call_id: "C1".into(),
+                from: FROM.into(),
+                name: "Ayse".into(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lid_caller_prefers_the_mapping_store_and_else_stays_a_lid() {
+        let rig = rig();
+        let map = LidMap::from_entries([("4242", "905551112233")]);
+        rig.table.on_incoming(&lid_offer("C1", Some(FROM)), &map);
+        assert_eq!(
+            rig.table.list()[0].update.peer,
+            "905551112233@s.whatsapp.net"
+        );
+        rig.table
+            .on_incoming(&lid_offer("C2", None), &LidMap::default());
+        let listed = rig.table.list();
+        let c2 = listed.iter().find(|c| c.update.call_id == "C2").unwrap();
+        assert_eq!(c2.update.peer, "4242@lid");
     }
 
     #[tokio::test]

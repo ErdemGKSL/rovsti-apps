@@ -1460,6 +1460,22 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   kind worded in the UI.
   **(F34, done in 5d8583b)** "No app handles it" fails silently in the Phone hosts (`PhoneApp.kt` Recents/Details/Keypad `launch`):
   Message or Add contact does nothing; show a toast (tr), as Contacts does with `contacts_no_app`.
+- **(F39, done in aebf938) Who is calling: one resolver on every surface (owner 2026-11-13: "Recents finds the name, the
+  call still shows the number").** The call service named a call once at `onCallAdded` with Android's `PhoneLookup`
+  (misses `0532 …` vs `+90532…`) and never again; the notifications showed the raw digits. Now `CallRegistry` names every
+  call through `identity/CallerLookup` (installed by Phone: `CallerIds` over the core's number book, the Recents resolver;
+  `PhoneLookup` only before the index exists), again on a new handle and on every resolver revision
+  (`refreshNames`, contacts edited during a call), off the main thread, rebuilding only on a change (no flicker); the
+  CallStyle incoming/ongoing notifications carry the contact photo and a formatted number for strangers; missed-call
+  notifications, call reminders and the WhatsApp push use the same lookup. Phone's call screens read
+  `NamedCallSource` (WhatsApp calls gain the contact and its photo, the WA picture stays the fallback), the WhatsApp
+  ring is re-posted when the contact's name lands, the keypad's "unknown number" and the person sheet for a bare number
+  use the book with E.164. Contacts: search by a whole number in any form, duplicates, import, "already has this
+  number" and the card's `contacts.number_key` use `caller_id::line_key`; the list's WhatsApp marks and the card's
+  WhatsApp rows compare in E.164 with the home code (`e164_of`). Tests: `CallerIdEverywhereTest`,
+  `NamedCallSourceTest`, `WaRingNotifierTest`, `MissedCallNotificationTest`, `IncomingCallTest`, `OngoingCallTest`,
+  `PhoneNumbersTest`, Rust `caller_id`, `search`, `contact_dupes`, `import_plan`, `whatsapp`, `contacts.wa_*` fixtures.
+  Open: the speed dial page (E5.9b, not in HEAD yet) must name its rows through `callerIds` too.
 
 ### X.2 Share cards with Takumi
 - Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least

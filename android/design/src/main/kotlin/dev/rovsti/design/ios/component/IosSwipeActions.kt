@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -147,7 +148,8 @@ fun IosSwipeableRow(
         Row(
             Modifier
                 .align(Alignment.CenterStart)
-                .fillMaxHeight(),
+                .fillMaxHeight()
+                .graphicsLayer { alpha = if (offset.value == 0f) 0f else 1f },
             horizontalArrangement = Arrangement.Start,
         ) {
             leadingActions.forEach { ActionButton(it, ::close) }
@@ -155,7 +157,9 @@ fun IosSwipeableRow(
         Row(
             Modifier
                 .align(Alignment.CenterEnd)
-                .fillMaxHeight(),
+                .fillMaxHeight()
+                // Rovsti: nothing of the buttons shows while the row rests (no colour fringe at rounded card corners).
+                .graphicsLayer { alpha = if (offset.value == 0f) 0f else 1f },
             horizontalArrangement = Arrangement.End,
         ) {
             trailingActions.forEach { ActionButton(it, ::close) }
@@ -163,6 +167,8 @@ fun IosSwipeableRow(
 
         Box(
             Modifier
+                // Rovsti: the row covers the buttons' full height (they can be taller than a one-line row at large fonts).
+                .fillMaxHeight()
                 .graphicsLayer { translationX = offset.value }
                 .background(IosTheme.colors.secondarySystemGroupedBackground)
                 .pointerInput(trailingActions.size, leadingActions.size) {
@@ -214,7 +220,7 @@ fun IosSwipeableRow(
                     }
                 },
         ) {
-            Box(Modifier.fillMaxWidth().tapClosesGroup(group)) { content() }
+            Box(Modifier.fillMaxSize().tapClosesGroup(group), contentAlignment = Alignment.CenterStart) { content() }
         }
     }
 

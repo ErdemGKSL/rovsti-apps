@@ -71,7 +71,18 @@ import dev.rovsti.phone.recents.RecentsScreen
 import dev.rovsti.phone.recents.RecentsSelectToolbar
 import dev.rovsti.phone.recents.RecentsStrings
 import dev.rovsti.phone.recents.RecentsViewModel
+import dev.rovsti.phone.settings.backup.BackupEntry
 import dev.rovsti.phone.settings.blocked.PhoneBlockedEntry
+import dev.rovsti.phone.settings.data.DataEntry
+import dev.rovsti.phone.settings.rememberBackupModel
+import dev.rovsti.phone.settings.rememberDataModel
+import dev.rovsti.phone.settings.rememberQuickRepliesModel
+import dev.rovsti.phone.settings.rememberSettingsHost
+import dev.rovsti.phone.settings.rememberSimChoicesModel
+import dev.rovsti.phone.settings.rememberSpeedDialModel
+import dev.rovsti.phone.settings.replies.QuickRepliesEntry
+import dev.rovsti.phone.settings.sim.SimChoicesEntry
+import dev.rovsti.phone.settings.speeddial.SpeedDialEntry
 import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupCompleteMoment
@@ -580,6 +591,9 @@ fun PhoneApp(
     }
     val miniTimer = rememberCallTimer(inCallUi.call, inCall::now, inCall::elapsed)
     val contactsModel = rememberContactsViewModel(container)
+    val backupModel = rememberBackupModel(container)
+    val settingsHost = rememberSettingsHost(container, backupModel)
+    val sims by container.simState.sims.collectAsState()
     val openContact: (Long, () -> Unit) -> Unit =
         remember(details, container) {
             { id, onDismissed ->
@@ -689,6 +703,7 @@ fun PhoneApp(
                     settings = container.commonSettings,
                     versionName = version,
                     blockedCount = blockList.rows.size.takeIf { blockList.ready },
+                    simChoices = sims.visible,
                     links =
                         SettingsLinks(
                             openSetup = sheets::present,
@@ -750,6 +765,15 @@ fun PhoneApp(
                 }
             }
             entry<PhoneRoute.WhatsAppSettings> { PhoneWhatsAppSettings(container) }
+            entry<PhoneRoute.QuickReplies> {
+                QuickRepliesEntry(rememberQuickRepliesModel(container), pop, popToRoot)
+            }
+            entry<PhoneRoute.SpeedDialPage> {
+                SpeedDialEntry(rememberSpeedDialModel(container), settingsHost, pop, popToRoot)
+            }
+            entry<PhoneRoute.SimChoices> { SimChoicesEntry(rememberSimChoicesModel(container), pop, popToRoot) }
+            entry<PhoneRoute.Data> { DataEntry(rememberDataModel(container), settingsHost, pop, popToRoot) }
+            entry<PhoneRoute.Backup> { BackupEntry(backupModel, settingsHost, pop, popToRoot) }
             entry<PhoneRoute.Appearance> { PhoneAppearanceEntry(container.commonSettings, pop, popToRoot) }
             entry<PhoneRoute.Haptics> { PhoneHapticsEntry(container.commonSettings, pop, popToRoot) }
             entry<PhoneRoute.About> {

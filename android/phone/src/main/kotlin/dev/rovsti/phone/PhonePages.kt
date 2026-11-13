@@ -52,6 +52,11 @@ object PhoneTags {
     const val WhatsAppRow = "phone-settings-whatsapp-row"
     const val BlockedRow = "phone-settings-blocked-row"
     const val Placeholder = "phone-placeholder"
+    const val RepliesRow = "phone-settings-replies-row"
+    const val SpeedDialRow = "phone-settings-speed-dial-row"
+    const val SimRow = "phone-settings-sim-row"
+    const val DataRow = "phone-settings-data-row"
+    const val BackupRow = "phone-settings-backup-row"
 
     fun root(route: String) = "phone-root-$route"
 }
@@ -214,6 +219,8 @@ fun PhoneSettingsPage(
     links: SettingsLinks,
     modifier: Modifier = Modifier,
     blockedCount: Int? = null,
+    /** Two or more SIMs: SIM choices is listed only then. */
+    simChoices: Boolean = false,
     onBack: (() -> Unit)? = null,
     onBackLongClick: (() -> Unit)? = null,
     onSetupAction: (SetupAction) -> Unit = {},
@@ -265,6 +272,33 @@ fun PhoneSettingsPage(
                         PhoneTags.StatsRow,
                         onClick = links.openStats,
                     ),
+                    pageRow(RovstiIcons.Message, R.string.settings_quick_replies, PhoneTags.RepliesRow) {
+                        links.openRoute(PhoneRoute.QuickReplies)
+                    },
+                    pageRow(RovstiIcons.Keypad, R.string.settings_speed_dial, PhoneTags.SpeedDialRow) {
+                        links.openRoute(PhoneRoute.SpeedDialPage)
+                    },
+                ) +
+                    listOfNotNull(
+                        if (simChoices) {
+                            pageRow(RovstiIcons.Phone, R.string.settings_sim_choices, PhoneTags.SimRow) {
+                                links.openRoute(PhoneRoute.SimChoices)
+                            }
+                        } else {
+                            null
+                        },
+                    ),
+        )
+        IosSettingsGroup(
+            title = stringResource(R.string.settings_group_data),
+            items =
+                listOf(
+                    pageRow(RovstiIcons.Folder, R.string.set_row_data, PhoneTags.DataRow) {
+                        links.openRoute(PhoneRoute.Data)
+                    },
+                    pageRow(RovstiIcons.Download, R.string.settings_backup, PhoneTags.BackupRow) {
+                        links.openRoute(PhoneRoute.Backup)
+                    },
                 ),
         )
         IosSettingsGroup(

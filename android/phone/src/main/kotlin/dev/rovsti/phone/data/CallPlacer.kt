@@ -120,6 +120,8 @@ class CallPlacer(
     private val onLeave: () -> Unit = {},
     private val nowMs: () -> Long = { System.nanoTime() / NANOS_PER_MS },
     private val repeatMs: Long = REPEAT_MS,
+    /** The SIM remembered for a number while the phone asks every time (Settings, SIM choices); null remembers nothing. */
+    private val remembered: dev.rovsti.phone.settings.sim.SimChoices? = null,
 ) {
     private val oneAtATime = Mutex()
     private var last: PlaceResult? = null
@@ -141,10 +143,12 @@ class CallPlacer(
             }
         val emergency = isEmergency(number)
         val now = sims.value
+        val known = remembered?.keyOf(number)?.takeIf { saved -> now.chips.any { it.key == saved } }
         val key =
             when {
                 emergency -> null
                 simKey != null -> simKey
+                now.ask && known != null -> known
                 now.ask -> return PlaceResult.NeedsSim(number, now.chips)
                 else -> now.defaultKey
             }
@@ -157,6 +161,8 @@ class CallPlacer(
             }
         val same = previousNumber != null && dialKey(previousNumber) == dialKey(number)
         if (previous != null && same && nowMs() - lastAtMs < repeatMs) return previous
+        // A pick made while the phone asks every time is remembered for this number (the Settings page forgets it).
+        if (!emergency && simKey != null && now.ask) remembered?.remember(number, simKey)
         val result =
             when (launcher.place(number, key)) {
                 CallLauncher.Launch.PLACED -> PlaceResult.Placed(number, key)

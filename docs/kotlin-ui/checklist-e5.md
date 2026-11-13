@@ -110,7 +110,7 @@ Recents, Keypad, the Person and Call details sheets, Favorites and the three Und
 | U2 | Save / share photo | `photo_saved`, `photo_cant_save`, `photo_cant_share` | Confirm / Reject | in HEAD |
 | U3 | Recents search, filter chips | empty state text | Selection (chips) | in HEAD (`recents_filter_*`) |
 | U4 | Copy as / Share as | `recents_notice_copied`, `details_notice_copied` | Confirm (fixed) | in HEAD (`recents_form_*`) |
-| U5 | Export call log CSV | "Call history exported" | Confirm | MISSING (E5.9 Data, `stash@{1}`) |
+| U5 | Export call log CSV | "Call history exported" | Confirm | in HEAD (round 15, E5.9) |
 | U6 | Pause / wait on `*` `#` | tone hint line (`keypad_tone_hint`) | LongPress | in HEAD (`KeypadAction.Hold`) |
 | U7 | Call statistics | none | Tick (bar tap) | in HEAD (`stats/`, `details_stats`) |
 | U8 | Per-call note | `details_note_saved`, `details_note_deleted` + Undo | Confirm (fixed) | in HEAD |
@@ -124,31 +124,31 @@ Recents, Keypad, the Person and Call details sheets, Favorites and the three Und
 | U16 | Export a person's calls | `details_notice_no_calls_to_export` | Reject | in HEAD (`details_menu_export`) |
 | U17 | In-call note, copy number | `incall_notice_note_saved`, `incall_notice_number_copied` | Confirm (`InCallEffect.Confirm`) | in HEAD |
 | U18 | Share person stats | share sheet | none | in HEAD (`details_menu_share_stats`) |
-| U19 | CSV `note` column | covered by U5 | n/a | MISSING with U5 |
+| U19 | CSV `note` column | covered by U5 | n/a | in HEAD (round 15, E5.9) |
 | U20 | Quick reply on missed | `recents_reply_title` sheet | Confirm (message app opens) | in HEAD |
 | U21 | Notes search in Recents | list filter | none | in HEAD |
-| U22 | Speed dial share / clear | "Speed dial cleared" + Undo | Confirm | MISSING (E5.9, `stash@{1}`) |
+| U22 | Speed dial share / clear | "Speed dial cleared" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U23 | This audit | | | done |
-| U24 | Delete all history + Undo | Undo pill | Confirm | MISSING (E5.9 Data, `stash@{1}`); per-person delete is in HEAD |
+| U24 | Delete all history + Undo | Undo pill | Confirm | in HEAD (round 15, E5.9b `DataViewModel.deleteAll`, 5 s window before the provider delete); per-person delete too |
 | U25 | Copy number | `recents_notice_copied` | Confirm (fixed) | in HEAD (`recents_menu_copy_number`) |
 | U26 | Share call details | share sheet | none | in HEAD |
-| U27 | Blocked: share, unblock all | "Unblocked n" + Undo | Confirm | MISSING (E5.9 Blocked, `stash@{2}`) |
+| U27 | Blocked: share, unblock all | "Unblocked n" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U28 | Stats CSV export | "Call statistics exported" | Confirm | in HEAD (`stats_export`) |
 | U29 | Add to contacts from keypad | `keypad_add_contact` | none (navigation) | in HEAD |
 | U30 | Notes page | "Note deleted" + Undo | Confirm | MISSING (E5.11, `stash@{0}`) |
 | U31 | Redial | status line | none | in HEAD (`KeypadViewModel`) |
 | U32 | Smart paste chooser | `keypad_paste_title` sheet | none | in HEAD |
 | U33 | Notes share all | share sheet | none | MISSING with U30 |
-| U34 | Bulk block from paste | "Blocked n" + Undo | Confirm | MISSING (E5.9) |
+| U34 | Bulk block from paste | "Blocked n" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U35 | Notes chip | empty text | Selection | in HEAD (`recents_filter_notes`) |
 | U36 | Copy / share all numbers | `details_notice_copied_all` | Confirm (fixed) | in HEAD |
 | U37 | Post-call "Add note" pill | `postcall_add_note` | none | in HEAD |
-| U38 | Blocked export / import | "Blocked numbers exported" | Confirm | MISSING (E5.9) |
+| U38 | Blocked export / import | "Blocked numbers exported" | Confirm | in HEAD (round 15, E5.9) |
 | U39 | Mark missed seen | none | none | in HEAD (`RecentsViewModel`) |
 | U40 | Share stats summary | share sheet | none | in HEAD |
-| U41 | Export pills name the file | per-export pill | Confirm | MISSING with U5, U28 partly done |
+| U41 | Export pills name the file | per-export pill | Confirm | in HEAD (round 15, E5.9b `DataEffect.Export` names the file; U28 partly done) |
 | U42 | Notes export | "Call notes exported" | Confirm | MISSING with U30 |
-| U43 | Delete older calls | "n calls deleted" + Undo | Confirm | MISSING (E5.9 Data) |
+| U43 | Delete older calls | "n calls deleted" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U44 | Remind on a missed call | `details_remind` pill | Confirm (fixed) | in HEAD |
 | U45 | Select: block / share | `recents_blocked_many` + Undo | Confirm (fixed) | in HEAD |
 | U46 | Tap a stats bar | bucket sheet | Tick | in HEAD |
@@ -159,8 +159,8 @@ Recents, Keypad, the Person and Call details sheets, Favorites and the three Und
 | U51 | Remember tones (memory only) | `incall_tones_send` | none | in HEAD (deviation: in memory) |
 | U52 | Stats records | none | none | in HEAD (`stats_records`) |
 | U53 | Field menu Share / E.164 | `keypad_notice_copied_e164` | Confirm (fixed) | in HEAD |
-| U54 | Export contacts .vcf | "Contacts exported" | Confirm | MISSING (E5.9 Data) |
-| U55 | Block by prefix | "Blocked +90 850*" + Undo | Confirm | MISSING (`stash@{2}` `BlockPrefixes.kt`) |
+| U54 | Export contacts .vcf | "Contacts exported" | Confirm | in HEAD (round 15, E5.9) |
+| U55 | Block by prefix | "Blocked +90 850*" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U56 | Copy country | dropped (U48, U4) | n/a | dropped |
 
 Moments added this step: the **theme melt** (`:design` `theme/ThemeMelt.kt`, used by `RovstiShellActivity`: the new theme

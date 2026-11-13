@@ -6,8 +6,15 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
+import dev.rovsti.phone.settings.SettingsFixtures
+import dev.rovsti.phone.settings.backup.BackupScreen
+import dev.rovsti.phone.settings.backup.BackupTags
 import dev.rovsti.phone.settings.blocked.BlockedContent
 import dev.rovsti.phone.settings.blocked.BlockedSample
+import dev.rovsti.phone.settings.data.DataScreen
+import dev.rovsti.phone.settings.data.DataTags
+import dev.rovsti.phone.settings.speeddial.SpeedDialScreen
+import dev.rovsti.phone.settings.speeddial.SpeedDialTags
 import dev.rovsti.testing.ShotTest
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,6 +67,26 @@ class SettingsEndPaddingTest : ShotTest() {
                 .call(BlockedSample.calls.last().key),
         ) {
             BlockedContent(BlockedSample.ui(), onAction = {}, onPaste = {}, onPrefix = {}, onImport = {})
+        }
+
+    @Test fun speedDialClearAllEndsClearOfTheBar() =
+        assertLastClearOfBar(PhoneRoute.SpeedDialPage, SpeedDialTags.Page, SpeedDialTags.ClearAll) {
+            SpeedDialScreen(SettingsFixtures.speedDial(), {}, {}, {})
+        }
+
+    @Test fun speedDialClearAllEndsClearOfTheBarAtTwiceTheFontSize() =
+        assertLastClearOfBar(PhoneRoute.SpeedDialPage, SpeedDialTags.Page, SpeedDialTags.ClearAll, fontScale = 2f) {
+            SpeedDialScreen(SettingsFixtures.speedDial(), {}, {}, {})
+        }
+
+    @Test fun dataEndsClearOfTheBar() =
+        assertLastClearOfBar(PhoneRoute.Data, DataTags.Page, DataTags.DeleteAll, fontScale = 2f) {
+            DataScreen(SettingsFixtures.data(), {}, {})
+        }
+
+    @Test fun backupEndsClearOfTheBar() =
+        assertLastClearOfBar(PhoneRoute.Backup, BackupTags.Page, BackupTags.Restore, fontScale = 2f) {
+            BackupScreen({}, {})
         }
 
     private companion object {

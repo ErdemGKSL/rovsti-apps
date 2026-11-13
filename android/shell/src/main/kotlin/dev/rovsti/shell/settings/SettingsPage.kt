@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -145,7 +147,11 @@ fun SettingsLazyPage(
             contentPadding = PaddingValues(start = gutter, end = gutter, bottom = settingsPageEndPadding()),
             actions = actions,
             listState = listState,
-            largeTitle = settingsLargeTitle(title, gutter, onBack != null || LocalPageBack.current != null),
+            largeTitle = {
+                // ScreenLazyPage, unlike ScreenPage, leaves the status bar to the title block.
+                Spacer(Modifier.statusBarsPadding())
+                settingsLargeTitle(title, gutter, onBack != null || LocalPageBack.current != null)()
+            },
             content = content,
         )
     }

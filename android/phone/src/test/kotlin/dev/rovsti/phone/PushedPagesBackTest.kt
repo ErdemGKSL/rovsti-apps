@@ -9,8 +9,14 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
 import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.core.model.stops.Appearance
+import dev.rovsti.phone.settings.SettingsFixtures
+import dev.rovsti.phone.settings.backup.BackupScreen
 import dev.rovsti.phone.settings.blocked.BlockedContent
 import dev.rovsti.phone.settings.blocked.BlockedSample
+import dev.rovsti.phone.settings.data.DataScreen
+import dev.rovsti.phone.settings.replies.QuickRepliesScreen
+import dev.rovsti.phone.settings.sim.SimChoicesScreen
+import dev.rovsti.phone.settings.speeddial.SpeedDialScreen
 import dev.rovsti.shell.settings.AboutInfo
 import dev.rovsti.shell.settings.AboutPage
 import dev.rovsti.shell.settings.AppearancePage
@@ -44,6 +50,11 @@ class PushedPagesBackTest : ShotTest() {
         listOf(
             PhoneRoute.Settings to {},
             PhoneRoute.Diagnostics to {},
+            PhoneRoute.QuickReplies to { QuickRepliesScreen(SettingsFixtures.replies(), {}, {}) },
+            PhoneRoute.SpeedDialPage to { SpeedDialScreen(SettingsFixtures.speedDial(), {}, {}, {}) },
+            PhoneRoute.SimChoices to { SimChoicesScreen(SettingsFixtures.sims(), {}) },
+            PhoneRoute.Data to { DataScreen(SettingsFixtures.data(), {}, {}) },
+            PhoneRoute.Backup to { BackupScreen({}, {}) },
             PhoneRoute.Appearance to { AppearancePage(Appearance.entries.first(), {}) },
             PhoneRoute.Haptics to { HapticsPage(HapticsLevel.entries.first(), {}) },
             PhoneRoute.About to { AboutPage(about, onOpenLicences = {}) },

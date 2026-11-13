@@ -311,7 +311,12 @@ open class PhoneContainer(
     val speedDial: SpeedDial by lazy { SpeedDial(store, ops) }
 
     /** Validation, the SIM choice and the call itself (`dial.validate`, `TelecomManager.placeCall`). */
-    val placer: CallPlacer by lazy { CallPlacer(ops, simState.sims, createCallLauncher(), onLeave = leaves::leave) }
+    val placer: CallPlacer by lazy {
+        CallPlacer(ops, simState.sims, createCallLauncher(), onLeave = leaves::leave, remembered = simChoices)
+    }
+
+    /** The SIM remembered for each number while the phone asks every time. */
+    val simChoices: dev.rovsti.phone.settings.sim.SimChoices by lazy { createSimChoices() }
 
     /** What Android says about the Setup checklist rows. */
     val setupFacts: SetupFactsSource by lazy { createSetupFacts() }
@@ -631,6 +636,10 @@ open class PhoneContainer(
     protected open fun createForgottenCalls(): ForgottenCalls = PrefsForgottenCalls(context)
 
     protected open fun createStore(): PhoneStore = PhoneStore(ops, scope)
+
+    protected open fun createSimChoices(): dev.rovsti.phone.settings.sim.SimChoices =
+        dev.rovsti.phone.settings.sim
+            .PrefsSimChoices(context.getSharedPreferences("sim-choices", Context.MODE_PRIVATE))
 
     protected open fun createRecents(): RecentsRepository =
         RecentsRepository(

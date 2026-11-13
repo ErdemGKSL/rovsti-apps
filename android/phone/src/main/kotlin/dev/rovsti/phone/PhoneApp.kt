@@ -604,7 +604,7 @@ fun PhoneApp(
     val miniTimer = rememberCallTimer(inCallUi.call, inCall::now, inCall::elapsed)
     val contactsModel = rememberContactsViewModel(container)
     val backupModel = rememberBackupModel(container)
-    val settingsHost = rememberSettingsHost(container, backupModel)
+    val settingsHost = rememberSettingsHost(container, backupModel, overlays)
     val sims by container.simState.sims.collectAsState()
     val openContact: (Long, () -> Unit) -> Unit =
         remember(details, container) {

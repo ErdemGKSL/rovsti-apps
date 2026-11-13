@@ -18,7 +18,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rovsti.core.model.phone.NamesByNumber
 import dev.rovsti.core.model.search.WireContact
-import dev.rovsti.design.overlay.LocalOverlay
+import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.phone.PhoneContainer
 import dev.rovsti.phone.R
@@ -123,15 +123,16 @@ fun rememberBackupModel(container: PhoneContainer): BackupViewModel {
 
 /**
  * The Android side of the Data and Backup pages: the "save as" document pickers (one per mime type), the share sheet and
- * the backup file picker. A saved file shows the pill that names it (U41); a picked backup goes to [backup] as text.
+ * the backup file picker. A saved file shows the pill that names it (U41) on [overlays]; a picked backup goes to [backup] as
+ * text. [overlays] is passed in, not read from `LocalOverlay`: [PhoneApp] calls this above its `OverlayHost`.
  */
 @Composable
 fun rememberSettingsHost(
     container: PhoneContainer,
     backup: BackupViewModel,
+    overlays: OverlayController,
 ): SettingsFilesHost {
     val context = LocalContext.current
-    val overlays = LocalOverlay.current
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<ExportFile?>(null) }
     val savedText = SavedWhat.entries.associateWith { savedMessageText(it) }

@@ -1441,16 +1441,16 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   contact, numbers stored in different formats, private/unknown numbers, and WhatsApp calls (F28 resolver). Tests for
   each case.
 - **(F30-F34, audit 2026-11-13, owner asked for a sweep; do in round 15 with F28/F29):**
-  **(F30)** Rust core error texts reach the UI in English: `PlaceResult.Invalid(reason)` and `Core(text)` toasts (e.g.
+  **(F30, done in 90f0288)** Rust core error texts reach the UI in English: `PlaceResult.Invalid(reason)` and `Core(text)` toasts (e.g.
   "nothing to dial", `crates/rovsti_core/src/dial.rs:22`; shown in `KeypadScreen`, `PersonSheet`, `RecentsScreen`,
   `FavoritesScreen`). Return error codes from the core and word them in Kotlin resources (en + tr).
   **(F31)** Failure effects play the success haptic: `haptics.confirm()` on `PersonEffect.Core`/`RecentsEffect.Core`
   (they carry failures such as an invalid number); use `reject()` or none.
-  **(F32)** Notification channel names/descriptions are hard-coded English (`platform/.../notify/PlatformChannels.kt`,
+  **(F32, done in b5507c4)** Notification channel names/descriptions are hard-coded English (`platform/.../notify/PlatformChannels.kt`,
   Stops `BridgeTripComponents.kt`, `TripAlarm.kt`); move to string resources with tr.
-  **(F33)** WhatsApp link error `KEY_REFUSED` (`wa/.../DefaultWaRepository.kt`) is shown as English text; use an error
+  **(F33, done in 0151edc)** WhatsApp link error `KEY_REFUSED` (`wa/.../DefaultWaRepository.kt`) is shown as English text; use an error
   kind worded in the UI.
-  **(F34)** "No app handles it" fails silently in the Phone hosts (`PhoneApp.kt` Recents/Details/Keypad `launch`):
+  **(F34, done in 5d8583b)** "No app handles it" fails silently in the Phone hosts (`PhoneApp.kt` Recents/Details/Keypad `launch`):
   Message or Add contact does nothing; show a toast (tr), as Contacts does with `contacts_no_app`.
 
 ### X.2 Share cards with Takumi

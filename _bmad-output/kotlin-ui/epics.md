@@ -1106,6 +1106,14 @@ name is bold `largeTitle`, Incoming is Light 36 sp; the answer morph jumps weigh
 shows a handset on earpiece; use a speaker glyph); Steps 2-3 E5.9; Step 4 E5.10; Step 5 E5.11; Step 6 E5.12; Step 7
 E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before E6.
 
+**R2 recovery + X.1** -> `_bmad-output/kotlin-ui/plans/round-15.md` (planned 2026-11-13 at base `d89810c`; round 14 re-verified
+in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in stashes). 8 steps: 1 recover E5.9a from
+`stash@{2}` + **F37** (speed dial "Clear all" touches the floating bar: shared settings end padding); 2 recover E5.9b from
+`stash@{1}`; 3 recover E5.11 from `stash@{0}` + **F38** (`e5.11-notes-light` shows raw `+4930123456`); 4 F31, **F35**
+(`e5.14-settings-fs2-light`: trailing actions squeeze titles into a word column at 2x font), **F36**
+(`e5.14-stats-rtl-dark`: "h 52 min 1", "123456 30 49+"), close E5 with the full gate; 5-8 X.1 (Rust people cache,
+`:people` client, Contacts provider + WorkManager sync, every avatar surface in Contacts and Phone). X.2 is round 16.
+
 ### Parity table
 
 | Features | Story |
@@ -1148,12 +1156,12 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
 > `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
 > (definition of done item 6).
 | E5.7b | In-call: multi-call, Add call, conference | R2 | done (round-13 step 8) |
-| E5.9 | Settings | R2 | todo (round 14 steps 2-3) |
+| E5.9 | Settings | R2 | todo (not in HEAD, verified 2026-11-13: work in `stash@{2}` r14-s2 and `stash@{1}` r14-s3; recovery = round 15 steps 1-2, with F37 bar end padding) |
 | E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
-| E5.11 | Notes page | R2 | todo (round 14 step 5) |
+| E5.11 | Notes page | R2 | todo (not in HEAD: `stash@{0}` r14-s5; recovery = round 15 step 3, with F38 raw number in unnamed rows) |
 | E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
 | E5.13 | Photo viewer and photo edit | R2 | done (round 14 step 7) |
-| E5.14 | Polish | R2 | done for what is in HEAD (round 14 step 8: U23 audit table in `checklist-e5.md`, success pills paired with Confirm, theme melt `ThemeMelt`, setup-complete moment, `KeypadRecompositionTest`, `RecentsScrollRecompositionTest`, `LargeTitleScaffold` plain height holder + `TabBarCellsTest` case, `e5.14-*` goldens). **E5 stays open:** E5.9 and E5.11 are not in HEAD (work in `stash@{2}`, `stash@{1}`, `stash@{0}`); a recovery step must come first. Round 15 = X.1 then X.2, then E6 |
+| E5.14 | Polish | R2 | done for what is in HEAD (round 14 step 8: U23 audit table in `checklist-e5.md`, success pills paired with Confirm, theme melt `ThemeMelt`, setup-complete moment, `KeypadRecompositionTest`, `RecentsScrollRecompositionTest`, `LargeTitleScaffold` plain height holder + `TabBarCellsTest` case, `e5.14-*` goldens). **E5 stays open:** E5.9 and E5.11 are not in HEAD (work in `stash@{2}`, `stash@{1}`, `stash@{0}`); a recovery step must come first. Round 15 steps 1-4 recover E5.9/E5.11, fix F31, F35 (2x-font row stacking, `e5.14-settings-fs2`), F36 (RTL bidi of numbers/durations, `e5.14-stats-rtl`) and close E5 |
 
 ### E5.1 App module
 - AC1 `dev.rovsti.phone`, arm64-v8a release, every component FQCN of the GPUI manifest (`MainActivity` with DIAL/VIEW
@@ -1381,8 +1389,8 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 | todo |
-| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 15 | todo |
+| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | todo (planned) |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | todo |
 
 ### X.1 WhatsApp photo fallback avatar
 - When a contact has **no photo of its own**, Contacts and Phone show the WhatsApp profile photo of the contact's
@@ -1444,7 +1452,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   **(F30, done in 90f0288)** Rust core error texts reach the UI in English: `PlaceResult.Invalid(reason)` and `Core(text)` toasts (e.g.
   "nothing to dial", `crates/rovsti_core/src/dial.rs:22`; shown in `KeypadScreen`, `PersonSheet`, `RecentsScreen`,
   `FavoritesScreen`). Return error codes from the core and word them in Kotlin resources (en + tr).
-  **(F31)** Failure effects play the success haptic: `haptics.confirm()` on `PersonEffect.Core`/`RecentsEffect.Core`
+  **(F31, open, verified 2026-11-13 at `RecentsScreen.kt:710`, `PersonSheet.kt:526`; round 15 step 4)** Failure effects play the success haptic: `haptics.confirm()` on `PersonEffect.Core`/`RecentsEffect.Core`
   (they carry failures such as an invalid number); use `reject()` or none.
   **(F32, done in b5507c4)** Notification channel names/descriptions are hard-coded English (`platform/.../notify/PlatformChannels.kt`,
   Stops `BridgeTripComponents.kt`, `TripAlarm.kt`); move to string resources with tr.

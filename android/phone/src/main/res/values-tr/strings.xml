@@ -272,6 +272,8 @@
     <string name="details_duration">Süre</string>
     <string name="details_channel">Kanal</string>
     <string name="details_number">Numara</string>
+    <!-- Arama ayrıntıları: kişinin adı değiştiyse aramanın yapıldığı andaki kayıtlı ad (F29). -->
+    <string name="details_saved_as">Arama sırasında %1$s olarak kayıtlıydı</string>
     <string name="details_note">Not</string>
     <string name="details_note_placeholder">Not ekle</string>
     <string name="details_note_save">Notu kaydet</string>

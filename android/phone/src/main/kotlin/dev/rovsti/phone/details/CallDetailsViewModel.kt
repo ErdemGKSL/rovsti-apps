@@ -7,6 +7,7 @@ import dev.rovsti.core.model.chat.ReminderSlot
 import dev.rovsti.core.model.chat.ReminderSlotOption
 import dev.rovsti.core.model.chat.ReminderSlotsRequest
 import dev.rovsti.core.model.phone.CallDetailsRequest
+import dev.rovsti.core.model.phone.CallLogEntry
 import dev.rovsti.core.model.phone.CallNote
 import dev.rovsti.core.model.phone.EntryRef
 import dev.rovsti.core.model.phone.HistoryLine
@@ -67,6 +68,8 @@ data class CallDetailsUi(
     val deletable: Boolean = false,
     val copyText: String = "",
     val shareText: String = "",
+    /** The name the call log cached at call time when the number's contact is now named otherwise (F29). */
+    val savedAs: String? = null,
 )
 
 sealed interface CallDetailsAction {
@@ -207,6 +210,11 @@ class CallDetailsViewModel(
 
     private fun logId(): Long? = (line.entry as? EntryRef.Log)?.id
 
+    private fun savedAs(): String? {
+        val id = logId() ?: return null
+        return savedAs(recents.savedNameOf(id), recents.callEntries.firstOrNull { it.id == id })
+    }
+
     private suspend fun build(note: String): CallDetailsUi {
         val sim =
             if (sims.value.visible) {
@@ -235,6 +243,7 @@ class CallDetailsViewModel(
                 deletable = logId() != null,
                 copyText = answer.copyText,
                 shareText = answer.shareText,
+                savedAs = savedAs(),
             )
         shown = ui
         return ui
@@ -365,4 +374,18 @@ class CallDetailsViewModel(
     private companion object {
         const val MS_PER_S = 1_000
     }
+}
+
+/**
+ * Pure: "Saved as …" (F29) for a call whose log cached [saved] at call time and whose entry, named by the current
+ * contacts, is [now]: the cached name when a contact owns the number now under another name; null when no contact
+ * owns it (the cached name is then the title itself), when the log cached nothing, or when the names agree.
+ */
+internal fun savedAs(
+    saved: String?,
+    now: CallLogEntry?,
+): String? {
+    val old = saved?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    if (now?.contactId == null) return null
+    return old.takeIf { it != now.cachedName?.trim() }
 }

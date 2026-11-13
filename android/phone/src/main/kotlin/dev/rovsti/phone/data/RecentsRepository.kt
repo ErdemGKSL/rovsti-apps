@@ -19,6 +19,7 @@ import dev.rovsti.core.model.phone.TimeFormat
 import dev.rovsti.core.model.wa.CallSummary
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.platform.calllog.CallLogRepository
+import dev.rovsti.platform.identity.CallerIds
 import dev.rovsti.platform.telephony.RebuildCoalescer
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -63,6 +64,10 @@ data class RecentsModel(
  *
  * [lastSeenMs] is the time the user last opened Recents (the missed badge counts calls after it). [locale] and [clock]
  * are read at each build (time zone and 12/24 h can change while the app runs).
+ *
+ * Names are the current contacts' ([ids], F29): each build matches the log's numbers to the contacts, and a change of
+ * the contacts ([idsChanged]) rebuilds, so a renamed or newly saved contact shows at once. The log's cached name
+ * names only a number no contact owns; [savedNameOf] keeps it for the call details.
  */
 class RecentsRepository(
     private val callLog: CallLogRepository,
@@ -73,6 +78,8 @@ class RecentsRepository(
     private val clock: () -> Long = System::currentTimeMillis,
     private val lastSeenMs: () -> Long = { 0L },
     private val windowMs: Long = RebuildCoalescer.WINDOW_MS,
+    private val ids: CallerIds? = null,
+    private val idsChanged: Flow<Long> = flowOf(0L),
 ) {
     private val state = MutableStateFlow(RecentsModel())
     private val pending = Channel<Unit>(Channel.CONFLATED)
@@ -80,13 +87,25 @@ class RecentsRepository(
 
     @Volatile private var entries: List<CallLogEntry> = emptyList()
 
-    /** The call-log entries of the last build's source, newest first (what redial reads). */
-    val callEntries: List<CallLogEntry> get() = entries
+    @Volatile private var named: List<CallLogEntry>? = null
+
+    @Volatile private var savedNames: Map<Long, String> = emptyMap()
+
+    /**
+     * The call-log entries of the last build, newest first (what redial, the person sheet and the statistics read),
+     * named by the current contacts.
+     */
+    val callEntries: List<CallLogEntry> get() = named ?: entries
+
+    /** The name the call log cached for entry [logId] at call time; null when it cached none. */
+    fun savedNameOf(logId: Long): String? = savedNames[logId]
 
     @Volatile private var wa: List<ExtraCall> = emptyList()
 
     /** The WhatsApp calls of the last build's source, newest first (the details sheets read their history from it). */
-    val extraCalls: List<ExtraCall> get() = wa
+    val extraCalls: List<ExtraCall> get() = namedWa ?: wa
+
+    @Volatile private var namedWa: List<ExtraCall>? = null
     private var delayed: Job? = null
 
     private val coalescer =
@@ -113,7 +132,7 @@ class RecentsRepository(
             for (ignored in pending) build()
         }
         scope.launch {
-            combine(callLog.entries(), extras) { log, extra -> log to extra }.collect { (log, extra) ->
+            combine(callLog.entries(), extras, idsChanged) { log, extra, _ -> log to extra }.collect { (log, extra) ->
                 val first = !state.value.ready
                 entries = log
                 wa = extra
@@ -139,8 +158,12 @@ class RecentsRepository(
     @Volatile private var builtStamp: Pair<Long, TimeFormat>? = null
 
     private suspend fun build() {
-        val log = entries
-        val extra = wa
+        val raw = entries
+        val log = ids?.liveEntries(raw) ?: raw
+        named = log
+        savedNames = raw.mapNotNull { e -> e.cachedName?.let { e.id to it } }.toMap()
+        val extra = ids?.liveExtras(wa) ?: wa
+        namedWa = extra
         val grouped = ops.recentsGroup(GroupRequest(log)).orFail() ?: return
         val merged =
             if (extra.isEmpty()) {
@@ -150,8 +173,14 @@ class RecentsRepository(
             }
         val nowMs = clock()
         val localeNow = locale()
-        val views = ops.recentsBuild(BuildRowsRequest(merged, nowMs, localeNow)).orFail()?.views ?: return
+        // Stamped before the op: a refreshIfStale racing this build must not start a second one for the same day.
+        val stampBefore = builtStamp
         builtStamp = stampOf(nowMs, localeNow)
+        val views =
+            ops.recentsBuild(BuildRowsRequest(merged, nowMs, localeNow)).orFail()?.views ?: run {
+                builtStamp = stampBefore
+                return
+            }
         val old = state.value.rows
         val delta = ok(ops.refreshDelta(RefreshDeltaRequest(old, merged))) ?: RefreshDelta(0, 0)
         val missed = ok(ops.missedExtras(MissedExtrasRequest(log, extra, lastSeenMs())))

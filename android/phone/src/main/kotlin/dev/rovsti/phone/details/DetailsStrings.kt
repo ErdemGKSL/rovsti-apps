@@ -54,6 +54,10 @@ class DetailsStrings(
     val durationLabel: String = res.getString(R.string.details_duration)
     val channelLabel: String = res.getString(R.string.details_channel)
     val numberLabel: String = res.getString(R.string.details_number)
+
+    /** "Saved as [name] at the time of the call" (F29). */
+    fun savedAs(name: String): String = res.getString(R.string.details_saved_as, name)
+
     val note: String = res.getString(R.string.details_note)
     val notePlaceholder: String = res.getString(R.string.details_note_placeholder)
     val noteSave: String = res.getString(R.string.details_note_save)

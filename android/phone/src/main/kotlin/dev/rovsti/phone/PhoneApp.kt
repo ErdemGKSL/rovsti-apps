@@ -159,6 +159,7 @@ private fun rememberFavoritesViewModel(container: PhoneContainer): FavoritesView
                         callLog = container.callLog,
                         callLogPermission = container.permissions.state(PermissionGroup.CALL_LOG),
                         placer = container.placer,
+                        ids = container.callerIds,
                     )
                 }
             }

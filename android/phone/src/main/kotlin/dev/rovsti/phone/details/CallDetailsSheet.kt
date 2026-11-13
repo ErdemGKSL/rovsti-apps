@@ -67,6 +67,7 @@ import dev.rovsti.phone.remind.showTimePicker
 object CallDetailsTags {
     const val Sheet = "call-details-sheet"
     const val Title = "call-details-title"
+    const val SavedAs = "call-details-saved-as"
     const val Note = "call-details-note"
     const val NoteSave = "call-details-note-save"
     const val NoteRevert = "call-details-note-revert"
@@ -149,6 +150,17 @@ fun ColumnScope.CallDetailsContent(
                         style = RovstiTheme.type.subheadline,
                         color = colors.labelSecondary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                ui.savedAs?.let { saved ->
+                    RovstiText(
+                        strings.savedAs(saved),
+                        modifier = Modifier.padding(top = Spacing.textGap).testTag(CallDetailsTags.SavedAs),
+                        style = RovstiTheme.type.footnote,
+                        color = colors.labelSecondary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }

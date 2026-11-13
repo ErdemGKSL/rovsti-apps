@@ -10,11 +10,13 @@ import dev.rovsti.core.model.phone.IdsForNumbersAnswer
 import dev.rovsti.core.model.phone.IdsForNumbersRequest
 import dev.rovsti.core.model.search.NameFormat
 import dev.rovsti.core.model.search.T9Row
+import dev.rovsti.core.model.search.WantedNumber
 import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.ContactIndexHandle
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.SearchOps
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.identity.ContactBook
 import dev.rovsti.platform.system.permissions.PermissionState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
@@ -53,6 +55,10 @@ sealed interface People {
  * Name order ([nameFormat]) comes from the Phone settings; T9 spells the names in that order. The other helpers are
  * the core's own rules: [displayName] (`phone.display_name`), [idsForNumbers] (`recents.ids_for_numbers`) and
  * [rankByCalls] (`recents.call_counts` into `search.set_call_counts`, so the T9 strip ranks callers first).
+ *
+ * It is also the [ContactBook] of the caller identity resolver ([owners], `search.match_numbers`): [revision] changes
+ * after every rebuild, so names follow contact edits (the contacts flow re-reads on the provider's change notification,
+ * off the main thread).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PeopleIndex(
@@ -63,9 +69,16 @@ class PeopleIndex(
     scope: CoroutineScope,
     private val nameFormat: () -> NameFormat? = { null },
     private val release: (Long) -> Unit = RustNative::release,
-) {
+) : ContactBook {
     private val peopleState = MutableStateFlow<People>(People.Loading)
     private val indexState = MutableStateFlow<ContactIndexHandle?>(null)
+    private val revisionState = MutableStateFlow(0L)
+
+    @Volatile private var byId: Map<Long, WireContact> = emptyMap()
+
+    override val revision: StateFlow<Long> = revisionState.asStateFlow()
+
+    override val ready: Boolean get() = indexState.value != null
 
     val people: StateFlow<People> = peopleState.asStateFlow()
 
@@ -90,6 +103,7 @@ class PeopleIndex(
                         else -> drop()
                     }
                     peopleState.value = next
+                    revisionState.value += 1
                 }
         }
     }
@@ -118,6 +132,16 @@ class PeopleIndex(
         return (open.matchNumber(number) as? Outcome.Ok)?.value?.row
     }
 
+    override suspend fun owners(
+        numbers: List<WantedNumber>,
+        homeCc: String?,
+    ): List<WireContact?>? {
+        val open = indexState.value ?: return null
+        val contacts = byId
+        val ids = (open.matchNumbers(numbers, homeCc) as? Outcome.Ok)?.value?.ids ?: return null
+        return ids.map { id -> id?.let(contacts::get) }
+    }
+
     /** The name to show for [contact] in the chosen order; empty when it has nothing to show. */
     suspend fun displayName(
         contact: WireContact,
@@ -143,6 +167,7 @@ class PeopleIndex(
 
     private suspend fun refresh(next: People.Ready) {
         val open = indexState.value
+        byId = next.contacts.associateBy { it.id }
         if (open == null) {
             when (val built = ContactIndexHandle.open(next.contacts, nameFormat(), search, release)) {
                 is Outcome.Ok -> indexState.value = built.value
@@ -154,6 +179,7 @@ class PeopleIndex(
     }
 
     private fun drop() {
+        byId = emptyMap()
         indexState.value?.close()
         indexState.value = null
     }

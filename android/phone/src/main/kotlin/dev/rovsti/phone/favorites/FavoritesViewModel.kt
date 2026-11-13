@@ -20,9 +20,12 @@ import dev.rovsti.phone.data.People
 import dev.rovsti.phone.data.PeopleIndex
 import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.PlaceResult
+import dev.rovsti.phone.data.liveEntries
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.identity.CallerIds
+import dev.rovsti.platform.identity.DeviceContactsSource
 import dev.rovsti.platform.system.permissions.PermissionState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -161,6 +164,8 @@ class FavoritesViewModel(
     private val clock: () -> Long = System::currentTimeMillis,
     private val widthDp: Double = DEFAULT_WIDTH_DP,
     private val worker: CoroutineDispatcher = Dispatchers.Default,
+    /** Who each number of the log is now (F29): the Frequent rows name the current contact. */
+    private val ids: CallerIds = CallerIds(listOf(DeviceContactsSource(people, e164 = { null }))),
 ) : ViewModel() {
     private val editing = MutableStateFlow(false)
     private val effects = Channel<FavoritesEffect>(Channel.BUFFERED)
@@ -288,18 +293,11 @@ class FavoritesViewModel(
             }.toImmutableList()
     }
 
-    /** Entries the provider has no contact for are matched by number, so a favorite never shows up as frequent too. */
-    private suspend fun known(entries: List<CallLogEntry>): List<CallLogEntry> {
-        val byNumber = HashMap<String, Long?>()
-        return entries.map { e ->
-            if (e.contactId != null) {
-                e
-            } else {
-                val id = byNumber.getOrPut(e.numberRaw) { people.matchNumber(e.numberRaw)?.id }
-                if (id != null) e.copy(contactId = id) else e
-            }
-        }
-    }
+    /**
+     * Every entry is matched to the current contacts by number (the log's own contact link and name are stale or
+     * empty), so a favorite never shows up as frequent too and a renamed contact shows its new name.
+     */
+    private suspend fun known(entries: List<CallLogEntry>): List<CallLogEntry> = ids.liveEntries(entries)
 
     /** The favorites as the rows show them now, for the move ops. */
     private fun shown(): List<WireContact> {

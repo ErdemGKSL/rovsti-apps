@@ -14,6 +14,7 @@ import dev.rovsti.core.model.phone.WireCallState
 import dev.rovsti.core.model.shared.InferHomeCcRequest
 import dev.rovsti.core.model.shared.NumberForm
 import dev.rovsti.core.model.shared.RenderRequest
+import dev.rovsti.core.model.wa.CallSummary
 import dev.rovsti.core.ops.ChatOps
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.NativeChatOps
@@ -38,6 +39,7 @@ import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.RecentsRepository
 import dev.rovsti.phone.data.SimState
 import dev.rovsti.phone.data.SpeedDial
+import dev.rovsti.phone.data.liveCalls
 import dev.rovsti.phone.details.CallDetailsTarget
 import dev.rovsti.phone.details.CallDetailsViewModel
 import dev.rovsti.phone.details.PersonSheetViewModel
@@ -73,6 +75,9 @@ import dev.rovsti.platform.calllog.BlocklistRepository
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.AndroidContactsRepository
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.identity.CallerIds
+import dev.rovsti.platform.identity.DeviceContactsSource
+import dev.rovsti.platform.identity.PhoneNumbers
 import dev.rovsti.platform.notify.ReminderItem
 import dev.rovsti.platform.notify.ReminderRepositories
 import dev.rovsti.platform.notify.RemindersRepository
@@ -98,12 +103,16 @@ import dev.rovsti.wa.calls.WaCallActions
 import dev.rovsti.wa.calls.WaCalls
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -243,6 +252,28 @@ open class PhoneContainer(
 
     /** The contacts with a number, their search index and T9; follows READ_CONTACTS. */
     val people: PeopleIndex by lazy { createPeople() }
+
+    /** The home region (SIM, network, locale, else TR) that national numbers are normalized in. */
+    val homeRegion: String by lazy { PhoneNumbers.homeRegion(context) }
+
+    /**
+     * Who a number is (F28, F29), for every surface that shows a person for a number: the device contacts through the
+     * core's number book ([people], `search.match_numbers`). More sources (the Contacts app's WhatsApp names and
+     * photos) plug in here.
+     */
+    val callerIds: CallerIds by lazy { createCallerIds() }
+
+    /** Changes whenever [callerIds] may answer differently (the contacts changed). */
+    val callerIdsChanged: Flow<Long> by lazy {
+        val revisions = callerIds.revisions
+        combine(revisions) { values -> values.sum() }.distinctUntilChanged()
+    }
+
+    /** The WhatsApp calls with the caller named by the contact that owns the number (F28); see [waCalls]. */
+    val waCallsNamed: StateFlow<List<CallSummary>>
+        get() = waCalls.let { if (::namedWaCalls.isInitialized) namedWaCalls else it.calls }
+
+    private lateinit var namedWaCalls: StateFlow<List<CallSummary>>
 
     /** The SIMs as chips and the "ask every time" state. */
     val simState: SimState by lazy { SimState(sims, ops, scope) }
@@ -433,7 +464,7 @@ open class PhoneContainer(
     protected open fun createCallSource(): CallSource =
         WaMergedCallSource(
             base = RegistryCallSource(registryCalls, CallRegistry.state, scope),
-            waCalls = waCalls.calls,
+            waCalls = waCallsNamed,
             muted = waCalls.mutedCalls,
             speaker = waCalls.speakerOn,
             arbiter = CoreWaArbiter(ops),
@@ -495,8 +526,12 @@ open class PhoneContainer(
 
     /** The calling code of home ("90"), guessed from the contacts' own numbers; null when there is nothing to guess from. */
     open suspend fun homeCc(): String? {
+        // The provider's E.164 form next to the stored one is the surest pair to read the country from.
         val numbers =
-            (people.people.value as? People.Ready)?.contacts?.flatMap { c -> c.numbers.map { it.raw } }.orEmpty()
+            (people.people.value as? People.Ready)
+                ?.contacts
+                ?.flatMap { c -> c.numbers.flatMap { listOfNotNull(it.raw, it.normalized) } }
+                .orEmpty()
         return (sharedOps.inferHomeCc(InferHomeCcRequest(numbers.take(HOME_CC_SAMPLE))) as? Outcome.Ok)?.value?.homeCc
     }
 
@@ -526,10 +561,11 @@ open class PhoneContainer(
             ringOver = { id -> WaIncoming.cancel(context, id) },
         ).also {
             it.start()
-            WaRingNotifier(it.calls, scope, clock) { id, title -> WaIncoming.show(context, id, title) }.start()
+            namedWaCalls = namedCalls(it.calls)
+            WaRingNotifier(namedWaCalls, scope, clock) { id, title -> WaIncoming.show(context, id, title) }.start()
             // The screen goes dark at the ear, and the ongoing notification names the call and leads back to it.
             WaInCallEffects(
-                calls = it.calls,
+                calls = namedWaCalls,
                 muted = it.mutedCalls,
                 speaker = it.speakerOn,
                 earpiece = communicationOnEarpiece(context),
@@ -539,6 +575,24 @@ open class PhoneContainer(
                 clock = clock,
             ).start()
         }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun namedCalls(calls: StateFlow<List<CallSummary>>): StateFlow<List<CallSummary>> =
+        combine(calls, callerIdsChanged) { list, _ -> list }
+            .mapLatest { callerIds.liveCalls(it) }
+            .stateIn(scope, SharingStarted.Eagerly, calls.value)
+
+    protected open fun createCallerIds(): CallerIds =
+        CallerIds(
+            listOf(
+                DeviceContactsSource(
+                    book = people,
+                    e164 = { PhoneNumbers.e164(it, homeRegion) },
+                    homeCc = ::homeCc,
+                    name = { people.displayName(it) },
+                ),
+            ),
+        )
 
     /** The deleted WhatsApp calls, kept across restarts. */
     protected open fun createForgottenCalls(): ForgottenCalls = PrefsForgottenCalls(context)
@@ -552,6 +606,8 @@ open class PhoneContainer(
             scope = scope,
             clock = clock,
             extras = waCalls.calls.map { RecentsRepository.extraCalls(it) },
+            ids = callerIds,
+            idsChanged = callerIdsChanged,
             locale = { DeviceLocaleTime.now(context, clock()) },
             lastSeenMs = { store.prefs.value.ui.missedSeenMs },
         ).also { it.start() }

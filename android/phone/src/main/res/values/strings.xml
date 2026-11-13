@@ -272,6 +272,8 @@
     <string name="details_duration">Duration</string>
     <string name="details_channel">Channel</string>
     <string name="details_number">Number</string>
+    <!-- Call details: the name the call log kept when the contact is now named otherwise (F29). -->
+    <string name="details_saved_as">Saved as %1$s at the time of the call</string>
     <string name="details_note">Note</string>
     <string name="details_note_placeholder">Add a note</string>
     <string name="details_note_save">Save note</string>

@@ -28,11 +28,34 @@ sealed interface WaNotice {
     /** The gateway refused or could not be reached. */
     data object Failed : WaNotice
 
-    /** The core's sentence for a call that cannot start (not connected, busy, no number). */
+    /**
+     * A call that cannot start, for one of the core's reasons (`phone.wa_tracker_can_place`: no number, not linked,
+     * busy) or because a national number has no known country. The screen says it in the phone's language (the core's
+     * sentences are English).
+     */
     data class Refused(
-        val text: String,
+        val reason: WaRefusal,
     ) : WaNotice
 }
+
+/** Why a WhatsApp call was not placed. */
+enum class WaRefusal { NoNumber, NotLinked, Busy, NeedsCountryCode }
+
+/**
+ * The reason the core refused a call with these inputs, in the order its `can_place` checks them (no number, then not
+ * connected, then busy); the core's message itself is English and never shown.
+ */
+internal fun refusalOf(
+    connected: Boolean,
+    busy: Boolean,
+    number: String,
+): WaRefusal =
+    when {
+        number.isBlank() -> WaRefusal.NoNumber
+        !connected -> WaRefusal.NotLinked
+        busy -> WaRefusal.Busy
+        else -> WaRefusal.NotLinked
+    }
 
 /** Where [WaNotice]s are said; one per container. */
 class WaNotices {
@@ -200,14 +223,17 @@ class WaCallLauncher(
 
     private suspend fun run(number: String) {
         val full = e164(number)?.takeIf { it.startsWith('+') } ?: withOwnCountry(number, ownUser())
-        val check = ops.canPlace(CanPlaceRequest(available.value, busy(), full ?: number))
+        val connected = available.value
+        val busyNow = busy()
+        val target = full ?: number
+        val check = ops.canPlace(CanPlaceRequest(connected, busyNow, target))
         if (check is Outcome.Err) {
-            notices.say(WaNotice.Refused(check.error.message.orEmpty()))
+            notices.say(WaNotice.Refused(refusalOf(connected, busyNow, target)))
             return
         }
         if (full == null) {
             // A national number whose country is unknown: its digits are not a WhatsApp user, so nothing is placed.
-            notices.say(WaNotice.Refused(NEEDS_COUNTRY_CODE))
+            notices.say(WaNotice.Refused(WaRefusal.NeedsCountryCode))
             return
         }
         when (val result = waCalls.place(jidOf(full))) {
@@ -237,9 +263,6 @@ class WaCallLauncher(
             ?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
 
     companion object {
-        /** What the user is told when a national number cannot be turned into a WhatsApp number. */
-        const val NEEDS_COUNTRY_CODE = "Add the country code to call this number on WhatsApp"
-
         private const val MAX_CC = 3
         private const val MIN_DIGITS = 7
 

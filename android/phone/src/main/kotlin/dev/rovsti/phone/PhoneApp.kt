@@ -82,6 +82,7 @@ import dev.rovsti.phone.stats.StatsHost
 import dev.rovsti.phone.stats.StatsPage
 import dev.rovsti.phone.stats.StatsViewModel
 import dev.rovsti.phone.wa.WaNotice
+import dev.rovsti.phone.wa.WaRefusal
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
 import dev.rovsti.platform.files.ShareIntents
@@ -446,6 +447,17 @@ fun PhoneApp(
     }
     val waMissing = stringResource(R.string.wa_notice_microphone)
     val waFailed = stringResource(R.string.wa_notice_failed)
+    val waRefused =
+        WaRefusal.entries.associateWith { reason ->
+            stringResource(
+                when (reason) {
+                    WaRefusal.NoNumber -> R.string.wa_refused_no_number
+                    WaRefusal.NotLinked -> R.string.wa_refused_not_linked
+                    WaRefusal.Busy -> R.string.wa_refused_busy
+                    WaRefusal.NeedsCountryCode -> R.string.wa_refused_country_code
+                },
+            )
+        }
     val activity = LocalContext.current.findComponentActivity()
     val microphone =
         rememberLauncherForActivityResult(container.permissions.contract(PermissionGroup.MICROPHONE)) { granted ->
@@ -461,7 +473,7 @@ fun PhoneApp(
             when (notice) {
                 WaNotice.NeedsMicrophone -> microphone.launch(Unit)
                 WaNotice.Failed -> overlays.showToast(waFailed)
-                is WaNotice.Refused -> overlays.showToast(notice.text)
+                is WaNotice.Refused -> overlays.showToast(waRefused.getValue(notice.reason))
             }
         }
     }

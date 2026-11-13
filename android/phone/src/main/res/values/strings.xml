@@ -377,6 +377,10 @@
     <string name="incall_notice_wa_unavailable">Not available on WhatsApp calls</string>
     <string name="wa_notice_microphone">Allow the microphone to make WhatsApp calls</string>
     <string name="wa_notice_failed">The WhatsApp call could not be started</string>
+    <string name="wa_refused_no_number">There is no number to call on WhatsApp</string>
+    <string name="wa_refused_not_linked">WhatsApp is not linked</string>
+    <string name="wa_refused_busy">Another call is in progress</string>
+    <string name="wa_refused_country_code">Add the country code to call this number on WhatsApp</string>
     <string name="details_menu_whatsapp">WhatsApp call</string>
 
     <!-- E5.10 Call statistics -->

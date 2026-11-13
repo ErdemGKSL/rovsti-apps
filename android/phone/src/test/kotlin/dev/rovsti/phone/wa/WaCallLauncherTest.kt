@@ -67,6 +67,9 @@ class WaCallLauncherTest {
     private val shared = NativeSharedOps(host.core)
     private val notices = WaNotices()
     private val said = CopyOnWriteArrayList<WaNotice>()
+    private val started =
+        java.util.concurrent.atomic
+            .AtomicInteger()
 
     /** The contacts of the owner: every number international, so there is no national/international pair to infer from. */
     private val book = listOf("+90 555 111 22 33", "+90 555 444 55 66", "+49 151 2345678")
@@ -86,6 +89,7 @@ class WaCallLauncherTest {
             e164 = ::e164,
             notices = notices,
             scope = scope,
+            onStarted = { started.incrementAndGet() },
         )
 
     init {
@@ -134,6 +138,27 @@ class WaCallLauncherTest {
     @Test fun `no JID is ever sent with a plus, a space or a trunk zero`() {
         for (n in listOf("+90 555 111 22 33", "0532 123 45 67", "(0532) 123 45 67", "90532 123 45 67")) placed(n)
         assertTrue(placedTo.toString(), placedTo.all { Regex("[1-9][0-9]{6,14}@s\\.whatsapp\\.net").matches(it) })
+    }
+
+    /** Owner bug 2026-11-13: a WhatsApp call placed from a sheet left the sheet open. A started call leaves the screen. */
+    @Test fun `a started call leaves the screen and a refused one does not`() {
+        placed("+90 555 111 22 33")
+        runBlocking { eventually("the leave was signalled") { started.get() == 1 } }
+        val notes = said.size
+        launcher.place("12")
+        runBlocking { eventually("the refusal") { said.size > notes } }
+        assertEquals("a refused call stays on the screen", 1, started.get())
+    }
+
+    /** A Turkish phone showed the core's English sentences: the refusal is a reason the screen words itself. */
+    @Test fun `a refusal carries its reason, never an English sentence`() {
+        assertEquals(WaRefusal.NoNumber, refusalOf(connected = true, busy = false, number = "  "))
+        assertEquals(WaRefusal.NotLinked, refusalOf(connected = false, busy = true, number = "+905551112233"))
+        assertEquals(WaRefusal.Busy, refusalOf(connected = true, busy = true, number = "+905551112233"))
+        val notes = said.size
+        launcher.place("12")
+        runBlocking { eventually("the refusal") { said.size > notes } }
+        assertEquals(WaNotice.Refused(WaRefusal.NeedsCountryCode), said.last())
     }
 
     @Test fun `own country helper`() {

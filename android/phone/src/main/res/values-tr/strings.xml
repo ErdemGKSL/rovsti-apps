@@ -377,6 +377,10 @@
     <string name="incall_notice_wa_unavailable">WhatsApp aramalarında kullanılamaz</string>
     <string name="wa_notice_microphone">WhatsApp araması için mikrofona izin verin</string>
     <string name="wa_notice_failed">WhatsApp araması başlatılamadı</string>
+    <string name="wa_refused_no_number">WhatsApp\'ta aranacak numara yok</string>
+    <string name="wa_refused_not_linked">WhatsApp bağlı değil</string>
+    <string name="wa_refused_busy">Başka bir arama sürüyor</string>
+    <string name="wa_refused_country_code">Bu numarayı WhatsApp\'ta aramak için ülke kodunu ekleyin</string>
     <string name="details_menu_whatsapp">WhatsApp araması</string>
 
     <!-- E5.10 Arama istatistikleri -->

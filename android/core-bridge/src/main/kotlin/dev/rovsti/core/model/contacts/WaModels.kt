@@ -17,6 +17,8 @@ import kotlinx.serialization.Serializable
 data class WaMarksRequest(
     val contacts: List<WireContact>,
     @SerialName("chat_users") val chatUsers: List<String>,
+    /** The home calling code (`"90"`): a national number is compared in its E.164 form (F39). */
+    @SerialName("home_cc") @EncodeDefault(NEVER) val homeCc: String? = null,
 )
 
 /** `contacts.wa_marks` answer: contact id to the JID of its chat. */
@@ -64,6 +66,8 @@ data class WaCardRequest(
     @SerialName("now_ms") val nowMs: Long,
     /** The phone's offset from UTC, for "last seen" lines. */
     @SerialName("offset_s") @EncodeDefault(NEVER) val offsetS: Int = 0,
+    /** The home calling code (`"90"`): a national number is looked up and matched in its E.164 form (F39). */
+    @SerialName("home_cc") @EncodeDefault(NEVER) val homeCc: String? = null,
 )
 
 /** `contacts.wa_card` answer. */

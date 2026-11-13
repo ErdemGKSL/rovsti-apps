@@ -105,4 +105,17 @@ class WaMarksTest {
             book.value = ready
             assertEquals(setOf(1L), marks.marks.value.keys)
         }
+
+    @Test fun theHomeCodeOfTheBookGoesWithTheRequest() =
+        runTest(UnconfinedTestDispatcher()) {
+            // F39: the core compares a contact saved as `0532 …` with the chat `90532…` in E.164 (`home_cc`).
+            val wa = FakeWaRepository(connected).apply { setChats(listOf(chat("905321234567@s.whatsapp.net"))) }
+            val asked = mutableListOf<List<WireContact>>()
+            WaMarks(wa, MutableStateFlow(ready), NativeContactsWaOps(core), backgroundScope) { contacts ->
+                asked += contacts
+                "90"
+            }
+            assertEquals("90", requests.single().homeCc)
+            assertEquals(listOf(ayse, cem), asked.single())
+        }
 }

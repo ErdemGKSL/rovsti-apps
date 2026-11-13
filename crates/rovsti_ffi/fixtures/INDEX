@@ -242,12 +242,14 @@ contacts.wa_card.chat
 contacts.wa_card.chat_last_seen
 contacts.wa_card.chat_online
 contacts.wa_card.local_number
+contacts.wa_card.local_number_home
 contacts.wa_card.lookup_checking
 contacts.wa_card.lookup_done
 contacts.wa_card.lookup_failed
 contacts.wa_card.lookup_not_on_whatsapp
 contacts.wa_card.no_number
 contacts.wa_marks
+contacts.wa_marks.local_number_home
 contacts.wa_marks.local_number_ignored
 contacts.wa_marks.no_chats
 contacts.wa_profile_lines

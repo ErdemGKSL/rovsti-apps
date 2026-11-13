@@ -69,6 +69,10 @@ class PeopleIndex(
     scope: CoroutineScope,
     private val nameFormat: () -> NameFormat? = { null },
     private val release: (Long) -> Unit = RustNative::release,
+    /** A number's E.164 form in the home region (Android's), so [matchNumber] keys it as Recents does (F39). */
+    private val e164: (String) -> String? = { null },
+    /** The home calling code for national numbers Android could not normalize. */
+    private val homeCc: suspend () -> String? = { null },
 ) : ContactBook {
     private val peopleState = MutableStateFlow<People>(People.Loading)
     private val indexState = MutableStateFlow<ContactIndexHandle?>(null)
@@ -126,11 +130,12 @@ class PeopleIndex(
         return (open.t9(digits, nameFormat()) as? Outcome.Ok)?.value?.hits.orEmpty()
     }
 
-    /** The contact that owns [number], null for a stranger. */
-    suspend fun matchNumber(number: String): WireContact? {
-        val open = indexState.value ?: return null
-        return (open.matchNumber(number) as? Outcome.Ok)?.value?.row
-    }
+    /**
+     * The contact that owns [number], null for a stranger: the number book with the number's E.164 form and the home
+     * code, exactly as the caller-ID resolver asks it (F39), so the keypad and Recents agree on who a number is.
+     */
+    suspend fun matchNumber(number: String): WireContact? =
+        owners(listOf(WantedNumber(number, e164(number))), homeCc())?.firstOrNull()
 
     override suspend fun owners(
         numbers: List<WantedNumber>,

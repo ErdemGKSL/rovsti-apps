@@ -201,18 +201,21 @@ pub fn status_line(
 }
 
 /// The contacts that get the WhatsApp mark in the list: some number of theirs
-/// matches a known 1:1 chat. Each maps to that chat's JID. Parses each chat
-/// and number once.
+/// is the number of a known 1:1 chat. Each maps to that chat's JID. A number
+/// is compared in its E.164 form by the shared caller-ID rules (F39,
+/// [`rovsti_core::caller_id::e164_of`]): the provider's `NORMALIZED_NUMBER`,
+/// else the number with `home_cc`, so a contact saved as `0532 …` gets the mark
+/// of the chat `90532…`. A national number with no known country never does.
 pub fn marked_contacts<'a>(
     contacts: impl IntoIterator<Item = &'a WireContact>,
     chat_users: &[String],
+    home_cc: Option<&str>,
 ) -> HashMap<i64, String> {
-    let chats: Vec<(&str, PhoneNumber)> = chat_users
+    let chats: HashMap<String, &str> = chat_users
         .iter()
         .filter_map(|user| {
-            PhoneNumber::parse(&format!("+{user}"))
-                .ok()
-                .map(|n| (user.as_str(), n))
+            rovsti_core::caller_id::e164_of(&format!("+{user}"), None, None)
+                .map(|key| (key, user.as_str()))
         })
         .collect();
     if chats.is_empty() {
@@ -223,11 +226,22 @@ pub fn marked_contacts<'a>(
         .filter_map(|c| {
             c.numbers
                 .iter()
-                .filter_map(|n| PhoneNumber::parse(&n.raw).ok())
-                .filter(PhoneNumber::is_international)
-                .find_map(|n| chats.iter().find(|(_, chat)| n.matches(chat)))
-                .map(|(user, _)| (c.id, format!("{user}@s.whatsapp.net")))
+                .filter_map(|n| {
+                    rovsti_core::caller_id::e164_of(&n.raw, n.normalized.as_deref(), home_cc)
+                })
+                .find_map(|key| chats.get(&key).copied())
+                .map(|user| (c.id, format!("{user}@s.whatsapp.net")))
         })
+        .collect()
+}
+
+/// The contact's numbers as the WhatsApp decisions read them: each in its
+/// E.164 form when the shared caller-ID rules give one (F39: a national number
+/// with the home calling code), else as written, in the same order.
+pub fn e164_numbers(numbers: &[String], home_cc: Option<&str>) -> Vec<String> {
+    numbers
+        .iter()
+        .map(|n| rovsti_core::caller_id::e164_of(n, None, home_cc).unwrap_or_else(|| n.clone()))
         .collect()
 }
 
@@ -394,9 +408,9 @@ mod tests {
         };
         let users = rovsti_wa_proto::chat_users(&[chat("96413459456093@lid")]);
         let c = contact(1, &["+96413459456093"]);
-        assert!(marked_contacts([&c], &users).is_empty());
+        assert!(marked_contacts([&c], &users, None).is_empty());
         let users = rovsti_wa_proto::chat_users(&[chat("96413459456093@s.whatsapp.net")]);
-        assert_eq!(marked_contacts([&c], &users).len(), 1);
+        assert_eq!(marked_contacts([&c], &users, None).len(), 1);
     }
 
     #[test]
@@ -495,14 +509,47 @@ mod tests {
             contact(3, &["+44 20 7946 0958"]),
             contact(4, &[]),
         ];
-        let marked = marked_contacts(&contacts, &["905321234567".to_owned()]);
+        let marked = marked_contacts(&contacts, &["905321234567".to_owned()], None);
         assert_eq!(
             marked.get(&1).map(String::as_str),
             Some("905321234567@s.whatsapp.net")
         );
+        // No home country known: a national number has no E.164 form to compare.
+        assert!(!marked.contains_key(&2));
         assert!(!marked.contains_key(&3));
         assert!(!marked.contains_key(&4));
-        assert!(marked_contacts(&contacts, &[]).is_empty());
+        assert!(marked_contacts(&contacts, &[], None).is_empty());
+    }
+
+    #[test]
+    fn a_nationally_saved_contact_gets_its_chat_with_the_home_code() {
+        // F39: the owner's contact is saved as `0532 …`; its chat is `90532…`.
+        let mut provider = contact(5, &["532-123-4567"]);
+        provider.numbers[0].normalized = Some("+905321234567".into());
+        let contacts = [
+            contact(2, &["0532 123 45 67"]),
+            contact(6, &["0532 123 45 68"]),
+            contact(7, &["Private"]),
+            provider,
+        ];
+        let users = ["905321234567".to_owned()];
+        let marked = marked_contacts(&contacts, &users, Some("90"));
+        let jid = Some("905321234567@s.whatsapp.net");
+        assert_eq!(marked.get(&2).map(String::as_str), jid);
+        assert_eq!(marked.get(&5).map(String::as_str), jid);
+        assert!(!marked.contains_key(&6));
+        assert!(!marked.contains_key(&7));
+        // The provider's own E.164 form needs no home code.
+        assert_eq!(
+            marked_contacts(&contacts, &users, None)
+                .get(&5)
+                .map(String::as_str),
+            jid
+        );
+        assert_eq!(
+            e164_numbers(&["0532 123 45 67".into(), "112".into()], Some("90")),
+            vec!["+905321234567".to_owned(), "112".to_owned()]
+        );
     }
 
     #[test]

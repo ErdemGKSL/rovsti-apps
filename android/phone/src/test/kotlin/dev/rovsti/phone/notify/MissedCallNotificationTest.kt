@@ -9,6 +9,8 @@ import dev.rovsti.phone.MainActivity
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.R
 import dev.rovsti.platform.calllog.MissedCalls
+import dev.rovsti.platform.identity.CallerIdentity
+import dev.rovsti.platform.identity.CallerLookup
 import dev.rovsti.platform.notify.PlatformChannels
 import dev.rovsti.platform.telephony.MissedCallNotifications
 import org.junit.Assert.assertEquals
@@ -54,7 +56,8 @@ class MissedCallNotificationTest {
         assertEquals(R.drawable.ic_notif_call_missed, n.smallIcon.resId)
         assertEquals(0xFFFF3B30.toInt(), n.color)
         assertEquals(MissedCallNotifications.GROUP, n.group)
-        assertEquals("+905551112233", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        // A caller nobody owns reads formatted (F39).
+        assertEquals("+90 555 111 22 33", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertEquals(listOf("Call back", "Message", "Remind me"), n.actions.map { it.title.toString() })
         // One caller: no digest yet.
         assertNull(summary())
@@ -113,6 +116,37 @@ class MissedCallNotificationTest {
         assertNull(single("+905559990000"))
         assertNotNull(single("+905551112233"))
         assertNull(summary())
+    }
+
+    @Test fun aContactSavedNationallyNamesAMissedCallFromItsE164FormAndTheDigestFollowsTheContacts() {
+        // F39: the app's caller-ID (the core's number book), not PhoneLookup; here a stand-in with the same answer.
+        var name = "Ayşe Yılmaz"
+        CallerLookup.install { number ->
+            if (number.filter(Char::isDigit).endsWith("5321234567")) {
+                CallerIdentity(contactId = 1, name = name)
+            } else {
+                null
+            }
+        }
+        try {
+            MissedCallNotifications.post(context, "+905321234567", 1_000L)
+            val n = single("+905321234567")!!
+            assertEquals("Ayşe Yılmaz", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+            assertEquals(
+                "Ayşe Yılmaz",
+                n.actions[0].let { shadowOf(it.actionIntent) }.savedIntent.getStringExtra(
+                    MissedCallNotifications.EXTRA_NAME,
+                ),
+            )
+            // Renamed before the next missed call: the digest names the first caller as the contacts are now.
+            name = "Ayşe Demir"
+            MissedCallNotifications.post(context, "+905559990000", 2_000L)
+            val lines = summary()!!.extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)!!.map { it.toString() }
+            assertTrue(lines.toString(), lines.any { it.startsWith("Ayşe Demir") })
+            assertTrue(lines.toString(), lines.any { it.startsWith("+90 555 999 00 00") })
+        } finally {
+            CallerLookup.install(null)
+        }
     }
 
     @Test fun aPrivateNumberHasNoActionsAndSaysMissedCall() {

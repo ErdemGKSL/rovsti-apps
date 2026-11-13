@@ -10,6 +10,9 @@ import android.text.format.DateFormat
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.PlatformPrefs
 import dev.rovsti.platform.R
+import dev.rovsti.platform.identity.CallerIdentity
+import dev.rovsti.platform.identity.CallerLookup
+import dev.rovsti.platform.identity.PhoneNumbers
 import dev.rovsti.platform.notify.NotificationIcon
 import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.NotifyPhotos
@@ -88,8 +91,19 @@ object MissedCallNotifications {
         if (!PlatformChannels.ensure(context, PlatformChannels.MISSED_CALLS)) return
         val person = NotifyPhotos.person(context, number)
         val missed = Missed(number, person.name, atMs)
-        val all =
-            (unseen(context).filterNot { it.number == number } + missed).takeLast(KEEP)
+        // The digest names every caller as the contacts are now (F39): a contact added since an earlier call shows.
+        val lookup = CallerLookup.of(context)
+        val earlier =
+            unseen(context).filterNot { it.number == number }.map { m ->
+                val now =
+                    try {
+                        lookup.identify(m.number)?.title
+                    } catch (_: RuntimeException) {
+                        m.name
+                    }
+                m.copy(name = now)
+            }
+        val all = (earlier + missed).takeLast(KEEP)
         save(context, all)
         val id = notificationId(number)
         try {
@@ -123,7 +137,10 @@ object MissedCallNotifications {
     private fun title(
         context: Context,
         m: Missed,
-    ): String = m.name ?: m.number.ifBlank { context.getString(R.string.notif_missed_call) }
+    ): String =
+        CallerLookup.titleOf(m.number, m.name?.let { CallerIdentity(name = it) }) {
+            PhoneNumbers.forReading(it, PhoneNumbers.homeRegion(context))
+        } ?: context.getString(R.string.notif_missed_call)
 
     private fun time(
         context: Context,

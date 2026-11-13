@@ -57,6 +57,9 @@ enum Query {
         /// The same query without a trunk `0` or `00` prefix, to find
         /// `05xx` among numbers stored as `+90 5xx`.
         national: Option<String>,
+        /// The query's caller-ID key when it is a whole number (not a short
+        /// code): finds a number saved in another form, as caller-ID does.
+        line: Option<String>,
         folded: String,
     },
 }
@@ -84,9 +87,12 @@ impl Query {
                 .or_else(|| digits.strip_prefix('0'))
                 .filter(|rest| rest.len() >= 3)
                 .map(str::to_owned);
+            let line =
+                crate::caller_id::line_key(trimmed, None, None).filter(|key| !key.starts_with('#'));
             Self::Digits {
                 digits,
                 national,
+                line,
                 folded: fold(trimmed),
             }
         } else {
@@ -131,6 +137,9 @@ pub(crate) struct Entry {
     folded_email: Option<String>,
     /// Digits only, per number.
     pub(crate) digits: Vec<String>,
+    /// [`crate::caller_id::line_key`] of every number: a whole number typed in
+    /// any form (`+90 532…` for a contact saved as `0532…`) finds its owner.
+    pub(crate) lines: Vec<String>,
     /// T9 codes of the primary name, and of the alternative when it differs.
     pub(crate) t9: crate::t9::NameCodes,
     pub(crate) t9_alt: Option<crate::t9::NameCodes>,
@@ -182,6 +191,13 @@ impl ContactIndex {
                     .iter()
                     .map(|n| search_digits(&n.raw))
                     .collect();
+                let lines = contact
+                    .numbers
+                    .iter()
+                    .filter_map(|n| {
+                        crate::caller_id::line_key(&n.raw, n.normalized.as_deref(), None)
+                    })
+                    .collect();
                 let alt = contact
                     .display_name_alt
                     .as_deref()
@@ -206,6 +222,7 @@ impl ContactIndex {
                     initials_alt,
                     folded_email,
                     digits,
+                    lines,
                     t9,
                     t9_alt,
                     calls: 0,
@@ -275,6 +292,7 @@ impl ContactIndex {
             Query::Digits {
                 digits,
                 national,
+                line,
                 folded,
             } => self
                 .entries
@@ -285,7 +303,8 @@ impl ContactIndex {
                             || national
                                 .as_deref()
                                 .is_some_and(|n| after_country_code(d, n))
-                    }) || e.folded_name.contains(&folded)
+                    }) || line.as_ref().is_some_and(|l| e.lines.contains(l))
+                        || e.folded_name.contains(&folded)
                 })
                 .map(|e| &e.contact)
                 .collect(),
@@ -493,6 +512,28 @@ mod tests {
         let idx = ContactIndex::new(vec![contact(1, "A", &["0532 555 11 22"])]);
         assert!(idx.search("0555 11").is_empty());
         assert_eq!(idx.search("0532 555").len(), 1);
+    }
+
+    #[test]
+    fn a_whole_number_in_another_form_finds_a_nationally_saved_contact() {
+        // F39: the owner's contact is saved as `0532 …`; searching the number as
+        // a caller shows it (`+90 532 …`, `0090…`, `90532…`) finds them.
+        let idx = ContactIndex::new(vec![
+            contact(1, "Ayşe", &["0532 123 45 67"]),
+            contact(2, "Bo", &["0532 123 45 68"]),
+            contact(3, "Emergency", &["112"]),
+        ]);
+        for q in [
+            "+90 532 123 45 67",
+            "+905321234567",
+            "905321234567",
+            "0090 532 123 45 67",
+            "05321234567",
+        ] {
+            assert_eq!(names(&idx.search(q)), ["Ayşe"], "query {q:?}");
+        }
+        // A short code is never a tail of a full number.
+        assert_eq!(names(&idx.search("112")), ["Emergency"]);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 use crate::contact_dates;
 use crate::contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, FieldKind};
-use crate::{import_plan, vcard};
+use crate::vcard;
 
 /// Longest side, in pixels, the decoder should be given. Callers downscale
 /// larger pictures to this first.
@@ -162,9 +162,7 @@ fn trim_punct(t: &str) -> &str {
 fn flush_run(run: &mut Vec<&str>, numbers: &mut Vec<DraftField>) {
     if !run.is_empty() {
         let value = run.join(" ");
-        if import_plan::number_key(&value).is_some_and(|k| k.len() >= 7)
-            && numbers.len() < MAX_PASTED_FIELDS
-        {
+        if digit_count(&value) >= 7 && numbers.len() < MAX_PASTED_FIELDS {
             numbers.push(DraftField::new(value, FieldKind::Mobile));
         }
         run.clear();
@@ -251,7 +249,12 @@ fn is_number(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_digit() || matches!(c, '+' | ' ' | '-' | '(' | ')' | '.' | '/'))
-        && import_plan::number_key(s).is_some()
+        && digit_count(s) > 0
+}
+
+/// How many ASCII digits `s` has (what makes pasted text a number).
+fn digit_count(s: &str) -> usize {
+    s.chars().filter(char::is_ascii_digit).count()
 }
 
 fn is_email(s: &str) -> bool {

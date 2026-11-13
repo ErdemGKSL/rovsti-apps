@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.app.Person
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.notify.NotificationIcon
 import dev.rovsti.platform.notify.NotificationKind
@@ -81,12 +82,15 @@ object CallNotifications {
         context: Context,
         call: IncomingCall,
         fullScreenAllowed: Boolean,
+        /** The caller's contact photo (F39); null shows the platform's initials. */
+        photo: Icon? = null,
     ): Notification {
         ensureChannels(context)
         val person =
             Person
                 .Builder()
                 .setName(call.title)
+                .setIcon(photo)
                 .setImportant(true)
                 .build()
         val show = showIncomingIntent(context, call.callId)
@@ -96,7 +100,7 @@ object CallNotifications {
         // notification nor carries a full-screen intent, and the incoming one is posted by a plain
         // notify(). Without the permission the heads-up falls back to ordinary Answer / Decline
         // actions (AD-2), which never throws.
-        if (!fullScreenAllowed) return incomingHeadsUp(context, call, show, answer, decline)
+        if (!fullScreenAllowed) return incomingHeadsUp(context, call, show, answer, decline, photo)
         val builder =
             Notification
                 .Builder(context, CHANNEL_INCOMING)
@@ -134,6 +138,7 @@ object CallNotifications {
         show: PendingIntent = showIncomingIntent(context, call.callId),
         answer: PendingIntent = answerIntent(context, call),
         decline: PendingIntent = declineIntent(context, call),
+        photo: Icon? = null,
     ): Notification {
         ensureChannels(context)
         val icon = NotificationIcon.small(context, NotificationKind.CALL_INCOMING)
@@ -151,6 +156,7 @@ object CallNotifications {
                 .setAutoCancel(false)
                 .addAction(Notification.Action.Builder(icon, "Decline", decline).build())
                 .addAction(Notification.Action.Builder(icon, "Answer", answer).build())
+        photo?.let { builder.setLargeIcon(it) }
         if (call.canMessage) {
             builder.addAction(
                 Notification.Action.Builder(icon, "Message", messageIntent(context, call)).build(),
@@ -209,12 +215,15 @@ object CallNotifications {
     fun ongoing(
         context: Context,
         call: OngoingCall,
+        /** The caller's contact photo (F39); null shows the platform's initials. */
+        photo: Icon? = null,
     ): Notification {
         ensureChannels(context)
         val person =
             Person
                 .Builder()
                 .setName(call.title)
+                .setIcon(photo)
                 .setImportant(true)
                 .build()
         val open =

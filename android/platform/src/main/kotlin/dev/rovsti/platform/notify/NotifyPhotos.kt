@@ -10,7 +10,7 @@ import android.graphics.Shader
 import android.graphics.drawable.Icon
 import android.net.Uri
 import android.provider.ContactsContract
-import dev.rovsti.platform.contacts.ContactsQuery
+import dev.rovsti.platform.identity.CallerLookup
 
 /** The person a call notification is about: the contact's name and a round photo for the large icon, when known. */
 data class NotifyPerson(
@@ -19,8 +19,9 @@ data class NotifyPerson(
 )
 
 /**
- * Looks a number up for a notification (`PhoneLookup`, then the contact's thumbnail). Every read can fail on a missing
- * grant or a missing contact; the answer is then just less decorated, never an error.
+ * Looks a number up for a notification (the app's caller-ID, [CallerLookup]: the same E.164 matching as Recents, F39),
+ * then the contact's thumbnail. Every read can fail on a missing grant or a missing contact; the answer is then just
+ * less decorated, never an error. Blocking: off the main thread.
  */
 object NotifyPhotos {
     private const val SIDE = 192
@@ -29,11 +30,17 @@ object NotifyPhotos {
         context: Context,
         number: String,
     ): NotifyPerson {
-        val match = ContactsQuery.lookup(context, number) ?: return NotifyPerson(null, null)
-        return NotifyPerson(match.displayName.takeIf { it.isNotBlank() }, thumbnail(context, match.contactId))
+        val who =
+            try {
+                CallerLookup.of(context).identify(number)
+            } catch (_: RuntimeException) {
+                null
+            } ?: return NotifyPerson(null, null)
+        return NotifyPerson(who.title, who.contactId?.let { icon(context, it) })
     }
 
-    private fun thumbnail(
+    /** The round photo of contact [contactId] for a notification; null without one. */
+    fun icon(
         context: Context,
         contactId: Long,
     ): Icon? =

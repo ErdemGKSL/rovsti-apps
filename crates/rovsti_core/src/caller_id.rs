@@ -194,6 +194,56 @@ impl NumberBook {
     }
 }
 
+/// The E.164 form (`+905321234567`) of `raw` as [`NumberBook`] keys it: the
+/// platform's `e164` (or the provider's `NORMALIZED_NUMBER`) when valid, else
+/// [`PhoneNumber::to_e164`] with `home_cc`. `None` for a withheld number, a
+/// short code, text that is no number, and a national number whose country is
+/// unknown.
+pub fn e164_of(raw: &str, e164: Option<&str>, home_cc: Option<&str>) -> Option<String> {
+    match key_of(raw, e164, home_cc)? {
+        Key::E164(key) => Some(key),
+        Key::Loose(_) | Key::Short(_) => None,
+    }
+}
+
+/// A hashable "same line" key with the rules of [`NumberBook`], for the places
+/// that group numbers rather than look one up (duplicates, an import against
+/// the book, "this contact already has this number"): a full number keys by
+/// its last [`MIN_TAIL`] national digits (E.164 when it has a country, so
+/// `+90 532 123 45 67`, `0532 123 45 67`, `0090 532…` and `532 123 45 67` are
+/// one key), a short code by all of its digits (`#112`, never equal to a
+/// full number), and a withheld number or text that is no number has none.
+/// An extension or dial string after the number is ignored.
+pub fn line_key(raw: &str, e164: Option<&str>, home_cc: Option<&str>) -> Option<String> {
+    match key_of(raw, e164, home_cc)? {
+        Key::E164(key) => Some(line_tail(&key[1..])),
+        Key::Loose(digits) => Some(line_tail(&digits)),
+        Key::Short(digits) => Some(format!("#{digits}")),
+    }
+}
+
+fn line_tail(digits: &str) -> String {
+    digits[digits.len().saturating_sub(MIN_TAIL)..].to_owned()
+}
+
+/// True when `a` and `b` reach the same line by the rules of [`NumberBook`]:
+/// equal E.164 forms, a number without a country against the last digits of
+/// the other (at least 9), short codes exactly; never for a withheld number.
+pub fn same_line(a: &str, b: &str, home_cc: Option<&str>) -> bool {
+    let (Some(ka), Some(kb)) = (key_of(a, None, home_cc), key_of(b, None, home_cc)) else {
+        return false;
+    };
+    match (ka, kb) {
+        (Key::E164(x), Key::E164(y)) => x == y,
+        (Key::Short(x), Key::Short(y)) => x == y,
+        (Key::E164(x), Key::Loose(y)) | (Key::Loose(y), Key::E164(x)) => {
+            tails_match(&y, tail(&x[1..]))
+        }
+        (Key::Loose(x), Key::Loose(y)) => tails_match(&x, &y),
+        _ => false,
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Bucket {
     E164,
@@ -381,5 +431,60 @@ mod tests {
         assert_eq!(id_of(&book, &contacts, "+902125550000,12"), Some(1));
         assert_eq!(id_of(&book, &contacts, "02125550000;ext=4"), Some(1));
         assert_eq!(id_of(&book, &contacts, "+902165550000"), Some(2));
+    }
+
+    #[test]
+    fn line_keys_group_every_form_of_a_number_as_the_book_does() {
+        let forms = [
+            "+90 532 123 45 67",
+            "0532 123 45 67",
+            "00905321234567",
+            "905321234567",
+            "(532) 123-45-67",
+            "+90 (0) 532 123 45 67",
+            "+90 532 123 45 67 ext. 12",
+        ];
+        for home in [Some("90"), None] {
+            let keys: Vec<_> = forms.iter().map(|f| line_key(f, None, home)).collect();
+            assert!(
+                keys.iter().all(|k| k == &keys[0] && k.is_some()),
+                "{home:?}: {keys:?}"
+            );
+            for f in forms {
+                assert!(same_line(forms[0], f, home), "{f} {home:?}");
+            }
+        }
+        assert_ne!(
+            line_key("0532 123 45 67", None, Some("90")),
+            line_key("0532 123 45 68", None, Some("90"))
+        );
+        assert!(!same_line("+905321234567", "+905321234568", Some("90")));
+    }
+
+    #[test]
+    fn line_keys_never_name_withheld_numbers_and_keep_short_codes_apart() {
+        for withheld in ["", "-2", "Private", "unknown"] {
+            assert_eq!(line_key(withheld, None, Some("90")), None, "{withheld}");
+            assert!(!same_line(withheld, withheld, Some("90")));
+        }
+        assert_eq!(line_key("112", None, Some("90")).as_deref(), Some("#112"));
+        assert_ne!(line_key("112", None, None), line_key("0112", None, None));
+        assert!(same_line("112", "112", None));
+        assert!(!same_line("4440123", "+90 532 444 01 23", Some("90")));
+    }
+
+    #[test]
+    fn e164_of_uses_the_platform_form_then_the_home_code() {
+        assert_eq!(
+            e164_of("0532 123 45 67", None, Some("90")).as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(
+            e164_of("532-123-4567", Some("+905321234567"), None).as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(e164_of("0532 123 45 67", None, None), None);
+        assert_eq!(e164_of("112", None, Some("90")), None);
+        assert_eq!(e164_of("Private", None, Some("90")), None);
     }
 }

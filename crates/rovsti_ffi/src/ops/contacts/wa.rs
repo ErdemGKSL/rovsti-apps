@@ -7,7 +7,8 @@ use crate::envelope::FfiError;
 use crate::op;
 use crate::ops::registry::{Case, OpSpec};
 use rovsti_app_core::contacts::whatsapp::{
-    LookupState, WaPanel, marked_contacts, number_jid, profile_lines, status_line, wa_chip_index,
+    LookupState, WaPanel, e164_numbers, marked_contacts, number_jid, profile_lines, status_line,
+    wa_chip_index,
 };
 use rovsti_core::wire::WireContact;
 use rovsti_wa_proto::{WaProfile, WaUser};
@@ -35,6 +36,9 @@ struct MarksReq {
     /// User parts of the 1:1 chats of the instance.
     #[serde(default)]
     chat_users: Vec<String>,
+    /// The home calling code (`"90"`): a national number is compared in its E.164 form (F39).
+    #[serde(default)]
+    home_cc: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -45,7 +49,7 @@ struct MarksAns {
 
 fn marks(req: MarksReq) -> Result<MarksAns, FfiError> {
     Ok(MarksAns {
-        marks: marked_contacts(&req.contacts, &req.chat_users)
+        marks: marked_contacts(&req.contacts, &req.chat_users, req.home_cc.as_deref())
             .into_iter()
             .collect(),
     })
@@ -64,6 +68,12 @@ fn marks_cases() -> Vec<Case> {
         Case::named(
             "local_number_ignored",
             json!({"contacts": wires(), "chat_users": ["905321234567"]}),
+        ),
+        // F39: with the home code a national number is compared in its E.164 form.
+        Case::named(
+            "local_number_home",
+            json!({"contacts": [{"id": 4, "display_name": "Ayşe", "numbers": [{"raw": "0532 123 45 67"}]}],
+                   "chat_users": ["905321234567"], "home_cc": "90"}),
         ),
     ]
 }
@@ -102,6 +112,9 @@ struct CardReq {
     /// The phone's offset from UTC, for "last seen" lines.
     #[serde(default)]
     offset_s: i32,
+    /// The home calling code (`"90"`): a national number is looked up and matched in its E.164 form (F39).
+    #[serde(default)]
+    home_cc: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -126,7 +139,9 @@ fn lookup_state(dto: LookupDto) -> Result<LookupState, FfiError> {
     }
 }
 
-fn card(req: CardReq) -> Result<CardAns, FfiError> {
+fn card(mut req: CardReq) -> Result<CardAns, FfiError> {
+    // One number, one key: the rows keep their order, a national number gains its country (F39).
+    req.numbers = e164_numbers(&req.numbers, req.home_cc.as_deref());
     let mut panel = WaPanel {
         chat_users: req.chat_users,
         offset_s: req.offset_s,
@@ -193,6 +208,11 @@ fn card_cases() -> Vec<Case> {
         Case::named(
             "local_number",
             json!({"id": 1, "numbers": ["0532 123 45 67"], "now_ms": NOW}),
+        ),
+        Case::named(
+            "local_number_home",
+            json!({"id": 1, "numbers": ["0532 123 45 67"], "chat_users": ["905321234567"],
+                   "home_cc": "90", "now_ms": NOW}),
         ),
         Case::named("no_number", json!({"id": 1, "numbers": [], "now_ms": NOW})),
         Case::named(
@@ -264,11 +284,33 @@ mod tests {
             presence: None,
             now_ms: NOW,
             offset_s: TZ,
+            home_cc: None,
         })
         .unwrap();
         assert_eq!(ans.chips.iter().filter(|c| **c).count(), 1);
         assert_eq!(ans.jid.as_deref(), Some("905321234567@s.whatsapp.net"));
         assert!(ans.lookup_request.is_empty());
+    }
+
+    #[test]
+    fn a_national_number_with_the_home_code_gets_its_chat_jid() {
+        // F39: the row of a contact saved as `0532 …` carries the chat `90532…`.
+        let ans = card(CardReq {
+            id: 1,
+            numbers: vec!["0532 123 45 67".into(), "0532 123 45 68".into()],
+            chat_users: vec!["905321234567".into()],
+            lookup: None,
+            presence: None,
+            now_ms: NOW,
+            offset_s: TZ,
+            home_cc: Some("90".into()),
+        })
+        .unwrap();
+        assert_eq!(
+            ans.number_jids,
+            vec![Some("905321234567@s.whatsapp.net".to_owned()), None]
+        );
+        assert_eq!(ans.chips, vec![true, false]);
     }
 
     #[test]

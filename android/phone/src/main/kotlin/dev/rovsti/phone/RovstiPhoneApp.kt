@@ -8,6 +8,7 @@ import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.phone.wa.WaCallActionReceiver
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.contacts.ContactPhotos
+import dev.rovsti.platform.identity.CallerLookup
 import dev.rovsti.platform.notify.PlatformChannels
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.shell.HasContainer
@@ -41,6 +42,9 @@ class RovstiPhoneApp :
         step("calls") {
             CallRegistry.init(this)
             CallRegistry.timing = IncomingPerf
+            // Calls and their notifications are named by the same caller-ID as Recents (F39); the container is
+            // built on the first lookup, off the main thread.
+            CallerLookup.install { number -> container.identifyBlocking(number) }
         }
         // Old contact photos go, off the main thread.
         step("prune") {

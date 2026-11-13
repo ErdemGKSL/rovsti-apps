@@ -2,8 +2,7 @@ package dev.rovsti.platform.wa
 
 import android.content.Context
 import dev.rovsti.platform.PlatformEvents
-import dev.rovsti.platform.contacts.ContactsQuery
-import dev.rovsti.platform.identity.PhoneNumbers
+import dev.rovsti.platform.identity.CallerLookup
 import org.json.JSONObject
 import java.util.concurrent.locks.LockSupport
 
@@ -61,8 +60,15 @@ object WaPush {
         data: Map<String, String>,
     ) {
         val app = context.applicationContext
-        // The process may be cold, with no contact index: Android's own PhoneLookup names the caller (F28).
-        val contactName = { number: String -> ContactsQuery.identity(app, number, PhoneNumbers.homeRegion(app))?.name }
+        // The app's caller-ID when it installed one, else (a cold process) Android's own PhoneLookup (F28, F39).
+        val lookup = CallerLookup.of(app)
+        val contactName = { number: String ->
+            try {
+                lookup.identify(number)?.name
+            } catch (_: RuntimeException) {
+                null
+            }
+        }
         WaIncomingNotice.of(data, contactName)?.let { WaIncoming.show(app, it) }
         if (data["kind"] == "call_end") {
             data["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }

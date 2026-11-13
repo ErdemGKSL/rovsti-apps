@@ -15,6 +15,8 @@ import dev.rovsti.contacts.photo.GatewayWaPhotoPort
 import dev.rovsti.contacts.photo.WaPhotoPort
 import dev.rovsti.contacts.trash.ContactDeletion
 import dev.rovsti.contacts.trash.ContactTrash
+import dev.rovsti.core.Outcome
+import dev.rovsti.core.model.shared.InferHomeCcRequest
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.ContactsWaOps
 import dev.rovsti.core.ops.NativeContactsOps
@@ -105,7 +107,12 @@ open class ContactsContainer(
     val recentTracker: RecentTracker by lazy { RecentTracker(book, store, ops, scope).also { it.start() } }
 
     /** The list's WhatsApp marks, from the chats the instance already has. */
-    val waMarks: WaMarks by lazy { WaMarks(wa, book.book, waCard, scope) }
+    val waMarks: WaMarks by lazy {
+        WaMarks(wa, book.book, waCard, scope) { contacts ->
+            val numbers = contacts.flatMap { c -> c.numbers.flatMap { listOfNotNull(it.raw, it.normalized) } }
+            (sharedOps.inferHomeCc(InferHomeCcRequest(numbers.take(HOME_CC_SAMPLE))) as? Outcome.Ok)?.value?.homeCc
+        }
+    }
 
     val qr: QrOps by lazy { createQr() }
 
@@ -145,3 +152,6 @@ open class ContactsContainer(
 
     protected open fun createShortcuts(): ShortcutsRepository = AndroidShortcutsRepository(context)
 }
+
+/** How many contact numbers the home-country guess reads (as Phone's). */
+private const val HOME_CC_SAMPLE = 200

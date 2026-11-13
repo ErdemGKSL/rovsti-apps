@@ -304,6 +304,22 @@ mod tests {
     }
 
     #[test]
+    fn caller_id_forms_link_and_short_codes_and_withheld_do_not() {
+        // F39: the shared caller-ID key, so every form a call shows is one number.
+        let g = find(&[
+            c(1, "Anna", &["0532 123 45 67"], &[]),
+            c(2, "Ann", &["0090 532 123 45 67 ext. 3"], &[]),
+            c(3, "Taxi", &["112"], &[]),
+            c(4, "Other", &["+90 532 444 01 12"], &[]),
+            c(5, "Ghost", &["Private"], &[]),
+            c(6, "Spook", &["unknown"], &[]),
+        ]);
+        assert_eq!(g.len(), 1, "{g:?}");
+        assert_eq!(g[0].ids, vec![1, 2]);
+        assert_eq!(g[0].reason, DupReason::SameNumber);
+    }
+
+    #[test]
     fn email_case_ignored() {
         let g = find(&[
             c(1, "A", &[], &["Anna@X.com"]),

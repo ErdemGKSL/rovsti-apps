@@ -17,29 +17,32 @@ data class IncomingCall(
     val subtitle: String?,
     /** The heads-up offers "Message" (quick replies exist and the caller has a number; story 18.7). */
     val canMessage: Boolean = false,
+    /** The contact behind the caller: its photo is the notification's avatar (F39). */
+    val contactId: Long? = null,
 ) {
     /** The notification is re-posted only when this changes (the name resolves a moment after the call arrives). */
-    val key: String get() = "$callId|$title|$subtitle|$canMessage"
+    val key: String get() = "$callId|$title|$subtitle|$canMessage|$contactId"
 
     companion object {
+        /**
+         * [format] writes a number for reading (F39): an unnamed caller is `+90 532 123 45 67`, not the dialled digits.
+         * The name is the registry's, resolved by the app's caller-ID (the same one Recents uses).
+         */
         fun of(
             calls: List<CallInfo>,
             hasReplies: Boolean = false,
+            format: (String) -> String = { it },
         ): IncomingCall? {
             val call = calls.firstOrNull { it.state == "ringing" } ?: return null
             val name = call.displayName?.trim()?.takeIf { it.isNotEmpty() }
             val number = call.numberRaw.trim().takeIf { it.isNotEmpty() }
+            val text = number?.let { format(it).trim().ifEmpty { it } }
             return IncomingCall(
                 call.id,
-                name ?: number ?: "Unknown",
-                if (name !=
-                    null
-                ) {
-                    number
-                } else {
-                    null
-                },
+                name ?: text ?: "Unknown",
+                if (name != null) text else null,
                 hasReplies && number != null,
+                call.contactId.takeIf { name != null },
             )
         }
 

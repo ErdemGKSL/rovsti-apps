@@ -55,4 +55,22 @@ class PhoneNumbersTest {
         assertEquals("+902125550000", PhoneNumbers.withoutExtension("+902125550000x12"))
         assertEquals("*#06#", PhoneNumbers.withoutExtension("*#06#"))
     }
+
+    @Test fun aNumberReadsFormattedAndAWithheldOneOrAShortCodeStaysAsItIs() {
+        // F39: what the notifications show for a caller nobody owns.
+        assertEquals("+90 532 123 45 67", PhoneNumbers.forReading("+905321234567", "TR"))
+        assertEquals("0532 123 45 67", PhoneNumbers.forReading(" 05321234567 ", "TR"))
+        assertEquals("112", PhoneNumbers.forReading("112", "TR"))
+        assertEquals("", PhoneNumbers.forReading("", "TR"))
+        assertEquals("Private", PhoneNumbers.forReading("Private", "TR"))
+    }
+
+    @Test fun aNotificationTitleIsTheNameElseTheReadableNumberElseNothing() {
+        val format = { raw: String -> "<$raw>" }
+        assertEquals("Ada", CallerLookup.titleOf("+90", CallerIdentity(contactId = 1, name = "Ada"), format))
+        assertEquals("Ada WA", CallerLookup.titleOf("+90", CallerIdentity(waPushName = "Ada WA"), format))
+        assertEquals("<+905321234567>", CallerLookup.titleOf("+905321234567", null, format))
+        assertNull(CallerLookup.titleOf("-2", null, format))
+        assertNull(CallerLookup.titleOf(" ", null, format))
+    }
 }

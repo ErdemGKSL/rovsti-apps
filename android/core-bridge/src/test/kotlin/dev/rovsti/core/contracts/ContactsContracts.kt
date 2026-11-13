@@ -388,7 +388,7 @@ object ContactsContracts : ContractModels {
             op<PrefsSaveRequest, Empty>("contacts.prefs_save")
             op<WaMarksRequest, WaMarksAnswer>(
                 "contacts.wa_marks",
-                ok = listOf("no_chats", "local_number_ignored"),
+                ok = listOf("no_chats", "local_number_ignored", "local_number_home"),
             )
             op<WaCardRequest, WaCardAnswer>(
                 "contacts.wa_card",
@@ -402,6 +402,7 @@ object ContactsContracts : ContractModels {
                         "lookup_not_on_whatsapp",
                         "lookup_failed",
                         "local_number",
+                        "local_number_home",
                         "no_number",
                     ),
                 err = listOf("bad_lookup_state"),

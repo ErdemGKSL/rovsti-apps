@@ -54,6 +54,7 @@ import dev.rovsti.phone.incoming.CallSource
 import dev.rovsti.phone.incoming.CoreIncomingBackend
 import dev.rovsti.phone.incoming.IncomingBackend
 import dev.rovsti.phone.incoming.IncomingViewModel
+import dev.rovsti.phone.incoming.NamedCallSource
 import dev.rovsti.phone.incoming.RegistryCallSource
 import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
@@ -74,7 +75,9 @@ import dev.rovsti.platform.calllog.AndroidCallLogRepository
 import dev.rovsti.platform.calllog.BlocklistRepository
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.AndroidContactsRepository
+import dev.rovsti.platform.contacts.ContactsQuery
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.identity.CallerIdentity
 import dev.rovsti.platform.identity.CallerIds
 import dev.rovsti.platform.identity.DeviceContactsSource
 import dev.rovsti.platform.identity.PhoneNumbers
@@ -115,6 +118,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /** A number the Keypad is asked to show: a `tel:` link decoded by `dial.fromTelUri`, or a WhatsApp hand-off. */
 data class DialRequest(
@@ -261,7 +265,28 @@ open class PhoneContainer(
      * core's number book ([people], `search.match_numbers`). More sources (the Contacts app's WhatsApp names and
      * photos) plug in here.
      */
-    val callerIds: CallerIds by lazy { createCallerIds() }
+    val callerIds: CallerIds by lazy {
+        createCallerIds().also { ids ->
+            // The call service names calls with it too (CallerLookup); a new answer re-names the live calls (F39).
+            scope.launch {
+                combine(ids.revisions) { values -> values.sum() }
+                    .distinctUntilChanged()
+                    .collect { CallRegistry.refreshNames() }
+            }
+        }
+    }
+
+    /**
+     * Blocking, off the main thread: who [number] is for the call service and the call notifications (F39, installed
+     * as `CallerLookup` by the app). [callerIds] answers once its index is built, exactly as Recents names the number;
+     * before (a cold process woken by a call), Android's `PhoneLookup` with the same rules, and the registry asks again
+     * when the index is ready.
+     */
+    fun identifyBlocking(number: String): CallerIdentity? {
+        val ids = callerIds
+        if (!ids.ready) return ContactsQuery.identity(context, number, homeRegion)
+        return runBlocking { ids.resolve(number) }
+    }
 
     /** Changes whenever [callerIds] may answer differently (the contacts changed). */
     val callerIdsChanged: Flow<Long> by lazy {
@@ -336,6 +361,9 @@ open class PhoneContainer(
     /** The calls as the screens read them (the registry's last snapshot); lazy so a cold path pays nothing. */
     val callSource: CallSource by lazy { createCallSource() }
 
+    /** [callSource] with every caller named by [callerIds], as the call screens show it (F39). */
+    val namedCallSource: CallSource by lazy { NamedCallSource(callSource, callerIds, callerIdsChanged, scope) }
+
     /** The reply choices and the reminder slots of the Incoming screen (the Rust core). */
     val incomingBackend: IncomingBackend by lazy { createIncomingBackend() }
 
@@ -352,7 +380,7 @@ open class PhoneContainer(
         unknown: String,
     ): IncomingViewModel =
         IncomingViewModel(
-            source = callSource,
+            source = namedCallSource,
             calls = calls,
             backend = incomingBackend,
             reminders = callReminders,
@@ -377,7 +405,7 @@ open class PhoneContainer(
         conference: String = "Conference call",
     ): InCallViewModel =
         InCallViewModel(
-            source = callSource,
+            source = namedCallSource,
             calls = calls,
             backend = inCallBackend,
             notes = StoreInCallNotes(store, ops, clock),
@@ -425,6 +453,7 @@ open class PhoneContainer(
             whatsAppAvailable = waLauncher.available,
             scope = scope,
             clock = clock,
+            identify = { number -> callerIds.resolve(number) },
         )
 
     /** The model of the Statistics page (E5.10); [scope] belongs to the page and ends with it. */
@@ -620,6 +649,8 @@ open class PhoneContainer(
             ops = ops,
             scope = scope,
             nameFormat = { store.prefs.value.settings.nameFormat },
+            e164 = { PhoneNumbers.e164(it, homeRegion) },
+            homeCc = ::homeCc,
         )
 
     protected open fun createCallLauncher(): CallLauncher = AndroidCallLauncher(context)

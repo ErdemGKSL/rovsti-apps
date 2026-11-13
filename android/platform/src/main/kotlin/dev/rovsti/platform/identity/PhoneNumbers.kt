@@ -61,6 +61,24 @@ object PhoneNumbers {
         }
     }
 
+    /**
+     * [raw] as people read it (`+905321234567` -> `+90 532 123 45 67`, `05321234567` -> `0532 123 45 67`) by Android's
+     * libphonenumber in [region]; the trimmed text itself for a withheld number, a short code or anything Android
+     * cannot format. Loads Android's metadata on first use: not the main thread.
+     */
+    fun forReading(
+        raw: String,
+        region: String,
+    ): String {
+        val text = raw.trim()
+        if (isWithheld(text) || text.length > MAX_TEXT || text.count { it.isDigit() } < MIN_DIGITS) return text
+        return try {
+            PhoneNumberUtils.formatNumber(text, region)?.takeIf { it.isNotBlank() } ?: text
+        } catch (_: RuntimeException) {
+            text
+        }
+    }
+
     /** Pure, the core's `is_withheld`: what a call log writes for a caller nobody can name. */
     fun isWithheld(raw: String): Boolean {
         val text = raw.trim { it.isWhitespace() || it in FORMAT_MARKS }

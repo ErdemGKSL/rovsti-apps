@@ -592,7 +592,9 @@ class ContactCardViewModel(
             }.collect { (users, nums) ->
                 waInputs.update { WaInputs(true, users, it.lookup, it.presence, it.profile) }
                 if (nums.isEmpty() || !firstAsk()) return@collect
-                val request = ok(waOps.card(WaCardRequest(id, nums, users, nowMs = clock()))) ?: return@collect
+                val request =
+                    ok(waOps.card(WaCardRequest(id, nums, users, nowMs = clock(), homeCc = homeCcCache)))
+                        ?: return@collect
                 if (request.lookupRequest.isEmpty()) {
                     synchronized(lookupMutex) { lookupAsked = false }
                     return@collect
@@ -657,6 +659,7 @@ class ContactCardViewModel(
                 presence = inputs.presence,
                 nowMs = clock(),
                 offsetS = locale(clock()).tzOffsetS,
+                homeCc = b.homeCc,
             )
         val answer = ok(waOps.card(request)) ?: return WaView()
         val profile = inputs.profile

@@ -33,7 +33,9 @@ import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.platform.PlatformEvents
 import dev.rovsti.platform.calllog.BlockGuard
 import dev.rovsti.platform.calllog.Blocklist
-import dev.rovsti.platform.contacts.ContactsQuery
+import dev.rovsti.platform.identity.CallerLookup
+import dev.rovsti.platform.identity.PhoneNumbers
+import dev.rovsti.platform.notify.NotifyPhotos
 import dev.rovsti.platform.system.Haptics
 import dev.rovsti.platform.system.SettingsMirror
 import dev.rovsti.platform.wire.AccountRef
@@ -84,6 +86,15 @@ object CallRegistry : CallsApi {
         var displayName: String? = null
         var displayNameAlt: String? = null
         var contactId: Long? = null
+
+        /** The number the name was last asked for (the handle can change: a redirect, a CNAP update). */
+        var resolvedFor: String? = null
+
+        /** The number as people read it (`+90 532 123 45 67`), for the notifications of a caller with no name. */
+        var numberText: String? = null
+
+        /** The contact's round photo for the CallStyle notifications; null without one. */
+        var photo: android.graphics.drawable.Icon? = null
 
         /** The call went Active once (the connect vibration plays once per call, story 16.8). */
         var connectedOnce = false
@@ -635,6 +646,8 @@ object CallRegistry : CallsApi {
                     details: Call.Details,
                 ) {
                     record("onDetailsChanged", id, stateName(call.state))
+                    // A new handle (a redirected or forwarded call) is a new caller to name.
+                    entries[id]?.let { resolveName(it) }
                     rebuild()
                 }
 
@@ -841,22 +854,88 @@ object CallRegistry : CallsApi {
         }
     }
 
-    /** Resolves the caller name once, off the main thread, then rebuilds. */
-    private fun resolveName(entry: Entry) {
+    /**
+     * Names the caller off the main thread, then rebuilds (F39). The name, the contact and its photo come from the app's
+     * resolver ([CallerLookup]: the core's number book that Recents uses, matching every form of a number by E.164),
+     * so the call screens and the notifications name a call as Recents does. Asked again when the handle changes and
+     * on [refreshNames] (the contacts changed), so a contact renamed or added during the call shows at once. Nothing is
+     * rebuilt when the answer did not change, so a refresh never makes the screen flicker.
+     */
+    private fun resolveName(
+        entry: Entry,
+        force: Boolean = false,
+    ) {
         val context = app ?: return
         val number =
-            entry.call.details.handle
-                ?.schemeSpecificPart ?: return
+            try {
+                entry.call.details.handle
+                    ?.schemeSpecificPart
+                    .orEmpty()
+                    .trim()
+            } catch (_: RuntimeException) {
+                ""
+            }
+        if (!force && number == entry.resolvedFor) return
+        entry.resolvedFor = number
         lookupExecutor.execute {
-            val match = ContactsQuery.lookup(context, number) ?: return@execute
+            val named = nameOf(context, number)
             main.post {
-                if (entries[entry.id] !== entry) return@post
-                entry.displayName = match.displayName
-                entry.displayNameAlt = match.displayNameAlt
-                entry.contactId = match.contactId
-                rebuild()
+                if (entries[entry.id] !== entry || entry.resolvedFor != number) return@post
+                val changed =
+                    entry.displayName != named.name ||
+                        entry.contactId != named.contactId ||
+                        entry.numberText != named.text ||
+                        (entry.photo == null) != (named.photo == null)
+                entry.displayName = named.name
+                entry.displayNameAlt = null
+                entry.contactId = named.contactId
+                entry.numberText = named.text
+                entry.photo = named.photo
+                if (changed) rebuild()
             }
         }
+    }
+
+    private class Named(
+        val name: String?,
+        val contactId: Long?,
+        val text: String,
+        val photo: android.graphics.drawable.Icon?,
+    )
+
+    /** Blocking, on [lookupExecutor]: who [number] is, its reading form and the contact's photo. Never throws. */
+    private fun nameOf(
+        context: Context,
+        number: String,
+    ): Named {
+        if (number.isEmpty()) return Named(null, null, "", null)
+        val who =
+            try {
+                CallerLookup.of(context).identify(number)
+            } catch (e: RuntimeException) {
+                Log.w("Rovsti", "caller lookup failed", e)
+                null
+            }
+        val text = PhoneNumbers.forReading(number, PhoneNumbers.homeRegion(context))
+        val photo = who?.contactId?.let { NotifyPhotos.icon(context, it) }
+        return Named(who?.title, who?.contactId, text, photo)
+    }
+
+    /**
+     * Asks every call's name again (the contacts or the app's index changed). The app calls it from any thread when its
+     * resolver's revision moves; a call whose answer is the same is not rebuilt.
+     */
+    fun refreshNames() {
+        main.post { entries.values.toList().forEach { resolveName(it, force = true) } }
+    }
+
+    /** The reading form of [raw] for the notifications, once the lookup has worked it out; else [raw]. */
+    private fun readable(raw: String): String {
+        val key = raw.trim()
+        return entries.values
+            .firstOrNull { it.resolvedFor == key }
+            ?.numberText
+            ?.takeIf { it.isNotEmpty() } ?: key
     }
 
     private fun liveTop(): List<Entry> =
@@ -1269,8 +1348,8 @@ object CallRegistry : CallsApi {
         updateKeyguardReceiver(calls.isNotEmpty())
         // The activity first: its lock-screen flags must be set before the full-screen intent fires.
         syncLiveCall(calls.isNotEmpty())
-        syncIncoming(IncomingCall.of(calls, SettingsMirror.values.hasReplies))
-        syncOngoing(OngoingCall.of(calls, focus))
+        syncIncoming(IncomingCall.of(calls, SettingsMirror.values.hasReplies, ::readable))
+        syncOngoing(OngoingCall.of(calls, focus, ::readable))
         syncProximity(calls, focus)
         publish(text)
     }
@@ -1330,7 +1409,8 @@ object CallRegistry : CallsApi {
             } catch (e: RuntimeException) {
                 false
             }
-        var posted = postIncoming(manager) { CallNotifications.incoming(context, call, allowed) }
+        val photo = entries[call.callId]?.photo
+        var posted = postIncoming(manager) { CallNotifications.incoming(context, call, allowed, photo) }
         // The platform may still refuse the CallStyle one: the plain heads-up cannot be.
         if (!posted) posted = postIncoming(manager) { CallNotifications.incomingHeadsUp(context, call) }
         if (!posted) {
@@ -1396,7 +1476,7 @@ object CallRegistry : CallsApi {
         if (call.key == ongoingKey) return
         ongoingKey = call.key
         try {
-            val notification = CallNotifications.ongoing(context, call)
+            val notification = CallNotifications.ongoing(context, call, entries[call.callId]?.photo)
             if (foregroundStarted) {
                 context
                     .getSystemService(NotificationManager::class.java)

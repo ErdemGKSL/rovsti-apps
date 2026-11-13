@@ -31,6 +31,14 @@ class WaRingNotifierTest {
         assertEquals(listOf("c1" to "Ada"), shown)
     }
 
+    @Test fun aRingingCallIsPostedAgainWhenTheContactsNameArrives() {
+        // F39: the push name (or the number) first, then the contact the resolver found; the same id is updated.
+        notifier.offer(listOf(call("c1", name = null)))
+        notifier.offer(listOf(call("c1", name = "Ayşe Yılmaz")))
+        notifier.offer(listOf(call("c1", name = "Ayşe Yılmaz")))
+        assertEquals(listOf("c1" to "+905551112233", "c1" to "Ayşe Yılmaz"), shown)
+    }
+
     @Test fun onlyFreshIncomingRingsArePosted() {
         notifier.offer(
             listOf(

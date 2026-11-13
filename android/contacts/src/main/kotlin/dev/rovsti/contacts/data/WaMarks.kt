@@ -2,6 +2,7 @@ package dev.rovsti.contacts.data
 
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.WaMarksRequest
+import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.model.wa.RichChat
 import dev.rovsti.core.ops.ContactsWaOps
 import dev.rovsti.wa.WaLinkState
@@ -34,6 +35,11 @@ class WaMarks(
     book: StateFlow<Book>,
     private val ops: ContactsWaOps,
     scope: CoroutineScope,
+    /**
+     * The home calling code of the book (`format.infer_home_cc`), so a contact saved as `0532 …` gets the mark of the
+     * chat `90532…`: the shared caller-ID rules compare numbers in E.164 (F39).
+     */
+    private val homeCc: suspend (List<WireContact>) -> String? = { null },
 ) {
     private val state = MutableStateFlow<ImmutableMap<Long, String>>(persistentMapOf())
 
@@ -59,7 +65,7 @@ class WaMarks(
         book: Book,
     ): ImmutableMap<Long, String> {
         if (users.isEmpty() || book !is Book.Ready) return persistentMapOf()
-        return when (val answer = ops.marks(WaMarksRequest(book.contacts, users))) {
+        return when (val answer = ops.marks(WaMarksRequest(book.contacts, users, homeCc(book.contacts)))) {
             is Outcome.Ok -> answer.value.marks.toImmutableMap()
             is Outcome.Err -> persistentMapOf()
         }

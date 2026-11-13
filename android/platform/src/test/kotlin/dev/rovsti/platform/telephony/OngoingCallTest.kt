@@ -31,6 +31,17 @@ class OngoingCallTest {
     }
 
     @Test
+    fun anUnnamedCallReadsFormattedAndANamedOneCarriesItsContact() {
+        // F39: an outgoing call to a stranger shows "+90 555 111 22 33", not the digits typed.
+        val calls = listOf(call(1, "dialing"))
+        val stranger = OngoingCall.of(calls, Focus.of(calls)) { "+90 555 111 22 33" }!!
+        assertEquals("+90 555 111 22 33", stranger.title)
+        assertNull(stranger.contactId)
+        val named = listOf(call(1, "active", name = "Ada").copy(contactId = 3))
+        assertEquals(3L, OngoingCall.of(named, Focus.of(named))?.contactId)
+    }
+
+    @Test
     fun contactNameBeatsTheNumber() {
         assertEquals("Ada", of(call(1, "dialing", name = "Ada"))?.title)
         assertEquals("+905551112233", of(call(1, "dialing"))?.title)

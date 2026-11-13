@@ -30,6 +30,19 @@ class IncomingCallTest {
     }
 
     @Test
+    fun numbersReadFormattedAndAContactCarriesItsPhoto() {
+        // F39: the registry's reading form, never the dialled digits; the contact id keys the avatar.
+        val format = { raw: String -> if (raw == "+905551112233") "+90 555 111 22 33" else raw }
+        val named = IncomingCall.of(listOf(call(1, "ringing", name = "Ada").copy(contactId = 7)), format = format)!!
+        assertEquals("+90 555 111 22 33", named.subtitle)
+        assertEquals(7L, named.contactId)
+        val stranger = IncomingCall.of(listOf(call(1, "ringing").copy(contactId = 7)), format = format)!!
+        assertEquals("+90 555 111 22 33", stranger.title)
+        assertNull("no name, no contact photo", stranger.contactId)
+        assertTrue("a new photo re-posts", named.key != named.copy(contactId = 8).key)
+    }
+
+    @Test
     fun anUnknownCallerShowsTheNumberAndNoSubtitle() {
         val c = IncomingCall.of(listOf(call(1, "ringing")))!!
         assertEquals("+905551112233", c.title)

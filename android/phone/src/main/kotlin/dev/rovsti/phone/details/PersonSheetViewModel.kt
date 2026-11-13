@@ -37,6 +37,7 @@ import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.calllog.CallLogResult
 import dev.rovsti.platform.calllog.Restorable
 import dev.rovsti.platform.files.ClipboardRepository
+import dev.rovsti.platform.identity.CallerIdentity
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -329,6 +330,11 @@ class PersonSheetViewModel(
     private val placeWhatsApp: (String) -> Unit = {},
     /** WhatsApp calls can be placed (the link is connected): enables the menu item. */
     val whatsAppAvailable: StateFlow<Boolean> = MutableStateFlow(false),
+    /**
+     * The caller-ID (F39): a sheet opened for a bare number (Blocked, Statistics, a favorite number) names the contact
+     * that owns it now, the same way Recents does. Asked on every build, so it follows contact edits.
+     */
+    private val identify: suspend (String) -> CallerIdentity? = { null },
 ) {
     private val effects = Channel<PersonEffect>(Channel.BUFFERED)
     val effect = effects.receiveAsFlow()
@@ -363,7 +369,17 @@ class PersonSheetViewModel(
         val home = homeCc()
         val now = clock()
         val rows = target.numbers.map { NumberRowUi(it.raw, render(it.raw, home), it.label) }
-        val title = target.name ?: rows.firstOrNull()?.display.orEmpty()
+        val owner =
+            if (target.name == null && target.contactId == null) {
+                target.numbers
+                    .singleOrNull()
+                    ?.let { identify(it.raw) }
+                    ?.takeIf { it.contactId != null }
+            } else {
+                null
+            }
+        val name = target.name ?: owner?.title
+        val title = name ?: rows.firstOrNull()?.display.orEmpty()
         val history =
             (
                 ops.history(
@@ -391,13 +407,13 @@ class PersonSheetViewModel(
             } else {
                 (
                     ops.statsPerson(
-                        PersonStatsRequest(entries, extras, numbers, null, target.name.orEmpty(), now, tzOffsetS()),
+                        PersonStatsRequest(entries, extras, numbers, null, name.orEmpty(), now, tzOffsetS()),
                     ) as? Outcome.Ok
                 )?.value
             }
         statsShare = stats?.shareText
         val subtitle =
-            if (target.name == null) {
+            if (name == null) {
                 target.numbers.firstOrNull()?.let {
                     (shared.countryLine(CountryLineRequest(it.raw, home)) as? Outcome.Ok)?.value?.line
                 }
@@ -410,10 +426,12 @@ class PersonSheetViewModel(
                 ready = true,
                 title = title,
                 subtitle = subtitle,
-                named = target.name != null,
+                named = name != null,
                 colorKey = target.numbers.firstOrNull()?.raw ?: title,
                 numbers = rows.toImmutableList(),
-                photo = target.contactId?.let { PersonPhoto(it, target.photoUri) },
+                photo =
+                    target.contactId?.let { PersonPhoto(it, target.photoUri) }
+                        ?: owner?.contactId?.let { PersonPhoto(it, owner.photoUri) },
                 history = lineUi.toImmutableList(),
                 stats =
                     stats?.let {

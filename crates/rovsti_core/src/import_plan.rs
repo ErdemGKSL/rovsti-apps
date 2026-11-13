@@ -3,7 +3,9 @@
 //!
 //! A card counts as already there when a contact with the same name (case and
 //! accents ignored) shares a phone number with it. Numbers are compared by
-//! their last ten digits, so `0555 111 22 33` and `+90 555 111 22 33` match.
+//! the shared caller-ID key ([`crate::caller_id::line_key`]), so
+//! `0555 111 22 33` and `+90 555 111 22 33` match and a short code only
+//! matches itself.
 //! A card without any number is compared by name and email instead (email
 //! case ignored); with no email either, by name alone. A card that has a
 //! number never matches on its name alone, and neither does a contact that
@@ -13,8 +15,6 @@ use std::collections::HashSet;
 
 use crate::{contact_edit::ContactDraft, search::fold, vcard::CardPhoto, wire::WireContact};
 
-/// How many trailing digits identify a number.
-const KEY_DIGITS: usize = 10;
 /// Most photos one import writes; later cards are added without one.
 pub const MAX_IMPORT_PHOTOS: usize = 200;
 
@@ -27,13 +27,13 @@ pub struct Plan {
     pub duplicates: usize,
 }
 
+/// The "same line" key of a number: [`crate::caller_id::line_key`], the
+/// shared matcher of every app (F39), so the import, the duplicates and "this
+/// contact already has this number" agree with caller-ID. No home country is
+/// known here, so a national number keys by its last digits, which equal those
+/// of the same number written with its country code.
 pub fn number_key(raw: &str) -> Option<String> {
-    let digits: Vec<char> = raw.chars().filter(char::is_ascii_digit).collect();
-    if digits.is_empty() {
-        return None;
-    }
-    let from = digits.len().saturating_sub(KEY_DIGITS);
-    Some(digits[from..].iter().collect())
+    crate::caller_id::line_key(raw, None, None)
 }
 
 /// `(folded name, number key)` pairs of one contact.
@@ -336,11 +336,17 @@ mod tests {
 
     #[test]
     fn short_numbers_compare_by_all_their_digits() {
-        assert_eq!(number_key("112").as_deref(), Some("112"));
+        assert_eq!(number_key("112").as_deref(), Some("#112"));
         assert_eq!(number_key("abc"), None);
+        assert_eq!(number_key("Private"), None);
         assert_eq!(
-            number_key("+90 555 111 22 33").as_deref(),
-            Some("5551112233")
+            number_key("+90 555 111 22 33"),
+            number_key("0555 111 22 33 ext. 4")
         );
+        assert_eq!(
+            number_key("+90 555 111 22 33"),
+            number_key("00905551112233")
+        );
+        assert_ne!(number_key("112"), number_key("+90 555 111 01 12"));
     }
 }

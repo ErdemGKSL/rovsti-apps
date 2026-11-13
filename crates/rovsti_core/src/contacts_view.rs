@@ -151,6 +151,11 @@ pub fn build_rows_styled<'a>(
         && query
             .chars()
             .all(|c| c.is_ascii_digit() || " -.()/+\u{a0}".contains(c));
+    // A whole number in another form (`+90 532…` for `0532…`): caller-ID's key (F39).
+    let wanted_line = digit_query
+        .then(|| crate::caller_id::line_key(query, None, None))
+        .flatten()
+        .filter(|key| !key.starts_with('#'));
     let mut out: Vec<ContactVm> = Vec::new();
     for c in contacts {
         let numbers: Vec<NumberVm> = c.numbers.iter().map(NumberVm::from_wire).collect();
@@ -158,7 +163,12 @@ pub fn build_rows_styled<'a>(
         let subtitle = if digit_query {
             c.numbers
                 .iter()
-                .position(|n| digits_of(&n.raw).contains(&wanted))
+                .position(|n| {
+                    digits_of(&n.raw).contains(&wanted)
+                        || wanted_line.is_some()
+                            && crate::caller_id::line_key(&n.raw, n.normalized.as_deref(), None)
+                                == wanted_line
+                })
                 .map(|i| numbers[i].display.clone())
         } else {
             None

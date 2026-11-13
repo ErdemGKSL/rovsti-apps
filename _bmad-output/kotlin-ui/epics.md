@@ -1412,7 +1412,10 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   read-only `ContentProvider` guarded by a **signature** permission (only Rovsti apps signed with the same key can read
   it; photos served as file descriptors via `openFile`). Phone and Messages keep an in-memory index warmed at process
   start and refreshed on the provider's change notifications, so rows, call screens and notifications never wait or pop
-  in late. If Contacts is not installed, each app falls back to its own cache with the same API. One shared Kotlin
+  in late. **Without Contacts (owner, 2026-11-13):** every app still works on its own, with no persistent cache: at
+  process start (and when WhatsApp gets linked) it syncs what it needs from the gateway into memory, behind the same
+  resolver API, and shows initials/numbers until that arrives. With Contacts installed, Contacts' cache is the source
+  and nothing is fetched twice. One shared Kotlin
   client module (resolver + provider contract) is used by all apps. Tests: provider contract and permission, the
   fallback path, change notification refresh, and that a list renders the WA photo on its first frame when cached.
   **Sync (owner: "of course it syncs now and then"):** a periodic WorkManager job in Contacts (about every 6 h, network

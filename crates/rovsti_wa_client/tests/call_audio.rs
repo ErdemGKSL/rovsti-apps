@@ -199,3 +199,57 @@ fn the_goertzel_check_tells_tones_apart() {
     assert!(!is_tone(&tone(OTHER_HZ, 0), TONE_HZ, OTHER_HZ));
     assert!(!is_tone(&vec![0; FRAME_SAMPLES], TONE_HZ, OTHER_HZ));
 }
+
+/// The first socket goes quiet (connected, but nothing moves: a stuck
+/// connection); the client opens a second one by itself and the peer's voice
+/// comes through it. Before, the audio stayed silent until the call ended.
+#[test]
+fn a_stuck_socket_is_reopened_and_the_audio_resumes() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = runtime.block_on(TcpListener::bind("127.0.0.1:0")).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        runtime.block_on(async move {
+            let (first, _) = listener.accept().await.unwrap();
+            let stuck = tokio_tungstenite::accept_async(first).await.unwrap();
+            let (second, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(second).await.unwrap();
+            for i in 0..3 {
+                let bytes = encode_frame(&tone(TONE_HZ, i * FRAME_SAMPLES)).unwrap();
+                socket.send(Message::Binary(bytes.into())).await.unwrap();
+            }
+            // Wait for the client to leave, then let go of both sockets.
+            while let Some(Ok(message)) = socket.next().await {
+                if message.is_close() {
+                    break;
+                }
+            }
+            drop(stuck);
+        });
+    });
+    let url = GatewayUrl::parse(&format!("http://127.0.0.1:{port}")).unwrap();
+    let mut audio = call_audio(url, ConnectKey::from_bytes(&[3; 32]), "CALL1").unwrap();
+    let started = std::time::Instant::now();
+    let mut heard = Vec::new();
+    let deadline = started + rovsti_wa_client::audio::STALL_LIMIT + Duration::from_secs(10);
+    while heard.len() < 3 {
+        match audio.speaker.try_recv() {
+            Ok(frame) => heard.push(frame),
+            Err(futures::channel::mpsc::TryRecvError::Closed) => panic!("audio ended"),
+            Err(_) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "no audio after the stall"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+    assert!(started.elapsed() >= rovsti_wa_client::audio::STALL_LIMIT);
+    assert_eq!(heard[0], tone(TONE_HZ, 0));
+    drop(audio);
+    server.join().unwrap();
+}

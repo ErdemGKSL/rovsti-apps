@@ -44,6 +44,10 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
         std::fs::set_permissions(&config.data_dir, std::fs::Permissions::from_mode(0o700))
             .map_err(|e| format!("cannot restrict {}: {e}", config.data_dir.display()))?;
     }
+    // The deploy script waits while this says a call is live.
+    wa_gateway::wa::calls::track_live_calls(
+        config.data_dir.join(wa_gateway::wa::calls::LIVE_CALLS_FILE),
+    );
     let store = Store::open(&config.db_path()).map_err(|e| e.to_string())?;
 
     let pusher = wa_gateway::push::from_config(config.fcm.as_ref(), store.clone())

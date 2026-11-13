@@ -848,14 +848,16 @@ async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
         .await
         .unwrap();
 
-    // One socket per call: a second one is refused with 409 at the handshake.
+    // A second socket for the same call takes over (the app reopens a stuck
+    // connection); the gateway closes the first one.
     let key = ConnectKey::parse(&created.key).unwrap();
     let (url, id) = (server.url.clone(), call_id.clone());
-    let second = blocking(move || call_audio(url, key, &id)).await;
-    match second {
-        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::Conflict),
-        other => panic!("expected a conflict, got {other:?}"),
-    }
+    let second = blocking(move || call_audio(url, key, &id)).await.unwrap();
+    let first_end = tokio::time::timeout(Duration::from_secs(10), audio.speaker.next())
+        .await
+        .expect("the replaced socket stayed open");
+    assert_eq!(first_end, None);
+    let mut audio = second;
 
     // The wrong size never leaves the client; the fake echoes the rest.
     let frames = [frame(1), frame(2), frame(3)];
@@ -888,6 +890,7 @@ async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
     assert_eq!((audio_stats.mic_from_app, audio_stats.mic_bad_size), (3, 0));
     assert_eq!(audio_stats.spk_to_app, 3);
     assert_eq!(audio_stats.spk_level.voiced_frames, 3, "{audio_stats}");
+    assert_eq!(audio_stats.sockets, 2);
 
     // Hanging up ends the call and closes the audio socket.
     let (g, id) = (gateway.clone(), call_id.clone());

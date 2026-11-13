@@ -114,8 +114,8 @@ back without code changes elsewhere):
 | Mode | whatsapp-rust | Microphone | Peer audio |
 |------|---------------|------------|------------|
 | `NativeOpus` | `encoded_audio(AudioFormat::OPUS_16KHZ_60MS, ..)` | `WaOpusEncoder::new()` (libopus, VoIP, 16 kHz, 60 ms, 24 kb/s, DTX) | `WaOpusDecoder::decode` |
-| `OpusInMlow` (**default**) | `encoded_audio(AudioFormat::OPUS_MLOW_16KHZ_60MS, ..)` | `WaOpusEncoder::new_mlow_escape()` (CELT in MLOW's escape, SID for silence) | escape: `decode_mlow_escape`; MLOW: wacore `MlowDecoder` (PT 121 = redundancy) |
-| `MlowPcm` (the old path) | `.audio(mic, speaker)` | engine's MLOW encoder | engine's MLOW decoder, plus `CallEvent::ForeignAudio` decoded with `decode_mlow_escape` |
+| `OpusInMlow` (default 2026-11-11 to 2026-11-13) | `encoded_audio(AudioFormat::OPUS_MLOW_16KHZ_60MS, ..)` | `WaOpusEncoder::new_mlow_escape()` (CELT in MLOW's escape, SID for silence) | escape: `decode_mlow_escape`; MLOW: wacore `MlowDecoder` (PT 121 = redundancy) |
+| `MlowPcm` (**default** since 2026-11-13, see the end) | `.audio(mic, speaker)` | engine's MLOW encoder | engine's MLOW decoder, plus `CallEvent::ForeignAudio` decoded with `decode_mlow_escape` |
 
 In `MlowPcm` the engine keeps sending silent 20 ms playout frames while the peer talks Opus, so
 `run_pcm_downlink` holds back all-zero engine frames for 500 ms after the last foreign packet
@@ -271,3 +271,55 @@ On the phone: Answer and Decline from the lock screen, ringtone and vibration in
 call screen shows, the screen going dark at the ear (and back on speaker), Hang up and the body of the ongoing
 notification. HyperOS: "Display pop-up windows while running in the background" and "Show on lock screen" for Rovsti
 Phone let the call screen open directly; full-screen notifications must be allowed (Android 14).
+
+## Audio stops after a second or two; no Opus on the way out (E5.8a follow-up 4)
+
+Owner's call, 2026-11-13 07:33 UTC, a recent APK. Gateway line (OpusInMlow):
+`mic: app=21 ... rms=-88.6dBFS peak=28 voiced=0 | spk: engine=167 opus=0 mlow=167 ... queue_drop=128 pcm_ms=2340
+stale=5 app=26`.
+
+**What the numbers say.** The peer's audio reached the gateway the whole time (167 MLOW packets in 10 s, each decoded to
+exactly 60 ms: `pcm_ms` 2340 = 39 x 60). The app's socket attached early (`stale=5`: only five frames had queued) and
+then carried 26 frames out and 21 in, about 1.5 s, and nothing after that in **either** direction, while the call stayed
+up: 167 = 5 stale + 26 sent + 8 left in the queue + 128 dropped on a full queue. No codec failure, no frame-size
+mismatch, no engine stall, and the server build of the deploy that followed had finished 9 s before the call began (the
+call ended 4 s before that restart). Neither side logged anything, because neither side noticed.
+
+**Why both directions stop at once (the bug).** The gateway's `audio_socket` and the client's `pump` were each one
+`select!` loop that both wrote and read the socket, awaiting each write before it read again. When the connection
+slows for a moment (the phone's radio, the tunnel), the buffers between the two ends fill, the gateway waits in a
+speaker write and stops reading the microphone, the phone waits in a microphone write and stops reading the speaker:
+each waits for the other to read, for good. Nothing timed out and nothing reopened the socket; a second socket for
+the call was refused (409) while the stuck one held the slot. `rovsti_wa_client` test
+`the_speaker_keeps_flowing_while_microphone_writes_are_stuck` reproduces it: with the old loop the speaker starves.
+
+**Fixed (gateway and app's Rust client).**
+
+- Both ends read and write side by side (`calls::shuttle`, `audio::pump`), so a slow write never stops reading.
+- The client pings every second and reopens the socket when nothing (no frame, no pong) came for 3 s, up to five times
+  in a row (`a_stuck_socket_is_reopened_and_the_audio_resumes`). The mic and speaker channels stay the same, so Kotlin
+  sees nothing of it. A close from the gateway (the call ended) or a failed connection still ends the audio.
+- The gateway gives the call's audio to the newest socket and tells the old one to step down (it used to answer 409),
+  and closes a socket that sent nothing for 5 s. It pings too.
+- Each socket logs `attached` and `closed after Ns: <why>; sent N frames, got M`; the summary line ends with
+  `sockets=N` (more than one: the app reopened).
+
+**No Opus out: `MlowPcm` is the default.** The microphone is encoded by whatsapp-rust's own MLOW encoder; the answer
+is the same MLOW signaling as `OpusInMlow` (`CallAudioMode::wire_format`, test
+`mlow_pcm_is_the_default_and_answers_with_the_mlow_signaling`), so the caller still takes it. libopus is left only
+to decode a peer that answers with the Opus escape (`ForeignAudio`; this peer sends plain MLOW). The engine's 20 ms
+playout frames are now joined into 60 ms frames before the speaker queue (before, eight 20 ms frames, 160 ms, filled
+it). Dropping libopus entirely is possible as a cargo feature of `wa_gateway` (off: build without `voip-libopus`,
+`ForeignAudio` counts the escape packets as failed and plays silence; `NativeOpus`/`OpusInMlow` compile out), at the
+cost of silence from a peer that sends the escape; it is not done, so no call can lose audio over it.
+
+**Deploys no longer cut calls.** The gateway keeps the number of live calls (ringing, connecting, active) in
+`<data_dir>/live-calls`; `remote-install.sh install` (and `rollback`) waits up to `CALL_WAIT` seconds (default 1800)
+until it is 0, checks again right before the restart, and gives up rather than cut a call. `status` shows it. The
+server build runs at `nice 19`.
+
+**On the phone:** a call of at least a minute, both ways, with the phone at the ear (screen dark) for part of it and on
+speaker for part. Then `journalctl -u wa-gateway | grep 'call audio'`: `sockets=1` and `mic: voiced` growing mean all
+was well; `closed after ...: nothing came from the app` followed by a second `attached` means the connection got stuck
+and the app recovered.
+

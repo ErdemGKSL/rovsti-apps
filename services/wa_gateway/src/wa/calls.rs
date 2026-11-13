@@ -8,27 +8,36 @@
 //! other two (`mic_tx`, `spk_rx`). A full channel drops frames, so a lagging
 //! side never adds latency.
 //!
+//! The audio socket reads and writes side by side ([`shuttle`]): a write
+//! stuck on the network never stops the microphone from being read. A socket
+//! that sends nothing for [`CLIENT_SILENCE`] is closed, and a new socket for
+//! the same call replaces the old one (the app reopens a stuck connection).
+//!
 //! Everything WhatsApp-specific sits behind [`CallBackend`] and [`LiveCall`],
 //! so the table is tested with fakes (see [`fake`]).
 
-use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use async_channel::{Receiver, Sender, TrySendError};
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::future::BoxFuture;
+use futures::{SinkExt, StreamExt};
 use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::audio::{Rechunker, decode_frame, encode_frame};
 use rovsti_wa_proto::{
     CallDirection, CallInput, CallMachine, CallPhase, CallStarted, CallSummary, CallUpdate,
     ErrorCode, GatewayEvent, PlaceCall, SetMuted,
 };
+use tokio::sync::Notify;
 use whatsapp_rust::CallError as WaCallError;
 use whatsapp_rust::voip::{AcceptCall, CallEvent, CallHandle, EncodedAudioFrame, OutgoingCall};
 use whatsapp_rust::wacore::stanza::call::REJECT_REASON_BUSY;
@@ -51,8 +60,67 @@ use crate::wa::lid::{self, LidMap};
 
 /// A ringing call that nobody answers ends as missed after this long.
 pub const RING_TIMEOUT: Duration = Duration::from_secs(60);
-/// Frames each audio channel holds (about half a second).
+/// Frames each audio channel holds: 60 ms frames, so about half a second.
+/// (The PCM engine's 20 ms playout is joined into 60 ms frames first, see
+/// [`call_audio::run_pcm_downlink`].)
 pub const AUDIO_QUEUE: usize = 8;
+/// The audio socket pings this often (the app answers with a pong).
+pub const SOCKET_PING_EVERY: Duration = Duration::from_secs(1);
+/// An audio socket that sends nothing (no frame, no pong) for this long is
+/// stuck and is closed, so the app's reopened socket finds the call free.
+pub const CLIENT_SILENCE: Duration = Duration::from_secs(5);
+/// How long a polite close may take before the socket is just dropped.
+const CLOSE_WAIT: Duration = Duration::from_secs(1);
+/// Audio sockets get a number, for the logs and for the lease.
+static NEXT_SOCKET: AtomicU64 = AtomicU64::new(1);
+
+// ------------------------------------------------------------- live calls
+
+/// The file in the data directory that holds how many calls are live (not
+/// ended: ringing, connecting or active) across all instances, one number and
+/// a newline. `scripts/deploy-wa-gateway.sh` waits while it is not `0`, so a
+/// redeploy never cuts a call.
+pub const LIVE_CALLS_FILE: &str = "live-calls";
+
+static LIVE_FILE: OnceLock<PathBuf> = OnceLock::new();
+static LIVE: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
+
+/// Mirrors the live call count to `path` from now on (once per process),
+/// starting at `0`.
+pub fn track_live_calls(path: PathBuf) {
+    if let Err(e) = write_live_count(&path, live_total()) {
+        log::warn!("cannot write {}: {e}", path.display());
+    }
+    let _ = LIVE_FILE.set(path);
+}
+
+fn live_total() -> usize {
+    LIVE.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .values()
+        .sum()
+}
+
+/// Records how many calls `instance` has live and rewrites the file.
+fn report_live(instance: &InstanceId, count: usize) {
+    let total = {
+        let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
+        live.insert(instance.to_string(), count);
+        live.values().sum()
+    };
+    if let Some(path) = LIVE_FILE.get()
+        && let Err(e) = write_live_count(path, total)
+    {
+        log::warn!("cannot write {}: {e}", path.display());
+    }
+}
+
+/// Writes `count` to `path` whole (a reader never sees half a file).
+pub fn write_live_count(path: &std::path::Path, count: usize) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, format!("{count}\n"))?;
+    std::fs::rename(&tmp, path)
+}
 /// How often a live call logs its audio counters.
 const AUDIO_LOG_EVERY: Duration = Duration::from_secs(10);
 /// Ended calls stay queryable this long.
@@ -238,7 +306,8 @@ struct CallEntry {
     mic_rx: Receiver<Frame>,
     spk_tx: Sender<Frame>,
     spk_rx: Receiver<Frame>,
-    audio_attached: bool,
+    /// The audio socket that has the call's audio now, if any.
+    audio_socket: Option<SocketSlot>,
     stats: Arc<CallAudioStats>,
     /// The relay is up. An outgoing call gets it from the offer's ack, while
     /// the callee still rings, so it only counts once the callee accepts.
@@ -269,7 +338,7 @@ impl CallEntry {
             mic_rx,
             spk_tx,
             spk_rx,
-            audio_attached: false,
+            audio_socket: None,
             stats: Arc::default(),
             media_up: false,
             started_ms: now_ms(),
@@ -306,6 +375,8 @@ pub struct CallTable {
     pusher: Arc<dyn Pusher>,
     ring_timeout: Duration,
     calls: Mutex<HashMap<String, CallEntry>>,
+    /// The ids of the calls that are not over (see [`LIVE_CALLS_FILE`]).
+    live: Mutex<HashSet<String>>,
 }
 
 impl std::fmt::Debug for CallTable {
@@ -314,24 +385,41 @@ impl std::fmt::Debug for CallTable {
     }
 }
 
-/// The audio socket's side of a call. Dropping it frees the call's single
-/// audio slot.
+/// The socket that has a call's audio: its number, and how to tell it a
+/// newer socket took over.
+struct SocketSlot {
+    id: u64,
+    replaced: Arc<Notify>,
+}
+
+/// The audio socket's side of a call. Dropping it frees the call's audio
+/// slot, unless a newer socket took it over.
 pub struct AudioPorts {
     pub mic_tx: Sender<Frame>,
     pub spk_rx: Receiver<Frame>,
     pub stats: Arc<CallAudioStats>,
+    /// Notified when a newer socket of the same call took over.
+    pub replaced: Arc<Notify>,
+    /// `<instance>: call audio <call id> socket <n>`, for the logs.
+    pub label: String,
     _lease: AudioLease,
 }
 
 struct AudioLease {
     table: Arc<CallTable>,
     call_id: String,
+    socket: u64,
 }
 
 impl Drop for AudioLease {
     fn drop(&mut self) {
-        if let Some(entry) = self.table.lock().get_mut(&self.call_id) {
-            entry.audio_attached = false;
+        if let Some(entry) = self.table.lock().get_mut(&self.call_id)
+            && entry
+                .audio_socket
+                .as_ref()
+                .is_some_and(|s| s.id == self.socket)
+        {
+            entry.audio_socket = None;
         }
     }
 }
@@ -349,6 +437,7 @@ impl CallTable {
             pusher,
             ring_timeout,
             calls: Mutex::new(HashMap::new()),
+            live: Mutex::new(HashSet::new()),
         })
     }
 
@@ -367,6 +456,23 @@ impl CallTable {
             now_ms(),
             GatewayEvent::Call(entry.update(call_id)),
         );
+        let count = {
+            let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
+            let changed = if entry.machine.phase().is_ended() {
+                live.remove(call_id)
+            } else {
+                live.insert(call_id.to_owned())
+            };
+            changed.then_some(live.len())
+        };
+        if let Some(count) = count {
+            report_live(&self.instance, count);
+        }
+    }
+
+    /// How many calls of this instance are not over.
+    pub fn live_calls(&self) -> usize {
+        self.live.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Every known call, newest first.
@@ -789,18 +895,28 @@ impl CallTable {
         Ok(CallStarted { call_id })
     }
 
-    /// Claims the call's one audio slot. The slot is free again when the
-    /// returned ports are dropped.
+    /// Claims the call's audio slot. A socket that has it already is told to
+    /// step down: the app opens a new socket when its old one got stuck, and
+    /// the stuck one may not notice for a while. The slot is free again when
+    /// the returned ports are dropped.
     pub fn attach_audio(self: &Arc<Self>, call_id: &str) -> Result<AudioPorts, CallError> {
         let mut calls = self.lock();
         let entry = calls.get_mut(call_id).ok_or(CallError::NotFound)?;
         if entry.machine.phase().is_ended() {
             return Err(CallError::Conflict("the call is over"));
         }
-        if entry.audio_attached {
-            return Err(CallError::Conflict("call audio is already attached"));
+        let id = NEXT_SOCKET.fetch_add(1, Ordering::Relaxed);
+        let label = format!("{}: call audio {call_id} socket {id}", self.instance);
+        if let Some(old) = entry.audio_socket.take() {
+            log::info!("{label}: replaces socket {}", old.id);
+            old.replaced.notify_one();
         }
-        entry.audio_attached = true;
+        let replaced = Arc::new(Notify::new());
+        entry.audio_socket = Some(SocketSlot {
+            id,
+            replaced: Arc::clone(&replaced),
+        });
+        bump(&entry.stats.sockets);
         // Frames queued while nobody listened are stale.
         while entry.spk_rx.try_recv().is_ok() {
             bump(&entry.stats.spk_stale);
@@ -810,29 +926,80 @@ impl CallTable {
             mic_tx: entry.mic_tx.clone(),
             spk_rx: entry.spk_rx.clone(),
             stats: Arc::clone(&entry.stats),
+            replaced,
+            label,
             _lease: AudioLease {
                 table: Arc::clone(self),
                 call_id: call_id.to_owned(),
+                socket: id,
             },
         })
     }
 }
 
-/// Shuttles audio between the socket and the call until either side ends.
-async fn audio_socket(mut socket: WebSocket, ports: AudioPorts) {
-    // The decoder hands over frames of any length (20 ms ones are common);
-    // the apps take whole 60 ms frames.
-    let mut speaker = Rechunker::new();
+/// Why an audio socket ended, for the log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SocketEnd {
+    /// The call ended and closed its channels.
+    CallEnded,
+    /// The app closed the socket.
+    AppClosed,
+    /// Reading or writing failed.
+    Broken,
+    /// Nothing came from the app for [`CLIENT_SILENCE`].
+    AppSilent,
+    /// A newer socket of the same call took over.
+    Replaced,
+}
+
+impl SocketEnd {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::CallEnded => "the call ended",
+            Self::AppClosed => "the app closed it",
+            Self::Broken => "the connection failed",
+            Self::AppSilent => "nothing came from the app (stuck connection)",
+            Self::Replaced => "a newer socket took over",
+        }
+    }
+}
+
+/// Shuttles audio between a socket and the call until either side ends, and
+/// logs how it ended. Reading and writing run side by side, so a write that
+/// waits on a slow network never stops the microphone (before, one loop did
+/// both, and a stuck write stopped the whole socket both ways); `silence`
+/// without any message from the app ends it.
+pub async fn shuttle<S>(socket: S, ports: AudioPorts, silence: Duration) -> SocketEnd
+where
+    S: futures::Stream<Item = Result<Message, axum::Error>>
+        + futures::Sink<Message, Error = axum::Error>
+        + Unpin,
+{
+    let started = Instant::now();
     let stats = &ports.stats;
-    'shuttle: loop {
-        tokio::select! {
-            frame = ports.spk_rx.recv() => match frame {
-                Ok(samples) => {
+    let (sent0, got0) = (
+        stats.spk_to_app.load(Ordering::Relaxed),
+        stats.mic_from_app.load(Ordering::Relaxed),
+    );
+    log::info!("{}: attached", ports.label);
+    let (mut sink, mut stream) = socket.split();
+    let writer = async {
+        // The decoder may hand over frames of any length; the apps take whole
+        // 60 ms frames.
+        let mut speaker = Rechunker::new();
+        let mut ping = tokio::time::interval(SOCKET_PING_EVERY);
+        ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        ping.tick().await;
+        loop {
+            tokio::select! {
+                frame = ports.spk_rx.recv() => {
+                    // The call ended and closed the channel.
+                    let Ok(samples) = frame else { return SocketEnd::CallEnded };
                     for whole in speaker.push(&samples) {
                         match encode_frame(&whole) {
                             Ok(bytes) => {
-                                if socket.send(Message::Binary(bytes.into())).await.is_err() {
-                                    break 'shuttle;
+                                if sink.send(Message::Binary(bytes.into())).await.is_err() {
+                                    return SocketEnd::Broken;
                                 }
                                 bump(&stats.spk_to_app);
                                 stats.spk_level.add(&whole);
@@ -841,25 +1008,57 @@ async fn audio_socket(mut socket: WebSocket, ports: AudioPorts) {
                         }
                     }
                 }
-                // The call ended and closed the channel.
-                Err(_) => break,
-            },
-            message = socket.recv() => match message {
-                Some(Ok(Message::Binary(bytes))) => match feed_mic(&bytes, &ports.mic_tx) {
+                _ = ping.tick() => {
+                    if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        return SocketEnd::Broken;
+                    }
+                }
+            }
+        }
+    };
+    let reader = async {
+        loop {
+            let message = match tokio::time::timeout(silence, stream.next()).await {
+                Err(_) => return SocketEnd::AppSilent,
+                Ok(Some(Ok(message))) => message,
+                Ok(Some(Err(_))) => return SocketEnd::Broken,
+                Ok(None) => return SocketEnd::AppClosed,
+            };
+            match message {
+                Message::Binary(bytes) => match feed_mic(&bytes, &ports.mic_tx) {
                     MicOutcome::Sent => bump(&stats.mic_from_app),
                     MicOutcome::Dropped => bump(&stats.mic_bad_size),
                     MicOutcome::Lagging => {
                         bump(&stats.mic_from_app);
                         bump(&stats.mic_lagging);
                     }
-                    MicOutcome::Closed => break,
+                    MicOutcome::Closed => return SocketEnd::CallEnded,
                 },
-                Some(Ok(Message::Close(_)) | Err(_)) | None => break,
-                Some(Ok(_)) => {}
-            },
+                Message::Close(_) => return SocketEnd::AppClosed,
+                // Pings are answered by the socket itself; a pong only shows
+                // the connection moves.
+                _ => {}
+            }
         }
+    };
+    let ended = tokio::select! {
+        ended = writer => ended,
+        ended = reader => ended,
+        () = ports.replaced.notified() => SocketEnd::Replaced,
+    };
+    if matches!(ended, SocketEnd::CallEnded | SocketEnd::Replaced) {
+        // Bounded: a stuck connection may never take the close.
+        let _ = tokio::time::timeout(CLOSE_WAIT, sink.send(Message::Close(None))).await;
     }
-    let _ = socket.send(Message::Close(None)).await;
+    log::info!(
+        "{}: closed after {}s: {}; sent {} frames, got {}",
+        ports.label,
+        started.elapsed().as_secs(),
+        ended.as_str(),
+        stats.spk_to_app.load(Ordering::Relaxed) - sent0,
+        stats.mic_from_app.load(Ordering::Relaxed) - got0,
+    );
+    ended
 }
 
 // ----------------------------------------------------------------- routes
@@ -965,7 +1164,9 @@ async fn audio(
 ) -> ApiResult<Response> {
     check_call_id(&call_id)?;
     let ports = state.calls(&auth.instance).attach_audio(&call_id)?;
-    Ok(ws.on_upgrade(move |socket| audio_socket(socket, ports)))
+    Ok(ws.on_upgrade(move |socket| async move {
+        shuttle(socket, ports, CLIENT_SILENCE).await;
+    }))
 }
 
 // ------------------------------------------------------------ whatsapp-rust
@@ -1020,7 +1221,8 @@ impl MediaPlan {
         stats.set_format(mode.label());
         let Some(format) = mode.encoded_format() else {
             let (eng_mic_tx, eng_mic_rx) = async_channel::bounded(AUDIO_QUEUE);
-            let (eng_spk_tx, eng_spk_rx) = async_channel::bounded(AUDIO_QUEUE);
+            // The engine plays out 20 ms frames: three per 60 ms slot.
+            let (eng_spk_tx, eng_spk_rx) = async_channel::bounded(AUDIO_QUEUE * 3);
             let foreign = Arc::new(ForeignAudio::new(spk_tx.clone(), Arc::clone(&stats)));
             return Ok(Self {
                 ends: MediaEnds::Pcm {
@@ -1903,21 +2105,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_second_audio_socket_conflicts_until_the_first_leaves() {
+    async fn a_second_audio_socket_takes_over_from_the_first() {
         let rig = rig();
         ring(&rig, "C1");
         let first = rig.table.attach_audio("C1").unwrap();
-        let second = rig.table.attach_audio("C1").err().unwrap();
-        assert_eq!(
-            HttpError::from(second).status(),
-            axum::http::StatusCode::CONFLICT
-        );
+        let second = rig.table.attach_audio("C1").unwrap();
+        // The first socket is told to step down.
+        tokio::time::timeout(Duration::from_secs(1), first.replaced.notified())
+            .await
+            .expect("the first socket was not told");
         assert!(matches!(
             rig.table.attach_audio("nope"),
             Err(CallError::NotFound)
         ));
+        // The old socket leaving does not free the slot of the new one.
         drop(first);
+        assert!(rig.table.lock().get("C1").unwrap().audio_socket.is_some());
+        drop(second);
+        assert!(rig.table.lock().get("C1").unwrap().audio_socket.is_none());
         let again = rig.table.attach_audio("C1").unwrap();
+        assert_eq!(again.stats.summary().sockets, 3);
 
         // The end of the call closes both directions.
         rig.table.on_missed("C1");
@@ -1930,6 +2137,174 @@ mod tests {
             rig.table.attach_audio("C1"),
             Err(CallError::Conflict(_))
         ));
+    }
+
+    /// An in-memory audio socket: what the app sends comes from `from_app`,
+    /// what the gateway sends goes to `to_app`. A `to_app` channel nobody
+    /// reads fills up and then blocks, like a connection that stopped moving.
+    struct FakeSocket {
+        from_app: futures::channel::mpsc::Receiver<Result<Message, axum::Error>>,
+        to_app: futures::channel::mpsc::Sender<Message>,
+    }
+
+    impl futures::Stream for FakeSocket {
+        type Item = Result<Message, axum::Error>;
+
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            std::pin::Pin::new(&mut self.from_app).poll_next(cx)
+        }
+    }
+
+    impl futures::Sink<Message> for FakeSocket {
+        type Error = axum::Error;
+
+        fn poll_ready(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), axum::Error>> {
+            std::pin::Pin::new(&mut self.to_app)
+                .poll_ready(cx)
+                .map_err(axum::Error::new)
+        }
+
+        fn start_send(
+            mut self: std::pin::Pin<&mut Self>,
+            item: Message,
+        ) -> Result<(), axum::Error> {
+            std::pin::Pin::new(&mut self.to_app)
+                .start_send(item)
+                .map_err(axum::Error::new)
+        }
+
+        fn poll_flush(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), axum::Error>> {
+            std::pin::Pin::new(&mut self.to_app)
+                .poll_flush(cx)
+                .map_err(axum::Error::new)
+        }
+
+        fn poll_close(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), axum::Error>> {
+            std::pin::Pin::new(&mut self.to_app)
+                .poll_close(cx)
+                .map_err(axum::Error::new)
+        }
+    }
+
+    type AppEnds = (
+        futures::channel::mpsc::Sender<Result<Message, axum::Error>>,
+        futures::channel::mpsc::Receiver<Message>,
+    );
+
+    /// A fake socket whose gateway-to-app side holds `room` messages.
+    fn fake_socket(room: usize) -> (FakeSocket, AppEnds) {
+        let (app_tx, from_app) = futures::channel::mpsc::channel(64);
+        let (to_app, app_rx) = futures::channel::mpsc::channel(room);
+        (FakeSocket { from_app, to_app }, (app_tx, app_rx))
+    }
+
+    fn mic_message(value: i16) -> Result<Message, axum::Error> {
+        Ok(Message::Binary(
+            encode_frame(&vec![value; FRAME_SAMPLES]).unwrap().into(),
+        ))
+    }
+
+    /// The owner's call stopped both ways at once: one loop wrote the
+    /// speaker and read the microphone, so a write waiting on the network
+    /// stopped the microphone too. Now the microphone keeps arriving while
+    /// speaker writes are stuck.
+    #[tokio::test]
+    async fn stuck_speaker_writes_do_not_stop_the_microphone() {
+        let rig = rig();
+        ring(&rig, "C1");
+        let (mic_rx, spk_tx) = {
+            let calls = rig.table.lock();
+            let entry = calls.get("C1").unwrap();
+            (entry.mic_rx.clone(), entry.spk_tx.clone())
+        };
+        let ports = rig.table.attach_audio("C1").unwrap();
+        // Nobody reads the app side: after one frame every write waits.
+        let (socket, (mut app_tx, _app_rx)) = fake_socket(0);
+        let task = tokio::spawn(shuttle(socket, ports, Duration::from_secs(5)));
+        for i in 0..4 {
+            spk_tx.send(vec![i; FRAME_SAMPLES]).await.unwrap();
+        }
+        for i in 0..6 {
+            app_tx.send(mic_message(10 + i)).await.unwrap();
+            let got = tokio::time::timeout(Duration::from_secs(2), mic_rx.recv())
+                .await
+                .expect("the microphone stopped behind a stuck write")
+                .unwrap();
+            assert_eq!(got[0], 10 + i);
+        }
+        let summary = rig.table.audio_summary("C1").unwrap();
+        assert_eq!(summary.mic_from_app, 6);
+        assert!(summary.spk_to_app <= 2, "{summary}");
+        // The app goes away: the socket ends.
+        app_tx.close_channel();
+        assert_eq!(task.await.unwrap(), SocketEnd::AppClosed);
+    }
+
+    #[tokio::test]
+    async fn a_silent_app_socket_is_closed_and_frees_the_call() {
+        let rig = rig();
+        ring(&rig, "C1");
+        let ports = rig.table.attach_audio("C1").unwrap();
+        let (socket, (_app_tx, _app_rx)) = fake_socket(64);
+        let ended = shuttle(socket, ports, Duration::from_millis(100)).await;
+        assert_eq!(ended, SocketEnd::AppSilent);
+        assert!(rig.table.lock().get("C1").unwrap().audio_socket.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_replaced_socket_steps_down_and_the_call_end_closes_the_new_one() {
+        let rig = rig();
+        ring(&rig, "C1");
+        let first = rig.table.attach_audio("C1").unwrap();
+        let (socket, (_keep_tx, mut first_rx)) = fake_socket(64);
+        let first_task = tokio::spawn(shuttle(socket, first, Duration::from_secs(5)));
+        let second = rig.table.attach_audio("C1").unwrap();
+        assert_eq!(first_task.await.unwrap(), SocketEnd::Replaced);
+        assert!(matches!(first_rx.next().await, Some(Message::Close(_))));
+
+        let (socket, (_keep_tx, mut second_rx)) = fake_socket(64);
+        let second_task = tokio::spawn(shuttle(socket, second, Duration::from_secs(5)));
+        rig.table.on_missed("C1");
+        assert_eq!(second_task.await.unwrap(), SocketEnd::CallEnded);
+        assert!(matches!(second_rx.next().await, Some(Message::Close(_))));
+    }
+
+    #[tokio::test]
+    async fn live_calls_count_until_the_call_is_over() {
+        let rig = rig();
+        assert_eq!(rig.table.live_calls(), 0);
+        ring(&rig, "C1");
+        ring(&rig, "C2");
+        assert_eq!(rig.table.live_calls(), 2);
+        rig.table.accept(&rig.calls, "C1").await.unwrap();
+        assert_eq!(rig.table.live_calls(), 2);
+        rig.table.on_missed("C2");
+        assert_eq!(rig.table.live_calls(), 1);
+        rig.table.on_missed("C1");
+        assert_eq!(rig.table.live_calls(), 0);
+    }
+
+    #[test]
+    fn the_live_calls_file_holds_one_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LIVE_CALLS_FILE);
+        write_live_count(&path, 2).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "2\n");
+        write_live_count(&path, 0).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "0\n");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[tokio::test]

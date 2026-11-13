@@ -3,24 +3,29 @@
 //! The apps speak 16 kHz mono PCM (`rovsti_wa_proto::audio`). How that PCM
 //! meets WhatsApp is [`CALL_AUDIO_MODE`]:
 //!
+//! - [`CallAudioMode::MlowPcm`] (default): whatsapp-rust's PCM audio
+//!   (`AudioConfig::MLOW_PCM`). The engine encodes the microphone with its own
+//!   pure-Rust MLOW encoder and decodes the peer's MLOW itself: no Opus on the
+//!   way out. The answer is the same MLOW signaling as in `OpusInMlow` (same
+//!   RTP profile, payload type and rate, see [`CallAudioMode::wire_format`]),
+//!   the one the caller's phone takes. Only a peer that answers with Opus/CELT
+//!   through MLOW's escape still needs libopus: the engine hands those packets
+//!   over as `CallEvent::ForeignAudio`, which [`ForeignAudio`] decodes into the
+//!   speaker. The engine keeps ticking silent 20 ms playout frames meanwhile,
+//!   so [`run_pcm_downlink`] holds those back while foreign audio plays, and
+//!   joins the engine's 20 ms frames into 60 ms ones so every queue counts
+//!   the same time per slot.
+//! - [`CallAudioMode::OpusInMlow`]: encoded audio in the MLOW RTP profile,
+//!   answered with the same MLOW signaling. The microphone goes out as
+//!   Opus/CELT through MLOW's escape (libopus); the peer may answer with MLOW
+//!   or with the escape, and both are decoded here. The default from
+//!   2026-11-11 to 2026-11-13.
 //! - [`CallAudioMode::NativeOpus`]: whatsapp-rust's encoded audio
 //!   with `AudioFormat::OPUS_16KHZ_60MS`. The gateway encodes the microphone
 //!   with libopus and decodes the peer's packets itself. The signaling clears
-//!   the MLOW capability, so the peer sends standard Opus too. whatsapp-rust
-//!   documents this as the profile verified on a live full-duplex Android call
-//!   (`agent_docs/voip_audio_codecs.md` in the crate). On the owner's phone the
-//!   caller never took this answer: their phone rang on and the call ended as
-//!   missed. The MLOW answer below is whatsapp-rust's compatibility default.
-//! - [`CallAudioMode::OpusInMlow`] (default): encoded audio in the MLOW RTP
-//!   profile, answered with the same MLOW signaling as the engine's default.
-//!   The microphone goes out as Opus/CELT through MLOW's escape; the peer may
-//!   answer with MLOW or with the escape, and both are decoded here.
-//! - [`CallAudioMode::MlowPcm`]: the engine's built-in pure-Rust MLOW codec
-//!   (the only mode before). The engine does not decode the Opus escape in
-//!   this mode: it hands those packets over as `CallEvent::ForeignAudio`,
-//!   which [`ForeignAudio`] decodes into the speaker. The engine keeps ticking
-//!   silent 20 ms playout frames meanwhile, so [`run_pcm_downlink`] holds
-//!   those back while foreign audio plays.
+//!   the MLOW capability, so the peer sends standard Opus too. On the owner's
+//!   phone the caller never took this answer: their phone rang on and the
+//!   call ended as missed. Kept only to compare.
 //!
 //! [`CallAudioStats`] counts every hop and measures the levels, and
 //! [`AudioSummary`] turns that into the one log line per call.
@@ -32,10 +37,11 @@ use std::time::{Duration, Instant};
 
 use async_channel::{Receiver, Sender, TrySendError};
 use bytes::Bytes;
+use rovsti_wa_proto::audio::Rechunker;
 use whatsapp_rust::voip::audio::{WaOpusDecoder, WaOpusEncoder};
 use whatsapp_rust::voip::{AudioCodec, AudioFormat, AudioRtpProfile, EncodedAudioFrame};
-use whatsapp_rust::wacore::voip::MlowDecoder;
 use whatsapp_rust::wacore::voip::rtp::RTP_PAYLOAD_TYPE_MLOW_RED;
+use whatsapp_rust::wacore::voip::{AudioConfig, MlowDecoder};
 
 pub type Frame = Vec<i16>;
 
@@ -48,7 +54,7 @@ pub enum CallAudioMode {
 }
 
 /// The mode every new call uses.
-pub const CALL_AUDIO_MODE: CallAudioMode = CallAudioMode::OpusInMlow;
+pub const CALL_AUDIO_MODE: CallAudioMode = CallAudioMode::MlowPcm;
 
 /// Encoded packets queued towards the engine (about 180 ms).
 pub const ENCODED_QUEUE: usize = 3;
@@ -79,11 +85,20 @@ impl CallAudioMode {
         }
     }
 
-    /// The microphone encoder of an encoded mode.
+    /// The format the call is signaled and carried in. `MlowPcm` and
+    /// `OpusInMlow` share the MLOW profile, so they answer alike.
+    pub fn wire_format(self) -> AudioFormat {
+        self.encoded_format()
+            .unwrap_or(AudioConfig::MLOW_PCM.format)
+    }
+
+    /// The gateway's microphone encoder of an encoded mode. PCM mode has
+    /// none: the engine encodes MLOW itself.
     pub fn encoder(self) -> Result<WaOpusEncoder, String> {
         let encoder = match self {
             Self::OpusInMlow => WaOpusEncoder::new_mlow_escape(),
-            Self::NativeOpus | Self::MlowPcm => WaOpusEncoder::new(),
+            Self::NativeOpus => WaOpusEncoder::new(),
+            Self::MlowPcm => return Err("PCM mode has no gateway encoder".to_owned()),
         };
         encoder.map_err(|e| e.to_string())
     }
@@ -199,6 +214,8 @@ pub struct CallAudioStats {
     pub spk_stale: AtomicU64,
     /// Whole 60 ms frames sent to the app.
     pub spk_to_app: AtomicU64,
+    /// Audio sockets the app opened (more than one: it reopened a stuck one).
+    pub sockets: AtomicU64,
     /// Level of the microphone PCM on its way to the engine.
     pub mic_level: Level,
     /// Level of the PCM sent to the app.
@@ -244,6 +261,7 @@ impl CallAudioStats {
             spk_stale: load(&self.spk_stale),
             spk_to_app: load(&self.spk_to_app),
             spk_level: self.spk_level.snapshot(),
+            sockets: load(&self.sockets),
         }
     }
 }
@@ -274,6 +292,7 @@ pub struct AudioSummary {
     pub spk_stale: u64,
     pub spk_to_app: u64,
     pub spk_level: LevelSnapshot,
+    pub sockets: u64,
 }
 
 impl fmt::Display for AudioSummary {
@@ -282,7 +301,8 @@ impl fmt::Display for AudioSummary {
             f,
             "format={} | mic: app={} bad={} lag={} engine={} engine_drop={} enc_fail={} {} | \
              spk: engine={} opus={} mlow={} dec_fail={} foreign={} foreign_ok={} \
-             foreign_fail={} gated={} queue_drop={} empty={} pcm_ms={} stale={} app={} {}",
+             foreign_fail={} gated={} queue_drop={} empty={} pcm_ms={} stale={} app={} {} | \
+             sockets={}",
             self.format,
             self.mic_from_app,
             self.mic_bad_size,
@@ -305,6 +325,7 @@ impl fmt::Display for AudioSummary {
             self.spk_stale,
             self.spk_to_app,
             self.spk_level,
+            self.sockets,
         )
     }
 }
@@ -556,21 +577,27 @@ pub async fn run_pcm_uplink(
 }
 
 /// The PCM engine's playout to the speaker, counted. Its silent frames are
-/// held back while foreign audio plays.
+/// held back while foreign audio plays. The engine plays out 20 ms (320
+/// sample) frames; they are joined into whole 60 ms frames here, so the
+/// speaker queue holds [`AUDIO_QUEUE`](crate::wa::calls::AUDIO_QUEUE) x 60 ms
+/// like in the other modes, not a third of that.
 pub async fn run_pcm_downlink(
     engine: Receiver<Frame>,
     spk: Sender<Frame>,
     foreign: Arc<ForeignAudio>,
     stats: Arc<CallAudioStats>,
 ) {
+    let mut whole = Rechunker::new();
     while let Ok(frame) = engine.recv().await {
         bump(&stats.spk_from_engine);
         if foreign.playing() && frame.iter().all(|&s| s == 0) {
             bump(&stats.spk_gated);
             continue;
         }
-        if !to_speaker(&spk, frame, &stats) {
-            break;
+        for pcm in whole.push(&frame) {
+            if !to_speaker(&spk, pcm, &stats) {
+                return;
+            }
         }
     }
 }
@@ -759,23 +786,95 @@ mod tests {
             Arc::clone(&foreign),
             Arc::clone(&stats),
         ));
-        // Nothing foreign yet: the engine's silence passes.
-        eng_tx.send(vec![0; 320]).await.unwrap();
-        assert_eq!(spk_rx.recv().await.unwrap(), vec![0; 320]);
+        // Nothing foreign yet: three 20 ms frames of engine silence pass, as
+        // one 60 ms frame.
+        for _ in 0..3 {
+            eng_tx.send(vec![0; 320]).await.unwrap();
+        }
+        assert_eq!(spk_rx.recv().await.unwrap(), vec![0; FRAME_SAMPLES]);
 
         let mut encoder = WaOpusEncoder::new_mlow_escape().unwrap();
         foreign.deliver(&encoder.encode(&tone(1_000.0, 0)).unwrap());
         assert_eq!(spk_rx.recv().await.unwrap().len(), FRAME_SAMPLES);
         // Silence is held back now; real engine sound still passes.
         eng_tx.send(vec![0; 320]).await.unwrap();
-        eng_tx.send(vec![5; 320]).await.unwrap();
+        for _ in 0..3 {
+            eng_tx.send(vec![5; 320]).await.unwrap();
+        }
         eng_tx.close();
         task.await.unwrap();
-        assert_eq!(spk_rx.try_recv().unwrap(), vec![5; 320]);
+        assert_eq!(spk_rx.try_recv().unwrap(), vec![5; FRAME_SAMPLES]);
         assert!(spk_rx.is_empty());
         let s = stats.summary();
-        assert_eq!((s.spk_from_engine, s.spk_gated), (3, 1));
+        assert_eq!((s.spk_from_engine, s.spk_gated), (7, 1));
         assert_eq!((s.foreign, s.foreign_ok), (1, 1));
+    }
+
+    /// The engine plays out 20 ms frames. Before, each took one slot of the
+    /// eight-frame speaker queue (160 ms in all), so a socket write that waited
+    /// a little dropped audio; now the queue holds 60 ms frames like the
+    /// other modes.
+    #[tokio::test]
+    async fn pcm_downlink_fills_the_speaker_queue_with_60_ms_frames() {
+        let stats = Arc::new(CallAudioStats::default());
+        let (spk_tx, spk_rx) = async_channel::bounded(8);
+        let (eng_tx, eng_rx) = async_channel::bounded(64);
+        let foreign = Arc::new(ForeignAudio::new(spk_tx.clone(), Arc::clone(&stats)));
+        // 480 ms of playout while nobody reads the speaker queue.
+        for i in 0..24 {
+            eng_tx.send(vec![i; 320]).await.unwrap();
+        }
+        eng_tx.close();
+        run_pcm_downlink(eng_rx, spk_tx, foreign, Arc::clone(&stats)).await;
+        let frames: Vec<Frame> = std::iter::from_fn(|| spk_rx.try_recv().ok()).collect();
+        assert_eq!(frames.len(), 8);
+        assert!(frames.iter().all(|f| f.len() == FRAME_SAMPLES));
+        assert_eq!(frames[1][..320], [3; 320]);
+        let s = stats.summary();
+        assert_eq!((s.spk_queue_dropped, s.spk_ms), (0, 480));
+    }
+
+    #[test]
+    fn mlow_pcm_is_the_default_and_answers_with_the_mlow_signaling() {
+        assert_eq!(CALL_AUDIO_MODE, CallAudioMode::MlowPcm);
+        // The gateway encodes nothing itself: no libopus on the way out.
+        assert!(CallAudioMode::MlowPcm.encoder().is_err());
+        assert_eq!(CallAudioMode::MlowPcm.encoded_format(), None);
+        // The same signaling as OpusInMlow, which the caller's phone takes;
+        // not the standard-Opus answer it ignored.
+        let pcm = CallAudioMode::MlowPcm.wire_format();
+        let escape = CallAudioMode::OpusInMlow.wire_format();
+        assert_eq!(pcm.codec, AudioCodec::Mlow);
+        assert_eq!(pcm.rtp_profile, AudioRtpProfile::Mlow);
+        assert_eq!(pcm.rtp_profile, escape.rtp_profile);
+        assert_eq!(pcm.rtp_payload_type, escape.rtp_payload_type);
+        assert_eq!(pcm.signaling_rate, escape.signaling_rate);
+        assert_eq!(pcm.samples_per_frame, escape.samples_per_frame);
+        assert_ne!(
+            CallAudioMode::NativeOpus.wire_format().rtp_profile,
+            AudioRtpProfile::Mlow
+        );
+    }
+
+    /// What the peer gets in the default mode: the engine's MLOW encoder
+    /// (the same one the engine runs) carries a 1 kHz tone, and an MLOW
+    /// decoder plays it back as 1 kHz.
+    #[test]
+    fn the_engine_mlow_encoder_carries_the_microphone() {
+        let mut encoder = whatsapp_rust::wacore::voip::MlowEncoder::new();
+        let mut decoder = InboundDecoder::new();
+        let mut pcm = Vec::new();
+        for i in 0..10 {
+            let frame: Vec<f32> = tone(1_000.0, i * FRAME_SAMPLES)
+                .iter()
+                .map(|&s| f32::from(s) / 32768.0)
+                .collect();
+            let packet = encoder.encode(&frame).unwrap();
+            assert!(!packet.is_empty(), "packet {i}");
+            pcm.extend(decoder.decode_mlow(&packet, false));
+        }
+        assert_eq!(pcm.len(), 10 * FRAME_SAMPLES);
+        assert_tone(&pcm);
     }
 
     #[test]
@@ -808,6 +907,7 @@ mod tests {
         bump(&stats.mic_bad_size);
         bump(&stats.foreign_failed);
         bump(&stats.spk_to_app);
+        bump(&stats.sockets);
         stats.spk_level.add(&[1_000; 960]);
         let line = stats.summary().to_string();
         assert_eq!(
@@ -815,7 +915,7 @@ mod tests {
             "format=native-opus pt120 16k/60ms | mic: app=2 bad=1 lag=0 engine=0 engine_drop=0 \
              enc_fail=0 rms=none peak=0 voiced=0 | spk: engine=0 opus=0 mlow=0 dec_fail=0 \
              foreign=0 foreign_ok=0 foreign_fail=1 gated=0 queue_drop=0 empty=0 pcm_ms=0 stale=0 app=1 \
-             rms=-30.3dBFS peak=1000 voiced=1"
+             rms=-30.3dBFS peak=1000 voiced=1 | sockets=1"
         );
     }
 

@@ -623,4 +623,20 @@
     <string name="data_span_year">1 yıl</string>
     <string name="data_older_ask">%1$s öncesindeki aramalar silinsin mi?</string>
     <string name="data_older_body">%1$d arama bu telefonun arama kaydından kaldırılacak.</string>
+    <string name="notes_title">Arama notları</string>
+    <string name="notes_search">Notlarda ara</string>
+    <string name="notes_empty_title">Henüz arama notu yok</string>
+    <string name="notes_empty_message">Bir aramanın ayrıntılarından not ekleyin, burada görünür.</string>
+    <string name="notes_no_match_title">Aramanızla eşleşen not yok</string>
+    <string name="notes_no_match_message">Başka bir kelime veya isim deneyin.</string>
+    <string name="notes_delete">Sil</string>
+    <string name="notes_open">Aramayı aç</string>
+    <string name="notes_deleted">Not silindi</string>
+    <string name="notes_undo">Geri al</string>
+    <string name="notes_share">Tüm notları paylaş</string>
+    <string name="notes_export">CSV olarak dışa aktar</string>
+    <string name="notes_notice_call_gone">Bu arama artık arama kaydında yok</string>
+    <string name="notes_notice_delete_failed">Not silinemedi</string>
+    <string name="notes_notice_undo_failed">Geri alınamadı</string>
+    <string name="notes_notice_export_failed">Notlar dışa aktarılamadı</string>
 </resources>

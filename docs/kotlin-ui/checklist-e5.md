@@ -135,10 +135,10 @@ Recents, Keypad, the Person and Call details sheets, Favorites and the three Und
 | U27 | Blocked: share, unblock all | "Unblocked n" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U28 | Stats CSV export | "Call statistics exported" | Confirm | in HEAD (`stats_export`) |
 | U29 | Add to contacts from keypad | `keypad_add_contact` | none (navigation) | in HEAD |
-| U30 | Notes page | "Note deleted" + Undo | Confirm | MISSING (E5.11, `stash@{0}`) |
+| U30 | Notes page | "Note deleted" + Undo | Confirm | in HEAD (round 15 step 3, E5.11: swipe delete or menu, "Note deleted" + Undo; `NotesViewModel.delete/undo`, `NotesScreenTest`) |
 | U31 | Redial | status line | none | in HEAD (`KeypadViewModel`) |
 | U32 | Smart paste chooser | `keypad_paste_title` sheet | none | in HEAD |
-| U33 | Notes share all | share sheet | none | MISSING with U30 |
+| U33 | Notes share all | share sheet | none | in HEAD (round 15 step 3, `NotesEffect.ShareText`; `NotesViewModelTest`) |
 | U34 | Bulk block from paste | "Blocked n" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U35 | Notes chip | empty text | Selection | in HEAD (`recents_filter_notes`) |
 | U36 | Copy / share all numbers | `details_notice_copied_all` | Confirm (fixed) | in HEAD |
@@ -147,7 +147,7 @@ Recents, Keypad, the Person and Call details sheets, Favorites and the three Und
 | U39 | Mark missed seen | none | none | in HEAD (`RecentsViewModel`) |
 | U40 | Share stats summary | share sheet | none | in HEAD |
 | U41 | Export pills name the file | per-export pill | Confirm | in HEAD (round 15, E5.9b `DataEffect.Export` names the file; U28 partly done) |
-| U42 | Notes export | "Call notes exported" | Confirm | MISSING with U30 |
+| U42 | Notes export | "Call notes exported" | Confirm | in HEAD (round 15 step 3, `NotesEffect.SaveCsv` through `DetailsHost.saveCsv`, file `rovsti-call-notes-<date>.csv`) |
 | U43 | Delete older calls | "n calls deleted" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U44 | Remind on a missed call | `details_remind` pill | Confirm (fixed) | in HEAD |
 | U45 | Select: block / share | `recents_blocked_many` + Undo | Confirm (fixed) | in HEAD |

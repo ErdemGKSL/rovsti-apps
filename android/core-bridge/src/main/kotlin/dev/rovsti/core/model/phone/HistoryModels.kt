@@ -351,6 +351,8 @@ data class NoteRowsRequest(
     val notes: Notes,
     @EncodeDefault(NEVER) val query: String = "",
     @EncodeDefault(NEVER) val names: NamesByNumber = emptyMap(),
+    /** The phone's clock and date style for the row dates; the core's default (UTC, 24 h) when null. */
+    @EncodeDefault(NEVER) val locale: LocaleTime? = null,
 )
 
 @Serializable

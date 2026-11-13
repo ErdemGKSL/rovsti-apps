@@ -623,4 +623,20 @@
     <string name="data_span_year">1 year</string>
     <string name="data_older_ask">Delete calls older than %1$s?</string>
     <string name="data_older_body">%1$d calls will be removed from this phone\'s call log.</string>
+    <string name="notes_title">Call notes</string>
+    <string name="notes_search">Search notes</string>
+    <string name="notes_empty_title">No call notes yet</string>
+    <string name="notes_empty_message">Add a note from a call\'s details and it shows up here.</string>
+    <string name="notes_no_match_title">No notes match your search</string>
+    <string name="notes_no_match_message">Try another word or a name.</string>
+    <string name="notes_delete">Delete</string>
+    <string name="notes_open">Open call</string>
+    <string name="notes_deleted">Note deleted</string>
+    <string name="notes_undo">Undo</string>
+    <string name="notes_share">Share all notes</string>
+    <string name="notes_export">Export as CSV</string>
+    <string name="notes_notice_call_gone">This call is no longer in the call log</string>
+    <string name="notes_notice_delete_failed">Couldn\'t delete the note</string>
+    <string name="notes_notice_undo_failed">Couldn\'t undo</string>
+    <string name="notes_notice_export_failed">Couldn\'t export the notes</string>
 </resources>

@@ -56,6 +56,7 @@ import dev.rovsti.phone.incoming.IncomingBackend
 import dev.rovsti.phone.incoming.IncomingViewModel
 import dev.rovsti.phone.incoming.NamedCallSource
 import dev.rovsti.phone.incoming.RegistryCallSource
+import dev.rovsti.phone.notes.NotesViewModel
 import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
 import dev.rovsti.phone.setup.SetupFactsSource
@@ -470,6 +471,23 @@ open class PhoneContainer(
             ops = ops,
             shared = sharedOps,
             homeCc = ::homeCc,
+            locale = ::localeNow,
+            scope = scope,
+            clock = clock,
+        )
+
+    /** The model of the Notes page (E5.11); [scope] belongs to the page and ends with it. */
+    open fun notesModel(scope: CoroutineScope): NotesViewModel =
+        NotesViewModel(
+            store = store,
+            recents = recents,
+            ops = ops,
+            // F29: the contact that owns the number now; the people index answers while the resolver cannot.
+            nameOf = { number ->
+                callerIds.resolve(number)?.name?.takeIf { it.isNotBlank() }
+                    ?: people.matchNumber(number)?.let { people.displayName(it) }?.takeIf { it.isNotBlank() }
+            },
+            display = numberDisplay,
             locale = ::localeNow,
             scope = scope,
             clock = clock,

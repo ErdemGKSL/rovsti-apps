@@ -66,6 +66,9 @@ import dev.rovsti.phone.keypad.KeypadHost
 import dev.rovsti.phone.keypad.KeypadScreen
 import dev.rovsti.phone.keypad.KeypadViewModel
 import dev.rovsti.phone.keypad.addContactIntent
+import dev.rovsti.phone.notes.NotesHost
+import dev.rovsti.phone.notes.NotesPage
+import dev.rovsti.phone.notes.NotesViewModel
 import dev.rovsti.phone.recents.RecentsHost
 import dev.rovsti.phone.recents.RecentsScreen
 import dev.rovsti.phone.recents.RecentsSelectToolbar
@@ -343,6 +346,15 @@ private class AndroidKeypadHost(
 private fun rememberStatsViewModel(container: PhoneContainer): StatsViewModel {
     val scope = remember(container) { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val model = remember(container, scope) { container.statsModel(scope) }
+    DisposableEffect(model) { onDispose { model.close() } }
+    return model
+}
+
+/** A Notes model for each visit of the page: it follows the notes file and ends with the page. */
+@Composable
+private fun rememberNotesViewModel(container: PhoneContainer): NotesViewModel {
+    val scope = remember(container) { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    val model = remember(container, scope) { container.notesModel(scope) }
     DisposableEffect(model) { onDispose { model.close() } }
     return model
 }
@@ -755,6 +767,27 @@ fun PhoneApp(
                     onOpenNumber = { name, number ->
                         details.presentPerson(PersonTarget(name, persistentListOf(TargetNumber(number))))
                     },
+                    onBack = pop,
+                    onBackLongClick = popToRoot,
+                )
+            }
+            entry<PhoneRoute.Notes> {
+                val model = rememberNotesViewModel(container)
+                val notesHost =
+                    remember(detailsHost) {
+                        object : NotesHost {
+                            override fun share(text: String) = detailsHost.share(text)
+
+                            override fun saveCsv(
+                                fileName: String,
+                                csv: String,
+                            ) = detailsHost.saveCsv(fileName, csv)
+                        }
+                    }
+                NotesPage(
+                    viewModel = model,
+                    host = notesHost,
+                    onOpenCall = { target, onDismissed -> details.presentCall(target, onDismissed) },
                     onBack = pop,
                     onBackLongClick = popToRoot,
                 )

@@ -804,6 +804,9 @@ struct NoteRowsReq {
     query: String,
     #[serde(default)]
     names: HashMap<String, String>,
+    /// The phone's clock and date style for the row dates (UTC, 24 h, day first when absent).
+    #[serde(default)]
+    locale: LocaleTime,
 }
 
 #[derive(Serialize)]
@@ -822,7 +825,7 @@ struct NoteRowOut {
 }
 
 fn notes_rows(req: NoteRowsReq) -> Result<NoteRowsAns, FfiError> {
-    let locale = LocaleTime::default();
+    let locale = req.locale;
     let rows = req
         .notes
         .rows(&req.query, name_lookup(&req.names))

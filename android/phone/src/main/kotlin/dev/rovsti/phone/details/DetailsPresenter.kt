@@ -95,12 +95,20 @@ class DetailsPresenter(
         return entry
     }
 
-    fun presentCall(target: CallDetailsTarget): SheetEntry {
+    fun presentCall(
+        target: CallDetailsTarget,
+        onDismissed: () -> Unit = {},
+    ): SheetEntry {
         val strings = DetailsStrings(resources())
         val model = call(target, scope())
         lateinit var entry: SheetEntry
         entry =
-            SheetEntry(title = strings.sheetCall, detents = PersonDetents, initialDetent = Detent.Medium) { sheet ->
+            SheetEntry(
+                title = strings.sheetCall,
+                detents = PersonDetents,
+                initialDetent = Detent.Medium,
+                onDismissed = onDismissed,
+            ) { sheet ->
                 CallDetailsSheet(model, sheet, host, onClose = { entry.sheet?.dismiss() })
             }
         overlays.present(entry)

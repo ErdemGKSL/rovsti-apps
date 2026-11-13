@@ -47,6 +47,7 @@ object PhoneTags {
     const val SettingsButton = "phone-settings-button"
     const val SettingsPage = "phone-settings-page"
     const val StatsRow = "phone-settings-stats"
+    const val NotesRow = "phone-settings-notes"
     const val SetupRow = "phone-settings-setup-row"
     const val VersionRow = "phone-settings-version-row"
     const val WhatsAppRow = "phone-settings-whatsapp-row"
@@ -272,6 +273,9 @@ fun PhoneSettingsPage(
                         PhoneTags.StatsRow,
                         onClick = links.openStats,
                     ),
+                    pageRow(RovstiIcons.Pencil, R.string.settings_notes, PhoneTags.NotesRow) {
+                        links.openRoute(PhoneRoute.Notes)
+                    },
                     pageRow(RovstiIcons.Message, R.string.settings_quick_replies, PhoneTags.RepliesRow) {
                         links.openRoute(PhoneRoute.QuickReplies)
                     },

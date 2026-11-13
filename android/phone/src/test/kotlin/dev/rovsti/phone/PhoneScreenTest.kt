@@ -145,6 +145,9 @@ class PhoneScreenTest : ShotTest() {
             compose.onNodeWithTag(PhoneTags.SetupRow, useUnmergedTree = true).performScrollTo()
             compose.mainClock.autoAdvance = false
             compose.onNodeWithTag(PhoneTags.SetupRow, useUnmergedTree = true).performClick()
+            compose.mainClock.autoAdvance = true
+            compose.onNodeWithTag(PhoneTags.WhatsAppRow, useUnmergedTree = true).performScrollTo()
+            compose.mainClock.autoAdvance = false
             compose.onNodeWithTag(PhoneTags.WhatsAppRow, useUnmergedTree = true).performClick()
             assertTrue(h.opened.containsAll(listOf("setup", "whatsapp")))
         }

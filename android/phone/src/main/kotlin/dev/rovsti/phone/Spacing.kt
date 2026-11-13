@@ -272,3 +272,14 @@ internal object BlockedMetrics {
     /** The cards bring their own gutters, so the page behind them has none. */
     val NoGutter = 0.dp
 }
+
+/** Dimensions of the Notes page (E5.11). */
+internal object NotesMetrics {
+    val Avatar = 40.dp
+
+    /** The square corner of a card row that is not the first or last of its card. */
+    val Flat = 0.dp
+
+    /** The gap under the search field, before the first card. */
+    val SearchBottom = 12.dp
+}

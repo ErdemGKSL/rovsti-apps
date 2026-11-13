@@ -179,6 +179,8 @@ internal fun HostedPhone(
     stats: @Composable () -> Unit = {},
     // The value on the Blocked numbers row of Settings and .
     blockedCount: Int? = 12,
+    // The Notes page (E5.11).
+    notes: @Composable () -> Unit = {},
 ) {
     val navigator =
         remember {
@@ -237,6 +239,7 @@ internal fun HostedPhone(
             )
         }
         entry<PhoneRoute.Stats> { stats() }
+        entry<PhoneRoute.Notes> { notes() }
         entry<PhoneRoute.WhatsAppSettings> { extra() }
         entry<PhoneRoute.Appearance> { extra() }
         entry<PhoneRoute.Haptics> { extra() }
@@ -249,7 +252,6 @@ internal fun HostedPhone(
         entry<PhoneRoute.SimChoices> { extra() }
         entry<PhoneRoute.Data> { extra() }
         entry<PhoneRoute.Backup> { extra() }
-        entry<PhoneRoute.Notes> { extra() }
         entry<PhoneRoute.Diagnostics> {
             DiagnosticsScreen(PhoneSample.diagnostics(), onCopyAll = {
                 harness.opened +=

@@ -1158,7 +1158,7 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
 | E5.7b | In-call: multi-call, Add call, conference | R2 | done (round-13 step 8) |
 | E5.9 | Settings | R2 | in-progress (round 15 step 1: E5.9a Settings root + Blocked numbers recovered from `stash@{2}`, F37 shared end padding `settingsPageEndPadding()`; E5.9b Quick replies, Speed dial, SIM choices, Data, Backup next, `stash@{1}`) |
 | E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
-| E5.11 | Notes page | R2 | todo (not in HEAD: `stash@{0}` r14-s5; recovery = round 15 step 3, with F38 raw number in unnamed rows) |
+| E5.11 | Notes page | R2 | done (round 15 step 3: `phone/.../notes/NotesViewModel` + `NotesScreen` recovered from `stash@{0}`; row in Settings (Calls group) opens `PhoneRoute.Notes`; a row opens Call details with `SearchFocusHandoff`; swipe delete + undo pill; unnamed rows are titled by `NumberDisplay` (F38) and named by the F29 resolver; core `call_notes.rows` takes the phone `locale`; tests `NotesViewModelTest`, `NotesScreenTest`, `E511ShotTest`) |
 | E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
 | E5.13 | Photo viewer and photo edit | R2 | done (round 14 step 7) |
 | E5.14 | Polish | R2 | done for what is in HEAD (round 14 step 8: U23 audit table in `checklist-e5.md`, success pills paired with Confirm, theme melt `ThemeMelt`, setup-complete moment, `KeypadRecompositionTest`, `RecentsScrollRecompositionTest`, `LargeTitleScaffold` plain height holder + `TabBarCellsTest` case, `e5.14-*` goldens). **E5 stays open:** E5.9 and E5.11 are not in HEAD (work in `stash@{2}`, `stash@{1}`, `stash@{0}`); a recovery step must come first. Round 15 steps 1-4 recover E5.9/E5.11, fix F31, F35 (2x-font row stacking, `e5.14-settings-fs2`), F36 (RTL bidi of numbers/durations, `e5.14-stats-rtl`) and close E5 |
@@ -1354,7 +1354,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 - Screenshots: `e5.10-stats-week`, `e5.10-stats-8-weeks`, `e5.10-stats-day-tapped`, `e5.10-records`, `e5.10-stats-empty`, `e5.10-stats-week-fs2` (done).
 
 ### E5.11 Notes page
-- Screenshots: `e5.11-notes`, `e5.11-notes-search`.
+- Screenshots: `e5.11-notes`, `e5.11-notes-search`, `e5.11-notes-empty`, `e5.11-notes-no-match`, `e5.11-notes-fs2` (done).
 
 ### E5.12 Reminders and setup flows
 - Screenshots: `e5.12-remind-later-menu`, `e5.12-xiaomi-setup-rows`, `e5.12-full-screen-intent-revoked-row`,

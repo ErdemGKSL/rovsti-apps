@@ -88,6 +88,7 @@ fun pageTag(
  *    leaves no room for the bar, so a page never jumps when the bar slides in or out while it leaves.
  *
  * Reselecting the current tab pops to the root, or emits [ScrollToTop] (collect `navigator.scrollToTop` in the root page).
+ * A tap on the folded bar only unfolds it; it is not a reselect.
  *
  * @param isMorphRoute a page that grows out of a tile of the page below: it slides in with the artwork easing and the
  *   page below holds still and dims.
@@ -158,8 +159,9 @@ fun <R : Any> RovstiNavHost(
                             onReselect = { navigator.select(Tab(tabs[it].id)) },
                             modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
                             minimizer = minimizer,
+                            // A tap on the folded circle only unfolds the bar (the minimizer): it is not a reselect, so
+                            // it never pops the stack or scrolls the page to the top.
                             folded = barMode == TabBarMode.Folded,
-                            onFoldedClick = { navigator.select(navigator.currentTab) },
                             chrome = hostMetrics,
                             accessory = accessory,
                         )

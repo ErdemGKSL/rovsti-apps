@@ -111,7 +111,8 @@ private val LabelStyle = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
  *   plus [ChromeMetrics.BarMargin]. The bar's measured height (tab row plus [accessory], if any) goes to [chrome]; it
  *   writes 0 while hidden, so `LocalContentInsets` always leaves room for both.
  * - [minimizer]: scrolling down folds the bar into the circle of the selected tab (Convx's inline state); scrolling up
- *   unfolds it. [folded] holds it folded; tapping the circle calls [onFoldedClick] and expands the minimizer.
+ *   unfolds it. [folded] holds it folded; tapping the circle calls [onFoldedClick] and expands the minimizer. The tap
+ *   is not a reselect: [onReselect] does not run.
  * - [accessory]: a pill above the row (centred between the circle and the screen edge while folded). It receives the
  *   modifier that carries the bar's fill, shadow and glass, and whether the bar is currently folded.
  * - [imeVisible] hides the bar while the keyboard is up.

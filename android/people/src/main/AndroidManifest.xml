@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A library manifest: no component. The provider is Contacts' (X.1b); the apps that read it hold the signature
+     permission and may see its package (Android 11 package visibility). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="dev.rovsti.permission.READ_PEOPLE" />
+    <queries>
+        <provider android:authorities="dev.rovsti.contacts.people" />
+    </queries>
+</manifest>

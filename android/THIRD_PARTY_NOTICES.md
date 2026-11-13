@@ -91,6 +91,11 @@ SOFTWARE.
 - Source: https://github.com/chrisbanes/haze. Licence: Apache-2.0. Copyright Chris Banes.
 - Status: used. `:design` depends on `dev.chrisbanes.haze:haze` and `haze-materials` 1.7.3 for `glass/TopFadeBlur.kt` (ported from Convx, which pins 1.3.1).
 
+## AndroidX WorkManager (work-runtime-ktx 2.11.0)
+
+- Source: https://developer.android.com/jetpack/androidx/releases/work. Licence: Apache-2.0. Copyright The Android Open Source Project.
+- Used for: the Contacts people-sync worker (X.1b). Pinned in `gradle/libs.versions.toml` (`work`); no module depends on it before X.1b.
+
 ## Apache License 2.0
 
 The Apache-licensed files above keep their own copyright and licence notices in their headers.

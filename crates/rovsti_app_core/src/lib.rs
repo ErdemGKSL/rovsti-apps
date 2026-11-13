@@ -5,6 +5,7 @@
 pub mod contacts;
 pub mod headless;
 pub mod messages;
+pub mod people;
 pub mod permission;
 pub mod phone;
 pub mod stops;

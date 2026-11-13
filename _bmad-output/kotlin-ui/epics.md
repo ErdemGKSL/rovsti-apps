@@ -1395,10 +1395,15 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | todo (planned) |
+| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | in-progress (X.1a done: Rust `people.*` cache + `:people` client module; X.1b-d open) |
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | todo |
 
 ### X.1 WhatsApp photo fallback avatar
+- **X.1a (round 15, step 5) done:** `rovsti_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
+  `people.*`, `OPS.md`) and the `:people` module (`PeopleContract`, `PersonAvatar`, `AvatarResolver`, `PeopleIndex` with a
+  `StateFlow` version, `PeopleSource` = `ProviderSource` / `GatewaySource` chosen by `PeopleSources.choose`). WorkManager
+  2.11.0 is pinned in `libs.versions.toml` for X.1b. Evidence: `crates/rovsti_app_core/src/people.rs` tests,
+  `android/people/src/test/**`.
 - When a contact has **no photo of its own**, Contacts and Phone show the WhatsApp profile photo of the contact's
   WhatsApp number instead of the initials (lists, card, favorites, recents, call screens incl. the photo background).
 - It is a **fallback only**: never written into the Android contact (the existing editor action "Use WhatsApp Photo"

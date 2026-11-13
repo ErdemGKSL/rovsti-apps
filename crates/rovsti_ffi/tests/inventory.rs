@@ -10,7 +10,7 @@ use std::path::Path;
 /// Domains whose rows must all be classified. Grows with each step of E2 R2.
 const DONE_DOMAINS: &[&str] = &[
     "bridge", "shared", "input", "phone", "search", "t9", "contacts", "qr", "messages", "stops",
-    "tiles", "wa", "platform",
+    "tiles", "wa", "platform", "people",
 ];
 
 /// Registered only in unit tests or with the `test-ops` feature; never in the fixture set.

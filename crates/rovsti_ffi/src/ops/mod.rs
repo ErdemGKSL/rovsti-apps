@@ -4,6 +4,7 @@ mod chat;
 mod contacts;
 mod core;
 mod messages;
+mod people;
 mod phone;
 mod qr;
 pub mod registry;

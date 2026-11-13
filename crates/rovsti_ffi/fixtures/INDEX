@@ -460,6 +460,16 @@ notify.build.passcode
 otp.find
 otp.find.after_emoji
 otp.find.none
+people.lookup
+people.lookup.by_lid
+people.lookup.unknown
+people.plan
+people.plan.nothing_to_do
+people.snapshot
+people.snapshot.missing
+people.upsert
+people.upsert.lid_join
+people.upsert.picture_removed
 phone.backup_export
 phone.backup_import
 phone.backup_import.empty

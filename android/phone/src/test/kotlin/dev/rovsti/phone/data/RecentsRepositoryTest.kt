@@ -68,13 +68,14 @@ class RecentsRepositoryTest {
         extras: MutableStateFlow<List<ExtraCall>> = MutableStateFlow(emptyList()),
         window: Long = 12,
         lastSeen: Long = 0,
+        clock: () -> Long = { T0 + 60_000 },
     ) = RecentsRepository(
         callLog = callLog,
         ops = NativePhoneOps(counting),
         scope = scope,
         extras = extras,
         locale = { locale },
-        clock = { T0 + 60_000 },
+        clock = clock,
         lastSeenMs = { lastSeen },
         windowMs = window,
     ).also { it.start() }
@@ -141,6 +142,25 @@ class RecentsRepositoryTest {
             eventually("rebuilt") { recents.model.value.rows.size == 8 }
             delay(600)
             assertEquals("five changes, one build", builds + 1, counting.count("recents.build"))
+        }
+
+    /** A phone left on Recents overnight said "Today" for yesterday's calls: coming back on a new day rebuilds. */
+    @Test fun comingBackOnAnotherDayRebuildsTheLabelsAndTheSameDayDoesNot() =
+        runBlocking {
+            var now = T0 + 60_000
+            val recents = repo(FakeCallLogRepository(log), window = 12, clock = { now })
+            eventually("first model") { recents.model.value.ready }
+            val builds = counting.count("recents.build")
+            now += 60_000
+            recents.refreshIfStale()
+            delay(200)
+            assertEquals("same day: nothing to rebuild", builds, counting.count("recents.build"))
+            now += 86_400_000
+            recents.refreshIfStale()
+            eventually("rebuilt for the new day") { counting.count("recents.build") == builds + 1 }
+            recents.refreshIfStale()
+            delay(200)
+            assertEquals("once per day", builds + 1, counting.count("recents.build"))
         }
 
     @Test fun whatsAppCallsOfThePhoneNumbersBecomeExtraCalls() {

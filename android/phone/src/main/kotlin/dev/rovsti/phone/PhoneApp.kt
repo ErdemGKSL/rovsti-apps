@@ -386,6 +386,8 @@ fun PhoneApp(
     overlays: OverlayController = remember { OverlayController() },
 ) {
     val recentsModel = rememberRecentsViewModel(container)
+    // Back in front on another day (or with another time format): the day labels and times are rebuilt.
+    OnResume { container.recents.refreshIfStale() }
     val missed by recentsModel.missedCount.collectAsState()
     val selection by recentsModel.selection.collectAsState()
     val recentsStrings = RecentsStrings.current()

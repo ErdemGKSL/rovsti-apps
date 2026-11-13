@@ -15,6 +15,7 @@ import dev.rovsti.core.model.phone.RecentsRow
 import dev.rovsti.core.model.phone.RefreshDelta
 import dev.rovsti.core.model.phone.RefreshDeltaRequest
 import dev.rovsti.core.model.phone.RowView
+import dev.rovsti.core.model.phone.TimeFormat
 import dev.rovsti.core.model.wa.CallSummary
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.platform.calllog.CallLogRepository
@@ -125,6 +126,18 @@ class RecentsRepository(
     /** Rebuilds at once (the user came back to the tab, the clock or the locale changed). */
     fun refreshNow() = coalescer.now()
 
+    /**
+     * The app came back to the front: rebuilds when the local day or the time format changed since the last build, so
+     * the day labels ("Today", "Yesterday") and the times are not those of the day the list was built. The log observer
+     * alone never fires for that: a phone left on Recents overnight still said "Today" for yesterday's calls.
+     */
+    fun refreshIfStale() {
+        if (!state.value.ready) return
+        if (stampOf(clock(), locale()) != builtStamp) coalescer.now()
+    }
+
+    @Volatile private var builtStamp: Pair<Long, TimeFormat>? = null
+
     private suspend fun build() {
         val log = entries
         val extra = wa
@@ -135,7 +148,10 @@ class RecentsRepository(
             } else {
                 ops.mergeExtras(MergeExtrasRequest(grouped.rows, extra)).orFail()?.rows ?: return
             }
-        val views = ops.recentsBuild(BuildRowsRequest(merged, clock(), locale())).orFail()?.views ?: return
+        val nowMs = clock()
+        val localeNow = locale()
+        val views = ops.recentsBuild(BuildRowsRequest(merged, nowMs, localeNow)).orFail()?.views ?: return
+        builtStamp = stampOf(nowMs, localeNow)
         val old = state.value.rows
         val delta = ok(ops.refreshDelta(RefreshDeltaRequest(old, merged))) ?: RefreshDelta(0, 0)
         val missed = ok(ops.missedExtras(MissedExtrasRequest(log, extra, lastSeenMs())))
@@ -166,6 +182,14 @@ class RecentsRepository(
     private fun <T> ok(out: Outcome<T>): T? = (out as? Outcome.Ok)?.value
 
     companion object {
+        private const val DAY_MS = 86_400_000L
+
+        /** The local day of [nowMs] and the time format: what the built labels depend on besides the log. */
+        internal fun stampOf(
+            nowMs: Long,
+            locale: LocaleTime,
+        ): Pair<Long, TimeFormat> = Math.floorDiv(nowMs + locale.tzOffsetS * MS_PER_S, DAY_MS) to locale.format
+
         /**
          * The WhatsApp calls the gateway lists, as the extra calls Recents merges in. A peer without a phone number
          * (a `@lid` or a group) cannot be called back from Recents and is left out, as in the Rust history

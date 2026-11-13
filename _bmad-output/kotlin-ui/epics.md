@@ -1425,14 +1425,14 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   the period also trigger a sync. The last sync time and result are visible in Contacts settings with a "Sync now" row.
 
 ### X.1b Who is this? one identity resolver (owner, 2026-11-13; do together with X.1, before X.2)
-- **(F28) WhatsApp calls show a bare number.** Incoming/in-call screens, the ringing notification, the ongoing and
+- **(F28, done in 0310ec0 + 47cb5b4) WhatsApp calls show a bare number.** Incoming/in-call screens, the ringing notification, the ongoing and
   missed WA call notifications, recents rows and call details show the raw number (or `…@lid`) for a WhatsApp call even
   when the caller is a saved contact. Resolve the caller like a cellular call: LID -> phone JID (the gateway's LID map;
   send the phone JID in events and pushes when known) -> normalized E.164 -> the device contact (trunk zero, `+`, spaces,
   national vs international all match, same matcher as cellular caller-ID) -> else the WhatsApp push/verified name ->
   else the formatted number. Same result in a cold process woken by the FCM push (resolve on the phone, not only on the
   gateway). Tests with a LID-only peer, a national-format contact number and a non-contact with a push name.
-- **(F29) Recents show stale names.** A call shows the name the call log cached at call time, so a renamed contact still
+- **(F29, done in e3ea831, 8b08b5f, 47cb5b4) Recents show stale names.** A call shows the name the call log cached at call time, so a renamed contact still
   shows the old name. Names (and photos) are resolved live from the current contacts by number at display time and
   update when contacts change (ContentObserver), in recents, favorites, speed dial, statistics, search and call details.
   The call log's cached name is used only when the number is no longer in contacts. If the cached name differs from

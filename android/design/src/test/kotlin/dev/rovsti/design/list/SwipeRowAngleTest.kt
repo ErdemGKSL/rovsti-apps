@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.theme.RovstiTheme
 import kotlinx.collections.immutable.persistentListOf
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -33,6 +34,7 @@ class SwipeRowAngleTest {
     val compose = createComposeRule()
 
     private val group = SwipeRowGroup()
+    private var deleted = 0
 
     private fun show() {
         compose.setContent {
@@ -41,7 +43,8 @@ class SwipeRowAngleTest {
                     LazyColumn(Modifier.testTag("list")) {
                         items(40) { i ->
                             SwipeRow(
-                                trailing = persistentListOf(SwipeAction("Delete", Color.Red) {}),
+                                leading = persistentListOf(SwipeAction("Message", Color.Blue) {}),
+                                trailing = persistentListOf(SwipeAction("Delete", Color.Red) { deleted++ }),
                                 rowKey = i,
                                 modifier = Modifier.testTag("row-$i"),
                             ) {
@@ -54,7 +57,7 @@ class SwipeRowAngleTest {
         }
     }
 
-    /** The row opens (joins the group as open) as soon as a swipe starts. */
+    /** The row is open (or being dragged) in its group. */
     private fun deleteShown() = group.openKey == 3
 
     @Test
@@ -80,5 +83,25 @@ class SwipeRowAngleTest {
         }
         compose.waitForIdle()
         assertTrue("a flat swipe did not open Delete", deleteShown())
+    }
+
+    @Test
+    fun aLongLeftSwipeOnARowOpenOnTheRightOnlyClosesIt() {
+        show()
+        compose.onNodeWithTag("row-3").performTouchInput {
+            down(center)
+            repeat(6) { moveBy(Offset(width * 0.06f, 0f), 60) }
+            up()
+        }
+        compose.waitForIdle()
+        assertTrue("the right swipe did not open Message", deleteShown())
+        compose.onNodeWithTag("row-3").performTouchInput {
+            down(center)
+            repeat(10) { moveBy(Offset(-width * 0.08f, 0f), 30) }
+            up()
+        }
+        compose.waitForIdle()
+        assertFalse("the row did not come back to rest", deleteShown())
+        assertEquals("a left swipe from an open row deleted it", 0, deleted)
     }
 }

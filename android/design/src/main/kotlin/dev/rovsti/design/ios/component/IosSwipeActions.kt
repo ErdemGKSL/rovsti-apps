@@ -3,7 +3,7 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/component/IosSwipeActions.kt
- * Changes for Rovsti: package and imports; the rest of the row is Convx's (velocity now tracks summed drag, action height, a drag must be within 25° of horizontal). Added: custom accessibility actions (one per
+ * Changes for Rovsti: package and imports; the rest of the row is Convx's (velocity now tracks summed drag, action height, a drag must be within 25° of horizontal, an open row closes before the other side opens). Added: custom accessibility actions (one per
  * swipe action, so TalkBack users reach them without a swipe), one haptic when a full swipe fires, test tags
  * `swipe-row`, `swipe-action-<n>`, and `close()` on a semantics action. E1.19: an optional [SwipeRowGroup] keeps one row
  * open per list and turns a tap on a resting-open list into "close".
@@ -55,6 +55,7 @@ import dev.rovsti.design.ios.foundation.projectedEndpoint
 import dev.rovsti.design.list.SwipeRowGroup
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.sign
 import kotlin.math.tan
 
 /** One button revealed by swiping an [IosSwipeableRow]. */
@@ -169,11 +170,14 @@ fun IosSwipeableRow(
                     // Rovsti fix: the layer translation moves this node's own coordinates with the finger, so
                     // change.position stays put and the tracker saw no velocity; track the summed drag instead.
                     var travelled = 0f
+                    // Rovsti: the side the row was open on when this drag began (0 when it rested closed).
+                    var openSide = 0f
                     detectSidewaysDrag(
                         onDragStart = {
                             if (group != null && rowKey != null) group.opened(rowKey)
                             tracker.resetTracking()
                             travelled = 0f
+                            openSide = sign(offset.value)
                         },
                         onDragEnd = {
                             val x = offset.value
@@ -182,7 +186,7 @@ fun IosSwipeableRow(
                             // Flick throws: decide from projected endpoint, hand off velocity.
                             val projected = projectedEndpoint(x, v)
                             when {
-                                onFullSwipe != null && -projected > full -> {
+                                onFullSwipe != null && openSide <= 0f && -projected > full -> {
                                     haptics.confirm()
                                     onFullSwipe()
                                     close(v)
@@ -191,9 +195,9 @@ fun IosSwipeableRow(
                                 else -> {
                                     val snaps =
                                         buildList {
-                                            if (trailingActions.isNotEmpty()) add(-trailingWidthPx)
+                                            if (trailingActions.isNotEmpty() && openSide <= 0f) add(-trailingWidthPx)
                                             add(0f)
-                                            if (leadingActions.isNotEmpty()) add(leadingWidthPx)
+                                            if (leadingActions.isNotEmpty() && openSide >= 0f) add(leadingWidthPx)
                                         }
                                     settle(nearestProjectedSnap(x, v, snaps) ?: 0f, v)
                                 }
@@ -204,9 +208,8 @@ fun IosSwipeableRow(
                         change.consume()
                         travelled += drag
                         tracker.addPosition(change.uptimeMillis, Offset(travelled, 0f))
-                        val next =
-                            (offset.value + drag)
-                                .coerceIn(-rowWidth.floatValue, leadingWidthPx)
+                        val (low, high) = swipeBounds(openSide, rowWidth.floatValue, leadingWidthPx)
+                        val next = (offset.value + drag).coerceIn(low, high)
                         scope.launch { offset.snapTo(next) }
                     }
                 },
@@ -344,3 +347,19 @@ private suspend fun PointerInputScope.detectSidewaysDrag(
         if (finished) onDragEnd() else onDragCancel()
     }
 }
+
+/**
+ * Rovsti: how far one drag may move a row that was open on [openSide] (the sign of its offset when the drag began).
+ * A row open on one side only closes while it is dragged towards the other: it stops at rest, and a second drag opens
+ * the other side. A closed row reaches either side (up to [rowWidth] to the start for the full swipe).
+ */
+internal fun swipeBounds(
+    openSide: Float,
+    rowWidth: Float,
+    leadingWidth: Float,
+): Pair<Float, Float> =
+    when {
+        openSide > 0f -> 0f to leadingWidth
+        openSide < 0f -> -rowWidth to 0f
+        else -> -rowWidth to leadingWidth
+    }

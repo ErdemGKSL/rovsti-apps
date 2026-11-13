@@ -1,5 +1,6 @@
 package dev.rovsti.contacts
 
+import dev.rovsti.platform.notify.PlatformChannels
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.w3c.dom.Element
@@ -121,5 +122,34 @@ class TurkishCoverageTest {
             }
         }
         assertTrue("Plurals without an \"other\" item:\n" + bad.joinToString("\n"), bad.isEmpty())
+    }
+
+    /**
+     * F32: every notification channel's name and description is a `:platform` string with a Turkish twin that is not
+     * the English text, so Settings > Notifications reads Turkish on a Turkish phone.
+     */
+    @Test fun everyPlatformChannelIsWordedInTurkish() {
+        val names =
+            dev.rovsti.platform.R.string::class.java.fields
+                .associate { it.getInt(null) to it.name }
+        val res = moduleRes("platform")
+        val en = read(File(res, "values/strings.xml"))
+        val tr = read(File(res, "values-tr/strings.xml"))
+        val bad = mutableListOf<String>()
+        for (spec in PlatformChannels.all) {
+            for (id in listOfNotNull(spec.name, spec.description)) {
+                val name = names[id]
+                val english = name?.let { en[it] }?.texts?.get("")
+                val turkish = name?.let { tr[it] }?.texts?.get("")
+                when {
+                    name == null -> bad += "${spec.id}: $id is no :platform string"
+                    english.isNullOrBlank() -> bad += "${spec.id}: $name has no English text"
+                    turkish.isNullOrBlank() -> bad += "${spec.id}: $name has no Turkish text"
+                    turkish == english && english != "WhatsApp" -> bad += "${spec.id}: $name is not translated"
+                }
+            }
+        }
+        assertTrue("Channels not worded in Turkish:\n" + bad.joinToString("\n"), bad.isEmpty())
+        assertTrue("every channel is checked", PlatformChannels.all.size >= 12)
     }
 }

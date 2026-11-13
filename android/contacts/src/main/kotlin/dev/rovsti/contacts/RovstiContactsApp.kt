@@ -2,6 +2,7 @@ package dev.rovsti.contacts
 
 import android.app.Application
 import dev.rovsti.platform.PlatformComponents
+import dev.rovsti.platform.notify.PlatformChannels
 import dev.rovsti.shell.HasContainer
 
 /**
@@ -18,5 +19,7 @@ class RovstiContactsApp :
         super.onCreate()
         // Birthday notifications and pinned shortcuts launch this activity (PlatformComponents, ARCH 7.4).
         PlatformComponents.install(PlatformComponents(mainActivity = MainActivity::class.java))
+        // Channel names and descriptions in the phone's language, again after a language change (F32).
+        PlatformChannels.followLocale(this)
     }
 }

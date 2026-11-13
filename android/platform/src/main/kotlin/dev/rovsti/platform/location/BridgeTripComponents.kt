@@ -28,6 +28,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import dev.rovsti.platform.Headless
 import dev.rovsti.platform.PlatformEvents
+import dev.rovsti.platform.R
 import dev.rovsti.platform.location.StartResult
 import dev.rovsti.platform.location.TRIP_MAX_INTERVAL_MS
 import dev.rovsti.platform.location.TRIP_MIN_INTERVAL_MS
@@ -102,7 +103,7 @@ class TripService : Service() {
         if (incoming == null) {
             // startForegroundService promises a startForeground call; keep it, then leave.
             try {
-                if (!foreground) promote(TripSpec("", "Trip", "", TRIP_MAX_INTERVAL_MS, false))
+                if (!foreground) promote(TripSpec("", getString(R.string.trip_title), "", TRIP_MAX_INTERVAL_MS, false))
             } catch (_: RuntimeException) {
             }
             shutdown(emitStopped = false)
@@ -181,8 +182,8 @@ class TripService : Service() {
             Notification
                 .Builder(this, PlatformChannels.TRIP_PROBLEM)
                 .let { NotificationIcon.apply(it, this, NotificationKind.TRIP) }
-                .setContentTitle("Stops paused your trip")
-                .setContentText("Tap to resume tracking.")
+                .setContentTitle(getString(R.string.trip_paused_title))
+                .setContentText(getString(R.string.trip_paused_text))
                 .setCategory(Notification.CATEGORY_ERROR)
                 .setContentIntent(open)
                 .setAutoCancel(true)
@@ -393,7 +394,7 @@ class TripService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .addAction(Notification.Action.Builder(null, getString(R.string.trip_stop), stop).build())
             .build()
     }
 
@@ -535,7 +536,7 @@ class AlarmActivity : Activity() {
             finish()
             return
         }
-        val (title, text) = TripAlarm.message()
+        val (title, text) = TripAlarm.message(this)
         setContentView(content(title, text))
         registerReceiver(closer, IntentFilter(TripAlarm.ACTION_CLOSE), Context.RECEIVER_NOT_EXPORTED)
     }
@@ -574,8 +575,8 @@ class AlarmActivity : Activity() {
             setBackgroundColor(Color.BLACK)
             addView(label(title, 34f, Color.WHITE))
             addView(label(text, 18f, Color.LTGRAY))
-            addView(button("Dismiss") { dismiss() })
-            addView(button("Snooze") { snooze() })
+            addView(button(getString(R.string.alarm_dismiss)) { dismiss() })
+            addView(button(getString(R.string.alarm_snooze)) { snooze() })
         }
     }
 

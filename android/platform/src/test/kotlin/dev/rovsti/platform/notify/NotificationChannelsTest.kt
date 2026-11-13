@@ -77,6 +77,51 @@ class NotificationChannelsTest {
         )
     }
 
+    /** F32: a channel made before the update (English words) gets today's words on the next ensure, and only them. */
+    @Test
+    @Config(qualifiers = "tr")
+    fun anExistingChannelGetsTheWordsOfTheLanguageOnEnsure() {
+        manager.createNotificationChannel(
+            android.app.NotificationChannel(PlatformChannels.MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH),
+        )
+        manager.getNotificationChannel(PlatformChannels.MESSAGES).importance = NotificationManager.IMPORTANCE_LOW
+        PlatformChannels.ensure(app, PlatformChannels.MESSAGES)
+        val channel = manager.getNotificationChannel(PlatformChannels.MESSAGES)
+        assertEquals("Mesajlar", channel.name.toString())
+        assertEquals("Yeni mesajlar", channel.description)
+        assertEquals("the user's importance stays", NotificationManager.IMPORTANCE_LOW, channel.importance)
+    }
+
+    @Test
+    @Config(qualifiers = "tr")
+    fun aTurkishPhoneCreatesTurkishChannels() {
+        for (row in table) PlatformChannels.ensure(app, row.id)
+        val names = manager.notificationChannels.associate { it.id to it.name.toString() }
+        assertEquals("Gelen aramalar", names[PlatformChannels.INCOMING_CALL])
+        assertEquals("Varış alarmı", names[PlatformChannels.TRIP_ALARM])
+        for (row in table) {
+            assertTrue(
+                "${row.id} is in Turkish",
+                names.getValue(row.id) != row.name || row.name == "WhatsApp",
+            )
+        }
+    }
+
+    @Test fun aLanguageChangeRelabelsEveryExistingChannel() {
+        for (row in table) PlatformChannels.ensure(app, row.id)
+        assertEquals("Missed calls", manager.getNotificationChannel(PlatformChannels.MISSED_CALLS).name.toString())
+        RuntimeEnvironment.setQualifiers("tr")
+        PlatformChannels.relabel(app)
+        val missed = manager.getNotificationChannel(PlatformChannels.MISSED_CALLS)
+        assertEquals("Cevapsız aramalar", missed.name.toString())
+        assertEquals("Yanıtlanmayan aramalar", missed.description)
+        assertEquals(
+            "relabel creates nothing",
+            table.map { it.id }.toSet(),
+            manager.notificationChannels.map { it.id }.toSet() - "miscellaneous",
+        )
+    }
+
     @Test fun theConstantsAreTheGpuiIds() {
         assertEquals(
             listOf(

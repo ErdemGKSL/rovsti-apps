@@ -15,4 +15,34 @@
     <string name="notif_missed_from">%1$s and %2$d more</string>
     <string name="notif_missed_channel">Missed calls</string>
     <string name="notif_missed_channel_desc">Calls that were not answered</string>
+
+    <!-- Notification channels (PlatformChannels, F32): names and descriptions in Settings. -->
+    <string name="channel_messages">Messages</string>
+    <string name="channel_messages_desc">New messages</string>
+    <string name="channel_birthdays">Birthdays</string>
+    <string name="channel_reminders">Call reminders</string>
+    <string name="channel_message_reminders">Message reminders</string>
+    <string name="channel_wa_calls">WhatsApp calls</string>
+    <string name="channel_wa_calls_desc">Incoming WhatsApp calls</string>
+    <string name="channel_wa_missed">Missed WhatsApp call</string>
+    <string name="channel_wa_missed_desc">WhatsApp calls that were not answered</string>
+    <string name="channel_trip_problem">Trip paused</string>
+    <string name="channel_trip">Trip in progress</string>
+    <string name="channel_trip_desc">Shown while Stops follows your trip</string>
+    <string name="channel_trip_alarm">Destination alarm</string>
+    <string name="channel_trip_alarm_desc">Rings when you are about to arrive</string>
+    <string name="channel_ongoing">Ongoing call</string>
+    <string name="channel_ongoing_desc">Shows the call in progress with an End button</string>
+    <string name="channel_incoming">Incoming calls</string>
+    <string name="channel_incoming_desc">Shows a ringing call with Answer and Decline</string>
+
+    <!-- Stops: the trip and destination-alarm notifications (F32). -->
+    <string name="trip_title">Trip</string>
+    <string name="trip_paused_title">Stops paused your trip</string>
+    <string name="trip_paused_text">Tap to resume tracking.</string>
+    <string name="trip_stop">Stop</string>
+    <string name="alarm_title">Wake up</string>
+    <string name="alarm_text">You crossed the line</string>
+    <string name="alarm_dismiss">Dismiss</string>
+    <string name="alarm_snooze">Snooze</string>
 </resources>

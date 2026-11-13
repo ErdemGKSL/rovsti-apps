@@ -8,6 +8,7 @@ import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.phone.wa.WaCallActionReceiver
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.contacts.ContactPhotos
+import dev.rovsti.platform.notify.PlatformChannels
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.shell.HasContainer
 
@@ -35,6 +36,8 @@ class RovstiPhoneApp :
                 ),
             )
         }
+        // Channel names and descriptions in the phone's language, again after a language change (F32).
+        step("channels") { PlatformChannels.followLocale(this) }
         step("calls") {
             CallRegistry.init(this)
             CallRegistry.timing = IncomingPerf

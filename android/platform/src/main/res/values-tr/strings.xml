@@ -14,4 +14,34 @@
     <string name="notif_missed_from">%1$s ve %2$d kişi daha</string>
     <string name="notif_missed_channel">Cevapsız aramalar</string>
     <string name="notif_missed_channel_desc">Yanıtlanmayan aramalar</string>
+
+    <!-- Bildirim kanalları (PlatformChannels, F32). -->
+    <string name="channel_messages">Mesajlar</string>
+    <string name="channel_messages_desc">Yeni mesajlar</string>
+    <string name="channel_birthdays">Doğum günleri</string>
+    <string name="channel_reminders">Arama hatırlatıcıları</string>
+    <string name="channel_message_reminders">Mesaj hatırlatıcıları</string>
+    <string name="channel_wa_calls">WhatsApp aramaları</string>
+    <string name="channel_wa_calls_desc">Gelen WhatsApp aramaları</string>
+    <string name="channel_wa_missed">Cevapsız WhatsApp araması</string>
+    <string name="channel_wa_missed_desc">Yanıtlanmayan WhatsApp aramaları</string>
+    <string name="channel_trip_problem">Yolculuk duraklatıldı</string>
+    <string name="channel_trip">Süren yolculuk</string>
+    <string name="channel_trip_desc">Stops yolculuğunuzu izlerken görünür</string>
+    <string name="channel_trip_alarm">Varış alarmı</string>
+    <string name="channel_trip_alarm_desc">Varmak üzereyken çalar</string>
+    <string name="channel_ongoing">Süren arama</string>
+    <string name="channel_ongoing_desc">Süren aramayı Bitir düğmesiyle gösterir</string>
+    <string name="channel_incoming">Gelen aramalar</string>
+    <string name="channel_incoming_desc">Çalan aramayı Yanıtla ve Reddet düğmeleriyle gösterir</string>
+
+    <!-- Stops: yolculuk ve varış alarmı bildirimleri (F32). -->
+    <string name="trip_title">Yolculuk</string>
+    <string name="trip_paused_title">Stops yolculuğunuzu duraklattı</string>
+    <string name="trip_paused_text">İzlemeyi sürdürmek için dokunun.</string>
+    <string name="trip_stop">Durdur</string>
+    <string name="alarm_title">Uyanın</string>
+    <string name="alarm_text">Alarm çizgisini geçtiniz</string>
+    <string name="alarm_dismiss">Kapat</string>
+    <string name="alarm_snooze">Ertele</string>
 </resources>

@@ -18,6 +18,7 @@ import dev.rovsti.bridge.TripAlarmReceiver
 import dev.rovsti.bridge.TripService
 import dev.rovsti.platform.Headless
 import dev.rovsti.platform.PlatformEvents
+import dev.rovsti.platform.R
 import dev.rovsti.platform.notify.NotificationIcon
 import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
@@ -300,8 +301,9 @@ object TripAlarm {
         app.sendBroadcast(Intent(ACTION_CLOSE).setPackage(app.packageName))
     }
 
-    /** The title and text the activity shows. */
-    fun message(): Pair<String, String> = "Wake up" to "You crossed the line"
+    /** The title and text the activity and the notification show, in the phone's language. */
+    fun message(context: Context): Pair<String, String> =
+        context.getString(R.string.alarm_title) to context.getString(R.string.alarm_text)
 
     /** The Stops preferences file in the data directory of the last trip; null before the first trip. */
     private fun readPrefs(context: Context): String? =
@@ -378,7 +380,7 @@ object TripAlarm {
         val fullScreenOk =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || manager.canUseFullScreenIntent()
         if (!fullScreenOk) android.util.Log.w("Rovsti", "full-screen intent not allowed; heads-up only")
-        val (title, text) = message()
+        val (title, text) = message(context)
         val screen =
             PendingIntent.getActivity(
                 context,
@@ -387,8 +389,20 @@ object TripAlarm {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        val snooze = Notification.Action.Builder(null, "Snooze", receiverIntent(context, ACTION_SNOOZE)).build()
-        val dismiss = Notification.Action.Builder(null, "Dismiss", receiverIntent(context, ACTION_DISMISS)).build()
+        val snooze =
+            Notification.Action
+                .Builder(
+                    null,
+                    context.getString(R.string.alarm_snooze),
+                    receiverIntent(context, ACTION_SNOOZE),
+                ).build()
+        val dismiss =
+            Notification.Action
+                .Builder(
+                    null,
+                    context.getString(R.string.alarm_dismiss),
+                    receiverIntent(context, ACTION_DISMISS),
+                ).build()
         val notification =
             Notification
                 .Builder(context, CHANNEL)

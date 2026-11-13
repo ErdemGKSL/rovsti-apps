@@ -19,7 +19,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -105,9 +104,11 @@ fun LargeTitleScaffold(
     val statusTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
     val settings = LocalGlassSettings.current
 
-    var titleHeightPx by remember { mutableFloatStateOf(0f) }
+    // A plain holder, not state: the height is written by onSizeChanged during layout and read in draw-phase lambdas
+    // (F21: a snapshot write there re-records the backdrop mid-frame). The scroll value still drives the redraw.
+    val titleHeightPx = remember { floatArrayOf(0f) }
     var toolbarWidthPx by remember { mutableIntStateOf(0) }
-    val collapse = state.rememberTitleCollapse { titleHeightPx }
+    val collapse = state.rememberTitleCollapse { titleHeightPx[0] }
     if (onCollapseChanged != null) {
         LaunchedEffect(collapse, onCollapseChanged) { snapshotFlow { collapse.value }.collect(onCollapseChanged) }
     }
@@ -162,7 +163,7 @@ fun LargeTitleScaffold(
                     collapse = collapse,
                     hasNavigation = navigation != null,
                     endReserve = if (navigation == null) toolbarWidth + Spacing.m else 0.dp,
-                    onHeight = { titleHeightPx = it },
+                    onHeight = { titleHeightPx[0] = it },
                 )
             },
             content = content,

@@ -703,14 +703,17 @@ fun RecentsEffects(
                 }
 
                 is RecentsEffect.Say -> {
+                    if (effect.notice.isSuccess()) haptics.confirm()
                     overlays.showToast(strings.say(effect.notice))
                 }
 
                 is RecentsEffect.Core -> {
+                    haptics.confirm()
                     overlays.showToast(strings.refused(effect.refusal))
                 }
 
                 is RecentsEffect.Reminded -> {
+                    haptics.confirm()
                     overlays.showToast(effect.text)
                 }
 
@@ -781,6 +784,7 @@ fun RecentsEffects(
                 }
 
                 is RecentsEffect.Undoable -> {
+                    haptics.confirm()
                     overlays.showUndo(
                         message = effect.text ?: strings.undoable(effect.kind, effect.count),
                         onUndo = { model.onAction(RecentsAction.Undo(effect.undo)) },

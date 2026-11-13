@@ -91,3 +91,104 @@ contact sheet `docs/kotlin-ui/screenshots/phone.png` was regenerated and opened.
 
 ## H. Tests
 - `MultiCallViewModelTest` (fake and REAL core), `AddCallSheetTest`, `InCallScreenTest` multi-call cases, `E57bShotTest`.
+
+# E5.14 Polish record (Phone, round-14 step 8)
+
+## U23 audit: every Phone utility, its pill and its haptic
+
+Rule (added this step, `PillFeedbackTest`): a pill that reports something DONE (copied, saved, cleared, reminded, added,
+removed, an Undo pill) is paired with `HapticEvent.Confirm` in the screen's effect collector; a failure notice is paired with
+`HapticEvent.Reject` by the view model (`*Effect.Reject` before the `Say`); long presses that open a menu play `LongPress`
+(design system); drags that cross a line play `Tick` / `ThresholdTick`. Fixed in this step: success pills had no haptic in
+Recents, Keypad, the Person and Call details sheets, Favorites and the three Undo pills (`RecentsScreen`, `KeypadScreen`,
+`PersonSheet`, `CallDetailsSheet`, `FavoritesScreen`). Status `in HEAD` = verified in `android/phone/src/main`;
+`MISSING` = not in HEAD (see "Not closed" below).
+
+| U | Utility | Pill (string key) | Haptic | Status |
+|---|---|---|---|---|
+| U1 | Photo viewer | none (full screen) | drag-dismiss spring | in HEAD (`details/photo`, `photo_open`) |
+| U2 | Save / share photo | `photo_saved`, `photo_cant_save`, `photo_cant_share` | Confirm / Reject | in HEAD |
+| U3 | Recents search, filter chips | empty state text | Selection (chips) | in HEAD (`recents_filter_*`) |
+| U4 | Copy as / Share as | `recents_notice_copied`, `details_notice_copied` | Confirm (fixed) | in HEAD (`recents_form_*`) |
+| U5 | Export call log CSV | "Call history exported" | Confirm | MISSING (E5.9 Data, `stash@{1}`) |
+| U6 | Pause / wait on `*` `#` | tone hint line (`keypad_tone_hint`) | LongPress | in HEAD (`KeypadAction.Hold`) |
+| U7 | Call statistics | none | Tick (bar tap) | in HEAD (`stats/`, `details_stats`) |
+| U8 | Per-call note | `details_note_saved`, `details_note_deleted` + Undo | Confirm (fixed) | in HEAD |
+| U9 | Share contact as QR | `details_notice_qr_failed` on failure | Reject | in HEAD (`details_sheet_qr`) |
+| U10 | Set / replace / remove photo | `photo_updated`, `photo_remove_*` | Confirm / Reject | in HEAD (E5.13) |
+| U11 | Call details sheet | `details_copied`, `details_call_deleted` | Confirm (fixed) | in HEAD |
+| U12 | Select mode, multi-delete | `recents_deleted_many` + Undo | Confirm (fixed) | in HEAD |
+| U13 | Remind later | `remind_set_at`, `recents_notice_reminder_failed` | Confirm (fixed) / Reject | in HEAD (E5.12) |
+| U14 | Keypad field menu | `keypad_notice_copied`, `keypad_notice_cleared` + Undo | LongPress, Confirm (fixed) | in HEAD |
+| U15 | Day section capsule | none | none (scroll) | in HEAD (`section_starts`) |
+| U16 | Export a person's calls | `details_notice_no_calls_to_export` | Reject | in HEAD (`details_menu_export`) |
+| U17 | In-call note, copy number | `incall_notice_note_saved`, `incall_notice_number_copied` | Confirm (`InCallEffect.Confirm`) | in HEAD |
+| U18 | Share person stats | share sheet | none | in HEAD (`details_menu_share_stats`) |
+| U19 | CSV `note` column | covered by U5 | n/a | MISSING with U5 |
+| U20 | Quick reply on missed | `recents_reply_title` sheet | Confirm (message app opens) | in HEAD |
+| U21 | Notes search in Recents | list filter | none | in HEAD |
+| U22 | Speed dial share / clear | "Speed dial cleared" + Undo | Confirm | MISSING (E5.9, `stash@{1}`) |
+| U23 | This audit | | | done |
+| U24 | Delete all history + Undo | Undo pill | Confirm | MISSING (E5.9 Data, `stash@{1}`); per-person delete is in HEAD |
+| U25 | Copy number | `recents_notice_copied` | Confirm (fixed) | in HEAD (`recents_menu_copy_number`) |
+| U26 | Share call details | share sheet | none | in HEAD |
+| U27 | Blocked: share, unblock all | "Unblocked n" + Undo | Confirm | MISSING (E5.9 Blocked, `stash@{2}`) |
+| U28 | Stats CSV export | "Call statistics exported" | Confirm | in HEAD (`stats_export`) |
+| U29 | Add to contacts from keypad | `keypad_add_contact` | none (navigation) | in HEAD |
+| U30 | Notes page | "Note deleted" + Undo | Confirm | MISSING (E5.11, `stash@{0}`) |
+| U31 | Redial | status line | none | in HEAD (`KeypadViewModel`) |
+| U32 | Smart paste chooser | `keypad_paste_title` sheet | none | in HEAD |
+| U33 | Notes share all | share sheet | none | MISSING with U30 |
+| U34 | Bulk block from paste | "Blocked n" + Undo | Confirm | MISSING (E5.9) |
+| U35 | Notes chip | empty text | Selection | in HEAD (`recents_filter_notes`) |
+| U36 | Copy / share all numbers | `details_notice_copied_all` | Confirm (fixed) | in HEAD |
+| U37 | Post-call "Add note" pill | `postcall_add_note` | none | in HEAD |
+| U38 | Blocked export / import | "Blocked numbers exported" | Confirm | MISSING (E5.9) |
+| U39 | Mark missed seen | none | none | in HEAD (`RecentsViewModel`) |
+| U40 | Share stats summary | share sheet | none | in HEAD |
+| U41 | Export pills name the file | per-export pill | Confirm | MISSING with U5, U28 partly done |
+| U42 | Notes export | "Call notes exported" | Confirm | MISSING with U30 |
+| U43 | Delete older calls | "n calls deleted" + Undo | Confirm | MISSING (E5.9 Data) |
+| U44 | Remind on a missed call | `details_remind` pill | Confirm (fixed) | in HEAD |
+| U45 | Select: block / share | `recents_blocked_many` + Undo | Confirm (fixed) | in HEAD |
+| U46 | Tap a stats bar | bucket sheet | Tick | in HEAD |
+| U47 | Long-press Call: SIM / WhatsApp | menu | LongPress | in HEAD |
+| U48 | Country of unknown number | row subtitle | none | in HEAD |
+| U49 | Paste tones + Stop | `incall_notice_tones_sent` | Confirm | in HEAD |
+| U50 | Copy tones | `incall_notice_tones_copied` | Confirm | in HEAD |
+| U51 | Remember tones (memory only) | `incall_tones_send` | none | in HEAD (deviation: in memory) |
+| U52 | Stats records | none | none | in HEAD (`stats_records`) |
+| U53 | Field menu Share / E.164 | `keypad_notice_copied_e164` | Confirm (fixed) | in HEAD |
+| U54 | Export contacts .vcf | "Contacts exported" | Confirm | MISSING (E5.9 Data) |
+| U55 | Block by prefix | "Blocked +90 850*" + Undo | Confirm | MISSING (`stash@{2}` `BlockPrefixes.kt`) |
+| U56 | Copy country | dropped (U48, U4) | n/a | dropped |
+
+Moments added this step: the **theme melt** (`:design` `theme/ThemeMelt.kt`, used by `RovstiShellActivity`: the new theme
+applies at once, a sheet of the old page colour fades over 360 ms in one draw-phase rectangle; none under reduce motion;
+`ThemeMeltTest`) and the **setup-complete moment** (`phone/setup/SetupCompleteMoment.kt`: the last checklist row turning
+done while the app is open gives Confirm and the "You're all set" pill; silent when already complete at launch;
+`PillFeedbackTest`).
+
+## Not closed: E5.9 Settings and E5.11 Notes are not in HEAD
+
+`git log` and `android/phone/src/main` show no `settings/` (Blocked, Quick replies, Speed dial, SIM, Data, Backup) and no
+`notes/` package. Their work was stashed as "blocked": `stash@{2}` (r14-s2, E5.9 Blocked + `BlockPrefixes`), `stash@{1}` (r14-s3,
+E5.9 rest, 4600 lines) and `stash@{0}` (r14-s5, E5.11 Notes, untracked files). Every MISSING row above belongs to one of them.
+`stash@{0}` is NOT safe to drop (`notes/*` exist nowhere in HEAD). Recovery needs its own step before E5 can be closed.
+
+## Checklist A-H for the R2 part 2 screens present in HEAD (Statistics, setup flows, reminders, photo viewer)
+
+- A licence: pass, new files are original GPL-3.0-or-later; nothing ported this step.
+- B layout: pass, `e5.10-*`, `e5.13-*` show nothing under the floating bar at rest and at the end of the list. Deviation
+  (observed in `e5.14-settings-fs2`): at 2x font the Setup rows give the trailing action ("Set as default") its natural width
+  and the title wraps to three lines; nothing is clipped. A stacked row layout at large fonts is a follow-up in `:design` list rows.
+- C overlays: pass, bucket sheet, remind menu, photo edit menu are overlay entries; no page change.
+- D motion: pass, bars on a staggered spring (none under reduce motion), theme melt is a draw-only fade.
+- E input: pass, no new text field.
+- F accessibility: pass, bars carry `stats_bar_desc`; setup rows carry state.
+- G platform: pass, no Rust before `Rust.init`; no new class reached by name (no keep rule); Phone has `values-tr`.
+- H tests: `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`, `E514ShotTest`, `KeypadRecompositionTest`,
+  `RecentsScrollRecompositionTest`, `PillFeedbackTest`, `ThemeMeltTest`, `TabBarCellsTest` (LargeTitleScaffold case).
+- RTL: `e5.14-settings-rtl`, `e5.14-stats-rtl` mirror correctly (back chevron and title at the right, row chevrons at the left,
+  tab order reversed). The English strings reorder digits inside the mirrored line ("of 5 2"): the app ships only en and tr,
+  so this is a harness artefact of English text in an RTL base direction, not a layout bug.

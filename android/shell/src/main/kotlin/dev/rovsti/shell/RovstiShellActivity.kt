@@ -17,6 +17,7 @@ import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.media.LocalRovstiImageLoader
 import dev.rovsti.design.theme.RovstiTheme
+import dev.rovsti.design.theme.ThemeMelt
 import dev.rovsti.design.transition.Tab
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.permissions.LocalPermissionController
@@ -102,7 +103,7 @@ abstract class RovstiShellActivity<R : Any> : ComponentActivity() {
                     LocalPermissionController provides container.permissions,
                     LocalSpecialAccess provides container.specialAccess,
                 ) {
-                    Content()
+                    ThemeMelt(dark) { Content() }
                 }
             }
         }

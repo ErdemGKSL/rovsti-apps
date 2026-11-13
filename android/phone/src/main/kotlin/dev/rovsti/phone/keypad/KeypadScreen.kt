@@ -143,6 +143,7 @@ fun KeypadScreen(
                 }
 
                 is KeypadEffect.Say -> {
+                    if (effect.notice.isSuccess()) haptics.confirm()
                     overlays.showToast(strings.say(effect.notice))
                 }
 
@@ -151,6 +152,7 @@ fun KeypadScreen(
                 }
 
                 is KeypadEffect.Undo -> {
+                    haptics.confirm()
                     overlays.showUndo(
                         message = strings.say(Notice.Cleared),
                         onUndo = { model.onAction(KeypadAction.Restore(effect.old)) },

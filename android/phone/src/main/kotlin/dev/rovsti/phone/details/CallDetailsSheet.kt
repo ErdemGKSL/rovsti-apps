@@ -343,10 +343,14 @@ fun CallDetailsEffects(
                 }
 
                 is CallDetailsEffect.Say -> {
+                    if (effect.notice == CallDetailsNotice.NoteSaved || effect.notice == CallDetailsNotice.Copied) {
+                        haptics.confirm()
+                    }
                     overlays.showToast(strings.say(effect.notice))
                 }
 
                 is CallDetailsEffect.Reminded -> {
+                    haptics.confirm()
                     overlays.showToast(effect.text)
                 }
 
@@ -379,6 +383,7 @@ fun CallDetailsEffects(
                 }
 
                 is CallDetailsEffect.Undoable -> {
+                    haptics.confirm()
                     overlays.showUndo(
                         message = strings.undoable(effect.kind),
                         onUndo = { model.onAction(CallDetailsAction.Undo(effect.undo)) },

@@ -73,6 +73,7 @@ import dev.rovsti.phone.recents.RecentsStrings
 import dev.rovsti.phone.recents.RecentsViewModel
 import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
+import dev.rovsti.phone.setup.SetupCompleteMoment
 import dev.rovsti.phone.setup.SetupEffectsRunner
 import dev.rovsti.phone.setup.SetupSheetContent
 import dev.rovsti.phone.setup.SetupSheetViewModel
@@ -396,6 +397,7 @@ fun PhoneApp(
     val setupModel = rememberSetupViewModel(container)
     val setup by setupModel.state.collectAsState()
     OnResume { setupModel.onAction(SetupAction.Refresh) }
+    SetupCompleteMoment(setup, overlays)
     val setupTitle = stringResource(R.string.setup_open)
     val sheets = remember(overlays, container) { SetupSheetPresenter(overlays, container, setupModel, setupTitle) }
     // First launch: offer the sheet once while the role is missing (never over a call).

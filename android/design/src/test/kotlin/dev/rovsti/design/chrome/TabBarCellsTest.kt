@@ -3,6 +3,7 @@ package dev.rovsti.design.chrome
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -48,7 +49,7 @@ class TabBarCellsTest : ShotTest() {
 
     /** The real nav host with the Recents tab and the Settings page pushed on it (pushed pages keep the full bar). */
     @Composable
-    private fun PushedPage() {
+    private fun PushedPage(large: Boolean = false) {
         val navigator =
             remember {
                 TabNavigator<R>(
@@ -72,7 +73,19 @@ class TabBarCellsTest : ShotTest() {
             modifier = Modifier.fillMaxSize(),
         ) {
             entry<R.Recents> { Box(Modifier.fillMaxSize()) }
-            entry<R.Settings> { ScreenPage(title = "Settings") { Box(Modifier.height(300.dp)) } }
+            entry<R.Settings> {
+                if (large) {
+                    LargeTitleScaffold(
+                        title = "Settings",
+                        state = rememberLazyListState(),
+                        actions = persistentListOf(),
+                    ) {
+                        item { Box(Modifier.height(300.dp)) }
+                    }
+                } else {
+                    ScreenPage(title = "Settings") { Box(Modifier.height(300.dp)) }
+                }
+            }
         }
     }
 
@@ -98,9 +111,15 @@ class TabBarCellsTest : ShotTest() {
     }
 
     @Test
-    fun everyCellDrawsInLightAndInTheSecondDarkFrame() {
+    fun everyCellDrawsInLightAndInTheSecondDarkFrame() = everyCellDraws(large = false)
+
+    /** F21 residual: the large-title page writes its measured title height in layout; it must not break the bar. */
+    @Test
+    fun everyCellDrawsUnderALargeTitleScaffold() = everyCellDraws(large = true)
+
+    private fun everyCellDraws(large: Boolean) {
         for (dark in listOf(false, true)) {
-            composeFrame(dark = dark) { PushedPage() }
+            composeFrame(dark = dark) { PushedPage(large) }
             advance(500)
             for (tab in tabs) {
                 val contrast = inkContrast("tab-${tab.id}")

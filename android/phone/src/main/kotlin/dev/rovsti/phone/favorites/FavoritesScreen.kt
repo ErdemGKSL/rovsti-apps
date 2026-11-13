@@ -499,10 +499,12 @@ fun FavoritesEffects(model: FavoritesViewModel) {
         model.effect.collect { effect ->
             when (effect) {
                 FavoritesEffect.Added -> {
+                    haptics.confirm()
                     overlays.showToast(added)
                 }
 
                 FavoritesEffect.Removed -> {
+                    haptics.confirm()
                     overlays.showToast(removed)
                 }
 

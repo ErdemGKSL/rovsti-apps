@@ -142,6 +142,9 @@ sealed interface KeypadAction {
 /** Things the keypad says in its own words (the screen maps them to strings). */
 enum class Notice { NoVoicemail, DialerOpened, CallFailed, NothingToPaste, Cleared, Copied, CopiedE164 }
 
+/** U23: a notice that reports something done (paired with the confirm haptic); the others are failures or hints. */
+internal fun Notice.isSuccess() = this == Notice.Cleared || this == Notice.Copied || this == Notice.CopiedE164
+
 /** One entry of the field menu. */
 @Immutable
 sealed interface FieldEntry {

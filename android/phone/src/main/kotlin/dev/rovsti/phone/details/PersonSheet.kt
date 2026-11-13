@@ -517,10 +517,14 @@ fun PersonEffects(
                 }
 
                 is PersonEffect.Say -> {
+                    if (effect.notice == PersonNotice.Copied || effect.notice == PersonNotice.CopiedAll) {
+                        haptics.confirm()
+                    }
                     overlays.showToast(strings.say(effect.notice))
                 }
 
                 is PersonEffect.Core -> {
+                    haptics.confirm()
                     overlays.showToast(strings.refused(effect.refusal))
                 }
 
@@ -575,6 +579,7 @@ fun PersonEffects(
                 }
 
                 is PersonEffect.Undoable -> {
+                    haptics.confirm()
                     overlays.showUndo(
                         message = strings.undoable(effect.kind, effect.count),
                         onUndo = { model.onAction(PersonAction.Undo(effect.undo)) },

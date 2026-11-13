@@ -297,6 +297,9 @@ enum class RecentsNotice {
     UndoFailed,
 }
 
+/** U23: a notice that reports something done (its pill is paired with the confirm haptic); the others are failures. */
+internal fun RecentsNotice.isSuccess() = this == RecentsNotice.Copied || this == RecentsNotice.CopiedWithCountry
+
 /** One-shot results. */
 sealed interface RecentsEffect {
     data class Say(

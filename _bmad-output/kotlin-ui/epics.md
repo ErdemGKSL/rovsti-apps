@@ -1153,7 +1153,7 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
 | E5.11 | Notes page | R2 | todo (round 14 step 5) |
 | E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
 | E5.13 | Photo viewer and photo edit | R2 | done (round 14 step 7) |
-| E5.14 | Polish | R2 | todo (round 14 step 8) |
+| E5.14 | Polish | R2 | done for what is in HEAD (round 14 step 8: U23 audit table in `checklist-e5.md`, success pills paired with Confirm, theme melt `ThemeMelt`, setup-complete moment, `KeypadRecompositionTest`, `RecentsScrollRecompositionTest`, `LargeTitleScaffold` plain height holder + `TabBarCellsTest` case, `e5.14-*` goldens). **E5 stays open:** E5.9 and E5.11 are not in HEAD (work in `stash@{2}`, `stash@{1}`, `stash@{0}`); a recovery step must come first. Round 15 = X.1 then X.2, then E6 |
 
 ### E5.1 App module
 - AC1 `dev.rovsti.phone`, arm64-v8a release, every component FQCN of the GPUI manifest (`MainActivity` with DIAL/VIEW

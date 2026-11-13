@@ -27,18 +27,18 @@ class WaIncomingTest {
         assertEquals(WaIncomingNotice("c1", "Ayse"), n)
     }
 
-    @Test fun fallsBackToTheUserPartOfSender() {
-        assertEquals("905551234567", WaIncomingNotice.of(call("sender" to "905551234567@s.whatsapp.net"))?.title)
+    @Test fun fallsBackToTheNumberOfSender() {
+        assertEquals("+905551234567", WaIncomingNotice.of(call("sender" to "905551234567@s.whatsapp.net"))?.title)
         assertEquals(
-            "905551234567",
+            "+905551234567",
             WaIncomingNotice.of(call("sender" to "905551234567:4@s.whatsapp.net", "name" to " "))?.title,
         )
     }
 
     @Test fun stillReadsTheOldFromKey() {
-        assertEquals("905551234567", WaIncomingNotice.of(call("from" to "905551234567@s.whatsapp.net"))?.title)
+        assertEquals("+905551234567", WaIncomingNotice.of(call("from" to "905551234567@s.whatsapp.net"))?.title)
         assertEquals(
-            "905551234567",
+            "+905551234567",
             WaIncomingNotice.of(call("sender" to "905551234567@s.whatsapp.net", "from" to "1@s.whatsapp.net"))?.title,
         )
     }
@@ -46,6 +46,38 @@ class WaIncomingTest {
     @Test fun fallsBackToTheGenericTitle() {
         assertEquals("WhatsApp call", WaIncomingNotice.of(call())?.title)
         assertEquals("WhatsApp call", WaIncomingNotice.of(call("sender" to "@lid"))?.title)
+    }
+
+    @Test fun aSavedContactNamesTheCallerBeforeTheWhatsAppName() {
+        val book = mapOf("+905551234567" to "Ayşe (iş)")
+        val n = WaIncomingNotice.of(call("name" to "Ayse", "sender" to "905551234567:4@s.whatsapp.net"), book::get)
+        assertEquals("Ayşe (iş)", n?.title)
+        // A stranger with a push name keeps it.
+        assertEquals(
+            "Mert",
+            WaIncomingNotice.of(call("name" to "Mert", "sender" to "905559999999@s.whatsapp.net"), book::get)?.title,
+        )
+        assertEquals("Ayşe (iş)", WaMissedNotice.of(end("sender" to "905551234567@s.whatsapp.net"), book::get)?.title)
+    }
+
+    @Test fun aLidPeerIsNoNumber() {
+        // The gateway could not map the LID to a phone JID: no number to look up, never the LID digits as a title.
+        val asked = ArrayList<String>()
+        val lookup = { n: String ->
+            asked += n
+            "Nobody"
+        }
+        assertEquals("Mert", WaIncomingNotice.of(call("name" to "Mert", "sender" to "123456789@lid"), lookup)?.title)
+        assertEquals("WhatsApp call", WaIncomingNotice.of(call("sender" to "123456789@lid"), lookup)?.title)
+        assertTrue(asked.isEmpty())
+    }
+
+    @Test fun aBareNumberTitleIsFormattedForReading() {
+        val context = RuntimeEnvironment.getApplication()
+        assertEquals("Ayse", WaIncoming.displayTitle(context, "Ayse"))
+        val shown = WaIncoming.displayTitle(context, "+905321234567")
+        assertEquals("+905321234567", shown.filter { it == '+' || it.isDigit() })
+        assertTrue(shown, shown.contains(' '))
     }
 
     @Test fun onlyCallsWithAnIdQualify() {
@@ -67,7 +99,7 @@ class WaIncomingTest {
     }
 
     @Test fun missedTitleFollowsTheSameFallbacks() {
-        assertEquals("905551234567", WaMissedNotice.of(end("sender" to "905551234567:4@s.whatsapp.net"))?.title)
+        assertEquals("+905551234567", WaMissedNotice.of(end("sender" to "905551234567:4@s.whatsapp.net"))?.title)
         assertEquals("WhatsApp call", WaMissedNotice.of(end())?.title)
     }
 

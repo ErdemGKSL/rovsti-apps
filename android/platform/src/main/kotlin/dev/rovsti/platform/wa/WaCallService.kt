@@ -112,7 +112,11 @@ class WaCallService : Service() {
             call: WaOngoingCall?,
         ): Notification {
             PlatformChannels.ensure(context, PlatformChannels.ONGOING_CALL)
-            val title = call?.title?.takeIf { it.isNotBlank() && it != WaIncomingNotice.FALLBACK_TITLE }
+            val title =
+                call
+                    ?.title
+                    ?.takeIf { it.isNotBlank() && it != WaIncomingNotice.FALLBACK_TITLE }
+                    ?.let { WaIncoming.displayTitle(context, it) }
             val builder =
                 Notification
                     .Builder(context, PlatformChannels.ONGOING_CALL)

@@ -8,28 +8,46 @@ import android.app.Person
 import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
+import android.telephony.PhoneNumberUtils
 import android.util.Log
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.R
+import dev.rovsti.platform.identity.PhoneNumbers
 import dev.rovsti.platform.notify.NotificationIcon
 import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
 import org.json.JSONObject
 
 /**
- * Pure: the caller title for an FCM data message: `name`, else the user part of `sender`
- * (`123:4@s.whatsapp.net` gives `123`), else [WaIncomingNotice.FALLBACK_TITLE]. Gateways before
+ * Pure: the caller's number for an FCM data message, `+<digits>` from a phone JID in `sender`
+ * (`905551234567:4@s.whatsapp.net`); null for a `@lid` the gateway could not map, a group or nothing. Gateways before
  * the rename sent `from`, which FCM reserves (it refused those pushes); it is still read.
  */
-internal fun waCallerTitle(data: Map<String, String>): String {
+internal fun waCallerNumber(data: Map<String, String>): String? {
+    val peer = (data["sender"] ?: data["from"]).orEmpty().trim()
+    val user = peer.substringBefore('@').substringBefore(':')
+    val server = peer.substringAfter('@', "")
+    val phone = server == "s.whatsapp.net" && user.isNotEmpty() && user.all { it in '0'..'9' }
+    return if (phone) "+$user" else null
+}
+
+/**
+ * Pure: the caller title for an FCM data message (F28), as the app names a WhatsApp caller: the device contact that
+ * owns the number ([contactName], resolved on the phone, so a cold process woken by the push names the caller too),
+ * else the WhatsApp name the gateway sent (`name`), else the `+` number, else [WaIncomingNotice.FALLBACK_TITLE].
+ */
+internal fun waCallerTitle(
+    data: Map<String, String>,
+    contactName: (String) -> String? = { null },
+): String {
+    val number = waCallerNumber(data)
+    number
+        ?.let(contactName)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { return it }
     val name = data["name"]?.trim().orEmpty()
-    val user =
-        (data["sender"] ?: data["from"])
-            .orEmpty()
-            .substringBefore('@')
-            .substringBefore(':')
-            .trim()
-    return name.ifEmpty { user.ifEmpty { WaIncomingNotice.FALLBACK_TITLE } }
+    return name.ifEmpty { number ?: WaIncomingNotice.FALLBACK_TITLE }
 }
 
 /** What an FCM `kind=call` data message says about an incoming WhatsApp call. */
@@ -41,11 +59,14 @@ data class WaIncomingNotice(
         /** The title when the push names nobody; the notifications show `R.string.wa_call_title` in its place. */
         const val FALLBACK_TITLE = "WhatsApp call"
 
-        /** Pure: the notice for [data], or null when it is not a call or has no `call_id`. */
-        fun of(data: Map<String, String>): WaIncomingNotice? {
+        /** Pure: the notice for [data], or null when it is not a call or has no `call_id`; see [waCallerTitle]. */
+        fun of(
+            data: Map<String, String>,
+            contactName: (String) -> String? = { null },
+        ): WaIncomingNotice? {
             if (data["kind"] != "call") return null
             val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
-            return WaIncomingNotice(id, waCallerTitle(data))
+            return WaIncomingNotice(id, waCallerTitle(data, contactName))
         }
     }
 }
@@ -57,10 +78,13 @@ data class WaMissedNotice(
 ) {
     companion object {
         /** Pure: the notice for [data], or null when it is not a missed `call_end` or has no `call_id`. */
-        fun of(data: Map<String, String>): WaMissedNotice? {
+        fun of(
+            data: Map<String, String>,
+            contactName: (String) -> String? = { null },
+        ): WaMissedNotice? {
             if (data["kind"] != "call_end" || data["missed"] != "1") return null
             val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
-            return WaMissedNotice(id, waCallerTitle(data))
+            return WaMissedNotice(id, waCallerTitle(data, contactName))
         }
     }
 }
@@ -136,11 +160,26 @@ object WaIncoming {
     /** Pure: the id of the "Answering…" notice of [openAnswered], distinct from the other two. */
     fun answeringNotificationId(callId: String): Int = notificationId(callId) xor ANSWERING_ID_MASK
 
-    /** The caller's title, with the generic one in the phone's language. */
-    private fun displayTitle(
+    /** The caller's title, with the generic one in the phone's language and a bare number formatted for reading. */
+    internal fun displayTitle(
         context: Context,
         title: String,
-    ): String = if (title == WaIncomingNotice.FALLBACK_TITLE) context.getString(R.string.wa_call_title) else title
+    ): String =
+        when {
+            title == WaIncomingNotice.FALLBACK_TITLE -> context.getString(R.string.wa_call_title)
+            PhoneNumbers.e164(title, PhoneNumbers.homeRegion(context)) == title -> pretty(context, title)
+            else -> title
+        }
+
+    private fun pretty(
+        context: Context,
+        number: String,
+    ): String =
+        try {
+            PhoneNumberUtils.formatNumber(number, PhoneNumbers.homeRegion(context)) ?: number
+        } catch (_: RuntimeException) {
+            number
+        }
 
     fun show(
         context: Context,

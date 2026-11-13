@@ -9,6 +9,8 @@ import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.ContactsContract.Contacts
 import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.model.search.WireNumber
+import dev.rovsti.platform.identity.CallerIdentity
+import dev.rovsti.platform.identity.PhoneNumbers
 import dev.rovsti.platform.wire.ProviderJson
 
 /**
@@ -39,6 +41,8 @@ object ContactsQuery {
         val sortKeyAlt: String? = null,
         val email: String? = null,
         val updatedMs: Long = 0,
+        /** `Phone.NORMALIZED_NUMBER`, the provider's E.164 form. */
+        val normalized: String? = null,
     )
 
     private val PROJECTION =
@@ -55,6 +59,8 @@ object ContactsQuery {
             Phone.DISPLAY_NAME_ALTERNATIVE,
             Phone.SORT_KEY_PRIMARY,
             Phone.SORT_KEY_ALTERNATIVE,
+            Phone.NORMALIZED_NUMBER,
+            Phone.CONTACT_LAST_UPDATED_TIMESTAMP,
         )
 
     private val CONTACT_PROJECTION =
@@ -179,6 +185,8 @@ object ContactsQuery {
                             displayNameAlt = c.getString(9),
                             sortKey = c.getString(10),
                             sortKeyAlt = c.getString(11),
+                            normalized = c.getString(12)?.takeIf { it.startsWith("+") },
+                            updatedMs = if (c.isNull(13)) 0 else c.getLong(13),
                         ),
                     )
                 }
@@ -198,7 +206,14 @@ object ContactsQuery {
                     .filter {
                         it.number.isNotEmpty() &&
                             seen.add(ProviderJson.normalize(it.number).ifEmpty { it.number })
-                    }.map { WireNumber(raw = it.number, label = it.label, default = it.superPrimary) }
+                    }.map {
+                        WireNumber(
+                            raw = it.number,
+                            label = it.label,
+                            default = it.superPrimary,
+                            normalized = it.normalized,
+                        )
+                    }
             val first = rowsOf[0]
             WireContact(
                 id = id,
@@ -237,31 +252,111 @@ object ContactsQuery {
         context: Context,
         number: String,
     ): Match? {
-        if (number.isBlank()) return null
+        val found = found(context, number, PhoneNumbers.homeRegion(context)) ?: return null
+        return Match(found.identity.contactId ?: return null, found.identity.name.orEmpty(), found.alt)
+    }
+
+    /** One `PhoneLookup` row, as [best] compares them. */
+    internal data class LookupRow(
+        val id: Long,
+        val name: String,
+        val alt: String?,
+        val starred: Boolean,
+        val updatedMs: Long,
+        val lookupKey: String?,
+        val photoUri: String?,
+    )
+
+    /**
+     * Pure: the row that names a number several contacts share, as the core's number book decides: starred first,
+     * then the most recently updated, then the lowest id.
+     */
+    internal fun best(rows: List<LookupRow>): LookupRow? =
+        rows.minWithOrNull(
+            compareByDescending<LookupRow> { it.starred }.thenByDescending { it.updatedMs }.thenBy { it.id },
+        )
+
+    private class Found(
+        val identity: CallerIdentity,
+        val alt: String?,
+    )
+
+    /**
+     * Who owns [number], by Android's `PhoneLookup` (the cold paths: an FCM push, the call service before the app has
+     * its index). The number goes in its E.164 form for [region] when Android has one; a withheld number and a short
+     * code that is not stored exactly match nobody. Null when unknown or not permitted.
+     */
+    fun identity(
+        context: Context,
+        number: String,
+        region: String,
+    ): CallerIdentity? = found(context, number, region)?.identity
+
+    private fun found(
+        context: Context,
+        number: String,
+        region: String,
+    ): Found? {
+        if (PhoneNumbers.isWithheld(number)) return null
+        val e164 = PhoneNumbers.e164(number, region)
+        val query = e164 ?: PhoneNumbers.withoutExtension(number).trim()
+        if (query.isEmpty()) return null
         return try {
-            val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number))
+            val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(query))
+            val rows = ArrayList<LookupRow>()
             context.contentResolver
-                .query(
-                    uri,
-                    arrayOf(
-                        ContactsContract.PhoneLookup._ID,
-                        ContactsContract.PhoneLookup.DISPLAY_NAME,
-                        ContactsContract.PhoneLookup.DISPLAY_NAME_ALTERNATIVE,
-                    ),
-                    null,
-                    null,
-                    null,
-                )?.use { c ->
-                    if (c.moveToFirst()) {
-                        Match(c.getLong(0), c.getString(1).orEmpty(), c.getString(2)?.takeIf { it.isNotEmpty() })
-                    } else {
-                        null
+                .query(uri, LOOKUP_PROJECTION, null, null, null)
+                ?.use { c ->
+                    while (c.moveToNext()) {
+                        val stored = c.getString(7).orEmpty()
+                        // PhoneLookup matches short numbers loosely; a short code must be stored as it was asked.
+                        val short = e164 == null && digitsOf(query).length < SHORT_DIGITS
+                        if (short && digitsOf(stored) != digitsOf(query)) continue
+                        rows +=
+                            LookupRow(
+                                id = c.getLong(0),
+                                name = c.getString(1).orEmpty(),
+                                alt = c.getString(2)?.takeIf { it.isNotEmpty() },
+                                starred = c.getInt(3) != 0,
+                                updatedMs = if (c.isNull(4)) 0 else c.getLong(4),
+                                lookupKey = c.getString(5),
+                                photoUri = c.getString(6),
+                            )
                     }
                 }
+            best(rows)?.let { row ->
+                Found(
+                    CallerIdentity(
+                        contactId = row.id,
+                        lookupKey = row.lookupKey,
+                        name = row.name,
+                        photoUri = row.photoUri,
+                        starred = row.starred,
+                    ),
+                    row.alt,
+                )
+            }
         } catch (_: SecurityException) {
             null
         } catch (_: RuntimeException) {
             null
         }
     }
+
+    /** Fewer digits than this is a short code or service number (the core's `MIN_E164_NSN`). */
+    private const val SHORT_DIGITS = 8
+
+    private fun digitsOf(text: String): String = text.filter { it in '0'..'9' }
+
+    private val LOOKUP_PROJECTION =
+        arrayOf(
+            ContactsContract.PhoneLookup._ID,
+            ContactsContract.PhoneLookup.DISPLAY_NAME,
+            ContactsContract.PhoneLookup.DISPLAY_NAME_ALTERNATIVE,
+            ContactsContract.PhoneLookup.STARRED,
+            ContactsContract.PhoneLookup.CONTACT_LAST_UPDATED_TIMESTAMP,
+            ContactsContract.PhoneLookup.LOOKUP_KEY,
+            ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI,
+            ContactsContract.PhoneLookup.NUMBER,
+        )
 }

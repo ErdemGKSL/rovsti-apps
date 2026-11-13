@@ -2,6 +2,8 @@ package dev.rovsti.platform.wa
 
 import android.content.Context
 import dev.rovsti.platform.PlatformEvents
+import dev.rovsti.platform.contacts.ContactsQuery
+import dev.rovsti.platform.identity.PhoneNumbers
 import org.json.JSONObject
 import java.util.concurrent.locks.LockSupport
 
@@ -59,10 +61,12 @@ object WaPush {
         data: Map<String, String>,
     ) {
         val app = context.applicationContext
-        WaIncomingNotice.of(data)?.let { WaIncoming.show(app, it) }
+        // The process may be cold, with no contact index: Android's own PhoneLookup names the caller (F28).
+        val contactName = { number: String -> ContactsQuery.identity(app, number, PhoneNumbers.homeRegion(app))?.name }
+        WaIncomingNotice.of(data, contactName)?.let { WaIncoming.show(app, it) }
         if (data["kind"] == "call_end") {
             data["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }
-            WaMissedNotice.of(data)?.let { WaIncoming.showMissed(app, it) }
+            WaMissedNotice.of(data, contactName)?.let { WaIncoming.showMissed(app, it) }
         }
         PlatformEvents.emit(EVENT, payload(data))
     }

@@ -295,15 +295,17 @@ interface AudioPort {
 }
 
 /**
- * The audio of one WhatsApp call: frames of exactly [FRAME_BYTES] (960 little-endian 16-bit samples, 60 ms at
- * 16 kHz, mono) in both directions. Call [push] and [pull] from the audio thread, never the main thread.
+ * The audio of one WhatsApp call: little-endian 16-bit samples at 16 kHz, mono. The microphone goes in frames of
+ * exactly [FRAME_BYTES] (960 samples, 60 ms); the peer's voice comes in frames of [STEP_BYTES] (20 ms) from a
+ * gateway that sends 20 ms frames and of [FRAME_BYTES] from an older one. Call [push] and [pull] from the audio
+ * thread, never the main thread.
  */
 class CallAudio internal constructor(
     id: Long,
     private val port: AudioPort,
     release: (Long) -> Unit,
 ) : RustHandle(id, release) {
-    /** Sends one microphone frame. Any other size is dropped by Rust; so is a frame while the queue is full. */
+    /** Sends one microphone frame. Any other size is dropped by Rust; a full queue drops its oldest frames. */
     fun push(pcm: ByteArray) {
         if (released) return
         RustThreading.assertNotMain()
@@ -311,8 +313,9 @@ class CallAudio internal constructor(
     }
 
     /**
-     * Fills [out] (at least [FRAME_BYTES]) with the next frame of the peer's voice. Answers [FRAME_BYTES], [NO_FRAME]
-     * when none is ready yet (play silence) or [ENDED] when the call is over.
+     * Fills [out] (at least [FRAME_BYTES]) with the next frame of the peer's voice, waiting about 20 ms for it.
+     * Answers the frame's length (a multiple of [STEP_BYTES] up to [FRAME_BYTES]: play that many bytes), [NO_FRAME]
+     * when none came or [ENDED] when the call is over.
      */
     fun pull(out: ByteArray): Int {
         if (released) return ENDED
@@ -322,6 +325,9 @@ class CallAudio internal constructor(
 
     companion object {
         const val FRAME_BYTES = 1920
+
+        /** The shortest frame [pull] answers: 20 ms. */
+        const val STEP_BYTES = 640
         const val NO_FRAME = 0
         const val ENDED = -1
     }

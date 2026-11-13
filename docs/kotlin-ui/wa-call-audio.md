@@ -2,9 +2,11 @@
 
 Status: traced and tested in software (round 13, step 6). The check on a real phone is an owner item (see the end).
 
-One format runs the whole way: **16 kHz, mono, signed 16-bit little-endian PCM, 960 samples = 1 920 bytes = 60 ms per
-frame**, in both directions (`crates/rovsti_wa_proto/src/audio.rs`: `SAMPLE_RATE`, `FRAME_SAMPLES`, `FRAME_BYTES`).
-The only hop that uses another size is inside the gateway: WhatsApp's decoder hands over 20 ms (320 sample) frames.
+One format runs the whole way: **16 kHz, mono, signed 16-bit little-endian PCM** (`crates/rovsti_wa_proto/src/audio.rs`).
+The microphone goes in frames of **960 samples = 1 920 bytes = 60 ms** (`FRAME_SAMPLES`, `FRAME_BYTES`; MLOW encodes
+60 ms at a time). The speaker comes in frames of **320 samples = 640 bytes = 20 ms** (`STEP_SAMPLES`), as WhatsApp's
+decoder plays them out, when the app asked for them; an app or a gateway from before that still speaks whole 60 ms
+frames, see "Latency" at the end.
 
 ## Microphone: phone to WhatsApp
 
@@ -13,9 +15,9 @@ The only hop that uses another size is inside the gateway: WhatsApp's decoder ha
 | 1 | `AudioRecord`, source `VOICE_COMMUNICATION` (platform echo cancel and noise suppression), `CHANNEL_IN_MONO`, `ENCODING_PCM_16BIT`, 16 kHz, buffer at least 4 frames | PCM16 mono, reads of any size | `android/platform/.../wa/WaCallAudio.kt` (`start`, `format`, `RECORD_SOURCE`, `bufferBytes`) |
 | 2 | Thread `wa-mic` fills a `ByteArray(1920)` with whole reads, then pushes | 1 920 bytes | `WaCallAudio.pumpMic` |
 | 3 | `CallFrames.push` -> `CallAudio.push` (never the main thread) -> `RustNative.audioPush(handle, pcm)` | 1 920 bytes, JNI `byte[]` | `android/core-bridge/.../ops/WaGateway.kt`, `RustNative.kt` |
-| 4 | `Java_dev_rovsti_core_RustNative_audioPush` -> `ops::audio_push`: `decode_frame` (other sizes are dropped with a debug log), `mic.try_send` (a full queue drops the frame, no added latency) | 960 `i16` | `crates/rovsti_ffi/src/jni_exports.rs`, `ops/wa/live.rs` |
+| 4 | `Java_dev_rovsti_core_RustNative_audioPush` -> `ops::audio_push`: `decode_frame` (other sizes are dropped with a debug log), `mic.try_send` (a full queue drops its oldest frames, no added latency) | 960 `i16` | `crates/rovsti_ffi/src/jni_exports.rs`, `ops/wa/live.rs` |
 | 5 | `rovsti_wa_client::audio::call_audio`: `pump` encodes with `encode_frame` and sends one **binary WebSocket message** per frame to `wss://<gateway>/v1/calls/<id>/audio` with `Authorization: Bearer <connect key>` | 1 920 bytes per message | `crates/rovsti_wa_client/src/audio.rs` |
-| 6 | Gateway `audio_socket` -> `feed_mic`: `decode_frame` (wrong sizes dropped), `try_send` into the call's `mic_tx` (`Lagging` frames are dropped) | 960 `i16` | `services/wa_gateway/src/wa/calls.rs` |
+| 6 | Gateway `audio_socket` -> `feed_mic`: `decode_frame` (wrong sizes dropped), `push` into the call's `mic` queue (`Lagging`: it was full and dropped its oldest frames) | 960 `i16` | `services/wa_gateway/src/wa/calls.rs` |
 | 7 | `MediaPlan` (gateway): in the default mode `call_audio::run_uplink` encodes each frame with libopus (`WaOpusEncoder`, 24 kb/s, DTX) and hands the packet to the engine (`encoded_audio`), which wraps it in RTP/SRTP. See "Codec mode" below | 960 `i16` frames in, one Opus packet out | `calls.rs`, `call_audio.rs` |
 
 ## Speaker: WhatsApp to phone
@@ -23,11 +25,11 @@ The only hop that uses another size is inside the gateway: WhatsApp's decoder ha
 | # | Hop | Format | Code |
 |---|-----|--------|------|
 | 1 | Default mode: the engine hands each decrypted packet to `call_audio::run_downlink`, which decodes it (libopus, or the MLOW decoder for an MLOW packet) into `spk_tx`. PCM mode: the engine's own decoder writes **20 ms, 320 sample** frames (any length is handled) | 960 samples per packet (default), 320 (PCM mode) | `calls.rs`, `call_audio.rs` |
-| 2 | `audio_socket` rechunks with `Rechunker` (commit 457ac0f) and sends only whole frames; leftover samples wait for the next chunk | 1 920-byte binary messages | `rovsti_wa_proto::audio::Rechunker`, `audio_socket` |
-| 3 | Client `pump` decodes each message (wrong size: dropped) and `try_send`s it to `speaker`; a full queue (8 frames, about half a second) drops the frame instead of adding latency | 960 `i16` | `audio.rs` |
-| 4 | `RustNative.audioPull(handle, out)`: 1 920 = a frame, 0 = none ready, -1 = call ended or handle gone | 1 920 bytes | `ops::audio_pull`, `jni_exports.rs` |
-| 5 | Thread `wa-speaker`: frame -> `AudioTrack.write(WRITE_BLOCKING)` (the track paces the thread; a non-blocking write used to cut a burst off at the track buffer); 0 -> parks 10 ms; -1 -> thread ends | 1 920 bytes | `WaCallAudio.pumpSpeaker` |
-| 6 | `AudioTrack`: `USAGE_VOICE_COMMUNICATION`, `CONTENT_TYPE_SPEECH`, `CHANNEL_OUT_MONO`, `ENCODING_PCM_16BIT`, 16 kHz, `MODE_STREAM`, buffer at least 4 frames | PCM16 mono | `WaCallAudio.trackAttributes`, `format` |
+| 2 | `to_speaker` puts the audio into the call's speaker queue in 20 ms slots (longer decoded frames are cut up). `shuttle` sends each slot as one message to an app that asked for `?spk_ms=20`; for an app that did not, `Rechunker` joins three into a whole frame | 640-byte binary messages (1 920 for an older app) | `call_audio.rs` (`to_speaker`, `FreshQueue`), `calls.rs` (`shuttle`) |
+| 3 | Client `pump` decodes each message with `decode_speaker_frame` (640, 1 280 or 1 920 bytes; anything else is dropped) and pushes it to the speaker queue, which drops its oldest audio when the player is behind | 320 `i16` (960 from an older gateway) | `audio.rs`, `queue.rs` |
+| 4 | `RustNative.audioPull(handle, out)` waits up to 20 ms for a frame: its length in bytes = a frame, 0 = none came, -1 = call ended or handle gone | 640 bytes (1 920 from an older gateway) | `ops::audio_pull`, `jni_exports.rs` |
+| 5 | Thread `wa-speaker`: frame of any valid length -> `AudioTrack.write(WRITE_BLOCKING)` (the track paces the thread), unless `PlayoutTrim` drops it; 0 -> asks again; -1 -> thread ends | 640 or 1 920 bytes | `WaCallAudio.pumpSpeaker`, `PlayoutTrim` |
+| 6 | `AudioTrack`: `USAGE_VOICE_COMMUNICATION`, `CONTENT_TYPE_SPEECH`, `CHANNEL_OUT_MONO`, `ENCODING_PCM_16BIT`, 16 kHz, `MODE_STREAM`, buffer two 60 ms frames (or the platform minimum), starts playing at 40 ms | PCM16 mono | `WaCallAudio.trackAttributes`, `format`, `speakerBufferBytes`, `startThresholdFrames` |
 
 ## Platform state while a call runs
 
@@ -323,3 +325,74 @@ speaker for part. Then `journalctl -u wa-gateway | grep 'call audio'`: `sockets=
 was well; `closed after ...: nothing came from the app` followed by a second `attached` means the connection got stuck
 and the app recovered.
 
+## Latency: the peer is heard about half a second late (E5.8a follow-up 5)
+
+**What was wrong.** From the gateway's decoder to the phone's loudspeaker the peer's voice took about 500 to 650 ms on
+a good connection, and after any stall more than a second, for the rest of the call. Nothing was broken; every stage
+held audio it did not need:
+
+| Stage | Before | Now |
+|-------|--------|-----|
+| Gateway: 20 ms playout frames joined into 60 ms (`run_pcm_downlink`) | the first sample of a frame waited 40 ms for the last | sent on as 20 ms frames |
+| Gateway speaker queue (`AUDIO_QUEUE`, 8 x 60 ms) | full after a stall: the **oldest** 480 ms stayed, new frames were dropped | `FreshQueue`: 10 x 20 ms; when full the oldest go and the newest 40 ms stay |
+| Client speaker queue (`QUEUE_FRAMES`, 8 x 60 ms) | the same, 480 ms | `queue.rs`: cut to 40 ms when more than 120 ms waits, and when more than 40 ms stood for a whole second |
+| `audioPull` | 0 when nothing was ready, and the thread slept 10 ms (`IDLE_POLL_MS`) | waits for the frame (up to 20 ms) and hands it over at once |
+| `AudioTrack` buffer | at least 4 x 60 ms = 240 ms, and playback started only when it was full | 2 x 60 ms = 120 ms, playback starts at 40 ms (`setStartThresholdInFrames`) |
+| `AudioTrack` fill | whatever a burst left in it stayed (blocking writes) | `PlayoutTrim` drops the surplus over 40 ms once it stood for 2 s |
+
+**Why a stall made it worse for good ("ratchet").** The track plays exactly as fast as frames arrive. When the network
+holds frames back and then delivers them at once, the burst fills the track buffer, then the client queue, then the
+gateway queue, and from then on every queue stays as full as the burst left it: nothing ever reads faster than real
+time. Dropping the **newest** frame on a full queue (what all three queues did) kept exactly the wrong audio. A gateway
+clock that runs a little faster than the phone's does the same thing slowly. Now every queue drops its oldest audio,
+and the two on the phone also notice a queue that merely stands: the least that waited over a window (1 s in the Rust
+queue, 2 s in the track) was never needed, so the part of it above 40 ms is cut. Jitter is left alone: a fill that
+dips to the target within the window shows the buffer is in use.
+
+**The frame size on the wire, and old versions.** The microphone direction did not change (960 samples; MLOW fixes
+it). For the speaker the app asks: it opens `/v1/calls/<id>/audio?spk_ms=20` (`SpeakerFrames::Step`,
+`rovsti_wa_client::call_audio_with`, used by `wa.call_audio_open`).
+
+| App | Gateway | What happens |
+|-----|---------|--------------|
+| new | new | 640-byte messages, 20 ms each |
+| old (asks for nothing) | new | the gateway joins three slots into the 1 920-byte frames that app has always taken (`SpeakerFrames::Whole`) |
+| new | old (ignores the query) | 1 920-byte messages; the receiver takes 640, 1 280 and 1 920 (`decode_speaker_frame`), `audioPull` answers the length and Kotlin writes that many bytes (`WaCallAudio.playable`) |
+
+The GPUI Phone app (`apps/phone`) keeps asking for whole frames (`call_audio`): its Kotlin bridge takes exactly 960
+samples. Both versions keep every counter and the reopen/takeover behaviour of follow-up 4.
+
+**What was not done.** The socket is still a WebSocket over TCP through the tunnel (a lost packet delays everything
+behind it; UDP or QUIC would not), and the engine's own jitter buffer is untouched. Those are the two remaining large
+parts of the delay.
+
+**Measuring it on a real call.**
+
+- Gateway, `journalctl -u wa-gateway | grep 'call audio'`: the counters line has `queue_mean=..ms queue_max=..ms` (how
+  much waited in the speaker queue when a frame came: 0 while the connection moves, up to 200 ms during a stall),
+  `queue_drop` (20 ms slots dropped, oldest first), `app` and `app_ms` (frames and milliseconds sent to the app;
+  `app_ms / app` is 20 for a new app and 60 for an old one). `attached, 20 ms speaker frames` says what the socket's
+  app asked for.
+- Gateway, the app's own report every 10 s on the same socket (a text message; an older gateway ignores it):
+  `call audio <id> socket <n>: app: spk_q mean=..ms max=..ms cut=..ms frames=.. | mic_q ...`. `mean` and `max` are what
+  a new frame found waiting in the client queue, `cut` is old audio dropped to get back to the target, `frames` per
+  10 s is about 500 with 20 ms frames and about 166 with 60 ms ones. The app writes the same line to logcat
+  (`wa audio: ...`).
+- Phone, `adb logcat -s Rovsti | grep 'WA call audio'`, every 10 s:
+  `track_fill mean=..ms min=..ms max=..ms trimmed=..ms frames=.. frame=20ms underruns=.. buffer=120ms`. `track_fill` is
+  frames written minus `playbackHeadPosition` before each write: the delay the track alone adds. `trimmed` is what
+  `PlayoutTrim` dropped, `underruns` is `AudioTrack.underrunCount` (it grows when the track ran dry: gaps).
+
+Good: `track_fill mean` around 40 to 60 ms, `spk_q mean` 0 to 20 ms, `queue_mean` 0 ms, `underruns` growing slowly or
+not at all. After switching Wi-Fi to mobile data in the call, `cut`, `trimmed` or `queue_drop` rise once and the means
+come back within a few seconds. If `underruns` climbs steadily and the voice crackles, the 40 ms target is too tight
+for that connection (`WaCallAudio.TARGET_FILL_MS`, `queue::SPEAKER_LIMITS`).
+
+**Tests.** `rovsti_wa_proto::audio` (20 ms round trip, the receiver takes 20/40/60 ms, the query), `rovsti_wa_client`
+`queue` (oldest dropped, drain to the target, a standing queue, clock drift, the waiting read) and `audio`
+(`frames_of_20_ms_and_of_60_ms_both_reach_the_speaker`, a burst from the socket), `tests/call_audio.rs`
+(`a_client_that_asks_for_20_ms_frames_plays_20_ms_and_whole_frames`), `rovsti_ffi` `tests/wa_live.rs` (pull sizes
+against an old and a new gateway, the waiting pull), `wa_gateway` `call_audio` (`FreshQueue`, 20 ms frames passed on,
+a stalled socket keeps the newest audio, the counters line) and `calls`
+(`the_socket_sends_20_ms_frames_only_to_an_app_that_asked_for_them`), `tests/api.rs` (old and new app end to end),
+`android/platform` `WaCallPlayoutTest` (buffer size, start threshold, frame sizes, fill, trim, the log line).

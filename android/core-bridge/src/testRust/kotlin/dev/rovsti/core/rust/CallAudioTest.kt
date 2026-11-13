@@ -42,6 +42,7 @@ class CallAudioTest {
 
     private fun frame(seed: Int) = ByteArray(CallAudio.FRAME_BYTES) { (seed * 31 + it * 7).toByte() }
 
+    /** Pulls until [count] frames came (the pull itself waits for a frame); the loopback gateway sends whole frames. */
     private fun pullUntil(
         audio: CallAudio,
         count: Int,
@@ -52,7 +53,7 @@ class CallAudioTest {
         while (got.size < count && System.nanoTime() < until) {
             when (val n = audio.pull(out)) {
                 CallAudio.FRAME_BYTES -> got += out.copyOf()
-                CallAudio.NO_FRAME -> Thread.sleep(5)
+                CallAudio.NO_FRAME -> Unit
                 else -> error("pull answered $n")
             }
         }
@@ -63,16 +64,20 @@ class CallAudioTest {
     fun framesPushedComeBackIdenticalAndInOrder() {
         val (wa, audio) = open()
         try {
-            assertEquals("/v1/calls/call1/audio", fake.seen.single().path)
+            // The app asks the gateway for 20 ms speaker frames; this loopback one, like a gateway from before
+            // them, sends back whole frames, and the pull hands those out too.
+            assertEquals("/v1/calls/call1/audio?spk_ms=20", fake.seen.single().path)
             // Anything but a whole frame is dropped by Rust.
             audio.push(ByteArray(10))
             audio.push(ByteArray(CallAudio.FRAME_BYTES + 1))
+            // One frame at a time, like the two audio threads: the speaker queue keeps only the newest audio when
+            // frames come faster than they are taken.
             val sent = (1..8).map { frame(it) }
-            for (pcm in sent) {
-                audio.push(pcm)
-                Thread.sleep(5)
-            }
-            val got = pullUntil(audio, sent.size)
+            val got =
+                sent.flatMap { pcm ->
+                    audio.push(pcm)
+                    pullUntil(audio, 1)
+                }
             assertEquals(sent.size, got.size)
             sent.zip(got).forEach { (a, b) -> assertArrayEquals(a, b) }
             // Nothing else is queued, and a buffer smaller than a frame consumes nothing.

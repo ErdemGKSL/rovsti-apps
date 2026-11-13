@@ -133,7 +133,7 @@ class WaIncomingTest {
         assertEquals(WaCallAudio.FRAME_SAMPLES * 2, CallAudio.FRAME_BYTES)
     }
 
-    @Test fun speakerBufferHoldsAtLeastFourFrames() {
+    @Test fun microphoneBufferHoldsAtLeastFourFrames() {
         assertEquals(WaCallAudio.FRAME_BYTES * 4, WaCallAudio.bufferBytes(100))
         assertEquals(50_000, WaCallAudio.bufferBytes(50_000))
     }

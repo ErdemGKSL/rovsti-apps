@@ -50,7 +50,8 @@ object RustNative {
 
     /**
      * One microphone frame for the `wa.call_audio_open` handle [call]: exactly 1 920 bytes (960 little-endian 16-bit
-     * samples, 60 ms at 16 kHz, mono). Any other size is dropped with a debug log. Use `CallAudio` instead.
+     * samples, 60 ms at 16 kHz, mono). Any other size is dropped with a debug log; when the socket is behind, the
+     * oldest queued frames are dropped, not this one. Use `CallAudio` instead.
      */
     external fun audioPush(
         call: Long,
@@ -58,8 +59,9 @@ object RustNative {
     )
 
     /**
-     * Fills [out] (at least 1 920 bytes) with the next frame of the peer's voice and answers 1 920, `0` when no frame
-     * is ready yet, or `-1` when the call ended or the handle is gone.
+     * Fills [out] (at least 1 920 bytes) with the next frame of the peer's voice, waiting up to 20 ms for it, and
+     * answers its length: 640 bytes (20 ms) from a gateway that sends 20 ms frames, 1 920 (60 ms) from an older one
+     * (1 280 is valid too). `0` when no frame came, `-1` when the call ended or the handle is gone.
      */
     external fun audioPull(
         call: Long,

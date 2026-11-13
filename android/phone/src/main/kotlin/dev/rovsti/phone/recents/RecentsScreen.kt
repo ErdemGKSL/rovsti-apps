@@ -84,6 +84,7 @@ import dev.rovsti.design.overlay.showUndo
 import dev.rovsti.design.press.rowPress
 import dev.rovsti.design.text.SearchField
 import dev.rovsti.design.text.rememberSearchFocusHandoff
+import dev.rovsti.design.text.rtlSafe
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -95,6 +96,7 @@ import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RecentsMetrics
 import dev.rovsti.phone.RootLinks
+import dev.rovsti.phone.playRefusalHaptic
 import dev.rovsti.phone.remind.RemindStrings
 import dev.rovsti.phone.remind.RemindTime
 import dev.rovsti.phone.remind.menuAnchor
@@ -459,7 +461,7 @@ private fun RowBody(
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RovstiText(
-                    row.title,
+                    row.title.rtlSafe(),
                     modifier = Modifier.weight(1f, fill = false),
                     style = type.body,
                     color = if (row.missed) colors.destructive else colors.labelPrimary,
@@ -491,7 +493,7 @@ private fun RowBody(
                     size = Sizes.sourceGlyph,
                 )
                 RovstiText(
-                    listOfNotNull(row.subtitle.ifBlank { null }, row.country).joinToString(" · "),
+                    listOfNotNull(row.subtitle.ifBlank { null }, row.country).joinToString(" · ").rtlSafe(),
                     modifier = Modifier.padding(start = Spacing.xs),
                     style = type.subheadline,
                     color = colors.labelSecondary,
@@ -708,7 +710,7 @@ fun RecentsEffects(
                 }
 
                 is RecentsEffect.Core -> {
-                    haptics.confirm()
+                    playRefusalHaptic(haptics)
                     overlays.showToast(strings.refused(effect.refusal))
                 }
 

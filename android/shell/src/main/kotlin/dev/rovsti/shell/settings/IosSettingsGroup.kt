@@ -5,6 +5,7 @@
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/component/IosSettingsGroup.kt
  * Changes for Rovsti: package dev.rovsti.shell.settings and imports (our shapes, IosTheme tokens and IosText/IosChevron/IosBadge
  * from :design). The group itself is as written; the numeric dp literals are named in SettingsMetrics (ConventionTest bans raw dp in :shell).
+ * Rovsti change (F35): a row with trailing content uses :design's StackingTrailingRow, which puts the action under the text at large fonts.
  */
 
 package dev.rovsti.shell.settings
@@ -44,6 +45,7 @@ import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.LocalIosContentColor
 import dev.rovsti.design.ios.foundation.LocalIosTextStyle
 import dev.rovsti.design.ios.foundation.iosRowPress
+import dev.rovsti.design.list.StackingTrailingRow
 import dev.rovsti.design.shapes.ContinuousRoundedRectangle
 
 /**
@@ -110,29 +112,23 @@ fun IosSettingsGroup(
 private fun IosSettingsItemRow(item: IosSettingsItem) {
     val colors = IosTheme.colors
     val contentColor = if (item.enabled) colors.label else colors.tertiaryLabel
+    val rowModifier =
+        Modifier
+            .fillMaxWidth()
+            .iosRowPress(
+                enabled = item.enabled,
+                onClick = item.onClick?.let { click -> { click() } },
+            ).padding(horizontal = SettingsMetrics.S16, vertical = SettingsMetrics.S12)
+    val minHeight = maxOf(IosMetrics.ListRowHeight, SettingsMetrics.S56)
 
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .iosRowPress(
-                    enabled = item.enabled,
-                    onClick = item.onClick?.let { click -> { click() } },
-                ).defaultMinSize(minHeight = maxOf(IosMetrics.ListRowHeight, SettingsMetrics.S56))
-                .padding(horizontal = SettingsMetrics.S16, vertical = SettingsMetrics.S12),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (item.leadingContent != null) {
-            item.leadingContent.invoke()
-            Spacer(Modifier.width(SettingsMetrics.S12))
-        } else {
-            item.icon?.let { icon ->
-                IosSettingsIconTile(icon, item)
-                Spacer(Modifier.width(SettingsMetrics.S12))
-            }
+    val leading: (@Composable () -> Unit)? =
+        when {
+            item.leadingContent != null -> item.leadingContent
+            item.icon != null -> ({ IosSettingsIconTile(item.icon, item) })
+            else -> null
         }
-
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SettingsMetrics.S2)) {
+    val textColumn: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(SettingsMetrics.S2)) {
             CompositionLocalProvider(
                 LocalIosTextStyle provides IosTheme.typography.body,
                 LocalIosContentColor provides contentColor,
@@ -146,14 +142,37 @@ private fun IosSettingsItemRow(item: IosSettingsItem) {
                 ) { description() }
             }
         }
+    }
 
-        if (item.trailingContent != null) {
+    if (item.trailingContent != null) {
+        // F35: the trailing action drops under the text at large font sizes or when it would squeeze the text.
+        StackingTrailingRow(
+            text = textColumn,
+            trailing = {
+                CompositionLocalProvider(
+                    LocalIosTextStyle provides IosTheme.typography.body,
+                    LocalIosContentColor provides colors.secondaryLabel,
+                ) { item.trailingContent.invoke() }
+            },
+            modifier = rowModifier.defaultMinSize(minHeight = minHeight),
+            leading = leading,
+            leadingGap = SettingsMetrics.S12,
+            trailingGap = SettingsMetrics.S12,
+            stackGap = SettingsMetrics.S2,
+        )
+        return
+    }
+
+    Row(
+        modifier = rowModifier.defaultMinSize(minHeight = minHeight),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leading != null) {
+            leading()
             Spacer(Modifier.width(SettingsMetrics.S12))
-            CompositionLocalProvider(
-                LocalIosTextStyle provides IosTheme.typography.body,
-                LocalIosContentColor provides colors.secondaryLabel,
-            ) { item.trailingContent.invoke() }
-        } else if (item.onClick != null) {
+        }
+        Box(Modifier.weight(1f)) { textColumn() }
+        if (item.onClick != null) {
             // A row that goes somewhere gets a chevron; one that just toggles does not.
             Spacer(Modifier.width(SettingsMetrics.S8))
             IosChevron()

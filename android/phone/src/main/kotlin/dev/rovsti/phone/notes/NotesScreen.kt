@@ -46,6 +46,7 @@ import dev.rovsti.design.overlay.showUndo
 import dev.rovsti.design.text.SearchField
 import dev.rovsti.design.text.SearchFocusHandoff
 import dev.rovsti.design.text.rememberSearchFocusHandoff
+import dev.rovsti.design.text.rtlSafe
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.NotesMetrics
@@ -211,8 +212,8 @@ private fun RowBody(
     Column(Modifier.fillMaxWidth().background(IosTheme.colors.secondarySystemGroupedBackground)) {
         if (separated) RowSeparator(inset = TextStartWithLeading)
         ListRow(
-            title = row.title,
-            secondary = row.subtitle,
+            title = row.title.rtlSafe(),
+            secondary = row.subtitle?.rtlSafe(),
             secondaryMaxLines = 2,
             leading = { Avatar(row.name ?: row.title, size = NotesMetrics.Avatar, colorKey = row.number) },
             onClick = onClick,

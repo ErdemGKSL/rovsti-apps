@@ -78,6 +78,7 @@ import dev.rovsti.phone.KeypadMetrics
 import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RootLinks
+import dev.rovsti.phone.playRefusalHaptic
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import java.util.concurrent.atomic.AtomicInteger
@@ -148,6 +149,7 @@ fun KeypadScreen(
                 }
 
                 is KeypadEffect.Core -> {
+                    playRefusalHaptic(haptics)
                     overlays.showToast(strings.refused(effect.refusal))
                 }
 

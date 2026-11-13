@@ -9,11 +9,13 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.iosColorsFrom
+import dev.rovsti.design.text.ltrStyleFor
 import dev.rovsti.design.text.rovstiSelectionColors
 
 val LocalRovstiColors = staticCompositionLocalOf { LightColors }
@@ -70,7 +72,9 @@ fun RovstiText(
     BasicText(
         text = text,
         modifier = modifier,
-        style = style.merge(TextStyle(color = color, textAlign = textAlign ?: TextAlign.Unspecified)),
+        style =
+            ltrStyleFor(style, text, LocalLayoutDirection.current)
+                .merge(TextStyle(color = color, textAlign = textAlign ?: TextAlign.Unspecified)),
         maxLines = maxLines,
         overflow = overflow,
     )

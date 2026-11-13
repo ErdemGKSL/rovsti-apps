@@ -73,6 +73,7 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.SheetState
 import dev.rovsti.design.overlay.sheetScrollConnection
+import dev.rovsti.design.text.rtlSafe
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
@@ -466,7 +467,7 @@ private fun PeopleGroup(
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
-                    description = { IosText(person.summary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    description = { IosText(person.summary.rtlSafe(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     onClick = { onAction(StatsAction.OpenPerson(person.key)) },
                 )
             },
@@ -491,7 +492,7 @@ private fun RecordsGroup(state: StatsUi) {
                         Modifier.testTag(StatsTags.Busiest),
                     )
                 },
-                description = { IosText("${busiest.title} · ${busiest.detail}") },
+                description = { IosText("${busiest.title} · ${busiest.detail}".rtlSafe()) },
             )
     }
     if (longest != null) {
@@ -499,7 +500,7 @@ private fun RecordsGroup(state: StatsUi) {
             IosSettingsItem(
                 icon = rememberVectorPainter(RovstiIcons.Phone),
                 title = { IosText(stringResource(R.string.stats_record_longest), Modifier.testTag(StatsTags.Longest)) },
-                description = { IosText("${longest.title} · ${longest.detail}") },
+                description = { IosText("${longest.title} · ${longest.detail}".rtlSafe()) },
             )
     }
     IosSettingsGroup(title = stringResource(R.string.stats_records), items = items)
@@ -567,7 +568,7 @@ internal fun BucketSheetContent(
                 overflow = TextOverflow.Ellipsis,
             )
             RovstiText(
-                bucket.summary,
+                bucket.summary.rtlSafe(),
                 style = RovstiTheme.type.footnote,
                 color = colors.labelSecondary,
                 textAlign = TextAlign.Center,
@@ -580,7 +581,7 @@ internal fun BucketSheetContent(
                     val missed = line.dir == StatDir.Missed
                     ListRow(
                         title = line.title,
-                        secondary = line.detail,
+                        secondary = line.detail?.rtlSafe(),
                         modifier = Modifier.testTag(StatsTags.line(index)),
                         titleColor = if (missed) colors.destructive else androidx.compose.ui.graphics.Color.Unspecified,
                         leading = {

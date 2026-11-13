@@ -61,6 +61,7 @@ import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RecentsMetrics
 import dev.rovsti.phone.RootLinks
+import dev.rovsti.phone.playRefusalHaptic
 import dev.rovsti.phone.rootToolbar
 import dev.rovsti.phone.setup.SetupUiState
 import kotlinx.collections.immutable.ImmutableList
@@ -514,6 +515,7 @@ fun FavoritesEffects(model: FavoritesViewModel) {
                 }
 
                 is FavoritesEffect.Core -> {
+                    playRefusalHaptic(haptics)
                     overlays.showToast(resources.getString(effect.refusal.text))
                 }
 

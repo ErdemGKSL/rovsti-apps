@@ -1,5 +1,7 @@
 package dev.rovsti.phone
 
+import dev.rovsti.design.haptics.HapticEvent
+import dev.rovsti.design.haptics.RovstiHaptics
 import dev.rovsti.phone.keypad.Notice
 import dev.rovsti.phone.keypad.isSuccess
 import dev.rovsti.phone.recents.RecentsNotice
@@ -28,5 +30,19 @@ class PillFeedbackTest {
         assertFalse("already complete when the app opened", SetupMoment.shouldPlay(previous = null, complete = true))
         assertFalse(SetupMoment.shouldPlay(previous = true, complete = true))
         assertFalse(SetupMoment.shouldPlay(previous = false, complete = false))
+    }
+
+    @Test fun aCoreRefusalPlaysRejectNeverConfirm() {
+        val played = mutableListOf<HapticEvent>()
+        val haptics =
+            object : RovstiHaptics {
+                override fun play(event: HapticEvent) {
+                    played += event
+                }
+            }
+        // Recents, PersonSheet, Keypad and Favorites all route their *Effect.Core through this one function.
+        repeat(4) { playRefusalHaptic(haptics) }
+        assertEquals(List(4) { HapticEvent.Reject }, played)
+        assertFalse(played.contains(HapticEvent.Confirm))
     }
 }

@@ -80,7 +80,8 @@ class ListRowSemanticsTest : ShotTest() {
         composeFrame(fontScale = 2f, content = content)
         val oneLineBig = compose.onNodeWithTag("one-line").getUnclippedBoundsInRoot().let { it.bottom - it.top }
         val twoLineBig = compose.onNodeWithTag("two-line").getUnclippedBoundsInRoot().let { it.bottom - it.top }
-        assertTrue("one line grows: $oneLine -> $oneLineBig", oneLineBig > oneLine)
+        // A one-line row stays at its 56 dp minimum while its text still fits in it (34 dp + padding at 2x).
+        assertTrue("one line never shrinks: $oneLine -> $oneLineBig", oneLineBig >= oneLine)
         assertTrue("two lines grow: $twoLine -> $twoLineBig", twoLineBig > twoLine)
     }
 }

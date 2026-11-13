@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.LocalIosTextStyle
+import dev.rovsti.design.text.ltrStyleFor
 
 /**
  * SwiftUI's `Text`. Inherits the ambient font and foreground style, so
@@ -45,7 +47,9 @@ fun IosText(
     BasicText(
         text = text,
         modifier = modifier,
-        style = style.merge(color = resolved, textAlign = textAlign ?: TextAlign.Unspecified),
+        style =
+            ltrStyleFor(style, text, LocalLayoutDirection.current)
+                .merge(color = resolved, textAlign = textAlign ?: TextAlign.Unspecified),
         maxLines = maxLines,
         overflow = overflow,
     )

@@ -1065,6 +1065,8 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 
 ## E5. Phone (`:phone`)
 
+**Status: DONE (R2)** (round 15 step 4; no MISSING row in `docs/kotlin-ui/checklist-e5.md`).
+
 Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56, `phone.md`), then polish.
 
 **R1** -> `_bmad-output/kotlin-ui/plans/round-12.md` (planned 2026-11-09 at base `c34b155`; E4 R2 re-verified done in
@@ -1156,12 +1158,12 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
 > `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
 > (definition of done item 6).
 | E5.7b | In-call: multi-call, Add call, conference | R2 | done (round-13 step 8) |
-| E5.9 | Settings | R2 | in-progress (round 15 step 1: E5.9a Settings root + Blocked numbers recovered from `stash@{2}`, F37 shared end padding `settingsPageEndPadding()`; E5.9b Quick replies, Speed dial, SIM choices, Data, Backup next, `stash@{1}`) |
+| E5.9 | Settings | R2 | done (round 15 steps 1-2: E5.9a Settings root + Blocked, E5.9b Quick replies, Speed dial, SIM, Data, Backup; F37) |
 | E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
 | E5.11 | Notes page | R2 | done (round 15 step 3: `phone/.../notes/NotesViewModel` + `NotesScreen` recovered from `stash@{0}`; row in Settings (Calls group) opens `PhoneRoute.Notes`; a row opens Call details with `SearchFocusHandoff`; swipe delete + undo pill; unnamed rows are titled by `NumberDisplay` (F38) and named by the F29 resolver; core `call_notes.rows` takes the phone `locale`; tests `NotesViewModelTest`, `NotesScreenTest`, `E511ShotTest`) |
 | E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
 | E5.13 | Photo viewer and photo edit | R2 | done (round 14 step 7) |
-| E5.14 | Polish | R2 | done for what is in HEAD (round 14 step 8: U23 audit table in `checklist-e5.md`, success pills paired with Confirm, theme melt `ThemeMelt`, setup-complete moment, `KeypadRecompositionTest`, `RecentsScrollRecompositionTest`, `LargeTitleScaffold` plain height holder + `TabBarCellsTest` case, `e5.14-*` goldens). **E5 stays open:** E5.9 and E5.11 are not in HEAD (work in `stash@{2}`, `stash@{1}`, `stash@{0}`); a recovery step must come first. Round 15 steps 1-4 recover E5.9/E5.11, fix F31, F35 (2x-font row stacking, `e5.14-settings-fs2`), F36 (RTL bidi of numbers/durations, `e5.14-stats-rtl`) and close E5 |
+| E5.14 | Polish | R2 | done (round 14 step 8 + round 15 step 4: F31, F35, F36, E5 closed) |
 
 ### E5.1 App module
 - AC1 `dev.rovsti.phone`, arm64-v8a release, every component FQCN of the GPUI manifest (`MainActivity` with DIAL/VIEW
@@ -1383,6 +1385,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   to `:design` `media/crop` (`CropFrame`, `CropSession`), shared by both apps.
 
 ### E5.14 Polish
+- **Status: done** (round 15 step 4: F31 reject haptic, F35 `ListRow` stacks the trailing action at font scale >= 1.5 or when the text gets under half the row (`ListRowStackingTest`, `e5.14-settings-fs2`), F36 `text/LtrIsolate.kt` + `rtlSafe()` (`LtrIsolateTest`, `e5.14-stats-rtl`, `e5.14-settings-rtl`), checklist A-H for Settings and Notes, `phone.png` regenerated). **E5 is DONE (R2).**
 - AC1 Every utility has a pill and a haptic (U23 audit table in the story notes); checklist pass; recomposition tests for
   keypad typing and Recents scroll; contact sheet `docs/kotlin-ui/screenshots/phone.png`.
 
@@ -1455,7 +1458,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   **(F30, done in 90f0288)** Rust core error texts reach the UI in English: `PlaceResult.Invalid(reason)` and `Core(text)` toasts (e.g.
   "nothing to dial", `crates/rovsti_core/src/dial.rs:22`; shown in `KeypadScreen`, `PersonSheet`, `RecentsScreen`,
   `FavoritesScreen`). Return error codes from the core and word them in Kotlin resources (en + tr).
-  **(F31, open, verified 2026-11-13 at `RecentsScreen.kt:710`, `PersonSheet.kt:526`; round 15 step 4)** Failure effects play the success haptic: `haptics.confirm()` on `PersonEffect.Core`/`RecentsEffect.Core`
+  **(F31, done in round 15 step 4: `playRefusalHaptic` -> `reject()` on the four `*Effect.Core`, `PillFeedbackTest`)** Failure effects play the success haptic: `haptics.confirm()` on `PersonEffect.Core`/`RecentsEffect.Core`
   (they carry failures such as an invalid number); use `reject()` or none.
   **(F32, done in b5507c4)** Notification channel names/descriptions are hard-coded English (`platform/.../notify/PlatformChannels.kt`,
   Stops `BridgeTripComponents.kt`, `TripAlarm.kt`); move to string resources with tr.

@@ -62,6 +62,7 @@ import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.DetailsMetrics
 import dev.rovsti.phone.details.photo.PersonPhotoAvatar
+import dev.rovsti.phone.playRefusalHaptic
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -524,7 +525,7 @@ fun PersonEffects(
                 }
 
                 is PersonEffect.Core -> {
-                    haptics.confirm()
+                    playRefusalHaptic(haptics)
                     overlays.showToast(strings.refused(effect.refusal))
                 }
 

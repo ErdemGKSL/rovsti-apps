@@ -6,17 +6,18 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
@@ -99,7 +100,7 @@ fun ListRow(
                 }
             }
         }
-    Row(
+    Box(
         modifier
             .fillMaxWidth()
             .heightIn(min = if (secondary != null) Sizes.rowMinTwoLine else Sizes.rowMin)
@@ -128,44 +129,109 @@ fun ListRow(
                     bottom = Spacing.s,
                 ),
             ),
-        verticalAlignment = Alignment.CenterVertically,
+        propagateMinConstraints = true,
     ) {
-        if (leading != null) {
-            Box(Modifier.width(LeadingSlotWidth), contentAlignment = Alignment.Center) { leading() }
-            Box(Modifier.width(Spacing.m))
-        }
-        Column(Modifier.weight(1f)) {
-            RovstiText(
-                title,
-                style = type.body,
-                color = titleColor.takeIf { it != Color.Unspecified } ?: colors.labelPrimary,
-                maxLines = titleMaxLines,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (secondary != null) {
-                RovstiText(
-                    secondary,
-                    modifier = Modifier.padding(top = Spacing.textGap),
-                    style = type.subheadline,
-                    color = colors.labelSecondary,
-                    maxLines = secondaryMaxLines,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        // Four slots in a custom layout: the trailing action sits beside the text, or under it when the text would be
+        // squeezed (large font, long title, wide action), as iOS stacks accessories at accessibility sizes.
+        val density = LocalDensity.current
+        val fontScale = density.fontScale
+        val gap = with(density) { Spacing.m.roundToPx() }
+        val trailGap = with(density) { Spacing.s.roundToPx() }
+        val textGap = with(density) { Spacing.textGap.roundToPx() }
+        val leadWidth = with(density) { LeadingSlotWidth.roundToPx() }
+        Layout(
+            modifier = Modifier.fillMaxWidth(),
+            content = {
+                Box(Modifier.layoutId(RowSlot.Leading), contentAlignment = Alignment.Center) { leading?.invoke() }
+                Column(Modifier.layoutId(RowSlot.Text)) {
+                    RovstiText(
+                        title,
+                        style = type.body,
+                        color = titleColor.takeIf { it != Color.Unspecified } ?: colors.labelPrimary,
+                        maxLines = titleMaxLines,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (secondary != null) {
+                        RovstiText(
+                            secondary,
+                            modifier = Modifier.padding(top = Spacing.textGap),
+                            style = type.subheadline,
+                            color = colors.labelSecondary,
+                            maxLines = secondaryMaxLines,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Box(Modifier.layoutId(RowSlot.Meta)) {
+                    if (meta != null) {
+                        RovstiText(meta, style = type.footnote, color = colors.labelSecondary, maxLines = 1)
+                    }
+                }
+                Box(Modifier.layoutId(RowSlot.Trailing)) { trailing?.invoke() }
+            },
+        ) { measurables, constraints ->
+            val width = constraints.maxWidth
+
+            fun find(slot: RowSlot) = measurables.first { it.layoutId == slot }
+            val loose = constraints.copy(minWidth = 0, minHeight = 0)
+            val lead = if (leading != null) find(RowSlot.Leading).measure(loose.copy(maxWidth = leadWidth)) else null
+            val leadSpace = if (lead != null) leadWidth + gap else 0
+            val metaP = if (meta != null) find(RowSlot.Meta).measure(loose) else null
+            val metaSpace = if (metaP != null) metaP.width + gap else 0
+            val trailP = if (trailing != null) find(RowSlot.Trailing).measure(loose) else null
+            val trailSpace = if (trailP != null) trailP.width + trailGap else 0
+            val stack =
+                trailP != null &&
+                    RowStacking.shouldStack(
+                        fontScale = fontScale,
+                        rowWidth = width - leadSpace,
+                        trailingWidth = trailSpace + metaSpace,
+                    )
+            val textMax = (width - leadSpace - metaSpace - if (stack) 0 else trailSpace).coerceAtLeast(0)
+            val textP = find(RowSlot.Text).measure(loose.copy(maxWidth = textMax))
+            val stackedTrailH = if (stack && trailP != null) textGap + trailP.height else 0
+            val besideTrailH = if (!stack && trailP != null) trailP.height else 0
+            val contentH = maxOf(lead?.height ?: 0, textP.height + stackedTrailH, metaP?.height ?: 0, besideTrailH)
+            val height = maxOf(contentH, constraints.minHeight)
+            layout(width, height) {
+                fun mid(h: Int) = Alignment.CenterVertically.align(h, height)
+                lead?.placeRelative(0, mid(lead.height))
+                if (stack) {
+                    val top = mid(textP.height + stackedTrailH)
+                    textP.placeRelative(leadSpace, top)
+                    trailP?.placeRelative(leadSpace, top + textP.height + textGap)
+                    metaP?.placeRelative(width - metaP.width, top)
+                } else {
+                    textP.placeRelative(leadSpace, mid(textP.height))
+                    var x = width
+                    if (trailP != null) {
+                        x -= trailP.width
+                        trailP.placeRelative(x, mid(trailP.height))
+                        x -= trailGap
+                    }
+                    if (metaP != null) {
+                        x -= metaP.width
+                        metaP.placeRelative(x, mid(metaP.height))
+                    }
+                }
             }
         }
-        if (meta != null) {
-            RovstiText(
-                meta,
-                modifier = Modifier.padding(start = Spacing.m),
-                style = type.footnote,
-                color = colors.labelSecondary,
-                maxLines = 1,
-            )
-        }
-        if (trailing != null) {
-            Box(Modifier.padding(start = Spacing.s)) { trailing() }
-        }
     }
+}
+
+private enum class RowSlot { Leading, Text, Meta, Trailing }
+
+/** When a row's trailing action drops under the text (F35). Pure, so a unit test pins the rule. */
+object RowStacking {
+    /** At this font scale (accessibility sizes) the trailing action always goes under the text. */
+    const val STACK_FONT_SCALE: Float = 1.5f
+
+    /** Stack when the font is large, or the text column beside the action would get under half of [rowWidth]. */
+    fun shouldStack(
+        fontScale: Float,
+        rowWidth: Int,
+        trailingWidth: Int,
+    ): Boolean = fontScale >= STACK_FONT_SCALE || rowWidth - trailingWidth < rowWidth / 2
 }
 
 /** The disclosure chevron at the end of a row that opens something. Decorative. */

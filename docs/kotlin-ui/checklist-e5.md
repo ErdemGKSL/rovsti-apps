@@ -102,7 +102,7 @@ removed, an Undo pill) is paired with `HapticEvent.Confirm` in the screen's effe
 (design system); drags that cross a line play `Tick` / `ThresholdTick`. Fixed in this step: success pills had no haptic in
 Recents, Keypad, the Person and Call details sheets, Favorites and the three Undo pills (`RecentsScreen`, `KeypadScreen`,
 `PersonSheet`, `CallDetailsSheet`, `FavoritesScreen`). Status `in HEAD` = verified in `android/phone/src/main`;
-`MISSING` = not in HEAD (see "Not closed" below).
+No row is MISSING any more (see "E5 closed" below).
 
 | U | Utility | Pill (string key) | Haptic | Status |
 |---|---|---|---|---|
@@ -169,19 +169,33 @@ applies at once, a sheet of the old page colour fades over 360 ms in one draw-ph
 done while the app is open gives Confirm and the "You're all set" pill; silent when already complete at launch;
 `PillFeedbackTest`).
 
-## Not closed: E5.9 Settings and E5.11 Notes are not in HEAD
+## E5 closed (round 15 step 4): recovery evidence
 
-`git log` and `android/phone/src/main` show no `settings/` (Blocked, Quick replies, Speed dial, SIM, Data, Backup) and no
-`notes/` package. Their work was stashed as "blocked": `stash@{2}` (r14-s2, E5.9 Blocked + `BlockPrefixes`), `stash@{1}` (r14-s3,
-E5.9 rest, 4600 lines) and `stash@{0}` (r14-s5, E5.11 Notes, untracked files). Every MISSING row above belongs to one of them.
-`stash@{0}` is NOT safe to drop (`notes/*` exist nowhere in HEAD). Recovery needs its own step before E5 can be closed.
+E5.9 Settings (root, Blocked numbers, Quick replies, Speed dial, SIM, Data, Backup) and E5.11 Notes were recovered into HEAD in
+round 15 steps 1-3 (commits 3ad1c3b, 5857821, 8e9b12b) from `stash@{2}`, `stash@{1}` and `stash@{0}`. Step 4 closes the
+three open findings: F31 (a refusal from the core plays `HapticEvent.Reject` through `playRefusalHaptic` in Recents,
+PersonSheet, Keypad and Favorites; `PillFeedbackTest`), F35 (the `:design` `ListRow` puts the trailing action under the
+text at font scale >= 1.5 or when the text column would get under half of the row; `ListRowStackingTest`) and F36
+(`:design` `text/LtrIsolate.kt`; `RovstiText`/`IosText` give plain text an LTR paragraph in an RTL layout, rows isolate numbers
+with `rtlSafe()`; `LtrIsolateTest`). Evidence: `e5.14-settings-fs2`, `e5.14-settings-rtl`, `e5.14-stats-rtl`, `e5.9-*`, `e5.11-*`.
+
+## Checklist A-H for the Settings and Notes pages (E5.9, E5.11)
+
+- A licence: pass, original GPL-3.0-or-later code, nothing ported.
+- B layout: pass, `e5.9-*` and `e5.11-*` show nothing under the floating bar; every pushed page has the glass back button.
+- C overlays: pass, menus, confirmations and pills are overlay entries; Undo pills for delete/unblock.
+- D motion: pass, shared row press, no animated resize.
+- E input: pass, the quick-reply and note fields use `imeOverlapPadding`.
+- F accessibility: pass, rows are one merged node with custom actions; trailing action reachable at 2x font.
+- G platform: pass, no Rust before `Rust.init`; no new class reached by name.
+- H tests: `BlockedViewModelTest`, `BackupViewModelTest`, `NotesViewModelTest`, `NotesScreenTest`, `PillFeedbackTest`,
+  `ListRowStackingTest`, `LtrIsolateTest`, `SettingsEndPaddingTest`.
 
 ## Checklist A-H for the R2 part 2 screens present in HEAD (Statistics, setup flows, reminders, photo viewer)
 
 - A licence: pass, new files are original GPL-3.0-or-later; nothing ported this step.
-- B layout: pass, `e5.10-*`, `e5.13-*` show nothing under the floating bar at rest and at the end of the list. Deviation
-  (observed in `e5.14-settings-fs2`): at 2x font the Setup rows give the trailing action ("Set as default") its natural width
-  and the title wraps to three lines; nothing is clipped. A stacked row layout at large fonts is a follow-up in `:design` list rows.
+- B layout: pass, `e5.10-*`, `e5.13-*` show nothing under the floating bar at rest and at the end of the list. Fixed in
+  step 4 (F35): at 2x font the trailing action ("Set as default") sits under the title and subtitle, which get the full width.
 - C overlays: pass, bucket sheet, remind menu, photo edit menu are overlay entries; no page change.
 - D motion: pass, bars on a staggered spring (none under reduce motion), theme melt is a draw-only fade.
 - E input: pass, no new text field.
@@ -190,5 +204,4 @@ E5.9 rest, 4600 lines) and `stash@{0}` (r14-s5, E5.11 Notes, untracked files). E
 - H tests: `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`, `E514ShotTest`, `KeypadRecompositionTest`,
   `RecentsScrollRecompositionTest`, `PillFeedbackTest`, `ThemeMeltTest`, `TabBarCellsTest` (LargeTitleScaffold case).
 - RTL: `e5.14-settings-rtl`, `e5.14-stats-rtl` mirror correctly (back chevron and title at the right, row chevrons at the left,
-  tab order reversed). The English strings reorder digits inside the mirrored line ("of 5 2"): the app ships only en and tr,
-  so this is a harness artefact of English text in an RTL base direction, not a layout bug.
+  tab order reversed). Numbers and durations keep their glyph order ("+49 30 123456", "1 h 52 min"): F36 fixed in step 4.

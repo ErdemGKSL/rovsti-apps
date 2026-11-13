@@ -52,6 +52,7 @@ import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
 import dev.rovsti.design.text.GlassTextField
 import dev.rovsti.design.text.imeOverlapPadding
+import dev.rovsti.design.text.rtlSafe
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
@@ -259,8 +260,8 @@ private fun UnblockRow(
         }
     SwipeRow(trailing = swipe, rowKey = item.key, modifier = Modifier.testTag(BlockedTags.row(item.key))) {
         ListRow(
-            title = item.title,
-            secondary = item.subtitle,
+            title = item.title.rtlSafe(),
+            secondary = item.subtitle?.rtlSafe(),
             actions = remember(item.key, unblock) { persistentListOf(CustomAction(unblock, remove)) },
         )
     }
@@ -279,8 +280,8 @@ private fun CallRow(
         }
     val line = listOfNotNull(reason, call.whenText.takeIf { it.isNotBlank() }).joinToString(CALL_SEPARATOR)
     ListRow(
-        title = call.title,
-        secondary = line.ifBlank { null },
+        title = call.title.rtlSafe(),
+        secondary = line.ifBlank { null }?.rtlSafe(),
         onClick = { onAction(BlockedAction.OpenCall(call.key)) },
         modifier = Modifier.testTag(BlockedTags.call(call.key)),
     )

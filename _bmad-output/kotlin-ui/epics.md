@@ -1152,7 +1152,7 @@ E5.13; Step 8 E5.14, close E5, full gate, APKs. X.1 and X.2 are round 15, before
 | E5.10 | Statistics | R2 | done (round 14 step 4: `phone/.../stats/StatsViewModel` + `StatsScreen` over `call_stats.overview/bucket`; bars on a staggered 0.8/300 spring, none under reduce motion; U46 bucket sheet, U52 records, U28 CSV, U40 share; reached from Settings, row "Call statistics"; tests `StatsViewModelTest`, `StatsScreenTest`, `E510ShotTest`) |
 | E5.11 | Notes page | R2 | todo (round 14 step 5) |
 | E5.12 | Reminders, notifications, setup flows | R2 | done (round 14 step 6: remind-later `ButtonMenuEntry` menu + Pick a time, exact/inexact `CallReminders` + `BootReceiver`, `MissedCallNotifications` with Call back / Message / Remind me and a grouped digest, Setup section in Settings, exact-alarm row; tests `CallReminderTest`, `MissedCallNotificationTest`, `SetupFlowViewModelTest`, `PhoneManifestTest`, `E512ShotTest`) |
-| E5.13 | Photo viewer and photo edit | R2 | todo (round 14 step 7) |
+| E5.13 | Photo viewer and photo edit | R2 | done (round 14 step 7) |
 | E5.14 | Polish | R2 | todo (round 14 step 8) |
 
 ### E5.1 App module
@@ -1361,7 +1361,15 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   group, `SetupEffectsRunner` shared by sheet and Settings, `SetupFactsSource.exactAlarmsAllowed` and the exact-alarm row.
 
 ### E5.13 Photo viewer
-- Screenshots: `e5.13-viewer`, `e5.13-photo-edit-menu`.
+- Screenshots: `e5.13-viewer`, `e5.13-photo-edit-menu`, `e5.13-viewer-zoomed`, `e5.13-person-sheet`, `e5.13-call-details`.
+- Built (round 14 step 7): the avatar of the Person sheet and of Call details (`PersonPhotoAvatar`, `phone/.../details/photo/`)
+  opens `:design` `PhotoViewer` out of its own rectangle; the flight runs on the shared-bounds spring 0.85/380, turns the
+  avatar circle into the photo rectangle (`ViewerPhoto.circular`) and a dismissing drag keeps the finger's velocity and
+  lands in the avatar. `PhotoSource` (Contact, WhatsApp read-only) is on `ViewerPhoto` for X.1. Toolbar: Save
+  (`FilesRepository.saveToGallery`, MediaStore), Share, Edit menu (Choose, Take, Remove after a question).
+  `PersonPhotoViewModel` writes through `ContactsRepository.setPhoto/removePhoto`; without the contacts grant (or a
+  provider refusal) `DetailsHost.editContact` opens the system Contacts editor. The crop/rotate page moved from `:contacts`
+  to `:design` `media/crop` (`CropFrame`, `CropSession`), shared by both apps.
 
 ### E5.14 Polish
 - AC1 Every utility has a pill and a haptic (U23 audit table in the story notes); checklist pass; recomposition tests for
@@ -1388,6 +1396,31 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   linked. A small WhatsApp glyph is not added on top (keep the avatar clean).
 - Tests: Rust cache (insert, refresh on picture-id change, eviction, offline read); Kotlin: contact with photo keeps it,
   without photo shows the WA image, unlinked shows initials. Screenshots `x1-wa-avatar-list`, `x1-wa-avatar-card`.
+- **Owner, 2026-11-13: everywhere, automatically.** No import step and no per-contact action: any person without a photo
+  of their own gets the WhatsApp picture wherever an avatar appears in both apps: Contacts list, search results, recents
+  ("recently viewed"), groups, the contact card hero, share/birthday cards (X.2); Phone recents, favorites, contacts tab,
+  keypad suggestions, speed dial, statistics ("most talked to"), the person sheet, call details, incoming and in-call
+  screens (photo background), the WaitingCallCard, and the ringing, missed-call and ongoing notifications (large icon).
+  One shared avatar resolver (own photo, else WA fallback, else initials) is used by every one of these, so no surface
+  can be missed; a test enumerates the surfaces. Unknown numbers (not in contacts) that are on WhatsApp get the picture
+  too. When the WA photo arrives later the avatar crossfades in without a layout change.
+
+### X.1b Who is this? one identity resolver (owner, 2026-11-13; do together with X.1, before X.2)
+- **(F28) WhatsApp calls show a bare number.** Incoming/in-call screens, the ringing notification, the ongoing and
+  missed WA call notifications, recents rows and call details show the raw number (or `…@lid`) for a WhatsApp call even
+  when the caller is a saved contact. Resolve the caller like a cellular call: LID -> phone JID (the gateway's LID map;
+  send the phone JID in events and pushes when known) -> normalized E.164 -> the device contact (trunk zero, `+`, spaces,
+  national vs international all match, same matcher as cellular caller-ID) -> else the WhatsApp push/verified name ->
+  else the formatted number. Same result in a cold process woken by the FCM push (resolve on the phone, not only on the
+  gateway). Tests with a LID-only peer, a national-format contact number and a non-contact with a push name.
+- **(F29) Recents show stale names.** A call shows the name the call log cached at call time, so a renamed contact still
+  shows the old name. Names (and photos) are resolved live from the current contacts by number at display time and
+  update when contacts change (ContentObserver), in recents, favorites, speed dial, statistics, search and call details.
+  The call log's cached name is used only when the number is no longer in contacts. If the cached name differs from
+  the current one, the call details page shows it as secondary info ("Saved as … at the time of the call"); nowhere else.
+  Think through: two contacts sharing a number (prefer the starred/most recently used one, consistently), a deleted
+  contact, numbers stored in different formats, private/unknown numbers, and WhatsApp calls (F28 resolver). Tests for
+  each case.
 
 ### X.2 Share cards with Takumi
 - Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least

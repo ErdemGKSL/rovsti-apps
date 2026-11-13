@@ -14,4 +14,9 @@
     <string name="wa_error_generic">Bir şeyler ters gitti</string>
     <string name="wa_nothing_to_paste">Yapıştırılacak bir şey yok</string>
     <string name="wa_nothing_to_share">Bu paylaşılamaz</string>
+
+    <!-- Bağlantı neden kurulamadı (WaLinkError, F33). -->
+    <string name="wa_link_key_refused">Ağ geçidi bu uygulamanın bağlantı anahtarını artık kabul etmiyor</string>
+    <string name="wa_link_unreachable">WhatsApp ağ geçidine ulaşılamıyor</string>
+    <string name="wa_link_failed">WhatsApp şu anda kullanılamıyor</string>
 </resources>

@@ -14,4 +14,9 @@
     <string name="wa_error_generic">Something went wrong</string>
     <string name="wa_nothing_to_paste">Nothing to paste</string>
     <string name="wa_nothing_to_share">Nothing can share this</string>
+
+    <!-- Why the link failed (WaLinkError, F33). -->
+    <string name="wa_link_key_refused">The gateway no longer accepts this app\'s connect key</string>
+    <string name="wa_link_unreachable">Can\'t reach the WhatsApp gateway</string>
+    <string name="wa_link_failed">WhatsApp is not available right now</string>
 </resources>

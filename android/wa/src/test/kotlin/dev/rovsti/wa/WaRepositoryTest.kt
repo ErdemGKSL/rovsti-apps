@@ -83,7 +83,7 @@ class WaRepositoryTest {
             val fake = FakeWaGateway(link = link).apply { openError = RustError.Network("no route") }
             val repo = repo(fake)
             repo.start()
-            assertEquals(WaLinkState.Error("no route"), repo.linkState.value)
+            assertEquals(WaLinkState.Error(WaLinkError.Unreachable), repo.linkState.value)
         }
 
     @Test fun linkingStatusAndQrEventsGiveLinking() =
@@ -121,7 +121,7 @@ class WaRepositoryTest {
             val repo = repo(fake)
             repo.start()
             fake.emitEvent("inst1", 1, GatewayEvent.KeyRevoked)
-            assertTrue(repo.linkState.value is WaLinkState.Error)
+            assertEquals(WaLinkState.Error(WaLinkError.KeyRefused), repo.linkState.value)
         }
 
     @Test fun eventsOfOtherInstancesAreIgnored() =

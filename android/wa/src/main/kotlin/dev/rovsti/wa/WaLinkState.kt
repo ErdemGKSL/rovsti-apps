@@ -1,6 +1,8 @@
 package dev.rovsti.wa
 
+import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
+import dev.rovsti.core.RustError
 import dev.rovsti.core.model.wa.InstanceStatus
 
 /** Where the link of this app to WhatsApp stands. The settings screens and the tab badges read it. */
@@ -29,8 +31,35 @@ sealed interface WaLinkState {
     /** WhatsApp banned the number. Nothing the app can do. */
     data object Banned : WaLinkState
 
-    /** The gateway could not be reached or refused the key. [message] is for the user. */
+    /** The gateway could not be reached or refused the key. The UI words [kind] from resources (F33). */
     data class Error(
-        val message: String,
+        val kind: WaLinkError,
     ) : WaLinkState
+}
+
+/**
+ * Why the link failed, as a kind the UI words in the phone's language ([text], en + tr). Never a sentence from Rust
+ * or the gateway: those are English and stay in the logs.
+ */
+enum class WaLinkError(
+    @StringRes val text: Int,
+) {
+    /** The gateway no longer accepts this app's connect key (revoked, or the gateway answered 401). */
+    KeyRefused(R.string.wa_link_key_refused),
+
+    /** The gateway could not be reached. */
+    Unreachable(R.string.wa_link_unreachable),
+
+    /** Anything else: the stored link could not be read, the gateway answered something unexpected. */
+    Failed(R.string.wa_link_failed),
+    ;
+
+    companion object {
+        fun of(error: RustError): WaLinkError =
+            when (error) {
+                is RustError.Auth -> KeyRefused
+                is RustError.Network -> Unreachable
+                else -> Failed
+            }
+    }
 }

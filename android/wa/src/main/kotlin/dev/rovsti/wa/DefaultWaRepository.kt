@@ -173,18 +173,18 @@ class DefaultWaRepository(
         open.feed = scope.launch { waEvents.feed(link.instanceId).collect(::onFeed) }
         when (val stream = gateway.startEvents(link.instanceId, lastSeq)) {
             is Outcome.Ok -> open.stream = stream.value
-            is Outcome.Err -> state.value = WaLinkState.Error(stream.error.message.orEmpty())
+            is Outcome.Err -> state.value = WaLinkState.Error(WaLinkError.of(stream.error))
         }
         when (val status = gateway.status()) {
             is Outcome.Ok -> if (state.value !is WaLinkState.Error) state.value = status.value.toLinkState()
-            is Outcome.Err -> state.value = WaLinkState.Error(status.error.message.orEmpty())
+            is Outcome.Err -> state.value = WaLinkState.Error(WaLinkError.of(status.error))
         }
         reloads.tryEmit(null)
         return gateway
     }
 
     private fun failed(error: RustError): WaGateway? {
-        state.value = WaLinkState.Error(error.message.orEmpty())
+        state.value = WaLinkState.Error(WaLinkError.of(error))
         return null
     }
 
@@ -204,7 +204,7 @@ class DefaultWaRepository(
     private fun onStream(event: WaStreamEvent) {
         when (event) {
             WaStreamEvent.Connected, is WaStreamEvent.Disconnected -> Unit
-            WaStreamEvent.Unauthorized -> state.value = WaLinkState.Error(KEY_REFUSED)
+            WaStreamEvent.Unauthorized -> state.value = WaLinkState.Error(WaLinkError.KeyRefused)
             is WaStreamEvent.Event -> onEvent(event)
         }
     }
@@ -218,7 +218,7 @@ class DefaultWaRepository(
             is GatewayEvent.State -> state.value = body.status().toLinkState()
             is GatewayEvent.Qr -> state.value = WaLinkState.Linking(qr = body.payload)
             is GatewayEvent.PairCode -> state.value = WaLinkState.Linking(code = body.code)
-            GatewayEvent.KeyRevoked -> state.value = WaLinkState.Error(KEY_REFUSED)
+            GatewayEvent.KeyRevoked -> state.value = WaLinkState.Error(WaLinkError.KeyRefused)
             else -> Unit
         }
         // One reload per event, whatever mix of reasons it has.
@@ -243,7 +243,6 @@ class DefaultWaRepository(
 
     private companion object {
         const val EVENT_BUFFER = 64
-        const val KEY_REFUSED = "The gateway no longer accepts this app's connect key."
     }
 }
 

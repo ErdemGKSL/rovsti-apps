@@ -88,10 +88,10 @@ class StopsRoutesTest {
         assertNull(stopsRouteFor("dev.rosty.stops.SOMETHING", "geo:1,2", null))
     }
 
-    @Test fun theHostNeverDrawsItsBar() {
-        val all =
+    @Test fun theMapDrawsItsOwnBarAndPushedPagesKeepTheFullOne() {
+        assertEquals(TabBarMode.Hidden, chromeFor(StopsRoute.Home).tabBar)
+        val pushed =
             listOf(
-                StopsRoute.Home,
                 StopsRoute.Settings,
                 StopsRoute.Appearance,
                 StopsRoute.About,
@@ -99,7 +99,18 @@ class StopsRoutesTest {
                 StopsRoute.LicenceDetail("x"),
                 StopsRoute.Logs(),
             )
-        for (route in all) assertEquals(route.toString(), TabBarMode.Hidden, chromeFor(route).tabBar)
+        for (route in pushed) {
+            assertEquals(route.toString(), TabBarMode.Visible, chromeFor(route).tabBar)
+            assertEquals(HomeTab.Settings, selectedHomeTab(route))
+        }
+        assertEquals(HomeTab.Trip, selectedHomeTab(StopsRoute.Home))
+    }
+
+    @Test fun barTapsOnAPushedPage() {
+        assertEquals(BarTap.ToMap, barTap("trip"))
+        assertEquals(BarTap.ToSaved, barTap("saved"))
+        assertEquals(BarTap.ToSettings, barTap("settings"))
+        assertNull(barTap("other"))
     }
 
     @Test fun theOneStackIsTheMapAndItSurvivesARestore() {

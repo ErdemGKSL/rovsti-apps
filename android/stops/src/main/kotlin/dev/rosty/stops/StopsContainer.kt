@@ -22,6 +22,7 @@ import dev.rosty.stops.data.StopsStore
 import dev.rosty.stops.data.StopsTiles
 import dev.rosty.stops.home.CoreHomeData
 import dev.rosty.stops.home.HomeData
+import dev.rosty.stops.home.HomeSheet
 import dev.rosty.stops.map.TileSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
@@ -81,6 +82,9 @@ open class StopsContainer(
 
     /** A link an intent brought (a shared place, a stop shortcut); the home consumes and clears it. */
     val pendingLink: MutableStateFlow<StopsLink?> = MutableStateFlow(null)
+
+    /** A sheet a page asked the map to open on the way back (the bar's Saved on Settings); the home clears it. */
+    val pendingSheet: MutableStateFlow<HomeSheet?> = MutableStateFlow(null)
 
     protected open fun createOps(): StopsOps = NativeStopsOps(rust)
 

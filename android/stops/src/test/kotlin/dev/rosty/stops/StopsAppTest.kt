@@ -89,6 +89,33 @@ class StopsAppTest : ShotTest() {
         compose.onNodeWithTag(HomeSheetTags.Title).assertDoesNotExist()
     }
 
+    @Test fun pushedPagesKeepTheFullBarWhoseItemsLeadBackToTheMap() {
+        val fixture = start()
+        compose.runOnUiThread {
+            fixture.navigator.push(StopsRoute.Settings)
+            fixture.navigator.push(StopsRoute.About)
+        }
+        advance(1500)
+        // Settings is selected on its sub-page; tapping it goes back to the Settings page.
+        compose.onAllNodesWithTag("tab-settings", useUnmergedTree = true).onFirst().performClick()
+        advance(1500)
+        assertEquals(StopsRoute.Settings, fixture.navigator.current)
+        // Saved goes back to the map and opens the Saved sheet there.
+        compose.onAllNodesWithTag("tab-saved", useUnmergedTree = true).onFirst().performClick()
+        advance(2000)
+        assertEquals(StopsRoute.Home, fixture.navigator.current)
+        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun tripOnAPushedPageGoesBackToTheMap() {
+        val fixture = start()
+        compose.runOnUiThread { fixture.navigator.push(StopsRoute.Settings) }
+        advance(1500)
+        compose.onAllNodesWithTag("tab-trip", useUnmergedTree = true).onFirst().performClick()
+        advance(1500)
+        assertEquals(listOf<StopsRoute>(StopsRoute.Home), fixture.navigator.stack(TripTab))
+    }
+
     @Test fun aboutShowsTheVersionRowThatHoldsDeveloperMode() {
         val fixture = start()
         compose.runOnUiThread {

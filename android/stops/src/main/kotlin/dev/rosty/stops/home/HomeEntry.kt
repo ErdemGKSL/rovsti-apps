@@ -122,6 +122,14 @@ fun HomeEntry(
         open = null
     }
 
+    val askedSheet by container.pendingSheet.collectAsState()
+    LaunchedEffect(askedSheet) {
+        askedSheet?.let {
+            openSheet(it)
+            container.pendingSheet.value = null
+        }
+    }
+
     val link by container.pendingLink.collectAsState()
     LaunchedEffect(link) {
         when (val now = link) {

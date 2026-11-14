@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rebuilt from apps/messages/platforms/android/app/src/main/AndroidManifest.xml (E6.1): the same permissions, components,
+     filters and flags with the same class names; the dev.gpui.* pieces and the vulkan uses-feature are gone.
+     MessagesManifestTest compares the merged result of both flavors with platform/src/test/resources/manifest/
+     messages.permissions.txt and with the GPUI file. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.RECEIVE_MMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
+    <!-- Scheduled SMS (AD-MSG6). The user can deny it in system settings; the alarm then falls back to
+         setAndAllowWhileIdle and the UI says "may be a few minutes late". -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- :design's haptics (tab bar, switches, long presses, sheets) call the vibrator; without it a tab switch crashes. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <permission
+        android:name="dev.rosty.permission.HANDOFF"
+        android:protectionLevel="signature" />
+
+    <!-- Contacts' people cache (X.1, names and WhatsApp pictures): signature level like HANDOFF, declared by every app
+         that reads it so whichever installs first defines it. :people's library manifest adds the uses-permission. -->
+    <permission
+        android:name="dev.rosty.permission.READ_PEOPLE"
+        android:protectionLevel="signature" />
+
+    <!-- :platform mirrors the permissions of all four apps so lint can check its calls; Messages uses no location and no
+         full-screen intents, so the merge drops them. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" tools:node="remove" />
+
+    <application
+        android:name=".RostyMessagesApp"
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/launcher_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Rosty">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|fontScale|density|keyboardHidden|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Required for the SMS role: compose to a number. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- WhatsApp handoff from a sibling Rosty app: only same-signed apps hold the permission. -->
+        <activity-alias
+            android:name=".WaHandoff"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:permission="dev.rosty.permission.HANDOFF">
+            <intent-filter>
+                <action android:name="dev.rosty.action.WA_CHAT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- SMS role components (AD-MSG4): all four are required for Android to offer the role. -->
+        <receiver
+            android:name=".SmsDeliverReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_DELIVER" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".MmsWapPushReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_WAP_PUSH">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" />
+                <data android:mimeType="application/vnd.wap.mms-message" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".HeadlessSmsSendService"
+            android:exported="true"
+            android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.RESPOND_VIA_MESSAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
+            </intent-filter>
+        </service>
+
+        <!-- Shared :platform receivers (they keep the dev.rosty.bridge names, ARCH 7.2). None is exported. -->
+        <receiver android:name="dev.rosty.bridge.ReplyReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.ScheduledSmsReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.MessageReminderReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.SmsStatusReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.MmsResultReceiver" android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Serves the MMS PDU files to the telephony service (MmsCodec). -->
+        <provider
+            android:name="dev.rosty.bridge.MmsFileProvider"
+            android:authorities="${applicationId}.mmsfiles"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!-- Pictures and files handed to the share sheet (cache/share only, read-only; E6.7). -->
+        <provider
+            android:name="dev.rosty.bridge.RostyShareProvider"
+            android:authorities="${applicationId}.rostyshare"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

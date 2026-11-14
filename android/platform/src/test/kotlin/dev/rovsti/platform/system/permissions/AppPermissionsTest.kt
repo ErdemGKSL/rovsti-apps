@@ -72,7 +72,8 @@ class AppPermissionsTest {
                     .map { it.removePrefix("uses-permission ") }
                     .toSet()
             val handoff = if (app.handoffUses) setOf("dev.rovsti.permission.HANDOFF") else emptySet()
-            assertEquals(app.app, committed, app.manifestPermissions + handoff)
+            val people = if (app.peopleUses) setOf("dev.rovsti.permission.READ_PEOPLE") else emptySet()
+            assertEquals(app.app, committed, app.manifestPermissions + handoff + people)
         }
     }
 

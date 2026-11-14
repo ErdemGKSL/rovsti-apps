@@ -17,5 +17,7 @@ uses-permission android.permission.VIBRATE
 uses-permission android.permission.WAKE_LOCK
 uses-permission android.permission.WRITE_CALL_LOG
 uses-permission android.permission.WRITE_CONTACTS
+uses-permission dev.rovsti.permission.READ_PEOPLE
 declares dev.rovsti.permission.HANDOFF signature
+declares dev.rovsti.permission.READ_PEOPLE signature
 protects activity-alias .WaHandoff dev.rovsti.permission.HANDOFF

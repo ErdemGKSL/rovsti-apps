@@ -61,6 +61,73 @@ class ContactsSettingsViewModelTest {
 
     private fun PeopleRig.next(vm: ContactsSettingsViewModel) = wait { vm.effects.first() }
 
+    private class FakeSync : dev.rovsti.contacts.people.PeopleSyncControl {
+        val flow =
+            MutableStateFlow(
+                dev.rovsti.contacts.people
+                    .PeopleSyncStatus(),
+            )
+        var syncs = 0
+        override val status = flow
+
+        override fun syncNow() {
+            syncs++
+        }
+    }
+
+    @Test fun theSyncRowsFollowTheLinkAndSyncNowRuns() {
+        val r = rig()
+        val sync = FakeSync()
+        val vm =
+            ContactsSettingsViewModel(
+                r.book,
+                r.store,
+                r.repo,
+                r.host.ops,
+                notifications = { permission },
+                people = sync,
+                formatTime = { "5 min. ago" },
+            )
+        r.ready(vm)
+        assertEquals("not linked: no rows", null, vm.state.value.peopleSync)
+
+        sync.flow.value =
+            dev.rovsti.contacts.people
+                .PeopleSyncStatus(linked = true)
+        assertEquals(
+            UiText.Res(R.string.settings_people_never),
+            r.wait { vm.state.first { it.peopleSync != null } }.peopleSync!!.last,
+        )
+        sync.flow.value =
+            dev.rovsti.contacts.people.PeopleSyncStatus(
+                linked = true,
+                lastSyncMs = 1,
+                outcome = dev.rovsti.contacts.people.SyncOutcome.Ok,
+            )
+        assertEquals(
+            UiText.Literal("5 min. ago"),
+            r
+                .wait {
+                    vm.state.first { it.peopleSync?.last is UiText.Literal }
+                }.peopleSync!!
+                .last,
+        )
+        sync.flow.value = sync.flow.value.copy(outcome = dev.rovsti.contacts.people.SyncOutcome.Failed, running = true)
+        val failed = r.wait { vm.state.first { it.peopleSync?.running == true } }.peopleSync!!
+        assertEquals(UiText.Res(R.string.settings_people_failed, listOf("5 min. ago")), failed.last)
+
+        vm.onAction(SettingsAction.SyncPeopleNow)
+        assertEquals(1, sync.syncs)
+        sync.flow.value =
+            dev.rovsti.contacts.people
+                .PeopleSyncStatus(linked = false)
+        assertEquals(
+            "unlinked again: the rows go",
+            null,
+            r.wait { vm.state.first { it.peopleSync == null } }.peopleSync,
+        )
+    }
+
     @Test fun theDefaultsAreFirstLastByFirstNameWithRemindersOff() {
         val r = rig()
         val vm = r.settings()

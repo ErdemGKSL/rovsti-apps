@@ -41,6 +41,7 @@ fun rememberContactsSettingsViewModel(container: ContactsContainer): ContactsSet
                             !android.text.format.DateFormat
                                 .is24HourFormat(container.context)
                         },
+                        people = container.peopleSync,
                     )
                 }
             }

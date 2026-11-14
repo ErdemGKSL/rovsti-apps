@@ -32,6 +32,13 @@
         android:name="dev.rovsti.permission.HANDOFF"
         android:protectionLevel="signature" />
 
+    <!-- The people cache of Rovsti Contacts (X.1b, WhatsApp names and photos): signature level like HANDOFF, declared by
+         both apps so whichever installs first defines it; only apps signed with the same key can read the provider. -->
+    <permission
+        android:name="dev.rovsti.permission.READ_PEOPLE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="dev.rovsti.permission.READ_PEOPLE" />
+
     <!-- :platform mirrors the permissions of all four apps so lint can check its calls; this app does not use
          location, so the merge drops them. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />

@@ -30,6 +30,7 @@ import dev.rovsti.design.ios.component.IosChevron
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.ios.component.IosToggle
 import dev.rovsti.design.ios.foundation.IosTheme
+import dev.rovsti.design.text.text
 import dev.rovsti.shell.settings.CommonSettings
 import dev.rovsti.shell.settings.CommonSettingsGroup
 import dev.rovsti.shell.settings.CommonSettingsPage
@@ -72,6 +73,8 @@ object SettingsTags {
     const val Emergency = "contacts-settings-emergency"
     const val Trash = "contacts-settings-trash"
     const val WhatsApp = "contacts-settings-whatsapp"
+    const val PeopleLast = "contacts-settings-people-last"
+    const val PeopleSync = "contacts-settings-people-sync"
 
     fun choice(index: Int): String = "contacts-settings-choice-$index"
 }
@@ -368,8 +371,62 @@ fun ContactsSettingsPage(
                     ),
                 ),
         )
+        state.peopleSync?.let { PeopleSyncGroup(it, onAction) }
         CommonSettingsGroup(settings, links.openCommon)
     }
+}
+
+/**
+ * "WhatsApp Names and Photos" (X.1b): when the cache was last filled and a row that fills it now. Only while WhatsApp
+ * is linked. The row stays where it is while it works: its title changes and it stops taking taps.
+ */
+@Composable
+internal fun PeopleSyncGroup(
+    sync: PeopleSyncUi,
+    onAction: (SettingsAction) -> Unit,
+) {
+    IosSettingsGroup(
+        title = stringResource(R.string.settings_people_title),
+        items =
+            listOf(
+                IosSettingsItem(
+                    icon = Tile(RovstiIcons.Photo),
+                    title = {
+                        IosText(
+                            stringResource(R.string.settings_people_last_sync),
+                            Modifier.testTag(SettingsTags.PeopleLast),
+                        )
+                    },
+                    trailingContent = {
+                        IosText(
+                            sync.last.text(),
+                            Modifier.widthIn(max = SettingsMetrics.ValueMax),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                ),
+                IosSettingsItem(
+                    icon = Tile(RovstiIcons.Rotate),
+                    title = {
+                        IosText(
+                            stringResource(
+                                if (sync.running) {
+                                    R.string.settings_people_syncing
+                                } else {
+                                    R.string.settings_people_sync_now
+                                },
+                            ),
+                            Modifier.testTag(SettingsTags.PeopleSync),
+                        )
+                    },
+                    trailingContent = { NoChevron() },
+                    enabled = !sync.running,
+                    onClick = { onAction(SettingsAction.SyncPeopleNow) },
+                ),
+            ),
+    )
+    SettingsFootnote(stringResource(R.string.settings_people_footer))
 }
 
 /** The footer under a group, in the same inset as the group titles. */

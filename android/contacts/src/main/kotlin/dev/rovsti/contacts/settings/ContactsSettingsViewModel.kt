@@ -6,6 +6,9 @@ import dev.rovsti.contacts.R
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
+import dev.rovsti.contacts.people.PeopleSyncControl
+import dev.rovsti.contacts.people.PeopleSyncStatus
+import dev.rovsti.contacts.people.SyncOutcome
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.Account
 import dev.rovsti.core.model.contacts.AccountLabelRequest
@@ -30,7 +33,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -55,14 +60,23 @@ class ContactsSettingsViewModel(
     private val notifications: () -> PermissionState,
     private val hour12: () -> Boolean = { false },
     private val worker: CoroutineDispatcher = Dispatchers.Default,
+    /** The WhatsApp names and photos sync; null: no rows. */
+    private val people: PeopleSyncControl? = null,
+    /** "5 min. ago" for the time of the last sync. */
+    private val formatTime: (Long) -> String = { relativeTime(it, System::currentTimeMillis) },
 ) : ViewModel() {
     private val accounts = MutableStateFlow<List<AccountOption>>(emptyList())
     private val outbox = Channel<SettingsEffect>(Channel.UNLIMITED)
 
     val state: StateFlow<ContactsSettingsState> =
-        combine(store.prefs, book.book, accounts) { p, b, a -> Triple(p, b, a) }
+        combine(
+            store.prefs,
+            book.book,
+            accounts,
+            people?.status?.map { peopleUi(it) } ?: flowOf(null),
+        ) { p, b, a, sync -> Inputs(p, b, a, sync) }
             .conflate()
-            .mapLatest { (p, b, a) -> build(p, b, a) }
+            .mapLatest { build(it.prefs, it.book, it.accounts).copy(peopleSync = it.sync) }
             .flowOn(worker)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ContactsSettingsState())
 
@@ -83,7 +97,26 @@ class ContactsSettingsViewModel(
             is SettingsAction.SetHour -> save { it.copy(reminderHour = action.hour.coerceIn(0, LAST_HOUR)) }
             is SettingsAction.SetReminders -> setReminders(action.on)
             is SettingsAction.NotificationsAnswered -> answered(action.granted)
+            SettingsAction.SyncPeopleNow -> people?.syncNow()
         }
+    }
+
+    private class Inputs(
+        val prefs: dev.rovsti.core.model.contacts.ContactsPrefs,
+        val book: Book,
+        val accounts: List<AccountOption>,
+        val sync: PeopleSyncUi?,
+    )
+
+    private fun peopleUi(status: PeopleSyncStatus): PeopleSyncUi? {
+        if (!status.linked) return null
+        val last =
+            when (status.outcome) {
+                SyncOutcome.Never -> UiText.Res(R.string.settings_people_never)
+                SyncOutcome.Ok -> UiText.Literal(formatTime(status.lastSyncMs))
+                SyncOutcome.Failed -> UiText.Res(R.string.settings_people_failed, listOf(formatTime(status.lastSyncMs)))
+            }
+        return PeopleSyncUi(last, status.running)
     }
 
     private fun save(
@@ -180,6 +213,19 @@ class ContactsSettingsViewModel(
     }
 
     companion object {
+        /** `5 min. ago`, `Yesterday`, or the date for an older time; in the phone's language. */
+        fun relativeTime(
+            ms: Long,
+            now: () -> Long,
+        ): String =
+            android.text.format.DateUtils
+                .getRelativeTimeSpanString(
+                    ms,
+                    now(),
+                    android.text.format.DateUtils.MINUTE_IN_MILLIS,
+                    android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE,
+                ).toString()
+
         const val STOP_TIMEOUT_MS = 5_000L
         val DENIED: UiText = UiText.Res(R.string.contacts_notifications_off)
         val CANT_SAVE: UiText = UiText.Res(R.string.contacts_cant_save_setting)

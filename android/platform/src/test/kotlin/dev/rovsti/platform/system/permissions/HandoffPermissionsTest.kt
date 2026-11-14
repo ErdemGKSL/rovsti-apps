@@ -29,6 +29,16 @@ class HandoffPermissionsTest {
                     // E5.12: BootReceiver re-arms the call-back reminders; they are exact while this is granted.
                     "uses-permission android.permission.RECEIVE_BOOT_COMPLETED",
                     "uses-permission android.permission.SCHEDULE_EXACT_ALARM",
+                    // X.1b: reads Contacts' people provider.
+                    "uses-permission dev.rovsti.permission.READ_PEOPLE",
+                ),
+            // X.1b: the people sync's WorkManager merges these.
+            "contacts" to
+                listOf(
+                    "uses-permission android.permission.ACCESS_NETWORK_STATE",
+                    "uses-permission android.permission.FOREGROUND_SERVICE",
+                    "uses-permission android.permission.RECEIVE_BOOT_COMPLETED",
+                    "uses-permission android.permission.WAKE_LOCK",
                 ),
         )
 
@@ -54,7 +64,15 @@ class HandoffPermissionsTest {
             elements
                 .filter { it.tagName == "permission" }
                 .map { "declares ${it.attr("name")} ${it.attr("protectionLevel")}" }
-                .sorted()
+                .plus(
+                    if (app in
+                        listOf("phone", "contacts")
+                    ) {
+                        listOf("declares $READ_PEOPLE signature")
+                    } else {
+                        emptyList()
+                    },
+                ).sorted()
         val protects =
             elements
                 .filter { it.attr("permission") == HANDOFF }
@@ -138,5 +156,6 @@ class HandoffPermissionsTest {
 
     private companion object {
         const val HANDOFF = "dev.rovsti.permission.HANDOFF"
+        const val READ_PEOPLE = "dev.rovsti.permission.READ_PEOPLE"
     }
 }

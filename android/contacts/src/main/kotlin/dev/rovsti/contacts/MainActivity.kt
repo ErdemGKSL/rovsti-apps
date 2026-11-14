@@ -9,6 +9,7 @@ import dev.rovsti.platform.contacts.Shortcuts
 import dev.rovsti.shell.NavSpec
 import dev.rovsti.shell.RovstiShellActivity
 import dev.rovsti.shell.shellContainer
+import kotlinx.coroutines.launch
 
 /**
  * The one activity of Rovsti Contacts (FQCN kept, singleTop). Edge to edge, back order, refresh rate and permission
@@ -33,6 +34,12 @@ class MainActivity : RovstiShellActivity<ContactsRoute>() {
         // A link is used once: a rotation or a restart must not open the same card again (AD-CT8).
         if (route != null) intent.removeExtra(Shortcuts.EXTRA_CONTACT_ID)
         return route
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Coming to the foreground with names and photos older than the sync period: sync (X.1b). Built off the main thread.
+        container.scope.launch { container.peopleSync.syncIfStale() }
     }
 
     @Composable

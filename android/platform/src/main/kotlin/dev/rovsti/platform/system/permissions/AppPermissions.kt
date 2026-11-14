@@ -27,12 +27,16 @@ class AppPermissions(
     val installTime: Set<String>,
     val specialPermissions: Set<String>,
     val handoffUses: Boolean = false,
+    /** Reads Contacts' people provider (X.1b): holds `dev.rovsti.permission.READ_PEOPLE`. */
+    val peopleUses: Boolean = false,
+    /** What a library merges into the manifest (WorkManager's network, wake lock and boot entries), not asked of the user. */
+    val libraryPermissions: Set<String> = emptySet(),
 ) {
     /** What [group] asks for in this app: Messages reads contacts but never writes them, so its group holds one entry. */
     fun permissionsOf(group: PermissionGroup): List<String> = group.permissions.filter { it in runtime }
 
     /** Every `uses-permission` the merged manifest must hold, without the HANDOFF entry. */
-    val manifestPermissions: Set<String> get() = runtime + installTime + specialPermissions
+    val manifestPermissions: Set<String> get() = runtime + installTime + specialPermissions + libraryPermissions
 
     companion object {
         const val ROLE_DIALER = "android.app.role.DIALER"
@@ -87,6 +91,7 @@ class AppPermissions(
                         Manifest.permission.INTERNET,
                     ),
                 specialPermissions = setOf(FSI, BATTERY, "android.permission.SCHEDULE_EXACT_ALARM"),
+                peopleUses = true,
             )
 
         val messages =
@@ -132,6 +137,14 @@ class AppPermissions(
                 installTime = setOf(Manifest.permission.VIBRATE, Manifest.permission.INTERNET),
                 specialPermissions = emptySet(),
                 handoffUses = true,
+                // work-runtime (the people sync, X.1b) merges these four.
+                libraryPermissions =
+                    setOf(
+                        "android.permission.ACCESS_NETWORK_STATE",
+                        Manifest.permission.FOREGROUND_SERVICE,
+                        Manifest.permission.RECEIVE_BOOT_COMPLETED,
+                        Manifest.permission.WAKE_LOCK,
+                    ),
             )
 
         /** `USE_EXACT_ALARM` is install-time for alarm apps: no Settings page. */

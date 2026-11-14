@@ -37,8 +37,28 @@ class ContactsManifestTest {
         assertEquals(expected, (uses + declares + protects).sorted())
     }
 
+    // The four WorkManager adds (ACCESS_NETWORK_STATE, FOREGROUND_SERVICE, RECEIVE_BOOT_COMPLETED, WAKE_LOCK) come from
+    // work-runtime for the people sync (X.1b) and are in the committed list.
     // androidx.core adds <applicationId>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION to every app that uses it.
     private fun isAndroidxInternal(name: String) = name.endsWith(".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
+
+    @Test fun thePeopleProviderIsExportedBehindTheSignaturePermission() {
+        val permission = "dev.rovsti.permission.READ_PEOPLE"
+        val provider = manifest.component("dev.rovsti.contacts.people.PeopleProvider")
+        assertEquals("provider", provider.kind)
+        assertEquals(true, provider.exported)
+        assertEquals("dev.rovsti.contacts.people", provider.attributes["authorities"])
+        assertEquals(permission, provider.attributes["readPermission"])
+        assertEquals(permission, provider.attributes["writePermission"])
+        assertEquals("signature", manifest.declaredPermissions[permission])
+        assertFalse("the owner of the provider needs no uses-permission", permission in manifest.usesPermissions)
+    }
+
+    @Test fun workManagerHasItsComponentsAndTheSyncWorkerNeedsNoneOfItsOwn() {
+        // The worker is created by name from WorkManager's database, not declared; WorkManager's own services merge in.
+        assertTrue(manifest.components.any { it.name == "androidx.work.impl.background.systemjob.SystemJobService" })
+        assertFalse(manifest.components.any { it.name.endsWith("PeopleSyncWorker") })
+    }
 
     @Test fun applicationFlags() {
         val app = manifest.application
@@ -102,6 +122,7 @@ class ContactsManifestTest {
         assertEquals(
             setOf(
                 "dev.rovsti.contacts.MainActivity",
+                "dev.rovsti.contacts.people.PeopleProvider",
                 "dev.rovsti.bridge.BirthdayReminderReceiver",
                 "dev.rovsti.bridge.RovstiShareProvider",
             ),

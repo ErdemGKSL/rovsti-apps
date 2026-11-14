@@ -1,6 +1,7 @@
 package dev.rovsti.contacts
 
 import android.app.Application
+import dev.rovsti.contacts.people.PeopleSyncWorker
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.notify.PlatformChannels
 import dev.rovsti.shell.HasContainer
@@ -21,5 +22,8 @@ class RovstiContactsApp :
         PlatformComponents.install(PlatformComponents(mainActivity = MainActivity::class.java))
         // Channel names and descriptions in the phone's language, again after a language change (F32).
         PlatformChannels.followLocale(this)
+        // The periodic WhatsApp names and photos sync (X.1b); the work finishes at once while WhatsApp is not linked.
+        // Off the main thread: WorkManager opens its database on first use.
+        Thread({ PeopleSyncWorker.schedule(this) }, "people-sync-schedule").start()
     }
 }

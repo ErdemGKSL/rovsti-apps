@@ -18,6 +18,14 @@
         android:name="dev.rovsti.permission.HANDOFF"
         android:protectionLevel="signature" />
 
+    <!-- The people cache of X.1b (WhatsApp names and photos) is read by Rovsti Phone through PeopleProvider. Same rule as
+         HANDOFF: signature level, declared by both apps, so only apps signed with the same key can read it. This app
+         owns the provider and needs no uses-permission; :people's library manifest carries one for the readers. -->
+    <permission
+        android:name="dev.rovsti.permission.READ_PEOPLE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="dev.rovsti.permission.READ_PEOPLE" tools:node="remove" />
+
     <!-- :platform mirrors the permissions of all four apps so lint can check its calls; this app does not use
          location or full-screen intents, so the merge drops them. VIBRATE stays: :design's haptics (tab bar, switches,
          long presses, sheets) call the vibrator, and without it a tab switch crashed with a SecurityException. -->
@@ -67,6 +75,15 @@
                 <data android:mimeType="text/directory" />
             </intent-filter>
         </activity>
+
+        <!-- The people cache for the sibling apps: exported, read and write both behind the signature permission (nothing
+             writes). Created before Application.onCreate returns, so it does no work until the first query. -->
+        <provider
+            android:name=".people.PeopleProvider"
+            android:authorities="dev.rovsti.contacts.people"
+            android:exported="true"
+            android:readPermission="dev.rovsti.permission.READ_PEOPLE"
+            android:writePermission="dev.rovsti.permission.READ_PEOPLE" />
 
         <receiver
             android:name="dev.rovsti.bridge.BirthdayReminderReceiver"

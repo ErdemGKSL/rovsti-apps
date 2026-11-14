@@ -25,6 +25,14 @@ data class SummaryUi(
     val accounts: ImmutableList<AccountCount> = persistentListOf(),
 )
 
+/** The "WhatsApp Names and Photos" rows (X.1b): what the last sync did and whether one is running. */
+@Immutable
+data class PeopleSyncUi(
+    /** "5 min. ago", "Not synced yet", "Failed, 5 min. ago". */
+    val last: UiText = UiText.Literal(""),
+    val running: Boolean = false,
+)
+
 /** What the Settings root and its choice pages show. */
 @Immutable
 data class ContactsSettingsState(
@@ -44,6 +52,8 @@ data class ContactsSettingsState(
     val hours: ImmutableList<HourChoice> = persistentListOf(),
     /** The book can be exported (there is at least one contact). */
     val hasContacts: Boolean = false,
+    /** The sync rows; null while WhatsApp is not linked (the cache is only fed while it is). */
+    val peopleSync: PeopleSyncUi? = null,
 ) {
     val showSaveTo: Boolean get() = accounts.size > 1
 }
@@ -69,6 +79,9 @@ sealed interface SettingsAction {
     data class SetHour(
         val hour: Int,
     ) : SettingsAction
+
+    /** The "Sync Now" row of the WhatsApp names and photos. */
+    data object SyncPeopleNow : SettingsAction
 
     /** The answer of the system dialog that [SettingsEffect.AskNotifications] opened. */
     data class NotificationsAnswered(

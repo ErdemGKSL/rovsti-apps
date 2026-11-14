@@ -450,4 +450,11 @@
     <string name="contacts_no_name">Adsız</string>
     <string name="contacts_column_n">%1$d. Sütun</string>
     <plurals name="contacts_n_contacts"><item quantity="one">%1$d kişi</item><item quantity="other">%1$d kişi</item></plurals>
+    <string name="settings_people_title">WhatsApp Adları ve Fotoğrafları</string>
+    <string name="settings_people_last_sync">Son Eşitleme</string>
+    <string name="settings_people_never">Henüz eşitlenmedi</string>
+    <string name="settings_people_failed">Başarısız, %1$s</string>
+    <string name="settings_people_sync_now">Şimdi Eşitle</string>
+    <string name="settings_people_syncing">Eşitleniyor…</string>
+    <string name="settings_people_footer">WhatsApp\'ta tanıştığınız kişilerin adları ve fotoğrafları bu telefonda kalır ve Rovsti Phone ile paylaşılır. Kişilerinize hiçbir şey eklenmez.</string>
 </resources>

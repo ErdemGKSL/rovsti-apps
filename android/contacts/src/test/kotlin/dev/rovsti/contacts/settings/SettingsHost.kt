@@ -65,6 +65,10 @@ internal class SettingsHarness(
                 is SettingsAction.NotificationsAnswered -> {
                     ui
                 }
+
+                SettingsAction.SyncPeopleNow -> {
+                    ui.copy(peopleSync = ui.peopleSync?.copy(running = true))
+                }
             }
     }
 

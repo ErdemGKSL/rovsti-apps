@@ -450,4 +450,11 @@
     <string name="contacts_no_name">No Name</string>
     <string name="contacts_column_n">Column %1$d</string>
     <plurals name="contacts_n_contacts"><item quantity="one">%1$d contact</item><item quantity="other">%1$d contacts</item></plurals>
+    <string name="settings_people_title">WhatsApp Names and Photos</string>
+    <string name="settings_people_last_sync">Last Sync</string>
+    <string name="settings_people_never">Not synced yet</string>
+    <string name="settings_people_failed">Failed, %1$s</string>
+    <string name="settings_people_sync_now">Sync Now</string>
+    <string name="settings_people_syncing">Syncing…</string>
+    <string name="settings_people_footer">Names and photos of the people you meet on WhatsApp stay on this phone and are shared with Rovsti Phone. Nothing is added to your contacts.</string>
 </resources>

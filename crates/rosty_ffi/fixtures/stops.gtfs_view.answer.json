@@ -1,0 +1,1 @@
+{"ok":{"has_feed":true,"total":2,"capped":false,"stops":[{"index":0,"id":"A","name":"Moda İskele","coord":{"lat":41.0001,"lon":29.0}},{"index":1,"id":"B","name":"Kadıköy","coord":{"lat":40.99,"lon":29.02}}],"line":[{"lat":41.0001,"lon":29.0},{"lat":40.99,"lon":29.02}]}}

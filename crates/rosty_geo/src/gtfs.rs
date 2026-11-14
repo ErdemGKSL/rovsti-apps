@@ -169,6 +169,66 @@ impl Feed {
             .unwrap_or_default()
     }
 
+    /// Indices of the stops inside the box `south..=north` by `west..=east`
+    /// (degrees), at most `cap`, in ascending order. When more are inside,
+    /// those nearest the middle of the box win, ties going to the lower
+    /// index, so the same view always answers the same stops.
+    ///
+    /// `west > east` is a box across the antimeridian (from `west` east to
+    /// 180 and on from -180 to `east`). A box 360 degrees wide or more takes
+    /// every longitude. `south > north` is read the other way round. A box
+    /// with a NaN or infinite edge holds nothing.
+    pub fn stops_in_box(&self, bbox: BBox, cap: usize) -> Vec<u32> {
+        let (hits, _) = self.box_hits(bbox, cap);
+        hits
+    }
+
+    /// [`Feed::stops_in_box`] with how many stops the box holds before the cap.
+    pub fn box_hits(&self, bbox: BBox, cap: usize) -> (Vec<u32>, usize) {
+        let Some(bbox) = bbox.normalised() else {
+            return (Vec::new(), 0);
+        };
+        let centre = bbox.centre();
+        let lon_scale = centre.lat.to_radians().cos().max(1e-6);
+        let mut hits: Vec<(f64, u32)> = self
+            .stops
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| bbox.contains(s.coord))
+            .map(|(i, s)| {
+                let dy = s.coord.lat - centre.lat;
+                let dx = lon_delta(s.coord.lon, centre.lon) * lon_scale;
+                (dx * dx + dy * dy, i as u32)
+            })
+            .collect();
+        let total = hits.len();
+        if cap == 0 {
+            return (Vec::new(), total);
+        }
+        if hits.len() > cap {
+            hits.select_nth_unstable_by(cap - 1, |a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            hits.truncate(cap);
+        }
+        let mut out: Vec<u32> = hits.into_iter().map(|h| h.1).collect();
+        out.sort_unstable();
+        (out, total)
+    }
+
+    /// The places a pattern calls at, in travel order: the line to draw.
+    /// `None` for a pattern the feed does not have; stops the pattern names
+    /// but the feed lacks are left out.
+    pub fn pattern_line(&self, pattern: u32) -> Option<Vec<Coord>> {
+        let pattern = self.patterns.get(pattern as usize)?;
+        Some(
+            pattern
+                .stops
+                .iter()
+                .filter_map(|&s| self.stops.get(s as usize))
+                .map(|s| s.coord)
+                .collect(),
+        )
+    }
+
     /// The stop closest to `coord` within `max_m` metres.
     pub fn nearest(&self, coord: Coord, max_m: f64) -> Option<u32> {
         // One degree of latitude is about 111 km; skip far rows cheaply.
@@ -182,6 +242,102 @@ impl Feed {
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(i, _)| i)
     }
+}
+
+/// A latitude and longitude box, in degrees. `west > east` crosses the
+/// antimeridian.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BBox {
+    pub south: f64,
+    pub west: f64,
+    pub north: f64,
+    pub east: f64,
+}
+
+impl BBox {
+    pub const fn new(south: f64, west: f64, north: f64, east: f64) -> Self {
+        Self {
+            south,
+            west,
+            north,
+            east,
+        }
+    }
+
+    /// The box with south below north and its longitudes within -180..=180,
+    /// or `None` when an edge is not a finite number.
+    fn normalised(self) -> Option<Self> {
+        if ![self.south, self.west, self.north, self.east]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return None;
+        }
+        let (south, north) = if self.south <= self.north {
+            (self.south, self.north)
+        } else {
+            (self.north, self.south)
+        };
+        // As wide as the world (or wider): every longitude.
+        if (self.east - self.west).abs() >= 360.0 {
+            return Some(Self::new(south, -180.0, north, 180.0));
+        }
+        Some(Self::new(
+            south,
+            wrap_lon(self.west),
+            north,
+            wrap_lon(self.east),
+        ))
+    }
+
+    fn crosses_antimeridian(self) -> bool {
+        self.west > self.east
+    }
+
+    /// Whether `c` is inside, edges included. Call on a normalised box.
+    fn contains(self, c: Coord) -> bool {
+        if !(self.south..=self.north).contains(&c.lat) {
+            return false;
+        }
+        let lon = wrap_lon(c.lon);
+        // 180 and -180 are one meridian: a stop written either way is on it.
+        self.holds_lon(lon) || (lon.abs() == 180.0 && self.holds_lon(-lon))
+    }
+
+    fn holds_lon(self, lon: f64) -> bool {
+        if self.crosses_antimeridian() {
+            lon >= self.west || lon <= self.east
+        } else {
+            (self.west..=self.east).contains(&lon)
+        }
+    }
+
+    /// The middle of the box, on the box's side of the antimeridian.
+    fn centre(self) -> Coord {
+        let width = if self.crosses_antimeridian() {
+            self.east + 360.0 - self.west
+        } else {
+            self.east - self.west
+        };
+        Coord::new(
+            (self.south + self.north) / 2.0,
+            wrap_lon(self.west + width / 2.0),
+        )
+    }
+}
+
+/// `lon` into -180..=180 (180 stays 180, so a box may end on either side).
+fn wrap_lon(lon: f64) -> f64 {
+    if (-180.0..=180.0).contains(&lon) {
+        lon
+    } else {
+        (lon + 180.0).rem_euclid(360.0) - 180.0
+    }
+}
+
+/// The signed difference `a - b` in degrees of longitude, the short way round.
+fn lon_delta(a: f64, b: f64) -> f64 {
+    (a - b + 180.0).rem_euclid(360.0) - 180.0
 }
 
 /// Lower-cases and strips accents, folding Turkish `İ ı ş ğ ç ö ü` to ASCII.
@@ -639,5 +795,257 @@ mod tests {
             b.stop_times(data),
             Err(GtfsError::TooLarge("stop_times"))
         ));
+    }
+
+    // ---- stops in a box and the line of a pattern ----
+
+    fn stop_at(id: &str, lat: f64, lon: f64) -> Stop {
+        Stop {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            coord: Coord::new(lat, lon),
+            parent: None,
+        }
+    }
+
+    fn feed_of(stops: Vec<Stop>, patterns: Vec<Pattern>) -> Feed {
+        Feed::new(stops, Vec::new(), patterns, 0)
+    }
+
+    #[test]
+    fn only_stops_inside_the_box_are_answered_edges_included() {
+        let feed = feed_of(
+            vec![
+                stop_at("in", 41.0, 29.0),
+                stop_at("north edge", 41.1, 29.0),
+                stop_at("west edge", 41.0, 28.9),
+                stop_at("just north", 41.1001, 29.0),
+                stop_at("just east", 41.0, 29.1001),
+                stop_at("far", -30.0, 150.0),
+            ],
+            Vec::new(),
+        );
+        let bbox = BBox::new(40.9, 28.9, 41.1, 29.1);
+        assert_eq!(feed.stops_in_box(bbox, 300), [0, 1, 2]);
+        assert_eq!(feed.box_hits(bbox, 300).1, 3);
+        // South and north the other way round are the same box.
+        assert_eq!(
+            feed.stops_in_box(BBox::new(41.1, 28.9, 40.9, 29.1), 300),
+            [0, 1, 2]
+        );
+        // A box of one point.
+        assert_eq!(
+            feed.stops_in_box(BBox::new(41.0, 29.0, 41.0, 29.0), 300),
+            [0]
+        );
+    }
+
+    #[test]
+    fn an_empty_feed_and_an_empty_box_answer_nothing() {
+        let empty = feed_of(Vec::new(), Vec::new());
+        assert!(
+            empty
+                .stops_in_box(BBox::new(-90.0, -180.0, 90.0, 180.0), 300)
+                .is_empty()
+        );
+        assert_eq!(
+            empty.box_hits(BBox::new(40.0, 28.0, 42.0, 30.0), 300),
+            (Vec::new(), 0)
+        );
+        let feed = feed_of(vec![stop_at("a", 41.0, 29.0)], Vec::new());
+        assert!(
+            feed.stops_in_box(BBox::new(10.0, 10.0, 11.0, 11.0), 300)
+                .is_empty()
+        );
+        // No room at all: nothing, but the count is still told.
+        assert_eq!(
+            feed.box_hits(BBox::new(40.0, 28.0, 42.0, 30.0), 0),
+            (Vec::new(), 1)
+        );
+    }
+
+    #[test]
+    fn a_box_with_an_edge_that_is_not_a_number_holds_nothing() {
+        let feed = feed_of(vec![stop_at("a", 41.0, 29.0)], Vec::new());
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                feed.stops_in_box(BBox::new(bad, 28.0, 42.0, 30.0), 300)
+                    .is_empty()
+            );
+            assert!(
+                feed.stops_in_box(BBox::new(40.0, bad, 42.0, 30.0), 300)
+                    .is_empty()
+            );
+            assert!(
+                feed.stops_in_box(BBox::new(40.0, 28.0, bad, 30.0), 300)
+                    .is_empty()
+            );
+            assert!(
+                feed.stops_in_box(BBox::new(40.0, 28.0, 42.0, bad), 300)
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn a_box_across_the_antimeridian_takes_both_sides() {
+        let feed = feed_of(
+            vec![
+                stop_at("west side", 0.0, 179.5),
+                stop_at("east side", 0.0, -179.5),
+                stop_at("on the line", 0.0, 180.0),
+                stop_at("on the line, other spelling", 0.0, -180.0),
+                stop_at("outside west", 0.0, 178.0),
+                stop_at("outside east", 0.0, -178.0),
+                stop_at("other side of the world", 0.0, 0.0),
+            ],
+            Vec::new(),
+        );
+        // From 179 east to -179: two degrees wide.
+        let bbox = BBox::new(-1.0, 179.0, 1.0, -179.0);
+        assert_eq!(feed.stops_in_box(bbox, 300), [0, 1, 2, 3]);
+        // The same box spelled with longitudes beyond 180.
+        assert_eq!(
+            feed.stops_in_box(BBox::new(-1.0, 179.0, 1.0, 181.0), 300),
+            [0, 1, 2, 3]
+        );
+        assert_eq!(
+            feed.stops_in_box(BBox::new(-1.0, -181.0, 1.0, -179.0), 300),
+            [0, 1, 2, 3]
+        );
+        // The cap keeps those nearest the middle (the antimeridian itself), measured the short way round.
+        assert_eq!(
+            feed.stops_in_box(BBox::new(-1.0, 177.0, 1.0, -177.0), 2),
+            [2, 3]
+        );
+        assert_eq!(
+            feed.stops_in_box(BBox::new(-1.0, 177.0, 1.0, -177.0), 4),
+            [0, 1, 2, 3]
+        );
+        // A box that does not cross does not take the far side.
+        assert_eq!(
+            feed.stops_in_box(BBox::new(-1.0, 177.0, 1.0, 180.0), 300),
+            [0, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn a_box_as_wide_as_the_world_takes_every_longitude() {
+        let feed = feed_of(
+            vec![
+                stop_at("a", 10.0, -170.0),
+                stop_at("b", 10.0, 0.0),
+                stop_at("c", 10.0, 170.0),
+                stop_at("south", -80.0, 0.0),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(
+            feed.stops_in_box(BBox::new(0.0, -180.0, 20.0, 180.0), 300),
+            [0, 1, 2]
+        );
+        assert_eq!(
+            feed.stops_in_box(BBox::new(0.0, -300.0, 20.0, 400.0), 300),
+            [0, 1, 2]
+        );
+        assert_eq!(
+            feed.stops_in_box(BBox::new(-90.0, -180.0, 90.0, 180.0), 300),
+            [0, 1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn stops_at_the_poles_are_found() {
+        let feed = feed_of(
+            vec![
+                stop_at("north pole", 90.0, 0.0),
+                stop_at("south pole", -90.0, 123.0),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(
+            feed.stops_in_box(BBox::new(89.0, -180.0, 90.0, 180.0), 300),
+            [0]
+        );
+        assert_eq!(
+            feed.stops_in_box(BBox::new(-90.0, 100.0, -89.0, 130.0), 1),
+            [1]
+        );
+    }
+
+    #[test]
+    fn the_cap_keeps_the_stops_nearest_the_middle_in_a_fixed_order() {
+        // Fifty stops in a row going east from the middle of the box, 0.001 degrees apart.
+        let stops: Vec<Stop> = (0..50)
+            .map(|i| stop_at(&format!("s{i}"), 41.0, 29.0 + f64::from(i) * 0.001))
+            .collect();
+        let feed = feed_of(stops, Vec::new());
+        let bbox = BBox::new(40.9, 28.9, 41.1, 29.1);
+        assert_eq!(feed.stops_in_box(bbox, 5), [0, 1, 2, 3, 4]);
+        assert_eq!(feed.box_hits(bbox, 5), (vec![0, 1, 2, 3, 4], 50));
+        assert_eq!(feed.stops_in_box(bbox, 300).len(), 50);
+        // Two stops equally far from the middle: the lower index wins, every time.
+        let pair = feed_of(
+            vec![
+                stop_at("east", 41.0, 29.01),
+                stop_at("west", 41.0, 28.99),
+                stop_at("centre", 41.0, 29.0),
+            ],
+            Vec::new(),
+        );
+        for _ in 0..20 {
+            assert_eq!(pair.stops_in_box(bbox, 2), [0, 2]);
+        }
+        // A big feed: the cap holds and the answer is sorted.
+        let many: Vec<Stop> = (0..2_000)
+            .map(|i| {
+                stop_at(
+                    "m",
+                    41.0 + f64::from(i / 40) * 0.0001,
+                    29.0 + f64::from(i % 40) * 0.0001,
+                )
+            })
+            .collect();
+        let hits = feed_of(many, Vec::new()).stops_in_box(bbox, 300);
+        assert_eq!(hits.len(), 300);
+        assert!(hits.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn the_line_of_a_pattern_is_its_stops_in_travel_order() {
+        let (f, _) = feed();
+        // t2 of the test feed: A, B, C, D going north.
+        let pattern = f.patterns.iter().position(|p| p.stops.len() == 4).unwrap() as u32;
+        let line = f.pattern_line(pattern).unwrap();
+        assert_eq!(line.len(), 4);
+        assert!(line.windows(2).all(|w| w[0].lat < w[1].lat));
+        // A pattern the feed does not have.
+        assert_eq!(f.pattern_line(f.patterns.len() as u32), None);
+        assert_eq!(f.pattern_line(u32::MAX), None);
+        assert_eq!(feed_of(Vec::new(), Vec::new()).pattern_line(0), None);
+    }
+
+    #[test]
+    fn a_pattern_that_names_a_missing_stop_skips_it_and_an_empty_one_is_empty() {
+        let feed = feed_of(
+            vec![stop_at("a", 41.0, 29.0), stop_at("b", 41.1, 29.0)],
+            vec![
+                Pattern {
+                    route: 0,
+                    headsign: String::new(),
+                    stops: vec![1, 7, 0],
+                },
+                Pattern {
+                    route: 0,
+                    headsign: String::new(),
+                    stops: Vec::new(),
+                },
+            ],
+        );
+        assert_eq!(
+            feed.pattern_line(0),
+            Some(vec![Coord::new(41.1, 29.0), Coord::new(41.0, 29.0)])
+        );
+        assert_eq!(feed.pattern_line(1), Some(Vec::new()));
     }
 }

@@ -713,6 +713,12 @@ stops.gtfs_import.not_a_zip
 stops.gtfs_import.saved
 stops.gtfs_search
 stops.gtfs_search.no_feed
+stops.gtfs_view
+stops.gtfs_view.antimeridian
+stops.gtfs_view.capped
+stops.gtfs_view.empty_box
+stops.gtfs_view.no_feed
+stops.gtfs_view.unknown_pattern
 stops.history_edit
 stops.history_edit.clear
 stops.history_edit.prune

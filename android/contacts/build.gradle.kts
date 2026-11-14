@@ -30,6 +30,8 @@ android {
                 // librovsti_ffi can be loaded into one class loader per JVM; the plain and the Robolectric tests that
                 // run the real Rust core would otherwise fight over it depending on their order (E4.3).
                 it.forkEvery = 1
+                // Robolectric plus the native Rust core exceed the 512m default test heap.
+                it.maxHeapSize = "2g"
                 // The merged manifest of the release variant is a test input (ContactsManifestTest, E4.1).
                 val merged =
                     layout.buildDirectory.dir("intermediates/merged_manifests/release/processReleaseManifest")

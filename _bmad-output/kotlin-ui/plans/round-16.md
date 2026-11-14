@@ -316,3 +316,22 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 ## Measurements
 
 (filled in by Steps 1, 4, 7 and 8: `.so` size before/after, APK size, static and GIF render times, GIF sizes)
+
+**Step 1 (2026-11-14), `librovsti_ffi.so`, aarch64-linux-android, `cargo build --release -p rovsti_ffi` (stripped by the profile):**
+
+| State | Bytes | Delta |
+|---|---|---|
+| HEAD without Takumi (baseline) | 10,030,336 | - |
+| Step 1 as committed: Takumi is a dependency of `rovsti_app_core` but no FFI op calls `cards` yet | 10,300,632 | +270,296 (+2.7 %) |
+| Temporary probe: one exported fn calling `cards::render_probe` (Takumi, Inter and the CSS and PNG paths linked; probe removed again) | 16,763,128 | +6,732,792 (+67 %) |
+
+- The real cost of X.2 is therefore about **6.7 MB** per APK ABI slice, of which the three Inter TTFs are 1.25 MB
+  (Regular 411,640 + SemiBold 419,744 + Bold 420,428). The 6.7 MB comes from Takumi's layout, text shaping (harfrust,
+  icu) and raster code at `opt-level = "z"`.
+- `rayon` is left **off**: the cards are 540-720 px, a render takes tens of milliseconds, and a rayon pool would add code
+  and a thread pool on a phone. Revisit in Step 7 only if the Step 4 GIF times miss the budget.
+- Size levers for later, not done now: Inter as woff2 (about 430 KB for the three, needs the `woff2` feature and its
+  decoder), dropping `webp` and `jpeg` encoders if the formats are unused, and a per-package `opt-level` override.
+- The extra 270 KB with no call comes from the dependency graph being linked (statics and trait objects that LTO could
+  not prove dead); it is not the fonts, which are only included when `cards::fonts` is reachable.
+

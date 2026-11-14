@@ -2,6 +2,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+pub mod cards;
 pub mod contacts;
 pub mod headless;
 pub mod messages;

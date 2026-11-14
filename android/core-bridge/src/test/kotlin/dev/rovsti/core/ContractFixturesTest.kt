@@ -2,7 +2,6 @@ package dev.rovsti.core
 
 import dev.rovsti.core.contracts.AllContracts
 import dev.rovsti.core.model.core.VersionInfo
-import dev.rovsti.core.ops.CardsOps
 import dev.rovsti.core.ops.ChatOps
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.ContactsWaOps
@@ -71,7 +70,6 @@ class ContractFixturesTest {
                 "ContactsOps" to ContactsOps.ops,
                 "ContactsWaOps" to ContactsWaOps.ops,
                 "QrOps" to QrOps.ops,
-                "CardsOps" to CardsOps.ops,
                 "PeopleOps" to PeopleOps.ops,
                 "MessagesOps" to MessagesOps.ops,
                 "ChatOps" to ChatOps.ops,

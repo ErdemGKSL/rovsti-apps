@@ -176,4 +176,10 @@
         <item quantity="one">%d okunmamış mesaj</item>
         <item quantity="other">%d okunmamış mesaj</item>
     </plurals>
+    <string name="conversation_forward">İlet</string>
+    <string name="forward_title">Şuna ilet</string>
+    <string name="forward_search">Sohbetlerde ara</string>
+    <string name="forward_none">Sohbet yok</string>
+    <string name="forward_via_sms">SMS</string>
+    <string name="forward_via_whatsapp">WhatsApp</string>
 </resources>

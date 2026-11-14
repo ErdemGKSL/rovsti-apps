@@ -3,9 +3,11 @@ package dev.rosty.messages.conversation
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -28,7 +30,9 @@ import dev.rosty.platform.files.FakeFilesRepository
 import dev.rosty.testing.ShotTest
 import dev.rosty.testing.gradientImage
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -59,6 +63,7 @@ class E63ShotTest : ShotTest() {
         tools: ToolsUi = ToolsUi(),
         text: String = "",
         menu: Boolean = false,
+        listState: LazyListState = rememberLazyListState(),
     ) {
         val labels =
             ToolLabels(
@@ -75,7 +80,7 @@ class E63ShotTest : ShotTest() {
             ConversationScreen(
                 state = state,
                 composer = rememberTextFieldState(text),
-                listState = rememberLazyListState(),
+                listState = listState,
                 actions =
                     remember {
                         ConversationActions(
@@ -242,5 +247,70 @@ class E63ShotTest : ShotTest() {
                 swipeLeft(startX = right * 0.8f, endX = right * 0.2f, durationMillis = 300)
             }
         })
+    }
+
+    @Test fun composerMultiline() =
+        snap(
+            "e6.3-composer-multiline",
+            ime = 300,
+            content = {
+                Thread(
+                    it,
+                    text =
+                        "Running a little late.\nThe train stopped at Kadıköy for ten minutes,\n" +
+                            "I will text you from the platform.",
+                )
+            },
+        )
+
+    @Test fun scrollToBottomCount() {
+        val labels = DayLabels(java.time.ZoneId.of("UTC"), java.util.Locale.US, true, "Today", "Yesterday")
+        val older =
+            (1..12).map { i ->
+                BubbleUi(
+                    "old:$i",
+                    i % 2 == 0,
+                    "Earlier message $i",
+                    "10:${10 + i}",
+                    atMs =
+                        ConversationSample.NOW - 30 * 86_400_000L + i * 60_000L,
+                )
+            }
+        val more =
+            (8..10).map { i ->
+                BubbleUi(
+                    "sms:$i",
+                    false,
+                    "Message $i",
+                    "14:${10 + i}",
+                    atMs =
+                        ConversationSample.NOW + i * 1_000L,
+                )
+            }
+        val base = older + ConversationSample.bubbles(picture)
+        val first =
+            ConversationSample
+                .state(
+                    picture,
+                ).copy(items = withDays(base, labels, ConversationSample.NOW).toImmutableList())
+        val second = first.copy(items = withDays(base + more, labels, ConversationSample.NOW).toImmutableList())
+        for (dark in listOf(false, true)) {
+            val overlays = OverlayController()
+            val state = mutableStateOf(first)
+            lateinit var list: LazyListState
+            composeFrame(dark = dark) {
+                list = rememberLazyListState()
+                Thread(overlays, state = state.value, listState = list)
+            }
+            advance(600)
+            compose.runOnUiThread { runBlocking { list.scrollToItem(12) } }
+            advance(600)
+            compose.runOnUiThread { state.value = second }
+            advance(1_200)
+            compose.onRoot().captureRoboImage(
+                filePath = "screenshots/e6.6-scroll-to-bottom-count-${if (dark) "dark" else "light"}.png",
+                roborazziOptions = options,
+            )
+        }
     }
 }

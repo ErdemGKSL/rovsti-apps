@@ -88,7 +88,7 @@ fun MessagesApp(
                 onRoleResult = { container.refreshSmsRole() },
             )
         }
-        entry<MessagesRoute.SmsThread> { route -> SmsThreadPage(container, route, pop) }
+        entry<MessagesRoute.SmsThread> { route -> SmsThreadPage(container, route, pop) { navigator.push(it) } }
         entry<MessagesRoute.WaThread> { route -> WaThreadPage(container, route, navigator, pop) }
         entry<MessagesRoute.NewConversation> { route -> NewConversationPage(container, route, navigator, pop) }
         entry<MessagesRoute.WhatsAppSettings> { WhatsAppSettingsEntry(container) }

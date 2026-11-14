@@ -28,6 +28,8 @@ import dev.rosty.design.text.resolve
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
+import dev.rosty.messages.compose.presentForward
+import dev.rosty.messages.inbox.rememberInboxViewModel
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.messages.viewer.picturesOf
@@ -92,12 +94,16 @@ fun smsBubbleMenu(
     bubble: BubbleUi,
     res: Resources,
     model: SmsThreadViewModel,
+    onForward: (BubbleUi) -> Unit = {},
 ): ImmutableList<MenuItem> {
     val items = ArrayList<MenuItem>()
     if (bubble.state == BubbleState.Failed) {
         items += MenuItem.Action(res.getString(R.string.sms_retry), RostyIcons.Rotate) { model.retry(bubble.key) }
     }
     items += MenuItem.Action(res.getString(R.string.conversation_copy), RostyIcons.Copy) { model.copy(bubble.key) }
+    if (bubble.text.isNotBlank()) {
+        items += MenuItem.Action(res.getString(R.string.conversation_forward), RostyIcons.Forward) { onForward(bubble) }
+    }
     items += MenuItem.Separator
     items +=
         MenuItem.Action(res.getString(R.string.inbox_delete), RostyIcons.Trash, destructive = true) {
@@ -112,6 +118,7 @@ fun SmsThreadPage(
     container: MessagesContainer,
     route: MessagesRoute.SmsThread,
     onBack: () -> Unit,
+    onOpen: (MessagesRoute) -> Unit = {},
 ) {
     val context = LocalContext.current
     val res = LocalResources.current
@@ -161,6 +168,10 @@ fun SmsThreadPage(
             title = { model.state.value.title },
         )
     val toolsState by host.tools.state.collectAsState()
+    val inbox = rememberInboxViewModel(container)
+    val forward: (BubbleUi) -> Unit = { bubble ->
+        overlays.presentForward(context, inbox.state.value.rows, model.tag, bubble.text, onOpen)
+    }
     val labels = rememberToolLabels()
     val actions =
         remember(model, res, onBack, overlays, host, state.title) {
@@ -189,7 +200,7 @@ fun SmsThreadPage(
                         }
                     }
                 },
-                menuFor = { smsBubbleMenu(it, res, model) },
+                menuFor = { smsBubbleMenu(it, res, model, forward) },
                 onSim = model::nextSim,
                 headerMenu =
                     headerMenu(

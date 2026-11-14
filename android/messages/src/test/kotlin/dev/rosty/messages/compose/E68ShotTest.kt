@@ -1,11 +1,18 @@
 package dev.rosty.messages.compose
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.onRoot
+import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.OverlayHost
+import dev.rosty.messages.inbox.InboxSample
 import dev.rosty.testing.ShotTest
 import kotlinx.collections.immutable.toImmutableList
 import org.junit.Test
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /** E6.8 screenshots: New Conversation with contacts, and while a number is typed. */
@@ -59,4 +66,19 @@ class E68ShotTest : ShotTest() {
                 )
             }
         }
+
+    @Test fun forwardChooser() {
+        val app = RuntimeEnvironment.getApplication()
+        for (dark in listOf(false, true)) {
+            val overlays = OverlayController()
+            composeFrame(dark = dark) { OverlayHost(overlays) { Box(Modifier.fillMaxSize()) } }
+            advance(500)
+            compose.runOnUiThread {
+                overlays.presentForward(app, InboxSample.state.rows, "wa:ada@s.whatsapp.net", "See you at six", {})
+            }
+            // The sheet's spring needs frames: one long advance runs only its first.
+            repeat(15) { advance(100) }
+            compose.onRoot().captureRoboImage("screenshots/e6.8-forward-chooser-${if (dark) "dark" else "light"}.png")
+        }
+    }
 }

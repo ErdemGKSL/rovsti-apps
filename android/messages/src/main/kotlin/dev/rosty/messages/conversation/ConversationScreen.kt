@@ -28,7 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import dev.rosty.design.chrome.ScreenScaffold
 import dev.rosty.design.chrome.topBarContentPadding
 import dev.rosty.design.controls.CapsuleButton
@@ -354,17 +354,12 @@ private fun JumpToLatest(
 ) {
     val away by remember { derivedStateOf { listState.firstVisibleItemIndex > JUMP_AFTER_ITEMS } }
     var seenNewest by remember { mutableStateOf<String?>(null) }
-    var arrived by remember { mutableIntStateOf(0) }
-    val newest = (state.items.firstOrNull { it is ConversationItem.Bubble })?.key
-    LaunchedEffect(newest, away) {
-        if (!away) {
-            seenNewest = newest
-            arrived = 0
-        } else if (newest != null && newest != seenNewest) {
-            if (seenNewest != null) arrived++
-            seenNewest = newest
-        }
+    val keys = state.items.mapNotNull { (it as? ConversationItem.Bubble)?.key }
+    LaunchedEffect(keys.firstOrNull(), away) {
+        if (!away || seenNewest == null) seenNewest = keys.firstOrNull()
     }
+    // Every bubble above the newest one seen at the end arrived while the list was scrolled away.
+    val arrived = seenNewest?.let { keys.indexOf(it) }?.coerceAtLeast(0) ?: 0
     if (!away) return
     val scope = rememberCoroutineScope()
     Box(modifier.padding(Spacing.gutter)) {
@@ -375,7 +370,8 @@ private fun JumpToLatest(
             modifier = Modifier.testTag(ConversationTags.JumpLatest),
         )
         if (arrived > 0) {
-            Box(Modifier.align(Alignment.TopEnd)) {
+            // Above the glass button, which draws in its own layer.
+            Box(Modifier.align(Alignment.TopEnd).zIndex(1f)) {
                 dev.rosty.messages.inbox
                     .UnreadBadge(minOf(arrived, JUMP_CAP), quiet = false)
             }

@@ -192,4 +192,10 @@
         <item quantity="one">%d unread message</item>
         <item quantity="other">%d unread messages</item>
     </plurals>
+    <string name="conversation_forward">Forward</string>
+    <string name="forward_title">Forward to</string>
+    <string name="forward_search">Search chats</string>
+    <string name="forward_none">No chats</string>
+    <string name="forward_via_sms">SMS</string>
+    <string name="forward_via_whatsapp">WhatsApp</string>
 </resources>

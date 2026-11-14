@@ -60,10 +60,14 @@ interface MapGesturePolicy {
  * A drag that a [MapGesturePolicy] took from the map. Exactly one of [onTap], [onDrop] and [onCancel] ends it.
  */
 interface MapDragClaim {
-    /** The finger moved beyond the touch slop and is now at ([x], [y]); called for every move after that. */
+    /**
+     * The finger moved beyond the touch slop and is now at ([x], [y]); called for every move after that.
+     * [uptimeMs] is the time of the pointer event, for the claim's own velocity samples.
+     */
     fun onDrag(
         x: Float,
         y: Float,
+        uptimeMs: Long,
     )
 
     /** The finger lifted after dragging, with its release velocity in px/s (a flick snaps to a stop). */
@@ -72,6 +76,7 @@ interface MapDragClaim {
         y: Float,
         velocityX: Float,
         velocityY: Float,
+        uptimeMs: Long,
     )
 
     /** The finger lifted without moving: a tap on the pin. */
@@ -214,7 +219,7 @@ private class MapGestureDetector(
                     if (moved) {
                         val held = claim
                         if (held != null) {
-                            held.onDrag(a.position.x, a.position.y)
+                            held.onDrag(a.position.x, a.position.y, a.uptimeMillis)
                         } else {
                             camera.panBy(a.position.x - anchor.x, a.position.y - anchor.y)
                             anchor = a.position
@@ -231,7 +236,7 @@ private class MapGestureDetector(
                 when {
                     held != null && moved -> {
                         val v = tracker.calculateVelocity()
-                        held.onDrop(at.x, at.y, v.x, v.y)
+                        held.onDrop(at.x, at.y, v.x, v.y, last.uptimeMillis)
                     }
 
                     held != null -> {

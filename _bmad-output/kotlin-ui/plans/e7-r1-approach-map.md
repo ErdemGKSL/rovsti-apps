@@ -109,3 +109,85 @@ stays the device check.
 - `MotionGate` exposes `frozen` only; `:design` has no Frost/Liquid tier switch keyed on it for arbitrary chrome, so
   AC3 is covered up to "the gate freezes while the map moves and thaws 120 ms after".
 - Map goldens are 150 to 290 kB, above the 150 kB guideline: a map is not flat chrome.
+
+### Radar layers and picking (E7.3/E7.4)
+
+Same package (`dev.rosty.stops.map`), self-contained pieces for the home to plug in. No Rust crate, no shared module
+and no dependency changed.
+
+**What the shell plugs in**
+
+| What | Where |
+|---|---|
+| `RadarState` (immutable: pins, `RadarCrossing`, `RadarPosition`, trail, `RadarStops`, line, `RadarSaved` + `showSaved`, measure), `RadarHolder` | `RadarState.kt` |
+| `rememberRadarOverlay(holder, dark)` for `StopsMap(overlay = ...)`; `RadarPainter`, `RadarPalette` | `RadarPainter.kt` |
+| `RadarHitTest` (`pinAt`, `stopAt`, `savedAt`, `hitsPosition`, `metresToPx`) | `RadarHitTest.kt` |
+| `PickController(ops, scope, camera, listener)`: the map's `gesturePolicy`; `state: StateFlow<PickUiState>`; `radar`; `beginMove/cancelMove/swap/clear/remove/place/setPair/restore`; `pinMenuModel(slot)`, `pinAnchor(slot)`; `enabled`; `savedStops`; `Modifier.pickAnchorOrigin(controller)` | `PickController.kt` |
+| `PickOps` / `StopsPickOps(StopsOps)`, `PickListener` | `PickController.kt` |
+| `presentPinMenu`, `presentCopyAsMenu`, `showThirdTapHint` on `OverlayController`; `PinMenuModel`, `PinMenuActions`, `rememberPinMenuStrings()` | `PinMenu.kt` |
+
+Wiring: `val pick = PickController(StopsPickOps(ops), scope, camera, listener)`;
+`StopsMap(camera, tiles, dark, Modifier.pickAnchorOrigin(pick), gesturePolicy = pick, overlay = rememberRadarOverlay(pick.radar, dark))`;
+position, breadcrumb, stops, line and saved markers go in with `pick.radar.update { it.copy(...) }`;
+`PickListener.onPinTap(slot)` -> `overlays.presentPinMenu(pick.pinAnchor(slot)!!, pick.pinMenuModel(slot)!!, strings, actions)`;
+`onThirdTap` -> `overlays.showThirdTapHint(strings)`; `onSavedStopTap(id)` opens the stop; `onSnapped` is the haptic.
+
+**Radar layers.** The state is coarse and immutable (it changes on a pick, a fix or a loaded list) with flat
+`lat, lon` arrays; `RadarHolder` keeps it in a snapshot state that only the draw phase reads, plus plain fields for
+the pin in the finger. So new state and a dragged pin redraw the map node and recompose nothing. `RadarPainter`
+draws on the native canvas with one `Path` and a few `Paint`s that are fields, in the order and sizes of the GPUI
+`scene_paths` (dp for its px): line, stop dots, saved rings on a white disc, the circle (two washed halves, dashed
+ring, diameter and end dots, "L"/"R") or a plain red line when A and B make no valid circle, breadcrumb (thinned per
+frame like `thin_polyline`), measure line, position with accuracy disc, pins with letter, snap ring and a caption
+plate cut to 160 dp. The circle's geometry is not computed in Kotlin: `RadarCrossing.of` takes the answers of
+`stops.crossing_validate` and `stops.crossing_read` (`outline_points = 48`) and the painter only projects them;
+the ring radius and the accuracy disc are metres over the Mercator scale at their own latitude. Colours are the
+GPUI palette on the iOS system colours of each theme. `RadarPainterTest` checks every layer by pixel, the edge
+cases (empty and too-short lists, zero-size viewport, NaN/zero/planet-size accuracy, zero-length diameter, more
+stops than the cap of 300, hidden saved markers) and measures a frame of all layers with 200 stops, a 500 point
+breadcrumb and a dragged pin: 0 bytes over 500 frames.
+
+**Hit tests** are pure functions of the camera and the state with the GPUI radii in dp (pin grab 32 =
+`PIN_GRAB_PX` in `apps/stops/src/map.rs`, saved marker 18, position dot 24), tested on the JVM including the
+antimeridian, a dense screen, ties and empty data.
+
+**Picking.** The state machine stays in Rust. `PickController` keeps the log of `PickEvent`s and after every
+gesture asks `stops.pick_replay` for the state, `stops.pick_labels` for the words ("Point A", "A-B 850 m") and
+`stops.crossing_*` for the circle; the calls run one at a time, in order, off the main thread. When nothing
+transient is left (no Move in progress) the log is replaced by one `restore` event so it never grows. As the map's
+`MapGesturePolicy`: a tap is first offered to the position dot and the saved markers, then becomes a `tap` event
+(first A, second B, third answers `full` -> `onThirdTap`); the destination is the transit stop under the finger
+when `stops.snap` says `tap_snaps` for its distance, else the raw point. `claimDrag` grabs the pin within 32 dp at
+touch-down (no long press) and remembers the finger's offset so the pin does not jump; while dragging, the pin
+follows through `RadarHolder.dragTo` (no Rust call on the finger's path) and the circle follows through a conflated
+off-thread recompute, a call or two behind; on drop the last 16 finger samples go to `stops.snap` (Rust's own
+velocity tracker computes release and peak speed) with the nearest stop within 56 dp, and the answer decides
+snap or free; a second finger calls `onCancel`, the pin and the settled circle come back and the map pinches.
+A tap never moves the view. `MapDragClaim.onDrag/onDrop` got an `uptimeMs` argument for those samples.
+Rust's own `open_menu`/`close_menu` events are not used: the overlay host owns the menu's life (a scrim tap closes
+it), and sending them would make the next map tap a `menu_closed`.
+
+**Pin menu.** Built from `stops.coord_format` and `stops.pick_save_offer`: two caption rows (decimal coordinate,
+"610 m from you, NE"), Copy as... (S1: the six formats, localised names by format id), QR code (S3), Open in maps
+(S4), Measure from here (S34), Save as stop (only when the gate is not saved yet), Lines (only on a transit stop),
+then Move, Swap A and B, Remove. It is a `ButtonMenuEntry` anchored to the pin's window rectangle; clipboard,
+QR sheet, intents, measure and saving are `PinMenuActions` callbacks for the shell.
+
+**Tests.** `PickControllerTest` and `PickGesturesTest` run against the real Rust core on the host library
+(`MapHostRust`), not a scripted fake: 19 controller cases (taps, too-close pair, tap snap in dp, Move/Swap/Remove/
+Clear, place/setPair/restore, drag follow and offset, flick snap, slow drop, nudge on a stop, cancel, menu model,
+anchor, a failing call, log compaction) and 7 Compose gesture cases with `mainClock.autoAdvance = false` for E7.4
+AC1. Screenshots `e7.3-*` and `e7.4-*` (light and dark) render the same pieces over the fixture tile.
+
+**Gaps found (not fixed here, they need a bridge op)**
+- **No op gives the transit stops in view or the stops of a pattern.** `stops.gtfs_search` needs a non-empty
+  query, so today Kotlin cannot get the coordinates to draw stop dots, to snap to, or to draw the chosen line.
+  `RadarStops` and `line` are inputs the shell must fill; a `stops.gtfs_view {bbox, cap, pattern?}` op (the GPUI
+  `stops_in_view` and pattern lookup) is the missing piece and belongs to E2.
+- The texts from Rust (`pick_labels`, the hint, `coord_format`'s "from you") are English only; the menu's own
+  words and the format names are localised (en + tr).
+
+**Known limits.** The pin menu can cover its pin when there is no room above or below (the design system's
+placement). Captions and pin letters use dp, not the font scale. The circle lags the dragged pin by a Rust call.
+The breadcrumb is thinned per frame rather than cached per zoom. The toast of the third-tap hint is placed by the
+overlay host; in the test window it sits over the attribution, which the shell's bottom chrome will move.

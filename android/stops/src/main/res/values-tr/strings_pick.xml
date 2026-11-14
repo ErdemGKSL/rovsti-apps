@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pick_menu_copy_as">Farklı biçimde kopyala…</string>
+    <string name="pick_menu_qr">QR kodu</string>
+    <string name="pick_menu_open_in_maps">Haritalarda aç</string>
+    <string name="pick_menu_measure">Buradan ölç</string>
+    <string name="pick_menu_save">Durak olarak kaydet</string>
+    <string name="pick_menu_move">Taşı</string>
+    <string name="pick_menu_swap">A ile B\'yi değiştir</string>
+    <string name="pick_menu_remove">Kaldır</string>
+    <string name="pick_menu_lines">Hatlar</string>
+    <string name="pick_hint_full">Ayarlamak için bir iğneyi sürükleyin veya Temizle\'ye dokunun.</string>
+    <string name="pick_format_decimal">Ondalık derece</string>
+    <string name="pick_format_dms">Derece, dakika, saniye</string>
+    <string name="pick_format_ddm">Derece, ondalık dakika</string>
+    <string name="pick_format_plus_code">Plus Code</string>
+    <string name="pick_format_geo">geo: bağlantısı</string>
+    <string name="pick_format_osm">OpenStreetMap bağlantısı</string>
+</resources>

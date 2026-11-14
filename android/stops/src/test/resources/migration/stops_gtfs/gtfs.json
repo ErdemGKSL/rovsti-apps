@@ -1,0 +1,1 @@
+{"stops": [{"id": "A", "name": "Moda İskele", "coord": {"lat": 41.0001, "lon": 29.0}, "parent": null}, {"id": "B", "name": "Kadıköy", "coord": {"lat": 40.99, "lon": 29.02}, "parent": null}], "routes": [{"id": "R1", "short_name": "14", "long_name": "Moda - Kadıköy", "kind": 3}], "patterns": [{"route": 0, "headsign": "Kadıköy", "stops": [0, 1]}], "imported_ms": 1790000000000}

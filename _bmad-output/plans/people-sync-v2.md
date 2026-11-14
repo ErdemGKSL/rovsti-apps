@@ -680,6 +680,21 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   `foregroundServiceType="dataSync"` (`tools:node="merge"`), the Stop receiver; Phone's call services keep their types,
   and Phone initialises WorkManager on demand (`Configuration.Provider`, startup initializer removed) so a cold start for
   a ringing call does not open WorkManager's database. No UI rows changed (no new shots).
+- **S12 Sharp pictures and the zoomable WhatsApp photo** (user report: the WhatsApp picture looked blurry and could
+  not be opened). *Done:* (a) The sync, the live picture pass and Phone standalone (one runner) ask `wa.picture` with
+  `full = true`: WhatsApp's preview is ~96 px and the 72-112 dp header avatars upscaled it. The bytes are stored
+  downscaled to a 512 px short side (`PICTURE_PX`, 448 px is 112 dp at 4x), JPEG 85 (`PeoplePictureCodec`: power-of-two
+  sampling, then an exact filtered scale), about 40 KB; `PeopleStore.MAX_BYTES` grows from 16 to 48 MB (about 1,000
+  pictures, oldest out first). (b) The book records the `picture_format` of each file (`people::PICTURE_FORMAT = 2`;
+  older files read as 0). `Book::plan` marks a file of an older format due, and the planner sends no `known_id` for it,
+  so the gateway answers bytes, not `unchanged`; an `unchanged` answer keeps the file's old format. The refresh runs
+  through the normal paced picture pass (3 s gap, `MAX_PICTURES` per run, 429 backoff): no burst. (c) The card's hero
+  avatar (Contacts) and the Person / Call details avatar (Phone) open a contact's WhatsApp picture, when it has no
+  photo of its own, in the same `PhotoViewer` (shared-bounds flight from the circle, pinch/double-tap, drag to
+  dismiss). Read-only: Save and Share, no Edit. The cached picture shows at once; `ViewerPhoto.upgrade` then loads the
+  gateway's full picture (`WaFullPictures`, one request per open, kept in `cache/wa-full`, the 4 newest) and fades
+  it in over the same picture. Not linked, offline, a 429 or an error keep the cached one and are logged under the tag
+  `people` (`full_picture result=...`). Small list avatars stay non-interactive. No gateway change.
 
 ## 13. Risks and device verification
 

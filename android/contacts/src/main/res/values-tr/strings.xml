@@ -355,6 +355,7 @@
     <string name="contacts_use_whatsapp_photo">WhatsApp Fotoğrafını Kullan</string>
     <string name="contacts_vcard_copied">vCard kopyalandı</string>
     <string name="contacts_view_photo">Fotoğrafı görüntüle</string>
+    <string name="contacts_view_whatsapp_photo">WhatsApp fotoğrafını görüntüle</string>
     <string name="contacts_voicemail_setting">Aramaları Sesli Mesaja Gönder</string>
     <string name="contacts_wa_unreachable">WhatsApp\'a şu anda ulaşılamıyor</string>
     <string name="contacts_website">Web sitesi</string>

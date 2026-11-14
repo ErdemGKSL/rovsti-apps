@@ -9,6 +9,7 @@ import dev.rovsti.core.model.wa.InstanceState
 import dev.rovsti.core.model.wa.WaProfile
 import dev.rovsti.core.ops.PeopleOps
 import dev.rovsti.people.sync.PartNotifier
+import dev.rovsti.people.sync.PeoplePictureCodec
 import dev.rovsti.people.sync.PeopleStore
 import dev.rovsti.people.sync.PeopleSyncHost
 import dev.rovsti.people.sync.PeopleSyncRunner
@@ -17,7 +18,6 @@ import dev.rovsti.people.sync.SliceResult
 import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.WaRepository
 import dev.rovsti.wa.avatars.AvatarCodec
-import dev.rovsti.wa.avatars.BitmapAvatarCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
@@ -120,7 +120,7 @@ class PeopleSync(
     private val scope: CoroutineScope,
     private val legacy: SharedPreferences? = null,
     gatewayUrl: suspend () -> String = { "" },
-    codec: AvatarCodec = BitmapAvatarCodec,
+    codec: AvatarCodec = PeoplePictureCodec,
     private val clock: () -> Long = System::currentTimeMillis,
     pause: suspend (Long) -> Unit = { delay(it) },
     random: () -> Int = { Random.nextInt(0, Int.MAX_VALUE) },

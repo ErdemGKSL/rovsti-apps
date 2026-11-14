@@ -18,16 +18,41 @@ data class PersonPhoto(
     val contactId: Long,
     val thumb: String?,
     val source: PhotoSource = PhotoSource.Contact,
+    /** For a [PhotoSource.WhatsApp] picture: whose it is and its id, so the viewer can fetch it full size (S12). */
+    val waJid: String? = null,
+    val waPictureId: String? = null,
 ) {
     val hasPhoto: Boolean get() = thumb != null
 
-    /** The full-size picture of the contact (`display_photo`); the avatar shows the thumbnail of the same photo. */
+    /**
+     * The full-size picture of the contact (`display_photo`); the avatar shows the thumbnail of the same photo. For a
+     * WhatsApp picture it is the cached one (the viewer swaps in the gateway's full-size picture when it can).
+     */
     val full: Uri
         get() =
-            Uri.withAppendedPath(
-                ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId),
-                ContactsContract.Contacts.Photo.DISPLAY_PHOTO,
+            if (source == PhotoSource.WhatsApp && thumb != null) {
+                Uri.parse(thumb)
+            } else {
+                Uri.withAppendedPath(
+                    ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId),
+                    ContactsContract.Contacts.Photo.DISPLAY_PHOTO,
+                )
+            }
+
+    companion object {
+        /** The read-only WhatsApp picture of [contactId] (-1: a number without a contact). */
+        fun whatsApp(
+            contactId: Long?,
+            picture: dev.rovsti.people.PersonAvatar.WhatsApp,
+        ): PersonPhoto =
+            PersonPhoto(
+                contactId = contactId ?: -1L,
+                thumb = picture.uri,
+                source = PhotoSource.WhatsApp,
+                waJid = picture.jid,
+                waPictureId = picture.pictureId,
             )
+    }
 }
 
 /**

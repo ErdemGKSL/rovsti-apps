@@ -69,14 +69,7 @@ fun ContactAvatar(
     /** On a call's aura the initials sit on a white disc (the design system's rule); photos are unchanged. */
     onAura: Boolean = false,
 ) {
-    val resolver = LocalAvatarResolver.current
-    val version = resolver?.version?.collectAsState()?.value ?: 0L
-    val avatar =
-        remember(resolver, version, face) {
-            resolver?.resolve(face.own, face.numbers)
-                ?: face.own?.takeIf { it.isNotBlank() }?.let { PersonAvatar.Own(it) }
-                ?: PersonAvatar.Initials
-        }
+    val avatar = rememberPersonAvatar(face)
     // A picture that shows up while the avatar is on screen (the sync finished) fades in; one known at the first
     // composition does not, and neither does anything under reduce motion.
     val seen = remember { Seen() }
@@ -116,6 +109,21 @@ fun ContactAvatar(
                 shape = CircleShape,
             )
         }
+    }
+}
+
+/**
+ * What [ContactAvatar] draws for [face]: own photo, else the WhatsApp picture, else initials. A screen reads it to know
+ * whether a tap on the avatar opens the photo viewer (and on which picture).
+ */
+@Composable
+fun rememberPersonAvatar(face: AvatarFace): PersonAvatar {
+    val resolver = LocalAvatarResolver.current
+    val version = resolver?.version?.collectAsState()?.value ?: 0L
+    return remember(resolver, version, face) {
+        resolver?.resolve(face.own, face.numbers)
+            ?: face.own?.takeIf { it.isNotBlank() }?.let { PersonAvatar.Own(it) }
+            ?: PersonAvatar.Initials
     }
 }
 

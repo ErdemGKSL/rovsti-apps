@@ -175,6 +175,13 @@ private class PersonPhotoSession(
         )
     }
 
+    /** The WhatsApp picture's full-size version from the gateway (S12); null for the contact's own photo. */
+    private fun fullPicture(): (suspend () -> Any?)? {
+        val jid = photo.waJid ?: return null
+        val id = photo.waPictureId ?: return null
+        return { container.waFullPictures.load(jid, id) }
+    }
+
     private fun openViewer() {
         val actions =
             PersonPhotoActions(
@@ -198,7 +205,13 @@ private class PersonPhotoSession(
             overlays().showPhotoViewer(
                 photos =
                     persistentListOf(
-                        ViewerPhoto(full = photo.full, thumb = photo.thumb, source = photo.source, circular = true),
+                        ViewerPhoto(
+                            full = photo.full,
+                            thumb = photo.thumb,
+                            source = photo.source,
+                            circular = true,
+                            upgrade = fullPicture(),
+                        ),
                     ),
                 initialPage = 0,
                 actions =

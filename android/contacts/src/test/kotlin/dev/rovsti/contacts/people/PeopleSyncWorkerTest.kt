@@ -138,6 +138,7 @@ class PeopleSyncWorkerTest {
         val file = File(container.dir, book.getValue(ayse).pictureFile!!)
         assertEquals("ayse-11", file.readText())
         assertEquals(1, container.gw.pictureAsks.count { it.knownId == null && it.jid == ayse })
+        assertTrue("the full picture is asked for (S12)", container.gw.pictureAsks.all { it.full })
         assertTrue("every part was told", container.changes >= 1)
         val status = container.awaitStatus { it is PeopleSyncStatus.Idle && it.lastMs != null }
         assertTrue(status is PeopleSyncStatus.Idle && status.lastMs != null)

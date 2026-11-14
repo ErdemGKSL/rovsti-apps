@@ -127,6 +127,12 @@ class PhotoViewerActionsTest {
             assertTrue("only Edit opens a menu", toolbar.map { it.menu != null } == listOf(false, false, true))
         }
 
+    @Test fun aWhatsAppPictureOffersSaveAndShareOnly() =
+        runTest {
+            val toolbar = actions(this).readOnlyActions(context)
+            assertEquals(listOf("save", "share"), toolbar.map { it.id })
+        }
+
     @Test fun theEditMenuFollowsTheWhatsAppState() =
         runTest {
             val a = actions(this)

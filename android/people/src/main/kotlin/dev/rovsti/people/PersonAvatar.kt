@@ -12,11 +12,13 @@ sealed interface PersonAvatar {
 
     /**
      * The WhatsApp picture, from the people cache. [uri] is a content or file URI; [pictureId] changes when the
-     * picture does, so it is the image cache key (the crossfade of X.1 runs when it changes).
+     * picture does, so it is the image cache key (the crossfade of X.1 runs when it changes). [jid] is the person
+     * the picture is of: the photo viewer asks the gateway for the full-size picture by it.
      */
     data class WhatsApp(
         val uri: String,
         val pictureId: String,
+        val jid: String? = null,
     ) : PersonAvatar
 
     /** Nothing to show: draw the monogram. */

@@ -37,6 +37,7 @@ import dev.rovsti.core.ops.SearchOps
 import dev.rovsti.core.ops.SharedOps
 import dev.rovsti.people.AvatarResolver
 import dev.rovsti.people.PeopleIndex
+import dev.rovsti.people.WaFullPictures
 import dev.rovsti.people.sync.PeopleStore
 import dev.rovsti.platform.calllog.AndroidBlocklistRepository
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
@@ -104,6 +105,11 @@ open class ContactsContainer(
 
     /** "Use WhatsApp Photo": the large picture of one JID from the owner's gateway. */
     val waPhotos: WaPhotoPort by lazy { createWaPhotos() }
+
+    /** The full-size WhatsApp picture the card's photo viewer swaps in (S12); a small cache folder, never the book. */
+    val waFullPictures: WaFullPictures by lazy {
+        WaFullPictures(File(context.cacheDir, WaFullPictures.DIR_NAME), picture = { body -> wa.gateway()?.picture(body) })
+    }
 
     /** The address book and its search indexes; follows READ_CONTACTS. */
     val book: BookRepository by lazy {

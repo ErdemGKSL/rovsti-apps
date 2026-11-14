@@ -137,8 +137,11 @@ class PeopleStore(
         /** The folder inside the app's files directory. */
         const val DIR_NAME = "people"
 
-        /** The disk budget of the picture files. */
-        const val MAX_BYTES = 16L * 1024 * 1024
+        /**
+         * The disk budget of the picture files: about 1,000 pictures of [PeopleSyncRunner.PICTURE_PX] (~40 KB each,
+         * S12); the oldest go first past it.
+         */
+        const val MAX_BYTES = 48L * 1024 * 1024
 
         private const val PART = ".part"
     }

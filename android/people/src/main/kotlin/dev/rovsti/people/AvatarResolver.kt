@@ -45,6 +45,6 @@ class AvatarResolver(
     private fun whatsApp(person: IndexedPerson?): PersonAvatar? {
         val id = person?.row?.pictureId ?: return null
         val uri = person.pictureUri ?: return null
-        return PersonAvatar.WhatsApp(uri, id)
+        return PersonAvatar.WhatsApp(uri, id, person.row.jid)
     }
 }

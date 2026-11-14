@@ -1258,6 +1258,109 @@ fn known_id_only_when_the_file_is_on_disk() {
 }
 
 #[test]
+fn a_preview_file_is_fetched_again_once_without_known_id() {
+    // S12: a file stored before the format bump (the small preview) is planned again, asked for without its id so
+    // the gateway sends the bytes, and once stored it is current: the next plan leaves it alone.
+    let mut w = World::new();
+    let a = "905550002222@s.whatsapp.net";
+    let name = avatars::file_name(a, "7");
+    w.book.upsert(
+        &[Update {
+            jid: a.into(),
+            on_whatsapp: Some(true),
+            picture_id: Some("7".into()),
+            picture_file: Some(name.clone()),
+            picture_format: Some(1),
+            ..Update::default()
+        }],
+        NOW - 1_000,
+    );
+    let on_disk = || {
+        vec![FileInfo {
+            path: format!("/x/{name}"),
+            bytes: 10,
+            modified_ms: 1,
+        }]
+    };
+    let mut s = w.begin(&[], Start::LivePictures, None).unwrap();
+    assert_eq!(w.next_awake(&mut s), Step::PlanPictures);
+    w.report(
+        &mut s,
+        Report::Files {
+            files: on_disk(),
+            max_bytes: 1 << 20,
+        },
+    );
+    match w.next_awake(&mut s) {
+        Step::Picture { jid, known_id } => {
+            assert_eq!(jid, a);
+            assert_eq!(known_id, None, "an old file is not offered as held");
+        }
+        other => panic!("{other:?}"),
+    }
+    w.report(
+        &mut s,
+        Report::Picture {
+            jid: a.into(),
+            result: PictureResult::Stored {
+                picture_id: "7".into(),
+                file: name.clone(),
+            },
+        },
+    );
+    let p = w.book.lookup(a).unwrap();
+    assert_eq!(p.picture_format, people::PICTURE_FORMAT);
+    assert!(
+        w.book
+            .plan(NOW, &on_disk(), 1 << 20)
+            .refresh
+            .iter()
+            .all(|r| r.jid != a),
+        "fetched once, then current"
+    );
+}
+
+#[test]
+fn an_unchanged_answer_keeps_the_old_format() {
+    let mut w = World::new();
+    let a = "905550003333@s.whatsapp.net";
+    let name = avatars::file_name(a, "7");
+    w.book.upsert(
+        &[Update {
+            jid: a.into(),
+            on_whatsapp: Some(true),
+            picture_id: Some("7".into()),
+            picture_file: Some(name.clone()),
+            picture_format: Some(1),
+            ..Update::default()
+        }],
+        NOW - 1_000,
+    );
+    let mut s = w.begin(&[], Start::LivePictures, None).unwrap();
+    assert_eq!(w.next_awake(&mut s), Step::PlanPictures);
+    w.report(
+        &mut s,
+        Report::Files {
+            files: vec![FileInfo {
+                path: format!("/x/{name}"),
+                bytes: 10,
+                modified_ms: 1,
+            }],
+            max_bytes: 1 << 20,
+        },
+    );
+    assert!(matches!(w.next_awake(&mut s), Step::Picture { .. }));
+    w.report(
+        &mut s,
+        Report::Picture {
+            jid: a.into(),
+            result: PictureResult::Unchanged,
+        },
+    );
+    assert_eq!(w.book.lookup(a).unwrap().picture_format, 1);
+}
+
+#[test]
 fn unlink_interrupts_the_stored_run() {
     let mut w = World::new();
     let mut s = w.begin(&numbers(5), Start::Restart, None).unwrap();

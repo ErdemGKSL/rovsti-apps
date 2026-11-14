@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import dev.rovsti.people.AvatarResolver
@@ -133,6 +134,38 @@ class PhoneAvatarSurfacesTest : ShotTest() {
         }
         advance(300)
         compose.onNodeWithTag("sheet-avatar").assert(kind("initials"))
+    }
+
+    @Test fun aTapOnTheWhatsAppPictureOfTheSheetOpensItReadOnly() {
+        // S12: a contact without a photo of its own whose number has a WhatsApp picture opens it in the viewer.
+        val number = "+90 532 111 22 33"
+        val opened = mutableListOf<dev.rovsti.phone.details.photo.PersonPhoto>()
+        withResolver(waResolver(listOf(number))) {
+            CompositionLocalProvider(
+                dev.rovsti.phone.details.photo.LocalPersonPhotoOpener provides
+                    dev.rovsti.phone.details.photo
+                        .PersonPhotoOpener { photo, _, _ -> opened += photo },
+            ) {
+                PersonPhotoAvatar(
+                    name = "Ayse",
+                    colorKey = "k",
+                    size = 96.dp,
+                    photo =
+                        dev.rovsti.phone.details.photo
+                            .PersonPhoto(5, null),
+                    numbers = listOf(number),
+                )
+            }
+        }
+        advance(300)
+        compose.onNodeWithTag(dev.rovsti.phone.details.photo.PERSON_AVATAR_TAG).assert(kind("whatsapp"))
+        compose.onNodeWithTag(dev.rovsti.phone.details.photo.PERSON_AVATAR_TAG).performClick()
+        val photo = opened.single()
+        assertEquals(dev.rovsti.design.media.PhotoSource.WhatsApp, photo.source)
+        assertEquals("905321112233@s.whatsapp.net", photo.waJid)
+        assertEquals("pic-905321112233", photo.waPictureId)
+        assertEquals("file:///people/905321112233@s.whatsapp.net.jpg", photo.full.toString())
+        assertTrue("a WhatsApp picture is never edited", !photo.source.editable)
     }
 
     @Test fun everySurfaceNamedByTheSpecReadsItsPictureThroughThePeopleLayer() {

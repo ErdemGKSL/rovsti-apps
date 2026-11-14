@@ -33,6 +33,7 @@ import dev.rovsti.people.PeopleIdentitySource
 import dev.rovsti.people.PeopleSource
 import dev.rovsti.people.PeopleSources
 import dev.rovsti.people.ProviderSource
+import dev.rovsti.people.WaFullPictures
 import dev.rovsti.people.sync.PeopleStore
 import dev.rovsti.people.sync.PeopleSyncRunner
 import dev.rovsti.phone.data.AndroidCallLauncher
@@ -275,6 +276,11 @@ open class PhoneContainer(
 
     /** The home region (SIM, network, locale, else TR) that national numbers are normalized in. */
     val homeRegion: String by lazy { PhoneNumbers.homeRegion(context) }
+
+    /** The full-size WhatsApp picture the photo viewer swaps in (S12); a small cache folder, never the people cache. */
+    val waFullPictures: WaFullPictures by lazy {
+        WaFullPictures(File(context.cacheDir, WaFullPictures.DIR_NAME), picture = { body -> wa.gateway()?.picture(body) })
+    }
 
     /** The people cache in memory (X.1d): names and WhatsApp pictures by number, read without blocking by every surface. */
     val peopleIndex: dev.rovsti.people.PeopleIndex by lazy {

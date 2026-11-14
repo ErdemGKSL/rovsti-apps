@@ -317,6 +317,7 @@ fun rememberCardPhotoViewer(
                 start(context, ShareIntents.image(uri, mime, name)) { latestOverlays.value.showToast(it) }
             },
             onOpened = { open[0] = it },
+            fullPicture = { jid, pictureId -> container.waFullPictures.load(jid, pictureId) },
         )
     }
 }

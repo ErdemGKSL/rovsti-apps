@@ -30,6 +30,9 @@ pub const MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PEOPLE: usize = 5_000;
 /// A picture is looked at again this long after it was last fetched.
 pub const REVALIDATE_MS: i64 = 7 * 24 * 3_600_000;
+/// How the picture files are made now (S12): 2 is the full picture downscaled to a sharp header avatar. A file of an
+/// older format (0, 1: WhatsApp's small preview) is fetched again once, through the normal paced picture pass.
+pub const PICTURE_FORMAT: u32 = 2;
 
 const PHONE_SUFFIX: &str = "@s.whatsapp.net";
 const LID_SUFFIX: &str = "@lid";
@@ -62,6 +65,9 @@ pub struct Person {
     /// The picture id changed and the file is the old one (or missing).
     #[serde(default)]
     pub picture_stale: bool,
+    /// The [`PICTURE_FORMAT`] the file was made with (0: before S12, the small preview).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub picture_format: u32,
     /// When the picture was last asked for (0: never).
     #[serde(default)]
     pub fetched_ms: i64,
@@ -113,6 +119,9 @@ pub struct Update {
     /// A picture file was just stored for `picture_id`.
     #[serde(default)]
     pub picture_file: Option<String>,
+    /// The format of `picture_file`; `None`: made now ([`PICTURE_FORMAT`]).
+    #[serde(default)]
+    pub picture_format: Option<u32>,
 }
 
 /// What an upsert changed outside the store.
@@ -199,6 +208,10 @@ fn lid_of(jid: &str) -> Option<&str> {
 fn phone_jid(number: &str) -> Option<String> {
     let digits = number.trim_start_matches('+');
     (!digits.is_empty()).then(|| format!("{digits}{PHONE_SUFFIX}"))
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 fn non_empty(text: &str) -> Option<String> {
@@ -345,6 +358,7 @@ impl Book {
             into.picture_id = other.picture_id;
             into.picture_file = other.picture_file;
             into.picture_stale = other.picture_stale;
+            into.picture_format = other.picture_format;
         } else {
             out.drop_files.extend(other.picture_file);
         }
@@ -355,6 +369,7 @@ impl Book {
             out.drop_files.extend(person.picture_file.take());
             person.picture_id = None;
             person.picture_stale = false;
+            person.picture_format = 0;
             person.fetched_ms = now_ms;
             return;
         }
@@ -363,6 +378,7 @@ impl Book {
                 // A file without an id: keep the old one's name only when it is the same file.
                 person.picture_file = Some(file.to_owned());
                 person.picture_stale = false;
+                person.picture_format = update.picture_format.unwrap_or(PICTURE_FORMAT);
                 person.fetched_ms = now_ms;
             }
             return;
@@ -377,6 +393,7 @@ impl Book {
                     out.drop_files.push(old);
                 }
                 person.picture_stale = false;
+                person.picture_format = update.picture_format.unwrap_or(PICTURE_FORMAT);
                 person.fetched_ms = now_ms;
             }
             None if changed => person.picture_stale = true,
@@ -386,8 +403,9 @@ impl Book {
 
     /// Which pictures to fetch now and which files to delete.
     ///
-    /// A picture is fetched when it is stale, when its id is known but the file is missing from `files`, when it
-    /// was never asked for, or when it was last fetched more than [`REVALIDATE_MS`] ago; "no picture" is
+    /// A picture is fetched when it is stale, when its id is known but the file is missing from `files` or was made
+    /// with an older [`PICTURE_FORMAT`], when it was never asked for, or when it was last fetched more than
+    /// [`REVALIDATE_MS`] ago; "no picture" is
     /// believed for [`NONE_FOR_MS`]. Only people on WhatsApp are asked for. Files go when they hold an older
     /// picture of a known person, and then the oldest over `max_bytes`.
     pub fn plan(&self, now_ms: i64, files: &[FileInfo], max_bytes: u64) -> Plan {
@@ -406,7 +424,9 @@ impl Book {
             let due = if p.picture_stale {
                 true
             } else if p.picture_id.is_some() {
-                !has_file || now_ms - p.fetched_ms > REVALIDATE_MS
+                !has_file
+                    || p.picture_format < PICTURE_FORMAT
+                    || now_ms - p.fetched_ms > REVALIDATE_MS
             } else {
                 p.fetched_ms == 0 || now_ms - p.fetched_ms > NONE_FOR_MS
             };
@@ -664,6 +684,42 @@ mod tests {
         // "no picture" is asked again after NONE_FOR_MS
         let later = book.plan(NOW + NONE_FOR_MS + 1, &[], 1_000_000);
         assert!(later.refresh.iter().any(|r| r.jid == "3@s.whatsapp.net"));
+    }
+
+    #[test]
+    fn plan_asks_again_for_a_file_of_an_older_format() {
+        let mut book = Book::default();
+        let name = avatars::file_name(JID, "1");
+        book.upsert(
+            &[Update {
+                on_whatsapp: Some(true),
+                picture_file: Some(name.clone()),
+                picture_format: Some(PICTURE_FORMAT - 1),
+                ..pic(JID, "1")
+            }],
+            NOW,
+        );
+        let files = [file(&name, 10, 1)];
+        let plan = book.plan(NOW + 1, &files, 1_000_000);
+        assert_eq!(plan.refresh.len(), 1, "the preview file is refreshed");
+        assert!(plan.remove.is_empty(), "and keeps showing meanwhile");
+        // a store without a format is a file of the current one
+        book.upsert(
+            &[Update {
+                picture_file: Some(name),
+                ..pic(JID, "1")
+            }],
+            NOW + 2,
+        );
+        assert_eq!(book.lookup(JID).unwrap().picture_format, PICTURE_FORMAT);
+        assert!(book.plan(NOW + 3, &files, 1_000_000).refresh.is_empty());
+    }
+
+    #[test]
+    fn a_saved_book_without_formats_reads_as_old_files() {
+        let json = r#"{"schema_version":1,"people":[{"jid":"1@s.whatsapp.net","picture_id":"9","picture_file":"f.jpg"}]}"#;
+        let book: Book = serde_json::from_str(json).unwrap();
+        assert_eq!(book.people[0].picture_format, 0);
     }
 
     #[test]

@@ -434,6 +434,7 @@
     <!-- The photo viewer and photo edit of the sheets (E5.13). -->
     <string name="photo_open">Show photo</string>
     <string name="photo_of">Photo of %1$s</string>
+    <string name="photo_whatsapp_of">WhatsApp photo of %1$s</string>
     <string name="photo_save">Save</string>
     <string name="photo_share">Share</string>
     <string name="photo_edit">Edit</string>

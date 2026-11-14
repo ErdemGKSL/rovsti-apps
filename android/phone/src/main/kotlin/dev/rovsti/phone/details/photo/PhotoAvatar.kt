@@ -13,8 +13,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import dev.rovsti.design.list.Avatar
+import dev.rovsti.people.PersonAvatar
 import dev.rovsti.people.ui.AvatarFace
 import dev.rovsti.people.ui.ContactAvatar
+import dev.rovsti.people.ui.rememberPersonAvatar
 import dev.rovsti.phone.R
 
 /** Test tag of the tappable avatar of the Person and Call details sheets. */
@@ -36,12 +38,46 @@ fun PersonPhotoAvatar(
     numbers: List<String> = emptyList(),
 ) {
     val opener = LocalPersonPhotoOpener.current
-    if (photo == null || opener == null) {
-        // No photo of their own to open: the WhatsApp picture of the number, else initials.
+    val bounds = remember { arrayOfNulls<Rect>(1) }
+    if (photo?.hasPhoto != true) {
+        // No photo of their own: the WhatsApp picture of the number opens read-only in the viewer (S12); a contact
+        // with initials only keeps the add-photo sheet, a stranger with initials is a plain avatar.
+        val face = AvatarFace(numbers = numbers)
+        val wa = rememberPersonAvatar(face) as? PersonAvatar.WhatsApp
+        val target = wa?.let { PersonPhoto.whatsApp(photo?.contactId, it) } ?: photo
+        if (opener == null || target == null) {
+            ContactAvatar(name, face, modifier, size, colorKey)
+            return
+        }
+        ContactAvatar(
+            name,
+            face,
+            modifier
+                .testTag(PERSON_AVATAR_TAG)
+                .onGloballyPositioned { bounds[0] = it.boundsInWindow() }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = stringResource(R.string.photo_open),
+                ) { opener.open(target, name) { bounds[0] } },
+            size,
+            colorKey,
+            contentDescription =
+                if (wa !=
+                    null
+                ) {
+                    stringResource(R.string.photo_whatsapp_of, name)
+                } else {
+                    stringResource(R.string.photo_of, name)
+                },
+        )
+        return
+    }
+    if (opener == null) {
         ContactAvatar(name, AvatarFace(numbers = numbers), modifier, size, colorKey)
         return
     }
-    val bounds = remember { arrayOfNulls<Rect>(1) }
     val label = stringResource(R.string.photo_of, name)
     Avatar(
         name = name,

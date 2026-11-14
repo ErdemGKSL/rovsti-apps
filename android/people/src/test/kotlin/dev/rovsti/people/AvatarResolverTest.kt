@@ -35,13 +35,19 @@ class AvatarResolverTest {
 
     @Test fun noPhotoAndAWhatsAppPictureShowsWhatsApp() {
         val avatar = resolver(ayse).resolve(null, listOf("0532 123 45 67"))
-        assertEquals(PersonAvatar.WhatsApp("content://p/905321234567@s.whatsapp.net/55", "55"), avatar)
+        assertEquals(
+            PersonAvatar.WhatsApp("content://p/905321234567@s.whatsapp.net/55", "55", "905321234567@s.whatsapp.net"),
+            avatar,
+        )
         assertEquals("a blank photo uri is no photo", avatar, resolver(ayse).resolve("  ", "+905321234567"))
     }
 
     @Test fun theFirstNumberWithAPictureWins() {
         val avatar = resolver(noPicture, ayse).resolve(null, listOf("+905320000000", "+905321234567"))
-        assertEquals(PersonAvatar.WhatsApp("content://p/905321234567@s.whatsapp.net/55", "55"), avatar)
+        assertEquals(
+            PersonAvatar.WhatsApp("content://p/905321234567@s.whatsapp.net/55", "55", "905321234567@s.whatsapp.net"),
+            avatar,
+        )
     }
 
     @Test fun unlinkedMeansInitials() {
@@ -57,11 +63,17 @@ class AvatarResolverTest {
     @Test fun anUnknownNumberThatIsOnWhatsAppGetsItsPicture() {
         // The number is in no address book (a caller in Recents), the cache knows it.
         val avatar = resolver(ayse).resolve(ownPhoto = null, number = "+90 532 123 45 67")
-        assertEquals(PersonAvatar.WhatsApp("content://p/905321234567@s.whatsapp.net/55", "55"), avatar)
+        assertEquals(
+            PersonAvatar.WhatsApp("content://p/905321234567@s.whatsapp.net/55", "55", "905321234567@s.whatsapp.net"),
+            avatar,
+        )
     }
 
     @Test fun aChatKnownByLidResolvesByJid() {
-        assertEquals(PersonAvatar.WhatsApp("content://p/4477@lid/9", "9"), resolver(lid).resolveJid("4477@lid"))
+        assertEquals(
+            PersonAvatar.WhatsApp("content://p/4477@lid/9", "9", "4477@lid"),
+            resolver(lid).resolveJid("4477@lid"),
+        )
         assertEquals(PersonAvatar.Initials, resolver(lid).resolveJid("1-2@g.us"))
         assertEquals(PersonAvatar.Own("u"), resolver(lid).resolveJid("4477@lid", ownPhoto = "u"))
     }

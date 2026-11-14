@@ -22,7 +22,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::people::{Book, FileInfo, Refresh, Update};
+use crate::people::{self, Book, FileInfo, Refresh, Update};
 
 /// File name inside the app data directory, next to `people.json`.
 pub const FILE: &str = "people-sync.json";
@@ -1051,6 +1051,7 @@ fn next_step(cp: &mut Checkpoint, s: &mut Session, book: &Book, now_ms: i64, ran
                 let known_id = first.picture_id.clone().filter(|id| {
                     book.lookup(&jid).is_some_and(|p| {
                         !p.picture_stale
+                            && p.picture_format >= people::PICTURE_FORMAT
                             && p.picture_id.as_deref() == Some(id.as_str())
                             && p.picture_file.as_ref().is_some_and(|f| s.files.contains(f))
                     })
@@ -1326,14 +1327,17 @@ fn report_inner(
                             p.jid.clone(),
                             p.picture_id.clone()?,
                             p.picture_file.clone()?,
+                            p.picture_format,
                         ))
                     });
                     match held {
-                        Some((key, id, file)) => {
+                        Some((key, id, file, format)) => {
+                            // The file on disk stays what it was: an unchanged answer does not make it newer.
                             let update = Update {
                                 jid: key,
                                 picture_id: Some(id),
                                 picture_file: Some(file),
+                                picture_format: Some(format),
                                 ..Update::default()
                             };
                             commit(book, &[update], now_ms, &mut out);

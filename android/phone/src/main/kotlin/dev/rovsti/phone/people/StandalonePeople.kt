@@ -6,6 +6,7 @@ import dev.rovsti.core.model.wa.GatewayEvent
 import dev.rovsti.core.ops.PeopleOps
 import dev.rovsti.people.GatewaySource
 import dev.rovsti.people.sync.PartNotifier
+import dev.rovsti.people.sync.PeoplePictureCodec
 import dev.rovsti.people.sync.PeopleStore
 import dev.rovsti.people.sync.PeopleSyncHost
 import dev.rovsti.people.sync.PeopleSyncRunner
@@ -13,7 +14,6 @@ import dev.rovsti.people.sync.SliceResult
 import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.WaRepository
 import dev.rovsti.wa.avatars.AvatarCodec
-import dev.rovsti.wa.avatars.BitmapAvatarCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -49,7 +49,7 @@ class StandalonePeople(
     /** Deletes the cache files (`people.json`, `people-sync.json`) after an unlink. */
     private val clear: suspend () -> Unit = {},
     gatewayUrl: suspend () -> String = { "" },
-    codec: AvatarCodec = BitmapAvatarCodec,
+    codec: AvatarCodec = PeoplePictureCodec,
     private val clock: () -> Long = System::currentTimeMillis,
     pause: suspend (Long) -> Unit = { delay(it) },
     random: () -> Int = { Random.nextInt(0, Int.MAX_VALUE) },

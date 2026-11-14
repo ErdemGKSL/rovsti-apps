@@ -128,6 +128,13 @@ class PhotoViewerActions(
             ViewerAction(EDIT, RovstiIcons.Pencil, context.getString(R.string.favorites_edit), menu = menu),
         )
 
+    /** Save and Share only: a picture that is not the contact's own (the WhatsApp one) cannot be edited here. */
+    fun readOnlyActions(context: Context): ImmutableList<ViewerAction> =
+        persistentListOf(
+            ViewerAction(SAVE, RovstiIcons.Download, context.getString(R.string.groups_save)) { save() },
+            ViewerAction(SHARE, RovstiIcons.Share, context.getString(R.string.contacts_share)) { share() },
+        )
+
     companion object {
         const val SAVE = "save"
         const val SHARE = "share"

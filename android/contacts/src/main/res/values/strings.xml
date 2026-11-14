@@ -355,6 +355,7 @@
     <string name="contacts_use_whatsapp_photo">Use WhatsApp Photo</string>
     <string name="contacts_vcard_copied">vCard copied</string>
     <string name="contacts_view_photo">View photo</string>
+    <string name="contacts_view_whatsapp_photo">View WhatsApp photo</string>
     <string name="contacts_voicemail_setting">Send Calls to Voicemail</string>
     <string name="contacts_wa_unreachable">WhatsApp can\'t be reached right now</string>
     <string name="contacts_website">Website</string>

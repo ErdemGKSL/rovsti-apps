@@ -27,7 +27,6 @@ import dev.rovsti.core.ops.WaGateway
 import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.WaRepository
 import dev.rovsti.wa.avatars.AvatarCodec
-import dev.rovsti.wa.avatars.BitmapAvatarCodec
 import dev.rovsti.wa.avatars.rateLimit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -127,7 +126,7 @@ class PeopleSyncRunner(
     private val numbers: suspend () -> List<String>,
     /** The stored link's gateway URL (part of the checkpoint's link identity); empty when unknown. */
     private val gatewayUrl: suspend () -> String = { "" },
-    private val codec: AvatarCodec = BitmapAvatarCodec,
+    private val codec: AvatarCodec = PeoplePictureCodec,
     private val clock: () -> Long = System::currentTimeMillis,
     private val pause: suspend (Long) -> Unit = { delay(it) },
     private val random: () -> Int = { Random.nextInt(0, Int.MAX_VALUE) },
@@ -454,7 +453,9 @@ class PeopleSyncRunner(
         jid: String,
         knownId: String?,
     ): SyncReport =
-        when (val answer = gateway.picture(PictureBody(jid, knownId = knownId))) {
+        // The full picture (S12): WhatsApp's preview is ~96 px and looks blurry in a header avatar. It is stored
+        // downscaled to PICTURE_PX; the request counts against the planner's picture pace like any other.
+        when (val answer = gateway.picture(PictureBody(jid, full = true, knownId = knownId))) {
             is Outcome.Ok -> {
                 SyncReport.picture(jid, pictureResult(jid, answer.value))
             }
@@ -595,7 +596,11 @@ class PeopleSyncRunner(
         /** `people_sync::Why::RateLimit` on the wire: a sleep step that waits out a short limit inline. */
         const val WHY_RATE_LIMIT = "rate_limit"
 
-        private const val PICTURE_PX = 256
+        /**
+         * The short side a stored picture is downscaled to (S12): the largest avatar that shows it is 112 dp (the call
+         * screen), 448 px at 4x, so 512 px is sharp on every screen and about 40 KB as a JPEG.
+         */
+        const val PICTURE_PX = 512
         private const val NOT_CONNECTED = "not_connected"
 
         /** WhatsApp really answered for this profile (an old gateway answers a throttled one with `fetched_ms: 0`). */

@@ -72,6 +72,8 @@ import dev.rovsti.design.ios.foundation.LocalIosBackdrop
 import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
+import dev.rovsti.design.media.PhotoSource
+import dev.rovsti.design.media.ViewerPhoto
 import dev.rovsti.design.media.showPhotoViewer
 import dev.rovsti.design.motion.rememberIosOverscrollFactory
 import dev.rovsti.design.overlay.ButtonMenuEntry
@@ -79,6 +81,7 @@ import dev.rovsti.design.overlay.ContextMenuStyle
 import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.overlay.OverlayEntry
 import dev.rovsti.design.overlay.longPressMenu
 import dev.rovsti.design.text.UiText
 import dev.rovsti.design.text.resolve
@@ -88,8 +91,10 @@ import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.design.transition.rovstiSharedBounds
+import dev.rovsti.people.PersonAvatar
 import dev.rovsti.people.ui.AvatarFace
 import dev.rovsti.people.ui.ContactAvatar
+import dev.rovsti.people.ui.rememberPersonAvatar
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -203,17 +208,30 @@ fun ContactCardScreen(
                         capsules = state.capsules,
                         onAction = onAction,
                         onBounds = { avatarBounds = it },
-                        onPhoto = {
-                            val uri = header.face.own
-                            if (uri != null && photoViewer != null) {
-                                photoViewer.open(header) { avatarBounds }
-                            } else if (uri != null && overlays != null) {
-                                overlays.showPhotoViewer(
-                                    photos = persistentListOf(uri),
-                                    initialPage = 0,
-                                    actions = persistentListOf(),
-                                    anchorFor = { avatarBounds },
-                                )
+                        onPhoto = { avatar ->
+                            when {
+                                avatar is PersonAvatar.Own && photoViewer != null -> {
+                                    photoViewer.open(header) { avatarBounds }
+                                }
+
+                                avatar is PersonAvatar.Own && overlays != null -> {
+                                    overlays.showPhotoViewer(
+                                        photos = persistentListOf(avatar.uri),
+                                        initialPage = 0,
+                                        actions = persistentListOf(),
+                                        anchorFor = { avatarBounds },
+                                    )
+                                }
+
+                                avatar is PersonAvatar.WhatsApp -> {
+                                    photoViewer?.openWhatsApp(header, avatar) { avatarBounds }
+                                        ?: overlays?.showPhotoViewer(
+                                            photos = persistentListOf(whatsAppViewerPhoto(avatar, null)),
+                                            initialPage = 0,
+                                            actions = persistentListOf(),
+                                            anchorFor = { avatarBounds },
+                                        )
+                                }
                             }
                         },
                     )
@@ -261,7 +279,33 @@ fun interface PhotoViewerLauncher {
         header: CardHeader,
         anchorFor: () -> Rect?,
     )
+
+    /**
+     * The WhatsApp picture of a contact without a photo of its own: read-only, so no Edit menu. Answers the open
+     * viewer; null (the default) leaves it to the screen, which opens it without a toolbar or the full-size swap.
+     */
+    fun openWhatsApp(
+        header: CardHeader,
+        picture: PersonAvatar.WhatsApp,
+        anchorFor: () -> Rect?,
+    ): OverlayEntry? = null
 }
+
+/**
+ * The viewer photo of a WhatsApp avatar: the cached picture at once (as both layers, so the full-size one that
+ * [upgrade] brings fades in over the same picture), flying out of the circle.
+ */
+fun whatsAppViewerPhoto(
+    picture: PersonAvatar.WhatsApp,
+    upgrade: (suspend () -> Any?)?,
+): ViewerPhoto =
+    ViewerPhoto(
+        full = picture.uri,
+        thumb = picture.uri,
+        source = PhotoSource.WhatsApp,
+        circular = true,
+        upgrade = upgrade,
+    )
 
 private const val TITLE_FADE_FROM = 0.45f
 private const val TITLE_FADE_SPAN = 0.2f
@@ -279,7 +323,7 @@ private fun Hero(
     capsules: ImmutableList<CardCapsule>,
     onAction: (ContactCardAction) -> Unit,
     onBounds: (Rect) -> Unit,
-    onPhoto: () -> Unit,
+    onPhoto: (PersonAvatar) -> Unit,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -291,19 +335,19 @@ private fun Hero(
             .padding(top = ScaffoldSpec.BarHeight, bottom = Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // The contact's own photo, else its WhatsApp picture, opens the viewer; initials do not.
+        val avatar = rememberPersonAvatar(header.face)
         val clickable =
-            if (header.face.own != null) {
-                Modifier.clickable(role = Role.Button, onClick = onPhoto)
-            } else {
+            if (avatar is PersonAvatar.Initials) {
                 Modifier
+            } else {
+                Modifier.clickable(role = Role.Button) { onPhoto(avatar) }
             }
         val avatarLabel =
-            if (header.face.own !=
-                null
-            ) {
-                resources.getString(R.string.contacts_view_photo)
-            } else {
-                header.name
+            when (avatar) {
+                is PersonAvatar.Own -> resources.getString(R.string.contacts_view_photo)
+                is PersonAvatar.WhatsApp -> resources.getString(R.string.contacts_view_whatsapp_photo)
+                PersonAvatar.Initials -> header.name
             }
         Box(
             Modifier

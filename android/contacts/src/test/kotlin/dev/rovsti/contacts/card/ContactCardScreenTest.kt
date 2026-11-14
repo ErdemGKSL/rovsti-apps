@@ -1,6 +1,7 @@
 package dev.rovsti.contacts.card
 
 import android.content.Intent
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
@@ -197,6 +198,32 @@ class ContactCardScreenTest : ShotTest() {
         compose.onNodeWithTag(CardTags.Avatar).performClick()
         advance(700)
         compose.onAllNodesWithTag(dev.rovsti.design.media.PhotoViewerTags.Root).assertCountEquals(0)
+    }
+
+    @Test fun aWhatsAppPictureOpensTheViewerReadOnly() {
+        // No photo of its own, a WhatsApp picture in the people cache (S12): the avatar opens the same viewer.
+        val state = rig(2).ready()
+        val numbers = state.header!!.numbers
+        assertTrue(numbers.isNotEmpty())
+        val harness = CardHarness(state)
+        composeFrame {
+            androidx.compose.runtime.CompositionLocalProvider(
+                dev.rovsti.people.ui.LocalAvatarResolver provides
+                    dev.rovsti.contacts.people
+                        .waResolver(numbers),
+            ) { HostedCard(harness) }
+        }
+        advance(300)
+        compose.onNodeWithTag(CardTags.Avatar).assertContentDescriptionEquals("View WhatsApp photo")
+        compose.onNodeWithTag(CardTags.Avatar).performClick()
+        advance(700)
+        compose.onNodeWithTag(dev.rovsti.design.media.PhotoViewerTags.Root).assertExists()
+        // No Edit menu for a picture that is not the contact's own.
+        compose
+            .onAllNodesWithTag(
+                dev.rovsti.design.media.PhotoViewerTags
+                    .action(dev.rovsti.contacts.photo.PhotoViewerActions.EDIT),
+            ).assertCountEquals(0)
     }
 
     @Test fun theAvatarFliesFromTheListRowToTheCardOverFiveHundredMilliseconds() {

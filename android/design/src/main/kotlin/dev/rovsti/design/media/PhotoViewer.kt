@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -116,6 +117,11 @@ data class ViewerPhoto(
     val source: PhotoSource = PhotoSource.Contact,
     /** The thumbnail it flies out of is a circle (an avatar): the flight turns the circle into the photo's rectangle. */
     val circular: Boolean = false,
+    /**
+     * A larger picture to load once the viewer is open (the full-size WhatsApp picture, S12); null keeps [full]. It
+     * fades in over the photo on show, which stays underneath, so nothing jumps; a null answer changes nothing.
+     */
+    val upgrade: (suspend () -> Any?)? = null,
 )
 
 /**
@@ -387,7 +393,9 @@ private fun ViewerPage(
         viewer.viewport.height
             .roundToInt()
             .coerceAtLeast(1)
-    val full = (model as? ViewerPhoto)?.full ?: model
+    val upgrade = (model as? ViewerPhoto)?.upgrade
+    val upgraded by produceState<Any?>(null, upgrade) { value = upgrade?.invoke() }
+    val full = upgraded ?: (model as? ViewerPhoto)?.full ?: model
     val thumb = (model as? ViewerPhoto)?.thumb
     val circular = (model as? ViewerPhoto)?.circular == true
     val request =
@@ -396,7 +404,7 @@ private fun ViewerPage(
                 .Builder(context)
                 .data(full)
                 .size(vw, vh)
-                .crossfade(thumb != null)
+                .crossfade(thumb != null || upgraded != null)
                 .build()
         }
     val thumbRequest =

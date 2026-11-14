@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- E7.1 fills this from apps/stops/platforms/android/app/src/main/AndroidManifest.xml (ARCH 7.2). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

@@ -1,45 +1,88 @@
 package dev.rovsti.phone.people
 
-import dev.rovsti.core.Outcome
-import dev.rovsti.core.model.people.PersonRow
+import dev.rovsti.core.log.RovstiLog
+import dev.rovsti.core.model.people.SyncWire
+import dev.rovsti.core.model.wa.GatewayEvent
+import dev.rovsti.core.ops.PeopleOps
 import dev.rovsti.people.GatewaySource
+import dev.rovsti.people.sync.PartNotifier
+import dev.rovsti.people.sync.PeopleStore
+import dev.rovsti.people.sync.PeopleSyncRunner
+import dev.rovsti.people.sync.SliceResult
 import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.WaRepository
+import dev.rovsti.wa.avatars.AvatarCodec
+import dev.rovsti.wa.avatars.BitmapAvatarCodec
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
+import kotlin.random.Random
 
 /**
- * Phone without Contacts (X.1d): the people live in memory only, fed by the gateway. When WhatsApp is linked (at
- * process start once the link is read, and again when a link is made) [sync] asks the gateway which of the numbers
- * [numbers] are on WhatsApp, reads their names and picture ids, and asks the app's own avatar cache ([wantPicture]) for
- * the pictures. Nothing is written to disk here: the pictures are the files the WhatsApp avatar cache already keeps,
- * and the rows are forgotten with the process. Until a sync has answered the source is empty and every avatar draws
- * initials; the incoming-call path only ever reads what is in memory ([GatewaySource] through `PeopleIndex`).
+ * Phone without Contacts (X.1d, people sync v2 S10): Phone keeps its own people cache on disk (`people.json` in its
+ * Rust data directory, pictures in [PeopleStore.dir]) and fills it with the same slow, resumable engine as Contacts
+ * ([PeopleSyncRunner]), so the two apps never add up to a burst against WhatsApp's limit from the same account.
  *
- * [pictureFile] finds a stored picture and [pictureChanges] fires when the avatar cache stored a new one, so a picture
- * that arrives after the sync is picked up without asking the gateway again.
+ * Phone has no worker: a slice runs (without a time budget) when the link is read at start, when WhatsApp becomes
+ * linked or reconnects, and again when a rate limit's wait ends while the process lives; the next start resumes the
+ * rest. Live `profile` events update a person at once and fetch a changed picture shortly after. On unlink the stored
+ * run is interrupted and the cache is deleted ([clear]): Phone keeps nobody's name for a link that is gone.
+ * [source] is what the app's `PeopleIndex` follows; it is told after every committed part (at most one per
+ * [notifyMinMs], the last one guaranteed).
  */
+@OptIn(FlowPreview::class)
 class StandalonePeople(
+    private val store: PeopleStore,
+    ops: PeopleOps,
     private val wa: WaRepository,
-    private val numbers: suspend () -> List<String>,
-    private val wantPicture: (jid: String, pictureId: String?) -> Unit,
-    private val pictureFile: suspend (jid: String) -> File?,
-    private val pictureChanges: Flow<*>,
+    numbers: suspend () -> List<String>,
     private val scope: CoroutineScope,
+    /** Deletes the cache files (`people.json`, `people-sync.json`) after an unlink. */
+    private val clear: suspend () -> Unit = {},
+    gatewayUrl: suspend () -> String = { "" },
+    codec: AvatarCodec = BitmapAvatarCodec,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val pause: suspend (Long) -> Unit = { delay(it) },
+    random: () -> Int = { Random.nextInt(0, Int.MAX_VALUE) },
+    lockFile: File? = null,
+    notifyMinMs: Long = NOTIFY_MIN_MS,
 ) {
-    private val files = ConcurrentHashMap<String, File>()
+    /** The cache as the app's `PeopleIndex` reads it: the store's rows, pictures from its folder. */
+    val source: GatewaySource =
+        GatewaySource(
+            fetch = { store.snapshot() },
+            pictureFile = { row -> row.pictureFile?.let { File(store.dir, File(it).name) }?.takeIf { it.isFile } },
+        )
 
-    @Volatile private var rows: List<PersonRow> = emptyList()
+    private val notifier = PartNotifier(scope, notifyMinMs) { source.changed() }
 
-    /** The in-memory source the app's `PeopleIndex` follows. */
-    val source: GatewaySource = GatewaySource(fetch = { rows }, pictureFile = { files[it.jid] })
+    /** The engine (shared with Contacts' code in `:people`). */
+    val runner =
+        PeopleSyncRunner(
+            store = store,
+            ops = ops,
+            wa = wa,
+            numbers = numbers,
+            gatewayUrl = gatewayUrl,
+            codec = codec,
+            clock = clock,
+            pause = pause,
+            random = random,
+            onPart = notifier::part,
+            lockFile = lockFile,
+        )
 
     private var started = false
 
-    /** Follows the link: syncs when WhatsApp becomes linked, forgets everything when it is not. Idempotent. */
+    @Volatile private var later: Job? = null
+
+    /** Follows the link and the gateway's `profile` events. Idempotent. */
     fun start() {
         synchronized(this) {
             if (started) return
@@ -47,90 +90,88 @@ class StandalonePeople(
         }
         scope.launch {
             var syncedFor: String? = null
+            var wasLinked = false
             wa.linkState.collect { link ->
-                val instance = (link as? WaLinkState.Connected)?.status?.instanceId
+                val connected = link as? WaLinkState.Connected
+                val gone = link is WaLinkState.None || link is WaLinkState.LoggedOut || link is WaLinkState.Banned
                 when {
-                    instance == null -> {
-                        syncedFor = null
-                        forget()
+                    connected != null -> {
+                        wasLinked = true
+                        // A new link, or the same one back after a disconnect: continue (or start) the run.
+                        val key = connected.status.instanceId + connected.status.state.name
+                        if (key != syncedFor) {
+                            syncedFor = key
+                            scope.launch { sync() }
+                        }
                     }
 
-                    instance != syncedFor -> {
-                        syncedFor = instance
-                        sync()
+                    gone && wa.settled.value -> {
+                        syncedFor = null
+                        if (wasLinked) forget()
+                        wasLinked = false
                     }
                 }
             }
         }
         scope.launch {
-            pictureChanges.collect {
-                if (rows.isNotEmpty() && refreshFiles()) source.changed()
-            }
+            wa.events
+                .filterIsInstance<GatewayEvent.Profile>()
+                .onEach { event ->
+                    val profile = event.profile()
+                    if (wa.linkState.value !is WaLinkState.Connected ||
+                        profile.jid.endsWith(GROUP_SUFFIX)
+                    ) {
+                        return@onEach
+                    }
+                    val answer = store.upsert(listOf(PeopleSyncRunner.profileUpdate(profile)))
+                    if (answer != null && (answer.changed > 0 || answer.dropFiles.isNotEmpty())) notifier.part()
+                }.debounce(LIVE_DEBOUNCE_MS)
+                .collect {
+                    if (wa.linkState.value is WaLinkState.Connected) {
+                        runner.run(SyncWire.START_LIVE_PICTURES, PeopleSyncRunner.LIVE_SLICE_MS)
+                    }
+                }
         }
     }
 
-    /** One pass over the gateway: who is on WhatsApp, their profiles, then the pictures. False when it could not. */
+    /**
+     * One slice: resumes a stored run or starts an incremental one (fresh answers are not asked again). A rate limit
+     * schedules the next slice for its end while the process lives. False when nothing could start.
+     */
     suspend fun sync(): Boolean {
-        if (wa.linkState.value !is WaLinkState.Connected) return false
-        val gateway = wa.gateway() ?: return false
-        val asked =
-            numbers()
-                .mapNotNull { e164 -> jidOf(e164)?.let { it to e164 } }
-                .distinctBy { it.first }
-                .take(MAX_NUMBERS)
-        val numberOf = asked.toMap()
-        val onWhatsapp = ArrayList<String>()
-        for (batch in asked.map { it.first }.chunked(BATCH)) {
-            val users = (gateway.lookupUsers(batch) as? Outcome.Ok)?.value ?: return false
-            users.filter { it.onWhatsapp }.mapTo(onWhatsapp) { it.jid }
-        }
-        val found = ArrayList<PersonRow>()
-        for (batch in onWhatsapp.chunked(BATCH)) {
-            val profiles = (gateway.profiles(batch) as? Outcome.Ok)?.value ?: return false
-            for (profile in profiles) {
-                found +=
-                    PersonRow(
-                        jid = profile.jid,
-                        numbers = listOfNotNull(numberOf[profile.jid]),
-                        name = profile.displayName(),
-                        onWhatsapp = true,
-                        pictureId = profile.pictureId,
-                    )
+        val result = runner.run(SyncWire.START_AUTO, null)
+        RovstiLog.event(PeopleSyncRunner.TAG, "standalone", "result" to result.javaClass.simpleName)
+        val until =
+            when (result) {
+                is SliceResult.Waiting -> result.untilMs
+                is SliceResult.Refused -> result.untilMs
+                else -> null
             }
-        }
-        rows = found
-        found.forEach { wantPicture(it.jid, it.pictureId) }
-        refreshFiles()
-        source.changed()
-        return true
+        if (until != null) continueAt(until)
+        return result == SliceResult.Done || result is SliceResult.Waiting
     }
 
-    private fun forget() {
-        rows = emptyList()
-        files.clear()
-        source.changed()
+    private fun continueAt(untilMs: Long) {
+        later?.cancel()
+        later =
+            scope.launch {
+                pause((untilMs - clock()).coerceAtLeast(PeopleSyncRunner.CONTINUE_DELAY_MS))
+                if (wa.linkState.value is WaLinkState.Connected) sync()
+            }
     }
 
-    /** Re-reads which pictures the avatar cache holds; true when that changed. */
-    private suspend fun refreshFiles(): Boolean {
-        var changed = false
-        for (row in rows) {
-            if (row.pictureId == null) continue
-            val file = pictureFile(row.jid)
-            if (file != null && files.put(row.jid, file) != file) changed = true
-        }
-        return changed
+    private suspend fun forget() {
+        later?.cancel()
+        runner.unlinked()
+        store.delete(store.files().map { it.path })
+        clear()
+        RovstiLog.event(PeopleSyncRunner.TAG, "standalone_forgot")
+        source.changed()
     }
 
     companion object {
-        const val BATCH = 50
-        const val MAX_NUMBERS = 1_000
-        private const val PHONE_SUFFIX = "@s.whatsapp.net"
-
-        /** `+905321234567` -> `905321234567@s.whatsapp.net`; null when it is not a plausible number. */
-        fun jidOf(e164: String): String? {
-            val digits = e164.removePrefix("+")
-            return if (digits.length in 7..15 && digits.all { it in '0'..'9' }) digits + PHONE_SUFFIX else null
-        }
+        const val NOTIFY_MIN_MS = 3_000L
+        private const val LIVE_DEBOUNCE_MS = 2_000L
+        private const val GROUP_SUFFIX = "@g.us"
     }
 }

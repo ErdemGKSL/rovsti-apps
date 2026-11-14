@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S9 done; see the notes under each step.
+Status: done (2026-11-14, branch `ui-overhaul`): S1 to S10 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -641,6 +641,16 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   ring and, in developer mode, the Logs page. OPS.md was updated with S5.
 - **S10 Phone standalone on the engine** (pending Q2): `StandalonePeople` becomes a thin wrapper over
   `PeopleStore` + `PeopleSyncRunner` in Phone's data dir; `GatewaySource` reads the store; pictures from the store.
+  *Done (notes, deviations):* `StandalonePeople` keeps the `GatewaySource` API (so `PeopleSources.choose` and
+  `PeopleIndex` are unchanged) but reads `PeopleStore` (`people.json` in Phone's Rust data dir, pictures in
+  `filesDir/people`) and runs the shared runner; the WhatsApp avatar cache is no longer asked for these pictures.
+  Phone has no worker: a slice (no time budget) runs when the link is read, when WhatsApp (re)connects, and at the end
+  of a rate limit's wait while the process lives (`Start::Auto`, so an interrupted run resumes and fresh answers are
+  not asked again); live `profile` events update at once and run the live picture pass, as in Contacts. On unlink the
+  stored run is interrupted and the book, checkpoint and pictures are deleted (Q2: removed on unlink). Same file lock
+  name (`noBackupFilesDir/people-sync.lock`, per app). `StandaloneSourceTest` runs the real planner on the host library
+  (not linked, sync into the on-disk cache with pictures, index and identity answers, a second start asks nothing,
+  live profile, unlink deletes).
 
 ## 13. Risks and device verification
 

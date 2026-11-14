@@ -19,6 +19,7 @@ import dev.rovsti.core.ops.ChatOps
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.NativeChatOps
 import dev.rovsti.core.ops.NativeContactsOps
+import dev.rovsti.core.ops.NativePeopleOps
 import dev.rovsti.core.ops.NativePhoneOps
 import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
@@ -32,6 +33,8 @@ import dev.rovsti.people.PeopleIdentitySource
 import dev.rovsti.people.PeopleSource
 import dev.rovsti.people.PeopleSources
 import dev.rovsti.people.ProviderSource
+import dev.rovsti.people.sync.PeopleStore
+import dev.rovsti.people.sync.PeopleSyncRunner
 import dev.rovsti.phone.data.AndroidCallLauncher
 import dev.rovsti.phone.data.BlockRepo
 import dev.rovsti.phone.data.CallLauncher
@@ -107,6 +110,7 @@ import dev.rovsti.platform.wa.WaIncoming
 import dev.rovsti.platform.wa.WaProximity
 import dev.rovsti.platform.wa.communicationOnEarpiece
 import dev.rovsti.shell.ShellContainer
+import dev.rovsti.wa.WaLinkStore
 import dev.rovsti.wa.avatars.WaAvatar
 import dev.rovsti.wa.calls.AndroidCallAudioPump
 import dev.rovsti.wa.calls.CallAudioPump
@@ -129,6 +133,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /** A number the Keypad is asked to show: a `tel:` link decoded by `dial.fromTelUri`, or a WhatsApp hand-off. */
 data class DialRequest(
@@ -279,17 +284,27 @@ open class PhoneContainer(
     /** Own photo, else the WhatsApp picture, else initials: the one place a Phone avatar is decided. */
     val avatarResolver: AvatarResolver by lazy { AvatarResolver(peopleIndex) }
 
-    /** Phone without Contacts: the gateway's people held in memory, started by [startPeople] only then. */
-    val standalonePeople: StandalonePeople by lazy {
+    /**
+     * Phone without Contacts: its own people cache (people sync v2 S10), filled by the shared sync engine, started by
+     * [startPeople] only then.
+     */
+    val standalonePeople: StandalonePeople by lazy { createStandalonePeople() }
+
+    protected open fun createStandalonePeople(): StandalonePeople =
         StandalonePeople(
+            store = PeopleStore(NativePeopleOps(rust), waOps, File(context.filesDir, PeopleStore.DIR_NAME)),
+            ops = NativePeopleOps(rust),
             wa = wa,
             numbers = ::peopleNumbers,
-            wantPicture = { jid, id -> avatars.want(jid, id) },
-            pictureFile = { jid -> avatars.file(jid) },
-            pictureChanges = avatars.revision,
             scope = scope,
+            clear = {
+                withContext(Dispatchers.IO) {
+                    listOf(PEOPLE_BOOK, PEOPLE_CHECKPOINT).forEach { File(context.noBackupFilesDir, it).delete() }
+                }
+            },
+            gatewayUrl = { (WaLinkStore(waOps).read() as? Outcome.Ok)?.value?.gatewayUrl.orEmpty() },
+            lockFile = File(context.noBackupFilesDir, PEOPLE_LOCK),
         )
-    }
 
     /** Which source feeds [peopleIndex]: Contacts' provider when it is installed, else the gateway (null before [startPeople]). */
     @Volatile var peopleSource: PeopleSource? = null
@@ -327,7 +342,7 @@ open class PhoneContainer(
                 (people.people.value as? People.Ready)?.contacts.orEmpty().flatMap { c ->
                     c.numbers.map { it.normalized ?: PhoneNumbers.e164(it.raw, homeRegion).orEmpty() }
                 }
-            (recent + book).filter { it.startsWith("+") }.distinct()
+            (recent + book).filter { it.startsWith("+") }.distinct().take(PeopleSyncRunner.MAX_NUMBERS)
         }
 
     /**
@@ -765,3 +780,10 @@ private const val HOME_CC_SAMPLE = 200
 
 /** How many recent calls the people sync reads numbers from. */
 private const val PEOPLE_RECENT_CALLS = 300
+
+/** The people cache files in the Rust data directory (`people::FILE`, `people_sync::FILE`), deleted on unlink. */
+private const val PEOPLE_BOOK = "people.json"
+private const val PEOPLE_CHECKPOINT = "people-sync.json"
+
+/** The people sync's cross-process guard, in `noBackupFilesDir`. */
+private const val PEOPLE_LOCK = "people-sync.lock"

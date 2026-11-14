@@ -250,4 +250,5 @@
     <string name="inbox_results_partial">in recent WhatsApp chats</string>
     <string name="inbox_results_no_sms">SMS not searched (no access)</string>
     <string name="tools_message_gone">That message is no longer here</string>
+    <string name="conversation_forwarded">Forwarded</string>
 </resources>

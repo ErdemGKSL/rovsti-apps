@@ -43,6 +43,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
@@ -56,7 +57,6 @@ import dev.rosty.design.controls.CapsuleStyle
 import dev.rosty.design.controls.GlassIconButton
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
-import dev.rosty.design.ios.foundation.IosTheme
 import dev.rosty.design.media.SizedImage
 import dev.rosty.design.overlay.ContextMenuStyle
 import dev.rosty.design.overlay.LocalOverlayOrNull
@@ -70,6 +70,7 @@ import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
+import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
 import dev.rosty.messages.ui.MessagesAvatar
 import dev.rosty.messages.ui.MessagesMetrics
@@ -509,7 +510,8 @@ private fun BubbleBody(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RostyIcon(RostyIcons.Forward, null, tint = secondary, size = MessagesMetrics.TickGlyph)
                 RostyText(
-                    FORWARDED_MARK,
+                    stringResource(R.string.conversation_forwarded),
+                    modifier = Modifier.padding(start = Spacing.xs),
                     style = RostyTheme.type.caption1.copy(fontStyle = FontStyle.Italic),
                     color = secondary,
                 )
@@ -587,7 +589,7 @@ private fun BubbleBody(
                 color = if (failed && !bubble.outgoing) RostyTheme.colors.destructive else secondary,
                 maxLines = 1,
             )
-            if (bubble.outgoing) StateGlyph(bubble.state, secondary)
+            if (bubble.outgoing) StateGlyph(bubble.state, secondary, read = ink)
         }
     }
 }
@@ -597,8 +599,9 @@ private fun BubbleBody(
 private fun StateGlyph(
     state: BubbleState,
     tint: Color,
+    /** Read ticks: the bubble's own text colour at full strength (teal did not read on the accent bubble). */
+    read: Color,
 ) {
-    val blue = IosTheme.colors.systemTeal
     when (state) {
         BubbleState.Waiting, BubbleState.Sending -> {
             RostyIcon(
@@ -618,7 +621,7 @@ private fun StateGlyph(
         }
 
         BubbleState.Read, BubbleState.Played -> {
-            DoubleTick(blue)
+            DoubleTick(read)
         }
 
         BubbleState.Failed -> {
@@ -661,4 +664,3 @@ private const val JUMP_AFTER_ITEMS = 2
 private const val JUMP_CAP = 99
 private const val QUOTE_ALPHA = 0.18f
 private const val DEFAULT_ASPECT = 4f / 3f
-private const val FORWARDED_MARK = " ↪"

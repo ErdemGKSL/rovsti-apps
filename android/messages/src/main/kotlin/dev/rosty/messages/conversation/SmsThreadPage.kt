@@ -257,6 +257,7 @@ fun ConversationEffects(
     copy: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val res = LocalResources.current
     LaunchedEffect(effects) {
         effects.collect { effect ->
             when (effect) {
@@ -268,7 +269,7 @@ fun ConversationEffects(
                     overlays.showUndo(
                         effect.text.resolve(context),
                         effect.undo,
-                        context.getString(R.string.inbox_undo),
+                        res.getString(R.string.inbox_undo),
                         durationMs = effect.durationMs,
                     )
                 }
@@ -279,11 +280,11 @@ fun ConversationEffects(
 
                 is ConversationEffect.Copy -> {
                     copy(effect.text)
-                    overlays.showToast(context.getString(R.string.conversation_copied))
+                    overlays.showToast(res.getString(R.string.conversation_copied))
                 }
 
                 ConversationEffect.NeedsRole -> {
-                    overlays.showToast(context.getString(R.string.inbox_needs_role))
+                    overlays.showToast(res.getString(R.string.inbox_needs_role))
                 }
             }
         }

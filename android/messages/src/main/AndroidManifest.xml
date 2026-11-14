@@ -153,5 +153,16 @@
             android:authorities="${applicationId}.rostyshare"
             android:exported="false"
             android:grantUriPermissions="true" />
+        <!-- WorkManager starts on demand (RostyMessagesApp is its Configuration.Provider), not at every process start:
+             an SMS arriving must not open its database. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 </manifest>

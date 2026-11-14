@@ -89,6 +89,7 @@ fun ChatsPage(
     val strings = rememberInboxStrings()
     val overlays = LocalOverlay.current
     val context = LocalContext.current
+    val res = LocalResources.current
     LaunchedEffect(navigator, listState) {
         navigator.scrollToTop.collect { if (it.tab == ChatsTab) listState.animateScrollToItem(0) }
     }
@@ -98,12 +99,12 @@ fun ChatsPage(
             RowMenuActions(
                 onAction = viewModel::onAction,
                 onMute = { row ->
-                    presentMute(overlays, context.resources) { viewModel.onAction(InboxAction.Mute(row.key, it)) }
+                    presentMute(overlays, res) { viewModel.onAction(InboxAction.Mute(row.key, it)) }
                 },
                 onAvatar = { row -> viewModel.onAction(InboxAction.Open(row.key)) },
                 onCopyCode = { code ->
                     container.clipboard.copy(code, sensitive = true)
-                    overlays.showToast(context.getString(R.string.inbox_code_copied, code))
+                    overlays.showToast(res.getString(R.string.inbox_code_copied, code))
                 },
             )
         }
@@ -163,6 +164,7 @@ private fun InboxEffects(
     strings: InboxStrings,
 ) {
     val context = LocalContext.current
+    val res = LocalResources.current
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -175,19 +177,19 @@ private fun InboxEffects(
                 }
 
                 is InboxEffect.Undo -> {
-                    overlays.showUndo(effect.text.resolve(context), effect.undo, context.getString(R.string.inbox_undo))
+                    overlays.showUndo(effect.text.resolve(context), effect.undo, res.getString(R.string.inbox_undo))
                 }
 
                 is InboxEffect.ConfirmDelete -> {
                     val message =
-                        effect.title?.let { context.getString(R.string.inbox_delete_one, it) }
-                            ?: context.resources.getQuantityString(
+                        effect.title?.let { res.getString(R.string.inbox_delete_one, it) }
+                            ?: res.getQuantityString(
                                 R.plurals.inbox_delete_many,
                                 effect.count,
                                 effect.count,
                             )
                     overlays.confirmDestructive(
-                        destructiveLabel = context.getString(R.string.inbox_delete),
+                        destructiveLabel = res.getString(R.string.inbox_delete),
                         onConfirm = effect.confirm,
                         message = message,
                         cancelLabel = strings.cancel,
@@ -195,7 +197,7 @@ private fun InboxEffects(
                 }
 
                 InboxEffect.NeedsRole -> {
-                    overlays.showToast(context.getString(R.string.inbox_needs_role))
+                    overlays.showToast(res.getString(R.string.inbox_needs_role))
                 }
             }
         }

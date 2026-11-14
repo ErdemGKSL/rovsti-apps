@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelProvider
@@ -59,6 +60,7 @@ fun NewConversationPage(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val res = LocalResources.current
     val owner = remember(context) { context.findComponentActivity() }
     val model =
         remember(owner, route) {
@@ -100,13 +102,13 @@ fun NewConversationPage(
                             actions =
                                 persistentListOf(
                                     ActionSheetAction(
-                                        context.getString(R.string.inbox_chip_sms),
+                                        res.getString(R.string.inbox_chip_sms),
                                     ) { model.openSms(effect.option) },
                                     ActionSheetAction(
-                                        context.getString(R.string.tab_whatsapp),
+                                        res.getString(R.string.tab_whatsapp),
                                     ) { model.openWhatsApp(effect.option) },
                                 ),
-                            cancelLabel = context.getString(R.string.inbox_cancel),
+                            cancelLabel = res.getString(R.string.inbox_cancel),
                         ),
                     )
                 }

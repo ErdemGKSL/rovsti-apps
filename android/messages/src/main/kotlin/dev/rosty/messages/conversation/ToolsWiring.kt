@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.rosty.core.model.chat.GalleryAnswer
@@ -62,16 +63,17 @@ import java.time.ZoneId
 @Composable
 fun rememberToolLabels(): ToolLabels {
     val context = LocalContext.current
+    val res = LocalResources.current
     return remember(context) {
         ToolLabels(
-            menu = context.getString(R.string.tools_menu),
-            find = context.getString(R.string.tools_find),
-            older = context.getString(R.string.tools_older),
-            newer = context.getString(R.string.tools_newer),
-            close = context.getString(R.string.tools_done),
-            jumpLatest = context.getString(R.string.tools_jump_latest),
-            position = { at, count -> context.getString(R.string.tools_position, at, count) },
-            noMatches = context.getString(R.string.tools_no_matches),
+            menu = res.getString(R.string.tools_menu),
+            find = res.getString(R.string.tools_find),
+            older = res.getString(R.string.tools_older),
+            newer = res.getString(R.string.tools_newer),
+            close = res.getString(R.string.tools_done),
+            jumpLatest = res.getString(R.string.tools_jump_latest),
+            position = { at, count -> res.getString(R.string.tools_position, at, count) },
+            noMatches = res.getString(R.string.tools_no_matches),
         )
     }
 }
@@ -336,6 +338,7 @@ fun rememberToolHost(
     title: () -> String,
 ): ToolHost {
     val context = LocalContext.current
+    val res = LocalResources.current
     val scope = rememberCoroutineScope()
     val tools = remember { ConversationTools(container.chat, scope, bubbles, System::currentTimeMillis) }
     val pending = remember { arrayOfNulls<ExportedChat>(1) }
@@ -347,7 +350,7 @@ fun rememberToolHost(
             scope.launch {
                 val written = container.files.writeExport(uri, text = file.text)
                 overlays.showToast(
-                    context.getString(
+                    res.getString(
                         if (written is FileResult.Ok) R.string.tools_exported else R.string.tools_export_failed,
                     ),
                 )
@@ -366,7 +369,7 @@ fun rememberToolHost(
             },
             copy = { text ->
                 container.clipboard.copy(text)
-                overlays.showToast(context.getString(R.string.conversation_copied))
+                overlays.showToast(res.getString(R.string.conversation_copied))
             },
         )
     }

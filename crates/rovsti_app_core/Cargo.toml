@@ -18,10 +18,14 @@ serde.workspace = true
 # (feature unification turned it on there); the golden answers are byte-identical.
 serde_json = { workspace = true, features = ["preserve_order"] }
 takumi.workspace = true
+gif.workspace = true
+color_quant.workspace = true
+qrcode.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 image.workspace = true
+image-webp.workspace = true
 
 [lints]
 workspace = true

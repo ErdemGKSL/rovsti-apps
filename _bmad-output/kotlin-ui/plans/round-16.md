@@ -221,6 +221,33 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
   Open each one with Read and judge the drop, the squash, the lens, the glint, the confetti and the still frame. Tune,
   then record the final constants.
 
+#### Step 4 result (implemented)
+
+- Code: `cards/{spring,anim,scene,refraction}.rs`, tests in `cards/anim_tests.rs`, goldens in `cards/golden/` (360 px,
+  `UPDATE_GOLDENS=1` rewrites them). Step 2 (model, templates, glisse refraction maps) had not been done at the base,
+  so `scene.rs` holds a minimal birthday and contact scene (frosted panel via `backdrop-filter`, rim, confetti, QR) and
+  `refraction.rs` a small dome map of our own for the lens; Step 2 replaces the scene with the real templates and keeps
+  `Pose`/`Choreography` as the motion layer.
+- Encoders: GIF is written with the `gif` crate (`=0.14.2`) and `color_quant` (`=1.1.0`) directly: Takumi's GIF writer
+  quantises per frame and cannot omit the NETSCAPE block. One 256-colour NeuQuant palette learned from the last frame,
+  4x4 ordered dither (stable per pixel, so a still background does not shimmer), each frame after the first stores only
+  the changed box (a 1x1 box for an unchanged frame). APNG and WebP use Takumi's writers (`loop_count: Some(1)`;
+  lossless WebP). Takumi's WebP writer merges identical neighbours, so the held still is one frame there (28 frames for
+  39, same total time).
+- Final constants (`anim::tuned`): drop from 720 px above on `sheetSettle` run on a 0.6 clock (arrives about 0.55 s);
+  jelly from the impact (97 percent of the drop) on `glassPressUp`, peak squash 8.5 percent, `sx * sy = 1`, relaxes over
+  1.0 s; refraction 0..1 follows the squash; lens 0.5-1.4 s on `menuMorphOpen` (0.55 weight) plus a smoothstep (0.45),
+  150x132 px, displacement 44 px at full strength; glint 0.9-1.6 s, 96 px soft disc travelling the rim, alpha sin(pi p);
+  confetti 40 pieces, burst at 0.3 s, flights 0.85-1.15 s, gravity 1400 px/s2, xorshift64* seed `0x5eedca4d2026`, x with
+  drag 2.5, spin 540-1080 deg/s dying cubically, 5 px landing hop, rests on the top edge (a third a little off it);
+  still from 2.0 s. Contact: panel on `morph` (scale 0.94 to 1, 48 px rise), drift on `morph` at half speed, QR on
+  `appear` from 0.4 s, still from 1.2 s.
+- Sizes at 720 px (4:5): birthday GIF 2.3 MB, contact GIF 1.5 MB (limit 3 MB).
+- Known limits: the lens bends with Takumi's nearest-pixel displacement, so glyph edges inside it are jagged for the
+  0.9 s it is visible; a `backdrop-filter` nested in another one bends nothing in Takumi 2.18.2, so the lens is a sibling
+  of the panel; `image-webp` 0.2.4 reads some WebP frames one level low (libwebp decodes them exactly), so the WebP
+  equality test allows one level.
+
 ### Step 5. Contacts preview sheet (Card Studio)
 
 - `android/contacts/src/main/kotlin/dev/rovsti/contacts/cards/`:

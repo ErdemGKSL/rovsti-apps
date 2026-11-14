@@ -62,6 +62,12 @@ qrcode = { version = "0.14", default-features = false, features = ["image"] }
 # allowed when it was chosen. rayon stays off until the Android .so size is measured (plans/round-16.md).
 takumi = { version = "=2.18.2", default-features = false, features = ["raster-backend", "png", "jpeg", "webp", "gif", "svg-source", "image-decoding"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Animated cards (X.2 step 4): the GIF is written here (global palette, no NETSCAPE block), so Takumi's own GIF writer,
+# which loops forever or n times and quantises each frame alone, is not used. Both crates are already in Takumi's tree.
+gif = "=0.14.2"
+color_quant = "=1.1.0"
+# Decodes the animated WebP the card tests produce (Takumi's own dev-dependency).
+image-webp = "=0.2.4"
 # Default features minus `simd`, which needs nightly (portable_simd).
 whatsapp-rust = { version = "0.7", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native"] }
 axum = { version = "0.8", features = ["ws"] }

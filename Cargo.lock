@@ -6364,8 +6364,12 @@ name = "rovsti_app_core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "color_quant",
+ "gif",
  "image",
+ "image-webp",
  "log",
+ "qrcode",
  "rovsti_core",
  "rovsti_geo",
  "rovsti_wa_client",

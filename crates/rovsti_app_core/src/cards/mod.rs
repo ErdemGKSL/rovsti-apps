@@ -23,7 +23,11 @@
 //!   `write_animated_webp` with `AnimatedGifOptions`, `AnimatedPngOptions` and `AnimatedWebpOptions`; the loop
 //!   setting is read in Step 4.
 
+pub mod anim;
 pub mod fonts;
+pub mod refraction;
+pub mod scene;
+pub mod spring;
 
 use takumi::prelude::{Bitmap, Node, OutputFormat, RenderOptions, StyleSheet, Viewport};
 
@@ -122,5 +126,7 @@ pub fn render_probe(line: &str, w: u32, h: u32) -> Result<Vec<u8>, CardError> {
     Ok(png)
 }
 
+#[cfg(test)]
+mod anim_tests;
 #[cfg(test)]
 mod tests;

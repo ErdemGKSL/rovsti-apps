@@ -8,7 +8,8 @@ following projects. Files with ported code carry a header naming the source.
 - Source: https://github.com/0kzh/glisse ("iOS 26 Liquid Glass for the web", TypeScript)
 - Licence: MIT. Copyright (c) 2026 Kelvin Zhang (full text below).
 - Used for: spring solver and constants, press/hold behaviour, refraction lens and rim-light maths, menu morph,
-  tab bar / segmented control / switch / slider / input geometry and gesture rules, glass tokens.
+  tab bar / segmented control / switch / slider / input geometry and gesture rules, glass tokens; the analytic spring
+  of `crates/rovsti_app_core/src/cards/spring.rs` (share-card choreography, Rust port of `src/internal/spring.ts`).
 - glisse credits, in its own comments, Aave's web liquid glass (lens shape) and kube.io's CSS/SVG liquid glass article
   (Snell's-law profile) as sources of its maths.
 

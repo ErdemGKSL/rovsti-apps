@@ -1,0 +1,333 @@
+package dev.rosty.stops.home
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import dev.rosty.design.chrome.BackdropScope
+import dev.rosty.design.chrome.ChromeMetrics
+import dev.rosty.design.chrome.RostyTabBar
+import dev.rosty.design.chrome.TabItem
+import dev.rosty.design.controls.ChipModel
+import dev.rosty.design.controls.ChipRow
+import dev.rosty.design.controls.GlassIconButton
+import dev.rosty.design.glass.GlassPreset
+import dev.rosty.design.glass.rostyGlass
+import dev.rosty.design.icons.RostyIcon
+import dev.rosty.design.icons.RostyIcons
+import dev.rosty.design.press.scalePress
+import dev.rosty.design.theme.RostyText
+import dev.rosty.design.theme.RostyTheme
+import dev.rosty.design.theme.Sizes
+import dev.rosty.design.theme.Spacing
+import dev.rosty.stops.HomeTab
+import dev.rosty.stops.R
+import dev.rosty.stops.StopsSizes
+import dev.rosty.stops.sideRoomDp
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+
+/** Test tags of the home's floating chrome. */
+object HomeTags {
+    const val Root = "home"
+    const val Search = "home-search"
+    const val Chips = "home-chips"
+    const val Buttons = "home-buttons"
+    const val Locate = "home-locate"
+    const val Layers = "home-layers"
+    const val Options = "home-map-options"
+    const val Bottom = "home-bottom"
+    const val TabBar = "home-tab-bar"
+}
+
+/** What the home's chrome asks for; every action of a later story is a no-op until it is wired. */
+class HomeActions(
+    val onTab: (HomeTab) -> Unit = {},
+    val onSearch: () -> Unit = {},
+    val onOpenSaved: () -> Unit = {},
+    val onOpenHistory: () -> Unit = {},
+    val onLocate: () -> Unit = {},
+    val onLayers: () -> Unit = {},
+    val onMapOptions: () -> Unit = {},
+)
+
+/**
+ * The map home (ARCH 8.4, SKILL navigation-layout 9). Layers, bottom to top:
+ *
+ * 1. [mapLayer], the full window under both system bars, recorded by a [BackdropScope] so the chrome's glass samples it;
+ * 2. floating chrome: the search pill and the one-line chip row at the top, and at the bottom one block holding the
+ *    button column (locate, layers, map options) and the home's tab bar folded to a circle. The block rides the sheet by
+ *    a `graphicsLayer` translation only (no relayout), up to the medium detent, and fades as the sheet grows past it;
+ * 3. the map sheet, an overlay entry (non-modal: the map keeps panning and taking taps at peek and medium).
+ *
+ * [camera] follows the glass-covered area: the top chrome, the button column and the sheet's **settled** detent.
+ */
+@Composable
+fun StopsHome(
+    state: HomeState,
+    mapLayer: MapLayer,
+    tabs: ImmutableList<TabItem>,
+    selectedTab: HomeTab,
+    actions: HomeActions,
+    modifier: Modifier = Modifier,
+    camera: MapCameraPadding = remember { MapCameraPadding() },
+    chips: ImmutableList<ChipModel> = persistentListOf(),
+) {
+    var detentFromTallest by rememberSaveable { mutableIntStateOf(MapSheetDetents.lastIndex) }
+    val entry =
+        rememberMapSheet(detentFromTallest) { _ ->
+            MapSheetContent(state, actions.onOpenSaved, actions.onOpenHistory)
+        }
+    val density = LocalDensity.current
+    val bottomInsetPx = WindowInsets.safeDrawing.getBottom(density).toFloat()
+    val gapPx = with(density) { Spacing.s.toPx() }
+    val fadePx = with(density) { StopsSizes.rideFade.toPx() }
+    // Measured on layout changes only (never per frame); the layer lambda below reads them.
+    var windowPx by remember { mutableFloatStateOf(0f) }
+    var windowWidthPx by remember { mutableFloatStateOf(0f) }
+    var topChromeBottomPx by remember { mutableFloatStateOf(0f) }
+    var blockPx by remember { mutableFloatStateOf(0f) }
+    var buttonsWidthPx by remember { mutableFloatStateOf(0f) }
+    var unfolded by remember { mutableStateOf(false) }
+    val barMetrics = remember { ChromeMetrics() }
+    // A wide window (landscape, tablets) has room beside the centred sheet: the chrome stays put there and the folded
+    // bar keeps to the start edge, so the sheet never covers it.
+    val sideRoom = with(density) { sideRoomDp(windowWidthPx.toDp(), Sizes.sheetMaxWidth) }
+    val wide = sideRoom >= StopsSizes.sideChromeMin
+
+    // The settled detent: remembered for the next visit, and the camera padding (on settle, never per frame).
+    LaunchedEffect(entry, camera) {
+        snapshotFlow {
+            val sheet = entry.sheet
+            CameraInputs(
+                settledVisiblePx =
+                    if (sheet == null || sheet.settledOffset.isNaN()) {
+                        0f
+                    } else {
+                        sheetVisiblePx(sheet.settledOffset, sheet.containerHeight)
+                    },
+                fromTallest = sheet?.let { s -> s.detentOffsets.indexOfFirst { it == s.settledOffset } } ?: -1,
+                topPx = topChromeBottomPx,
+                endPx = buttonsWidthPx,
+            )
+        }.collect { inputs ->
+            if (inputs.fromTallest >= 0) detentFromTallest = inputs.fromTallest
+            with(density) {
+                camera.update(
+                    PaddingValues(
+                        top = inputs.topPx.toDp(),
+                        bottom = inputs.settledVisiblePx.toDp(),
+                        end = inputs.endPx.toDp(),
+                    ),
+                )
+            }
+        }
+    }
+
+    BackdropScope(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .onSizeChanged {
+                    windowPx = it.height.toFloat()
+                    windowWidthPx = it.width.toFloat()
+                }.testTag(HomeTags.Root),
+        baseBg = RostyTheme.colors.page,
+        chrome = {
+            // Top: the search / pick pill and the chip row, inside the safe area.
+            Column(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                    ).padding(top = Spacing.s)
+                    .widthIn(max = Sizes.contentMaxWidth)
+                    .fillMaxWidth()
+                    .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom },
+            ) {
+                SearchPill(actions.onSearch, Modifier.padding(horizontal = Spacing.gutter))
+                if (chips.isNotEmpty()) {
+                    Spacer(Modifier.height(Spacing.s))
+                    ChipRow(
+                        chips = chips,
+                        selected = "",
+                        onSelect = {},
+                        modifier = Modifier.height(StopsSizes.chipRow).testTag(HomeTags.Chips),
+                    )
+                }
+            }
+            // Bottom: the button column over the folded tab bar, one block riding the sheet.
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .onSizeChanged { blockPx = it.height.toFloat() }
+                    .graphicsLayer {
+                        val sheet = entry.sheet
+                        if (wide) return@graphicsLayer
+                        val container = sheet?.containerHeight ?: windowPx
+                        val visible = if (sheet == null) 0f else sheetVisiblePx(sheet.offset.value, container)
+                        val maxVisible =
+                            rideMaxVisiblePx(
+                                mediumVisiblePx = container * MEDIUM_SHARE,
+                                windowHeightPx = windowPx,
+                                topChromeBottomPx = topChromeBottomPx,
+                                blockHeightPx = blockPx,
+                                bottomInsetPx = bottomInsetPx,
+                                gapPx = gapPx,
+                            )
+                        translationY = sheetRideTranslation(visible, bottomInsetPx, maxVisible)
+                        alpha = sheetRideAlpha(visible, maxVisible, fadePx)
+                    }.testTag(HomeTags.Bottom)
+                    // The bottom inset is taken here (the bar inside then adds only its 8 dp margin), so the block
+                    // rests above the gesture area with or without the bar.
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
+                horizontalAlignment = Alignment.End,
+            ) {
+                MapButtons(
+                    actions,
+                    Modifier
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                        .padding(end = StopsSizes.buttonColumnEnd)
+                        .onSizeChanged { buttonsWidthPx = it.width.toFloat() + gapPx },
+                )
+                Spacer(Modifier.height(Spacing.s))
+                RostyTabBar(
+                    tabs = tabs,
+                    selected = tabs.indexOfFirst { it.id == selectedTab.id }.coerceAtLeast(0),
+                    onSelect = { index ->
+                        unfolded = false
+                        HomeTab.entries.firstOrNull { it.id == tabs[index].id }?.let(actions.onTab)
+                    },
+                    onReselect = { unfolded = false },
+                    modifier =
+                        (if (wide) Modifier.align(Alignment.Start).width(sideRoom) else Modifier)
+                            .testTag(HomeTags.TabBar),
+                    folded = !unfolded,
+                    onFoldedClick = { unfolded = true },
+                    chrome = barMetrics,
+                )
+            }
+        },
+    ) {
+        mapLayer(Modifier.fillMaxSize(), camera)
+    }
+}
+
+/** The medium detent's share of the window (`Detent.Medium`). */
+private const val MEDIUM_SHARE = 0.5f
+
+/** What the camera padding is computed from; a data class so `snapshotFlow` emits on a real change only. */
+private data class CameraInputs(
+    val settledVisiblePx: Float,
+    val fromTallest: Int,
+    val topPx: Float,
+    val endPx: Float,
+)
+
+/**
+ * The top pill: a glass capsule that reads like a search field; a tap opens the pick sheet (E7.8: search, paste a
+ * link, recent trips). One 48 dp row.
+ */
+@Composable
+private fun SearchPill(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RostyTheme.colors
+    val label = stringResource(R.string.home_search)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = StopsSizes.searchPill)
+            .scalePress()
+            .rostyGlass(GlassPreset.Bar, CircleShape, "stops.search")
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClickLabel = label,
+                onClick = onClick,
+            ).semantics { role = Role.Button }
+            .padding(horizontal = Spacing.l)
+            .testTag(HomeTags.Search),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        RostyIcon(RostyIcons.Search, null, tint = colors.labelSecondary)
+        RostyText(
+            label,
+            style = RostyTheme.type.body,
+            color = colors.labelSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Locate / follow, layers and map options: 44 dp glass circles in 48 dp hit boxes (E7.9 wires them). */
+@Composable
+private fun MapButtons(
+    actions: HomeActions,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.testTag(HomeTags.Buttons)) {
+        GlassIconButton(
+            StopsIcons.Locate,
+            stringResource(R.string.home_locate),
+            actions.onLocate,
+            Modifier.testTag(HomeTags.Locate),
+        )
+        GlassIconButton(
+            StopsIcons.Layers,
+            stringResource(R.string.home_layers),
+            actions.onLayers,
+            Modifier.testTag(HomeTags.Layers),
+        )
+        GlassIconButton(
+            RostyIcons.Map,
+            stringResource(R.string.home_map_options),
+            actions.onMapOptions,
+            Modifier.testTag(HomeTags.Options),
+        )
+    }
+}

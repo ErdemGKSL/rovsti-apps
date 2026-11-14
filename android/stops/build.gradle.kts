@@ -58,10 +58,8 @@ android {
                     )
                 it.systemProperty("rosty.rustFixtureDirs", rustFixtures.absolutePath)
                 it.inputs.dir(rustFixtures).withPropertyName("rustFixtureDirs")
-                // The WhatsApp settings screenshot (arriving-soon chat rows) draws the views Rust wrote for E3.10.
-                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rosty_ffi/fixtures")
-                it.systemProperty("rosty.ffi.fixtures", ffiFixtures.absolutePath)
-                it.inputs.dir(ffiFixtures).withPropertyName("ffiFixtures")
+                // The old single-destination trip (AD-SX8) sits beside the dirs, in the crate's fixture root.
+                it.inputs.file(rustFixtures.resolve("../trip.legacy.json")).withPropertyName("legacyTripFixture")
                 it.inputs.files(fileTree("src/main")).withPropertyName("mainSources")
                 // StopsMigrationTest runs the real Rust core on the host library that :core-bridge builds (E2.6).
                 val hostLib = coreBridge.tasks.named("cargoBuildHost").flatMap { (it as CargoBuildTask).outputDir }

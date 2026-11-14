@@ -1,0 +1,35 @@
+<resources>
+    <string name="app_name">Rosty Duraklar</string>
+    <string name="tab_trip">Yolculuk</string>
+    <string name="tab_saved">Kayıtlı</string>
+    <string name="tab_settings">Ayarlar</string>
+    <string name="home_search">Durak ara ya da seç</string>
+    <string name="home_locate">Konumumu göster</string>
+    <string name="home_layers">Harita katmanları</string>
+    <string name="home_map_options">Harita seçenekleri</string>
+    <string name="home_sheet_title">Yolculuk planla</string>
+    <string name="home_sheet_hint">A noktası için haritaya dokunun, sonra B noktası için.</string>
+    <string name="home_trip_running">Süren yolculuk: %1$s</string>
+    <string name="home_saved_stops">Kayıtlı Duraklar</string>
+    <string name="home_history">Geçmiş</string>
+    <string name="home_transit">Toplu Taşıma Durakları</string>
+    <string name="home_transit_loaded">Yüklendi</string>
+    <string name="sheet_saved_title">Kayıtlı Duraklar</string>
+    <string name="sheet_history_title">Geçmiş</string>
+    <string name="sheet_pick_title">Durak Seç</string>
+    <string name="sheet_coming">Yakında</string>
+    <string name="sheet_saved_message">Kayıtlı duraklarınız burada listelenecek.</string>
+    <string name="sheet_history_message">Geçmiş yolculuklarınız burada listelenecek.</string>
+    <string name="sheet_pick_message">Burada arayabilir, bağlantı yapıştırabilir ya da son yolculuklardan birini seçebilirsiniz.</string>
+    <string name="sheet_pick_shared">Duraklar ile paylaşılan: %1$s</string>
+    <plurals name="count_stops">
+        <item quantity="one">%1$d durak</item>
+        <item quantity="other">%1$d durak</item>
+    </plurals>
+    <plurals name="count_trips">
+        <item quantity="one">%1$d yolculuk</item>
+        <item quantity="other">%1$d yolculuk</item>
+    </plurals>
+    <string name="settings_group_map">Harita</string>
+    <string name="settings_tile_server">Harita Sunucusu</string>
+</resources>

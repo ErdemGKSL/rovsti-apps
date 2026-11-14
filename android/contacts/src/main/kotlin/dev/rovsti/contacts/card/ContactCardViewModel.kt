@@ -827,6 +827,7 @@ class ContactCardViewModel(
                     starred = draft.starred,
                     isMyCard = b.myCard,
                     isEmergency = b.emergency,
+                    numbers = b.wire.numbers.map { it.raw },
                 ),
             capsules = capsules.toImmutableList(),
             sections = sections.toImmutableList(),

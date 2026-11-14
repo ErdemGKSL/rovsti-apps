@@ -13,6 +13,9 @@ package dev.rovsti.people
 class AvatarResolver(
     private val index: PeopleIndex,
 ) {
+    /** Counts up when the people cache changed; a screen reads it so its avatars recompose with the new picture. */
+    val version: kotlinx.coroutines.flow.StateFlow<Long> get() = index.version
+
     /** The avatar of a contact or caller with [ownPhoto] (null: none) and [numbers] (any order, any spelling). */
     fun resolve(
         ownPhoto: String?,

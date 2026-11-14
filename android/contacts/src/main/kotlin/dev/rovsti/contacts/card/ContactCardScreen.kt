@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.rovsti.contacts.R
+import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.core.model.contacts.TitleDetail
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.ScaffoldSpec
@@ -202,7 +203,7 @@ fun ContactCardScreen(
                         onAction = onAction,
                         onBounds = { avatarBounds = it },
                         onPhoto = {
-                            val uri = header.photoUri
+                            val uri = header.face.own
                             if (uri != null && photoViewer != null) {
                                 photoViewer.open(header) { avatarBounds }
                             } else if (uri != null && overlays != null) {
@@ -290,13 +291,13 @@ private fun Hero(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val clickable =
-            if (header.photoUri != null) {
+            if (header.face.own != null) {
                 Modifier.clickable(role = Role.Button, onClick = onPhoto)
             } else {
                 Modifier
             }
         val avatarLabel =
-            if (header.photoUri !=
+            if (header.face.own !=
                 null
             ) {
                 resources.getString(R.string.contacts_view_photo)
@@ -312,10 +313,10 @@ private fun Hero(
                     onBounds(Rect(origin, Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat())))
                 }.then(clickable),
         ) {
-            Avatar(
+            ContactAvatar(
                 name = header.name,
+                face = header.face,
                 size = CardMetrics.HeroAvatar,
-                photoModel = header.photoUri,
                 colorKey = header.id.toString(),
                 modifier = Modifier.rovstiSharedBounds("avatar-${header.id}").testTag(CardTags.AvatarFace),
             )

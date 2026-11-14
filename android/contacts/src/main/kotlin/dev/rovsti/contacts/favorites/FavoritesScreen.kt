@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import dev.rovsti.contacts.R
+import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.contacts.people.presentContactPicker
 import dev.rovsti.design.chrome.LargeTitleScaffold
@@ -380,10 +381,10 @@ internal fun PersonRow(
         secondary = person.secondary,
         modifier = modifier,
         leading = {
-            Avatar(
+            ContactAvatar(
                 person.name,
+                person.face,
                 size = Sizes.avatar,
-                photoModel = person.photoUri,
                 colorKey = person.colorKey,
             )
         },
@@ -443,10 +444,10 @@ internal fun UpcomingRow(
             secondary = if (withDate) event.pageLine else event.sectionLine,
             modifier = Modifier.testTag(FavTags.upcomingRow(event.key)),
             leading = {
-                Avatar(
+                ContactAvatar(
                     event.name,
+                    event.face,
                     size = Sizes.avatar,
-                    photoModel = event.photoUri,
                     colorKey = event.contactId.toString(),
                 )
             },

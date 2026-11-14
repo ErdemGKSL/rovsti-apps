@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import dev.rovsti.contacts.R
 import dev.rovsti.contacts.orNoName
+import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -157,10 +158,10 @@ fun DupesScreen(
                             title = row.name.orNoName(),
                             secondary = row.secondary.text(),
                             leading = {
-                                Avatar(
+                                ContactAvatar(
                                     row.name.orNoName(),
+                                    row.face,
                                     size = Sizes.avatar,
-                                    photoModel = row.photoUri,
                                     colorKey = row.colorKey,
                                 )
                             },
@@ -238,10 +239,10 @@ internal fun ColumnScope.MergeReviewContent(
                     Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).padding(top = DupesMetrics.HeaderTop),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Avatar(
+                    ContactAvatar(
                         review.name.orNoName(),
+                        review.face,
                         size = DupesMetrics.Avatar,
-                        photoModel = review.photoUri,
                         colorKey = review.colorKey,
                     )
                     RovstiText(

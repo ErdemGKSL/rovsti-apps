@@ -1,6 +1,7 @@
 package dev.rovsti.contacts.card
 
 import androidx.compose.runtime.Immutable
+import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.core.model.contacts.TitleDetail
 import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
@@ -119,7 +120,10 @@ data class CardHeader(
     val isMyCard: Boolean = false,
     /** On the emergency list: the "..." menu offers Remove instead of Add. */
     val isEmergency: Boolean = false,
-)
+    val numbers: List<String> = emptyList(),
+) {
+    val face: AvatarFace get() = AvatarFace(photoUri, numbers)
+}
 
 /** The "Recent" section: hidden, asking for the call log, or the newest calls. */
 @Immutable

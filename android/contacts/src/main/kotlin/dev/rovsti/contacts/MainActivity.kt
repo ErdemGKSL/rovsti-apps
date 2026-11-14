@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import dev.rovsti.contacts.people.LocalAvatarResolver
 import dev.rovsti.design.transition.Tab
 import dev.rovsti.platform.contacts.Shortcuts
 import dev.rovsti.shell.NavSpec
@@ -44,6 +46,9 @@ class MainActivity : RovstiShellActivity<ContactsRoute>() {
 
     @Composable
     override fun Content() {
-        ContactsApp(container = container, navigator = navigator)
+        // Every avatar goes through the resolver (own photo, else the WhatsApp picture, else initials; X.1c).
+        CompositionLocalProvider(LocalAvatarResolver provides container.avatarResolver) {
+            ContactsApp(container = container, navigator = navigator)
+        }
     }
 }

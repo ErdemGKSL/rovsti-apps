@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import dev.rovsti.contacts.R
 import dev.rovsti.contacts.orNoName
+import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -190,10 +191,10 @@ private fun CleanupRowItem(
                     title = row.name.orNoName(),
                     secondary = row.secondary,
                     leading = {
-                        Avatar(
+                        ContactAvatar(
                             row.name.orNoName(),
+                            row.face,
                             size = Sizes.avatar,
-                            photoModel = row.photoUri,
                             colorKey = row.colorKey,
                         )
                     },

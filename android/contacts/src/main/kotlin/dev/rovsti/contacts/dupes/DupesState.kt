@@ -2,6 +2,7 @@ package dev.rovsti.contacts.dupes
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.contacts.intake.PreviewSection
+import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.design.text.UiText
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -16,7 +17,9 @@ data class DupeRow(
     val name: String,
     val secondary: UiText,
     val photoUri: String?,
+    val numbers: List<String> = emptyList(),
 ) {
+    val face: AvatarFace get() = AvatarFace(photoUri, numbers)
     val colorKey: String get() = key.toString()
 }
 
@@ -33,7 +36,9 @@ data class MergeReview(
     val sources: UiText,
     val sections: ImmutableList<PreviewSection>,
     val mergeLabel: UiText,
+    val numbers: List<String> = emptyList(),
 ) {
+    val face: AvatarFace get() = AvatarFace(photoUri, numbers)
     val colorKey: String get() = key.toString()
 }
 

@@ -137,6 +137,7 @@ class EmergencyViewModel(
                         name = entry.name,
                         secondary = (shown ?: entry.number).ifBlank { null },
                         photoUri = contact?.photoUri,
+                        numbers = contact?.numbers.orEmpty().map { it.raw },
                     )
                 }.toImmutableList()
         dials = dialed

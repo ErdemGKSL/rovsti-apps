@@ -88,10 +88,20 @@ class RecentListsViewModel(
             )
         val answer =
             (ops.recentLists(request) as? Outcome.Ok)?.value ?: return RecentUiState(RecentPhase.Ready, selected = tab)
-        val photos = ready.contacts.associate { it.id to it.photoUri }
+        val byId = ready.contacts.associateBy { it.id }
 
         fun rows(list: List<RecentRow>) =
-            list.map { PersonItem(it.id, it.name, it.whenText, photos[it.id]) }.toImmutableList()
+            list
+                .map {
+                    val contact = byId[it.id]
+                    PersonItem(
+                        it.id,
+                        it.name,
+                        it.whenText,
+                        contact?.photoUri,
+                        numbers = contact?.numbers.orEmpty().map { n -> n.raw },
+                    )
+                }.toImmutableList()
         return RecentUiState(
             phase = RecentPhase.Ready,
             tabs = answer.tabs.map { RecentTabUi(it.id, it.label, it.emptyTitle, it.emptyBody) }.toImmutableList(),

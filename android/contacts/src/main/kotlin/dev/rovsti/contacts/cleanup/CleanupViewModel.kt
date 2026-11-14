@@ -89,7 +89,7 @@ class CleanupViewModel(
                     (ops.cleanup(CleanupRequest(ready.drafts, photoIds, f)) as? Outcome.Ok)?.value
                         ?: return@withContext null
                 val byId = ready.drafts.associateBy { it.id }
-                val photos = ready.contacts.associate { it.id to it.photoUri }
+                val photos = ready.contacts.associateBy { it.id }
                 Computed(
                     filter = f,
                     chips = answer.filters.map { ChipModel(it.id.name, it.label, it.count) },
@@ -189,5 +189,11 @@ class CleanupViewModel(
 
 private fun rowOf(
     draft: ContactDraft,
-    photoUri: String?,
-) = CleanupRow(draft.id ?: 0, draftTitle(draft), draftSecondary(draft), photoUri)
+    contact: dev.rovsti.core.model.search.WireContact?,
+) = CleanupRow(
+    draft.id ?: 0,
+    draftTitle(draft),
+    draftSecondary(draft),
+    contact?.photoUri,
+    contact?.numbers.orEmpty().map { it.raw },
+)

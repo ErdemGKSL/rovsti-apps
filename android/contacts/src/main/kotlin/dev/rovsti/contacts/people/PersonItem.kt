@@ -14,7 +14,11 @@ data class PersonItem(
     val secondary: String? = null,
     val photoUri: String? = null,
     val searchText: String = name,
+    val numbers: List<String> = emptyList(),
 ) {
+    /** The picture the resolver starts from (X.1c). */
+    val face: AvatarFace get() = AvatarFace(photoUri, numbers)
+
     val colorKey: String get() = id.toString()
 }
 
@@ -26,4 +30,5 @@ internal fun ContactRow.toPerson(secondary: String? = subtitle): PersonItem =
         secondary = secondary,
         photoUri = photoUri,
         searchText = (listOf(name) + numbers.map { it.raw }).joinToString(" "),
+        numbers = numbers.map { it.raw },
     )

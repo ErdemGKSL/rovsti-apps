@@ -200,8 +200,7 @@ class FavoritesViewModel(
         val byId = ready.contacts.associateBy { it.id }
         val withNumber = ready.drafts.filter { it.numbers.isNotEmpty() }.mapNotNullTo(HashSet()) { it.id }
 
-        fun upcoming(event: UpcomingEvent) =
-            event.toItem(byId[event.contactId]?.photoUri, event.contactId in withNumber)
+        fun upcoming(event: UpcomingEvent) = event.toItem(byId[event.contactId], event.contactId in withNumber)
         return FavoritesUiState(
             phase = FavoritesPhase.Ready,
             favorites = favorites,
@@ -342,7 +341,7 @@ class FavoritesViewModel(
 }
 
 private fun UpcomingEvent.toItem(
-    photoUri: String?,
+    contact: dev.rovsti.core.model.search.WireContact?,
     canWish: Boolean,
 ): UpcomingItem {
     val section = listOfNotNull(whenText, turningText).joinToString(SEPARATOR)
@@ -352,7 +351,8 @@ private fun UpcomingEvent.toItem(
         contactId = contactId,
         name = name,
         kind = kind,
-        photoUri = photoUri,
+        photoUri = contact?.photoUri,
+        numbers = contact?.numbers.orEmpty().map { it.raw },
         sectionLine = section,
         pageLine = page,
         canWish = canWish,

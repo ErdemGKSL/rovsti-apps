@@ -45,6 +45,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rovsti.contacts.R
+import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.core.model.contacts.QuickAction
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.ToolbarAction
@@ -425,11 +426,11 @@ private fun RowListRow(
         title = item.name,
         secondary = item.secondary,
         leading = {
-            Avatar(
+            ContactAvatar(
                 item.name,
+                item.face,
                 modifier = if (shared) Modifier.rovstiSharedBounds("avatar-${item.id}") else Modifier,
                 size = avatarSize,
-                photoModel = item.photoUri,
                 colorKey = item.id.toString(),
             )
         },
@@ -642,10 +643,10 @@ private fun ViewedBody(
     ListRow(
         title = item.name,
         leading = {
-            Avatar(
+            ContactAvatar(
                 item.name,
+                item.face,
                 size = VIEWED_AVATAR,
-                photoModel = item.photoUri,
                 colorKey = item.id.toString(),
             )
         },
@@ -732,10 +733,10 @@ private fun showAddPicker(
                         title = item.name,
                         secondary = item.secondary,
                         leading = {
-                            Avatar(
+                            ContactAvatar(
                                 item.name,
+                                item.face,
                                 size = Sizes.avatar,
-                                photoModel = item.photoUri,
                                 colorKey = item.id.toString(),
                             )
                         },

@@ -1,6 +1,7 @@
 package dev.rovsti.contacts.favorites
 
 import androidx.compose.runtime.Immutable
+import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.core.model.contacts.EventKind
 import dev.rovsti.design.text.UiText
@@ -24,7 +25,10 @@ data class UpcomingItem(
     val sectionLine: String,
     val pageLine: String,
     val canWish: Boolean,
-)
+    val numbers: List<String> = emptyList(),
+) {
+    val face: AvatarFace get() = AvatarFace(photoUri, numbers)
+}
 
 /** A titled block of the See All page ("This week", "This month", "Later"). */
 @Immutable

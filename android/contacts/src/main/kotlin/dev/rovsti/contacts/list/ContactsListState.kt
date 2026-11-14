@@ -6,6 +6,7 @@ import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.DraftSeed
 import dev.rovsti.contacts.R
 import dev.rovsti.contacts.UiConfirm
+import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.core.model.contacts.Addition
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.core.model.contacts.QuickAction
@@ -40,7 +41,11 @@ data class ContactItem(
     val whatsapp: Boolean,
     val hasNumber: Boolean,
     val photoUri: String?,
+    val numbers: List<String> = emptyList(),
 ) {
+    /** The picture the resolver starts from (X.1c). */
+    val face: AvatarFace get() = AvatarFace(photoUri, numbers)
+
     /** Which long-press menu the row gets: the quick actions only depend on these three facts. */
     val menuKey: MenuKey get() = MenuKey(hasNumber, whatsapp, starred)
 }

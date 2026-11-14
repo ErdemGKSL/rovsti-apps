@@ -1,6 +1,7 @@
 package dev.rovsti.contacts
 
 import android.content.Context
+import android.net.Uri
 import dev.rovsti.contacts.card.CardWaPort
 import dev.rovsti.contacts.card.RepositoryCardWaPort
 import dev.rovsti.contacts.data.AndroidReminderPort
@@ -35,6 +36,8 @@ import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
 import dev.rovsti.core.ops.SharedOps
+import dev.rovsti.people.AvatarResolver
+import dev.rovsti.people.PeopleIndex
 import dev.rovsti.platform.calllog.AndroidBlocklistRepository
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
 import dev.rovsti.platform.calllog.BlocklistRepository
@@ -51,6 +54,7 @@ import dev.rovsti.shell.settings.CommonSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -130,6 +134,33 @@ open class ContactsContainer(
     /** The cache itself: records in the Rust data directory, pictures in `filesDir/people/`. */
     val peopleStore: PeopleStore by lazy { createPeopleStore() }
 
+    /** The people cache in memory (lookups never block): what every avatar asks, see [avatarResolver]. */
+    val peopleIndex: PeopleIndex by lazy { PeopleIndex.forRegion(PhoneNumbers.homeRegion(context)) }
+
+    /** Own photo, else the WhatsApp picture, else initials: the one place a Contacts avatar is decided (X.1c). */
+    val avatarResolver: AvatarResolver by lazy { AvatarResolver(peopleIndex) }
+
+    /**
+     * Loads the people cache into [peopleIndex] once `Rust.init` is done, so the first screens already draw cached
+     * pictures. Safe to call early: it waits for the init (rule b) and does nothing when the core cannot answer.
+     */
+    suspend fun warmPeopleIndex() {
+        if (!rustReady()) return
+        refreshPeopleIndex()
+    }
+
+    /** Re-reads the cache into [peopleIndex] (after a sync); an unchanged cache recomposes nothing. */
+    suspend fun refreshPeopleIndex() {
+        val rows = peopleStore.snapshot()
+        val present =
+            withContext(Dispatchers.IO) {
+                rows.mapNotNull { row -> row.pictureFile?.let { File(peopleStore.dir, it) }?.takeIf { it.isFile } }
+            }.mapTo(HashSet()) { it.name }
+        peopleIndex.replace(rows) { row ->
+            row.pictureFile?.takeIf { it in present }?.let { Uri.fromFile(File(peopleStore.dir, it)).toString() }
+        }
+    }
+
     /** Fills [peopleStore] from the gateway while WhatsApp is linked (the worker, "Sync now", live events); started once. */
     val peopleSync: PeopleSync by lazy { createPeopleSync().also { it.start() } }
 
@@ -189,7 +220,10 @@ open class ContactsContainer(
             numbers = ::peopleNumbers,
             log = PeopleSyncLog(context.getSharedPreferences(PEOPLE_PREFS, Context.MODE_PRIVATE)),
             scope = scope,
-            onChanged = { peopleStore.notifyChanged(context.contentResolver) },
+            onChanged = {
+                peopleStore.notifyChanged(context.contentResolver)
+                scope.launch { refreshPeopleIndex() }
+            },
         )
 
     /** E.164 numbers worth asking WhatsApp about: the recent callers first, then the address book. */

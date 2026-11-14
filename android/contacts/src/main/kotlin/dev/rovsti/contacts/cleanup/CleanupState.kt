@@ -2,6 +2,7 @@ package dev.rovsti.contacts.cleanup
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.contacts.R
+import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.design.controls.ChipModel
 import dev.rovsti.design.text.UiText
@@ -17,7 +18,9 @@ data class CleanupRow(
     val name: String,
     val secondary: String?,
     val photoUri: String?,
+    val numbers: List<String> = emptyList(),
 ) {
+    val face: AvatarFace get() = AvatarFace(photoUri, numbers)
     val colorKey: String get() = id.toString()
 }
 

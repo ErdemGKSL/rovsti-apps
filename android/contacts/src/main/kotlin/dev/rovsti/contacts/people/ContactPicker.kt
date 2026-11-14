@@ -35,6 +35,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import dev.rovsti.contacts.R
+import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
@@ -188,10 +189,10 @@ internal fun ColumnScope.ContactPickerContent(
                         title = person.name,
                         secondary = person.secondary,
                         leading = {
-                            Avatar(
+                            ContactAvatar(
                                 person.name,
+                                person.face,
                                 size = Sizes.avatar,
-                                photoModel = person.photoUri,
                                 colorKey = person.colorKey,
                             )
                         },

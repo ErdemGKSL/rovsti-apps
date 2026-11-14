@@ -88,7 +88,7 @@ class DupesViewModel(
                             withContext(worker) {
                                 (ops.dupes(DraftsRequest(next.drafts)) as? Outcome.Ok)?.value
                             }
-                        val photos = next.contacts.associate { it.id to it.photoUri }
+                        val photos = next.contacts.associate { it.id to it }
                         publish(
                             answer?.groups.orEmpty(),
                             answer?.summary?.let { UiText.Literal(it) }
@@ -115,7 +115,7 @@ class DupesViewModel(
     private fun publish(
         found: List<DupGroup>,
         summary: UiText,
-        photos: Map<Long, String?>,
+        photos: Map<Long, dev.rovsti.core.model.search.WireContact>,
     ) {
         groups = found
         val ready = book.book.value as? Book.Ready
@@ -128,7 +128,8 @@ class DupesViewModel(
                     key = group.ids.first(),
                     name = draftTitle(keeper),
                     secondary = UiText.Res(R.string.contacts_dupe_secondary, listOf(more, UiText.Literal(group.label))),
-                    photoUri = photos[group.ids.first()],
+                    photoUri = photos[group.ids.first()]?.photoUri,
+                    numbers = photos[group.ids.first()]?.numbers.orEmpty().map { it.raw },
                 )
             }
         ui.update { old ->
@@ -157,13 +158,14 @@ class DupesViewModel(
                 withContext(worker) {
                     (ops.mergePlan(MergeRequest(drafts.first(), drafts.drop(1))) as? Outcome.Ok)?.value
                 } ?: return@launch
-            val photo = (book.book.value as? Book.Ready)?.contacts?.firstOrNull { it.id == key }?.photoUri
+            val contact = (book.book.value as? Book.Ready)?.contacts?.firstOrNull { it.id == key }
             val review =
                 MergeReview(
                     key = key,
                     name = draftTitle(merged.draft),
                     subtitle = draftSubtitle(merged.draft) ?: draftSecondary(merged.draft),
-                    photoUri = photo,
+                    photoUri = contact?.photoUri,
+                    numbers = contact?.numbers.orEmpty().map { it.raw },
                     sources =
                         UiText.Res(
                             R.string.contacts_merge_sources,

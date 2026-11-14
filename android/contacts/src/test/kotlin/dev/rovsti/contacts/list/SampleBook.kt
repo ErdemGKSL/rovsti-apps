@@ -128,6 +128,7 @@ internal object SampleBook {
                 whatsapp = p.id in marked,
                 hasNumber = true,
                 photoUri = if (p.id in photoSet) "content://contacts/photo/${p.id}" else null,
+                numbers = listOfNotNull(p.number, p.second),
             )
         }
     }

@@ -13,6 +13,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.R
+import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.contacts.people.presentContactPicker
 import dev.rovsti.design.chrome.LargeTitleScaffold
@@ -179,7 +180,7 @@ private fun MemberRow(
                 title = person.name,
                 secondary = person.secondary,
                 leading = {
-                    Avatar(person.name, size = Sizes.avatar, photoModel = person.photoUri, colorKey = person.colorKey)
+                    ContactAvatar(person.name, person.face, size = Sizes.avatar, colorKey = person.colorKey)
                 },
                 onClick = { onAction(GroupPageAction.OpenMember(person.id)) },
             )

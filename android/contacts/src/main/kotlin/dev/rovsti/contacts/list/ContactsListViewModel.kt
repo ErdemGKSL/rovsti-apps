@@ -532,6 +532,7 @@ private fun ContactRow.toItem(marks: Map<Long, String>) =
         whatsapp = id in marks,
         hasNumber = numbers.isNotEmpty(),
         photoUri = photoUri,
+        numbers = numbers.map { it.raw },
     )
 
 private fun ContactDraft.toSeed() =

@@ -120,7 +120,7 @@ private fun ValueChevron(value: String) {
             // A long value (an account) is cut, so the row's title keeps its line at large font sizes.
             IosText(
                 value,
-                Modifier.widthIn(max = SettingsMetrics.ValueMax),
+                Modifier.weight(1f, fill = false).widthIn(max = SettingsMetrics.ValueMax),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -173,6 +173,7 @@ fun ContactsSettingsPage(
                             )
                         },
                         trailingContent = { ValueChevron(stringResource(nameFormatName(state.nameFormat))) },
+                        trailingShrinks = true,
                         onClick = links.openNameFormat,
                     ),
                     IosSettingsItem(
@@ -184,6 +185,7 @@ fun ContactsSettingsPage(
                             )
                         },
                         trailingContent = { ValueChevron(stringResource(sortName(state.sortBy))) },
+                        trailingShrinks = true,
                         onClick = links.openSortBy,
                     ),
                 ),
@@ -202,6 +204,7 @@ fun ContactsSettingsPage(
                                 )
                             },
                             trailingContent = { ValueChevron(state.saveToLabel) },
+                            trailingShrinks = true,
                             onClick = links.openSaveTo,
                         ),
                     ),
@@ -220,6 +223,7 @@ fun ContactsSettingsPage(
                             )
                         },
                         trailingContent = { ValueChevron(state.summaryText) },
+                        trailingShrinks = true,
                         onClick = links.openSummary,
                     ),
                 ),
@@ -257,6 +261,7 @@ fun ContactsSettingsPage(
                                 )
                             },
                             trailingContent = { ValueChevron(state.hourLabel) },
+                            trailingShrinks = true,
                             onClick = links.openReminderTime,
                         )
                     } else {

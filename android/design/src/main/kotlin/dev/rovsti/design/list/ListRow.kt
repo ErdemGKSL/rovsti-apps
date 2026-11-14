@@ -86,6 +86,7 @@ fun ListRow(
     endInset: Dp = 0.dp,
     secondaryMaxLines: Int = 1,
     titleMaxLines: Int = 1,
+    trailingShrinks: Boolean = false,
 ) {
     val colors = RovstiTheme.colors
     val type = RovstiTheme.type
@@ -178,10 +179,22 @@ fun ListRow(
             val leadSpace = if (lead != null) leadWidth + gap else 0
             val metaP = if (meta != null) find(RowSlot.Meta).measure(loose) else null
             val metaSpace = if (metaP != null) metaP.width + gap else 0
-            val trailP = if (trailing != null) find(RowSlot.Trailing).measure(loose) else null
+            val trailM = if (trailing != null) find(RowSlot.Trailing) else null
+            val half = RowStacking.besideMax(width - leadSpace - metaSpace, trailGap)
+            // A value that cuts itself short (one ellipsized line) stays beside the text at its half of the row.
+            val shrinks =
+                trailM != null &&
+                    trailingShrinks &&
+                    fontScale < RowStacking.STACK_FONT_SCALE &&
+                    trailM.maxIntrinsicWidth(loose.maxHeight).let { full ->
+                        full > half &&
+                            RowStacking.shrinksInPlace(trailM.minIntrinsicHeight(half), trailM.minIntrinsicHeight(full))
+                    }
+            val trailP = trailM?.measure(if (shrinks) loose.copy(maxWidth = half) else loose)
             val trailSpace = if (trailP != null) trailP.width + trailGap else 0
             val stack =
                 trailP != null &&
+                    !shrinks &&
                     !RowStacking.isAccessory(trailP.width, RowStacking.ACCESSORY_MAX.roundToPx()) &&
                     RowStacking.shouldStack(
                         fontScale = fontScale,
@@ -238,6 +251,21 @@ object RowStacking {
         widthPx: Int,
         accessoryMaxPx: Int,
     ): Boolean = widthPx <= accessoryMaxPx
+
+    /** The widest a trailing element may be and still leave the text at least half of [rowWidth]. */
+    fun besideMax(
+        rowWidth: Int,
+        gapPx: Int,
+    ): Int = (rowWidth / 2 - gapPx).coerceAtLeast(0)
+
+    /**
+     * True when a trailing element squeezed to its half of the row is no taller than at its natural width: it cuts
+     * itself short (an ellipsized value) instead of wrapping, so it stays beside the text instead of dropping under.
+     */
+    fun shrinksInPlace(
+        heightAtHalf: Int,
+        heightAtFull: Int,
+    ): Boolean = heightAtHalf <= heightAtFull
 
     /** Stack when the font is large, or the text column beside the action would get under half of [rowWidth]. */
     fun shouldStack(

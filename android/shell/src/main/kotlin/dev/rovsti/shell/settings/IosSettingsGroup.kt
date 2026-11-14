@@ -161,6 +161,7 @@ private fun IosSettingsItemRow(item: IosSettingsItem) {
             leadingGap = SettingsMetrics.S12,
             trailingGap = SettingsMetrics.S12,
             stackGap = SettingsMetrics.S2,
+            trailingShrinks = item.trailingShrinks,
         )
         return
     }
@@ -239,6 +240,8 @@ data class IosSettingsItem(
     val title: @Composable () -> Unit,
     val description: (@Composable () -> Unit)? = null,
     val trailingContent: (@Composable () -> Unit)? = null,
+    /** The trailing content is a value that cuts itself short (one ellipsized line): it stays beside the title. */
+    val trailingShrinks: Boolean = false,
     val showBadge: Boolean = false,
     val isHighlighted: Boolean = false,
     val tintIcon: Boolean = true,

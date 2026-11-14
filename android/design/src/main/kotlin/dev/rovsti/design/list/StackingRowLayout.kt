@@ -27,6 +27,7 @@ fun StackingTrailingRow(
     leadingGap: Dp,
     trailingGap: Dp,
     stackGap: Dp,
+    trailingShrinks: Boolean = false,
 ) {
     val density = LocalDensity.current
     val fontScale = density.fontScale
@@ -47,9 +48,19 @@ fun StackingTrailingRow(
         fun find(slot: StackSlot) = measurables.first { it.layoutId == slot }
         val lead = if (leading != null) find(StackSlot.Leading).measure(loose) else null
         val leadSpace = if (lead != null) lead.width + leadGapPx else 0
-        val trail = find(StackSlot.Trailing).measure(loose)
+        val trailM = find(StackSlot.Trailing)
+        val trailFull = trailM.maxIntrinsicWidth(loose.maxHeight)
+        val half = RowStacking.besideMax(width - leadSpace, trailGapPx)
+        // A value that cuts itself short (one ellipsized line) stays beside the text at its half of the row.
+        val shrinks =
+            trailingShrinks &&
+                fontScale < RowStacking.STACK_FONT_SCALE &&
+                trailFull > half &&
+                RowStacking.shrinksInPlace(trailM.minIntrinsicHeight(half), trailM.minIntrinsicHeight(trailFull))
+        val trail = trailM.measure(if (shrinks) loose.copy(maxWidth = half) else loose)
         val stack =
-            !RowStacking.isAccessory(trail.width, RowStacking.ACCESSORY_MAX.roundToPx()) &&
+            !shrinks &&
+                !RowStacking.isAccessory(trail.width, RowStacking.ACCESSORY_MAX.roundToPx()) &&
                 RowStacking.shouldStack(
                     fontScale = fontScale,
                     rowWidth = width - leadSpace,

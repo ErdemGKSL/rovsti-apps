@@ -537,6 +537,7 @@ private fun ButtonRow(
                 title = b.label,
                 modifier = tag,
                 onClick = onClick,
+                trailingShrinks = true,
                 trailing = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -545,7 +546,11 @@ private fun ButtonRow(
                         b.detail?.let {
                             RovstiText(
                                 it,
-                                modifier = Modifier.widthIn(max = GatewayValueMax).testTag("wa-gateway-value"),
+                                modifier =
+                                    Modifier
+                                        .weight(1f, fill = false)
+                                        .widthIn(max = GatewayValueMax)
+                                        .testTag("wa-gateway-value"),
                                 style = RovstiTheme.type.body,
                                 color = colors.labelSecondary,
                                 maxLines = 1,

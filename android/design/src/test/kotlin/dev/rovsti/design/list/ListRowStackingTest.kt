@@ -61,6 +61,35 @@ class ListRowStackingTest : ShotTest() {
     }
 
     @Test
+    fun atFontScale1ALongValueIsCutShortBesideTheTitleInsteadOfDroppingUnderIt() {
+        composeFrame {
+            ListRow(
+                title = "Save To",
+                leading = { Spacer(Modifier.size(32.dp)) },
+                trailingShrinks = true,
+                trailing = {
+                    androidx.compose.foundation.layout.Row {
+                        RovstiText(
+                            "a.very.long.account.name.for.contacts@example.com",
+                            Modifier.weight(1f, fill = false).testTag("value"),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        ListRowChevron()
+                    }
+                },
+                onClick = {},
+                modifier = Modifier.testTag("row"),
+            )
+        }
+        val row = compose.onNodeWithTag("row").getUnclippedBoundsInRoot()
+        val value = compose.onNodeWithTag("value", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("value beside the title: $value in $row", value.top < row.top + row.height / 2)
+        assertTrue("value in the end half: $value in $row", value.left >= row.left + row.width / 2 - 32.dp)
+        assertTrue("one row high: ${row.height}", row.height < 100.dp)
+    }
+
+    @Test
     fun atFontScale2AChevronStaysAtTheEndOfTheRow() {
         composeFrame(fontScale = 2f) {
             ListRow(
@@ -88,6 +117,9 @@ class ListRowStackingTest : ShotTest() {
         )
         assertEquals(1.5f, RowStacking.STACK_FONT_SCALE)
         assertTrue(RowStacking.isAccessory(widthPx = 40, accessoryMaxPx = 48))
+        assertEquals(480, RowStacking.besideMax(rowWidth = 1000, gapPx = 20))
+        assertTrue(RowStacking.shrinksInPlace(heightAtHalf = 40, heightAtFull = 40))
+        assertFalse(RowStacking.shrinksInPlace(heightAtHalf = 80, heightAtFull = 40))
         assertFalse(RowStacking.isAccessory(widthPx = 200, accessoryMaxPx = 48))
     }
 

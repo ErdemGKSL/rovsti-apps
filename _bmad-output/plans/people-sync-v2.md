@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1, S2, S3 done; see the notes under each step.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S4 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -562,6 +562,13 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
 - **S4 Honest outcomes in v1 (small).** `NotLinked` no longer stored as Failed; link-settle wait
   (`WaRepository.settled`); profiles with `fetched_ms == 0` counted as unanswered -> Partial. This fixes the
   misleading row before the larger rewrite lands.
+  *Done (notes):* `run()` waits up to `LINK_WAIT_MS` (20 s) for `WaRepository.settled`; not settled is the new
+  `SyncResult.LinkNotReady` (worker `retry()`, nothing stored), settled without a link stays `NotLinked`, and neither
+  is written as "Failed" any more (`finish` returns early). `DefaultWaRepository` settles after the first `connect`
+  whatever its outcome. A profile with `fetched_ms == 0` and no picture id is unanswered: the run becomes `Partial`;
+  a batch with no real answer at all is logged as `rate_limited source=gateway_legacy` and ends the profile stage.
+  `Connected` with `status.state == Disconnected` is still attempted in v1 (its 409 ends as Failed); S6 maps it to
+  `Interrupted(WaDisconnected)`.
 - **S5 Planner in Rust.** `people_sync.rs` with all unit tests, `people.sync_*` ops + fixtures + Kotlin models and
   `PeopleOps` methods. Nothing uses it yet.
 - **S6 Runner + Contacts switch-over.** `PeopleStore` to `:people`, `PeopleSyncRunner`, `PartNotifier`,

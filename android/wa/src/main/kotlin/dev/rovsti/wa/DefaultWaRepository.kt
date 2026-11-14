@@ -92,6 +92,9 @@ class DefaultWaRepository(
     private val state = MutableStateFlow<WaLinkState>(WaLinkState.None)
     override val linkState: StateFlow<WaLinkState> = state.asStateFlow()
 
+    private val settledState = MutableStateFlow(false)
+    override val settled: StateFlow<Boolean> = settledState.asStateFlow()
+
     private val bus =
         MutableSharedFlow<GatewayEvent>(
             extraBufferCapacity = EVENT_BUFFER,
@@ -150,8 +153,11 @@ class DefaultWaRepository(
             removed
         }
 
+    /** [open], then the link is settled whatever the outcome. Call under [lock]. */
+    private suspend fun connect(): WaGateway? = open().also { settledState.value = true }
+
     /** Reads the link and opens everything. Call under [lock]. Returns the gateway, or null (and sets [state]). */
-    private suspend fun connect(): WaGateway? {
+    private suspend fun open(): WaGateway? {
         session?.let { return it.gateway }
         val link =
             when (val read = store.read()) {

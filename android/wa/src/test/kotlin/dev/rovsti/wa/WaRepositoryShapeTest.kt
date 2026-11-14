@@ -40,6 +40,7 @@ class WaRepositoryShapeTest {
                 "setGatewayOpener",
                 "getOnRelinkTo",
                 "setOnRelinkTo",
+                "setSettled",
             )
         val extra = fakeMethods.filter { signature(it) !in declared }.map { it.name }.toSet()
         assertEquals(emptySet<String>(), extra - controls)
@@ -48,7 +49,18 @@ class WaRepositoryShapeTest {
     @Test fun theInterfaceHasTheDocumentedMembers() {
         val names = declared.map { it.substringBefore('(') }.toSet()
         assertEquals(
-            setOf("getLinkState", "getEvents", "start", "gateway", "wake", "chats", "messages", "relinkTo", "forget"),
+            setOf(
+                "getLinkState",
+                "getSettled",
+                "getEvents",
+                "start",
+                "gateway",
+                "wake",
+                "chats",
+                "messages",
+                "relinkTo",
+                "forget",
+            ),
             names,
         )
     }

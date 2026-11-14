@@ -27,10 +27,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
 import kotlin.math.ceil
@@ -55,8 +57,14 @@ data class PeopleSyncStatus(
 
 /** What one run did, for the worker (and the tests). */
 sealed interface SyncResult {
-    /** WhatsApp is not linked: nothing was asked, nothing changed. */
+    /** WhatsApp is not linked: nothing was asked, nothing changed. Not stored: the row stays as it was. */
     data object NotLinked : SyncResult
+
+    /**
+     * The stored link was not read in time ([PeopleSync.LINK_WAIT_MS], a cold process): nothing was asked. Not a
+     * failure and not stored; the worker tries again.
+     */
+    data object LinkNotReady : SyncResult
 
     /**
      * The gateway could not be reached or answered with an error, or it kept answering "rate limited" before anything
@@ -213,6 +221,10 @@ class PeopleSync(
     /** A full sync (the worker, "Sync now"). */
     suspend fun run(): SyncResult =
         lock.withLock {
+            val waitStart = clock()
+            val settled = withTimeoutOrNull(LINK_WAIT_MS) { wa.settled.first { it } } != null
+            RovstiLog.event(TAG, "link_wait", "settled" to settled, "ms" to clock() - waitStart)
+            if (!settled) return@withLock SyncResult.LinkNotReady
             val link = wa.linkState.value
             if (link !is WaLinkState.Connected) {
                 RovstiLog.event(TAG, "run_skipped", "reason" to "not_linked", "link" to link.javaClass.simpleName)
@@ -340,6 +352,10 @@ class PeopleSync(
                     }
                 }
             answered++
+            // An older gateway answers a profile WhatsApp throttled with `fetched_ms: 0` (D6): not done, so the run is
+            // Partial and the next one asks again; a batch with no real answer at all is a throttle, the stage stops.
+            val unanswered = profiles.count { !isAnswered(it) }
+            if (unanswered > 0) short = true
             RovstiLog.event(
                 TAG,
                 "batch",
@@ -352,6 +368,18 @@ class PeopleSync(
             val answer = store.upsert(profiles.map(::profileUpdate)) ?: return SyncResult.Failed
             changed += answer.changed
             dropped += answer.dropFiles.size
+            if (profiles.isNotEmpty() && unanswered == profiles.size) {
+                RovstiLog.event(
+                    LogLevel.Warn,
+                    TAG,
+                    "rate_limited",
+                    "stage" to STAGE_PROFILES,
+                    "source" to "gateway_legacy",
+                    "n" to batch.size,
+                )
+                answered--
+                break
+            }
         }
 
         // 3. the pictures that changed, and what to drop
@@ -583,8 +611,13 @@ class PeopleSync(
         val (outcome, people) =
             when (result) {
                 is SyncResult.Synced -> SyncOutcome.Ok to result.people
+
                 is SyncResult.Partial -> SyncOutcome.Partial to result.people
-                SyncResult.Failed, SyncResult.NotLinked -> SyncOutcome.Failed to state.value.people
+
+                SyncResult.Failed -> SyncOutcome.Failed to state.value.people
+
+                // Nothing was asked: what the row shows stays true.
+                SyncResult.NotLinked, SyncResult.LinkNotReady -> return
             }
         log.save(now, outcome, people)
         state.value = state.value.copy(running = false, lastSyncMs = now, outcome = outcome, people = people)
@@ -596,6 +629,9 @@ class PeopleSync(
         private const val STAGE_LOOKUP = "lookup"
         private const val STAGE_PROFILES = "profiles"
         private const val STAGE_PICTURES = "pictures"
+
+        /** How long a run waits for the stored link to be read ([WaRepository.settled]). */
+        const val LINK_WAIT_MS = 20_000L
 
         /** How often the worker runs. */
         const val PERIOD_MS = 6L * 3_600_000
@@ -639,6 +675,7 @@ class PeopleSync(
         private fun SyncResult.label(): String =
             when (this) {
                 SyncResult.NotLinked -> "not_linked"
+                SyncResult.LinkNotReady -> "link_not_ready"
                 SyncResult.Failed -> "failed"
                 is SyncResult.Synced -> "synced"
                 is SyncResult.Partial -> "partial"

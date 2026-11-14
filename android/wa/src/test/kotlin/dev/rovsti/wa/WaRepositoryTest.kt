@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -55,7 +56,9 @@ class WaRepositoryTest {
         runTest(UnconfinedTestDispatcher()) {
             val fake = FakeWaGateway()
             val repo = repo(fake)
+            assertFalse("None before start means not read yet", repo.settled.value)
             repo.start()
+            assertTrue("no stored link: settled", repo.settled.value)
             assertEquals(WaLinkState.None, repo.linkState.value)
             assertNull(repo.gateway())
             assertEquals(0, fake.count("wa.open"))
@@ -84,6 +87,7 @@ class WaRepositoryTest {
             val repo = repo(fake)
             repo.start()
             assertEquals(WaLinkState.Error(WaLinkError.Unreachable), repo.linkState.value)
+            assertTrue("a failed open settles too", repo.settled.value)
         }
 
     @Test fun linkingStatusAndQrEventsGiveLinking() =

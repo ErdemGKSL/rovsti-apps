@@ -199,6 +199,42 @@ class PeopleSyncWorkerTest {
         assertEquals(SyncOutcome.Failed, container.peopleSync.status.value.outcome)
     }
 
+    @Test fun aLinkNotReadInTimeRetriesWithoutRecordingAFailure() {
+        script()
+        container.link.setSettled(false)
+        val result = runBlocking { container.peopleSync.run() }
+        assertEquals(SyncResult.LinkNotReady, result)
+        assertEquals(0, container.gw.gateway.core.calls.size)
+        assertEquals(
+            "nothing was asked, so nothing is stored",
+            SyncOutcome.Never,
+            container.peopleSync.status.value.outcome,
+        )
+    }
+
+    @Test fun profilesAnOldGatewayDidNotAnswerMakeThePartialOutcome() {
+        script()
+        container.gw.profiles[can] = WaProfile(can, pushName = "Can")
+        container.connect()
+        assertEquals("partial: the worker comes back sooner", ListenableWorker.Result.retry(), run())
+        assertEquals(SyncOutcome.Partial, container.peopleSync.status.value.outcome)
+        assertEquals(
+            "Ayse",
+            container.people.book
+                .getValue(ayse)
+                .name,
+        )
+    }
+
+    @Test fun aBatchWithNoRealAnswerStopsTheProfileStage() {
+        script()
+        container.gw.profiles[ayse] = WaProfile(ayse)
+        container.gw.profiles[can] = WaProfile(can)
+        container.connect()
+        assertEquals(ListenableWorker.Result.retry(), run())
+        assertEquals(SyncOutcome.Partial, container.peopleSync.status.value.outcome)
+    }
+
     @Test fun theNumbersOfTheRunDoNotNeedTheLinkToBeStarted() {
         // WorkManager can wake the process with no UI: the worker alone builds the sync, which starts following the link.
         assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)

@@ -19,6 +19,12 @@ interface WaRepository {
     val linkState: StateFlow<WaLinkState>
 
     /**
+     * False until [start] has read the stored link and, when there is one, the gateway's first status arrived or
+     * failed. Until then [linkState] `None` does not mean "not linked": a cold process (the sync worker) waits for it.
+     */
+    val settled: StateFlow<Boolean>
+
+    /**
      * The gateway events of this app's instance, in order. Lists should not be derived from this flow (events can be
      * dropped under load): use [chats] and [messages], which reload on a gap or a `resync`.
      */

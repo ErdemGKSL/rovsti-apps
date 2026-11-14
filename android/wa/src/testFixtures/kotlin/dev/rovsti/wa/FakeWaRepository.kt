@@ -35,6 +35,15 @@ class FakeWaRepository(
         private set
 
     override val linkState: StateFlow<WaLinkState> = state.asStateFlow()
+
+    private val settledState = MutableStateFlow(true)
+    override val settled: StateFlow<Boolean> = settledState.asStateFlow()
+
+    /** Whether the stored link has been read ([WaRepository.settled]); true by default. */
+    fun setSettled(value: Boolean) {
+        settledState.value = value
+    }
+
     override val events: SharedFlow<GatewayEvent> = bus.asSharedFlow()
 
     override fun start() {

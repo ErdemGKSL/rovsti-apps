@@ -29,6 +29,9 @@ class PeopleSyncWorker(
             // A partial run stored its progress; the retry's back-off continues it sooner than the next period.
             SyncResult.Failed, is SyncResult.Partial -> Result.retry()
 
+            // A cold process whose stored link was not read in time: not a failure, try again soon.
+            SyncResult.LinkNotReady -> Result.retry()
+
             SyncResult.NotLinked, is SyncResult.Synced -> Result.success()
         }
     }

@@ -31,12 +31,17 @@ class HandoffPermissionsTest {
                     "uses-permission android.permission.SCHEDULE_EXACT_ALARM",
                     // X.1b: reads Contacts' people provider.
                     "uses-permission dev.rosty.permission.READ_PEOPLE",
+                    // People sync v2 S11: the foreground people-sync worker (WorkManager's network check).
+                    "uses-permission android.permission.ACCESS_NETWORK_STATE",
+                    "uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                 ),
             // X.1b: the people sync's WorkManager merges these.
             "contacts" to
                 listOf(
                     "uses-permission android.permission.ACCESS_NETWORK_STATE",
                     "uses-permission android.permission.FOREGROUND_SERVICE",
+                    // People sync v2 S11: the sync runs as a foreground worker.
+                    "uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                     "uses-permission android.permission.RECEIVE_BOOT_COMPLETED",
                     "uses-permission android.permission.WAKE_LOCK",
                 ),

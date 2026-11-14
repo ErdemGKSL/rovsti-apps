@@ -13,7 +13,7 @@ private enum class StackSlot { Leading, Text, Trailing }
 
 /**
  * A row of an optional [leading] element, the [text] column and a [trailing] action that drops UNDER the text when it
- * would squeeze it (F35, [RowStacking]): at accessibility font sizes, or when the text column would get less than half of
+ * would squeeze it (F35, [RowStacking]); an accessory (a chevron, one icon) never drops: at accessibility font sizes, or when the text column would get less than half of
  * the row. Stacked, the action starts at the text column's left edge; side by side, it sits at the row's end. Children
  * are centred vertically in the row's minimum height. [leadingGap] separates [leading] from the text, [trailingGap] the
  * text from a side-by-side action, [stackGap] the text from a stacked one.
@@ -49,11 +49,12 @@ fun StackingTrailingRow(
         val leadSpace = if (lead != null) lead.width + leadGapPx else 0
         val trail = find(StackSlot.Trailing).measure(loose)
         val stack =
-            RowStacking.shouldStack(
-                fontScale = fontScale,
-                rowWidth = width - leadSpace,
-                trailingWidth = trail.width + trailGapPx,
-            )
+            !RowStacking.isAccessory(trail.width, RowStacking.ACCESSORY_MAX.roundToPx()) &&
+                RowStacking.shouldStack(
+                    fontScale = fontScale,
+                    rowWidth = width - leadSpace,
+                    trailingWidth = trail.width + trailGapPx,
+                )
         val textMax = (width - leadSpace - if (stack) 0 else trail.width + trailGapPx).coerceAtLeast(0)
         val textP = find(StackSlot.Text).measure(loose.copy(maxWidth = textMax))
         val block = if (stack) textP.height + stackGapPx + trail.height else maxOf(textP.height, trail.height)

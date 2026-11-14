@@ -61,6 +61,24 @@ class ListRowStackingTest : ShotTest() {
     }
 
     @Test
+    fun atFontScale2AChevronStaysAtTheEndOfTheRow() {
+        composeFrame(fontScale = 2f) {
+            ListRow(
+                title = "Deniz Aksoy",
+                secondary = "+90 555 333 44 55",
+                leading = { Spacer(Modifier.size(32.dp)) },
+                trailing = { ListRowChevron(Modifier.testTag("chevron")) },
+                onClick = {},
+                modifier = Modifier.testTag("row"),
+            )
+        }
+        val row = compose.onNodeWithTag("row").getUnclippedBoundsInRoot()
+        val chevron = compose.onNodeWithTag("chevron", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("chevron at the end: $chevron in $row", chevron.left > row.left + row.width * 0.75f)
+        assertTrue("chevron centred, not under the text: $chevron in $row", chevron.top < row.top + row.height / 2)
+    }
+
+    @Test
     fun theRuleIsPure() {
         assertTrue(RowStacking.shouldStack(fontScale = 1.5f, rowWidth = 1000, trailingWidth = 10))
         assertFalse(RowStacking.shouldStack(fontScale = 1f, rowWidth = 1000, trailingWidth = 400))
@@ -69,6 +87,8 @@ class ListRowStackingTest : ShotTest() {
             RowStacking.shouldStack(fontScale = 1f, rowWidth = 1000, trailingWidth = 600),
         )
         assertEquals(1.5f, RowStacking.STACK_FONT_SCALE)
+        assertTrue(RowStacking.isAccessory(widthPx = 40, accessoryMaxPx = 48))
+        assertFalse(RowStacking.isAccessory(widthPx = 200, accessoryMaxPx = 48))
     }
 
     private val stackingRow: @Composable () -> Unit = {

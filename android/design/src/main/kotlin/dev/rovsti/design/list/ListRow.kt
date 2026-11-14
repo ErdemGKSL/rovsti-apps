@@ -182,6 +182,7 @@ fun ListRow(
             val trailSpace = if (trailP != null) trailP.width + trailGap else 0
             val stack =
                 trailP != null &&
+                    !RowStacking.isAccessory(trailP.width, RowStacking.ACCESSORY_MAX.roundToPx()) &&
                     RowStacking.shouldStack(
                         fontScale = fontScale,
                         rowWidth = width - leadSpace,
@@ -225,6 +226,18 @@ private enum class RowSlot { Leading, Text, Meta, Trailing }
 object RowStacking {
     /** At this font scale (accessibility sizes) the trailing action always goes under the text. */
     const val STACK_FONT_SCALE: Float = 1.5f
+
+    /**
+     * A trailing element at most this wide (a chevron, a check, one icon) is an accessory: it stays at the row's end at
+     * every font size, as on iOS. Only a wide action (a text button, a value) drops under the text.
+     */
+    val ACCESSORY_MAX: Dp = 48.dp
+
+    /** True when a trailing element [widthPx] wide is an accessory that never stacks ([ACCESSORY_MAX] in pixels). */
+    fun isAccessory(
+        widthPx: Int,
+        accessoryMaxPx: Int,
+    ): Boolean = widthPx <= accessoryMaxPx
 
     /** Stack when the font is large, or the text column beside the action would get under half of [rowWidth]. */
     fun shouldStack(

@@ -55,6 +55,11 @@ first time), installs `/usr/local/bin/wa_gateway` and the unit from this folder,
 `127.0.0.1:7218`; a Cloudflare tunnel public hostname (`https://rovsti.erdemdev.tr`) points
 at `http://localhost:7218`.
 
+> **TODO (rename to Rosty).** The public hostname still carries the project's old name:
+> no DNS record or tunnel hostname exists yet for a Rosty name. Once one is set up on the
+> server, add it as a second tunnel hostname, switch the apps' default gateway URL, and keep
+> `rovsti.erdemdev.tr` routed until every linked app has moved over.
+
 ```
 scripts/deploy-wa-gateway.sh            # build and (re)install
 scripts/deploy-wa-gateway.sh status     # service, listener, health, config
@@ -72,7 +77,8 @@ scripts/deploy-wa-gateway.sh --dry-run  # connection and bundle check only
 - FCM push: the service-account key is uploaded to `/etc/wa-gateway/service-account.json`
   (root only, mode 0600) and handed to the service with `LoadCredential=` in a drop-in
   (`/etc/systemd/system/wa-gateway.service.d/10-rosty.conf`), so the unprivileged service
-  user never owns the file. The project id goes into `config.toml`.
+  user never owns the file. The project id goes into `config.toml`. The installer removes
+  the drop-in's pre-rename name (`10-rovsti.conf`) so only one is applied.
 - The workspace's release profile is tuned for Android size (fat LTO). The server build
   overrides it (no LTO, `opt-level` 2) so a Raspberry Pi finishes in a reasonable time.
 - Data lives in `/var/lib/wa-gateway`. Back it up: it holds the linked accounts' keys.
@@ -396,7 +402,9 @@ header. Older clients ignore them (no field is required, unknown fields are allo
   and the header `x-rosty-stale: rate-limited` (or `error`). Otherwise, and always
   with `refresh: true`, the error is returned; a never-fetched JID no longer comes
   back as an empty profile with `fetched_ms: 0`. A picture whose bytes the gateway
-  already holds is served the same way with `x-rosty-stale`.
+  already holds is served the same way with `x-rosty-stale`. Each such answer also
+  carries the same value under the header's pre-rename name, `x-rovsti-stale`, for
+  clients built before the rename.
 - **Logging.** Every request is logged at INFO as
   `instance=<id> <METHOD> <route template> -> <status> <ms>ms` (`/healthz` and the
   event stream at DEBUG); every contact-route 429 also at WARN as

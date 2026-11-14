@@ -5,8 +5,8 @@
 # setup. The keystore and passwords stay outside the repo.
 set -euo pipefail
 
-DIR="${ROSTY_SIGNING_DIR:-$HOME/ownCloud/Personal/rovsti}"
-KEYSTORE="$DIR/rovsti-release.jks"
+DIR="${ROSTY_SIGNING_DIR:-$HOME/ownCloud/Personal/rosty}"
+KEYSTORE="$DIR/rosty-release.jks"
 ENV_FILE="$DIR/signing.env"
 JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
 KEYTOOL="$JAVA_HOME/bin/keytool"

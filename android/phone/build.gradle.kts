@@ -8,7 +8,16 @@ plugins {
 // FCM for WhatsApp calls: the owner's google-services.json (git-ignored, never committed) sits next to this file. With
 // it the google-services plugin generates the Firebase options; without it the firebase flavor builds with no Firebase
 // app and WaPush.token() returns "".
-if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+// The file must list this app's package: one downloaded before the rename (old package name) is skipped with a warning
+// instead of failing every build, until the Firebase project has an Android app for dev.rosty.phone.
+val googleServices = file("google-services.json")
+if (googleServices.exists()) {
+    if (googleServices.readText().contains("\"dev.rosty.phone\"")) {
+        apply(plugin = "com.google.gms.google-services")
+    } else {
+        logger.warn("google-services.json has no client for dev.rosty.phone: building without Firebase")
+    }
+}
 
 val coreBridge = project(":core-bridge")
 
@@ -18,7 +27,11 @@ android {
     defaultConfig {
         applicationId = "dev.rosty.phone"
         // 100 + the CI build number, so every build installs over the last (docs/kotlin-ui/toolchain.md).
-        versionCode = 100 + (providers.environmentVariable("ROSTY_BUILD_NUMBER").orNull?.toIntOrNull() ?: 0)
+        // ROVSTI_BUILD_NUMBER is the pre-rename name, still read when the new one is unset.
+        val buildNumber =
+            providers.environmentVariable("ROSTY_BUILD_NUMBER").orNull
+                ?: providers.environmentVariable("ROVSTI_BUILD_NUMBER").orNull
+        versionCode = 100 + (buildNumber?.toIntOrNull() ?: 0)
         // The GPUI app's version (apps/phone/platforms/android/app/build.gradle.kts).
         versionName = "0.1.0"
     }

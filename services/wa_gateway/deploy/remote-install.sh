@@ -151,6 +151,8 @@ write_dropin() {
       echo "Environment=WA_GATEWAY_FCM_SA=/run/credentials/wa-gateway.service/fcm-sa"
     fi
   } | sudo tee "$DROPIN_DIR/10-rosty.conf" >/dev/null
+  # The drop-in had the project's old name before the rename; two would both apply.
+  sudo rm -f "$DROPIN_DIR/10-rovsti.conf"
 }
 
 install_all() {

@@ -22,7 +22,8 @@
 #   CLOUDFLARED=<path>            default: cloudflared on PATH, else ~/Downloads/cloudflared*
 #   GATEWAY_BIND=127.0.0.1:7218   where the gateway listens; point the tunnel at it
 #   GATEWAY_MAX_INSTANCES=4       GATEWAY_TRUST_PROXY=true (a tunnel/proxy sits in front)
-#   FCM_PROJECT=rovsti-598d7      FCM_SERVICE_ACCOUNT=~/.config/rovsti/wa-gateway/service-account.json
+#   FCM_PROJECT=rovsti-598d7      FCM_SERVICE_ACCOUNT=~/.config/rosty/wa-gateway/service-account.json
+#                                 (falls back to the pre-rename ~/.config/rovsti/... when that one is missing)
 #   FORCE_CONFIG=1                replace /etc/wa-gateway/config.toml (kept otherwise)
 #   BUILD_JOBS=3                  cargo jobs on the server (the box is shared)
 #   SKIP_LOCAL_CHECK=1            skip the local `cargo metadata` check of the bundle
@@ -39,7 +40,10 @@ GATEWAY_BIND="${GATEWAY_BIND:-127.0.0.1:7218}"
 GATEWAY_MAX_INSTANCES="${GATEWAY_MAX_INSTANCES:-4}"
 GATEWAY_TRUST_PROXY="${GATEWAY_TRUST_PROXY:-true}"
 FCM_PROJECT="${FCM_PROJECT:-rovsti-598d7}"
-FCM_SERVICE_ACCOUNT="${FCM_SERVICE_ACCOUNT:-$HOME/.config/rovsti/wa-gateway/service-account.json}"
+if [[ -z "${FCM_SERVICE_ACCOUNT:-}" ]]; then
+  FCM_SERVICE_ACCOUNT="$HOME/.config/rosty/wa-gateway/service-account.json"
+  [[ -f "$FCM_SERVICE_ACCOUNT" ]] || FCM_SERVICE_ACCOUNT="$HOME/.config/rovsti/wa-gateway/service-account.json"
+fi
 FORCE_CONFIG="${FORCE_CONFIG:-0}"
 BUILD_JOBS="${BUILD_JOBS:-3}"
 REMOTE_WORK="${REMOTE_WORK:-wa-gateway-build}"

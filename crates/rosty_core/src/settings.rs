@@ -323,6 +323,8 @@ pub const fn haptic_allowed(level: HapticsLevel, kind: HapticKind) -> bool {
 
 /// `kind` of a backup file.
 pub const BACKUP_KIND: &str = "rosty-phone-backup";
+/// `kind` of the backups written before the project was renamed; still imported.
+pub const LEGACY_BACKUP_KIND: &str = "rovsti-phone-backup";
 /// The backup format this build reads and writes.
 pub const BACKUP_VERSION: u32 = 1;
 
@@ -472,7 +474,7 @@ impl ImportPreview {
 
     /// Validates `file` (kind, version, bounds) against the `current` prefs.
     pub fn from(file: &BackupFile, current: &PrefsV2) -> Result<Self, ImportError> {
-        if file.kind != BACKUP_KIND || file.v == 0 {
+        if !matches!(file.kind.as_str(), BACKUP_KIND | LEGACY_BACKUP_KIND) || file.v == 0 {
             return Err(ImportError::NotABackup);
         }
         if file.v > BACKUP_VERSION {
@@ -825,6 +827,18 @@ mod tests {
         assert_eq!(b.created_ms, 5);
         // There is no field that could carry `ui`; the type says it.
         assert_eq!(b.settings, Settings::default());
+    }
+
+    #[test]
+    fn a_backup_from_before_the_rename_still_imports() {
+        let mut old = backup();
+        old.kind = LEGACY_BACKUP_KIND.to_owned();
+        assert!(ImportPreview::from(&old, &current()).is_ok());
+        old.kind = "some-other-app-backup".to_owned();
+        assert_eq!(
+            ImportPreview::from(&old, &current()).err(),
+            Some(ImportError::NotABackup)
+        );
     }
 
     #[test]

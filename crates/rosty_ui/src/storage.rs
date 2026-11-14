@@ -19,7 +19,8 @@ use gpui::{App, Task};
 /// WhatsApp keys never leave the phone). Must be called while the GPUI
 /// `main` is running, i.e. from the `Application::run` callback or a window's
 /// build closure; to ask again later, keep a [`DataDirs`] made there.
-/// Desktop: `$XDG_DATA_HOME/rosty/<app>` (or `~/.local/share/rosty/<app>`).
+/// Desktop: `$XDG_DATA_HOME/rosty/<app>` (or `~/.local/share/rosty/<app>`; an existing
+/// folder from before the rename, `rovsti/<app>`, while there is no `rosty/<app>`).
 pub fn data_dir(app: &'static str, cx: &mut App) -> Task<anyhow_like::Result<PathBuf>> {
     DataDirs::new(app).request(cx)
 }
@@ -83,7 +84,14 @@ impl DataDirs {
                     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
                 })
                 .unwrap_or_else(std::env::temp_dir);
+            // A desktop folder made before the rename (`rovsti`) is used while no new one exists.
+            let legacy = base.join("rovsti").join(self.app);
             let dir = base.join("rosty").join(self.app);
+            let dir = if !dir.exists() && legacy.is_dir() {
+                legacy
+            } else {
+                dir
+            };
             cx.background_executor().spawn(async move {
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("creating {}: {e}", dir.display()))?;

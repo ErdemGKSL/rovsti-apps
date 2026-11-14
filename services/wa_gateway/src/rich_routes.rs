@@ -295,6 +295,17 @@ pub fn profile_is_stale(profile: Option<&WaProfile>, refresh: bool, now: i64) ->
 /// not be asked: `rate-limited` or `error`.
 pub const STALE_HEADER: &str = "x-rosty-stale";
 
+/// The same header under the project's name before the rename, sent as well
+/// so clients built before it keep reading it.
+pub const LEGACY_STALE_HEADER: &str = "x-rovsti-stale";
+
+/// Marks `response` as served from storage, under both header names.
+fn mark_stale(response: &mut Response, why: &'static str) {
+    let headers = response.headers_mut();
+    headers.insert(STALE_HEADER, HeaderValue::from_static(why));
+    headers.insert(LEGACY_STALE_HEADER, HeaderValue::from_static(why));
+}
+
 /// Whether every JID has an answer WhatsApp really gave (`fetched_ms > 0`),
 /// so stored data may stand in when WhatsApp cannot be asked.
 fn all_answered(jids: &[String], known: &[WaProfile]) -> bool {
@@ -372,9 +383,7 @@ async fn profiles(
         .collect();
     let mut response = Json(ordered).into_response();
     if let Some(why) = served_stale {
-        response
-            .headers_mut()
-            .insert(STALE_HEADER, HeaderValue::from_static(why));
+        mark_stale(&mut response, why);
     }
     Ok(response)
 }
@@ -509,9 +518,7 @@ async fn fetch_picture(
         // Rate limited: the cached copy of the known picture stands in.
         (Err(_), Some((id, bytes))) => {
             let mut response = picture_response(headers, id, bytes.clone());
-            response
-                .headers_mut()
-                .insert(STALE_HEADER, HeaderValue::from_static("rate-limited"));
+            mark_stale(&mut response, "rate-limited");
             return Ok(response);
         }
         (Err(error), None) => return Err(error),

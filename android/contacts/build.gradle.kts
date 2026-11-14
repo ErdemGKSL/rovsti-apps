@@ -13,7 +13,11 @@ android {
     defaultConfig {
         applicationId = "dev.rosty.contacts"
         // 100 + the CI build number, so every build installs over the last (docs/kotlin-ui/toolchain.md).
-        versionCode = 100 + (providers.environmentVariable("ROSTY_BUILD_NUMBER").orNull?.toIntOrNull() ?: 0)
+        // ROVSTI_BUILD_NUMBER is the pre-rename name, still read when the new one is unset.
+        val buildNumber =
+            providers.environmentVariable("ROSTY_BUILD_NUMBER").orNull
+                ?: providers.environmentVariable("ROVSTI_BUILD_NUMBER").orNull
+        versionCode = 100 + (buildNumber?.toIntOrNull() ?: 0)
         // The GPUI app's Cargo.toml version (apps/contacts/Cargo.toml).
         versionName = "0.1.0"
     }

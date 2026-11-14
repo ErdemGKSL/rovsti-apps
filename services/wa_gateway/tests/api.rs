@@ -2176,6 +2176,10 @@ async fn profiles_serve_stale_when_every_jid_was_fetched() {
     .await;
     assert_eq!(status, 200, "{body}");
     assert!(head.contains("x-rosty-stale: rate-limited"), "{head}");
+    assert!(
+        head.contains("x-rovsti-stale: rate-limited"),
+        "legacy name: {head}"
+    );
     let profiles: Vec<rosty_wa_proto::WaProfile> = serde_json::from_str(&body).unwrap();
     assert_eq!(profiles[0].about.as_deref(), Some("old"));
     assert!(profiles[0].fetched_ms > 0);
@@ -2230,6 +2234,10 @@ async fn profiles_other_driver_error_is_not_silent() {
     .await;
     assert_eq!(status, 200);
     assert!(head.contains("x-rosty-stale: error"), "{head}");
+    assert!(
+        head.contains("x-rovsti-stale: error"),
+        "legacy name: {head}"
+    );
 }
 
 #[tokio::test]

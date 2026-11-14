@@ -1396,7 +1396,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | Story | Title | Round | Status |
 |---|---|---|---|
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
-| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | todo |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | in-progress (plan `plans/round-16.md`) |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rovsti_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1500,6 +1500,15 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   Open: the speed dial page (E5.9b, not in HEAD yet) must name its rows through `callerIds` too.
 
 ### X.2 Share cards with Takumi
+**Round 16** -> `_bmad-output/kotlin-ui/plans/round-16.md` (planned 2026-11-14 at base `93bcad4`; X.1 re-verified done in
+code). 8 steps: 1 Takumi `=2.18.2` spike + bundled Inter (OFL) + first static render; 2 static templates (birthday,
+contact with vCard QR, new number) and the glass panel with glisse-ported refraction maps; 3 `cards.*` FFI ops, fixtures,
+`:core-bridge` `CardsOps`; 4 one-shot animated cards (glisse spring port, play-once GIF/APNG/WebP, last frame = still);
+5 Contacts Card Studio sheet (menu, birthday row chip, Upcoming); 6 share and save (share provider, MediaStore, birthday
+notification action); 7 budgets and cancellation; 8 **F40** (X.1 goldens use featureless gradient "photos" that cannot
+prove the WhatsApp picture, e.g. `x1-wa-avatar-incoming-dark` looks like an aura: use recognisable test portraits),
+checklist, full gate, close X.2. Next planner after X.2: **E6 R1**.
+
 - Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least
   two weeks old, check its current API on docs.rs) inside the Rust core to render designed cards from node trees to
   **JPEG** (and PNG where transparency matters). New module `rovsti_app_core::cards`, ops exposed through `rovsti_ffi`

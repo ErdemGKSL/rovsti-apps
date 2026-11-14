@@ -1,21 +1,36 @@
 package dev.rovsti.contacts.settings
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -30,6 +45,11 @@ import dev.rovsti.design.ios.component.IosChevron
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.ios.component.IosToggle
 import dev.rovsti.design.ios.foundation.IosTheme
+import dev.rovsti.design.motion.LocalReduceMotion
+import dev.rovsti.design.overlay.AlertAction
+import dev.rovsti.design.overlay.AlertEntry
+import dev.rovsti.design.overlay.AlertRole
+import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.text.text
 import dev.rovsti.shell.settings.CommonSettings
 import dev.rovsti.shell.settings.CommonSettingsGroup
@@ -38,6 +58,8 @@ import dev.rovsti.shell.settings.IosSettingsGroup
 import dev.rovsti.shell.settings.IosSettingsItem
 import dev.rovsti.shell.settings.SettingsFooter
 import dev.rovsti.shell.settings.SettingsPage
+import dev.rovsti.shell.settings.dev.LocalDevMode
+import kotlinx.collections.immutable.persistentListOf
 
 /** Where the rows of the Settings root lead. Every member has a no-op default, so a test names only what it taps. */
 @Immutable
@@ -59,6 +81,8 @@ class SettingsLinks(
     val trash: () -> Unit = {},
     val whatsApp: () -> Unit = {},
     val openCommon: (CommonSettingsPage) -> Unit = {},
+    /** Developer mode's Logs page on the `sync` tag ("Sync Details"). */
+    val openSyncDetails: () -> Unit = {},
 )
 
 /** Test tags of the Settings pages of Contacts. */
@@ -75,6 +99,10 @@ object SettingsTags {
     const val WhatsApp = "contacts-settings-whatsapp"
     const val PeopleLast = "contacts-settings-people-last"
     const val PeopleSync = "contacts-settings-people-sync"
+    const val PeopleStatus = "contacts-settings-people-status"
+    const val PeopleContinue = "contacts-settings-people-continue"
+    const val PeopleDetails = "contacts-settings-people-details"
+    const val PeopleProgress = "contacts-settings-people-progress"
 
     fun choice(index: Int): String = "contacts-settings-choice-$index"
 }
@@ -371,24 +399,33 @@ fun ContactsSettingsPage(
                     ),
                 ),
         )
-        state.peopleSync?.let { PeopleSyncGroup(it, onAction) }
+        state.peopleSync?.let { PeopleSyncGroup(it, onAction, links.openSyncDetails) }
         CommonSettingsGroup(settings, links.openCommon)
     }
 }
 
 /**
- * "WhatsApp Names and Photos" (X.1b): when the cache was last filled and a row that fills it now. Only while WhatsApp
- * is linked. The row stays where it is while it works: its title changes and it stops taking taps.
+ * "WhatsApp Names and Photos" (X.1b, people sync v2 section 9): the status (with a progress bar while a run is active),
+ * "Continue Where It Left Off" while a run is resumable, "Sync Now" (it is "Stop" while running and asks "Start over?"
+ * first when a run is resumable), and in developer mode "Sync Details" (the Logs page on the `sync` tag). Only while
+ * WhatsApp is linked. The rows keep their places as the state changes, so nothing jumps.
  */
 @Composable
 internal fun PeopleSyncGroup(
     sync: PeopleSyncUi,
     onAction: (SettingsAction) -> Unit,
+    onDetails: () -> Unit = {},
 ) {
-    IosSettingsGroup(
-        title = stringResource(R.string.settings_people_title),
-        items =
-            listOf(
+    val overlay = LocalOverlayOrNull.current
+    val devMode = LocalDevMode.current
+    val developer = devMode?.enabled?.collectAsState()?.value == true
+    val title = stringResource(R.string.settings_people_restart_title)
+    val body = stringResource(R.string.settings_people_restart_body)
+    val restart = stringResource(R.string.settings_people_restart)
+    val cancel = stringResource(R.string.settings_people_restart_cancel)
+    val items =
+        buildList {
+            add(
                 IosSettingsItem(
                     icon = Tile(RovstiIcons.Photo),
                     title = {
@@ -397,36 +434,120 @@ internal fun PeopleSyncGroup(
                             Modifier.testTag(SettingsTags.PeopleLast),
                         )
                     },
-                    trailingContent = {
-                        IosText(
-                            sync.last.text(),
-                            Modifier.widthIn(max = SettingsMetrics.ValueMax),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    description = {
+                        Column(verticalArrangement = Arrangement.spacedBy(SettingsMetrics.ProgressGap)) {
+                            IosText(sync.last.text(), Modifier.testTag(SettingsTags.PeopleStatus))
+                            sync.progress?.let { SyncProgressBar(it) }
+                        }
                     },
                 ),
+            )
+            if (sync.canContinue) {
+                add(
+                    IosSettingsItem(
+                        icon = Tile(RovstiIcons.Forward),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_people_continue),
+                                Modifier.testTag(SettingsTags.PeopleContinue),
+                                color = if (sync.continueEnabled) IosTheme.tint else Color.Unspecified,
+                            )
+                        },
+                        trailingContent = { NoChevron() },
+                        enabled = sync.continueEnabled && !sync.running,
+                        onClick = { onAction(SettingsAction.ContinuePeople) },
+                    ),
+                )
+            }
+            add(
                 IosSettingsItem(
-                    icon = Tile(RovstiIcons.Rotate),
+                    icon = Tile(if (sync.running) RovstiIcons.Pause else RovstiIcons.Rotate),
                     title = {
                         IosText(
                             stringResource(
-                                if (sync.running) {
-                                    R.string.settings_people_syncing
-                                } else {
-                                    R.string.settings_people_sync_now
-                                },
+                                if (sync.running) R.string.settings_people_stop else R.string.settings_people_sync_now,
                             ),
                             Modifier.testTag(SettingsTags.PeopleSync),
                         )
                     },
                     trailingContent = { NoChevron() },
-                    enabled = !sync.running,
-                    onClick = { onAction(SettingsAction.SyncPeopleNow) },
+                    enabled = sync.running || sync.syncEnabled,
+                    onClick = {
+                        when {
+                            sync.running -> {
+                                onAction(SettingsAction.StopPeople)
+                            }
+
+                            sync.confirmRestart && overlay != null -> {
+                                overlay.present(
+                                    AlertEntry(
+                                        heading = title,
+                                        message = body,
+                                        actions =
+                                            persistentListOf(
+                                                AlertAction(cancel, AlertRole.Cancel),
+                                                AlertAction(restart, AlertRole.Default) {
+                                                    onAction(SettingsAction.SyncPeopleNow)
+                                                },
+                                            ),
+                                    ),
+                                )
+                            }
+
+                            else -> {
+                                onAction(SettingsAction.SyncPeopleNow)
+                            }
+                        }
+                    },
                 ),
-            ),
-    )
+            )
+            if (developer) {
+                add(
+                    IosSettingsItem(
+                        icon = Tile(RovstiIcons.Document),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_people_details),
+                                Modifier.testTag(SettingsTags.PeopleDetails),
+                            )
+                        },
+                        onClick = onDetails,
+                    ),
+                )
+            }
+        }
+    IosSettingsGroup(title = stringResource(R.string.settings_people_title), items = items)
     SettingsFootnote(stringResource(R.string.settings_people_footer))
+}
+
+/** A thin determinate bar; the fraction follows a spring (none with reduced motion), so steps never jump. */
+@Composable
+private fun SyncProgressBar(fraction: Float) {
+    val reduce = LocalReduceMotion.current
+    val shown by animateFloatAsState(
+        targetValue = fraction.coerceIn(0f, 1f),
+        animationSpec = if (reduce) snap() else spring(dampingRatio = 1f, stiffness = Spring.StiffnessLow),
+        label = "sync-progress",
+    )
+    val track = IosTheme.colors.tertiarySystemFill
+    val fill = IosTheme.tint
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(SettingsMetrics.ProgressHeight)
+            .clip(RoundedCornerShape(SettingsMetrics.ProgressHeight))
+            .background(track)
+            .testTag(SettingsTags.PeopleProgress)
+            .semantics { progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f) },
+    ) {
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(shown)
+                .clip(RoundedCornerShape(SettingsMetrics.ProgressHeight))
+                .background(fill),
+        )
+    }
 }
 
 /** The footer under a group, in the same inset as the group titles. */

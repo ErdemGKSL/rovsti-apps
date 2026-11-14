@@ -69,6 +69,14 @@ internal class SettingsHarness(
                 SettingsAction.SyncPeopleNow -> {
                     ui.copy(peopleSync = ui.peopleSync?.copy(running = true))
                 }
+
+                SettingsAction.ContinuePeople -> {
+                    ui.copy(peopleSync = ui.peopleSync?.copy(running = true, canContinue = false))
+                }
+
+                SettingsAction.StopPeople -> {
+                    ui.copy(peopleSync = ui.peopleSync?.copy(running = false, canContinue = true, progress = null))
+                }
             }
     }
 

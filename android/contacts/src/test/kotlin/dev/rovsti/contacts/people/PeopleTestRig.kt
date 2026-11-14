@@ -314,6 +314,15 @@ class PeopleTestContainer(
                 .core()
     }
 
+    /** The settings rows' status once it satisfies [ok] (it follows the runner on the scope, a moment later). */
+    fun awaitStatus(ok: (PeopleSyncStatus) -> Boolean): PeopleSyncStatus {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (!ok(peopleSync.status.value) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+        }
+        return peopleSync.status.value
+    }
+
     /** The real book, as the provider reads it. */
     fun book(): Map<String, PersonRow> =
         kotlinx.coroutines.runBlocking { peopleStore.snapshot().associateBy { it.jid } }

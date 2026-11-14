@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S6 and S8 done; see the notes under each step.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S8 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -613,6 +613,20 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   picture pass is `Start::LivePictures` with `LIVE_SLICE_MS`, and it simply gets `AlreadyRunning` while a run is
   active. (i) The settings row still uses the v1 `PeopleSyncStatus` shape (mapped from the planner's status) until S7.
 - **S7 Settings UI.** New status model, progress, Continue / Stop / restart alert, all strings, shots.
+  *Done (notes, deviations):* (a) `PeopleSyncStatus` is the sealed model of section 9 (`NotLinked`, `Connecting`,
+  `Idle(lastMs?, people)`, `Running(stage, done, total, nextAtMs?)` (Pacing is `Running` with `nextAtMs`; same words),
+  `RateLimited`, `Interrupted`, `Failed`), built in `PeopleSync` from the runner and the link; the wording is a pure
+  function `peopleSyncUi(status, now, ago)` (`PeopleSyncWords.kt`, `PeopleSyncWordsTest`), the view model only adds
+  the one-minute ticker for the ETA. (b) The status line is the row's description under "Last Sync" (it wraps at
+  font scale 2; a trailing value would have been cut), with a 4 dp determinate bar under it while running (spring,
+  `snap` with reduced motion). (c) The "Start Over?" alert is presented by the group itself through the overlay host
+  (as the Logs page's Clear), so the view model needs no alert state; Cancel keeps the run. (d) "Sync Details" shows in
+  developer mode (`LocalDevMode`) and opens `ContactsRoute.Logs(tag = "sync")` through `SettingsLinks.openSyncDetails`.
+  (e) The footer sentence is appended to the existing footer; `settings_people_failed`, `_partial` and `_syncing` are
+  gone, ETA minutes are a plural (`%d min` / `%d dk`). (f) `Interrupted(slice_budget)` reads "Partly synced, continues
+  automatically"; `process_death` / `link_not_ready` use the generic "Interrupted at x/y, <time ago>". Shots:
+  `android/contacts/screenshots/x1-people-sync-row{,-syncing,-limited}{,-fs2}-{light,dark}.png`,
+  `x1-people-sync-row-{never,stopped,tr}-{light,dark}.png`.
 - **S8 Live pass on the shared pace** (`Start.LivePictures`), commit mutex. (Can merge into S6 if small.)
   *Done in S6* (see S6 note h; the commit mutex is the Rust `book_lock`, note c).
 - **S9 Mechanical:** move remaining `android.util.Log` sites to `RovstiLog`, add the source-scan rule; docs:

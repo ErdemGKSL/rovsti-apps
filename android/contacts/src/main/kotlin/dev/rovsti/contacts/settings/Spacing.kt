@@ -12,4 +12,8 @@ internal object SettingsMetrics {
 
     /** Space under a footer, so the next group title does not touch it. */
     val AfterFooter = 16.dp
+
+    /** The people sync's progress bar under its status line. */
+    val ProgressHeight = 4.dp
+    val ProgressGap = 6.dp
 }

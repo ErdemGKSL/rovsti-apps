@@ -7,8 +7,6 @@ import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.people.PeopleSyncControl
-import dev.rovsti.contacts.people.PeopleSyncStatus
-import dev.rovsti.contacts.people.SyncOutcome
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.Account
 import dev.rovsti.core.model.contacts.AccountLabelRequest
@@ -27,15 +25,16 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -64,6 +63,9 @@ class ContactsSettingsViewModel(
     private val people: PeopleSyncControl? = null,
     /** "5 min. ago" for the time of the last sync. */
     private val formatTime: (Long) -> String = { relativeTime(it, System::currentTimeMillis) },
+    private val clock: () -> Long = System::currentTimeMillis,
+    /** How often the sync rows are worded again (a limit's ETA counts down). */
+    private val tickMs: Long = TICK_MS,
 ) : ViewModel() {
     private val accounts = MutableStateFlow<List<AccountOption>>(emptyList())
     private val outbox = Channel<SettingsEffect>(Channel.UNLIMITED)
@@ -73,7 +75,9 @@ class ContactsSettingsViewModel(
             store.prefs,
             book.book,
             accounts,
-            people?.status?.map { peopleUi(it) } ?: flowOf(null),
+            people?.status?.let { status ->
+                combine(status, ticker()) { it, now -> peopleSyncUi(it, now, formatTime) }
+            } ?: flowOf(null),
         ) { p, b, a, sync -> Inputs(p, b, a, sync) }
             .conflate()
             .mapLatest { build(it.prefs, it.book, it.accounts).copy(peopleSync = it.sync) }
@@ -98,6 +102,8 @@ class ContactsSettingsViewModel(
             is SettingsAction.SetReminders -> setReminders(action.on)
             is SettingsAction.NotificationsAnswered -> answered(action.granted)
             SettingsAction.SyncPeopleNow -> people?.syncNow()
+            SettingsAction.ContinuePeople -> people?.resume()
+            SettingsAction.StopPeople -> people?.stop()
         }
     }
 
@@ -108,31 +114,14 @@ class ContactsSettingsViewModel(
         val sync: PeopleSyncUi?,
     )
 
-    private fun peopleUi(status: PeopleSyncStatus): PeopleSyncUi? {
-        if (!status.linked) return null
-        val last =
-            when (status.outcome) {
-                SyncOutcome.Never -> {
-                    UiText.Res(R.string.settings_people_never)
-                }
-
-                SyncOutcome.Ok -> {
-                    UiText.Literal(formatTime(status.lastSyncMs))
-                }
-
-                SyncOutcome.Partial -> {
-                    UiText.Res(
-                        R.string.settings_people_partial,
-                        listOf(formatTime(status.lastSyncMs)),
-                    )
-                }
-
-                SyncOutcome.Failed -> {
-                    UiText.Res(R.string.settings_people_failed, listOf(formatTime(status.lastSyncMs)))
-                }
+    /** The clock, now and then every [tickMs]. */
+    private fun ticker(): Flow<Long> =
+        flow {
+            while (true) {
+                emit(clock())
+                delay(tickMs)
             }
-        return PeopleSyncUi(last, status.running)
-    }
+        }
 
     private fun save(
         change: (dev.rovsti.core.model.contacts.ContactsPrefs) -> dev.rovsti.core.model.contacts.ContactsPrefs,
@@ -242,6 +231,9 @@ class ContactsSettingsViewModel(
                 ).toString()
 
         const val STOP_TIMEOUT_MS = 5_000L
+
+        /** The sync rows' ticker: a limit's ETA is in minutes. */
+        const val TICK_MS = 60_000L
         val DENIED: UiText = UiText.Res(R.string.contacts_notifications_off)
         val CANT_SAVE: UiText = UiText.Res(R.string.contacts_cant_save_setting)
         private const val LAST_HOUR = 23

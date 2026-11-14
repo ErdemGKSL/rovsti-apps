@@ -12,10 +12,12 @@ import dev.rovsti.contacts.intake.VcfExport
 import dev.rovsti.contacts.list.ContactsListViewModel
 import dev.rovsti.contacts.list.ListPhase
 import dev.rovsti.contacts.me.PeopleRig
+import dev.rovsti.contacts.people.PeopleSyncStatus
 import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Rust
 import dev.rovsti.core.model.contacts.BirthdayAlarm
 import dev.rovsti.core.model.contacts.PinShortcut
+import dev.rovsti.core.model.people.SyncWire
 import dev.rovsti.core.model.phone.SortBy
 import dev.rovsti.core.model.search.NameFormat
 import dev.rovsti.core.ops.NativeContactsWaOps
@@ -62,22 +64,27 @@ class ContactsSettingsViewModelTest {
     private fun PeopleRig.next(vm: ContactsSettingsViewModel) = wait { vm.effects.first() }
 
     private class FakeSync : dev.rovsti.contacts.people.PeopleSyncControl {
-        val flow =
-            MutableStateFlow(
-                dev.rovsti.contacts.people
-                    .PeopleSyncStatus(),
-            )
-        var syncs = 0
+        val flow = MutableStateFlow<PeopleSyncStatus>(PeopleSyncStatus.NotLinked)
+        val calls = mutableListOf<String>()
         override val status = flow
 
         override fun syncNow() {
-            syncs++
+            calls += "sync"
+        }
+
+        override fun resume() {
+            calls += "resume"
+        }
+
+        override fun stop() {
+            calls += "stop"
         }
     }
 
-    @Test fun theSyncRowsFollowTheLinkAndSyncNowRuns() {
+    @Test fun theSyncRowsFollowTheStatusAndTheButtonsAct() {
         val r = rig()
         val sync = FakeSync()
+        var now = 1_000_000L
         val vm =
             ContactsSettingsViewModel(
                 r.book,
@@ -87,40 +94,33 @@ class ContactsSettingsViewModelTest {
                 notifications = { permission },
                 people = sync,
                 formatTime = { "5 min. ago" },
+                clock = { now },
+                tickMs = 50,
             )
         r.ready(vm)
         assertEquals("not linked: no rows", null, vm.state.value.peopleSync)
 
-        sync.flow.value =
-            dev.rovsti.contacts.people
-                .PeopleSyncStatus(linked = true)
+        sync.flow.value = PeopleSyncStatus.Idle(null)
         assertEquals(
             UiText.Res(R.string.settings_people_never),
             r.wait { vm.state.first { it.peopleSync != null } }.peopleSync!!.last,
         )
-        sync.flow.value =
-            dev.rovsti.contacts.people.PeopleSyncStatus(
-                linked = true,
-                lastSyncMs = 1,
-                outcome = dev.rovsti.contacts.people.SyncOutcome.Ok,
-            )
-        assertEquals(
-            UiText.Literal("5 min. ago"),
-            r
-                .wait {
-                    vm.state.first { it.peopleSync?.last is UiText.Literal }
-                }.peopleSync!!
-                .last,
-        )
-        sync.flow.value = sync.flow.value.copy(outcome = dev.rovsti.contacts.people.SyncOutcome.Failed, running = true)
-        val failed = r.wait { vm.state.first { it.peopleSync?.running == true } }.peopleSync!!
-        assertEquals(UiText.Res(R.string.settings_people_failed, listOf("5 min. ago")), failed.last)
+        sync.flow.value = PeopleSyncStatus.Running(SyncWire.STAGE_LOOKUP, 15, 60)
+        assertEquals(0.25f, r.wait { vm.state.first { it.peopleSync?.running == true } }.peopleSync!!.progress)
 
+        // A limit's ETA: the ticker words it again once it has passed.
+        sync.flow.value = PeopleSyncStatus.RateLimited(now + 60_000, SyncWire.STAGE_LOOKUP, 15, 60)
+        val limited = r.wait { vm.state.first { it.peopleSync?.continueEnabled == false } }.peopleSync!!
+        assertEquals(false, limited.syncEnabled)
+        now += 61_000
+        val ready = r.wait { vm.state.first { it.peopleSync?.continueEnabled == true } }.peopleSync!!
+        assertEquals(UiText.Res(R.string.settings_people_limited_ready), ready.last)
+
+        vm.onAction(SettingsAction.ContinuePeople)
+        vm.onAction(SettingsAction.StopPeople)
         vm.onAction(SettingsAction.SyncPeopleNow)
-        assertEquals(1, sync.syncs)
-        sync.flow.value =
-            dev.rovsti.contacts.people
-                .PeopleSyncStatus(linked = false)
+        assertEquals(listOf("resume", "stop", "sync"), sync.calls)
+        sync.flow.value = PeopleSyncStatus.NotLinked
         assertEquals(
             "unlinked again: the rows go",
             null,

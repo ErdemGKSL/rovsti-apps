@@ -28,9 +28,19 @@ data class SummaryUi(
 /** The "WhatsApp Names and Photos" rows (X.1b): what the last sync did and whether one is running. */
 @Immutable
 data class PeopleSyncUi(
-    /** "5 min. ago", "Not synced yet", "Failed, 5 min. ago". */
+    /** The status line: "Synced, 5 min. ago", "Checking numbers 30/120", "WhatsApp limit reached. Continues in 4 min". */
     val last: UiText = UiText.Literal(""),
+    /** A run is active: "Sync Now" is "Stop" and the progress bar shows. */
     val running: Boolean = false,
+    /** Of the current stage, 0..1, while [running]. */
+    val progress: Float? = null,
+    /** A resumable run exists: the "Continue Where It Left Off" row shows. */
+    val canContinue: Boolean = false,
+    /** False while WhatsApp's limit runs (D8): both buttons wait for the ETA. */
+    val continueEnabled: Boolean = true,
+    val syncEnabled: Boolean = true,
+    /** "Sync Now" asks "Start over?" first (a resumable run would be replaced). */
+    val confirmRestart: Boolean = false,
 )
 
 /** What the Settings root and its choice pages show. */
@@ -80,8 +90,14 @@ sealed interface SettingsAction {
         val hour: Int,
     ) : SettingsAction
 
-    /** The "Sync Now" row of the WhatsApp names and photos. */
+    /** The "Sync Now" row of the WhatsApp names and photos (after "Start over?" when a run is resumable). */
     data object SyncPeopleNow : SettingsAction
+
+    /** "Continue Where It Left Off". */
+    data object ContinuePeople : SettingsAction
+
+    /** "Stop" while a sync runs. */
+    data object StopPeople : SettingsAction
 
     /** The answer of the system dialog that [SettingsEffect.AskNotifications] opened. */
     data class NotificationsAnswered(

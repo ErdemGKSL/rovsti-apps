@@ -65,7 +65,7 @@ class PeopleSyncRateLimitTest {
         assertTrue("at least the first backoff", until - container.now >= 60_000)
         val stored = container.book().size
         assertTrue("the first batch's people are stored", stored in 1..5)
-        assertEquals(SyncOutcome.Partial, sync.status.value.outcome)
+        assertTrue(container.awaitStatus { it is PeopleSyncStatus.RateLimited } is PeopleSyncStatus.RateLimited)
         // Before the time is up the planner refuses to start (both buttons wait, D8).
         assertEquals(
             SliceResult.Refused(

@@ -21,9 +21,11 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35], qualifiers = "w411dp-h3600dp")
 class ContactsSettingsSyncRowTest : ShotTest() {
     private fun state(
-        last: UiText? = UiText.Literal("5 min. ago"),
+        last: UiText? = UiText.Literal("Synced, 5 min. ago"),
         running: Boolean = false,
     ) = SettingsSample.state(accounts = true).copy(peopleSync = last?.let { PeopleSyncUi(it, running) })
+
+    private fun state(sync: PeopleSyncUi) = SettingsSample.state(accounts = true).copy(peopleSync = sync)
 
     private fun page(h: SettingsHarness) {
         composeFrame { HostedSettings(h) { ContactsSettingsPage(h.ui, h.common, h.links(), h::on) } }
@@ -33,6 +35,11 @@ class ContactsSettingsSyncRowTest : ShotTest() {
     private fun text(name: String): SemanticsNodeInteraction = compose.onAllNodesWithText(name).onFirst()
 
     private fun top(name: String): Dp = text(name).getUnclippedBoundsInRoot().top
+
+    private fun tap(tag: String) {
+        compose.onNodeWithTag(tag, useUnmergedTree = true).performClick()
+        advance(300)
+    }
 
     @Test fun theRowsAreHiddenWhileWhatsAppIsNotLinked() {
         page(SettingsHarness(state(last = null)))
@@ -46,33 +53,77 @@ class ContactsSettingsSyncRowTest : ShotTest() {
         assertTrue("whatsapp row, then the sync group, then appearance", top("WhatsApp") < top(order[0]))
         assertTrue(top(order[0]) < top(order[1]))
         text("Last Sync").assertIsDisplayed()
-        text("5 min. ago").assertIsDisplayed()
+        text("Synced, 5 min. ago").assertIsDisplayed()
         text("Sync Now").assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.PeopleContinue, useUnmergedTree = true).assertDoesNotExist()
     }
 
-    @Test fun syncNowAsksForASync() {
+    @Test fun syncNowSyncsAtOnceWhenNothingIsResumable() {
         val h = SettingsHarness(state())
         page(h)
-        compose.onNodeWithTag(SettingsTags.PeopleSync, useUnmergedTree = true).performClick()
-        advance(300)
+        tap(SettingsTags.PeopleSync)
         assertEquals(listOf<SettingsAction>(SettingsAction.SyncPeopleNow), h.actions)
-        // The row stays in place and says what it does now.
-        text("Syncing…").assertIsDisplayed()
+        // The row stays in place and is "Stop" now.
+        text("Stop").assertIsDisplayed()
     }
 
-    @Test fun whileSyncingTheRowTakesNoTaps() {
-        val h = SettingsHarness(state(running = true))
+    @Test fun whileSyncingTheRowStopsTheRun() {
+        val h =
+            SettingsHarness(
+                state(PeopleSyncUi(UiText.Literal("Checking numbers 30/120"), running = true, progress = 0.25f)),
+            )
         page(h)
-        text("Syncing…").assertIsDisplayed()
-        compose.onNodeWithTag(SettingsTags.PeopleSync, useUnmergedTree = true).performClick()
-        advance(300)
-        assertTrue("no second sync is started", h.actions.isEmpty())
+        text("Stop").assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.PeopleProgress, useUnmergedTree = true).assertExists()
+        tap(SettingsTags.PeopleSync)
+        assertEquals(listOf<SettingsAction>(SettingsAction.StopPeople), h.actions)
+    }
+
+    @Test fun aResumableRunOffersContinueAndSyncNowAsksFirst() {
+        val sync = PeopleSyncUi(UiText.Literal("Stopped at 30/120"), canContinue = true, confirmRestart = true)
+        val h = SettingsHarness(state(sync))
+        page(h)
+        text("Continue Where It Left Off").assertIsDisplayed()
+        tap(SettingsTags.PeopleSync)
+        assertTrue("nothing yet: the alert asks", h.actions.isEmpty())
+        text("Start Over?").assertIsDisplayed()
+        text("Start Over").performClick()
+        advance(500)
+        assertEquals(listOf<SettingsAction>(SettingsAction.SyncPeopleNow), h.actions)
+    }
+
+    @Test fun cancellingTheAlertKeepsTheRun() {
+        val sync = PeopleSyncUi(UiText.Literal("Stopped at 30/120"), canContinue = true, confirmRestart = true)
+        val h = SettingsHarness(state(sync))
+        page(h)
+        tap(SettingsTags.PeopleSync)
+        text("Cancel").performClick()
+        advance(500)
+        assertTrue(h.actions.isEmpty())
+        tap(SettingsTags.PeopleContinue)
+        assertEquals(listOf<SettingsAction>(SettingsAction.ContinuePeople), h.actions)
+    }
+
+    @Test fun duringWhatsappsLimitBothButtonsWait() {
+        val sync =
+            PeopleSyncUi(
+                UiText.Literal("WhatsApp limit reached. Continues in 12 min"),
+                canContinue = true,
+                continueEnabled = false,
+                syncEnabled = false,
+                confirmRestart = true,
+            )
+        val h = SettingsHarness(state(sync))
+        page(h)
+        tap(SettingsTags.PeopleContinue)
+        tap(SettingsTags.PeopleSync)
+        assertTrue("no request during the penalty", h.actions.isEmpty())
     }
 
     @Test fun neverSyncedAndFailedAreWorded() {
         page(SettingsHarness(state(UiText.Res(R.string.settings_people_never))))
         text("Not synced yet").assertIsDisplayed()
-        page(SettingsHarness(state(UiText.Res(R.string.settings_people_failed, listOf("2 hr. ago")))))
-        text("Failed, 2 hr. ago").assertIsDisplayed()
+        page(SettingsHarness(state(UiText.Res(R.string.settings_people_failed_auth))))
+        text("Failed: the gateway rejected the connect key").assertIsDisplayed()
     }
 }

@@ -65,7 +65,8 @@ class PeopleSyncResumeTest {
         assertEquals(SyncWire.INTERRUPTED, stored.phase.kind)
         assertEquals(SyncWire.CANCELLED, stored.phase.reason)
         assertTrue(stored.resumable)
-        assertEquals(SyncOutcome.Partial, sync.status.value.outcome)
+        val shown = container.awaitStatus { it is PeopleSyncStatus.Interrupted }
+        assertTrue("$shown", shown is PeopleSyncStatus.Interrupted)
         assertEquals("the first batch is stored", 8, container.book().size)
         val firstBatch = asked().toSet()
 
@@ -75,7 +76,7 @@ class PeopleSyncResumeTest {
         assertTrue(asked().none { it in firstBatch })
         assertEquals(30, asked().size)
         assertEquals(23, container.book().size)
-        assertEquals(SyncOutcome.Ok, sync.status.value.outcome)
+        assertEquals(23, (container.awaitStatus { it is PeopleSyncStatus.Idle } as PeopleSyncStatus.Idle).people)
     }
 
     @Test fun aSliceCutByItsBudgetContinuesWhereItStopped() {

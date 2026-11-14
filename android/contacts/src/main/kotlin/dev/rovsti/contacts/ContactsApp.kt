@@ -21,6 +21,7 @@ import dev.rovsti.contacts.intake.IntakePage
 import dev.rovsti.contacts.intake.rememberImportActions
 import dev.rovsti.contacts.list.SelectToolbar
 import dev.rovsti.contacts.list.rememberContactsListViewModel
+import dev.rovsti.contacts.people.PeopleSync
 import dev.rovsti.contacts.recent.RecentPage
 import dev.rovsti.contacts.settings.ContactsSettingsEntry
 import dev.rovsti.contacts.settings.NameFormatEntry
@@ -117,6 +118,7 @@ fun ContactsApp(
                             },
                         )
                     },
+                    openSyncDetails = { navigator.push(ContactsRoute.Logs(tag = PeopleSync.TAG)) },
                 ),
             )
         }

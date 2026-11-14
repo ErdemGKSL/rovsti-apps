@@ -121,7 +121,7 @@ class PeopleSyncWorkerTest {
         assertEquals(0, container.gw.gateway.core.calls.size)
         assertTrue(container.book().isEmpty())
         assertEquals(0, container.changes)
-        assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)
+        assertEquals(PeopleSyncStatus.NotLinked, container.peopleSync.status.value)
         assertTrue("no continuation", work(PeopleSyncWorker.CONTINUE_NAME).isEmpty())
     }
 
@@ -139,9 +139,9 @@ class PeopleSyncWorkerTest {
         assertEquals("ayse-11", file.readText())
         assertEquals(1, container.gw.pictureAsks.count { it.knownId == null && it.jid == ayse })
         assertTrue("every part was told", container.changes >= 1)
-        val status = container.peopleSync.status.value
-        assertEquals(SyncOutcome.Ok, status.outcome)
-        assertEquals(2, status.people)
+        val status = container.awaitStatus { it is PeopleSyncStatus.Idle && it.lastMs != null }
+        assertTrue(status is PeopleSyncStatus.Idle && status.lastMs != null)
+        assertEquals(2, (status as PeopleSyncStatus.Idle).people)
         assertTrue("done: no continuation", work(PeopleSyncWorker.CONTINUE_NAME).isEmpty())
 
         // A second slice right away: an incremental run asks nothing (fresh negatives, fresh profiles, current files).
@@ -209,7 +209,7 @@ class PeopleSyncWorkerTest {
         container.link.gatewayOpener = { null }
         assertEquals(ListenableWorker.Result.success(), run())
         assertEquals(1, work(PeopleSyncWorker.CONTINUE_NAME).size)
-        assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)
+        assertEquals(PeopleSyncStatus.Idle(null), container.awaitStatus { it is PeopleSyncStatus.Idle })
     }
 
     @Test fun aLinkNotReadInTimeRetriesWithoutRecordingAnything() {
@@ -218,7 +218,7 @@ class PeopleSyncWorkerTest {
         val result = runBlocking { container.peopleSync.runSlice() }
         assertEquals(SliceResult.LinkNotReady, result)
         assertEquals(0, container.gw.gateway.core.calls.size)
-        assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)
+        assertEquals(PeopleSyncStatus.NotLinked, container.peopleSync.status.value)
     }
 
     @Test fun profilesAnOldGatewayDidNotAnswerKeepTheRunGoing() {
@@ -227,17 +227,15 @@ class PeopleSyncWorkerTest {
         container.connect()
         assertEquals(ListenableWorker.Result.success(), run())
         assertEquals("Ayse", container.book().getValue(ayse).name)
-        assertEquals(
-            "the legacy throttle leaves a resumable run and a continuation",
-            SyncOutcome.Partial,
-            container.peopleSync.status.value.outcome,
+        assertTrue(
+            "the legacy throttle leaves a resumable run",
+            container.awaitStatus { it is PeopleSyncStatus.RateLimited } is PeopleSyncStatus.RateLimited,
         )
         assertEquals(1, work(PeopleSyncWorker.CONTINUE_NAME).size)
     }
 
     @Test fun theNumbersOfTheRunDoNotNeedTheLinkToBeStarted() {
         // WorkManager can wake the process with no UI: the worker alone builds the sync, which starts following the link.
-        assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)
-        assertEquals(false, container.peopleSync.status.value.linked)
+        assertEquals(PeopleSyncStatus.NotLinked, container.peopleSync.status.value)
     }
 }

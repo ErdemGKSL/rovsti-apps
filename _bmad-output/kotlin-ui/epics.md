@@ -1747,14 +1747,14 @@ to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (A
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E7.1 | App module, manifest parity, full-screen map home skeleton, migration test | R1 | todo |
-| E7.2a | Camera, gestures, tile request/cancel, decode (`MapCamera`, `tile()` client) | R1 | todo |
-| E7.2b | Tile rasteriser, bitmap LRU, stand-ins, styles, scale bar, JVM render benchmark | R1 | todo |
-| E7.3 | Radar layers | R1 | todo |
-| E7.4 | Picking and the pin menu | R1 | todo |
-| E7.5 | Trip start, preflight, live card | R1 | todo |
-| E7.6 | Alarm and arrival | R1 | todo |
-| E7.7 | Saved stops | R1 | todo |
+| E7.1 | App module, manifest parity, full-screen map home skeleton, migration test | R1 | in-progress |
+| E7.2a | Camera, gestures, tile request/cancel, decode (`MapCamera`, `tile()` client) | R1 | in-progress |
+| E7.2b | Tile rasteriser, bitmap LRU, stand-ins, styles, scale bar, JVM render benchmark | R1 | in-progress |
+| E7.3 | Radar layers | R1 | in-progress |
+| E7.4 | Picking and the pin menu | R1 | in-progress |
+| E7.5 | Trip start, preflight, live card | R1 | in-progress |
+| E7.6 | Alarm and arrival | R1 | in-progress |
+| E7.7 | Saved stops | R1 | in-progress |
 | E7.8 | Pick sheets | R2 | todo |
 | E7.9 | Map options, measure, share location | R2 | todo |
 | E7.10 | Settings | R2 | todo |

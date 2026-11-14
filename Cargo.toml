@@ -107,7 +107,7 @@ incremental = false
 
 # Verification (scripts/kotlin-ui-check.sh): release code generation without the link-time cost. Fat LTO per test
 # binary would take far too long and debug builds fill the disk, so tests and the Gradle host library use this
-# profile (`cargo test --profile checks`, target/checks). Never `cargo clean`; to free space delete target/checks only.
+# profile (`cargo test --profile checks`, target/checks). Never `cargo clean`; to free space delete target/debug, then target/checks.
 [profile.checks]
 inherits = "release"
 lto = false

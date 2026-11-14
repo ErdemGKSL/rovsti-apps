@@ -6,6 +6,7 @@ import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.core.FakeRustCore
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.RustCore
+import dev.rovsti.core.RustError
 import dev.rovsti.core.model.people.PeopleLookupAnswer
 import dev.rovsti.core.model.people.PeopleLookupRequest
 import dev.rovsti.core.model.people.PeoplePlanAnswer
@@ -126,6 +127,43 @@ class FakePeopleRust(
     }
 }
 
+/** The gateway's 429: an `invalid` error whose detail says `rate_limited` (what `isRateLimited` reads). */
+fun <T> rateLimited(): Outcome<T> =
+    Outcome.Err(
+        RustError.Invalid(
+            "too many requests",
+            kotlinx.serialization.json.JsonObject(
+                mapOf("code" to kotlinx.serialization.json.JsonPrimitive("rate_limited")),
+            ),
+        ),
+    )
+
+/** The gateway's per-instance token bucket (`TokenBucket` in `services/wa_gateway`), all or nothing, on [clock]. */
+class FakeBucket(
+    private val burst: Int,
+    private val perSec: Double,
+    private val clock: () -> Long,
+    start: Int = burst,
+) {
+    private var tokens = start.toDouble()
+    private var last = clock()
+
+    /** The requests it turned away. */
+    var refused = 0
+
+    fun tryTake(n: Int): Boolean {
+        val now = clock()
+        tokens = (tokens + (now - last) * perSec / 1_000).coerceAtMost(burst.toDouble())
+        last = now
+        if (n > tokens) {
+            refused++
+            return false
+        }
+        tokens -= n
+        return true
+    }
+}
+
 /** The gateway of the sync tests: who is on WhatsApp, their profiles and pictures, and a log of what was asked. */
 class FakeGatewayData(
     val gateway: FakeWaGateway = FakeWaGateway(),
@@ -133,8 +171,19 @@ class FakeGatewayData(
     val onWhatsapp = mutableSetOf<String>()
     val profiles = mutableMapOf<String, WaProfile>()
     val pictures = mutableMapOf<String, PictureAnswer>()
+
+    /** Lookups the gateway answered (a refused one is not here). */
     val lookups = mutableListOf<List<String>>()
     val pictureAsks = mutableListOf<PictureBody>()
+
+    /** The lookup bucket; none: no rate limit. A refused lookup answers 429. */
+    var lookupBucket: FakeBucket? = null
+
+    /** The profile and picture bucket (one token per profile or picture); none: no rate limit. */
+    var profileBucket: FakeBucket? = null
+
+    /** A picture answer ahead of [pictures], e.g. a 429 for a jid; null: none. */
+    var pictureOverride: (PictureBody) -> Outcome<PictureAnswer>? = { null }
 
     init {
         // A gateway op: the request carries `handle` next to the body fields.
@@ -151,6 +200,7 @@ class FakeGatewayData(
                             },
                         ),
                     ).jids
+            if (lookupBucket?.tryTake(jids.size) == false) return@on rateLimited()
             lookups += jids
             Outcome.Ok(
                 dev.rovsti.core.Envelope.json.encodeToJsonElement(
@@ -159,10 +209,21 @@ class FakeGatewayData(
                 ),
             )
         }
-        gateway.profiles = { jids -> Outcome.Ok(jids.mapNotNull(profiles::get)) }
+        gateway.profiles = { jids ->
+            if (profileBucket?.tryTake(jids.size) == false) {
+                rateLimited()
+            } else {
+                Outcome.Ok(jids.mapNotNull(profiles::get))
+            }
+        }
         gateway.picture = { body ->
             pictureAsks += body
-            Outcome.Ok(pictures[body.jid] ?: PictureAnswer("none"))
+            pictureOverride(body)
+                ?: if (profileBucket?.tryTake(1) == false) {
+                    rateLimited()
+                } else {
+                    Outcome.Ok(pictures[body.jid] ?: PictureAnswer("none"))
+                }
         }
     }
 
@@ -202,6 +263,9 @@ class PeopleTestContainer(
     var ready: Boolean? = true
     var changes = 0
 
+    /** The waits the sync asked for; each one moves [now] on, so the fake buckets refill. */
+    val pauses = mutableListOf<Long>()
+
     init {
         link.gatewayOpener = { gw.open() }
     }
@@ -234,6 +298,10 @@ class PeopleTestContainer(
             onChanged = {
                 changes++
                 peopleStore.notifyChanged(context.contentResolver)
+            },
+            pause = {
+                pauses += it
+                now += it
             },
         )
 }

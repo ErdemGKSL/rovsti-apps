@@ -14,9 +14,11 @@ import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.WaRepository
 import dev.rovsti.wa.avatars.AvatarCodec
 import dev.rovsti.wa.avatars.BitmapAvatarCodec
+import dev.rovsti.wa.avatars.isRateLimited
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,9 +30,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.IOException
+import kotlin.math.ceil
 
-/** How the last sync ended, as the settings row words it. */
-enum class SyncOutcome { Never, Ok, Failed }
+/**
+ * How the last sync ended, as the settings row words it. [Partial]: what was asked is stored, the gateway's allowance
+ * ran out before the rest; the next run continues.
+ */
+enum class SyncOutcome { Never, Ok, Partial, Failed }
 
 /** What the settings row shows. */
 data class PeopleSyncStatus(
@@ -49,7 +55,10 @@ sealed interface SyncResult {
     /** WhatsApp is not linked: nothing was asked, nothing changed. */
     data object NotLinked : SyncResult
 
-    /** The gateway could not be reached or answered with an error; worth trying again later. */
+    /**
+     * The gateway could not be reached or answered with an error, or it kept answering "rate limited" before anything
+     * was stored; worth trying again later.
+     */
     data object Failed : SyncResult
 
     data class Synced(
@@ -58,6 +67,17 @@ sealed interface SyncResult {
         /** Pictures downloaded (new or replaced ones only). */
         val downloaded: Int,
         /** Picture files dropped (removed or replaced pictures, eviction). */
+        val dropped: Int,
+    ) : SyncResult
+
+    /**
+     * The gateway's rate limit (or this run's waiting budget) stopped the run after some answers were stored: the
+     * looked-up people, their profiles and the downloaded pictures are kept, and the next run continues where this one
+     * stopped (numbers asked about in a partial run go last). Not a failure: the settings row says "partly synced".
+     */
+    data class Partial(
+        val people: Int,
+        val downloaded: Int,
         val dropped: Int,
     ) : SyncResult
 }
@@ -71,6 +91,7 @@ class PeopleSyncLog(
             lastSyncMs = prefs.getLong(LAST, 0),
             outcome =
                 when {
+                    prefs.getBoolean(OK, false) && prefs.getBoolean(PARTIAL, false) -> SyncOutcome.Partial
                     prefs.getBoolean(OK, false) -> SyncOutcome.Ok
                     prefs.contains(LAST) -> SyncOutcome.Failed
                     else -> SyncOutcome.Never
@@ -80,21 +101,31 @@ class PeopleSyncLog(
 
     fun save(
         at: Long,
-        ok: Boolean,
+        outcome: SyncOutcome,
         people: Int,
     ) {
         prefs
             .edit()
             .putLong(LAST, at)
-            .putBoolean(OK, ok)
+            .putBoolean(OK, outcome == SyncOutcome.Ok || outcome == SyncOutcome.Partial)
+            .putBoolean(PARTIAL, outcome == SyncOutcome.Partial)
             .putInt(PEOPLE, people)
             .apply()
+    }
+
+    /** JIDs a partial run already asked about (and that are not on WhatsApp): the next run asks the others first. */
+    fun deferred(): Set<String> = prefs.getStringSet(DEFERRED, null)?.toSet().orEmpty()
+
+    fun defer(jids: Set<String>) {
+        prefs.edit().putStringSet(DEFERRED, jids).apply()
     }
 
     private companion object {
         const val LAST = "last_ms"
         const val OK = "ok"
+        const val PARTIAL = "partial"
         const val PEOPLE = "people"
+        const val DEFERRED = "deferred"
     }
 }
 
@@ -117,6 +148,15 @@ interface PeopleSyncControl {
  *    drop; a picture whose id the cache already holds is asked for with `known_id`, so an unchanged one costs no bytes;
  * 4. the provider's observers are told ([onChanged]) when anything changed.
  *
+ * Pacing: the gateway rate-limits every instance with token buckets (`services/wa_gateway`: lookups 60 at once then
+ * 1 per second, profiles and pictures together 120 then 2 per second) and answers 429 `rate_limited` beyond them. The
+ * run keeps its own copy of each bucket ([Allowance]) and waits ([pause]) before a call the copy says would be
+ * refused, so a first sync of a few hundred numbers is not refused at all; a 429 anyway (another app used the
+ * allowance) empties the copy, waits for the refill and asks again, at most [MAX_RETRIES] times per call. The waits
+ * of one run are capped ([LOOKUP_WAIT_MS] for lookups, [RUN_WAIT_MS] in all) to stay well inside WorkManager's ten
+ * minutes: when a wait would not fit, the run stops that stage cleanly and ends [SyncResult.Partial] (or
+ * [SyncResult.Failed] when nothing was answered at all). A rate-limited picture never counts as a failed one.
+ *
  * Live: a gateway `profile` event updates that person at once and fetches the new picture a moment later
  * ([start]). Runs are serialized; a run never overlaps another.
  */
@@ -130,6 +170,8 @@ class PeopleSync(
     private val codec: AvatarCodec = BitmapAvatarCodec,
     private val clock: () -> Long = System::currentTimeMillis,
     private val onChanged: () -> Unit = {},
+    /** Waits out the gateway's allowance; the tests make it instant. */
+    private val pause: suspend (Long) -> Unit = { delay(it) },
 ) : PeopleSyncControl {
     private val lock = Mutex()
     private val state = MutableStateFlow(log.load())
@@ -184,14 +226,35 @@ class PeopleSync(
         val gateway = wa.gateway() ?: return SyncResult.Failed
         var changed = 0
         var dropped = 0
+        var answered = 0
+        var short = false
 
-        // 1. who is on WhatsApp
+        // 1. who is on WhatsApp; the numbers a partial run already asked about go last
         val known = store.snapshot().mapTo(HashSet(), PersonRow::jid)
         val asked = numbers().mapNotNull { e164 -> jidOf(e164)?.let { it to e164 } }.distinctBy { it.first }
-        val unknown = asked.filter { it.first !in known }
+        val deferred = log.deferred()
+        val unknown = asked.filter { it.first !in known }.sortedBy { it.first in deferred }
         val numberOf = asked.toMap()
+        val lookups = Allowance(LOOKUP_BURST, LOOKUP_PER_SEC, Wait(pause, LOOKUP_WAIT_MS), clock)
+        val looked = HashSet<String>()
         for (batch in unknown.map { it.first }.chunked(BATCH)) {
-            val users = (gateway.lookupUsers(batch) as? Outcome.Ok)?.value ?: return SyncResult.Failed
+            val users =
+                when (val answer = paced(lookups, batch.size) { gateway.lookupUsers(batch) }) {
+                    is Paced.Done -> {
+                        answer.value
+                    }
+
+                    Paced.Error -> {
+                        return SyncResult.Failed
+                    }
+
+                    Paced.OutOfTime -> {
+                        short = true
+                        break
+                    }
+                }
+            answered++
+            looked += batch
             val found = users.filter { it.onWhatsapp }
             val answer =
                 store.upsert(
@@ -207,40 +270,89 @@ class PeopleSync(
             changed += answer.changed
             dropped += answer.dropFiles.size
         }
+        log.defer(if (short) (deferred + looked).intersect(numberOf.keys) else emptySet())
 
-        // 2. names and picture ids of everybody on WhatsApp
+        // 2. names and picture ids of everybody on WhatsApp (profiles and pictures share one allowance)
+        val queries = Allowance(PROFILE_BURST, PROFILE_PER_SEC, Wait(pause, RUN_WAIT_MS - lookups.waitedMs), clock)
         val people = store.snapshot().filter { it.onWhatsapp }
         for (batch in people.map { it.jid }.chunked(BATCH)) {
-            val profiles = (gateway.profiles(batch) as? Outcome.Ok)?.value ?: return SyncResult.Failed
+            val profiles =
+                when (val answer = paced(queries, batch.size) { gateway.profiles(batch) }) {
+                    is Paced.Done -> {
+                        answer.value
+                    }
+
+                    Paced.Error -> {
+                        return SyncResult.Failed
+                    }
+
+                    Paced.OutOfTime -> {
+                        short = true
+                        break
+                    }
+                }
+            answered++
             val answer = store.upsert(profiles.map(::profileUpdate)) ?: return SyncResult.Failed
             changed += answer.changed
             dropped += answer.dropFiles.size
         }
 
         // 3. the pictures that changed, and what to drop
-        val (downloaded, removed) = pictures(gateway) ?: return SyncResult.Failed
-        dropped += removed
-        if (changed > 0 || downloaded > 0 || dropped > 0) onChanged()
-        return SyncResult.Synced(store.snapshot().count { it.onWhatsapp }, downloaded, dropped)
+        val pictures = pictures(gateway, queries) ?: return SyncResult.Failed
+        dropped += pictures.dropped
+        answered += pictures.answered
+        short = short || pictures.short
+        if (changed > 0 || pictures.downloaded > 0 || dropped > 0) onChanged()
+        val onWhatsapp = store.snapshot().count { it.onWhatsapp }
+        return when {
+            !short -> SyncResult.Synced(onWhatsapp, pictures.downloaded, dropped)
+            answered > 0 -> SyncResult.Partial(onWhatsapp, pictures.downloaded, dropped)
+            else -> SyncResult.Failed
+        }
     }
 
-    /** Downloads what `people.plan` asks for and deletes what it lists; `(downloaded, dropped)`, null on a core error. */
-    private suspend fun pictures(gateway: WaGateway): Pair<Int, Int>? {
+    /** What one picture pass did; [short]: the allowance stopped it before the plan was done. */
+    private class PictureRun(
+        val downloaded: Int,
+        val dropped: Int,
+        val answered: Int,
+        val short: Boolean,
+    )
+
+    /** Downloads what `people.plan` asks for and deletes what it lists; null on a core error. */
+    private suspend fun pictures(
+        gateway: WaGateway,
+        allowance: Allowance,
+    ): PictureRun? {
         val plan = store.plan() ?: return null
         var downloaded = 0
         var dropped = 0
         var failures = 0
+        var answered = 0
+        var short = false
         val rows = store.snapshot().associateBy(PersonRow::jid)
         for (refresh in plan.refresh.take(MAX_PICTURES)) {
             if (failures >= MAX_FAILURES) break
             val row = rows[refresh.jid]
             // A stale picture is asked for with no known id, so the bytes come; a held one revalidates for free.
             val known = refresh.pictureId?.takeIf { row?.pictureStale != true && row?.pictureFile != null }
-            val answer = (gateway.picture(PictureBody(refresh.jid, knownId = known)) as? Outcome.Ok)?.value
-            if (answer == null) {
-                failures++
-                continue
-            }
+            val answer =
+                when (val got = paced(allowance, 1) { gateway.picture(PictureBody(refresh.jid, knownId = known)) }) {
+                    is Paced.Done -> {
+                        got.value
+                    }
+
+                    Paced.Error -> {
+                        failures++
+                        continue
+                    }
+
+                    Paced.OutOfTime -> {
+                        short = true
+                        break
+                    }
+                }
+            answered++
             when (answer.kind) {
                 "image" -> {
                     val id = answer.id
@@ -276,7 +388,26 @@ class PeopleSync(
         }
         store.delete(plan.remove)
         dropped += plan.remove.size
-        return downloaded to dropped
+        return PictureRun(downloaded, dropped, answered, short)
+    }
+
+    /**
+     * Calls [call] once [allowance] holds [cost] tokens. A 429 empties the allowance and asks again after the refill,
+     * at most [MAX_RETRIES] times; [Paced.OutOfTime] when the run's waiting budget cannot pay for the wait.
+     */
+    private suspend fun <T> paced(
+        allowance: Allowance,
+        cost: Int,
+        call: suspend () -> Outcome<T>,
+    ): Paced<T> {
+        repeat(MAX_RETRIES + 1) {
+            if (!allowance.take(cost)) return Paced.OutOfTime
+            when (val answer = call()) {
+                is Outcome.Ok -> return Paced.Done(answer.value)
+                is Outcome.Err -> if (answer.error.isRateLimited()) allowance.empty() else return Paced.Error
+            }
+        }
+        return Paced.OutOfTime
     }
 
     private suspend fun saveBytes(
@@ -326,23 +457,22 @@ class PeopleSync(
         lock.withLock {
             if (wa.linkState.value !is WaLinkState.Connected) return
             val gateway = wa.gateway() ?: return
-            val (downloaded, dropped) = pictures(gateway) ?: return
-            if (downloaded > 0 || dropped > 0) onChanged()
+            val allowance = Allowance(PROFILE_BURST, PROFILE_PER_SEC, Wait(pause, LIVE_WAIT_MS), clock)
+            val run = pictures(gateway, allowance) ?: return
+            if (run.downloaded > 0 || run.dropped > 0) onChanged()
         }
     }
 
     private fun finish(result: SyncResult) {
         val now = clock()
-        val ok = result is SyncResult.Synced
-        val people = (result as? SyncResult.Synced)?.people ?: state.value.people
-        log.save(now, ok, people)
-        state.value =
-            state.value.copy(
-                running = false,
-                lastSyncMs = now,
-                outcome = if (ok) SyncOutcome.Ok else SyncOutcome.Failed,
-                people = people,
-            )
+        val (outcome, people) =
+            when (result) {
+                is SyncResult.Synced -> SyncOutcome.Ok to result.people
+                is SyncResult.Partial -> SyncOutcome.Partial to result.people
+                SyncResult.Failed, SyncResult.NotLinked -> SyncOutcome.Failed to state.value.people
+            }
+        log.save(now, outcome, people)
+        state.value = state.value.copy(running = false, lastSyncMs = now, outcome = outcome, people = people)
     }
 
     companion object {
@@ -357,6 +487,20 @@ class PeopleSync(
 
         private const val MAX_PICTURES = 300
         private const val MAX_FAILURES = 5
+
+        /** The gateway's per-instance buckets (`services/wa_gateway/src/lib.rs`): burst, then tokens per second. */
+        const val LOOKUP_BURST = 60
+        const val LOOKUP_PER_SEC = 1
+        const val PROFILE_BURST = 120
+        const val PROFILE_PER_SEC = 2
+
+        /** Asks after a 429 before the run gives the stage up. */
+        const val MAX_RETRIES = 3
+
+        /** Waiting budgets: lookups of one run, everything of one run, a live picture pass. */
+        const val LOOKUP_WAIT_MS = 4L * 60_000
+        const val RUN_WAIT_MS = 6L * 60_000
+        const val LIVE_WAIT_MS = 30_000L
         private const val PICTURE_PX = 256
         private const val LIVE_DEBOUNCE_MS = 2_000L
         private const val PHONE_SUFFIX = "@s.whatsapp.net"
@@ -379,5 +523,83 @@ class PeopleSync(
                 pictureRemoved = if (profile.pictureId == null && hasAnswer) true else null,
             )
         }
+    }
+}
+
+/** What a paced gateway call came to. */
+private sealed interface Paced<out T> {
+    data class Done<out T>(
+        val value: T,
+    ) : Paced<T>
+
+    /** Not a rate limit: a real error. */
+    data object Error : Paced<Nothing>
+
+    /** The rate limit outlasted the run's waiting budget or [PeopleSync.MAX_RETRIES]. */
+    data object OutOfTime : Paced<Nothing>
+}
+
+/** A run's waiting budget: [pay] waits only while the budget lasts. */
+internal class Wait(
+    private val pause: suspend (Long) -> Unit,
+    private var leftMs: Long,
+) {
+    /** Waits [ms]; false (and no wait) when the budget cannot pay for it. */
+    suspend fun pay(ms: Long): Boolean {
+        if (ms > leftMs) return false
+        leftMs -= ms
+        pause(ms)
+        return true
+    }
+}
+
+/**
+ * The client's copy of one of the gateway's token buckets: it starts full ([burst]), refills [perSec] tokens per second
+ * by [clock], and [take] waits (paid from [wait]) for what is missing. The gateway charges only what it really asks
+ * WhatsApp for (its own cache is free), so the copy errs on the slow side; [empty] after a 429 resets it to the truth.
+ */
+internal class Allowance(
+    private val burst: Int,
+    private val perSec: Int,
+    private val wait: Wait,
+    private val clock: () -> Long,
+) {
+    private var tokens = burst.toDouble()
+    private var lastMs = clock()
+
+    /** What this allowance waited in all. */
+    var waitedMs = 0L
+        private set
+
+    /** Takes [cost] tokens, first waiting for the missing ones; false when the wait does not fit the budget. */
+    suspend fun take(cost: Int): Boolean {
+        refill()
+        val want = cost.coerceAtMost(burst).toDouble()
+        val missing = want - tokens
+        if (missing > 0) {
+            val ms = ceil(missing * MS_PER_S / perSec).toLong()
+            if (!wait.pay(ms)) return false
+            waitedMs += ms
+            tokens = want
+            lastMs = clock()
+        }
+        tokens -= want
+        return true
+    }
+
+    /** The gateway said 429: nothing is left. */
+    fun empty() {
+        tokens = 0.0
+        lastMs = clock()
+    }
+
+    private fun refill() {
+        val now = clock()
+        tokens = (tokens + (now - lastMs).coerceAtLeast(0) * perSec / MS_PER_S).coerceAtMost(burst.toDouble())
+        lastMs = now
+    }
+
+    private companion object {
+        const val MS_PER_S = 1_000.0
     }
 }

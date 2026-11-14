@@ -432,6 +432,6 @@ class WaAvatars(
 }
 
 /** A 429 from the gateway: an `invalid` error whose detail says `rate_limited`. */
-internal fun RustError.isRateLimited(): Boolean =
+fun RustError.isRateLimited(): Boolean =
     this is RustError.Invalid &&
         ((detail as? JsonObject)?.get("code")?.jsonPrimitive?.contentOrNull == "rate_limited")

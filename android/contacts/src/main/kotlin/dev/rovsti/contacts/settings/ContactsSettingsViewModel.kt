@@ -112,9 +112,24 @@ class ContactsSettingsViewModel(
         if (!status.linked) return null
         val last =
             when (status.outcome) {
-                SyncOutcome.Never -> UiText.Res(R.string.settings_people_never)
-                SyncOutcome.Ok -> UiText.Literal(formatTime(status.lastSyncMs))
-                SyncOutcome.Failed -> UiText.Res(R.string.settings_people_failed, listOf(formatTime(status.lastSyncMs)))
+                SyncOutcome.Never -> {
+                    UiText.Res(R.string.settings_people_never)
+                }
+
+                SyncOutcome.Ok -> {
+                    UiText.Literal(formatTime(status.lastSyncMs))
+                }
+
+                SyncOutcome.Partial -> {
+                    UiText.Res(
+                        R.string.settings_people_partial,
+                        listOf(formatTime(status.lastSyncMs)),
+                    )
+                }
+
+                SyncOutcome.Failed -> {
+                    UiText.Res(R.string.settings_people_failed, listOf(formatTime(status.lastSyncMs)))
+                }
             }
         return PeopleSyncUi(last, status.running)
     }

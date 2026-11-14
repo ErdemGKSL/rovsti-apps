@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 /**
  * The periodic people sync (X.1b). WorkManager creates it by name (`PeopleSyncWorker(Context, WorkerParameters)`), so
  * R8 keeps that constructor (`proguard-rules.pro`). It does what "Sync now" does ([PeopleSync.run]); with no link it
- * finishes at once, and a gateway error asks WorkManager to retry with its back-off.
+ * finishes at once, and a gateway error or a run the rate limit cut short asks WorkManager to retry with its back-off.
  */
 class PeopleSyncWorker(
     context: Context,
@@ -26,7 +26,9 @@ class PeopleSyncWorker(
         val container =
             (applicationContext as? HasContainer<*>)?.container as? ContactsContainer ?: return Result.failure()
         return when (container.peopleSync.run()) {
-            SyncResult.Failed -> Result.retry()
+            // A partial run stored its progress; the retry's back-off continues it sooner than the next period.
+            SyncResult.Failed, is SyncResult.Partial -> Result.retry()
+
             SyncResult.NotLinked, is SyncResult.Synced -> Result.success()
         }
     }

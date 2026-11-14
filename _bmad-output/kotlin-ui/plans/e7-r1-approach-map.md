@@ -191,3 +191,42 @@ AC1. Screenshots `e7.3-*` and `e7.4-*` (light and dark) render the same pieces o
 placement). Captions and pin letters use dp, not the font scale. The circle lags the dragged pin by a Rust call.
 The breadcrumb is thinned per frame rather than cached per zoom. The toast of the third-tap hint is placed by the
 overlay host; in the test window it sits over the attribution, which the shell's bottom chrome will move.
+
+### Transit stops in view: `stops.gtfs_view` (closing the gap of E7.3/E7.4)
+
+The gap named above is closed end to end, in three commits (Rust, `:core-bridge`, `:stops`).
+
+**Rust (`rosty_geo::gtfs`).** `BBox {south, west, north, east}` and `Feed::box_hits(bbox, cap) -> (indices, total)`
+(`stops_in_box` for the indices alone): the stops inside the box, edges included, at most `cap`. When more are
+inside, those nearest the middle of the box win (longitude measured the short way round and scaled by the cosine of
+the middle latitude, as the GPUI `stops_in_view` did around the view centre), ties to the lower index; the answer is
+in ascending feed order, so one view always answers the same stops. `west > east` is a box across the antimeridian;
+180 and -180 are one meridian; a box 360 degrees wide or more takes every longitude; `south > north` is read the
+other way round; a NaN or infinite edge holds nothing; `cap = 0` answers nothing but still counts. It takes a box,
+not a `Viewport`, because the Kotlin camera is Mercator and knows its own corners. `Feed::pattern_line(pattern)` is
+the pattern's stops in travel order, `None` for an unknown pattern, skipping stops the feed lacks. Ten unit tests
+(inside and edges, empty feed and empty box, bad edges, antimeridian in three spellings, world-wide box, poles, cap
+order and determinism on 2 000 stops, pattern line, missing stop, empty pattern).
+
+**Op (`rosty_ffi`).** `stops.gtfs_view {bbox, cap, pattern?, dir?}` reads the saved `gtfs.json` and answers
+`{has_feed, total, capped, stops: [{index, id, name, coord}], line}`; `line` is null without a pattern and for an
+unknown one. Six contract fixtures (main, `capped`, `unknown_pattern`, `antimeridian`, `empty_box`, `no_feed`),
+`INDEX` and `OPS.md` updated.
+
+**Kotlin (`:core-bridge`).** `GtfsBbox`, `GtfsViewRequest`, `GtfsViewStop`, `GtfsViewAnswer`; `StopsOps.gtfsView`,
+`NativeStopsOps`, the `ops` list; the strict contract test decodes all six pairs; `testRustBridge` imports
+`gtfs-tiny.zip` with `save` and asks views of it (all stops, both patterns, a smaller box, a cap, an unknown
+pattern, a box the long way round, and no feed).
+
+**`:stops`.** `PickController` listens to the camera. When the view is at rest (never while a finger or an
+animation moves it) and `TRANSIT_DEBOUNCE_MS` (150 ms) later it asks for the stops in the viewport plus 8 dp, at
+most `RadarStops.CAP` (300), and the line of the pattern a picked end carries, and writes them to
+`radar.stops` / `radar.line`. The flow is `collectLatest`: a view that changes again first cancels the pending
+request and a late answer is never shown. The same request as the one shown is not sent again; without a feed the
+stops are left alone; `refreshTransit()` asks again after an import; `close()` stops listening. A view as wide as
+the world asks for every longitude, a view over the antimeridian sends `west > east`. Tested against the real Rust
+core with the tiny feed (stops follow the camera, a tap snaps to a stop the feed put there, the line of a picked
+pattern, debounce and no request while moving, an overtaken request, the two box edge cases, refresh and close).
+
+**Note for the merge.** `StopsOps` has a new abstract method: any other implementation of the interface (a fake in
+another module) must add `gtfsView`. `PickOps` likewise gained `gtfsView`.

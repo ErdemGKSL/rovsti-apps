@@ -487,6 +487,206 @@ class PickControllerTest {
         assertNull(pick.pinAnchor(Slot.B))
     }
 
+    // ---- transit stops in view (stops.gtfs_view) ----
+
+    /** A data directory with the tiny feed imported: Moda İskele (A), Kadıköy (B) 2 km south-east, Bostancı (C) far east. */
+    private fun feedDir(): String {
+        val dir =
+            java.nio.file.Files
+                .createTempDirectory("pick-gtfs")
+                .toFile()
+                .apply { deleteOnExit() }
+                .absolutePath
+        val zip = java.io.File(System.getProperty("rosty.ffi.fixtures"), "../tests/data/gtfs-tiny.zip").canonicalPath
+        val request =
+            dev.rosty.core.model.stops
+                .GtfsImportRequest(zip, nowMs = 1_000, save = true, dir = dir)
+        assertTrue(runBlocking { rust.stops.gtfsImport(request) } is Outcome.Ok)
+        return dir
+    }
+
+    @Test fun theStopsInViewComeFromTheImportedFeedAndFollowTheCamera() {
+        // 12 m per dp, 400 x 800: 2.4 km to each side, 4.8 km up and down, around a point between A and B.
+        camera.setView(40.995, 29.01, 12.0)
+        val transit = PickController(rust.ops, scope, camera, listener, dataDir = feedDir())
+        MapHostRust.settle(transit)
+        assertEquals(listOf("A", "B"), transit.radar.state.stops.ids)
+        assertEquals(listOf("Moda İskele", "Kadıköy"), transit.radar.state.stops.names)
+        assertEquals(41.0001, transit.radar.state.stops.latLon[0], 1e-9)
+        assertEquals(1, transit.transitRequests)
+
+        // East to Bostancı: the other two leave the view.
+        camera.jumpTo(40.95, 29.09)
+        MapHostRust.settle(transit)
+        assertEquals(listOf("C"), transit.radar.state.stops.ids)
+        // Somewhere without stops: none, not the old ones.
+        camera.jumpTo(10.0, 10.0)
+        MapHostRust.settle(transit)
+        assertEquals(0, transit.radar.state.stops.size)
+        assertEquals(3, transit.transitRequests)
+        transit.close()
+    }
+
+    @Test fun aTapSnapsToAStopTheFeedPutOnTheMap() {
+        camera.setView(40.995, 29.01, 12.0)
+        val transit = PickController(rust.ops, scope, camera, listener, dataDir = feedDir())
+        MapHostRust.settle(transit)
+        // 20 dp from Kadıköy.
+        val x = camera.screenX(29.02) + 20f
+        val y = camera.screenY(40.99)
+        transit.onTap(x, y, camera.latAt(y), camera.lonAt(x))
+        MapHostRust.settle(transit)
+        assertEquals(
+            "B",
+            transit.state.value.ends.a!!
+                .gtfsStop,
+        )
+        assertEquals("Kadıköy", transit.state.value.labelA)
+        transit.close()
+    }
+
+    @Test fun thePatternOfAPickedStopIsDrawnAsTheLine() {
+        camera.setView(40.995, 29.01, 12.0)
+        val transit = PickController(rust.ops, scope, camera, listener, dataDir = feedDir())
+        MapHostRust.settle(transit)
+        assertEquals(0, transit.radar.state.line.size)
+        // Picked in the stop sheet with its line: pattern 1 runs from Moda to Bostancı.
+        transit.place(Slot.A, Destination("Moda İskele", Coord(41.0001, 29.0), gtfsStop = "A", pattern = 1))
+        MapHostRust.settle(transit)
+        assertEquals(
+            listOf(41.0001, 29.0, 40.95, 29.09),
+            transit.radar.state.line
+                .toList(),
+        )
+        // A pattern the feed does not have draws no line; clearing the pick removes it.
+        transit.place(Slot.A, Destination("Moda İskele", Coord(41.0001, 29.0), gtfsStop = "A", pattern = 77))
+        MapHostRust.settle(transit)
+        assertEquals(0, transit.radar.state.line.size)
+        assertEquals(listOf("A", "B"), transit.radar.state.stops.ids)
+        transit.close()
+    }
+
+    @Test fun withoutAFeedTheStopsTheScreenSetStay() {
+        pick.radar.update { it.copy(stops = stopsAt(200f to 300f)) }
+        camera.panBy(10f, 0f)
+        settle()
+        assertEquals(listOf("S0"), radar.stops.ids)
+        assertTrue(pick.transitRequests >= 1)
+    }
+
+    /** Holds `gtfs_view` answers until released and records the boxes asked for. */
+    private class SlowView(
+        private val real: PickOps,
+    ) : PickOps by real {
+        val asked = ArrayList<dev.rosty.core.model.stops.GtfsBbox>()
+        var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+        override suspend fun gtfsView(
+            request: dev.rosty.core.model.stops.GtfsViewRequest,
+        ): Outcome<dev.rosty.core.model.stops.GtfsViewAnswer> {
+            asked += request.bbox
+            gate?.await()
+            return real.gtfsView(request)
+        }
+    }
+
+    private fun idleFor(millis: Long) =
+        org.robolectric.Shadows
+            .shadowOf(android.os.Looper.getMainLooper())
+            .idleFor(java.time.Duration.ofMillis(millis))
+
+    @Test fun theRequestWaitsForTheViewToRestAndIsNotMadeWhileItMoves() {
+        camera.setView(40.995, 29.01, 12.0)
+        val ops = SlowView(rust.ops)
+        val transit = PickController(ops, scope, camera, listener, dataDir = feedDir())
+        MapHostRust.settle(transit)
+        assertEquals(1, ops.asked.size)
+
+        // A drag: nothing is asked while the finger is down, however long it takes.
+        camera.setGesture(active = true)
+        repeat(20) {
+            camera.panBy(-15f, 0f)
+            idleFor(30)
+        }
+        assertEquals(1, ops.asked.size)
+        // The finger lifts: still nothing until the debounce has passed, then one request for the final view.
+        camera.setGesture(active = false)
+        idleFor(PickController.TRANSIT_DEBOUNCE_MS - 40)
+        assertEquals(1, ops.asked.size)
+        MapHostRust.settle(transit)
+        assertEquals(2, ops.asked.size)
+
+        // A burst of programmatic moves (follow-me fixes) inside the debounce: one request.
+        repeat(5) {
+            camera.panBy(-4f, 0f)
+            idleFor(20)
+        }
+        MapHostRust.settle(transit)
+        assertEquals(3, ops.asked.size)
+        // Settling on the same view again asks nothing.
+        camera.setGesture(active = true)
+        camera.setGesture(active = false)
+        MapHostRust.settle(transit)
+        assertEquals(3, ops.asked.size)
+        transit.close()
+    }
+
+    @Test fun aRequestOvertakenByANewViewIsCancelledAndItsAnswerNeverShown() {
+        camera.setView(40.995, 29.01, 12.0)
+        val ops = SlowView(rust.ops)
+        val transit = PickController(ops, scope, camera, listener, dataDir = feedDir())
+        MapHostRust.settle(transit)
+        assertEquals(listOf("A", "B"), transit.radar.state.stops.ids)
+
+        // The request for Bostancı hangs; before it answers the view goes somewhere empty.
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        ops.gate = gate
+        camera.jumpTo(40.95, 29.09)
+        idleFor(PickController.TRANSIT_DEBOUNCE_MS + 50)
+        assertEquals(2, ops.asked.size)
+        camera.jumpTo(10.0, 10.0)
+        idleFor(PickController.TRANSIT_DEBOUNCE_MS + 50)
+        assertEquals(3, ops.asked.size)
+        ops.gate = null
+        gate.complete(Unit)
+        MapHostRust.settle(transit)
+        // The empty view's answer is shown; the overtaken one (which had Bostancı) never was.
+        assertEquals(0, transit.radar.state.stops.size)
+        transit.close()
+    }
+
+    @Test fun aViewAsWideAsTheWorldAsksForEveryLongitudeAndOneAcrossTheAntimeridianForBothSides() {
+        val ops = SlowView(rust.ops)
+        val wide = MapCamera(0.0, 0.0, 2000.0).apply { setViewport(40_000, 400, 1f) }
+        val all = PickController(ops, scope, wide, listener)
+        MapHostRust.settle(all)
+        assertEquals(-180.0, ops.asked.last().west, 0.0)
+        assertEquals(180.0, ops.asked.last().east, 0.0)
+        all.close()
+
+        val edge = MapCamera(0.0, 179.999, 4.0).apply { setViewport(400, 800, 1f) }
+        val across = PickController(ops, scope, edge, listener)
+        MapHostRust.settle(across)
+        val box = ops.asked.last()
+        assertTrue("west ${box.west} east ${box.east}", box.west > 179.9 && box.east < -179.9)
+        assertTrue(box.south < 0.0 && box.north > 0.0)
+        across.close()
+    }
+
+    @Test fun refreshAsksAgainAfterAnImportAndCloseStopsFollowing() {
+        camera.setView(40.995, 29.01, 12.0)
+        val ops = SlowView(rust.ops)
+        val transit = PickController(ops, scope, camera, listener, dataDir = feedDir())
+        MapHostRust.settle(transit)
+        transit.refreshTransit()
+        MapHostRust.settle(transit)
+        assertEquals(2, ops.asked.size)
+        transit.close()
+        camera.jumpTo(40.95, 29.09)
+        MapHostRust.settle(transit)
+        assertEquals(2, ops.asked.size)
+    }
+
     // ---- failures and the log ----
 
     /** Counts the events of every replay and can be told to fail. */

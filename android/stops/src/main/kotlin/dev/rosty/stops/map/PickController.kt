@@ -18,6 +18,9 @@ import dev.rosty.core.model.stops.CrossingValidateAnswer
 import dev.rosty.core.model.stops.CrossingValidateRequest
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Ends
+import dev.rosty.core.model.stops.GtfsBbox
+import dev.rosty.core.model.stops.GtfsViewAnswer
+import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.PickEvent
 import dev.rosty.core.model.stops.PickLabelsAnswer
 import dev.rosty.core.model.stops.PickLabelsRequest
@@ -33,8 +36,11 @@ import dev.rosty.core.model.stops.SnapRequest
 import dev.rosty.core.ops.StopsOps
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
 
@@ -56,6 +62,8 @@ interface PickOps {
     suspend fun formats(request: CoordFormatRequest): Outcome<CoordFormatAnswer>
 
     suspend fun saveOffer(request: SaveOfferRequest): Outcome<SaveOfferAnswer>
+
+    suspend fun gtfsView(request: GtfsViewRequest): Outcome<GtfsViewAnswer>
 }
 
 /** [PickOps] over the Rust core (`stops.pick_*`, `stops.snap`, `stops.crossing_*`, `stops.coord_format`). */
@@ -78,6 +86,8 @@ class StopsPickOps(
     override suspend fun formats(request: CoordFormatRequest) = ops.coordFormat(request)
 
     override suspend fun saveOffer(request: SaveOfferRequest) = ops.pickSaveOffer(request)
+
+    override suspend fun gtfsView(request: GtfsViewRequest) = ops.gtfsView(request)
 }
 
 /** What the screen shows about the pick, straight from Rust (`pick_replay` and `pick_labels`). */
@@ -129,7 +139,12 @@ interface PickListener {
  *
  * A dragged pin follows the finger without a Rust call per move ([RadarHolder.dragTo], read in draw); the circle
  * follows a call or two behind. A tap never moves the view. Not a ViewModel: the screen's container owns it with
- * [scope], and sets what else is on the map through [radar] (`radar.update { it.copy(stops = ...) }`).
+ * [scope], and sets what else is on the map through [radar] (`radar.update { it.copy(position = ...) }`).
+ *
+ * It also keeps the transit stops of [radar] in step with the camera (`stops.gtfs_view`): when the view settles, and
+ * [transitDebounceMs] later, the stops inside it (at most [RadarStops.CAP], nearest the middle first) and the line of
+ * the pattern a picked stop carries are asked for; a view that changes again first cancels the request. Without an
+ * imported feed the stops are left as they are. [close] ends that.
  *
  * Call from the main thread.
  */
@@ -139,6 +154,9 @@ class PickController(
     private val scope: CoroutineScope,
     private val camera: MapCamera,
     private val listener: PickListener = object : PickListener {},
+    /** The Stops data directory, null for the app's own (`gtfs.json` is read from it). */
+    private val dataDir: String? = null,
+    private val transitDebounceMs: Long = TRANSIT_DEBOUNCE_MS,
 ) : MapGesturePolicy {
     /** The layers state the map's overlay draws. */
     val radar = RadarHolder()
@@ -170,8 +188,18 @@ class PickController(
     private var liveSent = 0
     private var liveDone = 0
 
-    /** Every gesture so far has been answered and the circle is up to date (tests wait for it). */
-    val idle: Boolean get() = pending == 0 && liveDone == liveSent
+    private val transitWake = Channel<Unit>(Channel.CONFLATED)
+    private var transitSent = 0
+    private var transitDone = 0
+    private var transitShown: GtfsViewRequest? = null
+    private val cameraListener: () -> Unit = { if (!camera.moving.value) wakeTransit() }
+
+    /** Requests to `stops.gtfs_view` so far (tests count them). */
+    var transitRequests = 0
+        private set
+
+    /** Every gesture so far has been answered and the circle and the stops are up to date (tests wait for it). */
+    val idle: Boolean get() = pending == 0 && liveDone == liveSent && transitDone == transitSent
 
     private class LiveCrossing(
         val a: Coord,
@@ -190,6 +218,17 @@ class PickController(
                 }
             }
         }
+        camera.addListener(cameraListener)
+        scope.launch {
+            transitWake.receiveAsFlow().collectLatest {
+                val sequence = transitSent
+                // The view changed again before this ran out: collectLatest starts over and this request is dropped.
+                delay(transitDebounceMs)
+                loadTransit()
+                transitDone = sequence
+            }
+        }
+        wakeTransit()
         scope.launch {
             for (request in live) {
                 val crossing = crossing(request.a, request.b)
@@ -205,6 +244,67 @@ class PickController(
     private fun enqueue(work: suspend () -> Unit) {
         pending++
         queue.trySend(work)
+    }
+
+    // ---- transit stops in view ----
+
+    /** Stops following the camera. The controller's scope ends the rest. */
+    fun close() {
+        camera.removeListener(cameraListener)
+    }
+
+    /** Asks for the stops in view again: a feed was imported or removed. */
+    fun refreshTransit() {
+        transitShown = null
+        wakeTransit()
+    }
+
+    private fun wakeTransit() {
+        transitSent++
+        transitWake.trySend(Unit)
+    }
+
+    /** The box the map shows plus the margin that keeps dots from popping at the edge (8 dp, as in GPUI). */
+    private fun viewBox(): GtfsBbox? {
+        val w = camera.widthPx
+        val h = camera.heightPx
+        if (w <= 0 || h <= 0) return null
+        val margin = TRANSIT_MARGIN_DP * camera.density
+        val south = camera.latAt(h + margin)
+        val north = camera.latAt(-margin)
+        // A view as wide as the world shows every longitude; otherwise west may be greater than east (antimeridian).
+        if (camera.worldPx <= w + 2 * margin) return GtfsBbox(south, -180.0, north, 180.0)
+        return GtfsBbox(south, camera.lonAt(-margin), north, camera.lonAt(w + margin))
+    }
+
+    private suspend fun loadTransit() {
+        val bbox = viewBox() ?: return
+        val ends = ui.value.ends
+        val request = GtfsViewRequest(bbox, RadarStops.CAP, pattern = ends.a?.pattern ?: ends.b?.pattern, dir = dataDir)
+        if (request == transitShown) return
+        transitRequests++
+        val answer = (ops.gtfsView(request) as? Outcome.Ok)?.value ?: return
+        transitShown = request
+        // No feed: whatever stops the screen put there itself stay.
+        if (!answer.hasFeed) return
+        val stops =
+            RadarStops(
+                DoubleArray(2 * answer.stops.size) { i ->
+                    answer.stops[i / 2].coord.let {
+                        if (i % 2 ==
+                            0
+                        ) {
+                            it.lat
+                        } else {
+                            it.lon
+                        }
+                    }
+                },
+                answer.stops.map { it.id },
+                answer.stops.map { it.name },
+            )
+        val line = answer.line?.let(::flatten) ?: RadarState.NO_POINTS
+        radar.update { it.copy(stops = stops, line = line) }
     }
 
     // ---- the map's gestures ----
@@ -447,6 +547,8 @@ class PickController(
                 crossing = crossing,
             )
         }
+        // A picked stop may carry the pattern whose line is drawn.
+        wakeTransit()
     }
 
     /** The circle on AB from Rust, or null when A and B make no valid one (too close, too far). */
@@ -507,6 +609,10 @@ class PickController(
          * (`snap::FAST_RADIUS_PX`). Whether the stop found takes the pin is Rust's decision (`stops.snap`).
          */
         const val SNAP_SEARCH_DP = 56f
+
+        /** How long the view must rest before its transit stops are asked for. */
+        const val TRANSIT_DEBOUNCE_MS = 150L
+        private const val TRANSIT_MARGIN_DP = 8f
         private const val SAMPLES = 16
         private const val OUTCOME_FULL = "full"
         private const val DECISION_SNAP = "snap"

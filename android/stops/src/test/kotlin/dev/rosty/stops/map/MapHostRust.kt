@@ -20,6 +20,7 @@ import java.nio.file.Files
  */
 internal class MapHostRust {
     val ops: PickOps
+    val stops: NativeStopsOps
 
     init {
         val lib = File(System.getProperty("rosty.hostLib").orEmpty())
@@ -40,7 +41,8 @@ internal class MapHostRust {
                     ).await()
             }
         assertTrue("Rust.init: $started", started is Outcome.Ok)
-        ops = StopsPickOps(NativeStopsOps(Rust.core()))
+        stops = NativeStopsOps(Rust.core())
+        ops = StopsPickOps(stops)
     }
 
     companion object {
@@ -51,7 +53,8 @@ internal class MapHostRust {
         fun settle(controller: PickController) {
             val deadline = System.currentTimeMillis() + 10_000
             while (true) {
-                shadowOf(Looper.getMainLooper()).idle()
+                // Advances the looper's clock too: the transit debounce is a delay on it.
+                shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(25))
                 if (controller.idle) return
                 check(System.currentTimeMillis() < deadline) { "the pick controller did not settle" }
                 Thread.sleep(2)

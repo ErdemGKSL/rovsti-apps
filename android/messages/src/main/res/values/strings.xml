@@ -188,4 +188,8 @@
     <string name="tools_exported">Chat exported</string>
     <string name="tools_copy_name">Copy Name</string>
     <string name="tools_copy_number">Copy Number</string>
+    <plurals name="conversation_unread">
+        <item quantity="one">%d unread message</item>
+        <item quantity="other">%d unread messages</item>
+    </plurals>
 </resources>

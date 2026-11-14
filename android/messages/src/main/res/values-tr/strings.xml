@@ -172,4 +172,8 @@
     <string name="tools_exported">Sohbet dışa aktarıldı</string>
     <string name="tools_copy_name">Adı Kopyala</string>
     <string name="tools_copy_number">Numarayı Kopyala</string>
+    <plurals name="conversation_unread">
+        <item quantity="one">%d okunmamış mesaj</item>
+        <item quantity="other">%d okunmamış mesaj</item>
+    </plurals>
 </resources>

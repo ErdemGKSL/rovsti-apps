@@ -15,12 +15,16 @@ internal object ConversationSample {
     const val NOW = 1_790_000_000_000L
 
     /** A small picture on disk, standing for an MMS part. */
-    fun picture(dir: File): File {
-        val file = File(dir, "mms-part.png")
+    fun picture(
+        dir: File,
+        name: String = "mms-part.png",
+        sky: Int = Color.rgb(90, 160, 220),
+    ): File {
+        val file = File(dir, name)
         if (!file.exists()) {
             val bmp = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
-            c.drawColor(Color.rgb(90, 160, 220))
+            c.drawColor(sky)
             c.drawCircle(300f, 90f, 50f, Paint().apply { color = Color.rgb(255, 214, 10) })
             c.drawRect(0f, 220f, 400f, 300f, Paint().apply { color = Color.rgb(60, 140, 80) })
             file.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -56,13 +60,14 @@ internal object ConversationSample {
     fun state(
         picture: File?,
         sim: String? = null,
+        divider: Pair<String, String>? = null,
     ): ConversationUi {
         val labels = DayLabels(java.time.ZoneId.of("UTC"), java.util.Locale.US, true, "Today", "Yesterday")
         return ConversationUi(
             title = "Mert Kaya",
             subtitle = "+90 555 000 00 01",
             avatar = RowAvatar(colorKey = "mert"),
-            items = withDays(bubbles(picture), labels, NOW).toImmutableList(),
+            items = withDays(bubbles(picture), labels, NOW, divider).toImmutableList(),
             loaded = true,
             hasOlder = true,
             composer = ComposerMode.Ready("Text message", sim, if (sim != null) "142 left · 1 SMS" else null),

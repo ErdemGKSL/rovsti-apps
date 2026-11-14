@@ -56,6 +56,8 @@ class ResourceSmsWords(
 
     override fun people(count: Int) = res.getQuantityString(R.plurals.sms_people, count, count)
 
+    override fun unread(count: Int) = res.getQuantityString(R.plurals.conversation_unread, count, count)
+
     override fun part(contentType: String) =
         res.getString(
             when {
@@ -125,6 +127,7 @@ fun SmsThreadPage(
                             SmsThreadSources(
                                 sms = container.sms,
                                 ops = container.ops,
+                                chat = container.chat,
                                 store = container.store,
                                 book = container.book.book,
                                 roleHeld = container.smsRole,

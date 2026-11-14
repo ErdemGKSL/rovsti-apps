@@ -3,6 +3,8 @@ package dev.rosty.messages.conversation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.rosty.core.Outcome
+import dev.rosty.core.getOrNull
+import dev.rosty.core.model.chat.UnreadDividerRequest
 import dev.rosty.core.model.messages.DeliveryState
 import dev.rosty.core.model.messages.EventResult
 import dev.rosty.core.model.messages.MmsPart
@@ -17,6 +19,7 @@ import dev.rosty.core.model.messages.TimelineEvent
 import dev.rosty.core.model.messages.TimelineItem
 import dev.rosty.core.model.messages.TimelineRequest
 import dev.rosty.core.model.messages.Waiting
+import dev.rosty.core.ops.ChatOps
 import dev.rosty.core.ops.MessagesOps
 import dev.rosty.design.text.UiText
 import dev.rosty.messages.R
@@ -63,6 +66,9 @@ interface SmsWords {
 
     fun people(count: Int): String
 
+    /** "3 unread messages", the divider above the first unread message. */
+    fun unread(count: Int): String
+
     fun part(contentType: String): String
 }
 
@@ -94,6 +100,7 @@ sealed interface ConversationEffect {
 class SmsThreadSources(
     val sms: SmsRepository,
     val ops: MessagesOps,
+    val chat: ChatOps,
     val store: MessagesStore,
     val book: StateFlow<Book>,
     val roleHeld: StateFlow<Boolean>,
@@ -134,6 +141,9 @@ class SmsThreadViewModel(
     private var nextLocal = sources.now()
     private val holds = HashMap<Long, Job>()
 
+    /** Unread incoming messages when the thread opened (before it was marked read); the divider sits above them. */
+    private var unreadAtOpen: Int? = null
+
     /** The tag of drafts and notifications. */
     val tag: String get() = "sms:$thread"
 
@@ -173,6 +183,10 @@ class SmsThreadViewModel(
     private suspend fun loadNewest() {
         if (thread <= 0) return
         val page = sources.sms.messages(thread, null)
+        if (unreadAtOpen == null) {
+            unreadAtOpen =
+                page.sms.count { !it.read && it.box == INBOX_BOX } + page.mms.count { !it.read && !it.outgoing }
+        }
         lock.withLock { events += TimelineEvent.page(page) }
         rebuild()
     }
@@ -215,11 +229,23 @@ class SmsThreadViewModel(
                 title = title,
                 subtitle = subtitleOf(title),
                 avatar = avatarOf(title),
-                items = withDays(bubbles, days, now).toImmutableList(),
+                items = withDays(bubbles, days, now, dividerOf(bubbles)).toImmutableList(),
                 loaded = true,
                 hasOlder = answer?.hasOlder ?: ui.value.hasOlder,
                 composer = composerMode(),
             )
+    }
+
+    /** Rust's `unread_jump.divider` over the bubbles (oldest first): the key it sits above and its words. */
+    private suspend fun dividerOf(bubbles: List<BubbleUi>): Pair<String, String>? {
+        val unread = unreadAtOpen ?: return null
+        if (unread == 0) return null
+        val answer =
+            sources.chat
+                .unreadDivider(UnreadDividerRequest(incoming = bubbles.map { !it.outgoing }, unread = unread))
+                .getOrNull() ?: return null
+        val at = answer.index ?: return null
+        return bubbles.getOrNull(at)?.let { it.key to words.unread(unread) }
     }
 
     private fun titleOf(): String {
@@ -529,6 +555,9 @@ class SmsThreadViewModel(
         const val UNDO_SEND_MS = 4_000L
         const val UNDO_DELETE_MS = 5_000L
         private const val TICK_MS = 1_000L
+
+        /** `Telephony.Sms.MESSAGE_TYPE_INBOX`: a received SMS. */
+        private const val INBOX_BOX = 1
         private const val NOW_MS = 60_000L
         private const val COUNTER_WITHIN = 30
         private const val MATCH_DIGITS = 9

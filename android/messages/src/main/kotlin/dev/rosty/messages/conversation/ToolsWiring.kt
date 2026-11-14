@@ -3,22 +3,38 @@ package dev.rosty.messages.conversation
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import dev.rosty.core.model.chat.GalleryAnswer
 import dev.rosty.design.controls.SegmentedControl
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.list.ListRow
 import dev.rosty.design.list.SectionHeader
+import dev.rosty.design.media.SizedImage
 import dev.rosty.design.overlay.ActionSheetAction
 import dev.rosty.design.overlay.ActionSheetEntry
 import dev.rosty.design.overlay.Detent
@@ -119,7 +135,19 @@ fun headerMenu(
 /** Jump to date (M24) with the quick picks of GPUI: Today, Yesterday, 1 week ago, 1 month ago. */
 private fun presentJump(host: ToolHost) {
     val c = host.context
-    val today = LocalDate.now()
+    host.overlays.presentJumpToDate(c, LocalDate.now()) { start ->
+        val found = host.tools.jumpTo(start)
+        if (!found) host.overlays.showToast(c.getString(R.string.tools_further_back))
+    }
+}
+
+/** The jump-to-date sheet: [onPick] gets the start of the picked day in the phone's zone. */
+internal fun OverlayController.presentJumpToDate(
+    c: Context,
+    today: LocalDate,
+    zone: ZoneId = ZoneId.systemDefault(),
+    onPick: (Long) -> Unit,
+) {
     val picks =
         listOf(
             R.string.conversation_today to today,
@@ -127,21 +155,15 @@ private fun presentJump(host: ToolHost) {
             R.string.tools_week_ago to today.minusWeeks(1),
             R.string.tools_month_ago to today.minusMonths(1),
         )
-    host.overlays.present(
+    present(
         ActionSheetEntry(
             title = c.getString(R.string.tools_jump_date),
             actions =
                 picks
                     .map { (label, day) ->
-                        ActionSheetAction(c.getString(label)) {
-                            val start = day.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                            if (!host.tools.jumpTo(
-                                    start,
-                                )
-                            ) {
-                                host.overlays.showToast(c.getString(R.string.tools_further_back))
-                            }
-                        }
+                        ActionSheetAction(
+                            c.getString(label),
+                        ) { onPick(day.atStartOfDay(zone).toInstant().toEpochMilli()) }
                     }.toImmutableList(),
             cancelLabel = c.getString(R.string.inbox_cancel),
         ),
@@ -154,28 +176,37 @@ private enum class GalleryTabKind { Media, Links, Docs }
 private fun presentGallery(host: ToolHost) {
     host.scope.launch {
         val answer = host.tools.gallery() ?: return@launch
-        host.overlays.present(
-            SheetEntry(
-                title = host.context.getString(R.string.tools_gallery),
-                detents = persistentListOf(Detent.Medium, Detent.Large),
-            ) { sheet ->
-                GallerySheet(answer, host) { key ->
-                    host.overlays.dismissAll()
-                    host.tools.reveal(key)
-                }
-            },
-        )
+        val models = host.tools.mediaModels()
+        host.overlays.presentGallery(host.context, answer, models::get) { key ->
+            host.overlays.dismissAll()
+            host.tools.reveal(key)
+        }
     }
+}
+
+/** The gallery sheet over Rust's [answer]; [modelOf] gives a media item's picture (a file or URI) for the grid. */
+internal fun OverlayController.presentGallery(
+    c: Context,
+    answer: GalleryAnswer,
+    modelOf: (String) -> Any?,
+    onOpen: (String) -> Unit,
+) {
+    present(
+        SheetEntry(
+            title = c.getString(R.string.tools_gallery),
+            detents = persistentListOf(Detent.Medium, Detent.Large),
+        ) { _ -> GallerySheet(c, answer, modelOf, onOpen) },
+    )
 }
 
 @Composable
 private fun GallerySheet(
+    c: Context,
     answer: GalleryAnswer,
-    host: ToolHost,
+    modelOf: (String) -> Any?,
     onOpen: (String) -> Unit,
 ) {
-    val c = host.context
-    val tab = remember { androidx.compose.runtime.mutableStateOf(GalleryTabKind.Media) }
+    var tab by remember { mutableStateOf(GalleryTabKind.Media) }
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag(ToolTags.Gallery)) {
         SegmentedControl(
             items =
@@ -184,26 +215,26 @@ private fun GallerySheet(
                     c.getString(R.string.tools_tab_links),
                     c.getString(R.string.tools_tab_docs),
                 ),
-            selected = tab.value.ordinal,
-            onSelect = { tab.value = GalleryTabKind.entries[it] },
+            selected = tab.ordinal,
+            onSelect = { tab = GalleryTabKind.entries[it] },
             modifier = Modifier.padding(horizontal = Spacing.gutter, vertical = Spacing.s),
         )
-        val rows: List<Triple<String, String, String?>> =
-            when (tab.value) {
-                GalleryTabKind.Media -> answer.media.map { Triple(it.id, c.getString(R.string.wa_photo), null) }
-                GalleryTabKind.Links -> answer.links.map { Triple(it.id, it.short, it.host) }
-                GalleryTabKind.Docs -> answer.docs.map { Triple(it.id, it.name, it.detail) }
+        val count =
+            when (tab) {
+                GalleryTabKind.Media -> answer.media.size
+                GalleryTabKind.Links -> answer.links.size
+                GalleryTabKind.Docs -> answer.docs.size
             }
         val sections =
-            when (tab.value) {
+            when (tab) {
                 GalleryTabKind.Media -> answer.mediaSections
                 GalleryTabKind.Links -> answer.linkSections
                 GalleryTabKind.Docs -> answer.docSections
             }
-        if (rows.isEmpty()) {
+        if (count == 0) {
             RostyText(
                 c.getString(
-                    when (tab.value) {
+                    when (tab) {
                         GalleryTabKind.Media -> R.string.tools_no_media
                         GalleryTabKind.Links -> R.string.tools_no_links
                         GalleryTabKind.Docs -> R.string.tools_no_docs
@@ -215,16 +246,82 @@ private fun GallerySheet(
         }
         for (section in sections) {
             SectionHeader(section.label)
-            for (i in section.start until section.end.coerceAtMost(rows.size)) {
-                val (id, title, detail) = rows[i]
-                ListRow(title = title, secondary = detail, onClick = { onOpen(id) })
+            val range = section.start until section.end.coerceAtMost(count)
+            when (tab) {
+                GalleryTabKind.Media -> {
+                    MediaGrid(range.map { answer.media[it].id }, modelOf, c, onOpen)
+                }
+
+                GalleryTabKind.Links -> {
+                    for (i in range) {
+                        val link = answer.links[i]
+                        ListRow(title = link.short, secondary = link.host, onClick = { onOpen(link.id) })
+                    }
+                }
+
+                GalleryTabKind.Docs -> {
+                    for (i in range) {
+                        val doc = answer.docs[i]
+                        ListRow(title = doc.name, secondary = doc.detail, onClick = { onOpen(doc.id) })
+                    }
+                }
             }
         }
     }
 }
 
+/** Square thumbnails, [GRID_COLUMNS] a row with hairline gaps, as Photos lays out a month. */
+@Composable
+private fun MediaGrid(
+    ids: List<String>,
+    modelOf: (String) -> Any?,
+    c: Context,
+    onOpen: (String) -> Unit,
+) {
+    val photo = c.getString(R.string.wa_photo)
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter)) {
+        val gap = GRID_GAP
+        val side = (maxWidth - gap * (GRID_COLUMNS - 1)) / GRID_COLUMNS
+        val px = with(LocalDensity.current) { side.roundToPx() }
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            for (row in ids.chunked(GRID_COLUMNS)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    for (id in row) {
+                        Box(
+                            Modifier
+                                .size(side)
+                                .clip(RoundedCornerShape(GRID_RADIUS))
+                                .background(RostyTheme.colors.fillSecondary)
+                                .testTag(ToolTags.media(id))
+                                .clickable { onOpen(id) },
+                        ) {
+                            val model = modelOf(id)
+                            if (model != null) {
+                                SizedImage(
+                                    model = model,
+                                    widthPx = px,
+                                    heightPx = px,
+                                    modifier = Modifier.matchParentSize(),
+                                    contentScale = ContentScale.Crop,
+                                    contentDescription = photo,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val GRID_COLUMNS = 3
+private val GRID_GAP = 2.dp
+private val GRID_RADIUS = 4.dp
+
 object ToolTags {
     const val Gallery = "tools-gallery"
+
+    fun media(id: String) = "tools-media-$id"
 }
 
 /**

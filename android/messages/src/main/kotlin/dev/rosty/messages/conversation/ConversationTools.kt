@@ -162,6 +162,12 @@ class ConversationTools(
             ) as? Outcome.Ok
         )?.value
 
+    /** The picture of each loaded media message by bubble key, for the gallery grid. */
+    fun mediaModels(): Map<String, Any?> =
+        bubbles()
+            .mapNotNull { b -> b.media.firstOrNull { it.isImage }?.let { b.key to it.model } }
+            .toMap()
+
     /** The loaded messages as text: "Chat with …", day blocks, "[14:05] Ada: hi" (mine as "Me"). */
     suspend fun export(
         title: String,

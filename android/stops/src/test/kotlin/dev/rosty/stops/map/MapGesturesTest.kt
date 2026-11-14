@@ -73,6 +73,7 @@ class MapGesturesTest : ShotTest() {
         override fun onDrag(
             x: Float,
             y: Float,
+            uptimeMs: Long,
         ) {
             drags += Offset(x, y)
         }
@@ -82,6 +83,7 @@ class MapGesturesTest : ShotTest() {
             y: Float,
             velocityX: Float,
             velocityY: Float,
+            uptimeMs: Long,
         ) {
             drop = Offset(x, y)
             dropVelocity = Offset(velocityX, velocityY)

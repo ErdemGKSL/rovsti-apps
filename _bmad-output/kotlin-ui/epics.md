@@ -1566,6 +1566,9 @@ checklist, full gate, close X.2. Next planner after X.2: F40. E6 and E7 run in p
 > `ui-overhaul`. Planners on `ui-overhaul` skip E6 (do not plan, edit `android/messages` or change E6 statuses).
 > E8 still needs E6 done.
 
+**R1** -> `_bmad-output/kotlin-ui/plans/e6-r1.md` (planned 2026-11-14 at base `9e3432e`, the Rosty rename): E6.1, E6.4s, E6.2,
+E6.3, E6.4a, E6.6, E6.7, E6.8. Progress notes for the main thread: `_bmad-output/kotlin-ui/plans/e6-status.md`.
+
 Goal: parity with `apps/messages` (roadmap "Rosty Messages", `util-messages*.md` M1-M50, `messages.md`, AD-MSG1 to
 AD-MSG9, AD-WA11), then polish.
 
@@ -1590,16 +1593,16 @@ AD-MSG9, AD-WA11), then polish.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E6.1 | App module, SMS role, manifest parity, tabs, permissions, migration test | R1 | todo |
-| E6.2 | Unified inbox | R1 | todo |
-| E6.3 | SMS and MMS conversation | R1 | todo |
-| E6.4s | WhatsApp offline store and per-device sync engine (owner request 2026-11-10; before E6.2 and E6.4a) | R1 | todo |
-| E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | todo |
+| E6.1 | App module, SMS role, manifest parity, tabs, permissions, migration test | R1 | in-progress |
+| E6.2 | Unified inbox | R1 | in-progress |
+| E6.3 | SMS and MMS conversation | R1 | in-progress |
+| E6.4s | WhatsApp offline store and per-device sync engine (owner request 2026-11-10; before E6.2 and E6.4a) | R1 | in-progress |
+| E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | in-progress |
 | E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | todo |
 | E6.5 | Message context menu, select mode, detection pills | R2 | todo |
-| E6.6 | Conversation tools | R1 | todo |
-| E6.7 | Viewers: images, status, contact card, attachments | R1 | todo |
-| E6.8 | New conversation, forward, share-in, intents | R1 | todo |
+| E6.6 | Conversation tools | R1 | in-progress |
+| E6.7 | Viewers: images, status, contact card, attachments | R1 | in-progress |
+| E6.8 | New conversation, forward, share-in, intents | R1 | in-progress |
 | E6.9 | Notifications and inline reply | R2 | todo |
 | E6.10 | Scheduled send | R2 | todo |
 | E6.11 | Spam | R2 | todo |

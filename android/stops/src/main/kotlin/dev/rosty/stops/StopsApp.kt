@@ -10,8 +10,6 @@ import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.transition.TabNavigator
 import dev.rosty.shell.RostyShell
 import dev.rosty.stops.home.HomeEntry
-import dev.rosty.stops.home.MapLayer
-import dev.rosty.stops.home.RadarMapLayer
 import dev.rosty.stops.home.StopsIcons
 import dev.rosty.stops.settings.AboutEntry
 import dev.rosty.stops.settings.AppearanceEntry
@@ -23,15 +21,13 @@ import kotlinx.collections.immutable.persistentListOf
 
 /**
  * The screens of Rosty Stops: one [RostyShell] over the activity's navigator (the shell provides the overlay host and
- * the backdrop root above every page). [mapLayer] is the map under the home; until the tile renderer (E7.2a/b) is
- * wired it is the radar background, and tests pass a fixed picture.
+ * the backdrop root above every page).
  */
 @Composable
 fun StopsApp(
     container: StopsContainer,
     navigator: TabNavigator<StopsRoute>,
     overlays: OverlayController = remember { OverlayController() },
-    mapLayer: MapLayer = RadarMapLayer,
 ) {
     // The host's own bar is never shown (chromeFor hides it); the tab list only names the one stack.
     val tabs = persistentListOf(TabItem(TripTab.id, stringResource(R.string.tab_trip), StopsIcons.Navigation))
@@ -51,7 +47,7 @@ fun StopsApp(
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
     ) {
-        entry<StopsRoute.Home> { HomeEntry(container, navigator, mapLayer) }
+        entry<StopsRoute.Home> { HomeEntry(container, navigator) }
         entry<StopsRoute.Settings> { StopsSettingsEntry(container, onOpen = navigator::push, onBack = pop) }
         entry<StopsRoute.Appearance> { AppearanceEntry(container.commonSettings, pop, popToRoot) }
         entry<StopsRoute.About> {

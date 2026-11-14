@@ -32,4 +32,8 @@
     </plurals>
     <string name="settings_group_map">Harita</string>
     <string name="settings_tile_server">Harita Sunucusu</string>
+    <string name="home_copied">Kopyalandı</string>
+    <string name="home_no_maps_app">Bu yeri açabilecek bir uygulama yok.</string>
+    <string name="qr_title">QR Kodu</string>
+    <string name="qr_share">Paylaş</string>
 </resources>

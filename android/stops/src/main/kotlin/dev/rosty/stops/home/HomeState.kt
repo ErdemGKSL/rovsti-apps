@@ -3,7 +3,9 @@ package dev.rosty.stops.home
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.rosty.core.model.stops.Ends
 import dev.rosty.core.model.stops.SavedStop
+import dev.rosty.core.model.stops.SavedStops
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -27,6 +29,10 @@ data class HomeState(
     val tileServer: String = DEFAULT_TILE_HOST,
     /** S40: saved stops drawn on the map. */
     val savedOnMap: Boolean = true,
+    /** `saved.json` as read (the pin menu's "Save as stop" offer and the map markers need the whole file). */
+    val savedFile: SavedStops? = null,
+    /** The draft ends of the last session. */
+    val draft: Ends? = null,
 )
 
 /** The public VersaTiles server, the default when `tile_url` is unset (`rosty_tiles`). */
@@ -46,6 +52,8 @@ fun homeStateOf(snapshot: HomeSnapshot): HomeState =
         transitImportedMs = snapshot.transitImportedMs,
         tileServer = tileServerHost(snapshot.prefs.tileUrl),
         savedOnMap = snapshot.prefs.showSavedOnMap,
+        savedFile = snapshot.saved,
+        draft = snapshot.draft,
     )
 
 /**

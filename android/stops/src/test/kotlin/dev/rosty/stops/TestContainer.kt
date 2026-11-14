@@ -20,14 +20,19 @@ import dev.rosty.core.model.stops.StopsPrefs
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripLoadAnswer
+import dev.rosty.core.model.stops.StoreWriteRequest
 import dev.rosty.core.model.stops.TripRecord
 import dev.rosty.platform.location.FakeLocationRepository
 import dev.rosty.platform.location.FakeTripRepository
+import dev.rosty.platform.location.Fix
 import dev.rosty.platform.location.LocationRepository
 import dev.rosty.platform.location.TripRepository
 import dev.rosty.platform.system.FakeSpecialAccess
 import dev.rosty.platform.system.permissions.SpecialAccess
 import dev.rosty.shell.HasContainer
+import dev.rosty.stops.map.FakeTileSource
+import dev.rosty.stops.map.MapFixtures
+import dev.rosty.stops.map.TileSource
 import dev.rosty.wa.FakeWaRepository
 import dev.rosty.wa.WaRepository
 import kotlinx.serialization.json.Json
@@ -36,12 +41,21 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import dev.rosty.core.model.stops.Outcome as TripOutcome
 
-/** Invented sample data for the home (public places of Istanbul, made-up names). */
+/**
+ * Invented sample data for the home, on the fixture tile the map tests use (`MapFixtures.CITY_*`, a village east of
+ * Istanbul): two saved stops, one past trip; made-up names.
+ */
 object SampleStops {
-    val pierW = Endpoint("Pier West", Coord(41.0, 28.994))
-    val pierE = Endpoint("Pier East", Coord(41.0, 29.006))
-    val school = Endpoint("School Gate", Coord(40.99, 29.02))
-    val library = Endpoint("Library", Coord(40.992, 29.03))
+    private val lat0 = MapFixtures.cityLat
+    private val lon0 = MapFixtures.cityLon
+
+    val pierW = Endpoint("Pier West", Coord(lat0 + 0.002, lon0 - 0.006))
+    val pierE = Endpoint("Pier East", Coord(lat0 + 0.002, lon0 + 0.002))
+    val school = Endpoint("School Gate", Coord(lat0 - 0.004, lon0 - 0.003))
+    val library = Endpoint("Library", Coord(lat0 - 0.0035, lon0 + 0.005))
+
+    /** Where the fake location says the phone is: the middle of the tile. */
+    val here = Fix(lat0, lon0, accuracyM = 25.0, timeMs = 0L)
 
     val saved =
         SavedStops(
@@ -86,6 +100,7 @@ class FakeStopsCore(
 ) {
     val core = FakeRustCore()
     val savedPrefs = mutableListOf<StopsPrefs>()
+    val writes = mutableListOf<StoreWriteRequest>()
 
     init {
         core.onTyped("stops.prefs_load", DirRequest.serializer(), PrefsLoadAnswer.serializer()) {
@@ -115,6 +130,10 @@ class FakeStopsCore(
                 }
             Outcome.Ok(StoreReadAnswer(req.file, value, discarded = false))
         }
+        core.onTyped("stops.store_write", StoreWriteRequest.serializer(), Empty.serializer()) {
+            writes += it
+            Outcome.Ok(Empty)
+        }
         core.onTyped("stops.gtfs_search", GtfsSearchRequest.serializer(), GtfsSearchAnswer.serializer()) {
             Outcome.Ok(GtfsSearchAnswer(transitImportedMs != null, transitImportedMs, emptyList()))
         }
@@ -138,7 +157,7 @@ open class TestStopsContainer(
     context: Context,
     val fake: FakeStopsCore = FakeStopsCore(),
 ) : StopsContainer(context) {
-    val fakeLocation = FakeLocationRepository()
+    val fakeLocation = FakeLocationRepository(last = SampleStops.here)
     val fakeTrips = FakeTripRepository()
 
     override fun createRust(): RustCore = fake.core
@@ -150,6 +169,11 @@ open class TestStopsContainer(
     override fun createLocation(): LocationRepository = fakeLocation
 
     override fun createTrips(): TripRepository = fakeTrips
+
+    /** The fixture village and nothing else: no network, deterministic tiles. */
+    val tileSource = FakeTileSource.city()
+
+    override fun createTileSource(): TileSource = tileSource
 }
 
 /** An `Application` whose container is a [TestStopsContainer] (the activity tests). */

@@ -37,4 +37,9 @@
     <!-- Settings (E7.10 adds the alarm, tiles, GTFS and message pages). -->
     <string name="settings_group_map">Map</string>
     <string name="settings_tile_server">Tile Server</string>
+    <!-- Map actions. -->
+    <string name="home_copied">Copied</string>
+    <string name="home_no_maps_app">No app can open this place.</string>
+    <string name="qr_title">QR Code</string>
+    <string name="qr_share">Share</string>
 </resources>

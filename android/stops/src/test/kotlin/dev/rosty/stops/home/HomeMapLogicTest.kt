@@ -1,0 +1,35 @@
+package dev.rosty.stops.home
+
+import dev.rosty.platform.location.Fix
+import dev.rosty.stops.SampleStops
+import kotlinx.collections.immutable.toImmutableList
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class HomeMapLogicTest {
+    private val fix = Fix(41.1, 29.2, 20.0, 0L)
+
+    @Test fun aTripInProgressWinsTheFirstView() {
+        val state = HomeState(trip = TripSummary("A – B", SampleStops.pierW, SampleStops.pierE))
+        val view = firstView(state, fix) as FirstView.Fit
+        assertEquals(4, view.latLon.size)
+        assertEquals(SampleStops.pierE.coord.lon, view.latLon[3], 0.0)
+    }
+
+    @Test fun thenMyPositionThenTheSavedStopsThenTheDefault() {
+        assertEquals(FirstView.Centre(41.1, 29.2), firstView(HomeState(), fix))
+        val saved = HomeState(saved = SampleStops.saved.stops.toImmutableList())
+        val fit = firstView(saved, null) as FirstView.Fit
+        assertEquals(8, fit.latLon.size)
+        assertEquals(FirstView.Default, firstView(HomeState(), null))
+        assertEquals(FirstView.Default, firstView(HomeState(), Fix(Double.NaN, 1.0, 1.0, 0)))
+    }
+
+    @Test fun toastsClearTheHigherOfTheBlockAndTheSheet() {
+        // Block 300 px tall from the window bottom, sheet 360 px: the toast clears the sheet, less inset and margin.
+        assertEquals(360 - 72 - 24, toastBarPx(300f, 360f, 72f, 24f))
+        assertEquals(500 - 72 - 24, toastBarPx(500f, 360f, 72f, 24f))
+        assertTrue(toastBarPx(0f, 0f, 72f, 24f) == 0)
+    }
+}

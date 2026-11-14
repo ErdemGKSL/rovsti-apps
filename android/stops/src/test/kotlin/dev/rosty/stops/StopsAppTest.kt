@@ -19,6 +19,7 @@ import dev.rosty.stops.home.HomeTags
 import dev.rosty.stops.settings.SettingsTags
 import dev.rosty.testing.ShotTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.robolectric.annotation.Config
 
@@ -48,6 +49,17 @@ class StopsAppTest : ShotTest() {
         }
         compose.onNodeWithTag(HomeSheetTags.Title).assertIsDisplayed()
         compose.onNodeWithText("Plan a trip").assertIsDisplayed()
+    }
+
+    @Test fun theRealMapDrawsWithItsScaleBarAttributionAndHint() {
+        val fixture = start()
+        compose.onNodeWithTag(HomeTags.ScaleBar, useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("© OpenStreetMap contributors", substring = true, useUnmergedTree = true).assertExists()
+        // The fixture tile around the fake position was asked for.
+        assertTrue(
+            fixture.container.tileSource.requests
+                .isNotEmpty(),
+        )
     }
 
     @Test fun theSheetShowsWhatTheFilesHold() {

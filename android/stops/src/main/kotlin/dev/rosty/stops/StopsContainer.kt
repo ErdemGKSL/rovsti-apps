@@ -3,8 +3,10 @@ package dev.rosty.stops
 import android.content.Context
 import dev.rosty.core.Outcome
 import dev.rosty.core.model.stops.TilesOpenRequest
+import dev.rosty.core.ops.NativeQrOps
 import dev.rosty.core.ops.NativeStopsOps
 import dev.rosty.core.ops.NativeTilesOps
+import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.StopsOps
 import dev.rosty.core.ops.TileHandle
 import dev.rosty.core.ops.TilesOps
@@ -20,6 +22,7 @@ import dev.rosty.stops.data.StopsStore
 import dev.rosty.stops.data.StopsTiles
 import dev.rosty.stops.home.CoreHomeData
 import dev.rosty.stops.home.HomeData
+import dev.rosty.stops.map.TileSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 
@@ -52,6 +55,21 @@ open class StopsContainer(
         )
     }
 
+    /**
+     * Where the map screen gets its tiles: the open [tiles] handle, opened on the first tile asked for (so the
+     * container stays cheap) and reopened when the server changes.
+     */
+    open fun createTileSource(): TileSource =
+        TileSource { z, x, y, dark ->
+            when (val handle = tiles.handle()) {
+                is Outcome.Err -> handle
+                is Outcome.Ok -> handle.value.tile(z, x, y, dark = dark)
+            }
+        }
+
+    /** QR codes of places and stops (S3). */
+    val qr: QrOps by lazy { createQr() }
+
     /** One-shot fixes and live updates for the map's blue dot and follow mode. */
     val location: LocationRepository by lazy { createLocation() }
 
@@ -70,6 +88,8 @@ open class StopsContainer(
 
     protected open suspend fun openTiles(request: TilesOpenRequest): Outcome<TileHandle> =
         TileHandle.open(request, tilesOps)
+
+    protected open fun createQr(): QrOps = NativeQrOps(rust)
 
     protected open fun createLocation(): LocationRepository = AndroidLocationRepository(context)
 

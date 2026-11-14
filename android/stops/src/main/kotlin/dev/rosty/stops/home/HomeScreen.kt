@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -22,6 +23,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -52,6 +55,7 @@ import dev.rosty.design.controls.ChipModel
 import dev.rosty.design.controls.ChipRow
 import dev.rosty.design.controls.GlassIconButton
 import dev.rosty.design.glass.GlassPreset
+import dev.rosty.design.glass.LocalAppBackdropFrozen
 import dev.rosty.design.glass.rostyGlass
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
@@ -78,6 +82,9 @@ object HomeTags {
     const val Options = "home-map-options"
     const val Bottom = "home-bottom"
     const val TabBar = "home-tab-bar"
+    const val Hint = "home-hint"
+    const val MapFooter = "home-map-footer"
+    const val ScaleBar = "home-scale-bar"
 }
 
 /** What the home's chrome asks for; every action of a later story is a no-op until it is wired. */
@@ -94,7 +101,7 @@ class HomeActions(
 /**
  * The map home (ARCH 8.4, SKILL navigation-layout 9). Layers, bottom to top:
  *
- * 1. [mapLayer], the full window under both system bars, recorded by a [BackdropScope] so the chrome's glass samples it;
+ * 1. [map] (`StopsMap`), the full window under both system bars, recorded by a [BackdropScope] so the chrome's glass samples it;
  * 2. floating chrome: the search pill and the one-line chip row at the top, and at the bottom one block holding the
  *    button column (locate, layers, map options) and the home's tab bar folded to a circle. The block rides the sheet by
  *    a `graphicsLayer` translation only (no relayout), up to the medium detent, and fades as the sheet grows past it;
@@ -105,19 +112,21 @@ class HomeActions(
 @Composable
 fun StopsHome(
     state: HomeState,
-    mapLayer: MapLayer,
+    map: @Composable (Modifier) -> Unit,
     tabs: ImmutableList<TabItem>,
     selectedTab: HomeTab,
     actions: HomeActions,
     modifier: Modifier = Modifier,
     camera: MapCameraPadding = remember { MapCameraPadding() },
     chips: ImmutableList<ChipModel> = persistentListOf(),
+    hint: String? = null,
+    mapFooter: @Composable RowScope.() -> Unit = {},
+    motionFrozen: () -> Boolean = { false },
+    sheetContent: @Composable () -> Unit = { MapSheetContent(state, actions.onOpenSaved, actions.onOpenHistory) },
 ) {
     var detentFromTallest by rememberSaveable { mutableIntStateOf(MapSheetDetents.lastIndex) }
     val entry =
-        rememberMapSheet(detentFromTallest) { _ ->
-            MapSheetContent(state, actions.onOpenSaved, actions.onOpenHistory)
-        }
+        rememberMapSheet(detentFromTallest) { _ -> sheetContent() }
     val density = LocalDensity.current
     val bottomInsetPx = WindowInsets.safeDrawing.getBottom(density).toFloat()
     val gapPx = with(density) { Spacing.s.toPx() }
@@ -129,7 +138,11 @@ fun StopsHome(
     var blockPx by remember { mutableFloatStateOf(0f) }
     var buttonsWidthPx by remember { mutableFloatStateOf(0f) }
     var unfolded by remember { mutableStateOf(false) }
-    val barMetrics = remember { ChromeMetrics() }
+    // Toasts (the third-tap hint, "Copied") rise above the riding block and the settled sheet, not over the scale bar:
+    // the bar hands these metrics to the overlay host, and the settle below writes the clearance into them (the bar's
+    // own height write on a fold is read back and replaced).
+    val toastMetrics = remember { ChromeMetrics() }
+    val barMarginPx = with(density) { ChromeMetrics.BarMargin.toPx() }
     // A wide window (landscape, tablets) has room beside the centred sheet: the chrome stays put there and the folded
     // bar keeps to the start edge, so the sheet never covers it.
     val sideRoom = with(density) { sideRoomDp(windowWidthPx.toDp(), Sizes.sheetMaxWidth) }
@@ -149,9 +162,30 @@ fun StopsHome(
                 fromTallest = sheet?.let { s -> s.detentOffsets.indexOfFirst { it == s.settledOffset } } ?: -1,
                 topPx = topChromeBottomPx,
                 endPx = buttonsWidthPx,
+                blockPx = blockPx,
+                windowPx = windowPx,
+                wide = wide,
+                barWrite = toastMetrics.bottomBarPx,
             )
         }.collect { inputs ->
             if (inputs.fromTallest >= 0) detentFromTallest = inputs.fromTallest
+            val lift =
+                if (inputs.wide) {
+                    0f
+                } else {
+                    val maxVisible =
+                        rideMaxVisiblePx(
+                            inputs.windowPx * MEDIUM_SHARE,
+                            inputs.windowPx,
+                            inputs.topPx,
+                            inputs.blockPx,
+                            bottomInsetPx,
+                            gapPx,
+                        )
+                    -sheetRideTranslation(inputs.settledVisiblePx, bottomInsetPx, maxVisible)
+                }
+            toastMetrics.bottomBarPx =
+                toastBarPx(inputs.blockPx + lift, inputs.settledVisiblePx, bottomInsetPx, barMarginPx)
             with(density) {
                 camera.update(
                     PaddingValues(
@@ -174,83 +208,117 @@ fun StopsHome(
                 }.testTag(HomeTags.Root),
         baseBg = RostyTheme.colors.page,
         chrome = {
-            // Top: the search / pick pill and the chip row, inside the safe area.
-            Column(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-                    ).padding(top = Spacing.s)
-                    .widthIn(max = Sizes.contentMaxWidth)
-                    .fillMaxWidth()
-                    .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom },
-            ) {
-                SearchPill(actions.onSearch, Modifier.padding(horizontal = Spacing.gutter))
-                if (chips.isNotEmpty()) {
-                    Spacer(Modifier.height(Spacing.s))
-                    ChipRow(
-                        chips = chips,
-                        selected = "",
-                        onSelect = {},
-                        modifier = Modifier.height(StopsSizes.chipRow).testTag(HomeTags.Chips),
-                    )
-                }
-            }
-            // Bottom: the button column over the folded tab bar, one block riding the sheet.
-            Column(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .onSizeChanged { blockPx = it.height.toFloat() }
-                    .graphicsLayer {
-                        val sheet = entry.sheet
-                        if (wide) return@graphicsLayer
-                        val container = sheet?.containerHeight ?: windowPx
-                        val visible = if (sheet == null) 0f else sheetVisiblePx(sheet.offset.value, container)
-                        val maxVisible =
-                            rideMaxVisiblePx(
-                                mediumVisiblePx = container * MEDIUM_SHARE,
-                                windowHeightPx = windowPx,
-                                topChromeBottomPx = topChromeBottomPx,
-                                blockHeightPx = blockPx,
-                                bottomInsetPx = bottomInsetPx,
-                                gapPx = gapPx,
+            // While the map moves the chrome's glass keeps its last capture (MapMotionEffect feeds the gate).
+            val outer = LocalAppBackdropFrozen.current
+            CompositionLocalProvider(LocalAppBackdropFrozen provides { outer() || motionFrozen() }) {
+                Box(Modifier.fillMaxSize()) {
+                    // Top: the search / pick pill and the chip row, inside the safe area.
+                    Column(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .windowInsetsPadding(
+                                WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                            ).padding(top = Spacing.s)
+                            .widthIn(max = Sizes.contentMaxWidth)
+                            .fillMaxWidth()
+                            .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom },
+                    ) {
+                        SearchPill(actions.onSearch, Modifier.padding(horizontal = Spacing.gutter))
+                        if (!hint.isNullOrBlank()) {
+                            Spacer(Modifier.height(Spacing.s))
+                            HintPill(hint, Modifier.align(Alignment.CenterHorizontally))
+                        }
+                        if (chips.isNotEmpty()) {
+                            Spacer(Modifier.height(Spacing.s))
+                            ChipRow(
+                                chips = chips,
+                                selected = "",
+                                onSelect = {},
+                                modifier = Modifier.height(StopsSizes.chipRow).testTag(HomeTags.Chips),
                             )
-                        translationY = sheetRideTranslation(visible, bottomInsetPx, maxVisible)
-                        alpha = sheetRideAlpha(visible, maxVisible, fadePx)
-                    }.testTag(HomeTags.Bottom)
-                    // The bottom inset is taken here (the bar inside then adds only its 8 dp margin), so the block
-                    // rests above the gesture area with or without the bar.
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
-                horizontalAlignment = Alignment.End,
-            ) {
-                MapButtons(
-                    actions,
-                    Modifier
-                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                        .padding(end = StopsSizes.buttonColumnEnd)
-                        .onSizeChanged { buttonsWidthPx = it.width.toFloat() + gapPx },
-                )
-                Spacer(Modifier.height(Spacing.s))
-                RostyTabBar(
-                    tabs = tabs,
-                    selected = tabs.indexOfFirst { it.id == selectedTab.id }.coerceAtLeast(0),
-                    onSelect = { index ->
-                        unfolded = false
-                        HomeTab.entries.firstOrNull { it.id == tabs[index].id }?.let(actions.onTab)
-                    },
-                    onReselect = { unfolded = false },
-                    modifier =
-                        (if (wide) Modifier.align(Alignment.Start).width(sideRoom) else Modifier)
-                            .testTag(HomeTags.TabBar),
-                    folded = !unfolded,
-                    onFoldedClick = { unfolded = true },
-                    chrome = barMetrics,
-                )
+                        }
+                    }
+                    // Bottom: the button column over the folded tab bar, one block riding the sheet.
+                    Column(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .onSizeChanged { blockPx = it.height.toFloat() }
+                            .graphicsLayer {
+                                val sheet = entry.sheet
+                                if (wide) return@graphicsLayer
+                                val container = sheet?.containerHeight ?: windowPx
+                                val visible = if (sheet == null) 0f else sheetVisiblePx(sheet.offset.value, container)
+                                val maxVisible =
+                                    rideMaxVisiblePx(
+                                        mediumVisiblePx = container * MEDIUM_SHARE,
+                                        windowHeightPx = windowPx,
+                                        topChromeBottomPx = topChromeBottomPx,
+                                        blockHeightPx = blockPx,
+                                        bottomInsetPx = bottomInsetPx,
+                                        gapPx = gapPx,
+                                    )
+                                translationY = sheetRideTranslation(visible, bottomInsetPx, maxVisible)
+                                alpha = sheetRideAlpha(visible, maxVisible, fadePx)
+                            }.testTag(HomeTags.Bottom)
+                            // The bottom inset is taken here (the bar inside then adds only its 8 dp margin), so the block
+                            // rests above the gesture area with or without the bar.
+                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
+                        horizontalAlignment = Alignment.End,
+                    ) {
+                        // A wide window keeps the footer above the buttons, clear of the centred sheet.
+                        if (wide) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                    .padding(horizontal = Spacing.gutter, vertical = Spacing.xs)
+                                    .testTag(HomeTags.MapFooter),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom,
+                                content = mapFooter,
+                            )
+                        }
+                        MapButtons(
+                            actions,
+                            Modifier
+                                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                .padding(end = StopsSizes.buttonColumnEnd)
+                                .onSizeChanged { buttonsWidthPx = it.width.toFloat() + gapPx },
+                        )
+                        if (!wide) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                                    .padding(horizontal = Spacing.gutter, vertical = Spacing.xs)
+                                    .testTag(HomeTags.MapFooter),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom,
+                                content = mapFooter,
+                            )
+                        }
+                        RostyTabBar(
+                            tabs = tabs,
+                            selected = tabs.indexOfFirst { it.id == selectedTab.id }.coerceAtLeast(0),
+                            onSelect = { index ->
+                                unfolded = false
+                                HomeTab.entries.firstOrNull { it.id == tabs[index].id }?.let(actions.onTab)
+                            },
+                            onReselect = { unfolded = false },
+                            modifier =
+                                (if (wide) Modifier.align(Alignment.Start).width(sideRoom) else Modifier)
+                                    .testTag(HomeTags.TabBar),
+                            folded = !unfolded,
+                            onFoldedClick = { unfolded = true },
+                            chrome = toastMetrics,
+                        )
+                    }
+                }
             }
         },
     ) {
-        mapLayer(Modifier.fillMaxSize(), camera)
+        map(Modifier.fillMaxSize())
     }
 }
 
@@ -263,7 +331,24 @@ private data class CameraInputs(
     val fromTallest: Int,
     val topPx: Float,
     val endPx: Float,
+    val blockPx: Float,
+    val windowPx: Float,
+    val wide: Boolean,
+    /** What the metrics hold now: a write by the tab bar brings the clearance back. */
+    val barWrite: Int,
 )
+
+/**
+ * The toast's clearance above the window's bottom inset (pure), as `ChromeMetrics.bottomBarPx`: the higher of the
+ * riding block's top ([blockTopPx], from the window bottom, insets included) and the settled sheet's top, less the
+ * inset and the bar margin the toast maths adds back.
+ */
+fun toastBarPx(
+    blockTopPx: Float,
+    sheetTopPx: Float,
+    bottomInsetPx: Float,
+    barMarginPx: Float,
+): Int = (maxOf(blockTopPx, sheetTopPx) - bottomInsetPx - barMarginPx).coerceAtLeast(0f).toInt()
 
 /**
  * The top pill: a glass capsule that reads like a search field; a tap opens the pick sheet (E7.8: search, paste a
@@ -302,6 +387,25 @@ private fun SearchPill(
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/** The pick's next step ("Tap the map to set point A") or the pair's label ("A-B 850 m"), under the search pill. */
+@Composable
+private fun HintPill(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    RostyText(
+        text,
+        modifier
+            .rostyGlass(GlassPreset.Bar, CircleShape, "stops.hint")
+            .padding(horizontal = Spacing.l, vertical = Spacing.s)
+            .testTag(HomeTags.Hint),
+        style = RostyTheme.type.subheadline,
+        color = RostyTheme.colors.labelPrimary,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /** Locate / follow, layers and map options: 44 dp glass circles in 48 dp hit boxes (E7.9 wires them). */

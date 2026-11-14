@@ -38,11 +38,8 @@ internal object StopsSizes {
     /** The floating chrome rides the sheet up to its medium detent, then fades over this distance. */
     val rideFade = 96.dp
 
-    /** The radar placeholder's grid step, drawn while no map engine is wired. */
-    val radarGrid = 64.dp
-
-    /** Width of the radar placeholder's grid lines. */
-    val radarLine = 1.dp
+    /** The QR code card of the QR sheet (the Contacts sheet's size). */
+    val qrCode = 200.dp
 }
 
 /** The width beside a sheet of at most [sheetMaxWidth] centred in a [windowWidth] window, on one side (pure). */

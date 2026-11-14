@@ -36,6 +36,8 @@ import dev.rosty.core.model.stops.GtfsImportAnswer
 import dev.rosty.core.model.stops.GtfsImportRequest
 import dev.rosty.core.model.stops.GtfsSearchAnswer
 import dev.rosty.core.model.stops.GtfsSearchRequest
+import dev.rosty.core.model.stops.GtfsViewAnswer
+import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.HistoryEditAnswer
 import dev.rosty.core.model.stops.HistoryEditRequest
 import dev.rosty.core.model.stops.HistoryExportAnswer
@@ -339,6 +341,10 @@ object StopsContracts : ContractModels {
             op<GtfsSearchRequest, GtfsSearchAnswer>(
                 "stops.gtfs_search",
                 ok = listOf("no_feed"),
+            )
+            op<GtfsViewRequest, GtfsViewAnswer>(
+                "stops.gtfs_view",
+                ok = listOf("antimeridian", "capped", "empty_box", "no_feed", "unknown_pattern"),
             )
             op<CoordFormatRequest, CoordFormatAnswer>(
                 "stops.coord_format",

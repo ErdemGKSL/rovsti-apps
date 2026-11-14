@@ -17,7 +17,8 @@ use rosty_geo::prefs::{
 };
 use rosty_geo::tiles::{ATTRIBUTION, DEFAULT_TILE_URL, TileSource};
 use rosty_geo::{
-    AlarmSound, Coord, Feed, History, Measure, SavedStops, StopsPrefs, backup, notice, read_zip,
+    AlarmSound, BBox, Coord, Feed, History, Measure, SavedStops, StopsPrefs, backup, notice,
+    read_zip,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -68,6 +69,7 @@ pub(super) const OPS: &[OpSpec] = &[
         gtfs_search,
         search_cases
     ),
+    op!("stops.gtfs_view", ViewReq, Value, gtfs_view, view_cases),
     op!(
         "stops.coord_format",
         FormatReq,
@@ -517,6 +519,72 @@ fn search_cases() -> Vec<Case> {
             json!({"dir": "$DIR", "query": "kadikoy", "limit": 5}),
         )
         .seeded("stops_files"),
+    ]
+}
+
+#[derive(Deserialize)]
+struct ViewReq {
+    #[serde(default)]
+    dir: Option<String>,
+    /// The box the map shows, in degrees; `west > east` crosses the antimeridian.
+    bbox: BBox,
+    /// The most stops to answer; those nearest the middle of the box win.
+    cap: usize,
+    /// The pattern (line) to answer the stops of, in travel order.
+    #[serde(default)]
+    pattern: Option<u32>,
+}
+
+/// The transit stops in a map view and the line of one pattern, from the saved `gtfs.json`: what the map draws and
+/// snaps to. `total` counts the stops in the box before the cap; `line` is null without a `pattern` and for a pattern
+/// the feed does not have.
+fn gtfs_view(req: ViewReq) -> Result<Value, FfiError> {
+    let feed: Option<Feed> = storage::load_json(&data_dir(&req.dir)?, GTFS_FILE);
+    let Some(feed) = feed else {
+        return Ok(
+            json!({"has_feed": false, "total": 0, "capped": false, "stops": [], "line": null}),
+        );
+    };
+    let (hits, total) = feed.box_hits(req.bbox, req.cap);
+    let stops: Vec<Value> = hits
+        .iter()
+        .filter_map(|&i| {
+            let stop = feed.stops.get(i as usize)?;
+            Some(json!({"index": i, "id": stop.id, "name": stop.name, "coord": stop.coord}))
+        })
+        .collect();
+    let line = req.pattern.and_then(|p| feed.pattern_line(p));
+    Ok(json!({
+        "has_feed": true,
+        "total": total,
+        "capped": total > stops.len(),
+        "stops": stops,
+        "line": line,
+    }))
+}
+
+fn view_cases() -> Vec<Case> {
+    let around = json!({"south": 40.98, "west": 28.99, "north": 41.01, "east": 29.03});
+    vec![
+        Case::new(json!({"dir": "$DIR", "bbox": around, "cap": 300, "pattern": 0})).seeded("stops_gtfs"),
+        Case::named("capped", json!({"dir": "$DIR", "bbox": around, "cap": 1})).seeded("stops_gtfs"),
+        Case::named(
+            "unknown_pattern",
+            json!({"dir": "$DIR", "bbox": around, "cap": 300, "pattern": 9}),
+        )
+        .seeded("stops_gtfs"),
+        Case::named(
+            "antimeridian",
+            json!({"dir": "$DIR", "bbox": {"south": 40.0, "west": 29.01, "north": 42.0, "east": -170.0}, "cap": 300}),
+        )
+        .seeded("stops_gtfs"),
+        Case::named(
+            "empty_box",
+            json!({"dir": "$DIR", "bbox": {"south": 10.0, "west": 10.0, "north": 11.0, "east": 11.0}, "cap": 300,
+                   "pattern": 0}),
+        )
+        .seeded("stops_gtfs"),
+        Case::named("no_feed", json!({"dir": "$DIR", "bbox": around, "cap": 300, "pattern": 0})).seeded("stops_files"),
     ]
 }
 

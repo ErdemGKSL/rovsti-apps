@@ -182,4 +182,12 @@
     <string name="forward_none">Sohbet yok</string>
     <string name="forward_via_sms">SMS</string>
     <string name="forward_via_whatsapp">WhatsApp</string>
+    <string name="inbox_messages_header">Mesajlar</string>
+    <plurals name="inbox_results">
+        <item quantity="one">%d sonuç</item>
+        <item quantity="other">%d sonuç</item>
+    </plurals>
+    <string name="inbox_results_partial">son WhatsApp sohbetlerinde</string>
+    <string name="inbox_results_no_sms">SMS aranmadı (erişim yok)</string>
+    <string name="tools_message_gone">Bu mesaj artık burada değil</string>
 </resources>

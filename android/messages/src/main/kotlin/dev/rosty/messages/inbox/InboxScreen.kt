@@ -84,6 +84,10 @@ import kotlinx.collections.immutable.toImmutableList
 /** Test tags of the inbox. */
 object InboxTags {
     const val Root = "inbox"
+    const val MessagesHeader = "inbox-messages"
+
+    fun hit(key: String) = "inbox-hit-$key"
+
     const val Search = "inbox-search"
     const val Chips = "inbox-chips"
     const val Empty = "inbox-empty"
@@ -144,6 +148,11 @@ data class InboxStrings(
     val muted: String,
     val pinned: String,
     val unreadCount: (Int) -> String,
+    /** The Messages section of the search (M7). */
+    val messagesHeader: String = "",
+    val resultsCount: (Int) -> String = { it.toString() },
+    val partialNote: String = "",
+    val smsMissingNote: String = "",
 )
 
 @Composable
@@ -232,6 +241,10 @@ fun rememberInboxStrings(): InboxStrings {
         muted = stringResource(R.string.inbox_muted_a11y),
         pinned = stringResource(R.string.inbox_pinned_a11y),
         unreadCount = { n -> unread.format(n) },
+        messagesHeader = stringResource(R.string.inbox_messages_header),
+        resultsCount = { n -> res.getQuantityString(R.plurals.inbox_results, n, n) },
+        partialNote = stringResource(R.string.inbox_results_partial),
+        smsMissingNote = stringResource(R.string.inbox_results_no_sms),
     )
 }
 
@@ -419,6 +432,7 @@ fun InboxScreen(
                     }
                 }
                 body(state, strings, actions)
+                state.messages?.let { messagesSection(it, strings, actions.onAction) }
             }
         }
     }
@@ -447,9 +461,11 @@ private fun LazyListScope.body(
                         EmptyState(RostyIcons.Sms, strings.accessOffTitle, strings.accessOffDetail)
                     }
 
-                    state.query.isNotBlank() -> {
+                    state.query.isNotBlank() && state.messages?.hits.isNullOrEmpty() -> {
                         EmptyState(RostyIcons.Search, strings.noResults, "")
                     }
+
+                    state.query.isNotBlank() -> {}
 
                     state.anyRows -> {
                         EmptyState(

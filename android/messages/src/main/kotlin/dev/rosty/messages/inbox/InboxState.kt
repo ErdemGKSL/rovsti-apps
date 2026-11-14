@@ -58,6 +58,8 @@ data class InboxUiState(
     val select: SelectUi? = null,
     /** Whether any row of the folder exists before the chip and the search narrow it. */
     val anyRows: Boolean = false,
+    /** The messages that match the search text, under the matching chats; null without a search. */
+    val messages: MessagesSectionUi? = null,
 )
 
 /** One-shot results of an action: navigation and pills. */
@@ -94,6 +96,11 @@ sealed interface InboxAction {
 
     data class SetFilter(
         val filter: InboxFilter,
+    ) : InboxAction
+
+    /** A search hit: its conversation, told to reveal the message. */
+    data class OpenRoute(
+        val route: MessagesRoute,
     ) : InboxAction
 
     data class SetQuery(

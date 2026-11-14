@@ -10,7 +10,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -18,6 +20,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import dev.rosty.core.getOrNull
+import dev.rosty.core.model.chat.SearchJumpRequest
+import dev.rosty.core.model.chat.SearchJumpStep
+import dev.rosty.core.ops.ChatOps
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.overlay.MenuItem
@@ -168,6 +174,7 @@ fun SmsThreadPage(
             title = { model.state.value.title },
         )
     val toolsState by host.tools.state.collectAsState()
+    RevealHit(route.reveal, route.revealAtMs, state, host, container.chat, model::loadOlder)
     val inbox = rememberInboxViewModel(container)
     val forward: (BubbleUi) -> Unit = { bubble ->
         overlays.presentForward(context, inbox.state.value.rows, model.tag, bubble.text, onOpen)
@@ -284,3 +291,55 @@ fun ConversationEffects(
 }
 
 private const val DRAFT_DEBOUNCE_MS = 400L
+
+/**
+ * Works towards a global search hit (M7): older pages load until [key] is there (`global_search.jump` decides when to
+ * stop), then the page scrolls to it and it glows. Runs once per page.
+ */
+@Composable
+internal fun RevealHit(
+    key: String?,
+    atMs: Long?,
+    state: ConversationUi,
+    host: ToolHost,
+    chat: ChatOps,
+    loadOlder: () -> Unit,
+) {
+    if (key == null) return
+    val done = rememberSaveable(key) { mutableStateOf(false) }
+    val pages = remember(key) { intArrayOf(0) }
+    LaunchedEffect(key, state.items, state.loaded, state.loadingOlder) {
+        if (done.value || !state.loaded || state.loadingOlder) return@LaunchedEffect
+        val bubbles = bubblesOf(state.items)
+        val loaded = bubbles.any { it.key == key }
+        val request =
+            SearchJumpRequest(
+                loaded = loaded,
+                hasOlder = state.hasOlder,
+                pagesLoaded = pages[0],
+                oldestMs = bubbles.minOfOrNull { it.atMs },
+                targetMs = atMs ?: 0L,
+            )
+        when (chat.searchJump(request).getOrNull()?.step ?: SearchJumpStep.Gone) {
+            SearchJumpStep.Reveal -> {
+                done.value = true
+                if (loaded) host.tools.reveal(key)
+            }
+
+            SearchJumpStep.LoadOlder -> {
+                pages[0]++
+                loadOlder()
+            }
+
+            SearchJumpStep.FurtherBack -> {
+                done.value = true
+                host.overlays.showToast(host.context.getString(R.string.tools_further_back))
+            }
+
+            SearchJumpStep.Gone -> {
+                done.value = true
+                host.overlays.showToast(host.context.getString(R.string.tools_message_gone))
+            }
+        }
+    }
+}

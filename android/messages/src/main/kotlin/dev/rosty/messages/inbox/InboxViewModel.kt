@@ -34,12 +34,15 @@ import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -75,6 +78,7 @@ class InboxViewModel(
     private val sources: InboxSources,
     private val builder: InboxBuilder,
     private val words: InboxWords,
+    private val search: GlobalSearch? = null,
     private val default: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
     private val stateFlow = MutableStateFlow(InboxUiState())
@@ -88,6 +92,23 @@ class InboxViewModel(
 
     init {
         viewModelScope.launch { sources.store.load() }
+        // The Messages section of the search (M7): a short pause after typing, the newest query wins.
+        if (search != null) {
+            viewModelScope.launch {
+                stateFlow
+                    .map { it.query.trim() }
+                    .distinctUntilChanged()
+                    .collectLatest { query ->
+                        if (query.isEmpty()) {
+                            stateFlow.update { it.copy(messages = null) }
+                            return@collectLatest
+                        }
+                        delay(SEARCH_PAUSE_MS)
+                        val section = search.run(query, view.rows + view.archived, sources.smsReadable.value)
+                        stateFlow.update { if (it.query.trim() == query) it.copy(messages = section) else it }
+                    }
+            }
+        }
         val smsRows: Flow<List<SmsThreadRow>?> =
             sources.smsReadable.flatMapLatest { readable ->
                 if (readable) {
@@ -227,6 +248,10 @@ class InboxViewModel(
         when (action) {
             is InboxAction.Open -> {
                 open(action.key)
+            }
+
+            is InboxAction.OpenRoute -> {
+                effectChannel.trySend(InboxEffect.Open(action.route))
             }
 
             is InboxAction.SetFilter -> {
@@ -558,6 +583,8 @@ class InboxViewModel(
     }
 
     companion object {
+        /** The pause after the last keystroke before the message search runs. */
+        private const val SEARCH_PAUSE_MS = 250L
         private const val MIN_QUERY_DIGITS = 3
 
         /** Case- and accent-folded, for the search box (İ/ı fold to i like the Rust index does). */

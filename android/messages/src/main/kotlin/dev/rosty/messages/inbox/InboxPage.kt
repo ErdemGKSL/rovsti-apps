@@ -68,6 +68,7 @@ fun rememberInboxViewModel(container: MessagesContainer): InboxViewModel {
                         ),
                         InboxBuilder(words, time),
                         words,
+                        GlobalSearch(container.chat, container.sms, container.waChats, time, System::currentTimeMillis),
                     )
                 }
             }

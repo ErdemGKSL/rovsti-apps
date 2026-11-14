@@ -10,6 +10,7 @@ import androidx.compose.ui.test.swipeUp
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rosty.core.model.messages.InboxFilter
+import dev.rosty.messages.MessagesRoute
 import dev.rosty.testing.ShotTest
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
@@ -97,6 +98,37 @@ class E62ShotTest : ShotTest() {
                     ),
             ),
         )
+
+    @Test fun globalSearch() {
+        val hits =
+            listOf(
+                Triple("Ada Lovelace", "See you at the station at six", "14:05"),
+                Triple("Mert Kaya", "The station is closed, take the ferry", "Yesterday"),
+                Triple("Family", "Ece: Meet us by the station café", "9 Nov"),
+            ).mapIndexed { i, (title, text, time) ->
+                val at = text.indexOf("station")
+                SearchHitUi(
+                    key = "hit$i",
+                    title = title,
+                    avatar = RowAvatar(colorKey = title),
+                    time = time,
+                    snippet = text,
+                    highlightStart = at,
+                    highlightEnd = at + "station".length,
+                    route = MessagesRoute.SmsThread(1),
+                )
+            }
+        val state =
+            InboxSample.state.copy(
+                query = "station",
+                rows =
+                    InboxSample.state.rows
+                        .filter { it.key == "ada" }
+                        .toImmutableList(),
+                messages = MessagesSectionUi(hits.toImmutableList(), 3, partial = true, smsMissing = false),
+            )
+        snap("e6.2-global-search", state)
+    }
 
     @Test fun empty() = snap("e6.2-inbox-empty", InboxUiState(loaded = true, access = SmsAccess.Ready))
 

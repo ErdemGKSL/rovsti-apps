@@ -31,6 +31,9 @@ sealed interface MessagesRoute {
         val threadId: Long,
         val addresses: List<String> = emptyList(),
         val draft: String? = null,
+        /** A message to scroll to and light up once loaded (a global search hit), and when it was sent. */
+        val reveal: String? = null,
+        val revealAtMs: Long? = null,
     ) : MessagesRoute
 
     /** A WhatsApp conversation. */
@@ -38,6 +41,9 @@ sealed interface MessagesRoute {
     data class WaThread(
         val jid: String,
         val draft: String? = null,
+        /** A message to scroll to and light up once loaded (a global search hit), and when it was sent. */
+        val reveal: String? = null,
+        val revealAtMs: Long? = null,
     ) : MessagesRoute
 
     /** New conversation: a number or a contact, by SMS or WhatsApp. [share] carries a share-in to send. */

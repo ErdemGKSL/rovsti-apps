@@ -1,6 +1,7 @@
 package dev.rosty.messages.wa
 
 import dev.rosty.core.Outcome
+import dev.rosty.core.model.chat.SearchCandidate
 import dev.rosty.core.model.messages.InboxThread
 import dev.rosty.core.model.messages.Message
 import dev.rosty.core.model.messages.MessageDirection
@@ -30,6 +31,12 @@ interface WaChats {
         jid: String,
         kind: ChatActionKind,
     ): Boolean
+
+    /**
+     * The stored messages of the chats [jids] (the recent ones `global_search.prepare` picked) as search candidates,
+     * chat key `wa:<jid>` and message id the WhatsApp id; null while WhatsApp is not linked.
+     */
+    suspend fun searchCandidates(jids: List<String>): List<SearchCandidate>? = null
 }
 
 /** [WaChats] straight over the gateway (`:wa`): the live list and `chat_action`. */

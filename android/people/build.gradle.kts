@@ -24,8 +24,12 @@ dependencies {
     implementation(project(":platform"))
     // ContactAvatar (the one avatar composable of every app) draws through the design system.
     implementation(project(":design"))
+    // The people sync runner (people sync v2) talks to the gateway through the app's WaRepository.
+    implementation(project(":wa"))
     api(libs.coroutines.core)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.coroutines.test)
+    testImplementation(testFixtures(project(":core-bridge")))
+    testImplementation(testFixtures(project(":wa")))
 }

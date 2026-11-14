@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S5 done; see the notes under each step.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S6 and S8 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -592,8 +592,29 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
 - **S6 Runner + Contacts switch-over.** `PeopleStore` to `:people`, `PeopleSyncRunner`, `PartNotifier`,
   `PeopleSync` delegates, worker continuation work, one-time migration of the old prefs, removal of
   `Allowance/Wait/Paced/PeopleSyncLog`. Sync log lines complete (section 10). Rewritten and new Kotlin tests.
+  *Done (notes, deviations):* (a) `PeopleStore` moved to `:people` as `dev.rovsti.people.sync.PeopleStore` with one
+  addition, an optional `dataDir` passed as `dir` to every `people.*` request (tests give each container its own book);
+  `:people` now depends on `:wa`. (b) The Kotlin tests drive the **real** planner: `PeopleTestContainer.useRealPeople()`
+  routes `people.*` to the host library (`RoutingCore`), the gateway stays the scripted fake, so the planner is not
+  duplicated in a Kotlin fake; the runner tests live in `:contacts` (it already wires the host library) as
+  `PeopleSyncResumeTest` (stop and continue asks nothing twice, a budget-cut slice continues, no connection is
+  `interrupted(network)`, a second slice is `AlreadyRunning`), `PeopleSyncRateLimitTest` (hinted 429 slept inline,
+  long limit ends the slice and refuses until the ETA, rate-limited picture, legacy-200 throttle),
+  `PeopleSyncWorkerTest` (schedule, continuation, result mapping) and `PeopleSyncLiveTest`; `PartNotifierTest` in
+  `:people`. (c) Concurrent writers of `people.json` (a live profile upsert during a report) are serialized **in Rust**
+  (`book_lock` in `rovsti_ffi::ops::people` around `people.upsert` and every `people.sync_*`), not by a Kotlin commit
+  mutex: `RustDispatcher` runs four calls at once, and the lock also covers Phone. (d) The legacy prefs are not
+  migrated into the checkpoint (no op for it): `PeopleSync` shows their last sync until the first v2 run finishes, then
+  clears them. (e) The worker maps `LinkNotReady` to `retry()` (as S4), everything else to `success()`; continuation
+  delays: rate limit end (at least `CONTINUE_DELAY_MS`), 1 min after a slice budget or cancel, 15 min after
+  `network` / `wa_disconnected`. A cancelled worker coroutine is the runner's cancellation (no `onStopped` override).
+  (f) `Connected` with `state == Disconnected` ends the slice `Interrupted(WaDisconnected)` before anything is asked
+  and stores nothing. (g) The link's gateway URL comes from `WaLinkStore.read()`. (h) S8 is merged here: the live
+  picture pass is `Start::LivePictures` with `LIVE_SLICE_MS`, and it simply gets `AlreadyRunning` while a run is
+  active. (i) The settings row still uses the v1 `PeopleSyncStatus` shape (mapped from the planner's status) until S7.
 - **S7 Settings UI.** New status model, progress, Continue / Stop / restart alert, all strings, shots.
 - **S8 Live pass on the shared pace** (`Start.LivePictures`), commit mutex. (Can merge into S6 if small.)
+  *Done in S6* (see S6 note h; the commit mutex is the Rust `book_lock`, note c).
 - **S9 Mechanical:** move remaining `android.util.Log` sites to `RovstiLog`, add the source-scan rule; docs:
   `docs/whatsapp-gateway.md`, `docs/architecture.md` (people sync + logging paragraphs), `crates/rovsti_ffi/OPS.md`.
 - **S10 Phone standalone on the engine** (pending Q2): `StandalonePeople` becomes a thin wrapper over

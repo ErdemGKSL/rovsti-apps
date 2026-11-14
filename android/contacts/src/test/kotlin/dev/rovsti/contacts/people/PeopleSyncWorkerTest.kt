@@ -8,8 +8,11 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
+import dev.rovsti.core.model.people.SyncWire
 import dev.rovsti.core.model.wa.PictureAnswer
 import dev.rovsti.core.model.wa.WaProfile
+import dev.rovsti.people.sync.PeopleSyncRunner
+import dev.rovsti.people.sync.SliceResult
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,7 +26,7 @@ import org.robolectric.annotation.Config
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/** X.1b: the periodic work (unique, constraints) and what one run of it does. */
+/** X.1b and people sync v2 S6: the periodic work, the continuation, and what one slice of it does (real planner). */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = PeopleTestApp::class)
 class PeopleSyncWorkerTest {
@@ -38,8 +41,8 @@ class PeopleSyncWorkerTest {
         WorkManagerTestInitHelper.initializeTestWorkManager(context)
     }
 
-    private fun work(): List<WorkInfo> =
-        WorkManager.getInstance(context).getWorkInfosForUniqueWork(PeopleSyncWorker.UNIQUE_NAME).get()
+    private fun work(name: String = PeopleSyncWorker.UNIQUE_NAME): List<WorkInfo> =
+        WorkManager.getInstance(context).getWorkInfosForUniqueWork(name).get()
 
     private fun run(): ListenableWorker.Result =
         runBlocking { TestListenableWorkerBuilder<PeopleSyncWorker>(context).build().doWork() }
@@ -51,6 +54,7 @@ class PeopleSyncWorkerTest {
     ) = WaProfile(jid, pushName = name, pictureId = picture, fetchedMs = 1)
 
     private fun script() {
+        container.useRealPeople()
         container.numbers = listOf("+905321234567", "+905559876543", "+905550000000")
         container.gw.onWhatsapp += listOf(ayse, can)
         container.gw.profiles[ayse] = profile(ayse, "Ayse", "11")
@@ -79,15 +83,46 @@ class PeopleSyncWorkerTest {
         assertEquals(id, work().single().id)
     }
 
-    // ---- one run
+    @Test fun theContinuationIsOneTimeOnANetworkAndReplacesAnOlderOne() {
+        PeopleSyncWorker.continueLater(context, 60_000)
+        PeopleSyncWorker.continueLater(context, 120_000)
+        val infos = work(PeopleSyncWorker.CONTINUE_NAME).filter { it.state == WorkInfo.State.ENQUEUED }
+        assertEquals("REPLACE keeps one", 1, infos.size)
+        assertEquals(NetworkType.CONNECTED, infos.single().constraints.requiredNetworkType)
+        assertNull(infos.single().periodicityInfo)
+    }
+
+    @Test fun whatTheNextSliceWaitsFor() {
+        val now = 1_000_000L
+        val gap = PeopleSyncRunner.CONTINUE_DELAY_MS
+        assertNull(PeopleSyncWorker.continueInMs(SliceResult.Done, now))
+        assertNull(PeopleSyncWorker.continueInMs(SliceResult.NotLinked, now))
+        assertNull(PeopleSyncWorker.continueInMs(SliceResult.AlreadyRunning, now))
+        assertNull(
+            "a failure waits for the next period",
+            PeopleSyncWorker.continueInMs(SliceResult.Failed("auth", ""), now),
+        )
+        assertEquals(600_000L, PeopleSyncWorker.continueInMs(SliceResult.Waiting(now + 600_000), now))
+        assertEquals("never sooner than the gap", gap, PeopleSyncWorker.continueInMs(SliceResult.Waiting(now + 5), now))
+        assertEquals(gap, PeopleSyncWorker.continueInMs(SliceResult.Interrupted(SyncWire.SLICE_BUDGET), now))
+        assertEquals(
+            PeopleSyncWorker.OFFLINE_DELAY_MS,
+            PeopleSyncWorker.continueInMs(SliceResult.Interrupted(SyncWire.NETWORK), now),
+        )
+        assertEquals(300_000L, PeopleSyncWorker.continueInMs(SliceResult.Refused(now + 300_000), now))
+        assertNull(PeopleSyncWorker.continueInMs(SliceResult.Refused(null), now))
+    }
+
+    // ---- one slice
 
     @Test fun withoutALinkNothingIsAskedAndNothingChanges() {
         script()
         assertEquals(ListenableWorker.Result.success(), run())
         assertEquals(0, container.gw.gateway.core.calls.size)
-        assertTrue(container.people.book.isEmpty())
+        assertTrue(container.book().isEmpty())
         assertEquals(0, container.changes)
         assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)
+        assertTrue("no continuation", work(PeopleSyncWorker.CONTINUE_NAME).isEmpty())
     }
 
     @Test fun aLinkedRunFillsTheCacheAndDownloadsTheChangedPicturesOnly() {
@@ -95,144 +130,109 @@ class PeopleSyncWorkerTest {
         container.connect()
         assertEquals(ListenableWorker.Result.success(), run())
 
-        val book = container.people.book
+        val book = container.book()
         assertEquals(setOf(ayse, can), book.keys)
         assertEquals("Ayse", book.getValue(ayse).name)
         assertEquals("+905321234567", book.getValue(ayse).numbers.single())
         assertEquals("a person who is not on WhatsApp is not kept", null, book[nobody])
         val file = File(container.dir, book.getValue(ayse).pictureFile!!)
         assertEquals("ayse-11", file.readText())
-        assertEquals(
-            "only Ayse has a picture to download",
-            1,
-            container.gw.pictureAsks.count {
-                it.knownId == null &&
-                    it.jid == ayse
-            },
-        )
-        assertEquals(1, container.changes)
-        assertEquals(SyncOutcome.Ok, container.peopleSync.status.value.outcome)
-        assertEquals(2, container.peopleSync.status.value.people)
+        assertEquals(1, container.gw.pictureAsks.count { it.knownId == null && it.jid == ayse })
+        assertTrue("every part was told", container.changes >= 1)
+        val status = container.peopleSync.status.value
+        assertEquals(SyncOutcome.Ok, status.outcome)
+        assertEquals(2, status.people)
+        assertTrue("done: no continuation", work(PeopleSyncWorker.CONTINUE_NAME).isEmpty())
 
-        // A second run: the numbers are known, the picture is on disk and current, Can's "no picture" is fresh.
+        // A second slice right away: an incremental run asks nothing (fresh negatives, fresh profiles, current files).
         container.gw.lookups.clear()
         container.gw.pictureAsks.clear()
         container.changes = 0
+        container.now += 60_000
         assertEquals(ListenableWorker.Result.success(), run())
-        assertEquals("only the unknown number is asked about again", listOf(listOf(nobody)), container.gw.lookups)
-        assertEquals(
-            "no picture is downloaded twice",
-            emptyList<Any>(),
-            container.gw.pictureAsks.filter {
-                it.jid ==
-                    ayse
-            },
-        )
+        assertEquals(emptyList<List<String>>(), container.gw.lookups)
+        assertEquals("no picture is downloaded twice", 0, container.gw.pictureAsks.count { it.jid == ayse })
         assertEquals("nothing changed, nobody is told", 0, container.changes)
     }
 
-    @Test fun lookupsGoInBatchesOfFifty() {
+    @Test fun lookupsGoInSmallBatchesAGapApart() {
         script()
-        container.numbers = (1..120).map { "+90532000%04d".format(it) }
+        container.numbers = (1..40).map { "+90532000%04d".format(it) }
         container.connect()
         run()
-        assertEquals(listOf(50, 50, 20), container.gw.lookups.map { it.size })
+        assertEquals(listOf(15, 15, 10), container.gw.lookups.map { it.size })
+        assertTrue("paced: no burst", container.pauses.count { it >= 16_000 } >= 2)
     }
 
     @Test fun aNewPictureIdReplacesTheFileAndTheOldOneIsDropped() {
         script()
         container.connect()
         run()
-        val old =
-            container.people.book
-                .getValue(ayse)
-                .pictureFile!!
+        val old = container.book().getValue(ayse).pictureFile!!
         container.gw.profiles[ayse] = profile(ayse, "Ayse", "12")
         container.gw.pictures[ayse] = PictureAnswer("image", id = "12", dataB64 = b64("ayse-12"))
         container.gw.pictureAsks.clear()
+        // Profiles are asked again once a day.
+        container.now += 25L * 3_600_000
         assertEquals(ListenableWorker.Result.success(), run())
-        val now =
-            container.people.book
-                .getValue(ayse)
-                .pictureFile!!
+        val now = container.book().getValue(ayse).pictureFile!!
         assertEquals("ayse-12", File(container.dir, now).readText())
         assertFalse("the old picture is deleted", File(container.dir, old).exists())
-        assertEquals(1, container.gw.pictureAsks.size)
+        assertEquals(1, container.gw.pictureAsks.count { it.jid == ayse })
     }
 
     @Test fun aRemovedPictureIsDropped() {
         script()
         container.connect()
         run()
-        val file =
-            File(
-                container.dir,
-                container.people.book
-                    .getValue(ayse)
-                    .pictureFile!!,
-            )
+        val file = File(container.dir, container.book().getValue(ayse).pictureFile!!)
         assertTrue(file.exists())
         container.gw.profiles[ayse] = profile(ayse, "Ayse", null)
+        container.now += 25L * 3_600_000
         assertEquals(ListenableWorker.Result.success(), run())
-        assertNull(
-            container.people.book
-                .getValue(ayse)
-                .pictureFile,
-        )
+        assertNull(container.book().getValue(ayse).pictureFile)
         assertFalse("the file of a removed picture is deleted", file.exists())
     }
 
-    @Test fun aStrayFileNobodyHoldsIsDeleted() {
+    @Test fun aStrayFileOfAnOldPictureIsDeleted() {
         script()
         container.connect()
         container.dir.mkdirs()
-        val stray = File(container.dir, "stray~1.jpg").apply { writeText("x") }
+        val stray = File(container.dir, "905321234567_s.whatsapp.net~10.jpg").apply { writeText("x") }
         run()
         assertFalse(stray.exists())
     }
 
-    @Test fun aGatewayErrorAsksForARetry() {
+    @Test fun noGatewayInterruptsAndContinuesLaterWithoutAFailure() {
         script()
         container.connect()
         container.link.gatewayOpener = { null }
-        assertEquals(ListenableWorker.Result.retry(), run())
-        assertEquals(SyncOutcome.Failed, container.peopleSync.status.value.outcome)
+        assertEquals(ListenableWorker.Result.success(), run())
+        assertEquals(1, work(PeopleSyncWorker.CONTINUE_NAME).size)
+        assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)
     }
 
-    @Test fun aLinkNotReadInTimeRetriesWithoutRecordingAFailure() {
+    @Test fun aLinkNotReadInTimeRetriesWithoutRecordingAnything() {
         script()
         container.link.setSettled(false)
-        val result = runBlocking { container.peopleSync.run() }
-        assertEquals(SyncResult.LinkNotReady, result)
+        val result = runBlocking { container.peopleSync.runSlice() }
+        assertEquals(SliceResult.LinkNotReady, result)
         assertEquals(0, container.gw.gateway.core.calls.size)
-        assertEquals(
-            "nothing was asked, so nothing is stored",
-            SyncOutcome.Never,
-            container.peopleSync.status.value.outcome,
-        )
+        assertEquals(SyncOutcome.Never, container.peopleSync.status.value.outcome)
     }
 
-    @Test fun profilesAnOldGatewayDidNotAnswerMakeThePartialOutcome() {
+    @Test fun profilesAnOldGatewayDidNotAnswerKeepTheRunGoing() {
         script()
         container.gw.profiles[can] = WaProfile(can, pushName = "Can")
         container.connect()
-        assertEquals("partial: the worker comes back sooner", ListenableWorker.Result.retry(), run())
-        assertEquals(SyncOutcome.Partial, container.peopleSync.status.value.outcome)
+        assertEquals(ListenableWorker.Result.success(), run())
+        assertEquals("Ayse", container.book().getValue(ayse).name)
         assertEquals(
-            "Ayse",
-            container.people.book
-                .getValue(ayse)
-                .name,
+            "the legacy throttle leaves a resumable run and a continuation",
+            SyncOutcome.Partial,
+            container.peopleSync.status.value.outcome,
         )
-    }
-
-    @Test fun aBatchWithNoRealAnswerStopsTheProfileStage() {
-        script()
-        container.gw.profiles[ayse] = WaProfile(ayse)
-        container.gw.profiles[can] = WaProfile(can)
-        container.connect()
-        assertEquals(ListenableWorker.Result.retry(), run())
-        assertEquals(SyncOutcome.Partial, container.peopleSync.status.value.outcome)
+        assertEquals(1, work(PeopleSyncWorker.CONTINUE_NAME).size)
     }
 
     @Test fun theNumbersOfTheRunDoNotNeedTheLinkToBeStarted() {

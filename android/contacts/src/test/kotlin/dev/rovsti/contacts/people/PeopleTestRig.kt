@@ -24,6 +24,7 @@ import dev.rovsti.core.model.wa.PictureBody
 import dev.rovsti.core.model.wa.WaProfile
 import dev.rovsti.core.model.wa.WaUser
 import dev.rovsti.core.ops.WaGateway
+import dev.rovsti.people.sync.PeopleStore
 import dev.rovsti.shell.HasContainer
 import dev.rovsti.wa.FakeWaGateway
 import dev.rovsti.wa.FakeWaRepository
@@ -127,13 +128,23 @@ class FakePeopleRust(
     }
 }
 
-/** The gateway's 429: an `invalid` error whose detail says `rate_limited` (what `isRateLimited` reads). */
-fun <T> rateLimited(): Outcome<T> =
+/**
+ * The gateway's 429: an `invalid` error whose detail says `rate_limited` (what `rateLimit()` reads), with the S1 hint
+ * fields when given.
+ */
+fun <T> rateLimited(
+    retryAfterMs: Long? = null,
+    source: String? = null,
+): Outcome<T> =
     Outcome.Err(
         RustError.Invalid(
             "too many requests",
             kotlinx.serialization.json.JsonObject(
-                mapOf("code" to kotlinx.serialization.json.JsonPrimitive("rate_limited")),
+                buildMap {
+                    put("code", kotlinx.serialization.json.JsonPrimitive("rate_limited"))
+                    retryAfterMs?.let { put("retry_after_ms", kotlinx.serialization.json.JsonPrimitive(it)) }
+                    source?.let { put("source", kotlinx.serialization.json.JsonPrimitive(it)) }
+                },
             ),
         ),
     )
@@ -250,21 +261,68 @@ object IdentityCodec : AvatarCodec {
 
 fun b64(text: String): String = Base64.getEncoder().encodeToString(text.encodeToByteArray())
 
+/**
+ * The real host library for `people.*` (the planner and the book, people sync v2) once [real] is set, the fake for
+ * everything else (the gateway's `wa.*` ops, `wa.avatars_plan`).
+ */
+class RoutingCore(
+    private val fake: RustCore,
+) : RustCore {
+    @Volatile var real: RustCore? = null
+
+    override suspend fun version() = fake.version()
+
+    override suspend fun call(
+        op: String,
+        request: kotlinx.serialization.json.JsonElement,
+    ): Outcome<kotlinx.serialization.json.JsonElement> {
+        val host = real
+        return if (host != null && op.startsWith("people.")) host.call(op, request) else fake.call(op, request)
+    }
+
+    override suspend fun headless(
+        kind: String,
+        json: String,
+    ) = fake.headless(kind, json)
+}
+
 /** Contacts' container on fakes: no native library, a temp picture directory, a scripted gateway. */
 class PeopleTestContainer(
     context: Context,
 ) : ContactsContainer(context) {
     val people = FakePeopleRust()
+    val routing = RoutingCore(people.core)
     val gw = FakeGatewayData()
     val link = FakeWaRepository()
     val dir: File = Files.createTempDirectory("people").toFile().apply { deleteOnExit() }
+
+    /** The `people.*` data directory of this container (the real library writes `people.json` here). */
+    val peopleData: File = Files.createTempDirectory("people-data").toFile().apply { deleteOnExit() }
     var numbers: List<String> = emptyList()
     var now = 1_000_000_000L
     var ready: Boolean? = true
     var changes = 0
 
+    /**
+     * Routes `people.*` to the real host library (the sync tests: the planner is not faked); skips the test when the
+     * library is not built. Call before the first use of the store.
+     */
+    fun useRealPeople() {
+        dev.rovsti.contacts.HostRust("people-sync")
+        routing.real =
+            dev.rovsti.core.Rust
+                .core()
+    }
+
+    /** The real book, as the provider reads it. */
+    fun book(): Map<String, PersonRow> =
+        kotlinx.coroutines.runBlocking { peopleStore.snapshot().associateBy { it.jid } }
+
     /** The waits the sync asked for; each one moves [now] on, so the fake buckets refill. */
     val pauses = mutableListOf<Long>()
+
+    /** Runs inside every wait before the clock moves (a test can hold the sync there). */
+    @Volatile var pauseHook: (suspend (Long) -> Unit)? = null
 
     init {
         link.gatewayOpener = { gw.open() }
@@ -272,7 +330,7 @@ class PeopleTestContainer(
 
     fun connect() = link.setState(WaLinkState.Connected(InstanceStatus("inst", InstanceState.Connected)))
 
-    override fun createRust(): RustCore = people.core
+    override fun createRust(): RustCore = routing
 
     override suspend fun rustReady(): Boolean =
         when (ready) {
@@ -284,24 +342,35 @@ class PeopleTestContainer(
     override fun createWa(): WaRepository = link
 
     override fun createPeopleStore() =
-        PeopleStore(peopleOps, waOps, dir, kotlinx.coroutines.Dispatchers.IO, clock = { now })
+        PeopleStore(
+            peopleOps,
+            waOps,
+            dir,
+            kotlinx.coroutines.Dispatchers.IO,
+            clock = { now },
+            dataDir = peopleData.absolutePath,
+        )
 
     override fun createPeopleSync() =
         PeopleSync(
             store = peopleStore,
+            ops = peopleOps,
             wa = wa,
             numbers = { numbers },
-            log = PeopleSyncLog(context.getSharedPreferences("people-sync-test", Context.MODE_PRIVATE)),
             scope = scope,
+            legacy = context.getSharedPreferences("people-sync-test", Context.MODE_PRIVATE),
             codec = IdentityCodec,
             clock = { now },
+            pause = {
+                pauses += it
+                pauseHook?.invoke(it)
+                now += it
+            },
+            random = { 20 },
+            notifyMinMs = 0,
             onChanged = {
                 changes++
                 peopleStore.notifyChanged(context.contentResolver)
-            },
-            pause = {
-                pauses += it
-                now += it
             },
         )
 }

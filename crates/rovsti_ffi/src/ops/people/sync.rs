@@ -8,7 +8,7 @@
 //! The first `people.sync_*` call for a directory in a process turns a stored `Running` run into
 //! `Interrupted(process_death)`: a run is only `Running` while the process that runs it lives.
 
-use super::data_dir;
+use super::{book_lock, data_dir};
 use crate::envelope::FfiError;
 use crate::handles;
 use crate::ops::registry::{Case, PLACEHOLDER_HANDLE as H};
@@ -69,6 +69,7 @@ pub(super) struct StatusReq {
 }
 
 pub(super) fn status(req: StatusReq) -> Result<Status, FfiError> {
+    let _writing = book_lock();
     let cp = load(&data_dir(&req.dir)?)?;
     Ok(ps::status(&cp, req.now_ms))
 }
@@ -108,6 +109,7 @@ pub(super) struct BeginAns {
 }
 
 pub(super) fn begin(req: BeginReq) -> Result<BeginAns, FfiError> {
+    let _writing = book_lock();
     let dir = data_dir(&req.dir)?;
     let mut cp = load(&dir)?;
     let book = people::load(&dir);
@@ -171,6 +173,7 @@ pub(super) struct NextReq {
 }
 
 pub(super) fn next(req: NextReq) -> Result<Step, FfiError> {
+    let _writing = book_lock();
     let shared = slice(req.handle)?;
     let mut slice = lock(&shared);
     let Slice { dir, session } = &mut *slice;
@@ -201,6 +204,7 @@ pub(super) struct ReportReq {
 }
 
 pub(super) fn report(req: ReportReq) -> Result<Committed, FfiError> {
+    let _writing = book_lock();
     let shared = slice(req.handle)?;
     let mut slice = lock(&shared);
     let Slice { dir, session } = &mut *slice;
@@ -266,6 +270,7 @@ fn cancelled() -> Interrupt {
 }
 
 pub(super) fn stop(req: StopReq) -> Result<Status, FfiError> {
+    let _writing = book_lock();
     match req.handle {
         Some(handle) => {
             let shared = slice(handle)?;

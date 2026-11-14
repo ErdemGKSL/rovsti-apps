@@ -65,6 +65,15 @@ pub(super) const OPS: &[OpSpec] = &[
 
 const NOW: i64 = 1_790_000_000_000;
 
+/// Serializes the writers of `people.json` (`people.upsert`, the `people.sync_*` ops): each loads, changes and saves
+/// the whole file, and the Kotlin side may call two at once (a live profile event during a sync), so without this one
+/// write could undo the other.
+fn book_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn data_dir(dir: &Option<String>) -> Result<PathBuf, FfiError> {
     match dir {
         Some(dir) => Ok(dir.into()),
@@ -86,6 +95,7 @@ struct UpsertReq {
 
 fn upsert(req: UpsertReq) -> Result<Upserted, FfiError> {
     let dir = data_dir(&req.dir)?;
+    let _writing = book_lock();
     let mut book = people::load(&dir);
     let out = book.upsert(&req.people, req.now_ms);
     if out.changed > 0 || !out.drop_files.is_empty() {

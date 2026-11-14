@@ -2,11 +2,10 @@ package dev.rovsti.contacts.people
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.ListenableWorker
-import androidx.work.testing.TestListenableWorkerBuilder
-import androidx.work.testing.WorkManagerTestInitHelper
+import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.wa.PictureAnswer
 import dev.rovsti.core.model.wa.WaProfile
+import dev.rovsti.people.sync.SliceResult
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -17,163 +16,95 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * X.1b: the gateway's rate limit (lookups 60 then 1/s, profiles and pictures 120 then 2/s) paces the sync instead of
- * failing it. The fake buckets run on the container's clock, which every requested pause moves on.
+ * People sync v2: WhatsApp's limit (a 429 with a hint), the gateway's bucket and an old gateway's silent throttle
+ * (profiles with `fetched_ms: 0`), on the real planner. Short waits are slept inline, long ones end the slice with the
+ * time to continue, and nothing already stored is lost.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = PeopleTestApp::class)
 class PeopleSyncRateLimitTest {
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private val container get() = (context as PeopleTestApp).container
+    private val sync get() = container.peopleSync
 
-    private val ayse = "905321234567@s.whatsapp.net"
+    private fun jid(i: Int) = "90532000%04d@s.whatsapp.net".format(i)
 
-    /** Ayse first, then 149 numbers nobody uses WhatsApp on. */
-    private val numbers = listOf("+905321234567") + (1..149).map { "+90532000%04d".format(it) }
-    private val jids = numbers.map { PeopleSync.jidOf(it)!! }
-
-    @Before fun initWorkManager() {
-        WorkManagerTestInitHelper.initializeTestWorkManager(context)
-    }
-
-    private fun run(): ListenableWorker.Result =
-        runBlocking { TestListenableWorkerBuilder<PeopleSyncWorker>(context).build().doWork() }
-
-    private fun script() {
-        container.numbers = numbers
-        container.gw.onWhatsapp += ayse
-        container.gw.profiles[ayse] = WaProfile(ayse, pushName = "Ayse", pictureId = "11", fetchedMs = 1)
-        container.gw.pictures[ayse] = PictureAnswer("image", id = "11", dataB64 = b64("ayse-11"))
+    @Before fun script() {
+        container.useRealPeople()
+        container.numbers = (1..30).map { "+90532000%04d".format(it) }
+        for (i in 1..30 step 3) {
+            container.gw.onWhatsapp += jid(i)
+            container.gw.profiles[jid(i)] = WaProfile(jid(i), pushName = "P$i", pictureId = "$i", fetchedMs = 1)
+            container.gw.pictures[jid(i)] = PictureAnswer("image", id = "$i", dataB64 = b64("p$i"))
+        }
         container.connect()
     }
 
-    private fun bucket(
-        burst: Int,
-        perSec: Double,
-        start: Int = burst,
-    ) = FakeBucket(burst, perSec, { container.now }, start)
+    private fun slice(): SliceResult = runBlocking { sync.runSlice() }
 
-    private val outcome get() = container.peopleSync.status.value.outcome
-
-    @Test fun aFirstSyncOfOneHundredFiftyNumbersIsPacedAndNeverRefused() {
-        script()
-        val lookups = bucket(60, 1.0)
-        container.gw.lookupBucket = lookups
-        container.gw.profileBucket = bucket(120, 2.0)
-
-        assertEquals(ListenableWorker.Result.success(), run())
-
-        assertEquals(SyncOutcome.Ok, outcome)
-        assertEquals("every number is looked up once", jids, container.gw.lookups.flatten())
-        assertEquals("the pacing keeps under the allowance", 0, lookups.refused)
-        assertTrue("the run waited for the refill", container.pauses.isNotEmpty())
-        assertTrue(container.pauses.sum() <= PeopleSync.RUN_WAIT_MS)
-        assertEquals(
-            "Ayse",
-            container.people.book
-                .getValue(ayse)
-                .name,
-        )
-        assertTrue(
-            container.people.book
-                .getValue(ayse)
-                .pictureFile != null,
-        )
+    @Test fun aShortWhatsappLimitIsSleptInlineAndTheSameBatchIsAskedAgain() {
+        var refused = 0
+        val known = container.gw.profiles.toMap()
+        container.gw.gateway.profiles = { jids ->
+            if (refused++ == 0) {
+                rateLimited(retryAfterMs = 70_000, source = "whatsapp")
+            } else {
+                Outcome.Ok(jids.mapNotNull(known::get))
+            }
+        }
+        assertEquals(SliceResult.Done, slice())
+        assertEquals(10, container.book().values.count { it.name != null })
+        assertTrue("the wait honours the hint", container.pauses.any { it >= 70_000 })
     }
 
-    @Test fun aRefusedLookupWaitsForTheRefillAndAsksAgain() {
-        script()
-        // Another app spent the allowance a moment ago.
-        val lookups = bucket(60, 1.0, start = 0)
-        container.gw.lookupBucket = lookups
-
-        assertEquals(ListenableWorker.Result.success(), run())
-
-        assertEquals(SyncOutcome.Ok, outcome)
-        assertTrue("the gateway refused at least once", lookups.refused > 0)
-        assertEquals("every number is looked up once", jids, container.gw.lookups.flatten())
-    }
-
-    @Test fun aPersistentRateLimitKeepsTheProgressAndTheNextRunContinues() {
-        script()
-        // The first batch fits the burst, then nothing comes back.
-        container.gw.lookupBucket = bucket(60, 0.0)
-
-        assertEquals("a partial run retries soon", ListenableWorker.Result.retry(), run())
-
-        assertEquals("partial progress is not a failure", SyncOutcome.Partial, outcome)
-        assertEquals(listOf(jids.take(50)), container.gw.lookups)
+    @Test fun aLongLimitEndsTheSliceWithTheTimeToContinueAndKeepsWhatWasStored() {
+        container.gw.lookupBucket = FakeBucket(burst = 15, perSec = 0.0, clock = { container.now })
+        val result = slice()
+        assertTrue("$result", result is SliceResult.Waiting)
+        val until = (result as SliceResult.Waiting).untilMs
+        assertTrue("at least the first backoff", until - container.now >= 60_000)
+        val stored = container.book().size
+        assertTrue("the first batch's people are stored", stored in 1..5)
+        assertEquals(SyncOutcome.Partial, sync.status.value.outcome)
+        // Before the time is up the planner refuses to start (both buttons wait, D8).
         assertEquals(
-            "what was found is kept, with its profile",
-            "Ayse",
-            container.people.book
-                .getValue(ayse)
-                .name,
+            SliceResult.Refused(
+                sync.runner.status.value.stored
+                    ?.notBeforeMs,
+            ),
+            slice(),
         )
-        assertTrue(container.pauses.sum() <= PeopleSync.LOOKUP_WAIT_MS)
-
-        // The limit is gone: the numbers never asked go first, the ones the partial run asked go last.
+        // After it, the run continues where it stopped: the first batch is not asked again.
         container.gw.lookupBucket = null
         container.gw.lookups.clear()
-        assertEquals(ListenableWorker.Result.success(), run())
-        assertEquals(SyncOutcome.Ok, outcome)
-        assertEquals(jids.drop(50).take(50), container.gw.lookups.first())
-        assertEquals(
-            "every unknown number is asked once",
-            (jids.drop(50) + jids.drop(1).take(49)).toSet(),
-            container.gw.lookups
-                .flatten()
-                .toSet(),
-        )
-        assertEquals(
-            149,
-            container.gw.lookups
-                .flatten()
-                .size,
-        )
-    }
-
-    @Test fun aRateLimitBeforeAnyAnswerIsAFailureButNoCrash() {
-        script()
-        container.gw.lookupBucket = bucket(60, 0.0, start = 0)
-
-        assertEquals(ListenableWorker.Result.retry(), run())
-
-        assertEquals(SyncOutcome.Failed, outcome)
-        assertTrue(container.people.book.isEmpty())
-        assertTrue("the waits stay inside the budget", container.pauses.sum() <= PeopleSync.LOOKUP_WAIT_MS)
-    }
-
-    @Test fun aRateLimitedPictureWaitsAndTheLoopGoesOn() {
-        // Six people with a picture each; every first ask is refused, more than MAX_FAILURES (5) in a row.
-        val people = (1..6).map { "90533000000$it@s.whatsapp.net" }
-        container.numbers = people.map { "+" + it.substringBefore('@') }
-        for (jid in people) {
-            container.gw.onWhatsapp += jid
-            container.gw.profiles[jid] = WaProfile(jid, pushName = jid.take(12), pictureId = "p", fetchedMs = 1)
-            container.gw.pictures[jid] = PictureAnswer("image", id = "p", dataB64 = b64(jid))
-        }
-        val refused = mutableSetOf<String>()
-        container.gw.pictureOverride = { body -> if (refused.add(body.jid)) rateLimited() else null }
-        container.connect()
-
-        assertEquals(ListenableWorker.Result.success(), run())
-
-        assertEquals(SyncOutcome.Ok, outcome)
-        assertEquals(
-            "every picture is downloaded",
-            people.toSet(),
-            container.gw.pictureAsks
-                .map { it.jid }
-                .toSet(),
-        )
+        container.now = until + 1
+        assertEquals(SliceResult.Done, slice())
         assertTrue(
-            people.all {
-                container.people.book
-                    .getValue(it)
-                    .pictureFile != null
-            },
+            container.gw.lookups
+                .flatten()
+                .none { it == jid(1) },
         )
-        assertTrue("the refusals were waited out", container.pauses.isNotEmpty())
+        assertEquals(10, container.book().size)
+    }
+
+    @Test fun aRateLimitedPictureIsNotAFailure() {
+        var refusals = 0
+        container.gw.pictureOverride = { body ->
+            if (body.jid == jid(1) && refusals++ == 0) rateLimited(source = "whatsapp") else null
+        }
+        assertEquals(SliceResult.Done, slice())
+        assertTrue(
+            "the picture was asked again after the wait",
+            container.gw.pictureAsks.count { it.jid == jid(1) } >= 2,
+        )
+        assertTrue(container.book().getValue(jid(1)).pictureFile != null)
+    }
+
+    @Test fun anOldGatewaysUnansweredProfilesAreAThrottleNotAnAnswer() {
+        container.gw.profiles.keys
+            .forEach { container.gw.profiles[it] = WaProfile(it) }
+        val result = slice()
+        assertTrue("$result", result is SliceResult.Waiting)
+        assertTrue("no name came from an unanswered profile", container.book().values.all { it.name == null })
     }
 }

@@ -12,9 +12,7 @@ import dev.rovsti.contacts.data.RecentTracker
 import dev.rovsti.contacts.data.ReminderPort
 import dev.rovsti.contacts.data.StoreCommonSettings
 import dev.rovsti.contacts.data.WaMarks
-import dev.rovsti.contacts.people.PeopleStore
 import dev.rovsti.contacts.people.PeopleSync
-import dev.rovsti.contacts.people.PeopleSyncLog
 import dev.rovsti.contacts.photo.GatewayWaPhotoPort
 import dev.rovsti.contacts.photo.WaPhotoPort
 import dev.rovsti.contacts.trash.ContactDeletion
@@ -38,6 +36,7 @@ import dev.rovsti.core.ops.SearchOps
 import dev.rovsti.core.ops.SharedOps
 import dev.rovsti.people.AvatarResolver
 import dev.rovsti.people.PeopleIndex
+import dev.rovsti.people.sync.PeopleStore
 import dev.rovsti.platform.calllog.AndroidBlocklistRepository
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
 import dev.rovsti.platform.calllog.BlocklistRepository
@@ -51,10 +50,10 @@ import dev.rovsti.platform.system.permissions.AppPermissions
 import dev.rovsti.platform.system.permissions.PermissionGroup
 import dev.rovsti.shell.ShellContainer
 import dev.rovsti.shell.settings.CommonSettings
+import dev.rovsti.wa.WaLinkStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -216,13 +215,16 @@ open class ContactsContainer(
     protected open fun createPeopleSync(): PeopleSync =
         PeopleSync(
             store = peopleStore,
+            ops = peopleOps,
             wa = wa,
             numbers = ::peopleNumbers,
-            log = PeopleSyncLog(context.getSharedPreferences(PEOPLE_PREFS, Context.MODE_PRIVATE)),
             scope = scope,
+            legacy = context.getSharedPreferences(PEOPLE_PREFS, Context.MODE_PRIVATE),
+            gatewayUrl = { (WaLinkStore(waOps).read() as? Outcome.Ok)?.value?.gatewayUrl.orEmpty() },
+            lockFile = File(context.noBackupFilesDir, PEOPLE_LOCK),
             onChanged = {
                 peopleStore.notifyChanged(context.contentResolver)
-                scope.launch { refreshPeopleIndex() }
+                refreshPeopleIndex()
             },
         )
 
@@ -249,4 +251,8 @@ private const val HOME_CC_SAMPLE = 200
 /** How many recent calls the people sync reads numbers from. */
 private const val RECENT_CALLS = 300
 
+/** The v1 sync's prefs: read once by [PeopleSync] for the last sync, then cleared; the name stays reserved. */
 private const val PEOPLE_PREFS = "people-sync"
+
+/** The people sync's cross-process guard, in `noBackupFilesDir`. */
+private const val PEOPLE_LOCK = "people-sync.lock"

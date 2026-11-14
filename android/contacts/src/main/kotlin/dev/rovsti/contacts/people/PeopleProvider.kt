@@ -10,6 +10,7 @@ import android.os.ParcelFileDescriptor
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.people.PeopleContract
 import dev.rovsti.people.PeopleContract.addPerson
+import dev.rovsti.people.sync.PeopleStore
 import dev.rovsti.shell.HasContainer
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull

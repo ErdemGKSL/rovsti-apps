@@ -1,0 +1,40 @@
+<resources>
+    <string name="app_name">Rosty Stops</string>
+    <!-- The home's folded tab bar (the GPUI tabs). -->
+    <string name="tab_trip">Trip</string>
+    <string name="tab_saved">Saved</string>
+    <string name="tab_settings">Settings</string>
+    <!-- Floating chrome over the map. -->
+    <string name="home_search">Search or pick a stop</string>
+    <string name="home_locate">Show my location</string>
+    <string name="home_layers">Map layers</string>
+    <string name="home_map_options">Map options</string>
+    <!-- The sheet over the map. -->
+    <string name="home_sheet_title">Plan a trip</string>
+    <string name="home_sheet_hint">Tap the map to set point A, then point B.</string>
+    <string name="home_trip_running">Trip in progress: %1$s</string>
+    <string name="home_saved_stops">Saved Stops</string>
+    <string name="home_history">History</string>
+    <string name="home_transit">Transit Stops</string>
+    <string name="home_transit_loaded">Loaded</string>
+    <!-- Sheets that later stories fill in (E7.7, E7.8, E7.11). -->
+    <string name="sheet_saved_title">Saved Stops</string>
+    <string name="sheet_history_title">History</string>
+    <string name="sheet_pick_title">Pick a Stop</string>
+    <string name="sheet_coming">Coming soon</string>
+    <string name="sheet_saved_message">Your saved stops will be listed here.</string>
+    <string name="sheet_history_message">Your past trips will be listed here.</string>
+    <string name="sheet_pick_message">Search, paste a link or choose a recent trip here.</string>
+    <string name="sheet_pick_shared">Shared with Stops: %1$s</string>
+    <plurals name="count_stops">
+        <item quantity="one">%1$d stop</item>
+        <item quantity="other">%1$d stops</item>
+    </plurals>
+    <plurals name="count_trips">
+        <item quantity="one">%1$d trip</item>
+        <item quantity="other">%1$d trips</item>
+    </plurals>
+    <!-- Settings (E7.10 adds the alarm, tiles, GTFS and message pages). -->
+    <string name="settings_group_map">Map</string>
+    <string name="settings_tile_server">Tile Server</string>
+</resources>

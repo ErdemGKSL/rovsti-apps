@@ -113,6 +113,18 @@ answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the hand
 the client must have sent. Pure: `wa.push_parse` (FCM wake), `wa.link_read` / `wa.link_write` (`whatsapp-link.json`), `wa.avatars_plan` (picture file names and the disk prune plan; the
 `AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up), `wa.settings_apply {model?, link?, app, now_ms, input?}` (the stateless WhatsApp settings state machine: answers `{model, effects, view}`, a render-ready page; the caller keeps `model` as JSON; the gateway URL and `rwk_` key checks run inside it).
 People cache (X.1): `people.upsert {dir?, now_ms, people:[{jid, number?, lid?, push_name?, verified_name?, on_whatsapp?, picture_id?, picture_removed?, picture_file?}]}` writes `people.json` (a changed `picture_id` marks the picture stale and keeps the old file showing; `picture_removed` drops the file; a LID and its number join into one person under the phone JID) and answers `{changed, stale, drop_files}`; `people.lookup {dir?, key}` (E.164 in any spelling, phone JID, LID JID or bare LID; offline, a missing or damaged file reads as empty) answers `{person: row|null}`; `people.plan {dir?, now_ms, files, max_bytes}` answers `{refresh:[{jid, picture_id}], remove:[path]}` (orphans of a changed picture, then the oldest over the cap, by the `wa.avatars_plan` rules); `people.snapshot {dir?}` answers `{people: rows}` sorted by name for the Contacts provider.
+
+People sync v2 (`rovsti_app_core::people_sync`, plan `_bmad-output/plans/people-sync-v2.md`): `people.sync_begin
+{dir?, now_ms, instance_id, gateway_url, numbers, start: resume|restart|auto|live_pictures, slice_ms?}` opens a slice and
+answers `{handle?, refused?: {kind: not_before, until_ms} | {kind: nothing_to_resume}, status}`; `people.sync_next
+{handle, now_ms, rand}` answers one step (`{kind: lookup|profiles, jids}`, `{kind: plan_pictures}`, `{kind: picture,
+jid, known_id?}`, `{kind: sleep, ms, why: pace|rate_limit}`, `{kind: stop, stopped: {outcome: done|waiting|interrupted|
+failed, ...}}`); `people.sync_report {handle, now_ms, rand, report}` commits the answer (`lookup`, `profiles`, `files`,
+`picture`, `rate_limited`, `error`, `cancelled`; `people.json` first, `people-sync.json` second) and answers `{changed,
+drop_files, stage, progress}`; `people.sync_stop {handle?|dir?, now_ms, reason}` ends the slice and releases the handle
+(without a handle it interrupts the stored run: unlink); `people.sync_status {dir?, now_ms}` answers `{run?, last?,
+not_before_ms?}` for the settings row. The first `people.sync_*` call for a directory in a process turns a stored
+`running` run into `interrupted(process_death)`.
 Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
 
 | Item | Used by | Domain | Class | Target |
@@ -188,6 +200,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rovsti_app_core::messages::tags` | messages | messages | op | messages.tag |
 | `rovsti_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rovsti_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
+| `rovsti_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
 | `rovsti_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rovsti_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rovsti_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

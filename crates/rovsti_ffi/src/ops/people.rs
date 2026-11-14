@@ -1,7 +1,8 @@
 //! `people.*` (X.1): the people cache of `rovsti_app_core::people`, a file (`people.json`) in the data directory.
 //!
 //! A request may name `dir` (tests, fixtures), else `core.init`'s data dir is used. `people.upsert` writes; the
-//! others only read, so they work offline and never fail on a missing or damaged file.
+//! others only read, so they work offline and never fail on a missing or damaged file. The `people.sync_*` ops
+//! (people sync v2) are in [`sync`].
 
 use crate::envelope::FfiError;
 use crate::op;
@@ -11,6 +12,8 @@ use rovsti_app_core::people::{self, FileInfo, Plan, Row, Update, Upserted};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
+
+mod sync;
 
 pub(super) const OPS: &[OpSpec] = &[
     op!("people.upsert", UpsertReq, Upserted, upsert, upsert_cases),
@@ -22,6 +25,41 @@ pub(super) const OPS: &[OpSpec] = &[
         SnapshotAns,
         snapshot,
         snapshot_cases
+    ),
+    op!(
+        "people.sync_status",
+        sync::StatusReq,
+        rovsti_app_core::people_sync::Status,
+        sync::status,
+        sync::status_cases
+    ),
+    op!(
+        "people.sync_begin",
+        sync::BeginReq,
+        sync::BeginAns,
+        sync::begin,
+        sync::begin_cases
+    ),
+    op!(
+        "people.sync_next",
+        sync::NextReq,
+        rovsti_app_core::people_sync::Step,
+        sync::next,
+        sync::next_cases
+    ),
+    op!(
+        "people.sync_report",
+        sync::ReportReq,
+        rovsti_app_core::people_sync::Committed,
+        sync::report,
+        sync::report_cases
+    ),
+    op!(
+        "people.sync_stop",
+        sync::StopReq,
+        rovsti_app_core::people_sync::Status,
+        sync::stop,
+        sync::stop_cases
     ),
 ];
 

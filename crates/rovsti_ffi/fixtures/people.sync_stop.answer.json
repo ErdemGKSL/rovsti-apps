@@ -1,0 +1,1 @@
+{"ok":{"run":{"id":1790000000000,"mode":"full","stage":"lookup","phase":{"kind":"interrupted","reason":"cancelled"},"progress":{"done":0,"total":2},"resumable":true,"heartbeat_ms":1790000000000,"stats":{"batches":0,"people_found":0,"downloaded":0,"dropped":0,"waits_ms":0,"rate_limits":0}}}}

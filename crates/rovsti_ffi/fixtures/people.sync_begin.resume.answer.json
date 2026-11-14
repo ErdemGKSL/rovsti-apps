@@ -1,0 +1,1 @@
+{"ok":{"handle":7777777777,"status":{"run":{"id":1789996400000,"mode":"full","stage":"lookup","phase":{"kind":"running"},"progress":{"done":1,"total":2},"resumable":false,"heartbeat_ms":1790000000000,"stats":{"batches":1,"people_found":0,"downloaded":0,"dropped":0,"waits_ms":20000,"rate_limits":0}},"last":{"at_ms":1789900000000,"people":2,"downloaded":1,"duration_ms":600000}}}}

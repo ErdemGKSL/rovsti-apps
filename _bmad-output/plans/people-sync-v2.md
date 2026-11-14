@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S4 done; see the notes under each step.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S5 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -571,6 +571,24 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   `Interrupted(WaDisconnected)`.
 - **S5 Planner in Rust.** `people_sync.rs` with all unit tests, `people.sync_*` ops + fixtures + Kotlin models and
   `PeopleOps` methods. Nothing uses it yet.
+  *Done (notes, deviations):* (a) `PlanPictures` is answered with `Report::Files { files, max_bytes }` (the files on
+  disk) instead of a `PicturePlan`; the planner runs `Book::plan` itself and answers the deletions in
+  `Committed.drop_files`, so the picture rules stay in one place and `known_id` is only offered when that file is on
+  disk. (b) The `Session` lives in the FFI handle registry (`people.sync_begin` answers a `handle`, the fixture test
+  chains it), not a `Mutex<Option<Session>>` in `state.rs`; `people.sync_stop` releases it. (c) The process-death rule
+  needs no `fresh_process` flag: the first `people.sync_*` call for a directory in a process turns a stored `Running`
+  into `Interrupted(ProcessDeath)`. (d) `LinkId.gateway` is FNV-1a 64 of the URL (trailing `/` ignored), not SHA-256:
+  stable across builds and no new dependency for `rovsti_app_core`. (e) A link change also clears `last`. (f) A profile
+  an old gateway leaves unanswered three times in one run (`MAX_UNANSWERED`) is given up for that run, so a mixed batch
+  cannot loop forever; a whole unanswered batch is the D6 throttle and does not count against the JIDs. (g) A
+  non-network gateway error on one picture fails only that picture (as v1), not the run. (h) With the backoff doubling
+  past `INLINE_WAIT_MAX_MS` on the second strike, the second 429 of a slice already ends it; `MAX_STRIKES` stays as a
+  guard. (i) The live pass (`Start::LivePictures`) keeps its own run in the session and swaps it in only while a call
+  runs, so the stored run, `negatives` and `last` are never touched. (j) The Kotlin models are flat classes with every
+  variant's fields optional (the decoder is strict), plus `SyncWire` constants and `SyncReport` builders. 43 planner
+  tests in `people_sync_tests.rs`, 2 op tests and 12 fixture cases. `cargo clippy/test --workspace` currently fails in
+  the GPUI `apps/contacts` and `apps/phone` test builds (`WireNumber.normalized`, since e3ea831), unrelated; the crates
+  touched here are clean.
 - **S6 Runner + Contacts switch-over.** `PeopleStore` to `:people`, `PeopleSyncRunner`, `PartNotifier`,
   `PeopleSync` delegates, worker continuation work, one-time migration of the old prefs, removal of
   `Allowance/Wait/Paced/PeopleSyncLog`. Sync log lines complete (section 10). Rewritten and new Kotlin tests.

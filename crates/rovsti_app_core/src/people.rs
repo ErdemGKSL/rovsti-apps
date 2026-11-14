@@ -142,7 +142,7 @@ pub struct Refresh {
 }
 
 /// A file on disk, for [`Book::plan`].
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileInfo {
     pub path: String,
     pub bytes: u64,

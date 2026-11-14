@@ -2,8 +2,8 @@
 //! No device is needed: the Kotlin sources of `android/platform` are read as text.
 //!
 //! Moved from `apps/stops/src/kotlin_contract.rs` (E3 AC4). The assertions on the Stops manifest, on
-//! `stops/MainActivity.kt` and on the GPUI `RostyBridge` stay in that copy until E8.6; E7.1 re-targets the manifest
-//! ones at `android/stops/src/main/AndroidManifest.xml`.
+//! `stops/MainActivity.kt` and on the GPUI `RostyBridge` stay in that copy until E8.6; E7.1 re-targeted the manifest
+//! and `MainActivity` ones at the Kotlin Stops app in `stops_kotlin_contract.rs`.
 
 use rosty_geo::poll;
 

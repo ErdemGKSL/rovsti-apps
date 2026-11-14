@@ -191,7 +191,8 @@ class StandaloneSourceTest {
         val p = people()
         p.start()
         connect()
-        waitFor("synced") { p.source.load().size == 2 }
+        // After the whole first run, so its profile batch cannot answer after the event.
+        waitFor("synced") { p.source.load().count { it.pictureFile != null } == 2 }
         repo.emit(
             GatewayEvent.Profile(
                 jid = "905321112233@s.whatsapp.net",

@@ -9,7 +9,9 @@ import dev.rosty.core.model.stops.DestParseRequest
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Endpoint
 import dev.rosty.core.model.stops.FixIn
+import dev.rosty.core.model.stops.GtfsBbox
 import dev.rosty.core.model.stops.GtfsImportRequest
+import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.PickEvent
 import dev.rosty.core.model.stops.PickReplayRequest
 import dev.rosty.core.model.stops.ProjectRequest
@@ -208,6 +210,62 @@ class StopsOpsNativeTest {
             assertEquals(2, report.patterns)
             val missing = ops.gtfsImport(GtfsImportRequest("/nope/feed.zip", nowMs = 1)) as Outcome.Err
             assertTrue(missing.error is RustError.NotFound)
+        }
+
+    @Test
+    fun theSavedFeedAnswersTheStopsInAViewAndTheLineOfAPattern() =
+        runBlocking {
+            val fixtures = System.getProperty("rosty.contract")
+            val zip = File(fixtures, "../tests/data/gtfs-tiny.zip").canonicalPath
+            val dir =
+                java.nio.file.Files
+                    .createTempDirectory("gtfs-view")
+                    .toFile()
+                    .apply { deleteOnExit() }
+                    .absolutePath
+            // Nothing imported yet: no feed, nothing to draw.
+            val all = GtfsBbox(south = 40.9, west = 28.9, north = 41.1, east = 29.2)
+            val before = ops.gtfsView(GtfsViewRequest(all, cap = 300, pattern = 0, dir = dir)).getOrOk()
+            assertFalse(before.hasFeed)
+            assertTrue(before.stops.isEmpty())
+            assertNull(before.line)
+
+            assertTrue(ops.gtfsImport(GtfsImportRequest(zip, nowMs = 1_000, save = true, dir = dir)).getOrOk().saved)
+            val view = ops.gtfsView(GtfsViewRequest(all, cap = 300, pattern = 0, dir = dir)).getOrOk()
+            assertTrue(view.hasFeed)
+            assertEquals(listOf("A", "B", "C"), view.stops.map { it.id })
+            assertEquals(listOf(0, 1, 2), view.stops.map { it.index })
+            assertEquals("Moda İskele", view.stops[0].name)
+            assertEquals(Coord(40.95, 29.09), view.stops[2].coord)
+            assertEquals(3, view.total)
+            assertFalse(view.capped)
+            // The first pattern is the trip to Kadıköy: A then B.
+            assertEquals(listOf(Coord(41.0001, 29.0), Coord(40.99, 29.02)), view.line)
+            val second = ops.gtfsView(GtfsViewRequest(all, cap = 300, pattern = 1, dir = dir)).getOrOk()
+            assertEquals(listOf(Coord(41.0001, 29.0), Coord(40.95, 29.09)), second.line)
+
+            // A smaller box, a cap, and a pattern the feed does not have.
+            val west = GtfsBbox(south = 40.98, west = 28.99, north = 41.01, east = 29.03)
+            val two = ops.gtfsView(GtfsViewRequest(west, cap = 300, pattern = 9, dir = dir)).getOrOk()
+            assertEquals(listOf("A", "B"), two.stops.map { it.id })
+            assertNull(two.line)
+            val capped = ops.gtfsView(GtfsViewRequest(all, cap = 1, dir = dir)).getOrOk()
+            assertEquals(1, capped.stops.size)
+            assertEquals(3, capped.total)
+            assertTrue(capped.capped)
+            // The stop nearest the middle of the box (41.0, 29.05) is B.
+            assertEquals("B", capped.stops.single().id)
+            // A box that reaches the feed the long way round, across the antimeridian.
+            val around = GtfsBbox(south = 40.0, west = 29.05, north = 42.0, east = 29.01)
+            assertEquals(
+                listOf(
+                    "A",
+                    "C",
+                ),
+                ops.gtfsView(GtfsViewRequest(around, cap = 300, dir = dir)).getOrOk().stops.map {
+                    it.id
+                },
+            )
         }
 
     private fun <T> Outcome<T>.getOrOk(): T = (this as? Outcome.Ok)?.value ?: error("failed: $this")

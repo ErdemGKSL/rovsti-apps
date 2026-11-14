@@ -277,6 +277,46 @@ data class GtfsSearchAnswer(
     val rows: List<GtfsHit>,
 )
 
+/** A latitude and longitude box in degrees; [west] greater than [east] crosses the antimeridian. */
+@Serializable
+data class GtfsBbox(
+    val south: Double,
+    val west: Double,
+    val north: Double,
+    val east: Double,
+)
+
+/** What the map shows of the imported feed: the stops in [bbox] and, with [pattern], the line of that pattern. */
+@Serializable
+data class GtfsViewRequest(
+    val bbox: GtfsBbox,
+    /** The most stops to answer; those nearest the middle of the box win. */
+    val cap: Int,
+    @EncodeDefault(NEVER) val pattern: Int? = null,
+    @EncodeDefault(NEVER) val dir: String? = null,
+)
+
+@Serializable
+data class GtfsViewStop(
+    /** Index in the feed, as in [GtfsHit.index]. */
+    val index: Int,
+    val id: String,
+    val name: String,
+    val coord: Coord,
+)
+
+@Serializable
+data class GtfsViewAnswer(
+    @SerialName("has_feed") val hasFeed: Boolean,
+    /** Stops inside the box before the cap. */
+    val total: Int,
+    val capped: Boolean,
+    /** In feed order. */
+    val stops: List<GtfsViewStop>,
+    /** The stops of the pattern in travel order; null without a pattern and for one the feed does not have. */
+    val line: List<Coord>?,
+)
+
 @Serializable
 data class CoordFormatRequest(
     val at: Coord,

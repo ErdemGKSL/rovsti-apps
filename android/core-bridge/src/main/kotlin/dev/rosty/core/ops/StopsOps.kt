@@ -38,6 +38,8 @@ import dev.rosty.core.model.stops.GtfsImportAnswer
 import dev.rosty.core.model.stops.GtfsImportRequest
 import dev.rosty.core.model.stops.GtfsSearchAnswer
 import dev.rosty.core.model.stops.GtfsSearchRequest
+import dev.rosty.core.model.stops.GtfsViewAnswer
+import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.HistoryEditAnswer
 import dev.rosty.core.model.stops.HistoryEditRequest
 import dev.rosty.core.model.stops.HistoryExportAnswer
@@ -273,6 +275,9 @@ interface StopsOps {
     /** Searches the imported feed. */
     suspend fun gtfsSearch(req: GtfsSearchRequest): Outcome<GtfsSearchAnswer>
 
+    /** The transit stops in a map view and the line of one pattern. */
+    suspend fun gtfsView(req: GtfsViewRequest): Outcome<GtfsViewAnswer>
+
     /** A coordinate in every format, with the view links. */
     suspend fun coordFormat(req: CoordFormatRequest): Outcome<CoordFormatAnswer>
 
@@ -359,6 +364,7 @@ interface StopsOps {
                 "stops.poll",
                 "stops.gtfs_import",
                 "stops.gtfs_search",
+                "stops.gtfs_view",
                 "stops.coord_format",
                 "stops.coord_parse",
                 "stops.measure",
@@ -529,6 +535,9 @@ class NativeStopsOps(
 
     override suspend fun gtfsSearch(req: GtfsSearchRequest) =
         core.call("stops.gtfs_search", req, GtfsSearchRequest.serializer(), GtfsSearchAnswer.serializer())
+
+    override suspend fun gtfsView(req: GtfsViewRequest) =
+        core.call("stops.gtfs_view", req, GtfsViewRequest.serializer(), GtfsViewAnswer.serializer())
 
     override suspend fun coordFormat(req: CoordFormatRequest) =
         core.call("stops.coord_format", req, CoordFormatRequest.serializer(), CoordFormatAnswer.serializer())

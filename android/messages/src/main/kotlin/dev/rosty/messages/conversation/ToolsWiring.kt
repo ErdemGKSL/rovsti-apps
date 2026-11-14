@@ -46,8 +46,12 @@ import dev.rosty.design.overlay.showToast
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
+import dev.rosty.design.time.LocalRostyClock
+import dev.rosty.design.time.RostyClock
+import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
+import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.platform.files.ExportDocument
 import dev.rosty.platform.files.FileResult
 import dev.rosty.platform.files.ShareIntents
@@ -56,6 +60,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -88,7 +93,12 @@ class ToolHost(
     /** "Save as" with the system document picker (the page owns the launcher). */
     val saveAs: (ExportedChat) -> Unit,
     val copy: (String) -> Unit,
-)
+    /** "Now", from the injected clock (tests fix it). */
+    val clock: RostyClock = SystemRostyClock,
+) {
+    /** Today in the phone's zone. */
+    fun today(): LocalDate = Instant.ofEpochMilli(clock.nowMillis()).atZone(ZoneId.systemDefault()).toLocalDate()
+}
 
 /**
  * The header menu (E6.6): Search in chat, Jump to date, Media/links/docs, Export chat, Share as text, Copy name/number
@@ -137,7 +147,7 @@ fun headerMenu(
 /** Jump to date (M24) with the quick picks of GPUI: Today, Yesterday, 1 week ago, 1 month ago. */
 private fun presentJump(host: ToolHost) {
     val c = host.context
-    host.overlays.presentJumpToDate(c, LocalDate.now()) { start ->
+    host.overlays.presentJumpToDate(c, host.today()) { start ->
         val found = host.tools.jumpTo(start)
         if (!found) host.overlays.showToast(c.getString(R.string.tools_further_back))
     }
@@ -282,7 +292,7 @@ private fun MediaGrid(
 ) {
     val photo = c.getString(R.string.wa_photo)
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter)) {
-        val gap = GRID_GAP
+        val gap = MessagesMetrics.GalleryGap
         val side = (maxWidth - gap * (GRID_COLUMNS - 1)) / GRID_COLUMNS
         val px = with(LocalDensity.current) { side.roundToPx() }
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
@@ -292,7 +302,7 @@ private fun MediaGrid(
                         Box(
                             Modifier
                                 .size(side)
-                                .clip(RoundedCornerShape(GRID_RADIUS))
+                                .clip(RoundedCornerShape(MessagesMetrics.GalleryCorner))
                                 .background(RostyTheme.colors.fillSecondary)
                                 .testTag(ToolTags.media(id))
                                 .clickable { onOpen(id) },
@@ -317,8 +327,6 @@ private fun MediaGrid(
 }
 
 private const val GRID_COLUMNS = 3
-private val GRID_GAP = 2.dp
-private val GRID_RADIUS = 4.dp
 
 object ToolTags {
     const val Gallery = "tools-gallery"
@@ -339,6 +347,7 @@ fun rememberToolHost(
 ): ToolHost {
     val context = LocalContext.current
     val res = LocalResources.current
+    val clock = LocalRostyClock.current
     val scope = rememberCoroutineScope()
     val tools = remember { ConversationTools(container.chat, scope, bubbles, System::currentTimeMillis) }
     val pending = remember { arrayOfNulls<ExportedChat>(1) }
@@ -367,6 +376,7 @@ fun rememberToolHost(
                 pending[0] = file
                 save.launch(file.fileName)
             },
+            clock = clock,
             copy = { text ->
                 container.clipboard.copy(text)
                 overlays.showToast(res.getString(R.string.conversation_copied))

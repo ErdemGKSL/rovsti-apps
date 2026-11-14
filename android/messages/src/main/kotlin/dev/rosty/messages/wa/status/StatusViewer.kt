@@ -57,6 +57,7 @@ import dev.rosty.design.text.rtlSafe
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
+import dev.rosty.messages.theme.StatusMetrics
 import dev.rosty.messages.ui.MessagesAvatar
 import kotlinx.collections.immutable.ImmutableList
 import java.io.File

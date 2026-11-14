@@ -75,8 +75,8 @@ import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
+import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.messages.ui.MessagesAvatar
-import dev.rosty.messages.ui.MessagesMetrics
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList

@@ -1,4 +1,4 @@
-package dev.rosty.messages.ui
+package dev.rosty.messages.theme
 
 import androidx.compose.ui.unit.dp
 
@@ -25,4 +25,8 @@ object MessagesMetrics {
     val JumpButton = 40.dp
     val EmptyShare = 0.7f
     val GlowPad = 2.dp
+
+    /** The gallery grid: hairline gaps, slightly rounded thumbnails. */
+    val GalleryGap = 2.dp
+    val GalleryCorner = 4.dp
 }

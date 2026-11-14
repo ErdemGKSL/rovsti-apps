@@ -72,8 +72,8 @@ import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
+import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.messages.ui.MessagesAvatar
-import dev.rosty.messages.ui.MessagesMetrics
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.launch
 

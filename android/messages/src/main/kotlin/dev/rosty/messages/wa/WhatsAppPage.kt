@@ -37,6 +37,8 @@ import dev.rosty.design.text.resolve
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
+import dev.rosty.design.time.LocalRostyClock
+import dev.rosty.design.time.RostyClock
 import dev.rosty.design.transition.TabNavigator
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
@@ -320,6 +322,17 @@ private fun statusRow(
     container: MessagesContainer,
     list: StatusList,
     words: StatusWords,
+): androidx.compose.runtime.State<StatusRowUi> {
+    val clock = LocalRostyClock.current
+    return statusRowState(container, list, words, clock)
+}
+
+@Composable
+private fun statusRowState(
+    container: MessagesContainer,
+    list: StatusList,
+    words: StatusWords,
+    clock: RostyClock,
 ) = produceState(StatusRowUi(subtitle = words.none), list, words) {
     val names = HashMap<String, String?>()
     for (author in list.authors) {
@@ -331,7 +344,7 @@ private fun statusRow(
                 ?.takeIf { it.isNotBlank() }
     }
     value =
-        statusRowOf(list, words, System.currentTimeMillis()) { jid, carried ->
+        statusRowOf(list, words, clock.nowMillis()) { jid, carried ->
             names[jid]
                 ?: carried?.takeIf { it.isNotBlank() }
                 ?: numberOfJid(jid)

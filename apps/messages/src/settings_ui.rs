@@ -4,8 +4,8 @@
 //! Everything it changes lives in [`crate::prefs::MessagesPrefs`] (through the
 //! backend, which saves it) or in Android (default role, system blocklist).
 //! The encrypted backup runs off the UI thread: reading the provider, PBKDF2
-//! and AES-GCM (`rovsti_core::msg_backup`), then the file hand-off through
-//! `rovsti_android::documents`. Its state is the pure machine in
+//! and AES-GCM (`rosty_core::msg_backup`), then the file hand-off through
+//! `rosty_android::documents`. Its state is the pure machine in
 //! [`crate::backup_ui`].
 
 use std::{
@@ -19,8 +19,8 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TextInputAction,
     TextInputPurpose, Window, div, px,
 };
-use rovsti_android::{Error, documents, sms};
-use rovsti_core::{
+use rosty_android::{Error, documents, sms};
+use rosty_core::{
     ThreadId, blocklist,
     msg_backup::{self, BackupBody, BackupError, RestorePlan},
     quick_replies::{self, ReplyError},
@@ -29,7 +29,7 @@ use rovsti_core::{
     text_scale::ChatTextSize,
     wire::{DocumentOp, DocumentResult, EmergencyList},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{glass_icon_button, glass_pill, list_row, section},
     current_theme,
@@ -37,7 +37,7 @@ use rovsti_ui::{
     theme,
     tokens::{Theme, typography},
 };
-use rovsti_wa_proto::{is_pn_jid, jid_user};
+use rosty_wa_proto::{is_pn_jid, jid_user};
 
 use crate::{
     backend::{Backend, BackendEvent, now_ms},
@@ -444,9 +444,9 @@ impl SettingsView {
     fn change_block(&mut self, number: String, block: bool, cx: &mut Context<Self>) {
         let task = cx.background_executor().spawn(async move {
             if block {
-                rovsti_android::blocklist::block(&number)
+                rosty_android::blocklist::block(&number)
             } else {
-                rovsti_android::blocklist::unblock(&number)
+                rosty_android::blocklist::unblock(&number)
             }
         });
         cx.spawn(async move |this, cx| {
@@ -883,7 +883,7 @@ impl SettingsView {
             "Default SMS app",
             Some(
                 if held {
-                    "Rovsti Messages sends and receives your SMS."
+                    "Rosty Messages sends and receives your SMS."
                 } else {
                     "Not the default yet. Tap to make it the default."
                 }
@@ -910,7 +910,7 @@ impl SettingsView {
                 .id("set-contacts")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.backend.update(cx, |backend, cx| {
-                        backend.ask_access(rovsti_android::permissions::Group::Contacts, cx);
+                        backend.ask_access(rosty_android::permissions::Group::Contacts, cx);
                     });
                 }))
                 .into_any_element(),
@@ -986,7 +986,7 @@ impl SettingsView {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.backend.update(cx, |backend, cx| {
                             backend
-                                .ask_access(rovsti_android::permissions::Group::Notifications, cx);
+                                .ask_access(rosty_android::permissions::Group::Notifications, cx);
                         });
                     }))
                     .into_any_element(),
@@ -1252,7 +1252,7 @@ impl SettingsView {
                         theme,
                         None,
                         "Import backup",
-                        Some("Restore from a Rovsti Messages backup file.".into()),
+                        Some("Restore from a Rosty Messages backup file.".into()),
                         None,
                     )
                     .id("backup-import")
@@ -1462,7 +1462,7 @@ fn seal_to_cache(
 fn open_archive(
     path: &Path,
     passphrase: &str,
-    existing: &[rovsti_core::sms::SmsRow],
+    existing: &[rosty_core::sms::SmsRow],
 ) -> Result<(BackupBody, RestorePlan), OpenFailure> {
     let meta =
         fs::metadata(path).map_err(|e| OpenFailure::Io(format!("Couldn't read the file: {e}")))?;
@@ -1490,7 +1490,7 @@ fn remove_later<T: 'static>(path: &Path, cx: &mut Context<T>) {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::sms::SmsRow;
+    use rosty_core::sms::SmsRow;
 
     use super::*;
 
@@ -1560,7 +1560,7 @@ mod tests {
     #[test]
     fn export_then_open_round_trips_through_a_file() {
         let dir =
-            std::env::temp_dir().join(format!("rovsti-messages-settings-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rosty-messages-settings-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let body = BackupBody {
             created_ms: 5,

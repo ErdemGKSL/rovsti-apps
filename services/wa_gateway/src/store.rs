@@ -7,7 +7,7 @@ use std::fmt;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use rovsti_wa_proto::{
+use rosty_wa_proto::{
     AppId, ChatSummary, InstanceState, InstanceStatus, KeyHash, KeyId, KeyInfo, Reaction,
     RichMessage, ScheduledState, ScheduledText, WaMessage, is_status_chat,
 };
@@ -1198,7 +1198,7 @@ fn last_message_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::{ConnectKey, MessageBody};
+    use rosty_wa_proto::{ConnectKey, MessageBody};
 
     fn new_key(seed: u8, label: &str) -> (ConnectKey, NewKey) {
         let key = ConnectKey::from_bytes(&[seed; 32]);
@@ -1878,7 +1878,7 @@ mod tests {
         let chat = "123-1@g.us";
         let mut m = text(chat, "img", 10, false);
         m.body = MessageBody::Media {
-            kind: rovsti_wa_proto::MediaKind::Image,
+            kind: rosty_wa_proto::MediaKind::Image,
             caption: None,
             mime: "image/png".into(),
             size: 3,
@@ -1960,7 +1960,7 @@ mod tests {
 
     #[tokio::test]
     async fn meta_thumbnails_and_push_names_are_stored() {
-        use rovsti_wa_proto::{DeliveryStatus, MessageMeta, Quoted};
+        use rosty_wa_proto::{DeliveryStatus, MessageMeta, Quoted};
         let store = store_with_instance().await;
         let chat = "g@g.us";
         let mut m = text(chat, "m1", 10, false);
@@ -2058,7 +2058,7 @@ mod tests {
 
     #[tokio::test]
     async fn group_receipts_need_every_member() {
-        use rovsti_wa_proto::DeliveryStatus;
+        use rosty_wa_proto::DeliveryStatus;
         let store = store_with_instance().await;
         let group = "g@g.us";
         let mine = text(group, "m", 1, true);
@@ -2075,7 +2075,7 @@ mod tests {
                 Some(2),
             )
         };
-        let status_of = |page: &[rovsti_wa_proto::RichMessage], msg: &str| {
+        let status_of = |page: &[rosty_wa_proto::RichMessage], msg: &str| {
             page.iter()
                 .find(|r| r.message.id == msg)
                 .and_then(|r| r.meta.status)
@@ -2114,7 +2114,7 @@ mod tests {
 
     #[tokio::test]
     async fn edits_revokes_and_deletes() {
-        use rovsti_wa_proto::{DELETED_BY_ME, EditRecord};
+        use rosty_wa_proto::{DELETED_BY_ME, EditRecord};
         let store = store_with_instance().await;
         let chat = "c@s.whatsapp.net";
         let thumb = vec![0xff, 0xd8, 1];
@@ -2462,7 +2462,7 @@ mod tests {
 
     #[tokio::test]
     async fn chat_settings_and_profiles() {
-        use rovsti_wa_proto::MUTED_FOREVER;
+        use rosty_wa_proto::MUTED_FOREVER;
         let store = store_with_instance().await;
         let chat = "c@s.whatsapp.net";
         store

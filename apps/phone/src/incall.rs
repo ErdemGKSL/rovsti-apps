@@ -19,14 +19,14 @@ use gpui::{
     StatefulInteractiveElement, Styled, StyledImage, Task, Window, div, linear_color_stop,
     linear_gradient, prelude::*, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     avatar,
     call::{CallState, caller_label, format_number, status_text},
     dial::{self, TonePlan, ToneStep},
     scene::{CallScene, DisabledReason},
     wire::{AudioRoute, DisconnectCause, PendingOp},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon, current_theme,
     glass::{GlassInteraction, GlassSpec, glass_interactive},
     motion::{Entrance, Motion, press_scale},
@@ -36,7 +36,7 @@ use rovsti_ui::{
     tokens::{Theme, mix, typography},
     touch::{pointer_surface, touch_surface},
 };
-use rovsti_wa_proto::{Arbitration, EndReason, WaControl, WaScreen, WaScreenPhase, arbitrate};
+use rosty_wa_proto::{Arbitration, EndReason, WaControl, WaScreen, WaScreenPhase, arbitrate};
 
 use crate::{
     PhoneApp,
@@ -213,9 +213,7 @@ pub(crate) fn note_call_ms(view: &CallView) -> i64 {
 /// The number as the screen would show it, for a long-press copy; `None` for a private caller.
 pub(crate) fn copy_number_text(view: &CallView) -> Option<String> {
     let raw = callable_number(&view.number)?;
-    Some(
-        rovsti_core::PhoneNumber::parse(raw).map_or_else(|_| raw.to_owned(), |n| format_number(&n)),
-    )
+    Some(rosty_core::PhoneNumber::parse(raw).map_or_else(|_| raw.to_owned(), |n| format_number(&n)))
 }
 
 /// The second caller of a waiting call (stories 9.2, 15.8) and what the card may offer.
@@ -242,11 +240,11 @@ pub struct WaitingView {
 
 impl WaitingView {
     pub(crate) fn from_scene(scene: &CallScene<'_>) -> Option<Self> {
-        use rovsti_core::scene::Control;
+        use rosty_core::scene::Control;
         let call = scene.waiting?;
         let label = caller_label(call.display_name.as_deref(), &call.number_raw, false);
         let ends = scene.primary().map_or_else(String::new, |p| {
-            if p.has_prop(rovsti_core::wire::props::CONFERENCE) || !p.children.is_empty() {
+            if p.has_prop(rosty_core::wire::props::CONFERENCE) || !p.children.is_empty() {
                 "the conference".to_owned()
             } else {
                 middle_truncate(
@@ -331,11 +329,11 @@ fn middle_truncate(text: &str, max: usize) -> String {
 }
 
 impl CallView {
-    pub(crate) fn from_model(model: &rovsti_core::call::CallModel) -> Option<Self> {
+    pub(crate) fn from_model(model: &rosty_core::call::CallModel) -> Option<Self> {
         let call = model.foreground()?;
         let audio = model.audio();
         let conference =
-            call.has_prop(rovsti_core::wire::props::CONFERENCE) || !call.children.is_empty();
+            call.has_prop(rosty_core::wire::props::CONFERENCE) || !call.children.is_empty();
         let label = if conference {
             std::borrow::Cow::Borrowed("Conference")
         } else {
@@ -345,7 +343,7 @@ impl CallView {
             .display_name
             .as_deref()
             .filter(|n| !n.trim().is_empty())
-            .and_then(|_| rovsti_core::PhoneNumber::parse(&call.number_raw).ok())
+            .and_then(|_| rosty_core::PhoneNumber::parse(&call.number_raw).ok())
             .map(|n| SharedString::from(middle_truncate(&format_number(&n), 28)));
         Some(Self {
             source: CallSource::Telecom(call.id),
@@ -437,7 +435,7 @@ impl CallView {
             Some(WA_CAPTION) => Some(WA_CAPTION),
             Some(_) => return self,
         };
-        let country = rovsti_core::calling_code::country_line(number, home_cc);
+        let country = rosty_core::calling_code::country_line(number, home_cc);
         if let Some(caption) = crate::details_ui::header_caption(label, country.as_deref()) {
             self.secondary = Some(caption.into());
         }
@@ -770,7 +768,7 @@ fn caption_slot(color: Hsla) -> gpui::Div {
         .text_center()
 }
 
-fn sp(value: f32, params: rovsti_ui::spring::SpringParams) -> Spring {
+fn sp(value: f32, params: rosty_ui::spring::SpringParams) -> Spring {
     Spring::new(value, params).with_epsilon(0.002)
 }
 
@@ -1104,7 +1102,7 @@ impl PhoneApp {
             self.incall.wa_zone = None;
         }
         let diff = if wa_front.is_some() {
-            rovsti_core::scene::SceneDiff {
+            rosty_core::scene::SceneDiff {
                 applied: true,
                 primary: true,
                 ..Default::default()
@@ -1148,7 +1146,7 @@ impl PhoneApp {
         }
         if waiting.is_some() && !ic.waiting_open {
             ic.aura.update(cx, |a, cx| a.waiting_pulse(cx));
-            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         }
         let waiting_gone = waiting.is_none() && ic.waiting_open;
         ic.set_waiting(waiting);
@@ -1214,7 +1212,7 @@ impl PhoneApp {
                 if ic.view.as_ref() != Some(&view) {
                     if view.state == CallState::Active && !was_active && !is_new {
                         // S9: a light haptic as the timer lands.
-                        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                     }
                     self.apply_view(view, window, cx);
                 }
@@ -1335,7 +1333,7 @@ impl PhoneApp {
     fn apply_scene(
         &mut self,
         si: zone::SceneIn,
-        diff: rovsti_core::scene::SceneDiff,
+        diff: rosty_core::scene::SceneDiff,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1494,7 +1492,7 @@ impl PhoneApp {
             .read(cx)
             .calls()
             .call(was.id)
-            .is_some_and(|c| c.state != rovsti_core::wire::WireCallState::Ringing);
+            .is_some_and(|c| c.state != rosty_core::wire::WireCallState::Ringing);
         if !answered {
             self.show_notice_pill(format!("Missed call from {}", was.name), None, false, cx);
         }
@@ -1644,7 +1642,7 @@ impl PhoneApp {
             && self.notes.get(&a.number, a.at_ms).is_none()
         {
             self.show_pill_action(
-                rovsti_core::call::after_call_text(&a.who, a.talk_s),
+                rosty_core::call::after_call_text(&a.who, a.talk_s),
                 "Add note",
                 PillAction::AddNote {
                     number: a.number,
@@ -1749,7 +1747,7 @@ impl PhoneApp {
                     && zone.enabled(Slot::Keypad)
                     && paste_shown(live, true, self.incall.paste_label.as_deref()) =>
             {
-                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                 if self.incall.pasting {
                     self.stop_paste(cx);
                     self.show_notice_pill("Stopped sending tones", None, false, cx);
@@ -1769,7 +1767,7 @@ impl PhoneApp {
                     if self.incall.pasting {
                         self.stop_paste(cx);
                     }
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                     push_digit(&mut self.incall.digits, digit);
                     self.incall.digit_line = digit_line(&self.incall.digits).into();
                     self.incall.dtmf_down = true;
@@ -1808,7 +1806,7 @@ impl PhoneApp {
                 if let Some(reason) = en.reason(Slot::HoldSwap) {
                     self.show_notice_pill(reason.text(), None, false, cx);
                 } else if swapping {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                     self.start_pending(Slot::HoldSwap, window, cx);
                     self.backend.update(cx, |b, cx| {
                         b.swap(cx);
@@ -1825,7 +1823,7 @@ impl PhoneApp {
                 if let Some(reason) = en.reason(Slot::Merge) {
                     self.show_notice_pill(reason.text(), None, false, cx);
                 } else {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                     self.start_pending(Slot::Merge, window, cx);
                     self.backend.update(cx, |b, cx| {
                         b.merge(cx);
@@ -1843,7 +1841,7 @@ impl PhoneApp {
             return;
         };
         if let Some(reason) = self.incall.zone.enablement.reason(slot) {
-            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, HapticFeedback::Selection);
             self.show_notice_pill(reason.text(), None, false, cx);
         }
     }
@@ -1968,7 +1966,7 @@ impl PhoneApp {
             this.update_in(cx, |this, window, cx| {
                 if alive(this) {
                     this.incall.pasting = false;
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                     this.show_notice_pill(dial::tones_text(&plan), None, false, cx);
                 }
             })
@@ -1986,7 +1984,7 @@ impl PhoneApp {
         if backend::copy_text(&text) != backend::Outcome::Done {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
         self.show_notice_pill("Copied tones", None, false, cx);
     }
 
@@ -2660,7 +2658,7 @@ impl PhoneApp {
             .inset_0()
             .opacity(fade)
             .occlude()
-            .child(rovsti_ui::components::backdrop(
+            .child(rosty_ui::components::backdrop(
                 theme,
                 theme::accent_glow(theme),
             ))
@@ -2743,7 +2741,7 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::{
+    use rosty_core::{
         call::CallModel,
         wire::{CallSnapshot, WireCall, WireCallState},
     };

@@ -30,7 +30,7 @@
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-27-2026 12:00
 last_updated: 10-28-2026 23:30
-project: rovsti-phone
+project: rosty-phone
 project_key: NOKEY
 tracking_system: file-system
 story_location: apps/phone/_bmad-output/implementation-artifacts
@@ -59,7 +59,7 @@ development_status:
   epic-2-retrospective: optional
 
   epic-3: in-progress
-  3-1-event-channel-and-rovstibridge-emit: review
+  3-1-event-channel-and-rostybridge-emit: review
   3-2-call-snapshot-commands-and-callregistry: review
   3-3-permissions-and-settings-bridge: review
   3-4-provider-pulls-and-observers-call-log-contacts-favorites: review
@@ -147,7 +147,7 @@ development_status:
   epic-11-retrospective: optional
 
   epic-12: in-progress
-  12-1-perf-feature-and-rovstiperf-logging: review
+  12-1-perf-feature-and-rostyperf-logging: review
   12-2-scripted-perf-scenarios: review
   12-3-idle-discipline-and-view-caching: review
   12-4-allocation-discipline: review
@@ -176,7 +176,7 @@ development_status:
   14-0a-consolidated-wire-field-table-and-bit-constants: review
   14-0b-snapshot-schema-v0-2-and-golden-fixtures: review
   14-0c-kotlin-wire-constants-caps-calleventring-and-jvm-goldens: review
-  14-0d-rovsti_core-audio-endpoint-list: review
+  14-0d-rosty_core-audio-endpoint-list: review
   14-0e-coalesced-rebuild-in-callregistry: review
   14-0f-diagnostics-page-skeleton-and-report: review
   14-1-audiopath-in-kotlin-and-spike-s3-probe: review
@@ -188,10 +188,10 @@ development_status:
   14-7-live-updates-s18-device-arrival-and-the-names-row: review
   14-8-shortcut-footer-hearing-aid-hint-and-compatibility-value: review
   14-9-provider-and-seam-wire-structs-with-golden-fixtures: review
-  14-10-rovsti_core-scene-and-scenediff: review
-  14-11-rovsti_core-settings-prefsv2-and-upgrade-chain: review
+  14-10-rosty_core-scene-and-scenediff: review
+  14-11-rosty_core-settings-prefsv2-and-upgrade-chain: review
   14-12-prefs-v2-storage-migration-prefswriter-and-backend-settings: review
-  14-13-rovsti_core-names-and-blocklist-blockset: review
+  14-13-rosty_core-names-and-blocklist-blockset: review
   14-14-t9-index-frequent-and-is_emergency: review
   14-15-manifest-and-permission-additions-check-apk-sh-and-desktop-s: review
   epic-14-retrospective: optional

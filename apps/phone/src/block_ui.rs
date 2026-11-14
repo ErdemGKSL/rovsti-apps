@@ -12,13 +12,13 @@ use gpui::{
     MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window,
     div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     blocklist::BlockRefusal,
     call_log::{EntryRef, deleted_text, entries_by_id},
     recents::split_refs,
     wire::CallLogEntry,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     motion::press_scale,
@@ -28,7 +28,7 @@ use rovsti_ui::{
     tokens::{Theme, shadow, typography},
     touch::touch_surface,
 };
-use rovsti_wa_proto::WaCallRecord;
+use rosty_wa_proto::WaCallRecord;
 use std::sync::Arc;
 
 use crate::{PhoneApp, backend, recents::ROW_H};
@@ -61,7 +61,7 @@ pub(crate) enum PillAction {
     /// Stop choosing a contact for a speed-dial digit.
     CancelSpeedDialPick,
     /// Undo of a speed-dial Remove: put the entry back on its digit.
-    RestoreSpeedDial(u8, rovsti_core::settings::SpeedDialEntry),
+    RestoreSpeedDial(u8, rosty_core::settings::SpeedDialEntry),
     /// Undo of a speed-dial assign that replaced nothing: free the digit again.
     ClearSpeedDial(u8),
     /// Undo of a quick-reply Clear: put the old text back in its slot.
@@ -69,23 +69,23 @@ pub(crate) enum PillAction {
     /// Undo of a Recents Delete: re-insert the call-log rows and WhatsApp records.
     RestoreCalls(Arc<[CallLogEntry]>, Arc<[WaCallRecord]>),
     /// Undo of a backup import: put the prefs from just before it back.
-    RestorePrefs(Box<rovsti_core::settings::ImportPreview>),
+    RestorePrefs(Box<rosty_core::settings::ImportPreview>),
     /// Undo of Reset settings: put the previous settings back.
-    RestoreSettings(Box<rovsti_core::settings::Settings>),
+    RestoreSettings(Box<rosty_core::settings::Settings>),
     /// Open the system prompt for call log access.
     GrantCallLog,
     /// Undo of Delete note on the call details sheet.
-    RestoreNote(Box<rovsti_core::call_notes::CallNote>),
+    RestoreNote(Box<rosty_core::call_notes::CallNote>),
     /// Ask for the microphone, or open App info when Android won't ask again.
     GrantMic,
     /// Undo of setting a reminder: disarm the one with this id.
     CancelReminder(i64),
     /// Undo of Cancel reminder: arm it again.
-    RestoreReminder(Box<rovsti_core::reminder::Reminder>),
+    RestoreReminder(Box<rosty_core::reminder::Reminder>),
     /// Undo of the keypad field's Clear: the typed number comes back.
     RestoreDialed(SharedString),
     /// Undo of Speed dial Clear all: every assignment comes back.
-    RestoreSpeedDialAll(std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>),
+    RestoreSpeedDialAll(std::collections::BTreeMap<u8, rosty_core::settings::SpeedDialEntry>),
     /// Undo of Blocked > Unblock all: block every one of these numbers again.
     BlockAll(Arc<[SharedString]>),
     /// Undo of a bulk block from the Blocked page: unblock every one of these numbers.
@@ -103,8 +103,8 @@ pub(crate) fn delete_label(count: u32) -> String {
 
 /// The number as a person reads it (grouped when it parses).
 pub(crate) fn shown_number(raw: &str) -> String {
-    match rovsti_core::PhoneNumber::parse(raw) {
-        Ok(n) => rovsti_core::call::format_number(&n),
+    match rosty_core::PhoneNumber::parse(raw) {
+        Ok(n) => rosty_core::call::format_number(&n),
         Err(_) => raw.trim().to_owned(),
     }
 }
@@ -366,7 +366,7 @@ impl PhoneApp {
         use crate::wa_call::{MicAsk, mic_ask};
         match mic_ask(self.backend.read(cx).permissions().microphone) {
             MicAsk::Ask => {
-                backend::request_permission(rovsti_android::permissions::Group::Microphone);
+                backend::request_permission(rosty_android::permissions::Group::Microphone);
             }
             MicAsk::OpenSettings => {
                 backend::open_app_details();
@@ -398,7 +398,7 @@ impl PhoneApp {
         if let Some(index) = index {
             self.row_menu.s27 = Some(S27::new(index, window.prefers_reduced_motion()));
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         let task = self.backend.update(cx, |b, cx| b.block(&raw, cx));
         cx.spawn(async move |this, cx| {
             let done = task.await;
@@ -432,7 +432,7 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         let task = self.backend.update(cx, |b, cx| b.unblock(&raw, cx));
         cx.spawn(async move |this, cx| {
             let done = task.await;
@@ -508,7 +508,7 @@ impl PhoneApp {
         } else {
             None
         };
-        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
         self.row_menu.open(MenuTarget {
             index,
             number,
@@ -666,7 +666,7 @@ impl PhoneApp {
         }
         // Past the cap no snapshot is kept, so the pill has no Undo.
         let undoable = crate::history_ui::within_undo_cap(total);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         let records = self
             .wa_call
             .update(cx, |ui, cx| ui.forget_calls(&wa_ids, cx));

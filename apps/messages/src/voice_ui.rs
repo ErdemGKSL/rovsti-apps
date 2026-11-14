@@ -1,10 +1,10 @@
 //! The voice note player shared by the WhatsApp and SMS pages: one note plays
 //! at a time, the pages draw a [`player_row`] for each audio bubble.
 //!
-//! Playback is the platform `MediaPlayer` behind `rovsti_android::voice`; the
+//! Playback is the platform `MediaPlayer` behind `rosty_android::voice`; the
 //! controller polls its state every 250 ms while a note plays. The pure rules
 //! (speed cycle, scrub math, time labels, what a tap does) live in
-//! `rovsti_core::voice_player`.
+//! `rosty_core::voice_player`.
 
 use std::{
     cell::Cell,
@@ -18,14 +18,14 @@ use gpui::{
     ParentElement, Pixels, SharedString, StatefulInteractiveElement, Styled, TouchPhase, div, px,
     relative,
 };
-use rovsti_android::{Error as AndroidError, voice};
-use rovsti_core::voice_player::{self, PlayerState, Speed, TogglePlan};
-use rovsti_ui::{
+use rosty_android::{Error as AndroidError, voice};
+use rosty_core::voice_player::{self, PlayerState, Speed, TogglePlan};
+use rosty_ui::{
     Icon,
     tokens::typography,
     touch::{Pointer, pointer_surface},
 };
-use rovsti_wa_client::Gateway;
+use rosty_wa_client::Gateway;
 
 use crate::{backend::Backend, conversation::cache_stem, files::ext_for_mime};
 

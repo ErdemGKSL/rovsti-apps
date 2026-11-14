@@ -17,8 +17,8 @@ use gpui::{
     RenderImage, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Task,
     Window, div, img, list, px, rgba,
 };
-use rovsti_core::{call_log::relative_time, recents::LocaleTime};
-use rovsti_ui::{
+use rosty_core::{call_log::relative_time, recents::LocaleTime};
+use rosty_ui::{
     Icon,
     components::{empty_state, glass_icon_button, glass_pill},
     current_theme, layout,
@@ -26,12 +26,12 @@ use rovsti_ui::{
     theme,
     tokens::{Theme, metrics, mix, typography},
 };
-use rovsti_wa_client::Gateway;
-use rovsti_wa_proto::{
+use rosty_wa_client::Gateway;
+use rosty_wa_proto::{
     StatusAuthor, StatusItem, StatusKind, StatusList, StatusPlayer, is_pn_jid, jid_user,
     status::STATUS_SHOW_MS, status::Step,
 };
-use rovsti_wa_ui::{WaAvatars, decode_image, display_name, photo_avatar};
+use rosty_wa_ui::{WaAvatars, decode_image, display_name, photo_avatar};
 
 use crate::backend::{Backend, now_ms};
 use crate::conversation::header_bar;
@@ -261,7 +261,7 @@ fn ring_avatar(
 }
 
 /// The leading element of the Chats tab's Status row: a
-/// [`rovsti_ui::row::avatar_stack`] of discs (green for unseen updates, grey
+/// [`rosty_ui::row::avatar_stack`] of discs (green for unseen updates, grey
 /// for seen ones). The stack fills the fixed 48 dp leading slot, so the
 /// row's text column starts at 76 dp like every other row.
 pub(crate) fn entry_avatars(

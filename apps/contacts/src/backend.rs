@@ -1,4 +1,4 @@
-//! Everything Rovsti Contacts asks Android, and how the answers read.
+//! Everything Rosty Contacts asks Android, and how the answers read.
 //!
 //! Every function here blocks on a JNI call: run them on the background
 //! executor, never on the UI thread. Errors come back as short words for the
@@ -11,10 +11,10 @@ use std::{
     sync::Arc,
 };
 
-use rovsti_android::{
+use rosty_android::{
     Error, contacts_edit, documents, media, providers, reminders, shortcuts, telecom,
 };
-use rovsti_core::{
+use rosty_core::{
     birthday_reminder::{self, BirthdayAlarm},
     call_stats, contact_csv,
     contact_dates::Upcoming,
@@ -79,7 +79,7 @@ impl Failed {
     }
 }
 
-fn decode<T: DeserializeOwned + Default>(raw: rovsti_android::Result<String>) -> Result<T, Failed> {
+fn decode<T: DeserializeOwned + Default>(raw: rosty_android::Result<String>) -> Result<T, Failed> {
     let json = match raw {
         Ok(json) => json,
         Err(Error::Unsupported) => return Err(Failed::Unsupported),
@@ -99,7 +99,7 @@ pub(crate) fn android_words(error: &Error) -> String {
     }
 }
 
-fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
+fn done(result: rosty_android::Result<bool>) -> Result<(), String> {
     match result {
         Ok(true) => Ok(()),
         Ok(false) => Err(Failed::Wire(WireError::Refused).words()),
@@ -436,7 +436,7 @@ pub(crate) fn import_with_photos(
     let payload =
         decode::<ImportPayload>(contacts_edit::import(&json)).map_err(|error| error.words())?;
     let mut set = 0;
-    for (id, photo) in rovsti_core::import_plan::photo_targets(&payload.ids, photos) {
+    for (id, photo) in rosty_core::import_plan::photo_targets(&payload.ids, photos) {
         let Ok(path) = photo_file(photo) else {
             continue;
         };
@@ -492,7 +492,7 @@ pub(crate) fn remove_photo(contact_id: i64) -> Result<(), String> {
 
 /// Reads the pixel size out of the answer of `photo_size`: `{"w":..,"h":..}`,
 /// bare or inside an envelope. A size of zero means Android could not read it.
-fn decode_size(raw: rovsti_android::Result<String>) -> Result<(u32, u32), Failed> {
+fn decode_size(raw: rosty_android::Result<String>) -> Result<(u32, u32), Failed> {
     let json = match raw {
         Ok(json) => json,
         Err(Error::Unsupported) => return Err(Failed::Unsupported),
@@ -592,7 +592,7 @@ mod hand_off {
 
     /// Where files for save and share are written.
     fn temp_dir() -> Option<PathBuf> {
-        let dir = std::env::temp_dir().join("rovsti-contacts");
+        let dir = std::env::temp_dir().join("rosty-contacts");
         std::fs::create_dir_all(&dir).ok()?;
         Some(dir)
     }
@@ -701,7 +701,7 @@ mod hand_off {
             .map(image::DynamicImage::into_rgba8)
     }
 
-    /// Saves the PNG at `path` to the gallery (Pictures/Rovsti) as `name`.
+    /// Saves the PNG at `path` to the gallery (Pictures/Rosty) as `name`.
     pub(crate) fn save_to_gallery(path: &Path, name: &str) -> Result<(), String> {
         done(media::save_image_to_gallery(
             &path.to_string_lossy(),
@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     fn shared_file_reads_a_plain_vcf_path() {
-        let dir = std::env::temp_dir().join(format!("rovsti-shared-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rosty-shared-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("dir");
         let path = dir.join("one.vcf");
         std::fs::write(
@@ -911,7 +911,7 @@ mod tests {
     #[test]
     fn export_ics_says_it_needs_a_phone_on_desktop() {
         let error =
-            export_ics("rovsti-birthdays-1.ics", "BEGIN:VCALENDAR\r\n").expect_err("no dialog");
+            export_ics("rosty-birthdays-1.ics", "BEGIN:VCALENDAR\r\n").expect_err("no dialog");
         assert!(!error.is_empty());
     }
 
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn the_crop_image_is_downscaled_and_missing_files_are_none() {
-        let dir = std::env::temp_dir().join("rovsti-contacts-crop-test");
+        let dir = std::env::temp_dir().join("rosty-contacts-crop-test");
         std::fs::create_dir_all(&dir).expect("dir");
         let path = dir.join("wide.png");
         image::RgbaImage::new(2880, 1440)
@@ -1265,7 +1265,7 @@ mod tests {
             .quiet_zone(true)
             .module_dimensions(6, 6)
             .build();
-        let dir = std::env::temp_dir().join("rovsti-contacts-scan-test");
+        let dir = std::env::temp_dir().join("rosty-contacts-scan-test");
         std::fs::create_dir_all(&dir).expect("dir");
         let path = dir.join(name);
         img.save_with_format(&path, image::ImageFormat::Png)
@@ -1292,7 +1292,7 @@ mod tests {
 
     #[test]
     fn scan_image_with_no_code_or_a_bad_file_says_so() {
-        let dir = std::env::temp_dir().join("rovsti-contacts-scan-test");
+        let dir = std::env::temp_dir().join("rosty-contacts-scan-test");
         std::fs::create_dir_all(&dir).expect("dir");
         let blank = dir.join("blank.png");
         image::GrayImage::from_pixel(64, 64, image::Luma([255]))

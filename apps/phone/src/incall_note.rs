@@ -11,8 +11,8 @@ use gpui::{
     InteractiveElement, IntoElement, MouseButton, ParentElement, Role, SharedString,
     StatefulInteractiveElement, Styled, Subscription, TextInputAction, Window, div, px, svg,
 };
-use rovsti_core::call_notes::SetOutcome;
-use rovsti_ui::{
+use rosty_core::call_notes::SetOutcome;
+use rosty_ui::{
     Icon,
     components::flat_glass,
     field::{Bare, TextField, bare_field},
@@ -84,7 +84,7 @@ impl PhoneApp {
             seen_submits,
             _field_sub: sub,
         });
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.presses.release_all();
         cx.notify();
     }
@@ -160,11 +160,11 @@ impl PhoneApp {
                 if backend::copy_text(&text) != backend::Outcome::Done {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
-                rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
                 self.show_notice_pill("Number copied", None, false, cx);
             }
             None => {
-                rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
+                rosty_ui::haptics::perform(window, HapticFeedback::Reject);
                 self.show_notice_pill("No number to copy", None, false, cx);
             }
         }

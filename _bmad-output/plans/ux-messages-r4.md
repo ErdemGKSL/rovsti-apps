@@ -1,4 +1,4 @@
-# UX completeness pass: Rovsti Messages (round 4)
+# UX completeness pass: Rosty Messages (round 4)
 
 Base: `c9374174ff8e07f2efb7109da5878781928003c9` (main, clean tree, no stash). Rounds 1
 (`ux-messages.md`, G1 to G10), 2 (`ux-messages-r2.md`, H1 to H9) and 3
@@ -6,14 +6,14 @@ Base: `c9374174ff8e07f2efb7109da5878781928003c9` (main, clean tree, no stash). R
 phone, with fresh eyes on what earlier rounds did not look at: Android permissions,
 WhatsApp message cards, the two mute switches, Spam from inside a conversation,
 scheduled sends that fail, and recovery after failed WhatsApp actions.
-Scope as before: `apps/messages`, `rovsti_core`, `rovsti_wa_proto`/`rovsti_wa_client`
-as used by Messages, existing `rovsti_android` seams. No new product features, no
+Scope as before: `apps/messages`, `rosty_core`, `rosty_wa_proto`/`rosty_wa_client`
+as used by Messages, existing `rosty_android` seams. No new product features, no
 backends, no Kotlin changes (cargo is the only verification).
 
 GPUI and seam APIs used below were checked at the pinned rev or in this repo:
 `App::open_url(&self, &str)` (Kotlin `openUrl` = `ACTION_VIEW` on any scheme, so `geo:`
-works), `rovsti_android::permissions::{state, request, open_app_details, Group, Access}`,
-`rovsti_android::trip::can_schedule_exact_alarms`, `telecom::{place_call, add_contact}`.
+works), `rosty_android::permissions::{state, request, open_app_details, Group, Access}`,
+`rosty_android::trip::can_schedule_exact_alarms`, `telecom::{place_call, add_contact}`.
 Icons exist in the enabled gpui_icons features: `LucideMapPin`, `LucidePhone`,
 `LucideMessageCircle`, `LucideUserPlus`, `LucideBellOff`, `LucideAlarmClock`,
 `LucideShieldCheck`, `LucideCopy`.
@@ -26,7 +26,7 @@ Icons exist in the enabled gpui_icons features: `LucideMapPin`, `LucidePhone`,
 | N2 | Medium | **A received WhatsApp location or contact card is a dead end.** The location card shows coordinates as text: no "Open in Maps", no Copy. The contact card shows a name and number: no Call, no Message, no Add to contacts, no Copy (`copy_text_of` returns `None` for both, so long-press offers only Reply/Star/Delete). | `conversation.rs::location_card` (3001), `contact_card`, `copy_text_of` (50), `actions` (2211) |
 | N3 | Medium | **The two WhatsApp mutes disagree.** The row menu's "Mute…" mutes on the gateway (bell-off on the row); the bell inside the chat only writes a local prefs tag. A chat muted from the row shows an unmuted bell inside it; a chat muted with the bell shows no bell-off on its row, and the row menu still offers "Mute…". Settings > Muted lists only the local tags. | `main.rs::sync_open_page` (2303), `toggle_open_mute` (2289), `wa_menu_items` (1833), `inbox.rs::build` (653), `settings_ui.rs::notifications` |
 | N4 | Medium | **Inside a Spam conversation there is no "Not spam" and no sign it is spam.** `open_page_menu` hard-codes `in_spam: false` and `sms_actions::actions` never offers NotSpam on a page; the user must go Back and long-press the row. | `main.rs::open_page_menu` (1280), `sms_actions.rs::actions`, `sms_conversation.rs::top_slot` |
-| N5 | Medium | **A scheduled SMS that fails to send loses its text.** `ScheduleQueue::reconcile` removes the item and the app only says "1 scheduled message couldn't be sent": no recipient, no text, no way to open it and send again. | `backend.rs::reconcile_fired` (872), `rovsti_core::schedule::reconcile` |
+| N5 | Medium | **A scheduled SMS that fails to send loses its text.** `ScheduleQueue::reconcile` removes the item and the app only says "1 scheduled message couldn't be sent": no recipient, no text, no way to open it and send again. | `backend.rs::reconcile_fired` (872), `rosty_core::schedule::reconcile` |
 | N6 | Low | **Failed WhatsApp reaction and edit are not undone or recoverable.** A failed reaction stays on the bubble (optimistic) and the line shows the raw client error (`"Couldn't send the reaction: {error}"`). A failed edit has already cleared the composer: the new text is gone. | `conversation.rs::react` (831), edit send (~525) |
 | N7 | Low | **"Couldn't load WhatsApp chats" has no Retry**: chats stay missing until a reconnect or restart. | `main.rs::load_chats` (772) |
 | N8 | Low | **Scheduled SMS may be late without a word.** When Android denies exact alarms (default for new installs on Android 14), the alarm falls back to inexact; the manifest comment says "the UI says 'may be a few minutes late'", but the Send later sheet says nothing and offers no way to App info. | `schedule_ui.rs::ScheduleSheet`, `AndroidManifest.xml` comment |
@@ -35,21 +35,21 @@ Icons exist in the enabled gpui_icons features: `LucideMapPin`, `LucidePhone`,
 ## Plan (ordered by user impact, pure logic first; every step leaves all checks green)
 
 Checks after every step (from the task):
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 `df` showed 6.8 GB free at planning time; under 6 GB run `rm -rf target/debug/incremental` first.
 Until a later step calls a new pure function, mark it `#[cfg_attr(not(test), allow(dead_code))]`
 and remove the attribute in that step.
 
 ### Step 1. Pure logic (+tests)
 - New `apps/messages/src/access.rs` (`mod access;` in `main.rs`), using
-  `rovsti_android::permissions::Access as Perm` (compiles on desktop):
+  `rosty_android::permissions::Access as Perm` (compiles on desktop):
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum Ask { Request, OpenAppInfo }`
   - `pub fn ask_for(state: Perm) -> Option<Ask>`: Granted → None, Denied → Request,
     PermanentlyDenied → OpenAppInfo.
   - `pub fn notify_banner(app_switch_on: bool, state: Option<Perm>) -> Option<&'static str>`:
     `None` when the app's own Notifications switch is off, the state is unknown (`None`,
     desktop) or Granted; else `NOTIFY_OFF` =
-    "Android has notifications off for Rovsti Messages. Tap to allow them."
+    "Android has notifications off for Rosty Messages. Tap to allow them."
   - `pub const CONTACTS_OFF: &str = "Contacts access is off: names and search by name need it. Tap to allow.";`
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)] pub struct ResumePulls { pub role: bool, pub access: bool, pub threads: bool, pub contacts: bool }`
     and `pub fn resume_pulls(threads: crate::backend::Access, contacts_denied: bool) -> ResumePulls`:
@@ -97,13 +97,13 @@ and remove the attribute in that step.
     and `pub fn late_note(is_sms: bool, exact_allowed: Option<bool>) -> Option<&'static str>`
     (`Some` only for `is_sms && exact_allowed == Some(false)`).
   - Tests: `failed_notice_names_one_and_counts_many`, `late_note_only_for_sms_without_exact_alarms`.
-- `crates/rovsti_wa_proto/src/timeline.rs`: `pub fn own_reaction(&self, id: &str) -> Option<&str>`
+- `crates/rosty_wa_proto/src/timeline.rs`: `pub fn own_reaction(&self, id: &str) -> Option<&str>`
   (the `from_me` reaction's emoji of item `id`). Test next to the `set_own_reaction` tests:
   set, read back, clear → None.
 
 ### Step 2. Ask for notifications and contacts; refresh on return (fixes N1)
 - `backend.rs`:
-  - Fields `notify_access: Option<rovsti_android::permissions::Access>` (None = unknown or
+  - Fields `notify_access: Option<rosty_android::permissions::Access>` (None = unknown or
     desktop) and `contacts_denied: bool`; getters `notify_access()`, `contacts_denied()`.
   - `pull_contacts`: set `contacts_denied = true` on `Pull::Denied`, `false` on `Ready`
     (carry the flag out of the background task with the index).
@@ -196,7 +196,7 @@ and remove the attribute in that step.
   to, detail: None }, cx)`, then on the opened `Open::Sms` page `set_draft(&body, cx)` (the
   existing round-1 method), so Send (or Send later) resends it.
 - `backend.rs`: `exact_alarms: Option<bool>` pulled in `refresh_all` and `on_resume` with
-  `rovsti_android::trip::can_schedule_exact_alarms()` (`Err(Unsupported)` → `None`).
+  `rosty_android::trip::can_schedule_exact_alarms()` (`Err(Unsupported)` → `None`).
 - `schedule_ui.rs::ScheduleSheet`: field `late_note: Option<&'static str>` and a setter;
   `MessagesApp::ask_schedule_sms` sets it from `late_note(true, backend.exact_alarms())`,
   `ask_schedule_whatsapp` clears it. The sheet renders it as a small tappable line with

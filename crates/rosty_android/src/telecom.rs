@@ -1,0 +1,225 @@
+//! Calls through Android's Telecom stack.
+
+use crate::{
+    Result,
+    bridge::{self, Arg},
+};
+
+/// Places a call with `TelecomManager.placeCall` (needs `CALL_PHONE`; as the
+/// default dialer Rosty Phone also gets the in-call UI). Returns `false` if
+/// the permission is missing and the system dial pad was opened instead.
+pub fn place_call(number: &str) -> Result<bool> {
+    bridge::call_bool_str("placeCall", number)
+}
+
+/// Calls the voicemail box (`voicemail:` URI through `TelecomManager.placeCall`;
+/// needs `CALL_PHONE`). `false` when the permission is missing and the system
+/// dial pad was opened instead.
+pub fn call_voicemail() -> Result<bool> {
+    bridge::call_bool0("callVoicemail")
+}
+
+/// [`place_call`] on a chosen SIM (story 16.3): `account_key` is the opaque
+/// `PhoneAccountInfo::key`. Kotlin adds `EXTRA_PHONE_ACCOUNT_HANDLE`; it never
+/// changes the system default, and never takes a key for an emergency number.
+pub fn place_call_on(number: &str, account_key: &str) -> Result<bool> {
+    bridge::call_bool(
+        "placeCallOn",
+        &[bridge::Arg::Str(number), bridge::Arg::Str(account_key)],
+    )
+}
+
+/// The call-capable accounts as JSON (`rosty_core::wire::PhoneAccountsResponse`).
+/// Blocks on Telecom and Subscription queries: call it off the UI thread.
+pub fn phone_accounts() -> Result<String> {
+    bridge::call_string("phoneAccounts", &[])
+}
+
+/// Answers a system account picker with the account `account_key` (the
+/// registry safety net, story 16.3).
+pub fn select_account(call_id: i32, account_key: &str) -> Result<bool> {
+    bridge::call_bool(
+        "callSelectAccount",
+        &[bridge::Arg::Int(call_id), bridge::Arg::Str(account_key)],
+    )
+}
+
+/// A settings page the apps hand off to (story 14.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SystemPage {
+    Bluetooth,
+    HearingDevices,
+    Accessibility,
+    Sound,
+    DefaultApps,
+    CallSettings,
+    CallAccessibility,
+    ChangePhoneAccounts,
+    EmergencyInfo,
+    AppDetails,
+}
+
+impl SystemPage {
+    pub const ALL: [SystemPage; 10] = [
+        Self::Bluetooth,
+        Self::HearingDevices,
+        Self::Accessibility,
+        Self::Sound,
+        Self::DefaultApps,
+        Self::CallSettings,
+        Self::CallAccessibility,
+        Self::ChangePhoneAccounts,
+        Self::EmergencyInfo,
+        Self::AppDetails,
+    ];
+
+    /// The key `SystemPages.ACTIONS` (Kotlin) understands.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Bluetooth => "bluetooth",
+            Self::HearingDevices => "hearing_devices",
+            Self::Accessibility => "accessibility",
+            Self::Sound => "sound",
+            Self::DefaultApps => "default_apps",
+            Self::CallSettings => "call_settings",
+            Self::CallAccessibility => "call_accessibility",
+            Self::ChangePhoneAccounts => "change_phone_accounts",
+            Self::EmergencyInfo => "emergency_info",
+            Self::AppDetails => "app_details",
+        }
+    }
+}
+
+/// Opens a system settings page. Returns the envelope
+/// `{v, ok, error?, data?:{fallback}}` (see `rosty_core::wire::OpenSystemResponse`):
+/// `fallback:true` means App info opened because the page has no activity.
+pub fn open_system(page: SystemPage) -> Result<String> {
+    bridge::call_string("openSystem", &[bridge::Arg::Str(page.key())])
+}
+
+/// Opens the SMS composer for `number` (`smsto:`). `false` when no app answered.
+pub fn send_sms_to(number: &str) -> Result<bool> {
+    bridge::call_bool_str("sendSmsTo", number)
+}
+
+/// Opens the SMS composer for `number` with `body` filled in (`smsto:` plus
+/// `sms_body`; the user still presses send, so no `SEND_SMS` is needed).
+/// `false` when no app answered.
+pub fn compose_sms(number: &str, body: &str) -> Result<bool> {
+    bridge::call_bool("composeSms", &[Arg::Str(number), Arg::Str(body)])
+}
+
+/// Opens one SMS composer for all `numbers` (`smsto:` joined by `;`) with `body`
+/// filled in; the user still presses send. `false` when no recipient is left or
+/// no app answered.
+pub fn compose_group_sms(numbers: &[String], body: &str) -> Result<bool> {
+    let joined = rosty_core::group_tools::sms_address(numbers);
+    bridge::call_bool("composeGroupSms", &[Arg::Str(&joined), Arg::Str(body)])
+}
+
+/// Opens the e-mail composer addressed to all `addresses` (`EXTRA_EMAIL`).
+/// `false` when no recipient is left or no app answered.
+pub fn email_group(addresses: &[String]) -> Result<bool> {
+    let joined = rosty_core::group_tools::email_address(addresses);
+    bridge::call_bool("emailGroup", &[Arg::Str(&joined)])
+}
+
+/// Opens the e-mail composer for `address` (`mailto:`). `false` when no app answered.
+pub fn send_email_to(address: &str) -> Result<bool> {
+    bridge::call_bool_str("sendEmailTo", address)
+}
+
+/// Puts `text` on the clipboard.
+pub fn copy_text(text: &str) -> Result<bool> {
+    bridge::call_bool_str("copyText", text)
+}
+
+/// Opens the system share sheet with `text`.
+pub fn share_text(text: &str) -> Result<bool> {
+    bridge::call_bool_str("shareText", text)
+}
+
+/// Whether the default SIM has a voicemail number; `true` when unknown, so
+/// an unreadable state never blocks the call.
+pub fn voicemail_configured() -> Result<bool> {
+    bridge::call_bool0("voicemailConfigured")
+}
+
+/// Whether the phone reports hearing-aid compatibility
+/// (`TelephonyManager.isHearingAidCompatibilitySupported()`); feeds the
+/// informational row in Settings (story 16.10).
+pub fn hearing_aid_compatible() -> Result<bool> {
+    bridge::call_bool0("hearingAidCompatible")
+}
+
+/// Opens the system "add contact" screen (create or add to existing) with
+/// `number` filled in. Needs no permission; `false` when no Contacts app
+/// answered.
+pub fn add_contact(number: &str) -> Result<bool> {
+    bridge::call_bool_str("addContact", number)
+}
+
+/// Opens the system "new contact" screen pre-filled from `card_json` (name,
+/// company, notes, phones and emails). Needs no permission; `false` when the
+/// JSON is malformed or no Contacts app answered.
+pub fn insert_contact(card_json: &str) -> Result<bool> {
+    bridge::call_bool_str("insertContact", card_json)
+}
+
+/// Opens the system Contacts app. `false` when no app answered.
+pub fn open_contacts() -> Result<bool> {
+    bridge::call_bool0("openContacts")
+}
+
+/// Opens the system Contacts app to edit `contact_id`. `false` when no app
+/// answered.
+pub fn edit_contact(contact_id: i64) -> Result<bool> {
+    bridge::call_bool_str("editContact", &contact_id.to_string())
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod tests {
+    use super::*;
+    use crate::Error;
+
+    #[test]
+    fn desktop_is_unsupported() {
+        assert!(matches!(place_call_on("1", "k"), Err(Error::Unsupported)));
+        assert!(matches!(phone_accounts(), Err(Error::Unsupported)));
+        assert!(matches!(select_account(1, "k"), Err(Error::Unsupported)));
+        assert!(matches!(place_call("1"), Err(Error::Unsupported)));
+        assert!(matches!(call_voicemail(), Err(Error::Unsupported)));
+        assert!(matches!(add_contact("1"), Err(Error::Unsupported)));
+        assert!(matches!(insert_contact("{}"), Err(Error::Unsupported)));
+        for page in SystemPage::ALL {
+            assert!(matches!(open_system(page), Err(Error::Unsupported)));
+        }
+        assert!(matches!(send_sms_to("1"), Err(Error::Unsupported)));
+        assert!(matches!(compose_sms("1", "hi"), Err(Error::Unsupported)));
+        assert!(matches!(send_email_to("a@b.c"), Err(Error::Unsupported)));
+        let list = vec!["1".to_owned(), "2".to_owned()];
+        assert!(matches!(
+            compose_group_sms(&list, "hi"),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(email_group(&list), Err(Error::Unsupported)));
+        assert!(matches!(copy_text("x"), Err(Error::Unsupported)));
+        assert!(matches!(share_text("x"), Err(Error::Unsupported)));
+        assert!(matches!(hearing_aid_compatible(), Err(Error::Unsupported)));
+        assert!(matches!(voicemail_configured(), Err(Error::Unsupported)));
+        assert!(matches!(edit_contact(1), Err(Error::Unsupported)));
+        assert!(matches!(open_contacts(), Err(Error::Unsupported)));
+    }
+
+    #[test]
+    fn page_keys_are_unique() {
+        for (i, a) in SystemPage::ALL.iter().enumerate() {
+            assert!(
+                SystemPage::ALL
+                    .iter()
+                    .skip(i + 1)
+                    .all(|b| b.key() != a.key())
+            );
+        }
+    }
+}

@@ -8,8 +8,8 @@ use gpui::{
     ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*,
     px, svg,
 };
-use rovsti_core::number_format::{self, NumberForm};
-use rovsti_ui::{
+use rosty_core::number_format::{self, NumberForm};
+use rosty_ui::{
     Icon,
     components::flat_glass,
     motion::press_scale,
@@ -220,8 +220,8 @@ impl PhoneApp {
         let raw = match self.sheet_kind {
             crate::SheetKind::Number => self.recents.number.as_ref().map(|r| r.number.to_string()),
             crate::SheetKind::Contact => self.contact_sheet.as_ref().and_then(|s| {
-                match rovsti_core::contacts_view::call_target(&s.contact.numbers) {
-                    rovsti_core::contacts_view::CallTarget::Direct(i) => {
+                match rosty_core::contacts_view::call_target(&s.contact.numbers) {
+                    rosty_core::contacts_view::CallTarget::Direct(i) => {
                         Some(s.contact.numbers[i].raw.to_string())
                     }
                     _ => None,
@@ -240,7 +240,7 @@ impl PhoneApp {
         if forms.len() < 2 {
             return; // one format only: the plain tap already does it
         }
-        rovsti_ui::haptics::perform(window, gpui::HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, gpui::HapticFeedback::LongPress);
         self.copy_as = Some(CopyAs { share, forms });
         self.sheet_kind = crate::SheetKind::CopyAs;
         self.presses.release_all();

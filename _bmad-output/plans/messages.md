@@ -1,9 +1,9 @@
-# Plan: Rovsti Messages, finish the open roadmap items
+# Plan: Rosty Messages, finish the open roadmap items
 
 - Base: `9223976a49623ccafce1547428912a4ddea9f5ff` ("WIP: carry-over before sync")
-- Unit: Rovsti Messages. Architect plan, no source changed.
+- Unit: Rosty Messages. Architect plan, no source changed.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android`
 - Nothing runs on a device here. Kotlin is written but not compiled by the checks; pure
   Kotlin helpers get a JVM test next to the existing ones, and every Kotlin change keeps the
   "strings, ints and bools only" JNI seam (AD-5, AD-8).
@@ -12,21 +12,21 @@
 
 | Roadmap item | Code at the base |
 |---|---|
-| WhatsApp through the gateway (link, history, text, media, reactions, groups, presence) | Done. `services/wa_gateway`, `rovsti_wa_client::Gateway::{chats, messages, send_text, send_media, media, react, mark_read, chat_state, groups, ...}`, `rovsti_wa_proto::timeline::Timeline` |
-| WhatsApp conversation view | Done: `apps/messages/src/conversation.rs` (1126 lines; composer, media, reactions, group sender names, typing). `LOCAL_OFFSET_S = 0` is still hard-coded although `rovsti_android::providers::local_time_info` + `rovsti_core::recents::LocaleTime::parse` now exist |
-| Shared WhatsApp settings (link for the first time / connect with key) | Done: `rovsti_wa_ui::WhatsAppSettings` in all four apps (Messages: tab 1). Key list and revoke exist. **No new work** |
-| FCM wake | Done for the event stream (`WhatsAppSettings::forward_push`, `rovsti_wa_proto::push::Wake::Message { chat }`). The gateway sends `{"kind":"message","chat","count"}` and **no text** (AD-WA6) |
-| SMS/MMS | **Missing.** `rovsti_core::thread::{ThreadId::Sms(i64), Message, Channel}` exist; no provider pull, no send, no receiver, no ejected Android host for Messages (`apps/messages` has no `platforms/`) |
-| Unified inbox by number | **Partial.** `MessagesApp::threads: Vec<rovsti_core::Message>` holds one row per thread id; SMS rows are inert, nothing merges a person's SMS thread with their WhatsApp chat |
+| WhatsApp through the gateway (link, history, text, media, reactions, groups, presence) | Done. `services/wa_gateway`, `rosty_wa_client::Gateway::{chats, messages, send_text, send_media, media, react, mark_read, chat_state, groups, ...}`, `rosty_wa_proto::timeline::Timeline` |
+| WhatsApp conversation view | Done: `apps/messages/src/conversation.rs` (1126 lines; composer, media, reactions, group sender names, typing). `LOCAL_OFFSET_S = 0` is still hard-coded although `rosty_android::providers::local_time_info` + `rosty_core::recents::LocaleTime::parse` now exist |
+| Shared WhatsApp settings (link for the first time / connect with key) | Done: `rosty_wa_ui::WhatsAppSettings` in all four apps (Messages: tab 1). Key list and revoke exist. **No new work** |
+| FCM wake | Done for the event stream (`WhatsAppSettings::forward_push`, `rosty_wa_proto::push::Wake::Message { chat }`). The gateway sends `{"kind":"message","chat","count"}` and **no text** (AD-WA6) |
+| SMS/MMS | **Missing.** `rosty_core::thread::{ThreadId::Sms(i64), Message, Channel}` exist; no provider pull, no send, no receiver, no ejected Android host for Messages (`apps/messages` has no `platforms/`) |
+| Unified inbox by number | **Partial.** `MessagesApp::threads: Vec<rosty_core::Message>` holds one row per thread id; SMS rows are inert, nothing merges a person's SMS thread with their WhatsApp chat |
 | Notifications with inline reply | **Missing** |
 | OTP, spam, scheduled send | **Missing** |
-| Encrypted backup / export | **Missing.** Phone's plain JSON prefs backup (`rovsti_core::settings::BackupFile`, `rovsti_android::documents`) is the pattern; `Documents.MAX_BYTES` is 256 KB, too small for messages |
+| Encrypted backup / export | **Missing.** Phone's plain JSON prefs backup (`rosty_core::settings::BackupFile`, `rosty_android::documents`) is the pattern; `Documents.MAX_BYTES` is 256 KB, too small for messages |
 
-Reusable pieces: `rovsti_core::PhoneNumber::{parse, matches, whatsapp_user}`,
-`rovsti_core::search::ContactIndex::match_number`, `rovsti_core::wire::{Envelope, WireError,
-DocumentOp, DocumentResult, PhoneAccounts}`, `rovsti_core::sim::SimInfo`,
-`rovsti_android::{bridge, events, providers, documents, roles::Role::Sms}`,
-`rovsti_ui::storage::{data_dir, save_json, load_json}`, `rovsti_wa_proto::{to_rovsti, jid_user}`.
+Reusable pieces: `rosty_core::PhoneNumber::{parse, matches, whatsapp_user}`,
+`rosty_core::search::ContactIndex::match_number`, `rosty_core::wire::{Envelope, WireError,
+DocumentOp, DocumentResult, PhoneAccounts}`, `rosty_core::sim::SimInfo`,
+`rosty_android::{bridge, events, providers, documents, roles::Role::Sms}`,
+`rosty_ui::storage::{data_dir, save_json, load_json}`, `rosty_wa_proto::{to_rosty, jid_user}`.
 
 External APIs, verified:
 
@@ -58,18 +58,18 @@ External APIs, verified:
 
 - **AD-MSG1 Pure first.** SMS wire types, the unified inbox merge, the SMS timeline, the MMS
   PDU codec, OTP, spam rules, the schedule queue, the notification digest and the backup
-  archive are `rovsti_core` modules with unit tests. GPUI and Kotlin only map.
-- **AD-MSG2 SMS lives in the provider.** Rovsti Messages keeps no SMS database; the
-  Telephony provider is the store. Rust pulls through `rovsti_android::sms` (JSON envelopes,
+  archive are `rosty_core` modules with unit tests. GPUI and Kotlin only map.
+- **AD-MSG2 SMS lives in the provider.** Rosty Messages keeps no SMS database; the
+  Telephony provider is the store. Rust pulls through `rosty_android::sms` (JSON envelopes,
   off the UI thread) and re-pulls on `sms_changed`.
-- **AD-MSG3 Unified inbox key.** One person = one `rovsti_core::inbox::PersonKey`: the contact
+- **AD-MSG3 Unified inbox key.** One person = one `rosty_core::inbox::PersonKey`: the contact
   id when `ContactIndex::match_number` finds one, else the canonical number. A WhatsApp chat
   joins by `PhoneNumber::parse("+" + jid_user(jid))`. Groups (SMS multi-recipient threads,
   `@g.us` chats) never merge.
 - **AD-MSG4 Cold paths stay in Kotlin, logic stays in Rust.** SMS receive, SMS inline reply
   and scheduled SMS run in Kotlin receivers (the process may have no activity). They ask
-  Rust for decisions through one headless JNI call, `RovstiBridge.nativeHeadless(kind, json)`,
-  exported by the app with `rovsti_android::headless_entry!` (same pattern as
+  Rust for decisions through one headless JNI call, `RostyBridge.nativeHeadless(kind, json)`,
+  exported by the app with `rosty_android::headless_entry!` (same pattern as
   `gpui_android::android_entry!`). If the library cannot be loaded, Kotlin falls back to a
   plain notification with no OTP chip and no spam filter.
 - **AD-MSG5 WhatsApp notifications.** The FCM payload has no text (AD-WA6 stays). On a
@@ -95,10 +95,10 @@ External APIs, verified:
 
 ## Steps
 
-### Step 1. Pure: SMS wire, unified inbox, SMS timeline (`rovsti_core`)
+### Step 1. Pure: SMS wire, unified inbox, SMS timeline (`rosty_core`)
 
-Files: `crates/rovsti_core/src/sms.rs` (new), `inbox.rs` (new), `sms_timeline.rs` (new),
-`lib.rs`; golden fixtures in `crates/rovsti_core/tests/sms_golden.rs`.
+Files: `crates/rosty_core/src/sms.rs` (new), `inbox.rs` (new), `sms_timeline.rs` (new),
+`lib.rs`; golden fixtures in `crates/rosty_core/tests/sms_golden.rs`.
 
 ```rust
 // sms.rs: Kotlin -> Rust payloads, all fields #[serde(default)] like wire.rs.
@@ -137,7 +137,7 @@ pub fn preferred_channel(row: &InboxRow) -> Channel;   // channel of the newest 
 ```
 
 ```rust
-// sms_timeline.rs: like rovsti_wa_proto::timeline::Timeline, for one SMS thread
+// sms_timeline.rs: like rosty_wa_proto::timeline::Timeline, for one SMS thread
 pub struct SmsItem { pub key: SmsKey, pub outgoing: bool, pub body: String, pub parts: Vec<MmsPart>,
     pub at_ms: i64, pub state: DeliveryState, pub sub_id: Option<i32> }
 pub enum SmsKey { Sms(i64), Mms(i64), Local(u64) }
@@ -160,12 +160,12 @@ chat under one contact; `0532…` national SMS matches the `+90` chat; group cha
 2-recipient SMS thread stay separate; ordering and unread sums; status never goes back from
 Delivered to Sent; retry only for Failed.
 
-Acceptance: `cargo test -p rovsti_core sms inbox sms_timeline` passes; all checks green.
+Acceptance: `cargo test -p rosty_core sms inbox sms_timeline` passes; all checks green.
 
-### Step 2. Pure: MMS PDU codec and the encrypted backup archive (`rovsti_core`)
+### Step 2. Pure: MMS PDU codec and the encrypted backup archive (`rosty_core`)
 
-Files: `crates/rovsti_core/src/mms_pdu.rs` (new), `msg_backup.rs` (new), `lib.rs`,
-`crates/rovsti_core/Cargo.toml` (add `aes-gcm = { version = "0.10.3", default-features =
+Files: `crates/rosty_core/src/mms_pdu.rs` (new), `msg_backup.rs` (new), `lib.rs`,
+`crates/rosty_core/Cargo.toml` (add `aes-gcm = { version = "0.10.3", default-features =
 false, features = ["aes", "alloc"] }`, `pbkdf2 = { version = "0.12.2", features = ["hmac"] }`,
 `sha2.workspace = true`; add the first two to `[workspace.dependencies]`).
 
@@ -208,12 +208,12 @@ truncated input -> `Truncated`, wrong type -> `WrongType`; backup round-trip wit
 iteration count (1 000) in tests, wrong passphrase -> `WrongPassphrase`, a flipped header
 byte -> `WrongPassphrase` (AAD), unknown version -> `NewerVersion`, `restore_plan` dedupe.
 
-Acceptance: `cargo test -p rovsti_core mms_pdu msg_backup`; `cargo check -p rovsti_android
+Acceptance: `cargo test -p rosty_core mms_pdu msg_backup`; `cargo check -p rosty_android
 --target aarch64-linux-android` still passes (new crypto deps build for Android).
 
-### Step 3. Pure: OTP, spam rules, schedule queue, notification digest (`rovsti_core`)
+### Step 3. Pure: OTP, spam rules, schedule queue, notification digest (`rosty_core`)
 
-Files: `crates/rovsti_core/src/otp.rs`, `spam.rs`, `schedule.rs`, `notify.rs` (all new), `lib.rs`.
+Files: `crates/rosty_core/src/otp.rs`, `spam.rs`, `schedule.rs`, `notify.rs` (all new), `lib.rs`.
 
 ```rust
 // otp.rs
@@ -269,18 +269,18 @@ spam ordering (allow beats rule, OTP survives keyword rule, blocked wins); rule 
 schedule bounds, cap, reconcile; `quick_times` across midnight; `notify::build` caps lines at
 6, groups prefix sender, spam -> `None`, OTP fills `otp`.
 
-Acceptance: `cargo test -p rovsti_core otp spam schedule notify`; then tighten
+Acceptance: `cargo test -p rosty_core otp spam schedule notify`; then tighten
 `msg_backup::BackupBody` to the real `SpamRules` / `Vec<ScheduledSms>`.
 
-### Step 4. Gateway: scheduled WhatsApp send (`rovsti_wa_proto`, `services/wa_gateway`, `rovsti_wa_client`)
+### Step 4. Gateway: scheduled WhatsApp send (`rosty_wa_proto`, `services/wa_gateway`, `rosty_wa_client`)
 
-Files: `crates/rovsti_wa_proto/src/api.rs`, `services/wa_gateway/src/store.rs`,
+Files: `crates/rosty_wa_proto/src/api.rs`, `services/wa_gateway/src/store.rs`,
 `services/wa_gateway/src/schedule.rs` (new), `lib.rs`, `routes.rs`, `main.rs`,
-`crates/rovsti_wa_client/src/http.rs`, `services/wa_gateway/tests/api.rs`,
+`crates/rosty_wa_client/src/http.rs`, `services/wa_gateway/tests/api.rs`,
 `docs/whatsapp-gateway.md` (API table).
 
 ```rust
-// rovsti_wa_proto::api
+// rosty_wa_proto::api
 pub mod routes { pub const SCHEDULED: &str = "/v1/scheduled"; pub const SCHEDULED_ONE: &str = "/v1/scheduled/{id}"; }
 pub struct ScheduleText { pub chat: String, pub text: String, pub send_at_ms: i64 }
 pub enum ScheduledState { Pending, Sent { message_id: String }, Failed { reason: String } }
@@ -303,7 +303,7 @@ pending per instance), `GET /v1/scheduled` (pending + finished of the last 7 day
 `DELETE /v1/scheduled/{id}` (only `Pending`, 404 otherwise). `main.rs` starts the sweeper
 every 15 s. A `GatewayEvent::Scheduled(ScheduledText)` is published on every state change
 (add the variant; an older client logs "undecodable event" and skips it,
-`rovsti_wa_client/src/events.rs:254`, so no compatibility shim is needed).
+`rosty_wa_client/src/events.rs:254`, so no compatibility shim is needed).
 
 Client: `Gateway::{schedule_text(&ScheduleText) -> Result<ScheduledText>, scheduled() ->
 Result<Vec<ScheduledText>>, cancel_scheduled(id) -> Result<()>}`.
@@ -313,18 +313,18 @@ Tests: store migration v1 -> v2 keeps data (extend
 cancel, cancel twice -> 404, past time -> 400, sweeper sends once and marks Sent, driver error
 -> Failed, deleting the instance cascades), client path tests.
 
-Acceptance: `cargo test -p wa_gateway -p rovsti_wa_proto -p rovsti_wa_client`; client still
+Acceptance: `cargo test -p wa_gateway -p rosty_wa_proto -p rosty_wa_client`; client still
 checks for `aarch64-linux-android`.
 
-### Step 5. Android seam: SMS, notifications, scheduled SMS, documents by file, headless entry (`rovsti_android` + shared Kotlin + `rovsti_wa_ui::headless`)
+### Step 5. Android seam: SMS, notifications, scheduled SMS, documents by file, headless entry (`rosty_android` + shared Kotlin + `rosty_wa_ui::headless`)
 
-Rust files: `crates/rovsti_android/src/sms.rs`, `notify.rs`, `headless.rs` (new),
-`documents.rs`, `events.rs`, `lib.rs`; `crates/rovsti_wa_ui/src/headless.rs` (new);
-`crates/rovsti_core/src/wire.rs` (`DocumentOp::{ExportMessages, ImportMessages}`,
+Rust files: `crates/rosty_android/src/sms.rs`, `notify.rs`, `headless.rs` (new),
+`documents.rs`, `events.rs`, `lib.rs`; `crates/rosty_wa_ui/src/headless.rs` (new);
+`crates/rosty_core/src/wire.rs` (`DocumentOp::{ExportMessages, ImportMessages}`,
 `DocumentResult.path: Option<String>`).
 
 ```rust
-// rovsti_android::sms (all blocking, off the UI thread, Unsupported on desktop)
+// rosty_android::sms (all blocking, off the UI thread, Unsupported on desktop)
 pub fn threads(limit: usize) -> Result<String>;                         // pullSmsThreads -> Envelope<SmsThreadsPayload>
 pub fn messages(thread_id: i64, before_ms: Option<i64>, limit: usize) -> Result<String>; // pullSmsMessages
 pub fn sims() -> Result<String>;                                        // pullSmsSims -> Envelope<SmsSimsPayload>
@@ -335,13 +335,13 @@ pub fn delete_thread(thread_id: i64) -> Result<bool>;
 pub fn insert_restored(json: &str) -> Result<String>;                   // restore; needs ROLE_SMS
 pub fn arm_scheduled(item_json: &str) -> Result<bool>;   pub fn disarm_scheduled(id: u64) -> Result<bool>;
 pub fn pull_fired() -> Result<String>;                                  // Vec<FiredSms>, then cleared
-// rovsti_android::notify
+// rosty_android::notify
 pub fn show(spec_json: &str) -> Result<bool>;  pub fn cancel(tag: &str) -> Result<bool>;
 pub fn copy_to_clipboard(text: &str, sensitive: bool) -> Result<bool>;  // EXTRA_IS_SENSITIVE for OTPs
-// rovsti_android::documents
+// rosty_android::documents
 pub fn export_file(name: &str, mime: &str, path: &str) -> Result<bool>; // op export_messages
 pub fn import_file(max_bytes: u64) -> Result<bool>;                     // op import_messages, answer has `path`
-// rovsti_android::events::kind
+// rosty_android::events::kind
 SMS_CHANGED, SMS_STATUS, SMS_RECEIVED, MSG_REPLY /* {tag, text} while attached */, SCHEDULED_FIRED, OPEN_THREAD
 ```
 
@@ -351,7 +351,7 @@ SMS_CHANGED, SMS_STATUS, SMS_RECEIVED, MSG_REPLY /* {tag, text} while attached *
 macro_rules! headless_entry { ($handler:path) => {
     #[cfg(target_os = "android")]
     #[unsafe(no_mangle)]
-    pub extern "system" fn Java_dev_rovsti_bridge_RovstiBridge_nativeHeadless<'a>(
+    pub extern "system" fn Java_dev_rosty_bridge_RostyBridge_nativeHeadless<'a>(
         mut env: $crate::jni::JNIEnv<'a>, _class: $crate::jni::objects::JClass<'a>,
         kind: $crate::jni::objects::JString<'a>, json: $crate::jni::objects::JString<'a>,
     ) -> $crate::jni::sys::jstring { $crate::headless::run(&mut env, kind, json, $handler) }
@@ -361,12 +361,12 @@ pub fn run(..) -> jstring   // android only: reads both strings, catch_unwind ar
 Re-export `pub use jni;` under `cfg(target_os = "android")`. Pure dispatcher for tests:
 `pub fn dispatch(kind: &str, json: &str, table: &[(&str, Handler)]) -> String`.
 
-`rovsti_wa_ui::headless` (blocking, no GPUI): `pub fn wa_digest(json: &str) -> String`
+`rosty_wa_ui::headless` (blocking, no GPUI): `pub fn wa_digest(json: &str) -> String`
 (`{dir, chat}` -> load `StoredLink` from `dir/whatsapp-link.json`, `Gateway::messages(chat,
 None, 5)`, `chats()` for the title, map through `notify::build`; `{}` on any error) and
 `pub fn wa_reply(json: &str) -> String` (`{dir, chat, text}` -> `send_text`; `{"ok":bool}`).
 
-Kotlin (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`): `SmsQuery.kt` (provider pulls,
+Kotlin (`crates/rosty_android/kotlin/dev/rosty/bridge/`): `SmsQuery.kt` (provider pulls,
 JSON via `WireJson`), `SmsSend.kt` (`createForSubscriptionId`, multipart, sent/delivery
 `PendingIntent`s -> `sms_status` and provider `STATUS` update, writes to `Sms.Sent`/`Outbox`),
 `MmsCodec.kt` (only file plumbing: write PDU to a cache file, call
@@ -377,28 +377,28 @@ with `FLAG_MUTABLE`, "Copy code" and "Mark read" actions, tag from `Notification
 WhatsApp -> `nativeHeadless("wa_reply")`, then re-posts the notification with the sent line),
 `ScheduledSms.kt` (AlarmManager, `SharedPreferences` store of armed payloads, `fired` list),
 `Headless.kt` (`ensureLoaded(libName)` with `System.loadLibrary`, `UnsatisfiedLinkError` ->
-`null`), `RovstiBridge.kt` (`@JvmStatic external fun nativeHeadless(kind: String, json:
+`null`), `RostyBridge.kt` (`@JvmStatic external fun nativeHeadless(kind: String, json:
 String): String` and the new static methods), `Documents.kt` (`exportFile`/`importFile`,
 copy by stream to/from cache, 64 MB cap). JVM tests: `SmsJsonTest`, `NotificationSpecTest`,
-`ScheduledSmsStoreTest` in `apps/phone/platforms/android/app/src/test/java/dev/rovsti/bridge/`
+`ScheduledSmsStoreTest` in `apps/phone/platforms/android/app/src/test/java/dev/rosty/bridge/`
 (the only Gradle project with a test source set today) or in the new Messages host (step 6).
 
 Rust tests: every facade `Unsupported` on desktop (pattern of `providers.rs`); `dispatch`
 unknown kind -> `""`; `wa_digest` with a missing link file -> `{}`; `wa_reply` against the
-loopback gateway in `crates/rovsti_wa_client/tests/loopback.rs` style (a `FakeDriver`-backed
+loopback gateway in `crates/rosty_wa_client/tests/loopback.rs` style (a `FakeDriver`-backed
 `wa_gateway` dev-dependency if acceptable, otherwise only the error paths).
 
-Acceptance: all checks green; `cargo check -p rovsti_android --target aarch64-linux-android`
+Acceptance: all checks green; `cargo check -p rosty_android --target aarch64-linux-android`
 compiles `headless.rs` and the macro (add `headless_entry!(crate_test_handler)` in a
 `#[cfg(test)]`-free doc example or an android-only test module so the expansion is checked).
 
-### Step 6. Rovsti Messages Android host (`apps/messages/platforms/android`)
+### Step 6. Rosty Messages Android host (`apps/messages/platforms/android`)
 
 Eject the host the way Contacts did (`apps/contacts/platforms/android`, Kotlin bridge as a
-Gradle source dir `crates/rovsti_android/kotlin`, no symlink). Files:
+Gradle source dir `crates/rosty_android/kotlin`, no symlink). Files:
 
 - `apps/messages/gpuiforge.json`: `"management": "manual"`, `"project-dir":
-  "platforms/android"`, `"activity": "dev.rovsti.messages.MainActivity"`, `min_sdk 34`,
+  "platforms/android"`, `"activity": "dev.rosty.messages.MainActivity"`, `min_sdk 34`,
   `target_sdk 36`; permissions: keep the SMS/MMS set, add `SCHEDULE_EXACT_ALARM`,
   `RECEIVE_BOOT_COMPLETED` (re-arm alarms after reboot) and `INTERNET` (gateway); drop
   `FOREGROUND_SERVICE*` and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (no foreground service,
@@ -408,7 +408,7 @@ Gradle source dir `crates/rovsti_android/kotlin`, no symlink). Files:
   `application/vnd.wap.mms-message`), `HeadlessSmsSendService` (`RESPOND_VIA_MESSAGE`,
   `SEND_RESPOND_VIA_MESSAGE`, schemes sms/smsto/mms/mmsto), `MainActivity` with `SENDTO`
   and `SEND` (text/plain, image/*) filters, `ReplyReceiver`, `ScheduledSmsReceiver`,
-  `BootReceiver`, firebase flavor `RovstiMessagingService` (copy Phone's
+  `BootReceiver`, firebase flavor `RostyMessagingService` (copy Phone's
   `src/firebase/...`, calling `WaPush.onMessage` and, for `kind=message` while not attached,
   `MessageNotifications.fromWaPush` -> `nativeHeadless("wa_digest")`).
 - `SmsDeliverReceiver.kt`: writes the message to `Telephony.Sms.Inbox` (the default app
@@ -418,14 +418,14 @@ Gradle source dir `crates/rovsti_android/kotlin`, no symlink). Files:
   (Rust `decode_notification_ind`), downloads with `downloadMultimediaMessage`, then
   `nativeHeadless("mms_retrieved")` decodes parts, Kotlin persists them to `Telephony.Mms`
   and posts the notification.
-- `MainActivity.kt`: `nativeLibraryName() = "rovsti_messages"`, `RovstiBridge.attachNative()`,
+- `MainActivity.kt`: `nativeLibraryName() = "rosty_messages"`, `RostyBridge.attachNative()`,
   forwards `SENDTO`/`SEND` intents and notification taps as a one-shot `open_thread` /
-  `ui_request` through the `Mailbox`, `onActivityResult` -> `RovstiBridge.handleActivityResult`.
+  `ui_request` through the `Mailbox`, `onActivityResult` -> `RostyBridge.handleActivityResult`.
 - Rust: `apps/messages/src/headless.rs` (new) with `fn handle(kind: &str, json: &str) ->
-  String` dispatching `sms_classify` (spam + OTP from `rovsti_core`, rules read from
+  String` dispatching `sms_classify` (spam + OTP from `rosty_core`, rules read from
   `<dir>/messages-prefs.json`), `mms_notification`, `mms_retrieved`, `mms_send_req`,
-  `wa_digest`, `wa_reply` (from `rovsti_wa_ui::headless`); `main.rs`:
-  `rovsti_android::headless_entry!(headless::handle);`. Unit tests for `handle` routing
+  `wa_digest`, `wa_reply` (from `rosty_wa_ui::headless`); `main.rs`:
+  `rosty_android::headless_entry!(headless::handle);`. Unit tests for `handle` routing
   and for each kind's JSON in/out (desktop, pure).
 - `docs/android.md`: the Messages host section (role components, FCM flavor, exact alarm
   fallback, the headless call and its fallback). `docs/architecture.md`: Messages row and
@@ -442,12 +442,12 @@ Files: `apps/messages/src/backend.rs` (new), `backend/preview.rs` (new, desktop 
 threads), `inbox.rs` (new, replaces `MessagesApp::chats`), `sms_conversation.rs` (new),
 `conversation.rs` (local time), `main.rs`, `apps/messages/Cargo.toml` (add `serde_json`).
 
-- `Backend` entity: installs the event sink (`rovsti_android::events::install_sink_owned`),
+- `Backend` entity: installs the event sink (`rosty_android::events::install_sink_owned`),
   pulls `sms::threads(500)`, `sms::sims()`, `providers::contacts()` -> `ContactIndex`,
   `providers::local_time_info()`, `roles::is_held(Role::Sms)` on the background executor;
   re-pulls on `sms_changed`, `contacts_changed`, `permissions_changed`; applies `sms_status`
   to the open `SmsTimeline`. Desktop uses `preview.rs` (no `Unsupported` errors on screen).
-- Inbox: `rovsti_core::inbox::merge(sms_threads, wa_threads, contacts)`; one row per person
+- Inbox: `rosty_core::inbox::merge(sms_threads, wa_threads, contacts)`; one row per person
   with SMS / WhatsApp badges (both when merged), unread count, OTP chip on the snippet
   (`otp::detect`, tap -> `notify::copy_to_clipboard(code, true)`), spam rows hidden into a
   "Spam" filter row at the bottom (`spam::classify` on the snippet). Tapping a merged row
@@ -456,7 +456,7 @@ threads), `inbox.rs` (new, replaces `MessagesApp::chats`), `sms_conversation.rs`
 - Read-only banner while `ROLE_SMS` is not held: "Set as default SMS app" ->
   `roles::request(Role::Sms)`, falling back to `xiaomi` default-apps page (existing pattern).
 - `SmsConversation` entity: `SmsTimeline` pages of 50 via `sms::messages`, glass composer
-  (reuse `rovsti_ui::field::TextField` and the WhatsApp composer layout), segment counter
+  (reuse `rosty_ui::field::TextField` and the WhatsApp composer layout), segment counter
   from `sms::segments`, SIM chip when `SmsSimsPayload.sims.len() > 1` (default from
   `default_sub_id`, choice remembered per thread in `messages-prefs.json`), delivery ticks
   (Pending clock, Sent one tick, Delivered two, Failed red with Retry), MMS image parts via
@@ -469,21 +469,21 @@ threads), `inbox.rs` (new, replaces `MessagesApp::chats`), `sms_conversation.rs`
 Tests (pure, in-app `#[cfg(test)]` where logic is thin): row title/badge mapping,
 SIM chip visibility, delivery tick mapping. Heavy logic must already be in steps 1 to 3.
 
-Acceptance: all checks green; `cargo run -p rovsti_messages` shows the preview inbox with a
+Acceptance: all checks green; `cargo run -p rosty_messages` shows the preview inbox with a
 merged SMS + WhatsApp person and an SMS conversation that "sends" against the preview backend.
 
 ### Step 8. Messages app: notifications and inline reply, scheduled send, Settings (spam, backup), docs
 
 Files: `apps/messages/src/notifications.rs`, `schedule_ui.rs`, `settings_ui.rs`,
 `backup_ui.rs` (new), `main.rs`, `prefs.rs` (new: `messages-prefs.json` with
-`SpamRules`, per-thread SIM, notification switches; `rovsti_ui::storage::{save_json,
+`SpamRules`, per-thread SIM, notification switches; `rosty_ui::storage::{save_json,
 load_json}`), docs.
 
 - Notifications while attached: on `GatewayEvent::Message` (not from me, not the open chat)
   and on `sms_received`, build `notify::build` and `notify::show`; `msg_reply` events send
   through `sms::send` or `Gateway::send_text` and append to the timeline; `notify::cancel`
   when a thread is opened. `uiAttached(true)` tells Kotlin to skip its own WhatsApp digest.
-- Scheduled send: long-press Send -> sheet (`rovsti_ui::sheet::Sheet`) with
+- Scheduled send: long-press Send -> sheet (`rosty_ui::sheet::Sheet`) with
   `schedule::quick_times` and a custom time; SMS -> `ScheduleQueue` (`scheduled.json`) +
   `sms::arm_scheduled`; WhatsApp -> `Gateway::schedule_text`. A "Scheduled" strip in each
   conversation lists pending items (local queue + `Gateway::scheduled()`), cancel ->
@@ -491,7 +491,7 @@ load_json}`), docs.
   `ScheduleQueue::reconcile`; failures show a notice pill.
 - Settings tab (replaces the empty state): Default SMS app, Notifications (on, OTP copy
   chip), Spam (enable, rules list with add/delete, allow list, blocked numbers via
-  `rovsti_android::blocklist`), Backup (Export encrypted: passphrase twice, strength check,
+  `rosty_android::blocklist`), Backup (Export encrypted: passphrase twice, strength check,
   `msg_backup::seal` with `getrandom` salt/nonce in the app, write to cache,
   `documents::export_file(name, "application/octet-stream", path)`; Import:
   `documents::import_file(64 MiB)` -> `msg_backup::open` -> `restore_plan` preview ->

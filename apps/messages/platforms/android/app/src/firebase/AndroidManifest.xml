@@ -2,7 +2,7 @@
     <!-- Merged only when app/google-services.json exists (see app/build.gradle.kts). -->
     <application>
         <service
-            android:name=".RovstiMessagingService"
+            android:name=".RostyMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />

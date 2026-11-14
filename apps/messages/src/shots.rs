@@ -1,15 +1,15 @@
-//! Headless screenshots of Rovsti Messages (`docs/screenshots.md`).
+//! Headless screenshots of Rosty Messages (`docs/screenshots.md`).
 //!
-//! `cargo test -p rovsti_messages --features shots shots -- --ignored --nocapture`
+//! `cargo test -p rosty_messages --features shots shots -- --ignored --nocapture`
 
 mod gateway;
 
 use std::path::PathBuf;
 
 use gpui::{AppContext as _, Context, Window};
-use rovsti_core::{ThreadId, inbox_filter::InboxFilter};
-use rovsti_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
-use rovsti_ui::tokens::Theme;
+use rosty_core::{ThreadId, inbox_filter::InboxFilter};
+use rosty_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
+use rosty_ui::tokens::Theme;
 
 use crate::{
     MessagesApp, SETTINGS_TAB, WHATSAPP_TAB,
@@ -23,7 +23,7 @@ use crate::{
 pub(crate) const SHOT_NOW_MS: i64 = 1_794_055_200_000;
 
 fn open(spec: ShotSpec) -> Rig<MessagesApp> {
-    rovsti_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
+    rosty_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
     shots_data::use_shots_fixture(true);
     let mut rig = Rig::open(spec, move |window, cx| {
         let backend = Backend::start(cx);
@@ -142,15 +142,15 @@ const SCENES: [(u32, &str, bool, Scene); 16] = [
 /// Links the app to the fake gateway at `url`, the way a linked app starts:
 /// the saved link is in its data folder.
 fn write_link(data: &std::path::Path, url: &str) {
-    let dir = data.join("rovsti").join("messages");
-    let link = rovsti_wa_ui::StoredLink {
+    let dir = data.join("rosty").join("messages");
+    let link = rosty_wa_ui::StoredLink {
         gateway_url: url.to_owned(),
         instance_id: "shots".to_owned(),
-        key: rovsti_wa_proto::ConnectKey::from_bytes(&[7; 32])
+        key: rosty_wa_proto::ConnectKey::from_bytes(&[7; 32])
             .as_str()
             .to_owned(),
     };
-    rovsti_ui::storage::save_json(&dir, rovsti_wa_ui::LINK_FILE, &link)
+    rosty_ui::storage::save_json(&dir, rosty_wa_ui::LINK_FILE, &link)
         .expect("save the WhatsApp link");
 }
 
@@ -185,9 +185,9 @@ const INBOX_LIGHT_TEXT: [(&str, Rect); 4] = [
 ];
 
 fn assert_inbox_contrast(path: &std::path::Path) {
-    let img = rovsti_ui::shots::open_png(path);
+    let img = rosty_ui::shots::open_png(path);
     for (name, rect) in INBOX_LIGHT_TEXT {
-        let ratio = rovsti_ui::shots::color::contrast_in(&img, rect);
+        let ratio = rosty_ui::shots::color::contrast_in(&img, rect);
         assert!(ratio >= 4.5, "{name} {rect:?}: contrast {ratio:.2} < 4.5");
     }
 }
@@ -212,8 +212,8 @@ fn shots() {
                 assert_inbox_contrast(&path);
             }
             if nn == 1 {
-                let img = rovsti_ui::shots::open_png(&path);
-                let step = rovsti_ui::shots::color::edge_strip_step(&img, 8, 16);
+                let img = rosty_ui::shots::open_png(&path);
+                let step = rosty_ui::shots::color::edge_strip_step(&img, 8, 16);
                 assert!(step <= 2, "{theme:?}: backdrop step {step} at x=8 > 2");
             }
             saved.push(path);

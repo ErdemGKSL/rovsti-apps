@@ -17,13 +17,13 @@ use gpui::{
     MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window,
     div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     names,
     settings::{Settings, SortBy},
     sim::SimInfo,
     wire::{HapticsLevel, NameFormat, WireContact},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{backdrop, glass_icon_button, glass_icon_button_turned},
     moments::Fade,
@@ -291,7 +291,7 @@ pub(crate) fn toggle_value(row: RowId, s: &Settings, system_tones: bool) -> bool
         RowId::VibrateConnect => s.vibrate_connect,
         RowId::VibrateEnd => s.vibrate_end,
         RowId::KeypadTones => {
-            rovsti_core::settings::effective_keypad_tones(s.keypad_tones, system_tones)
+            rosty_core::settings::effective_keypad_tones(s.keypad_tones, system_tones)
         }
         RowId::ShowFrequent => s.show_frequent,
         _ => false,
@@ -453,7 +453,7 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
                 icon: Icon::LucideChevronRight,
             },
         )],
-        footer: Some("Calls and chats go through your Rovsti gateway."),
+        footer: Some("Calls and chats go through your Rosty gateway."),
     });
 
     if key.sims.visible() {
@@ -726,7 +726,7 @@ impl Default for SettingsUi {
             sub_shown: false,
             sub_enter: Spring::new(0.0, motion_tokens::appear()).with_epsilon(0.002),
             #[cfg(not(target_os = "android"))]
-            preview_taps: std::env::var("ROVSTI_PREVIEW_TAPS")
+            preview_taps: std::env::var("ROSTY_PREVIEW_TAPS")
                 .map(|v| v.split(',').map(str::to_owned).collect())
                 .unwrap_or_default(),
         }
@@ -1105,7 +1105,7 @@ impl PhoneApp {
             (RowId::KeypadTones, _) => {
                 let system = self.backend.read(cx).facts().system_keypad_tones;
                 self.toggle_setting(row, window, cx, move |s| {
-                    let now = rovsti_core::settings::effective_keypad_tones(s.keypad_tones, system);
+                    let now = rosty_core::settings::effective_keypad_tones(s.keypad_tones, system);
                     s.keypad_tones = Some(!now);
                 });
             }
@@ -1131,22 +1131,22 @@ impl PhoneApp {
                 self.pick_setting(row, i, window, cx, move |s| s.name_format = format);
             }
             (RowId::Ringtone, _) => {
-                self.open_system_page(rovsti_android::telecom::SystemPage::Sound, cx)
+                self.open_system_page(rosty_android::telecom::SystemPage::Sound, cx)
             }
             (RowId::SimDefault, _) => {
-                self.open_system_page(rovsti_android::telecom::SystemPage::ChangePhoneAccounts, cx)
+                self.open_system_page(rosty_android::telecom::SystemPage::ChangePhoneAccounts, cx)
             }
             (RowId::Forwarding, _) => {
-                self.open_system_page(rovsti_android::telecom::SystemPage::CallSettings, cx);
+                self.open_system_page(rosty_android::telecom::SystemPage::CallSettings, cx);
             }
             (RowId::Accessibility, _) => {
-                self.open_system_page(rovsti_android::telecom::SystemPage::CallAccessibility, cx);
+                self.open_system_page(rosty_android::telecom::SystemPage::CallAccessibility, cx);
             }
             (RowId::DefaultApps, _) => {
-                self.open_system_page(rovsti_android::telecom::SystemPage::DefaultApps, cx);
+                self.open_system_page(rosty_android::telecom::SystemPage::DefaultApps, cx);
             }
             (RowId::EmergencyInfo, _) => {
-                self.open_system_page(rovsti_android::telecom::SystemPage::EmergencyInfo, cx);
+                self.open_system_page(rosty_android::telecom::SystemPage::EmergencyInfo, cx);
             }
             (RowId::Blocked, _) => self.settings_open_sub(Sub::Blocked, window, cx),
             (RowId::Replies, _) => self.settings_open_sub(Sub::Replies, window, cx),
@@ -1188,7 +1188,7 @@ impl PhoneApp {
 
     fn open_system_page(
         &mut self,
-        page: rovsti_android::telecom::SystemPage,
+        page: rosty_android::telecom::SystemPage,
         cx: &mut Context<Self>,
     ) {
         if let Some(text) = backend::open_system(page).notice() {
@@ -1210,7 +1210,7 @@ impl PhoneApp {
             let target = self.settings.anim[row.index()].target;
             self.settings.anim[row.index()].snap(target);
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.say_if_unsaved(cx);
     }
 
@@ -1230,7 +1230,7 @@ impl PhoneApp {
         if window.prefers_reduced_motion() {
             self.settings.anim[row.index()].snap(index as f32);
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.say_if_unsaved(cx);
     }
 
@@ -1320,7 +1320,7 @@ impl PhoneApp {
     }
 
     /// Row text colour for a dimmed row.
-    fn dimmed(colors: &rovsti_ui::tokens::Colors, enabled: bool) -> Hsla {
+    fn dimmed(colors: &rosty_ui::tokens::Colors, enabled: bool) -> Hsla {
         if enabled {
             colors.label
         } else {
@@ -1826,7 +1826,7 @@ impl PhoneApp {
         )
     }
 
-    /// The WhatsApp page: the shared settings screen from `rovsti_wa_ui`.
+    /// The WhatsApp page: the shared settings screen from `rosty_wa_ui`.
     /// It handles its own taps, so it needs no ids of the touch router.
     fn whatsapp_body(&self) -> AnyElement {
         div()
@@ -1842,7 +1842,7 @@ impl PhoneApp {
     /// Opens Diagnostics as a sheet over the page (the long-press on the title).
     pub(crate) fn settings_diagnostics(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings.is_open() && !self.sheet.is_open() {
-            rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+            rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
             self.sheet_kind = SheetKind::Diagnostics;
             self.sheet.open();
             self.presses.release_all();
@@ -1903,7 +1903,7 @@ mod tests {
 
     #[test]
     fn two_sims_add_the_sim_section() {
-        use rovsti_core::wire::{PhoneAccountInfo, PhoneAccounts};
+        use rosty_core::wire::{PhoneAccountInfo, PhoneAccounts};
         let account = |k: &str, slot| PhoneAccountInfo {
             key: k.into(),
             label: format!("Net{slot}"),
@@ -1980,7 +1980,7 @@ mod tests {
     #[test]
     fn a_refused_import_adds_the_red_row() {
         let mut k = key();
-        k.import_error = Some("This isn't a Rovsti Phone backup.");
+        k.import_error = Some("This isn't a Rosty Phone backup.");
         let data = build_sections(&k)
             .into_iter()
             .find(|s| s.title == "Data")

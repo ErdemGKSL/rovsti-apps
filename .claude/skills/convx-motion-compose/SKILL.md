@@ -1,7 +1,7 @@
 ---
 name: convx-motion-compose
 description: >-
-  Fluid iOS 26 liquid-glass UI in Kotlin + Jetpack Compose (no GPUI) for Rovsti: interruptible springs, drag/fling
+  Fluid iOS 26 liquid-glass UI in Kotlin + Jetpack Compose (no GPUI) for Rosty: interruptible springs, drag/fling
   with velocity hand-off, squash and stretch, shared elements, predictive back, AGSL/RenderEffect glass with
   fallbacks, popovers, context menus, sheets, dialogs, toasts, tab bar, large titles, insets, lists, text fields,
   haptics, 120 Hz performance rules and a screen review checklist. From Convx (GPL-3.0, ported with attribution) and
@@ -11,11 +11,11 @@ description: >-
   alt sayfa, sekme çubuğu, takılma, iOS tarzı arayüz.
 ---
 
-# Convx-grade motion, glass and overlays in Compose (Rovsti)
+# Convx-grade motion, glass and overlays in Compose (Rosty)
 
 ## 0. Licensing rule (read before porting)
 
-Rovsti is **GPL-3.0-or-later** (root `LICENSE`). Convx is GPL-3.0, so its code is portable close to verbatim.
+Rosty is **GPL-3.0-or-later** (root `LICENSE`). Convx is GPL-3.0, so its code is portable close to verbatim.
 
 | Source | Licence | What you may do |
 |---|---|---|
@@ -33,21 +33,21 @@ Required header lines (Kotlin or AGSL), placed after the upstream header if ther
 ```
 
 Written as `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`. `LicenceHeaderTest`
-(`android/design/src/test/kotlin/dev/rovsti/design/LicenceHeaderTest.kt`) enforces it for every file under `backdrop/`,
+(`android/design/src/test/kotlin/dev/rosty/design/LicenceHeaderTest.kt`) enforces it for every file under `backdrop/`,
 `shapes/` and `ios/`, every file naming Convx in its header, and every glisse file.
 
-Code blocks in `references/` are either Rovsti's own sketches or glisse translations (marked); for Convx features the
+Code blocks in `references/` are either Rosty's own sketches or glisse translations (marked); for Convx features the
 references point to the Convx file to port.
 
 ## 1. Project constraints
 
 - Kotlin + Jetpack Compose, **no GPUI**, **no Material overlays** (menus, dialogs, sheets are ours). minSdk 34
-  (`crates/rovsti_android/kotlin/dev/rovsti/bridge/MediaShare.kt:13`), so `RenderEffect` (31) and AGSL
+  (`crates/rosty_android/kotlin/dev/rosty/bridge/MediaShare.kt:13`), so `RenderEffect` (31) and AGSL
   `RuntimeShader` (33) are always available on device. Robolectric/Paparazzi may not render them: screenshots use the
   Flat tier (see `references/glass.md` section 7).
 - Domain logic stays in the Rust crates; Kotlin UI is thin. Every number policy (placement, projection, collapse
   fraction, rubber band) is a pure Kotlin function with a JVM test.
-- Old GPUI UIs (`apps/*`, `crates/rovsti_ui`, `rovsti_wa_ui`, `liquid_glass_kit`) are a feature inventory only.
+- Old GPUI UIs (`apps/*`, `crates/rosty_ui`, `rosty_wa_ui`, `liquid_glass_kit`) are a feature inventory only.
 - Verify every Compose API against the pinned version's sources before relying on it (names below were current in
   Compose 1.7-1.10; overscroll, haptic types and shadow APIs moved in 1.8-1.9).
 
@@ -91,7 +91,7 @@ references point to the Convx file to port.
 ## 5. Workflow for a new screen
 
 1. Sketch layers: content layer (list or map, full window) / chrome layer (bars, floating buttons) / overlay host.
-2. Pull tokens from `RovstiMotion`, `GlassTokens`, spacing tokens. No raw numbers at call sites.
+2. Pull tokens from `RostyMotion`, `GlassTokens`, spacing tokens. No raw numbers at call sites.
 3. Build with the recipes; every gesture uses the drag/release pattern; every popover goes through the host.
 4. Add JVM tests for new pure functions, a Compose test for gestures (manual clock), Roborazzi/Paparazzi screenshots
    (light/dark, font scale 1.0/2.0, overlay open, last row visible). **Open the PNGs with the Read tool and judge them.**

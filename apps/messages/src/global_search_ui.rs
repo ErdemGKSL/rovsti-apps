@@ -1,7 +1,7 @@
 //! The "Messages" section of the Chats search: messages of SMS and of the most
 //! recent WhatsApp chats that contain the query, with a highlighted snippet.
 //! Matching, snippets, the footer and the jump rules are
-//! `rovsti_core::global_search`; this file owns the debounce, the background
+//! `rosty_core::global_search`; this file owns the debounce, the background
 //! reads and the rows.
 
 use std::time::Duration;
@@ -10,19 +10,19 @@ use gpui::{
     AnyElement, Context, FontWeight, HighlightStyle, InteractiveElement, IntoElement,
     ParentElement, StatefulInteractiveElement, Styled, StyledText, Task, div, px,
 };
-use rovsti_android::sms;
-use rovsti_core::{
+use rosty_android::sms;
+use rosty_core::{
     ThreadId,
     global_search::{
         self, JumpTarget, MIN_QUERY_CHARS, SearchCandidate, SearchHit, Source, WA_CHATS,
     },
     sms::SmsMessagesPayload,
 };
-use rovsti_ui::{
+use rosty_ui::{
     theme,
     tokens::{Theme, metrics, typography},
 };
-use rovsti_wa_proto::RichMessage;
+use rosty_wa_proto::RichMessage;
 
 use crate::{
     MessagesApp,
@@ -201,7 +201,7 @@ impl MessagesApp {
             .iter()
             .map(|jid| {
                 let thread = ThreadId::WhatsApp(jid.clone());
-                let fallback = rovsti_wa_ui::display_name(None, None, jid);
+                let fallback = rosty_wa_ui::display_name(None, None, jid);
                 (jid.clone(), title_of(&thread, fallback))
             })
             .collect();

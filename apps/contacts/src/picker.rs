@@ -9,8 +9,8 @@ use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::{contact_edit, contacts_view, wire::WireContact};
-use rovsti_ui::{
+use rosty_core::{contact_edit, contacts_view, wire::WireContact};
+use rosty_ui::{
     Icon,
     components::{empty_state, large_title},
     current_theme,
@@ -276,7 +276,7 @@ impl ContactsApp {
     /// "Add to a Contact" on a no-results search: opens the single choice.
     pub(crate) fn open_add_picker(
         &mut self,
-        add: rovsti_core::contact_edit::Addition,
+        add: rosty_core::contact_edit::Addition,
         cx: &mut Context<Self>,
     ) {
         self.open_picker(PickFor::AddTo, Vec::new(), cx);
@@ -340,8 +340,8 @@ impl ContactsApp {
                         .map(|id| (*id, true))
                         .chain(change.remove.iter().map(|id| (*id, false)));
                     for (id, starred) in steps {
-                        match rovsti_android::providers::set_starred(id, starred) {
-                            Ok(true) | Err(rovsti_android::Error::Unsupported) => {}
+                        match rosty_android::providers::set_starred(id, starred) {
+                            Ok(true) | Err(rosty_android::Error::Unsupported) => {}
                             Ok(false) | Err(_) => failures += 1,
                         }
                     }
@@ -400,7 +400,7 @@ impl ContactsApp {
             let picture =
                 self.avatar_picture(id, row.vm.photo_uri.is_some(), row.wa_jid.as_deref(), cx);
             let photo = picture.as_ref().map(|(image, opacity)| (image, *opacity));
-            let item = rovsti_ui::components::list_row(
+            let item = rosty_ui::components::list_row(
                 theme,
                 Some(
                     photo_avatar(theme, row.monogram.clone(), 40.0, tint, photo).into_any_element(),

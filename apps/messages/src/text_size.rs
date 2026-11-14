@@ -1,7 +1,7 @@
 //! Bubble text metrics for the "Text size" setting.
 
 use gpui::{Pixels, px};
-use rovsti_core::text_scale::ChatTextSize;
+use rosty_core::text_scale::ChatTextSize;
 
 /// Font size and line height of message text. Captions, times and headers
 /// stay fixed.

@@ -1,7 +1,7 @@
-# Plan: Rovsti Phone, round 3
+# Plan: Rosty Phone, round 3
 
-- Base: `9a1257c2999d5b695cc3292283fd1fc129bc9c50` ("Rovsti Phone: review fixes")
-- Unit: Rovsti Phone. Architect plan, no source changed.
+- Base: `9a1257c2999d5b695cc3292283fd1fc129bc9c50` ("Rosty Phone: review fixes")
+- Unit: Rosty Phone. Architect plan, no source changed.
 - Verdict: **done**. No further steps.
 
 ## State at the base
@@ -9,8 +9,8 @@
 Round 1 (`phone.md`, commits `3fca1aa`..`bdb3c78`) and round 2 (`phone-r2.md`, commits
 `d6af978`..`9a1257c`) landed every step. `git stash list` is empty. All checks pass at the
 base (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test --workspace`, `cargo check -p rovsti_android --target aarch64-linux-android`,
-`cargo check -p rovsti_wa_client --target aarch64-linux-android`).
+`cargo test --workspace`, `cargo check -p rosty_android --target aarch64-linux-android`,
+`cargo check -p rosty_wa_client --target aarch64-linux-android`).
 
 ## Goal coverage
 
@@ -18,10 +18,10 @@ base (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -
 | --- | --- |
 | Open Phone roadmap items that need no device | All Phone items in `docs/roadmap.md` are ticked (speed dial, voicemail, T9, WhatsApp calls, FCM, Recents, cold start) |
 | Place a WhatsApp call from a contact / Recents / keypad | `apps/phone/src/wa_call.rs`, contact sheet `sheet-cw-*`, Recents, keypad chip |
-| Incoming WhatsApp call woken by FCM | `WaPush.kt` / `WaIncoming.kt` (CallStyle, Answer/Decline, `call_end`, `wa_missed`), `rovsti_wa_proto::push::Wake`, `WaCallUi::sync_calls` + `plan_snapshot` for a cold start |
-| In-call UI reusing the glass screen | `CallSource::WhatsApp` on the Incoming and In-Call screens, `rovsti_wa_proto::call::{WaScreen, arbitrate}` |
+| Incoming WhatsApp call woken by FCM | `WaPush.kt` / `WaIncoming.kt` (CallStyle, Answer/Decline, `call_end`, `wa_missed`), `rosty_wa_proto::push::Wake`, `WaCallUi::sync_calls` + `plan_snapshot` for a cold start |
+| In-call UI reusing the glass screen | `CallSource::WhatsApp` on the Incoming and In-Call screens, `rosty_wa_proto::call::{WaScreen, arbitrate}` |
 | Audio over the gateway | Gateway `voip-mlow` bridge + audio WebSocket, Kotlin `WaCallAudio`, `wa::call_audio_speaker` |
-| Shared WhatsApp settings (link / connect with key) | `rovsti_wa_ui::WhatsAppSettings` in Phone, Messages, Contacts and Stops; key list/revoke |
+| Shared WhatsApp settings (link / connect with key) | `rosty_wa_ui::WhatsAppSettings` in Phone, Messages, Contacts and Stops; key list/revoke |
 
 ## Left out (needs a device or an owner decision)
 

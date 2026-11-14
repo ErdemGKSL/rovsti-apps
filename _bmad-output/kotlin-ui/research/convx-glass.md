@@ -1,12 +1,12 @@
 # Convx research: liquid glass rendering, modules, design tokens
 
-Scope: how Convx draws "liquid glass" on Android (Compose), what the `hig`, `canvas` and `spine` modules are, and the design tokens it uses. This is a research input for the Rovsti Kotlin UI rewrite.
+Scope: how Convx draws "liquid glass" on Android (Compose), what the `hig`, `canvas` and `spine` modules are, and the design tokens it uses. This is a research input for the Rosty Kotlin UI rewrite.
 
 Source: `cosmictaserdev-creator/Convx` checked out at `$REF` = `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/ref/Convx`. All paths below are relative to `$REF`. `C/` is shorthand for `app/src/main/kotlin/com/convx/music/ui/component/`, `B/` for `C/backdrop/`, `T/` for `app/src/main/kotlin/com/convx/music/ui/theme/`.
 
 ## 0. Licence and provenance (read first)
 
-- Convx is GPL-3.0 (`LICENSE`; file headers such as `C/GlassEffect.kt:1-4`, `T/GlassTintTokens.kt:1-4`, `C/TopFadeBlur.kt:1-4` say "Licensed under GPL-3.0"). Rovsti is MIT/Apache. Nothing in this report is a copy of Convx code. The pseudo-code is written from scratch and parameters (numbers) are facts, not expression.
+- Convx is GPL-3.0 (`LICENSE`; file headers such as `C/GlassEffect.kt:1-4`, `T/GlassTintTokens.kt:1-4`, `C/TopFadeBlur.kt:1-4` say "Licensed under GPL-3.0"). Rosty is MIT/Apache. Nothing in this report is a copy of Convx code. The pseudo-code is written from scratch and parameters (numbers) are facts, not expression.
 - Most of the glass engine is NOT original Convx work. It is vendored from permissively licensed upstreams, with Convx modifications on top:
   - `B/**` (backdrop engine): "Vendored from Kyant0/backdrop v2.0.0 (io.github.kyant0:backdrop) ... Apache License 2.0" with Convx additions: backdrop resolution scale, KMP merge, composite colour filter, pool, freeze (`B/internal/Shaders.kt:1-24`, `B/DrawBackdropModifier.kt:1-9`, `B/BackdropEffectScope.kt` header).
   - `C/backdrop/catalog/components/LiquidBottomTabs.kt:1-17`, `LiquidToggle.kt:1-14`: "Vendored from Kyant0/AndroidLiquidGlass (kmp branch) ... Apache License 2.0" (catalog demo components).
@@ -14,7 +14,7 @@ Source: `cosmictaserdev-creator/Convx` checked out at `$REF` = `/tmp/claude-0/-h
   - `hig/` is a fork of Compose Cupertino (Apache-2.0; `hig/LICENSE`, `hig/src/main/kotlin/zone/ien/hig/Surface.kt:1-16`). Its `HazePlatform.kt:21-22` carries Haze's Apache-2.0 notice.
   - `C/backdrop/catalog/utils/InteractiveHighlight.kt` header says "Copyright 2026, compose-miuix-ui contributors, SPDX Apache-2.0" (behaviour copied from that project).
 - The Convx-original (GPL) parts are the glue: `C/GlassEffect.kt`, `B/GlassPool.kt`, `B/backdrops/BackdropFreeze.kt`, `NavTransitionFreeze.kt`, `BackdropStaticRegion.kt`, `T/GlassTintTokens.kt`, `T/AppleTokens.kt`, `C/TopFadeBlur.kt`, `C/OverlayMenu.kt`, `ios/foundation/IosMenuMaterial.kt`, and the Convx edits to the vendored files (mixed-licence; treat as GPL).
-- Consequence for Rovsti (matches the owner's "MIT-licensed library, copy from there" option): depend on the permissive upstreams directly (Kyant0 backdrop, Capsule, Haze, compose-cupertino) or write our own engine from the technique descriptions below. Do not take the Convx-modified copies. Before depending, re-check each upstream repo's LICENSE file at the pinned version (this report only saw the headers inside Convx's copies, not the upstream repos).
+- Consequence for Rosty (matches the owner's "MIT-licensed library, copy from there" option): depend on the permissive upstreams directly (Kyant0 backdrop, Capsule, Haze, compose-cupertino) or write our own engine from the technique descriptions below. Do not take the Convx-modified copies. Before depending, re-check each upstream repo's LICENSE file at the pinned version (this report only saw the headers inside Convx's copies, not the upstream repos).
 
 ## 1. The rendering model in one page
 
@@ -89,7 +89,7 @@ scale = 1 - t * (1 - 0.30)        // blur 0 -> 1.0 ; blur >= 2.5dp -> 0.30
 
 ### 2.5 Loop bucket (video backdrops)
 
-For looping animated backdrops (canvas video) the processed layer is cached per integer "bucket" (frame slot) and reused, capped at 64 entries (`B/DrawBackdropModifier.kt:62, 417-460`). Not needed for Rovsti unless we blur live video.
+For looping animated backdrops (canvas video) the processed layer is cached per integer "bucket" (frame slot) and reused, capped at 64 entries (`B/DrawBackdropModifier.kt:62, 417-460`). Not needed for Rosty unless we blur live video.
 
 ## 3. The effect chain
 
@@ -97,7 +97,7 @@ For looping animated backdrops (canvas video) the processed layer is cached per 
 
 - `RenderEffect` (blur, colour filter chain, layer effects): API 31 (`B/Platform.kt:15-16`).
 - `RuntimeShader`/AGSL (lens, rim shader, variable blur): API 33 (`B/Platform.kt:18-19`).
-- Convx minSdk is 26 (`app/build.gradle.kts:37`), hence all the fallbacks. Rovsti's own bridge says minSdk 34 (`/home/user/rovsti-apps/crates/rovsti_android/kotlin/dev/rovsti/bridge/MediaShare.kt:13`), so AGSL is always available for us and we can delete the whole pre-33 branch.
+- Convx minSdk is 26 (`app/build.gradle.kts:37`), hence all the fallbacks. Rosty's own bridge says minSdk 34 (`/home/user/rovsti-apps/crates/rosty_android/kotlin/dev/rosty/bridge/MediaShare.kt:13`), so AGSL is always available for us and we can delete the whole pre-33 branch.
 - Glass is also disabled on low-RAM devices: `isGlassAllowed() = API>=31 && !ActivityManager.isLowRamDevice` (`C/GlassEffect.kt:170-183`).
 
 ### 3.2 Order and parameters
@@ -216,14 +216,14 @@ Provides the iOS component vocabulary in Compose, independent of Material: `Cupe
 - iOS system colour values: light separator `#3C3C43 @ 0.12`, opaque separator `#C6C6C8`, system fill `#787880 @ 0.20/0.16/0.12/0.08`, link `#007AFF`; dark: label secondary `#EBEBF5 @ 0.60`, link `#0984FF`, separator `#545458 @ 0.6`, grouped bg `#1C1C1E`, secondary `#2C2C2E` (`hig/.../theme/ColorScheme.kt:270-393`).
 
 ### 8.2 `canvas` (`canvas/`)
-Not rendering. It resolves looping artwork videos ("canvases" / animated artwork) for tracks and artist backgrounds from Apple Music (`AppleMusicCanvasProvider.kt`, `AppleMusicCatalog.kt`, `AppleMusicArtistBackgroundProvider.kt`) and Tidal (`TidalCanvasProvider.kt`), plus playlist export helpers. The UI consumes them as video backgrounds, which is why the glass code has the loop-bucket cache (2.5). Irrelevant to Rovsti (we have no music or video backdrop).
+Not rendering. It resolves looping artwork videos ("canvases" / animated artwork) for tracks and artist backgrounds from Apple Music (`AppleMusicCanvasProvider.kt`, `AppleMusicCatalog.kt`, `AppleMusicArtistBackgroundProvider.kt`) and Tidal (`TidalCanvasProvider.kt`), plus playlist export helpers. The UI consumes them as video backgrounds, which is why the glass code has the loop-bucket cache (2.5). Irrelevant to Rosty (we have no music or video backdrop).
 
 ### 8.3 `spine` (`spine/`)
-Not UI. A plugin/module host: downloads JS "modules" (index/manifest, Eclipse addon format) and executes them in QuickJS to answer `searchTracks` / `getTrackStreamUrl`, with shared-call dedup caches and rate limits (`ModuleManager.kt:15-30`, `QuickJsExecutor.kt`, `EclipseAddon.kt`, `SharedModuleCalls.kt`). Irrelevant to Rovsti.
+Not UI. A plugin/module host: downloads JS "modules" (index/manifest, Eclipse addon format) and executes them in QuickJS to answer `searchTracks` / `getTrackStreamUrl`, with shared-call dedup caches and rate limits (`ModuleManager.kt:15-30`, `QuickJsExecutor.kt`, `EclipseAddon.kt`, `SharedModuleCalls.kt`). Irrelevant to Rosty.
 
 Other modules `app` (everything), `artwork`, `lyrics`, `innertube`, `integrations`, `spotify`, `network-storage` are content/backend and out of scope for this topic.
 
-## 9. Design tokens (facts to re-derive for Rovsti)
+## 9. Design tokens (facts to re-derive for Rosty)
 
 All values are numbers from Convx; re-evaluate against iOS 26 and our own contrast needs.
 
@@ -244,7 +244,7 @@ Layout/type (`T/AppleTokens.kt`, `T/PageMetrics.kt`):
 - Elevation: handled by blurred shadows (3.5), not Material elevation; hairlines and rims carry separation.
 - Accent: app red `#FA2D48` (Apple Music) (line 21); page backgrounds `#121212 / #1A1A1A`, cards `#1C1C1E / #2C2C2E`, secondary text iOS systemGray `#8E8E93` (lines 24-27, 177).
 - Motion tokens (SwiftUI-modelled): all springs share stiffness 158 (= (2*pi/0.5s)^2); standard = critically damped (1.0), emphasis 0.85, expressive 0.76; fade tween 200 ms (lines 75-92). Glass-specific springs: press 0.5/300, drag value 1.0/1000, scale 0.6-0.7/250, menu open X 0.72/700, Y 0.78/420, alpha tween 90 ms (`OverlayMenu.kt:106-112`).
-- Adaptive text on artwork-tinted surfaces: HSL shift keeps the hue, caps saturation at 0.16 (body) / 0.42 (secondary) / 0.55 (headings), then walks lightness in 0.04 steps up to 12 times until contrast >= 4.5 (`AppleTokens.kt:96-169`). Page background from artwork: darken each channel by `165.9 * luminance` if luminance > 0.1 (`T/AppleColors.kt:23-52`). Overkill for Rovsti (no artwork), but the contrast loop is a good idea for avatars/WA backgrounds.
+- Adaptive text on artwork-tinted surfaces: HSL shift keeps the hue, caps saturation at 0.16 (body) / 0.42 (secondary) / 0.55 (headings), then walks lightness in 0.04 steps up to 12 times until contrast >= 4.5 (`AppleTokens.kt:96-169`). Page background from artwork: darken each channel by `165.9 * luminance` if luminance > 0.1 (`T/AppleColors.kt:23-52`). Overkill for Rosty (no artwork), but the contrast loop is a good idea for avatars/WA backgrounds.
 
 ## 10. What to take, what to skip
 
@@ -262,12 +262,12 @@ Skip: Haze, loop buckets, canvas, spine, HIG components, artwork-driven tinting,
 
 Known weak points in Convx we should not inherit: glass over WebView needs special-casing (`AppRoutePolicy.isWebViewRoute`), low-RAM devices lose glass entirely (no cheap tier), the freeze means glass can look stale for up to 300-900 ms after scroll, `GlassEffectConfigTest`/`GlassTintTokensTest` had unresolved failing assertions at the last review (`docs/CODEBASE_REVIEW_2026-10.md:82`), and there are no device perf numbers committed (same file).
 
-## 11. Recipe for Rovsti (Kotlin, Compose, minSdk 34, no GPUI)
+## 11. Recipe for Rosty (Kotlin, Compose, minSdk 34, no GPUI)
 
 Goal: iOS 26-style glass for the 4 apps, with the specific owner complaints in mind: floating tab bar must never cover the last row (use content padding, section 11.6), Stops is a FULL-SCREEN map with floating glass controls, buttons must not push content when tapped (glass pieces are overlays, never in flow), popovers and context menus exist.
 
 ### 11.1 Dependency decision
-Option A (recommended): depend on upstream `io.github.kyant0:backdrop` (Apache-2.0 per the vendored header; verify the upstream LICENSE and version) for `layerBackdrop`, `drawBackdrop`, `blur`, `lens`, `vibrancy`, highlight and shadow, and on Kyant0 `capsule` for squircle shapes. Then write only the Rovsti layer (tokens, pool/freeze, components) ourselves.
+Option A (recommended): depend on upstream `io.github.kyant0:backdrop` (Apache-2.0 per the vendored header; verify the upstream LICENSE and version) for `layerBackdrop`, `drawBackdrop`, `blur`, `lens`, `vibrancy`, highlight and shadow, and on Kyant0 `capsule` for squircle shapes. Then write only the Rosty layer (tokens, pool/freeze, components) ourselves.
 Option B: write a small engine ourselves from section 2-3. About 600-900 lines. Needed if upstream is unmaintained or lags our Compose version (Convx vendored it precisely because the binary AAR broke at runtime against newer Compose, `B/internal/Shaders.kt:5-7`).
 Either way: no code from Convx.
 
@@ -346,6 +346,6 @@ Read `isLowRamDevice`, `PowerManager.isPowerSaveMode` and the accessibility "red
 5. Pool only if profiling needs it.
 
 ## 12. Open questions for the integrator
-- Can the Stops map surface be sampled by a `GraphicsLayer` (Convx special-cases WebView and skips recording on those routes, `AppRootContent.kt:~900`)? Needs a spike on MapLibre/own tile renderer. If the map is drawn by our own Compose/Skia tile painter (rovsti_tiles), capture works natively, so the choice of map view affects the glass design.
+- Can the Stops map surface be sampled by a `GraphicsLayer` (Convx special-cases WebView and skips recording on those routes, `AppRootContent.kt:~900`)? Needs a spike on MapLibre/own tile renderer. If the map is drawn by our own Compose/Skia tile painter (rosty_tiles), capture works natively, so the choice of map view affects the glass design.
 - Upstream licence check for Kyant0 backdrop + capsule at the version we pin (this report saw only the vendored headers).
 - Font: Convx bundles SF Pro, which is not redistributable under MIT/Apache; use the system font or an OFL font.

@@ -6,7 +6,7 @@ use gpui::{
     AnyElement, ClipboardItem, Context, InteractiveElement, IntoElement, ParentElement,
     RenderImage, Role, SharedString, StatefulInteractiveElement, Styled, div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_card::ContactCard,
     contact_dates,
     contact_edit::{
@@ -15,7 +15,7 @@ use rovsti_core::{
     },
     contact_select, number_format, vcard,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{glass_icon_button, list_row, section},
     glass::{GlassSpec, glass},
@@ -395,7 +395,7 @@ impl ContactsApp {
     fn field_act(
         &mut self,
         what: &'static str,
-        action: impl FnOnce() -> rovsti_android::Result<bool> + Send + 'static,
+        action: impl FnOnce() -> rosty_android::Result<bool> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
         self.field_sheet.close();
@@ -421,7 +421,7 @@ impl ContactsApp {
                 self.share_sheet.close();
                 self.act(
                     "share",
-                    move || rovsti_android::telecom::share_text(&text),
+                    move || rosty_android::telecom::share_text(&text),
                     cx,
                 );
                 cx.notify();
@@ -477,7 +477,7 @@ impl ContactsApp {
                         this.update(cx, |this, cx| {
                             this.act(
                                 "copy the contact",
-                                move || rovsti_android::telecom::copy_text(&payload),
+                                move || rosty_android::telecom::copy_text(&payload),
                                 cx,
                             );
                             this.notice = Some(copied_vcard_words(with_photo).into());
@@ -491,7 +491,7 @@ impl ContactsApp {
                 let payload = contact_select::full_text(&draft);
                 self.act(
                     "copy the contact",
-                    move || rovsti_android::telecom::copy_text(&payload),
+                    move || rosty_android::telecom::copy_text(&payload),
                     cx,
                 );
                 self.notice = Some(contact_select::copied_contact_notice().into());
@@ -652,7 +652,7 @@ impl ContactsApp {
                 let number = target.dial().to_owned();
                 self.field_act(
                     "call",
-                    move || rovsti_android::telecom::place_call(&number),
+                    move || rosty_android::telecom::place_call(&number),
                     cx,
                 );
             }
@@ -660,13 +660,13 @@ impl ContactsApp {
                 let number = target.dial().to_owned();
                 self.field_act(
                     "send a message",
-                    move || rovsti_android::telecom::send_sms_to(&number),
+                    move || rosty_android::telecom::send_sms_to(&number),
                     cx,
                 );
             }
             FieldAction::SendEmail => self.field_act(
                 "send an email",
-                move || rovsti_android::telecom::send_email_to(&text),
+                move || rosty_android::telecom::send_email_to(&text),
                 cx,
             ),
             FieldAction::Copy(_) => self.copy_field(text, cx),
@@ -677,7 +677,7 @@ impl ContactsApp {
             }
             FieldAction::Share(_) => self.field_act(
                 "share",
-                move || rovsti_android::telecom::share_text(&text),
+                move || rosty_android::telecom::share_text(&text),
                 cx,
             ),
             FieldAction::SetDefault(clear) => self.set_default_entry(target, clear, cx),
@@ -755,7 +755,7 @@ impl ContactsApp {
                             } else {
                                 &mut open.numbers
                             };
-                            rovsti_core::contact_edit::set_primary(list, index);
+                            rosty_core::contact_edit::set_primary(list, index);
                         }
                         this.notice = Some(done.into());
                         this.reload(cx);
@@ -1344,7 +1344,7 @@ impl ContactsApp {
                         if let Some(number) = call_number.clone() {
                             this.act(
                                 "call",
-                                move || rovsti_android::telecom::place_call(&number),
+                                move || rosty_android::telecom::place_call(&number),
                                 cx,
                             );
                         }
@@ -1363,7 +1363,7 @@ impl ContactsApp {
                     if let Some(number) = sms_number.clone() {
                         this.act(
                             "send a message",
-                            move || rovsti_android::telecom::send_sms_to(&number),
+                            move || rosty_android::telecom::send_sms_to(&number),
                             cx,
                         );
                     }
@@ -1379,7 +1379,7 @@ impl ContactsApp {
                         let address = address.clone();
                         this.act(
                             "send an email",
-                            move || rovsti_android::telecom::send_email_to(&address),
+                            move || rosty_android::telecom::send_email_to(&address),
                             cx,
                         );
                     }),
@@ -1406,11 +1406,7 @@ impl ContactsApp {
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let raw = raw.clone();
-                    this.act(
-                        "call",
-                        move || rovsti_android::telecom::place_call(&raw),
-                        cx,
-                    );
+                    this.act("call", move || rosty_android::telecom::place_call(&raw), cx);
                 }))
                 .on_long_press(cx.listener(move |this, _, _, cx| {
                     this.open_field_sheet(press_target.clone(), cx);
@@ -1455,7 +1451,7 @@ impl ContactsApp {
                             let address = address.clone();
                             this.act(
                                 "send an email",
-                                move || rovsti_android::telecom::send_email_to(&address),
+                                move || rosty_android::telecom::send_email_to(&address),
                                 cx,
                             );
                         }))
@@ -1515,7 +1511,7 @@ impl ContactsApp {
                                         this.act(
                                             "send a message",
                                             move || {
-                                                rovsti_android::telecom::compose_sms(&number, &text)
+                                                rosty_android::telecom::compose_sms(&number, &text)
                                             },
                                             cx,
                                         );
@@ -1768,7 +1764,7 @@ impl ContactsApp {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.act(
                         "edit this contact",
-                        move || rovsti_android::telecom::edit_contact(id),
+                        move || rosty_android::telecom::edit_contact(id),
                         cx,
                     );
                 }))
@@ -1833,7 +1829,7 @@ impl ContactsApp {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::contact_edit::{DraftField, FieldKind};
+    use rosty_core::contact_edit::{DraftField, FieldKind};
 
     use super::*;
 

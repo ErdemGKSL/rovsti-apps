@@ -2,7 +2,7 @@
 //! the same person, a review sheet with the merged preview, and the merge
 //! itself (confirmed, with Undo).
 //!
-//! The matching and merging rules live in `rovsti_core::contact_dupes`; this
+//! The matching and merging rules live in `rosty_core::contact_dupes`; this
 //! file holds the small pure helpers (texts, the plan, the undo cards) and
 //! the thin screen code.
 
@@ -10,13 +10,13 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
-use rovsti_core::{
+use rosty_core::{
     avatar,
     contact_dupes::{self, DupGroup},
     contact_edit::ContactDraft,
     import_plan::number_key,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
     sheet::Sheet,
@@ -150,7 +150,7 @@ pub(crate) fn names_line(drafts: &[ContactDraft], ids: &[i64]) -> String {
     let mut names: Vec<String> = Vec::new();
     for d in drafts_of(drafts, ids) {
         let name = d.display_name();
-        let key = rovsti_core::search::fold(name.trim());
+        let key = rosty_core::search::fold(name.trim());
         if !seen.contains(&key) {
             seen.push(key);
             names.push(name);
@@ -556,7 +556,7 @@ impl ContactsApp {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::contact_edit::{DraftField, FieldKind};
+    use rosty_core::contact_edit::{DraftField, FieldKind};
 
     use super::*;
     use crate::sample;

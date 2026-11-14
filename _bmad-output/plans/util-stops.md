@@ -1,4 +1,4 @@
-# util-stops: everyday utilities for Rovsti Stops (round 1)
+# util-stops: everyday utilities for Rosty Stops (round 1)
 
 baseSha: ae71621ab0a127390d9c52267016166e83a68cf5
 
@@ -10,7 +10,7 @@ entries; working tree clean. Disk had 2.7 GB free at planning time: run `rm -rf 
 before building.
 
 Already shipped, so not planned again:
-- Pin menu on the map (`map.rs::pin_menu`): Share (text with an OSM link via `rovsti_geo::share_text`,
+- Pin menu on the map (`map.rs::pin_menu`): Share (text with an OSM link via `rosty_geo::share_text`,
   clipboard fallback through `saved_ui::share_outcome`), Move, Remove (pill with Undo), Lines (GTFS stop).
 - Map controls: Me (locate, permission flow), Fit (follow = true), +/-; scale bar; breadcrumb trail.
 - Paste a shared location in the picker (`dest::parse_location`: geo:, OSM, Google, `lat, lon`).
@@ -21,24 +21,24 @@ Already shipped, so not planned again:
 - Settings: sound / vibration toggles (last one cannot be turned off), snooze length, Test alarm,
   battery / autostart / exact alarms, History page (stats, per-record Use / Delete with Undo, two-tap
   Clear with Undo), Map tiles page (Test and save, Reset, Paste, Downloaded maps size + two-tap clear),
-  Arriving soon (WhatsApp, through `rovsti_wa_client`).
+  Arriving soon (WhatsApp, through `rosty_wa_client`).
 - Tiles: `MapTiles::prefetch` is used only for the trip circle at trip start; no user prefetch.
 
 Reusable pieces (do not re-create):
-- `rovsti_core::location_link::{geo_url, osm_url, coords_text, is_valid}` (rovsti_geo already depends on
-  rovsti_core).
-- `rovsti_wa_ui::qr_png(payload, min_px)` (Stops already depends on `rovsti_wa_ui`); pattern in
+- `rosty_core::location_link::{geo_url, osm_url, coords_text, is_valid}` (rosty_geo already depends on
+  rosty_core).
+- `rosty_wa_ui::qr_png(payload, min_px)` (Stops already depends on `rosty_wa_ui`); pattern in
   `apps/contacts/src/qr_sheet.rs` and `apps/contacts/src/backend.rs::{save_png, export_ics}`
   (write to cache, then `media::save_image_to_gallery` / `media::share_image` / `documents::export_file`).
-- `rovsti_android::{telecom::{share_text, copy_text}, media::{save_image_to_gallery, share_image,
+- `rosty_android::{telecom::{share_text, copy_text}, media::{save_image_to_gallery, share_image,
   share_file}, documents::{export_file, import_file}}`: all exist with desktop `Error::Unsupported`.
   `export_file` answers `document_result` op `export_messages`, `import_file` op `import_messages`
   (Contacts reuses `export_file` the same way for `.ics`). Stops handles only `ImportGtfs` today
   (`main.rs` ~line 472), so these ops are free for Stops. No new Kotlin is needed for round 1.
-- Stops' manifest has **no** `dev.rovsti.bridge.RovstiShareProvider` (Phone's manifest lines 119-123
+- Stops' manifest has **no** `dev.rosty.bridge.RostyShareProvider` (Phone's manifest lines 119-123
   have it); `media::share_image` / `share_file` need it.
-- `rovsti_geo::gtfs::fold` for search, `SavedStops::{search, find_gate, restore}`, `rovsti_ui::haptics`,
-  `rovsti_ui::set_theme_override` (app-wide; Phone uses it).
+- `rosty_geo::gtfs::fold` for search, `SavedStops::{search, find_gate, restore}`, `rosty_ui::haptics`,
+  `rosty_ui::set_theme_override` (app-wide; Phone uses it).
 - GPUI: use only APIs already used in `apps/stops` (sheets via `SheetMode`, `glass_pill`, `list_row`,
   `cx.write_to_clipboard`, `cx.read_from_clipboard`, `cx.open_url`) or `apps/contacts/src/qr_sheet.rs`
   (`gpui::Image::from_bytes(ImageFormat::Png, ..)`). Grep the pinned checkout before anything new.
@@ -64,7 +64,7 @@ Reusable pieces (do not re-create):
 | S15 | History: Start again directly, Save as stop from a record, filter by outcome, search | backlog R2 |
 | S16 | Export history as CSV / GPX | backlog R2 |
 | S17 | Follow-me mode on the map (keep centred on the live fix, heading-up off), cycling Me button | backlog R3 |
-| S18 | Home screen shortcut for a saved stop that starts its trip (`rovsti_android::shortcuts`, new Kotlin spec) | backlog R3 |
+| S18 | Home screen shortcut for a saved stop that starts its trip (`rosty_android::shortcuts`, new Kotlin spec) | backlog R3 |
 | S19 | Reverse a saved stop's direction and Duplicate a saved stop | backlog R3 |
 | S20 | Copy / share the live trip status text ("Arriving at X, 1.2 km, about 4 min") | backlog R3 |
 | S21 | Re-arm after dismiss: "Ring again in N min" on the alarm screen and a re-arm pill after Dismiss | backlog R3 |
@@ -74,14 +74,14 @@ Reusable pieces (do not re-create):
 
 ## Round 1 plan (S1-S9)
 
-Steps 1-3 are pure (rovsti_geo, unit-tested). Step 4 is Android packaging. Steps 5-8 are thin GPUI glue.
+Steps 1-3 are pure (rosty_geo, unit-tested). Step 4 is Android packaging. Steps 5-8 are thin GPUI glue.
 Every step must leave all checks green:
 `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace &&
-cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target
-aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target
+aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 
 ### Step 1. Pure: coordinate formats, Plus Code, bearing (S1, S9)
-- New `crates/rovsti_geo/src/coord_format.rs` (`pub mod coord_format;` in lib.rs):
+- New `crates/rosty_geo/src/coord_format.rs` (`pub mod coord_format;` in lib.rs):
   - `pub enum CoordFormat { Decimal, Dms, Ddm, PlusCode, GeoUri, OsmLink }` with
     `pub const ALL: [CoordFormat; 6]`, `fn label(self) -> &'static str` ("Decimal", "Degrees, minutes,
     seconds", "Degrees and minutes", "Plus Code", "geo: link", "OpenStreetMap link").
@@ -97,17 +97,17 @@ aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-andr
   (47.365590, 8.524997) -> `8FVC9G8F+6X` and a southern/western point; poles and lon 180 do not panic;
   bearing due north/east/south/west and across the antimeridian; cardinal boundaries (22.4 -> N,
   22.6 -> NE, 359 -> N).
-- Acceptance: `cargo test -p rovsti_geo` passes with the new tests.
+- Acceptance: `cargo test -p rosty_geo` passes with the new tests.
 
 ### Step 2. Pure: saved-stop share text, QR payloads, measure tool (S2, S3, S8)
-- `crates/rovsti_geo/src/dest.rs`:
+- `crates/rosty_geo/src/dest.rs`:
   - `pub fn stop_share_text(name: &str, a: Coord, b: Coord) -> String`: name line, then
     `A: <osm link>` and `B: <osm link>` lines.
   - `pub fn parse_stop_share(text: &str) -> Option<(String, SharedPlace, SharedPlace)>`: two location
     links in the text (first = A, second = B), name = first non-link line; `None` for zero or one link.
     `parse_location` behaviour stays unchanged (first link wins).
   - `pub fn point_qr_payload(c: Coord, label: &str) -> String` = `geo_url` (label when not blank).
-- New `crates/rovsti_geo/src/measure.rs` (`pub mod measure;`): `pub struct Measure { points: Vec<Coord> }`
+- New `crates/rosty_geo/src/measure.rs` (`pub mod measure;`): `pub struct Measure { points: Vec<Coord> }`
   with `MAX_POINTS = 50`, `push(&mut self, c) -> bool` (false when full), `undo(&mut self) -> Option<Coord>`,
   `clear`, `points(&self) -> &[Coord]`, `legs_m(&self) -> Vec<f64>`, `total_m(&self) -> f64`.
 - Tests: share -> parse round trip keeps the name and both coords to 5 decimals; a single-link text is
@@ -115,9 +115,9 @@ aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-andr
   empty name; measure totals equal the sum of legs, undo on empty is `None`, push past the cap is false.
 
 ### Step 3. Pure: saved stops export / import (GPX and JSON) and Saved-tab sort (S5, S6)
-- New `crates/rovsti_geo/src/places_io.rs` (`pub mod places_io;`):
+- New `crates/rosty_geo/src/places_io.rs` (`pub mod places_io;`):
   - `pub fn to_json(stops: &SavedStops) -> String` (the v2 file format, pretty).
-  - `pub fn to_gpx(stops: &SavedStops) -> String`: GPX 1.1, creator "Rovsti Stops", one `<rte>` per stop
+  - `pub fn to_gpx(stops: &SavedStops) -> String`: GPX 1.1, creator "Rosty Stops", one `<rte>` per stop
     with `<name>` (XML-escaped) and two `<rtept lat lon><name>A|B</name></rtept>`.
   - `pub struct Incoming { pub name: String, pub a: Coord, pub b: Coord }`.
   - `pub enum ImportError { Empty, NotRecognised, TooLarge }` with `message()`.
@@ -132,7 +132,7 @@ aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-andr
     MergePlan` (duplicate = `find_gate` or a repeat inside the file; invalid = `Diameter::new` fails;
     cap `saved_stops::MAX_STOPS`). `pub fn summary(plan: &MergePlan) -> String`
     ("Add 3 stops. 1 already saved." etc).
-  - `pub fn export_file_name(kind: &str, today: &str) -> String` -> `rovsti-stops-2026-11-07.gpx`.
+  - `pub fn export_file_name(kind: &str, today: &str) -> String` -> `rosty-stops-2026-11-07.gpx`.
 - `saved_stops.rs`: `pub enum SavedSort { Saved, Name, Nearest }` and
   `pub fn sorted<'a>(hits: Vec<&'a SavedStop>, sort: SavedSort, here: Option<Coord>) -> Vec<&'a SavedStop>`
   (Nearest without `here` falls back to Saved order; Name uses `fold`).
@@ -143,10 +143,10 @@ aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-andr
 
 ### Step 4. Android packaging and backend wrappers (S3, S5)
 - `apps/stops/platforms/android/app/src/main/AndroidManifest.xml`: add the
-  `dev.rovsti.bridge.RovstiShareProvider` provider exactly as in Phone's manifest (authorities
-  `${applicationId}.rovstishare`, not exported, grantUriPermissions).
+  `dev.rosty.bridge.RostyShareProvider` provider exactly as in Phone's manifest (authorities
+  `${applicationId}.rostyshare`, not exported, grantUriPermissions).
 - `apps/stops/src/kotlin_contract.rs`: test that the manifest declares the provider and that
-  `MediaShare.kt` uses the `.rovstishare` authority.
+  `MediaShare.kt` uses the `.rostyshare` authority.
 - `apps/stops/src/backend.rs`: `pub(crate) fn save_png(name, bytes) -> Result<(), String>`,
   `pub(crate) fn share_png(name, bytes, title) -> Result<(), String>`,
   `pub(crate) fn export_text(name, mime, text) -> Result<(), String>` (cache file + `documents::export_file`,

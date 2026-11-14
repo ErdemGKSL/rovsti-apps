@@ -1,13 +1,13 @@
 //! vCard export and import, and the events Kotlin sends back.
 //!
 //! Both start a system file picker and return at once. The answer is a
-//! one-shot `document_result` event (`rovsti_core::wire::DocumentResult`),
+//! one-shot `document_result` event (`rosty_core::wire::DocumentResult`),
 //! which `ContactsApp::on_event` routes here. No storage permission is used.
 
 use gpui::Context;
-use rovsti_android::events::{RawEvent, kind};
-use rovsti_core::contact_intake::Intake;
-use rovsti_core::{
+use rosty_android::events::{RawEvent, kind};
+use rosty_core::contact_intake::Intake;
+use rosty_core::{
     contact_csv, contact_dates,
     contact_edit::ContactDraft,
     contact_ics,
@@ -262,7 +262,7 @@ impl ContactsApp {
         } else if event.kind == kind::WA_PUSH {
             self.whatsapp.update(cx, |w, cx| w.wake(cx));
         } else if event.kind == kind::OPEN_CONTACT {
-            match rovsti_android::events::parse_open_contact(&event.json) {
+            match rosty_android::events::parse_open_contact(&event.json) {
                 Some(id) => self.open_contact_from_event(id, cx),
                 None => log::warn!("bad open_contact: {}", event.json),
             }

@@ -1,18 +1,18 @@
 //! The card's "Calls" section (ringtone and "send calls to voicemail"), the
 //! Home screen shortcut and the Settings "Contacts" summary page.
 //!
-//! What the texts say lives in `rovsti_core::contact_options` and
-//! `rovsti_core::contact_stats`; the provider is reached through `backend`.
+//! What the texts say lives in `rosty_core::contact_options` and
+//! `rosty_core::contact_stats`; the provider is reached through `backend`.
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_options::{self, ContactOptions},
     contact_stats::{self, Summary},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
     theme,

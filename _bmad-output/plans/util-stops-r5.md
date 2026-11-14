@@ -1,4 +1,4 @@
-# util-stops: everyday utilities for Rovsti Stops (round 5)
+# util-stops: everyday utilities for Rosty Stops (round 5)
 
 baseSha: 20d7c96b83cb7c7a92eb8886c5e26e56c98a07ac
 
@@ -25,7 +25,7 @@ baseSha: 20d7c96b83cb7c7a92eb8886c5e26e56c98a07ac
   - S35 colour tags: still low value next to favourites; stays in backlog.
   - S40 (new, backlog R6): saved stops as markers on the map (needs Scene/painter work in `map.rs`).
 - Reusable: `session::format_distance`, `coord_format::cardinal`, `Coord::{distance_m,
-  bearing_deg}` (check exact name in `crates/rovsti_geo/src/coord.rs`; `trip_ui.rs::bearing_text`
+  bearing_deg}` (check exact name in `crates/rosty_geo/src/coord.rs`; `trip_ui.rs::bearing_text`
   already computes a bearing), `History::{take, put_back, records}`, `PillAction::RestoreHistory`,
   `PillAction::RestoreEnds`, `request_start`, `show_pill`, `save_prefs`, `history_io::share_text`.
 
@@ -48,14 +48,14 @@ baseSha: 20d7c96b83cb7c7a92eb8886c5e26e56c98a07ac
 
 ## Round 5 plan
 
-Steps 1-2 pure (unit-tested, `crates/rovsti_geo`), steps 3-6 thin GPUI, step 7 docs. No new Android
+Steps 1-2 pure (unit-tested, `crates/rosty_geo`), steps 3-6 thin GPUI, step 7 docs. No new Android
 seam is needed. Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace
---all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target
-aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo
-check -p rovsti_tiles --target aarch64-linux-android`.
+--all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target
+aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo
+check -p rosty_tiles --target aarch64-linux-android`.
 
 ### Step 1. Pure: history usage and age pruning (S36, S38)
-- `crates/rovsti_geo/src/history.rs`:
+- `crates/rosty_geo/src/history.rs`:
   - `pub const DAY_MS: i64 = 86_400_000; pub const PRUNE_CHOICES_DAYS: [u32; 2] = [30, 90];`
   - `impl History { pub fn older_than(&self, now_ms: i64, days: u32) -> usize }`: number of records
     with `ended_ms < now_ms - days * DAY_MS` (saturating; future records never count).
@@ -68,7 +68,7 @@ check -p rovsti_tiles --target aarch64-linux-android`.
     pair) never match.
   - `pub fn usage_text(u: Usage, now_ms: i64, tz_offset_s: i32) -> String`: "Used once, today",
     "Used 4 times, last yesterday", "Used 4 times, last 5 Nov" (year added when not the current
-    year: "5 Nov 2025"). Use `rovsti_core::contact_dates::local_ymd` like `history_io` does, and
+    year: "5 Nov 2025"). Use `rosty_core::contact_dates::local_ymd` like `history_io` does, and
     reuse its month-name helper (make it `pub(crate)` if private).
   - `pub fn prune_label(n: usize, days: u32) -> String`: "Delete 12 trips older than 30 days" /
     "Delete 1 trip older than 90 days".
@@ -79,15 +79,15 @@ check -p rovsti_tiles --target aarch64-linux-android`.
   singular/plural.
 
 ### Step 2. Pure: nearest saved stop, pin distance line, alarm defaults (S34, S37, S39)
-- `crates/rovsti_geo/src/saved_stops.rs`: `pub const NEAREST_CHIP_M: f64 = 2_000.0;` and
+- `crates/rosty_geo/src/saved_stops.rs`: `pub const NEAREST_CHIP_M: f64 = 2_000.0;` and
   `impl SavedStops { pub fn nearest(&self, here: Coord, max_m: f64) -> Option<(&SavedStop, f64)> }`:
   smallest `here.distance_m(stop.center())`, only `<= max_m`, skips stops whose `diameter()` fails;
   ties go to the favourite, then to the earlier stop.
-- `crates/rovsti_geo/src/coord_format.rs`: `pub fn from_you_text(here: Coord, to: Coord) ->
+- `crates/rosty_geo/src/coord_format.rs`: `pub fn from_you_text(here: Coord, to: Coord) ->
   String`: `"1.2 km from you, NE"` (distance via `session::format_distance`, direction via
   `cardinal(bearing)` using the same bearing function `trip_ui::bearing_text` uses); under 10 m ->
   `"You are here"`.
-- `crates/rovsti_geo/src/prefs.rs`:
+- `crates/rosty_geo/src/prefs.rs`:
   - `impl StopsPrefs { pub fn alarm_is_default(&self) -> bool }`: `sound`, `vibrate`, `snooze_min`,
     `vibration`, `volume_pct`, `alarm_sound` all equal `StopsPrefs::default()`'s.
   - `pub fn with_alarm_defaults(&self) -> StopsPrefs`: a clone with exactly those six fields reset;

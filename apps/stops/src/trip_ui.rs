@@ -11,12 +11,12 @@ use gpui::{
     AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
-use rovsti_geo::{
+use rosty_android::trip::{AlarmAction, TripAlarmEvent};
+use rosty_geo::{
     ActiveTrip, Coord, Diameter, FixOut, NoticeState, Side, TripState, saved_stops::NEAREST_CHIP_M,
     tiles::tiles_for_circle,
 };
-use rovsti_ui::{
+use rosty_ui::{
     components::{backdrop, flat_glass, glass_pill, list_row, section},
     theme,
     tokens::{Theme, radius, typography},
@@ -40,7 +40,7 @@ pub fn nearest_row_visible(has_here: bool, ends_empty: bool, trip: bool) -> bool
     has_here && ends_empty && !trip
 }
 
-pub use rovsti_app_core::stops::types::distance_text;
+pub use rosty_app_core::stops::types::distance_text;
 
 /// An arrow glyph for the compass octant of a bearing (north is up).
 pub fn octant_arrow(deg: f64) -> &'static str {
@@ -60,7 +60,7 @@ pub fn octant_arrow(deg: f64) -> &'static str {
 pub fn bearing_text(here: Coord, target: Coord) -> String {
     format!(
         "{}, {}",
-        rovsti_geo::coord_format::cardinal(here.bearing_deg(target)),
+        rosty_geo::coord_format::cardinal(here.bearing_deg(target)),
         distance_text(here.distance_m(target))
     )
 }
@@ -123,7 +123,7 @@ fn status_text(
     arrive: Option<String>,
 ) -> String {
     let crossed = live.is_some_and(|l| l.state != TripState::Tracking);
-    rovsti_geo::status_share_text(
+    rosty_geo::status_share_text(
         &trip.label(),
         live.map(|l| l.line_m),
         live.and_then(|l| l.eta_min),
@@ -286,10 +286,10 @@ pub struct AlarmView {
 }
 
 /// Title of the last-trip card.
-pub fn last_trip_title(record: &rovsti_geo::TripRecord) -> String {
+pub fn last_trip_title(record: &rosty_geo::TripRecord) -> String {
     match record.outcome {
-        rovsti_geo::Outcome::Arrived => format!("Arrived at {}", record.title()),
-        rovsti_geo::Outcome::Cancelled => format!("Trip stopped: {}", record.title()),
+        rosty_geo::Outcome::Arrived => format!("Arrived at {}", record.title()),
+        rosty_geo::Outcome::Cancelled => format!("Trip stopped: {}", record.title()),
     }
 }
 
@@ -402,7 +402,7 @@ impl StopsApp {
         }
         let (id, title, summary) = (record.id, last_trip_title(record), record.summary_line());
         let pair = record.pair();
-        let share = rovsti_geo::history_io::share_text(record, self.tz_offset_s);
+        let share = rosty_geo::history_io::share_text(record, self.tz_offset_s);
         let colors = theme::colors(theme);
         let row = list_row(theme, None, title, Some(summary.into()), None).into_any_element();
         let mut pills = div()
@@ -631,7 +631,7 @@ impl StopsApp {
             details.extend(circle_text(l));
             let clock = l
                 .eta_min
-                .map(|m| rovsti_geo::arrival_clock(now_ms(), m, self.tz_offset_s));
+                .map(|m| rosty_geo::arrival_clock(now_ms(), m, self.tz_offset_s));
             details.extend(eta_text(l.eta_min, clock.as_deref()));
         }
         if let Some((here, _)) = self.map.position {
@@ -744,7 +744,7 @@ impl StopsApp {
             .live
             .as_ref()
             .and_then(|l| l.eta_min)
-            .map(|m| rovsti_geo::arrival_clock(now_ms(), m, self.tz_offset_s));
+            .map(|m| rosty_geo::arrival_clock(now_ms(), m, self.tz_offset_s));
         Some(status_text(trip, self.live.as_ref(), here, arrive))
     }
 
@@ -764,7 +764,7 @@ impl StopsApp {
         };
         self.run_android(
             "Share status",
-            move || rovsti_android::telecom::share_text(&text),
+            move || rosty_android::telecom::share_text(&text),
             cx,
         );
     }
@@ -1316,7 +1316,7 @@ impl StopsApp {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rovsti_geo::Coord;
+    use rosty_geo::Coord;
 
     #[test]
     fn nearest_row_truth_table() {
@@ -1334,12 +1334,12 @@ mod tests {
 
     #[test]
     fn last_trip_title_by_outcome() {
-        let mut r = rovsti_geo::TripRecord {
+        let mut r = rosty_geo::TripRecord {
             label: "Home".into(),
             ..Default::default()
         };
         assert_eq!(last_trip_title(&r), format!("Arrived at {}", r.title()));
-        r.outcome = rovsti_geo::Outcome::Cancelled;
+        r.outcome = rosty_geo::Outcome::Cancelled;
         assert_eq!(last_trip_title(&r), format!("Trip stopped: {}", r.title()));
     }
 
@@ -1536,7 +1536,7 @@ mod tests {
 
     #[test]
     fn a_restored_trip_shows_its_last_distance_to_the_line() {
-        let end = |label: &str, lon: f64| rovsti_geo::Endpoint {
+        let end = |label: &str, lon: f64| rosty_geo::Endpoint {
             label: label.into(),
             coord: Coord::new(41.0, lon),
         };
@@ -1544,7 +1544,7 @@ mod tests {
         let mut trip = ActiveTrip::new(1, end("A", 28.994), end("B", 29.006), 0).unwrap();
         assert_eq!(Live::from_trip(&trip), None);
         trip.on_fix(
-            rovsti_geo::Fix {
+            rosty_geo::Fix {
                 at: Coord::new(41.002, 29.0),
                 accuracy_m: 10.0,
                 speed_mps: None,

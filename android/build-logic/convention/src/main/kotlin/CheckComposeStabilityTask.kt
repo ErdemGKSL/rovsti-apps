@@ -10,7 +10,7 @@ import org.gradle.api.tasks.TaskAction
  * Fails when a hot composable is not `restartable skippable` in the Compose compiler report (ORIGINAL).
  *
  * Reads the `*-composables.txt` files in the reports directory, written by a compile run with `-PcomposeReports`. A declaration looks like
- * `restartable skippable scheme("...") fun dev.rovsti.design.ios.component.IosToggle(`; the parameters follow on the
+ * `restartable skippable scheme("...") fun dev.rosty.design.ios.component.IosToggle(`; the parameters follow on the
  * next lines. [hot] holds simple names; every overload of a name must be restartable and skippable, and a name that
  * is not in the report at all fails too (so a rename cannot silently drop a composable from the gate).
  */

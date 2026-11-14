@@ -1,8 +1,8 @@
 # Phone: Prefs v2 migration (stories 14.11, 14.12)
 
 `prefs.json` in the no-backup data dir. v0.1 wrote a flat file with no
-`schema_version`; v0.2 writes `PrefsV2` (`rovsti_core::settings`). Loading and
-saving live in `rovsti_ui::storage` (`load_prefs`, `PrefsWriter`).
+`schema_version`; v0.2 writes `PrefsV2` (`rosty_core::settings`). Loading and
+saving live in `rosty_ui::storage` (`load_prefs`, `PrefsWriter`).
 
 | Found on disk | Result | Side effect |
 |---|---|---|
@@ -34,7 +34,7 @@ their v0.1 behaviour; the Diagnostics page is unchanged.
 
 Per-call notes (U8, U17) are kept in `call-notes.json`, next to `prefs.json` in the no-backup data
 dir. The file is read and written off the UI thread (`apps/phone/src/notes.rs`); the matching and
-cleaning rules are in `rovsti_core::call_notes` (a note is keyed by number and the time the call
+cleaning rules are in `rosty_core::call_notes` (a note is keyed by number and the time the call
 rang or was placed, matched with a 2 minute window; text is clipped to 1000 characters and at most
 2000 notes are kept).
 

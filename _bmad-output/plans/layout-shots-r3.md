@@ -4,20 +4,20 @@ baseSha: e3b623081adfc6ff90bf67d48abde9a6c3614ddd
 
 ## Status
 
-- **Harness: done.** `rovsti_ui` feature `shots`, per-app `shots` features, `src/shots.rs`
+- **Harness: done.** `rosty_ui` feature `shots`, per-app `shots` features, `src/shots.rs`
   modules, `docs/screenshots.md`, `docs/screenshots/baseline/{phone,messages,contacts,stops}.png`
-  are committed. target/shots/{phone,messages,contacts,stops,rovsti_ui} were rendered at
-  18:31-18:34 today; since then only `crates/rovsti_ui/src/shots.rs` changed (8 lines, review
+  are committed. target/shots/{phone,messages,contacts,stops,rosty_ui} were rendered at
+  18:31-18:34 today; since then only `crates/rosty_ui/src/shots.rs` changed (8 lines, review
   fix), so they reflect HEAD. Baseline file list: `layout-shots.md`, section Baseline.
-- **Round 2 (text fields): implemented** in 8aae8fc..e3b6230: `rovsti_core::text_edit::EditBuffer`,
-  one `EntityInputHandler` (`crates/rovsti_ui/src/field.rs`, the only impl in the workspace),
+- **Round 2 (text fields): implemented** in 8aae8fc..e3b6230: `rosty_core::text_edit::EditBuffer`,
+  one `EntityInputHandler` (`crates/rosty_ui/src/field.rs`, the only impl in the workspace),
   shaped-line rendering, scroll-to-caret, marked underline, Password mode, multiline composer,
   drawn handles and edit menu, Contacts/Phone ported.
 - Opened with Read this round:
-  - `target/shots/rovsti_ui/01-fields-dark.png`: all 13 states correct (caret mid-text with
+  - `target/shots/rosty_ui/01-fields-dark.png`: all 13 states correct (caret mid-text with
     handle, word selection, menu, long URL scrolled to caret with no ellipsis, composing
     underline, 3-line multiline, masked secret).
-  - `target/shots/rovsti_ui/02-field-touch-light.png`: tap handle, long-press menu,
+  - `target/shots/rosty_ui/02-field-touch-light.png`: tap handle, long-press menu,
     Paste-only, secret without Cut/Copy.
   - `target/shots/messages/06-composer-typing-dark.png`: composer wraps to 3 lines, caret at end.
   - Small desktop-only flaw seen: the Paste-only menu (gallery row 13 and touch row 3) is
@@ -57,7 +57,7 @@ GPUI/host APIs used below were grepped at d6c8412, not invented: `TextInputFocus
 
 ## Steps
 
-### 1. Selection-chrome policy in `rovsti_ui::field`
+### 1. Selection-chrome policy in `rosty_ui::field`
 - Add `pub enum SelectionChrome { Native, Drawn }` and `pub fn selection_chrome() ->
   SelectionChrome`: `Native` when `cfg!(target_os = "android")`, else `Drawn`; plus
   `pub fn set_selection_chrome(Option<SelectionChrome>)` (an atomic/thread-local override, like
@@ -67,7 +67,7 @@ GPUI/host APIs used below were grepped at d6c8412, not invented: `TextInputFocus
 - No behaviour change yet (Drawn everywhere on desktop). Acceptance: checks green.
 
 ### 2. Native path: hand Android its own selection UI
-In `crates/rovsti_ui/src/field.rs`, when `selection_chrome() == Native`:
+In `crates/rosty_ui/src/field.rs`, when `selection_chrome() == Native`:
 - `touch_layer`: register `window.on_mouse_event(|e: &TextInputFocusEvent, phase, ..|)`; when
   `phase.bubble()` and `bounds.contains(&e.position)`: focus, `buf.unmark()`, caret at
   `byte_at(e.position)` (reset `scroll` to 0 first if the field was unfocused), `cx.notify()`,
@@ -85,8 +85,8 @@ In `crates/rovsti_ui/src/field.rs`, when `selection_chrome() == Native`:
   at the x of byte 5 focuses the field and puts the caret at 5; a `LongPressEvent` leaves the
   selection and menu untouched; a tap leaves `insertion_visible()` false; menu shortcuts
   ctrl-a/c/x/v (`simulate_keystrokes("ctrl-a")` etc.) still work.
-- Acceptance: tests green; `cargo check -p rovsti_android --target aarch64-linux-android` and
-  the two other Android checks green; `target/shots/rovsti_ui/0{1,2}-*.png` re-rendered and
+- Acceptance: tests green; `cargo check -p rosty_android --target aarch64-linux-android` and
+  the two other Android checks green; `target/shots/rosty_ui/0{1,2}-*.png` re-rendered and
   pixel-identical to before (Drawn on desktop).
 
 ### 3. Finger pan inside a field
@@ -102,10 +102,10 @@ In `crates/rovsti_ui/src/field.rs`, when `selection_chrome() == Native`:
   `#[gpui::test]` simulating `ScrollWheelEvent` on a long URL moves `scroll` and stops at the
   end; on a short text it is not consumed.
 - Acceptance: add gallery state 14 "Long URL panned to the start while focused" in
-  `crates/rovsti_ui/src/shots/fields.rs` (state set by the same scroll call); visible in
+  `crates/rosty_ui/src/shots/fields.rs` (state set by the same scroll call); visible in
   `01-fields-{dark,light}.png`.
 
-### 4. Undo / redo in `rovsti_core::text_edit`
+### 4. Undo / redo in `rosty_core::text_edit`
 - `pub struct History { undo: Vec<Snapshot>, redo: Vec<Snapshot>, open: Option<Kind> }`,
   `Snapshot { text, anchor, head }`, cap 100. `record(kind, &EditBuffer)` before each edit;
   consecutive `Insert` of non-whitespace graphemes and consecutive `Delete` coalesce; a caret
@@ -113,9 +113,9 @@ In `crates/rovsti_ui/src/field.rs`, when `selection_chrome() == Native`:
   not recorded until `unmark`/commit, so IME composition is one step.
 - `TextField::mutate` records; `handle_key`: ctrl/cmd-z undo, ctrl/cmd-shift-z and ctrl-y redo;
   `set`/`clear` from the app reset the history.
-- Unit tests in rovsti_core (Turkish words coalesce per word, paste is one step, composition
+- Unit tests in rosty_core (Turkish words coalesce per word, paste is one step, composition
   is one step, redo cleared by a new edit, cap). One `#[gpui::test]` for the keys.
-- Acceptance: `cargo test -p rovsti_core text_edit` and `-p rovsti_ui field` green.
+- Acceptance: `cargo test -p rosty_core text_edit` and `-p rosty_ui field` green.
 
 ### 5. Drawn menu stays over its field (desktop polish)
 - In `edit_menu` clamp the capsule's left to `max(field_left, viewport_left + 8 dp)` and its
@@ -135,8 +135,8 @@ In `crates/rovsti_ui/src/field.rs`, when `selection_chrome() == Native`:
 - `docs/screenshots.md`: gallery state 14 and the `set_selection_chrome` note.
 
 ### 7. Fresh shots and full checks
-- Re-run the rovsti_ui and four app shot suites (`docs/screenshots.md` commands; check
-  `df -h .` first). Open `rovsti_ui/01-fields-dark.png`, `rovsti_ui/02-field-touch-light.png`,
+- Re-run the rosty_ui and four app shot suites (`docs/screenshots.md` commands; check
+  `df -h .` first). Open `rosty_ui/01-fields-dark.png`, `rosty_ui/02-field-touch-light.png`,
   `messages/06-composer-typing-dark.png`, `contacts/06-editor-dark.png` with Read. Baselines in
   `docs/screenshots/baseline/` change only if step 5 altered a scene in them.
 - All standard checks, the `--features shots` clippy runs, and the three Android
@@ -146,5 +146,5 @@ In `crates/rovsti_ui/src/field.rs`, when `selection_chrome() == Native`:
 
 Unchanged from round 1 (full file list in `layout-shots.md` under Baseline):
 target/shots/{phone,messages,contacts,stops}/ (13/13/13/12 scenes x dark+light, `-dark-small`
-of scene 01, `contact_sheet.png`), target/shots/rovsti_ui/{00-smoke,01-fields,02-field-touch}
+of scene 01, `contact_sheet.png`), target/shots/rosty_ui/{00-smoke,01-fields,02-field-touch}
 -{dark,light}.png, docs/screenshots/baseline/{phone,messages,contacts,stops}.png.

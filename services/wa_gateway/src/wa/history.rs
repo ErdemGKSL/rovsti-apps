@@ -1,6 +1,6 @@
 //! History sync: WhatsApp's `HistorySync` protobuf to store rows.
 
-use rovsti_wa_proto::{DeliveryStatus, MUTED_FOREVER, MessageBody, Reaction, is_status_chat};
+use rosty_wa_proto::{DeliveryStatus, MUTED_FOREVER, MessageBody, Reaction, is_status_chat};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::history_sync::HistorySyncError;
 use whatsapp_rust::wacore::types::events::LazyHistorySync;
@@ -295,7 +295,7 @@ pub fn drain(
 mod tests {
     use super::*;
     use crate::store::{InstanceId, Store};
-    use rovsti_wa_proto::{ConnectKey, KeyId};
+    use rosty_wa_proto::{ConnectKey, KeyId};
     use whatsapp_rust::waproto::buffa::MessageField;
 
     fn web_message(

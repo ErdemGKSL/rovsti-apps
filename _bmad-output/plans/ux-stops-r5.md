@@ -1,4 +1,4 @@
-# UX completeness pass: Rovsti Stops (round 5)
+# UX completeness pass: Rosty Stops (round 5)
 
 Base: `fc7e72a7439d76f5debd995a74eea22ea6b841aa` (main). No stash, clean tree.
 Rounds 1-4 (`ux-stops.md` .. `ux-stops-r4.md`) are done and committed (last: `73c35fe`..`fc7e72a`).
@@ -16,7 +16,7 @@ saved items is moving a place (U5, deferred twice). The owner asked for every ga
 so it is planned now. The audit also found silent failures around the arrival message and the
 snooze limit.
 
-Scope: `apps/stops`, `crates/rovsti_geo`, `crates/rovsti_tiles`. No new product features and no
+Scope: `apps/stops`, `crates/rosty_geo`, `crates/rosty_tiles`. No new product features and no
 backends. Pure logic goes first, with tests. GPUI glue stays thin. Only GPUI APIs already used in
 this app are allowed: `glass_pill`/`list_row` with `.id(..).on_click(cx.listener(..))`,
 `empty_state`, `self.tabs.jump_to`, `self.map.take_over()`, `Viewport::new(.., STREET_MPP)` as in
@@ -26,21 +26,21 @@ this app are allowed: `glass_pill`/`list_row` with `.id(..).on_click(cx.listener
 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
-| V1 | **Medium** | A saved place cannot be moved (round-4 U5). Rename is the only edit. To fix a misplaced "Home", the user must delete it, find the spot, save again under the same name, and lose its list position. Items created in one place cannot be fully managed elsewhere. | `saved_ui.rs`, `rovsti_geo::places` |
-| V2 | **Medium** | A failed arrival message is silent. After `MAX_NOTICE_ATTEMPTS`, or a `GiveUp` (no link, bad chat), `NoticeState` stops retrying. The live card still says "Will text when arriving", and the alarm screen says nothing. The user thinks the chat was told and does not text them by hand. | `rovsti_geo::session::{NoticeState, FixOut}`, `trip_ui.rs::{Live, live_card, alarm_screen}` |
+| V1 | **Medium** | A saved place cannot be moved (round-4 U5). Rename is the only edit. To fix a misplaced "Home", the user must delete it, find the spot, save again under the same name, and lose its list position. Items created in one place cannot be fully managed elsewhere. | `saved_ui.rs`, `rosty_geo::places` |
+| V2 | **Medium** | A failed arrival message is silent. After `MAX_NOTICE_ATTEMPTS`, or a `GiveUp` (no link, bad chat), `NoticeState` stops retrying. The live card still says "Will text when arriving", and the alarm screen says nothing. The user thinks the chat was told and does not text them by hand. | `rosty_geo::session::{NoticeState, FixOut}`, `trip_ui.rs::{Live, live_card, alarm_screen}` |
 | V3 | Low | The alarm keeps a "Snooze N min" button after the 5th snooze (`MAX_SNOOZES`). Tapping it, or System Back (which snoozes), ends the trip with no warning: headless refuses the snooze and Kotlin dismisses. | `trip_ui.rs::alarm_screen`, `main.rs::on_back` |
 | V4 | Low | "Swap" shows and is tappable with no point set, and it does nothing (no feedback). | `trip_ui.rs::setup_cards` |
 | V5 | Low | The Saved empty state explains how to save a place but has no way there. The user has to find the Trip tab on their own. | `saved_ui.rs::saved_tab` |
 | V6 | Info | The pin menu of a saved place offers Rename but not Delete. The Saved tab has Delete with undo. No change. | `map.rs::pin_menu` |
 | V7 | Info | The "Text X when arriving" toggle resets to On at launch. By design (round-3 T8): a per-trip choice. No change. | `trip_ui.rs` |
 | V8 | Info | Statistics rows ("Top places") are not tappable. They are statistics, and their places are reachable from Saved and History. No change. | `settings_ui.rs` |
-| V9 | Info | `rovsti_tiles`: no new gap. Test before save, reset with undo, size and Clear are all in place. | |
+| V9 | Info | `rosty_tiles`: no new gap. Test before save, reset with undo, size and Clear are all in place. | |
 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
-### S1. rovsti_geo pure logic, with tests (no UI change)
+### S1. rosty_geo pure logic, with tests (no UI change)
 
-`crates/rovsti_geo/src/places.rs`:
+`crates/rosty_geo/src/places.rs`:
 - Factor the coordinate check of `add` into `fn valid_coord(coord: Coord) -> bool` and reuse it.
 - New method:
   `pub fn relocate(&mut self, id: u64, coord: Coord, gtfs_stop: Option<String>) -> Result<(Coord, Option<String>), PlaceError>`.
@@ -57,7 +57,7 @@ this app are allowed: `glass_pill`/`list_row` with `.id(..).on_click(cx.listener
     the same place is allowed
   - `relocate_refuses_bad_coords_and_unknown_ids`
 
-`crates/rovsti_geo/src/session.rs`:
+`crates/rosty_geo/src/session.rs`:
 - `impl NoticeState { pub fn gave_up(&self) -> bool { !self.sent && self.attempts >= MAX_NOTICE_ATTEMPTS } }`
 - `FixOut` gains `#[serde(default)] pub notice_failed: bool`. `fix_out` sets it to
   `self.notice.as_ref().is_some_and(NoticeState::gave_up)`. Older JSON keeps loading.
@@ -71,7 +71,7 @@ this app are allowed: `glass_pill`/`list_row` with `.id(..).on_click(cx.listener
     old-answer test if one exists.
 - Fix every `FixOut { .. }` struct literal in the workspace (grep `FixOut {`).
 
-Acceptance: `cargo test -p rovsti_geo` passes with the new tests, and nothing in the UI changes.
+Acceptance: `cargo test -p rosty_geo` passes with the new tests, and nothing in the UI changes.
 
 ### S2. Stops pure helpers, with tests (no UI change)
 
@@ -213,7 +213,7 @@ Acceptance:
 
 ### S7. Docs and status
 
-`docs/roadmap.md`, Rovsti Stops:
+`docs/roadmap.md`, Rosty Stops:
 - Replace "[ ] Idea (open, U5): move a saved place to a new location" with "[x] Move a saved
   place on the map, with undo (done without a device)".
 - Extend the trip line with "a failed arrival message is shown on the live card and the alarm;
@@ -227,13 +227,13 @@ Append a Status section to this file listing the fixed, deferred and by-design g
 ## Checks (every step)
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```
 Disk: 9.3 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
 Other people push to main in parallel. Keep one focused commit per step, with the prefix
-"Rovsti stops:".
+"Rosty stops:".
 
 ## Status
 
@@ -241,5 +241,5 @@ Other people push to main in parallel. Keep one focused commit per step, with th
   the alarm), V3 (alarm shows when no snoozes are left), V4 (Swap hidden with no point), V5 (Saved
   empty state links to the map).
 - By design, no change: V6 (pin menu of a saved place has Rename only), V7 (arrival-text toggle
-  resets per trip), V8 (statistics rows not tappable), V9 (`rovsti_tiles` has no new gap).
+  resets per trip), V8 (statistics rows not tappable), V9 (`rosty_tiles` has no new gap).
 - `docs/architecture.md` lists neither Saved actions nor `FixOut` fields in full, so it is unchanged.

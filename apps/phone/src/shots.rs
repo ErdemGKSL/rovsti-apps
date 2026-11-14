@@ -1,14 +1,14 @@
-//! Headless screenshots of Rovsti Phone (`docs/screenshots.md`).
+//! Headless screenshots of Rosty Phone (`docs/screenshots.md`).
 //!
-//! `cargo test -p rovsti_phone --features shots shots -- --ignored --nocapture`
+//! `cargo test -p rosty_phone --features shots shots -- --ignored --nocapture`
 
 use std::path::PathBuf;
 
 use futures::channel::mpsc;
 use gpui::{AppContext as _, Context, Window};
-use rovsti_core::call_log_query::RecentsFilter;
-use rovsti_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
-use rovsti_ui::tokens::Theme;
+use rosty_core::call_log_query::RecentsFilter;
+use rosty_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
+use rosty_ui::tokens::Theme;
 
 use crate::{CONTACTS_TAB, FAVORITES_TAB, PhoneApp, RECENTS_TAB, backend::Backend};
 
@@ -16,7 +16,7 @@ use crate::{CONTACTS_TAB, FAVORITES_TAB, PhoneApp, RECENTS_TAB, backend::Backend
 pub(crate) const SHOT_NOW_MS: i64 = 1_794_055_200_000;
 
 fn open(spec: ShotSpec) -> Rig<PhoneApp> {
-    rovsti_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
+    rosty_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
     let (_tx, rx) = mpsc::unbounded::<String>();
     let mut rig = Rig::open(spec, move |window, cx| {
         let backend = Backend::start(cx);
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn the_long_number_is_longer_than_a_keypad_line() {
-        let number = rovsti_core::dial::from_tel_uri(LONG_NUMBER_URI);
+        let number = rosty_core::dial::from_tel_uri(LONG_NUMBER_URI);
         assert_eq!(number, "+905321234567891234");
         assert!(number.len() > 15);
     }

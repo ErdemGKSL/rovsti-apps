@@ -9,7 +9,7 @@ mechanics of these text boxes properly, even the default HTML input works better
 `shots` and `text-input` units already worked on that, and `layout-text-input-r2.md` marked
 it done. This unit's computed task is the layout overhaul. This plan only covers that
 overhaul, and it must not regress text fields. Step 1 changes every shot's colours, the
-field galleries included, so the regression guard is: after step 1, `rovsti_ui/01-fields-*`
+field galleries included, so the regression guard is: after step 1, `rosty_ui/01-fields-*`
 and `02-field-touch-*` are re-rendered once and must then stay byte-identical through
 steps 2 to 7. The orchestrator should still ask the owner on a device which text-box
 behaviour is wrong. Headless shots cannot show IME, selection-handle or keyboard problems.
@@ -18,10 +18,10 @@ behaviour is wrong. Headless shots cannot show IME, selection-handle or keyboard
 
 - The owner's device shot (`054d28c4-image.jpg`, Messages inbox, dark).
 - Fresh renders at HEAD (made in this round):
-  `target/shots/rovsti_ui/03-layout-{dark,light}.png`,
+  `target/shots/rosty_ui/03-layout-{dark,light}.png`,
   `target/shots/messages/01-inbox-{dark,light}.png`, `10-inbox-end-dark.png`.
 - Round 1 plan `layout-system.md`, `docs/design/layout.md` (2.14 "Migrated screens"),
-  `docs/screenshots.md`, `crates/rovsti_ui/src/{theme,row,components,tab_bar,shots,layout}.rs`,
+  `docs/screenshots.md`, `crates/rosty_ui/src/{theme,row,components,tab_bar,shots,layout}.rs`,
   `gpui_wgpu/src/offscreen_renderer.rs` at the pinned rev. git log shows round 1's 8 steps
   all landed (`7deff5f..ec5523d`). There is no stash.
 
@@ -54,7 +54,7 @@ inset. In `10-inbox-end-dark` the last row clears the bar.
 3. **The Status row breaks the text column.** Its `avatar_stack` (3 x 28 dp, step 18) is
    about 64 dp wide, so its title starts at 92 dp. Every other row starts at 76 dp
    (16 + 48 + 12). The separator under it also starts at 92 dp. Seen in
-   `messages/01-inbox-*` and `rovsti_ui/03-layout-*` (Status row). The "+3" disc and rings
+   `messages/01-inbox-*` and `rosty_ui/03-layout-*` (Status row). The "+3" disc and rings
    crowd the 28 dp discs.
 4. **Avatar initials are too big.** `components::avatar` uses `size * 0.4` at Headline
    weight, which on 48 dp is about 19 dp bold. "MK", "MD", "CÖ" and "HS" nearly touch the
@@ -72,10 +72,10 @@ inset. In `10-inbox-end-dark` the last row clears the bar.
 ## Steps (each leaves every check green)
 
 ### 1. Fix the colour pipeline of the headless shots
-- In `crates/rovsti_ui/src/shots.rs`, `WgpuHeadless::render_scene_to_image` decodes the
+- In `crates/rosty_ui/src/shots.rs`, `WgpuHeadless::render_scene_to_image` decodes the
   readback once with an sRGB-to-linear table applied to R, G and B (not A). That undoes the
   extra hardware encode of the `Rgba8UnormSrgb` target. The table is a pure function
-  `srgb_decode_lut() -> [u8; 256]` in a new `crates/rovsti_ui/src/shots/color.rs`, with a
+  `srgb_decode_lut() -> [u8; 256]` in a new `crates/rosty_ui/src/shots/color.rs`, with a
   `#[cfg(test)]` unit test that is not ignored: endpoints 0 and 255 are fixed,
   `lut[linear_to_srgb(122)] == 122 ± 1`, and the table is monotonic. Do not change
   gpui-fusion. Read `WgpuOffscreenRenderer` and `WgpuRenderer::new_external` at the pinned
@@ -86,21 +86,21 @@ inset. In `10-inbox-end-dark` the last row clears the bar.
 - Add a pure helper in `shots/color.rs`:
   `contrast_in(img, rect) -> f32` (darkest and lightest pixel in a rect, WCAG ratio via
   `layout::geom::contrast_ratio`). Unit-test it on a synthetic 2-colour image.
-- Re-render `rovsti_ui` (smoke, fields, field_touch, layout) and `messages`. Copy the new
+- Re-render `rosty_ui` (smoke, fields, field_touch, layout) and `messages`. Copy the new
   `01-fields-*` and `02-field-touch-*` to the scratchpad as the text-field guard for
   steps 2 to 7. Add a "Colour accuracy" paragraph to `docs/screenshots.md`.
-**Acceptance:** `cargo test -p rovsti_ui --features shots color` passes, including
+**Acceptance:** `cargo test -p rosty_ui --features shots color` passes, including
 `color_probe` with `--ignored`. Open `messages/01-inbox-dark.png`: the tab icon accent
 samples about (10,132,255), which matches the device shot. All checks pass, plus the
 `shots` clippy line.
 
 ### 2. Text colour roles that pass 4.5:1 on every surface they sit on
-- In `crates/rovsti_ui/src/layout.rs` `geom`, add
+- In `crates/rosty_ui/src/layout.rs` `geom`, add
   `ensure_contrast(fg: [f32;3], bg: [f32;3], min: f32) -> [f32;3]`. It keeps the hue and
   lowers or raises lightness in 1 % steps until `contrast_ratio >= min`. Tests: `#007AFF`
   on white comes back darker with a ratio of at least 4.5; a colour that already passes
   comes back unchanged.
-- In `crates/rovsti_ui/src/theme.rs`, add `accent_text(theme) -> Hsla`: the accent adjusted
+- In `crates/rosty_ui/src/theme.rs`, add `accent_text(theme) -> Hsla`: the accent adjusted
   against the theme background, about `#0068DA` in light, and dark unchanged. Use it
   wherever accent is text, not fill: `ListRow` unread meta, the OTP chip label, the
   `PageHeader` subtitle link, and empty-state link text. The selected filter chip keeps
@@ -113,7 +113,7 @@ samples about (10,132,255), which matches the device shot. All checks pass, plus
   alpha colours blended before the check. Raise `secondary_label` alpha or make it opaque
   only where a case fails. `tertiary_label` stays icon-only (3:1, separate assert), and the
   test fails if it is used as text (grep check in docs only).
-**Acceptance:** `cargo test -p rovsti_ui theme` passes. In the new
+**Acceptance:** `cargo test -p rosty_ui theme` passes. In the new
 `messages/01-inbox-light.png`, `contrast_in` is at least 4.5 on the preview, time, chip
 count and Spam badge rects. Assert these in the messages shots test with the rects listed
 in a const table next to the test. All checks pass.
@@ -129,14 +129,14 @@ in a const table next to the test. All checks pass.
   Caption2 (11 dp) w600.
 - Unit test in `row.rs`: `text_inset()` = `MARGIN + AVATAR + space::M` = 76 for every
   leading kind (avatar, stack, icon tile).
-**Acceptance:** in `messages/01-inbox-*`, `09-status-*` and `rovsti_ui/03-layout-*`,
+**Acceptance:** in `messages/01-inbox-*`, `09-status-*` and `rosty_ui/03-layout-*`,
 "Status" starts at x = 152 px (76 dp), like the other titles, and its separator starts at
 152 px. All checks pass.
 
 ### 4. Avatar initials and source-badge placement
 - `layout::geom::initials_size(avatar) = (avatar * 0.36).round()`, which gives 17 dp at
   48 and 10 dp at 28. Weight 600, not Headline bold. The test checks 48 → 17 and 40 → 14.
-- `components::avatar` uses it. Add a pure `rovsti_core` initials function (or reuse the
+- `components::avatar` uses it. Add a pure `rosty_core` initials function (or reuse the
   existing one; grep `fn initials`) that takes at most 2 graphemes and keeps Turkish
   dotted capitals ("İG", "Şİ") intact, with tests.
 - The source badge centre sits on the avatar rim at 45° (centre at
@@ -156,12 +156,12 @@ from the rim, and no badge covers a letter ("MK", "AY", "MD"). All checks pass.
   unit-tested). The messages shots test asserts that the column at x = 8 px (inside the
   margin, no content) never jumps more than 2 levels between neighbouring rows in either
   theme.
-**Acceptance:** open `messages/01-inbox-dark.png` and `rovsti_ui/03-layout-dark.png`. The
+**Acceptance:** open `messages/01-inbox-dark.png` and `rosty_ui/03-layout-dark.png`. The
 upper half is near-black with a faint tint behind the title, and there is no diagonal
 band. The step assert passes. All checks pass.
 
 ### 6. Tab bar frost and final geometry check
-- In `crates/rovsti_ui/src/tab_bar.rs`, use a bar-specific `GlassSpec` built from
+- In `crates/rosty_ui/src/tab_bar.rs`, use a bar-specific `GlassSpec` built from
   `GlassSpec::chrome(theme)`, changing only existing fields (`blur`, `tint`,
   `saturation`; grep `liquid_glass_kit/src/glass.rs`): blur 12 px, and a tint of the
   background at 0.72 in light and 0.60 in dark. The puck keeps its spec. Follow
@@ -185,11 +185,11 @@ centred on the first icon. Re-render Phone and Stops too (the bar is shared) and
 - Refresh all four `docs/screenshots/baseline/*.png`, because every colour changed with
   step 1. Note in the commit that Phone, Contacts and Stops baselines are still the
   per-app "before" layouts, now with correct colours.
-- Confirm that `rovsti_ui/01-fields-*` and `02-field-touch-*` are byte-identical to the
+- Confirm that `rosty_ui/01-fields-*` and `02-field-touch-*` are byte-identical to the
   step 1 copies.
 - Run every check in the unit list plus the `shots` clippy line. Watch disk (6.2 GB free
   at plan time): clean `target/debug/incremental` and stale test binaries before the
   final runs.
 **Acceptance:** all checks pass, the docs match the code, the field shots are unchanged
 since step 1, and `messages/01-inbox-{dark,light}`, `09-status-*`, `10-inbox-end-*` and
-`rovsti_ui/03-layout-*` were opened and match the spec.
+`rosty_ui/03-layout-*` were opened and match the spec.

@@ -1,6 +1,6 @@
-# Third-party notices (Rovsti Android UI)
+# Third-party notices (Rosty Android UI)
 
-Code under `android/` and the Rovsti skill `.claude/skills/convx-motion-compose/` contains portions ported from the
+Code under `android/` and the Rosty skill `.claude/skills/convx-motion-compose/` contains portions ported from the
 following projects. Files with ported code carry a header naming the source.
 
 ## glisse
@@ -41,12 +41,12 @@ SOFTWARE.
 - Source: https://github.com/cosmictaserdev-creator/Convx (Kotlin + Jetpack Compose music player, iOS-style Liquid Glass UI)
 - Licence: GPL-3.0. Copyright: Convx Project (C) 2026, see the Convx git history for contributors. The licence text is the
   root `LICENSE` of this repository.
-- Used for (planned paths under `android/design/src/main/kotlin/dev/rovsti/design/`): `backdrop/` (glass engine, GlassPool,
+- Used for (planned paths under `android/design/src/main/kotlin/dev/rosty/design/`): `backdrop/` (glass engine, GlassPool,
   BackdropFreeze, NavTransitionFreeze, BackdropStaticRegion), `shapes/`, `glass/` (GlassEffect, TopFadeBlur, tint tokens),
   `ios/` (foundation, menus, sheets, tab bar, navigation bar, list, swipe actions, button, toggle, slider, fields, toasts).
 - Each ported file keeps its original header and adds
   `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <original path>`.
-- Settings pages, ported into `android/shell/src/main/kotlin/dev/rovsti/shell/settings/` (E3.11): `ui/component/IosSettingsGroup.kt`
+- Settings pages, ported into `android/shell/src/main/kotlin/dev/rosty/shell/settings/` (E3.11): `ui/component/IosSettingsGroup.kt`
   (`IosSettingsGroup.kt`), `ui/screens/settings/SettingsPage.kt` (`SettingsPage.kt`) and the rows of
   `ui/screens/settings/AboutScreen.kt` (`AboutPage.kt`; the Convx links, donation rows and Discord are left out).
 - Not ported (music-player specific): code Convx itself adapted from BitChord, Flamingo, MeloX-Android and Square
@@ -314,7 +314,7 @@ The Apache-licensed files above keep their own copyright and licence notices in 
 
 - Source: https://developer.android.com/guide/navigation/navigation-3 (`androidx.navigation3:navigation3-runtime`,
   `navigation3-ui`). Licence: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0). Copyright The Android Open Source Project.
-- Used as a dependency only (`design/transition/RovstiNavHost.kt`, `:catalog`); no Navigation 3 source is copied into this repository.
+- Used as a dependency only (`design/transition/RostyNavHost.kt`, `:catalog`); no Navigation 3 source is copied into this repository.
 
 ## Compose Reorderable
 
@@ -326,8 +326,8 @@ The Apache-licensed files above keep their own copyright and licence notices in 
 ## Takumi (takumi 2.18.2, takumi-core 0.34.0, takumi-raster 0.5.11, takumi-svg)
 
 - Source: https://github.com/kane50613/takumi (crates.io `takumi`, pinned `=2.18.2`). Copyright (c) 2025 Kane Wang.
-- Licence: MIT OR Apache-2.0; Rovsti uses it under the MIT terms below (the Apache-2.0 text further up in this file is
-  the alternative). Used as a dependency only by `crates/rovsti_app_core/src/cards/` (share cards); no Takumi source is
+- Licence: MIT OR Apache-2.0; Rosty uses it under the MIT terms below (the Apache-2.0 text further up in this file is
+  the alternative). Used as a dependency only by `crates/rosty_app_core/src/cards/` (share cards); no Takumi source is
   copied into this repository.
 - Takumi carries third-party notices for code it ports (Chromium Blink and Skia, emoji-segmenter, ICU); they ship with
   the library and are reproduced after the MIT text.
@@ -1119,8 +1119,8 @@ SPDX-License-Identifier: Unicode-3.0
 
 - Source: https://github.com/rsms/inter (release `Inter-4.1.zip`, `extras/ttf/Inter-{Regular,SemiBold,Bold}.ttf`).
   Copyright (c) 2016 The Inter Project Authors.
-- Licence: SIL Open Font License 1.1 (full text below, also at `crates/rovsti_app_core/assets/fonts/OFL.txt`).
-- Used for: the fonts bundled in the Rust core for share cards (`crates/rovsti_app_core/assets/fonts/`, loaded with
+- Licence: SIL Open Font License 1.1 (full text below, also at `crates/rosty_app_core/assets/fonts/OFL.txt`).
+- Used for: the fonts bundled in the Rust core for share cards (`crates/rosty_app_core/assets/fonts/`, loaded with
   `include_bytes!`). The font files are unmodified; the name "Inter" is not a Reserved Font Name in this release.
 
 ```text

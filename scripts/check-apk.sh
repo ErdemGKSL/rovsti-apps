@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Checks the built Rovsti Phone debug/release APK:
-#   1. librovsti_phone.so exports the JNI bridge symbols (nm -D);
+# Checks the built Rosty Phone debug/release APK:
+#   1. librosty_phone.so exports the JNI bridge symbols (nm -D);
 #   2. the merged manifest has no INTERNET or SEND_SMS permission, no privileged
 #      permission, and all AD-18/AD-34 permissions (incl. VIBRATE);
 #   3. the <queries> block lists exactly the three v0.2 intents and the
@@ -36,18 +36,18 @@ trap 'rm -rf "$work"' EXIT
 
 # 1. JNI symbols, per ABI.
 SYMBOLS=(
-  Java_dev_rovsti_bridge_RovstiBridge_nativeInit
-  Java_dev_rovsti_bridge_RovstiBridge_nativeOnEvent
+  Java_dev_rosty_bridge_RostyBridge_nativeInit
+  Java_dev_rosty_bridge_RostyBridge_nativeOnEvent
 )
-libs=$(unzip -Z1 "$APK" | grep -E '^lib/[^/]+/librovsti_phone\.so$' || true)
-[[ -n "$libs" ]] || { echo "FAIL: no librovsti_phone.so in the APK." >&2; exit 1; }
+libs=$(unzip -Z1 "$APK" | grep -E '^lib/[^/]+/librosty_phone\.so$' || true)
+[[ -n "$libs" ]] || { echo "FAIL: no librosty_phone.so in the APK." >&2; exit 1; }
 # Only the ABIs configured in gpuiforge.json (arm64-v8a only) must be present.
 configured=$(python3 -c 'import json,sys;print("\n".join(json.load(open(sys.argv[1]))["platforms"]["android"]["abis"]))' "$ROOT/apps/phone/gpuiforge.json")
 while IFS= read -r abi; do
-  if grep -qx "lib/$abi/librovsti_phone.so" <<<"$libs"; then
+  if grep -qx "lib/$abi/librosty_phone.so" <<<"$libs"; then
     echo "ok   ABI $abi present"
   else
-    echo "FAIL configured ABI $abi has no librovsti_phone.so" >&2
+    echo "FAIL configured ABI $abi has no librosty_phone.so" >&2
     fail=1
   fi
 done <<<"$configured"

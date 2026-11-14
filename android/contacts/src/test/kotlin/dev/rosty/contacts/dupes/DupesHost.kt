@@ -1,0 +1,118 @@
+package dev.rosty.contacts.dupes
+
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import dev.rosty.contacts.ContactsRoots
+import dev.rosty.contacts.ContactsRoute
+import dev.rosty.contacts.ContactsTabs
+import dev.rosty.contacts.chromeFor
+import dev.rosty.contacts.contactsTabItems
+import dev.rosty.contacts.en
+import dev.rosty.contacts.intake.PreviewLine
+import dev.rosty.contacts.intake.PreviewSection
+import dev.rosty.design.overlay.OverlayController
+import dev.rosty.design.text.UiText
+import dev.rosty.design.transition.TabNavigator
+import dev.rosty.shell.RostyShell
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+
+/** Holds the page state like the view model would and records what the screen asks for. */
+internal class DupesHarness(
+    initial: DupesUiState,
+) {
+    var ui by mutableStateOf(initial)
+    val actions = mutableListOf<DupesAction>()
+    var backs = 0
+    val overlays = OverlayController()
+
+    fun on(action: DupesAction) {
+        actions += action
+        if (action == DupesAction.CloseReview) ui = ui.copy(review = null)
+    }
+}
+
+internal val SampleReview =
+    MergeReview(
+        key = 1,
+        name = "Ayşe Yılmaz",
+        subtitle = "Acme Yazılım",
+        photoUri = "content://contacts/photo/1",
+        sources = UiText.Literal("From Ayşe Yılmaz, A. Yılmaz, Ayşe"),
+        sections =
+            persistentListOf(
+                PreviewSection(
+                    UiText.Literal("Phone"),
+                    persistentListOf(
+                        PreviewLine(UiText.Literal("Mobile"), "+90 555 111 22 33"),
+                        PreviewLine(UiText.Literal("Work"), "0212 000 00 01"),
+                    ),
+                ),
+                PreviewSection(
+                    UiText.Literal("Email"),
+                    persistentListOf(PreviewLine(UiText.Literal("Work"), "ayse@acme.example")),
+                ),
+                PreviewSection(
+                    UiText.Literal("Notes"),
+                    persistentListOf(PreviewLine(UiText.Literal("Notes"), "Met at the 2023 conference.")),
+                ),
+            ),
+        mergeLabel = UiText.Literal("Merge 3 Contacts"),
+    )
+
+internal val SampleDupes =
+    DupesUiState(
+        phase = DupesPhase.Ready,
+        summary = UiText.Literal("4 possible duplicates"),
+        rows =
+            listOf(
+                DupeRow(1, "Ayşe Yılmaz", UiText.Literal("and 2 more · Same number"), "content://contacts/photo/1"),
+                DupeRow(4, "Burak Demir", UiText.Literal("and 1 more · Same number"), null),
+                DupeRow(6, "Elif Kaya", UiText.Literal("and 1 more · Same name"), null),
+                DupeRow(9, "Mehmet Öz", UiText.Literal("and 3 more · Same email"), "content://contacts/photo/9"),
+            ).toImmutableList(),
+    )
+
+/** The duplicates page pushed over the Settings tab in the real shell (tab bar hidden, as in the app). */
+@Composable
+internal fun HostedDupes(harness: DupesHarness) {
+    val navigator = remember { TabNavigator(ContactsTabs, ContactsRoots) }
+    val tabs = contactsTabItems("Contacts", "Favorites", "Groups", "Settings")
+    LaunchedEffect(Unit) { navigator.push(ContactsRoute.Duplicates) }
+    RostyShell(
+        navigator = navigator,
+        tabs = tabs,
+        chromeFor = { chromeFor(it, UiText::en) },
+        overlays = harness.overlays,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        entry<ContactsRoute.ContactsList> {}
+        entry<ContactsRoute.Favorites> {}
+        entry<ContactsRoute.Groups> {}
+        entry<ContactsRoute.Settings> {}
+        entry<ContactsRoute.Duplicates> {
+            DupesScreen(
+                state = harness.ui,
+                onAction = harness::on,
+                onBack = { harness.backs++ },
+                overlays = harness.overlays,
+            )
+        }
+    }
+}
+
+/** [HostedDupes] with the model's effects wired to the overlays, fed from [effects]. */
+@Composable
+internal fun HostedDupesWithEffects(
+    harness: DupesHarness,
+    effects: kotlinx.coroutines.flow.Flow<DupesEffect>,
+) {
+    DupesEffects(effects, harness.overlays, harness::on)
+    HostedDupes(harness)
+}

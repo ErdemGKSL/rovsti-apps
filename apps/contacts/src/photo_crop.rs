@@ -7,7 +7,7 @@
 //! quarter. Use photo hands the chosen [`CropView`] to
 //! `backend::change_photo_with`, which crops the original file.
 //!
-//! The maths is `rovsti_core::contact_photo::CropView`; [`frame_rect`] and
+//! The maths is `rosty_core::contact_photo::CropView`; [`frame_rect`] and
 //! [`image_in_frame`] map it to screen space (through the shared
 //! `photos::image_rect`), and [`photo_source_choices`] lists the photo menu.
 
@@ -25,11 +25,11 @@ use gpui::{
     RenderImage, Role, SharedString, StatefulInteractiveElement, Styled, StyledImage, TouchPhase,
     Window, canvas, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_photo::{CropView, rotated_size},
     zoom::{Point, Size, ZoomView},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     layout::content_bottom_inset,
@@ -384,7 +384,7 @@ impl ContactsApp {
         // Android deletes the file it crops, and the viewer still needs this one
         // for Save and Share: crop a copy.
         let copy = std::env::temp_dir()
-            .join("rovsti-contacts")
+            .join("rosty-contacts")
             .join(format!("crop-{id}.png"));
         let copied = copy
             .parent()
@@ -785,7 +785,7 @@ impl ContactsApp {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::contact_photo::plan_for;
+    use rosty_core::contact_photo::plan_for;
 
     use super::*;
 

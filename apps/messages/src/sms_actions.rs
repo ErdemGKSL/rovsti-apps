@@ -172,7 +172,7 @@ pub fn sender_of(addresses: &[String]) -> Option<&str> {
 }
 
 /// Shown when deleting needs the default-SMS-app role.
-pub const NEEDS_ROLE: &str = "Make Rovsti Messages your default SMS app to delete messages";
+pub const NEEDS_ROLE: &str = "Make Rosty Messages your default SMS app to delete messages";
 
 /// The pill action label offered next to [`NEEDS_ROLE`].
 pub const MAKE_DEFAULT: &str = "Make default";
@@ -212,8 +212,8 @@ pub fn blocked_text(title: &str) -> String {
 }
 
 /// Why Block was refused before Android was asked.
-pub fn refusal_note(refusal: rovsti_core::blocklist::BlockRefusal) -> &'static str {
-    use rovsti_core::blocklist::BlockRefusal;
+pub fn refusal_note(refusal: rosty_core::blocklist::BlockRefusal) -> &'static str {
+    use rosty_core::blocklist::BlockRefusal;
     match refusal {
         BlockRefusal::Emergency => "Emergency numbers can't be blocked",
         BlockRefusal::NoNumber | BlockRefusal::NotANumber => "Unknown number, cannot block",
@@ -416,10 +416,10 @@ mod tests {
         assert_eq!(not_spam_text(" Bank "), "Bank is no longer spam");
         assert_eq!(blocked_text("Ayse"), "Blocked Ayse");
         assert_eq!(blocked_text("  "), "Blocked this number");
-        let emergency = rovsti_core::wire::EmergencyList::default();
-        let refusal = rovsti_core::blocklist::can_block("112", &emergency).expect_err("refused");
+        let emergency = rosty_core::wire::EmergencyList::default();
+        let refusal = rosty_core::blocklist::can_block("112", &emergency).expect_err("refused");
         assert_eq!(refusal_note(refusal), "Emergency numbers can't be blocked");
-        let refusal = rovsti_core::blocklist::can_block("*#06#", &emergency).expect_err("refused");
+        let refusal = rosty_core::blocklist::can_block("*#06#", &emergency).expect_err("refused");
         assert_eq!(refusal_note(refusal), "Unknown number, cannot block");
     }
 

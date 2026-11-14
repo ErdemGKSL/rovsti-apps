@@ -8,16 +8,16 @@ Epic file: `_bmad-output/kotlin-ui/epics.md`. Supersedes the first round-3 plan,
 Owner decisions this plan follows (user message: "tamam okey projemizi gpl yap kodları çok yüksek benzerlikte taşı" =
 "OK, make our project GPL and port the code with very high similarity"):
 
-1. Rovsti becomes **GPL-3.0-or-later**. Convx (GPL-3.0) code is ported **as close to verbatim as possible**: keep its
+1. Rosty becomes **GPL-3.0-or-later**. Convx (GPL-3.0) code is ported **as close to verbatim as possible**: keep its
    structure, algorithms, constants, shaders and names where sensible; adapt only package names, our theme/tokens, our
    data models, and remove music-player specifics. The old "never copy Convx" rule is revoked.
 2. **Glass bug, top priority**: on a real phone the catalog APK shows no liquid glass anywhere. Our hand-written engine
-   (`android/design/src/main/kotlin/dev/rovsti/design/glass/*`) is replaced by Convx's device-proven stack.
+   (`android/design/src/main/kotlin/dev/rosty/design/glass/*`) is replaced by Convx's device-proven stack.
 3. Then Convx's iOS component library replaces our hand-written equivalents where Convx's is better.
 
 `$CX` below = `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/ref/Convx`,
-`$CXK` = `$CX/app/src/main/kotlin/com/convx/music`, `D` = `android/design/src/main/kotlin/dev/rovsti/design`,
-`DT` = `android/design/src/test/kotlin/dev/rovsti/design`, `CAT` = `android/catalog/src/{main,test}/kotlin/dev/rovsti/catalog`.
+`$CXK` = `$CX/app/src/main/kotlin/com/convx/music`, `D` = `android/design/src/main/kotlin/dev/rosty/design`,
+`DT` = `android/design/src/test/kotlin/dev/rosty/design`, `CAT` = `android/catalog/src/{main,test}/kotlin/dev/rosty/catalog`.
 
 ## State found (verified, not trusted)
 
@@ -38,7 +38,7 @@ Owner decisions this plan follows (user message: "tamam okey projemizi gpl yap k
   ground rule says the same.
 - Our glass engine: `D/glass/` `GlassTier.kt` (125), `GlassSource.kt` (63), `GlassNode.kt` (266), `GlassSpec.kt` (173),
   `Lens.kt` (181), `LensShader.kt` (130), `Rim.kt` (202), `GlassEffect.kt` (27). Callers: `D/chrome/{BackButton,
-  LargeTitleScaffold,RovstiTabBar,Toolbar}.kt`, `D/controls/Buttons.kt`, `D/overlay/{ActionSheet,Alert,ButtonMenu,
+  LargeTitleScaffold,RostyTabBar,Toolbar}.kt`, `D/controls/Buttons.kt`, `D/overlay/{ActionSheet,Alert,ButtonMenu,
   ContextMenuEntry,ContextMenuPanel,Popover,PreviewCardEntry}.kt`, catalog `ButtonsPage`, `GlassPage`, `LargeTitlePage`,
   `TabBarPage`, `ToastsPage`; tests `DT/glass/*` (6 files), `CAT/{E18ShotTest,FlatLegibilityTest,GlassPageTest,
   RuntimeShaderProbeTest,ScaffoldTest,TabBarGestureTest}.kt`, `android/testing/.../ShotTest.kt`.
@@ -108,17 +108,17 @@ Owner decisions this plan follows (user message: "tamam okey projemizi gpl yap k
    *      https://github.com/Kyant0/backdrop — Copyright 2025 Kyant0, Apache License 2.0" + Convx's notes>
    *
    * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <original path from repo root>
-   * Changes for Rovsti: <one line: package, tokens, removed music specifics, Popup -> OverlayEntry, ...>
+   * Changes for Rosty: <one line: package, tokens, removed music specifics, Popup -> OverlayEntry, ...>
    */
   ```
   Files that also contain glisse code keep the glisse line as well. `LicenceHeaderTest` (Step 1) enforces this.
 - Port **close to verbatim**: same file split, class/function names (prefix nothing; `Ios*`, `liquidGlass`,
   `drawBackdrop`, `LayerBackdrop` keep their names), same constants and AGSL strings. Allowed changes: package
-  (`dev.rovsti.design.*`), imports, our tokens (`RovstiTheme.colors` feeds `IosColors`), Rovsti data models, removal of
+  (`dev.rosty.design.*`), imports, our tokens (`RostyTheme.colors` feeds `IosColors`), Rosty data models, removal of
   music-player code paths (player morph, lyrics, artwork tints, loop buckets for video, Apple-Music-UI switches,
   `rememberPreference` keys -> parameters or our `GlassSettings` local), and Kotlin/Compose API drift at BOM 2026.09
   (note each in `docs/kotlin-ui/api-notes.md`).
-- Package map: `$CXK/ui/component/backdrop/**` -> `D/backdrop/**` (package `dev.rovsti.design.backdrop.*`, same
+- Package map: `$CXK/ui/component/backdrop/**` -> `D/backdrop/**` (package `dev.rosty.design.backdrop.*`, same
   sub-packages `backdrops`, `effects`, `highlight`, `shadow`, `internal`, `catalog.components`, `catalog.utils`);
   `shapes/**` -> `D/shapes/**`; `GlassEffect.kt`, `TopFadeBlur.kt` -> `D/glass/`; `AppleTokens.kt`, `GlassTintTokens.kt`
   -> `D/theme/`; `ios/foundation/*` -> `D/ios/foundation/`; `ios/component/*` and the four `component/Ios*`/`OverlayMenu`/
@@ -131,18 +131,18 @@ Owner decisions this plan follows (user message: "tamam okey projemizi gpl yap k
 - Commit message prefix: `Kotlin UI (E1 R3, Convx port): ...`, with the attribution lines from the session reminder.
 - Checks per step: `bash scripts/kotlin-ui-check.sh` (Steps 1 also needs the CLAUDE.md Rust checks because
   `Cargo.toml` changes: `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace` and
-  `cargo check -p rovsti_android --target aarch64-linux-android`).
+  `cargo check -p rosty_android --target aarch64-linux-android`).
 
 ---
 
-## Step 1 (E1.23): relicense Rovsti to GPL-3.0-or-later; notices; skill and docs
+## Step 1 (E1.23): relicense Rosty to GPL-3.0-or-later; notices; skill and docs
 
 Files:
 - `Cargo.toml` `[workspace.package] license = "GPL-3.0-or-later"`. Grep every `Cargo.toml` (crates, apps, services,
   `android/**` if any) for a non-workspace `license`; set it to the same. `cargo metadata --format-version 1 | jq
   '.packages[] | select(.source==null) | .license'` prints only `GPL-3.0-or-later`.
 - `LICENSE` (repo root): byte-for-byte copy of `$CX/LICENSE` (GPL-3.0 text). `cmp $CX/LICENSE LICENSE` is silent.
-- `README.md`: new section "Licence": Rovsti is GPL-3.0-or-later (see `LICENSE`); the Android UI contains code ported from
+- `README.md`: new section "Licence": Rosty is GPL-3.0-or-later (see `LICENSE`); the Android UI contains code ported from
   Convx (GPL-3.0) and from Apache-2.0 / MIT projects listed in `android/THIRD_PARTY_NOTICES.md`; each ported file names
   its source in its header. Note that Convx states "GPL-3.0" without "or later", so the combined Android apps are
   distributed under GPL-3.0 (version 3), which "GPL-3.0-or-later" permits.
@@ -156,7 +156,7 @@ Files:
   Step 3 adds the dependency). Append the full Apache License 2.0 text once (copy `$CX/hig/LICENSE`) and state that the
   Apache-licensed files keep their own notices. Mention Flamingo / MeloX / BitChord / Square (GPL-3.0, from
   `$CX/NOTICE`) only as "not ported: music-player specific".
-- `.claude/skills/convx-motion-compose/SKILL.md`: rewrite section 0: Convx is GPL-3.0 and Rovsti is GPL-3.0-or-later, so
+- `.claude/skills/convx-motion-compose/SKILL.md`: rewrite section 0: Convx is GPL-3.0 and Rosty is GPL-3.0-or-later, so
   Convx code is portable close to verbatim with the header above; upstream Apache files keep their attribution; glisse
   rule unchanged; the frontmatter description line "Convx research (GPL: techniques only)" becomes "Convx (GPL-3.0,
   ported with attribution)". `references/glass.md`, `overlays.md`, `motion.md`, `navigation-layout.md`,
@@ -167,7 +167,7 @@ Files:
 - `CLAUDE.md`: one line under the bullets: "- Licence: GPL-3.0-or-later (`LICENSE`). Ported code keeps its upstream
   header and adds `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>` (or the glisse
   line); list new sources in `android/THIRD_PARTY_NOTICES.md`."
-- `docs/kotlin-ui/architecture.md` section 0: the Convx row becomes "Convx (GPL-3.0) is ported with attribution; Rovsti
+- `docs/kotlin-ui/architecture.md` section 0: the Convx row becomes "Convx (GPL-3.0) is ported with attribution; Rosty
   is GPL-3.0-or-later." Section 4.1 `glass` row: "Convx backdrop engine (`backdrop/`), `liquidGlass`, freeze, pool;
   fallbacks only as Convx does them (pre-31, reduce transparency, low RAM)".
 - Move the untracked `D/controls/SwitchRules.kt` to the scratchpad `wip/` folder (not deleted: Step 7 may read it).
@@ -184,7 +184,7 @@ Commit: `Kotlin UI (E1 R3, Convx port): relicense to GPL-3.0-or-later, notices, 
 
 ## Step 2 (E1.24): port the Convx backdrop engine and the continuous shapes (no callers yet)
 
-Files (close to verbatim, package `dev.rovsti.design.backdrop...`):
+Files (close to verbatim, package `dev.rosty.design.backdrop...`):
 - All 42 files of `$CXK/ui/component/backdrop/**` -> `D/backdrop/**`, same names and sub-packages: `Backdrop.kt`,
   `BackdropEffectScope.kt`, `DrawBackdropModifier.kt` (keep `backdropScale`, `frozen`, `ThawPollMs = 48`, padding logic,
   composite colour filter, geometry-change rules; drop the `loopBucket` cache only if it pulls player code, otherwise keep
@@ -201,7 +201,7 @@ Files (close to verbatim, package `dev.rovsti.design.backdrop...`):
   baseBg: Color, currentRoute: String?, extraFrozen: () -> Boolean = { false })` (Convx's `pureBlack`/`AppTheme` and the
   floating-tab-bar connection become the `baseBg` and `extraFrozen` parameters; the 120 ms mirror loop stays).
 - If a catalog component imports app-specific code (preferences, `SymbolIcon`), replace it with a parameter or our
-  `RovstiIcon`; note it in the header "Changes" line.
+  `RostyIcon`; note it in the header "Changes" line.
 - `docs/kotlin-ui/api-notes.md`: one row per API that changed between Convx's Compose version and BOM 2026.09.
 
 Tests:
@@ -232,7 +232,7 @@ Files:
   `LocalGlassEffectConfig`, `LocalAppBackdrop`, `PooledGlass`/`LocalPooledGlass`, `LocalAppBackdropFrozen`,
   `LocalAppMotionFrozen`, `Modifier.liquidGlass(...)`. Drop `LocalAppleMusicUi`, `LocalBackdropLoopBucket` (or keep as
   inert defaults if removing them changes `liquidGlass`'s body). The old file of the same name (our 27-line effect chain)
-  is deleted in Step 4; in this step put the port at `D/glass/convx/GlassEffect.kt` (package `dev.rovsti.design.glass`
+  is deleted in Step 4; in this step put the port at `D/glass/convx/GlassEffect.kt` (package `dev.rosty.design.glass`
   is shared, so name the old file's function out of the way if they clash, e.g. keep our old file until Step 4).
 - `D/glass/TopFadeBlur.kt` <- `TopFadeBlur.kt`. Add `dev.chrisbanes.haze:haze` + `haze-materials` (Convx pins 1.3.1;
   take the newest stable that resolves against BOM 2026.09, write the check in `api-notes.md`) as `:design`
@@ -245,12 +245,12 @@ Files:
   `Modifier.iosMenuSurface` with the 8 dp blur / 25 % lens / 68 % fill and the "draw frost while the snapshot
   initialises" path; `MenuBackdropResolutionKey` -> `GlassSettings.menuBackdropResolution`), `IosTheme.kt`
   (`IosTheme(...)`, locals incl. `LocalIosBackdrop`, `IosMetrics`), `IosColors.kt`, `IosDesignSystem.kt` (minus
-  `HigBridge` use: `rememberDesignBackground` reads `RovstiTheme.colors.page`), `IosShapes.kt`, `IosTypography.kt`
+  `HigBridge` use: `rememberDesignBackground` reads `RostyTheme.colors.page`), `IosShapes.kt`, `IosTypography.kt`
   (system font), `IosPressable.kt`; `ConvxUtils.kt` with `additiveChrome`, `outerDarkRim`, `elasticStretchLayerBlock`,
   `projectedEndpoint`, `nearestProjectedSnap` (each with its Convx path).
-- Bridge to our theme: `RovstiTheme` provides `IosTheme(colors = iosColorsFrom(RovstiTheme.colors, dark))` inside it, so
+- Bridge to our theme: `RostyTheme` provides `IosTheme(colors = iosColorsFrom(RostyTheme.colors, dark))` inside it, so
   every ported component sees our palette; `iosColorsFrom` maps label/secondary/separator/fill/accent/destructive/page
-  from `RovstiColors` and keeps Convx defaults for the rest. Where our `GlassTokens` (glisse) and Convx's
+  from `RostyColors` and keeps Convx defaults for the rest. Where our `GlassTokens` (glisse) and Convx's
   `GlassTintTokens`/`AppleTokens` disagree, Convx wins for glass surfaces; `GlassTokens` stays only for glisse-ported
   pieces not replaced yet.
 - New `D/glass/GlassSettings.kt`: `@Immutable data class GlassSettings(reduceTransparency = false, reduceDynamicBlur =
@@ -273,8 +273,8 @@ Commit: `Kotlin UI (E1 R3, Convx port): liquidGlass, tokens, iOS foundation, Top
 ## Step 4 (E1.26): one root backdrop, migrate every caller, delete the old engine, prove the real path; APK
 
 Root:
-- `D/chrome/RovstiRoot.kt` (new; Convx `AppRootContent` pattern, ported structure where it exists): `@Composable fun
-  RovstiBackdropRoot(baseBg: Color = RovstiTheme.colors.page, route: String?, content: @Composable () -> Unit, chrome:
+- `D/chrome/RostyRoot.kt` (new; Convx `AppRootContent` pattern, ported structure where it exists): `@Composable fun
+  RostyBackdropRoot(baseBg: Color = RostyTheme.colors.page, route: String?, content: @Composable () -> Unit, chrome:
   @Composable BoxScope.() -> Unit, overlays: OverlayController)`: builds `rememberAppBackdropState`, then
   `Box { Box(Modifier.fillMaxSize().layerBackdrop(state.appBackdrop).nestedScroll(state.scrollConnection)) { content() };
   CompositionLocalProvider(LocalAppBackdrop provides state.appBackdrop, LocalAppBackdropFrozen provides
@@ -282,7 +282,7 @@ Root:
   chrome(); OverlayHost(...) } }`. Chrome and overlays are siblings AFTER the recorded subtree (Convx comment: "avoid a
   recursive RenderNode draw"). Page pushback (`PushBack.kt`) is applied to the recorded content box so sheets sample the
   pushed page as it is seen.
-- Catalog `CatalogApp.kt` uses `RovstiBackdropRoot`; every page draws into it. Pages that showed glass over stripes
+- Catalog `CatalogApp.kt` uses `RostyBackdropRoot`; every page draws into it. Pages that showed glass over stripes
   (`GlassPage`, `ButtonsPage`, `TabBarPage`, `LargeTitlePage`, `ToastsPage`) put `StripedBackdrop` in the content slot;
   no page creates its own source any more (a page may use a local `rememberLayerBackdrop()` only where Convx does,
   e.g. `CombinedBackdrop` for the tab bar puck).
@@ -337,7 +337,7 @@ Commit: `Kotlin UI (E1 R3, Convx port): root backdrop, callers migrated, old eng
 Files: `D/ios/component/IosMenu.kt` (+ `IosMenuAnchor`, `IosCheckmark`), `AppleContextMenu.kt`
 (`AppleContextMenu`, `AppleMenuController`, `rememberAppleMenuController`), `IosContextMenu.kt` (`IosContextMenu`,
 `IosContextMenuOverlay`), `OverlayMenu.kt` (`liquidGlass` variant), `IosText.kt`, `IosGlyph.kt` (`SymbolIcon` ->
-`RovstiIcon`). Close to verbatim; the `Popup(...)` blocks become `OverlayEntry`s presented through our
+`RostyIcon`). Close to verbatim; the `Popup(...)` blocks become `OverlayEntry`s presented through our
 `OverlayController` (same z-order, scrim, back owner) at the same position Convx computes; Convx's open/close
 animations, scale-from-anchor, item press highlight, separators, destructive colour, submenus and long-press preview
 lift stay as Convx wrote them.
@@ -361,7 +361,7 @@ Commit: `Kotlin UI (E1 R3, Convx port): IosMenu, AppleContextMenu, IosContextMen
 Files: `D/ios/component/IosSheet.kt` (`rememberIosSheetState`, `BoxScope.IosSheet`, projected snap via
 `nearestProjectedSnap`), `IosPageSheet.kt` (`Dialog` -> modal `OverlayEntry`), `IosSheetPresentation.kt`,
 `BottomSheet.kt` minus everything under `ui.player.*` (player morph, `recordPlayerLayer`, screen-corner expansion) and
-`NavigationBarAnimationSpec` (-> our `RovstiMotion` token of the same duration, cited).
+`NavigationBarAnimationSpec` (-> our `RostyMotion` token of the same duration, cited).
 Replacement: `D/overlay/SheetEntry.kt` / `SheetState.kt` / `SheetMath.kt` physics and drawing are replaced by Convx's;
 our detents API (`Peek`/`Medium`/`Large`), non-modal mode, predictive back, page pushback and the F4 stacked step-back
 are kept as the facade (Convx's presentation decides scale/corner numbers if it has them). All `SheetGestureTest` and
@@ -399,7 +399,7 @@ Commit: `Kotlin UI (E1 R3, Convx port): IosToggle, IosSlider, segmented control`
 Files: `D/ios/component/IosTabBar.kt` (+ `rememberIosTabBarState`, `IosBadge`) with `LiquidBottomTabs` puck;
 `IosNavigationBar.kt` (+ `IosToolbarGroup`, `IosToolbarSpacer`, `rememberIosNavigationBarCollapse`); `IosButton.kt`;
 `IosList.kt` (`IosList`, `IosNavigationRow`, `IosChevron`); `IosSwipeActions.kt` (`IosSwipeableRow`).
-Replacement: `RovstiTabBar` becomes a facade over `IosTabBar` (keep `TabBarMinimizer`, `ChromeMetrics`,
+Replacement: `RostyTabBar` becomes a facade over `IosTabBar` (keep `TabBarMinimizer`, `ChromeMetrics`,
 `LocalContentInsets`, IME hide, list-end-above-bar rule: `ListEndAboveBarTest`, `ImeHidesBarTest`, `PuckBoundsTest`,
 `TabBarSemanticsTest` keep passing, numbers updated to Convx with citations); `LargeTitleScaffold` inline bar and
 `Toolbar` capsules use `IosNavigationBar` collapse + `IosToolbarGroup`; `Buttons.kt` glass buttons delegate to

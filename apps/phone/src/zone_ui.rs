@@ -12,8 +12,8 @@ use gpui::{
     ParentElement, Pixels, Point, Role, SharedString, StatefulInteractiveElement, Styled,
     TouchPhase, Window, div, px, svg,
 };
-use rovsti_core::call::CallState;
-use rovsti_ui::{
+use rosty_core::call::CallState;
+use rosty_ui::{
     Icon,
     components::flat_glass,
     motion::press_scale,
@@ -306,10 +306,10 @@ impl PhoneApp {
                 );
             }
             let secondary = match (view.route, &view.secondary) {
-                (rovsti_core::wire::AudioRoute::Bluetooth, _) => {
+                (rosty_core::wire::AudioRoute::Bluetooth, _) => {
                     Some(SharedString::from("Bluetooth"))
                 }
-                (rovsti_core::wire::AudioRoute::WiredHeadset, _) => {
+                (rosty_core::wire::AudioRoute::WiredHeadset, _) => {
                     Some(SharedString::from("Headphones"))
                 }
                 (_, s) => s.clone(),
@@ -924,7 +924,7 @@ impl PhoneApp {
         };
         let reduced = self.reduced;
         if kind == 0 && r.can_split {
-            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Confirm);
+            rosty_ui::haptics::perform(window, gpui::HapticFeedback::Confirm);
             let party = Party {
                 id: r.id,
                 name: r.label.clone(),
@@ -943,7 +943,7 @@ impl PhoneApp {
                 b.split(r.id, cx);
             });
         } else if kind == 1 && r.can_drop {
-            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
             self.incall.zone.eject = Some(crate::zone::Eject {
                 id: r.id,
                 since: std::time::Instant::now(),

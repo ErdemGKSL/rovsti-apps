@@ -9,8 +9,8 @@ use gpui::{
     Render, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, TextInputAction,
     TextInputPurpose, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
-use rovsti_core::{PhoneNumber, search::ContactIndex};
-use rovsti_ui::{
+use rosty_core::{PhoneNumber, search::ContactIndex};
+use rosty_ui::{
     Icon,
     components::{avatar, glass_icon_button},
     current_theme,
@@ -41,7 +41,7 @@ pub struct Recipient {
 }
 
 /// The JID of the first number a WhatsApp lookup found registered.
-pub fn registered_jid(users: &[rovsti_wa_proto::WaUser]) -> Option<String> {
+pub fn registered_jid(users: &[rosty_wa_proto::WaUser]) -> Option<String> {
     users
         .iter()
         .find(|user| user.on_whatsapp)
@@ -71,7 +71,7 @@ pub fn options(query: &str, contacts: &ContactIndex) -> Vec<Recipient> {
         });
     }
     'contacts: for contact in contacts.search(query) {
-        let usable = |n: &&rovsti_core::wire::WireNumber| !n.raw.trim().is_empty();
+        let usable = |n: &&rosty_core::wire::WireNumber| !n.raw.trim().is_empty();
         // The default number first, then the provider's order.
         let ordered = contact
             .numbers
@@ -268,7 +268,7 @@ impl Render for NewConversation {
                 .child(crate::access::CONTACTS_OFF)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.backend.update(cx, |backend, cx| {
-                        backend.ask_access(rovsti_android::permissions::Group::Contacts, cx);
+                        backend.ask_access(rosty_android::permissions::Group::Contacts, cx);
                     });
                 }))
         });
@@ -319,13 +319,13 @@ impl Render for NewConversation {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::wire::{WireContact, WireNumber};
+    use rosty_core::wire::{WireContact, WireNumber};
 
     use super::*;
 
     #[test]
     fn registered_jid_skips_unregistered() {
-        let user = |jid: &str, on_whatsapp| rovsti_wa_proto::WaUser {
+        let user = |jid: &str, on_whatsapp| rosty_wa_proto::WaUser {
             jid: jid.into(),
             on_whatsapp,
             business: false,

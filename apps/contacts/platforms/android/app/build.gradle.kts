@@ -27,7 +27,7 @@ require(gpuiSigningMode in listOf("auto", "debug", "configured", "unsigned")) {
 }
 
 android {
-    namespace = "dev.rovsti.contacts"
+    namespace = "dev.rosty.contacts"
     // Android lint's release "vital" pass crashes inside a detector on this
     // toolchain (LintDriver.handleDetectorError); the build does not need it.
     lint {
@@ -46,7 +46,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "dev.rovsti.contacts"
+        applicationId = "dev.rosty.contacts"
         minSdk = "34".toInt()
         targetSdk = "36".toInt()
         versionCode = "1".toInt()
@@ -76,10 +76,10 @@ android {
 // apps/contacts, found from the Gradle project (platforms/android) so the repo can move.
 val contactsAppDir = rootProject.projectDir.resolve("../..").canonicalFile
 
-// The shared Kotlin bridge lives in crates/rovsti_android. It is added as a source
+// The shared Kotlin bridge lives in crates/rosty_android. It is added as a source
 // directory instead of a symlink, which Windows checkouts do not create.
 android.sourceSets["main"].kotlin.directories.add(
-    contactsAppDir.resolve("../../crates/rovsti_android/kotlin").canonicalPath,
+    contactsAppDir.resolve("../../crates/rosty_android/kotlin").canonicalPath,
 )
 
 for (profile in listOf("debug", "release")) {
@@ -94,7 +94,7 @@ for (profile in listOf("debug", "release")) {
             commandLine(providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"),
                 "build-android-native", "--output", output.get().asFile.absolutePath,
                 "--manifest-path", contactsAppDir.resolve("Cargo.toml").path,
-                "--library", "rovsti_contacts", "--abi", abi,
+                "--library", "rosty_contacts", "--abi", abi,
                 "--profile", rustProfile, "--min-sdk", "34")
             if (gpuiStagingRoot.isNotEmpty()) args("--staging-root", gpuiStagingRoot)
         }

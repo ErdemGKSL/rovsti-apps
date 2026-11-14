@@ -1,3 +1,3 @@
-//! `messages-prefs.json` lives in `rovsti_app_core`; this keeps the call sites unchanged.
+//! `messages-prefs.json` lives in `rosty_app_core`; this keeps the call sites unchanged.
 
-pub use rovsti_app_core::messages::prefs::*;
+pub use rosty_app_core::messages::prefs::*;

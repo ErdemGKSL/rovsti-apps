@@ -6,7 +6,7 @@
 //! what a restore would do before anything is written. Nothing here touches
 //! the platform; the file and crypto work lives in [`crate::settings_ui`].
 
-use rovsti_core::{
+use rosty_core::{
     msg_backup::{BackupError, RestorePlan, Strength, passphrase_strength},
     schedule::{MIN_LEAD_MS, ScheduleTarget, ScheduledSms},
     spam::SpamRules,
@@ -191,7 +191,7 @@ pub fn strength_label(passphrase: &str) -> Option<&'static str> {
 
 pub fn describe(error: BackupError) -> &'static str {
     match error {
-        BackupError::NotABackup => "That file is not a Rovsti Messages backup.",
+        BackupError::NotABackup => "That file is not a Rosty Messages backup.",
         BackupError::NewerVersion(_) => "That backup comes from a newer version of the app.",
         BackupError::WrongPassphrase => "Wrong passphrase, or the backup was changed.",
         BackupError::Corrupt => "The backup is damaged.",
@@ -239,17 +239,17 @@ pub fn merge_spam(current: &mut SpamRules, backup: &SpamRules) -> usize {
     added
 }
 
-/// `rovsti-messages-20261105.rmb` for the local day of `now_ms` (the phone's
+/// `rosty-messages-20261105.rmb` for the local day of `now_ms` (the phone's
 /// offset from UTC is `tz_offset_s`).
 pub fn backup_file_name(now_ms: i64, tz_offset_s: i32) -> String {
     let local_s = now_ms.div_euclid(1000) + i64::from(tz_offset_s);
     let (year, month, day) = civil_from_days(local_s.div_euclid(86_400));
-    format!("rovsti-messages-{year:04}{month:02}{day:02}.rmb")
+    format!("rosty-messages-{year:04}{month:02}{day:02}.rmb")
 }
 
 /// Shown when a restore needs the default-SMS-app role and it is not held.
 pub const RESTORE_NEEDS_ROLE: &str =
-    "Make Rovsti Messages your default SMS app to restore messages.";
+    "Make Rosty Messages your default SMS app to restore messages.";
 
 /// Whether a restore must wait for the role: it is not held and this is not
 /// just the preview (which reads the archive without writing).
@@ -287,7 +287,7 @@ fn plural(n: u64) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::{schedule::ScheduledSms, spam::SpamRule};
+    use rosty_core::{schedule::ScheduledSms, spam::SpamRule};
 
     use super::*;
 
@@ -442,13 +442,13 @@ mod tests {
         // 2026-11-05 12:00 UTC.
         assert_eq!(
             backup_file_name(1_793_880_000_000, 0),
-            "rovsti-messages-20261105.rmb"
+            "rosty-messages-20261105.rmb"
         );
-        assert_eq!(backup_file_name(0, 0), "rovsti-messages-19700101.rmb");
+        assert_eq!(backup_file_name(0, 0), "rosty-messages-19700101.rmb");
         // 22:30 UTC is already the next day in Turkey (+03:00).
         assert_eq!(
             backup_file_name(1_793_880_000_000 + 37_800_000, 3 * 3600),
-            "rovsti-messages-20261106.rmb"
+            "rosty-messages-20261106.rmb"
         );
     }
 

@@ -1,18 +1,18 @@
-# UX completeness pass: Rovsti Messages (round 5)
+# UX completeness pass: Rosty Messages (round 5)
 
 Base: `09709cc06dcc9a3ff9d98896bfb59968b4299f36` (main, clean tree, no stash). Rounds 1
 (`ux-messages.md`, G1 to G10), 2 (`ux-messages-r2.md`, H1 to H9), 3 (`ux-messages-r3.md`,
 K1 to K9) and 4 (`ux-messages-r4.md`, N1 to N8) are done. This round re-audits as a user
 holding the phone, looking at what earlier rounds did not: moving a sender *into* Spam,
 what survives an app restart, where scheduled messages can be found again, how Send later
-is discovered, and the Status viewer. Scope as before: `apps/messages`, `rovsti_core`,
-`rovsti_wa_proto`/`rovsti_wa_client` as used by Messages, existing `rovsti_android` seams.
+is discovered, and the Status viewer. Scope as before: `apps/messages`, `rosty_core`,
+`rosty_wa_proto`/`rosty_wa_client` as used by Messages, existing `rosty_android` seams.
 No new product features, no backends, no Kotlin changes (cargo is the only verification).
 
 Checked in this repo / at the pinned gpui-fusion rev: `Icon` is `gpui_icons::GpuiIcons`
 with the `lucide-misc` feature on, so `LucideShieldAlert` and `LucideCalendarClock` exist
 (assets `misc/shield-alert.svg`, `misc/calendar-clock.svg`); `LucideAlarmClock`,
-`LucideMessageCircle`, `LucideArchive` are already used. `rovsti_ui::storage::{load_json,
+`LucideMessageCircle`, `LucideArchive` are already used. `rosty_ui::storage::{load_json,
 save_json}`, `Backend::data_dir()`, `Gateway::scheduled()`, `GatewayEvent::Scheduled`,
 `blocklist::can_block` (refuses `NotANumber` for alphanumeric senders) all exist.
 
@@ -20,7 +20,7 @@ save_json}`, `Backend::data_dir()`, `Gateway::scheduled()`, `GatewayEvent::Sched
 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
-| P1 | **High** | **A sender cannot be moved into Spam where it is seen.** "Not spam" exists, its opposite does not. The common Turkish promo senders are alphanumeric (`TRENDYOL`, `GARANTI`): their row and page menus offer Block, Call and Add to contacts, but Block always refuses ("Unknown number, cannot block") and Call/Add make no sense. The only way to silence them is Settings > Spam > Sender and typing the sender id by hand, although `SpamRule::Sender` already does exactly this. Without the SMS role Block is impossible for any sender, so this is also the only path then. | `sms_actions.rs::actions`, `main.rs::row_sms_actions/sms_row_action/open_page_menu`, `prefs.rs`, `rovsti_core::spam` |
+| P1 | **High** | **A sender cannot be moved into Spam where it is seen.** "Not spam" exists, its opposite does not. The common Turkish promo senders are alphanumeric (`TRENDYOL`, `GARANTI`): their row and page menus offer Block, Call and Add to contacts, but Block always refuses ("Unknown number, cannot block") and Call/Add make no sense. The only way to silence them is Settings > Spam > Sender and typing the sender id by hand, although `SpamRule::Sender` already does exactly this. Without the SMS role Block is impossible for any sender, so this is also the only path then. | `sms_actions.rs::actions`, `main.rs::row_sms_actions/sms_row_action/open_page_menu`, `prefs.rs`, `rosty_core::spam` |
 | P2 | Medium | **Drafts die with the process.** `drafts.rs` keeps text "for the session" only, and only on `leave_page`. Type half a message, switch to another app, Android kills Messages: the text is gone and the inbox's "Draft:" line with it. | `drafts.rs`, `main.rs::leave_page/on_window_active` |
 | P3 | Medium | **Scheduled messages can only be found inside their conversation.** No overview anywhere. A message scheduled to a new number (no provider thread yet) has no inbox row at all until it is sent: to check or cancel it the user must retype the number in New message. Gateway items are only fetched when a chat opens. | `main.rs::sync_chat_list/chat_item/load_remote_scheduled`, `schedule_ui.rs::strip_items` |
 | P4 | Medium | **A WhatsApp scheduled message that fails says nothing** unless its chat is open (the SMS case got a pill with "Open" in round 4; the gateway's `Scheduled` event with `Failed` only updates the list). | `main.rs::on_gateway_events` (`GatewayEvent::Scheduled`) |
@@ -32,7 +32,7 @@ save_json}`, `Backend::data_dir()`, `Gateway::scheduled()`, `GatewayEvent::Sched
 ## Plan (ordered by user impact, pure logic first; every step leaves all checks green)
 
 Checks after every step (from the task):
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 `df` showed 6.3 GB free at planning time; under 6 GB run `rm -rf target/debug/incremental` first.
 Until a later step calls a new pure function, mark it `#[cfg_attr(not(test), allow(dead_code))]`
 and remove the attribute in that step. One focused commit per step (others push to main
@@ -56,7 +56,7 @@ in parallel).
     `move_to_spam_hidden_for_contacts_spam_and_mixed_rows`, `page_offers_move_to_spam`.
 - `apps/messages/src/prefs.rs`:
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct SpamMark { pub rule_added: bool, pub was_allowed: bool }`
-  - `pub fn mark_spam(&mut self, sender: &str) -> Result<SpamMark, rovsti_core::spam::RuleError>`:
+  - `pub fn mark_spam(&mut self, sender: &str) -> Result<SpamMark, rosty_core::spam::RuleError>`:
     trim; `was_allowed = self.unallow_sender(sender)`; `self.spam.add_rule(SpamRule::Sender
     { pattern })`: `Ok` → `rule_added = true`, `Err(Duplicate)` → `rule_added = false`
     (still Ok), `Err(e)` otherwise → put the allow entry back if it was removed and return

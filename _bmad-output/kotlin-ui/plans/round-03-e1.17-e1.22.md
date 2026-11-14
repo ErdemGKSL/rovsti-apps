@@ -12,7 +12,7 @@ row for every new API).
   `0ba6814` (E1.12 + E1.14), `6bc19e9` (E1.13), `1898350` (E1.16), `f65b7bd` (E1.15, round close), `d0dcf08` (review
   fixes). Working tree clean. `stash@{0}` is the deprecated GPUI layout WIP: leave it, do not pop it.
 - Code checked against the R2 stories: every file named in the E1.9-E1.16 evidence lines exists under
-  `android/design/src/main/kotlin/dev/rovsti/design/{overlay,text}` (`OverlayHost`, `Scrim`, `Placement`, `MenuMorph`,
+  `android/design/src/main/kotlin/dev/rosty/design/{overlay,text}` (`OverlayHost`, `Scrim`, `Placement`, `MenuMorph`,
   `MenuModel`, `MenuPanel`, `ButtonMenu`, `ContextMenuGesture/Entry/Panel`, `PreviewCardEntry/Layout`, `Popover`,
   `SheetEntry/State/Math`, `PushBack`, `Alert`, `ActionSheet`, `Toast`, `ToastMath`; `GlassTextField`, `SearchField`,
   `ComposerField`, `TextSelection`). JVM tests `PlacePanelTest`, `MenuMorphTest`, `MenuHitTest`,
@@ -22,15 +22,15 @@ row for every new API).
   `android/catalog/screenshots/` including every R2 name the stories list. E1.9-E1.16 stay `done`.
 - **Not present yet** (R3 scope): no `controls/Switch.kt`, `Slider.kt`, `SegmentedControl.kt`; no navigation
   dependency or `transition` package; no swipe row or alphabet rail in `list/`; no `media` package, no Coil
-  (`android/testing/src/main/kotlin/dev/rovsti/testing/ShotTest.kt:48` has `TODO(E1.20)` for the fake image fetcher);
+  (`android/testing/src/main/kotlin/dev/rosty/testing/ShotTest.kt:48` has `TODO(E1.20)` for the fake image fetcher);
   no recomposition counter or convention test; no `docs/kotlin-ui/design-system.md` or contact sheet.
 - Ready to reuse: `SelectionPuck` (`chrome/SelectionPuck.kt`, glisse header, position/lift/velocity, projected
   release), `TabBarGeometry.kt` (`slotWidth`, `slotUnder`, `isTap`, `puckRect`), `Hold.kt` (hold rule),
-  `RovstiMotion.Toggle` (1000/80) and `ThumbLift` (2000/80) (`motion/RovstiMotion.kt:42-43`), lens presets
+  `RostyMotion.Toggle` (1000/80) and `ThumbLift` (2000/80) (`motion/RostyMotion.kt:42-43`), lens presets
   `SegmentLens`, `SwitchThumb`, `SliderThumb` (`glass/Lens.kt:39-43`), `GlassSpec` thumb preset with
-  `LensOptions.SwitchThumb` (`glass/GlassSpec.kt:145`), `RovstiHaptics.toggle(on)` (`haptics/RovstiHaptics.kt:69`),
-  `Fling`, `Rubber`, `.gated()`, `PredictiveBackHandler` already used by sheets, `rovsti_core::zoom` as the inventory
-  for viewer maths (`crates/rovsti_core/src/zoom.rs:40-155`: `fit`, `pinch`, `pan`, `double_tap`, `settled`,
+  `LensOptions.SwitchThumb` (`glass/GlassSpec.kt:145`), `RostyHaptics.toggle(on)` (`haptics/RostyHaptics.kt:69`),
+  `Fling`, `Rubber`, `.gated()`, `PredictiveBackHandler` already used by sheets, `rosty_core::zoom` as the inventory
+  for viewer maths (`crates/rosty_core/src/zoom.rs:40-155`: `fit`, `pinch`, `pan`, `double_tap`, `settled`,
   `max_offset`, `dismiss_progress`, `should_dismiss`, `page_drag`).
 - Compose reports already exist behind `-PcomposeReports`
   (`android/build-logic/convention/src/main/kotlin/ComposeConventionPlugin.kt:11-25`).
@@ -84,7 +84,7 @@ detent. The upper sheet is placed so its top is at least 10 dp below the lower s
 detent offset).
 - `overlay/PushBack.kt` / `OverlayHost.kt`: extend the pushback registry to a stack depth per sheet entry
   (`depthAbove(entry): Int`, number of modal sheets above it). `SheetEntry` reads its depth in `graphicsLayer`
-  (scale, translationY, dim layer alpha) animated with the same spring as the page pushback (`RovstiMotion` token
+  (scale, translationY, dim layer alpha) animated with the same spring as the page pushback (`RostyMotion` token
   used by `PushBack.kt`; add `SheetStepBack` only if no fitting token exists, with provenance comment "ORIGINAL").
 - `SheetMath.kt`: pure `stackedTopPx(lowerTopPx, stepBackPx)` and `upperDetentOffset(...)` clamp; JVM tests.
 - Catalog `SheetsPage.stacked()`: lower sheet opens at **Large**, the second at Medium, so the stack reads clearly.
@@ -102,7 +102,7 @@ Commit: `Kotlin UI (E1): R2 fixes: action-sheet shadow, stacked sheets step back
 
 ## Step 2 (E1.17 part 1): Switch
 
-Files (`android/design/src/main/kotlin/dev/rovsti/design/controls/`):
+Files (`android/design/src/main/kotlin/dev/rosty/design/controls/`):
 - `SwitchRules.kt` (**glisse header**; ported from `glisse/src/switch.tsx:25-179`, SKILL navigation-layout 5.1):
   `object SwitchRules { TRAVEL_DP = 57.9f * 0.375f; dragPosition(from, dxPx, travelPx) (rubber band /22 past either
   end); isScroll(dxDp, dyDp, held); startsDrag(dxDp) (>= 4 dp); onRelease(checked, moved, value, nearVertically)
@@ -110,16 +110,16 @@ Files (`android/design/src/main/kotlin/dev/rovsti/design/controls/`):
   `SwitchGeometry` (track 60 x 25.1 dp, thumb rest scale 0.65, held `0.65 + 0.25 * lift`, travel 21.71 dp, stand-in
   track sizes `(W-24)*(.85+.1*lift)`, `(H-12)*.75*(.525+.45*lift)`, face opacity `1 - 0.85 * lift`, hit area >= 44 dp
   tall and +8 dp each side, disabled alpha 0.35).
-  Rovsti extension (marked in a comment): when the drag moved and the release speed is above 300 dp/s, the target
+  Rosty extension (marked in a comment): when the drag moved and the release speed is above 300 dp/s, the target
   comes from `Fling` projection of `value * travel` (SKILL 5.1 "release velocity decides when the drag is fast").
-- `RovstiSwitch.kt` (glisse header for the drawing order; rendering is ours): `@Composable fun RovstiSwitch(checked:
+- `RostySwitch.kt` (glisse header for the drawing order; rendering is ours): `@Composable fun RostySwitch(checked:
   Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier, enabled = true)`. Three `Animatable`s: `position`
-  (`RovstiMotion.Toggle`), `colour` (`Toggle`), `lift` (`ThumbLift`), all with visibility thresholds, retargeted not
+  (`RostyMotion.Toggle`), `colour` (`Toggle`), `lift` (`ThumbLift`), all with visibility thresholds, retargeted not
   restarted. Semantics and keyboard through `Modifier.toggleable(value = checked, role = Role.Switch, ...)`; gestures
   in one `pointerInput` that consumes only after `held` (hold rule from `press/Hold.kt`) or `startsDrag`, so a vertical
-  swipe on a list still scrolls. Track fill `RovstiTheme.colors` on-colour (glisse `tokens.on`) blended by `colour` in
+  swipe on a list still scrolls. Track fill `RostyTheme.colors` on-colour (glisse `tokens.on`) blended by `colour` in
   the draw phase; thumb = `GlassSpec` thumb preset (Flat tier in tests: white thumb 0.85 + rim). All animated values
-  read in `graphicsLayer`/`drawBehind` only. Haptic `RovstiHaptics.toggle(on)` on commit (not on every drag frame).
+  read in `graphicsLayer`/`drawBehind` only. Haptic `RostyHaptics.toggle(on)` on commit (not on every drag frame).
   Reduce motion: `.gated()` springs, no lift growth.
 - `ListRow` trailing slot: add a `ListRowTrailing.Switch(checked, onChange)` variant (or a documented example in the
   catalog) so a settings row's whole surface toggles the switch (TalkBack reads one node: label + state).
@@ -151,12 +151,12 @@ Commit: `Kotlin UI (E1): Switch (glisse)`.
   rail 6 dp at 21 dp from the top, inset 16 dp, radius 3; fill width `(W - 36dp) * p + 18dp`; thumb 60 x 40 dp drawn
   at 0.6 at rest, `0.6 + 0.4 * lift` held; thumb x `(W - 36dp) * p - 12dp`; touch target >= 36 x 40 dp (wrap to
   48 dp tall for TalkBack); pure `progressAt(xPx, widthPx)`, `valueFor(progress, range, steps)`.
-- `RovstiSlider.kt`: `RovstiSlider(value: Float, onValueChange, modifier, valueRange = 0f..1f, steps = 0,
+- `RostySlider.kt`: `RostySlider(value: Float, onValueChange, modifier, valueRange = 0f..1f, steps = 0,
   onValueChangeFinished)`. Finger owns the value (`snapTo` undispatched); tap on the rail jumps there with the
   `Toggle` spring; lift `ThumbLift`; haptic `SegmentTick` per step when `steps > 0`, none for continuous sliders.
-  Semantics `progressSemantics(value, range, steps)` + `setProgress`. Rovsti extension (ORIGINAL, written from the
+  Semantics `progressSemantics(value, range, steps)` + `setProgress`. Rosty extension (ORIGINAL, written from the
   skill's description only): `elasticEnds = true` soft-caps a drag past an end with a sigmoid at 28 dp and releases
-  with `spring(0.5, 1500)` (add the token `RovstiMotion.SliderOverflow` with provenance).
+  with `spring(0.5, 1500)` (add the token `RostyMotion.SliderOverflow` with provenance).
 ### Segmented control
 - `SegmentedControl.kt` (**glisse header**, `segmented-control.tsx`, `segments.tsx:55-339`, `styles.css:505-511`):
   capsule 32 dp (track `tokens.segmentTrack`), labels 13 sp, thumb inset 2 dp (`tokens.segmentThumb`), held thumb
@@ -202,33 +202,33 @@ otherwise `implementation`. Record in `api-notes.md` (javap against the download
 `SharedTransitionLayout`, `Modifier.sharedBounds`, `rememberSharedContentState`, `BoundsTransform`. If any name
 differs at 1.2.1, use the real one and write the difference in the notes; do not guess.
 
-Files (`android/design/src/main/kotlin/dev/rovsti/design/transition/`, ORIGINAL):
+Files (`android/design/src/main/kotlin/dev/rosty/design/transition/`, ORIGINAL):
 - `TabNavigator.kt`: pure Kotlin, no Compose types in its logic: `class TabNavigator<R : Any>(tabs: List<Tab>,
   roots: Map<Tab, R>)` holding one `SnapshotStateList<R>` per tab; `select(tab)` (switches; reselecting the current
   tab with a stack deeper than 1 pops to root, at depth 1 emits `ScrollToTop(tab)` through a `MutableSharedFlow
   (extraBufferCapacity = 1)` — never a sticky flag), `push(route)`, `pop(): Boolean` (false at root so the activity
   finishes), `replaceTop`, `resetTo(tab, routes)` (deep links: `routeFor(extras)` results), `current`, `stack(tab)`.
   Saveable via a `Saver` of route lists (routes are `@Serializable`).
-- `NavTransitions.kt`: `RovstiNav.push`/`pop`/`predictivePop` `ContentTransform`s from SKILL navigation-layout 3:
+- `NavTransitions.kt`: `RostyNav.push`/`pop`/`predictivePop` `ContentTransform`s from SKILL navigation-layout 3:
   enter slide from full width; exit slide to `-PushParallax` (add `PushParallax = 0.3f` and `PushDimAlpha = 0.7f` to
-  `RovstiMotion` with provenance comments if missing) with fade to the dim alpha; tweens (`RovstiMotion.push()`; add a
+  `RostyMotion` with provenance comments if missing) with fade to the dim alpha; tweens (`RostyMotion.push()`; add a
   350 ms `CriticalEasing` tween if missing) so predictive back can scrub. Tab switch = 200 ms crossfade, decided from
   initial/target route (a `isTabSwitch` lambda). Reduce motion: crossfade only, no parallax.
-- `RovstiNavHost.kt`: `@Composable fun <R : Any> RovstiNavHost(navigator: TabNavigator<R>, chromeFor: (R) ->
+- `RostyNavHost.kt`: `@Composable fun <R : Any> RostyNavHost(navigator: TabNavigator<R>, chromeFor: (R) ->
   ChromeSpec, entries: EntryProviderBuilder<R>.() -> Unit)` wrapping `SharedTransitionLayout { NavDisplay(...) }`;
   exposes `LocalSharedScopes` (shared transition scope + the entry's animated-content scope) for `sharedBounds`.
   Back order: overlay host first (its `BackHandler` is registered later, so it wins), then the tab stack, then the
   activity (ARCH 5.1 reason 2). `ChromeSpec(tabBar: Visible|Folded|Hidden, largeTitle: String?)` data class.
-- `SharedBounds.kt`: `Modifier.rovstiSharedBounds(key: Any)` reading `LocalSharedScopes`, `BoundsTransform` 350 ms
+- `SharedBounds.kt`: `Modifier.rostySharedBounds(key: Any)` reading `LocalSharedScopes`, `BoundsTransform` 350 ms
   critically damped (500 ms variant for large art), `renderInOverlayDuringTransition = true`, `zIndexInOverlay = 2f`;
   no-op when the scopes are absent (previews/tests outside the host). `isTransitionActive` exposed so heavy work can
   pause (SKILL motion 8).
 - `docs/kotlin-ui/shell-usage.md` (new, short; AC4): how an app declares `sealed interface Route`, `chromeFor`
-  (pure, JVM-tested), `routeFor(extras)`, and wires `RovstiNavHost` + `RovstiTabBar` + `OverlayHost` in that order.
-  E3.11 `:shell` will move `RovstiRoot` there; this doc is the contract.
-- `:catalog`: convert the catalog's own navigation (`CatalogApp.kt`) to `RovstiNavHost` with two tabs ("Components",
+  (pure, JVM-tested), `routeFor(extras)`, and wires `RostyNavHost` + `RostyTabBar` + `OverlayHost` in that order.
+  E3.11 `:shell` will move `RostyRoot` there; this doc is the contract.
+- `:catalog`: convert the catalog's own navigation (`CatalogApp.kt`) to `RostyNavHost` with two tabs ("Components",
   "Demo") so the scaffold is exercised for real; "Demo" tab: a contact list (avatars) -> detail page with the avatar
-  flying via `rovstiSharedBounds("avatar-$id")`, detail -> sub-detail push.
+  flying via `rostySharedBounds("avatar-$id")`, detail -> sub-detail push.
 
 Tests:
 - JVM `TabNavigatorTest`: per-tab stacks independent; push on tab A, switch to B, back to A restores A's stack;
@@ -261,7 +261,7 @@ Files (`list/`, ORIGINAL; behaviour from SKILL motion 5.3 and navigation-layout 
 - `SwipeRow.kt`: `SwipeRow(leading: ImmutableList<SwipeAction>, trailing: ImmutableList<SwipeAction>, modifier,
   content)`; `SwipeAction(label, icon, tint, destructive, onClick)`; 76 dp per action (`Sizes.swipeAction`), actions
   drawn behind the row pinned to the edge, row translated in `graphicsLayer` only; horizontal drag claimed only after
-  touch slop with |dx| > |dy| (vertical scroll wins otherwise); settle `RovstiMotion.SwipeSettle` (1.0/500, add if
+  touch slop with |dx| > |dy| (vertical scroll wins otherwise); settle `RostyMotion.SwipeSettle` (1.0/500, add if
   missing) seeded with release velocity; full swipe: the first action expands to fill, `HapticEvent`
   `GestureThresholdActivate` once on crossing (and once again if it un-crosses), commit runs the action once; a tap on
   the open row or a scroll of the list closes it; only one row open per list (`SwipeRowGroup` state holder).
@@ -303,12 +303,12 @@ exists), `Fetcher.Factory`/`FakeImage` test utilities (`coil-test` artifact if p
 `Fetcher`).
 
 Files:
-- `media/RovstiImages.kt` (ORIGINAL; SKILL performance 4): `rovstiImageLoader(context, lowRam: Boolean)` (memory 25 %,
+- `media/RostyImages.kt` (ORIGINAL; SKILL performance 4): `rostyImageLoader(context, lowRam: Boolean)` (memory 25 %,
   15 % on low RAM, disk cache in `filesDir/images`, crossfade off by default, hardware bitmaps on),
   `rememberSlotRequest(model, sizeDp)` (size from `roundToPx` of the slot, guards size <= 0), `RowImage`
   (crossfade off) and `Avatar` photo path: `list/Avatar.kt` gains a photo model that falls back to initials on
   error/empty (no `SubcomposeAsyncImage`). `onTrimMemory(RUNNING_LOW)` hook documented for `:shell`.
-- `media/ZoomMath.kt` (pure, ORIGINAL Kotlin re-implementation of the behaviour of `rovsti_core::zoom`, not a
+- `media/ZoomMath.kt` (pure, ORIGINAL Kotlin re-implementation of the behaviour of `rosty_core::zoom`, not a
   translation of its code): `fit(content, viewport)`, `ZoomState(scale, offset)`, `pinch(delta, focus)` (focus stays
   under the fingers), `pan` with bounds `maxOffset`, `doubleTap(focus)` (fit <-> 2.5x at the focus), `settled()`
   (rubber band back inside bounds, scale clamped 1..5 with a 0.8..6 rubber range while pinching),
@@ -321,7 +321,7 @@ Files:
   pinch + pan + double tap + vertical dismiss, claiming the vertical dismiss only at scale 1); tap toggles chrome
   (top bar with "3 of 7" and close, bottom toolbar slots Save, Share, Forward, Edit, Remove passed as
   `ImmutableList<ViewerAction>`; chrome fades 200 ms); back / swipe down dismiss; shared-bounds entry from the
-  thumbnail when opened inside `RovstiNavHost` (optional; otherwise a scale-fade from the anchor rect like the
+  thumbnail when opened inside `RostyNavHost` (optional; otherwise a scale-fade from the anchor rect like the
   context-menu lift). Semantics: page title "Photo 3 of 7", custom actions for next/previous, zoom actions.
 - `:testing`: replace `TODO(E1.20)` in `ShotTest.kt:48` with a fake image loader (deterministic coloured test images
   from `testing/src/main/res` or generated bitmaps) installed for every shot.
@@ -347,7 +347,7 @@ Commit: `Kotlin UI (E1): Coil loader, slot-sized images, PhotoViewer`.
 
 ## Step 7 (E1.21): performance harness and convention tests
 
-- `android/testing/src/main/kotlin/dev/rovsti/testing/Recomposition.kt` (ORIGINAL, SKILL performance 10.2):
+- `android/testing/src/main/kotlin/dev/rosty/testing/Recomposition.kt` (ORIGINAL, SKILL performance 10.2):
   `RecompositionCounter`, `@Composable CountRecompositions(tag, counter)` (SideEffect increment). To count inside
   `:design` composables without test hooks in production code, the test wraps child slots (labels, rows) with the
   counter, and for the bar/menu itself uses `Modifier.drawBehind` counters only where a slot exists; write down in
@@ -370,8 +370,8 @@ Commit: `Kotlin UI (E1): Coil loader, slot-sized images, PhotoViewer`.
   epics must use (AC2c); turn it on for the catalog page tests now and fix or suppress findings with written reasons.
 - Compiler-report gate (AC3): a Gradle task `:design:checkComposeStability` (in `build-logic`) that runs after
   compilation with `-PcomposeReports`, parses `build/compose_reports/*-composables.txt`, and fails if any of the named
-  hot composables is not `restartable skippable`: `RovstiTabBar` cells, `ListRow`, `Avatar`, `SwipeRow`, `MenuRows`,
-  `RovstiSwitch`, `RovstiSlider`, `SegmentedControl`, `GlassTextField`. Fix instability with `@Immutable` models,
+  hot composables is not `restartable skippable`: `RostyTabBar` cells, `ListRow`, `Avatar`, `SwipeRow`, `MenuRows`,
+  `RostySwitch`, `RostySlider`, `SegmentedControl`, `GlassTextField`. Fix instability with `@Immutable` models,
   `ImmutableList`, or `compose_stability.conf` entries. Add it to `scripts/kotlin-ui-check.sh` as one more Gradle
   task (keep the script's structure; `-PcomposeReports` only on that task's invocation).
 - No screenshots.
@@ -412,7 +412,7 @@ Commit: `Kotlin UI (E1): catalog complete, design contact sheet, design-system d
 ## Order and dependencies inside the round
 
 1 (fixes) -> 2 (switch) -> 3 (slider, segmented; reuse the puck) -> 4 (navigation; the catalog moves onto it, so later
-pages are added through `RovstiNavHost`) -> 5 (swipe row, rail: they live in the Demo/List pages) -> 6 (images and
+pages are added through `RostyNavHost`) -> 5 (swipe row, rail: they live in the Demo/List pages) -> 6 (images and
 viewer; avatars gain photos, used by the shared-bounds demo) -> 7 (perf harness and conventions run over everything
 above) -> 8 (catalog complete and close). Each step ends with `bash scripts/kotlin-ui-check.sh` green (record goldens
 with `RECORD=1`, then verify without it) and its own commit. Keep 6 GB free (`df -h .`): two new dependency trees
@@ -420,11 +420,11 @@ with `RECORD=1`, then verify without it) and its own commit. Keep 6 GB free (`df
 
 ## Licence notes for this round
 
-- Glisse-derived (header required): `SwitchRules.kt`, `RovstiSwitch.kt`, `SliderGeometry.kt`, `RovstiSlider.kt`,
+- Glisse-derived (header required): `SwitchRules.kt`, `RostySwitch.kt`, `SliderGeometry.kt`, `RostySlider.kt`,
   `SegmentedControl.kt`.
 - ORIGINAL (no header, no Convx code; numbers from the skill only): F4 sheet stacking, `TabNavigator`,
-  `NavTransitions`, `RovstiNavHost`, `SharedBounds`, `SwipeMath`, `SwipeRow`, `AlphabetRail`, `RovstiImages`,
-  `ZoomMath` (Kotlin re-implementation of our own Rust `rovsti_core::zoom` behaviour; Rovsti code, MIT/Apache),
+  `NavTransitions`, `RostyNavHost`, `SharedBounds`, `SwipeMath`, `SwipeRow`, `AlphabetRail`, `RostyImages`,
+  `ZoomMath` (Kotlin re-implementation of our own Rust `rosty_core::zoom` behaviour; Rosty code, MIT/Apache),
   `PhotoViewer`, `Recomposition.kt`, `ConventionTest`, the stability gate, the contact-sheet task. Do not open Convx
   files while writing them.
 - New third-party: Navigation 3 and Coil 3 (both Apache-2.0) as dependencies: NOTICE entries in step 8.

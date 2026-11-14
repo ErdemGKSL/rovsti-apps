@@ -6,8 +6,8 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::settings::reply_choices;
-use rovsti_ui::{
+use rosty_core::settings::reply_choices;
+use rosty_ui::{
     Icon,
     motion::press_scale,
     motion_tokens::scale,
@@ -181,13 +181,13 @@ impl PhoneApp {
         };
         let extras = self.wa_call.read(cx).recents_extras();
         let notes = self.notes.snapshot();
-        let now_ms = rovsti_core::clock::now_ms();
+        let now_ms = rosty_core::clock::now_ms();
         cx.spawn(async move |this, cx| {
             let made = cx
                 .background_executor()
                 .spawn(async move {
                     let refs: Vec<&str> = numbers.iter().map(String::as_str).collect();
-                    rovsti_core::call_log_query::person_export(
+                    rosty_core::call_log_query::person_export(
                         &source, &extras, &refs, &who, now_ms, tz, &notes,
                     )
                 })

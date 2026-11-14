@@ -18,8 +18,8 @@ All code is committed (d31f512..2fde375) and the working tree is clean:
 
 Checks: the full run (scratchpad `checks-r5.log`) passed. The only later commit (2fde375,
 `apps/messages/src/settings_ui.rs`) was re-checked this round: `cargo fmt --check` passed,
-`cargo clippy -p rovsti_messages --all-targets -D warnings` passed, and
-`cargo test -p rovsti_messages` passed (219 tests).
+`cargo clippy -p rosty_messages --all-targets -D warnings` passed, and
+`cargo test -p rosty_messages` passed (219 tests).
 
 ## Deploy
 Round 5 tried the deploy. The session's permission system denied it (auto-mode classifier:

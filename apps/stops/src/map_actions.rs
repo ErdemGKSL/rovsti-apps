@@ -6,8 +6,8 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_geo::{Coord, Measure};
-use rovsti_ui::{
+use rosty_geo::{Coord, Measure};
+use rosty_ui::{
     components::{list_row, section},
     haptics,
     tokens::Theme,
@@ -189,7 +189,7 @@ impl StopsApp {
         };
         let a = pick::trip_endpoint(Slot::A, &Destination::dropped(a));
         let b = pick::trip_endpoint(Slot::B, &Destination::dropped(b));
-        let name = rovsti_geo::saved_stops::suggest_name(self.gtfs.as_deref(), &a, &b);
+        let name = rosty_geo::saved_stops::suggest_name(self.gtfs.as_deref(), &a, &b);
         self.sheet.close();
         match self.saved.add(&name, a, b, now_ms()) {
             Ok(id) => {
@@ -201,7 +201,7 @@ impl StopsApp {
                     cx,
                 );
             }
-            Err(rovsti_geo::SavedStopError::Duplicate(id)) => {
+            Err(rosty_geo::SavedStopError::Duplicate(id)) => {
                 let existing = self
                     .saved
                     .get(id)

@@ -7,26 +7,26 @@
     <!-- Haptics (tab bar, switches, long presses) drive the vibrator; a normal permission. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Chat and call on WhatsApp are handed to Rovsti Messages and Phone. Only
+    <!-- Chat and call on WhatsApp are handed to Rosty Messages and Phone. Only
          apps signed with the same key hold this (whichever installs first defines it). -->
-    <uses-permission android:name="dev.rovsti.permission.HANDOFF" />
+    <uses-permission android:name="dev.rosty.permission.HANDOFF" />
     <permission
-        android:name="dev.rovsti.permission.HANDOFF"
+        android:name="dev.rosty.permission.HANDOFF"
         android:protectionLevel="signature" />
 
     <queries>
         <intent>
-            <action android:name="dev.rovsti.action.WA_CALL" />
+            <action android:name="dev.rosty.action.WA_CALL" />
         </intent>
         <intent>
-            <action android:name="dev.rovsti.action.WA_CHAT" />
+            <action android:name="dev.rosty.action.WA_CHAT" />
         </intent>
     </queries>
 
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
     <application
-        android:name=".RovstiContactsApp"
-        android:label="Rovsti Contacts"
+        android:name=".RostyContactsApp"
+        android:label="Rosty Contacts"
         android:icon="@drawable/gpui_app_icon"
         android:roundIcon="@drawable/gpui_app_icon"
         android:theme="@style/GpuiTheme"
@@ -59,12 +59,12 @@
             </intent-filter>
         </activity>
 
-        <receiver android:name="dev.rovsti.bridge.BirthdayReminderReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.BirthdayReminderReceiver" android:exported="false" />
 
         <!-- Images and files handed to the share sheet (cache/share only, read-only). -->
         <provider
-            android:name="dev.rovsti.bridge.RovstiShareProvider"
-            android:authorities="${applicationId}.rovstishare"
+            android:name="dev.rosty.bridge.RostyShareProvider"
+            android:authorities="${applicationId}.rostyshare"
             android:exported="false"
             android:grantUriPermissions="true" />
     </application>

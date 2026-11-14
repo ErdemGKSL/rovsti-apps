@@ -5,7 +5,7 @@
 //! background executor. Pinch and double-tap zoom, drag to pan, swipe down to
 //! close, a tap hides the chrome, and the bottom bar saves to the gallery or
 //! shares. Modelled on the Phone app's photo viewer; the maths lives in
-//! `rovsti_core::zoom`.
+//! `rosty_core::zoom`.
 
 use std::{
     path::{Path, PathBuf},
@@ -22,8 +22,8 @@ use gpui::{
     RenderImage, Role, SharedString, StatefulInteractiveElement, Styled, StyledImage, TouchPhase,
     Window, canvas, div, px,
 };
-use rovsti_core::zoom::{self, Point, Size, ZoomView};
-use rovsti_ui::{
+use rosty_core::zoom::{self, Point, Size, ZoomView};
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     motion_tokens,
@@ -32,10 +32,10 @@ use rovsti_ui::{
     tokens::{Theme, shadow, typography},
     touch::{TAP_SLOP, TapGuard, drag_surface},
 };
-use rovsti_wa_client::{Gateway, Picture};
+use rosty_wa_client::{Gateway, Picture};
 
 use crate::{MessagesApp, conversation::cache_stem, files::ext_for_mime, forward_ui::ForwardItem};
-use rovsti_core::forward::ForwardBody;
+use rosty_core::forward::ForwardBody;
 
 /// Height of the strip at the top and bottom where the chrome sits; a finger
 /// that lands there belongs to the buttons, not to the picture.
@@ -82,13 +82,13 @@ pub(crate) fn photo_name(title: &str, mime: &str) -> String {
     };
     format!(
         "{}-photo.{ext}",
-        rovsti_core::number_format::file_slug(title)
+        rosty_core::number_format::file_slug(title)
     )
 }
 
 /// [`save_name`] with the file name's first word chosen by where the picture came from.
 fn branded_name(brand: &str, title: &str, mime: &str, at_ms: i64) -> String {
-    let (y, m, d) = rovsti_wa_proto::presence::civil_from_days(at_ms.div_euclid(86_400_000));
+    let (y, m, d) = rosty_wa_proto::presence::civil_from_days(at_ms.div_euclid(86_400_000));
     let secs = at_ms.rem_euclid(86_400_000) / 1000;
     let stamp = format!(
         "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
@@ -100,7 +100,7 @@ fn branded_name(brand: &str, title: &str, mime: &str, at_ms: i64) -> String {
         "bin" => "jpg",
         ext => ext,
     };
-    match rovsti_core::number_format::file_slug_opt(title) {
+    match rosty_core::number_format::file_slug_opt(title) {
         Some(stem) => format!("{brand}-{stem}-{stamp}.{ext}"),
         None => format!("{brand}-{stamp}.{ext}"),
     }
@@ -748,7 +748,7 @@ fn load_blocking(
             (bytes, path)
         }
         ViewerSource::ContactPhoto { uri } => {
-            let path = match rovsti_android::providers::contact_photo(uri, PHOTO_PX) {
+            let path = match rosty_android::providers::contact_photo(uri, PHOTO_PX) {
                 Ok(path) if path.is_empty() => return Err(LoadError::NoPhoto),
                 Ok(path) => PathBuf::from(path),
                 Err(error) => {
@@ -759,7 +759,7 @@ fn load_blocking(
             (std::fs::read(&path).map_err(|_| LoadError::Failed)?, path)
         }
     };
-    let image = rovsti_wa_ui::decode_image(&bytes, MAX_PX).ok_or(LoadError::Failed)?;
+    let image = rosty_wa_ui::decode_image(&bytes, MAX_PX).ok_or(LoadError::Failed)?;
     Ok((image, path))
 }
 
@@ -806,7 +806,7 @@ impl MessagesApp {
     fn viewer_loader(&self, cx: &Context<Self>) -> (Option<Gateway>, PathBuf) {
         let gateway = self.whatsapp.read(cx).gateway();
         let dir = self.backend.read(cx).data_dir().map_or_else(
-            || std::env::temp_dir().join("rovsti-viewer"),
+            || std::env::temp_dir().join("rosty-viewer"),
             |dir| dir.join("cache").join("viewer"),
         );
         (gateway, dir)
@@ -922,14 +922,14 @@ impl MessagesApp {
             }
         };
         let task = cx.background_executor().spawn(async move {
-            rovsti_android::media::save_image_to_gallery(&path.to_string_lossy(), &name, &item.mime)
+            rosty_android::media::save_image_to_gallery(&path.to_string_lossy(), &name, &item.mime)
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.show_pill(match result {
                     Ok(true) => "Saved to Photos",
-                    Err(rovsti_android::Error::Unsupported) => "Saving needs an Android phone.",
+                    Err(rosty_android::Error::Unsupported) => "Saving needs an Android phone.",
                     Ok(false) | Err(_) => "Couldn't save the picture",
                 });
                 cx.notify();
@@ -957,14 +957,14 @@ impl MessagesApp {
             return;
         };
         let task = cx.background_executor().spawn(async move {
-            rovsti_android::media::share_image(&path.to_string_lossy(), &item.mime, &item.title)
+            rosty_android::media::share_image(&path.to_string_lossy(), &item.mime, &item.title)
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {}
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("Sharing needs an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("Couldn't share the picture"),
@@ -1705,7 +1705,7 @@ mod tests {
             0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99,
             0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
         ];
-        let image = rovsti_wa_ui::decode_image(PNG, 64).expect("a picture");
+        let image = rosty_wa_ui::decode_image(PNG, 64).expect("a picture");
         v.set_full(image, PathBuf::from("a.jpg"));
         assert_eq!(swipe(&mut v, -200.0, 300), Release::Page);
         assert!(v.full.is_none());

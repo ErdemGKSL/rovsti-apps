@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Rovsti Kişiler</string>
+    <string name="app_name">Rosty Kişiler</string>
     <string name="tab_contacts">Kişiler</string>
     <string name="tab_favorites">Favoriler</string>
     <string name="tab_groups">Gruplar</string>
@@ -124,7 +124,7 @@
     <string name="contacts_cant_change_default">Varsayılan değiştirilemiyor.</string>
     <string name="contacts_cant_change_favorite">Favori değiştirilemiyor.</string>
     <string name="contacts_cant_change_group">Şu anda bu grup değiştirilemiyor.</string>
-    <string name="contacts_cant_change_groups_permission">Gruplar değiştirilemiyor: Rovsti\'nin kişileri değiştirme izni yok.</string>
+    <string name="contacts_cant_change_groups_permission">Gruplar değiştirilemiyor: Rosty\'nin kişileri değiştirme izni yok.</string>
     <string name="contacts_cant_change_photo">Fotoğraf değiştirilemiyor</string>
     <string name="contacts_cant_change_ringtone">Zil sesi değiştirilemiyor</string>
     <string name="contacts_cant_change_setting">Bu ayar değiştirilemiyor</string>
@@ -145,7 +145,7 @@
     <string name="contacts_cant_save_group">Şu anda grup kaydedilemiyor.</string>
     <string name="contacts_cant_save_here">Buraya dosya kaydedilemiyor.</string>
     <string name="contacts_cant_save_image">Görüntü kaydedilemiyor</string>
-    <string name="contacts_cant_save_permission">Kaydedilemiyor: Rovsti\'nin kişileri değiştirme izni yok.</string>
+    <string name="contacts_cant_save_permission">Kaydedilemiyor: Rosty\'nin kişileri değiştirme izni yok.</string>
     <string name="contacts_cant_save_photo">Fotoğraf kaydedilemiyor</string>
     <string name="contacts_cant_save_right_now">Şu anda kaydedilemiyor.</string>
     <string name="contacts_cant_save_setting">Ayar kaydedilemiyor.</string>
@@ -221,7 +221,7 @@
     <string name="contacts_import">İçe Aktar</string>
     <string name="contacts_import_contacts">Kişileri İçe Aktar</string>
     <string name="contacts_import_csv">CSV İçe Aktar</string>
-    <string name="contacts_install_messages">WhatsApp\'ta sohbet etmek için Rovsti Mesajlar\'ı yükleyin</string>
+    <string name="contacts_install_messages">WhatsApp\'ta sohbet etmek için Rosty Mesajlar\'ı yükleyin</string>
     <string name="contacts_job_title">Unvan</string>
     <string name="contacts_keep_editing">Düzenlemeye Devam Et</string>
     <string name="contacts_label">Etiket</string>
@@ -328,7 +328,7 @@
     <string name="contacts_send_email">E-posta Gönder</string>
     <string name="contacts_send_to_voicemail">Sesli Mesaja Gönder</string>
     <string name="contacts_set_as_default">Varsayılan Yap</string>
-    <string name="contacts_set_default_phone">Arayanları engellemek için Rovsti Telefon\'u varsayılan telefon uygulaması yapın.</string>
+    <string name="contacts_set_default_phone">Arayanları engellemek için Rosty Telefon\'u varsayılan telefon uygulaması yapın.</string>
     <string name="contacts_set_my_card">Kartımı Ayarla</string>
     <string name="contacts_share">Paylaş</string>
     <string name="contacts_share_address">Adresi Paylaş</string>
@@ -483,7 +483,7 @@
     <string name="settings_people_restart_body">Şimdiye kadarki ilerleme korunur, ancak herkes yeniden denetlenir. Bu daha uzun sürer.</string>
     <string name="settings_people_restart">Baştan Başla</string>
     <string name="settings_people_restart_cancel">Vazgeç</string>
-    <string name="settings_people_footer">WhatsApp\'ta tanıştığınız kişilerin adları ve fotoğrafları bu telefonda kalır ve Rovsti Phone ile paylaşılır. Kişilerinize hiçbir şey eklenmez. Eşitleme, WhatsApp hesabınızı sınırlamasın diye bilerek yavaştır.</string>
+    <string name="settings_people_footer">WhatsApp\'ta tanıştığınız kişilerin adları ve fotoğrafları bu telefonda kalır ve Rosty Phone ile paylaşılır. Kişilerinize hiçbir şey eklenmez. Eşitleme, WhatsApp hesabınızı sınırlamasın diye bilerek yavaştır.</string>
     <string name="card_birthday_title">Doğum günün kutlu olsun, %1$s!</string>
     <string name="card_birthday_title_nameless">Doğum günün kutlu olsun!</string>
     <plurals name="card_birthday_age"><item quantity="one">%1$d yaşına giriyorsun</item><item quantity="other">%1$d yaşına giriyorsun</item></plurals>

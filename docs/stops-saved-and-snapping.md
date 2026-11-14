@@ -1,6 +1,6 @@
 # Stops: saved stops and pin snapping
 
-Code: `crates/rovsti_geo/src/saved_stops.rs` (model, file format, name prefill),
+Code: `crates/rosty_geo/src/saved_stops.rs` (model, file format, name prefill),
 `apps/stops/src/snap.rs` (snap decision, pure, no gpui), `apps/stops/src/map.rs`
 (`Gesture::PinDrop`, `drop_destination`, `PinSettle`), `apps/stops/src/saved_ui.rs` (Saved tab).
 
@@ -8,7 +8,7 @@ Code: `crates/rovsti_geo/src/saved_stops.rs` (model, file format, name prefill),
 
 A and B are not stops. The two points together define one **stop**: the segment AB (the
 diameter) is the gate, and crossing that segment fires the alarm
-(`crates/rovsti_geo/src/crossing.rs`, unchanged). Crossing is two-way, so direction does not
+(`crates/rosty_geo/src/crossing.rs`, unchanged). Crossing is two-way, so direction does not
 matter. UI and docs say "stop" for the pair and "point A" / "point B" only for its two ends.
 Pins snap to GTFS stops (which are real stops of a feed); saved stops are never snap targets.
 
@@ -66,5 +66,5 @@ left it. To unsnap, drag the pin slowly away (more than `HOLD_PX`), or release s
 
 On a snap the pin glides from the release point to the stop with a spring: the liquid-glass
 `motion_tokens::release()` (0 -> 1, stiffness 420, `PinSettle`). Reduced motion jumps. A
-light haptic (`HapticFeedback::Selection` through `rovsti_ui::haptics::perform`) plays on
+light haptic (`HapticFeedback::Selection` through `rosty_ui::haptics::perform`) plays on
 every snap. A free drop has neither settle nor haptic.

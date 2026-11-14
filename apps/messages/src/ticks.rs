@@ -4,8 +4,8 @@
 //! them once a voice note was played.
 
 use gpui::{Hsla, IntoElement, ParentElement, Styled, div, px, rgb};
-use rovsti_ui::Icon;
-use rovsti_wa_proto::{DeliveryStatus, Item, ItemState, MessageMeta};
+use rosty_ui::Icon;
+use rosty_wa_proto::{DeliveryStatus, Item, ItemState, MessageMeta};
 
 /// Blue ticks on my own (accent-filled) bubble: a light sky blue that stands
 /// out from the grey-white of the other ticks.
@@ -109,7 +109,7 @@ pub fn read_color(on_bubble: bool) -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::{MediaMeta, MessageBody, WaMessage};
+    use rosty_wa_proto::{MediaMeta, MessageBody, WaMessage};
 
     fn item(from_me: bool, state: ItemState) -> Item {
         Item {

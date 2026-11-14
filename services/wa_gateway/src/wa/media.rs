@@ -1,7 +1,7 @@
 //! Media messages: uploaded files to WhatsApp message protobufs, and stored
 //! protobufs back to something `client.download` accepts. Pure.
 
-use rovsti_wa_proto::MediaKind;
+use rosty_wa_proto::MediaKind;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::upload::UploadResponse;
 use whatsapp_rust::wacore::download::{Downloadable, MediaType};

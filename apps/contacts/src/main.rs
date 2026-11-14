@@ -1,9 +1,9 @@
-//! Rovsti Contacts: the phone's address book in liquid glass.
+//! Rosty Contacts: the phone's address book in liquid glass.
 //!
 //! Contacts are read from Android's `ContactsContract` through
-//! `rovsti_android` (the `backend` module); search, sections, the detail card,
+//! `rosty_android` (the `backend` module); search, sections, the detail card,
 //! the editor's checks, vCard files and the import plan come from
-//! `rovsti_core`. The owner can create, edit and delete contacts and groups,
+//! `rosty_core`. The owner can create, edit and delete contacts and groups,
 //! import and export a `.vcf`, and see photos. Desktop runs show a sample
 //! address book. Nothing leaves the device.
 
@@ -39,7 +39,7 @@ mod whatsapp;
 
 use std::{iter, path::PathBuf, sync::Arc};
 
-use rovsti_app_core::contacts::{prefs, trash_store};
+use rosty_app_core::contacts::{prefs, trash_store};
 
 use futures::StreamExt;
 use gpui::{
@@ -48,11 +48,11 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, canvas,
     div, list, prelude::*, px, size, svg,
 };
-use rovsti_android::{
+use rosty_android::{
     events,
     permissions::{self, Group as AccessGroup},
 };
-use rovsti_core::{
+use rosty_core::{
     contact_card::{self, ContactCard},
     contact_edit::{Account, ContactDraft, Group, account_label},
     contact_trash::Trash,
@@ -61,7 +61,7 @@ use rovsti_core::{
     settings::SortBy,
     wire::{NameFormat, WireContact},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon, IconAssets,
     components::{empty_state, glass_icon_button, glass_pill, large_title, list_row, section},
     current_theme,
@@ -74,7 +74,7 @@ use rovsti_ui::{
     tokens::{Theme, metrics, shadow, typography},
 };
 
-use rovsti_wa_ui::{AppId, WaAvatars, WhatsAppSettings};
+use rosty_wa_ui::{AppId, WaAvatars, WhatsAppSettings};
 
 use crate::{
     backend::Book,
@@ -202,7 +202,7 @@ mod notice_tests {
         let ids = vec![2_i64, 5, 9];
         let set: std::collections::BTreeSet<i64> = [1, 2, 5, 7, 9].into();
         assert_eq!(
-            rovsti_core::contact_select::export_ids(&set, &ids),
+            rosty_core::contact_select::export_ids(&set, &ids),
             vec![1, 7]
         );
     }
@@ -314,8 +314,8 @@ impl From<ContactVm> for Row {
 
 struct ContactsApp {
     tabs: TabBar,
-    motion: rovsti_ui::motion::Motion,
-    page: rovsti_ui::motion::Entrance,
+    motion: rosty_ui::motion::Motion,
+    page: rosty_ui::motion::Entrance,
     scroll: ScrollHandle,
     field: Entity<TextField>,
     seen_edits: u64,
@@ -358,7 +358,7 @@ struct ContactsApp {
     /// Open this contact once the next pull lands (after a save).
     pending_open: Option<i64>,
     /// A shared file read before the book loaded, and how many extra files it came with.
-    pending_intake: Option<(rovsti_core::contact_intake::Intake, usize, Option<String>)>,
+    pending_intake: Option<(rosty_core::contact_intake::Intake, usize, Option<String>)>,
     /// The calling code most numbers in the book start with.
     home_cc: Option<String>,
     /// The field sheet shows the "Copy as" list.
@@ -382,7 +382,7 @@ struct ContactsApp {
     calls: history::Calls,
     calls_loads: u64,
     /// The phone's clock style, for the call times.
-    locale: rovsti_core::recents::LocaleTime,
+    locale: rosty_core::recents::LocaleTime,
     /// Birthday and anniversary notifications (opt in) and their local hour.
     birthday_reminders: bool,
     reminder_hour: u8,
@@ -399,33 +399,33 @@ struct ContactsApp {
     /// The version before the last saved edit, for the Undo on its pill.
     edit_undo: Option<EditUndo>,
     /// "In details" search: the index of the book (built per reload), and its rows.
-    deep: Option<Arc<rovsti_core::contact_find::DeepIndex>>,
+    deep: Option<Arc<rosty_core::contact_find::DeepIndex>>,
     deep_loads: u64,
     deep_rows: Vec<Row>,
     /// Frequently contacted (call log), and its rows under the favorites.
-    frequent: Vec<rovsti_core::contact_frequent::Frequent>,
+    frequent: Vec<rosty_core::contact_frequent::Frequent>,
     frequent_loads: u64,
     frequent_rows: Vec<Row>,
     dupes: dupes::Dupes,
     /// Birthdays and anniversaries within a year (soonest first), the first
     /// number of each contact for the Wish chip, and the page showing them.
-    upcoming: Vec<rovsti_core::contact_dates::Upcoming>,
+    upcoming: Vec<rosty_core::contact_dates::Upcoming>,
     upcoming_numbers: std::collections::HashMap<i64, String>,
     upcoming_loads: u64,
     upcoming_open: bool,
     recent: recent::RecentLists,
     /// The tab of the Recent page, kept for the session.
-    recent_tab: rovsti_core::contact_recent::RecentTab,
+    recent_tab: rosty_core::contact_recent::RecentTab,
     recent_open: bool,
     /// Lookup key of my card, and the emergency keys, as saved in the prefs.
     my_card: Option<String>,
     emergency: Vec<String>,
     /// Recently added bookkeeping and recently viewed keys, as saved in the prefs.
     known_max_id: Option<i64>,
-    added_marks: Vec<rovsti_core::contact_recent::AddedMark>,
+    added_marks: Vec<rosty_core::contact_recent::AddedMark>,
     viewed: Vec<String>,
     /// The numbers / emails waiting for the "Add to which contact?" choice.
-    add_pending: Option<rovsti_core::contact_edit::Addition>,
+    add_pending: Option<rosty_core::contact_edit::Addition>,
     emergency_rows: Vec<me::EmergencyRow>,
     emergency_open: bool,
     /// The owner changed them before the prefs file was read.
@@ -449,7 +449,7 @@ struct ContactsApp {
     scrub_letters: Vec<char>,
     scrub: upcoming::Scrub,
     /// Select mode in the Contacts list: the ticked contacts.
-    select: Option<rovsti_core::multi_select::Selection<i64>>,
+    select: Option<rosty_core::multi_select::Selection<i64>>,
     select_ui: select::SelectUi,
     /// The contacts whose delete waits for their Undo window.
     pending_delete: Option<PendingDelete>,
@@ -563,13 +563,13 @@ impl ContactsApp {
         // Tell Kotlin the session is live so an answer that came early is delivered.
         cx.background_executor()
             .spawn(async {
-                let _ = rovsti_android::window::ui_attached(true);
+                let _ = rosty_android::window::ui_attached(true);
             })
             .detach();
 
         // The saved name format and sort order. The platform sometimes refuses
         // the first request for the data folder; asking again works.
-        let data_dirs = rovsti_ui::storage::DataDirs::new("contacts");
+        let data_dirs = rosty_ui::storage::DataDirs::new("contacts");
         cx.spawn(async move |this, cx| {
             let mut attempt = 1;
             let dir = loop {
@@ -703,9 +703,9 @@ impl ContactsApp {
             notice_action: None,
             calls: history::Calls::Hidden,
             calls_loads: 0,
-            locale: rovsti_core::recents::LocaleTime::default(),
+            locale: rosty_core::recents::LocaleTime::default(),
             birthday_reminders: false,
-            reminder_hour: rovsti_core::birthday_reminder::DEFAULT_HOUR,
+            reminder_hour: rosty_core::birthday_reminder::DEFAULT_HOUR,
             birthday_touched: false,
             prefs_ready: false,
             upcoming_ready: false,
@@ -714,7 +714,7 @@ impl ContactsApp {
             upcoming_loads: 0,
             upcoming_open: false,
             recent: recent::RecentLists::default(),
-            recent_tab: rovsti_core::contact_recent::RecentTab::Added,
+            recent_tab: rosty_core::contact_recent::RecentTab::Added,
             recent_open: false,
             my_card: None,
             emergency: Vec::new(),
@@ -798,8 +798,8 @@ impl ContactsApp {
                 if this.pulls == pull_id {
                     let book = match (book, this.pending_delete.as_ref()) {
                         (Book::Ready(index), Some(pending)) => {
-                            Book::Ready(Arc::new(rovsti_core::search::ContactIndex::new(
-                                rovsti_core::contacts_view::without(index.all(), &pending.ids),
+                            Book::Ready(Arc::new(rosty_core::search::ContactIndex::new(
+                                rosty_core::contacts_view::without(index.all(), &pending.ids),
                             )))
                         }
                         (book, _) => book,
@@ -844,7 +844,7 @@ impl ContactsApp {
         .detach();
     }
 
-    fn index(&self) -> Option<&Arc<rovsti_core::search::ContactIndex>> {
+    fn index(&self) -> Option<&Arc<rosty_core::search::ContactIndex>> {
         match &self.book {
             Book::Ready(index) => Some(index),
             _ => None,
@@ -865,7 +865,7 @@ impl ContactsApp {
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         self.rebuild_rows(cx);
         self.home_cc = self.index().and_then(|index| {
-            rovsti_core::number_format::infer_home_cc(
+            rosty_core::number_format::infer_home_cc(
                 index
                     .all()
                     .flat_map(|c| c.numbers.iter().map(|n| n.raw.as_str())),
@@ -922,7 +922,7 @@ impl ContactsApp {
     /// The favorites in the owner's saved order (the rest by name).
     fn favorite_refs<'a>(
         &self,
-        index: &'a rovsti_core::search::ContactIndex,
+        index: &'a rosty_core::search::ContactIndex,
     ) -> Vec<&'a WireContact> {
         contacts_view::order_favorite_refs(
             contacts_view::ordered(contact_card::favorites(index.all()), self.style),
@@ -1203,7 +1203,7 @@ impl ContactsApp {
     fn act(
         &mut self,
         what: &'static str,
-        action: impl FnOnce() -> rovsti_android::Result<bool> + Send + 'static,
+        action: impl FnOnce() -> rosty_android::Result<bool> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
         self.clear_notice();
@@ -1242,7 +1242,7 @@ impl ContactsApp {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { rovsti_android::providers::set_starred(id, starred) })
+                .spawn(async move { rosty_android::providers::set_starred(id, starred) })
                 .await;
             this.update(cx, |this, cx| {
                 let done = if starred {
@@ -1251,7 +1251,7 @@ impl ContactsApp {
                     "Removed from Favorites."
                 };
                 match result {
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.notice = Some(done.into());
                         cx.notify();
                     }
@@ -1288,7 +1288,7 @@ impl ContactsApp {
         for contact in all.iter_mut().filter(|c| ids.contains(&c.id)) {
             contact.starred = starred;
         }
-        self.book = Book::Ready(Arc::new(rovsti_core::search::ContactIndex::new(all)));
+        self.book = Book::Ready(Arc::new(rosty_core::search::ContactIndex::new(all)));
         if let Some(draft) = self
             .open_draft
             .as_mut()
@@ -1348,7 +1348,7 @@ impl ContactsApp {
             return false;
         };
         let ids: Vec<i64> = index.all().map(|c| c.id).collect();
-        let (max, marks) = rovsti_core::contact_recent::note_pull(
+        let (max, marks) = rosty_core::contact_recent::note_pull(
             self.known_max_id,
             &self.added_marks,
             &ids,
@@ -1368,7 +1368,7 @@ impl ContactsApp {
     /// Marks a contact created in the app as recently added.
     pub(crate) fn note_created(&mut self, id: i64) {
         self.added_marks =
-            rovsti_core::contact_recent::note_created(&self.added_marks, id, whatsapp::now_ms());
+            rosty_core::contact_recent::note_created(&self.added_marks, id, whatsapp::now_ms());
     }
 
     /// The preferences as they are now.
@@ -1695,7 +1695,7 @@ impl ContactsApp {
                     .child(empty_state(
                         theme,
                         "Allow Access to Contacts",
-                        "Rovsti Contacts reads your address book on this phone. Nothing is uploaded. \
+                        "Rosty Contacts reads your address book on this phone. Nothing is uploaded. \
                          If Android no longer asks, allow Contacts in the app's settings.",
                     ))
                     .child(
@@ -1814,10 +1814,10 @@ impl ContactsApp {
                 .into_any_element()
             } else {
                 let draft = matches!(self.book, Book::Ready(_))
-                    .then(|| rovsti_core::contact_edit::draft_from_query(query))
+                    .then(|| rosty_core::contact_edit::draft_from_query(query))
                     .flatten();
                 let addition = matches!(self.book, Book::Ready(_))
-                    .then(|| rovsti_core::contact_edit::Addition::from_query(query))
+                    .then(|| rosty_core::contact_edit::Addition::from_query(query))
                     .flatten();
                 div()
                     .flex()
@@ -1849,7 +1849,7 @@ impl ContactsApp {
         };
         let query = self.field.read(cx).text().to_owned();
         let recent_row = (matches!(self.book, Book::Ready(_))
-            && rovsti_core::contact_recent::show_entry(
+            && rosty_core::contact_recent::show_entry(
                 &query,
                 self.recent.added.len(),
                 self.recent.edited.len(),
@@ -2157,7 +2157,7 @@ impl ContactsApp {
                     .child(
                         "Contacts are kept in this phone's address book. \
                          Files you export or import stay where you save them. \
-                         Only WhatsApp goes through your Rovsti gateway.",
+                         Only WhatsApp goes through your Rosty gateway.",
                     ),
             )
             .into_any_element()
@@ -2226,7 +2226,7 @@ impl ContactsApp {
         let owns_button = match self.notice_action {
             Some(NoticeAction::UndoDelete) => self.pending_delete.as_ref().is_some_and(|p| {
                 self.notice.as_deref()
-                    == Some(rovsti_core::contact_trash::moved_notice(p.ids.len()).as_str())
+                    == Some(rosty_core::contact_trash::moved_notice(p.ids.len()).as_str())
             }),
             Some(NoticeAction::UndoMerge) => self
                 .merge_undo
@@ -2396,7 +2396,7 @@ impl Render for ContactsApp {
         let picking = self.picker.is_some();
 
         // The keyboard covers the bottom of the screen: leave room to scroll.
-        let keyboard = px(rovsti_ui::layout::keyboard_inset(window));
+        let keyboard = px(rosty_ui::layout::keyboard_inset(window));
         let bottom = content_bottom_inset(window);
         let focused_field = ui::take_focused_field_bounds();
         if editing {
@@ -2493,7 +2493,7 @@ impl Render for ContactsApp {
                     cx.notify();
                 }),
             )
-            .child(rovsti_ui::components::backdrop(
+            .child(rosty_ui::components::backdrop(
                 theme,
                 theme::colors(theme).green,
             ))
@@ -2503,9 +2503,9 @@ impl Render for ContactsApp {
             } else {
                 None
             })
-            .children(self.select_bar_view(rovsti_ui::layout::safe_area(window).bottom, theme, cx))
-            .children(self.trash_bar_view(rovsti_ui::layout::safe_area(window).bottom, theme, cx))
-            .children(self.cleanup_bar_view(rovsti_ui::layout::safe_area(window).bottom, theme, cx))
+            .children(self.select_bar_view(rosty_ui::layout::safe_area(window).bottom, theme, cx))
+            .children(self.trash_bar_view(rosty_ui::layout::safe_area(window).bottom, theme, cx))
+            .children(self.cleanup_bar_view(rosty_ui::layout::safe_area(window).bottom, theme, cx))
             .children(self.select.is_some().then(|| {
                 let entity = cx.entity();
                 canvas(
@@ -2532,7 +2532,7 @@ impl Render for ContactsApp {
                 .then(|| {
                     self.tabs.render(
                         theme,
-                        rovsti_ui::layout::safe_area(window).bottom,
+                        rosty_ui::layout::safe_area(window).bottom,
                         move |index, _, cx| {
                             entity.update(cx, |this, cx| {
                                 this.tabs.press();
@@ -2623,7 +2623,7 @@ impl Render for ContactsApp {
 #[gpui_platform::main]
 fn main() {
     // Keeps the JNI entry points in the final library (see `bridge::keep_symbols`).
-    rovsti_android::bridge::keep_symbols();
+    rosty_android::bridge::keep_symbols();
     // Files and text shared to the app, and links opened with it.
     let (share_tx, share_rx) = futures::channel::mpsc::unbounded::<intake::Incoming>();
     let app = gpui_platform::application().with_assets(IconAssets::new());
@@ -2659,7 +2659,7 @@ fn main() {
                 app
             },
         )
-        .expect("failed to open the Rovsti Contacts window");
+        .expect("failed to open the Rosty Contacts window");
         cx.activate(true);
     });
 }

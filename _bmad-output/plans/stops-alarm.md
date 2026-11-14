@@ -1,21 +1,21 @@
-# Plan: Rovsti Stops, adaptive polling and alarm-clock-grade alarm (round 1)
+# Plan: Rosty Stops, adaptive polling and alarm-clock-grade alarm (round 1)
 
 - Base: `e5d05671787e6ab3782eeb7924da0c509287c587` ("WIP: carry-over before sync")
 - Architect: PLAN agent. No source changed by this plan.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 - No device and no Gradle run here. Kotlin is verified by reading plus the cargo "Kotlin contract"
   test introduced in step 5 (it `include_str!`s the Kotlin sources and asserts the required calls and
   mirrored constants). Disk: if `df` shows < 6 GB free, `rm -rf target/debug/incremental` first.
 
 ## What exists at the base (verified)
 
-- `crates/rovsti_geo/src/crossing.rs` `CrossingTrip::next_fix_in` (private): Tracking ->
+- `crates/rosty_geo/src/crossing.rs` `CrossingTrip::next_fix_in` (private): Tracking ->
   `slack = line_m - acc - max(DEAD_BAND_M, acc)`, `slack / MAX_SPEED_MPS / 2` clamped to 3..300 s;
   not Tracking -> 60 s. A garbage coordinate answers a hard-coded 3 s. NaN accuracy counts as 0
   (optimistic, wrong). Only one test (`trip_next_fix_and_eta`) touches the curve (300 s far, 3 s near).
   `MAX_SPEED_MPS = 60`, `MAX_ACCURACY_M = 150` are `pub(crate)` in `trip.rs`.
-- `crates/rovsti_geo/src/session.rs` `FixOut { next_fix_ms, high_accuracy (<= 15 s), ... }`;
+- `crates/rosty_geo/src/session.rs` `FixOut { next_fix_ms, high_accuracy (<= 15 s), ... }`;
   `ActiveTrip::snooze` caps at `MAX_SNOOZES = 5`.
 - `TripService.kt`: foreground service type `location` (`ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION`,
   manifest `foregroundServiceType="location"`), `LocationManager` only, GPS / `FUSED_PROVIDER` /
@@ -31,7 +31,7 @@
   `setSound(null, null)`; `setFullScreenIntent` without checking `canUseFullScreenIntent`. Process
   death mid-ring leaves nothing to re-ring.
 - `AlarmActivity.kt`: `setShowWhenLocked`, `setTurnScreenOn`, `FLAG_KEEP_SCREEN_ON` (OK).
-- Facade already there: `rovsti_android::permissions::{can_use_full_screen_intent,
+- Facade already there: `rosty_android::permissions::{can_use_full_screen_intent,
   open_full_screen_intent_settings}` (desktop `Unsupported`), `Preflight.full_screen`, and the
   "Let the alarm wake the screen" row in `apps/stops/src/trip_ui.rs:212`. Gap: `Preflight` is
   gathered only at startup (`main.rs:273`) and after the row is tapped it is set to `None`, so the
@@ -42,7 +42,7 @@
 
 ## Decisions
 
-- **AD-SA1 One explicit polling curve** in a new pure module `rovsti_geo::poll`. Interval =
+- **AD-SA1 One explicit polling curve** in a new pure module `rosty_geo::poll`. Interval =
   `slack / (2 * MAX_SPEED_MPS)` clamped to `[MIN_POLL = 3 s, MAX_POLL = 300 s]`, where
   `slack = line_m - acc - max(DEAD_BAND_M, acc)`. Unknown or unusable accuracy counts as
   `MAX_ACCURACY_M` (pessimistic). Unknown distance (no usable fix yet) -> `MAX_POLL`. A garbage or
@@ -50,12 +50,12 @@
 - **AD-SA2 Retry window** `retry_after(interval) = interval + grace`, `grace = (interval / 4)`
   clamped to 5..30 s. Rust sends it as `FixOut.retry_ms`; Kotlin uses it for the watchdog and keeps
   a mirrored fallback formula for the start spec.
-- **AD-SA3 Alarm policy is Rust data** (`rovsti_geo::alarm::AlarmPlan`), sent to Kotlin inside the
+- **AD-SA3 Alarm policy is Rust data** (`rosty_geo::alarm::AlarmPlan`), sent to Kotlin inside the
   start spec (`"alarm": {...}`) and saved with `TripPrefs`. Kotlin has identical defaults so it
   rings even if Rust never answered. The cargo contract test keeps both in sync.
 - **AD-SA4 Never silent**: sound sources in order `user_alarm, default_alarm, default_ringtone,
   default_notification, tone` (ToneGenerator on STREAM_ALARM; no bundled raw sound because
-  `rovsti_android` ships no resources). MediaPlayer errors (`OnErrorListener`, exceptions) advance
+  `rosty_android` ships no resources). MediaPlayer errors (`OnErrorListener`, exceptions) advance
   to the next source. Vibration with alarm usage runs independently.
 - **AD-SA5 Ring timeout**: after `ring_timeout` (10 min) the alarm stops and re-rings after the
   user's snooze length; timeouts do not consume `MAX_SNOOZES` and are capped at
@@ -67,9 +67,9 @@
 
 ## Steps
 
-### 1. Explicit polling curve (pure, `rovsti_geo::poll`)
+### 1. Explicit polling curve (pure, `rosty_geo::poll`)
 
-- New `crates/rovsti_geo/src/poll.rs`, `pub mod poll;` in `lib.rs`. Make `MAX_SPEED_MPS` and
+- New `crates/rosty_geo/src/poll.rs`, `pub mod poll;` in `lib.rs`. Make `MAX_SPEED_MPS` and
   `MAX_ACCURACY_M` usable from it (they are `pub(crate)` already; re-export as `pub` consts in
   `poll` with docs).
 - API:
@@ -97,13 +97,13 @@
   300 s -> 330 s, monotonic). In `crossing.rs`: update `trip_next_fix_and_eta`; extend
   `garbage_fixes_neither_panic_nor_change_state` to assert the interval equals the curve at the
   last known distance; a new test that a first fix with accuracy 1000 m gives 300 s.
-- Acceptance: checks green; `grep -n "clamp(3.0, 300.0)" crates/rovsti_geo` finds nothing.
+- Acceptance: checks green; `grep -n "clamp(3.0, 300.0)" crates/rosty_geo` finds nothing.
 
-### 2. `FixOut.retry_ms` and the alarm policy (pure, `rovsti_geo`)
+### 2. `FixOut.retry_ms` and the alarm policy (pure, `rosty_geo`)
 
 - `session.rs`: `FixOut` gains `#[serde(default)] pub retry_ms: u64` = `retry_after(next_fix_in)`.
   Test in `session.rs` (far and near) and update the serde fixture there.
-- New `crates/rovsti_geo/src/alarm.rs` (`pub mod alarm;`, re-export `AlarmPlan, SoundSource`):
+- New `crates/rosty_geo/src/alarm.rs` (`pub mod alarm;`, re-export `AlarmPlan, SoundSource`):
   ```rust
   pub const MIN_ALARM_VOLUME_PCT: u8 = 80;
   pub const RAMP: Duration = Duration::from_secs(4);          // full loudness within 5 s
@@ -141,7 +141,7 @@
   `snooze_min`, calls `trip.ring_timed_out`, saves, answers `{"ring_at_ms": n}` or
   `{"silenced": true}` (trip stays Arrived, not ended). Update the module table doc. Tests:
   timeout re-arms without consuming snoozes, cap answers `silenced`, unknown trip answers `ENDED`.
-- `rovsti_android::trip`: `TripAlarmEvent::TimedOut { at_ms }` parsed from
+- `rosty_android::trip`: `TripAlarmEvent::TimedOut { at_ms }` parsed from
   `{"event":"timed_out","at_ms":n}` (extend `alarm_events_parse`); `AlarmAction` unchanged.
 - `main.rs`/`trip_ui.rs`: handle `TimedOut` like `Snoozed` in the live card text ("Rings again at
   HH:MM").
@@ -154,7 +154,7 @@
 - `trip_ui.rs`: tapping "Open" no longer sets `full_screen = None` permanently; the activation
   refresh brings the row back if still denied. Also show the row on the live card while a trip
   runs (it already shows on the Trip tab; keep one row).
-- `RovstiBridge.canUseFullScreenIntent`: `Build.VERSION.SDK_INT < 34 || manager.canUseFullScreenIntent()`
+- `RostyBridge.canUseFullScreenIntent`: `Build.VERSION.SDK_INT < 34 || manager.canUseFullScreenIntent()`
   (the API only exists on 14+; the shared bridge is also built for minSdk 26 hosts).
 - Test: a pure helper `fn full_screen_notice(pre: &Preflight) -> Option<&'static str>` in
   `backend.rs` with tests for `Some(false)` / `Some(true)` / `None`.
@@ -172,7 +172,7 @@
     (S+) and legacy paths; when `IllegalArgumentException` drops the provider, re-arm the
     watchdog with `tripWatchdogMs(TRIP_MIN_INTERVAL_MS * 10)`.
 - New `apps/stops/src/kotlin_contract.rs` (`#[cfg(test)] mod kotlin_contract;` in `main.rs`):
-  `include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/TripService.kt")` and
+  `include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/TripService.kt")` and
   assert: `FOREGROUND_SERVICE_TYPE_LOCATION`, `requestLocationUpdates` twice (both paths),
   `retry_ms`, `TRIP_MAX_INTERVAL_MS = 300_000L` equals `poll::MAX_POLL`, the watchdog grace
   literals `5_000` and `30_000`; manifest
@@ -181,18 +181,18 @@
 
 ### 6. TripAlarm audio: focus, volume, routing, fallback chain (Kotlin, thin)
 
-- New `crates/rovsti_android/kotlin/dev/rovsti/bridge/AlarmSound.kt` (`internal class
+- New `crates/rosty_android/kotlin/dev/rosty/bridge/AlarmSound.kt` (`internal class
   AlarmSound(context, plan)`), used by `TripAlarm`:
   - `ALARM_ATTRS = AudioAttributes.Builder().setUsage(USAGE_ALARM).setContentType(CONTENT_TYPE_SONIFICATION).build()`.
   - Focus: `AudioFocusRequest.Builder(AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE).setAudioAttributes(ALARM_ATTRS)
     .setOnAudioFocusChangeListener { }` (loss is ignored: the alarm keeps ringing);
     `requestAudioFocus` before playing, `abandonAudioFocusRequest` in `stop()`.
-  - Volume: save `getStreamVolume(STREAM_ALARM)` into SharedPreferences `rovsti_alarm`
+  - Volume: save `getStreamVolume(STREAM_ALARM)` into SharedPreferences `rosty_alarm`
     (`saved_volume`) before changing; target `alarmVolumeTarget(cur, min, max, plan.volumePct)`
     and ramp every 250 ms with `rampVolume` (Kotlin mirrors of step 2, same formulas), wrapped in
     `try { setStreamVolume } catch (SecurityException)`; `stop()` restores and clears the pref.
     `TripAlarm.recover(context)` restores a stale saved volume when nothing rings (called from
-    `TripService.onCreate`, `TripAlarmReceiver.onReceive`, `RovstiBridge` init).
+    `TripService.onCreate`, `TripAlarmReceiver.onReceive`, `RostyBridge` init).
   - Sources in `plan.soundOrder`: `RingtoneManager.getActualDefaultRingtoneUri(TYPE_ALARM)`,
     `getDefaultUri(TYPE_ALARM)`, `getDefaultUri(TYPE_RINGTONE)`, `getDefaultUri(TYPE_NOTIFICATION)`,
     then `ToneGenerator(AudioManager.STREAM_ALARM, 100)` repeating `TONE_CDMA_ALERT_CALL_GUARD` via

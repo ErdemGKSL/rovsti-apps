@@ -1,11 +1,11 @@
 plugins {
-    id("rovsti.android.library")
-    id("rovsti.compose")
+    id("rosty.android.library")
+    id("rosty.compose")
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "dev.rovsti.design"
+    namespace = "dev.rosty.design"
 }
 
 android {
@@ -58,7 +58,7 @@ tasks.named<CheckComposeStabilityTask>("checkComposeStability") {
             "FoldingTabGroup",
             "FoldingTabCell",
             "Tab",
-            "RovstiTabBar",
+            "RostyTabBar",
             "FrostedTopBar",
             "IosNavigationBar",
             "IosTabBar",

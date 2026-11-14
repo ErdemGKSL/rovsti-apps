@@ -1,6 +1,6 @@
-//! Rovsti Phone: the dialer.
+//! Rosty Phone: the dialer.
 //!
-//! Desktop `cargo run -p rovsti_phone` renders the same UI for design work
+//! Desktop `cargo run -p rosty_phone` renders the same UI for design work
 //! (placing a call walks a fake one through the In-Call screen); real calls,
 //! contacts and the call log need the Android host (see docs/android.md) and
 //! the default-dialer role.
@@ -68,11 +68,11 @@ use incoming::Incoming;
 use notice::Notice;
 use photos::Photos;
 use recents::RecentsView;
-use rovsti_core::{
+use rosty_core::{
     dial,
     setup::{OpenedThisSession, SetupChecklist},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon, IconAssets,
     components::{backdrop, large_title},
     current_theme,
@@ -164,7 +164,7 @@ struct PhoneApp {
     tab_view: Entity<TabBarView>,
     dialed: String,
     /// Speed-dial map the badges below were built from (rebuilt only on change).
-    speed_map: std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>,
+    speed_map: std::collections::BTreeMap<u8, rosty_core::settings::SpeedDialEntry>,
     /// Keypad badge per digit (index `d - 1`): shown name and avatar hue.
     speed_badges: [Option<(SharedString, Option<usize>)>; 9],
     /// Keypad screen-reader label per digit when it has a speed dial.
@@ -174,7 +174,7 @@ struct PhoneApp {
     /// `dialed` split into the settled digits and the newest one, as text
     /// ready to draw; rebuilt only when `dialed` or the elision changes.
     shown_digits: (String, Option<usize>, SharedString, SharedString),
-    kp_layout: rovsti_core::keypad_layout::KeypadLayout,
+    kp_layout: rosty_core::keypad_layout::KeypadLayout,
     status: Option<Status>,
     /// Whose number is typed (story 10.1); shown in the status line.
     dial_match: keypad::DialMatch,
@@ -182,7 +182,7 @@ struct PhoneApp {
     /// The open "Copy as" / "Share as" chooser.
     copy_as: Option<actions_ui::CopyAs>,
     /// The keypad field's long-press menu (`keypad::field_menu_overlay`).
-    field_menu: Option<Vec<rovsti_core::dial::FieldAction>>,
+    field_menu: Option<Vec<rosty_core::dial::FieldAction>>,
     quick_reply: Option<person_ui::QuickReply>,
     /// The numbers behind the open "Which number?" sheet.
     paste_choice: Option<Vec<String>>,
@@ -236,7 +236,7 @@ struct PhoneApp {
     /// The checklist last seen once Android's answers were in.
     setup_seen: Option<SetupChecklist>,
     /// Items that were done earlier in this run and are open again.
-    setup_reopened: Vec<rovsti_core::setup::SetupItem>,
+    setup_reopened: Vec<rosty_core::setup::SetupItem>,
     /// The "Something changed" sheet title for `setup_reopened`, built once.
     setup_changed_title: Option<SharedString>,
     /// S15: the old theme's veil fading out over a theme change.
@@ -281,13 +281,13 @@ struct PhoneApp {
     reply: replies_ui::ReplyUi,
     replies_ed: replies_ui::ReplyEditor,
     /// The WhatsApp settings page (the shared screen), shown by `Sub::WhatsApp`.
-    whatsapp: Entity<rovsti_wa_ui::WhatsAppSettings>,
+    whatsapp: Entity<rosty_wa_ui::WhatsAppSettings>,
     /// WhatsApp calls: the incoming card and the live call (AD-WA5).
     wa_call: Entity<wa_call::WaCallUi>,
     /// WhatsApp wake-ups already forwarded to `whatsapp`.
     wa_pushes_seen: u64,
     /// WhatsApp profile pictures and names of the people Phone shows.
-    wa_avatars: Entity<rovsti_wa_ui::WaAvatars>,
+    wa_avatars: Entity<rosty_wa_ui::WaAvatars>,
     /// A WhatsApp picture is fading in (read once per frame for `tick`).
     wa_fading: bool,
 
@@ -339,7 +339,7 @@ struct PhoneApp {
     _restore_timeout: Option<gpui::Task<()>>,
     /// Frame timings per scenario (`perf` builds only).
     #[cfg(any(feature = "perf", test))]
-    recorder: rovsti_ui::perf::Recorder,
+    recorder: rosty_ui::perf::Recorder,
 }
 
 /// How long the first frame waits for the stored preferences.
@@ -360,9 +360,9 @@ impl PhoneApp {
         tabs.jump_to(KEYPAD_TAB);
         #[cfg_attr(target_os = "android", allow(unused_mut))]
         let mut restored = false;
-        // Desktop design preview: start on another tab (ROVSTI_PREVIEW_TAB=1).
+        // Desktop design preview: start on another tab (ROSTY_PREVIEW_TAB=1).
         #[cfg(not(target_os = "android"))]
-        if let Some(tab) = std::env::var("ROVSTI_PREVIEW_TAB")
+        if let Some(tab) = std::env::var("ROSTY_PREVIEW_TAB")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|t| *t < TABS.len())
@@ -374,31 +374,31 @@ impl PhoneApp {
         let mut sheet = Sheet::new();
         // Desktop design preview: open the Setup sheet at start-up.
         #[cfg(not(target_os = "android"))]
-        if std::env::var_os("ROVSTI_PREVIEW_SHEET").is_some() {
+        if std::env::var_os("ROSTY_PREVIEW_SHEET").is_some() {
             sheet.open();
         }
         // Desktop design preview: start a fake call at start-up.
         #[cfg(not(target_os = "android"))]
-        if std::env::var_os("ROVSTI_PREVIEW_CALL").is_some() {
+        if std::env::var_os("ROSTY_PREVIEW_CALL").is_some() {
             backend.update(cx, |backend, cx| {
                 backend.place_call("+905551112233", cx);
             });
         }
-        // Desktop design preview: a multi-call scene at start-up (ROVSTI_PREVIEW_SCENE=two, conf,
+        // Desktop design preview: a multi-call scene at start-up (ROSTY_PREVIEW_SCENE=two, conf,
         // conf4, hidden, waiting, nomerge, three; see backend/preview_multi.rs).
         #[cfg(not(target_os = "android"))]
-        if let Ok(scene) = std::env::var("ROVSTI_PREVIEW_SCENE") {
+        if let Ok(scene) = std::env::var("ROSTY_PREVIEW_SCENE") {
             backend.update(cx, |backend, cx| backend.preview_scene(&scene, cx));
         }
         // Desktop design preview: ring a fake call at start-up (see backend/preview.rs).
         #[cfg(not(target_os = "android"))]
-        if let Some(value) = std::env::var_os("ROVSTI_PREVIEW_INCOMING") {
+        if let Some(value) = std::env::var_os("ROSTY_PREVIEW_INCOMING") {
             let name = value
                 .to_str()
                 .filter(|n| !n.is_empty() && *n != "1")
                 .map(str::to_owned);
-            let locked = std::env::var_os("ROVSTI_PREVIEW_LOCKED").is_some();
-            let give_up = std::env::var_os("ROVSTI_PREVIEW_MISSED").is_some();
+            let locked = std::env::var_os("ROSTY_PREVIEW_LOCKED").is_some();
+            let give_up = std::env::var_os("ROSTY_PREVIEW_MISSED").is_some();
             backend.update(cx, |backend, cx| {
                 backend.preview_ring(name.as_deref(), locked, give_up, cx);
             });
@@ -413,9 +413,9 @@ impl PhoneApp {
         let notes_field = notes_ui.field.clone();
         let replies_ed = replies_ui::ReplyEditor::new(cx);
         let reply_fields = replies_ed.fields.clone();
-        let whatsapp = cx
-            .new(|cx| rovsti_wa_ui::WhatsAppSettings::new(rovsti_wa_ui::AppId::Phone, "phone", cx));
-        let wa_avatars = cx.new(|cx| rovsti_wa_ui::WaAvatars::new(&whatsapp, cx));
+        let whatsapp =
+            cx.new(|cx| rosty_wa_ui::WhatsAppSettings::new(rosty_wa_ui::AppId::Phone, "phone", cx));
+        let wa_avatars = cx.new(|cx| rosty_wa_ui::WaAvatars::new(&whatsapp, cx));
         let wa_call = cx.new(|cx| wa_call::WaCallUi::new(whatsapp.clone(), wa_avatars.clone(), cx));
         // The glass In-Call and Incoming screens draw WhatsApp calls.
         wa_call.update(cx, |ui, _| ui.set_incall_mounted(true));
@@ -439,10 +439,10 @@ impl PhoneApp {
                     this.wa_call.update(cx, |ui, cx| {
                         for (call_id, action) in actions {
                             match action {
-                                rovsti_android::events::WaCallAction::Answer => {
+                                rosty_android::events::WaCallAction::Answer => {
                                     ui.answer_id(&call_id, cx);
                                 }
-                                rovsti_android::events::WaCallAction::Decline => {
+                                rosty_android::events::WaCallAction::Decline => {
                                     ui.decline_id(&call_id, cx);
                                 }
                             }
@@ -571,7 +571,7 @@ impl PhoneApp {
             speed_map: Default::default(),
             speed_badges: Default::default(),
             speed_aria: Default::default(),
-            kp_layout: rovsti_core::keypad_layout::keypad_layout(&keypad::default_input()),
+            kp_layout: rosty_core::keypad_layout::keypad_layout(&keypad::default_input()),
             shown_digits: (
                 String::new(),
                 None,
@@ -668,7 +668,7 @@ impl PhoneApp {
             restored,
             _restore_timeout: None,
             #[cfg(any(feature = "perf", test))]
-            recorder: rovsti_ui::perf::Recorder::default(),
+            recorder: rosty_ui::perf::Recorder::default(),
         };
         app.load_notes(cx);
         #[cfg(feature = "perf")]
@@ -695,7 +695,7 @@ impl PhoneApp {
         app.sync_contacts(cx);
         // Desktop design preview: leave the call screen after 3 s (the pill).
         #[cfg(not(target_os = "android"))]
-        if std::env::var_os("ROVSTI_PREVIEW_PILL").is_some() {
+        if std::env::var_os("ROSTY_PREVIEW_PILL").is_some() {
             cx.spawn(async move |this, cx| {
                 cx.background_executor()
                     .timer(std::time::Duration::from_secs(3))
@@ -707,9 +707,9 @@ impl PhoneApp {
             })
             .detach();
         }
-        // Desktop design preview: scroll Contacts after start-up (ROVSTI_PREVIEW_SCROLL=400).
+        // Desktop design preview: scroll Contacts after start-up (ROSTY_PREVIEW_SCROLL=400).
         #[cfg(not(target_os = "android"))]
-        if let Some(y) = std::env::var("ROVSTI_PREVIEW_SCROLL")
+        if let Some(y) = std::env::var("ROSTY_PREVIEW_SCROLL")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
         {
@@ -726,9 +726,9 @@ impl PhoneApp {
             .detach();
         }
         // Desktop design preview: a missed call lands in the log after N seconds
-        // (ROVSTI_PREVIEW_NEWCALL=3), to watch Recents refresh live.
+        // (ROSTY_PREVIEW_NEWCALL=3), to watch Recents refresh live.
         #[cfg(not(target_os = "android"))]
-        if let Some(secs) = std::env::var("ROVSTI_PREVIEW_NEWCALL")
+        if let Some(secs) = std::env::var("ROSTY_PREVIEW_NEWCALL")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
         {
@@ -738,17 +738,17 @@ impl PhoneApp {
                     .await;
                 this.update(cx, |this, cx| {
                     this.backend.update(cx, |backend, cx| {
-                        backend.preview_new_call(rovsti_core::wire::CallLogKind::Missed, cx);
+                        backend.preview_new_call(rosty_core::wire::CallLogKind::Missed, cx);
                     });
                 })
                 .ok();
             })
             .detach();
         }
-        // Desktop design preview: flip light/dark after N seconds (ROVSTI_PREVIEW_THEME_FLIP=4)
+        // Desktop design preview: flip light/dark after N seconds (ROSTY_PREVIEW_THEME_FLIP=4)
         // to watch the theme melt (S15); `...=4,dark` starts the flip towards dark.
         #[cfg(not(target_os = "android"))]
-        if let Ok(spec) = std::env::var("ROVSTI_PREVIEW_THEME_FLIP") {
+        if let Ok(spec) = std::env::var("ROSTY_PREVIEW_THEME_FLIP") {
             let mut parts = spec.split(',');
             let secs = parts
                 .next()
@@ -760,7 +760,7 @@ impl PhoneApp {
                     .timer(std::time::Duration::from_secs(secs))
                     .await;
                 this.update(cx, |_, cx| {
-                    rovsti_ui::set_theme_override(Some(if to_dark {
+                    rosty_ui::set_theme_override(Some(if to_dark {
                         Theme::Dark
                     } else {
                         Theme::Light
@@ -771,28 +771,28 @@ impl PhoneApp {
             })
             .detach();
         }
-        // Desktop design preview: a typed number (ROVSTI_PREVIEW_DIAL=05551112233).
+        // Desktop design preview: a typed number (ROSTY_PREVIEW_DIAL=05551112233).
         #[cfg(not(target_os = "android"))]
-        if let Ok(number) = std::env::var("ROVSTI_PREVIEW_DIAL") {
+        if let Ok(number) = std::env::var("ROSTY_PREVIEW_DIAL") {
             app.dialed = number;
             app.delete_shown.snap(1.0);
         }
         #[cfg(not(target_os = "android"))]
-        if let Ok(script) = std::env::var("ROVSTI_PREVIEW_KEYS") {
+        if let Ok(script) = std::env::var("ROSTY_PREVIEW_KEYS") {
             app.start_preview_keys(script, window, cx);
         }
         #[cfg(not(target_os = "android"))]
-        if std::env::var_os("ROVSTI_PREVIEW_SETTINGS").is_some() {
+        if std::env::var_os("ROSTY_PREVIEW_SETTINGS").is_some() {
             app.settings.open(false);
             app.settings.enter_snap();
             app.sync_settings_rows(cx, true);
         }
         #[cfg(not(target_os = "android"))]
-        if let Ok(query) = std::env::var("ROVSTI_PREVIEW_QUERY") {
+        if let Ok(query) = std::env::var("ROSTY_PREVIEW_QUERY") {
             app.contacts.field.update(cx, |f, cx| f.set(&query, cx));
         }
         #[cfg(not(target_os = "android"))]
-        if let Ok(spec) = std::env::var("ROVSTI_PREVIEW_CONTACT") {
+        if let Ok(spec) = std::env::var("ROSTY_PREVIEW_CONTACT") {
             app.preview_contact_sheet(&spec, window, cx);
         }
         // A call that is already ringing (the full-screen intent started us cold, or the
@@ -903,7 +903,7 @@ impl PhoneApp {
         } else if self.tabs.selected() == RECENTS_TAB && self.recents.narrowed() {
             // A search or filter is cleared before Back leaves Recents.
             self.recents.field.update(cx, |field, cx| field.clear(cx));
-            self.recents_choose_filter(rovsti_core::call_log_query::RecentsFilter::All, cx);
+            self.recents_choose_filter(rosty_core::call_log_query::RecentsFilter::All, cx);
         } else if self.tabs.selected() != KEYPAD_TAB {
             // From any other tab Back goes home, to the Keypad; there the OS decides.
             self.select_tab(KEYPAD_TAB, cx);
@@ -1171,7 +1171,7 @@ impl PhoneApp {
         cx.notify();
     }
 
-    /// Raw-touch listener for the control `id` (see `rovsti_ui::touch`).
+    /// Raw-touch listener for the control `id` (see `rosty_ui::touch`).
     fn touch_listener(
         cx: &mut Context<Self>,
         id: Option<SharedString>,
@@ -1253,9 +1253,9 @@ impl PhoneApp {
     }
 
     /// What the slow-frame log calls the screen the owner is on.
-    fn scenario(&self) -> rovsti_ui::perf::Scenario {
-        use rovsti_ui::perf::Scenario;
-        if let Some(forced) = rovsti_ui::perf::forced() {
+    fn scenario(&self) -> rosty_ui::perf::Scenario {
+        use rosty_ui::perf::Scenario;
+        if let Some(forced) = rosty_ui::perf::forced() {
             forced
         } else if self.incoming.covers() {
             Scenario::Incoming
@@ -1289,10 +1289,10 @@ impl PhoneApp {
                         reopened.push(item);
                     }
                 }
-                reopened = rovsti_core::setup::still_reopened(&reopened, &now);
+                reopened = rosty_core::setup::still_reopened(&reopened, &now);
                 if reopened != self.setup_reopened {
                     self.setup_changed_title =
-                        rovsti_core::setup::changed_title(&reopened).map(SharedString::from);
+                        rosty_core::setup::changed_title(&reopened).map(SharedString::from);
                     self.setup_reopened = reopened;
                 }
                 cx.notify();
@@ -1366,7 +1366,7 @@ impl PhoneApp {
         } else if self.sheet.is_visible() || self.settings.covers() {
             GAP + 10.0
         } else {
-            rovsti_ui::layout::geom::tab_bar_bottom(self.safe_bottom)
+            rosty_ui::layout::geom::tab_bar_bottom(self.safe_bottom)
                 + f32::from(metrics::TAB_BAR_HEIGHT)
                 + GAP
         }
@@ -1422,8 +1422,8 @@ impl PhoneApp {
                 .items_center()
                 .justify_center()
                 .opacity(collapse)
-                .text_size(rovsti_ui::tokens::typography::HEADLINE.size)
-                .font_weight(rovsti_ui::tokens::typography::HEADLINE.weight)
+                .text_size(rosty_ui::tokens::typography::HEADLINE.size)
+                .font_weight(rosty_ui::tokens::typography::HEADLINE.weight)
                 .text_color(colors.label)
                 .child(TABS[tab]);
             #[cfg(not(target_os = "android"))]
@@ -1564,12 +1564,12 @@ impl PhoneApp {
 /// was drawn when `large_title` assumed a 56 dp top: the title now starts at
 /// `content_top(safe.top)`, so the buttons beside it follow.
 pub(crate) fn title_dy(window: &Window) -> f32 {
-    rovsti_ui::layout::geom::content_top(rovsti_ui::layout::safe_area(window).top) - 56.0
+    rosty_ui::layout::geom::content_top(rosty_ui::layout::safe_area(window).top) - 56.0
 }
 
 /// Bottom safe-area inset of the window in dp (0 on desktop).
 pub(crate) fn safe_bottom(window: &Window) -> f32 {
-    rovsti_ui::layout::safe_area(window).bottom
+    rosty_ui::layout::safe_area(window).bottom
 }
 
 impl Render for PhoneApp {
@@ -1585,7 +1585,7 @@ impl Render for PhoneApp {
         self.melt
             .observe(theme, reduced, self.motion.last_frame_over_budget());
         self.sync_setup_celebration(reduced, cx);
-        rovsti_ui::perf::set_scenario(self.scenario());
+        rosty_ui::perf::set_scenario(self.scenario());
         self.contacts_sync_focus(window, cx);
         self.sync_notice(cx);
         self.sync_pill(cx);
@@ -1609,7 +1609,7 @@ impl Render for PhoneApp {
         self.sheet.set_viewport(window.viewport_size());
         self.update_back(window);
         self.reduced = window.prefers_reduced_motion();
-        self.kp_layout = rovsti_core::keypad_layout::keypad_layout(&self.keypad_input(window));
+        self.kp_layout = rosty_core::keypad_layout::keypad_layout(&self.keypad_input(window));
         self.font.set_target(self.field_font());
         let keep = self.kp_layout.number_fit.keep;
         if self.shown_digits.0 != self.dialed || self.shown_digits.1 != keep {
@@ -1644,7 +1644,7 @@ impl Render for PhoneApp {
             )
             .child(backdrop(theme, theme::accent_glow(theme)))
             // Compiles the glass pipelines in the first frame, not on first touch.
-            .child(rovsti_ui::glass::warm_up_layer())
+            .child(rosty_ui::glass::warm_up_layer())
             .children(self.setup_wash(theme));
         let away = self.tabs_away.value.clamp(0.0, 1.0);
         if tabs_visible {
@@ -1664,7 +1664,7 @@ impl Render for PhoneApp {
                         .bottom(px(-away * 140.0))
                         .left_0()
                         .right_0()
-                        .h(rovsti_ui::tab_bar::slot_height(safe_bottom))
+                        .h(rosty_ui::tab_bar::slot_height(safe_bottom))
                         .opacity(self.settings_tab_fade())
                         .child(
                             self.tab_view
@@ -1704,7 +1704,7 @@ fn main() {
     theme::set_accent(theme::AccentPair::from_hex(
         0x08_80_6E, 0x2D_D4_B4, 0x14_C8_A8,
     ));
-    rovsti_ui::perf::install_sink(backend::perf_line);
+    rosty_ui::perf::install_sink(backend::perf_line);
     let (dial_tx, dial_rx) = mpsc::unbounded::<String>();
     let app = gpui_platform::application().with_assets(IconAssets::new());
     app.on_open_urls(move |urls| {
@@ -1716,8 +1716,8 @@ fn main() {
         let backend = Backend::start(cx);
         #[cfg(feature = "perf")]
         {
-            rovsti_ui::perf::set_thermal(cx.thermal_state());
-            cx.on_thermal_state_change(|cx| rovsti_ui::perf::set_thermal(cx.thermal_state()))
+            rosty_ui::perf::set_thermal(cx.thermal_state());
+            cx.on_thermal_state_change(|cx| rosty_ui::perf::set_thermal(cx.thermal_state()))
                 .detach();
         }
         cx.open_window(
@@ -1739,7 +1739,7 @@ fn main() {
                 app
             },
         )
-        .expect("failed to open the Rovsti Phone window");
+        .expect("failed to open the Rosty Phone window");
         cx.activate(true);
     });
 }

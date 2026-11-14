@@ -1,3 +1,3 @@
-//! Unsent composer text lives in `rovsti_app_core`; this keeps the call sites unchanged.
+//! Unsent composer text lives in `rosty_app_core`; this keeps the call sites unchanged.
 
-pub use rovsti_app_core::messages::drafts::*;
+pub use rosty_app_core::messages::drafts::*;

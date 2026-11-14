@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use rovsti_wa_proto::{
+use rosty_wa_proto::{
     ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, KeptContent, MessageBody, MessageMeta,
     Reaction, RichChat, RichMessage, WaMessage, WaProfile, is_status_chat,
 };
@@ -14,7 +14,7 @@ use super::{InstanceId, Store, StoreError, last_message_row, reactions_of, upser
 /// Largest thumbnail kept per message (they are a few KiB in practice).
 pub const MAX_THUMBNAIL_BYTES: usize = 64 * 1024;
 
-/// What is stored with a message besides the [`rovsti_wa_proto::WaMessage`].
+/// What is stored with a message besides the [`rosty_wa_proto::WaMessage`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MessageExtras {
     pub meta: MessageMeta,
@@ -394,7 +394,7 @@ pub(super) fn insert_row(
     tx: &Transaction<'_>,
     instance: &InstanceId,
     chat: &str,
-    message: &rovsti_wa_proto::WaMessage,
+    message: &rosty_wa_proto::WaMessage,
     extras: &MessageExtras,
 ) -> Result<bool, StoreError> {
     let thumb = extras
@@ -598,7 +598,7 @@ impl Store {
     pub async fn insert_message_full(
         &self,
         instance: InstanceId,
-        message: rovsti_wa_proto::WaMessage,
+        message: rosty_wa_proto::WaMessage,
         extras: MessageExtras,
     ) -> Result<bool, StoreError> {
         // Status updates never become a chat or an unread count.
@@ -698,7 +698,7 @@ impl Store {
                 };
                 out.push(RichChat {
                     meta: chat_meta(conn, &instance, &jid)?,
-                    chat: rovsti_wa_proto::ChatSummary {
+                    chat: rosty_wa_proto::ChatSummary {
                         jid,
                         name,
                         last,
@@ -1188,7 +1188,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::MediaKind;
+    use rosty_wa_proto::MediaKind;
 
     #[test]
     fn group_ticks_wait_for_every_member() {
@@ -1314,7 +1314,7 @@ mod tests {
 
     #[test]
     fn deleted_messages_read_as_deleted_with_their_content_kept() {
-        use rovsti_wa_proto::{MediaMeta, Quoted};
+        use rosty_wa_proto::{MediaMeta, Quoted};
         let history = vec![EditRecord {
             text: "frist".into(),
             edited_at: 4,

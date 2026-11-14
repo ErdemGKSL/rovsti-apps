@@ -7,9 +7,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use rovsti_wa_proto::api::routes as r;
-use rovsti_wa_proto::meta::picture_etag;
-use rovsti_wa_proto::{
+use rosty_wa_proto::api::routes as r;
+use rosty_wa_proto::meta::picture_etag;
+use rosty_wa_proto::{
     ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, EditMessage, ErrorCode, MAX_PROFILES,
     MUTED_FOREVER, MarkRead, MessageBody, ProfilesRequest, RevokeMessage, StarMessage, WaMessage,
     WaProfile,
@@ -293,7 +293,7 @@ pub fn profile_is_stale(profile: Option<&WaProfile>, refresh: bool, now: i64) ->
 
 /// Response header on answers served from storage because WhatsApp could
 /// not be asked: `rate-limited` or `error`.
-pub const STALE_HEADER: &str = "x-rovsti-stale";
+pub const STALE_HEADER: &str = "x-rosty-stale";
 
 /// Whether every JID has an answer WhatsApp really gave (`fetched_ms > 0`),
 /// so stored data may stand in when WhatsApp cannot be asked.

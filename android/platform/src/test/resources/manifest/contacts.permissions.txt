@@ -9,6 +9,6 @@ uses-permission android.permission.RECEIVE_BOOT_COMPLETED
 uses-permission android.permission.VIBRATE
 uses-permission android.permission.WAKE_LOCK
 uses-permission android.permission.WRITE_CONTACTS
-uses-permission dev.rovsti.permission.HANDOFF
-declares dev.rovsti.permission.HANDOFF signature
-declares dev.rovsti.permission.READ_PEOPLE signature
+uses-permission dev.rosty.permission.HANDOFF
+declares dev.rosty.permission.HANDOFF signature
+declares dev.rosty.permission.READ_PEOPLE signature

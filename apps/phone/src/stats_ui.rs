@@ -1,7 +1,7 @@
 //! Call statistics in the UI (U7, U18): the "Call statistics" block under
 //! Recent calls in the Number and Contact sheets, and the Settings page.
 //!
-//! The numbers come from `rovsti_core::call_stats`. The merged
+//! The numbers come from `rosty_core::call_stats`. The merged
 //! `Vec<StatCall>` is cached against the call log snapshot and the
 //! WhatsApp history revision, and each view-model is cached against that and
 //! the numbers it describes, so nothing is recomputed per frame.
@@ -13,8 +13,8 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, div, px, svg,
 };
-use rovsti_core::call_stats::{self, DayBar, Range, StatCall, Totals};
-use rovsti_ui::{
+use rosty_core::call_stats::{self, DayBar, Range, StatCall, Totals};
+use rosty_ui::{
     Icon, theme,
     tokens::{Theme, mix, typography},
     touch::touch_surface,
@@ -353,7 +353,7 @@ impl PhoneApp {
             self.show_notice_pill(export_pill_text(0), None, false, cx);
             return;
         }
-        rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
         let outcome = backend::share_text(&text);
         if outcome != backend::Outcome::Done {
             self.show_notice_pill(
@@ -386,7 +386,7 @@ impl PhoneApp {
         } else {
             // The picker's result pill says "Call statistics exported"; opening
             // a system sheet is a Selection tick, like the other exports.
-            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
         }
     }
 
@@ -453,7 +453,7 @@ impl PhoneApp {
         if !has_calls {
             return;
         }
-        rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
         self.stats.bucket = Some(index);
         self.sheet_kind = crate::SheetKind::StatsBucket;
         self.sheet.open();
@@ -1062,7 +1062,7 @@ fn note_line(theme: Theme, text: &'static str) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::call_stats::StatDir;
+    use rosty_core::call_stats::StatDir;
 
     fn call(number: &str, date_ms: i64, duration_s: u64, dir: StatDir) -> StatCall {
         StatCall {

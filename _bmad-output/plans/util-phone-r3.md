@@ -1,4 +1,4 @@
-# util-phone: everyday utilities for Rovsti Phone (round 3)
+# util-phone: everyday utilities for Rosty Phone (round 3)
 
 baseSha: d620b2408b0f2be73e6957ff63ec6c57eaf7acff
 
@@ -6,7 +6,7 @@ baseSha: d620b2408b0f2be73e6957ff63ec6c57eaf7acff
 
 Round 1 (82abee0..ca837b6) shipped U1-U6, and round 2 (fd3fee0..d620b24) shipped U7-U11 and U17-U19,
 as planned in `util-phone.md` and `util-phone-r2.md`. `git stash list` is empty. These are in the tree:
-`rovsti_core::{zoom, number_format, call_log_query, call_stats, call_notes}`, `rovsti_android::media`,
+`rosty_core::{zoom, number_format, call_log_query, call_stats, call_notes}`, `rosty_android::media`,
 `documents::export_calls`, the photo viewer with set/replace/remove (`photo_viewer.rs`,
 `photo_edit.rs`), the QR share, the Call details sheet (`details_ui.rs`), the in-call note
 (`incall_note.rs`), the stats page (`stats_ui.rs`), Recents search with filter chips, Copy as / Share as,
@@ -20,8 +20,8 @@ Still missing (checked by grep at baseSha):
 - Settings > Data > "Delete all call history" (`history_ui::delete_all_history`) has no Undo. Only the
   pill "Call history deleted" shows.
 - Recents search (`call_log_query::matches`) ignores note text.
-- No reminders. `rovsti_android::notify` posts message notifications only. The AlarmManager pattern
-  lives in `kotlin/dev/rovsti/bridge/ScheduledSms.kt` (store + receiver + `RovstiBridge` entry points).
+- No reminders. `rosty_android::notify` posts message notifications only. The AlarmManager pattern
+  lives in `kotlin/dev/rosty/bridge/ScheduledSms.kt` (store + receiver + `RostyBridge` entry points).
   The Phone manifest has `POST_NOTIFICATIONS` but neither `SCHEDULE_EXACT_ALARM` nor
   `RECEIVE_BOOT_COMPLETED`, and `scripts/check-apk.sh` guards the permission list. So reminders use
   inexact `setAndAllowWhileIdle` and are re-armed when the app starts, and no permission is added.
@@ -69,16 +69,16 @@ Still missing (checked by grep at baseSha):
 ## Steps (round 3)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first (6.8 GB free at baseSha). Make one
-focused commit per step (`Rovsti phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before
+focused commit per step (`Rosty phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before
 S4-S8. Never invent GPUI APIs: copy patterns already in `apps/phone/src` (sheets with `SheetKind`,
 `touch_surface`, `presses`, `show_notice_pill`/`show_pill_action`, `PillAction`, `SearchField`,
-`rovsti_ui::haptics::perform`). Every utility gets a pill, and every destructive one gets a confirm or
+`rosty_ui::haptics::perform`). Every utility gets a pill, and every destructive one gets a confirm or
 an Undo (both for bulk deletes).
 
-### S1. Pure: notes search, selection, per-person export (`rovsti_core`)
+### S1. Pure: notes search, selection, per-person export (`rosty_core`)
 - `call_notes.rs`: `impl Notes { pub fn mentions(&self, number: &str, first_ms: i64, last_ms: i64,
   folded_text: &str) -> bool }`. True when a note whose number `PhoneNumber::matches` the row's
   number, with `at_ms` in `[first_ms - MATCH_WINDOW_MS, last_ms + MATCH_WINDOW_MS]`, has
@@ -106,7 +106,7 @@ an Undo (both for bulk deletes).
   &[ExtraCall], numbers: &[&str]) -> Vec<ExtraCall>` (same matching as `call_log::ids_for_numbers` and
   `recents::extra_ids_for_numbers`; reuse those helpers or their matcher, and do not duplicate the
   logic). Also `pub fn person_csv_file_name(who: &str, now_ms: i64, tz_offset_s: i32) -> String`, e.g.
-  `rovsti-calls-anna-smith-2026-11-06.csv`. The slug is ASCII-folded, lowercase, `[a-z0-9-]` only,
+  `rosty-calls-anna-smith-2026-11-06.csv`. The slug is ASCII-folded, lowercase, `[a-z0-9-]` only,
   dashes collapsed, at most 32 chars, and falls back to `csv_file_name` when empty.
 - Tests (in-module): notes hits by text with accents/case; the window edges; another number's note never
   matches; one-digit text ignored; selection survives a rebuild where rows shift; `retain_present` drops
@@ -114,8 +114,8 @@ an Undo (both for bulk deletes).
   filters keep national and international forms; the slug cases (`"Ünal Öz"` -> `unal-oz`, emoji-only ->
   fallback name).
 
-### S2. Pure: reminders, quick-reply targets, keypad field menu, speed-dial text (`rovsti_core`)
-- New `crates/rovsti_core/src/reminder.rs` (`pub mod reminder;`). The types are serde, so the Kotlin
+### S2. Pure: reminders, quick-reply targets, keypad field menu, speed-dial text (`rosty_core`)
+- New `crates/rosty_core/src/reminder.rs` (`pub mod reminder;`). The types are serde, so the Kotlin
   store holds the same JSON:
   `#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)] pub struct Reminder { pub id: i64,
   pub number: String, pub name: Option<String>, pub at_ms: i64, pub created_ms: i64 }`.
@@ -147,18 +147,18 @@ an Undo (both for bulk deletes).
   refused; JSON round-trip and bad JSON; `for_number` with national vs E.164; `reply_choices` fallback;
   `field_menu` matrix; `list_text` order/empty; `clear_all` returns the old map.
 
-### S3. Android glue: SMS composer with body, call-back reminders (`rovsti_android` + Kotlin)
-- `crates/rovsti_android/src/telecom.rs`: `pub fn compose_sms(number: &str, body: &str) -> Result<bool>`
+### S3. Android glue: SMS composer with body, call-back reminders (`rosty_android` + Kotlin)
+- `crates/rosty_android/src/telecom.rs`: `pub fn compose_sms(number: &str, body: &str) -> Result<bool>`
   -> `bridge::call_bool("composeSms", &[Arg::Str(number), Arg::Str(body)])`. Kotlin
-  `RovstiBridge.composeSms(number, body)` = `start(Intent(ACTION_SENDTO, Uri.fromParts("smsto",
-  number, null)).putExtra("sms_body", body))` next to `sendSmsTo` (RovstiBridge.kt:724). There is no
+  `RostyBridge.composeSms(number, body)` = `start(Intent(ACTION_SENDTO, Uri.fromParts("smsto",
+  number, null)).putExtra("sms_body", body))` next to `sendSmsTo` (RostyBridge.kt:724). There is no
   `SEND_SMS`. Add it to the desktop-unsupported test.
-- New `crates/rovsti_android/src/reminders.rs` (`pub mod reminders;` in `lib.rs`, doc header like
+- New `crates/rosty_android/src/reminders.rs` (`pub mod reminders;` in `lib.rs`, doc header like
   `notify.rs`): `pub fn arm(reminder_json: &str) -> Result<bool>` (`armCallReminder`), `pub fn
   disarm(id: i64) -> Result<bool>` (`disarmCallReminder`, the id as a string as `sms::disarm` does),
   `pub fn armed() -> Result<String>` (`armedCallReminders`, a JSON array), and `pub fn rearm_all() ->
   Result<bool>` (`rearmCallReminders`). Desktop test: all return `Error::Unsupported`.
-- New `crates/rovsti_android/kotlin/dev/rovsti/bridge/CallReminders.kt` modelled on
+- New `crates/rosty_android/kotlin/dev/rosty/bridge/CallReminders.kt` modelled on
   `ScheduledSms.kt`. `ReminderItem.parse` (pure, null on bad JSON / id<=0 / empty number), a
   SharedPreferences-backed `ReminderStore` (arm/disarm/get/all), and `object CallReminders { arm,
   disarm, all, rearmAll, fire }`. Alarms use `setAndAllowWhileIdle(RTC_WAKEUP, …)` only (no exact-alarm
@@ -167,9 +167,9 @@ an Undo (both for bulk deletes).
   `reminder::notification_title/body`, so Kotlin does not format). The tap intent is `ACTION_DIAL
   tel:<number>` with `setPackage(context.packageName)` (the Phone app answers its own dial intent through
   `DialIntents.kt`). A "Call back" action does the same, and `setAutoCancel(true)`. Then it disarms and
-  emits `RovstiBridge.emit("reminder_fired", {id})`. `class CallReminderReceiver : BroadcastReceiver`
-  handles only the fire action (no BOOT_COMPLETED). Wire `@JvmStatic` entry points in `RovstiBridge.kt`
-  beside `armScheduledSms`. Declare `<receiver android:name="dev.rovsti.bridge.CallReminderReceiver"
+  emits `RostyBridge.emit("reminder_fired", {id})`. `class CallReminderReceiver : BroadcastReceiver`
+  handles only the fire action (no BOOT_COMPLETED). Wire `@JvmStatic` entry points in `RostyBridge.kt`
+  beside `armScheduledSms`. Declare `<receiver android:name="dev.rosty.bridge.CallReminderReceiver"
   android:exported="false" />` in `apps/phone/platforms/android/app/src/main/AndroidManifest.xml`. Add no
   permission.
 - `apps/phone/src/backend.rs`: thin wrappers `pub fn compose_sms(number, body) -> Outcome`, `pub fn

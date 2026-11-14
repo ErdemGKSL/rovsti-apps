@@ -1,7 +1,7 @@
 //! Settings > Call notes (U30, U33): every call note in one searchable list.
 //!
 //! The rules (search, the row texts, the share text) live in
-//! `rovsti_core::call_notes`; this only shows them. A row opens the Call
+//! `rosty_core::call_notes`; this only shows them. A row opens the Call
 //! details sheet of its call, the trash glyph deletes the note (with Undo)
 //! and "Share all" sends every note as text through the share sheet.
 
@@ -12,8 +12,8 @@ use gpui::{
     MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement, Styled,
     UniformListScrollHandle, Window, div, prelude::*, px, svg, uniform_list,
 };
-use rovsti_core::{call_notes, recents::LocaleTime};
-use rovsti_ui::{
+use rosty_core::{call_notes, recents::LocaleTime};
+use rosty_ui::{
     Icon,
     field::{Bare, TextField, bare_field},
     glass::{GlassSpec, glass},
@@ -138,7 +138,7 @@ impl PhoneApp {
         move |raw| match &contacts {
             Load::Ready(index) => index
                 .match_number(raw)
-                .map(|c| rovsti_core::names::display(c, format).into_owned()),
+                .map(|c| rosty_core::names::display(c, format).into_owned()),
             _ => None,
         }
     }
@@ -210,7 +210,7 @@ impl PhoneApp {
         if text.is_empty() {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         let outcome = backend::share_text(&text);
         if outcome != backend::Outcome::Done {
             self.show_notice_pill(
@@ -231,9 +231,9 @@ impl PhoneApp {
             return;
         }
         let csv = snapshot.to_csv(name_of, tz);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.backup.export_kind = crate::backup_ui::ExportKind::Notes;
-        let name = rovsti_core::call_notes::notes_csv_file_name(backend::now_ms(), tz);
+        let name = rosty_core::call_notes::notes_csv_file_name(backend::now_ms(), tz);
         let outcome = backend::export_calls(&name, &csv);
         if outcome != backend::Outcome::Done {
             self.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);
@@ -255,7 +255,7 @@ impl PhoneApp {
         };
         let name_of = self.notes_name_of(cx);
         let who = name_of(&row.number).map(SharedString::from);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.open_details_for(&vm, who, SheetKind::CallDetails, true, window, cx);
         self.sheet.open();
     }
@@ -269,7 +269,7 @@ impl PhoneApp {
             return;
         };
         self.save_notes(cx);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         self.show_pill_action(
             "Note deleted",
             "Undo",
@@ -307,7 +307,7 @@ impl PhoneApp {
                 "nt-rows",
                 count,
                 cx.processor(move |this, range: Range<usize>, window, cx| {
-                    let theme = rovsti_ui::current_theme(window);
+                    let theme = rosty_ui::current_theme(window);
                     this.notes_rows(theme, range, cx)
                 }),
             )

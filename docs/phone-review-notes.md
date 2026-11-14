@@ -1,6 +1,6 @@
 # Phone review notes
 
-Follow-up to the independent review of Rovsti Phone (commit db693ea). Items that were fixed
+Follow-up to the independent review of Rosty Phone (commit db693ea). Items that were fixed
 are covered by tests and commits; this file records what was deliberately left alone.
 
 - **`sync_calls` None arm (incall.rs).** The "view is None, so the shown call is gone"
@@ -14,9 +14,9 @@ are covered by tests and commits; this file records what was deliberately left a
 - **Aura drift.** The look is unchanged. While only the drift moves it now repaints about every
   33 ms instead of every vsync frame, and not at all while the window is inactive or under
   reduced motion. Spring motion still runs on vsync frames.
-- **Perf build.** It now installs as `dev.rovsti.phone.perf` (debug build type) so it can sit
+- **Perf build.** It now installs as `dev.rosty.phone.perf` (debug build type) so it can sit
   next to the signed release. Component name for `am start`:
-  `dev.rovsti.phone.perf/dev.rovsti.phone.MainActivity`.
+  `dev.rosty.phone.perf/dev.rosty.phone.MainActivity`.
 - **Eject paths.** `build.gradle.kts` derives `phoneAppDir` from the Gradle project directory;
   `scripts/fix-eject-paths.sh` re-applies that after a `gpuiforge platform eject android`.
 
@@ -56,7 +56,7 @@ desktop wording through `Outcome::why_not`.
 | U43 Delete older calls | Chooser row dimmed with "No calls older than ..." at 0, confirm sheet with the count, Undo pill through `delete_call_ids`; over `UNDO_CAP` the body says "This can't be undone." | No change. |
 | U39 Mark missed as seen | Automatic after `VIEW_DELAY`, no feedback needed. | No change. |
 
-Tests: pure texts and parsers have in-module tests in `rovsti_core`; `export_calls_pill` per kind
+Tests: pure texts and parsers have in-module tests in `rosty_core`; `export_calls_pill` per kind
 and the new control ids are covered in `apps/phone`.
 
 ## Utilities feedback audit (R6)
@@ -75,4 +75,4 @@ the desktop `Unsupported` wording and screen-reader labels.
 | U48 Country caption | Read-only text, no feedback needed. | No change. |
 
 Tests: pure logic (`calling_code`, `tone_plan`, `Selection::numbers`, `calls_in`, `bucket_title`) has
-in-module tests in `rovsti_core`; control ids and labels are covered in `apps/phone`.
+in-module tests in `rosty_core`; control ids and labels are covered in `apps/phone`.

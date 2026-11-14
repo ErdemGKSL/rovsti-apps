@@ -1,9 +1,9 @@
-# Plan: Rovsti Phone, finish the buildable roadmap items and WhatsApp calling
+# Plan: Rosty Phone, finish the buildable roadmap items and WhatsApp calling
 
 - Base: `60259d6a5bdb65ec627a144d8a540b967f89004f` ("WIP: carry-over before sync")
-- Unit: Rovsti Phone. Architect plan, no source changed.
+- Unit: Rosty Phone. Architect plan, no source changed.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android`
 - Nothing runs on a device here. Kotlin changes are kept small, pure helpers get a
   JVM test next to the existing ones (`apps/phone/platforms/android/app/src/test/...`),
   but the required checks only cover Rust.
@@ -14,22 +14,22 @@ The Phone checklist in `docs/roadmap.md` is stale: most items are built.
 
 | Roadmap item | Code today |
 |---|---|
-| InCallService + glass in-call (mute, speaker, keypad, hold, swap, merge) | Built: `RovstiInCallService.kt`, `apps/phone/src/incall.rs`, `zone.rs` (S19 hold, S20 swap, S21 merge), `rovsti_core::scene` |
+| InCallService + glass in-call (mute, speaker, keypad, hold, swap, merge) | Built: `RostyInCallService.kt`, `apps/phone/src/incall.rs`, `zone.rs` (S19 hold, S20 swap, S21 merge), `rosty_core::scene` |
 | Full-screen incoming incl. lock screen | Built: `IncomingCall.kt`, `CallRegistry.kt`, `apps/phone/src/incoming.rs` |
-| Call log grouped, missed badges | Built: `rovsti_core::{call_log,recents}`, `apps/phone/src/recents.rs` |
-| Contacts, search, favourites | Built: `contacts.rs`, `rovsti_core::search`. **T9 on the keypad is not wired**: `rovsti_core::t9` (`ContactIndex::t9`, `T9Scratch`) exists and is tested, but `keypad.rs` only does `match_number` (story 10.1) |
-| Speed dial, long-press 1 voicemail | **Missing in the UI**: `rovsti_core::settings::{SpeedDialEntry, SPEED_DIAL_DIGITS}` and `PrefsV2::speed_dial` exist (and backup carries them), but no keypad hold, no settings page, no voicemail call |
-| Dual-SIM picker | Built: `sim_ui.rs`, `rovsti_core::sim`, `telecom::place_call_on` |
-| Blocklist | Built: `block_ui.rs`, `blocked_ui.rs`, `rovsti_core::blocklist`, `Blocklist.kt` |
-| Audio routing | Built: `route.rs`, `rovsti_core::audio` |
+| Call log grouped, missed badges | Built: `rosty_core::{call_log,recents}`, `apps/phone/src/recents.rs` |
+| Contacts, search, favourites | Built: `contacts.rs`, `rosty_core::search`. **T9 on the keypad is not wired**: `rosty_core::t9` (`ContactIndex::t9`, `T9Scratch`) exists and is tested, but `keypad.rs` only does `match_number` (story 10.1) |
+| Speed dial, long-press 1 voicemail | **Missing in the UI**: `rosty_core::settings::{SpeedDialEntry, SPEED_DIAL_DIGITS}` and `PrefsV2::speed_dial` exist (and backup carries them), but no keypad hold, no settings page, no voicemail call |
+| Dual-SIM picker | Built: `sim_ui.rs`, `rosty_core::sim`, `telecom::place_call_on` |
+| Blocklist | Built: `block_ui.rs`, `blocked_ui.rs`, `rosty_core::blocklist`, `Blocklist.kt` |
+| Audio routing | Built: `route.rs`, `rosty_core::audio` |
 
 WhatsApp (gateway unit, `wa-gateway*.md`, all landed):
 
 - Gateway (`services/wa_gateway/src/wa/calls.rs`) does offer/accept/reject/terminate and
   bridges call audio; client has `Gateway::{place_call, accept_call, reject_call,
-  end_call, set_muted}` and `rovsti_wa_client::call_audio`. No new whatsapp-rust API is
+  end_call, set_muted}` and `rosty_wa_client::call_audio`. No new whatsapp-rust API is
   needed for this unit; the gateway side is complete.
-- Shared settings (`rovsti_wa_ui::WhatsAppSettings`, two options: link / connect with key,
+- Shared settings (`rosty_wa_ui::WhatsAppSettings`, two options: link / connect with key,
   key list and revoke) is in all four apps; Phone shows it under Settings, `Sub::WhatsApp`.
 - Phone: `apps/phone/src/wa_call.rs` (`Tracker`, `WaCallUi`) shows WhatsApp calls as a
   **separate glass card**, not on the glass In-Call screen. Outgoing WhatsApp call exists
@@ -39,7 +39,7 @@ WhatsApp (gateway unit, `wa-gateway*.md`, all landed):
 - FCM: `WaPush.onMessage` only emits `wa_push`; the Phone host has **no**
   `FirebaseMessagingService` and nothing posts an incoming WhatsApp call notification, so a
   cold phone is woken but shows nothing until the app is opened.
-  `rovsti_wa_proto::push::parse_wake` drops the `from` / `name` fields the gateway sends
+  `rosty_wa_proto::push::parse_wake` drops the `from` / `name` fields the gateway sends
   (`services/wa_gateway/src/push/mod.rs`).
 - A WhatsApp call never appears in Recents.
 
@@ -55,9 +55,9 @@ via GPUiForge, CI.
 
 ## Steps
 
-### Step 1. Pure: speed dial and voicemail resolution (`rovsti_core`)
+### Step 1. Pure: speed dial and voicemail resolution (`rosty_core`)
 
-Files: `crates/rovsti_core/src/speed_dial.rs` (new), `crates/rovsti_core/src/lib.rs`.
+Files: `crates/rosty_core/src/speed_dial.rs` (new), `crates/rosty_core/src/lib.rs`.
 
 ```rust
 pub enum HoldDigit { Voicemail, Call { number_raw: String, name: String }, Unassigned(u8), Ignore }
@@ -74,15 +74,15 @@ Reuse `SPEED_DIAL_DIGITS` and the 200-char limit from `settings.rs` (make `MAX_F
 assigned 2..9 -> Call; unassigned -> Unassigned; non-empty `dialed_before` -> Ignore;
 assign out of range / empty number refused; long name refused; unassign twice false.
 
-Acceptance: `cargo test -p rovsti_core speed_dial` passes, all checks green.
+Acceptance: `cargo test -p rosty_core speed_dial` passes, all checks green.
 
-### Step 2. Pure: WhatsApp call on the call screens, wake details, local call history (`rovsti_wa_proto`)
+### Step 2. Pure: WhatsApp call on the call screens, wake details, local call history (`rosty_wa_proto`)
 
-Files: `crates/rovsti_wa_proto/src/call.rs` (extend), `push.rs`, `history.rs` (new), `lib.rs`.
+Files: `crates/rosty_wa_proto/src/call.rs` (extend), `push.rs`, `history.rs` (new), `lib.rs`.
 
 - `push.rs`: `Wake::Call { call_id: String, from: Option<String>, name: Option<String> }`
   (serde `#[serde(default)]`), so the notification can name the caller. Update the existing
-  tests and every match on `Wake::Call` (grep `Wake::Call` in `crates/rovsti_wa_ui` and apps).
+  tests and every match on `Wake::Call` (grep `Wake::Call` in `crates/rosty_wa_ui` and apps).
 - `call.rs`: what the glass screens need, so Phone's GPUI code stays a mapping:
 ```rust
 pub enum WaControl { Mute, Speaker, Keypad, Hold, AddCall, End }
@@ -114,12 +114,12 @@ impl WaCallHistory { pub fn record_end(&mut self, view: &WaCallView, started_ms:
 Tests: wake with and without from/name; `enabled()` per phase; every `arbitrate` row; history
 dedupe, cap, missed rule, JSON round-trip, garbage JSON.
 
-Acceptance: `cargo test -p rovsti_wa_proto` passes; `rovsti_wa_proto` and `rovsti_wa_client`
+Acceptance: `cargo test -p rosty_wa_proto` passes; `rosty_wa_proto` and `rosty_wa_client`
 still check for `aarch64-linux-android`.
 
-### Step 3. Android facades: voicemail, WhatsApp speaker, WhatsApp incoming notification (`rovsti_android` + Kotlin bridge)
+### Step 3. Android facades: voicemail, WhatsApp speaker, WhatsApp incoming notification (`rosty_android` + Kotlin bridge)
 
-Rust (`crates/rovsti_android/src`), each returning `Error::Unsupported` on desktop, with a
+Rust (`crates/rosty_android/src`), each returning `Error::Unsupported` on desktop, with a
 `desktop_is_unsupported` test like `wa.rs` has:
 
 - `telecom.rs`: `pub fn call_voicemail() -> Result<bool>` -> `bridge::call_bool0("callVoicemail")`.
@@ -131,9 +131,9 @@ Rust (`crates/rovsti_android/src`), each returning `Error::Unsupported` on deskt
   `{"call_id":..,"action":"answer"|"decline"}`; add a pure decoder
   `pub fn parse_wa_call_action(json: &str) -> Option<(String, WaCallAction)>` + tests.
 
-Kotlin (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`):
+Kotlin (`crates/rosty_android/kotlin/dev/rosty/bridge/`):
 
-- `RovstiBridge.kt`: `callVoicemail()` = `TelecomManager.placeCall(Uri.fromParts("voicemail", "", null), Bundle())`
+- `RostyBridge.kt`: `callVoicemail()` = `TelecomManager.placeCall(Uri.fromParts("voicemail", "", null), Bundle())`
   behind the same `CALL_PHONE` check as `place()`; `waSpeaker(on)`, `waShowIncoming`, `waCancelIncoming`.
 - `WaCallAudio.kt`: `setSpeaker(context, on)`: API 31+ `AudioManager.setCommunicationDevice`
   with the `TYPE_BUILTIN_SPEAKER` / `TYPE_BUILTIN_EARPIECE` device from
@@ -146,9 +146,9 @@ Kotlin (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`):
 - `WaPush.onMessage`: for `kind=call` call `WaIncoming.show(app, data)` **before** emitting
   `wa_push`, so a cold process still rings. For `kind=call_end` (if the gateway sends it, else
   skip) cancel.
-- `RovstiBridge`: a helper `deliverWaCallAction(intent)` that pulls the two extras and queues
+- `RostyBridge`: a helper `deliverWaCallAction(intent)` that pulls the two extras and queues
   `wa_call_action` through the existing `mailbox` (so it survives until Rust is live).
-- JVM test `WaIncomingTest.kt` in `apps/phone/platforms/android/app/src/test/java/dev/rovsti/bridge/`.
+- JVM test `WaIncomingTest.kt` in `apps/phone/platforms/android/app/src/test/java/dev/rosty/bridge/`.
 
 Acceptance: Rust checks green incl. the Android target; desktop tests prove `Unsupported`.
 
@@ -157,8 +157,8 @@ Acceptance: Rust checks green incl. the Android target; desktop tests prove `Uns
 Files: `apps/phone/src/keypad.rs`, `apps/phone/src/settings_ui.rs`, new `apps/phone/src/speed_dial_ui.rs`, `main.rs` (mod).
 
 - `HoldAction::Digit(u8)`: armed in the digit key's finger-down like `HoldAction::Plus`
-  (reuse `arm_hold`, 500 ms). `hold_fired` calls `rovsti_core::speed_dial::on_hold` and:
-  Voicemail -> `rovsti_android::telecom::call_voicemail()` through a new
+  (reuse `arm_hold`, 500 ms). `hold_fired` calls `rosty_core::speed_dial::on_hold` and:
+  Voicemail -> `rosty_android::telecom::call_voicemail()` through a new
   `Backend::call_voicemail(cx) -> Placement` (handles `Unsupported` like `place_call` does);
   Call -> `place_call_from(number_raw)`; Unassigned -> notice pill "No speed dial on N" with
   action "Set" opening the page; the digit that went into `dialed` on finger-down is removed
@@ -191,21 +191,21 @@ Acceptance: checks green; helper tests pass.
 
 ### Step 6. Phone: WhatsApp calls on the glass Incoming and In-Call screens
 
-Files: `apps/phone/src/wa_call.rs`, `incall.rs`, `incoming.rs`, `zone.rs`, `main.rs`, `rovsti_core/src/scene.rs`.
+Files: `apps/phone/src/wa_call.rs`, `incall.rs`, `incoming.rs`, `zone.rs`, `main.rs`, `rosty_core/src/scene.rs`.
 
 - `wa_call.rs`: `WaCallUi` keeps the gateway/audio work (`answer`, `place`, `hang_up`,
   `toggle_mute`, pump) but stops rendering its own card: `render` returns an empty `div()`
   unless the In-Call screen is not mounted (desktop fallback only). Add
   `pub fn screen(&self) -> Option<WaScreen>` (Step 2) and `pub fn set_speaker(&mut self, on, cx)`
-  calling `rovsti_android::wa::call_audio_speaker`. Make `answer`, `hang_up`, `toggle_mute`
+  calling `rosty_android::wa::call_audio_speaker`. Make `answer`, `hang_up`, `toggle_mute`
   `pub(crate)`.
 - `incall.rs`: add `pub(crate) enum CallSource { Telecom(i32), WhatsApp(String) }` to
   `CallView` (replace bare `id` reads with `source`; Telecom keeps `i32`). `CallView::from_wa(&WaScreen)`
   maps title/phase/muted/elapsed (`connect_time_ms = now - elapsed`), `route = Speaker|Earpiece`,
-  `can_hold = false`. In `sync_calls`, take `rovsti_wa_proto::call::arbitrate(...)`: `ShowWa` puts
+  `can_hold = false`. In `sync_calls`, take `rosty_wa_proto::call::arbitrate(...)`: `ShowWa` puts
   the WhatsApp view in front; `WaWaiting` fills `waiting` (Decline only; add
   `DisabledReason::WhatsAppCall` with text "Not available on WhatsApp calls" to
-  `rovsti_core::scene` and its `text()` test).
+  `rosty_core::scene` and its `text()` test).
 - `incall_tap`: for `CallSource::WhatsApp`, Mute -> `wa_call.toggle_mute`, Audio/Speaker ->
   `wa_call.set_speaker`, End -> `wa_call.hang_up(false)`; Keypad, Hold, Add, Merge, Swap are dimmed
   with `DisabledReason::WhatsAppCall` (the existing `HoldAction::Reason` explains on hold).
@@ -232,20 +232,20 @@ Files: `contacts.rs`, `keypad.rs`, `block_ui.rs`, `recents.rs`, `main.rs`, `back
   `backend.rs`, ~line 268/882): answer -> `wa_call.answer_id(call_id)`, decline ->
   `wa_call.decline_id(call_id)`; both idempotent through a pure `AnswerOnce`-style guard in
   `wa_call.rs` (tested). A `Wake::Call` also calls `WhatsAppSettings::wake` (already) and, when the
-  call ends or is answered in-app, `rovsti_android::wa::cancel_incoming`.
+  call ends or is answered in-app, `rosty_android::wa::cancel_incoming`.
 - `MainActivity.kt` (phone host): in `onCreate`/`onNewIntent` pass the intent to
-  `RovstiBridge.deliverWaCallAction(intent)`; Decline moves the task back (`moveTaskToBack(true)`)
+  `RostyBridge.deliverWaCallAction(intent)`; Decline moves the task back (`moveTaskToBack(true)`)
   so it does not open the UI, matching telephony Decline (acceptance row 19).
-- Optional Firebase in the phone host: `app/src/firebase/kotlin/dev/rovsti/phone/RovstiMessagingService.kt`
+- Optional Firebase in the phone host: `app/src/firebase/kotlin/dev/rosty/phone/RostyMessagingService.kt`
   (the snippet in `docs/android.md`, now calling only `WaPush.onMessage`) and in
   `app/build.gradle.kts`: only when `google-services.json` exists, apply
   `com.google.gms.google-services`, add `firebase-messaging`, add the source dir and merge a
   manifest entry for `com.google.firebase.MESSAGING_EVENT`. Without the file the build is unchanged.
-- Recents: persist `WaCallHistory` (Step 2) to `wa-calls.json` in `rovsti_ui::storage::data_dir()`
+- Recents: persist `WaCallHistory` (Step 2) to `wa-calls.json` in `rosty_ui::storage::data_dir()`
   through a small writer in `wa_call.rs` on `Change::Ended`; Recents merges these rows into the
-  grouped list with a WhatsApp badge (pure merge in `rovsti_core::recents` takes a generic
-  `ExtraCall { number_raw, started_ms, duration_s, missed, label }` so rovsti_core does not depend
-  on rovsti_wa_proto; tests for ordering, grouping and the missed badge count). The row menu
+  grouped list with a WhatsApp badge (pure merge in `rosty_core::recents` takes a generic
+  `ExtraCall { number_raw, started_ms, duration_s, missed, label }` so rosty_core does not depend
+  on rosty_wa_proto; tests for ordering, grouping and the missed badge count). The row menu
   "WhatsApp call" stays.
 
 Acceptance: checks green; new pure tests pass; the Android host files are syntactically

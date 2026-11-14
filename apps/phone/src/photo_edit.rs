@@ -10,7 +10,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     motion::press_scale,

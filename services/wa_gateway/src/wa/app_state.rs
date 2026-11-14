@@ -2,7 +2,7 @@
 //! deletes, and the app-state and profile events that other devices and
 //! WhatsApp send (archive, pin, mute, star, push names, pictures, about).
 
-use rovsti_wa_proto::{MUTED_FOREVER, MediaKind, MessageBody};
+use rosty_wa_proto::{MUTED_FOREVER, MediaKind, MessageBody};
 use whatsapp_rust::features::message_edit;
 use whatsapp_rust::prelude::*;
 

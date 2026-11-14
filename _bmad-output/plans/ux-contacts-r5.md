@@ -1,6 +1,6 @@
-# UX completeness pass: Rovsti Contacts (round 5)
+# UX completeness pass: Rosty Contacts (round 5)
 
-Base: `da24d21b9769519b3e8333d2dbfdb5fb87d05df3` (main, "Rovsti contacts: Docs and plan status").
+Base: `da24d21b9769519b3e8333d2dbfdb5fb87d05df3` (main, "Rosty contacts: Docs and plan status").
 The tree is clean and there is no stash. Rounds 1 to 4 (`ux-contacts.md` U1 to U7,
 `ux-contacts-r2.md` V1 to V5, `ux-contacts-r3.md` W1 to W3, `ux-contacts-r4.md` X1 to X3) are
 done.
@@ -15,9 +15,9 @@ email, per-field sheet with copy/share/email/note copy, Edit, Open in Android Co
 with Undo), the editor (names, numbers, emails, note, groups, photo choose/remove/WhatsApp
 photo, Save to, discard confirm), permission recovery and Try Again, and Back from every layer.
 
-Every `rovsti_android::contacts_edit` seam (detail, full, save, delete, import, groups,
+Every `rosty_android::contacts_edit` seam (detail, full, save, delete, import, groups,
 save_group, set_group_members, delete_group, accounts, photo_size, set_photo, remove_photo) and
-`providers::set_starred` has a UI entry point. The `rovsti_core::contact_edit` helpers are all
+`providers::set_starred` has a UI entry point. The `rosty_core::contact_edit` helpers are all
 used by the app (`draft_from_query` by the No Results state).
 
 | # | Sev | Finding |

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use rovsti_wa_proto::{
+use rosty_wa_proto::{
     ChatAction, ChatState, DELETED_BY_ME, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
     LinkRequest, MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage, SendReaction, SendText,
     Sent, WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
@@ -633,7 +633,7 @@ impl EventSink {
 /// the `Message` event. The first tick of my own messages is implied, and in
 /// a one-to-one chat the sender's push name is the chat's (`ChatMeta`), so
 /// those alone do not double the event traffic.
-pub fn worth_announcing(chat: &str, meta: &rovsti_wa_proto::MessageMeta) -> bool {
+pub fn worth_announcing(chat: &str, meta: &rosty_wa_proto::MessageMeta) -> bool {
     let mut rest = meta.clone();
     if rest.status == Some(DeliveryStatus::Sent) {
         rest.status = None;
@@ -964,7 +964,7 @@ mod fake {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use rovsti_wa_proto::{
+    use rosty_wa_proto::{
         InstanceState, InstanceStatus, MediaMeta, MessageBody, MessageMeta, Quoted,
     };
 
@@ -1608,7 +1608,7 @@ mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::Quoted;
+    use rosty_wa_proto::Quoted;
 
     #[test]
     fn moved_ticks_become_receipts_and_played_meta() {

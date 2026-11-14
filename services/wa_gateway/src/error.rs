@@ -4,7 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::http::header::{HeaderValue, RETRY_AFTER};
 use axum::response::{IntoResponse, Response};
-use rovsti_wa_proto::{ApiError, ErrorCode, LimitSource};
+use rosty_wa_proto::{ApiError, ErrorCode, LimitSource};
 
 use crate::driver::DriverError;
 use crate::store::StoreError;

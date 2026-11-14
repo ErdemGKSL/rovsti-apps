@@ -17,12 +17,12 @@ inventory only**, never a design reference.
 
 - `git status` clean, HEAD `7bf317d` ("E4 R1 review fixes"). `stash@{0}` is the deprecated GPUI layout WIP: never pop it.
 - **E4 R1 done**, checked file by file: `android/settings.gradle.kts:27` includes `:contacts`; every test class the
-  round-10 verification list names exists under `android/contacts/src/test/kotlin/dev/rovsti/contacts/**`
+  round-10 verification list names exists under `android/contacts/src/test/kotlin/dev/rosty/contacts/**`
   (`ContactsManifestTest`, `ContactsRoutesTest`, `ContactsMigrationTest`, `ContactsStoreTest`, `BookRepositoryTest`,
   `WaMarksTest`, `ContactsListViewModelTest`, `ContactsListScreenTest`, `ContactCardViewModelTest`,
   `ContactCardScreenTest`, `ContactEditorViewModelTest`, `ContactEditorScreenTest`, `PhotoCropTest`,
   `TrashViewModelTest`, `FavoritesViewModelTest`, `GroupsViewModelTest`, `SelectModeViewModelTest`,
-  `SelectModeScreenTest`); `MergedManifest` is in `:testing`; Rust `crates/rovsti_ffi/src/ops/contacts/wa.rs` exists;
+  `SelectModeScreenTest`); `MergedManifest` is in `:testing`; Rust `crates/rosty_ffi/src/ops/contacts/wa.rs` exists;
   80 goldens in `android/contacts/screenshots/` (`e4.1-*` .. `e4.8-*`, light and dark); reorderable in
   `gradle/libs.versions.toml:37` and `THIRD_PARTY_NOTICES.md:316`. E4.1-E4.8 stay `done`.
 - **Rust ops for all of R2 already exist** (`ContactsOps.kt`, registered `contacts.*` ops): `vcardWrite`,
@@ -36,9 +36,9 @@ inventory only**, never a design reference.
 - What is still placeholder: `ContactsPages.kt:162` `IntakePlaceholderPage` (VIEW/SEND vCard target); the Settings tab
   (`ContactsSettings.kt:44-70`) has only WhatsApp, Trash and the common group; the card's photo viewer
   (`ContactCardScreen.kt:196`) is opened without the Save/Share/Change/Remove actions; `ContactsPrefs` (Rust
-  `crates/rovsti_core/src/contacts_prefs.rs:32`) has no appearance/haptics fields, so the Contacts `CommonSettings`
+  `crates/rosty_core/src/contacts_prefs.rs:32`) has no appearance/haptics fields, so the Contacts `CommonSettings`
   answers `null` for both rows.
-- The QR drawing is `private fun QrCard` in `wa/src/main/kotlin/dev/rovsti/wa/settings/WhatsAppSettingsScreen.kt:254`;
+- The QR drawing is `private fun QrCard` in `wa/src/main/kotlin/dev/rosty/wa/settings/WhatsAppSettingsScreen.kt:254`;
   E4.9 needs it too, so it moves to `:design`.
 - GPUI inventory for this round: `apps/contacts/src/qr_sheet.rs` (QR sheet, Save/Share image, dark-on-white card in
   dark mode), `transfer.rs` (vCard export/import through SAF + `document_result`), `intake.rs` (Paste contact, shared
@@ -61,7 +61,7 @@ inventory only**, never a design reference.
   card skips formatting for non-default rows).
 - `e4.2-row-context-menu-dark.png`: lifted row above, menu floats and nothing moved. **F12:** the icon column is
   inconsistent: "Copy number" and "Add to Home screen" have no glyph while the other rows do (iOS menus give every row
-  of a group a glyph or none). Add `RovstiIcons.Copy` and `RovstiIcons.AddToHome` (or `square.and.arrow.down` style)
+  of a group a glyph or none). Add `RostyIcons.Copy` and `RostyIcons.AddToHome` (or `square.and.arrow.down` style)
   to those items in the `contacts.quick` -> `MenuItem` mapping (`list/ContactsListScreen.kt`) and the card field menu.
 - `e4.1-settings-light.png`: **F13:** the WhatsApp/Trash card and the About card touch (no gap between the two
   `IosSettingsGroup`s). `SettingsPage` (`:shell`) or `IosSettingsGroup` must put the inset-grouped section spacing
@@ -73,11 +73,11 @@ inventory only**, never a design reference.
 
 1. **Disk first, every step.** `df -h .` before any build. Below 8 GB: `rm -rf target/debug/incremental
    target/aarch64-linux-android/debug/incremental android/*/build`. Below 7 GB: also `cargo clean -p` for the deprecated
-   GPUI crates (`rovsti_phone rovsti_messages rovsti_stops rovsti_contacts rovsti_ui rovsti_wa_ui liquid_glass_kit`)
+   GPUI crates (`rosty_phone rosty_messages rosty_stops rosty_contacts rosty_ui rosty_wa_ui liquid_glass_kit`)
    and delete Gradle versions under `~/.gradle/caches/` other than the wrapper's. Never below 6 GB. Start Step 1 with
    the 7 GB clean (we are at 6.5 GB).
 2. **Domain logic in Rust.** Every decision goes through the existing `contacts.*` op (State found). Kotlin only orders
-   effects. A missing decision becomes a new `rovsti_ffi` op with fixtures, never a Kotlin rewrite.
+   effects. A missing decision becomes a new `rosty_ffi` op with fixtures, never a Kotlin rewrite.
 3. **Screens** (ARCH 5.2): ViewModel with one `@Immutable UiState` (`ImmutableList` fields), `onAction(sealed)`,
    `stateIn(WhileSubscribed(5_000))`, one-shot `Effect`s through a `Channel`. Composables never map/sort/filter. Only
    `:design`/`:shell` components. Every list gets `LocalContentInsets` bottom padding, `key` + `contentType`.
@@ -85,7 +85,7 @@ inventory only**, never a design reference.
    WhatsApp as the 14 dp `SourceGlyph` once per row, chip rows are one non-wrapping `LazyRow` (Clean up filters!),
    16 dp gutter, every long-press opens a host context menu floating above the content, text fields are
    `GlassTextField`, nothing pushes content on tap.
-5. **Motion** (SKILL refs): pages push/pop through `RovstiNavHost` with predictive back (`shell-usage.md` 7); sheets
+5. **Motion** (SKILL refs): pages push/pop through `RostyNavHost` with predictive back (`shell-usage.md` 7); sheets
    `overlays.md` 5 (`sheetSettle` 0.86/380, dismiss +12 % H or velocity); context menus `overlays.md` 3; button menus
    `overlays.md` 4.3; photo viewer `motion.md` 8 (`Motion.sharedArtwork()` 500 ms, swipe-down dismiss); undo pill /
    toast `overlays.md` 6; list insert/remove `appear` spring; reduce motion via `MotionGate`.
@@ -94,7 +94,7 @@ inventory only**, never a design reference.
    `android/contacts/screenshots/`. **Every new PNG is opened with Read and judged**; what was seen goes in the commit
    message and the epics Evidence line.
 7. **Check per step:** `bash scripts/kotlin-ui-check.sh` prints `ALL GREEN`; Rust changes also run
-   `cargo test -p rovsti_app_core -p rovsti_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in
+   `cargo test -p rosty_app_core -p rosty_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in
    Step 8. `references/checklist.md` B-H in each screen commit.
 8. **Commits:** one per step, `Kotlin UI (E4 R2): <step title>`, ending with the session attribution lines. Never push
    to `main`.
@@ -108,12 +108,12 @@ inventory only**, never a design reference.
   inset-grouped lists); F12 glyphs on every menu item of the row and field menus; F14 one display format for every
   number on the card. Re-record the affected goldens (`e3.11-*settings*`, `e4.1-settings-*`, `e4.2-row-context-menu-*`,
   `e4.3-card-full-*`, `e4.3-field-menu-open-*`) and open them.
-- Move `QrCard` from `:wa` to `:design` as `dev.rovsti.design.media.QrCode(matrix: QrMatrix?, modifier)` (dark modules
+- Move `QrCard` from `:wa` to `:design` as `dev.rosty.design.media.QrCode(matrix: QrMatrix?, modifier)` (dark modules
   on a white rounded card in both themes, quiet zone 4 modules, `drawWithCache` with one `Path`); `:wa` calls it.
   `QrCodeTest` (pixel at a dark module is black in dark theme too).
 - E4.9 (C4, C12, C16, C36): card top-bar "..." `ButtonMenuEntry` gains **Share** submenu: "Share as Text"
   (`contacts.card` share text -> `ShareIntents.text`), "Share as File" (`vcardWrite` one contact ->
-  `MediaShare.stageForShare("<Name>.vcf")` -> SEND with `text/x-vcard` via `RovstiShareProvider`: closes the R1
+  `MediaShare.stageForShare("<Name>.vcf")` -> SEND with `text/x-vcard` via `RostyShareProvider`: closes the R1
   carry-over), "Show QR Code" (`QrSheet`: `SheetEntry` medium detent, `qr.encode` of the vCard payload, name under the
   code, buttons "Save Image" -> `MediaShare.saveToGallery` + toast "Saved to Photos", "Share Image" -> staged PNG);
   **Export .vcf** (C12, `Documents.create("text/x-vcard")`); **Copy** submenu "Copy Contact" / "Copy as vCard" (C16,
@@ -181,7 +181,7 @@ inventory only**, never a design reference.
   "Send Calls to Voicemail" `IosToggle` -> `setVoicemail` with confirm alert when turning on (texts from the op); "Block
   This Caller" / "Unblock" destructive row -> confirm -> `BlocklistRepository.add/remove` for every number of the
   contact (needs default dialer or SMS role: when `BlockedNumberContract.canCurrentUserBlockNumbers` is false the row
-  explains "Set Rovsti Phone as the default phone app to block" and opens role settings).
+  explains "Set Rosty Phone as the default phone app to block" and opens role settings).
 - Tests: `PhotoViewerActionsTest` (Edit menu items by state, Save calls gallery once), `CallOptionsViewModelTest`
   (ringtone result saved, voicemail confirm, block all numbers, cannot-block sentence), Compose test: toggle animates
   with the switch spring and the section does not jump.
@@ -202,7 +202,7 @@ inventory only**, never a design reference.
 
 ### Step 7. Settings (E4.15, C22, C29) with appearance and haptics prefs
 
-- Rust: add `appearance: Option<Appearance>`-style and `haptics` fields to `rovsti_core::contacts_prefs::ContactsPrefs`
+- Rust: add `appearance: Option<Appearance>`-style and `haptics` fields to `rosty_core::contacts_prefs::ContactsPrefs`
   (`#[serde(default)]`, missing -> Auto/Normal; bump `SCHEMA_VERSION` only if the loader needs it), update
   `prefs_load`/`prefs_save` fixtures and the Kotlin `StoreModels.kt` model; the Contacts `CommonSettings` now answers
   real flows, so the Appearance and Haptics rows appear. `ContactsMigrationTest`: old fixture without the fields loads
@@ -229,7 +229,7 @@ inventory only**, never a design reference.
 - Contact sheet: `docs/kotlin-ui/screenshots/contacts.png` (montage of the main goldens, light row and dark row,
   built by the existing E1.22 contact-sheet script). Open it.
 - Close: disk clean; full `CLAUDE.md` gate (`cargo fmt --all && cargo clippy --workspace --all-targets && cargo test
-  --workspace`, `cargo check -p rovsti_android --target aarch64-linux-android`), then `bash scripts/kotlin-ui-check.sh`;
+  --workspace`, `cargo check -p rosty_android --target aarch64-linux-android`), then `bash scripts/kotlin-ui-check.sh`;
   build and name `android/contacts/build/outputs/apk/debug/contacts-debug.apk` and
   `android/catalog/build/outputs/apk/debug/catalog-debug.apk` in the commit. `platform-port.md` rows for the Contacts
   GPUI files become `ported (E4.x)`.

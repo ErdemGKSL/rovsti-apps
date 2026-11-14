@@ -1,4 +1,4 @@
-# util-messages: everyday utilities for Rovsti Messages (round 4)
+# util-messages: everyday utilities for Rosty Messages (round 4)
 
 baseSha: 550a12dd01e23acf443ec1016f05ccb6074cefaf
 
@@ -15,7 +15,7 @@ M21, M22, M25. `git stash list` is empty. Re-checked by grep for the open rows:
   one `forward_ui::ForwardItem { body: ForwardBody, picture }` via `ConversationEvent::Forward` /
   `SmsConversationEvent::Forward`. `chat_export::export_text` already formats "[14:05] Ada: text"
   with day lines.
-- M23 SMS star: none. `rovsti_core::starred` only builds rows (`StarCandidate`, `starred_rows`,
+- M23 SMS star: none. `rosty_core::starred` only builds rows (`StarCandidate`, `starred_rows`,
   `empty_text`) for WA. SMS keys: `SmsKey::{provider_id, from_provider_id}` ("sms:12"/"mms:7").
   Prefs: `apps/messages/src/prefs.rs::MessagesPrefs` (serde, `reset()` keeps SIM choices and
   quick replies).
@@ -25,17 +25,17 @@ M21, M22, M25. `git stash list` is empty. Re-checked by grep for the open rows:
   `goto_pages` counts pages; reveal via `jump_to(id)` / `glow(key)`. Day picker precedent:
   `schedule_ui::CustomPick` (`step_day`, `day_label`).
 - M26 contact card: WA `SharedContact { display_name, vcard }` shows name + first number;
-  `card_actions` gives Call/Message/Add to contacts(number only)/Copy. `rovsti_core::vcard::parse`
+  `card_actions` gives Call/Message/Add to contacts(number only)/Copy. `rosty_core::vcard::parse`
   -> `ContactDraft { given, family, org, note, numbers, emails: Vec<DraftField> }` exists.
   `telecom::add_contact(number)` only puts PHONE in `ACTION_INSERT_OR_EDIT`. No .vcf save in
   Messages (but `documents::export_file(name, mime, path)` is generic). MMS `text/x-vcard`
   parts only show `part_label` + "Save file".
 - M27 clear chat: SMS already has "Delete conversation" (`Backend::delete_thread`). WA has no
-  gateway "clear chat" endpoint (`rovsti_wa_client::http` has `delete_for_me` per message only).
+  gateway "clear chat" endpoint (`rosty_wa_client::http` has `delete_for_me` per message only).
 - M28 share non-image file: MMS non-image parts have Save only (`saveable_parts`, `save_label`);
   WA documents/audio/video have Save only (`save_media` ~1718 downloads to
   `cache/wa-save-<stem>` then `documents::export_file`). `media::share_image(path, mime, title)`
-  -> Kotlin `shareImage` (`RovstiBridge.kt:795`); `MediaShare.mimeFor` knows images only and
+  -> Kotlin `shareImage` (`RostyBridge.kt:795`); `MediaShare.mimeFor` knows images only and
   `stageForShare` names the copy after the source file (MMS part files may lack an extension).
 - M29 mute durations: the chat row menu offers 8 hours / 1 week / Always for WA
   (`main.rs` `mute_choices`, `MUTE_8H_MS`, `MUTE_WEEK_MS`, ~2682). The header bell
@@ -88,16 +88,16 @@ M21, M22, M25. `git stash list` is empty. Re-checked by grep for the open rows:
 ## Plan, round 4 (pure logic first; every step leaves all checks green)
 
 Conventions as in R3: library-crate items are `pub` with doc comments; every new
-`rovsti_core` module is added to `crates/rovsti_core/src/lib.rs` (`pub mod …;`) in
+`rosty_core` module is added to `crates/rosty_core/src/lib.rs` (`pub mod …;`) in
 alphabetical order; app-crate pure helpers that are not called yet get
 `#[cfg_attr(not(test), allow(dead_code))]` only until the UI step that uses them, then the
 attribute is removed. Before building, if `df -h /` shows < 6 GB free, run
 `rm -rf target/debug/incremental`. Every step ends with the full check list from the task.
-Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
+Commit messages: `Rosty messages: <Pure|Android seams|UI>: <what> (Mxx)`.
 
-### S1 Pure: multi-select and local stars (rovsti_core)
+### S1 Pure: multi-select and local stars (rosty_core)
 
-- `crates/rovsti_core/src/multi_select.rs` (new):
+- `crates/rosty_core/src/multi_select.rs` (new):
   - `pub const MAX_SELECTED: usize = 200;`
   - `#[derive(Clone, Debug, Default)] pub struct Selection<K: Ord + Clone> { keys: BTreeSet<K> }`
     with `new()`, `toggle(&mut self, key: K) -> bool` (true when now selected; refuses past
@@ -113,11 +113,11 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   - Notices: `copied_notice(n)` "Copied" / "Copied 3 messages"; `starred_notice(n, star)`
     "Starred 3 messages" / "Unstarred 1 message"; `deleted_notice(n)` "Deleted 3 messages for
     you"; `cap_notice()` "You can select up to 200 messages".
-- `crates/rovsti_core/src/chat_export.rs`: factor the per-message loop of `export_text` into
+- `crates/rosty_core/src/chat_export.rs`: factor the per-message loop of `export_text` into
   `pub fn block_text(lines: &[ExportLine<'_>], tz_offset_s: i32) -> String` (day lines +
   "[14:05] Ada: text", no "Chat with" header, no leading blank line); `export_text` becomes
   header + `"\n"` + block. Existing export tests must stay unchanged and green.
-- `crates/rovsti_core/src/starred.rs`: local stars for SMS.
+- `crates/rosty_core/src/starred.rs`: local stars for SMS.
   - `#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)] pub struct LocalStar {
     pub thread_id: i64, pub at_ms: i64, pub author: String, pub preview: String }`
   - `#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)] #[serde(transparent)]
@@ -132,11 +132,11 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   continuation indent); star_all mixed/all-starred/empty; notices plural/singular;
   block_text equals export_text minus header; LocalStars set/unset/cap eviction/rows_for
   ordering/forget_thread; serde round-trip `{"sms:1":{...}}`.
-- Commit: `Rovsti messages: Pure: multi-select, block copy, local stars (rovsti_core)`.
+- Commit: `Rosty messages: Pure: multi-select, block copy, local stars (rosty_core)`.
 
-### S2 Pure: jump to date, mute choices, shared contact card (rovsti_core)
+### S2 Pure: jump to date, mute choices, shared contact card (rosty_core)
 
-- `crates/rovsti_core/src/date_jump.rs` (new):
+- `crates/rosty_core/src/date_jump.rs` (new):
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct DayPick { day: i64 }` (local day
     number as `call_log::day_key` gives). `today(now_ms, tz) -> Self`, `step_day(self, d: i32,
     now_ms, tz) -> Self` and `step_month(self, d: i32, now_ms, tz) -> Self` (never after today;
@@ -156,7 +156,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
     on a later day is decided by the caller with `starts_later(at_ms, start_ms, tz)` ->
     "No messages on {label}: showing the next day with messages". Expose
     `pub fn starts_later(at_ms: i64, start_ms: i64, tz: i32) -> bool`.
-- `crates/rovsti_core/src/mute.rs` (new):
+- `crates/rosty_core/src/mute.rs` (new):
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum MuteFor { EightHours, Week, Always }`,
     `pub const ALL: [MuteFor; 3]`, `label(self) -> &'static str` ("8 hours", "1 week",
     "Always"), `until_ms(self, now_ms) -> Option<i64>` (`None` = always; constants
@@ -165,7 +165,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
     "Muted until 18:05" same day, "Muted until Sat 14 Nov 09:00" otherwise.
   - `pub fn is_active(until_ms: Option<i64>, now_ms) -> bool`.
   - Move `MUTE_8H_MS` / `MUTE_WEEK_MS` users in `main.rs` to `MuteFor::until_ms` in S6, not here.
-- `crates/rovsti_core/src/shared_card.rs` (new):
+- `crates/rosty_core/src/shared_card.rs` (new):
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub struct CardView { pub name: String, pub org:
     String, pub numbers: Vec<CardField>, pub emails: Vec<CardField>, pub note: String }`,
     `pub struct CardField { pub value: String, pub label: String }` (label from
@@ -185,21 +185,21 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   notices; MuteFor until values and labels, muted_notice same-day vs later; from_vcard with
   2 numbers + 2 emails + org, with `item1.TEL;waid=` style lines, with empty vcard;
   to_vcard round trip; vcf_file_name non-ASCII/blank; insert_json shape.
-- Commit: `Rovsti messages: Pure: jump to date, mute choices, shared card (rovsti_core)`.
+- Commit: `Rosty messages: Pure: jump to date, mute choices, shared card (rosty_core)`.
 
-### S3 Android seams and prefs (rovsti_android, Kotlin, prefs.rs)
+### S3 Android seams and prefs (rosty_android, Kotlin, prefs.rs)
 
-- `crates/rovsti_android/src/media.rs`: `pub fn share_file(path: &str, mime: &str, name: &str)
+- `crates/rosty_android/src/media.rs`: `pub fn share_file(path: &str, mime: &str, name: &str)
   -> Result<bool>` -> bridge `"shareFile"` (`Arg::Str` x3). Doc: any type; `name` is the file
   name the receiver sees. Desktop test `Error::Unsupported`.
-- `crates/rovsti_android/src/telecom.rs`: `pub fn insert_contact(card_json: &str) ->
+- `crates/rosty_android/src/telecom.rs`: `pub fn insert_contact(card_json: &str) ->
   Result<bool>` -> `bridge::call_bool_str("insertContact", card_json)`. Doc: opens the system
   "new contact" screen pre-filled; needs no permission. Desktop test.
-- Kotlin `crates/rovsti_android/kotlin/dev/rovsti/bridge/MediaShare.kt`: `stageForShare(context,
+- Kotlin `crates/rosty_android/kotlin/dev/rosty/bridge/MediaShare.kt`: `stageForShare(context,
   path, name: String? = null)` uses `safeName("${millis}-${name ?: source.name}", …)`;
   `mimeFor` adds pdf, vcf (`text/x-vcard`), txt, mp3, m4a/aac (`audio/mp4`), ogg/opus
   (`audio/ogg`), amr, 3gp (`video/3gpp`), mp4, zip; default stays octet-stream.
-- Kotlin `RovstiBridge.kt`: `@JvmStatic fun shareFile(path, mime, name): Boolean` (like
+- Kotlin `RostyBridge.kt`: `@JvmStatic fun shareFile(path, mime, name): Boolean` (like
   `shareImage`, type `mime.ifEmpty { "*/*" }`, stages with `name`); `@JvmStatic fun
   insertContact(json: String): Boolean`: parse with `org.json.JSONObject`, `Intent(Intent.
   ACTION_INSERT, ContactsContract.Contacts.CONTENT_URI)` with `Insert.NAME`, `Insert.COMPANY`,
@@ -207,7 +207,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   (`Phone.NUMBER`, `Phone.TYPE` from label: Mobile/Home/Work else `TYPE_CUSTOM` + `LABEL`) and
   `Email.CONTENT_ITEM_TYPE` rows; malformed JSON -> false; `start(intent)`.
 - `apps/messages/src/prefs.rs`:
-  - `#[serde(default)] pub sms_stars: rovsti_core::starred::LocalStars` (kept by `reset()`,
+  - `#[serde(default)] pub sms_stars: rosty_core::starred::LocalStars` (kept by `reset()`,
     like quick replies).
   - `#[serde(default)] pub mute_until: BTreeMap<String, i64>`; `pub fn set_muted_until(&mut
     self, tag, until: Option<i64>)` (inserts into `muted`; `Some` also records the end, `None`
@@ -220,13 +220,13 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
 - `apps/messages/src/main.rs`: call `prefs.expire_mutes(now_ms())` through
   `backend.update_prefs` at start-up and on each foreground resume (where `ui_active` flips on),
   and before the notification mute check (~2329). Nothing else in the UI yet.
-- Commit: `Rovsti messages: Android seams: share file, insert contact; prefs: SMS stars, mute ends`.
+- Commit: `Rosty messages: Android seams: share file, insert contact; prefs: SMS stars, mute ends`.
 
 ### S4 UI: select mode in WhatsApp chats (M20)
 
 - `apps/messages/src/conversation.rs`: `select: Option<Selection<String>>` (message ids).
   - Entry: "Select" pill (`Icon::LucideListChecks`, check the icon exists in the pinned
-    gpui-fusion / rovsti_ui icon enum by grep; fall back to `LucideCheckSquare`) in
+    gpui-fusion / rosty_ui icon enum by grep; fall back to `LucideCheckSquare`) in
     `quick_strip`; it closes the strip and selects that message.
   - While selecting: taps toggle instead of opening media/strip; each bubble row shows a
     leading round check (filled accent when selected) and a tinted row background; long press
@@ -247,7 +247,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
     `timeline` changes call `selection.retain(|id| still loaded)`.
 - Keep GPUI glue thin: all strings and decisions come from `multi_select`.
 - Acceptance doc rows (`docs/messages-acceptance.md`): M20 WA.
-- Commit: `Rovsti messages: UI: select mode in WhatsApp chats (M20)`.
+- Commit: `Rosty messages: UI: select mode in WhatsApp chats (M20)`.
 
 ### S5 UI: select mode and stars in SMS chats (M20, M23)
 
@@ -266,7 +266,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   goto/`JumpTarget { id: provider_id, at_ms }` path -> glow; empty text from
   `starred::empty_text(false)`; row long-press offers Unstar).
 - Delete conversation and single delete call `forget_thread` / `forget`.
-- Commit: `Rovsti messages: UI: select mode and stars in SMS chats (M20, M23)`.
+- Commit: `Rosty messages: UI: select mode and stars in SMS chats (M20, M23)`.
 
 ### S6 UI: jump to date and header mute durations (M24, M29)
 
@@ -287,7 +287,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   Replace the row-menu constants `MUTE_8H_MS` / `MUTE_WEEK_MS` with `MuteFor` and add the
   same three choices to the SMS row menu (`SmsAction::Mute`). Header subtitle shows
   "Muted until …" when an end is set (WA from `ChatMeta::muted_until_ms`, ignoring `MUTED_FOREVER`; SMS from `mute_end`).
-- Commit: `Rovsti messages: UI: jump to date and mute durations (M24, M29)`.
+- Commit: `Rosty messages: UI: jump to date and mute durations (M24, M29)`.
 
 ### S7 UI: contact cards and file sharing (M26, M28)
 
@@ -305,7 +305,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   video media: download as `save_media` does (factor `download_media(id) -> Task<Result<
   PathBuf, String>>`), then `share_file(path, mime, file_name)`. Pills: Unsupported ->
   "Sharing needs an Android phone.", false -> "Couldn't open the share sheet".
-- Commit: `Rovsti messages: UI: contact cards and file sharing (M26, M28)`.
+- Commit: `Rosty messages: UI: contact cards and file sharing (M26, M28)`.
 
 ### S8 Docs and backlog
 
@@ -317,7 +317,7 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   (WA select mode) and 124-137 (SMS select, stars, jump to date, mute, contact cards, file
   sharing). Deferrals: none; WA delete for everyone and WA clear chat stay out (no gateway
   endpoint).
-- Commit: `Rovsti messages: utilities R4 docs and backlog`.
+- Commit: `Rosty messages: utilities R4 docs and backlog`.
 
 ## Round 5 backlog
 

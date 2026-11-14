@@ -65,7 +65,7 @@ device stays connected, route by type plus name and re-check.
    "Hearing aid" subtitle). Switch a device off during the call: its row dims
    with "Disconnected" and the check moves to what Android falls back to.
 6. Connect and disconnect Bluetooth five times in a row: the control follows
-   with no flicker (logcat `RovstiSpike` prints one `snapshot` line per change).
+   with no flicker (logcat `RostySpike` prints one `snapshot` line per change).
 7. Provoke a failure (switch the earbuds off right after tapping their row):
    the pending look reverts after 1 s with the pill "Couldn't switch to ...".
 8. Tap "Bluetooth settings" and "Hearing aids" in the popover footer: the popover
@@ -73,6 +73,6 @@ device stays connected, route by type plus name and re-check.
    phone without the hearing page opens App info and says "Opened app settings
    instead".
 9. Burst check (14.0e): connect and disconnect the earbuds quickly; at most two
-   `snapshot` lines appear per burst in `adb logcat -s RovstiSpike`. Note the
+   `snapshot` lines appear per burst in `adb logcat -s RostySpike`. Note the
    count in the result table above.
 10. Run the Diagnostics Audio probe (see the procedure) and paste the report.

@@ -1,0 +1,24 @@
+package dev.rosty.messages
+
+import android.app.Application
+import dev.rosty.bridge.Headless
+import dev.rosty.bridge.MmsCodec
+import dev.rosty.bridge.RostyBridge
+
+/**
+ * Hands the application to the shared Kotlin bridge and tells the headless path which library to load.
+ * Receivers run this `onCreate` first, so everything they need is set before `onReceive`. The native
+ * library is loaded by the activity (AD-8) or, with no activity, lazily by `Headless.call`; never here.
+ */
+class RostyMessagesApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        RostyBridge.install(this)
+        Headless.libName = LIBRARY
+        MmsCodec.downloadedHandler = MmsCodec.DownloadedHandler(MmsInbox::onDownloaded)
+    }
+
+    companion object {
+        const val LIBRARY = "rosty_messages"
+    }
+}

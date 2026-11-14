@@ -6,10 +6,10 @@
 use std::sync::Arc;
 
 use gpui::{Context, Task};
-use rovsti_android::{Error, blocklist, calls, calls::Reject};
+use rosty_android::{Error, blocklist, calls, calls::Reject};
 #[cfg(not(target_os = "android"))]
-use rovsti_core::wire::SilencedBy;
-use rovsti_core::{
+use rosty_core::wire::SilencedBy;
+use rosty_core::{
     blocklist::{BlockRefusal, BlockSet, can_block},
     wire::{BlockedNumber, BlocklistPayload, CallLogEntry, CallLogPayload, EmergencyList},
 };
@@ -71,10 +71,10 @@ impl From<Reject> for ReplyOutcome {
 }
 
 /// The system blocklist is not usable in the desktop preview when
-/// `ROVSTI_PREVIEW_BLOCK=off` (rehearses "Blocking isn't available").
+/// `ROSTY_PREVIEW_BLOCK=off` (rehearses "Blocking isn't available").
 fn preview_off() -> bool {
     cfg!(not(target_os = "android"))
-        && std::env::var("ROVSTI_PREVIEW_BLOCK").is_ok_and(|v| v == "off")
+        && std::env::var("ROSTY_PREVIEW_BLOCK").is_ok_and(|v| v == "off")
 }
 
 fn load_blocklist() -> (Load<BlockState>, bool) {
@@ -323,7 +323,7 @@ impl Backend {
     }
 
     /// Desktop: the fake call is declined and the outcome is rehearsed
-    /// (`ROVSTI_PREVIEW_REPLY` = `sent`, `opened` or `declined`).
+    /// (`ROSTY_PREVIEW_REPLY` = `sent`, `opened` or `declined`).
     #[cfg(not(target_os = "android"))]
     fn preview_reply(
         &mut self,
@@ -332,7 +332,7 @@ impl Backend {
         cx: &mut Context<Self>,
     ) -> ReplyOutcome {
         self.preview_command(CallCommand::Reject(id), cx);
-        fixed.unwrap_or_else(|| match std::env::var("ROVSTI_PREVIEW_REPLY").as_deref() {
+        fixed.unwrap_or_else(|| match std::env::var("ROSTY_PREVIEW_REPLY").as_deref() {
             Ok("opened") => ReplyOutcome::Opened,
             Ok("declined") => ReplyOutcome::Declined,
             _ => ReplyOutcome::Sent,
@@ -395,7 +395,7 @@ mod tests {
     use super::*;
 
     const BLOCKLIST: &str =
-        include_str!("../../../../crates/rovsti_core/tests/fixtures/blocklist.json");
+        include_str!("../../../../crates/rosty_core/tests/fixtures/blocklist.json");
 
     fn row(id: i64, raw: &str, normalized: &str) -> BlockedNumber {
         BlockedNumber {

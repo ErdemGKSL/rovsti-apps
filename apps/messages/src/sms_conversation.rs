@@ -1,9 +1,9 @@
 //! One SMS/MMS conversation: pages from the provider through the backend,
 //! optimistic sends, delivery ticks, a SIM chip and a composer. The merge of
-//! pages and `sms_status` events is `rovsti_core::sms_timeline::SmsTimeline`;
+//! pages and `sms_status` events is `rosty_core::sms_timeline::SmsTimeline`;
 //! this module is the GPUI shell around it plus a few pure text helpers.
 
-use rovsti_core::text_detect::{self, DetectAction};
+use rosty_core::text_detect::{self, DetectAction};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -16,8 +16,8 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, img,
     list, prelude::*, px,
 };
-use rovsti_android::{Error as AndroidError, documents};
-use rovsti_core::{
+use rosty_android::{Error as AndroidError, documents};
+use rosty_core::{
     ThreadId,
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
@@ -30,7 +30,7 @@ use rovsti_core::{
     unread_jump::{self, JumpState},
     wire::{DocumentOp, DocumentResult},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{glass_icon_button, glass_pill},
     current_theme,
@@ -38,7 +38,7 @@ use rovsti_ui::{
     theme,
     tokens::{Theme, radius, typography},
 };
-use rovsti_wa_ui::photo_avatar;
+use rosty_wa_ui::photo_avatar;
 
 use crate::text_size::bubble_text;
 use crate::{
@@ -107,7 +107,7 @@ pub enum SmsConversationEvent {
     /// An Email pill of an address found in a bubble.
     Email(String),
     /// Add to contacts for a shared contact card.
-    AddContactCard(rovsti_core::shared_card::CardView),
+    AddContactCard(rosty_core::shared_card::CardView),
     /// The header's more button: the conversation menu.
     Menu,
     /// The Spam banner's "Not spam": allow this sender.
@@ -187,7 +187,7 @@ pub struct SmsConversation {
     /// slot, then one item per [`Entry`].
     list: KeyedList,
     /// The text size the list was last measured at.
-    measured_text_size: rovsti_core::text_scale::ChatTextSize,
+    measured_text_size: rosty_core::text_scale::ChatTextSize,
     /// Day breaks and messages in timeline order, rebuilt when `rows_dirty`.
     entries: Vec<Entry>,
     /// The timeline changed since `entries`.
@@ -235,7 +235,7 @@ pub struct SmsConversation {
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
     /// The header's copy choices (name, number), while their sheet is open.
-    header_sheet: Option<Vec<rovsti_core::copy_choices::CopyChoice>>,
+    header_sheet: Option<Vec<rosty_core::copy_choices::CopyChoice>>,
     /// The "Media, links and docs" sheet.
     gallery: Option<crate::gallery_ui::GallerySheet>,
     /// The "View contact" sheet of a shared card.
@@ -255,15 +255,15 @@ pub struct SmsConversation {
     /// The hit that glows for a moment.
     highlight: Option<SmsKey>,
     /// The message a search hit opened the thread for, until it is shown.
-    goto: Option<rovsti_core::global_search::JumpTarget>,
+    goto: Option<rosty_core::global_search::JumpTarget>,
     /// Provider id -> badge text of the armed message reminders.
     reminders: std::collections::HashMap<String, String>,
     /// Older pages loaded while working towards `goto`.
     goto_pages: usize,
     /// The "Jump to date" sheet, with the day picked so far.
-    date_sheet: Option<rovsti_core::date_jump::DayPick>,
+    date_sheet: Option<rosty_core::date_jump::DayPick>,
     /// The day being worked towards and the older pages loaded for it.
-    date_goto: Option<(rovsti_core::date_jump::DayPick, usize)>,
+    date_goto: Option<(rosty_core::date_jump::DayPick, usize)>,
     /// When the mute ends (header line), if it is timed.
     muted_until: Option<i64>,
     /// The scroll-to-bottom button and its count of new messages.
@@ -275,8 +275,8 @@ pub struct SmsConversation {
     /// The message waiting at the "Delete this message?" sheet.
     delete_confirm: Option<SmsKey>,
     /// Where the header's bell and more buttons were painted, for their popovers.
-    mute_anchor: rovsti_ui::menu::AnchorSlot,
-    more_anchor: rovsti_ui::menu::AnchorSlot,
+    mute_anchor: rosty_ui::menu::AnchorSlot,
+    more_anchor: rosty_ui::menu::AnchorSlot,
     /// Confirmed deletes in their Undo window (hidden from the rows).
     pending: PendingDeletes<SmsKey>,
     /// Deletes handed to the backend, still hidden until it answers.
@@ -376,8 +376,8 @@ impl SmsConversation {
             opening_unread: (unread > 0).then_some(unread),
             divider: None,
             delete_confirm: None,
-            mute_anchor: rovsti_ui::menu::AnchorSlot::new(),
-            more_anchor: rovsti_ui::menu::AnchorSlot::new(),
+            mute_anchor: rosty_ui::menu::AnchorSlot::new(),
+            more_anchor: rosty_ui::menu::AnchorSlot::new(),
             pending: PendingDeletes::default(),
             deleting: Vec::new(),
             ticking: false,
@@ -390,7 +390,7 @@ impl SmsConversation {
 
     /// Opens the thread at a search hit: it is shown once loaded (the first
     /// page is still on its way when this runs).
-    pub fn set_goto(&mut self, target: Option<rovsti_core::global_search::JumpTarget>) {
+    pub fn set_goto(&mut self, target: Option<rosty_core::global_search::JumpTarget>) {
         self.goto = target;
     }
 
@@ -460,12 +460,12 @@ impl SmsConversation {
     }
 
     /// Where the header's bell button was painted.
-    pub fn mute_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+    pub fn mute_anchor(&self) -> rosty_ui::menu::AnchorSlot {
         self.mute_anchor.clone()
     }
 
     /// Where the header's more button was painted.
-    pub fn more_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+    pub fn more_anchor(&self) -> rosty_ui::menu::AnchorSlot {
         self.more_anchor.clone()
     }
 
@@ -694,7 +694,7 @@ impl SmsConversation {
     /// Works towards the message a search hit asked for: shows it, loads one
     /// more older page, or says why it stopped.
     fn continue_goto(&mut self, cx: &mut Context<Self>) {
-        use rovsti_core::global_search::{JumpStep, jump_notice, jump_step};
+        use rosty_core::global_search::{JumpStep, jump_notice, jump_step};
         let Some(target) = self.goto.clone() else {
             return;
         };
@@ -1049,7 +1049,7 @@ impl SmsConversation {
     /// A reply chip was tapped: it goes into the composer, the row closes and
     /// the keyboard stays up.
     fn insert_quick_reply(&mut self, reply: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let text = rovsti_core::quick_replies::insert_into(self.composer.read(cx).text(), reply);
+        let text = rosty_core::quick_replies::insert_into(self.composer.read(cx).text(), reply);
         self.composer.update(cx, |field, cx| field.set(&text, cx));
         self.quick_open = false;
         let focus = self.composer.read(cx).focus_handle();
@@ -1267,7 +1267,7 @@ impl SmsConversation {
     /// "Jump to date" on the page menu: opens the sheet on today.
     pub fn open_date_sheet(&mut self, cx: &mut Context<Self>) {
         let (now, tz) = (self.frame_now, self.backend.read(cx).locale().tz_offset_s);
-        self.date_sheet = Some(rovsti_core::date_jump::DayPick::today(now, tz));
+        self.date_sheet = Some(rosty_core::date_jump::DayPick::today(now, tz));
         cx.notify();
     }
 
@@ -1295,9 +1295,7 @@ impl SmsConversation {
     /// Works towards the first message of the picked day: shows it, loads one more
     /// older page, or says why it stopped.
     fn continue_date_goto(&mut self, cx: &mut Context<Self>) {
-        use rovsti_core::date_jump::{
-            DateStep, date_notice, date_step, later_notice, starts_later,
-        };
+        use rosty_core::date_jump::{DateStep, date_notice, date_step, later_notice, starts_later};
         let Some((day, pages)) = self.date_goto else {
             return;
         };
@@ -1475,7 +1473,7 @@ impl SmsConversation {
     }
 
     fn select_forward(&mut self, cx: &mut Context<Self>) {
-        use rovsti_core::forward::ForwardBody;
+        use rosty_core::forward::ForwardBody;
         let single = match self.selected_items().as_slice() {
             [one] => forward_item(one, &self.title).filter(|f| f.picture.is_some()),
             _ => None,
@@ -1720,7 +1718,7 @@ impl SmsConversation {
     /// files Docs, and links come from the bodies.
     fn build_gallery(&self) -> crate::gallery_ui::GallerySheet {
         use crate::gallery_ui::{base_name, kind_of_mime};
-        use rovsti_core::chat_gallery::{self, GalleryInput};
+        use rosty_core::chat_gallery::{self, GalleryInput};
         struct Owned {
             id: String,
             at_ms: i64,
@@ -1988,7 +1986,7 @@ impl SmsConversation {
         self.select = None;
         self.rows_dirty = true;
         let task = cx.background_executor().spawn(async move {
-            rovsti_android::media::share_file(&part.path, &part.mime, &part.name)
+            rosty_android::media::share_file(&part.path, &part.mime, &part.name)
                 .map_err(|e| matches!(e, AndroidError::Unsupported))
         });
         cx.spawn(async move |this, cx| {
@@ -2281,8 +2279,8 @@ impl SmsConversation {
     }
 
     /// The Info rows of a message.
-    fn info_rows(&self, item: &SmsItem, cx: &gpui::App) -> Vec<rovsti_core::message_info::InfoRow> {
-        use rovsti_core::message_info::{InfoInput, rows};
+    fn info_rows(&self, item: &SmsItem, cx: &gpui::App) -> Vec<rosty_core::message_info::InfoRow> {
+        use rosty_core::message_info::{InfoInput, rows};
         let backend = self.backend.read(cx);
         let sim = item.sub_id.and_then(|id| {
             backend
@@ -2457,7 +2455,7 @@ impl SmsConversation {
     /// Jumps to a starred message: the sheet closes and the page works towards it.
     fn jump_to_star(&mut self, row: &StarredRow, cx: &mut Context<Self>) {
         self.starred_open = false;
-        self.goto = Some(rovsti_core::global_search::JumpTarget {
+        self.goto = Some(rosty_core::global_search::JumpTarget {
             id: row.id.clone(),
             at_ms: row.at_ms,
         });
@@ -2529,7 +2527,7 @@ impl SmsConversation {
                                 .flex_col()
                                 .px(px(16.0))
                                 .py(px(8.0))
-                                .min_h(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .min_h(rosty_ui::tokens::metrics::MIN_HIT)
                                 .rounded(px(14.0))
                                 .hover(|s| s.bg(colors.label.opacity(0.06)))
                                 .child(
@@ -2563,7 +2561,7 @@ impl SmsConversation {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .size(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .size(rosty_ui::tokens::metrics::MIN_HIT)
                                 .child(
                                     gpui::svg()
                                         .path(Icon::LucideStar.path())
@@ -2620,7 +2618,7 @@ impl SmsConversation {
             [one] => Some(one.as_str()),
             _ => None,
         };
-        let choices = rovsti_core::copy_choices::header_choices(&self.title, number, None);
+        let choices = rosty_core::copy_choices::header_choices(&self.title, number, None);
         if choices.is_empty() {
             cx.emit(SmsConversationEvent::Notice("Nothing to copy"));
         } else {
@@ -3124,7 +3122,7 @@ impl SmsConversation {
                         })),
                 );
             }
-            for (n, link) in rovsti_core::spam::open_links(&item.body, 3)
+            for (n, link) in rosty_core::spam::open_links(&item.body, 3)
                 .into_iter()
                 .enumerate()
             {
@@ -3136,17 +3134,17 @@ impl SmsConversation {
                         })),
                 );
             }
-            let place = rovsti_core::location_link::find_places(&item.body, 1).pop();
+            let place = rosty_core::location_link::find_places(&item.body, 1).pop();
             if let Some(place) = &place {
                 let (lat, lon, label) = (place.lat, place.lon, place.label.clone());
-                let coords = rovsti_core::location_link::coords_text(lat, lon);
+                let coords = rosty_core::location_link::coords_text(lat, lon);
                 pills = pills.child(
                     glass_pill(theme, "Open in Maps")
                         .id(("sms-place-open", index))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.selected = None;
                             this.rows_dirty = true;
-                            cx.open_url(&rovsti_core::location_link::geo_url(
+                            cx.open_url(&rosty_core::location_link::geo_url(
                                 lat,
                                 lon,
                                 label.as_deref(),
@@ -3168,7 +3166,7 @@ impl SmsConversation {
                         })),
                 );
             }
-            if let Some(link) = rovsti_core::spam::open_links(&item.body, 1)
+            if let Some(link) = rosty_core::spam::open_links(&item.body, 1)
                 .into_iter()
                 .next()
                 && !place
@@ -3186,7 +3184,7 @@ impl SmsConversation {
                         })),
                 );
             }
-            if let Some(found) = rovsti_core::date_detect::detect(
+            if let Some(found) = rosty_core::date_detect::detect(
                 &item.body,
                 now_ms(),
                 self.backend.read(cx).locale().tz_offset_s,
@@ -3195,9 +3193,9 @@ impl SmsConversation {
             .into_iter()
             .next()
             {
-                let title = rovsti_core::date_detect::event_title(&self.title, &item.body);
-                let matched = rovsti_core::date_detect::matched_text(&item.body, &found).to_owned();
-                let end_ms = rovsti_core::date_detect::calendar_end_ms(&found);
+                let title = rosty_core::date_detect::event_title(&self.title, &item.body);
+                let matched = rosty_core::date_detect::matched_text(&item.body, &found).to_owned();
+                let end_ms = rosty_core::date_detect::calendar_end_ms(&found);
                 pills = pills.child(
                     glass_pill(theme, format!("Add to calendar · {}", found.label))
                         .id(("sms-add-calendar", index))
@@ -3389,7 +3387,7 @@ impl Render for SmsConversation {
                 back,
                 avatar,
                 self.title.clone(),
-                rovsti_core::mute::header_line(self.muted_until, now, locale.tz_offset_s)
+                rosty_core::mute::header_line(self.muted_until, now, locale.tz_offset_s)
                     .or_else(|| header_subtitle(&self.title, &self.recipients)),
                 Some(trailing),
                 Some(hold),
@@ -3906,7 +3904,7 @@ pub(crate) fn forward_item(
     item: &SmsItem,
     title: &SharedString,
 ) -> Option<crate::forward_ui::ForwardItem> {
-    use rovsti_core::forward::ForwardBody;
+    use rosty_core::forward::ForwardBody;
     let text = copy_text(item);
     let picture = item.parts.iter().find_map(|p| {
         let path = p.path.as_deref().filter(|_| is_image(&p.content_type))?;
@@ -3939,7 +3937,7 @@ pub fn copy_code(item: &SmsItem) -> Option<String> {
     if item.outgoing {
         return None;
     }
-    rovsti_core::otp::detect(&item.body).map(|o| o.code)
+    rosty_core::otp::detect(&item.body).map(|o| o.code)
 }
 
 #[cfg(test)]
@@ -3953,7 +3951,7 @@ mod tests {
         assert!(!super::spam_banner_visible(true, &[]));
     }
 
-    use rovsti_core::sms::{MmsPart, SmsSim};
+    use rosty_core::sms::{MmsPart, SmsSim};
 
     #[test]
     fn share_labels() {

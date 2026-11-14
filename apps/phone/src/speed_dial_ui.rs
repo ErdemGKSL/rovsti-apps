@@ -1,7 +1,7 @@
 //! Speed dial (keypad long-press) and its Settings page.
 //!
 //! Holding a digit on an empty keypad field calls voicemail (1) or the
-//! contact assigned to it (2..=9); see `rovsti_core::speed_dial` for what a
+//! contact assigned to it (2..=9); see `rosty_core::speed_dial` for what a
 //! hold means. The Settings page lists the nine digits: 1 is voicemail and
 //! fixed, a free digit starts a pick in the Contacts tab (the contact sheet
 //! shows the number list, a tap on a number assigns it), an assigned digit
@@ -16,12 +16,12 @@ use gpui::{
     AnyElement, Context, HapticFeedback, Hsla, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     dial,
     settings::SpeedDialEntry,
     speed_dial::{self, HoldDigit},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     theme::{self, call_colors},
     tokens::{Theme, radius, typography},
@@ -108,7 +108,7 @@ pub(crate) fn rows(map: &BTreeMap<u8, SpeedDialEntry>) -> Vec<Row> {
         digit: 1,
         slot: Slot::Voicemail,
     }];
-    out.extend(rovsti_core::settings::SPEED_DIAL_DIGITS.map(|digit| Row {
+    out.extend(rosty_core::settings::SPEED_DIAL_DIGITS.map(|digit| Row {
         digit,
         slot: match map.get(&digit) {
             Some(e) if !e.number_raw.is_empty() => Slot::Assigned {
@@ -171,7 +171,7 @@ impl PhoneApp {
         dial::backspace(&mut self.dialed);
         self.status = None;
         self.delete_shown.set_target(0.0);
-        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
         match hold {
             HoldDigit::Voicemail => self.voicemail_press(window, cx),
             HoldDigit::Call { number_raw, .. } => {
@@ -229,7 +229,7 @@ impl PhoneApp {
                 if let Some(digit) = self.speed_dial.menu.take() {
                     let old = map.get(&digit).cloned();
                     self.speed_dial_write(digit, None, cx);
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                     if let Some(old) = old {
                         self.show_pill_action(
                             format!("Removed speed dial {digit}"),
@@ -247,7 +247,7 @@ impl PhoneApp {
                     Some(Slot::Assigned { .. }) => {
                         self.speed_dial.menu =
                             (self.speed_dial.menu != Some(digit)).then_some(digit);
-                        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                     }
                     _ => {}
                 }
@@ -271,7 +271,7 @@ impl PhoneApp {
                 });
             });
             self.sync_settings_rows(cx, false);
-            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
             if old.is_empty() {
                 self.show_notice_pill("Nothing to clear", None, false, cx);
             } else {
@@ -326,7 +326,7 @@ impl PhoneApp {
                 .relative()
                 .h(px(52.0))
                 .rounded_full()
-                .bg(rovsti_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
+                .bg(rosty_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -412,7 +412,7 @@ impl PhoneApp {
             name: name.to_owned(),
         };
         if self.speed_dial_write(digit, Some(entry), cx) {
-            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
             self.show_pill_action(
                 format!("Speed dial {digit}: {name}"),
                 "View",
@@ -447,7 +447,7 @@ impl PhoneApp {
             name: name.to_owned(),
         };
         if self.speed_dial_write(digit, Some(entry), cx) {
-            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
             let text = speed_dial::assigned_text(digit, name, previous.as_ref());
             let action = match previous {
                 Some(prev) => PillAction::RestoreSpeedDial(digit, prev),
@@ -474,7 +474,7 @@ impl PhoneApp {
             .get(&digit)
             .cloned();
         self.speed_dial_write(digit, None, cx);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         if let Some(old) = old {
             self.show_pill_action(
                 format!("Removed speed dial {digit}"),

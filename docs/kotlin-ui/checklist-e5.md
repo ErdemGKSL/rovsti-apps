@@ -8,7 +8,7 @@ Favorites and Contacts tabs (E5.5) are NOT part of this pass: that step was stas
 
 ## A. Licence and provenance
 - pass: no GPUI, no Material. The call aura is the Convx port in `:design` (`media/CallAura.kt`, header kept).
-- pass: `CallSheetMotion` (mini pill windows) is Rovsti code that uses Convx's published numbers only (0.2, 0.3, 0.1-0.6).
+- pass: `CallSheetMotion` (mini pill windows) is Rosty code that uses Convx's published numbers only (0.2, 0.3, 0.1-0.6).
 
 ## B. Layout
 - pass: In-Call is one column (collapse button, caller block that scrolls at large fonts, 3 x 2 grid or tone keypad, End);
@@ -24,7 +24,7 @@ Favorites and Contacts tabs (E5.5) are NOT part of this pass: that step was stas
 - pass: opening any of them does not change the page layout (they are siblings in the overlay host).
 
 ## D. Motion
-- pass: avatar shares bounds with Incoming (`rovstiSharedBounds`, 500 ms `Motion.sharedArtwork`).
+- pass: avatar shares bounds with Incoming (`rostySharedBounds`, 500 ms `Motion.sharedArtwork`).
 - pass: the aura runs only while live and not held, stops under reduce motion and while a transition runs
   (`InCallScreenTest`, `IncomingScreenTest`).
 - pass: the timer is a `produceState` read in its own text composable: a tick recomposes the text only
@@ -60,7 +60,7 @@ faces (E5.7b), WhatsApp calls (E5.8), the tab bar (F21). Goldens opened: `e5.5-*
 contact sheet `docs/kotlin-ui/screenshots/phone.png` was regenerated and opened.
 
 ## A. Licence and provenance
-- pass: new files are original (Rovsti GPL-3.0-or-later); nothing new was ported this step. `SegmentedControl`, `IosSheet`
+- pass: new files are original (Rosty GPL-3.0-or-later); nothing new was ported this step. `SegmentedControl`, `IosSheet`
   and the keys (`DigitKey`, `CallKey`, `DeleteKey`) are the existing design-system pieces.
 
 ## B. Layout
@@ -75,7 +75,7 @@ contact sheet `docs/kotlin-ui/screenshots/phone.png` was regenerated and opened.
   panel is a sheet (Split / End per row, End all); End-all is also a context menu on a long press of End.
 
 ## D. Motion
-- pass: S19 hold-away 0.86/380 (`RovstiMotion.holdAway`), S20 swap 0.8/420 (`swapCross`), S21 merge 0.75/500 (`mergePull`); all
+- pass: S19 hold-away 0.86/380 (`RostyMotion.holdAway`), S20 swap 0.8/420 (`swapCross`), S21 merge 0.75/500 (`mergePull`); all
   are layer transforms (no layout), snap under reduce motion. S22 = split/drop rows leave through the sheet's list motion.
 - deviation: the swap moves the identity block by a graphics layer; the avatars are not shared-bounds elements of two layouts.
 
@@ -86,7 +86,7 @@ contact sheet `docs/kotlin-ui/screenshots/phone.png` was regenerated and opened.
 - pass: the Held card reads "name, on hold" and "Swap calls"; dimmed controls keep taking taps and say the core's sentence.
 
 ## G. Platform
-- pass: `scene.of` goes through `PhoneOps.sceneOf` (already in `rovsti_ffi`; "zone" ops of the plan are `scene.*`); the model
+- pass: `scene.of` goes through `PhoneOps.sceneOf` (already in `rosty_ffi`; "zone" ops of the plan are `scene.*`); the model
   never calls Rust before `Rust.init`. Add call places on the live call's SIM. No class is reached by name (no new keep rules).
 
 ## H. Tests
@@ -147,7 +147,7 @@ No row is MISSING any more (see "E5 closed" below).
 | U39 | Mark missed seen | none | none | in HEAD (`RecentsViewModel`) |
 | U40 | Share stats summary | share sheet | none | in HEAD |
 | U41 | Export pills name the file | per-export pill | Confirm | in HEAD (round 15, E5.9b `DataEffect.Export` names the file; U28 partly done) |
-| U42 | Notes export | "Call notes exported" | Confirm | in HEAD (round 15 step 3, `NotesEffect.SaveCsv` through `DetailsHost.saveCsv`, file `rovsti-call-notes-<date>.csv`) |
+| U42 | Notes export | "Call notes exported" | Confirm | in HEAD (round 15 step 3, `NotesEffect.SaveCsv` through `DetailsHost.saveCsv`, file `rosty-call-notes-<date>.csv`) |
 | U43 | Delete older calls | "n calls deleted" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U44 | Remind on a missed call | `details_remind` pill | Confirm (fixed) | in HEAD |
 | U45 | Select: block / share | `recents_blocked_many` + Undo | Confirm (fixed) | in HEAD |
@@ -163,7 +163,7 @@ No row is MISSING any more (see "E5 closed" below).
 | U55 | Block by prefix | "Blocked +90 850*" + Undo | Confirm | in HEAD (round 15, E5.9) |
 | U56 | Copy country | dropped (U48, U4) | n/a | dropped |
 
-Moments added this step: the **theme melt** (`:design` `theme/ThemeMelt.kt`, used by `RovstiShellActivity`: the new theme
+Moments added this step: the **theme melt** (`:design` `theme/ThemeMelt.kt`, used by `RostyShellActivity`: the new theme
 applies at once, a sheet of the old page colour fades over 360 ms in one draw-phase rectangle; none under reduce motion;
 `ThemeMeltTest`) and the **setup-complete moment** (`phone/setup/SetupCompleteMoment.kt`: the last checklist row turning
 done while the app is open gives Confirm and the "You're all set" pill; silent when already complete at launch;
@@ -176,7 +176,7 @@ round 15 steps 1-3 (commits 3ad1c3b, 5857821, 8e9b12b) from `stash@{2}`, `stash@
 three open findings: F31 (a refusal from the core plays `HapticEvent.Reject` through `playRefusalHaptic` in Recents,
 PersonSheet, Keypad and Favorites; `PillFeedbackTest`), F35 (the `:design` `ListRow` puts the trailing action under the
 text at font scale >= 1.5 or when the text column would get under half of the row; `ListRowStackingTest`) and F36
-(`:design` `text/LtrIsolate.kt`; `RovstiText`/`IosText` give plain text an LTR paragraph in an RTL layout, rows isolate numbers
+(`:design` `text/LtrIsolate.kt`; `RostyText`/`IosText` give plain text an LTR paragraph in an RTL layout, rows isolate numbers
 with `rtlSafe()`; `LtrIsolateTest`). Evidence: `e5.14-settings-fs2`, `e5.14-settings-rtl`, `e5.14-stats-rtl`, `e5.9-*`, `e5.11-*`.
 
 ## Checklist A-H for the Settings and Notes pages (E5.9, E5.11)

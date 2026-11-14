@@ -1,4 +1,4 @@
-# util-contacts: everyday utilities for Rovsti Contacts (round 5)
+# util-contacts: everyday utilities for Rosty Contacts (round 5)
 
 baseSha: 4e256b536dd85ed61572685c60d0ddfca54b062f
 
@@ -11,7 +11,7 @@ fixes") and ticked in `docs/roadmap.md` ("Utilities, round 4"). Clean tree, no s
 (`ux-contacts-r5.md`) returned done.
 
 Facts the R5 steps build on (checked at baseSha, do not re-create):
-- vCard: `rovsti_core::vcard::{parse, write, export_name, Parsed}` read 2.1/3.0/4.0 and write 3.0
+- vCard: `rosty_core::vcard::{parse, write, export_name, Parsed}` read 2.1/3.0/4.0 and write 3.0
   (`push_line` folds at 75 bytes). `PHOTO` is skipped on read (test at vcard.rs ~l. 666) and never written.
   `ContactDraft` (contact_edit.rs l. 164) has no photo field and is the JSON sent to Kotlin `save` /
   `import`: do NOT add photo bytes to it.
@@ -23,7 +23,7 @@ Facts the R5 steps build on (checked at baseSha, do not re-create):
   applies it after the first save (`editor.rs::save_editor` -> `apply_photo_with`). `CropView: Default`.
 - Photos: `backend::full_photo(uri) -> Option<(RgbaImage, PathBuf)>` (background only); the app's
   `image` dep has `jpeg` + `webp` features (`image::codecs::jpeg::JpegEncoder::new_with_quality`).
-  `rovsti_core` has no base64 dep; the workspace has `base64 = "0.22"` (used by `rovsti_wa_proto`).
+  `rosty_core` has no base64 dep; the workspace has `base64 = "0.22"` (used by `rosty_wa_proto`).
 - Files: `documents::export_contacts(name, text)` (mime `text/x-vcard`), `documents::export_calls(name,
   csv)` (mime `text/csv`, answers `DocumentOp::ExportCalls`, which Contacts does not handle yet),
   `documents::import_contacts()` (Kotlin `importContactsIntent`, mimes x-vcard/vcard/directory/plain/
@@ -59,16 +59,16 @@ Facts the R5 steps build on (checked at baseSha, do not re-create):
 | C46 | Phonetic name and Relationship fields (card, editor, vCard `X-PHONETIC-*`, `RELATED`) | backlog R6 |
 | C47 | Share several selected contacts as plain text (select mode) | backlog R6 |
 | C48 | Multi-card vCard import keeps photos (Kotlin import writes the photo per card) | backlog R6 |
-| C35 | Block / unblock a number from the card (hand-off to Rovsti Phone, which holds the dialer role) | deferred (Phone change) |
+| C35 | Block / unblock a number from the card (hand-off to Rosty Phone, which holds the dialer role) | deferred (Phone change) |
 | C37 | Last SMS with this contact on the card | dropped (READ_SMS belongs to Messages) |
 
 ## Rules for every step
 
 All checks green after each step: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
-One focused commit per step, prefix `Rovsti contacts: `. Do not change Phone / Messages behaviour (shared
-`rovsti_core` / `rovsti_android` changes keep them compiling: fix struct literals only). Read
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
+One focused commit per step, prefix `Rosty contacts: `. Do not change Phone / Messages behaviour (shared
+`rosty_core` / `rosty_android` changes keep them compiling: fix struct literals only). Read
 `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S7; use only GPUI APIs already used in this repo or
 grepped in `~/.cargo/git/checkouts/gpui-fusion-*/d6c8412/crates/gpui`. Every action ends in a pill
 (`self.notice`); destructive ones (Remove my card, removing an emergency contact) go through
@@ -78,8 +78,8 @@ log, JPEG encode, file reads) runs on the background executor.
 ## Steps (round 5)
 
 ### S1. Pure: vCard PHOTO and CSV (C33, C39)
-- `crates/rovsti_core/Cargo.toml`: add `base64.workspace = true`.
-- `crates/rovsti_core/src/vcard.rs` (update the module doc):
+- `crates/rosty_core/Cargo.toml`: add `base64.workspace = true`.
+- `crates/rosty_core/src/vcard.rs` (update the module doc):
   `pub const MAX_PHOTO_BYTES: usize = 256 * 1024;`
   `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum PhotoFormat { Jpeg, Png }` with
   `pub fn mime(self) -> &'static str` and `pub fn sniff(bytes: &[u8]) -> Option<Self>` (FF D8 FF / PNG magic).
@@ -94,7 +94,7 @@ log, JPEG encode, file reads) runs on the background executor.
   `pub fn write_one(draft: &ContactDraft, photo: Option<&CardPhoto>) -> String`: same as `write(&[draft])`
   plus `PHOTO;ENCODING=b;TYPE=JPEG|PNG:<base64>` before `END:VCARD`, folded by `push_line`.
   `write` stays photo-free (bulk export size).
-- New `crates/rovsti_core/src/contact_csv.rs` (+ `pub mod`):
+- New `crates/rosty_core/src/contact_csv.rs` (+ `pub mod`):
   `pub fn write(drafts: &[ContactDraft]) -> String`: UTF-8 BOM, CRLF, RFC 4180 quoting; Google columns
   `First Name, Middle Name, Last Name, Nickname, Organization Name, Organization Title, Birthday, Notes,`
   then `Phone N - Label, Phone N - Value`, `E-mail N - Label, E-mail N - Value`,
@@ -109,7 +109,7 @@ log, JPEG encode, file reads) runs on the background executor.
   at most 5000 rows.
   `pub fn looks_like_csv(mime: Option<&str>, name: &str, head: &[u8]) -> bool` (`text/csv`,
   `text/comma-separated-values`, `.csv`, or a first line with `First Name` / `Given Name` and a comma).
-  `pub fn file_name(count: usize, today: (i32, u8, u8)) -> String` (`rovsti-contacts-<n>-YYYY-MM-DD.csv`).
+  `pub fn file_name(count: usize, today: (i32, u8, u8)) -> String` (`rosty-contacts-<n>-YYYY-MM-DD.csv`).
 - `contact_intake.rs`: `from_file` tries `contact_csv` when `looks_like_csv` (before the vCard check
   fails), giving `Intake::Cards`; `notice` unchanged.
 - Tests: v2.1 / v3 / v4 photo decode; folded photo lines; oversize -> None; uri photo -> None; PNG magic
@@ -117,17 +117,17 @@ log, JPEG encode, file reads) runs on the background executor.
   the same draft and bytes); `write` still has no PHOTO; CSV round trip of a full draft (Turkish text,
   commas, quotes, newline in note, two numbers with primary); Google export from the docs header; Outlook
   header; ` ::: ` multi values; BOM; skipped rows; `looks_like_csv`; intake routes a CSV to Cards.
-- Acceptance: `cargo test -p rovsti_core vcard contact_csv contact_intake` green; no app change.
+- Acceptance: `cargo test -p rosty_core vcard contact_csv contact_intake` green; no app change.
 
 ### S2. Pure: undo last edit, search in details, frequently contacted (C40, C41, C42)
-- `crates/rovsti_core/src/contact_edit.rs`:
+- `crates/rosty_core/src/contact_edit.rs`:
   `pub fn undo_target(before: &ContactDraft, after: &ContactDraft) -> Option<ContactDraft>`: `None` when
   `before.id` is `None` (a new contact) or both are equal after `clean()`; else `before` cleaned, with
   `id = after.id`. `pub fn change_summary(before: &ContactDraft, after: &ContactDraft) -> Option<String>`:
   one change -> "Name changed" / "Number added" / "Number removed" / "Email changed" / "Note changed" /
   "Birthday added" ...; 2+ -> "3 changes"; none -> `None`. Pill text is `saved_notice(summary)` ->
   "Saved · Number added" or "Saved.".
-- New `crates/rovsti_core/src/contact_find.rs`:
+- New `crates/rosty_core/src/contact_find.rs`:
   `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum DeepField { Company, JobTitle, Nickname, Note,
   Address, Email, Website }` with `pub fn label(self) -> &'static str`;
   `#[derive(Clone, Debug, PartialEq, Eq)] pub struct DeepHit { pub id: i64, pub field: DeepField, pub
@@ -137,7 +137,7 @@ log, JPEG encode, file reads) runs on the background executor.
   nothing (numbers are covered by `search_loose`); first matching field per contact in the enum order;
   `skip` = ids already shown by name; snippet = up to 48 chars around the hit on char boundaries with
   `…`, newlines as spaces).
-- New `crates/rovsti_core/src/contact_frequent.rs`:
+- New `crates/rosty_core/src/contact_frequent.rs`:
   `pub const WINDOW_MS: i64 = 30 * 86_400_000; pub const MAX_SHOWN: usize = 6;`
   `#[derive(Clone, Debug, PartialEq, Eq)] pub struct Frequent { pub contact_id: i64, pub calls: u32,
   pub last_ms: i64 }`; `pub fn rank(calls: &[StatCall], contacts: &[WireContact], now_ms: i64, limit:
@@ -150,14 +150,14 @@ log, JPEG encode, file reads) runs on the background executor.
   per field, Turkish folding ("işçi" finds "IŞÇI"), skip list, limit, snippet boundaries with emoji,
   digits -> empty, one-char -> empty; frequent ranks by score, ties by recency, window edge, starred out,
   national vs international numbers matched to the same contact, unknown numbers ignored.
-- Acceptance: `cargo test -p rovsti_core contact_edit contact_find contact_frequent` green.
+- Acceptance: `cargo test -p rosty_core contact_edit contact_find contact_frequent` green.
 
 ### S3. Pure: My card and emergency contacts (C38, C43)
-- `crates/rovsti_core/src/contacts_prefs.rs`: `#[serde(default)] pub my_card: Option<String>` (lookup
+- `crates/rosty_core/src/contacts_prefs.rs`: `#[serde(default)] pub my_card: Option<String>` (lookup
   key), `#[serde(default)] pub emergency: Vec<String>` (lookup keys), `pub const MAX_EMERGENCY: usize = 5;`,
   `pub fn emergency_keys(&self) -> Vec<String>` (dedup, drop empty, cap). Old JSON (with and without
   `favorites_order`) still parses; fix `Default` / `from_style` literals.
-- New `crates/rovsti_core/src/contact_me.rs`:
+- New `crates/rosty_core/src/contact_me.rs`:
   `pub fn resolve<'a>(key: Option<&str>, all: &'a [WireContact]) -> Option<&'a WireContact>` (by
   `lookup_key`); `pub fn my_card_row(found: Option<&WireContact>) -> (String, String)` (("My card",
   "Ayşe Yılmaz") or ("Set up my card", "Choose the contact that is you"));
@@ -173,10 +173,10 @@ log, JPEG encode, file reads) runs on the background executor.
   an owner); `pub fn emergency_notice(added: bool) -> &'static str`.
 - Tests: prefs default and old JSON, cap and dedup; resolve by key and missing key; row texts; toggle add /
   remove / full / no number / no key; list order with a deleted contact; share text with and without owner.
-- Acceptance: `cargo test -p rovsti_core` green; workspace compiles.
+- Acceptance: `cargo test -p rosty_core` green; workspace compiles.
 
 ### S4. Backend wrappers and Android glue (C33, C39, C41, C42)
-- `crates/rovsti_android/kotlin/dev/rovsti/bridge/Documents.kt`: `importContactsIntent` mime list gains
+- `crates/rosty_android/kotlin/dev/rosty/bridge/Documents.kt`: `importContactsIntent` mime list gains
   `text/csv`, `text/comma-separated-values` (only Contacts uses it). No manifest change (Contacts does not
   claim every CSV).
 - `apps/contacts/src/backend.rs`:
@@ -260,12 +260,12 @@ log, JPEG encode, file reads) runs on the background executor.
 - Acceptance: all checks green.
 
 ### S8. Docs, backlog and review fixes (C33, C38-C44)
-- `docs/roadmap.md` Rovsti Contacts: "Utilities, round 5 (C33, C38-C44, done without a device)" with one line
+- `docs/roadmap.md` Rosty Contacts: "Utilities, round 5 (C33, C38-C44, done without a device)" with one line
   per utility, and a device-check line for vCard photos, CSV in Google Contacts, Frequently contacted.
   `docs/architecture.md`: vCard PHOTO only for single cards, CSV via the `text/csv` save picker, My card and
   emergency keys in `contacts-prefs.json`, frequent list read-only from the call log.
 - Update this file's backlog statuses to `done R5` for what landed; keep C45-C48 as `backlog R6`.
-- Self review of the R5 diff (`git diff 4e256b5..HEAD -- apps/contacts crates/rovsti_core
-  crates/rovsti_android`): no blocking work on the UI thread, every action has a pill, Confirm on remove
+- Self review of the R5 diff (`git diff 4e256b5..HEAD -- apps/contacts crates/rosty_core
+  crates/rosty_android`): no blocking work on the UI thread, every action has a pill, Confirm on remove
   My card / emergency remove, QR payload photo-free, no Phone/Messages behaviour change; fix in the same commit.
 - Acceptance: all checks green.

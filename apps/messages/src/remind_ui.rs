@@ -1,17 +1,17 @@
 //! "Remind me" on a message: a time sheet over the chat, the pills that follow it and the
 //! confirm before a reminder is cancelled. The wording, slots and storage are pure
-//! (`rovsti_core::reminder::Slot`, `rovsti_core::message_reminder`); the alarm is armed by
+//! (`rosty_core::reminder::Slot`, `rosty_core::message_reminder`); the alarm is armed by
 //! `Backend::arm_message_reminder`.
 
 use gpui::{
     AnyElement, Context, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_android::Error;
-use rovsti_core::{
+use rosty_android::Error;
+use rosty_core::{
     message_reminder::{self, MessageReminder},
     reminder::Slot,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon, theme,
     tokens::{Theme, typography},
 };
@@ -76,7 +76,7 @@ pub fn rows(
             RemindEvent::Cancel,
             format!(
                 "Cancel reminder ({})",
-                rovsti_core::reminder::clock(r.at_ms, tz_offset_s)
+                rosty_core::reminder::clock(r.at_ms, tz_offset_s)
             ),
         ));
     }

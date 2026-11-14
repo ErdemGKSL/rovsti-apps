@@ -50,8 +50,8 @@ Font scale 2.0, light (31 pages) and RTL dark (31 pages):
 | Convx files keep upstream header plus `Ported from Convx (...)`; `LicenceHeaderTest` | pass (`design/src/test/.../LicenceHeaderTest.kt` runs in `testDebugUnitTest`) |
 | glisse-derived files carry the MIT header (shader files too) | pass (same test; Kyant0/Aave credit lines kept in lens/rim shaders) |
 | `android/THIRD_PARTY_NOTICES.md` has glisse's full MIT text and every ported source with its licence | pass (glisse, Convx, Kyant0 backdrop/AndroidLiquidGlass/Capsule, compose-miuix-ui, compose-hig, compose-floating-tab-bar, Haze, Coil, Navigation 3) |
-| No GPUI, no Material menus/dialogs/sheets, no non-redistributable font | pass (`ConventionTest` rule `material3` and `window`: no `androidx.compose.material*`, `Popup`/`Dialog` only under `design/.../overlay/`; system font via `RovstiTheme.type`; the unused `compose-material3` alias in `libs.versions.toml` is not referenced by any module) |
-| New test files carry the Rovsti GPL header | pass (`ChecklistSweepTest`, `ListRailInsetTest`: "Rovsti Project (C) 2026, GPL-3.0-or-later. Original code.") |
+| No GPUI, no Material menus/dialogs/sheets, no non-redistributable font | pass (`ConventionTest` rule `material3` and `window`: no `androidx.compose.material*`, `Popup`/`Dialog` only under `design/.../overlay/`; system font via `RostyTheme.type`; the unused `compose-material3` alias in `libs.versions.toml` is not referenced by any module) |
+| New test files carry the Rosty GPL header | pass (`ChecklistSweepTest`, `ListRailInsetTest`: "Rosty Project (C) 2026, GPL-3.0-or-later. Original code.") |
 
 ## B. Layout (owner complaints first)
 
@@ -74,14 +74,14 @@ ContextMenu, Popover, Dialogs, Sheets, TextFields, Toasts, OverlayStates.
 
 | Item | Result |
 |---|---|
-| Specs from `RovstiMotion`; every spring has a `visibilityThreshold` | pass (`RovstiMotionTokensTest`; 17 `visibilityThreshold` sites in `:design`; Convx-ported chrome keeps Convx's own specs, which carry thresholds) |
+| Specs from `RostyMotion`; every spring has a `visibilityThreshold` | pass (`RostyMotionTokensTest`; 17 `visibilityThreshold` sites in `:design`; Convx-ported chrome keeps Convx's own specs, which carry thresholds) |
 | Press changes only transform/alpha/overlay: no layout shift | pass (`PressNoLayoutShiftTest`, `PressPageTest`, `TriggerBoundsTest`: bounds before/after press and open) |
 | Drags: snapTo during drag, fling release with velocity | pass (`SheetGestureTest`, `SheetMathTest`, `FlingRubberTest`, `TabBarGestureTest`, `SwipeRowTest`) |
 | Interruptions retarget the same Animatable; press deflates in `finally` | pass (`MenuSlideTest`, `ContextMenuGestureTest`, `SpringStateTest`, `HoldTest`) |
 | Overshoot only on surfaces | pass (`MotionPage` chart: surfaces overshoot, `Toggle` curve is the no-overshoot dashed line) |
 | Predictive back scrubbed transitions are tweens; sheets preview 35% | pass (`NavTest`, golden `e1.18-predictive-back-50pct`; `SheetEntry` back preview) |
 | Reduce motion goes through `gated(...)` | pass (`MotionGateTest`; `MotionGate.kt` used by overlay, toast, chrome) |
-| Light push dim (`NavTransitions.kt:75`) | deviation: the outgoing page fades to `RovstiMotion.PushDimAlpha = 0.85` (`motion/RovstiMotion.kt:134`). It is Convx's spec, ported; on a light page the dim is barely visible in `e1.18-push-mid-light` while it reads clearly in dark. Kept for parity; revisit in E4.16 polish only if the owner dislikes it on device |
+| Light push dim (`NavTransitions.kt:75`) | deviation: the outgoing page fades to `RostyMotion.PushDimAlpha = 0.85` (`motion/RostyMotion.kt:134`). It is Convx's spec, ported; on a light page the dim is barely visible in `e1.18-push-mid-light` while it reads clearly in dark. Kept for parity; revisit in E4.16 polish only if the owner dislikes it on device |
 
 ## D. Overlays
 
@@ -112,9 +112,9 @@ ContextMenu, Popover, Dialogs, Sheets, TextFields, Toasts, OverlayStates.
 |---|---|
 | Tab bar puck springs, `Role.Tab` + `selected`, labels drop at 1.5x font scale | pass (`TabBarSemanticsTest`, `TabBarGestureTest`, `PuckBoundsTest`; labels drop in the fs2 sweep) |
 | Tab bar hold 150 ms / tap slop 24 dp / drag start 6 dp (glisse numbers) | deviation: the bar is Convx's device-proven `floatingtabbar` (ported in E1.29), which arbitrates tap vs drag with Compose touch slop and its own spring set; the glisse numbers belong to our retired hand-written bar. Behaviour tested in `TabBarGestureTest` (tap selects, 1.6 slots rounds to slot 2, release off the bar is ignored, wobble inside the cell still taps, vertical move before the hold belongs to the page) |
-| Switch/slider/segmented follow glisse geometry; toggles give haptics | pass (`ToggleTest`, `SliderTest`, `SegmentedTest`, `IosControlsRulesTest`; `IosToggle` and `SegmentedControl` call `RovstiHaptics`) |
+| Switch/slider/segmented follow glisse geometry; toggles give haptics | pass (`ToggleTest`, `SliderTest`, `SegmentedTest`, `IosControlsRulesTest`; `IosToggle` and `SegmentedControl` call `RostyHaptics`) |
 | Text fields: `BasicTextField(TextFieldState)`, caret, selection handles, magnifier, toolbar, IME action, above keyboard, clear keeps focus | pass (`TextFieldsPage`, `TextFieldsTest`, `ImeHidesBarTest`, goldens `e1.16-field-selection-toolbar`, `e1.16-composer-ime-open`; `ShadowNoopMagnifier` only for Robolectric) |
-| Haptics through `RovstiHaptics` only, never during scroll | pass (`HapticEventTest`, `HapticsTest`; no page or component outside `haptics/` calls `performHapticFeedback` (grep)) |
+| Haptics through `RostyHaptics` only, never during scroll | pass (`HapticEventTest`, `HapticsTest`; no page or component outside `haptics/` calls `performHapticFeedback` (grep)) |
 | Touch targets >= 48 dp, merged semantics, custom actions for swipe | pass (`CatalogAccessibilityTest` over all 31 pages light and dark, and now `ChecklistSweepTest` at fs2/RTL; `ListRowSemanticsTest`) |
 
 ## G. Performance

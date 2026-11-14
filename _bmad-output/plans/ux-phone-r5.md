@@ -1,7 +1,7 @@
-# UX completeness pass: Rovsti Phone (round 5)
+# UX completeness pass: Rosty Phone (round 5)
 
 Base: `0d5213fbf39959ee6db02ebed9b3c12584cdcbdd` (main, clean tree, no stash).
-Scope: `apps/phone`, `crates/rovsti_core`, `crates/rovsti_android` (permission seam and shared
+Scope: `apps/phone`, `crates/rosty_core`, `crates/rosty_android` (permission seam and shared
 Kotlin bridge), the Phone Android host manifest. No new product features and no backends. Intent
 comes from code and docs that already exist: `gpuiforge.json` lists `RECORD_AUDIO`,
 `docs/android.md` and `docs/architecture.md` say Phone needs it for WhatsApp calls,
@@ -17,7 +17,7 @@ the call-outcome banner's lifetime, and speed dial as seen from the Keypad.
 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
-| V1 | **High** | **WhatsApp calls in Phone are silent: the microphone can never be granted.** The ejected manifest (`management: manual`) lacks `RECORD_AUDIO` although `gpuiforge.json` lists it, no code ever asks for the permission (the bridge has no microphone group), and `open_call_audio` only logs `call audio did not start: is RECORD_AUDIO granted?`. The call connects, the timer runs, the other side hears nothing and the user is told nothing. | `apps/phone/platforms/android/app/src/main/AndroidManifest.xml`, `RovstiBridge.kt` permission `groups`, `rovsti_android::permissions::Group`, `wa_call.rs::open_call_audio/answer/place`, `main.rs` WhatsApp error observer |
+| V1 | **High** | **WhatsApp calls in Phone are silent: the microphone can never be granted.** The ejected manifest (`management: manual`) lacks `RECORD_AUDIO` although `gpuiforge.json` lists it, no code ever asks for the permission (the bridge has no microphone group), and `open_call_audio` only logs `call audio did not start: is RECORD_AUDIO granted?`. The call connects, the timer runs, the other side hears nothing and the user is told nothing. | `apps/phone/platforms/android/app/src/main/AndroidManifest.xml`, `RostyBridge.kt` permission `groups`, `rosty_android::permissions::Group`, `wa_call.rs::open_call_audio/answer/place`, `main.rs` WhatsApp error observer |
 | V2 | Medium | **Call-outcome notices never go away.** "The call could not be placed", "Placed through the system phone app" and every WhatsApp reason except "not connected" ("Another call is in progress", "Could not place the WhatsApp call", ...) are set in `call_note` and stay until the user changes tab. They have no action and cannot be dismissed, and `overlay_band_top` makes the band above the Tab Bar swallow taps meant for the list rows behind them. EXPERIENCE: info notices live 2 s. | `notice.rs`, `recents.rs::place_call_from_on`, `main.rs::place_whatsapp` and WhatsApp error observer |
 | V3 | Low | **Speed dial is invisible on the Keypad.** Digits 2-9 with an assignment look and read exactly like free ones (story 20.2: a 14 px hue dot at the key's top-right, TalkBack "5, speed dial {name}. Long press to call"). Same discoverability gap round 3 fixed for voicemail on 1 (T4). | `keypad.rs::dial_key`, `Key` |
 | V4 | Low | **"No speed dial on 5" > "Set" makes the user pick the digit again.** The pill opens the Speed dial page; the digit the user just held is known, so "Set" should start the contact pick for it directly (the page's own Free-row path). | `speed_dial_ui.rs::speed_dial_hold/speed_dial_pick`, `block_ui.rs::PillAction::SpeedDial` |
@@ -26,30 +26,30 @@ the call-outcome banner's lifetime, and speed dial as seen from the Keypad.
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (`df` showed 7.4 GB free at planning time; if it shows under 6 GB, `rm -rf target/debug/incremental` first).
 Never invent GPUI APIs: reuse only what these files already call (`show_pill_action`,
 `show_notice_pill`, `cx.spawn` + `background_executor().timer` as in `sync_pill`, `svg()`,
-`rovsti_ui::theme::hue_pair`, `touch_surface`).
+`rosty_ui::theme::hue_pair`, `touch_surface`).
 
 ### S1. Pure logic and the microphone permission seam (+tests)
-`crates/rovsti_android/src/permissions.rs`:
+`crates/rosty_android/src/permissions.rs`:
 - `Group::Microphone` with key `"microphone"` (doc: `RECORD_AUDIO`, asked on demand by Phone for
   WhatsApp calls; not in `Group::ALL`). Add it to the `every` array of
   `group_keys_are_unique_and_all_excludes_on_demand_groups` and assert
   `!Group::ALL.contains(&Group::Microphone)`; add `state(Group::Microphone)` to `desktop_is_unsupported`.
 - `apps/phone/src/setup_ui.rs:290`: add `Group::Microphone` to the on-demand arm
   (`Group::Bluetooth | Group::Location | Group::BackgroundLocation | Group::Microphone`).
-- Kotlin `crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt` `groups`:
+- Kotlin `crates/rosty_android/kotlin/dev/rosty/bridge/RostyBridge.kt` `groups`:
   `"microphone" to listOf(android.Manifest.permission.RECORD_AUDIO)`.
   (`apps/stops/src/kotlin_contract.rs` style: if Phone has no such contract test, none is added.)
 
 `apps/phone/src/wa_call.rs` (pure, tested in its test module):
 - `pub(crate) const MIC_OFF: &str = "Allow the microphone so they can hear you";`
 - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub(crate) enum MicAsk { Ready, Ask, OpenSettings }`
-  and `pub(crate) fn mic_ask(access: rovsti_android::permissions::Access) -> MicAsk`
+  and `pub(crate) fn mic_ask(access: rosty_android::permissions::Access) -> MicAsk`
   (Granted → Ready, Denied → Ask, PermanentlyDenied → OpenSettings). Tests for the three.
-- `pub(crate) fn mic_started(result: &rovsti_android::Result<bool>) -> bool`: `Ok(true)` and any
+- `pub(crate) fn mic_started(result: &rosty_android::Result<bool>) -> bool`: `Ok(true)` and any
   `Err` (desktop `Unsupported`) are true; only `Ok(false)` is false. Tests: `Ok(true)`, `Ok(false)`,
   `Err(Error::Unsupported)`.
 
@@ -64,7 +64,7 @@ Never invent GPUI APIs: reuse only what these files already call (`show_pill_act
   `Some("{digit}, speed dial {name}. Long press to call")` for a non-blank name, else `None`.
   Tests: `("5", Some("Ayşe"))`, `("5", Some("  "))` → None, `("5", None)` → None.
 
-`crates/rovsti_core/src/speed_dial.rs`:
+`crates/rosty_core/src/speed_dial.rs`:
 - `pub fn badges(map: &BTreeMap<u8, SpeedDialEntry>) -> [Option<(String, Option<usize>)>; 9]`:
   index `d - 1` for digits 2..=9 with an entry whose `number_raw` is non-blank: the shown name
   (`name` trimmed, else `number_raw` trimmed) and its hue
@@ -83,12 +83,12 @@ Never invent GPUI APIs: reuse only what these files already call (`show_pill_act
   `permissions_changed`/resume pull keeps it fresh.
 - `apps/phone/src/wa_call.rs`:
   - `open_call_audio` returns `Result<(CallAudio, bool), ClientError>` where the bool is
-    `mic_started(&rovsti_android::wa::call_audio_start())` (keep the log line for `Ok(false)`).
+    `mic_started(&rosty_android::wa::call_audio_start())` (keep the log line for `Ok(false)`).
   - `WaCallUi.mic_off: bool`. `attach_audio(audio, mic, cx)`: when `!mic`, set `mic_off = true`
     and `self.error = Some(MIC_OFF)` (through `fail(MIC_OFF, "RECORD_AUDIO missing", cx)`).
     `finish`/call end resets `mic_off = false`.
   - `pub(crate) fn mic_off(&self) -> bool` and `pub(crate) fn retry_mic(&mut self, cx)`: when
-    `mic_off` and a session is live, run `rovsti_android::wa::call_audio_start()` on the background
+    `mic_off` and a session is live, run `rosty_android::wa::call_audio_start()` on the background
     executor; on `Ok(true)` set `mic_off = false` and `cx.notify()`.
   - `fn ask_mic()` (private, in `wa_call.rs`), called at the top of `place` (after `can_place`
     passes) and of `answer` (after the ringing check), so every answer path is covered
@@ -123,7 +123,7 @@ denied: "Allow" opens App info. Cargo: S1 tests.
   with their action. No other caller writes `call_note`.
 - Existing tests keep passing; the S1 `transient` tests cover the split.
 
-Acceptance: desktop with `ROVSTI_PREVIEW_ROLE=0` (system-app placement): call a Favorite: the pill
+Acceptance: desktop with `ROSTY_PREVIEW_ROLE=0` (system-app placement): call a Favorite: the pill
 "Placed through the system phone app" shows for 2 s and goes, then the Preview "Fix" banner is back;
 Recents rows under the band are tappable once it is gone. WhatsApp "Another call is in progress"
 behaves the same.

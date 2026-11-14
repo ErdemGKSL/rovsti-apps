@@ -1,0 +1,21 @@
+[package]
+name = "rosty_android"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Android system integration for the Rosty apps: default-app roles, Xiaomi/HyperOS background settings, and the JNI bridge to the Kotlin host."
+
+[dependencies]
+futures.workspace = true
+log.workspace = true
+rosty_core.workspace = true
+rosty_wa_proto.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+
+[lints]
+workspace = true

@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
-use rovsti_wa_proto::{ConnectKey, ErrorCode, KeyId};
+use rosty_wa_proto::{ConnectKey, ErrorCode, KeyId};
 
 use crate::AppState;
 use crate::error::HttpError;

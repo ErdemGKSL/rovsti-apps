@@ -1,4 +1,4 @@
-# util-contacts: everyday utilities for Rovsti Contacts (round 3)
+# util-contacts: everyday utilities for Rosty Contacts (round 3)
 
 baseSha: 2baca187e0db5b88877f3761c4aa458ec7481d4c
 
@@ -9,7 +9,7 @@ f68d778 .. 2baca18, last one "utilities review fixes"): C1-C18 are done and tick
 No stash entries, clean tree, ~9.4 GB free.
 
 Shipped and reusable now (do not re-create):
-- Pure: `rovsti_core::{contact_dupes, contact_dates, contact_select, contact_photo (CropView, turns),
+- Pure: `rosty_core::{contact_dupes, contact_dates, contact_select, contact_photo (CropView, turns),
   vcard (BDAY/ANNIVERSARY/ADR/URL/NICKNAME/TITLE), contacts_view::{recent, recent_when, show_recent,
   scrubber_*}, multi_select, pending_delete}`; `recents::{history(entries, extras, numbers, limit),
   history_text(line, now_ms, locale)}` and `call_log_query::entries_for_numbers` (Phone's per-contact
@@ -18,7 +18,7 @@ Shipped and reusable now (do not re-create):
   `confirm.rs` (deletes for good after the Undo window), dupes page, upcoming page, recent page,
   photo viewer / crop / camera, QR sheet (`qr_sheet::qr_payload`), Settings rows "Export to a .vcf
   file", "Import from a .vcf file", "Find duplicates" (`main.rs::settings_tab`), `prefs.rs` (atomic
-  JSON file in the app data dir, `rovsti_core::contacts_prefs::ContactsPrefs`).
+  JSON file in the app data dir, `rosty_core::contacts_prefs::ContactsPrefs`).
 - Android: `providers::call_log(limit)` (Kotlin `pullCallLog`), `permissions::{Group, has, request}`
   (`Group::Phone` = CALL_PHONE + READ_PHONE_STATE + READ/WRITE_CALL_LOG), `reminders::*` (call and
   message reminders: `ReminderStore<T>` generic in `CallReminders.kt`, receivers declared per host,
@@ -64,18 +64,18 @@ history; birthday notifications; default number/email; cleanup filters; group-wi
 ## Steps (round 3)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focused commit per step,
-prefix `Rovsti contacts: `. Do not change `apps/phone` / `apps/messages` behaviour (a shared
-`rovsti_core`/`rovsti_android` change must keep them compiling; fix struct literals only). Read
+prefix `Rosty contacts: `. Do not change `apps/phone` / `apps/messages` behaviour (a shared
+`rosty_core`/`rosty_android` change must keep them compiling; fix struct literals only). Read
 `.claude/skills/liquid-glass-gpui/SKILL.md` before S6-S8 and use only GPUI APIs already used in
 `apps/contacts` (`on_long_press`, `on_click`, `ListState`, `RenderImage`, `cx.open_url`, glass rows
-from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones go through
+from `rosty_ui`). Every action ends in a pill (`self.notice`), destructive ones go through
 `confirm.rs::Confirm`.
 
 ### S1. Pure: local trash model (C20)
-- New `crates/rovsti_core/src/contact_trash.rs` (`pub mod contact_trash;` in `lib.rs`):
+- New `crates/rosty_core/src/contact_trash.rs` (`pub mod contact_trash;` in `lib.rs`):
   - `pub const SCHEMA_VERSION: u32 = 1; pub const RETENTION_DAYS: u32 = 30; pub const MAX_ENTRIES:
     usize = 500; pub const MAX_FILE_BYTES: usize = 8 * 1024 * 1024;`
   - `#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)] pub struct TrashEntry { pub key: u64,
@@ -97,16 +97,16 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
 - Tests: push keys unique and monotonic across reloads; cap drops the oldest; purge at exactly 30
   days; take clears ids and leaves others; restore_drafts drops stale groups and remaps accounts;
   JSON round trip; JSON without `schema_version` parses; texts singular/plural.
-- Acceptance: `cargo test -p rovsti_core contact_trash` green; no app change.
+- Acceptance: `cargo test -p rosty_core contact_trash` green; no app change.
 
 ### S2. Pure: scan-to-add decoder and payload parser (C19)
 - Root `Cargo.toml` `[workspace.dependencies]`: `rqrr = { version = "0.11", default-features = false }`;
-  `crates/rovsti_core/Cargo.toml` `[dependencies] rqrr.workspace = true` and `[dev-dependencies]
+  `crates/rosty_core/Cargo.toml` `[dependencies] rqrr.workspace = true` and `[dev-dependencies]
   qrcode = { workspace = true }` (workspace `qrcode` has `default-features = false, features = ["image"]`;
   if that pulls `image` into core dev-deps it is acceptable, or use `QrCode::to_colors()` + `width()` to
   draw the test bitmap by hand, preferred). Note the licence (`(MIT OR Apache-2.0) AND ISC`) in
   `docs/architecture.md` third-party list if one exists.
-- New `crates/rovsti_core/src/contact_scan.rs`:
+- New `crates/rosty_core/src/contact_scan.rs`:
   - `pub const MAX_SIDE: u32 = 1600;` `pub fn decode_luma(width: u32, height: u32, luma: &[u8]) ->
     Vec<String>`: returns `vec![]` when `luma.len() != w*h` or a side is 0; uses
     `rqrr::PreparedImage::prepare_from_greyscale(w as usize, h as usize, |x, y| luma[y * w + x])`,
@@ -124,16 +124,16 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
   `qrcode`, render 4 px modules + 4-module quiet zone into a luma buffer, `decode_luma` returns the
   payload; wrong buffer length -> empty; blank image -> empty; MECARD with escapes and BDAY; `tel:+90 532`
   -> Number; `mailto:a@b.c`; random URL -> Nothing; vCard without any field -> Nothing.
-- Acceptance: `cargo test -p rovsti_core contact_scan` green; aarch64 checks still pass (rqrr is pure).
+- Acceptance: `cargo test -p rosty_core contact_scan` green; aarch64 checks still pass (rqrr is pure).
 
 ### S3. Pure: card history, cleanup filters, group recipients (C21, C24, C25)
 - History: no new matcher; `recents::history(entries, &[], numbers, limit)` + `history_text` are the
-  logic. Add `crates/rovsti_core/src/contact_history.rs` with only `pub const CARD_LIMIT: usize = 5;
+  logic. Add `crates/rosty_core/src/contact_history.rs` with only `pub const CARD_LIMIT: usize = 5;
   pub const PULL_LIMIT: usize = 500;` and `pub fn summary(lines: &[HistoryLine]) -> Option<String>`
   ("3 calls in the last 30 days"-style header: count + "last call 2 days ago" via
   `contacts_view::recent_when`), `pub fn permission_text() -> (&'static str, &'static str)` (title
-  "Show calls with this contact?", body "Rovsti Contacts reads your call log on this phone only.").
-- New `crates/rovsti_core/src/contact_cleanup.rs`:
+  "Show calls with this contact?", body "Rosty Contacts reads your call log on this phone only.").
+- New `crates/rosty_core/src/contact_cleanup.rs`:
   `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum Cleanup { NoNumber, NoName, NoPhoto, NoGroup }`
   with `pub const ALL: [Cleanup; 4]`, `pub fn label(self) -> &'static str` ("No number", "No name",
   "No photo", "Not in a group"); `pub fn matches(d: &ContactDraft, has_photo: bool, c: Cleanup) -> bool`
@@ -141,7 +141,7 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
   in `contact_edit`); `pub fn ids(drafts: &[ContactDraft], photo_ids: &HashSet<i64>, c: Cleanup) ->
   Vec<i64>` (drafts with `id`, order of `drafts`); `pub fn counts(..) -> [usize; 4]`;
   `pub fn empty_text(c) -> String` ("Every contact has a number").
-- New `crates/rovsti_core/src/group_tools.rs`:
+- New `crates/rosty_core/src/group_tools.rs`:
   `pub const MAX_SMS: usize = 30; pub const MAX_EMAIL: usize = 50;`
   `pub fn sms_recipients(members: &[ContactDraft]) -> (Vec<String>, usize /* without a number */)`:
   per member the default number (S4 `primary`, else first mobile, else first), deduped by
@@ -155,7 +155,7 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
   as "first mobile, else first" now and switch to `primary` in S4 (state which in the commit).
 - Tests: summary empty/one/many; cleanup each filter, ids skip `id: None`, counts; recipients dedup
   by number key, cap flag, missing counts; address joins; file name sanitising.
-- Acceptance: `cargo test -p rovsti_core contact_history contact_cleanup group_tools` green.
+- Acceptance: `cargo test -p rosty_core contact_history contact_cleanup group_tools` green.
 
 ### S4. Pure: default number/email and birthday reminder plan (C22, C23)
 - `contact_edit.rs` `DraftField`: `#[serde(default, skip_serializing_if = "std::ops::Not::not")] pub
@@ -169,7 +169,7 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
   `primary` (if S3 did the fallback).
 - Field sheet actions: `pub fn default_action(is_primary: bool, count: usize) -> Option<(&'static str,
   bool)>` ("Set as default" / "Clear default", None when the list has one entry).
-- New `crates/rovsti_core/src/birthday_reminder.rs`:
+- New `crates/rosty_core/src/birthday_reminder.rs`:
   `pub const DEFAULT_HOUR: u8 = 9; pub const HORIZON_DAYS: u16 = 60;`
   `#[derive(Clone, Debug, PartialEq, Serialize)] pub struct BirthdayAlarm { pub id: i64, pub contact_id:
   i64, pub at_ms: i64, pub title: String, pub body: String }`;
@@ -187,7 +187,7 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
 - Tests: one primary kept by `clean`; set/clear; vCard 3.0 and 4.0 pref round trip; merge rule;
   plan skips past hour today, includes tomorrow, respects horizon and tz offset, stable ids across
   calls, distinct ids for birthday vs anniversary; diff; prefs default and old JSON.
-- Acceptance: `cargo test -p rovsti_core` green; workspace compiles.
+- Acceptance: `cargo test -p rosty_core` green; workspace compiles.
 
 ### S5. Android glue and backend wrappers (C19-C25)
 - Default flag: Kotlin `ContactsEdit.kt` `DraftBuilder.add` reads `Data.IS_SUPER_PRIMARY` (Phone and
@@ -196,23 +196,23 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
   this is what keeps the default on save).
 - Call history: Contacts manifest gains `android.permission.READ_CALL_LOG` only. `permissions.rs`
   `Group::CallLog` (key `"call_log"`, not in `Group::ALL`) and the Kotlin map entry
-  `"call_log" to listOf(READ_CALL_LOG)` in `RovstiBridge.kt`. History reuses `providers::call_log`.
-- Group SMS / e-mail: `RovstiBridge.kt` `composeGroupSms(numbers: String, body: String)` building
+  `"call_log" to listOf(READ_CALL_LOG)` in `RostyBridge.kt`. History reuses `providers::call_log`.
+- Group SMS / e-mail: `RostyBridge.kt` `composeGroupSms(numbers: String, body: String)` building
   `Uri.parse("smsto:" + Uri.encode(numbers, ";"))` and `emailGroup(addresses: String)` using
   `ACTION_SENDTO mailto:` with `Intent.EXTRA_EMAIL` array; Rust `telecom::{compose_group_sms(numbers:
   &[String], body) -> Result<bool>, email_group(addresses: &[String]) -> Result<bool>}` (Unsupported on
   desktop, `false` when no app handles it).
 - Scan image: `documents::pick_scan_image() -> Result<bool>` reusing the photo picker in
   `Documents.kt` with `document_result` op `scan_image` (same `path`/`mime` reply as `contact_photo`).
-- Birthday reminders: new `crates/rovsti_android/kotlin/dev/rovsti/bridge/BirthdayReminders.kt` built
+- Birthday reminders: new `crates/rosty_android/kotlin/dev/rosty/bridge/BirthdayReminders.kt` built
   on `ReminderStore<T>` (like `MessageReminders.kt`): item `{id, contact_id, at_ms, title, body}`,
   channel `"birthdays"` ("Birthdays"), `setAndAllowWhileIdle`, tap = launch intent with
-  `EXTRA_CONTACT_ID`; `BirthdayReminderReceiver` (not exported). `RovstiBridge`: `armBirthday(json)`,
+  `EXTRA_CONTACT_ID`; `BirthdayReminderReceiver` (not exported). `RostyBridge`: `armBirthday(json)`,
   `disarmBirthday(id)`, `armedBirthdays()`, `rearmBirthdays()`, and `deliverOpenContact(intent)`
   posting one-shot `open_contact {id}` through the mailbox; call it from Contacts `MainActivity.kt`
   `onCreate`/`onNewIntent` (as Messages calls `deliverOpenThread`). Contacts manifest gains
   `POST_NOTIFICATIONS` and the receiver. Rust `reminders::{arm_birthday, disarm_birthday,
-  armed_birthdays, rearm_birthdays}`. Keep `proguard-rovsti.pro` rules in step if it lists bridge
+  armed_birthdays, rearm_birthdays}`. Keep `proguard-rosty.pro` rules in step if it lists bridge
   classes.
 - `apps/contacts/src/backend.rs`: `trash_load(dir) / trash_save(dir, &Trash)` in a new
   `apps/contacts/src/trash_store.rs` (same atomic temp-file + rename as `prefs.rs`, file
@@ -286,7 +286,7 @@ from `rovsti_ui`). Every action ends in a pill (`self.notice`), destructive ones
   this group has a number" when empty), "Email group" (likewise), "Share as .vcf" (`share_vcf(
   group_file_name, vcard::write(members))`), "Save to file" (`start_export_named`). Work off the UI
   thread; failures show the Android words.
-- Docs: `docs/roadmap.md` Rovsti Contacts section: "Utilities, round 3 (C19-C25, done without a
+- Docs: `docs/roadmap.md` Rosty Contacts section: "Utilities, round 3 (C19-C25, done without a
   device)" with one line per utility; `docs/architecture.md`: the local trash file, the rqrr
   dependency, Contacts' READ_CALL_LOG / POST_NOTIFICATIONS and the `open_contact` one-shot. Update
   this file's backlog statuses to `done R3` for what landed.

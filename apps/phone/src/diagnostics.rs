@@ -10,8 +10,8 @@ use gpui::{
     MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window,
     div, list, px,
 };
-use rovsti_android::diagnostics::{EVENTS, GROUPS, HEADER};
-use rovsti_ui::{
+use rosty_android::diagnostics::{EVENTS, GROUPS, HEADER};
+use rosty_ui::{
     motion::press_scale,
     motion_tokens::scale,
     theme,
@@ -53,7 +53,7 @@ pub(crate) enum BackupStage {
 }
 
 /// The tiny file the S13 check writes and reads back.
-const BACKUP_PROBE: &str = "{\"probe\":\"rovsti-s13\",\"n\":1}";
+const BACKUP_PROBE: &str = "{\"probe\":\"rosty-s13\",\"n\":1}";
 
 #[derive(Default)]
 pub(crate) struct Diagnostics {
@@ -116,7 +116,7 @@ fn count(text: &str) -> (usize, usize, usize) {
 /// ring. No numbers and no names appear in any of them.
 pub(crate) fn report(header: &str, sections: &[(&str, &str)], events: &str) -> String {
     let mut out = String::with_capacity(512);
-    out.push_str("Rovsti Phone diagnostics\n");
+    out.push_str("Rosty Phone diagnostics\n");
     out.push_str(header.trim());
     out.push('\n');
     for (title, text) in sections {
@@ -138,9 +138,9 @@ pub(crate) fn report(header: &str, sections: &[(&str, &str)], events: &str) -> S
 
 /// Runs a probe synchronously; call from a background thread only.
 fn run_probe(probe: &str) -> String {
-    match rovsti_android::diagnostics::run(probe) {
+    match rosty_android::diagnostics::run(probe) {
         Ok(text) => text,
-        Err(rovsti_android::Error::Unsupported) => {
+        Err(rosty_android::Error::Unsupported) => {
             "unknown: Not available on this platform".to_owned()
         }
         Err(error) => format!("unknown: {error}"),
@@ -164,7 +164,7 @@ impl PhoneApp {
         self.diag.copied = false;
         self.diag.backup_lines.clear();
         let outcome = self.backend.update(cx, |b, cx| {
-            b.export_raw("rovsti-s13-probe.json", BACKUP_PROBE, cx)
+            b.export_raw("rosty-s13-probe.json", BACKUP_PROBE, cx)
         });
         if outcome.failed() {
             self.diag_backup_finish("fail: export picker started (no activity answered)", cx);
@@ -203,10 +203,10 @@ impl PhoneApp {
     /// A picker answered while the S13 check is waiting for it.
     pub(crate) fn diag_backup_result(
         &mut self,
-        result: rovsti_core::wire::DocumentResult,
+        result: rosty_core::wire::DocumentResult,
         cx: &mut Context<Self>,
     ) {
-        use rovsti_core::wire::DocumentOp;
+        use rosty_core::wire::DocumentOp;
         match (self.diag.backup, result.op) {
             (Some(BackupStage::Exporting), DocumentOp::ExportBackup) => {
                 if !result.ok {
@@ -313,7 +313,7 @@ impl PhoneApp {
             let text = cx
                 .background_executor()
                 .spawn(async move {
-                    let header = match rovsti_android::diagnostics::run(HEADER) {
+                    let header = match rosty_android::diagnostics::run(HEADER) {
                         Ok(h) => h,
                         Err(_) => desktop_header(),
                     };
@@ -546,7 +546,7 @@ mod tests {
             &[("Audio", "pass: names")],
             "0 onCallAdded",
         );
-        assert!(r.starts_with("Rovsti Phone diagnostics\napp=1 model=X"));
+        assert!(r.starts_with("Rosty Phone diagnostics\napp=1 model=X"));
         assert!(r.contains("== Audio ==\npass: names"));
         assert!(r.contains("== Call event ring ==\n0 onCallAdded"));
         assert!(report("h", &[], "").contains("(empty)"));

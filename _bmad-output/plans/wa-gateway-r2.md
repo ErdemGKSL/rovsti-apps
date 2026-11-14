@@ -8,18 +8,18 @@
 
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_wa_proto  --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_wa_proto  --target aarch64-linux-android
 ```
 
 ## Gap analysis (code at `ebad6da` against the whole goal)
 
-Done and kept as is: `rovsti_wa_proto`, `rovsti_wa_client` (all routes, events
+Done and kept as is: `rosty_wa_proto`, `rosty_wa_client` (all routes, events
 socket with resume, call audio socket), `services/wa_gateway` (linking QR and code,
 history sync, text, media, reactions, groups, presence, chat state, incoming and
 outgoing calls through `voip-mlow`, FCM HTTP v1, hashed revocable keys), the shared
-two-option widget in all four apps, `rovsti_whatsapp` deleted, Kotlin `WaPush` and
+two-option widget in all four apps, `rosty_whatsapp` deleted, Kotlin `WaPush` and
 `WaCallAudio`, Phone incoming-call card, docs.
 
 Still missing on the app side, so the server features cannot be used:
@@ -46,9 +46,9 @@ yet), device testing.
 
 ---
 
-## Step 1: pure WhatsApp conversation model (`rovsti_wa_proto::timeline`)
+## Step 1: pure WhatsApp conversation model (`rosty_wa_proto::timeline`)
 
-**Files:** `crates/rovsti_wa_proto/src/timeline.rs`, export in `lib.rs`.
+**Files:** `crates/rosty_wa_proto/src/timeline.rs`, export in `lib.rs`.
 
 ```rust
 pub struct Timeline { chat: String, items: Vec<Item>, has_older: bool }
@@ -84,14 +84,14 @@ own echo before and after `confirm`; receipt upgrade/no downgrade; `MessageUpdat
 replaces reactions; events for another chat are ignored; `fail` keeps the text;
 `user_jid` for `+90…`, local number without country code (error); `day_breaks`.
 
-**Acceptance:** checks green; `rovsti_wa_proto` still has no I/O.
+**Acceptance:** checks green; `rosty_wa_proto` still has no I/O.
 
 ## Step 2: Messages: WhatsApp conversation with a text composer
 
 **Files:** `apps/messages/src/conversation.rs` (new), `apps/messages/src/main.rs`.
 
 - `pub struct Conversation { chat: String, title: SharedString, timeline: Timeline,
-  composer: Entity<rovsti_ui::field::TextField>, gateway: Gateway, next_local: u64,
+  composer: Entity<rosty_ui::field::TextField>, gateway: Gateway, next_local: u64,
   loading: bool }` is a GPUI entity. On open it fetches
   `gateway.messages(&chat, None, 50)` on `cx.background_executor()`, then
   `mark_read(MarkRead { chat, sender: None, ids: timeline.unread_ids() })` when there
@@ -101,7 +101,7 @@ replaces reactions; events for another chat are ignored; `fail` keeps the text;
   → `confirm` or `fail`; a failed bubble shows "Not sent · Tap to retry".
 - Bubbles: own on the right (accent), others on the left (secondary fill), sender
   name above group messages (`is_group` from `ChatSummary`), time and tick state.
-  Use `rovsti_ui::components` and the field helpers `input_layer`/`field_box`; read
+  Use `rosty_ui::components` and the field helpers `input_layer`/`field_box`; read
   `.claude/skills/liquid-glass-gpui/SKILL.md` first. Glass composer bar above the
   keyboard inset like Phone's reply sheet.
 - `main.rs`: the inbox row of a WhatsApp thread gets `.on_click` opening
@@ -118,7 +118,7 @@ unlinked) without panics.
 
 ## Step 3: Messages: reactions, media, typing and presence in the conversation
 
-**Files:** `apps/messages/src/conversation.rs`, `crates/rovsti_wa_proto/src/timeline.rs`.
+**Files:** `apps/messages/src/conversation.rs`, `crates/rosty_wa_proto/src/timeline.rs`.
 
 - Reactions: chips under a bubble (`Reaction` grouped by emoji with counts via a pure
   `fn reaction_chips(&[Reaction]) -> Vec<(String, u32, bool /*mine*/)>` in
@@ -128,7 +128,7 @@ unlinked) without panics.
 - Media: `MessageBody::Media` renders a placeholder card (kind label, caption, size).
   For `Image`/`Sticker` a tap downloads `gateway.media(id)` in the background and shows
   it with `img(Arc<Image>)` / `Image::from_bytes(ImageFormat::..)` (check the exact
-  names at gpui-fusion `d6c8412`, as `rovsti_wa_ui::view` does for the QR); a small
+  names at gpui-fusion `d6c8412`, as `rosty_wa_ui::view` does for the QR); a small
   in-memory LRU of 16 decoded images per conversation. Other kinds show "Open on
   WhatsApp" text only.
 - Typing: composer edits send `chat_state(ChatState { chat, state: Typing })`
@@ -136,7 +136,7 @@ unlinked) without panics.
   for this chat shows "typing…" under the title for 6 s. On open,
   `subscribe_presence(chat)` for 1:1 chats; `GatewayEvent::Presence` shows "online" /
   "last seen …".
-- Pure throttle: `rovsti_wa_proto::timeline::TypingThrottle { fn on_edit(now_ms) ->
+- Pure throttle: `rosty_wa_proto::timeline::TypingThrottle { fn on_edit(now_ms) ->
   bool, fn on_send() -> bool }`.
 
 **Tests:** `reaction_chips` grouping and "mine"; `TypingThrottle` timing.
@@ -154,7 +154,7 @@ unlinked) without panics.
 - `WaCallUi::place(&mut self, number: &str, cx)`: if a call is on screen or the widget
   is not connected, show the error line and return. Otherwise in the background:
   `user_jid(number)` → `gateway.place_call(&jid)` → `on_placed` →
-  `rovsti_wa_client::call_audio(url, key, &call_id)` → `call_audio_start()`, and start
+  `rosty_wa_client::call_audio(url, key, &call_id)` → `call_audio_start()`, and start
   the same `pump` as `answer` (factor the shared tail of `answer` into
   `fn attach_audio(&mut self, call_id, cx)`). `hang_up(false)` already ends it;
   `status_line` already covers `(Ringing, Out)` "Calling…".
@@ -172,14 +172,14 @@ pure `fn can_place(connected: bool, busy: bool, number: &str) -> Result<(), &'st
 
 ## Step 5: widget: connected apps (list and revoke keys), relink, delete instance
 
-**Files:** `crates/rovsti_wa_proto/src/api.rs`, `services/wa_gateway/src/routes.rs`
+**Files:** `crates/rosty_wa_proto/src/api.rs`, `services/wa_gateway/src/routes.rs`
 (+ `store.rs` if needed), `services/wa_gateway/tests/api.rs`,
-`crates/rovsti_wa_ui/src/{model.rs,view.rs}`.
+`crates/rosty_wa_ui/src/{model.rs,view.rs}`.
 
 - Proto: `KeyInfo` gains `#[serde(default)] pub current: bool`. Gateway `list_keys`
   sets it for the key that authenticated the request. `DELETE /v1/keys/{own id}` stays
   allowed (it is how an app revokes itself) and answers 204.
-- Model (`rovsti_wa_ui::model`):
+- Model (`rosty_wa_ui::model`):
   - `Screen::Keys { keys: Vec<KeyInfo> }`, `Screen::LoggedOut`,
     `Screen::ConfirmDelete`.
   - `Input::{OpenKeys, KeysLoaded(Vec<KeyInfo>), Revoke(String), Revoked(String),
@@ -208,8 +208,8 @@ key as `current`; relink after a fake-driver logout emits `Qr`.
 
 ## Step 6: FCM wake reaches the event stream
 
-**Files:** `crates/rovsti_wa_proto/src/push.rs` (new), `crates/rovsti_wa_client/src/events.rs`,
-`crates/rovsti_wa_ui/src/view.rs`, `apps/phone/src/backend.rs` (or wherever Phone
+**Files:** `crates/rosty_wa_proto/src/push.rs` (new), `crates/rosty_wa_client/src/events.rs`,
+`crates/rosty_wa_ui/src/view.rs`, `apps/phone/src/backend.rs` (or wherever Phone
 drains its `events` sink), `apps/messages/src/main.rs`, `apps/contacts/src/main.rs`.
 
 - Pure: `pub enum Wake { Call { call_id: String }, Message { chat: String } }` and

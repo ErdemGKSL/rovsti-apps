@@ -14,13 +14,13 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Task, TouchPhase, UniformListScrollHandle,
     Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg, uniform_list,
 };
-use rovsti_core::{
+use rosty_core::{
     contacts_view::{self, CallTarget, ContactVm, NameStyle, NumberVm},
     search::ContactIndex,
     speed_dial,
     wire::WireContact,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::flat_glass,
     field::{Bare, TextField, bare_field},
@@ -157,8 +157,8 @@ pub(crate) fn list_row_height() -> f32 {
 }
 
 /// A list press id (`ct-12`) on the stack, for reading a spring each frame.
-pub(crate) fn list_key(prefix: &str, index: usize) -> rovsti_core::small_text::SmallText<16> {
-    let mut id = rovsti_core::small_text::SmallText::<16>::new();
+pub(crate) fn list_key(prefix: &str, index: usize) -> rosty_core::small_text::SmallText<16> {
+    let mut id = rosty_core::small_text::SmallText::<16>::new();
     id.push_str(prefix);
     id.push_padded(index as u64, 1);
     id
@@ -633,7 +633,7 @@ impl PhoneApp {
 
     fn frequent_rows(
         &self,
-        entries: &[rovsti_core::wire::CallLogEntry],
+        entries: &[rosty_core::wire::CallLogEntry],
         cx: &gpui::App,
     ) -> Vec<ContactRow> {
         let backend = self.backend.read(cx);
@@ -643,11 +643,11 @@ impl PhoneApp {
             .iter()
             .flat_map(|list| list.iter().map(|c| c.id))
             .collect();
-        rovsti_core::call_log::frequent(
+        rosty_core::call_log::frequent(
             entries,
             backend::now_ms(),
-            rovsti_core::call_log::FREQUENT_WINDOW_DAYS,
-            rovsti_core::call_log::FREQUENT_LIMIT,
+            rosty_core::call_log::FREQUENT_WINDOW_DAYS,
+            rosty_core::call_log::FREQUENT_LIMIT,
             |id| starred.contains(&id),
         )
         .into_iter()
@@ -694,7 +694,7 @@ impl PhoneApp {
         self.backend.update(cx, |backend, cx| {
             backend.update_prefs(cx, |p| p.favorites_order = keys)
         });
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.sync_contacts(cx);
         cx.notify();
         true
@@ -837,7 +837,7 @@ impl PhoneApp {
     fn list_limit(window: &Window) -> f32 {
         // The floating tab bar sits over the bottom of the list.
         f32::from(
-            window.viewport_size().height - rovsti_ui::layout::content_bottom_inset(window)
+            window.viewport_size().height - rosty_ui::layout::content_bottom_inset(window)
                 + metrics::TAB_BAR_MARGIN,
         )
     }
@@ -984,7 +984,7 @@ impl PhoneApp {
                                 this.favorites.tap.spoil();
                                 this.favorites.lifted = Some(index);
                                 this.presses.release_all();
-                                rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                                rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
                                 cx.notify();
                             }
                         })
@@ -1202,7 +1202,7 @@ impl PhoneApp {
     }
 
     /// Desktop design preview: opens a sample contact's sheet at start-up
-    /// (`ROVSTI_PREVIEW_CONTACT=<id>`, add `c` for the chooser).
+    /// (`ROSTY_PREVIEW_CONTACT=<id>`, add `c` for the chooser).
     #[cfg(not(target_os = "android"))]
     pub(crate) fn preview_contact_sheet(
         &mut self,
@@ -1375,7 +1375,7 @@ impl PhoneApp {
                 if backend::copy_text(&text) != backend::Outcome::Done {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
                 }
-                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.show_notice_pill(
                     contacts_view::copied_numbers_text(numbers.len()),
                     None,
@@ -1491,7 +1491,7 @@ impl PhoneApp {
                             {
                                 sheet.star_fx.play(next, reduced);
                             }
-                            rovsti_ui::haptics::perform(
+                            rosty_ui::haptics::perform(
                                 window,
                                 if next {
                                     HapticFeedback::Confirm
@@ -1646,9 +1646,9 @@ impl PhoneApp {
                 true,
                 "Allow contacts access",
                 if permanent {
-                    "Rovsti Phone needs it to show your contacts. Turn on Contacts under Permissions."
+                    "Rosty Phone needs it to show your contacts. Turn on Contacts under Permissions."
                 } else {
-                    "Rovsti Phone needs it to show the people on this phone."
+                    "Rosty Phone needs it to show the people on this phone."
                 },
                 Some((
                     "cs-grant",
@@ -1869,7 +1869,7 @@ impl PhoneApp {
             "contacts",
             c.rows.len() + TAIL_ROWS,
             cx.processor(move |this, range: Range<usize>, window, cx| {
-                let theme = rovsti_ui::current_theme(window);
+                let theme = rosty_ui::current_theme(window);
                 let rows = Arc::clone(&this.contacts.rows);
                 this.want_photos(
                     range
@@ -1990,9 +1990,9 @@ impl PhoneApp {
                 true,
                 "Allow contacts access",
                 if permanent {
-                    "Rovsti Phone needs it to show your favorites. Turn on Contacts under Permissions."
+                    "Rosty Phone needs it to show your favorites. Turn on Contacts under Permissions."
                 } else {
-                    "Rovsti Phone needs it to show your favorites."
+                    "Rosty Phone needs it to show your favorites."
                 },
                 Some((
                     "fv-grant",
@@ -2040,7 +2040,7 @@ impl PhoneApp {
                     .relative()
                     .w_full()
                     .h(px(GRID_ROW_H))
-                    .mb(rovsti_ui::layout::content_bottom_inset(window))
+                    .mb(rosty_ui::layout::content_bottom_inset(window))
                     .child(self.frequent_block(theme, width, cx))
                     .child(pointer_surface(
                         Rc::clone(&self.favorites.bounds),
@@ -2127,7 +2127,7 @@ impl PhoneApp {
             "favorites",
             rows + extra + 1,
             cx.processor(move |this, range: Range<usize>, window, cx| {
-                let theme = rovsti_ui::current_theme(window);
+                let theme = rosty_ui::current_theme(window);
                 let width = f32::from(window.viewport_size().width);
                 let cols = contacts_view::favorite_columns(width);
                 let tiles = Arc::clone(&this.favorites.tiles);
@@ -2163,7 +2163,7 @@ impl PhoneApp {
         let bounds = f.bounds.get();
         let overlay = f.lifted.zip(f.drag).and_then(|(i, at)| {
             let tile = f.tiles.get(i)?;
-            let theme = rovsti_ui::current_theme(window);
+            let theme = rosty_ui::current_theme(window);
             let tile_w = tile_width(width, cols);
             let photo = self.row_photo(tile, cx);
             let scale = lift_scale(window.prefers_reduced_motion());

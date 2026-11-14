@@ -1,7 +1,7 @@
-# UX completeness pass: Rovsti Phone (round 3)
+# UX completeness pass: Rosty Phone (round 3)
 
 Base: `da3614bdb8dd9115f7851def09e398d5c6db8776` (main, clean tree, no stash).
-Scope: `apps/phone`, `crates/rovsti_core`, `crates/rovsti_android` (Phone seams). No new product
+Scope: `apps/phone`, `crates/rosty_core`, `crates/rosty_android` (Phone seams). No new product
 features and no backends. Intent comes from the app's own planning
 (`apps/phone/_bmad-output/planning-artifacts/epics.md`: stories 7.4, 7.5, 19.1, 20.3, 21.1, 21.2)
 and from code that already exists but has no UI path (`SetupChecklist::reopened_since`,
@@ -16,10 +16,10 @@ sheet. This round re-audits from the side of a user holding the phone.
 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
-| T1 | **High** | **One call inside a grouped row cannot be deleted.** Recents groups consecutive calls ("Ayşe (3)"); the row menu deletes all three, the sheets delete every call with the person. The sheet's "Recent calls" lines are inert, so there is no way to remove just one call (story 21.1/21.2 "Delete entry"). | `recents.rs::history_section`, `HistoryVm`, `rovsti_core::recents::HistoryLine` |
+| T1 | **High** | **One call inside a grouped row cannot be deleted.** Recents groups consecutive calls ("Ayşe (3)"); the row menu deletes all three, the sheets delete every call with the person. The sheet's "Recent calls" lines are inert, so there is no way to remove just one call (story 21.1/21.2 "Delete entry"). | `recents.rs::history_section`, `HistoryVm`, `rosty_core::recents::HistoryLine` |
 | T2 | Medium | **Sheet history goes stale while the sheet is open.** `ContactSheet.history` is rebuilt only when contacts change (`refresh_open_sheet`), `RecentsView.number_history` only when the sheet opens. A call that ends, a delete (T1) or an Undo while the sheet is up is not shown. | `contacts.rs::refresh_open_sheet`, `recents.rs::rebuild_recents`, `sync_wa_history` |
 | T3 | Medium | **Blocked calls are a dead end.** Settings > Blocked numbers > Blocked calls opens the Number sheet, but `recents::history` drops Blocked entries (and the main pull excludes type 6), so the sheet shows no calls and no "Delete call history". The only way to remove a blocked call is "Delete all call history". `delete_call_ids` also snapshots Undo entries from `log.source`, which never holds blocked rows, so a blocked delete would be a silent no-op. | `blocked_ui.rs::blocked_call_tap`, `history_ui.rs`, `block_ui.rs::delete_call_ids`, `backend.rs::call_log_write`, `sample.rs` |
-| T4 | Medium | **Voicemail is hidden and can dead-end.** Holding `1` calls voicemail, but the `1` key shows no voicemail glyph (story 20.3), so nobody finds it. With no voicemail number set the status still says "Calling voicemail..." and nothing happens; story 20.3 wants "No voicemail number set" with "Open call settings". | `keypad.rs::dial_key`, `voicemail_press`, `rovsti_android::telecom`, `RovstiBridge.kt` |
+| T4 | Medium | **Voicemail is hidden and can dead-end.** Holding `1` calls voicemail, but the `1` key shows no voicemail glyph (story 20.3), so nobody finds it. With no voicemail number set the status still says "Calling voicemail..." and nothing happens; story 20.3 wants "No voicemail number set" with "Open call settings". | `keypad.rs::dial_key`, `voicemail_press`, `rosty_android::telecom`, `RostyBridge.kt` |
 | T5 | Medium | **Contacts search "No matches" is a dead end for a number.** Typing or pasting an unsaved number in Contacts search shows only "No contact matches ...". The user expects Call, Message and Add to contacts (story 19.1 "wherever I see an unsaved number"). | `contacts.rs::no_matches`, `contacts_results` |
 | T6 | Low | **The Keypad's matched name is not tappable.** When the typed number belongs to a contact, the status line shows the name and avatar but tapping it does nothing; there is no way from the Keypad to that person's sheet. | `keypad.rs::status_line` |
 | T7 | Low | **A Xiaomi "I did it" cannot be taken back.** Once confirmed, the row is done with no buttons. `set_xiaomi_confirmed(item, false)` and `XiaomiConfirmations::unconfirm` exist with no UI (story 7.5: "without false done"). | `setup_ui.rs::buttons`, `Act` |
@@ -29,13 +29,13 @@ sheet. This round re-audits from the side of a user holding the phone.
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (`df` showed 6.4 GB free at planning time; if it shows under 6 GB, `rm -rf target/debug/incremental` first).
 Never invent GPUI APIs: reuse only what these files already call (`touch_surface`, `svg().path(icon.path())`,
 `show_pill_action`, `presses`, `uniform_list`). Icons: `LucideTrash2` and `LucideVoicemail` are already used in Phone.
 
-### S1. Pure logic in rovsti_core (+tests)
-`crates/rovsti_core/src/recents.rs`:
+### S1. Pure logic in rosty_core (+tests)
+`crates/rosty_core/src/recents.rs`:
 - `HistoryLine` gains `pub entry: EntryRef` and `pub blocked: bool`. `history` fills
   `EntryRef::Log(entry.id)` for call-log lines and `EntryRef::WhatsApp(extra.call_id.clone())` for
   extras; `blocked: false`. Update every `HistoryLine { .. }` literal (core tests, `apps/phone/src/recents.rs` tests).
@@ -45,16 +45,16 @@ Never invent GPUI APIs: reuse only what these files already call (`touch_surface
   `blocked: true`, `whatsapp: false`, `entry: EntryRef::Log(id)`.
 - `history_text`: a `blocked` line has the title "Blocked call" and never a duration.
 
-`crates/rovsti_core/src/call_log.rs`:
+`crates/rosty_core/src/call_log.rs`:
 - `pub fn blocked_ids_for_numbers(entries: &[CallLogEntry], numbers: &[&str]) -> Vec<i64>`: the mirror
   of `ids_for_numbers` that keeps only Blocked entries.
 
-`crates/rovsti_core/src/contacts_view.rs`:
+`crates/rosty_core/src/contacts_view.rs`:
 - `pub fn query_number(query: &str) -> Option<String>`: `None` when the trimmed query contains any
   alphabetic character; otherwise `dial::normalise_paste(query)`, returned only when non-empty and
   `dial::validate` accepts it.
 
-`crates/rovsti_core/src/setup.rs`:
+`crates/rosty_core/src/setup.rs`:
 - `pub fn changed_title(reopened: &[SetupItem]) -> Option<String>`: `None` for an empty slice;
   "Something changed: {title}" for one item; "Something changed: {first} and {n} more" for more
   (titles from `SetupItem::title`).
@@ -126,15 +126,15 @@ Edit deletes one with Undo; "Delete call history" > Delete empties that number's
 Blocked calls list updates (desktop preview included).
 
 ### S5. Voicemail seam and Keypad: glyph on 1, "No voicemail number set" (fixes T4)
-- Kotlin `crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt`:
+- Kotlin `crates/rosty_android/kotlin/dev/rosty/bridge/RostyBridge.kt`:
   `@JvmStatic fun voicemailConfigured(): Boolean`, never throws: true when `READ_PHONE_STATE` is not
   granted or on any exception (unknown never blocks the call); otherwise
   `!TelecomManager.getVoiceMailNumber(handle).isNullOrBlank()` with `handle` =
   `getDefaultOutgoingPhoneAccount("tel")` ?: first of `callCapablePhoneAccounts` (true when none).
-- `crates/rovsti_android/src/telecom.rs`: `pub fn voicemail_configured() -> Result<bool>` via
+- `crates/rosty_android/src/telecom.rs`: `pub fn voicemail_configured() -> Result<bool>` via
   `bridge::call_bool0("voicemailConfigured")`; add it to the desktop `Unsupported` test.
 - `apps/phone/src/backend.rs`: `pub fn voicemail_configured(&self) -> bool` (Android result, `true`
-  on error; desktop: false only when `ROVSTI_PREVIEW_NO_VOICEMAIL=1`). `call_voicemail` returns a new
+  on error; desktop: false only when `ROSTY_PREVIEW_NO_VOICEMAIL=1`). `call_voicemail` returns a new
   `Placement::NoVoicemail` before placing when it is false (handle the new arm everywhere `Placement`
   is matched: `keypad.rs`, `recents.rs::place_call_from_on`, `speed_dial_ui.rs` if any).
 - `apps/phone/src/main.rs::Status` gains `NoVoicemail`. `keypad.rs::voicemail_press` sets it; the
@@ -187,7 +187,7 @@ Blocked calls list updates (desktop preview included).
 - `docs/phone-acceptance.md`: rows for S2 (one-call delete, live sheet history), S4 (blocked calls
   history and delete), S5 (voicemail glyph, no-voicemail status), S6 (search number actions, Keypad
   name opens contact), S7 (Mark as not done, Something changed).
-- `docs/roadmap.md` (Rovsti Phone): note per-call delete and blocked-call delete under the existing
+- `docs/roadmap.md` (Rosty Phone): note per-call delete and blocked-call delete under the existing
   "Delete call history" tick; note voicemail "not set" handling (device check of S9 still PENDING).
 - `apps/phone/_bmad-output/implementation-artifacts/sprint-status.yaml`: leave 20-3 and 21-1 as
   `backlog` (only parts are done); no other changes.
@@ -202,7 +202,7 @@ Implemented on main after base `da3614b`:
 
 | Step | Commit |
 |------|--------|
-| S1 pure logic in rovsti_core (+tests) | `3d4929d` |
+| S1 pure logic in rosty_core (+tests) | `3d4929d` |
 | S2 sheet history per-call delete, live refresh | `5335462` |
 | S3 delete path with caller snapshot, blocked refresh | `4e808e9` |
 | S4 blocked calls history and delete | `a901c5a` |

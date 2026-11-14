@@ -22,7 +22,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, StyledImage, Task, TouchPhase, UniformListScrollHandle,
     Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg, uniform_list,
 };
-use rovsti_core::{
+use rosty_core::{
     blocklist,
     call_log::RecentsRow,
     call_log_query::{self, Query, RecentsFilter},
@@ -31,7 +31,7 @@ use rovsti_core::{
     sim::SimInfo,
     wire::EmergencyList,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{flat_glass, glass_pill},
     field::{Bare, TextField, bare_field},
@@ -180,7 +180,7 @@ pub(crate) struct RowVm {
     /// A WhatsApp row's picture: the contact's photo, then WhatsApp's.
     photo: CallerPhoto,
     /// The call-log and WhatsApp entries this row stands for (Delete acts on them).
-    refs: Arc<[rovsti_core::call_log::EntryRef]>,
+    refs: Arc<[rosty_core::call_log::EntryRef]>,
     /// The SIM the newest call used, resolved once per call-log swap (never per frame).
     /// `None` with one SIM or when the log's key matches no account (the slot stays empty).
     sim: Option<SimBadge>,
@@ -236,7 +236,7 @@ impl RowVm {
         if named {
             return subtitle;
         }
-        let Some(country) = rovsti_core::calling_code::country_line(number, home_cc) else {
+        let Some(country) = rosty_core::calling_code::country_line(number, home_cc) else {
             return subtitle;
         };
         crate::details_ui::header_caption(Some(&subtitle), Some(&country)).unwrap_or(subtitle)
@@ -320,7 +320,7 @@ pub(crate) struct RecentsView {
     /// The SIMs the rows were resolved against.
     sims: SimInfo,
     /// The Name format the titles were built with.
-    format: rovsti_core::wire::NameFormat,
+    format: rosty_core::wire::NameFormat,
     built_at: Option<Instant>,
     /// Loading has taken longer than [`SKELETON_DELAY`].
     skeleton_on: bool,
@@ -394,7 +394,7 @@ impl RecentsView {
             typing: false,
             log: None,
             sims: SimInfo::default(),
-            format: rovsti_core::wire::NameFormat::default(),
+            format: rosty_core::wire::NameFormat::default(),
             built_at: None,
             skeleton_on: false,
             skeleton_in: Entrance::default(),
@@ -575,7 +575,7 @@ fn note_only_hits(
     if text.chars().count() < 2 {
         return hits;
     }
-    let folded = rovsti_core::search::fold(text);
+    let folded = rosty_core::search::fold(text);
     for &i in visible {
         let row = &merged[i];
         if call_log_query::matches(row, &query.text) {
@@ -597,8 +597,8 @@ fn press_id(index: usize, zone: Zone) -> SharedString {
 
 /// The press id as text on the stack: reading a press spring every frame must
 /// not allocate (AD-21 2). `press_id` is for the tap, which keeps the id.
-pub(crate) fn press_key(index: usize, zone: Zone) -> rovsti_core::small_text::SmallText<16> {
-    let mut id = rovsti_core::small_text::SmallText::<16>::new();
+pub(crate) fn press_key(index: usize, zone: Zone) -> rosty_core::small_text::SmallText<16> {
+    let mut id = rosty_core::small_text::SmallText::<16>::new();
     id.push_str(match zone {
         Zone::Row => "rc-",
         Zone::Info => "ri-",
@@ -729,7 +729,7 @@ impl PhoneApp {
         let missed = match &self.recents.log {
             Some(log) => {
                 let seen = self.backend.read(cx).prefs().ui.missed_seen_ms;
-                rovsti_core::call_log::missed_badge(&log.entries, seen).saturating_add(
+                rosty_core::call_log::missed_badge(&log.entries, seen).saturating_add(
                     recents::missed_extras(&self.wa_call.read(cx).recents_extras(), seen),
                 )
             }
@@ -751,7 +751,7 @@ impl PhoneApp {
             // after the first load; a first load or an equal count stays still.
             self.tabs.set_badge(
                 RECENTS_TAB,
-                rovsti_core::call_log::badge_label(missed)
+                rosty_core::call_log::badge_label(missed)
                     .map(|text| SharedString::from(text.as_str().to_owned())),
             );
             if grew {
@@ -853,8 +853,8 @@ impl PhoneApp {
                     .as_ref()
                     .and_then(|i| i.match_number(&extra.number_raw));
                 if let Some(contact) = contact {
-                    extra.label = Some(rovsti_core::names::display(contact, format).into_owned());
-                } else if let Ok(jid) = rovsti_wa_proto::user_jid(&extra.number_raw) {
+                    extra.label = Some(rosty_core::names::display(contact, format).into_owned());
+                } else if let Ok(jid) = rosty_wa_proto::user_jid(&extra.number_raw) {
                     match avatars.name(&jid) {
                         Some(name) => extra.label = Some(name.to_owned()),
                         None => unnamed.push(SharedString::from(jid)),
@@ -867,7 +867,7 @@ impl PhoneApp {
         unnamed.dedup();
         let merged = recents::merge_extras(&log.rows, &extras);
         let views = recents::build(&merged, backend::now_ms(), log.locale);
-        let last_first = format == rovsti_core::wire::NameFormat::LastFirst;
+        let last_first = format == rosty_core::wire::NameFormat::LastFirst;
         let rows: Vec<RowVm> = views
             .into_iter()
             .zip(merged.iter())
@@ -879,7 +879,7 @@ impl PhoneApp {
                     && let Some(index) = &index
                     && let Some(contact) = index.match_number(&v.number)
                 {
-                    v.title = rovsti_core::names::display(contact, format).into_owned();
+                    v.title = rosty_core::names::display(contact, format).into_owned();
                 }
                 let photo = if v.whatsapp {
                     wa_row_photo(index.as_deref(), &v.number)
@@ -998,7 +998,7 @@ impl PhoneApp {
     fn recents_hit(&self, position: Point<Pixels>, window: &Window) -> Option<(usize, Zone)> {
         // The floating tab bar sits over the bottom of the list; a tap on it
         // must never reach the rows behind.
-        let limit = window.viewport_size().height - rovsti_ui::layout::content_bottom_inset(window)
+        let limit = window.viewport_size().height - rosty_ui::layout::content_bottom_inset(window)
             + metrics::TAB_BAR_MARGIN;
         if position.y > limit
             || self
@@ -1066,7 +1066,7 @@ impl PhoneApp {
                                     if this.recents.touch.take().is_some() {
                                         this.recents.suppress_click = true;
                                         this.recents.tap.spoil();
-                                        rovsti_ui::haptics::perform(
+                                        rosty_ui::haptics::perform(
                                             window,
                                             HapticFeedback::LongPress,
                                         );
@@ -1154,7 +1154,7 @@ impl PhoneApp {
         };
         if let Some(select) = self.recents.select.as_mut() {
             select.toggle(row);
-            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, HapticFeedback::Selection);
             cx.notify();
         }
     }
@@ -1197,11 +1197,11 @@ impl PhoneApp {
                     } else {
                         sel.select_all(&merged, &visible);
                     }
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                 }
             }
             SEL_DONE => {
-                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                 self.recents.select = None;
             }
             SEL_DEL => {
@@ -1254,7 +1254,7 @@ impl PhoneApp {
             );
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         let outcome = backend::share_text(&text);
         if outcome != backend::Outcome::Done {
             self.show_notice_pill(
@@ -1285,7 +1285,7 @@ impl PhoneApp {
             self.show_notice_pill("Not available on this platform", None, false, cx);
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.confirm_block = numbers;
         self.sheet_kind = crate::SheetKind::ConfirmBlockSelected;
         self.sheet.open();
@@ -1311,7 +1311,7 @@ impl PhoneApp {
                 &backend.blocked_numbers_set(),
             )
         };
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         self.recents_leave_select(cx);
         if many.to_block.is_empty() {
             let text = if many.already_blocked > 0 {
@@ -1400,7 +1400,7 @@ impl PhoneApp {
 
     /// Height from the window bottom up to the select bar's top edge.
     fn select_bar_inset(&self) -> f32 {
-        rovsti_ui::layout::geom::content_bottom(self.safe_bottom, 0.0)
+        rosty_ui::layout::geom::content_bottom(self.safe_bottom, 0.0)
             + SELECT_BAR_GAP
             + SELECT_BAR_H
     }
@@ -1493,7 +1493,7 @@ impl PhoneApp {
                 .left(metrics::ROW_INSET)
                 .right(metrics::ROW_INSET)
                 .bottom(
-                    px(rovsti_ui::layout::geom::content_bottom(
+                    px(rosty_ui::layout::geom::content_bottom(
                         self.safe_bottom,
                         0.0,
                     )) + px(SELECT_BAR_GAP),
@@ -1630,7 +1630,7 @@ impl PhoneApp {
             );
             return false;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         self.flights.home = None;
         let placement = self
             .backend
@@ -1672,7 +1672,7 @@ impl PhoneApp {
     pub(crate) fn recents_row_refs(
         &self,
         index: usize,
-    ) -> Option<Arc<[rovsti_core::call_log::EntryRef]>> {
+    ) -> Option<Arc<[rosty_core::call_log::EntryRef]>> {
         Some(Arc::clone(&self.recents.row(index)?.refs))
     }
 
@@ -1746,7 +1746,7 @@ impl PhoneApp {
                     false,
                     "No recent calls",
                     if preview {
-                        "Calls you make and receive show up here. Make Rovsti Phone your default phone app to see everything."
+                        "Calls you make and receive show up here. Make Rosty Phone your default phone app to see everything."
                     } else {
                         "Calls you make and receive show up here."
                     },
@@ -1797,9 +1797,9 @@ impl PhoneApp {
                     true,
                     "Allow call log access",
                     if permanent {
-                        "Rovsti Phone needs it to show your recent calls. Turn on Phone, Call logs and Contacts under Permissions."
+                        "Rosty Phone needs it to show your recent calls. Turn on Phone, Call logs and Contacts under Permissions."
                     } else {
-                        "Rovsti Phone needs it to show your recent calls."
+                        "Rosty Phone needs it to show your recent calls."
                     },
                     Some((
                         "rc-grant",
@@ -1832,7 +1832,7 @@ impl PhoneApp {
             "recents",
             r.visible.len() + TAIL_ROWS,
             cx.processor(move |this, range: Range<usize>, window, cx| {
-                let theme = rovsti_ui::current_theme(window);
+                let theme = rosty_ui::current_theme(window);
                 this.want_recent_photos(range.clone(), cx);
                 this.recents_rows(theme, range, cx)
             }),
@@ -2320,11 +2320,8 @@ impl PhoneApp {
                         };
                         crate::details_ui::header_caption(
                             None,
-                            rovsti_core::calling_code::country_line(
-                                &row.number,
-                                home_cc.as_deref(),
-                            )
-                            .as_deref(),
+                            rosty_core::calling_code::country_line(&row.number, home_cc.as_deref())
+                                .as_deref(),
                         )
                     })
                     .flatten()
@@ -2677,7 +2674,7 @@ pub(crate) struct HistoryVm {
     missed: bool,
     whatsapp: bool,
     /// The stored call this line stands for (deleting it, restoring it).
-    pub(crate) entry: rovsti_core::call_log::EntryRef,
+    pub(crate) entry: rosty_core::call_log::EntryRef,
     /// A call the phone blocked.
     pub(crate) blocked: bool,
     /// The number as stored, and when the call started (the key of its note).
@@ -3061,7 +3058,7 @@ pub(crate) fn avatar_view(
 
 /// Where a WhatsApp row's picture comes from: the matched contact's photo,
 /// then the WhatsApp picture of its number.
-fn wa_row_photo(index: Option<&rovsti_core::search::ContactIndex>, number: &str) -> CallerPhoto {
+fn wa_row_photo(index: Option<&rosty_core::search::ContactIndex>, number: &str) -> CallerPhoto {
     let contact = index.and_then(|i| i.match_number(number));
     CallerPhoto {
         contact: contact.and_then(|c| {
@@ -3069,7 +3066,7 @@ fn wa_row_photo(index: Option<&rovsti_core::search::ContactIndex>, number: &str)
                 .as_deref()
                 .map(|uri| (c.id, SharedString::from(uri.to_owned())))
         }),
-        wa_jid: rovsti_wa_proto::user_jid(number)
+        wa_jid: rosty_wa_proto::user_jid(number)
             .ok()
             .map(SharedString::from),
     }
@@ -3488,12 +3485,12 @@ mod tests {
     }
 
     fn line(
-        call_type: rovsti_core::call_log::CallType,
+        call_type: rosty_core::call_log::CallType,
         whatsapp: bool,
         duration_s: u64,
     ) -> recents::HistoryLine {
         recents::HistoryLine {
-            entry: rovsti_core::call_log::EntryRef::Log(1),
+            entry: rosty_core::call_log::EntryRef::Log(1),
             blocked: false,
             call_type,
             whatsapp,
@@ -3505,7 +3502,7 @@ mod tests {
 
     #[test]
     fn history_vm_marks_missed_and_keeps_the_duration_out_of_missed_calls() {
-        use rovsti_core::call_log::CallType;
+        use rosty_core::call_log::CallType;
         let now = 3_600_000;
         let missed = HistoryVm::new(
             &line(CallType::Missed, true, 0),
@@ -3558,7 +3555,7 @@ mod tests {
         let row = |name: Option<&str>| RecentsRow {
             number_raw: "+905551112233".into(),
             normalized: "+905551112233".into(),
-            call_type: rovsti_core::call_log::CallType::Incoming,
+            call_type: rosty_core::call_log::CallType::Incoming,
             count: 1,
             first_ms: 1_000,
             last_ms: 1_000,
@@ -3624,7 +3621,7 @@ mod tests {
             subtitle: subtitle.into(),
             time: String::new(),
             aria: String::new(),
-            direction: rovsti_core::recents::Direction::Incoming,
+            direction: rosty_core::recents::Direction::Incoming,
             missed: false,
             callable: !number.is_empty(),
             number: number.into(),

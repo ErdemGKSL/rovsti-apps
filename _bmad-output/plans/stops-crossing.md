@@ -1,11 +1,11 @@
-# Plan: Rovsti Stops, diameter-crossing alarm (round 1)
+# Plan: Rosty Stops, diameter-crossing alarm (round 1)
 
 - Base: `7acac595199fb54b854f9fa3a711734e61f7bcb5` ("WIP: carry-over before sync")
-- Unit: Rovsti Stops. Architect: PLAN agent. No source changed by this plan.
+- Unit: Rosty Stops. Architect: PLAN agent. No source changed by this plan.
 - Earlier plans: `stops.md` (8 steps, done), `stops-r2.md` (done). No earlier
   `stops-crossing*.md`, no stash entries, nothing of the crossing trigger exists in the tree.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android`
   (if `df` shows under 6 GB free: `rm -rf target/debug/incremental` first). No device.
 
 ## Owner's spec (binding)
@@ -19,13 +19,13 @@ optional WhatsApp "arriving" message). Left/right is still shown so the user und
 
 ## What the code has at the base
 
-- `rovsti_geo::trip`: `AlarmRule::{Radius, Eta, BeforeStop}`, `Fix`, `TripState`,
+- `rosty_geo::trip`: `AlarmRule::{Radius, Eta, BeforeStop}`, `Fix`, `TripState`,
   `TripUpdate { state, distance_m, ring, next_fix_in, eta }`, `Trip { destination, rule, .. }`,
   `MAX_ACCURACY_M = 150`, polling `(slack / 60 m/s / 2).clamp(3, 300)` s.
-- `rovsti_geo::session`: `ActiveTrip { id, label, trip, started_ms, snoozes, ring_at_ms, track,
+- `rosty_geo::session`: `ActiveTrip { id, label, trip, started_ms, snoozes, ring_at_ms, track,
   notice }`, `NoticeState { rule: AlarmRule, .. }`, `FixIn`, `FixOut { state, distance_m,
   next_fix_ms, high_accuracy, ring, title, text, notice_sent, at }`, `FixPos`.
-- `rovsti_geo::{history (TripRecord.destination/rule, recent_destinations), places (Place.rule),
+- `rosty_geo::{history (TripRecord.destination/rule, recent_destinations), places (Place.rule),
   prefs (RuleChoice, NoticeWhen, NoticePrefs::to_notice_state(alarm)) }`.
 - `apps/stops`: `backend.rs` (`build_trip(id, label, destination, rule, started, notice)`,
   `sim_fix`), `headless.rs` (`trip_fix/trip_alarm/trip_end` over `trip.json`, under
@@ -72,9 +72,9 @@ optional WhatsApp "arriving" message). Left/right is still shown so the user und
 
 ## Steps
 
-### 1. Pure diameter geometry and crossing watcher (`rovsti_geo`, additive)
+### 1. Pure diameter geometry and crossing watcher (`rosty_geo`, additive)
 
-New `crates/rovsti_geo/src/crossing.rs`, exported from `lib.rs`
+New `crates/rosty_geo/src/crossing.rs`, exported from `lib.rs`
 (`pub use crossing::{Diameter, DiameterError, Side, SideReading, CrossingWatch, Crossing,
 MIN_DIAMETER_M, MAX_DIAMETER_M, DEAD_BAND_M}`). Nothing else changes.
 
@@ -117,7 +117,7 @@ MIN_DIAMETER_M, MAX_DIAMETER_M, DEAD_BAND_M}`). Nothing else changes.
   (left, on-line, right -> fires); a 2 km accuracy fix is ignored; `half_disc(Left)` points all
   have `offset >= 0`; serde round trip; deserialising `{a, b}` with a == b is an error.
 
-### 2. Pure crossing trip machine (`rovsti_geo`, additive)
+### 2. Pure crossing trip machine (`rosty_geo`, additive)
 
 In `crossing.rs` (or `crossing/trip.rs` if the file passes ~600 lines):
 
@@ -139,11 +139,11 @@ In `crossing.rs` (or `crossing/trip.rs` if the file passes ~600 lines):
   100 m from AB, `eta` = line distance / speed, `NoticeRule` both variants (ETA hit, inside
   fallback, stopped outside = false), serde round trip keeps state and side.
 
-### 3. Switch the trip session and stored data to the crossing trigger (`rovsti_geo` + `apps/stops` non-GPUI)
+### 3. Switch the trip session and stored data to the crossing trigger (`rosty_geo` + `apps/stops` non-GPUI)
 
 The breaking step; it removes the old rule and keeps the app compiling with a minimal UI.
 
-`rovsti_geo`:
+`rosty_geo`:
 - `trip.rs`: delete `AlarmRule`, old `Trip`, `TripUpdate` and their tests; keep `Fix`,
   `TripState`, the constants. `lib.rs` exports updated.
 - New `pub struct Endpoint { pub label: String, pub coord: Coord }` (serde, in `crossing.rs`).
@@ -194,7 +194,7 @@ The breaking step; it removes the old rule and keeps the app compiling with a mi
 
 - Trip tab setup card: two glass rows "A  <label or Choose A>" and "B  <label or Choose B>";
   tapping a row sets `active_slot` and opens the picker titled "Choose A"/"Choose B"; a Swap
-  button (`Icon` already in `rovsti_ui`; grep the icon list, do not invent) calls `ends.swap()`;
+  button (`Icon` already in `rosty_ui`; grep the icon list, do not invent) calls `ends.swap()`;
   under the rows: "Circle 1.2 km across. Crossing the line A – B either way wakes you."
   (pure `trigger_text(&Diameter) -> String` in `trip_ui.rs`, tested) or the `DiameterError`
   sentence.

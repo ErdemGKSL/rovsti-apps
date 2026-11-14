@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/cradiy/gpuiforge/main/gpuiforge.schema.json",
   "app": {
-    "name": "Rovsti Stops"
+    "name": "Rosty Stops"
   },
   "platforms": {
     "android": {
@@ -9,7 +9,7 @@
         "arm64-v8a",
         "x86_64"
       ],
-      "application-id": "dev.rovsti.stops",
+      "application-id": "dev.rosty.stops",
       "features": [
         "notifications",
         "audio-playback"
@@ -39,7 +39,7 @@
         "min_sdk": "34",
         "target_sdk": "36"
       },
-      "activity": "dev.rovsti.stops.MainActivity",
+      "activity": "dev.rosty.stops.MainActivity",
       "signing": {
         "keystore": "/home/erdem/ownCloud/Personal/rovsti/rovsti-release.jks",
         "key-alias": "rovsti",
@@ -54,7 +54,7 @@
           "args": [
             "build",
             "-p",
-            "rovsti_stops",
+            "rosty_stops",
             "--profile",
             "{{cargo_profile}}"
           ]
@@ -66,7 +66,7 @@
           "args": [
             "run",
             "-p",
-            "rovsti_stops",
+            "rosty_stops",
             "--profile",
             "{{cargo_profile}}"
           ]

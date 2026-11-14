@@ -2,7 +2,7 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Navigation and layout: structure, insets, tab bar, controls, lists, text fields, haptics, Stops map
 
-> **Licence.** Rovsti is GPL-3.0-or-later: port Convx navigation/chrome code (`AppNavHost.kt`, `FoldingTabBar.kt`,
+> **Licence.** Rosty is GPL-3.0-or-later: port Convx navigation/chrome code (`AppNavHost.kt`, `FoldingTabBar.kt`,
 > `FoldGeometry.kt`, `FloatingNavBar.kt`, `ScreenTitleBar.kt`, `ui/ios/IosTabBar.kt`, `IosNavigationBar.kt`) with the header
 > from `SKILL.md` section 0. Its `FloatingTabBar.kt` is a modified vendored Apache-2.0 file: keep its notice.
 
@@ -17,19 +17,19 @@ Prefixes: Convx `A/` = `app/src/main/kotlin/com/convx/music/`, `C/` = `A/ui/comp
 // ORIGINAL. MainActivity: enableEdgeToEdge() before setContent; manifest windowSoftInputMode="adjustResize",
 // android:enableOnBackInvokedCallback="true".
 @Composable
-fun RovstiRoot(app: AppSpec) {
+fun RostyRoot(app: AppSpec) {
     val overlay = remember { OverlayController() }
     val chrome = remember { ChromeMetrics() }                     // measured bar heights (section 2)
     val glass = rememberGlassSource()
-    RovstiTheme {
+    RostyTheme {
         OverlayHost(overlay) {
-            Box(Modifier.fillMaxSize().background(RovstiTheme.colors.page)) {
+            Box(Modifier.fillMaxSize().background(RostyTheme.colors.page)) {
                 CompositionLocalProvider(LocalContentInsets provides chrome.contentInsets()) {
                     // 1. content layer: full window, scrolls under chrome
-                    AppNavHost(app, Modifier.fillMaxSize().glassSource(glass, RovstiTheme.colors.page))
+                    AppNavHost(app, Modifier.fillMaxSize().glassSource(glass, RostyTheme.colors.page))
                 }
                 // 2. chrome layer: siblings drawn after the content (never inside the glass source)
-                RovstiTabBar(app.tabs, glass, Modifier.align(Alignment.BottomCenter).onSizeChanged { chrome.bottomBarPx = it.height })
+                RostyTabBar(app.tabs, glass, Modifier.align(Alignment.BottomCenter).onSizeChanged { chrome.bottomBarPx = it.height })
             }
         }
     }
@@ -43,7 +43,7 @@ background under the NavHost so the incoming screen never shows through (`A/AppR
 
 Convx builds one inset value that already includes tab bar and mini player heights and screens spend it as list
 `contentPadding` (`A/AppRootContent.kt:524-551`), but from constants (80/64/84 dp) that drift from the real bar
-(`A/constants/Dimensions.kt:21-28`). Rovsti measures.
+(`A/constants/Dimensions.kt:21-28`). Rosty measures.
 
 ```kotlin
 // ORIGINAL
@@ -93,16 +93,16 @@ Test (Compose): scroll a 50-row list to the end and assert the last row's bottom
 // ORIGINAL: push/pop with depth parallax (U/utils/Motion.kt:157-179; A/AppNavHost.kt:55-98). Tweens, so predictive back can scrub.
 NavHost(
     navController, startDestination = start, modifier = modifier,
-    enterTransition = { slideInHorizontally(RovstiMotion.push()) { it } },
+    enterTransition = { slideInHorizontally(RostyMotion.push()) { it } },
     exitTransition = {
-        slideOutHorizontally(RovstiMotion.push()) { -(it * RovstiMotion.PushParallax).toInt() } +
-            fadeOut(RovstiMotion.push(), targetAlpha = RovstiMotion.PushDimAlpha)
+        slideOutHorizontally(RostyMotion.push()) { -(it * RostyMotion.PushParallax).toInt() } +
+            fadeOut(RostyMotion.push(), targetAlpha = RostyMotion.PushDimAlpha)
     },
     popEnterTransition = {
-        slideInHorizontally(RovstiMotion.push()) { -(it * RovstiMotion.PushParallax).toInt() } +
-            fadeIn(RovstiMotion.push(), initialAlpha = RovstiMotion.PushDimAlpha)
+        slideInHorizontally(RostyMotion.push()) { -(it * RostyMotion.PushParallax).toInt() } +
+            fadeIn(RostyMotion.push(), initialAlpha = RostyMotion.PushDimAlpha)
     },
-    popExitTransition = { slideOutHorizontally(RovstiMotion.push()) { it } },
+    popExitTransition = { slideOutHorizontally(RostyMotion.push()) { it } },
 ) { /* graph */ }
 ```
 
@@ -125,7 +125,7 @@ Detail pages that grow out of a tile use shared bounds (motion.md 8) and the cov
 | icon | | 26 dp, gap 1 dp | |
 | selected colour | foreground | `tokens.fill` | segment label |
 
-Rovsti uses the icon + label variant (bar 60 dp tall), centred, max width 500 dp, 16 dp from the sides, 8 dp above the system
+Rosty uses the icon + label variant (bar 60 dp tall), centred, max width 500 dp, 16 dp from the sides, 8 dp above the system
 inset (Convx `AppRootContent.kt:1170-1180`). At font scale >= 1.5 drop labels and keep icons (do not clip). Cells >= 48 dp
 tall for touch (`FT/FloatingTabBarBars.kt:116,334`).
 
@@ -162,7 +162,7 @@ fun held(downAtMs: Long, nowMs: Long, moved: Boolean): Boolean = moved || nowMs 
 
 ### 4.4 Minimise on scroll (ORIGINAL; behaviour from `FT/FloatingTabBar.kt:388-522`)
 
-Convx ships "expanded only at the top"; iOS 26 minimises on scroll down and expands on scroll up. Rovsti: minimise after
+Convx ships "expanded only at the top"; iOS 26 minimises on scroll down and expands on scroll up. Rosty: minimise after
 ~40 dp of accumulated downward scroll, expand after ~8 dp upward or at the top; reset on direction flip; never consume; write
 state only on the edge.
 
@@ -220,7 +220,7 @@ object SwitchRules {
 ```
 
 Compose: `Modifier.toggleable(value, role = Role.Switch, onValueChange = ...)` for semantics and keyboard, custom
-`pointerInput` for the drag (consume only after `held` or `startsDrag`). Add `RovstiHaptics.toggle(on)` on commit (Convx
+`pointerInput` for the drag (consume only after `held` or `startsDrag`). Add `RostyHaptics.toggle(on)` on commit (Convx
 has no toggle haptic; iOS does). Convx's improvement worth keeping: release velocity decides when the drag is fast
 (`DragAxis` projection on `value * travel`).
 
@@ -243,7 +243,7 @@ in its place, 24px wider and 16px taller", `G/styles.css:505-511`), same puck en
 ### 5.4 Buttons (glisse `G/button.tsx`, `G/styles.css:132-227`)
 
 Glass (default) and filled (`tokens.fill`, white label, pressed `fill` mixed 15% toward black). Height 40 dp (44 dp in
-Rovsti for touch), padding 0/16 (12 with icon), radius = half height, gap 8, label 15-17 sp, icon 20 dp, icon-only = circle
+Rosty for touch), padding 0/16 (12 with icon), radius = half height, gap 8, label 15-17 sp, icon 20 dp, icon-only = circle
 (needs `contentDescription`), disabled alpha 0.35, focus ring 2 dp `tokens.ring` offset 2 dp. Press = `glassPress` (motion.md 7).
 Pressed fill switches to `glassActive` instantly and fades back over 200 ms. Never ripple.
 
@@ -267,7 +267,7 @@ Convx's discipline is "the only gutter" + three gaps (`A/ui/theme/AppleTokens.kt
 ## 7. Text fields and search (owner complaint: worse than an HTML input)
 
 Use the platform text stack, do not reimplement it. Convx does nothing special here (`A/ui/ios/compat/IosCompatFields.kt:109-130`),
-so this section is Rovsti's own.
+so this section is Rosty's own.
 
 - `BasicTextField(state = TextFieldState)` (foundation 1.7+): caret placement by tap, long-press word selection, handles,
   magnifier, platform cut/copy/paste/select-all toolbar, IME composition, autofill all come for free. The state lives in the
@@ -292,7 +292,7 @@ fun GlassTextField(
     imeAction: ImeAction = if (search) ImeAction.Search else ImeAction.Done,
     onSubmit: () -> Unit = {},
 ) {
-    val tokens = RovstiTheme.glass
+    val tokens = RostyTheme.glass
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val fill = animateColorAsState(if (focused) tokens.glassActive else tokens.glass, tween(200), label = "fieldFill")
@@ -304,7 +304,7 @@ fun GlassTextField(
             .widthIn(max = 360.dp)
             .drawBehind { drawRoundRect(fill.value, cornerRadius = CornerRadius(size.height / 2f)) }   // read in draw
             .focusRequester(focus),
-        textStyle = RovstiTheme.type.body.copy(color = tokens.foreground),
+        textStyle = RostyTheme.type.body.copy(color = tokens.foreground),
         lineLimits = TextFieldLineLimits.SingleLine,
         keyboardOptions = KeyboardOptions(imeAction = imeAction),
         onKeyboardAction = { onSubmit() },
@@ -318,7 +318,7 @@ fun GlassTextField(
             ) {
                 CompositionLocalProvider(LocalContentColor provides tokens.muted) { if (leading != null) leading() else if (search) SearchGlyph() }
                 Box(Modifier.weight(1f)) {
-                    if (state.text.isEmpty()) Text(placeholder, style = RovstiTheme.type.body, color = tokens.muted)
+                    if (state.text.isEmpty()) Text(placeholder, style = RostyTheme.type.body, color = tokens.muted)
                     inner()
                 }
                 if (search && state.text.isNotEmpty()) {
@@ -335,7 +335,7 @@ fun GlassTextField(
 }
 ```
 
-(`LocalContentColor`/`Text` here are Rovsti's own design-system equivalents, not Material.) Search glyph: circle r 4.75 at
+(`LocalContentColor`/`Text` here are Rosty's own design-system equivalents, not Material.) Search glyph: circle r 4.75 at
 (7,7) + line to (13.75,13.75) on a 16 grid, stroke 1.5 round; clear glyph: two 7-unit diagonals, stroke 1.5
 (`G/search-field.tsx:7-20`, `G/input.tsx:44-60`). Tapping anywhere on the pill focuses the field (`G/input.tsx:38-40`):
 `clickable(indication = null, interactionSource = null) { focus.requestFocus() }` on the container.
@@ -356,7 +356,7 @@ directly because `View.performHapticFeedback` is silenced on Samsung when "touch
 ```kotlin
 // ORIGINAL. Constants: CLOCK_TICK (21), TEXT_HANDLE_MOVE (27), CONFIRM/REJECT/GESTURE_START/GESTURE_END (30),
 // SEGMENT_TICK/TOGGLE_ON/TOGGLE_OFF (34). VibrationEffect.createPredefined (29) needs the VIBRATE permission.
-class RovstiHaptics(private val view: View, private val vibrator: Vibrator?, private val mode: () -> HapticMode) {
+class RostyHaptics(private val view: View, private val vibrator: Vibrator?, private val mode: () -> HapticMode) {
     enum class HapticMode { Off, System, Strong }
     fun tick() = play(HapticFeedbackConstants.CLOCK_TICK, VibrationEffect.EFFECT_TICK)
     fun selection() = play(HapticFeedbackConstants.SEGMENT_TICK, VibrationEffect.EFFECT_TICK)
@@ -395,7 +395,7 @@ Box(Modifier.fillMaxSize()) {
     Column(Modifier.align(Alignment.CenterEnd).padding(end = 12.dp)                       // locate, layers, compass
         .graphicsLayer { translationY = -min(sheet.visibleHeightPx(), maxRidePx) }) { GlassIconButton(...) }
     StopSheetEntry(...)                         // overlay host entry: peek ~120 dp / medium / large, background interaction on
-    RovstiTabBar(folded = true, ...)            // folded to a circle by default on Stops
+    RostyTabBar(folded = true, ...)            // folded to a circle by default on Stops
 }
 ```
 
@@ -404,7 +404,7 @@ Box(Modifier.fillMaxSize()) {
 - Floating buttons ride the sheet via `graphicsLayer` translation (no relayout) up to a limit.
 - Gestures on the map never recompose chrome: camera in a holder read in draw (`performance.md` 4).
 - Glass over a panning map: Frost tier while panning, Liquid when idle (`glass.md` 5.6); if the map is a `SurfaceView`, Flat.
-- Tiles come from the user-chosen tile server (default `tiles.versatiles.org`) through the Rust `rovsti_tiles` cache; the UI
+- Tiles come from the user-chosen tile server (default `tiles.versatiles.org`) through the Rust `rosty_tiles` cache; the UI
   never fetches tiles itself.
 
 ## 10. Large titles

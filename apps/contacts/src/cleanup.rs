@@ -1,7 +1,7 @@
 //! The Clean up page (Settings, "Clean up"): contacts without a number, a
 //! name, a photo or a group, with select and delete.
 //!
-//! The filters live in `rovsti_core::contact_cleanup`. The lists are built
+//! The filters live in `rosty_core::contact_cleanup`. The lists are built
 //! once per address-book pull (and when the page opens), never per frame.
 //! Delete goes through the same path as select mode, so it ends in the Trash.
 
@@ -11,13 +11,13 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     avatar,
     contact_cleanup::{self, Cleanup},
     contact_edit::ContactDraft,
     multi_select::{self, Selection},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{
         empty_state, flat_glass, glass_icon_button, glass_pill, large_title, list_row, section,
@@ -371,7 +371,7 @@ impl ContactsApp {
         .on_click(cx.listener(move |this, _, _, cx| {
             if let Some(select) = this.cleanup_ui.select.as_mut() {
                 if !select.toggle(id) {
-                    this.notice = Some(rovsti_core::contact_select::cap_notice().into());
+                    this.notice = Some(rosty_core::contact_select::cap_notice().into());
                 }
                 cx.notify();
             } else {
@@ -427,7 +427,7 @@ impl ContactsApp {
             div()
                 .id("cleanup-select-bar")
                 .absolute()
-                .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
+                .bottom(px(rosty_ui::layout::geom::tab_bar_bottom(safe_bottom)))
                 .left(px(8.0))
                 .right(px(8.0))
                 .flex()
@@ -449,7 +449,7 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::contact_edit::{DraftField, FieldKind};
+    use rosty_core::contact_edit::{DraftField, FieldKind};
 
     fn draft(id: i64, given: &str, number: bool, group: bool) -> ContactDraft {
         ContactDraft {

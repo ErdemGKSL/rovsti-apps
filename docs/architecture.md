@@ -22,13 +22,13 @@ against `cc05989`, and its shader validation still passes on this rev.
 
 ## Layers
 
-Text input: every text box in every app is `rovsti_ui::field::TextField`, drawn on top of
-`rovsti_core::text_edit::EditBuffer`. The buffer owns text, selection and composing range
+Text input: every text box in every app is `rosty_ui::field::TextField`, drawn on top of
+`rosty_core::text_edit::EditBuffer`. The buffer owns text, selection and composing range
 and has no GPUI types, so the logic is tested on the desktop. The old per-app copies
 (`apps/contacts/src/field.rs`, `apps/phone/src/field.rs`) are gone; add new inputs with
 `TextField::new`, `with_input` or `multiline`, never a second `EntityInputHandler`.
 
-Selection chrome. `rovsti_ui::field::selection_chrome()` is `Native` on Android and `Drawn`
+Selection chrome. `rosty_ui::field::selection_chrome()` is `Native` on Android and `Drawn`
 everywhere else (`set_selection_chrome(Some(..))` overrides it for tests and the shots).
 - Android (`Native`): the field hands the platform its own selection UI, as an HTML input
   does. A tap reaches the field as `TextInputFocusEvent`: it focuses, raises the keyboard
@@ -44,7 +44,7 @@ everywhere else (`set_selection_chrome(Some(..))` overrides it for tests and the
   moves the horizontal scroll (single line) or vertical scroll (multiline) and reports
   whether it consumed the delta. At an edge it does not, so the page scrolls on, like a
   browser. A long URL in Stops search can be panned by finger.
-- Undo and redo: `rovsti_core::text_edit::History` (100 steps) records before each edit.
+- Undo and redo: `rosty_core::text_edit::History` (100 steps) records before each edit.
   Runs of typing and runs of deletes coalesce into one step; paste, cut, newline, a
   selection replace or a caret jump close the group, and IME composition is one step.
   Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z and Ctrl+Y redo. `set` and `clear` from an app
@@ -53,57 +53,57 @@ everywhere else (`set_selection_chrome(Some(..))` overrides it for tests and the
 ```
 apps/{phone,messages,contacts,stops}  GPUI views, one window per app
         │
-crates/rovsti_ui                   glass components, tab bar, theme, data dirs, text field
-                                   (`rovsti_ui::field`, the only IME input handler)
-crates/rovsti_core::text_edit      pure edit model behind the field (selection, IME
+crates/rosty_ui                   glass components, tab bar, theme, data dirs, text field
+                                   (`rosty_ui::field`, the only IME input handler)
+crates/rosty_core::text_edit      pure edit model behind the field (selection, IME
                                    composing range, graphemes, UTF-16 offsets; unit tested)
 crates/liquid_glass_kit            glass material (WGSL), springs, tokens
         │
-crates/rovsti_wa_ui                shared WhatsApp settings screen (two options)
-crates/rovsti_wa_client ═══ HTTP + WebSocket (TLS) ═══▶ services/wa_gateway
+crates/rosty_wa_ui                shared WhatsApp settings screen (two options)
+crates/rosty_wa_client ═══ HTTP + WebSocket (TLS) ═══▶ services/wa_gateway
         │                                                  owns the whatsapp-rust sessions
-crates/rovsti_wa_proto             wire types, connect keys, events, call state (pure,
+crates/rosty_wa_proto             wire types, connect keys, events, call state (pure,
         │                          shared by the client and the gateway)
-crates/rovsti_tiles ═══ HTTPS (rustls) ═══▶ the user's tile server (default tiles.versatiles.org)
+crates/rosty_tiles ═══ HTTPS (rustls) ═══▶ the user's tile server (default tiles.versatiles.org)
         │                          fetch + disk cache of map tiles, used by Stops
-crates/rovsti_android ──JNI──▶ kotlin/dev/rovsti/bridge/RovstiBridge.kt
+crates/rosty_android ──JNI──▶ kotlin/dev/rosty/bridge/RostyBridge.kt
         │                           (roles, telecom, Xiaomi settings, services,
         │                            WaPush, WaCallAudio)
-crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
+crates/rosty_core, rosty_geo     pure Rust, no I/O, unit-tested
 ```
 
-- **Pure-core rule.** Logic that can be tested without a phone goes in `rovsti_core`
-  or `rovsti_geo`: phone number matching, the alarm state machine, and later thread
-  merging and search. The dial keypad's layout budget is `rovsti_core::keypad_layout`
+- **Pure-core rule.** Logic that can be tested without a phone goes in `rosty_core`
+  or `rosty_geo`: phone number matching, the alarm state machine, and later thread
+  merging and search. The dial keypad's layout budget is `rosty_core::keypad_layout`
   (rects and sizes from viewport, insets and text length); the view only places boxes.
 - **JNI seam.** `gpui_android` keeps its `JavaVM` private, so the Kotlin host passes
-  its own through `RovstiBridge.install(app)` and, after the activity loaded the library, `RovstiBridge.attachNative()` → `nativeInit`. Rust
+  its own through `RostyBridge.install(app)` and, after the activity loaded the library, `RostyBridge.attachNative()` → `nativeInit`. Rust
   calls static Kotlin methods that take only strings, ints and bools. Android logic
   such as RoleManager, Telecom, providers and services lives in Kotlin. Desktop
   builds return `Error::Unsupported`.
 - **Async.** GPUI runs the UI on Android's main Looper. WhatsApp runs on the
-  gateway; `rovsti_wa_client` keeps its event WebSocket on its own thread and
-  `rovsti_wa_ui` forwards `GatewayEvent`s to the app through a GPUI task.
+  gateway; `rosty_wa_client` keeps its event WebSocket on its own thread and
+  `rosty_wa_ui` forwards `GatewayEvent`s to the app through a GPUI task.
 - **Map tiles.** Stops draws Shortbread vector tiles under its radar map. The logic is pure
-  and tested in `rovsti_geo::tiles` (slippy math, MVT decoding, styles for colorful and
-  eclipse, clipping, the LRU index and fetch queue); the I/O is in `rovsti_tiles` (ureq over
+  and tested in `rosty_geo::tiles` (slippy math, MVT decoding, styles for colorful and
+  eclipse, clipping, the LRU index and fetch queue); the I/O is in `rosty_tiles` (ureq over
   rustls, disk cache). It is the only network traffic besides the WhatsApp gateway.
   The server is a setting (`tile_url` in `stops-prefs.json`).
 - **Storage.** Each app keeps its files in its no-backup directory
-  (`rovsti_ui::storage::data_dir`). Nothing leaves the device except WhatsApp traffic
+  (`rosty_ui::storage::data_dir`). Nothing leaves the device except WhatsApp traffic
   to the user's own gateway, map tile requests to the chosen tile server, and what the
   user chooses to share. Stops caches tiles in `tiles/<server key>/`, one directory per
-  server, capped at 128 MiB with least-recently-used eviction. `rovsti_tiles::disk_usage` and
+  server, capped at 128 MiB with least-recently-used eviction. `rosty_tiles::disk_usage` and
   `clear_all` back the downloaded size and the Clear button in Settings > Map tiles. An app keeps its
   WhatsApp link (`whatsapp-link.json`: gateway URL, instance id, connect key) there.
 
 - **QR scanning.** Contacts decodes a picked picture with `rqrr` (pure Rust, no
-  native code; licence `(MIT OR Apache-2.0) AND ISC`) in `rovsti_core::contact_scan`.
+  native code; licence `(MIT OR Apache-2.0) AND ISC`) in `rosty_core::contact_scan`.
   The payload parser reads vCard, MECARD, `tel:` and `mailto:`.
 
 - **Contacts trash file.** Deleted contacts are kept as drafts in `contacts-trash.json` in the
   app's data directory (`apps/contacts/src/trash_store.rs`, atomic temp file + rename, size
-  guarded, a damaged file reads as an empty Trash). The model is `rovsti_core::contact_trash`:
+  guarded, a damaged file reads as an empty Trash). The model is `rosty_core::contact_trash`:
   30 days, at most 500 entries. Merge deletes are not trashed; select-mode and Clean up deletes are.
 
 ## What each app needs from Android
@@ -112,14 +112,14 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | --- | --- | --- |
 | Phone | `ROLE_DIALER` | `InCallService` (in-call UI + ringing via full-screen intent), `ACTION_DIAL` activity filter, call log and contacts providers; `RECORD_AUDIO` for WhatsApp calls |
 | Messages | `ROLE_SMS` | `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` (MMS) receiver, `RESPOND_VIA_MESSAGE` service, `SENDTO`/`SEND` activity filters, inline-reply, scheduled-SMS and boot receivers; one headless JNI call into Rust for cold decisions (AD-MSG4); WhatsApp wakes through optional FCM push and fetches its text through that same call (AD-MSG5); no foreground service |
-| Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rovsti.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
-| Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rovsti_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `TripAlarm`/`AlarmSound` (alarm-usage audio focus, `STREAM_ALARM` volume raise and restore, `CATEGORY_ALARM` channel), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
+| Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rosty.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RostyBridge` intents as Phone |
+| Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rosty_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `TripAlarm`/`AlarmSound` (alarm-usage audio focus, `STREAM_ALARM` volume raise and restore, `CATEGORY_ALARM` channel), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
 
 ### Stops: decisions (AD-ST1 to AD-ST9, AD-SA1 to AD-SA9, AD-SX1 to AD-SX8)
 
 - **AD-ST1 Pure first.** The trip session, destination parsing, saved stops, history and
   statistics, prefs, the arriving-soon template, GTFS parsing and the map projection are
-  `rovsti_geo` modules with unit tests. Kotlin and GPUI only map.
+  `rosty_geo` modules with unit tests. Kotlin and GPUI only map.
 - **AD-ST2 The trip runs headless.** `TripService` owns the location updates and calls
   `Headless.call("trip_fix", json)` on every fix. Rust (`apps/stops/src/headless.rs`) loads
   `trip.json`, runs `ActiveTrip::on_fix`, saves, maybe sends the WhatsApp notice, and answers
@@ -131,7 +131,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   Snooze re-rings through `AlarmManager.setAlarmClock`; a watchdog alarm asks for a fix when none
   arrived. GPUI draws its own alarm screen only while the app is open. AD-SA1 to AD-SA6 fix the
   details: polling curve, retry window, policy, fallback chain, timeout and routing.
-- **AD-SA1 One explicit polling curve** (`rovsti_geo::poll`). Interval =
+- **AD-SA1 One explicit polling curve** (`rosty_geo::poll`). Interval =
   `slack / (2 * MAX_SPEED_MPS)` clamped to `[MIN_POLL = 3 s, MAX_POLL = 300 s]`, with
   `slack = line_m - acc - max(DEAD_BAND_M, acc)`. The closer to the A-B diameter, the shorter;
   never longer than 300 s. The `/2` keeps two fixes at worst-case speed from jumping the band
@@ -143,7 +143,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   covers the start spec), so a missing fix triggers a retry, never silence. On a `null` location
   the service tries the other provider once, then reports `searching`. Every changed interval
   re-registers the location request (both the `LocationRequest` and the legacy path).
-- **AD-SA3 Alarm policy is Rust data.** `rovsti_geo::alarm::AlarmPlan` (volume percent, ramp,
+- **AD-SA3 Alarm policy is Rust data.** `rosty_geo::alarm::AlarmPlan` (volume percent, ramp,
   ring timeout, sound order, vibration pattern) goes to Kotlin inside the start spec (`"alarm"`) and
   is saved with the trip prefs. Kotlin has identical defaults so the alarm rings even if Rust never
   answered; a cargo contract test (`apps/stops/src/kotlin_contract.rs`) keeps both in sync. The
@@ -151,7 +151,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   (`ramp_volume`, full loudness within 5 s) are pure functions mirrored in Kotlin.
 - **AD-SA4 Never silent.** Sound sources in order: `user_alarm`, `default_alarm`,
   `default_ringtone`, `default_notification`, `tone` (a `ToneGenerator` on `STREAM_ALARM`; no
-  bundled raw sound because `rovsti_android` ships no resources). A null URI, an exception or a
+  bundled raw sound because `rosty_android` ships no resources). A null URI, an exception or a
   `MediaPlayer` `OnErrorListener` callback advances to the next source. Vibration with alarm usage
   runs independently of the sound.
 - **AD-SA5 Ring timeout and guard.** After the ring timeout (10 min) the alarm stops and re-rings
@@ -185,11 +185,11 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 - **AD-ST4 Map: vector tiles under a vector radar.** No region is bundled with the app (it bloats
   the APK and goes stale). Stops downloads Shortbread 1.0 vector tiles (MVT, zoom 0-14, overzoomed
   beyond 14) from a VersaTiles-compatible server that the user sets (default
-  `https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}`). `rovsti_geo::tiles` decodes and styles them
-  (colorful in the light theme, eclipse in the dark one). `rovsti_tiles` fetches them and keeps the
+  `https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}`). `rosty_geo::tiles` decodes and styles them
+  (colorful in the light theme, eclipse in the dark one). `rosty_tiles` fetches them and keeps the
   disk cache. The app paints them with `canvas` and `PathBuilder` under the radar layers (saved stops,
   A and B, the circle with the diameter line and its halves, position, breadcrumb, GTFS stops and line) over
-  `rovsti_geo::view`. Where a tile is missing, the radar look shows. Tiles around the trip circle
+  `rosty_geo::view`. Where a tile is missing, the radar look shows. Tiles around the trip circle
   are prefetched when a trip starts. Text labels are not drawn. The map shows
   "(c) OpenStreetMap contributors".
 - **AD-ST5 Points are local.** A and B each come from the same sources: are `geo:` URIs and maps links (shared, opened or
@@ -224,12 +224,12 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   (saved, recent, stop search, stop sheet, shared links through the Confirm sheet, which
   emphasises the open end) refit the view. The idle view is the pair, else your position at
   street level, else the last trip or first saved stop, else the default city. Your position
-  comes from the `stops_location` seam in `rovsti_android::location` (last known location plus
+  comes from the `stops_location` seam in `rosty_android::location` (last known location plus
   one fresh fix on request; no background tracking, nothing leaves the phone). All state and
   label text is the pure, tested `apps/stops/src/pick.rs`; coordinates survive only in the pin
   menu's and the Confirm sheet's details lines.
 
-The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius, ETA and
+The trigger is a diameter crossing (`rosty_geo::crossing`); the earlier radius, ETA and
 "N stops before" rules are gone.
 
 - **AD-SX1 Geometry is local metres.** Equirectangular projection around the midpoint of AB
@@ -257,8 +257,8 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
 ### Contacts: decisions (AD-CT1 to AD-CT6)
 
 - **AD-CT1 Pure first.** Draft rules, accounts, the photo crop plan, the handoff payload,
-  presence text, a contact's WhatsApp target and the lookup cache are pure (`rovsti_core`,
-  `rovsti_wa_proto`, `apps/contacts/src/whatsapp.rs`) with unit tests. Kotlin and GPUI only map.
+  presence text, a contact's WhatsApp target and the lookup cache are pure (`rosty_core`,
+  `rosty_wa_proto`, `apps/contacts/src/whatsapp.rs`) with unit tests. Kotlin and GPUI only map.
 - **AD-CT2 Number-less contacts are Contacts-only.** Phone keeps `pullContacts`; Contacts uses
   `pullContactsAll`, and a draft needs a name or organisation.
 - **AD-CT3 Accounts.** A writable account is `type|name` (empty = phone only), listed from
@@ -266,14 +266,14 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
   `contacts-prefs.json`.
 - **AD-CT4 Photos.** Android Photo Picker (no permission); Rust plans a centred square crop
   (`contact_photo::plan`), Kotlin decodes, crops and writes a JPEG to the display photo.
-- **AD-CT4a Camera write rule.** `RovstiShareProvider` is read-only except for the camera
+- **AD-CT4a Camera write rule.** `RostyShareProvider` is read-only except for the camera
   capture: `openFile` accepts mode "w"/"wt" only for files named `camera-<digits>.jpg` in
   `cache/share/` (`MediaShare.writable`). The camera app gets a write grant on that one URI
   through `EXTRA_OUTPUT`; every other name stays "r". The app declares no `CAMERA` permission.
 - **AD-CT5 WhatsApp goes through the apps that own it.** Chat and call are handed to Messages
-  and Phone by an explicit intent (`dev.rovsti.action.WA_CHAT` / `WA_CALL`, extras `jid`,
-  `name`) guarded by the signature permission `dev.rovsti.permission.HANDOFF`; Kotlin keeps only
-  same-signed packages. A missing app is reported ("Install Rovsti Phone to call on WhatsApp").
+  and Phone by an explicit intent (`dev.rosty.action.WA_CHAT` / `WA_CALL`, extras `jid`,
+  `name`) guarded by the signature permission `dev.rosty.permission.HANDOFF`; Kotlin keeps only
+  same-signed packages. A missing app is reported ("Install Rosty Phone to call on WhatsApp").
 - **AD-CT6 Availability is lazy.** The list mark comes from the instance's existing chats
   (`GET /v1/chats`, read on connect and on `Resync`, computed per pull and per refresh, never
   per frame). Only an opened card sends that one contact's international numbers (at most 12)
@@ -287,15 +287,15 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
 - **AD-CT8 `open_contact` one-shot.** A birthday notification starts Contacts with
   `EXTRA_CONTACT_ID`; Kotlin posts one `open_contact {id}` event through the mailbox
   (`deliverOpenContact`, called from `onCreate` and `onNewIntent`, like Messages' open thread).
-  `rovsti_android::events::parse_open_contact` reads it; the app opens the card, or keeps the id
+  `rosty_android::events::parse_open_contact` reads it; the app opens the card, or keeps the id
   as `pending_open` until the book has loaded.
 - **AD-CT9 Group tools.** Message group and Email group build one `smsto:` / `mailto:` intent
-  (`telecom::compose_group_sms`, `email_group`) from `rovsti_core::group_tools` (at most 30
+  (`telecom::compose_group_sms`, `email_group`) from `rosty_core::group_tools` (at most 30
   numbers / 50 addresses, one per distinct number). The cards are read off the UI thread.
 - **AD-CT10 Round 4 intake and writes.** Contacts receives shared and opened vCards through
   `on_receive_share` (SEND) and `on_open_urls` (VIEW, `content://`, copied to `cacheDir/shared/`
   by `readSharedUri` and read off the UI thread); the manifest filters (`text/x-vcard`,
-  `text/vcard`, `text/directory`) are mirrored in `gpuiforge.json`. `rovsti_core::contact_intake`
+  `text/vcard`, `text/directory`) are mirrored in `gpuiforge.json`. `rosty_core::contact_intake`
   decides what a file is. Per-contact `CUSTOM_RINGTONE` and `SEND_TO_VOICEMAIL` are written
   through `ContactOptions.kt` (voicemail on asks first). Pinned Home screen shortcuts launch the
   app with `EXTRA_CONTACT_ID` and reuse `open_contact` (AD-CT8). The Favorites order is a list
@@ -303,7 +303,7 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
 - **AD-CT11 Round 5 data.** vCard `PHOTO` is written only for single cards (share, save, copy;
   bulk exports and the QR payload stay photo-free), built off the UI thread. CSV export goes
   through the `text/csv` save picker and import reads Google / Outlook headers
-  (`rovsti_core::contact_csv`). "My card" and the emergency contacts (up to 5) are lookup keys in
+  (`rosty_core::contact_csv`). "My card" and the emergency contacts (up to 5) are lookup keys in
   `contacts-prefs.json` (`my_card`, `emergency`). Frequently contacted is computed from the call
   log, read-only, and never written back to the provider.
 - **AD-CT12 Round 6 data.** `contacts-prefs.json` also holds the first-seen marks
@@ -314,16 +314,16 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
   with the other edited mimes in `ContactsEdit.kt` (`EDITED_MIMES`). The Kotlin import answers
   `{added, ids}` (ids aligned with the sent cards, 0 for a failure) so photos of a multi-card
   import are set afterwards through the single-photo path. The calendar file
-  (`rovsti_core::contact_ics`) is written to the temp dir and handed to
+  (`rosty_core::contact_ics`) is written to the temp dir and handed to
   `documents::export_file`; its answer arrives as `DocumentOp::ExportMessages`.
 
 ### Messages: decisions (AD-MSG1 to AD-MSG9)
 
 - **AD-MSG1 Pure first.** SMS wire types, the unified inbox merge, the SMS timeline, the MMS
   PDU codec, OTP, spam rules, the schedule queue, the notification digest and the backup
-  archive are `rovsti_core` modules with unit tests. GPUI and Kotlin only map.
+  archive are `rosty_core` modules with unit tests. GPUI and Kotlin only map.
 - **AD-MSG2 SMS lives in the provider.** Messages keeps no SMS database. Rust pulls through
-  `rovsti_android::sms` (JSON envelopes, off the UI thread) and pulls again on `sms_changed`.
+  `rosty_android::sms` (JSON envelopes, off the UI thread) and pulls again on `sms_changed`.
 - **AD-MSG3 One person, one inbox row.** The key is the contact id when the number matches a
   contact, else the canonical number; a WhatsApp chat joins by its JID's number. Groups never
   merge.
@@ -342,12 +342,12 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
   a fixed scorer, all in `messages-prefs.json`; the same file is what the cold receivers read.
   Spam goes to a Spam folder and is never deleted or announced loudly.
 - **AD-MSG9 WhatsApp media goes up through the gateway.** Messages picks a file (`DocumentOp::Attachment`),
-  `rovsti_wa_proto::media` sizes (16 MiB) and classifies it, and `Gateway::send_media` uploads it; the
+  `rosty_wa_proto::media` sizes (16 MiB) and classifies it, and `Gateway::send_media` uploads it; the
   bubble is optimistic (`push_pending_media`) and a retry re-reads the cached file. Inline reply stays text.
 
 While attached, the app tells Kotlin (`uiAttached(true)`) and posts notifications itself:
 `notifications::should_notify` filters (not mine, not the open chat), a per-conversation digest
-feeds `rovsti_core::notify::build`, and `msg_reply` events go out through the channel the
+feeds `rosty_core::notify::build`, and `msg_reply` events go out through the channel the
 notification came from.
 
 ### Messages: cold paths (AD-MSG4, AD-MSG5)
@@ -356,8 +356,8 @@ notification came from.
   reply can be sent and a scheduled SMS can fire with no activity and no UI process. Those
   paths are Kotlin receivers (`SmsDeliverReceiver`, `MmsWapPushReceiver`, `ReplyReceiver`,
   `ScheduledSmsReceiver`). When one needs a decision it calls
-  `RovstiBridge.nativeHeadless(kind, json)`, which `apps/messages/src/main.rs` exports with
-  `rovsti_android::headless_entry!(headless::handle)`. `System.loadLibrary` from a receiver
+  `RostyBridge.nativeHeadless(kind, json)`, which `apps/messages/src/main.rs` exports with
+  `rosty_android::headless_entry!(headless::handle)`. `System.loadLibrary` from a receiver
   only runs `JNI_OnLoad`, which registers native methods and does not start GPUI. The handler
   is plain blocking Rust (`apps/messages/src/headless.rs`): `sms_classify` (spam rules from
   `messages-prefs.json` plus passcode detection), `mms_notification`, `mms_retrieved`,
@@ -366,7 +366,7 @@ notification came from.
   Kotlin gets no decision and posts a plain notification (no passcode chip, no spam filter,
   no MMS decode). The message itself is always stored first.
 - **AD-MSG5 WhatsApp notifications.** The FCM payload carries no text (AD-WA6). On a
-  `kind=message` push `RovstiMessagingService` calls `WaPush.onMessage`, and when the UI is not
+  `kind=message` push `RostyMessagingService` calls `WaPush.onMessage`, and when the UI is not
   attached it asks `nativeHeadless("wa_digest", {dir, chat})`; Rust reads `whatsapp-link.json`,
   fetches the last messages from the gateway and answers a `NotificationSpec`. Inline reply is
   `nativeHeadless("wa_reply", {dir, chat, text})`. While the UI is attached the app posts
@@ -374,13 +374,13 @@ notification came from.
 
 ### Phone: incoming calls
 
-`RovstiInCallService` -> `CallRegistry` posts a `CallStyle.forIncomingCall`
+`RostyInCallService` -> `CallRegistry` posts a `CallStyle.forIncomingCall`
 notification (Decline to `CallActionReceiver`, Answer an activity PendingIntent
 carrying `answer_call_id`, full-screen intent when allowed) before anything else
 happens, so a call is answerable without GPUI. `MainActivity` sets
 `setShowWhenLocked`/`setTurnScreenOn` dynamically while a call is live. Rust draws
 `apps/phone/src/incoming.rs` from the same snapshot and reports its first frame back
-(`RovstiPerf` log, `docs/spikes/s2-incoming.md`). The native fallback screen
+(`RostyPerf` log, `docs/spikes/s2-incoming.md`). The native fallback screen
 (`NativeIncoming.kt`) is off unless `CURTAIN_ENABLED` is flipped; it is always the
 error view if GPUI dies while ringing. Telecom rings (the app plays no sound);
 `ProximityController` blanks the screen at the ear.
@@ -394,14 +394,14 @@ Everything in the apps is local except WhatsApp. WhatsApp runs on a gateway the 
 hosts (`services/wa_gateway`, Rust, axum and tokio). It owns every whatsapp-rust
 session and does all WhatsApp work server-side: linking (QR and pairing code),
 history sync, text, media, reactions, groups, presence and voice calls. The apps are
-thin clients of it through `rovsti_wa_client`. Setup and operation:
+thin clients of it through `rosty_wa_client`. Setup and operation:
 [whatsapp-gateway.md](whatsapp-gateway.md). The decision record is
 `_bmad-output/plans/wa-gateway.md`.
 
-- **AD-WA1 Crates.** `rovsti_wa_proto` is pure (wire types, connect keys, URL rules,
+- **AD-WA1 Crates.** `rosty_wa_proto` is pure (wire types, connect keys, URL rules,
   the audio frame codec, the event log, the call state machine, `WaCallView`).
-  `rovsti_wa_client` is the HTTP and WebSocket client (rustls with a pure-Rust crypto
-  provider, so it builds for Android without the NDK). `rovsti_wa_ui` is the settings
+  `rosty_wa_client` is the HTTP and WebSocket client (rustls with a pure-Rust crypto
+  provider, so it builds for Android without the NDK). `rosty_wa_ui` is the settings
   widget the four apps share. `services/wa_gateway` is the server. The "binary
   packages only" rule covers `apps/*`; the gateway also has a `lib` for its tests.
 - **Instances and connect keys (AD-WA2).** A linked WhatsApp account is an
@@ -428,7 +428,7 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   attributes, `MODE_IN_COMMUNICATION`) hands frames to Rust as base64 strings across
   the strings-only JNI seam, about 2.6 KB seventeen times a second each way. Phone's
   `wa_call.rs` owns the gateway and audio work (one pump task between
-  `rovsti_android::wa` and the client's `CallAudio`) but draws nothing itself: the
+  `rosty_android::wa` and the client's `CallAudio`) but draws nothing itself: the
   glass In-Call and Incoming screens show a WhatsApp call through `CallSource::WhatsApp`.
   Mute, Speaker (`call_audio_speaker`) and End work; Keypad, Hold, Add, Merge and Swap
   are dimmed with "Not available on WhatsApp calls".
@@ -440,10 +440,10 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   oldest ended call is evicted to make room. Live calls are never evicted, so a table
   full of live calls refuses a new one. A cold Phone has missed the live `CallUpdate`
   events (the event stream sends no replay for a fresh `after`), so it reads this
-  snapshot instead: `rovsti_wa_proto::plan_snapshot` picks the newest live call (a
+  snapshot instead: `rosty_wa_proto::plan_snapshot` picks the newest live call (a
   ringing incoming call first) when no call is tracked, and the ended calls whose id is
   not in `wa-calls.json` yet.
-- **One call owns the screen (arbitration).** `rovsti_wa_proto::call::arbitrate`
+- **One call owns the screen (arbitration).** `rosty_wa_proto::call::arbitrate`
   decides from three inputs: a cellular call is live, a cellular call is ringing, and
   the WhatsApp call. A WhatsApp call already placed or active keeps the screen, and a
   cellular call that rings beside it gets its own banner. A ringing WhatsApp offer is
@@ -459,8 +459,8 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   The app wakes, opens the event socket and fetches. Firebase is optional in the app;
   see [android.md](android.md#whatsapp-push-and-call-audio).
 - **People sync (people sync v2).** The names and photos of the people the apps meet
-  on WhatsApp live in `people.json` (`rovsti_app_core::people`), filled by a slow,
-  resumable sync whose planner is pure Rust (`rovsti_app_core::people_sync`, driven
+  on WhatsApp live in `people.json` (`rosty_app_core::people`), filled by a slow,
+  resumable sync whose planner is pure Rust (`rosty_app_core::people_sync`, driven
   step by step through the `people.sync_*` ops). The planner chooses the work (set-based
   cursor: the JIDs done per run), paces it (one gap for lookups and profiles, both usync
   queries on WhatsApp's side, one for pictures; no burst), backs off on a 429 without
@@ -472,12 +472,12 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   picture changes; Phone without Contacts runs the same engine on its own data
   directory. Writers of `people.json` are serialized in Rust. Decision record:
   `_bmad-output/plans/people-sync-v2.md`.
-- **Logging and developer mode.** App code logs through `RovstiLog`
-  (`:core-bridge`, `dev.rovsti.core.log`; a source scan forbids direct
+- **Logging and developer mode.** App code logs through `RostyLog`
+  (`:core-bridge`, `dev.rosty.core.log`; a source scan forbids direct
   `android.util.Log`): every line is masked (`LogMask`, the same rules as
-  `rovsti_core::redact`, one shared fixture), kept in a memory ring, and written to
+  `rosty_core::redact`, one shared fixture), kept in a memory ring, and written to
   `noBackupFilesDir/logs` only while developer mode is on. Rust logs go to a bounded
-  ring in `rovsti_ffi` that Kotlin drains (`core.logs_drain`) while developer mode is
+  ring in `rosty_ffi` that Kotlin drains (`core.logs_drain`) while developer mode is
   on. Holding the Version row of About for 10 s toggles developer mode; its Logs page
   filters, copies and shares (the only way a line leaves the phone). Names and message
   text are never logged.

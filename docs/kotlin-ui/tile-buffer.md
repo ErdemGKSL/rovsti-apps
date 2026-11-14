@@ -4,9 +4,9 @@ The `tile(handle, z, x, y, flags)` export of `RustNative` answers one map tile a
 Stops map draws without parsing a vector tile in Kotlin. Rust does the work that does not change per frame: it
 downloads or reads the cached tile, classifies the features (Shortbread to draw classes), clips them to the tile
 plus a 1/16 margin, simplifies them (tolerance `extent / 1024`) and attaches the colours of the chosen style.
-Writer: `crates/rovsti_ffi/src/tile_buffer.rs` (`encode`, with `decode` as the reference reader). Reader:
-`dev.rovsti.core.model.stops.TileBuffer.decode`. Both are held to this document by tests on the same real
-tile, `crates/rovsti_geo/src/tiles/testdata/osm-14-9520-6130.mvt`.
+Writer: `crates/rosty_ffi/src/tile_buffer.rs` (`encode`, with `decode` as the reference reader). Reader:
+`dev.rosty.core.model.stops.TileBuffer.decode`. Both are held to this document by tests on the same real
+tile, `crates/rosty_geo/src/tiles/testdata/osm-14-9520-6130.mvt`.
 
 ## Telling a buffer from an error
 
@@ -50,7 +50,7 @@ is self-describing.
 ### Colours
 
 `rgba` is `0xRRGGBBAA` read as a number, so red is `rgba >> 24`; alpha is 0..255 (tunnels and the park fill are
-half transparent). The background and the class colours come from `rovsti_geo::tiles::MapStyle` (`Colorful` for
+half transparent). The background and the class colours come from `rosty_geo::tiles::MapStyle` (`Colorful` for
 light, `Eclipse` for dark), so the map matches the GPUI map it replaces.
 
 ### Paint order, casing and widths
@@ -65,7 +65,7 @@ boundaries), tunnels right after their surface class.
   as a line record (`paint_id | 0x8000`, kind 1, `width14 = 1`) whose parts are the polygon rings with the first
   point repeated at the end.
 * Width at a given zoom: `max(0.5, width14 * 2^clamp(displayZoom - 14, -3, 2))` px, the same rule as
-  `rovsti_geo::tiles::line_width`. Strokes use round joins and caps.
+  `rosty_geo::tiles::line_width`. Strokes use round joins and caps.
 * The vertex count of a buffer, counting the non-casing records only, equals `TileGeometry::vertices` of the
   tile (tests assert this on the fixture). Casing and outline records repeat points on top of that.
 
@@ -124,6 +124,6 @@ Adding a class needs no version bump (see paint ids).
 
 ## Where it is used
 
-* `tile(handle, z, x, y, flags)` (JNI) reads a handle from `tiles.open` (see `crates/rovsti_ffi/OPS.md`).
+* `tile(handle, z, x, y, flags)` (JNI) reads a handle from `tiles.open` (see `crates/rosty_ffi/OPS.md`).
 * `tiles.encode_mvt {mvt, z, x, y, flags}` builds the same buffer from a vector tile without a cache or a
   network; its fixtures are the input of `TileBufferTest` in `:core-bridge`.

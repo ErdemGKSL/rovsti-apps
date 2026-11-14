@@ -1,8 +1,8 @@
 //! The contact QR code: a glass sheet with the code on a white card, and
 //! Save (to Photos) and Share image.
 //!
-//! The payload is a vCard (see `rovsti_core::number_format::contact_qr`), drawn
-//! by `rovsti_wa_ui::qr_png`. The card stays dark-on-white in dark mode, since
+//! The payload is a vCard (see `rosty_core::number_format::contact_qr`), drawn
+//! by `rosty_wa_ui::qr_png`. The card stays dark-on-white in dark mode, since
 //! scanners need the contrast.
 
 use std::sync::Arc;
@@ -11,12 +11,12 @@ use gpui::{
     AnyElement, Context, Image, ImageFormat, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, img, px,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_edit::ContactDraft,
     number_format::{self, QR_MAX_BYTES, QrTooBig},
     vcard,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon, theme,
     tokens::{Theme, radius, typography},
 };
@@ -88,7 +88,7 @@ pub(crate) fn qr_payload(draft: &ContactDraft) -> Result<String, QrTooBig> {
 /// Builds the sheet content for `draft`.
 pub(crate) fn make_card(draft: &ContactDraft) -> Result<QrCard, QrFailure> {
     let payload = qr_payload(draft).map_err(|_| QrFailure::TooBig)?;
-    let png = rovsti_wa_ui::qr_png(&payload, QR_PX).map_err(|error| {
+    let png = rosty_wa_ui::qr_png(&payload, QR_PX).map_err(|error| {
         log::warn!("rendering the contact QR failed: {error}");
         QrFailure::Draw
     })?;
@@ -236,7 +236,7 @@ impl ContactsApp {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::contact_edit::{DraftField, FieldKind};
+    use rosty_core::contact_edit::{DraftField, FieldKind};
 
     use super::*;
 

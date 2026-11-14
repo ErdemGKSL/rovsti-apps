@@ -1,21 +1,21 @@
 # Plan: stops-pair, round 1
 
 Base: c7844d0d92ad556ec58ac3de4aa17121520c5062. No earlier util-stops-pair plan, no stash.
-Nothing of the goal is implemented yet: Saved still holds single `rovsti_geo::places::Place`
+Nothing of the goal is implemented yet: Saved still holds single `rosty_geo::places::Place`
 (`SavedPlaces`, `saved.json`), the pin menu offers Save/Rename per point, and pin drops always
 run `map::snap_destination` (saved place, then GTFS stop within `PICK_RADIUS_PX` = 40 px).
 
 Domain words (code, UI, docs): a **stop** / **saved stop** is the pair; its two ends are
 **point A** and **point B**. Never call A or B a stop. Crossing logic in
-`crates/rovsti_geo/src/crossing.rs` is not touched.
+`crates/rosty_geo/src/crossing.rs` is not touched.
 
 Checks after every step:
 `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
-`&& cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`&& cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (if `df` < 6 GB free: `rm -rf target/debug/incremental` first).
 
-## Step 1. Pure saved-stop model in rovsti_geo
-New `crates/rovsti_geo/src/saved_stops.rs` (`pub mod saved_stops;` in lib.rs, re-export
+## Step 1. Pure saved-stop model in rosty_geo
+New `crates/rosty_geo/src/saved_stops.rs` (`pub mod saved_stops;` in lib.rs, re-export
 `SavedStop, SavedStops, SavedStopError, LoadedStops`). `places.rs` stays until step 3.
 - `pub const FORMAT_VERSION: u32 = 2; MAX_STOPS: usize = 200; MAX_NAME_CHARS: usize = 60;`
   `DUPLICATE_GATE_M: f64 = 25.0;` `NAME_SEARCH_M: f64 = 300.0`.
@@ -74,7 +74,7 @@ window ignored; fewer than two samples = 0; radius 0 at 200, full at 1000, half-
 tap_snaps at 39/41 px.
 
 ## Step 3. Switch the app to SavedStops and delete the single-place model
-Single compiling change across apps/stops; remove `crates/rovsti_geo/src/places.rs` and its
+Single compiling change across apps/stops; remove `crates/rosty_geo/src/places.rs` and its
 lib.rs exports.
 - `store.rs`: keep `SAVED_FILE = "saved.json"` (doc: saved stops, format v2).
   `backend.rs`: `Data.saved: SavedStops`; in `load` read the text
@@ -105,14 +105,14 @@ lib.rs exports.
   away" when known) with Rename/Up/Down/Delete as before; empty state "No Saved Stops" / "Set
   point A and point B on the map, then tap Save stop." Rename sheet now renames a saved stop.
 Update/replace every test that used `SavedPlaces`/`Place`. Grep must show no `SavedPlaces`,
-`Place {` (geo), `from_place`, `named_from`, `relocat` left in apps/ and crates/rovsti_geo.
+`Place {` (geo), `from_place`, `named_from`, `relocat` left in apps/ and crates/rosty_geo.
 
 ## Step 4. "Save stop" on the pick bar with a prefilled name
 - `pick.rs` pure: `pub enum SaveOffer { None, Save, Saved { id: u64, name: String } }` and
   `pub fn save_offer(ends: &Ends, saved: &SavedStops) -> SaveOffer` (None unless both ends set and
   the diameter is valid; Saved when `find_gate` matches); tests.
 - `picker.rs`: `SheetMode::SaveStop { a: Destination, b: Destination }`; `open_save_stop(cx)`
-  fills the name field with `rovsti_geo::saved_stops::suggest_name(self.gtfs.as_deref(), &a_ep,
+  fills the name field with `rosty_geo::saved_stops::suggest_name(self.gtfs.as_deref(), &a_ep,
   &b_ep)` (placeholder "Stop name" when empty, via the existing field component); Save calls
   `saved.add(name, a, b, now_ms())`, persists, pill "Saved stop {name}" or the error message
   (Duplicate -> "Already saved as {name}").
@@ -153,13 +153,13 @@ Tests: save_offer cases (one end, invalid gate, new, already saved in reverse or
 
 ## Step 7. Spring settle into the snapped spot and a light haptic
 - `MapState.settle: Option<PinSettle>`; `PinSettle { slot, from: Coord, spring: Spring }` using
-  `rovsti_ui::spring::Spring` with `rovsti_ui::motion_tokens::release()` (0 -> 1). On a Snap
+  `rosty_ui::spring::Spring` with `rosty_ui::motion_tokens::release()` (0 -> 1). On a Snap
   drop: set it from the release coord; pins render at `lerp(from, dest.coord, value)`; tick it in
   the `motion.frame_timed` closure in main.rs; skip the scene cache while settling (or include the
   settle value in `SceneKey`). Reduced motion: no settle (jump).
-- Haptic: in the drop handler call `rovsti_ui::haptics::perform(window, HapticFeedback::Selection)`
+- Haptic: in the drop handler call `rosty_ui::haptics::perform(window, HapticFeedback::Selection)`
   when the decision is Snap (this is the existing haptic path, GPUI `Window`; no new
-  rovsti_android function is needed). The map input listener must pass `window` through; verify
+  rosty_android function is needed). The map input listener must pass `window` through; verify
   the closure signature in map.rs `input_surface` and the fork source before changing it.
 - Pure test: lerp of the settle at 0/1 and that a Free drop starts no settle.
 

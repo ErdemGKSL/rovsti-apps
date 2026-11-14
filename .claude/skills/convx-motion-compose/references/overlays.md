@@ -2,7 +2,7 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Overlays: host, context menu, popover, sheet, dialog, toast, text toolbar
 
-> **Licence.** Rovsti is GPL-3.0-or-later: port Convx's overlay files (`ui/ios/IosContextMenu.kt`, `AppleContextMenu.kt`,
+> **Licence.** Rosty is GPL-3.0-or-later: port Convx's overlay files (`ui/ios/IosContextMenu.kt`, `AppleContextMenu.kt`,
 > `IosMenu.kt`, `IosSheet.kt`, `IosSheetPresentation.kt`, `OverlayMenu.kt`, `BottomSheetMenu.kt`, `FlingProjection.kt`
 > under `app/src/main/kotlin/com/convx/music/ui/`) with the header from `SKILL.md` section 0. The button-anchored menu morph
 > is `PORTED FROM GLISSE` (`src/menu.tsx`, MIT) and keeps that header. Convx's `hig/` module is an Apache-2.0 fork of
@@ -21,7 +21,7 @@ boxes (`OverlayMenu`, `IosSheet`) (`U/ios/component/IosContextMenu.kt:170-173`, 
 backdrop (`U/ios/component/IosSheet.kt:107-117`), and its dialogs cannot animate out because the `Dialog` window is
 destroyed on dismiss (`U/component/Dialog.kt:366-371`).
 
-Rovsti: **every overlay is an entry in one `OverlayHost`**, the last child of the window-filling root `Box`.
+Rosty: **every overlay is an entry in one `OverlayHost`**, the last child of the window-filling root `Box`.
 
 Why: one back owner, one scrim policy, one z-order (list order), one place for modal accessibility, glass can sample the
 same source, exit animations always play, and Roborazzi/Paparazzi capture it (separate windows may be missing from
@@ -89,7 +89,7 @@ inset-aware (status bar + 8 dp, nav bar + 16 dp, `AppleContextMenu.kt:360-363`).
 
 ```kotlin
 // ORIGINAL
-package dev.rovsti.ui.overlay
+package dev.rosty.ui.overlay
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -261,8 +261,8 @@ growing glass rect mapped back through their own scale.
 
 ```kotlin
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
-// Rovsti extension: `upward` (grow from the trigger's bottom when placePanel chose Side.Above).
-package dev.rovsti.ui.overlay
+// Rosty extension: `upward` (grow from the trigger's bottom when placePanel chose Side.Above).
+package dev.rosty.ui.overlay
 
 import androidx.compose.ui.geometry.Size
 
@@ -396,7 +396,7 @@ class SheetState(private val scope: CoroutineScope, val dismissible: Boolean = t
 
     fun tallestOffset(): Float = detentOffsets.first()
 
-    fun present() = scope.launch { offset.snapTo(containerHeight); offset.animateTo(detentOffsets.last(), RovstiMotion.sheetSettle(0.5f)) }
+    fun present() = scope.launch { offset.snapTo(containerHeight); offset.animateTo(detentOffsets.last(), RostyMotion.sheetSettle(0.5f)) }
 
     /** Finger drag. Past the tallest detent the sheet resists instead of stopping dead (Convx clamps; iOS resists). */
     fun drag(change: PointerInputChange?, dy: Float) {
@@ -411,11 +411,11 @@ class SheetState(private val scope: CoroutineScope, val dismissible: Boolean = t
         tracker.resetTracking()
         val rest = Fling.restingPoint(offset.value, velocityY)
         if (dismissible && rest > detentOffsets.last() + 0.12f * containerHeight) {
-            offset.animateTo(containerHeight, RovstiMotion.sheetDismiss(0.5f), initialVelocity = velocityY)
+            offset.animateTo(containerHeight, RostyMotion.sheetDismiss(0.5f), initialVelocity = velocityY)
             onDismissed()
         } else {
             val target = Fling.nearestSnap(detentOffsets, rest, velocityY)
-            offset.animateTo(target, RovstiMotion.sheetSettle(0.5f), initialVelocity = velocityY)
+            offset.animateTo(target, RostyMotion.sheetSettle(0.5f), initialVelocity = velocityY)
         }
     }
 

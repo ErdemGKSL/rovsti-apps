@@ -1,4 +1,4 @@
-# UX completeness pass: Rovsti Messages (round 2)
+# UX completeness pass: Rosty Messages (round 2)
 
 Base: `12bdf27189c130e73201073e88684a3ac0d82266` (main, clean tree, no stash).
 Round 1 (`ux-messages.md`, S1 to S8) has landed: SMS row and page menus, delete with
@@ -15,7 +15,7 @@ backends: every fix below uses a seam or gateway call that already exists
 |---|-----|-----|-------|
 | H1 | **High** | **Received WhatsApp documents, videos and audio dead-end.** The bubble shows "rapor.pdf · 3 pages" but tapping does nothing (`downloadable` is images/stickers only; `fetch_media` marks other MIME types failed). The user can never open or keep the file. `documents::export_file(name, mime, path)` ("Save as") exists and Settings already uses it. Images cannot be saved either. | `conversation.rs::media_card` (~1823), `fetch_media` (821) |
 | H2 | Medium | **A blocked sender cannot be unblocked where it is seen, and Block shows for an already blocked number.** `row_sms_actions` builds the context with `..Default` so `blocked` is always false; `SmsAction` has no `Unblock`. Unblocking is only in Settings. | `main.rs::row_sms_actions` (121), `sms_actions.rs` |
-| H3 | Medium | **"Make Rovsti Messages your default SMS app to delete messages" dead-ends.** The refusal comes as a plain pill *after* the user confirmed the delete; nothing leads to the role request (`Backend::request_sms_role` exists, used only by the banner). | `backend.rs::delete_thread` (712), `main.rs::sms_row_action` |
+| H3 | Medium | **"Make Rosty Messages your default SMS app to delete messages" dead-ends.** The refusal comes as a plain pill *after* the user confirmed the delete; nothing leads to the role request (`Backend::request_sms_role` exists, used only by the banner). | `backend.rs::delete_thread` (712), `main.rs::sms_row_action` |
 | H4 | Medium | **A WhatsApp chat page has no menu.** Pin, Archive, Mark unread exist only on the inbox row; an unknown WhatsApp number cannot be called or added to contacts from its chat (the SMS page got this in round 1). | `conversation.rs` header (~2257), `main.rs::wa_menu_items` |
 | H5 | Medium | **Message text cannot be shared**, only copied (`telecom::share_text` exists). Known contacts cannot be opened from the SMS page (`telecom::edit_contact(id)` exists). | `conversation.rs::actions` (~2029), `sms_conversation.rs` selection pills, `sms_actions.rs` |
 | H6 | Medium | **Cancelling a scheduled message loses its text and says nothing**; only the first 3 scheduled items can be seen or cancelled ("and N more" is dead text). | `schedule_ui.rs::strip` (424), `main.rs::cancel_scheduled` (2227) |
@@ -27,7 +27,7 @@ backends: every fix below uses a seam or gateway call that already exists
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (`df` showed 6.8 GB free at planning time; under 6 GB run `rm -rf target/debug/incremental` first).
 Never invent GPUI APIs: reuse what these files already call (`menu_card`, `menu_item`,
 `glass_pill`, `glass_icon_button`, `list_row`, `on_long_press`, `show_pill_action` /
@@ -76,7 +76,7 @@ app already uses.
 - `save_media`: refuse when `self.saving.is_some()` (pill "Already saving a file");
   background `gateway.media(&id)` then write the bytes to
   `backend.data_dir()/cache/wa-save-{id}` (create the dir; `None` data dir → notice "The
-  app's storage is not ready yet."), then `rovsti_android::documents::export_file(&name, &mime, &path)`.
+  app's storage is not ready yet."), then `rosty_android::documents::export_file(&name, &mime, &path)`.
   `Err(Unsupported)` → notice "Saving needs an Android phone."; `Ok(false)` → "Couldn't
   save that file". Keep `saving: Option<PathBuf>`.
 - The answer is a `BackendEvent::Document` with op `ExportMessages` (the seam's op, shared
@@ -122,7 +122,7 @@ app already uses.
   emitting new `ConversationEvent::Share(String)`.
 - `sms_conversation.rs` selection pills: "Share" after "Copy"; new
   `SmsConversationEvent::Share(String)`.
-- `main.rs::share_text(text, cx)`: background `rovsti_android::telecom::share_text`,
+- `main.rs::share_text(text, cx)`: background `rosty_android::telecom::share_text`,
   `Err(Unsupported)` → pill "Sharing needs an Android phone.", `Ok(false)`/`Err` →
   "Couldn't share that".
 

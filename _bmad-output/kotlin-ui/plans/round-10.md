@@ -20,10 +20,10 @@ reference.
 - **E3 R2 done**, checked file by file: `android/settings.gradle.kts` includes `:wa` and `:shell`; every test class the
   round-09 verification list names exists (`PermissionStateTest`, `PermissionControllerTest`, `HandoffPermissionsTest`,
   `WaRepositoryTest`, `WaCallsTest`, `WaAvatarsTest`, `WhatsAppSettingsViewModelTest`, `WhatsAppSettingsScreenTest`,
-  `PermissionGateTest`, `RefreshRateTest`, `NoticesParserTest`, `RovstiShareProviderTest`, `NoMediaPermissionTest`,
+  `PermissionGateTest`, `RefreshRateTest`, `NoticesParserTest`, `RostyShareProviderTest`, `NoMediaPermissionTest`,
   `E311SettingsShotTest`, `SettingsPagesTest`, `LicenceAssetsTest`, `CommonSettingsTest`, `RouteForPatternTest`,
-  `ShellContainerTest`); `crates/rovsti_app_core/src/wa_link/settings.rs` + `settings_view.rs` exist and
-  `crates/rovsti_wa_ui/src/model.rs:4` re-exports them; 44 `wa.settings_apply.*` fixtures; 15 goldens in
+  `ShellContainerTest`); `crates/rosty_app_core/src/wa_link/settings.rs` + `settings_view.rs` exist and
+  `crates/rosty_wa_ui/src/model.rs:4` re-exports them; 44 `wa.settings_apply.*` fixtures; 15 goldens in
   `android/wa/screenshots/`, 15 in `android/shell/screenshots/`; `catalog-debug.apk` built. E3 stays `done`.
 - **Screenshots of the previous round, opened and judged:**
   - `android/wa/screenshots/e3.10-wa-connected-dark.png`: status row with green dot, three action rows, destructive
@@ -36,13 +36,13 @@ reference.
     `Spacing.gutter` and `InsetGroupedSection` adds its own gutter (double gutter). The same host draws the rationale
     shot (cards ~48 dp in). The component is fine; the demo page is wrong, and E4 must not copy it. Fixed in Step 1.
 - What E4 starts from:
-  - Manifest: `apps/contacts/platforms/android/app/src/main/AndroidManifest.xml` (Application `.RovstiContactsApp`,
+  - Manifest: `apps/contacts/platforms/android/app/src/main/AndroidManifest.xml` (Application `.RostyContactsApp`,
     `.MainActivity` singleTop with MAIN/LAUNCHER, SEND and VIEW(content) for `text/x-vcard`, `text/vcard`,
-    `text/directory`; `dev.rovsti.bridge.BirthdayReminderReceiver`; `dev.rovsti.bridge.RovstiShareProvider`
-    `${applicationId}.rovstishare`; `<queries>` for `dev.rovsti.action.WA_CALL`/`WA_CHAT`; HANDOFF uses-permission and
+    `text/directory`; `dev.rosty.bridge.BirthdayReminderReceiver`; `dev.rosty.bridge.RostyShareProvider`
+    `${applicationId}.rostyshare`; `<queries>` for `dev.rosty.action.WA_CALL`/`WA_CHAT`; HANDOFF uses-permission and
     `<permission ... signature>`; `allowBackup=false`, `supportsRtl=true`). Expected permission set:
     `android/platform/src/test/resources/manifest/contacts.permissions.txt`. The receiver and provider classes already
-    exist in `:platform` (`notify/NotifyReceivers.kt:44`, `files/RovstiShareProvider.kt:18`).
+    exist in `:platform` (`notify/NotifyReceivers.kt:44`, `files/RostyShareProvider.kt:18`).
   - `AndroidAppConventionPlugin.kt` sets only common config and `targetSdk`: **no release signing yet** (E4.1 AC1).
   - Data: `ContactsRepository` (`platform/contacts/ContactsRepository.kt:31-102`: `all`, `withNumbers`, `favorites`,
     `full`, `detail`, `save`, `delete`, `setStarred`, `groups`, `saveGroup`, `deleteGroup`, `setMembers`, `accounts`,
@@ -54,11 +54,11 @@ reference.
     `favoritesMove`, `selectBar`, `selectExport`, `groups*`, `trash*`, `photoPlan`, `photoCrop`, `photoAccepts`,
     `prefsLoad`/`prefsSave`, `deepIndexNew`/`deepFind`); `SearchOps` (ContactIndex: `indexNew`, `query`,
     `queryLoose`, `fold`); `QrOps`.
-  - **Gap:** the WhatsApp decisions of AD-CT6 live in `crates/rovsti_app_core/src/contacts/whatsapp.rs`
+  - **Gap:** the WhatsApp decisions of AD-CT6 live in `crates/rosty_app_core/src/contacts/whatsapp.rs`
     (`marked_contacts` :206, `WaPanel::{target, lookup_request, jid, jid_for_number, status}` :51-98,
     `wa_chip_index` :159, `status_line` :173, `profile_lines` :237) and only `lookup_jids` is reachable over FFI
-    (`crates/rovsti_ffi/src/ops/wa/pure.rs:9`). Step 2 exposes the rest.
-  - Migration fixtures: `crates/rovsti_app_core/tests/fixtures/dirs/contacts/{contacts-prefs,contacts-trash}.json`
+    (`crates/rosty_ffi/src/ops/wa/pure.rs:9`). Step 2 exposes the rest.
+  - Migration fixtures: `crates/rosty_app_core/tests/fixtures/dirs/contacts/{contacts-prefs,contacts-trash}.json`
     and `.../dirs/wa/whatsapp-link.json`.
   - `ContactsPrefs` (`core-bridge/.../model/contacts/StoreModels.kt:100-115`) has **no appearance and no haptics**
     field, so the Contacts `CommonSettings` answers `null` for both (rows hidden), as `shell-usage.md` allows. Adding
@@ -66,20 +66,20 @@ reference.
   - `:design` has everything the screens need: `ScreenLazyPage`/`ScreenPage`/`LargeTitleScaffold`, `SearchField`,
     `GlassTextField`, `AlphabetScrollBar` (Convx port), `ListRow`, `InsetGroupedSection`, `IosList`, `Avatar`,
     `SourceGlyph`, `SwipeRow`/`IosSwipeActions`, `ContextMenuEntry`/`PreviewCardEntry`, `ButtonMenuEntry`/`IosMenu`,
-    `Popover`, `SheetEntry`, `Alert`/`ActionSheet`, `Toast`/undo pill, `PhotoViewer`, `RovstiImage`, `ChipRow`,
-    `EmptyState`, `rovstiSharedBounds`.
+    `Popover`, `SheetEntry`, `Alert`/`ActionSheet`, `Toast`/undo pill, `PhotoViewer`, `RostyImage`, `ChipRow`,
+    `EmptyState`, `rostySharedBounds`.
 - Disk: **7.4 GB free** (limit 6 GB). Clean before Step 1 (Rule 1).
 
 ## Rules for this round
 
 1. **Disk first, every step.** `df -h .` before any build. Below 8 GB: `rm -rf target/debug/incremental
    target/aarch64-linux-android/debug/incremental android/*/build`. Below 7 GB: also `cargo clean -p` for the deprecated
-   GPUI crates (`rovsti_phone rovsti_messages rovsti_stops rovsti_contacts rovsti_ui rovsti_wa_ui liquid_glass_kit`)
+   GPUI crates (`rosty_phone rosty_messages rosty_stops rosty_contacts rosty_ui rosty_wa_ui liquid_glass_kit`)
    and delete Gradle versions under `~/.gradle/caches/` other than the wrapper's. Never below 6 GB. `:contacts` adds an
    APK build dir: clean before Steps 1, 4 and 8.
-2. **Domain logic in Rust.** Every decision the GPUI app made through `rovsti_core`/`rovsti_app_core` goes through the
+2. **Domain logic in Rust.** Every decision the GPUI app made through `rosty_core`/`rosty_app_core` goes through the
    matching op (sections, sorting, search, card rows, dates, quick actions, validation, diff, trash rules, select bar,
-   favorites move, group titles). Kotlin only orders effects. If a needed decision has no op, add it to `rovsti_ffi`
+   favorites move, group titles). Kotlin only orders effects. If a needed decision has no op, add it to `rosty_ffi`
    with fixtures (as Step 2 does) instead of rewriting it in Kotlin.
 3. **Screens** (ARCH 5.2): ViewModel with one `@Immutable UiState` (`ImmutableList` fields), `onAction(sealed)`,
    `stateIn(WhileSubscribed(5_000))`, one-shot `Effect`s through a `Channel` (navigation, toasts, undo, intents).
@@ -89,8 +89,8 @@ reference.
    (40 dp), WhatsApp shown once per row as the 14 dp `SourceGlyph` after the name (never a pill), chip rows are one
    non-wrapping `LazyRow`, 16 dp gutter everywhere, every long-press opens a host context menu that floats above the
    content and never pushes it, text fields are `GlassTextField` (caret, selection, paste menu).
-5. **Motion** (SKILL refs): push/pop and predictive back from `RovstiNavHost` (`shell-usage.md` 7); shared avatar list
-   row -> card with `Modifier.rovstiSharedBounds("avatar-$id")` and `Motion.sharedArtwork()` 500 ms (`motion.md` 8);
+5. **Motion** (SKILL refs): push/pop and predictive back from `RostyNavHost` (`shell-usage.md` 7); shared avatar list
+   row -> card with `Modifier.rostySharedBounds("avatar-$id")` and `Motion.sharedArtwork()` 500 ms (`motion.md` 8);
    context menus `overlays.md` 3 (lift `menuLift` 0.80/420, panel `menuGrowX/Y`, return `previewReturn` 0.75/500);
    button menus `overlays.md` 4.3 (press-slide-release); sheets `overlays.md` 5 (`sheetSettle` 0.86/380, dismiss rule
    +12 % H or velocity); swipe rows `motion.md` 5.3 (76 dp per action, `swipeSettle` 1/500); alphabet rail
@@ -102,7 +102,7 @@ reference.
    with Read and judged**; what was seen goes in the commit message and the epics Evidence line. Look for overlaps,
    clipped text, last row above the tab bar, 16 dp gutters, menus floating (not inline), one glyph per row.
 7. **Check per step:** `bash scripts/kotlin-ui-check.sh` prints `ALL GREEN`; Rust steps also run
-   `cargo test -p rovsti_app_core -p rovsti_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in
+   `cargo test -p rosty_app_core -p rosty_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in
    Step 8. Every new screen gets `references/checklist.md` B-H in its commit message.
 8. **Commits:** one per step, `Kotlin UI (E4 R1): <step title>`, ending with the session attribution lines. Never push
    to `main`.
@@ -111,30 +111,30 @@ reference.
 
 ### Step 1. `:contacts` app module, manifest parity, release signing, container, tabs, routes, migration (E4.1) + F11
 
-- Disk clean. `android/contacts` with `rovsti.android.app`, `rovsti.compose`, `rovsti.screenshots`,
-  `kotlin.serialization`; namespace and `applicationId` `dev.rovsti.contacts`, `versionCode = 100` (+ build number from
-  env `ROVSTI_BUILD_NUMBER`, default 0), `versionName` from the GPUI `Cargo.toml`. Depends on `:shell` (api `:design`,
+- Disk clean. `android/contacts` with `rosty.android.app`, `rosty.compose`, `rosty.screenshots`,
+  `kotlin.serialization`; namespace and `applicationId` `dev.rosty.contacts`, `versionCode = 100` (+ build number from
+  env `ROSTY_BUILD_NUMBER`, default 0), `versionName` from the GPUI `Cargo.toml`. Depends on `:shell` (api `:design`,
   `:platform`, `:wa`, `:core-bridge`); test deps `:testing` and testFixtures of `:platform`, `:wa`, `:core-bridge`,
   `:shell`. `include(":contacts")`.
-- **Release signing from env** in `AndroidAppConventionPlugin.kt`: when `ROVSTI_KEYSTORE`, `ANDROID_STORE_PASSWORD`
+- **Release signing from env** in `AndroidAppConventionPlugin.kt`: when `ROSTY_KEYSTORE`, `ANDROID_STORE_PASSWORD`
   and `ANDROID_KEY_PASSWORD` are set, a `release` signing config (alias `rovsti`, as `apps/*/gpuiforge.json`
   `signing`) is used by the release build type; otherwise release stays unsigned and the build still succeeds (CI and
   agent machine have no keystore). Document it in `docs/kotlin-ui/toolchain.md`.
 - Manifest rebuilt from the GPUI one (State found): same components, filters, `<queries>`, HANDOFF declaration,
   `allowBackup=false`, `supportsRtl`, `enableOnBackInvokedCallback`, `windowSoftInputMode=adjustResize`, launchMode
-  singleTop; drop `dev.gpui.android.*` and the vulkan `uses-feature`; theme = a `Theme.Rovsti` NoActionBar style in
+  singleTop; drop `dev.gpui.android.*` and the vulkan `uses-feature`; theme = a `Theme.Rosty` NoActionBar style in
   `:shell` if none exists. App icon: convert `apps/contacts/assets/app.png` to `mipmap` (adaptive foreground).
-- Classes (FQCN kept, ARCH 7.2): `dev.rovsti.contacts.RovstiContactsApp : Application, HasContainer<ContactsContainer>`
-  and `dev.rovsti.contacts.MainActivity : RovstiShellActivity`. `ContactsContainer : ShellContainer` adds lazily
+- Classes (FQCN kept, ARCH 7.2): `dev.rosty.contacts.RostyContactsApp : Application, HasContainer<ContactsContainer>`
+  and `dev.rosty.contacts.MainActivity : RostyShellActivity`. `ContactsContainer : ShellContainer` adds lazily
   `contacts: ContactsRepository`, `callLog`, `ops: ContactsOps`, `search: SearchOps`, `qr: QrOps`, `shortcuts`,
   `store: ContactsStore` (Step 2) and `commonSettings: CommonSettings` (both `null`, see State found).
 - Navigation: `@Serializable sealed interface ContactsRoute` with `ContactsList`, `Favorites`, `Groups`, `Settings`
   (tab roots), `ContactCard(id: Long)`, `ContactEditor(id: Long?, prefill: DraftSeed?)`, `Trash`, `GroupPage(id)`,
   `UpcomingBirthdays`, `WhatsAppSettings`, and the `CommonSettingsPage` routes. Tabs `Tab("contacts")`, `favorites`,
-  `groups`, `settings` with icons person.2 / star / folder / gear (`RovstiIcons`), titles from `apps/contacts/src/
+  `groups`, `settings` with icons person.2 / star / folder / gear (`RostyIcons`), titles from `apps/contacts/src/
   main.rs:89` `TABS`. `chromeFor`: tab roots Visible + large title; card/editor/trash Hidden; settings sub-pages Folded.
   `routeFor(extras)`: `BirthdayReminders.EXTRA_CONTACT_ID` and the shortcut extra (`Shortcuts` in `:platform`) ->
-  `contacts` tab + `ContactCard(id)` (AD-CT8; the extra is removed after use, one-shot, as `RovstiBridge.kt:571-575`
+  `contacts` tab + `ContactCard(id)` (AD-CT8; the extra is removed after use, one-shot, as `RostyBridge.kt:571-575`
   did); SEND/VIEW with a vCard -> `contacts` tab + an `Intake(uri)` route (the page itself is E4.10, R2; in R1 it is a
   placeholder `EmptyState` "Import arrives in a later update" so the filter is not dead).
 - Tab roots in this step are empty shells: `ContactsList` with the large title + `PermissionGate(Contacts)` (nothing is
@@ -162,13 +162,13 @@ reference.
 - Screenshot: `e4.1-tabs-empty-book` (light/dark): Contacts tab, permission granted, empty book -> `EmptyState`
   "No Contacts" / "Tap + to add someone, or import a .vcf file in Settings." (`main.rs:1810-1814`), the floating tab
   bar with four tabs, nothing under the bar. Open it.
-- `platform-port.md`: rows `apps/contacts/.../MainActivity.kt` and `RovstiContactsApp.kt` become `ported (E4.1)`.
+- `platform-port.md`: rows `apps/contacts/.../MainActivity.kt` and `RostyContactsApp.kt` become `ported (E4.1)`.
 - Acceptance: check green; `android/contacts/build/outputs/apk/debug/contacts-debug.apk` exists and carries
-  `librovsti_ffi.so` (extend `scripts/check-catalog-apk.sh` to take the contacts APK too).
+  `librosty_ffi.so` (extend `scripts/check-catalog-apk.sh` to take the contacts APK too).
 
 ### Step 2. Data layer: `ContactsStore`, `BookRepository`, search index, WhatsApp marks (Rust ops `contacts.wa_*`)
 
-- Rust (`crates/rovsti_ffi/src/ops/contacts/`, new `wa.rs`), stateless ops over `rovsti_app_core::contacts::whatsapp`:
+- Rust (`crates/rosty_ffi/src/ops/contacts/`, new `wa.rs`), stateless ops over `rosty_app_core::contacts::whatsapp`:
   - `contacts.wa_marks {contacts, chat_users} -> {marks: {id: jid}}` (`marked_contacts`);
   - `contacts.wa_card {id, numbers, target?, lookup?: {state, users}, presence?, now_ms} -> {lookup_request, jid,
     chips: [bool], status_line?, number_jids: [jid?]}` (`WaPanel` + `wa_chip_index` + `status_line` + `number_jid`);
@@ -177,7 +177,7 @@ reference.
   online/last seen), registered in the op registry and `OPS.md`; Kotlin `ContactsWaOps` facade + `@Serializable
   @Immutable` models in `model/contacts/WaModels.kt` + `compose_stability.conf` entries; `WireFixturesTest` decodes
   them. Rust unit tests reuse `whatsapp.rs`'s existing cases.
-- Kotlin, package `dev.rovsti.contacts.data`:
+- Kotlin, package `dev.rosty.contacts.data`:
   - `ContactsStore`: `prefs: StateFlow<ContactsPrefs>` from `prefsLoad`, `update { }` -> `prefsSave` (serialised
     writes, `Mutex`), plus `favoritesOrder`, `viewed`, `myCard`, `emergency` views; `trash()` / `trashPush` /
     `trashRestore` / `trashDelete` / `trashConfirm` wrappers.
@@ -190,7 +190,7 @@ reference.
 - Tests: `ContactsStoreTest` (prefs round trip through fixtures, concurrent updates serialised), `BookRepositoryTest`
   (provider change -> one `indexReplace`; permission revoked -> `NoPermission`; deep handle closed on replace),
   `WaMarksTest` (not linked -> empty; chats + book -> marks; refetch on resync), and the fixture decode test.
-- Acceptance: check green + `cargo test -p rovsti_app_core -p rovsti_ffi` + `check-ffi-exports.sh`.
+- Acceptance: check green + `cargo test -p rosty_app_core -p rosty_ffi` + `check-ffi-exports.sh`.
 
 ### Step 3. Contacts list and search (E4.2)
 
@@ -205,7 +205,7 @@ reference.
 - `ContactsListScreen`: `ScreenLazyPage` with large title "Contacts", trailing toolbar "Select" capsule + "+" glass
   circle button (`main.rs:1786-1803`); `SearchField` under the title that docks into the inline bar on collapse
   (`navigation-layout.md` 7, 10); `LazyColumn` with letter `SectionHeader`s (sticky) and `ListRow`s: 40 dp `Avatar`
-  (photo via `RovstiImage` slot size, else monogram + hue), name (bold family part per name format), one secondary
+  (photo via `RostyImage` slot size, else monogram + hue), name (bold family part per name format), one secondary
   line (`subtitle`), star glyph if starred, WhatsApp 14 dp `SourceGlyph` after the name when `marks` has the id. Row tap
   -> `ContactCard(id)` (records `recentViewed` "open"). `AlphabetScrollBar` on the trailing edge when `showScrubber`,
   letters from the op, `scrollToItem` while scrubbing, haptic per letter, bubble with the letter; hidden while
@@ -234,7 +234,7 @@ reference.
   `PermissionRow` in the section until granted. WhatsApp (AD-CT5/CT6): on open, `contacts.wa_card` gives the lookup
   request; `WaGateway.lookupUsers` once; then chips per number (C17), presence subscribe for the JID and the
   `status_line`; profile lines (`wa_profile_lines`).
-- `ContactCardScreen`: hero header (88 dp avatar with `rovstiSharedBounds("avatar-$id")`, tap opens `PhotoViewer`
+- `ContactCardScreen`: hero header (88 dp avatar with `rostySharedBounds("avatar-$id")`, tap opens `PhotoViewer`
   when a photo exists - the full viewer menu is E4.12), name, org/title line, presence line; one row of action
   capsules Call, Message, WhatsApp (only when a JID), Email (only with an email) - equal width, glass, never wrapping
   (at fs2 labels drop to icons); then `InsetGroupedSection`s per field kind (numbers with label + WA chip, emails,
@@ -255,7 +255,7 @@ reference.
 
 - `ContactEditorViewModel(id?, seed?, repo, ops, store)`: holds a `ContactDraft` in `SavedStateHandle` (JSON);
   `draftEdit` for every change (add/remove rows, labels, default), `draftValidate` sentences inline under the field
-  (`rovsti_core::contact_edit`), `draftDiff` decides dirty and the Save enablement, save -> `ContactsRepository.save`
+  (`rosty_core::contact_edit`), `draftDiff` decides dirty and the Save enablement, save -> `ContactsRepository.save`
   (account from `prefs.save_to` or the chooser, AD-CT3; number-less contacts allowed, AD-CT2), then `recentNoteCreated`
   and an "Undo" pill that restores the previous draft (C40, 5 s like `UNDO_LIFE`, `main.rs:112`).
 - `ContactEditorScreen`: page-sheet presentation (`IosPageSheet` via `SheetEntry` large detent) with Cancel / title /
@@ -278,7 +278,7 @@ reference.
 ### Step 6. Editor photo (E4.4 AC2) and Delete, Undo, Trash (E4.5)
 
 - Photo: the avatar in the editor opens an `IosMenu` Choose Photo (`PickPhoto` contract, no media permission), Take
-  Photo (`CapturePhoto` via `RovstiShareProvider`, C14), Use WhatsApp Photo (only with a JID; `WaGateway.picture` ->
+  Photo (`CapturePhoto` via `RostyShareProvider`, C14), Use WhatsApp Photo (only with a JID; `WaGateway.picture` ->
   file, the `fetch_wa_photo` path rule `wa_photo_path`), Remove Photo (destructive; `removePhoto`). After Choose/Take,
   `ContactPhotoCropScreen` (C13): full-screen dark page, the image under a circular mask, pinch/pan with `ZoomMath`
   (E1.20), rotate 90 deg button, Cancel / Choose; geometry from `photoPlan` / `photoAccepts` / `photoCrop` (Rust crops
@@ -331,7 +331,7 @@ reference.
   (back leaves select mode, not the tab).
 - Screenshots: `e4.8-select-mode`, `e4.8-select-actions-menu`. Open both.
 - Close: disk clean; full `CLAUDE.md` gate (`cargo fmt --all && cargo clippy --workspace --all-targets && cargo test
-  --workspace`, `cargo check -p rovsti_android --target aarch64-linux-android`) then `bash scripts/kotlin-ui-check.sh`;
+  --workspace`, `cargo check -p rosty_android --target aarch64-linux-android`) then `bash scripts/kotlin-ui-check.sh`;
   name `android/contacts/build/outputs/apk/debug/contacts-debug.apk` (and the catalog APK) in the commit. Run
   `references/checklist.md` A-H over all Contacts screens and record it in `docs/kotlin-ui/checklist-e4.md`.
 - epics.md: E4.1-E4.8 `done` with one Evidence line each (commit, tests, PNGs opened and what was seen); point the

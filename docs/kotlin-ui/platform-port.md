@@ -6,16 +6,16 @@ One row per Kotlin source of the GPUI build. Source of truth for E8.6, which del
 
 Rules: `:platform` keeps each file's logic, constants, intent actions, extras, pref keys and channel ids; the Rust seams are
 `PlatformEvents` (events out), `Headless.call` (blocking decisions) and `:core-bridge` facades. Components named by the manifests
-keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so far:
-`CallReminderReceiver`, `RovstiShareProvider`, `MessageReminderReceiver`, `MmsFileProvider`, `MmsResultReceiver`, `ReplyReceiver`,
+keep `dev.rosty.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so far:
+`CallReminderReceiver`, `RostyShareProvider`, `MessageReminderReceiver`, `MmsFileProvider`, `MmsResultReceiver`, `ReplyReceiver`,
 `ScheduledSmsReceiver`, `SmsStatusReceiver`, `BirthdayReminderReceiver`, `AlarmActivity`, `TripAlarmReceiver`, `TripService`,
-`TripWatchdogReceiver`. `RovstiShareProvider` is the E3.8a share provider (ported to `platform/files/RovstiShareProvider.kt`).
+`TripWatchdogReceiver`. `RostyShareProvider` is the E3.8a share provider (ported to `platform/files/RostyShareProvider.kt`).
 
-## Bridge files (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`)
+## Bridge files (`crates/rosty_android/kotlin/dev/rosty/bridge/`)
 
 | Source | Destination | Step | Status |
 |---|---|---|---|
-| `AlarmActivity.kt` | platform.location.BridgeTripComponents (package dev.rovsti.bridge) | 7 (E3.7) | ported |
+| `AlarmActivity.kt` | platform.location.BridgeTripComponents (package dev.rosty.bridge) | 7 (E3.7) | ported |
 | `AlarmOptions.kt` | platform.location.AlarmOptions (public; `REQUEST_ALARM_SOUND` const replaces `Documents.REQUEST_ALARM_SOUND`) | 7 (E3.7) | ported |
 | `AlarmSound.kt` | platform.location.AlarmSound (prefs via `PlatformPrefs.ALARM`) | 7 (E3.7) | ported |
 | `BirthdayReminders.kt` | platform.notify.BirthdayReminders | 6 (E3.6) | ported |
@@ -35,7 +35,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `Headless.kt` | platform.Headless (blocking wrapper over Rust.core().headless) | 1 (E3.1) | ported, rewritten |
 | `KeypadTone.kt` | platform.telephony.KeypadTone | 5 (E3.5) | ported |
 | `Mailbox.kt` | none: one-shots become intent handling in the activity | 7 (E3.11) | dropped: one-shots become intent handling in the activity (ARCH 7.3, E3.11) |
-| `MediaShare.kt` | platform.files.MediaShare (names, share dir, `mimeFor`, gallery save, staging) plus `ShareIntents`; `RovstiShareProvider` (package `dev.rovsti.bridge`) is `files/RovstiShareProvider.kt` | 8a (E3.8a) | ported |
+| `MediaShare.kt` | platform.files.MediaShare (names, share dir, `mimeFor`, gallery save, staging) plus `ShareIntents`; `RostyShareProvider` (package `dev.rosty.bridge`) is `files/RostyShareProvider.kt` | 8a (E3.8a) | ported |
 | `MessageNotifications.kt` | platform.notify.MessageNotifications | 6 (E3.6) | ported |
 | `MessageReminders.kt` | platform.notify.MessageReminders | 6 (E3.6) | ported |
 | `MissedCalls.kt` | platform.calllog.MissedCalls; LocaleTimeInfo is platform.system.LocaleTimeInfo | 3 (E3.3), LocaleTimeInfo in 1 | ported |
@@ -45,7 +45,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `ProviderObservers.kt` | platform.ProviderChanges (callbackFlow) | 1 (E3.1) | ported, rewritten |
 | `RejectPolicy.kt` | platform.telephony.RejectPolicy; `FlipRule` (same file) goes to platform.telephony.FlipDetector | 3 (E3.3), FlipRule in 5 | ported (`FlipRule` lives in FlipDetector.kt) |
 | `ReplyReceiver.kt` | platform.notify.ReplyReceiver | 6 (E3.6) | ported |
-| `RovstiBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
+| `RostyBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
 | `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | ported |
 | `SettingsMirror.kt` | platform.system.SettingsMirror | 1 (E3.1) | ported |
 | `Shortcuts.kt` | platform.contacts.Shortcuts + `ShortcutsRepository` (target activity from `PlatformComponents`; `EXTRA_CONTACT_ID` is now owned here, `BirthdayReminders` in step 6 reads it) | 2 (E3.2) | ported |
@@ -60,17 +60,17 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `TripService.kt` | platform.location.TripModel (pure helpers, `StartResult`) + `TripService`/`TripWatchdogReceiver` in BridgeTripComponents + `TripRepository` (`status`, `start`) | 7 (E3.7) | ported |
 | `VoicePlayer.kt` | platform.telephony.VoicePlayer | 5 (E3.5) | ported |
 | `WaCallAudio.kt` | platform.wa.WaCallAudio (+ `CallFrames`/`CallAudio.asFrames()`: frames go to the core-bridge handle `audioPush`/`audioPull` as `ByteArray`, no base64; a `wa-mic` and a `wa-speaker` thread) | 8 (E3.9 seams) | ported |
-| `WaIncoming.kt` | platform.wa.WaIncoming (channels via `PlatformChannels`; `takeAction(context, intent)` replaces `RovstiBridge.deliverWaCallAction`) | 8 (E3.9 seams) | ported |
+| `WaIncoming.kt` | platform.wa.WaIncoming (channels via `PlatformChannels`; `takeAction(context, intent)` replaces `RostyBridge.deliverWaCallAction`) | 8 (E3.9 seams) | ported |
 | `WaPush.kt` | platform.wa.WaPush (`onMessage(context, data)` emits `wa_push` on `PlatformEvents`; `:wa` calls `reconnectNow`) | 8 (E3.9 seams) | ported |
 | `WireJson.kt` | platform.wire.WireJson | 1 (E3.1) | ported |
 | `XiaomiOps.kt` | platform.system.XiaomiOps | 1 (E3.1) | ported |
 
-## App host files (`apps/<app>/platforms/android/app/src/main/kotlin/dev/rovsti/<app>/`)
+## App host files (`apps/<app>/platforms/android/app/src/main/kotlin/dev/rosty/<app>/`)
 
 | Source | Destination | Step | Status |
 |---|---|---|---|
 | `apps/phone/.../phone/AudioPath.kt` | platform.telephony.AudioPath | 5 (E3.5) | ported |
-| `apps/phone/.../phone/CallActionReceiver.kt` | `:phone` `dev.rovsti.phone.CallActionReceiver` (calls `CallRegistry`) | E5 | ported (E5.1) |
+| `apps/phone/.../phone/CallActionReceiver.kt` | `:phone` `dev.rosty.phone.CallActionReceiver` (calls `CallRegistry`) | E5 | ported (E5.1) |
 | `apps/phone/.../phone/CallEventRing.kt` | platform.telephony.CallEventRing | 5 (E3.5) | ported |
 | `apps/phone/.../phone/CallNotifications.kt` | platform.telephony.CallNotifications | 5 (E3.5) | ported |
 | `apps/phone/.../phone/CallRegistry.kt` | platform.telephony.CallRegistry | 5 (E3.5) | ported |
@@ -80,15 +80,15 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/phone/.../phone/FlipDetector.kt` | platform.telephony.FlipDetector | 5 (E3.5) | ported |
 | `apps/phone/.../phone/IncomingCall.kt` | platform.telephony.IncomingCall | 5 (E3.5) | ported |
 | `apps/phone/.../phone/IncomingPerf.kt` | `:phone` `IncomingPerf : IncomingTiming` (installed in `CallRegistry.timing`; the Diagnostics page reads its timeline) | E5 | ported (E5.1) |
-| `apps/phone/.../phone/MainActivity.kt` | `:phone` `dev.rovsti.phone.MainActivity : RovstiShellActivity<PhoneRoute>` (lock-screen flags only while a call is live, Answer once, dial links, native fallback) | E5 | ported (E5.1) |
+| `apps/phone/.../phone/MainActivity.kt` | `:phone` `dev.rosty.phone.MainActivity : RostyShellActivity<PhoneRoute>` (lock-screen flags only while a call is live, Answer once, dial links, native fallback) | E5 | ported (E5.1) |
 | `apps/phone/.../phone/NativeIncoming.kt` | `:phone` `NativeIncoming` (the error view when the Compose UI cannot start; the GPUI curtain is dropped) | E5 | ported (E5.1) |
 | `apps/phone/.../phone/OngoingCall.kt` | platform.telephony.OngoingCall | 5 (E3.5) | ported |
 | `apps/phone/.../phone/ProximityController.kt` | platform.telephony.ProximityController | 5 (E3.5) | ported |
 | `apps/phone/.../phone/RebuildCoalescer.kt` | platform.telephony.RebuildCoalescer | 5 (E3.5) | ported |
-| `apps/phone/.../phone/RovstiInCallService.kt` | `:phone` `RovstiInCallService : InCallService, InCallHost` (forwards to `CallRegistry`) | E5 | ported (E5.1) |
-| `apps/phone/.../phone/RovstiPhoneApp.kt` | `:phone` `RovstiPhoneApp : HasContainer<PhoneContainer>` | E5 | ported (E5.1) |
+| `apps/phone/.../phone/RostyInCallService.kt` | `:phone` `RostyInCallService : InCallService, InCallHost` (forwards to `CallRegistry`) | E5 | ported (E5.1) |
+| `apps/phone/.../phone/RostyPhoneApp.kt` | `:phone` `RostyPhoneApp : HasContainer<PhoneContainer>` | E5 | ported (E5.1) |
 | `apps/phone/.../phone/VoicemailReceiver.kt` | `:phone` `VoicemailReceiver` (disabled in the manifest; empty until spike S9) | E5 | ported (E5.1) |
-| `apps/phone/platforms/android/app/src/firebase/.../RovstiMessagingService.kt` | `:phone` `src/firebase` (the `firebase` flavor; calls `WaPush.onMessage`) | E5 | ported (E5.1) |
+| `apps/phone/platforms/android/app/src/firebase/.../RostyMessagingService.kt` | `:phone` `src/firebase` (the `firebase` flavor; calls `WaPush.onMessage`) | E5 | ported (E5.1) |
 | `apps/messages/.../messages/BootReceiver.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/messages/.../messages/ComposeRequest.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/messages/.../messages/HeadlessSmsSendService.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
@@ -96,13 +96,13 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/messages/.../messages/MainActivity.kt` | app module E6 (Application/MainActivity on `:shell`) | E6 | app module E6 |
 | `apps/messages/.../messages/MmsInbox.kt` | platform.sms.MmsInbox | 4 (E3.4) | done |
 | `apps/messages/.../messages/MmsWapPushReceiver.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
-| `apps/messages/.../messages/RovstiMessagesApp.kt` | app module E6 (Application/MainActivity on `:shell`) | E6 | app module E6 |
+| `apps/messages/.../messages/RostyMessagesApp.kt` | app module E6 (Application/MainActivity on `:shell`) | E6 | app module E6 |
 | `apps/messages/.../messages/SmsDeliverReceiver.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/stops/.../stops/BootReceiver.kt` | app module E7 (component stays in the app; calls `:platform`) | E7 | app module E7 |
 | `apps/stops/.../stops/MainActivity.kt` | app module E7 (Application/MainActivity on `:shell`) | E7 | app module E7 |
-| `apps/stops/.../stops/RovstiStopsApp.kt` | app module E7 (Application/MainActivity on `:shell`) | E7 | app module E7 |
-| `apps/contacts/.../contacts/MainActivity.kt` | `:contacts` `dev.rovsti.contacts.MainActivity : RovstiShellActivity` | E4 | ported (E4.1) |
-| `apps/contacts/.../contacts/RovstiContactsApp.kt` | `:contacts` `dev.rovsti.contacts.RovstiContactsApp : HasContainer<ContactsContainer>` | E4 | ported (E4.1) |
+| `apps/stops/.../stops/RostyStopsApp.kt` | app module E7 (Application/MainActivity on `:shell`) | E7 | app module E7 |
+| `apps/contacts/.../contacts/MainActivity.kt` | `:contacts` `dev.rosty.contacts.MainActivity : RostyShellActivity` | E4 | ported (E4.1) |
+| `apps/contacts/.../contacts/RostyContactsApp.kt` | `:contacts` `dev.rosty.contacts.RostyContactsApp : HasContainer<ContactsContainer>` | E4 | ported (E4.1) |
 | `apps/contacts/src/**` GPUI screens (list, card, editor, groups, favorites, settings) | `:contacts` packages `list`, `card`, `editor`, `groups`, `favorites`, `settings`, `trash` | E4 | ported (E4.2-E4.8, E4.15) |
 | GPUI contact features: share, import, duplicates, photo viewer, call options, My card, emergency, recent | `:contacts` packages `intake`, `dupes`, `cleanup`, `photo`, `card`, `me`, `emergency`, `recent` | E4 | ported (E4.9-E4.14) |
 
@@ -110,30 +110,30 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 
 | Source | Destination | Step | Status |
 |---|---|---|---|
-| `apps/phone/.../src/test/java/dev/rovsti/phone/{IncomingCall,OngoingCall,AudioPath,ProximityPolicy,CallEventRing,DialIntents,RebuildCoalescer}Test.kt` | `:platform` test `telephony.<same name>` (the `IncomingTimeline` case stays with `IncomingPerf` in `:phone`) | 5 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/WireFixturesTest.kt` | `:platform` test, same name | 1 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/WireV2Test.kt` | `:platform` test, same name | 1 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/LocaleTimeInfoTest.kt` | `:platform` test, same name | 1 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/SystemPagesTest.kt` | `:platform` test, same name | 1 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/XiaomiOpsTest.kt` | `:platform` test, same name | 1 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic16Test.kt` | SettingsMirrorTest (mirror and system-page cases); the Mailbox, tone, SIM and document cases go with their classes | 1, 3, 5 | partly moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/MessagesSeamTest.kt` | MessagesSeamTest (Headless cases, FakeRustCore); SMS/MMS/notification/scheduled cases go with E3.4/E3.6 | 1, 4, 6 | partly moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/ContactPhotosTest.kt` | `:platform` test `contacts.ContactPhotosTest` (plan cases now on `PhotoPlan`) | 2 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/MultiCallTest.kt` | `:platform` test `telephony.MultiCallTest` | 5 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/WaIncomingTest.kt` | `:platform` test `wa.WaIncomingTest` (plus frame-size, takeAction and wake-event cases) | 8 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic17Test.kt` | BlocklistTest (blocklist, reason and BlockGuard cases), RejectPolicyTest (reject cases); the FlipRule cases are `telephony.FlipRuleTest` (step 5); the Epic17Probes cases (blocking, reject, silence probes) are dropped with the GPUI spikes | 3, 5 | moved; probe cases dropped |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/SpikeProbesTest.kt` | dropped with its GPUI spike (recorded again in step 3: nothing of it is ported) | 1 | dropped |
+| `apps/phone/.../src/test/java/dev/rosty/phone/{IncomingCall,OngoingCall,AudioPath,ProximityPolicy,CallEventRing,DialIntents,RebuildCoalescer}Test.kt` | `:platform` test `telephony.<same name>` (the `IncomingTimeline` case stays with `IncomingPerf` in `:phone`) | 5 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/WireFixturesTest.kt` | `:platform` test, same name | 1 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/WireV2Test.kt` | `:platform` test, same name | 1 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/LocaleTimeInfoTest.kt` | `:platform` test, same name | 1 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/SystemPagesTest.kt` | `:platform` test, same name | 1 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/XiaomiOpsTest.kt` | `:platform` test, same name | 1 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/Epic16Test.kt` | SettingsMirrorTest (mirror and system-page cases); the Mailbox, tone, SIM and document cases go with their classes | 1, 3, 5 | partly moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/MessagesSeamTest.kt` | MessagesSeamTest (Headless cases, FakeRustCore); SMS/MMS/notification/scheduled cases go with E3.4/E3.6 | 1, 4, 6 | partly moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/ContactPhotosTest.kt` | `:platform` test `contacts.ContactPhotosTest` (plan cases now on `PhotoPlan`) | 2 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/MultiCallTest.kt` | `:platform` test `telephony.MultiCallTest` | 5 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/WaIncomingTest.kt` | `:platform` test `wa.WaIncomingTest` (plus frame-size, takeAction and wake-event cases) | 8 | moved |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/Epic17Test.kt` | BlocklistTest (blocklist, reason and BlockGuard cases), RejectPolicyTest (reject cases); the FlipRule cases are `telephony.FlipRuleTest` (step 5); the Epic17Probes cases (blocking, reject, silence probes) are dropped with the GPUI spikes | 3, 5 | moved; probe cases dropped |
+| `apps/phone/.../src/test/java/dev/rosty/bridge/SpikeProbesTest.kt` | dropped with its GPUI spike (recorded again in step 3: nothing of it is ported) | 1 | dropped |
 
 ## Call log, blocklist, SIM repositories (E3.3, step 3)
 
-`dev.rovsti.platform.calllog`: `CallLogRepository` (`entries(limit)`, `blocked(limit)`, `missedCount()` are cold `Flow`s
+`dev.rosty.platform.calllog`: `CallLogRepository` (`entries(limit)`, `blocked(limit)`, `missedCount()` are cold `Flow`s
 that query on collect and again after a `CallLog.Calls.CONTENT_URI` change through the shared `liveQuery` helper: debounced
 by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the rows first and answers a `Restorable`,
 `restore(rows)` puts them back as read, `deleteAll()`, `markMissedRead()`; writes answer a sealed `CallLogResult`),
 `AndroidCallLogRepository(context, io)`, `FakeCallLogRepository`. `BlocklistRepository` (`numbers()` flow of the
 `:core-bridge` `BlockedNumber`, `block` keeps the emergency/blank refusal and answers `Blocklist.Result`, `unblock`,
 `canBlock`, `isBlocked`), `AndroidBlocklistRepository(context, io, provider, isEmergency)`, `FakeBlocklistRepository`.
-`dev.rovsti.platform.telephony`: `SimRepository` (`accounts()` flow of `PhoneAccounts`, re-read on a
+`dev.rosty.platform.telephony`: `SimRepository` (`accounts()` flow of `PhoneAccounts`, re-read on a
 `SubscriptionManager` listener or default-subscription broadcast, empty without `READ_PHONE_STATE`; `probe(placed, log)`),
 `AndroidSimRepository(context, io, changes, collect)`, `FakeSimRepository`.
 
@@ -149,7 +149,7 @@ by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the row
 
 ## Contacts repository (E3.2, step 2)
 
-`dev.rovsti.platform.contacts`: `ContactsRepository` (reads are cold `Flow`s that query on collect and again after a
+`dev.rosty.platform.contacts`: `ContactsRepository` (reads are cold `Flow`s that query on collect and again after a
 `ContactsContract.AUTHORITY_URI` change, debounced by `CHANGE_DEBOUNCE_MS` so a burst is one re-query, `mapLatest`,
 `flowOn(io)`; writes are `suspend` and answer a sealed `ContactResult`), `AndroidContactsRepository(context, io)`,
 `FakeContactsRepository` and `RecordingProvider` in `:platform` testFixtures.
@@ -166,7 +166,7 @@ by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the row
 - `SmsQuery` returns typed rows (`SmsThreadRow`, `SmsRow`, `MmsRow`, `SmsMessagesPayload`), not envelopes; the old
   `SmsJson` builders became `SmsRules` (delivery mapping, paging, extensions).
 - The four manifest components (`SmsStatusReceiver`, `MmsFileProvider`, `MmsResultReceiver`, `ScheduledSmsReceiver`) live
-  in `platform/sms/BridgeComponents.kt` under `package dev.rovsti.bridge`. Their receivers do blocking work through
+  in `platform/sms/BridgeComponents.kt` under `package dev.rosty.bridge`. Their receivers do blocking work through
   `ReceiverWork` (tests run it inline).
 - `MmsInbox` posts its notification through the `MessageNotifier` seam; E3.6 installs `MessageNotifications` there. The
   app installs `MmsCodec.downloadedHandler = MmsCodec.DownloadedHandler(MmsInbox::onDownloaded)` in `Application.onCreate`.
@@ -175,39 +175,39 @@ by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the row
 
 ## Telecom core (E3.5, step 5)
 
-`dev.rovsti.platform.telephony`: `CallRegistry` (same state machine, same rebuild order), `CallsApi`, `MultiCall` (+ `PendingMachine`,
+`dev.rosty.platform.telephony`: `CallRegistry` (same state machine, same rebuild order), `CallsApi`, `MultiCall` (+ `PendingMachine`,
 `MultiCallFacts`), `AudioPath`, `ProximityController` + `ProximityPolicy`, `CallNotifications`, `IncomingCall` (+ `AnswerOnce`),
 `OngoingCall`, `CallSurface`, `CallEventRing`, `FlipDetector` (+ `FlipRule`), `RebuildCoalescer`, `DialIntents`, `Caps`, `KeypadTone`,
 `VoicePlayer`. Resources: the per-kind notification glyphs (`ic_notif_*`, replacing `ic_stat_call`) and glass large icons (`ic_notif_large_*`) live in `:platform` (`NotificationKind`).
 
 Seams:
 
-- `InCallHost` replaces the `RovstiInCallService` field: the app's `InCallService` (or an adapter around it) passes itself to
+- `InCallHost` replaces the `RostyInCallService` field: the app's `InCallService` (or an adapter around it) passes itself to
   `CallRegistry.onServiceBound(host)`; the registry asks it for `setMuted`, `setAudioRoute`, `requestEndpoint`, `legacyAudioState` and
   `startForeground`/`stopForegroundRemove`.
 - `PlatformComponents.mainActivity` / `callAction` replace `MainActivity::class.java` / `CallActionReceiver::class.java` in
   `CallNotifications` and `CallSurface`. `callAction` is required for call notifications (a missing one fails loudly).
 - `CallRegistry.state: StateFlow<List<WireCall>>` (`phone.WireCall`, decoded from the same `calls` JSON the Rust side gets) is set
-  last in a rebuild, after the notifications. `PlatformEvents.emit("calls", json)` replaces `RovstiBridge.emit` and
-  `PlatformEvents.uiAttached` replaces `RovstiBridge.uiReady`.
+  last in a rebuild, after the notifications. `PlatformEvents.emit("calls", json)` replaces `RostyBridge.emit` and
+  `PlatformEvents.uiAttached` replaces `RostyBridge.uiReady`.
 - `IncomingPerf.kt` and `NativeIncoming.kt` stay in `:phone` (E5). The registry calls `CallRegistry.timing: IncomingTiming?`
   (`onCallAdded`, `mark("notify")`, `frame`, `clear`); `:phone` installs an `IncomingPerf` adapter there.
 - Dropped: `probeRejectText` and the `rejectPathOverride` (spike S7, GPUI spikes), `Epic17Probes` use.
-- Unchanged on purpose: the per-process `answerToken`, the intent action strings (`dev.rovsti.phone.ANSWER_CALL` etc.) and extras, the
+- Unchanged on purpose: the per-process `answerToken`, the intent action strings (`dev.rosty.phone.ANSWER_CALL` etc.) and extras, the
   "Answer is honoured once" rule (`AnswerOnce`), channel ids `ongoing` (LOW) and `incoming` (HIGH, silent), notification ids 1001/1002.
-  `PlatformConventionTest` now allows only ALL_CAPS action tokens after `dev.rovsti.phone.` and forbids any phone import or class.
+  `PlatformConventionTest` now allows only ALL_CAPS action tokens after `dev.rosty.phone.` and forbids any phone import or class.
 
 ## Notifications and reminders (E3.6, step 6)
 
-`dev.rovsti.platform.notify`: `PlatformChannels` (every channel id and importance as constants plus `ensure`, pinned by
+`dev.rosty.platform.notify`: `PlatformChannels` (every channel id and importance as constants plus `ensure`, pinned by
 `NotificationChannelsTest` against `src/test/resources/notification_channels.tsv`; `CallNotifications` now uses it),
 `MessageNotifications` (+ `NotificationSpec`, `notifier` seam for `MmsInbox`), `NotificationIcon`, `ReplyActions`,
 `MessageReminders`, `CallReminders`, `BirthdayReminders`, `ReminderStore`, `ReminderRepositories` (`RemindersRepository`: `arm`,
 `disarm`, `armed(): Flow`, `rearmAll`).
 
 - The four receivers (`MessageReminderReceiver`, `CallReminderReceiver`, `BirthdayReminderReceiver`, `ReplyReceiver`) are in
-  `notify/NotifyReceivers.kt` under `package dev.rovsti.bridge`; the logic is in `platform.notify`.
-- `PlatformEvents.uiAttached` replaces `RovstiBridge.uiReady`; `msg_reply`, `reminder_fired`, `message_reminder_fired`,
+  `notify/NotifyReceivers.kt` under `package dev.rosty.bridge`; the logic is in `platform.notify`.
+- `PlatformEvents.uiAttached` replaces `RostyBridge.uiReady`; `msg_reply`, `reminder_fired`, `message_reminder_fired`,
   `message_reminders_changed` go to `PlatformEvents`. New and additive: `birthday_reminder_fired`, `reminders_changed`,
   `birthday_reminders_changed` (the `armed()` flows refresh on them).
 - Changed on purpose: a failed or undecided cold reply (`wa_reply` with no answer) re-posts the notification unchanged instead of
@@ -216,21 +216,21 @@ Seams:
 
 ## WhatsApp seams, FQCN and PendingIntent contract (E3 R1, step 8)
 
-`dev.rovsti.platform.wa`: `WaPush` (token by reflection; `onMessage(context, data)` shows or cancels the call notification
+`dev.rosty.platform.wa`: `WaPush` (token by reflection; `onMessage(context, data)` shows or cancels the call notification
 and emits `wa_push` on `PlatformEvents`, which `:wa` (E3.9) turns into `reconnectNow()`), `WaIncoming` (+ `WaIncomingNotice`,
 `WaMissedNotice`; channels `wa_calls` and `wa_missed` come from `PlatformChannels`), `WaCallAudio` (`start(context, CallFrames)`;
 `CallAudio.asFrames()` binds the `:core-bridge` handle, so the microphone thread calls `audioPush` and the speaker thread
 `audioPull`; frame size equals `CallAudio.FRAME_BYTES`, pinned by a test).
 
-Tests that guard the whole round: `FqcnTest` (all 13 components load by their `dev.rovsti.bridge` names, `RovstiShareProvider`
+Tests that guard the whole round: `FqcnTest` (all 13 components load by their `dev.rosty.bridge` names, `RostyShareProvider`
 being the 13th, E3.8a), `PendingIntentContractTest` (action and extra strings of reminders, scheduled SMS, reply actions, trip alarm and
 watchdog equal the GPUI source constants, read as text), `PortInventoryTest` (every bridge `.kt` has a row with an allowed status).
 
 Summary of what does not move in R1:
 
-- dropped: `SpikeProbes`, `Epic17Probes`, `Mailbox`, the `RovstiBridge` statics (replaced by repositories and `PlatformEvents`);
-- E3.8a (done, round 09): `Documents`, `MediaShare`, `RovstiShareProvider`, plus `ClipboardRepository` and `ShareIntents`;
-- E3.8b (done, round 09): roles and permissions in `platform.system.permissions`: `PermissionGroup`, `AppPermissions`, `PermissionState` (`decide`, `nextAction`), `PermissionController`, `SpecialAccess` (+ `FakeSpecialAccess`), `ForegroundStart`; the `RovstiBridge` permission, role, special-access and battery helpers are replaced by them, and `HandoffPermissionsTest` pins the manifest lists;
+- dropped: `SpikeProbes`, `Epic17Probes`, `Mailbox`, the `RostyBridge` statics (replaced by repositories and `PlatformEvents`);
+- E3.8a (done, round 09): `Documents`, `MediaShare`, `RostyShareProvider`, plus `ClipboardRepository` and `ShareIntents`;
+- E3.8b (done, round 09): roles and permissions in `platform.system.permissions`: `PermissionGroup`, `AppPermissions`, `PermissionState` (`decide`, `nextAction`), `PermissionController`, `SpecialAccess` (+ `FakeSpecialAccess`), `ForegroundStart`; the `RostyBridge` permission, role, special-access and battery helpers are replaced by them, and `HandoffPermissionsTest` pins the manifest lists;
 - app module: `IncomingPerf`, `NativeIncoming`, the manifest components and the Application/MainActivity classes.
 
 ## `:wa` module (E3.9, R9)
@@ -239,10 +239,10 @@ Summary of what does not move in R1:
 
 | GPUI / bridge source | Kotlin | Notes |
 |---|---|---|
-| `rovsti_wa_ui::settings` link state, `Gateway` handling | `WaLinkStore`, `WaRepository` / `DefaultWaRepository` (R9-4) | link state, events, resync, wake |
-| call handling in `apps/messages` + `WaCallAudio.kt` | `dev.rovsti.wa.calls.WaCalls` (R9-5) | `calls: StateFlow<List<CallSummary>>`, `place`, `accept`, `reject`, `end`, `mute`, `speaker` |
-| `rovsti_wa_ui::avatars` (`WaAvatars`, `fetch`, `decode_image`) | `dev.rovsti.wa.avatars.WaAvatars`, `AvatarBook`, `AvatarCodec`, `WaAvatarFetcher` (R9-5) | `want`, `wantAll`, `wantProfile`, `profile`, `name` |
-| `rovsti_app_core::wa_link::avatars` (`AvatarBook`, `Backoff`) | `AvatarBook` (Kotlin twin, same constants) | `wa.avatars_plan` only names and prunes files (the op is stateless); dedup, parallelism and back-off live in the Kotlin book, as the GPUI client had them in its own book |
+| `rosty_wa_ui::settings` link state, `Gateway` handling | `WaLinkStore`, `WaRepository` / `DefaultWaRepository` (R9-4) | link state, events, resync, wake |
+| call handling in `apps/messages` + `WaCallAudio.kt` | `dev.rosty.wa.calls.WaCalls` (R9-5) | `calls: StateFlow<List<CallSummary>>`, `place`, `accept`, `reject`, `end`, `mute`, `speaker` |
+| `rosty_wa_ui::avatars` (`WaAvatars`, `fetch`, `decode_image`) | `dev.rosty.wa.avatars.WaAvatars`, `AvatarBook`, `AvatarCodec`, `WaAvatarFetcher` (R9-5) | `want`, `wantAll`, `wantProfile`, `profile`, `name` |
+| `rosty_app_core::wa_link::avatars` (`AvatarBook`, `Backoff`) | `AvatarBook` (Kotlin twin, same constants) | `wa.avatars_plan` only names and prunes files (the op is stateless); dedup, parallelism and back-off live in the Kotlin book, as the GPUI client had them in its own book |
 
 Calls:
 
@@ -254,5 +254,5 @@ Avatars:
 
 - One fetch per jid at a time, 3 at once, none while a 429 back-off holds (5 s doubling to 5 min, reset by a good answer). A 429 is `RustError.Invalid` with detail `{"code":"rate_limited"}` (`map_error` in `ops/wa/mod.rs`).
 - Files: `filesDir/wa-avatars/<clean jid>~<id>.jpg`, written as a `.part` then renamed, stored already decoded down to 128 px with `BitmapFactory.Options.inSampleSize` (`BitmapAvatarCodec`), 8 MiB budget, pruned oldest first from the `remove` list of `wa.avatars_plan` after every write and at start.
-- Coil: image model `WaAvatar(jid)` (key `wa-avatar:<jid>`), registered with `rovstiImageLoader(context, lowRam) { waAvatars(avatars) }`. `WaAvatars` calls its `invalidate(jid)` when a stored picture changed, so the host removes `MemoryCache.Key("wa-avatar:<jid>")`. Rows call `want(jid, pictureId)` in a `LaunchedEffect(avatars.revision)`.
+- Coil: image model `WaAvatar(jid)` (key `wa-avatar:<jid>`), registered with `rostyImageLoader(context, lowRam) { waAvatars(avatars) }`. `WaAvatars` calls its `invalidate(jid)` when a stored picture changed, so the host removes `MemoryCache.Key("wa-avatar:<jid>")`. Rows call `want(jid, pictureId)` in a `LaunchedEffect(avatars.revision)`.
 - Tests: `WaCallsTest`, `WaAvatarsTest` (virtual time), fixtures `FakeWaGateway` (calls, picture, profiles, plan, names), `FakeAvatarsPlan`, `FakeCallPump`.

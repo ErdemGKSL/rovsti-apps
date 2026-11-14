@@ -1,4 +1,4 @@
-# util-stops: everyday utilities for Rovsti Stops (round 4)
+# util-stops: everyday utilities for Rosty Stops (round 4)
 
 baseSha: 4df8c8f8cb988cb79b084445b6b8135dcc7d53d0
 
@@ -31,7 +31,7 @@ baseSha: 4df8c8f8cb988cb79b084445b6b8135dcc7d53d0
   `session::format_distance`, `coord_format::{format, CoordFormat::OsmLink}`, `backend::{export_text,
   pick_import, read_import, save_stops, save_prefs}`, `save_history_in_background`, `use_tile_source`,
   `map_options::set_appearance`, `MapTiles::set_cap`, `pending_export: Option<ExportKind>`,
-  `rovsti_core::contact_dates::local_ymd`, `PillAction`, `SheetMode`.
+  `rosty_core::contact_dates::local_ymd`, `PillAction`, `SheetMode`.
 - Document routing: places import uses `backend::pick_import` and arrives as
   `DocumentOp::ImportMessages` (`main.rs::on_event` -> `on_places_picked`). A second importer (backup)
   needs an explicit `pending_import` like `pending_export`.
@@ -59,15 +59,15 @@ baseSha: 4df8c8f8cb988cb79b084445b6b8135dcc7d53d0
 
 ## Round 4 plan
 
-Steps 1-3 pure (unit-tested, `crates/rovsti_geo`), steps 4-6 thin GPUI, step 7 docs. No new Android
+Steps 1-3 pure (unit-tested, `crates/rosty_geo`), steps 4-6 thin GPUI, step 7 docs. No new Android
 seam is needed (reuses `export_text`, `pick_import`, `share`, `open_url`). Every step leaves all checks
 green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test
---workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target
+--workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target
 aarch64-linux-android`.
 
 ### Step 1. Pure: favourites and list text (S24, S30)
-- `crates/rovsti_geo/src/saved_stops.rs`:
+- `crates/rosty_geo/src/saved_stops.rs`:
   - `SavedStop.favourite: bool` with `#[serde(default, skip_serializing_if = "std::ops::Not::not")]`;
     `FORMAT_VERSION` stays 2 (old files load, files without favourites are byte-identical). Update the
     ~14 `SavedStop { .. }` literals in the workspace (`grep -rn "SavedStop {" apps crates`), `add`
@@ -83,7 +83,7 @@ aarch64-linux-android`.
     `coord_format::format(center, CoordFormat::Decimal)`, distance via `session::format_distance` when
     `here` is Some), then the OSM link (`CoordFormat::OsmLink`) on the next line indented two spaces.
     Empty slice -> `""`.
-- `crates/rovsti_geo/src/places_io.rs`: `Incoming.favourite: bool`; JSON import reads `favourite`
+- `crates/rosty_geo/src/places_io.rs`: `Incoming.favourite: bool`; JSON import reads `favourite`
   (default false), GPX import false; `merge_plan`/apply keeps it (set it on the stop returned by
   `SavedStops::add`). JSON export already serialises `SavedStops`, so it carries the flag.
 - Tests: old JSON without `favourite` loads; serialising a non-favourite has no `favourite` key;
@@ -92,7 +92,7 @@ aarch64-linux-android`.
   and without `here`, multibyte name; import of a JSON with a favourite keeps it, duplicate skipped.
 
 ### Step 2. Pure: trip summary text and last-trip lookup (S27, S33)
-- `crates/rovsti_geo/src/history.rs`:
+- `crates/rosty_geo/src/history.rs`:
   - `pub fn format_duration(ms: u64) -> String` (move the body of `settings_ui::duration_text` here:
     "under 1 min", "18 min", "1 h 05 min"; `duration_text` becomes a thin call so its tests still pass).
   - `pub fn snoozes_text(n: u8) -> Option<String>` (0 -> None, "1 snooze", "3 snoozes").
@@ -103,19 +103,19 @@ aarch64-linux-android`.
   - `pub const LAST_TRIP_CARD_MS: i64 = 12 * 3_600_000;`
     `impl History { pub fn last_finished(&self, now_ms: i64) -> Option<&TripRecord> }`: the newest
     record when `now_ms - ended_ms` is in `0..=LAST_TRIP_CARD_MS`, else None.
-- `crates/rovsti_geo/src/history_io.rs`: `pub fn share_text(record: &TripRecord, tz_offset_s: i32) ->
+- `crates/rosty_geo/src/history_io.rs`: `pub fn share_text(record: &TripRecord, tz_offset_s: i32) ->
   String`: Arrived -> `"Arrived at Home – Work on 5 Nov 2026, 18:42. 18 min · 3.4 km · 1 snooze."`;
   Cancelled -> `"Trip to Home – Work stopped on 5 Nov 2026, 18:42. ..."`; second line the geo link of
   B (`dest::point_qr_payload(b.coord, Some(title))`) when the record has B. Local date and time via
-  `rovsti_core::contact_dates::local_ymd` and the existing local-time helper used by `to_csv`.
+  `rosty_core::contact_dates::local_ymd` and the existing local-time helper used by `to_csv`.
 - Tests: `format_duration` edges (0, 59 s, 60 min, 125 min); `snoozes_text`; `title` for pair, empty
   labels, legacy, empty; `summary_line` with 0 and 2 snoozes; `last_finished` (fresh, 13 h old,
   future `ended_ms`, empty history); `share_text` arrived / cancelled / legacy (no link line) with a
   +03:00 offset.
 
 ### Step 3. Pure: backup format (S32)
-- New `crates/rovsti_geo/src/backup.rs` (`pub mod backup;` in `lib.rs`):
-  - `pub const BACKUP_APP: &str = "rovsti-stops"; pub const BACKUP_VERSION: u32 = 1;`
+- New `crates/rosty_geo/src/backup.rs` (`pub mod backup;` in `lib.rs`):
+  - `pub const BACKUP_APP: &str = "rosty-stops"; pub const BACKUP_VERSION: u32 = 1;`
   - `#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)] pub struct Backup { pub app: String,
     pub version: u32, pub created_ms: i64, pub saved: SavedStops, pub history: History, pub prefs:
     StopsPrefs }` and `impl Backup { pub fn new(saved, history, prefs, now_ms) -> Self }`.
@@ -131,8 +131,8 @@ aarch64-linux-android`.
     defaults when missing.
   - `pub fn summary(backup: &Backup, tz_offset_s: i32) -> String`: `"12 stops, 48 trips and settings
     from 5 Nov 2026"` (singulars "1 stop", "1 trip").
-  - `pub fn export_file_name(today: &str) -> String` -> `rovsti-stops-backup-2026-11-07.json`.
-  - The WhatsApp connect key is not in `StopsPrefs` (it lives with `rovsti_wa_client`) and is never
+  - `pub fn export_file_name(today: &str) -> String` -> `rosty-stops-backup-2026-11-07.json`.
+  - The WhatsApp connect key is not in `StopsPrefs` (it lives with `rosty_wa_client`) and is never
     written; add a doc comment saying so.
 - Tests: round trip equals; a prefs object missing new fields loads with defaults; wrong `app`,
   version 2, garbage, `saved.version` 1 give the right errors; an invalid gate is dropped and

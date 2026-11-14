@@ -1,3 +1,3 @@
-# JNI looks these up by name from librovsti_ffi (crates/rovsti_ffi/src/events.rs, jni_exports.rs).
--keep class dev.rovsti.core.RustNative { *; }
--keepclassmembers class dev.rovsti.core.RustEvents { public void onEvent(java.lang.String, byte[]); }
+# JNI looks these up by name from librosty_ffi (crates/rosty_ffi/src/events.rs, jni_exports.rs).
+-keep class dev.rosty.core.RustNative { *; }
+-keepclassmembers class dev.rosty.core.RustEvents { public void onEvent(java.lang.String, byte[]); }

@@ -1,6 +1,6 @@
 //! Reaction targets. Pure.
 
-use rovsti_wa_proto::{SendReaction, WaMessage};
+use rosty_wa_proto::{SendReaction, WaMessage};
 use whatsapp_rust::prelude::*;
 
 use super::convert::is_group;
@@ -49,7 +49,7 @@ pub fn target_author(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::MessageBody;
+    use rosty_wa_proto::MessageBody;
 
     const DM: &str = "905321234567@s.whatsapp.net";
     const GROUP: &str = "120363-1@g.us";

@@ -1,11 +1,11 @@
 plugins {
-    id("rovsti.android.library")
-    id("rovsti.compose")
+    id("rosty.android.library")
+    id("rosty.compose")
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "dev.rovsti.people"
+    namespace = "dev.rosty.people"
     testOptions {
         unitTests {
             isIncludeAndroidResources = true

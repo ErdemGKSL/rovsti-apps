@@ -14,13 +14,13 @@ use gpui::{
     IntoElement, MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement,
     Styled, Task, UniformListScrollHandle, Window, div, prelude::*, px, svg, uniform_list,
 };
-use rovsti_core::{
+use rosty_core::{
     blocklist::{self, BlockInputError},
     call_log::relative_time,
     recents::LocaleTime,
     wire::EmergencyList,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::flat_glass,
     field::{Bare, TextField, bare_field},
@@ -282,7 +282,7 @@ impl PhoneApp {
             };
             index
                 .match_number(raw)
-                .map(|c| rovsti_core::names::display(c, format).into_owned())
+                .map(|c| rosty_core::names::display(c, format).into_owned())
         };
         match list {
             Load::Ready(state) => {
@@ -424,12 +424,12 @@ impl PhoneApp {
             };
             index
                 .match_number(raw)
-                .map(|c| rovsti_core::names::display(c, format).into_owned())
+                .map(|c| rosty_core::names::display(c, format).into_owned())
         });
         if text.is_empty() {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         let outcome = backend::share_text(&text);
         if outcome != backend::Outcome::Done {
             self.show_notice_pill(
@@ -449,7 +449,7 @@ impl PhoneApp {
         {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.sheet_kind = SheetKind::UnblockAll;
         self.sheet.open();
         cx.notify();
@@ -470,7 +470,7 @@ impl PhoneApp {
                 .map(|r| r.raw.clone())
                 .filter(|r| !r.trim().is_empty())
                 .collect();
-            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
             self.close_sheet(cx);
             if raws.is_empty() {
                 return;
@@ -512,7 +512,7 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         let tasks: Vec<_> = raws
             .iter()
             .map(|raw| self.backend.update(cx, |b, cx| b.block(raw, cx)))
@@ -562,7 +562,7 @@ impl PhoneApp {
                 .relative()
                 .h(px(52.0))
                 .rounded_full()
-                .bg(rovsti_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
+                .bg(rosty_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -677,7 +677,7 @@ impl PhoneApp {
         } else {
             self.blocked.seg.set_target(index as f32);
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         window.blur();
         self.blocked_sync(cx);
     }
@@ -701,7 +701,7 @@ impl PhoneApp {
             } else {
                 "Emergency numbers can't be blocked"
             });
-            rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
+            rosty_ui::haptics::perform(window, HapticFeedback::Reject);
             return;
         }
         if listed > 1 {
@@ -713,12 +713,12 @@ impl PhoneApp {
         match blocklist::parse_input(&typed, &emergency) {
             Err(error) => {
                 self.blocked.error = Some(error_text(error));
-                rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
+                rosty_ui::haptics::perform(window, HapticFeedback::Reject);
             }
             Ok(number) => {
                 if self.backend.read(cx).is_blocked(&number) {
                     self.blocked.error = Some("Already blocked");
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Reject);
                     return;
                 }
                 self.blocked.field.update(cx, |f, cx| f.clear(cx));
@@ -736,7 +736,7 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         self.bulk_block_run(many, blocklist::bulk_text, cx);
     }
 
@@ -805,9 +805,9 @@ impl PhoneApp {
             };
             index
                 .match_number(raw)
-                .map(|c| rovsti_core::names::display(c, format).into_owned())
+                .map(|c| rosty_core::names::display(c, format).into_owned())
         });
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.backup.export_kind = crate::backup_ui::ExportKind::Blocked;
         let outcome = backend::export_calls(&blocklist::csv_file_name(backend::now_ms(), tz), &csv);
         if outcome != backend::Outcome::Done {
@@ -821,7 +821,7 @@ impl PhoneApp {
             self.show_notice_pill("Not available on this platform", None, false, cx);
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.blocked.import_pending = true;
         let outcome = backend::import_file(IMPORT_MAX_BYTES);
         if outcome != backend::Outcome::Done {
@@ -838,7 +838,7 @@ impl PhoneApp {
     /// The picker answered an Import: reads the file, blocks what it lists.
     pub(crate) fn blocked_file_picked(
         &mut self,
-        result: rovsti_core::wire::DocumentResult,
+        result: rosty_core::wire::DocumentResult,
         cx: &mut Context<Self>,
     ) {
         if !result.ok {
@@ -906,7 +906,7 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         let tasks: Vec<_> = raws
             .iter()
             .map(|raw| self.backend.update(cx, |b, cx| b.unblock(raw, cx)))
@@ -1006,7 +1006,7 @@ impl PhoneApp {
                             .mx(px(2.0))
                             .h_full()
                             .rounded_full()
-                            .bg(rovsti_ui::tokens::mix(
+                            .bg(rosty_ui::tokens::mix(
                                 colors.background,
                                 colors.label,
                                 if theme.is_dark() { 0.22 } else { 0.0 },
@@ -1170,7 +1170,7 @@ impl PhoneApp {
                             .h(px(36.0 * press_scale(add_press, scale::PRESS)))
                             .px(px(16.0))
                             .rounded_full()
-                            .bg(rovsti_ui::tokens::mix(
+                            .bg(rosty_ui::tokens::mix(
                                 colors.accent,
                                 gpui::white(),
                                 0.2 * add_press,
@@ -1498,7 +1498,7 @@ impl PhoneApp {
                 Icon::LucideTriangleAlert,
                 true,
                 "Allow call log access",
-                "Rovsti Phone needs it to show your blocked calls.",
+                "Rosty Phone needs it to show your blocked calls.",
                 Some((
                     "set-bk-grant",
                     "Grant access",
@@ -1541,7 +1541,7 @@ impl PhoneApp {
                 "bk-numbers",
                 count,
                 cx.processor(move |this, range: Range<usize>, window, cx| {
-                    let theme = rovsti_ui::current_theme(window);
+                    let theme = rosty_ui::current_theme(window);
                     this.blocked_number_rows(theme, range, cx)
                 }),
             )
@@ -1552,7 +1552,7 @@ impl PhoneApp {
                 "bk-calls",
                 count,
                 cx.processor(move |this, range: Range<usize>, window, cx| {
-                    let theme = rovsti_ui::current_theme(window);
+                    let theme = rosty_ui::current_theme(window);
                     this.blocked_call_rows(theme, range, cx)
                 }),
             )

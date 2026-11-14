@@ -1,12 +1,12 @@
 plugins {
-    id("rovsti.android.library")
-    id("rovsti.compose")
-    id("rovsti.screenshots")
+    id("rosty.android.library")
+    id("rosty.compose")
+    id("rosty.screenshots")
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "dev.rovsti.shell"
+    namespace = "dev.rosty.shell"
     testFixtures { enable = true }
     testOptions {
         unitTests {

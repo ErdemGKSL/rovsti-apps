@@ -18,13 +18,13 @@ use gpui::{
     StatefulInteractiveElement, Styled, StyledImage, Task, Window, canvas, div, linear_color_stop,
     linear_gradient, point, prelude::*, px, size, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     call::{CallState, incoming_announcement, is_missed, missed_headline},
     gesture::{self, Dir, Release, Tick},
     wire::{DisconnectCause, SilencedBy},
 };
-use rovsti_ui::moments::Fade;
-use rovsti_ui::{
+use rosty_ui::moments::Fade;
+use rosty_ui::{
     Icon,
     components::{backdrop, flat_glass},
     current_theme,
@@ -76,7 +76,7 @@ const HINT_KEY: &str = "incoming_drag";
 const RING_PERIOD: f32 = 1.6;
 const GLOW_PERIOD: f32 = 1.2;
 
-fn sp(value: f32, params: rovsti_ui::spring::SpringParams) -> Spring {
+fn sp(value: f32, params: rosty_ui::spring::SpringParams) -> Spring {
     Spring::new(value, params).with_epsilon(0.002)
 }
 
@@ -739,7 +739,7 @@ impl PhoneApp {
         let aura = inc.aura_state(Phase::Dialing);
         inc.aura.update(cx, |a, cx| a.set(aura, cx));
         if silenced == Some(SilencedBy::Flip) {
-            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         }
     }
 
@@ -873,7 +873,7 @@ impl PhoneApp {
         }
         let outcome = self.backend.update(cx, |b, cx| b.silence_ringer(cx));
         if outcome != backend::Outcome::Declined {
-            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         }
         cx.notify();
     }
@@ -968,10 +968,10 @@ impl PhoneApp {
                 }
                 match follow.tick {
                     Some(Tick::Half) => {
-                        rovsti_ui::haptics::perform(window, HapticFeedback::Selection)
+                        rosty_ui::haptics::perform(window, HapticFeedback::Selection)
                     }
                     Some(Tick::Commit) => {
-                        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm)
+                        rosty_ui::haptics::perform(window, HapticFeedback::Confirm)
                     }
                     None => {}
                 }
@@ -1051,7 +1051,7 @@ impl PhoneApp {
                 }
             }
         };
-        rovsti_ui::haptics::perform(
+        rosty_ui::haptics::perform(
             window,
             match act {
                 Act::Answer => HapticFeedback::Confirm,

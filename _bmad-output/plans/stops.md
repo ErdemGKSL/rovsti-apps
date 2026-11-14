@@ -1,9 +1,9 @@
-# Plan: Rovsti Stops
+# Plan: Rosty Stops
 
 - Base: `87ac870d88f80fae45a4df46d3307a0de7abd8fd` ("WIP: carry-over before sync")
-- Unit: Rovsti Stops. Architect: PLAN agent. No source changed by this plan.
+- Unit: Rosty Stops. Architect: PLAN agent. No source changed by this plan.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android`
 - Nothing runs on a device here. Kotlin is checked by reading only; it keeps the strings-only
   JNI seam, and every Rust seam function returns `Error::Unsupported` on desktop.
 
@@ -11,20 +11,20 @@
 
 - `apps/stops/src/main.rs` (235 lines) is a scaffold: three tabs (Trip, Saved, Settings), a
   four-chip "Wake me" picker over `RULES` (300 m, 500 m, 1 km, 2 min ETA), an empty state and a
-  dead "Choose destination" pill. Settings is the shared `rovsti_wa_ui::WhatsAppSettings`
+  dead "Choose destination" pill. Settings is the shared `rosty_wa_ui::WhatsAppSettings`
   (`AppId::Stops`, data dir `"stops"`), wired with `WhatsAppSettings::forward_push`.
-- `rovsti_geo` (pure, serde only): `Coord` (haversine), `Trip`, `AlarmRule::{Radius, Eta}`, `Fix`,
+- `rosty_geo` (pure, serde only): `Coord` (haversine), `Trip`, `AlarmRule::{Radius, Eta}`, `Fix`,
   `TripState`, `TripUpdate { state, distance_m, ring, next_fix_in }`, adaptive polling 3..300 s,
   fixes worse than 150 m ignored. Six unit tests. `Trip` is not serde (private fields).
 - Shared WhatsApp: link first time / connect with key, keys hashed at rest, revocable, link in
   `whatsapp-link.json` (done for all four apps, `docs/whatsapp-notes.md`).
-  `rovsti_wa_ui::headless` already sends text without GPUI (`wa_reply`, private `gateway_in`).
+  `rosty_wa_ui::headless` already sends text without GPUI (`wa_reply`, private `gateway_in`).
   `Gateway::send_text(&SendText { chat, text, quoted_id })` and `Gateway::chats()` exist
-  (`crates/rovsti_wa_client/src/http.rs`), blocking (ureq).
-- `rovsti_android`: strings-only bridge (`bridge::call_bool/int/string`), event sink
+  (`crates/rosty_wa_client/src/http.rs`), blocking (ureq).
+- `rosty_android`: strings-only bridge (`bridge::call_bool/int/string`), event sink
   (`events::install_sink_owned`), one-shot `Mailbox`, headless JNI entry (`headless_entry!`,
   Kotlin `Headless.call(kind, json)` from receivers/services with no UI), permission groups
-  (`permissions::Group`, Kotlin map in `RovstiBridge.missing`), `documents::import_file` (op
+  (`permissions::Group`, Kotlin map in `RostyBridge.missing`), `documents::import_file` (op
   hard-wired to `import_messages`), `xiaomi::request_ignore_battery_optimizations`,
   `permissions::can_use_full_screen_intent`.
 - GPUI (verified at `~/.cargo/git/checkouts/gpui-fusion-141089add1664e03/d6c8412`):
@@ -51,7 +51,7 @@ Gaps found while studying (fixed by this plan):
 
 - **AD-ST1 Pure first.** The trip session (fix handling, snooze, the arriving-soon notice),
   destination parsing, saved places, history and statistics, prefs, GTFS parsing and the map
-  projection are `rovsti_geo` modules with unit tests. Kotlin and GPUI only map.
+  projection are `rosty_geo` modules with unit tests. Kotlin and GPUI only map.
 - **AD-ST2 The trip runs headless.** A Kotlin foreground service (`foregroundServiceType=
   "location"`) owns location updates. On every fix it calls `Headless.call("trip_fix", json)`;
   Rust (`apps/stops/src/headless.rs`) loads `trip.json`, runs `ActiveTrip::on_fix`, saves, maybe
@@ -74,7 +74,7 @@ Gaps found while studying (fixed by this plan):
   needs a tile/vector style renderer that does not exist for GPUI here. Decision: a minimal
   vector "radar" map drawn with `canvas` + `PathBuilder`: destination, alarm ring, your position
   with its accuracy, the breadcrumb of this trip, and (after a GTFS import) nearby stops and the
-  chosen line's pattern. Equirectangular projection around the view centre (`rovsti_geo::view`),
+  chosen line's pattern. Equirectangular projection around the view centre (`rosty_geo::view`),
   pinch/drag to pan and zoom, tap the nearest stop to pick it. Raster tiles stay out of scope; the
   roadmap item is ticked as "decided: vector radar map, no tiles".
 - **AD-ST5 Destinations are local.** Sources: shared `geo:` URIs and maps links (`on_open_urls`,
@@ -85,7 +85,7 @@ Gaps found while studying (fixed by this plan):
 - **AD-ST6 GTFS is optional and local.** Import a GTFS `.zip` through the file picker (op
   `import_gtfs`, 64 MiB cap from Kotlin `Documents.MAX_FILE_BYTES`). `zip` 2.6 (deflate via
   `flate2`, pure Rust) extracts `stops.txt`, `routes.txt`, `trips.txt`, `stop_times.txt`;
-  `rovsti_geo::gtfs` streams them into a compact `Feed { stops, routes, patterns }` (distinct
+  `rosty_geo::gtfs` streams them into a compact `Feed { stops, routes, patterns }` (distinct
   ordered stop lists per route and headsign) saved as `gtfs.json`. Caps: 100 000 stops,
   20 000 patterns, 8 000 000 stop_times rows; over a cap the import is refused with a reason.
   "N stops before" (1 to 3) is a new rule `AlarmRule::BeforeStop { trigger, metres }` whose
@@ -94,20 +94,20 @@ Gaps found while studying (fixed by this plan):
   one chat (from `Gateway::chats()`, groups allowed), a template (default
   `"Arriving at {stop} in about {min} min."`, max 500 chars) and when: with the alarm, or N
   minutes before (5/10/15, an `AlarmRule::Eta` of its own). It is per-trip toggleable on the Trip
-  tab. The headless fix handler sends it with `rovsti_wa_ui::headless::send_text_in` (blocking on
+  tab. The headless fix handler sends it with `rosty_wa_ui::headless::send_text_in` (blocking on
   the service thread). At most once per trip: `notice.sent` is persisted before the send; a send
   that failed with a transport error (`ClientError::Http`/`Tls`, no response) is retried on the
   next fixes, at most 3 attempts; `Unauthorized`/`Api` errors stop retrying. No WhatsApp link or
   no chat chosen means the option is hidden. Nothing else leaves the phone.
 - **AD-ST8 History is local.** `history.json` (cap 500, newest first) holds each ended trip:
   label, destination, rule, started/ended ms, outcome (`Arrived`, `Cancelled`), travelled metres,
-  snoozes, notice sent. Stats are computed in `rovsti_geo::history`.
+  snoozes, notice sent. Stats are computed in `rosty_geo::history`.
 
 ## Steps
 
-### Step 1. Pure trip session and notice (`rovsti_geo`)
+### Step 1. Pure trip session and notice (`rosty_geo`)
 
-Files: `crates/rovsti_geo/src/{trip.rs, session.rs (new), notice.rs (new), lib.rs}`.
+Files: `crates/rosty_geo/src/{trip.rs, session.rs (new), notice.rs (new), lib.rs}`.
 
 - `trip.rs`: derive `Serialize, Deserialize` on `Fix`, `TripState`, `Trip` (private fields stay
   private). Move the threshold test into `pub fn AlarmRule::is_met(&self, distance_m: f64, fix: &Fix) -> bool`
@@ -143,12 +143,12 @@ Files: `crates/rovsti_geo/src/{trip.rs, session.rs (new), notice.rs (new), lib.r
   its ETA rule is earlier, retry stops after 3 attempts and on `GiveUp`, snooze clamps and caps;
   `render` placeholders, caps, unicode boundary.
 
-Acceptance: `cargo test -p rovsti_geo` covers all new behaviour; existing tests unchanged and green.
+Acceptance: `cargo test -p rosty_geo` covers all new behaviour; existing tests unchanged and green.
 
-### Step 2. Pure destinations, places, history, prefs (`rovsti_geo`)
+### Step 2. Pure destinations, places, history, prefs (`rosty_geo`)
 
-Files: `crates/rovsti_geo/src/{dest.rs, places.rs, history.rs, prefs.rs}` (new), `Cargo.toml`
-(add `rovsti_core.workspace = true` for `rovsti_core::search::fold`).
+Files: `crates/rosty_geo/src/{dest.rs, places.rs, history.rs, prefs.rs}` (new), `Cargo.toml`
+(add `rosty_core.workspace = true` for `rosty_core::search::fold`).
 
 - `dest.rs`: `pub struct SharedPlace { pub coord: Coord, pub label: Option<String> }`,
   `pub enum DestError { NoCoordinates, OutOfRange, NotALocation }` with user-facing `message()`.
@@ -179,14 +179,14 @@ Files: `crates/rovsti_geo/src/{dest.rs, places.rs, history.rs, prefs.rs}` (new),
   cap and fold search ("kadikoy" finds "Kadıköy"); history cap, recent dedupe, stats sums and
   the 30-day window; prefs default and an empty `{}` JSON load.
 
-Acceptance: all parsers are pure and covered; `rovsti_geo` still has no I/O.
+Acceptance: all parsers are pure and covered; `rosty_geo` still has no I/O.
 
-### Step 3. Pure GTFS feed and map projection (`rovsti_geo`), zip dependency
+### Step 3. Pure GTFS feed and map projection (`rosty_geo`), zip dependency
 
 Files: root `Cargo.toml` `[workspace.dependencies]`: `zip = { version = "2.6", default-features =
 false, features = ["deflate-flate2"] }`, `flate2 = "1.1"` (already in `Cargo.lock` 1.1.10; its
-default `rust_backend` gives zip a pure-Rust inflater). `crates/rovsti_geo/Cargo.toml`: `zip`,
-`flate2`. New `crates/rovsti_geo/src/{csv.rs, gtfs.rs, view.rs}`.
+default `rust_backend` gives zip a pure-Rust inflater). `crates/rosty_geo/Cargo.toml`: `zip`,
+`flate2`. New `crates/rosty_geo/src/{csv.rs, gtfs.rs, view.rs}`.
 
 - `csv.rs`: minimal RFC 4180 reader over `impl BufRead`: BOM, quoted fields with `""`, CRLF,
   header map by column name; `CsvReader::next_record(&mut self) -> io::Result<Option<&[String]>>`
@@ -216,12 +216,12 @@ default `rust_backend` gives zip a pure-Rust inflater). `crates/rovsti_geo/Cargo
   fit contains all points, zoom keeps the focal point.
 
 Acceptance: workspace builds for desktop and `aarch64-linux-android` with the new deps;
-`cargo test -p rovsti_geo` green.
+`cargo test -p rosty_geo` green.
 
 ### Step 4. Android seam: trip service, alarm, location permission, GTFS pick
 
-Rust: `crates/rovsti_android/src/trip.rs` (new, `pub mod trip` in `lib.rs`):
-`pub fn start(spec_json: &str) -> Result<bool>` (`RovstiBridge.tripStart(json)`: `{dir, title,
+Rust: `crates/rosty_android/src/trip.rs` (new, `pub mod trip` in `lib.rs`):
+`pub fn start(spec_json: &str) -> Result<bool>` (`RostyBridge.tripStart(json)`: `{dir, title,
 text, next_fix_ms, high_accuracy}`), `pub fn stop() -> Result<bool>` (`tripStop`),
 `pub fn is_running() -> Result<bool>` (`tripRunning`), `pub fn alarm(action: AlarmAction) ->
 Result<bool>` (`tripAlarm(String)`: `"dismiss"|"snooze"|"test"`), `pub fn arm_snooze(at_ms: i64)`
@@ -229,11 +229,11 @@ Result<bool>` (`tripAlarm(String)`: `"dismiss"|"snooze"|"test"`), `pub fn arm_sn
 `events::kind::{TRIP_STATUS = "trip_status", TRIP_ALARM = "trip_alarm"}` plus
 `parse_trip_alarm(json) -> Option<TripAlarmEvent { Ringing, Snoozed { at_ms }, Dismissed }>`.
 `permissions::Group::Location` (key `"location"`, not in `Group::ALL`). `documents::import_gtfs(
-max_bytes)` (`importGtfs`, op `import_gtfs`) and `rovsti_core::wire::DocumentOp::ImportGtfs`.
+max_bytes)` (`importGtfs`, op `import_gtfs`) and `rosty_core::wire::DocumentOp::ImportGtfs`.
 Desktop tests: every new function is `Err(Error::Unsupported)`; `parse_trip_alarm` table test;
 `DocumentOp` serde for `"import_gtfs"`.
 
-Kotlin, shared dir `crates/rovsti_android/kotlin/dev/rovsti/bridge/`:
+Kotlin, shared dir `crates/rosty_android/kotlin/dev/rosty/bridge/`:
 - `TripService.kt`: `Service`; `startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)`;
   `LocationManager.requestLocationUpdates(provider, LocationRequest.Builder(intervalMs)
   .setQuality(QUALITY_HIGH_ACCURACY | QUALITY_BALANCED_POWER_ACCURACY).setMinUpdateIntervalMillis(..)
@@ -253,7 +253,7 @@ Kotlin, shared dir `crates/rovsti_android/kotlin/dev/rovsti/bridge/`:
   Dismiss and Snooze call `Headless.call("trip_alarm", {dir, action})` and emit `trip_alarm`.
 - `AlarmActivity.kt`: plain Views (no GPUI): title, distance text, big Dismiss and Snooze;
   `setShowWhenLocked(true)`, `setTurnScreenOn(true)`; Back = Snooze.
-- `RovstiBridge.kt`: `"location"` permission group (`ACCESS_FINE_LOCATION`,
+- `RostyBridge.kt`: `"location"` permission group (`ACCESS_FINE_LOCATION`,
   `ACCESS_COARSE_LOCATION`), `tripStart/tripStop/tripRunning/tripAlarm/tripSnooze/
   canScheduleExactAlarms/importGtfs`; `Documents.fileOp` maps a new request code to `import_gtfs`.
 - Kotlin unit tests are not run here; keep pure helpers (`TripAlarm.snoozeAt`, interval and
@@ -265,32 +265,32 @@ Contacts are untouched (the new classes compile in every host but are declared o
 ### Step 5. Stops Android host and the headless trip handler
 
 - Eject by copying `apps/contacts/platforms/android` to `apps/stops/platforms/android`
-  (no `gpuiforge` CLI here): rename namespace/applicationId to `dev.rovsti.stops`, library
-  `rovsti_stops`, `stopsAppDir`, Kotlin `dev/rovsti/stops/{MainActivity.kt, RovstiStopsApp.kt}`
-  (`RovstiBridge.install(this)`, `Headless.libName = "rovsti_stops"`). `gpuiforge.json`:
+  (no `gpuiforge` CLI here): rename namespace/applicationId to `dev.rosty.stops`, library
+  `rosty_stops`, `stopsAppDir`, Kotlin `dev/rosty/stops/{MainActivity.kt, RostyStopsApp.kt}`
+  (`RostyBridge.install(this)`, `Headless.libName = "rosty_stops"`). `gpuiforge.json`:
   `management: manual`, `project-dir`, `activity`, `min_sdk 34`, `target_sdk 36`, add
   `INTERNET`, `ACCESS_NETWORK_STATE`, `USE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED` (no more
   `SCHEDULE_EXACT_ALARM`).
-- `AndroidManifest.xml`: permissions as above; `<service android:name="dev.rovsti.bridge.TripService"
+- `AndroidManifest.xml`: permissions as above; `<service android:name="dev.rosty.bridge.TripService"
   android:foregroundServiceType="location" android:exported="false"/>`; `AlarmActivity`
   (`showWhenLocked`, `turnScreenOn`, `excludeFromRecents`, `launchMode=singleInstance`);
   `TripAlarmReceiver` (not exported); `MainActivity` intent filters: `VIEW` + `geo` scheme,
   `VIEW` for `https` hosts `maps.google.com`, `www.google.com` path `/maps`,
   `www.openstreetmap.org`, `maps.apple.com` (no `autoVerify`), `SEND` `text/plain`.
   A boot receiver ends a trip left running before a reboot (`trip_end` reason `cancelled`).
-- Rust: `crates/rovsti_wa_ui/src/headless.rs`: make `gateway_in` `pub` and add
+- Rust: `crates/rosty_wa_ui/src/headless.rs`: make `gateway_in` `pub` and add
   `pub fn send_text_in(dir: &str, chat: &str, text: &str) -> Result<(), SendFailure>` with
   `SendFailure { NoLink, Retryable(String), Fatal(String) }` (`Http`/`Tls` retryable;
   `Unauthorized`/`Api`/`Url`/`Key`/`Decode` fatal); `wa_reply` uses it. Unit test the mapping.
 - `apps/stops/src/store.rs`: file names `trip.json`, `history.json`, `saved.json`,
   `stops-prefs.json`, `gtfs.json`; `static TRIP_LOCK`; `load_trip/save_trip/end_trip(dir,
   outcome, now_ms)` (moves the session into history).
-- `apps/stops/src/headless.rs`: `handle(kind, json)` via `rovsti_android::headless::dispatch` with
+- `apps/stops/src/headless.rs`: `handle(kind, json)` via `rosty_android::headless::dispatch` with
   `trip_fix` (FixIn + dir -> FixOut; sends the notice when `send_notice` is set and records
   `notice_result`), `trip_alarm` (`dismiss` -> end Arrived, `snooze` -> `{ring_at_ms}` or
   `{dismissed:true}` when snoozes ran out, using prefs `snooze_min`), `trip_end` (`{dir,
-  reason}`). No trip -> `{"state":"ended"}`. `main.rs`: `rovsti_android::headless_entry!(headless::handle);`
-  and `rovsti_android::bridge::keep_symbols()` at start.
+  reason}`). No trip -> `{"state":"ended"}`. `main.rs`: `rosty_android::headless_entry!(headless::handle);`
+  and `rosty_android::bridge::keep_symbols()` at start.
 - Tests (desktop, temp dir): a sequence of FixIn moves the trip to `ring` once and the file
   persists the state; snooze cap; dismiss writes one history record; a bad JSON answers `""`;
   notice with no link records `GiveUp` and never retries.
@@ -322,15 +322,15 @@ the shared Kotlin dir is a Gradle source dir (not a copy).
   (`history.recent_destinations(5)`), and (step 7) GTFS search.
 - Alarm screen (GPUI, when attached): big distance, Dismiss / Snooze buttons calling
   `trip::alarm`. Saved tab: list, swipe-free row menu (Start, Rename, Delete), empty state kept.
-- Desktop: `ROVSTI_STOPS_SIMULATE=1` feeds synthetic fixes straight to `headless::handle`
-  ("trip_fix") every second so the UI can be exercised with `cargo run -p rovsti_stops`.
-- Follow `.claude/skills/liquid-glass-gpui` (sheet, glass pills, `rovsti_ui::components`).
+- Desktop: `ROSTY_STOPS_SIMULATE=1` feeds synthetic fixes straight to `headless::handle`
+  ("trip_fix") every second so the UI can be exercised with `cargo run -p rosty_stops`.
+- Follow `.claude/skills/liquid-glass-gpui` (sheet, glass pills, `rosty_ui::components`).
 
 Acceptance: green checks; a pure `picker::offer` mapping (text -> sheet or error) is unit-tested.
 
 ### Step 7. Map view, GTFS import and line-aware alarm
 
-- `apps/stops/src/map.rs`: `canvas` element over a `Viewport` (`rovsti_geo::view`). Paint:
+- `apps/stops/src/map.rs`: `canvas` element over a `Viewport` (`rosty_geo::view`). Paint:
   accuracy disc and position dot (`PathBuilder::fill` + `arc_to` circles), alarm ring
   (`PathBuilder::stroke(px(2.))`, dashed with `dash_array`), breadcrumb polyline (last 500 fixes
   kept in memory from `trip_status`), destination pin, GTFS stops in view (cap 300 per frame,
@@ -377,7 +377,7 @@ Acceptance: green checks; roadmap and architecture match the code.
 
 - Doze and HyperOS can still delay location for a foreground service; the watchdog alarm and the
   battery/autostart rows mitigate, the on-device check stays open in the roadmap.
-- `USE_EXACT_ALARM` is a Play policy permission for alarm apps; Rovsti is sideloaded and Stops is
+- `USE_EXACT_ALARM` is a Play policy permission for alarm apps; Rosty is sideloaded and Stops is
   an alarm app. If refused later, the fallback is `SCHEDULE_EXACT_ALARM` + `setAlarmClock`.
 - Large GTFS feeds (country-wide) hit the caps by design; the message tells the user to pick a
   city or agency feed.

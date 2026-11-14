@@ -10,9 +10,9 @@ cd "$ROOT"
 # shellcheck source=android-env.sh
 source scripts/android-env.sh
 
-# Rust crates the Kotlin apps use. The deprecated GPUI crates (apps/*, rovsti_ui,
-# rovsti_wa_ui, liquid_glass_kit) are deliberately excluded.
-RUST_PKGS=(-p rovsti_core -p rovsti_app_core -p rovsti_geo -p rovsti_tiles -p rovsti_wa_proto -p rovsti_wa_client -p rovsti_android -p rovsti_ffi)
+# Rust crates the Kotlin apps use. The deprecated GPUI crates (apps/*, rosty_ui,
+# rosty_wa_ui, liquid_glass_kit) are deliberately excluded.
+RUST_PKGS=(-p rosty_core -p rosty_app_core -p rosty_geo -p rosty_tiles -p rosty_wa_proto -p rosty_wa_client -p rosty_android -p rosty_ffi)
 
 step() {
   local name="$1"; shift
@@ -41,12 +41,12 @@ gradle() {
 if [[ -z "${SKIP_RUST:-}" ]]; then
   step "cargo fmt --check" cargo fmt --all --check
   step "cargo test --profile checks (Kotlin-facing crates)" cargo test --profile checks "${RUST_PKGS[@]}"
-  if [[ -f crates/rovsti_android/Cargo.toml ]]; then
-    step "cargo check --release rovsti_android aarch64-linux-android" \
-      cargo check --release --target aarch64-linux-android -p rovsti_android
+  if [[ -f crates/rosty_android/Cargo.toml ]]; then
+    step "cargo check --release rosty_android aarch64-linux-android" \
+      cargo check --release --target aarch64-linux-android -p rosty_android
   fi
-  step "cargo check --release rovsti_ffi aarch64-linux-android" \
-    cargo check --release --target aarch64-linux-android -p rovsti_ffi
+  step "cargo check --release rosty_ffi aarch64-linux-android" \
+    cargo check --release --target aarch64-linux-android -p rosty_ffi
   # With Gradle the exports are checked on the packaged release APK libraries (check-catalog-apk.sh); Rust-only runs
   # check the release .so directly (builds it in release when missing).
   if [[ -n "${SKIP_GRADLE:-}" ]]; then
@@ -64,7 +64,7 @@ if [[ -z "${SKIP_GRADLE:-}" ]]; then
     # :phone has no plain testReleaseUnitTest (flavors): :phone:testPlainReleaseUnitTest is named explicitly.
     step "gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :core-bridge:testRustBridge assembleRelease $shot :phone:$phone_shot" \
       gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :core-bridge:testRustBridge assembleRelease "$shot" ":phone:$phone_shot"
-    step "release APKs have librovsti_ffi.so (arm64-v8a) with the JNI exports" bash scripts/check-catalog-apk.sh
+    step "release APKs have librosty_ffi.so (arm64-v8a) with the JNI exports" bash scripts/check-catalog-apk.sh
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck
   fi

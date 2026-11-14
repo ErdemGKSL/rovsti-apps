@@ -1,29 +1,29 @@
-# Rovsti Phone: owner acceptance checklist
+# Rosty Phone: owner acceptance checklist
 
 For the person testing on the Xiaomi phone. Do the steps in order. Mark each row Pass or Fail
 and write what you saw next to every Fail. You need a second phone to call yours.
 
-APK: `~/Downloads/rovsti-phone-release.apk` (signed by `CN=ErdemGKSL`, built with
+APK: `~/Downloads/rosty-phone-release.apk` (signed by `CN=ErdemGKSL`, built with
 `bash scripts/build-release.sh`).
 
 | # | Step | Expected | Pass / Fail | Notes |
 |---|---|---|---|---|
 | **A. Install** | | | | |
-| 1 | Copy the APK to the phone and open it (or `adb install -r rovsti-phone-release.apk`). Allow installs from this source if asked. | Installs as "Rovsti Phone". | | |
+| 1 | Copy the APK to the phone and open it (or `adb install -r rosty-phone-release.apk`). Allow installs from this source if asked. | Installs as "Rosty Phone". | | |
 | 2 | Open the app. | Keypad/Recents opens with the glass tab bar. Preview or "Fix" banner is allowed to show until step 5. | | |
 | **B. Restricted settings and default app** | | | | |
-| 3 | Settings, Apps, Rovsti Phone, three dots (top right), Allow restricted settings. If the entry is missing, do step 4 once first, then come back. | The entry appears and is accepted. | | |
-| 4 | In the app open Setup (shield button), tap "Default phone app". | The system asks to make Rovsti Phone the default phone app. | | |
+| 3 | Settings, Apps, Rosty Phone, three dots (top right), Allow restricted settings. If the entry is missing, do step 4 once first, then come back. | The entry appears and is accepted. | | |
+| 4 | In the app open Setup (shield button), tap "Default phone app". | The system asks to make Rosty Phone the default phone app. | | |
 | 5 | Accept. Return to the app. | The row shows Done. Phone and call log, Contacts, Notifications and Full-screen notifications: tap each row and allow. Each ends as Done. | | |
 | **C. Xiaomi rows** | | | | |
-| 6 | Autostart: tap "Open settings", switch Rovsti Phone on, come back. | Done (read from the system), or tap "Confirm" if it stays Unverifiable. | | |
+| 6 | Autostart: tap "Open settings", switch Rosty Phone on, come back. | Done (read from the system), or tap "Confirm" if it stays Unverifiable. | | |
 | 7 | Battery saver: open settings, choose "No restrictions". Confirm. | Done or confirmed. | | |
 | 8 | Show on lock screen: open settings, allow, confirm. | Done or confirmed. | | |
 | 9 | Background pop-ups: open settings, allow, confirm. | Done or confirmed. | | |
 | 10 | Close and reopen the app. | Confirmed rows stay Done; when all rows are Done the Setup button stops asking for attention. | | |
 | **D. Outgoing call** | | | | |
 | 11 | Keypad: type a number. Keys react the moment the finger touches. | Digits appear without the layout jumping. | | |
-| 11a | Keypad: type 30 digits on a small (360x640) and a tall phone. | Number font shrinks to 22, then a leading ellipsis keeps the end visible; the number never wraps into the keys and the keys do not move. Layout comes from `rovsti_core::keypad_layout`. | | |
+| 11a | Keypad: type 30 digits on a small (360x640) and a tall phone. | Number font shrinks to 22, then a leading ellipsis keeps the end visible; the number never wraps into the keys and the keys do not move. Layout comes from `rosty_core::keypad_layout`. | | |
 | 11b | Keypad: type a number with many matches and a valid unsaved number. | Matches and the Add to contacts / Message / WhatsApp chips keep a fixed height (extras collapse into "N more"); nothing overlaps the keys, call row or tab bar and the bottom inset is respected. | | |
 | 11c | Keypad: check Portrait (key 56 and up), Compact (small height) and Landscape (rotate). | Keys stay 36..78; letters under digits show only at key 60 and above; in Landscape the grid sits right and the call row left, all inside the screen. | | |
 | 11d | Keypad: rotate to Landscape and type a number. | The title is a single row beside the setup and gear buttons; nothing overlaps the number, matches or keys. | | |
@@ -54,15 +54,15 @@ APK: `~/Downloads/rovsti-phone-release.apk` (signed by `CN=ErdemGKSL`, built wit
 | 33 | Tap End on the ongoing notification while a second call is ringing. | The active call ends, the waiting call keeps ringing. | | |
 | **H. Performance and logs** | | | | |
 | 34 | Follow `docs/perf/README.md` ("Measuring on the phone"). That needs the separate perf APK from `scripts/perf-build.sh`; it replaces the release APK, so reinstall the release one afterwards. | Table filled in. Idle shows `renders=0`. | | |
-| 35 | Logs: `adb logcat -s Rovsti RovstiPerf`. Tag `Rovsti` shows errors and state changes, `RovstiPerf` shows `report ...` lines and call ids. | No phone numbers or contact names appear in either tag. | | |
+| 35 | Logs: `adb logcat -s Rosty RostyPerf`. Tag `Rosty` shows errors and state changes, `RostyPerf` shows `report ...` lines and call ids. | No phone numbers or contact names appear in either tag. | | |
 
 ## Reading the logs
 
-* `adb logcat -s Rovsti` : app messages. Look for `ongoing-call notification failed` (foreground
+* `adb logcat -s Rosty` : app messages. Look for `ongoing-call notification failed` (foreground
   service refused) and `GPUI stopped; calls are unaffected` (UI died, the call is fine).
-* `adb logcat -s RovstiPerf` : one `report scenario=... build_ms p50/p95/p99 ...` line per
+* `adb logcat -s RostyPerf` : one `report scenario=... build_ms p50/p95/p99 ...` line per
   scenario. Targets are in `docs/perf/README.md`.
-* Share a bug with: `adb logcat -d -s Rovsti RovstiPerf GPUI AndroidRuntime > rovsti.log`.
+* Share a bug with: `adb logcat -d -s Rosty RostyPerf GPUI AndroidRuntime > rosty.log`.
 
 Result: ____ of 35 passed. Tester: ____  Date: ____  Phone / HyperOS version: ____
 
@@ -83,9 +83,9 @@ nothing SIM-related may be visible on them, and that is itself a check.
 | S7 | Ringtone and sounds. | The system sound settings open. | | |
 | S8 | System shortcuts: Call forwarding and waiting, Accessibility, Default apps. | Each opens its system page (or App info with "Opened app settings instead"). "Hearing-aid compatibility" shows Supported or Not reported and does nothing. | | |
 | **UJ-10 Backup** | | | | |
-| S9 | Settings, Data, Export favorites and settings. | The system file picker; after saving: "Saved to rovsti-phone-backup-{date}.json". | | |
+| S9 | Settings, Data, Export favorites and settings. | The system file picker; after saving: "Saved to rosty-phone-backup-{date}.json". | | |
 | S10 | Change a setting, then Import and pick that file. | The Import preview sheet lists what it replaces and says it cannot be undone. Import: the setting is back. Cancel leaves everything as is. | | |
-| S11 | Import any text file that is not a backup. | Red row "This isn't a Rovsti Phone backup." and nothing changes. | | |
+| S11 | Import any text file that is not a backup. | Red row "This isn't a Rosty Phone backup." and nothing changes. | | |
 | **Dual SIM (skip on one SIM)** | | | | |
 | S12 | Phone default SIM = "Ask every time". Type a number and tap Call. | "Call with" rises with both SIMs; the number stays in the field. Pick one: the call starts on it and the chip flies to the In-Call screen. | | |
 | S13 | Dismiss the chooser by dragging it down. | Nothing is placed, the number stays typed. | | |
@@ -98,7 +98,7 @@ nothing SIM-related may be visible on them, and that is itself a check.
 ## Owner release 5: Blocking and incoming controls (Epics 17 and 18)
 
 Release 4 ("Blocking", 17.6) was not built on its own: owner release 5 carries both epics. Install
-over the previous release (no uninstall). Rovsti Phone must be the default phone app. Use a second
+over the previous release (no uninstall). Rosty Phone must be the default phone app. Use a second
 phone to call this one; its number goes into the S6, S7 and S8 steps below.
 
 | # | Step | Expected | Pass / Fail | Notes |
@@ -269,7 +269,7 @@ outgoing and WhatsApp calls. Save needs Android 10 or newer (no storage permissi
 | U3 | Zoom in and drag; fling and let go. | The photo pans and never leaves a gap at an edge; it settles with a short glide. | | |
 | U4 | At fit size, drag down, then tap the close button. | Drag down dismisses the viewer (it springs back if short); the close button also closes it. | | |
 | **Save and share** | | | | |
-| U5 | In the viewer tap Save. | Pill "Saved to gallery"; the picture is in Gallery under Pictures/Rovsti. | | |
+| U5 | In the viewer tap Save. | Pill "Saved to gallery"; the picture is in Gallery under Pictures/Rosty. | | |
 | U6 | Tap Share. | The system share sheet opens with the picture; sharing to another app shows the image. | | |
 | **Search and filters** | | | | |
 | U7 | Recents: type part of a name, then part of a number. | The list narrows to matching people and numbers; clearing the field restores the list. | | |
@@ -313,7 +313,7 @@ that accepts photo writes (the system Contacts app does).
 | **QR code (U9)** | | | | |
 | R2-U9a | Contact sheet, tap "Share as QR code". | The viewer opens with the contact's name as title and a QR on a white card. Pinch and double-tap do nothing; swipe down closes. | | |
 | R2-U9b | Scan the QR with another phone. | It offers to add a contact with that name and the numbers. | | |
-| R2-U9c | Tap Save, then Share. | Save: pill "Saved to Photos", file `rovsti-<name>-qr.png` under Pictures/Rovsti. Share: the share sheet opens with the image. | | |
+| R2-U9c | Tap Save, then Share. | Save: pill "Saved to Photos", file `rosty-<name>-qr.png` under Pictures/Rosty. Share: the share sheet opens with the image. | | |
 | R2-U9d | Try a contact with very many numbers. | The QR opens and a pill says "N numbers left out to fit". | | |
 | R2-U9e | Number sheet of an unsaved number, tap "Share as QR code". | A QR of that single number opens, titled with the number. | | |
 | **Photo set, replace, remove (U10)** | | | | |
@@ -351,7 +351,7 @@ that accepts photo writes (the system Contacts app does).
 | R4-U27a | Settings, Blocked numbers, tap Share (hidden when the list is empty). | The share sheet opens with "Blocked numbers" and one line per number. | | |
 | R4-U27b | Tap Unblock all, then Cancel. | A sheet states the count; Cancel changes nothing. | | |
 | R4-U27c | Unblock all, confirm. | The list empties, pill "Unblocked n numbers" with Undo; Undo blocks them all again with a pill. | | |
-| R4-U28 | Settings, Call statistics, pick a range, Export CSV. | The document picker saves `rovsti-call-stats-<range>-<date>.csv`; pill "Exported n people", or "No calls in this range" for an empty range. | | |
+| R4-U28 | Settings, Call statistics, pick a range, Export CSV. | The document picker saves `rosty-call-stats-<range>-<date>.csv`; pill "Exported n people", or "No calls in this range" for an empty range. | | |
 | R4-U30a | Settings, Call notes. | All notes are listed newest first with the person, date and preview; the empty state reads "No call notes yet. Add one from a call's details." | | |
 | R4-U30b | Search by a word, a name and digits. | The list filters; a tap opens that call's details sheet. | | |
 | R4-U30c | Tap a row's delete glyph. | Pill "Note deleted" with Undo; Undo restores it. | | |
@@ -370,12 +370,12 @@ that accepts photo writes (the system Contacts app does).
 | R5-U36b | Same, tap Share, then "All numbers". | Share sheet with the name and every number. The row is absent for a one-number contact and for other actions. | | |
 | R5-U37a | End a connected outgoing call of 4:32. | One pill "Call with <name>, 4:32" with "Add note"; tapping it opens Call details with the note field editing. | | |
 | R5-U37b | End a short incoming call, and a call that already has a note. | A short incoming call shows the Block offer only; a call with a note shows no pill. | | |
-| R5-U38a | Settings, Blocked numbers, tap Export (hidden when empty). | The picker saves `rovsti-blocked-numbers-<date>.csv`; pill "Blocked numbers exported". | | |
+| R5-U38a | Settings, Blocked numbers, tap Export (hidden when empty). | The picker saves `rosty-blocked-numbers-<date>.csv`; pill "Blocked numbers exported". | | |
 | R5-U38b | Tap Unblock all, confirm. | List empty, pill with Undo. | | |
 | R5-U38c | Tap Import and pick the exported file. | Every number is blocked again; pill "Blocked n numbers" with Undo; Undo unblocks them. Importing again says "No new numbers to block"; emergency numbers are skipped. | | |
 | R5-U40 | Settings, Call statistics, Share. | Share sheet with "Call statistics, <range>", totals and up to 10 people. An empty range says "No calls in this range". | | |
 | R5-U41 | Export call history, a person's calls, statistics, blocked numbers, notes; cancel one. | Each pill names what was saved: "Call history exported", "Call statistics exported", "Blocked numbers exported", "Call notes exported"; cancel says "Export cancelled". | | |
-| R5-U42 | Settings, Call notes, Export (hidden when empty). | `rovsti-call-notes-<date>.csv` with columns date,time,name,number,note, newest first. | | |
+| R5-U42 | Settings, Call notes, Export (hidden when empty). | `rosty-call-notes-<date>.csv` with columns date,time,name,number,note, newest first. | | |
 | R5-U43a | Settings, Data, Delete older calls. | A chooser lists 30 days / 90 days / 1 year, each with the count; a row with none is dimmed. | | |
 | R5-U43b | Pick a row, confirm. | Pill "n calls deleted" with Undo; Undo restores them. Cancel changes nothing. | | |
 | R5-fb | Run U36-U43 on a desktop preview. | Android-only ones show "Not available on this platform" rather than staying silent. | | |

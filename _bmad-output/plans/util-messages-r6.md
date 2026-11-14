@@ -1,4 +1,4 @@
-# util-messages: everyday utilities for Rovsti Messages (round 6)
+# util-messages: everyday utilities for Rosty Messages (round 6)
 
 baseSha: 6837afec5206cb8cd7ffdb1d006b3aac6105563a
 
@@ -12,11 +12,11 @@ fixes") shipped M1-M26 and M28-M38 (M27 cut). `git stash list` is empty. The R6 
   (`main.rs::open_row_menu` ~1544) with WA `chat_action` (~2610, `ChatActionKind::{Archive,
   Pin, Mute, Unmute, MarkRead}` via the gateway) and SMS `sms_row_action` (~1767, local
   `SmsMarks` pins/archive/unread, mute tags, `backend.delete_thread`). `mark_all_read`
-  (~2355) + `inbox::MarkAllTargets` is the only bulk path. `rovsti_core::multi_select::
+  (~2355) + `inbox::MarkAllTargets` is the only bulk path. `rosty_core::multi_select::
   Selection<K>` (generic, `toggle`, `select_all`, `retain`, `title(n)`) is reusable.
 - M40 maps links / coordinates in text: none. Only WA location cards have
   `CardAction::OpenMap { url }` with the app-local `geo_url` (`conversation.rs` ~5476).
-  `rovsti_core::location_link` has `is_valid`, `osm_url`, `share_text`. Detection pills
+  `rosty_core::location_link` has `is_valid`, `osm_url`, `share_text`. Detection pills
   are built in the WA strip (`conversation.rs` ~4135-4215: Copy link, Add to calendar,
   `text_detect::actions`) and under SMS bubbles (`sms_conversation.rs` ~3069-3130).
 - M41 notification "Remind me": none. `MessageNotifications.kt` (~111-125) adds Reply,
@@ -58,19 +58,19 @@ fixes") shipped M1-M26 and M28-M38 (M27 cut). `git stash list` is empty. The R6 
 
 ## Plan, round 6 (pure logic first; every step leaves all checks green)
 
-Conventions as in R5: library items are `pub` with doc comments; each new `rovsti_core`
-module is added to `crates/rovsti_core/src/lib.rs` in alphabetical order; app-crate pure
+Conventions as in R5: library items are `pub` with doc comments; each new `rosty_core`
+module is added to `crates/rosty_core/src/lib.rs` in alphabetical order; app-crate pure
 helpers not called yet get `#[cfg_attr(not(test), allow(dead_code))]` until the UI step
 that uses them. Never invent GPUI APIs: grep
 `~/.cargo/git/checkouts/gpui-fusion-141089add1664e03/d6c8412/crates/gpui` first. Disk is
 tight (6.3 GB free at audit): if `df -h /` shows < 6 GB free run
 `rm -rf target/debug/incremental` before building. Every step ends green on:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
-Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused commit per step.
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
+Commits: `Rosty messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused commit per step.
 
-### S1 Pure: places in text, copy choices, next unread (rovsti_core) (M40, M42, M43)
+### S1 Pure: places in text, copy choices, next unread (rosty_core) (M40, M42, M43)
 
-- `crates/rovsti_core/src/location_link.rs` (extend):
+- `crates/rosty_core/src/location_link.rs` (extend):
   - `#[derive(Clone, Debug, PartialEq)] pub struct Place { pub lat: f64, pub lon: f64,
     pub label: Option<String>, pub span: std::ops::Range<usize> }`.
   - `pub fn find_places(text: &str, max: usize) -> Vec<Place>`: recognises
@@ -86,7 +86,7 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
     `conversation.rs::geo_url` logic here (same output, percent-encoded label) and make
     the app call it; keep the app's existing tests passing (move them here).
   - `pub fn coords_text(lat: f64, lon: f64) -> String` -> `"41.008200, 28.978400"`.
-- `crates/rovsti_core/src/copy_choices.rs` (new):
+- `crates/rosty_core/src/copy_choices.rs` (new):
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub struct CopyChoice { pub label:
     &'static str, pub text: String, pub notice: &'static str }`.
   - `pub fn header_choices(name: &str, number: Option<&str>, wa_id: Option<&str>) ->
@@ -95,7 +95,7 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
     (only for a group / LID / channel JID, i.e. when there is no number, the JID's user
     part for `@s.whatsapp.net`, the full JID otherwise). Notices: "Name copied", "Number
     copied", "ID copied".
-- `crates/rovsti_core/src/unread_jump.rs` (extend):
+- `crates/rosty_core/src/unread_jump.rs` (extend):
   - `pub fn next_unread<K: PartialEq>(order: &[(K, bool)], current: Option<&K>) ->
     Option<usize>`: index of the first unread entry after `current` in list order,
     wrapping, never `current` itself; `None` when nothing else is unread.
@@ -106,11 +106,11 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
   not matched, short links skipped, dedup and `max`; geo_url (moved) and coords_text;
   header_choices for 1:1 SMS, saved contact, unknown number (name == number), WA group
   JID, LID JID; next_unread wraps, skips current, `None` cases; labels.
-- Commit: `Rovsti messages: Pure: places in text, copy choices, next unread (rovsti_core)`.
+- Commit: `Rosty messages: Pure: places in text, copy choices, next unread (rosty_core)`.
 
-### S2 Pure: inbox bulk actions (rovsti_core) (M39)
+### S2 Pure: inbox bulk actions (rosty_core) (M39)
 
-- `crates/rovsti_core/src/inbox_bulk.rs` (new):
+- `crates/rosty_core/src/inbox_bulk.rs` (new):
   - `#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)] pub struct BulkFacts { pub
     unread: bool, pub muted: bool, pub pinned: bool, pub archived: bool, pub whatsapp:
     bool, pub sms: bool, pub sms_only: bool }`.
@@ -132,11 +132,11 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
     `pub fn partial_notice(done, failed) -> String` ("Archived 3 chats; 1 failed").
 - Tests: action set for mixed / all-muted / all-pinned / in-archive / any WA row hides
   Delete; pin_room both caps; every notice singular/plural; destructive flag.
-- Commit: `Rovsti messages: Pure: inbox bulk actions (rovsti_core) (M39)`.
+- Commit: `Rosty messages: Pure: inbox bulk actions (rosty_core) (M39)`.
 
 ### S3 Pure + headless: chat reminder from a notification (M41)
 
-- `crates/rovsti_core/src/message_reminder.rs`:
+- `crates/rosty_core/src/message_reminder.rs`:
   - `pub fn chat_reminder(tag: &str, title: &str, preview: &str, minutes: i64, now_ms:
     i64) -> Option<MessageReminder>`: `None` for a blank tag or `minutes <= 0`;
     `message_id` = `""` (a chat reminder; the tap opens the chat, no glow), `at_ms =
@@ -151,7 +151,7 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
   with an empty `message_id` as chat reminders (kept in the list for cancel/rearm only).
 - Tests: chat_reminder None cases and times; for_message ignores blank ids; parse_list
   keeps a chat reminder; headless `msg_remind` ok/blank-tag/bad-JSON.
-- Commit: `Rovsti messages: Pure: chat reminders and msg_remind headless kind (M41)`.
+- Commit: `Rosty messages: Pure: chat reminders and msg_remind headless kind (M41)`.
 
 ### S4 Android seams: "Remind me" notification action (M41)
 
@@ -159,7 +159,7 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
   notification's open intent puts `EXTRA_MESSAGE_ID`/`EXTRA_MESSAGE_AT` only when the id is
   non-blank.
 - `MessageNotifications.kt`: a fourth action "Remind me in 1 hour" (`slot` 3, immutable)
-  -> `ReplyReceiver.ACTION_REMIND = "dev.rovsti.bridge.MSG_REMIND"`, carrying
+  -> `ReplyReceiver.ACTION_REMIND = "dev.rosty.bridge.MSG_REMIND"`, carrying
   `EXTRA_TITLE` (spec.title) and `EXTRA_BODY` (last line) extras. Not for OTP
   notifications (`spec.otp != null`). Check `tag.hashCode() * 4 + slot` request codes:
   slot 3 collides with `openIntent`'s `+ 3`; move both to a `* 8` scheme (Reply 0, Copy 1,
@@ -171,12 +171,12 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
   `message_reminders_changed {}` through the bridge event path used by
   `message_reminder_fired` (no-op when no activity).
 - `apps/messages/src/main.rs` / `backend.rs`: on `message_reminders_changed` reload with
-  `rovsti_android::reminders::armed_messages()` + `parse_list`.
+  `rosty_android::reminders::armed_messages()` + `parse_list`.
 - No new Rust seam is needed (arming is Kotlin-side); add a desktop unit test that the
   event name parses in the app's event dispatch if there is a table for it.
 - `docs/messages-acceptance.md`: rows for M41 (action present, toast, reminder fires and
   opens the chat without a glow, not on OTP notifications).
-- Commit: `Rovsti messages: Android seams: Remind me notification action (M41)`.
+- Commit: `Rosty messages: Android seams: Remind me notification action (M41)`.
 
 ### S5 UI: WhatsApp Copy code, places in text, header copy (M44, M40, M42)
 
@@ -199,7 +199,7 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
   (reuse `info_ui` sheet style or `RowMenu`-like list) listing `header_choices(..)`; tap
   copies via the existing Copy event, pill = `notice`. Haptic `Selection` on hold.
 - `docs/messages-acceptance.md`: rows for M44, M40, M42.
-- Commit: `Rovsti messages: UI: WhatsApp Copy code, maps in text, header copy (M44, M40, M42)`.
+- Commit: `Rosty messages: UI: WhatsApp Copy code, maps in text, header copy (M44, M40, M42)`.
 
 ### S6 UI: Next unread chat (M43)
 
@@ -216,7 +216,7 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
 - Hidden in select mode, while find is open, and on narrow headers if the title would
   truncate below ~80 px (just hide when `label` is None).
 - `docs/messages-acceptance.md`: row for M43.
-- Commit: `Rovsti messages: UI: Next unread chat (M43)`.
+- Commit: `Rosty messages: UI: Next unread chat (M43)`.
 
 ### S7 UI: inbox select mode (M39)
 
@@ -244,14 +244,14 @@ Commits: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`, one focused c
   bool) -> BulkFacts` with tests.
 - `docs/messages-acceptance.md`: rows for M39 (enter/exit, Select all, each action, Undo,
   delete confirm, mixed rows hide Delete, pin caps).
-- Commit: `Rovsti messages: UI: inbox select mode and bulk actions (M39)`.
+- Commit: `Rosty messages: UI: inbox select mode and bulk actions (M39)`.
 
 ### S8 Docs and backlog
 
 - `docs/messages-acceptance.md`: rows for M39-M44 present with pill/confirm/undo
   expectations and desktop Unsupported behaviour.
 - This file: mark shipped rows "done R6", note deferrals; round 7 backlog is M45-M50.
-- Commit: `Rovsti messages: utilities R6 docs and backlog`.
+- Commit: `Rosty messages: utilities R6 docs and backlog`.
 
 ## Shipped (R6) and deferrals
 

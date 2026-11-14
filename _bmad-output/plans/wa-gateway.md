@@ -2,23 +2,23 @@
 
 - Base: `6ca7f07` ("Docs: WhatsApp moves to a shared backend gateway")
 - Unit owner decisions: everything is local except WhatsApp. WhatsApp lives on
-  `services/wa_gateway`. Apps reach it only through `crates/rovsti_wa_client`. A
+  `services/wa_gateway`. Apps reach it only through `crates/rosty_wa_client`. A
   linked account is an *instance*. Each app offers two options: link for the first
   time, or connect to an existing instance with a connect key.
 - Every step leaves these checks green:
 
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android   # from step 2 on
-cargo check -p rovsti_wa_proto  --target aarch64-linux-android   # from step 1 on (cheap)
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android   # from step 2 on
+cargo check -p rosty_wa_proto  --target aarch64-linux-android   # from step 1 on (cheap)
 ```
 
 ## What the code looks like today (source of truth)
 
-- `crates/rovsti_whatsapp` (`session.rs`, `qr.rs`): one local whatsapp-rust `Bot` on
+- `crates/rosty_whatsapp` (`session.rs`, `qr.rs`): one local whatsapp-rust `Bot` on
   its own Tokio thread. It emits `WaEvent {Qr, PairCode, Connected, LoggedOut,
-  Message, Failed}` and maps `MessageContext` to `rovsti_core::Message`. `qr_png()`
+  Message, Failed}` and maps `MessageContext` to `rosty_core::Message`. `qr_png()`
   renders a payload as a PNG.
 - `apps/messages/src/whatsapp.rs`: the `WhatsAppScreen` entity with `LinkState`,
   QR display and share, plus `take_new_messages()`. `main.rs` observes it and folds
@@ -26,13 +26,13 @@ cargo check -p rovsti_wa_proto  --target aarch64-linux-android   # from step 1 o
 - Settings tabs: Phone uses `settings_ui.rs`, whose second-level pages are `Sub
   {Blocked, Replies}` with id prefixes for the raw-touch router. Contacts has
   `settings_tab()`. Stops and Messages have an `empty_state` placeholder.
-- `rovsti_ui::storage`: `data_dir(app, cx)` plus an atomic temp-and-rename save
+- `rosty_ui::storage`: `data_dir(app, cx)` plus an atomic temp-and-rename save
   (`save_prefs`). Text input is the crate-private `SearchField` in
   `apps/{phone,contacts}/src/field.rs`, built on gpui `EntityInputHandler`.
   Clipboard: `cx.read_from_clipboard()` / `cx.write_to_clipboard(ClipboardItem::new_string(..))`.
-- The `rovsti_android` JNI seam only passes strings, ints and bools.
+- The `rosty_android` JNI seam only passes strings, ints and bools.
   `bridge::call_{bool,int,string}`. Kotlin-to-Rust events go through
-  `events::dispatch(kind, json)`, coming from `RovstiBridge.nativeOnEvent`. On desktop
+  `events::dispatch(kind, json)`, coming from `RostyBridge.nativeOnEvent`. On desktop
   every function returns `Error::Unsupported`.
 - Workspace members are `apps/*` and `crates/*`. whatsapp-rust 0.7 is a workspace dep
   with `default-features = false` and `sqlite-storage, tokio-transport, tokio-runtime,
@@ -112,15 +112,15 @@ cargo check -p rovsti_wa_proto  --target aarch64-linux-android   # from step 1 o
 ## Architecture decisions for this unit
 
 - **AD-WA1 Crates.**
-  - `crates/rovsti_wa_proto` is pure and platform-free: wire types, connect keys, URL
+  - `crates/rosty_wa_proto` is pure and platform-free: wire types, connect keys, URL
     rules, the audio frame codec, the event log and the call state machine.
-  - `crates/rovsti_wa_client` is the HTTP and WebSocket client. It uses rustls with
+  - `crates/rosty_wa_client` is the HTTP and WebSocket client. It uses rustls with
     graviola and builds for aarch64-linux-android without the NDK.
-  - `crates/rovsti_wa_ui` is the shared GPUI settings widget (two options) plus QR
-    rendering, which moves here from `rovsti_whatsapp::qr`.
+  - `crates/rosty_wa_ui` is the shared GPUI settings widget (two options) plus QR
+    rendering, which moves here from `rosty_whatsapp::qr`.
   - `services/wa_gateway` is the server, with lib and bin. The "binary only" rule in
     CLAUDE.md covers `apps/*` only; the gateway needs `src/lib.rs` for `tests/`.
-  - `crates/rovsti_whatsapp` is **deleted** in step 7. Its session code moves to
+  - `crates/rosty_whatsapp` is **deleted** in step 7. Its session code moves to
     `services/wa_gateway/src/wa/`.
 - **AD-WA2 Connect keys.**
   - Format: `rwk_` followed by base64url (no padding) of 32 random bytes, 47 characters
@@ -170,16 +170,16 @@ cargo check -p rovsti_wa_proto  --target aarch64-linux-android   # from step 1 o
   - Anyone who can reach the gateway can create an instance, capped by
     `max_instances` (default 4).
   - Failed bearer authentication is limited per IP by a pure token bucket
-    (`rovsti_wa_proto::limit`).
+    (`rosty_wa_proto::limit`).
 
 ---
 
-## Step 1: `rovsti_wa_proto` (pure wire and domain crate)
+## Step 1: `rosty_wa_proto` (pure wire and domain crate)
 
-**Files:** `crates/rovsti_wa_proto/{Cargo.toml,src/lib.rs,src/key.rs,src/url.rs,src/api.rs,src/event.rs,src/log.rs,src/audio.rs,src/call.rs,src/limit.rs}`,
-plus a root `Cargo.toml` workspace dep `rovsti_wa_proto = { path = "crates/rovsti_wa_proto" }`
+**Files:** `crates/rosty_wa_proto/{Cargo.toml,src/lib.rs,src/key.rs,src/url.rs,src/api.rs,src/event.rs,src/log.rs,src/audio.rs,src/call.rs,src/limit.rs}`,
+plus a root `Cargo.toml` workspace dep `rosty_wa_proto = { path = "crates/rosty_wa_proto" }`
 and the workspace deps `sha2 = "0.10"` and `base64 = "0.22"` (both already in the lock).
-The crate depends on serde, serde_json, thiserror, sha2, base64 and rovsti_core (for
+The crate depends on serde, serde_json, thiserror, sha2, base64 and rosty_core (for
 `PhoneNumber::whatsapp_user`). It has no I/O and no randomness, because callers
 supply the bytes.
 
@@ -222,8 +222,8 @@ supply the bytes.
   - `PlaceCall { to }`, `CallStarted { call_id }`, `SetMuted { muted }`
   - `ApiError { code: ErrorCode, message }` with `ErrorCode { Unauthorized,
     NotFound, BadRequest, Conflict, LimitReached, NotConnected, RateLimited, Internal }`
-  - `fn to_rovsti(&WaMessage) -> rovsti_core::Message` (`ThreadId::WhatsApp(chat)`,
-    with the sender parsed as `+{user}` like today's `session::to_rovsti`)
+  - `fn to_rosty(&WaMessage) -> rosty_core::Message` (`ThreadId::WhatsApp(chat)`,
+    with the sender parsed as `+{user}` like today's `session::to_rosty`)
 - `event.rs`: `EventEnvelope { seq, at_ms, event }` and `GatewayEvent { Qr { payload,
   valid_for_ms }, PairCode { code, valid_for_ms }, State(InstanceStatus),
   Message(WaMessage), MessageUpdate { chat, id, reactions, read: bool }, Receipt { chat,
@@ -264,13 +264,13 @@ supply the bytes.
 - CallMachine transitions table and token bucket refill.
 - `LinkRequest::pair_phone` with `+90…` and with a number missing its country code.
 
-**Acceptance:** all checks green, and `cargo check -p rovsti_wa_proto --target
+**Acceptance:** all checks green, and `cargo check -p rosty_wa_proto --target
 aarch64-linux-android` passes.
 
-## Step 2: `rovsti_wa_client` (HTTP + WebSocket, Android-buildable)
+## Step 2: `rosty_wa_client` (HTTP + WebSocket, Android-buildable)
 
-**Files:** `crates/rovsti_wa_client/{Cargo.toml,src/lib.rs,src/tls.rs,src/http.rs,src/events.rs,src/audio.rs,src/error.rs}`
-and a workspace dep entry. Dependencies: `rovsti_wa_proto`, `serde`, `serde_json`,
+**Files:** `crates/rosty_wa_client/{Cargo.toml,src/lib.rs,src/tls.rs,src/http.rs,src/events.rs,src/audio.rs,src/error.rs}`
+and a workspace dep entry. Dependencies: `rosty_wa_proto`, `serde`, `serde_json`,
 `thiserror`, `log`, `futures`, `tokio` (+`net`), `rustls` (no default features; `std`,
 `tls12`, `logging`), `rustls-graviola 0.4`, `webpki-roots 1`, `tokio-tungstenite 0.30`
 (`connect`, `handshake`, `__rustls-tls`), `ureq 3` (`rustls-no-provider`, `json`) and
@@ -322,12 +322,12 @@ ureq's default `rustls` feature; the android check would fail without the NDK.
   .tls_config(TlsConfig::builder().provider(TlsProvider::Rustls)
   .unversioned_rustls_crypto_provider(tls::provider()).root_certs(RootCerts::WebPki).build())
   .http_status_as_error(false)`. The routes are the table in step 3; keep them as
-  `const`s in `rovsti_wa_proto::api::routes` so the server and client share them
+  `const`s in `rosty_wa_proto::api::routes` so the server and client share them
   (add that module in this step).
 - `events.rs`:
   `pub fn subscribe(url: GatewayUrl, key: ConnectKey, after: Option<u64>) -> Result<(EventStream, futures::channel::mpsc::UnboundedReceiver<ClientEvent>), ClientError>`
   spawns a named thread `wa-events` running a 1-worker Tokio runtime, as
-  `rovsti_whatsapp::Session` does today. It connects with
+  `rosty_whatsapp::Session` does today. It connects with
   `connect_async_tls_with_config(request_with_bearer, None, true, Some(Connector::Rustls(tls::client_config())))`,
   remembers the last `seq`, reconnects with `backoff_ms` plus jitter, and answers
   pings. It emits `ClientEvent { Connected, Event(EventEnvelope), Disconnected(String),
@@ -348,8 +348,8 @@ ureq's default `rustls` feature; the android check would fail without the NDK.
   the test (no server crate) answers `GET /v1/instance` with canned JSON. Assert that
   `status()` parses it and that a 401 maps to `Unauthorized`.
 
-**Acceptance:** checks green, plus `cargo check -p rovsti_wa_client --target
-aarch64-linux-android` passes without the NDK, and `cargo tree -p rovsti_wa_client
+**Acceptance:** checks green, plus `cargo check -p rosty_wa_client --target
+aarch64-linux-android` passes without the NDK, and `cargo tree -p rosty_wa_client
 --target aarch64-linux-android -e normal | grep -E "ring|aws-lc"` is empty.
 
 ## Step 3: `services/wa_gateway` core (server, store, keys, events) on a fake driver
@@ -360,8 +360,8 @@ aarch64-linux-android` passes without the NDK, and `cargo tree -p rovsti_wa_clie
   `axum = { version = "0.8", features = ["ws"] }`, `rusqlite = "=0.39.0"`,
   `async-channel = "2"`, `getrandom = "0.3"`, `env_logger`, and `toml = "0.9"` (in the lock).
 - `services/wa_gateway/{Cargo.toml,src/lib.rs,src/main.rs,src/config.rs,src/store.rs,src/auth.rs,src/routes.rs,src/hub.rs,src/driver.rs,tests/api.rs}`.
-  Dependencies: `rovsti_wa_proto`, axum, tokio (`full`), rusqlite, serde, serde_json,
-  log, env_logger, getrandom and async-channel. Dev-dependency: `rovsti_wa_client`, so
+  Dependencies: `rosty_wa_proto`, axum, tokio (`full`), rusqlite, serde, serde_json,
+  log, env_logger, getrandom and async-channel. Dev-dependency: `rosty_wa_client`, so
   the tests use the real client.
 
 What each file holds:
@@ -406,7 +406,7 @@ What each file holds:
   parses `Authorization: Bearer`, runs `ConnectKey::parse`, hashes, looks up in the
   store, and checks `AuthLimiter` for the client IP on failure
   (`ConnectInfo<SocketAddr>`, or `X-Forwarded-For` only when `trust_proxy = true`).
-- `routes.rs` (axum `Router`, `/v1`, constants shared with `rovsti_wa_proto::api::routes`):
+- `routes.rs` (axum `Router`, `/v1`, constants shared with `rosty_wa_proto::api::routes`):
 
   | Method + path | Auth | Body → Result |
   | --- | --- | --- |
@@ -432,7 +432,7 @@ What each file holds:
 - Unit: store migrations on a temp file, key lookup via the hash only (assert that the
   DB file does not contain the plaintext key), revoke, the instance cap, config
   parsing and env override.
-- `tests/api.rs`: bind `127.0.0.1:0` with `FakeDriver` and use `rovsti_wa_client::Gateway`.
+- `tests/api.rs`: bind `127.0.0.1:0` with `FakeDriver` and use `rosty_wa_client::Gateway`.
   It covers create instance → receive `Qr`, then `State(Connected)` over `subscribe`;
   `mint_key`, then a second client with that key sees the same status; revoke → 401
   plus a `KeyRevoked` event; resume with `after` replays only newer events; send_text
@@ -446,7 +446,7 @@ usage.
 Move the session code server-side.
 
 **Files:** `services/wa_gateway/src/wa/{mod.rs,session.rs,convert.rs,history.rs}`.
-`session.rs` starts from `crates/rovsti_whatsapp/src/session.rs`; leave the old crate
+`session.rs` starts from `crates/rosty_whatsapp/src/session.rs`; leave the old crate
 in place until step 7, but stop adding to it. `whatsapp-rust.workspace = true` goes into
 the gateway; no voip feature yet.
 
@@ -491,7 +491,7 @@ the gateway; no voip feature yet.
 - Unit `convert.rs`: build `wa::Message` protos by hand (text, extended text, image
   with caption, reaction, unknown) → the `WaMessage` body. `is_from_me` maps to
   direction, and the group sender JID maps correctly. Port the existing
-  `to_rovsti` expectations.
+  `to_rosty` expectations.
 - `history.rs`: feed a hand-built `wa::HistorySync` (one conversation, two messages)
   through the mapping function, separate from the stream, and check the store rows.
 - No network tests: linking needs a real phone.
@@ -604,25 +604,25 @@ disabled" and runs.
   dropped.
 
 **Acceptance:** checks green (the first build with voip-mlow takes about 3 min).
-`cargo tree -p rovsti_wa_client` still has no whatsapp-rust and no ring.
+`cargo tree -p rosty_wa_client` still has no whatsapp-rust and no ring.
 
-## Step 7: shared link UI (`rovsti_wa_ui`) in all four apps; Messages migrated; `rovsti_whatsapp` removed
+## Step 7: shared link UI (`rosty_wa_ui`) in all four apps; Messages migrated; `rosty_whatsapp` removed
 
 **Files:**
-- `crates/rovsti_ui/src/storage.rs`: add generic `load_json<T: DeserializeOwned>(dir,
+- `crates/rosty_ui/src/storage.rs`: add generic `load_json<T: DeserializeOwned>(dir,
   name) -> Option<T>` and `save_json<T: Serialize>(dir, name, &T) -> io::Result<()>`.
   These are atomic tmp + `sync_all` + rename, factored out of `save_prefs`, which now
   calls `save_json`.
-- `crates/rovsti_ui/src/field.rs`: a public `TextField`, a generalised copy of
+- `crates/rosty_ui/src/field.rs`: a public `TextField`, a generalised copy of
   `apps/contacts/src/field.rs` with `set()`, `text()`, `clear()`, `backspace()`,
   `focus_handle()`, the `EntityInputHandler` impl, and an `input_mode` for URL or phone
   entry. Copy it as it is; check the gpui method names against `d6c8412`
   (`EntityInputHandler`, `TextInputMode`, `TextInputAction` are already used there).
   Contacts can switch to it later; this step leaves the app copies alone.
-- `crates/rovsti_wa_ui/{Cargo.toml,src/lib.rs,src/qr.rs,src/model.rs,src/view.rs}`
-  depends on gpui, rovsti_ui, rovsti_wa_proto, rovsti_wa_client, qrcode, image,
+- `crates/rosty_wa_ui/{Cargo.toml,src/lib.rs,src/qr.rs,src/model.rs,src/view.rs}`
+  depends on gpui, rosty_ui, rosty_wa_proto, rosty_wa_client, qrcode, image,
   futures and log.
-  - `qr.rs`: moved verbatim from `crates/rovsti_whatsapp/src/qr.rs` (`qr_png`, plus its
+  - `qr.rs`: moved verbatim from `crates/rosty_whatsapp/src/qr.rs` (`qr_png`, plus its
     test).
   - `model.rs` (pure, unit-tested state machine, no GPUI):
     ```rust
@@ -654,46 +654,46 @@ disabled" and runs.
     `pub fn link(&self) -> Option<&StoredLink>`, `pub fn gateway(&self) -> Option<Gateway>`,
     `pub fn take_events(&mut self) -> Vec<GatewayEvent>`; the apps observe the entity
     (Messages does today).
-    Components: `rovsti_ui::components::{section, glass_pill, list_row}`, following the
+    Components: `rosty_ui::components::{section, glass_pill, list_row}`, following the
     liquid-glass-gpui skill. Read its SKILL.md first.
 - Apps:
   - Messages: delete `apps/messages/src/whatsapp.rs`. The "WhatsApp" tab hosts
     `Entity<WhatsAppSettings>` (AppId::Messages). `main.rs` observes it, converts
-    `GatewayEvent::Message` through `rovsti_wa_proto::to_rovsti`, and, once connected,
+    `GatewayEvent::Message` through `rosty_wa_proto::to_rosty`, and, once connected,
     loads `Gateway::chats()` in the background to fill `threads`. Remove
-    `rovsti_whatsapp` from `apps/messages/Cargo.toml` and add `rovsti_wa_ui` +
-    `rovsti_wa_client` + `rovsti_wa_proto`. Update the module doc ("WhatsApp runs on
-    the Rovsti gateway").
+    `rosty_whatsapp` from `apps/messages/Cargo.toml` and add `rosty_wa_ui` +
+    `rosty_wa_client` + `rosty_wa_proto`. Update the module doc ("WhatsApp runs on
+    the Rosty gateway").
   - Contacts: add a "WhatsApp" section row in `settings_tab()` that opens the widget
-    as a pushed page or sheet (`rovsti_ui::sheet`).
+    as a pushed page or sheet (`rosty_ui::sheet`).
   - Stops: replace the Settings `empty_state` with a section containing the widget.
   - Phone: add `Sub::WhatsApp` (prefix `"set-wa-"`, title "WhatsApp") and a
     `RowId::WhatsApp` settings row. `settings_body` for `Sub::WhatsApp` renders the
     entity. Check that the raw-touch router passes clicks through to the child entity
     (follow how `Sub::Replies` hosts `SearchField`).
-- Delete `crates/rovsti_whatsapp`, remove its workspace dep line, and update README's
+- Delete `crates/rosty_whatsapp`, remove its workspace dep line, and update README's
   table and Layout.
 
 **Tests:**
-- `rovsti_wa_ui::model`: both flows end to end on inputs (create → Qr → Event(State
+- `rosty_wa_ui::model`: both flows end to end on inputs (create → Qr → Event(State
   Connected) → Save; paste bad key → Failed with the right message; paste good key →
   Verify → Unauthorized → Failed("This key was revoked or is wrong"); Connected →
   ShowKey → CopyToClipboard; Unlink → Forget → Choose), and pair-code flow with a
   number missing its country code.
 - `StoredLink` json round-trip.
-- `rovsti_ui::storage::save_json/load_json` round-trip and corrupt-file → `None`.
+- `rosty_ui::storage::save_json/load_json` round-trip and corrupt-file → `None`.
 - The `qr_png` test moves with the code.
 - If the Phone harness has gpui test-support (`apps/phone` dev-deps), add one test
   that `Sub::WhatsApp` has a unique prefix in the existing prefix-uniqueness test, if
   there is one.
 
-**Acceptance:** checks green; `git grep rovsti_whatsapp` finds only docs and history;
+**Acceptance:** checks green; `git grep rosty_whatsapp` finds only docs and history;
 every app builds on desktop and shows the two options.
 
 ## Step 8: Android wake and call audio, Phone WhatsApp call UI, docs
 
 **Files:**
-- `crates/rovsti_android/src/wa.rs`, added to `lib.rs`. It has desktop
+- `crates/rosty_android/src/wa.rs`, added to `lib.rs`. It has desktop
   `Error::Unsupported` and a `desktop_is_unsupported` test like `documents.rs`:
   - `pub fn push_token() -> Result<String>` calls `call_string("waPushToken")`; an empty
     string means FCM is not packaged.
@@ -704,31 +704,31 @@ every app builds on desktop and shows the two options.
     frame yet.
   - `pub fn call_audio_play(frame: &[i16]) -> Result<()>` calls
     `call_bool("waPlayFrame", &[Arg::Str(&frame_to_base64(frame))])`.
-  - Add the dependency `rovsti_wa_proto` (pure, which keeps `rovsti_android`'s android
+  - Add the dependency `rosty_wa_proto` (pure, which keeps `rosty_android`'s android
     check NDK-free).
-- Kotlin, `crates/rovsti_android/kotlin/dev/rovsti/bridge/`:
+- Kotlin, `crates/rosty_android/kotlin/dev/rosty/bridge/`:
   - `WaCallAudio.kt`: `AudioRecord` with `VOICE_COMMUNICATION`, 16 kHz mono PCM16, and
     `AudioTrack` with `USAGE_VOICE_COMMUNICATION`. It keeps a mic queue of base64 960-sample
     frames, sets `AudioManager.MODE_IN_COMMUNICATION`, and needs `RECORD_AUDIO`.
   - `WaPush.kt`: reads the token via reflection on `com.google.firebase.messaging.FirebaseMessaging`
     and returns `""` when it is absent, so hosts without Firebase still compile. It
     also has `onMessage(data: Map<String,String>)` →
-    `RovstiBridge.nativeOnEvent("wa_push", json)`.
-  - Add the bridge statics to `RovstiBridge.kt`. Document in `docs/android.md` the
+    `RostyBridge.nativeOnEvent("wa_push", json)`.
+  - Add the bridge statics to `RostyBridge.kt`. Document in `docs/android.md` the
     optional `FirebaseMessagingService` subclass that a host adds when
     `google-services.json` is present, and that it shows a `CallStyle.forIncomingCall`
     notification for `kind=call`, as `CallRegistry` does.
-- Pure call-screen logic, `rovsti_core::wa_call` (new module):
-  `WaCallView { peer_label, phase: rovsti_wa_proto::call::CallPhase, muted, elapsed_s }`
+- Pure call-screen logic, `rosty_core::wa_call` (new module):
+  `WaCallView { peer_label, phase: rosty_wa_proto::call::CallPhase, muted, elapsed_s }`
   and `fn from_update(&CallUpdate, now_ms) -> WaCallView`. Tests cover the label
   fallbacks (name → number → "WhatsApp call").
-  `rovsti_core` must not depend on rovsti_wa_proto in the other direction: put the
-  module in `rovsti_wa_proto::call` if a dependency cycle appears, since proto
+  `rosty_core` must not depend on rosty_wa_proto in the other direction: put the
+  module in `rosty_wa_proto::call` if a dependency cycle appears, since proto
   already depends on core.
 - Phone: `apps/phone/src/wa_call.rs`. When `WhatsAppSettings` is connected, Phone keeps
   an `EventStream`. On `GatewayEvent::Call` with phase `Ringing` it shows a glass
   incoming card reusing `incoming.rs` styling with Answer and Decline. Answer runs
-  `accept_call`, then `call_audio()`, then `rovsti_android::wa::call_audio_start()`.
+  `accept_call`, then `call_audio()`, then `rosty_android::wa::call_audio_start()`.
   Two background tasks pump `call_audio_read()` → `CallAudio.mic` and
   `CallAudio.speaker` → `call_audio_play()`. On desktop `Unsupported` means no audio
   and the UI still works. Mute uses `set_muted`; End uses `end_call` +
@@ -737,8 +737,8 @@ every app builds on desktop and shows the two options.
   with `AppId::Messages`. Add `android.permission.RECORD_AUDIO` to Phone's
   `gpuiforge.json`.
 - Docs:
-  - `docs/architecture.md`: the layers diagram adds `services/wa_gateway ⇄ rovsti_wa_client`,
-    `rovsti_wa_ui` and `rovsti_wa_proto`, and drops `rovsti_whatsapp`. Add a new
+  - `docs/architecture.md`: the layers diagram adds `services/wa_gateway ⇄ rosty_wa_client`,
+    `rosty_wa_ui` and `rosty_wa_proto`, and drops `rosty_whatsapp`. Add a new
     "WhatsApp gateway" section with instances, connect keys (AD-WA2), transport (AD-WA3),
     events (AD-WA4), call audio (AD-WA5), push (AD-WA6) and storage (AD-WA7). The
     Storage bullet becomes "Nothing leaves the device except WhatsApp traffic to the
@@ -746,7 +746,7 @@ every app builds on desktop and shows the two options.
     WhatsApp socket alive" in favour of FCM wake.
   - `README.md`: the intro becomes "everything runs on the device except WhatsApp,
     which runs on your own gateway". Add the Layout entries `services/wa_gateway`,
-    `rovsti_wa_proto`, `rovsti_wa_client` and `rovsti_wa_ui`, and a
+    `rosty_wa_proto`, `rosty_wa_client` and `rosty_wa_ui`, and a
     "Run the gateway" quick start.
   - `docs/whatsapp-notes.md`: mark the open questions as resolved and link to the
     architecture section.
@@ -755,7 +755,7 @@ every app builds on desktop and shows the two options.
     the ToS warning.
 
 **Tests:**
-- `rovsti_android::wa` desktop-unsupported test.
+- `rosty_android::wa` desktop-unsupported test.
 - `WaCallView` mapping.
 - If the pump loop is split into a pure `fn pump_step(mic: Option<Vec<i16>>, ..)`
   helper, add a Rechunker test there too.
@@ -772,7 +772,7 @@ an incoming WhatsApp call rings Phone through FCM, and answering gives two-way a
   to enforcement. The UI warning text stays: the shared widget's intro shows it
   before "Link".
 - graviola requires the ARMv8 crypto extensions. If a non-crypto arm64 device ever
-  matters, add a `tls-ring` feature to `rovsti_wa_client`; it needs the NDK to check.
+  matters, add a `tls-ring` feature to `rosty_wa_client`; it needs the NDK to check.
 - The `voip-mlow` codec negotiates MLOW/PCM. `AcceptCall::start` returns
   `AudioFormatNotOffered(rate)` if the caller's offer does not carry the needed rate.
   Surface it as `Ended(Failed("unsupported codec"))`. libopus (`voip-libopus`) is a

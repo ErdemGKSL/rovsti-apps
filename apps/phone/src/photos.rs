@@ -14,7 +14,7 @@ use std::{
 };
 
 use gpui::{Context, RenderImage, SharedString};
-use rovsti_core::lru::Lru;
+use rosty_core::lru::Lru;
 
 use crate::{PhoneApp, backend};
 

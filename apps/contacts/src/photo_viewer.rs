@@ -6,10 +6,10 @@
 //! pan, swipe down to close, a tap hides the chrome, and the bottom bar saves
 //! to the gallery, shares, or (for the contact's own photo) edits.
 //!
-//! The maths lives in `rovsti_core::zoom`. [`PhotoViewer`] holds the gesture
+//! The maths lives in `rosty_core::zoom`. [`PhotoViewer`] holds the gesture
 //! state and the springs that animate it; `photos::image_rect` is the one pure
 //! function that maps a view to the rectangle the image is drawn in. Adapted
-//! from Rovsti Phone's viewer, without the QR mode.
+//! from Rosty Phone's viewer, without the QR mode.
 
 use std::{
     path::PathBuf,
@@ -26,8 +26,8 @@ use gpui::{
     RenderImage, Role, SharedString, StatefulInteractiveElement, Styled, StyledImage, TouchPhase,
     Window, canvas, div, px,
 };
-use rovsti_core::zoom::{self, Point, Size, ZoomView};
-use rovsti_ui::{
+use rosty_core::zoom::{self, Point, Size, ZoomView};
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     layout::content_bottom_inset,
@@ -53,7 +53,7 @@ static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 /// A file name for the gallery: the person's name, safe for a file system.
 pub(crate) fn photo_file_name(title: &str) -> String {
-    match rovsti_core::number_format::file_slug_opt(title) {
+    match rosty_core::number_format::file_slug_opt(title) {
         Some(stem) => format!("{stem}-photo.png"),
         None => "photo.png".to_owned(),
     }
@@ -450,7 +450,7 @@ fn export_png(image: &RenderImage, token: u64) -> Option<PathBuf> {
         pixel.swap(0, 2);
     }
     let pixels = image::RgbaImage::from_raw(u32::try_from(w).ok()?, u32::try_from(h).ok()?, bytes)?;
-    let path = std::env::temp_dir().join(format!("rovsti-contacts-viewer-{token}.png"));
+    let path = std::env::temp_dir().join(format!("rosty-contacts-viewer-{token}.png"));
     pixels
         .save_with_format(&path, image::ImageFormat::Png)
         .ok()?;

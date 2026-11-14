@@ -10,12 +10,12 @@ use gpui::{
     InteractiveElement, IntoElement, MouseButton, ParentElement, Role, SharedString,
     StatefulInteractiveElement, Styled, StyledText, Window, div, prelude::*, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     dial::{self, Push},
     names,
     t9::{T9Hit, T9Scratch},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::large_title,
     glass::{GlassGrid, GlassInteraction, GlassSpec, glass, glass_interactive, paint_glass_grid},
@@ -71,15 +71,15 @@ pub(crate) fn paste_choice_index(id: &str) -> Option<usize> {
 pub const HEADER_H: f32 = 56.0 + 41.0 + 8.0;
 const LONG_ZERO: u64 = 400;
 /// The layout input before the first frame (a 412x915 phone).
-pub fn default_input() -> rovsti_core::keypad_layout::KeypadInput {
-    rovsti_core::keypad_layout::KeypadInput {
+pub fn default_input() -> rosty_core::keypad_layout::KeypadInput {
+    rosty_core::keypad_layout::KeypadInput {
         viewport_w: 412.0,
         viewport_h: 915.0,
         insets: Default::default(),
         text_len: 0,
         header_h: HEADER_H,
-        tab_bar_h: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_HEIGHT) * 1.1,
-        tab_bar_margin: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_MARGIN),
+        tab_bar_h: f32::from(rosty_ui::tokens::metrics::TAB_BAR_HEIGHT) * 1.1,
+        tab_bar_margin: f32::from(rosty_ui::tokens::metrics::TAB_BAR_MARGIN),
     }
 }
 /// Holding a digit key for speed dial or voicemail.
@@ -139,7 +139,7 @@ pub(crate) struct T9Match {
     /// Address of the contact index they were asked of.
     index: usize,
     /// The name format the spans were computed under.
-    format: rovsti_core::wire::NameFormat,
+    format: rosty_core::wire::NameFormat,
     hits: Vec<T9Hit>,
     /// Bumped whenever `hits` changes, so [`T9Rows`] knows to resolve again.
     hits_gen: u64,
@@ -166,7 +166,7 @@ struct T9All {
 struct AllKey {
     hits_gen: u64,
     index: usize,
-    format: rovsti_core::wire::NameFormat,
+    format: rosty_core::wire::NameFormat,
 }
 
 /// What [`T9Rows`] was resolved from.
@@ -174,7 +174,7 @@ struct AllKey {
 struct RowsKey {
     hits_gen: u64,
     index: usize,
-    format: rovsti_core::wire::NameFormat,
+    format: rosty_core::wire::NameFormat,
     exact: Option<i64>,
     /// Rows the layout has room for.
     cap: usize,
@@ -240,17 +240,17 @@ pub(crate) fn visible_suggestions(
 
 /// One hit resolved into a row: name, matched span, number and labels.
 fn suggestion_of(
-    index: &rovsti_core::search::ContactIndex,
+    index: &rosty_core::search::ContactIndex,
     hit: &T9Hit,
-    format: rovsti_core::wire::NameFormat,
+    format: rosty_core::wire::NameFormat,
 ) -> Option<Suggestion> {
     let contact = index.contact(hit.contact_idx)?;
     let number = contact.numbers.get(usize::from(hit.number_idx))?;
     let name = names::display(contact, format).into_owned();
     let span = hit.name_span.and_then(|s| byte_range(&name, s));
     Some(Suggestion {
-        monogram: rovsti_core::avatar::monogram(&name).map(|c| c.to_string().into()),
-        hue: rovsti_core::avatar::hue_index(Some(contact.id)),
+        monogram: rosty_core::avatar::monogram(&name).map(|c| c.to_string().into()),
+        hue: rosty_core::avatar::hue_index(Some(contact.id)),
         label: format!("Call {name}, {}", number.raw).into(),
         number: number.raw.clone().into(),
         span,
@@ -301,7 +301,7 @@ impl Default for Ghost {
         Self {
             digit: None,
             width: 0.0,
-            t: Spring::new(1.0, rovsti_ui::motion_tokens::morph()).with_epsilon(0.002),
+            t: Spring::new(1.0, rosty_ui::motion_tokens::morph()).with_epsilon(0.002),
         }
     }
 }
@@ -502,7 +502,7 @@ impl PhoneApp {
             }
             "kp-vm-set" => {
                 let outcome =
-                    backend::open_system(rovsti_android::telecom::SystemPage::CallSettings);
+                    backend::open_system(rosty_android::telecom::SystemPage::CallSettings);
                 if let Some(text) = outcome.notice() {
                     self.set_status(text);
                 }
@@ -580,14 +580,14 @@ impl PhoneApp {
         match action {
             HoldAction::Plus => {
                 if dial::long_press_zero(&mut self.dialed) {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                    rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
                     self.digit_pop.snap(1.18);
                     self.digit_pop.set_target(1.0);
                 }
             }
             HoldAction::Pause => {
                 if dial::long_press_star(&mut self.dialed) {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                    rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
                     self.digit_pop.snap(1.18);
                     self.digit_pop.set_target(1.0);
                     self.show_notice_pill("Pause added", None, false, cx);
@@ -595,7 +595,7 @@ impl PhoneApp {
             }
             HoldAction::Wait => {
                 if dial::long_press_hash(&mut self.dialed) {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                    rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
                     self.digit_pop.snap(1.18);
                     self.digit_pop.set_target(1.0);
                     self.show_notice_pill("Wait added", None, false, cx);
@@ -605,7 +605,7 @@ impl PhoneApp {
             HoldAction::Erase(step) => self.erase_step(step, window, cx),
             HoldAction::Diagnostics => {
                 if self.sheet.is_open() && self.sheet_kind == crate::SheetKind::Setup {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                    rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
                     self.sheet_kind = crate::SheetKind::Diagnostics;
                     self.presses.release_all();
                 }
@@ -630,7 +630,7 @@ impl PhoneApp {
         } else {
             self.shake.kick(-1400.0);
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
+        rosty_ui::haptics::perform(window, HapticFeedback::Reject);
     }
 
     pub(crate) fn set_status(&mut self, status: impl Into<SharedString>) {
@@ -647,7 +647,7 @@ impl PhoneApp {
                 self.digit_pop.snap(1.18);
                 self.digit_pop.set_target(1.0);
                 self.delete_shown.set_target(1.0);
-                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                 if key == '0' {
                     self.arm_hold(LONG_ZERO, HoldAction::Plus, window, cx);
                 } else if key == '*' {
@@ -699,14 +699,14 @@ impl PhoneApp {
     }
 
     /// The pure layout's input for this frame.
-    pub(crate) fn keypad_input(&self, window: &Window) -> rovsti_core::keypad_layout::KeypadInput {
+    pub(crate) fn keypad_input(&self, window: &Window) -> rosty_core::keypad_layout::KeypadInput {
         let size = window.viewport_size();
         let e = window.insets().effective();
-        let safe = rovsti_ui::layout::safe_area(window);
-        rovsti_core::keypad_layout::KeypadInput {
+        let safe = rosty_ui::layout::safe_area(window);
+        rosty_core::keypad_layout::KeypadInput {
             viewport_w: f32::from(size.width),
             viewport_h: f32::from(size.height),
-            insets: rovsti_core::keypad_layout::Insets {
+            insets: rosty_core::keypad_layout::Insets {
                 top: f32::from(e.top).max(safe.top),
                 right: f32::from(e.right),
                 bottom: f32::from(e.bottom).max(safe.bottom),
@@ -714,8 +714,8 @@ impl PhoneApp {
             },
             text_len: self.dialed.chars().count(),
             header_h: HEADER_H + crate::title_dy(window),
-            tab_bar_h: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_HEIGHT) * 1.1,
-            tab_bar_margin: rovsti_ui::layout::TAB_BAR_GAP,
+            tab_bar_h: f32::from(rosty_ui::tokens::metrics::TAB_BAR_HEIGHT) * 1.1,
+            tab_bar_margin: rosty_ui::layout::TAB_BAR_GAP,
         }
     }
 
@@ -729,7 +729,7 @@ impl PhoneApp {
             if let Some(digit) = last {
                 self.begin_ghost(digit, window);
             }
-            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, HapticFeedback::Selection);
             self.status = None;
             if self.dialed.is_empty() {
                 self.delete_shown.set_target(0.0);
@@ -750,7 +750,7 @@ impl PhoneApp {
         if let Some(digit) = last {
             self.begin_ghost(digit, window);
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.status = None;
         if self.dialed.is_empty() {
             self.delete_shown.set_target(0.0);
@@ -787,7 +787,7 @@ impl PhoneApp {
         if items.is_empty() {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
         self.field_menu = Some(items);
         self.presses.release_all();
         cx.notify();
@@ -805,7 +805,7 @@ impl PhoneApp {
                 if backend::copy_text(&text) != backend::Outcome::Done {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
-                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.show_notice_pill(
                     dial::field_done_text(dial::FieldAction::Copy),
                     None,
@@ -819,7 +819,7 @@ impl PhoneApp {
                 if !old.is_empty() {
                     self.status = None;
                     self.delete_shown.set_target(0.0);
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                     self.show_pill_action(
                         dial::field_done_text(dial::FieldAction::Clear),
                         "Undo",
@@ -846,7 +846,7 @@ impl PhoneApp {
     fn field_menu_overlay(
         &self,
         theme: Theme,
-        layout: &rovsti_core::keypad_layout::KeypadLayout,
+        layout: &rosty_core::keypad_layout::KeypadLayout,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let items = self.field_menu.as_ref()?;
@@ -867,7 +867,7 @@ impl PhoneApp {
                     .aria_label(action.label())
                     .relative()
                     .opacity(1.0 - 0.3 * press)
-                    .child(rovsti_ui::components::glass_pill(theme, action.label()).text_color(ink))
+                    .child(rosty_ui::components::glass_pill(theme, action.label()).text_color(ink))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| this.mouse_down(id, window, cx)),
@@ -946,7 +946,7 @@ impl PhoneApp {
         self.digit_pop.snap(1.1);
         self.digit_pop.set_target(1.0);
         self.delete_shown.set_target(1.0);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
     }
 
     fn open_paste_choose(
@@ -958,7 +958,7 @@ impl PhoneApp {
         if self.sheet.is_visible() {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.paste_choice = Some(list);
         self.sheet_kind = crate::SheetKind::PasteChoose;
         self.sheet.open();
@@ -1096,7 +1096,7 @@ impl PhoneApp {
             self.open_sim_chooser(crate::sim_ui::ChooserFor::Dial, raw.into(), None, cx);
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         let placement = self
             .backend
             .update(cx, |backend, cx| backend.place_call_on(&raw, account, cx));
@@ -1143,13 +1143,13 @@ impl PhoneApp {
             self.invalid(window);
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         self.place_whatsapp(&raw, cx);
     }
 
     fn whatsapp_chip(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let press = self.presses.value("wa-call").clamp(0.0, 1.0);
-        let pill = rovsti_ui::components::glass_pill(theme, "WhatsApp")
+        let pill = rosty_ui::components::glass_pill(theme, "WhatsApp")
             .text_color(call_colors(theme).answer)
             .opacity(1.0 - 0.3 * press);
         div()
@@ -1172,7 +1172,7 @@ impl PhoneApp {
 
     /// Calls voicemail and says how it went, like the Call button does.
     pub(crate) fn voicemail_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         match self
             .backend
             .update(cx, |backend, cx| backend.call_voicemail(cx))
@@ -1243,8 +1243,8 @@ impl PhoneApp {
                 this.dial_match.task = None;
                 let found = hit.map(|(id, name)| Found {
                     id,
-                    monogram: rovsti_core::avatar::monogram(&name).map(|c| c.to_string().into()),
-                    hue: rovsti_core::avatar::hue_index(Some(id)),
+                    monogram: rosty_core::avatar::monogram(&name).map(|c| c.to_string().into()),
+                    hue: rosty_core::avatar::hue_index(Some(id)),
                     label: format!("Dialing {name}").into(),
                     name: name.into(),
                 });
@@ -1404,7 +1404,7 @@ impl PhoneApp {
             .t9
             .hits
             .iter()
-            .take(rovsti_core::t9::MAX_HITS)
+            .take(rosty_core::t9::MAX_HITS)
             .filter_map(|hit| suggestion_of(&index, hit, key.format))
             .collect();
         self.t9.all = T9All {
@@ -1457,7 +1457,7 @@ impl PhoneApp {
         self.digit_pop.snap(1.1);
         self.digit_pop.set_target(1.0);
         self.delete_shown.set_target(1.0);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         cx.notify();
     }
 
@@ -1601,7 +1601,7 @@ impl PhoneApp {
     fn t9_strip(
         &self,
         theme: Theme,
-        layout: &rovsti_core::keypad_layout::KeypadLayout,
+        layout: &rosty_core::keypad_layout::KeypadLayout,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
         let (rows, more) = self.t9_rows();
@@ -1760,7 +1760,7 @@ impl PhoneApp {
         let at_rest = press == 0.0;
         let spec =
             GlassSpec::control(theme).lerp(GlassSpec::lens(theme), press.clamp(0.0, 1.0) * 0.9);
-        let style = rovsti_core::keypad_layout::key_style(size);
+        let style = rosty_core::keypad_layout::key_style(size);
         let glyph = style.glyph;
         let caption = div()
             .h(px(style.caption_h))
@@ -1974,7 +1974,7 @@ impl PhoneApp {
         let colors = theme::colors(theme);
         let press = self.presses.value("paste");
         let shown = 1.0 - self.delete_shown.value.clamp(0.0, 1.0);
-        let pill = rovsti_ui::components::glass_pill(theme, "Paste")
+        let pill = rosty_ui::components::glass_pill(theme, "Paste")
             .text_color(colors.accent)
             .opacity(shown * (1.0 - 0.3 * press.clamp(0.0, 1.0)));
         div()
@@ -1998,7 +1998,7 @@ impl PhoneApp {
     fn status_line(
         &self,
         theme: Theme,
-        layout: &rovsti_core::keypad_layout::KeypadLayout,
+        layout: &rosty_core::keypad_layout::KeypadLayout,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = theme::colors(theme);
@@ -2209,7 +2209,7 @@ impl PhoneApp {
 
         // Every section is a clipped box at a rect from the pure layout, so
         // content can never spill into a neighbour.
-        let section = |r: rovsti_core::keypad_layout::Rect| {
+        let section = |r: rosty_core::keypad_layout::Rect| {
             div()
                 .absolute()
                 .left(px(r.x))
@@ -2389,16 +2389,16 @@ impl PhoneApp {
 type Badges = [Option<(SharedString, Option<usize>)>; 9];
 
 fn speed_badges(
-    map: &std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>,
+    map: &std::collections::BTreeMap<u8, rosty_core::settings::SpeedDialEntry>,
 ) -> Badges {
-    rovsti_core::speed_dial::badges(map).map(|b| b.map(|(n, h)| (SharedString::from(n), h)))
+    rosty_core::speed_dial::badges(map).map(|b| b.map(|(n, h)| (SharedString::from(n), h)))
 }
 
 /// Spoken label per digit key (index `d - 1`); `None` for free digits.
 fn speed_aria_labels(
-    map: &std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>,
+    map: &std::collections::BTreeMap<u8, rosty_core::settings::SpeedDialEntry>,
 ) -> [Option<SharedString>; 9] {
-    let badges = rovsti_core::speed_dial::badges(map);
+    let badges = rosty_core::speed_dial::badges(map);
     std::array::from_fn(|i| {
         let digit = (i + 1).to_string();
         let name = badges[i].as_ref().map(|(n, _)| n.as_str());
@@ -2511,7 +2511,7 @@ mod tests {
         let mut map = std::collections::BTreeMap::new();
         map.insert(
             5,
-            rovsti_core::settings::SpeedDialEntry {
+            rosty_core::settings::SpeedDialEntry {
                 lookup_key: String::new(),
                 number_raw: "0555".into(),
                 name: "Ayşe".into(),
@@ -2538,14 +2538,14 @@ mod tests {
 
     #[test]
     fn suggestion_of_resolves_hits_and_rejects_stale_ones() {
-        let index = rovsti_core::search::ContactIndex::new(crate::sample::long_contacts(5));
+        let index = rosty_core::search::ContactIndex::new(crate::sample::long_contacts(5));
         let hit = T9Hit {
             contact_idx: 0,
             number_idx: 0,
             name_span: None,
             rank: 3,
         };
-        let format = rovsti_core::wire::NameFormat::default();
+        let format = rosty_core::wire::NameFormat::default();
         let row = suggestion_of(&index, &hit, format).expect("first contact resolves");
         assert!(row.label.starts_with("Call "));
         assert!(row.label.ends_with(&*row.number));

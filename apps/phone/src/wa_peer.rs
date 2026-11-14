@@ -4,14 +4,14 @@
 //! A name is the address book's, then WhatsApp's own (a profile, then the name
 //! the call came with), then the number. A picture is the contact's photo,
 //! then the WhatsApp profile picture, then the monogram. Pictures come from
-//! the shared [`rovsti_wa_ui::WaAvatars`]; this module only says which JID to
+//! the shared [`rosty_wa_ui::WaAvatars`]; this module only says which JID to
 //! ask for and reads what is held. Everything here is resolved when a call or
 //! a list changes, never per frame.
 
 use std::sync::Arc;
 
 use gpui::{App, Context, RenderImage, SharedString};
-use rovsti_core::avatar;
+use rosty_core::avatar;
 
 use crate::{PhoneApp, backend::Load, wa_call::dial_number};
 
@@ -54,7 +54,7 @@ pub(crate) fn bare_jid(peer: &str) -> String {
 pub(crate) fn contact_jid<'a>(numbers: impl IntoIterator<Item = &'a str>) -> Option<SharedString> {
     numbers
         .into_iter()
-        .find_map(|n| rovsti_wa_proto::user_jid(n).ok())
+        .find_map(|n| rosty_wa_proto::user_jid(n).ok())
         .map(SharedString::from)
 }
 
@@ -70,7 +70,7 @@ pub(crate) fn caller_name(
         .map(str::trim)
         .filter(|n| !n.is_empty())
         .or(Some(call_label));
-    rovsti_wa_ui::display_name(contact, wa_name, jid)
+    rosty_wa_ui::display_name(contact, wa_name, jid)
 }
 
 impl PhoneApp {
@@ -90,7 +90,7 @@ impl PhoneApp {
             (Load::Ready(index), Some(number)) => index.match_number(&number),
             _ => None,
         };
-        let contact_name = contact.map(|c| rovsti_core::names::display(c, format));
+        let contact_name = contact.map(|c| rosty_core::names::display(c, format));
         let avatars = self.wa_avatars.read(cx);
         let name = caller_name(
             contact_name.as_deref(),

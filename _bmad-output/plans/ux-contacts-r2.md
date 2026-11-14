@@ -1,6 +1,6 @@
-# UX completeness pass: Rovsti Contacts (round 2)
+# UX completeness pass: Rosty Contacts (round 2)
 
-Base: `ee44136a360a574af815ed65fe0b21d3f651458c` (main, "Rovsti contacts: UX gap review fixes").
+Base: `ee44136a360a574af815ed65fe0b21d3f651458c` (main, "Rosty contacts: UX gap review fixes").
 Clean tree, no stash. Round 1 (`ux-contacts.md`, U1 to U7) is done: group picker, Favorites "+",
 per-field card actions, export of every contact, the Save-to setting, and the stale texts.
 
@@ -17,23 +17,23 @@ Add no new GPUI calls.
 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
-| R1 | **High** | **Importing a file you exported adds every contact that has no number a second time.** `import_plan::plan` builds duplicate keys only from phone numbers, so a card with no number never counts as "already in your address book". Since U2, export writes email-only and org-only contacts, so export followed by import duplicates all of them. The confirm card says "Add 12 contacts?" when nothing is new. | `crates/rovsti_core/src/import_plan.rs` |
+| R1 | **High** | **Importing a file you exported adds every contact that has no number a second time.** `import_plan::plan` builds duplicate keys only from phone numbers, so a card with no number never counts as "already in your address book". Since U2, export writes email-only and org-only contacts, so export followed by import duplicates all of them. The confirm card says "Add 12 contacts?" when nothing is new. | `crates/rosty_core/src/import_plan.rs` |
 | R2 | Medium | **Delete Contact cannot be undone.** A confirm card exists, but one wrong tap on "Delete" loses a contact and its photo for good, and the delete also reaches the synced account. Messages and Stops offer Undo after their deletes, so Contacts is the odd one out. This is G10 from round 1, now decided: keep the confirm and defer the delete for 5 s behind an Undo button. | `confirm.rs::delete_contact`, `main.rs::notice` |
 | R3 | Medium | **On a phone with several accounts, groups hide their account.** A new group silently goes to the "Save to" account, and the New Group form has no way to see or change that. The Groups tab and the group page do not show the account. The picker then lists every contact, and members from another account are only reported afterwards as "N contacts are in another account and can't join". A user with Google contacts who makes "Family" on the phone account has no way to understand why nobody can join. | `groups.rs::start_group_edit`, `save_group_edit`, `build_group_items`, `group_page_item`, `picker.rs::picker_item` |
-| R4 | Medium | **Search does not find the email shown on the row.** A contact with no number shows its email as the row subtitle (`WireContact.email`), but `ContactIndex::search` only matches names and digits. Typing "ayse@" finds nothing, even though that text is on screen. | `crates/rovsti_core/src/search.rs::search` |
+| R4 | Medium | **Search does not find the email shown on the row.** A contact with no number shows its email as the row subtitle (`WireContact.email`), but `ContactIndex::search` only matches names and digits. Typing "ayse@" finds nothing, even though that text is on screen. | `crates/rosty_core/src/search.rs::search` |
 | R5 | Low | **Import wording is wrong.** The card says "N contacts without a name or a phone number". The cards that are really skipped are those with no name, a bad number or a bad email (`DraftError`). Cards with no number import fine since round 1. The doc of `export_contacts` still reads "Reads every contact with a number". | `confirm.rs::import_summary`, `transfer.rs` |
 | R6 | Info (not planned) | Still new features, not gaps: choosing the default number (needs a new `IS_SUPER_PRIMARY` write path), importing into a chosen account (Kotlin `importJson` is phone-only by design and the card says "saved on this phone"), sharing a vCard file, and quick actions on list rows. Re-checked and complete: Back through every layer (confirm, sheets, picker, editor, group edit, card, group page, WhatsApp, tabs, search), empty states on all tabs and in the picker, the notices after each write, permission recovery, Try Again, and discard-changes. | — |
 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (if `df` shows under 6 GB free, `rm -rf target/debug/incremental` first).
-Commit each step on its own with a focused message ("Rovsti contacts: ...").
+Commit each step on its own with a focused message ("Rosty contacts: ...").
 
-### V1. rovsti_core: import dedup for cards without a number, and search by email (R1, R4) (done, 4457acb)
+### V1. rosty_core: import dedup for cards without a number, and search by email (R1, R4) (done, 4457acb)
 
-In `crates/rovsti_core/src/import_plan.rs`:
+In `crates/rosty_core/src/import_plan.rs`:
 - Keep the number keys. When a contact has **no** number key, give it these fallback keys:
   - one key per email, `(folded name, "@" + lowercase trimmed email)`. The `@` prefix keeps
     them apart from digit keys. Existing contacts use `WireContact.email`, and incoming cards
@@ -56,7 +56,7 @@ In `crates/rovsti_core/src/import_plan.rs`:
     contacts gives `add.is_empty()`. Use the existing vCard test helpers. If writing goes
     through `ContactDraft`, build the `WireContact`s with matching `email`.
 
-In `crates/rovsti_core/src/search.rs`:
+In `crates/rosty_core/src/search.rs`:
 - `Entry` gets `folded_email: Option<String>` (`fold` of the trimmed `WireContact.email`; none
   when it is blank).
 - `Query::Text(folded)` matches `e.folded_name.contains(&folded)` **or**
@@ -80,7 +80,7 @@ In `crates/rovsti_core/src/search.rs`:
 
 ### V3. Groups show and choose their account (R3) (done, e00019a)
 
-Pure helpers in `crates/rovsti_core/src/contact_edit.rs`, with tests:
+Pure helpers in `crates/rosty_core/src/contact_edit.rs`, with tests:
 - `pub fn group_subtitle(members: usize, account: Option<&str>) -> String`. It returns
   "No contacts" / "1 contact" / "N contacts", and with `Some(key)` appends
   " · {account_label(key)}". For example, "3 contacts · Google, a@b.com" and
@@ -123,7 +123,7 @@ The confirm card stays. After "Delete", the contact disappears at once and the n
 is up. Nothing is restored on Android, so the photo, the id and the sync identity all
 survive an Undo.
 
-Pure logic in `crates/rovsti_core/src/contacts_view.rs` (or `contact_card.rs`, next to
+Pure logic in `crates/rosty_core/src/contacts_view.rs` (or `contact_card.rs`, next to
 `favorites`), with tests:
 - `pub fn without<'a>(contacts: impl IntoIterator<Item = &'a WireContact>, hidden: &[i64]) -> Vec<WireContact>`
   clones every contact whose id is not in `hidden`, in the order given.
@@ -167,12 +167,12 @@ In `apps/contacts/src/main.rs` and `confirm.rs`:
 - Back while the Undo notice shows does nothing special, and the delete still commits on
   time.
 
-Tests: the `without` tests in rovsti_core. The app-side state stays thin glue with no new
+Tests: the `without` tests in rosty_core. The app-side state stays thin glue with no new
 pure logic beyond them.
 
 ### V5. Docs and plan status (done, this commit)
 
-- `docs/roadmap.md` (Rovsti Contacts): tick a "UX completeness pass, round 2" line covering
+- `docs/roadmap.md` (Rosty Contacts): tick a "UX completeness pass, round 2" line covering
   import dedup for contacts without a number, search by email, group accounts, and Undo for
   Delete Contact, each "(done without a device)". Extend the open device-check item with
   "a delete commits after 5 s or when leaving the app".

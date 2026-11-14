@@ -1,16 +1,16 @@
 //! The quick sheet: a long press on a Favorites, group or Recent row lists the
-//! actions of `rovsti_core::contact_quick` for that contact. Also the
+//! actions of `rosty_core::contact_quick` for that contact. Also the
 //! Favorites header buttons (Edit / Done / +).
 
 use gpui::{
     AnyElement, Context, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
     Styled, Window, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_quick::{self, QuickAction},
     contacts_view::{self, CallTarget, NumberVm},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     theme::{self},
     tokens::{Theme, typography},
@@ -147,7 +147,7 @@ impl ContactsApp {
                 if let Some(number) = self.quick_number(&target, "Choose a number to call.", cx) {
                     self.act(
                         "call",
-                        move || rovsti_android::telecom::place_call(&number),
+                        move || rosty_android::telecom::place_call(&number),
                         cx,
                     );
                 }
@@ -157,7 +157,7 @@ impl ContactsApp {
                 {
                     self.act(
                         "send a message",
-                        move || rovsti_android::telecom::send_sms_to(&number),
+                        move || rosty_android::telecom::send_sms_to(&number),
                         cx,
                     );
                 }
@@ -170,7 +170,7 @@ impl ContactsApp {
                 if let Some(number) = self.quick_number(&target, "Tap a number to copy it.", cx) {
                     self.act(
                         "copy the number",
-                        move || rovsti_android::telecom::copy_text(&number),
+                        move || rosty_android::telecom::copy_text(&number),
                         cx,
                     );
                     self.notice = Some("Number copied.".into());
@@ -252,7 +252,7 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::contacts_view::ContactVm;
+    use rosty_core::contacts_view::ContactVm;
 
     fn row(numbers: usize, jid: Option<&str>, starred: bool) -> Row {
         let mut row = Row::from(ContactVm {

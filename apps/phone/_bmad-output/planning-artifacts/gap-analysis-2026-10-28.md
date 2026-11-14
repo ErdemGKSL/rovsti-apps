@@ -1,25 +1,25 @@
 ---
-title: "Rovsti Phone: gap analysis after the first device test"
+title: "Rosty Phone: gap analysis after the first device test"
 created: 2026-10-28
 status: final
 inputs:
-  - apps/phone/_bmad-output/planning-artifacts/prds/prd-rovsti-phone-2026-10-27/prd.md
+  - apps/phone/_bmad-output/planning-artifacts/prds/prd-rosty-phone-2026-10-27/prd.md
   - apps/phone/_bmad-output/planning-artifacts/epics.md
   - apps/phone/_bmad-output/implementation-artifacts/sprint-status.yaml
-  - apps/phone/src/*.rs, apps/phone/platforms/android/app/src/main/kotlin/dev/rovsti/phone/*.kt (read for "already built" claims)
+  - apps/phone/src/*.rs, apps/phone/platforms/android/app/src/main/kotlin/dev/rosty/phone/*.kt (read for "already built" claims)
 feeds: PRD update, FR-41 to FR-73, NFR-14 to NFR-18, proposed Epics 14 to 21
 ---
 
-# Rovsti Phone: gap analysis (2026-10-28)
+# Rosty Phone: gap analysis (2026-10-28)
 
-The owner tested v0.1 (Epics 1 to 13) and found it lacks features a modern dialer has, for example a detailed audio-route picker and shortcuts for conference calls. This document lists what mainstream dialers and the Android Telecom API offer, compares it with what Rovsti Phone has, decides what is in scope, and groups the in-scope work into proposed epics. The PRD update (FR-41+) follows directly from section 5.
+The owner tested v0.1 (Epics 1 to 13) and found it lacks features a modern dialer has, for example a detailed audio-route picker and shortcuts for conference calls. This document lists what mainstream dialers and the Android Telecom API offer, compares it with what Rosty Phone has, decides what is in scope, and groups the in-scope work into proposed epics. The PRD update (FR-41+) follows directly from section 5.
 
 ## 1. Method and evidence quality
 
 - **API facts** were checked against the Android SDK platform 36.1 `api-versions.xml` on this machine (`~/Android/Sdk/platforms/android-36.1/data/api-versions.xml`). That file is generated from the same source as developer.android.com's "added in / deprecated in" markers. The developer.android.com reference pages themselves could not be read through the fetch tool (each page is ~335 KB of navigation, the class body is cut off), so no developer.android.com page was read in full.
 - **Behavioural facts** (who may write the blocklist, endpoint type meanings) were checked in AOSP source on android.googlesource.com.
 - **Competitor facts** come from vendor support pages where the search reached them. Everything else is marked **K** (common knowledge, not re-verified in this run). Marks: **V** = verified in a source below, **K** = from knowledge, unverified, **?** = could not verify and must be tested on the device.
-- Confirmed in the repo (not the web): the app already uses the Android 14 `CallEndpoint` API (`RovstiInCallService` overrides `onCallEndpointChanged` and `onAvailableCallEndpointsChanged`; `CallRegistry.route(name)` picks the first endpoint of a given type), declares `BLUETOOTH_CONNECT`, `WRITE_CALL_LOG` and `WRITE_CONTACTS`, and the Rust wire model `AudioRoute` has only Earpiece, Speaker, Bluetooth, WiredHeadset, Unknown. So the data needed for a named-device picker reaches Kotlin but is flattened to a type before Rust sees it. That is the single most important finding for the owner's first complaint.
+- Confirmed in the repo (not the web): the app already uses the Android 14 `CallEndpoint` API (`RostyInCallService` overrides `onCallEndpointChanged` and `onAvailableCallEndpointsChanged`; `CallRegistry.route(name)` picks the first endpoint of a given type), declares `BLUETOOTH_CONNECT`, `WRITE_CALL_LOG` and `WRITE_CONTACTS`, and the Rust wire model `AudioRoute` has only Earpiece, Speaker, Bluetooth, WiredHeadset, Unknown. So the data needed for a named-device picker reaches Kotlin but is flattened to a type before Rust sees it. That is the single most important finding for the owner's first complaint.
 
 ### Sources
 
@@ -34,18 +34,18 @@ The owner tested v0.1 (Epics 1 to 13) and found it lacks features a modern diale
 
 ## 2. Platform constraints that decide scope
 
-1. **Sideloaded default dialer.** Rovsti Phone holds `ROLE_DIALER` by sideload. On Android 15+ the Dialer role is a restricted setting for sideloaded apps; the owner already allows it once in App info (three dots, "Allow restricted settings") (V, 9to5google / Android Authority; menu path is user-reported). Everything in this document assumes that is done. Anything needing privileged permissions (`MODIFY_PHONE_STATE`, `READ_PRIVILEGED_PHONE_STATE`, `CAPTURE_AUDIO_OUTPUT`) is out of reach and flagged "privileged".
+1. **Sideloaded default dialer.** Rosty Phone holds `ROLE_DIALER` by sideload. On Android 15+ the Dialer role is a restricted setting for sideloaded apps; the owner already allows it once in App info (three dots, "Allow restricted settings") (V, 9to5google / Android Authority; menu path is user-reported). Everything in this document assumes that is done. Anything needing privileged permissions (`MODIFY_PHONE_STATE`, `READ_PRIVILEGED_PHONE_STATE`, `CAPTURE_AUDIO_OUTPUT`) is out of reach and flagged "privileged".
 2. **No INTERNET permission.** Rules out caller-ID/spam lookup, reverse lookup, cloud backup, AI call screening, visual-voicemail IMAP, any update check.
 3. **Default-dialer-only providers.** `BlockedNumberContract` accepts the default phone app (V, AOSP source), so blocking is possible. Visual voicemail needs a carrier VVM client plus network, so it is out.
-4. **SMS.** Reject-with-message goes through `Call.reject(true, text)` (API 23+, V: `reject(ZLjava/lang/String;)V`). Which component actually sends the text (Telecom, the default SMS app, or the dialer's own `SEND_SMS`) is **? and needs a device spike**; the SMS runtime permission is itself a restricted setting for sideloaded apps on Android 15 (V, 9to5google), and Xiaomi adds its own "Send SMS" app-op. The safe fallback is `ACTION_SENDTO sms:` with the text prefilled (opens the default SMS app, which may be Rovsti Messages).
-5. **HyperOS.** Xiaomi's own dialer is "Phone" with its own blocklist, recorder and smart dial; Rovsti Phone cannot read or share the Xiaomi harassment filter. The system `BlockedNumbers` provider is the shared store. Behaviour of the system provider versus Xiaomi's filter on HyperOS is **?** (a German forum guide says HyperOS suppresses blocked calls before the log; weak evidence).
+4. **SMS.** Reject-with-message goes through `Call.reject(true, text)` (API 23+, V: `reject(ZLjava/lang/String;)V`). Which component actually sends the text (Telecom, the default SMS app, or the dialer's own `SEND_SMS`) is **? and needs a device spike**; the SMS runtime permission is itself a restricted setting for sideloaded apps on Android 15 (V, 9to5google), and Xiaomi adds its own "Send SMS" app-op. The safe fallback is `ACTION_SENDTO sms:` with the text prefilled (opens the default SMS app, which may be Rosty Messages).
+5. **HyperOS.** Xiaomi's own dialer is "Phone" with its own blocklist, recorder and smart dial; Rosty Phone cannot read or share the Xiaomi harassment filter. The system `BlockedNumbers` provider is the shared store. Behaviour of the system provider versus Xiaomi's filter on HyperOS is **?** (a German forum guide says HyperOS suppresses blocked calls before the log; weak evidence).
 6. **Layout rule from the owner.** Controls appear in reserved slots and are disabled (not removed) when unsupported, so the main layout never shifts. This supersedes FR-17's "shown only when supported" wording (the capability gate stays; the visibility rule changes).
 
 ## 3. Comparison table
 
-Columns: **G** Google Phone, **S** Samsung Phone, **X** Xiaomi/HyperOS Dialer, **A** Apple Phone. "Y" = has it, "-" = no or unknown, "K" = from knowledge only. "Local?" = feasible with no network and no privileged permission. "Now" = status in Rovsti Phone v0.1. Effort S (about one story), M (2 to 4 stories), L (5+ or a spike). Value is for the owner (H/M/L).
+Columns: **G** Google Phone, **S** Samsung Phone, **X** Xiaomi/HyperOS Dialer, **A** Apple Phone. "Y" = has it, "-" = no or unknown, "K" = from knowledge only. "Local?" = feasible with no network and no privileged permission. "Now" = status in Rosty Phone v0.1. Effort S (about one story), M (2 to 4 stories), L (5+ or a spike). Value is for the owner (H/M/L).
 
-| # | Feature | Who has it | Android API (since API, verified in SDK 36.1) | Local-only feasible? | Effort | Value | Now in Rovsti Phone? |
+| # | Feature | Who has it | Android API (since API, verified in SDK 36.1) | Local-only feasible? | Effort | Value | Now in Rosty Phone? |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Audio route picker: earpiece, speaker, wired, each Bluetooth device by name, live updates | G Y, S Y, X Y, A Y (K) | `InCallService.onAvailableCallEndpointsChanged`, `onCallEndpointChanged`, `requestCallEndpointChange(CallEndpoint, Executor, OutcomeReceiver)` (34); `CallEndpoint.getEndpointName()`, `getEndpointType()`, `getIdentifier()`; types EARPIECE, BLUETOOTH, WIRED_HEADSET, SPEAKER, STREAMING, UNKNOWN (V). `setAudioRoute` and `CallAudioState` deprecated in 34 | Yes | M | H (owner asked) | Deferred. Plumbing exists; type-only toggle (FR-15) |
 | 2 | Hearing-aid route and indicator | S Y (K), G Y (K, via Bluetooth), A Y (MFi, K) | No `CallEndpoint` type for hearing aids (V, AOSP). A BLE hearing aid shows as a TYPE_BLUETOOTH endpoint with its device name. `TelephonyManager.isHearingAidCompatibilitySupported()` (23) reports the handset's HAC support. The hearing-aid pairing UI is system Settings | Partly: name and route yes; HAC icon only as "supported" flag; no special mode | S | M | New. Shortcut to Bluetooth/Accessibility settings only |
@@ -88,7 +88,7 @@ Columns: **G** Google Phone, **S** Samsung Phone, **X** Xiaomi/HyperOS Dialer, *
 | 39 | RTT / TTY | G Y, S Y, A Y | `Call.sendRttRequest()` (26), `PhoneAccount.CAPABILITY_RTT` (26), `Call.Details.PROPERTY_RTT` (28), `TelecomManager.isTtySupported()` (28), `ACTION_SHOW_CALL_ACCESSIBILITY_SETTINGS` (23) | Possible but carrier gated | L | L | Out. A Settings shortcut to the system accessibility page is in |
 | 40 | Video calls | G Y, S Y, A Y | `VideoProfile`, `CAPABILITY_SUPPORTS_VT_*` | Carrier gated | L | N/A (owner: video N/A) | Out |
 | 41 | Call forwarding, call waiting, caller-ID settings | G Y, S Y (V, call waiting), X Y | Carrier network settings; open system page `TelecomManager.ACTION_SHOW_CALL_SETTINGS` (V, present) | Shortcut only | S | L | New (shortcut only) |
-| 42 | Call notes / contact notes | A (K), few Android | App-local table; Rovsti rule: no own contacts DB | Yes | M | L | Out for now (backlog) |
+| 42 | Call notes / contact notes | A (K), few Android | App-local table; Rosty rule: no own contacts DB | Yes | M | L | Out for now (backlog) |
 | 43 | Backup/restore of local app data | Y via cloud on others | Local JSON via Storage Access Framework (`ACTION_CREATE_DOCUMENT`/`OPEN_DOCUMENT`, no permission) | Yes | S | M | New |
 | 44 | Theme follows system | all Y | built | Yes | - | - | Built (FR-37) |
 | 45 | Assisted dialing (country code prefix) | G Y | `Call.Details.PROPERTY_ASSISTED_DIALING` (30); carrier-config driven | Possible | S | L | Out |
@@ -122,7 +122,7 @@ Suggested order: 14, 15, 16, 17, 18, then 19 to 21 in any order. Each epic ends 
 
 ### Epic 14: Audio routes and devices (P1)
 
-- 14.1 Wire: endpoint list DTO (identifier, type, name, selected, available) from `RovstiInCallService`; golden fixtures; select by identifier. Keep the old `AudioRoute` for compatibility.
+- 14.1 Wire: endpoint list DTO (identifier, type, name, selected, available) from `RostyInCallService`; golden fixtures; select by identifier. Keep the old `AudioRoute` for compatibility.
 - 14.2 Route picker UI: glass sheet/popover from the Audio control with one row per endpoint (icon by type, name, check mark on the current one), spring open, live list updates without the sheet jumping.
 - 14.3 Audio control behaviour: tap toggles speaker/earpiece when no other endpoint exists; with a headset or Bluetooth present the tap opens the picker; the control label shows the current route name. Reduced motion respected.
 - 14.4 Bluetooth and hearing-aid shortcuts: footer row "Bluetooth settings" and "Hearing aids" (accessibility settings), `BLUETOOTH_CONNECT` runtime request when names are missing, HAC support flag shown in Settings.
@@ -171,7 +171,7 @@ Suggested order: 14, 15, 16, 17, 18, then 19 to 21 in any order. Each epic ends 
 
 ### Epic 20: Keypad intelligence (P2)
 
-- 20.1 T9 index in `rovsti_core` (letters to digits, prefix and word-start match, ranking), unit tested; results strip above the keypad, tap fills or calls.
+- 20.1 T9 index in `rosty_core` (letters to digits, prefix and word-start match, ranking), unit tested; results strip above the keypad, tap fills or calls.
 - 20.2 Speed dial: assign digits 2 to 9 in Settings or from a Contact Sheet; long-press on the keypad key dials.
 - 20.3 Voicemail: long-press 1 calls voicemail (`getVoiceMailNumber`), Voicemail tile in Recents filter; no badge unless the device exposes one (**?**).
 - 20.4 Emergency: number recognised with `isEmergencyNumber`, button relabelled "Emergency call", no animation delay, never blocked; Emergency info shortcut in Settings if the intent resolves.

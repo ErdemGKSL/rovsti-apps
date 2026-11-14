@@ -24,9 +24,9 @@ first release build (2026-11-03).
   (Found with Process Monitor: filter Result is SHARING VIOLATION.)
 - **Git symlinks.** `core.symlinks=false` checks a symlink out as a small text file, and
   gpuiforge's source snapshot refuses symlinks and junctions. No host uses one now: all four
-  add `crates/rovsti_android/kotlin` as a Gradle source directory in `app/build.gradle.kts`.
-  (Phone used to link `kotlin/dev/rovsti/bridge`, which needed a temporary copy to build.)
-- **Signing.** All apps use the release key in `<ownCloud>\Personal\rovsti`
+  add `crates/rosty_android/kotlin` as a Gradle source directory in `app/build.gradle.kts`.
+  (Phone used to link `kotlin/dev/rosty/bridge`, which needed a temporary copy to build.)
+- **Signing.** All apps use the release key in `<ownCloud>\Personal\rosty`
   (`rovsti-release.jks`, alias `rovsti`, SHA-256 `df5123f5...e68d8fc5`; see
   `docs/phone-build.md`, "Release key"). The phone's apps carry it, so never sign with a new
   throwaway key: Linux and Windows builds must match or the update is refused.

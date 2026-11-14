@@ -1,8 +1,8 @@
-# UX completeness pass: Rovsti Phone (round 1)
+# UX completeness pass: Rosty Phone (round 1)
 
 Base: `a3113fc2bea0f28f7ce7b1f5a09d0ffa6cf0637c` (main). No stash, clean tree.
-Scope: `apps/phone`, `crates/rovsti_core`, `crates/rovsti_android` (Phone seams), WhatsApp calls
-through `rovsti_wa_client`/`rovsti_wa_ui`. No new product features and no backends. Intent is
+Scope: `apps/phone`, `crates/rosty_core`, `crates/rosty_android` (Phone seams), WhatsApp calls
+through `rosty_wa_client`/`rosty_wa_ui`. No new product features and no backends. Intent is
 taken from the app's own planning (`apps/phone/_bmad-output/planning-artifacts/epics.md`,
 Epics 19 to 21, still `backlog` in `sprint-status.yaml`) and from model fields that already exist.
 Pure logic goes first and is tested. GPUI glue stays thin and uses only GPUI APIs the app
@@ -15,10 +15,10 @@ audits from the user's side.
 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
-| G1 | **High** | **The Contact sheet has no Message, Copy, Share or Block.** The only actions are Call, WhatsApp, star and "Edit in Contacts". `telecom::share_text` and `telecom::copy_text` exist in `rovsti_android` but Phone never uses them. You cannot text, copy, share or block a saved person from Phone (story 19.3). | `contacts.rs::contact_sheet_body/contact_sheet_act` |
+| G1 | **High** | **The Contact sheet has no Message, Copy, Share or Block.** The only actions are Call, WhatsApp, star and "Edit in Contacts". `telecom::share_text` and `telecom::copy_text` exist in `rosty_android` but Phone never uses them. You cannot text, copy, share or block a saved person from Phone (story 19.3). | `contacts.rs::contact_sheet_body/contact_sheet_act` |
 | G2 | **High** | **The Number sheet (Recents info for an unknown number) only offers Call and Add to contacts.** Message, Copy, Block and WhatsApp call exist only in the hidden 450 ms long-press menu (`block_ui::RowMenu`). | `recents.rs::number_sheet_body` |
-| G3 | **High** | **No call history anywhere.** `CallLogEntry.duration_s` and `ExtraCall.duration_s` are loaded but never shown. A grouped row ("Ayşe (3)") cannot be opened to see when each call happened or how long it lasted. Info on a known number opens the Contact sheet, which shows no calls at all (story 21.1 data). | `recents.rs`, `contacts.rs`, `rovsti_core::recents` |
-| G4 | **High** | **Favorites cannot be reordered.** `PrefsV2.favorites_order` is stored, validated, exported and imported, but the grid ignores it (alphabetical `rows_of`) and no UI writes it (story 19.5, FR-64). | `contacts.rs::sync_contacts`, `rovsti_core::settings` |
+| G3 | **High** | **No call history anywhere.** `CallLogEntry.duration_s` and `ExtraCall.duration_s` are loaded but never shown. A grouped row ("Ayşe (3)") cannot be opened to see when each call happened or how long it lasted. Info on a known number opens the Contact sheet, which shows no calls at all (story 21.1 data). | `recents.rs`, `contacts.rs`, `rosty_core::recents` |
+| G4 | **High** | **Favorites cannot be reordered.** `PrefsV2.favorites_order` is stored, validated, exported and imported, but the grid ignores it (alphabetical `rows_of`) and no UI writes it (story 19.5, FR-64). | `contacts.rs::sync_contacts`, `rosty_core::settings` |
 | G5 | **High** | **The Frequent row is missing.** `call_log::frequent` (tested) and `Settings.show_frequent` (default on, part of backup) exist, but Favorites has no Frequent row and Settings has no "Show Frequent" toggle (story 19.6). | `contacts.rs::favorites_body`, `settings_ui.rs` |
 | G6 | Medium | **Keypad: a typed number that matches no contact has no "Add to contacts" or "Message".** Story 19.1 puts "Add to contacts" in the status-line slot. | `keypad.rs::status_line` |
 | G7 | Medium | **Tapping a WhatsApp row in Recents calls back over the carrier.** A missed WhatsApp call is called back as a cellular call. The WhatsApp call-back is only in the long-press menu. | `recents.rs::recents_call` |
@@ -26,23 +26,23 @@ audits from the user's side.
 | G9 | Low | **Speed dial "Remove" acts at once with no feedback or Undo.** Every other destructive action in Phone (Block, Unblock) gives a pill with Undo. | `speed_dial_ui.rs::speed_dial_tap` |
 | G10 | Low | **Quick replies "Clear" empties a field with no Undo.** | `replies_ui.rs` (CLEAR_IDS branch) |
 | G11 | Low | A stale comment says "Holding a row opens the same sheet as its info button", but holding a row opens the row menu. | `recents.rs` ~l.704 |
-| G12 | High (deferred, round 2) | **Delete call history (one entry, a grouped row, or everything) does not exist** (stories 21.2, 21.3). This needs a new shared Kotlin `CallLogWrite` (`WRITE_CALL_LOG`), a `rovsti_android::providers` mirror and spike S12 on a device. It is a seam plus a permission, not glue, so it is planned on its own next round. | `crates/rovsti_android`, Kotlin bridge |
-| G13 | Info (not planned) | Delete contact (19.2) is reachable through "Edit in Contacts" (Rovsti Contacts has Delete). Contact ringtone (19.4) is gated off by design (`Caps.CONTACT_RINGTONE = false`). The in-app editor (19.7) is P3 and cut first. Call quality (21.4) needs feature bits that no seam carries. The full Call details page with S35 (21.1) is covered for the user by G3's in-sheet history. Blocked numbers, Backup, Quick replies reset, the WhatsApp settings (link and connect key) and Diagnostics copy are already complete, with pills. | — |
+| G12 | High (deferred, round 2) | **Delete call history (one entry, a grouped row, or everything) does not exist** (stories 21.2, 21.3). This needs a new shared Kotlin `CallLogWrite` (`WRITE_CALL_LOG`), a `rosty_android::providers` mirror and spike S12 on a device. It is a seam plus a permission, not glue, so it is planned on its own next round. | `crates/rosty_android`, Kotlin bridge |
+| G13 | Info (not planned) | Delete contact (19.2) is reachable through "Edit in Contacts" (Rosty Contacts has Delete). Contact ringtone (19.4) is gated off by design (`Caps.CONTACT_RINGTONE = false`). The in-app editor (19.7) is P3 and cut first. Call quality (21.4) needs feature bits that no seam carries. The full Call details page with S35 (21.1) is covered for the user by G3's in-sheet history. Blocked numbers, Backup, Quick replies reset, the WhatsApp settings (link and connect key) and Diagnostics copy are already complete, with pills. | — |
 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (if `df` shows under 6 GB free, `rm -rf target/debug/incremental` first).
 
-### P1. rovsti_core pure logic: history lines, duration, favorites order (+ tests)
-`crates/rovsti_core/src/call_log.rs`:
+### P1. rosty_core pure logic: history lines, duration, favorites order (+ tests)
+`crates/rosty_core/src/call_log.rs`:
 - `pub fn format_duration(seconds: u64) -> SmallText<16>`: `m:ss`, or `h:mm:ss` from an hour on.
   Make `apps/phone/src/wa_call.rs::format_elapsed` call it (`.to_string()`) so the two never drift.
 - `pub fn clock_text(then_ms: i64, tz_offset_s: i32, hour12: bool) -> RelativeTime`: the
   existing private `push_clock` exposed for one timestamp.
 
-`crates/rovsti_core/src/recents.rs`:
+`crates/rosty_core/src/recents.rs`:
 - `#[derive(Clone, Debug, PartialEq, Eq)] pub struct HistoryLine { pub call_type: CallType, pub whatsapp: bool, pub date_ms: i64, pub duration_s: u64 }`
 - `pub fn history(entries: &[CallLogEntry], extras: &[ExtraCall], numbers: &[&str], limit: usize) -> Vec<HistoryLine>`:
   - Takes call-log entries and WhatsApp extras whose number matches any of `numbers`
@@ -57,7 +57,7 @@ Checks after every step:
     `clock_text`. When `duration_s > 0` and the type is not Missed or Declined, it ends with
     `" · " + format_duration`.
 
-`crates/rovsti_core/src/contacts_view.rs`:
+`crates/rosty_core/src/contacts_view.rs`:
 - `pub fn order_favorites<'a>(favorites: &'a [WireContact], order: &[String]) -> Vec<&'a WireContact>`:
   - Contacts whose `lookup_key` is in `order` come first, by their index there.
   - The rest (unknown key or no key) follow, sorted by `display_name`, case-insensitive, then by
@@ -91,7 +91,7 @@ Tests:
   - `pub(crate) fn action_strip(app, theme, ids: [&'static str; 4], blocked: bool, cx) -> AnyElement`:
     a row of four 64 x 64 `flat_glass` tiles with a 12 px gap. Each tile has an icon
     (`LucideMessageCircle`, `LucideCopy`, `LucideShare2` (check the icon exists in
-    `rovsti_ui::Icon`, else `LucideShare`), `LucideBan`) and a caption: Message, Copy, Share,
+    `rosty_ui::Icon`, else `LucideShare`), `LucideBan`) and a caption: Message, Copy, Share,
     and Block or Unblock. Tiles press on touch and act on finger-up through `touch_surface`.
   - `PhoneApp::run_strip_action(&mut self, action, number: SharedString, who: SharedString, window, cx)`:
     - Message calls `backend::send_sms_to`; a failure goes to the pill with `why_not`.
@@ -145,7 +145,7 @@ Acceptance:
   - Each line's aria is "{title}, {detail}".
   - Lines are not tappable: the sheet already has Call.
 - Desktop preview: the sample call log (`sample.rs`) must give the sample contacts a few lines,
-  with durations, so `ROVSTI_PREVIEW_CONTACT=1` shows the section.
+  with durations, so `ROSTY_PREVIEW_CONTACT=1` shows the section.
 
 Acceptance:
 - Info on "Ayşe (3)" shows three lines with times and durations.
@@ -232,7 +232,7 @@ Acceptance:
   - Use pure `fn call_back_on_whatsapp(row_whatsapp: bool, connected: bool) -> bool`. When true,
     call `place_whatsapp(&number, cx)` instead of the carrier, with no SIM chooser and no flight.
     Tested.
-  - The row aria for WhatsApp rows gets ", WhatsApp" (check `rovsti_core::recents::build`;
+  - The row aria for WhatsApp rows gets ", WhatsApp" (check `rosty_core::recents::build`;
     extend it there with a test if the word is missing).
 - Fix the stale comment at the long-press timer ("Holding a row opens its menu").
 
@@ -257,7 +257,7 @@ Acceptance:
 ### P8. Docs and plan status
 - `docs/phone-acceptance.md`: add rows for P2 to P7 (quick actions, chooser, recent calls,
   favorites order, Frequent, keypad Add/Message, WhatsApp call-back, Undo pills).
-- `docs/roadmap.md` (Rovsti Phone): tick "Favorites order and Frequent", "Quick actions",
+- `docs/roadmap.md` (Rosty Phone): tick "Favorites order and Frequent", "Quick actions",
   "Call history in sheets". Leave an unticked "Delete call history (needs `CallLogWrite`, spike
   S12)".
 - `apps/phone/_bmad-output/implementation-artifacts/sprint-status.yaml`: move 19-1, 19-3, 19-5
@@ -266,7 +266,7 @@ Acceptance:
 
 ## Next round (candidates)
 - G12: `CallLogWrite.delete(ids)` / `restore(entries)` / `deleteAll()` in the shared Kotlin, a
-  `rovsti_android::providers` mirror (desktop `Unsupported` + tests), Recents menu "Delete entry"
+  `rosty_android::providers` mirror (desktop `Unsupported` + tests), Recents menu "Delete entry"
   with Undo, and Settings > Data "Delete all call history" behind a confirm sheet.
 - Re-audit after P1 to P8.
 
@@ -274,7 +274,7 @@ Acceptance:
 
 P1 to P8 are implemented on `main` (checks green after each step; no device, cargo only):
 
-- `08bc2d8` P1 rovsti_core pure logic: history lines, duration, favorites order (+tests)
+- `08bc2d8` P1 rosty_core pure logic: history lines, duration, favorites order (+tests)
 - `af1ee79` P2 Quick actions strip on the Contact sheet and Number sheet
 - `7ff7ef7` P3 Recent calls in the Number sheet and Contact sheet
 - `b06fa0e` P4 Favorites in the user's order with Move earlier/later and drag reorder

@@ -2,7 +2,7 @@
 //!
 //! [`Editor`] holds the form: one text field per input, the kind of each
 //! number and email, and the groups ticked. `ContactsApp::editor_view` draws
-//! it; `save_editor` cleans and checks the draft with `rovsti_core::contact_edit`
+//! it; `save_editor` cleans and checks the draft with `rosty_core::contact_edit`
 //! and hands it to Android on the background executor.
 
 use std::collections::BTreeSet;
@@ -11,14 +11,14 @@ use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_dates, contact_edit,
     contact_edit::{
         Account, ContactDraft, DraftEvent, DraftField, DraftRelation, EventKind, FieldKind,
         MAX_FIELDS, RelationKind, account_label, retain_account_groups,
     },
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{large_title, section},
     field::TextField,
@@ -152,7 +152,7 @@ pub(crate) struct Editor {
     saving: bool,
     /// A picked image for a contact that is not saved yet; it becomes the
     /// photo once the first save returns the id.
-    pub(crate) pending_photo: Option<(String, rovsti_core::contact_photo::CropView)>,
+    pub(crate) pending_photo: Option<(String, rosty_core::contact_photo::CropView)>,
     /// The form as it opened: leaving with anything else asks first.
     initial: ContactDraft,
     events: Vec<EventRow>,

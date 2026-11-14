@@ -18,7 +18,7 @@ With one SIM the check says `unknown ... n/a` and the SIM UI stays hidden.
 ## Owner procedure
 
 1. Phone settings: Calls -> default SIM for calls = "Ask every time" (or the phone's equivalent).
-2. In Rovsti Phone type a number you can ring and tap Call: the "Call with" sheet rises. Pick SIM 1,
+2. In Rosty Phone type a number you can ring and tap Call: the "Call with" sheet rises. Pick SIM 1,
    let the call connect, end it. Check the SIM chip appears on the In-Call screen.
 3. Repeat and pick SIM 2.
 4. Open Diagnostics -> SIM -> Run, then Copy report.

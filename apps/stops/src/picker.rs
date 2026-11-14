@@ -9,13 +9,13 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ListSizingBehavior, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_geo::{
+use rosty_geo::{
     Coord, Feed,
     coord_format::{self, CoordFormat},
     dest::parse_location,
     places_io::MergePlan,
 };
-use rovsti_ui::{
+use rosty_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
     haptics, theme,
@@ -37,7 +37,7 @@ pub fn copied_pill(format: CoordFormat) -> String {
 /// Stops listed for a search.
 const MAX_STOP_HITS: usize = 20;
 
-pub use rovsti_app_core::stops::types::{Destination, Ends, Slot};
+pub use rosty_app_core::stops::types::{Destination, Ends, Slot};
 
 /// What shared or pasted text leads to.
 #[derive(Clone, Debug, PartialEq)]
@@ -100,7 +100,7 @@ pub enum SheetMode {
     /// A saved stop's ring was tapped on the map.
     SavedStop(u64),
     /// Confirming the replacement of all data by a backup file.
-    RestoreBackup(Box<rovsti_geo::backup::Backup>),
+    RestoreBackup(Box<rosty_geo::backup::Backup>),
 }
 
 /// The stop search for one query, and the lines of the stop the sheet shows,
@@ -117,7 +117,7 @@ pub struct StopHits {
 
 /// Space the sheet keeps around its body: the gap above the panel (56), the
 /// margin under it (10), the grabber (30) and the body's bottom padding (12).
-/// Mirrors `rovsti_ui::sheet`.
+/// Mirrors `rosty_ui::sheet`.
 const SHEET_CHROME: f32 = 108.0;
 
 /// One row of the destination search, built once per render of the sheet;
@@ -225,8 +225,8 @@ impl StopsApp {
             return;
         };
         // Text from "Share" on a saved stop carries both points.
-        if let Some((name, a, b)) = rovsti_geo::dest::parse_stop_share(&text) {
-            let dest = |p: rovsti_geo::dest::SharedPlace| {
+        if let Some((name, a, b)) = rosty_geo::dest::parse_stop_share(&text) {
+            let dest = |p: rosty_geo::dest::SharedPlace| {
                 Destination::new(p.label.unwrap_or_default().trim().to_owned(), p.coord)
             };
             self.choose_pair(dest(a), dest(b), cx);
@@ -271,7 +271,7 @@ impl StopsApp {
         ) {
             return;
         }
-        let name = rovsti_geo::saved_stops::suggest_name(
+        let name = rosty_geo::saved_stops::suggest_name(
             self.gtfs.as_deref(),
             &pick::trip_endpoint(Slot::A, &a),
             &pick::trip_endpoint(Slot::B, &b),
@@ -298,7 +298,7 @@ impl StopsApp {
                 self.sheet.close();
                 self.show_pill(format!("Saved stop {saved_name}"), None, cx);
             }
-            Err(rovsti_geo::SavedStopError::Duplicate(id)) => {
+            Err(rosty_geo::SavedStopError::Duplicate(id)) => {
                 let existing = self.saved.get(id).map_or(String::new(), |s| s.name.clone());
                 self.show_pill(format!("Already saved as {existing}"), None, cx);
             }
@@ -317,7 +317,7 @@ impl StopsApp {
     /// Opens the QR sheet for a point (a `geo:` link), or says why not.
     pub(crate) fn open_qr(&mut self, label: &str, coord: Coord, cx: &mut Context<Self>) {
         let name = label.trim();
-        let payload = rovsti_geo::dest::point_qr_payload(coord, (!name.is_empty()).then_some(name));
+        let payload = rosty_geo::dest::point_qr_payload(coord, (!name.is_empty()).then_some(name));
         match crate::qr_sheet::make_card(&payload, name) {
             Ok(card) => {
                 self.sheet_mode = SheetMode::Qr(card);
@@ -398,7 +398,7 @@ impl StopsApp {
         let usage = self
             .history
             .usage_of(stop.a.coord, stop.b.coord)
-            .map(|u| rovsti_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
+            .map(|u| rosty_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
         let detail =
             crate::saved_ui::stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
         let title = crate::saved_ui::row_title(stop);
@@ -710,7 +710,7 @@ impl StopsApp {
         let results = list(
             state,
             cx.processor(|this, ix: usize, window, cx| {
-                let theme = rovsti_ui::current_theme(window);
+                let theme = rosty_ui::current_theme(window);
                 match this.pick_items.get(ix).cloned() {
                     Some(item) => this.pick_item(theme, item, cx),
                     None => div().into_any_element(),
@@ -890,7 +890,7 @@ impl StopsApp {
             }
             PickItem::Hint => Self::footnote(
                 theme,
-                "Share a location from any maps app to Rovsti Stops, or paste a link, coordinates or Plus Code here.",
+                "Share a location from any maps app to Rosty Stops, or paste a link, coordinates or Plus Code here.",
             ),
         }
     }
@@ -1250,9 +1250,9 @@ pub fn stop_subtitle(details: &str, here: Option<Coord>, stop: Coord) -> String 
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::stop_subtitle;
-    use rovsti_app_core::stops::types::coord_text;
-    use rovsti_geo::Coord;
-    use rovsti_geo::DiameterError;
+    use rosty_app_core::stops::types::coord_text;
+    use rosty_geo::Coord;
+    use rosty_geo::DiameterError;
 
     #[test]
     fn stop_subtitle_adds_distance_only_with_a_fix() {
@@ -1263,7 +1263,7 @@ mod tests {
 
     #[test]
     fn the_copied_pill_names_the_format() {
-        use rovsti_geo::coord_format::CoordFormat;
+        use rosty_geo::coord_format::CoordFormat;
         assert_eq!(
             super::copied_pill(CoordFormat::PlusCode),
             "Copied Plus Code"

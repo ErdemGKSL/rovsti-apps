@@ -9,8 +9,8 @@ use gpui::{
     AnyElement, Context, HapticFeedback, Hsla, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::scene::DisabledReason;
-use rovsti_ui::{
+use rosty_core::scene::DisabledReason;
+use rosty_ui::{
     Icon,
     components::flat_glass,
     motion::press_scale,
@@ -71,7 +71,7 @@ impl PhoneApp {
         }
         match id {
             "iw-hold" => {
-                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.incall.waiting_acted = true;
                 self.backend.update(cx, |b, cx| {
                     if w.relabelled {
@@ -82,7 +82,7 @@ impl PhoneApp {
                 });
             }
             "iw-end" => {
-                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.incall.waiting_acted = true;
                 self.backend.update(cx, |b, cx| {
                     b.answer_replacing(w.id, cx);
@@ -118,7 +118,7 @@ impl PhoneApp {
         let grow = pop((self.incall.waiting_age - 0.06 - STAGGER * index as f32) / 0.26);
         let k = press_scale(press, 0.97) * (0.55 + 0.45 * grow);
         let body = match fill {
-            Some(fill) => div().bg(rovsti_ui::tokens::mix(fill, gpui::white(), 0.16 * press)),
+            Some(fill) => div().bg(rosty_ui::tokens::mix(fill, gpui::white(), 0.16 * press)),
             None => flat_glass(theme, None),
         };
         div()

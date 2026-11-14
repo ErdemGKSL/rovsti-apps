@@ -10,7 +10,7 @@ Severity: **High** = crash, data loss, dead end, duplicate data or an action on 
 
 Status: `[ ]` open, `[x]` fixed, `[-]` skipped (reason given), `[>]` deferred (other agent).
 Files owned by the concurrent WhatsApp ticks/receipts work (`services/wa_gateway`,
-`crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `apps/messages/src/conversation.rs`,
+`crates/rosty_wa_proto`, `crates/rosty_wa_client`, `apps/messages/src/conversation.rs`,
 `apps/messages/src/inbox.rs`) are not edited here.
 
 Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19), 1 deferred
@@ -41,7 +41,7 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
 
 ### Dial keypad layout (PC21)
 
-- [x] PC21 `apps/phone/src/keypad.rs`, `crates/rovsti_core/src/keypad_layout.rs` | High | Typing a number could make the number, matches, action chips and key grid overlap or run off-screen. Fixed by one pure layout budget, `rovsti_core::keypad_layout`, that gives each section its own clipped rect.
+- [x] PC21 `apps/phone/src/keypad.rs`, `crates/rosty_core/src/keypad_layout.rs` | High | Typing a number could make the number, matches, action chips and key grid overlap or run off-screen. Fixed by one pure layout budget, `rosty_core::keypad_layout`, that gives each section its own clipped rect.
   - Vertical budget, top to bottom: header (inset-aware), number field, matches row, action chips (these flex and shrink or drop first), 3x4 key grid, call/backspace row, 8 px gap, tab bar slot, bottom inset. The grid, call row and tab bar are reserved first.
   - Key size is the smaller of the width-derived and height-derived sizes, clamped to 36..78.
   - Modes: Portrait (key 56 and up), Compact (smaller labels, optional rows dropped to keep keys at 36 or more) and Landscape (grid on the right, number, chips and call row on the left).
@@ -80,7 +80,7 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
 - [x] M6 `apps/messages/src/main.rs:921-962` | Medium | Back from the Spam list closes the app.
 - [x] M7 `apps/messages/src/main.rs:507,530` | Medium | A failed first WhatsApp chat fetch is treated as loaded: chats stay missing until resync/restart, no error.
 - [x] M8 `apps/messages/src/main.rs:545-554,1173-1182` | Medium | Opening an SMS thread not yet in the thread list (cold notification tap) gives empty recipients and a blank title; Send goes nowhere.
-- [x] M9 `apps/messages/src/sms_conversation.rs:117`, `crates/rovsti_ui/src/field.rs:145-155` | Medium | The keyboard's Send key only hides the keyboard; nothing is sent. (The WhatsApp composer half is in `conversation.rs`: deferred, other agent.)
+- [x] M9 `apps/messages/src/sms_conversation.rs:117`, `crates/rosty_ui/src/field.rs:145-155` | Medium | The keyboard's Send key only hides the keyboard; nothing is sent. (The WhatsApp composer half is in `conversation.rs`: deferred, other agent.)
 - [x] M10 `apps/messages/src/main.rs:1919-1932` | Medium | The Settings page ignores the keyboard height; passphrase/spam/block fields near the bottom sit behind the keyboard.
 - [x] M11 `apps/messages/src/schedule_ui.rs:371-390` | Medium | The "Send later" sheet's custom-time field and Schedule button are covered by the keyboard.
 - [x] M12 `apps/messages/src/backend.rs:56,808` | Medium | Backups silently miss threads past the 500-thread list cap.
@@ -105,29 +105,29 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
 - [x] C4 `apps/contacts/src/main.rs:257-264` | Medium | The data folder is asked for once and never retried; prefs and "Use as Contact Photo" stay broken for the run.
 - [x] C5 `apps/contacts/src/editor.rs:225-230,549-550`, `main.rs:563-564` | Medium | Cancel and Back drop a dirty editor immediately; typed edits are lost.
 - [x] C6 `apps/contacts/src/ui.rs:131-134`, `main.rs:1304-1311` | Medium | The keyboard covers lower editor fields; nothing scrolls the focused field into view.
-- [x] C7 `apps/contacts/src/main.rs:603,642`, `whatsapp.rs:496-498` | Medium | Raw `rovsti_android::Error` text (JNI/bridge details) shown in the notice.
+- [x] C7 `apps/contacts/src/main.rs:603,642`, `whatsapp.rs:496-498` | Medium | Raw `rosty_android::Error` text (JNI/bridge details) shown in the notice.
 - [x] C8 `apps/contacts/src/whatsapp.rs:235,238` | Medium | "Use the WhatsApp photo" shows raw HTTP/io error text.
-- [x] C9 `crates/rovsti_wa_ui/src/view.rs:69-73,159` | Medium | The shared WhatsApp settings show raw `ClientError` text ("http: ...", "tls: ...").
-- [x] C10 `crates/rovsti_wa_ui/src/view.rs:881-883,939-945` | Medium | "Unlink this app" and "Revoke" act on one tap without confirmation.
+- [x] C9 `crates/rosty_wa_ui/src/view.rs:69-73,159` | Medium | The shared WhatsApp settings show raw `ClientError` text ("http: ...", "tls: ...").
+- [x] C10 `crates/rosty_wa_ui/src/view.rs:881-883,939-945` | Medium | "Unlink this app" and "Revoke" act on one tap without confirmation.
 - [x] C11 `apps/contacts/src/main.rs:545-579` | Medium | Back with a search query on the Contacts tab closes the app instead of clearing the search.
 - [x] C12 `apps/contacts/src/main.rs:1201-1226` | Low | The Contacts notice never times out.
 - [x] C13 `apps/contacts/src/whatsapp.rs:64-74` | Low | The WhatsApp lookup cache keeps the old status after a contact's numbers are edited.
 - [x] C14 `apps/contacts/src/confirm.rs:205` | Low | The "Nothing to add" card's only button says "Cancel".
 - [x] C15 `apps/contacts/src/whatsapp.rs:208` | Low | ASCII-only case compare shows a redundant "WhatsApp name" for Turkish names (AYŞE vs Ayşe).
-- [x] C16 `crates/rovsti_ui/src/components.rs:29-34` | Low | `large_title` cannot shrink; long group names overflow off-screen.
-- [x] C17 `crates/rovsti_wa_ui/src/view.rs:526-561` | Low | "Share QR to PC..." fails silently.
+- [x] C16 `crates/rosty_ui/src/components.rs:29-34` | Low | `large_title` cannot shrink; long group names overflow off-screen.
+- [x] C17 `crates/rosty_wa_ui/src/view.rs:526-561` | Low | "Share QR to PC..." fails silently.
 - [x] C18 `apps/contacts/src/main.rs:1162-1173`, `transfer.rs:19,50` | Low | Dimmed Export/Import still tappable while busy, with no feedback.
-- [-] C19 `crates/rovsti_ui/src/touch.rs:33`, `tab_bar.rs:443` | Low | `touch_surface` ignores occlusion: a finger on a scrim over the tab bar still swells the bar. Skipped: needs hit-test occlusion inside the shared touch_surface (every tab bar); only a press animation, and touch hover on gpui_android is unverified.
+- [-] C19 `crates/rosty_ui/src/touch.rs:33`, `tab_bar.rs:443` | Low | `touch_surface` ignores occlusion: a finger on a scrim over the tab bar still swells the bar. Skipped: needs hit-test occlusion inside the shared touch_surface (every tab bar); only a press animation, and touch hover on gpui_android is unverified.
 - [x] C20 `apps/contacts/src/whatsapp.rs:374-401` | Low | "Use as Contact Photo" has no in-flight guard; a double tap applies it twice.
-- [x] R1 `crates/rovsti_core/src/import_plan.rs` | High | Re-importing an export duplicated every contact without a number (round 2).
+- [x] R1 `crates/rosty_core/src/import_plan.rs` | High | Re-importing an export duplicated every contact without a number (round 2).
 - [x] R2 `apps/contacts/src/confirm.rs` | Medium | Delete Contact could not be undone; now deferred 5 s behind an Undo pill (round 2).
 - [x] R3 `apps/contacts/src/groups.rs`, `picker.rs` | Medium | Groups hid their account on multi-account phones; now shown and choosable (round 2).
-- [x] R4 `crates/rovsti_core/src/search.rs` | Medium | Search did not find the email shown on a row (round 2).
+- [x] R4 `crates/rosty_core/src/search.rs` | Medium | Search did not find the email shown on a row (round 2).
 - [x] R5 `apps/contacts/src/confirm.rs`, `transfer.rs` | Low | Wrong import wording and a stale export doc (round 2).
 - [x] S1 `apps/contacts/src/main.rs`, `groups.rs`, `picker.rs`, `editor.rs`, `whatsapp.rs`, `transfer.rs` | Medium | The Undo for Delete Contact vanished after almost any tap while the delete still went through; now it survives navigation (round 3).
 - [x] S2 `apps/contacts/src/confirm.rs` | Low | The Undo button stayed on screen after the delete committed; now it goes away with the commit (round 3).
 - [x] S3 `apps/contacts/src/transfer.rs`, `backend.rs` | Low | Export wrote an empty file for an empty book and included a contact waiting for Undo; now it says there is nothing to export and leaves the pending one out (round 3).
-- [x] T1 `crates/rovsti_core/src/contact_edit.rs`, `apps/contacts/src/main.rs`, `editor.rs` | Medium | A search with no results dead-ended; now it offers Create Contact with the number, email or name filled in (round 4).
+- [x] T1 `crates/rosty_core/src/contact_edit.rs`, `apps/contacts/src/main.rs`, `editor.rs` | Medium | A search with no results dead-ended; now it offers Create Contact with the number, email or name filled in (round 4).
 - [ ] T2 `apps/contacts/src/editor.rs` | Info | A custom Android label on a number or email is dropped when its kind is cycled (not planned).
 - [ ] T3 `apps/contacts/src/main.rs` | Info | Other apps' insert/view intents are not answered; default number, vCard share, Undo for Delete Group and a custom favorites order stay out of scope (not planned).
 

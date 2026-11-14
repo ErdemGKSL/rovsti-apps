@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Rovsti Phone</string>
+    <string name="app_name">Rosty Phone</string>
     <string name="tab_favorites">Favorites</string>
     <string name="tab_recents">Recents</string>
     <string name="tab_contacts">Contacts</string>
@@ -59,10 +59,10 @@
     <string name="setup_steps_lock_screen">In Other permissions, turn on Show on lock screen.</string>
     <string name="setup_steps_popups">In Other permissions, turn on Display pop-up windows while running in the background.</string>
     <string name="setup_steps_battery">Choose No restrictions.</string>
-    <string name="setup_steps_autostart">Switch Rovsti Phone on.</string>
+    <string name="setup_steps_autostart">Switch Rosty Phone on.</string>
     <string name="setup_tail_fell_back"> This phone opened App info instead; look for Other permissions, Autostart or Battery saver there.</string>
     <string name="setup_tail_open_first"> Open settings first, then confirm here.</string>
-    <string name="notice_not_default">Rovsti is not your phone app</string>
+    <string name="notice_not_default">Rosty is not your phone app</string>
     <string name="notice_not_default_action">Tap to finish setup</string>
 
     <!-- Settings and Diagnostics -->
@@ -75,7 +75,7 @@
     <string name="diag_copy_all">Copy all</string>
     <string name="diag_copied">Report copied</string>
     <string name="diag_copy_failed">Couldn\'t copy the report</string>
-    <string name="diag_report_title">Rovsti Phone diagnostics</string>
+    <string name="diag_report_title">Rosty Phone diagnostics</string>
     <string name="diag_section_app">App</string>
     <string name="diag_rust_core">Rust core</string>
     <string name="diag_not_loaded">not loaded</string>
@@ -91,7 +91,7 @@
     <string name="diag_call_events">Call events</string>
     <string name="diag_report_none">none</string>
     <string name="diag_none">Nothing recorded yet</string>
-    <string name="fallback_stopped">Rovsti Phone\'s screen stopped.\nYour call is not affected.</string>
+    <string name="fallback_stopped">Rosty Phone\'s screen stopped.\nYour call is not affected.</string>
     <string name="fallback_end_call">End call</string>
     <string name="native_incoming">Incoming call</string>
     <string name="native_incoming_locked">Incoming call (locked)</string>
@@ -199,7 +199,7 @@
     <string name="recents_notice_copied_country">Number copied with country code</string>
     <string name="recents_notice_call_failed">Couldn\'t place the call</string>
     <string name="recents_notice_dialer_opened">Opened the dialer</string>
-    <string name="recents_notice_not_default">Make Rovsti the default phone app to block numbers</string>
+    <string name="recents_notice_not_default">Make Rosty the default phone app to block numbers</string>
     <string name="recents_notice_block_refused">That number can\'t be blocked</string>
     <string name="recents_notice_already_blocked">Already blocked</string>
     <string name="recents_notice_block_failed">Couldn\'t block</string>
@@ -256,7 +256,7 @@
     <string name="details_notice_copied_all">Numbers copied</string>
     <string name="details_notice_call_failed">Couldn\'t place the call</string>
     <string name="details_notice_dialer_opened">Opened the dialer</string>
-    <string name="details_notice_not_default">Make Rovsti the default phone app to block numbers</string>
+    <string name="details_notice_not_default">Make Rosty the default phone app to block numbers</string>
     <string name="details_notice_block_refused">That number can\'t be blocked</string>
     <string name="details_notice_already_blocked">Already blocked</string>
     <string name="details_notice_block_failed">Couldn\'t block</string>
@@ -482,7 +482,7 @@
     <string name="blocked_copy">Copy number</string>
     <string name="blocked_empty_title">No blocked numbers</string>
     <string name="blocked_empty_message">Numbers you block never ring. Paste a list or block a whole prefix.</string>
-    <string name="blocked_footer_cannot">Blocking needs Rovsti as your default phone app. Open Setup to change that.</string>
+    <string name="blocked_footer_cannot">Blocking needs Rosty as your default phone app. Open Setup to change that.</string>
     <string name="blocked_tools_share">Share list</string>
     <string name="blocked_tools_export">Export as file</string>
     <string name="blocked_tools_import">Import from file</string>
@@ -511,7 +511,7 @@
     <string name="blocked_pill_unblocked_many">Unblocked %1$d numbers</string>
     <string name="blocked_pill_range_added">Prefix blocked</string>
     <string name="blocked_pill_range_removed">Prefix unblocked</string>
-    <string name="blocked_notice_unavailable">Make Rovsti your default phone app to change the list.</string>
+    <string name="blocked_notice_unavailable">Make Rosty your default phone app to change the list.</string>
     <string name="blocked_notice_failed">Couldn\'t change the list.</string>
     <string name="blocked_notice_none_found">No numbers found in that text.</string>
     <string name="blocked_notice_emergency">Emergency numbers can\'t be blocked.</string>
@@ -559,7 +559,7 @@
     <string name="sd_rejected">Couldn\'t change the speed dial</string>
     <string name="sd_none_to_share">Nothing assigned yet</string>
     <string name="sim_title">SIM choices</string>
-    <string name="sim_footer">When your phone asks which SIM to use, Rovsti remembers your pick for that number and uses it next time. Forget a number to be asked again.</string>
+    <string name="sim_footer">When your phone asks which SIM to use, Rosty remembers your pick for that number and uses it next time. Forget a number to be asked again.</string>
     <string name="sim_empty_title">No remembered SIMs</string>
     <string name="sim_empty_message">Pick a SIM when your phone asks, and it is listed here.</string>
     <string name="sim_single_message">SIM choices appear on phones with two SIMs.</string>
@@ -592,7 +592,7 @@
     <string name="data_all_message">All %1$d calls will be deleted after five seconds. Undo until then cancels it.</string>
     <string name="data_all_pending">Deleting all calls\u2026</string>
     <string name="data_all_done">Call history deleted</string>
-    <string name="data_failed">Couldn\'t do that. Check that Rovsti is your phone app.</string>
+    <string name="data_failed">Couldn\'t do that. Check that Rosty is your phone app.</string>
     <string name="data_saved_history">Call history exported</string>
     <string name="data_saved_notes">Call notes exported</string>
     <string name="data_saved_contacts">Contacts exported</string>
@@ -617,7 +617,7 @@
     <string name="backup_preview_clamped">Some values were outside the allowed range and were adjusted.</string>
     <string name="backup_apply">Restore</string>
     <string name="backup_applied">Backup restored</string>
-    <string name="backup_invalid">That file is not a Rovsti Phone backup</string>
+    <string name="backup_invalid">That file is not a Rosty Phone backup</string>
     <string name="backup_undone">Settings put back</string>
     <string name="data_span_30">30 days</string>
     <string name="data_span_90">90 days</string>

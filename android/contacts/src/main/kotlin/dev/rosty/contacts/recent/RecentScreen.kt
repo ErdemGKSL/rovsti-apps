@@ -1,0 +1,160 @@
+package dev.rosty.contacts.recent
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import dev.rosty.contacts.R
+import dev.rosty.contacts.favorites.PersonRow
+import dev.rosty.design.chrome.LargeTitleScaffold
+import dev.rosty.design.chrome.LocalContentInsets
+import dev.rosty.design.chrome.NavigationButton
+import dev.rosty.design.controls.EmptyState
+import dev.rosty.design.controls.SegmentedControl
+import dev.rosty.design.icons.RostyIcons
+import dev.rosty.design.list.RowSeparator
+import dev.rosty.design.list.TextStartWithLeading
+import dev.rosty.design.theme.RostyText
+import dev.rosty.design.theme.RostyTheme
+import dev.rosty.design.theme.Spacing
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+
+/** Test tags of the Recently Added / Edited page. */
+object RecentTags {
+    const val Screen = "recent-screen"
+    const val Segments = "recent-segments"
+    const val Empty = "recent-empty"
+    const val Footer = "recent-footer"
+
+    fun row(id: Long) = "recent-row-$id"
+}
+
+/** Where each segment's list was scrolled to when the user left it: item index and pixel offset. */
+internal class SegmentScroll {
+    private val saved = HashMap<String, Pair<Int, Int>>()
+
+    fun save(
+        id: String,
+        state: LazyListState,
+    ) {
+        saved[id] = state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset
+    }
+
+    suspend fun restore(
+        id: String,
+        state: LazyListState,
+    ) {
+        val (index, offset) = saved[id] ?: (0 to 0)
+        state.scrollToItem(index, offset)
+    }
+}
+
+/**
+ * The Recently Added / Edited page (E4.14), stateless: a segmented control (the Convx-ported [SegmentedControl]) over
+ * the list of the shown segment. The control is the first item of the one list, so the pill springs between segments
+ * instead of being rebuilt; each segment keeps its own scroll position while the other is shown.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun RecentScreen(
+    state: RecentUiState,
+    onAction: (RecentAction) -> Unit,
+    onBack: () -> Unit,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val scroll = remember { SegmentScroll() }
+    val pageColor = RostyTheme.colors.page
+    LaunchedEffect(state.selected) { scroll.restore(state.selected, listState) }
+    val labels = remember(state.tabs) { state.tabs.map { it.label }.toImmutableList() }
+    LargeTitleScaffold(
+        title = stringResource(R.string.contacts_recent),
+        state = listState,
+        actions = persistentListOf(),
+        navigation = NavigationButton(onClick = onBack),
+        modifier = modifier.testTag(RecentTags.Screen),
+    ) {
+        if (state.phase == RecentPhase.Ready && state.tabs.isNotEmpty()) {
+            // Sticky: the control stays under the bar while the list scrolls, so the other segment is one tap away.
+            stickyHeader(key = "segments", contentType = "segments") {
+                Box(Modifier.fillMaxWidth().background(pageColor)) {
+                    SegmentedControl(
+                        items = labels,
+                        selected = state.selectedIndex,
+                        onSelect = { index ->
+                            val tab = state.tabs.getOrNull(index) ?: return@SegmentedControl
+                            if (tab.id != state.selected) {
+                                scroll.save(state.selected, listState)
+                                onAction(RecentAction.SelectTab(tab.id))
+                            }
+                        },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.gutter, vertical = Spacing.s)
+                                .testTag(RecentTags.Segments),
+                    )
+                }
+            }
+            val rows = state.rows
+            if (rows.isEmpty()) {
+                item(key = "empty-${state.selected}", contentType = "empty") {
+                    val bottom = LocalContentInsets.current.calculateBottomPadding()
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = RecentMetrics.EmptyHeight)
+                            .padding(bottom = bottom)
+                            .testTag(RecentTags.Empty),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        EmptyState(
+                            icon = RostyIcons.Clock,
+                            title = state.selectedTab?.emptyTitle.orEmpty(),
+                            message = state.selectedTab?.emptyBody.orEmpty(),
+                        )
+                    }
+                }
+            }
+            rows.forEachIndexed { index, person ->
+                item(key = "${state.selected}-${person.id}", contentType = "recent") {
+                    Column {
+                        if (index > 0) RowSeparator(inset = TextStartWithLeading)
+                        PersonRow(
+                            person,
+                            Modifier.testTag(RecentTags.row(person.id)),
+                            onClick = { onAction(RecentAction.Open(person.id)) },
+                            trailing = null,
+                        )
+                    }
+                }
+            }
+            if (rows.isNotEmpty()) {
+                item(key = "footer", contentType = "footer") {
+                    RostyText(
+                        pluralStringResource(R.plurals.contacts_recent_window, state.windowDays, state.windowDays),
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.gutter + Spacing.m, vertical = Spacing.m)
+                            .testTag(RecentTags.Footer),
+                        style = RostyTheme.type.footnote,
+                        color = RostyTheme.colors.labelSecondary,
+                    )
+                }
+            }
+        }
+    }
+}

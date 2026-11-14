@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use rovsti_wa_proto::meta::body_preview;
-use rovsti_wa_proto::{
+use rosty_wa_proto::meta::body_preview;
+use rosty_wa_proto::{
     ChatAction, ChatActionKind, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
     InstanceState, InstanceStatus, LinkRequest, MarkRead, MessageBody, MessageMeta, Quoted,
     Reaction, RevokeMessage, SendReaction, SendText, Sent, TypingState, WaMessage, WaUser,
@@ -1433,7 +1433,7 @@ impl WaDriver for WaRuntime {
         let instance = instance.clone();
         Box::pin(async move {
             let (client, _) = self.client_of(&instance)?;
-            let chat = convert::parse_jid(rovsti_wa_proto::STATUS_BROADCAST)?;
+            let chat = convert::parse_jid(rosty_wa_proto::STATUS_BROADCAST)?;
             for batch in batches {
                 let author = convert::parse_jid(&batch.participant)?;
                 let ids: Vec<&str> = batch.ids.iter().map(String::as_str).collect();

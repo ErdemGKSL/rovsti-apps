@@ -5,8 +5,8 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::reminder::{self, Reminder, Slot};
-use rovsti_ui::{
+use rosty_core::reminder::{self, Reminder, Slot};
+use rosty_ui::{
     Icon,
     motion::press_scale,
     motion_tokens::scale,
@@ -69,7 +69,7 @@ pub(crate) fn remind_caption(list: &[Reminder], number: &str, tz_offset_s: i32) 
 
 /// Whether a reminder can be set for `number` (not private or empty).
 pub(crate) fn can_remind(number: &str) -> bool {
-    rovsti_core::PhoneNumber::parse(number.trim()).is_ok()
+    rosty_core::PhoneNumber::parse(number.trim()).is_ok()
 }
 
 pub(crate) fn now_ms() -> i64 {

@@ -15,11 +15,11 @@ use gpui::{
     StatefulInteractiveElement, Styled, TouchPhase, UniformListScrollHandle, Window, div, px, svg,
     uniform_list,
 };
-use rovsti_core::{
+use rosty_core::{
     contacts_view::{self, CallTarget},
     dial,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::flat_glass,
     glass::{GlassSpec, glass},
@@ -137,12 +137,12 @@ impl PhoneApp {
     /// opens from the success callback.
     pub(crate) fn open_add_call(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The state is re-read from the system at the tap, not from the last snapshot.
-        let locked = rovsti_android::window::keyguard_locked()
+        let locked = rosty_android::window::keyguard_locked()
             .unwrap_or_else(|_| self.backend.read(cx).calls().keyguard_locked());
         if locked {
             let gen_now = self.backend.read(cx).keyguard_gen();
             self.add.awaiting_keyguard = Some(gen_now);
-            if rovsti_android::window::request_dismiss_keyguard().is_err() {
+            if rosty_android::window::request_dismiss_keyguard().is_err() {
                 // Desktop preview: there is no keyguard to dismiss.
                 self.add.awaiting_keyguard = None;
                 self.show_add_call(window, cx);
@@ -267,7 +267,7 @@ impl PhoneApp {
 
     /// The one call path. A refusal stays in the sheet and the first call stays Active.
     fn add_call_place(&mut self, raw: &str, window: &mut Window, cx: &mut Context<Self>) {
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         let placement = self
             .backend
             .update(cx, |backend, cx| backend.place_call(raw, cx));
@@ -311,7 +311,7 @@ impl PhoneApp {
             "sheet-ac-seg0" | "sheet-ac-seg1" | "sheet-ac-seg2" => {
                 let segment = usize::from(id.as_bytes()[id.len() - 1] - b'0');
                 if self.add.segment_allowed(segment, locked) && segment != self.add.segment {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                     self.add.segment = segment;
                     self.add.chooser = None;
                     self.add.failed = None;
@@ -683,7 +683,7 @@ impl PhoneApp {
                     list.id(),
                     count,
                     cx.processor(move |this, range: Range<usize>, window, _cx| {
-                        let theme = rovsti_ui::current_theme(window);
+                        let theme = rosty_ui::current_theme(window);
                         this.add_call_rows(theme, list, range)
                     }),
                 )
@@ -759,7 +759,7 @@ impl PhoneApp {
                     .text_size(typography::SUBHEADLINE.size)
                     .text_color(colors.secondary_label)
                     .text_center()
-                    .child("Rovsti Phone needs it to show the people on this phone."),
+                    .child("Rosty Phone needs it to show the people on this phone."),
             )
             .child(
                 div()

@@ -10,7 +10,7 @@ All code work is committed (d31f512..79abdef), working tree clean:
   logging `lid-merge: startup sweep merged N of M LID chats`; sends accept PN or legacy LID.
 - Proto/apps: `is_pn_jid`/`is_lid_jid`, "WhatsApp user" label; every
   `format!("+{}", jid_user(..))` call site (conversation.rs, main.rs, inbox.rs, status_ui.rs,
-  rovsti_core inbox.rs, rovsti_wa_ui view.rs, rovsti_wa_proto api.rs) is guarded by `is_pn_jid`;
+  rosty_core inbox.rs, rosty_wa_ui view.rs, rosty_wa_proto api.rs) is guarded by `is_pn_jid`;
   ChatMerged rekeys drafts/pins/mutes in Messages, Phone, Contacts.
 - Round-2 S1 (status author guard + test `author_number_only_for_phone_jids`) is done.
 Only the gateway deploy is left.

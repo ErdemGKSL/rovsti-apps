@@ -31,15 +31,15 @@
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
     <permission
-        android:name="dev.rovsti.permission.HANDOFF"
+        android:name="dev.rosty.permission.HANDOFF"
         android:protectionLevel="signature" />
 
-    <!-- The people cache of Rovsti Contacts (X.1b, WhatsApp names and photos): signature level like HANDOFF, declared by
+    <!-- The people cache of Rosty Contacts (X.1b, WhatsApp names and photos): signature level like HANDOFF, declared by
          both apps so whichever installs first defines it; only apps signed with the same key can read the provider. -->
     <permission
-        android:name="dev.rovsti.permission.READ_PEOPLE"
+        android:name="dev.rosty.permission.READ_PEOPLE"
         android:protectionLevel="signature" />
-    <uses-permission android:name="dev.rovsti.permission.READ_PEOPLE" />
+    <uses-permission android:name="dev.rosty.permission.READ_PEOPLE" />
 
     <!-- :platform mirrors the permissions of all four apps so lint can check its calls; this app does not use
          location, so the merge drops them. -->
@@ -61,13 +61,13 @@
     </queries>
 
     <application
-        android:name=".RovstiPhoneApp"
+        android:name=".RostyPhoneApp"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/launcher_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Rovsti">
+        android:theme="@style/Theme.Rosty">
 
         <activity
             android:name=".MainActivity"
@@ -96,20 +96,20 @@
             </intent-filter>
         </activity>
 
-        <!-- WhatsApp hand-off from a sibling Rovsti app: only same-signed apps hold the permission. -->
+        <!-- WhatsApp hand-off from a sibling Rosty app: only same-signed apps hold the permission. -->
         <activity-alias
             android:name=".WaHandoff"
             android:exported="true"
-            android:permission="dev.rovsti.permission.HANDOFF"
+            android:permission="dev.rosty.permission.HANDOFF"
             android:targetActivity=".MainActivity">
             <intent-filter>
-                <action android:name="dev.rovsti.action.WA_CALL" />
+                <action android:name="dev.rosty.action.WA_CALL" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity-alias>
 
         <service
-            android:name=".RovstiInCallService"
+            android:name=".RostyInCallService"
             android:exported="true"
             android:foregroundServiceType="phoneCall"
             android:permission="android.permission.BIND_INCALL_SERVICE">
@@ -123,7 +123,7 @@
 
         <!-- Keeps the microphone usable in the background during a WhatsApp call (docs/kotlin-ui/wa-call-audio.md). -->
         <service
-            android:name="dev.rovsti.platform.wa.WaCallService"
+            android:name="dev.rosty.platform.wa.WaCallService"
             android:exported="false"
             android:foregroundServiceType="microphone|phoneCall" />
 
@@ -134,7 +134,7 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
-        <!-- WorkManager starts on demand (RovstiPhoneApp is its Configuration.Provider), not at every process start:
+        <!-- WorkManager starts on demand (RostyPhoneApp is its Configuration.Provider), not at every process start:
              a cold start for a ringing call must not open its database. -->
         <provider
             android:name="androidx.startup.InitializationProvider"
@@ -146,7 +146,7 @@
                 tools:node="remove" />
         </provider>
         <receiver
-            android:name="dev.rovsti.people.sync.PeopleSyncStopReceiver"
+            android:name="dev.rosty.people.sync.PeopleSyncStopReceiver"
             android:exported="false" />
 
         <receiver
@@ -172,7 +172,7 @@
 
         <!-- Call-back reminder alarms (exact while the exact-alarm permission is granted, else inexact). -->
         <receiver
-            android:name="dev.rovsti.bridge.CallReminderReceiver"
+            android:name="dev.rosty.bridge.CallReminderReceiver"
             android:exported="false" />
 
         <!-- E5.12: a reboot, an update or a change of the exact-alarm permission clears the alarms; this sets them again
@@ -189,8 +189,8 @@
 
         <!-- Images handed to the share sheet (cache/share only, read-only). -->
         <provider
-            android:name="dev.rovsti.bridge.RovstiShareProvider"
-            android:authorities="${applicationId}.rovstishare"
+            android:name="dev.rosty.bridge.RostyShareProvider"
+            android:authorities="${applicationId}.rostyshare"
             android:exported="false"
             android:grantUriPermissions="true" />
     </application>

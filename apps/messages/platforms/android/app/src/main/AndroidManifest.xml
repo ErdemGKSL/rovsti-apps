@@ -15,15 +15,15 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
 
     <permission
-        android:name="dev.rovsti.permission.HANDOFF"
+        android:name="dev.rosty.permission.HANDOFF"
         android:protectionLevel="signature" />
 
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
-        android:name=".RovstiMessagesApp"
-        android:label="Rovsti Messages"
+        android:name=".RostyMessagesApp"
+        android:label="Rosty Messages"
         android:icon="@drawable/gpui_app_icon"
         android:roundIcon="@drawable/gpui_app_icon"
         android:theme="@style/GpuiTheme"
@@ -58,14 +58,14 @@
             </intent-filter>
         </activity>
 
-        <!-- WhatsApp handoff from a sibling Rovsti app: only same-signed apps hold the permission. -->
+        <!-- WhatsApp handoff from a sibling Rosty app: only same-signed apps hold the permission. -->
         <activity-alias
             android:name=".WaHandoff"
             android:targetActivity=".MainActivity"
             android:exported="true"
-            android:permission="dev.rovsti.permission.HANDOFF">
+            android:permission="dev.rosty.permission.HANDOFF">
             <intent-filter>
-                <action android:name="dev.rovsti.action.WA_CHAT" />
+                <action android:name="dev.rosty.action.WA_CHAT" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity-alias>
@@ -104,12 +104,12 @@
             </intent-filter>
         </service>
 
-        <!-- Shared bridge receivers (crates/rovsti_android/kotlin). None is exported. -->
-        <receiver android:name="dev.rovsti.bridge.ReplyReceiver" android:exported="false" />
-        <receiver android:name="dev.rovsti.bridge.ScheduledSmsReceiver" android:exported="false" />
-        <receiver android:name="dev.rovsti.bridge.MessageReminderReceiver" android:exported="false" />
-        <receiver android:name="dev.rovsti.bridge.SmsStatusReceiver" android:exported="false" />
-        <receiver android:name="dev.rovsti.bridge.MmsResultReceiver" android:exported="false" />
+        <!-- Shared bridge receivers (crates/rosty_android/kotlin). None is exported. -->
+        <receiver android:name="dev.rosty.bridge.ReplyReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.ScheduledSmsReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.MessageReminderReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.SmsStatusReceiver" android:exported="false" />
+        <receiver android:name="dev.rosty.bridge.MmsResultReceiver" android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"
@@ -122,7 +122,7 @@
 
         <!-- Serves the MMS PDU files to the telephony service (MmsCodec). -->
         <provider
-            android:name="dev.rovsti.bridge.MmsFileProvider"
+            android:name="dev.rosty.bridge.MmsFileProvider"
             android:authorities="${applicationId}.mmsfiles"
             android:exported="false"
             android:grantUriPermissions="true" />

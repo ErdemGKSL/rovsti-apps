@@ -1,4 +1,4 @@
-//! Everything Rovsti Messages asks Android, and how the answers land.
+//! Everything Rosty Messages asks Android, and how the answers land.
 //!
 //! The [`Backend`] entity owns the process's one event sink (so it also hands
 //! WhatsApp pushes to the app), pulls the SMS threads, SIMs, contacts, locale
@@ -15,14 +15,14 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Task};
-use rovsti_android::{
+use rosty_android::{
     Error,
     events::{self, RawEvent, kind},
     permissions, providers, reminders,
     roles::{self, Role},
     sms,
 };
-use rovsti_core::{
+use rosty_core::{
     blocklist::BlockSet,
     recents::LocaleTime,
     schedule::{ScheduleError, ScheduleQueue, ScheduledSms},
@@ -38,7 +38,7 @@ use rovsti_core::{
         Handoff, WireError, parse_handoff,
     },
 };
-use rovsti_ui::storage;
+use rosty_ui::storage;
 use serde::de::DeserializeOwned;
 
 use crate::{
@@ -114,7 +114,7 @@ pub enum Pull<T> {
 }
 
 /// Decodes one `Envelope<T>` answer of a provider pull.
-pub fn decode<T: DeserializeOwned + Default>(raw: rovsti_android::Result<String>) -> Pull<T> {
+pub fn decode<T: DeserializeOwned + Default>(raw: rosty_android::Result<String>) -> Pull<T> {
     let json = match raw {
         Ok(json) => json,
         Err(Error::Unsupported) => return Pull::Unsupported,
@@ -130,7 +130,7 @@ pub fn decode<T: DeserializeOwned + Default>(raw: rovsti_android::Result<String>
     }
 }
 
-pub use rovsti_app_core::messages::access::Access;
+pub use rosty_app_core::messages::access::Access;
 
 /// The SIM a new message should use: the thread's remembered one while it is
 /// still active, else the system default when active, else none (Android picks).
@@ -143,7 +143,7 @@ pub fn sim_for(sims: &SmsSimsPayload, remembered: Option<i32>) -> Option<i32> {
 }
 
 pub fn now_ms() -> i64 {
-    rovsti_core::clock::now_ms()
+    rosty_core::clock::now_ms()
 }
 
 /// Pull generations: only the newest pull of each kind lands.
@@ -180,7 +180,7 @@ pub struct Backend {
     saving: bool,
     save_due: bool,
     /// Armed "Remind me" reminders on single messages.
-    message_reminders: Vec<rovsti_core::message_reminder::MessageReminder>,
+    message_reminders: Vec<rosty_core::message_reminder::MessageReminder>,
     /// Sample data, on desktop only.
     preview: Option<Preview>,
     preview_sims: u32,
@@ -200,7 +200,7 @@ pub const DELETE_FAILED: &str = "Couldn't delete that conversation";
 impl Backend {
     /// Starts a session: installs the sink, pulls everything, drains events.
     pub fn start(cx: &mut App) -> Entity<Self> {
-        rovsti_android::bridge::keep_symbols();
+        rosty_android::bridge::keep_symbols();
         let data_dir = storage::data_dir("messages", cx);
         cx.new(|cx| {
             let (mut events_rx, sink) = events::install_sink_owned();
@@ -223,11 +223,11 @@ impl Backend {
                 save_due: false,
                 message_reminders: Vec::new(),
                 preview: desktop.then(|| Preview::initial(now_ms())),
-                preview_sims: std::env::var("ROVSTI_PREVIEW_SIMS")
+                preview_sims: std::env::var("ROSTY_PREVIEW_SIMS")
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(2),
-                preview_role: std::env::var_os("ROVSTI_PREVIEW_NO_ROLE").is_none(),
+                preview_role: std::env::var_os("ROSTY_PREVIEW_NO_ROLE").is_none(),
                 data_dir: None,
                 next_local: 1,
                 pulls: Pulls::default(),
@@ -282,7 +282,7 @@ impl Backend {
             // Tell Kotlin the session is live: it stops posting its own
             // digests and hands over what queued while no UI was attached.
             let attach = cx.background_executor().spawn(async {
-                if let Err(error) = rovsti_android::window::ui_attached(true)
+                if let Err(error) = rosty_android::window::ui_attached(true)
                     && !matches!(error, Error::Unsupported)
                 {
                     log::debug!("uiAttached failed: {error}");
@@ -291,7 +291,7 @@ impl Backend {
             attach.detach();
             backend.load_message_reminders(cx);
             cx.on_release(move |_, _| {
-                let _ = rovsti_android::window::ui_attached(false);
+                let _ = rosty_android::window::ui_attached(false);
             })
             .detach();
             backend._tasks = vec![drain, dir];
@@ -330,7 +330,7 @@ impl Backend {
         self.locale
     }
 
-    /// Whether Rovsti Messages is the default SMS app. `true` while unknown, so
+    /// Whether Rosty Messages is the default SMS app. `true` while unknown, so
     /// the read-only banner never flashes at start.
     pub fn sms_role_held(&self) -> bool {
         self.sms_role.unwrap_or(true)
@@ -380,7 +380,7 @@ impl Backend {
         self.ui_active = active;
         cx.background_executor()
             .spawn(async move {
-                if let Err(error) = rovsti_android::window::ui_attached(active)
+                if let Err(error) = rosty_android::window::ui_attached(active)
                     && !matches!(error, Error::Unsupported)
                 {
                     log::debug!("uiAttached failed: {error}");
@@ -647,7 +647,7 @@ impl Backend {
     pub fn pull_exact_alarms(&mut self, cx: &mut Context<Self>) {
         let task = cx
             .background_executor()
-            .spawn(async { rovsti_android::trip::can_schedule_exact_alarms() });
+            .spawn(async { rosty_android::trip::can_schedule_exact_alarms() });
         cx.spawn(async move |this, cx| {
             let allowed = task.await;
             this.update(cx, |this, cx| {
@@ -703,7 +703,7 @@ impl Backend {
         let generation = self.pulls.blocked;
         let task = cx
             .background_executor()
-            .spawn(async { decode::<BlocklistPayload>(rovsti_android::blocklist::pull()) });
+            .spawn(async { decode::<BlocklistPayload>(rosty_android::blocklist::pull()) });
         cx.spawn(async move |this, cx| {
             let pulled = task.await;
             this.update(cx, |this, cx| {
@@ -963,7 +963,7 @@ impl Backend {
 
     /// Drops what the preferences kept for a thread that is gone.
     fn forget_thread_prefs(&mut self, thread_id: i64, cx: &mut Context<Self>) {
-        let tag = crate::notifications::thread_tag(&rovsti_core::ThreadId::Sms(thread_id));
+        let tag = crate::notifications::thread_tag(&rosty_core::ThreadId::Sms(thread_id));
         self.update_prefs(cx, |prefs| {
             prefs.set_muted(&tag, false);
             prefs.sim_choices.remove(&thread_id);
@@ -1113,7 +1113,7 @@ impl Backend {
     // ---- message reminders ------------------------------------------------
 
     /// The armed "Remind me" reminders.
-    pub fn message_reminders(&self) -> &[rovsti_core::message_reminder::MessageReminder] {
+    pub fn message_reminders(&self) -> &[rosty_core::message_reminder::MessageReminder] {
         &self.message_reminders
     }
 
@@ -1129,7 +1129,7 @@ impl Backend {
         });
         cx.spawn(async move |this, cx| {
             let list = match task.await {
-                Ok(json) => rovsti_core::message_reminder::parse_list(&json),
+                Ok(json) => rosty_core::message_reminder::parse_list(&json),
                 Err(Error::Unsupported) => Vec::new(),
                 Err(error) => {
                     log::warn!("reading message reminders failed: {error}");
@@ -1154,7 +1154,7 @@ impl Backend {
             .spawn(async { reminders::armed_messages() });
         cx.spawn(async move |this, cx| {
             let list = match task.await {
-                Ok(json) => rovsti_core::message_reminder::parse_list(&json),
+                Ok(json) => rosty_core::message_reminder::parse_list(&json),
                 Err(Error::Unsupported) => return,
                 Err(error) => {
                     log::warn!("reading message reminders failed: {error}");
@@ -1174,10 +1174,10 @@ impl Backend {
     /// Arms the alarm for `reminder` off the UI thread. `Ok(false)` means Android refused it.
     pub fn arm_message_reminder(
         &self,
-        reminder: &rovsti_core::message_reminder::MessageReminder,
+        reminder: &rosty_core::message_reminder::MessageReminder,
         cx: &mut Context<Self>,
     ) -> Task<Result<bool, Error>> {
-        let json = rovsti_core::message_reminder::arm_json(reminder);
+        let json = rosty_core::message_reminder::arm_json(reminder);
         cx.background_executor()
             .spawn(async move { reminders::arm_message(&json) })
     }
@@ -1198,7 +1198,7 @@ impl Backend {
     /// Remembers an armed reminder; a second one for the same message replaces the first.
     pub fn track_message_reminder(
         &mut self,
-        reminder: rovsti_core::message_reminder::MessageReminder,
+        reminder: rosty_core::message_reminder::MessageReminder,
         cx: &mut Context<Self>,
     ) {
         // Chat reminders (empty message_id) never replace each other.
@@ -1222,7 +1222,7 @@ impl Backend {
     }
 
     fn on_message_reminder_fired(&mut self, json: &str, cx: &mut Context<Self>) {
-        match rovsti_core::message_reminder::fired_id(json) {
+        match rosty_core::message_reminder::fired_id(json) {
             Some(id) => self.forget_message_reminder(id, cx),
             None => self.load_message_reminders(cx),
         }
@@ -1342,7 +1342,7 @@ impl Backend {
         to: Vec<String>,
         body: String,
         sub_id: Option<i32>,
-        task: Task<rovsti_android::Result<bool>>,
+        task: Task<rosty_android::Result<bool>>,
         cx: &mut Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
@@ -1480,7 +1480,7 @@ pub fn collect_all(
 
 fn documents_pick_attachment() -> bool {
     matches!(
-        rovsti_android::documents::pick_attachment(ATTACH_MAX_BYTES),
+        rosty_android::documents::pick_attachment(ATTACH_MAX_BYTES),
         Ok(true)
     )
 }
@@ -1496,7 +1496,7 @@ fn status(local_id: u64, uri: Option<String>, state: DeliveryState) -> SmsStatus
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::sms::SmsSim;
+    use rosty_core::sms::SmsSim;
 
     use super::*;
 

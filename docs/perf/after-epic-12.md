@@ -16,10 +16,10 @@ frame was already cheap there (p50 0.3 to 1.3 ms). Allocations per frame fell 4.
 scenarios. The big change is on the GPU side (below), which the desktop CPU numbers cannot show.
 Whether the phone meets the 4 ms / one-frame targets is story 12.7.
 
-## 12.1 Perf feature and `RovstiPerf`
+## 12.1 Perf feature and `RostyPerf`
 
-* `rovsti_ui::perf::Recorder`: per root render it reads `Window::frame_diagnostics()` (enabled once
-  with `Recorder::enable`), pushes `build_time` into a preallocated ring (`rovsti_core::perf::FrameStats`),
+* `rosty_ui::perf::Recorder`: per root render it reads `Window::frame_diagnostics()` (enabled once
+  with `Recorder::enable`), pushes `build_time` into a preallocated ring (`rosty_core::perf::FrameStats`),
   counts view-cache hits/misses, renders and animation requests, and logs ONE report line when the
   scenario changes. Zero allocation per frame (test `observing_a_frame_does_not_allocate`).
 * Thermal state: `App::on_thermal_state_change` feeds `perf::set_thermal`; it is printed, never used
@@ -33,8 +33,8 @@ Whether the phone meets the 4 ms / one-frame targets is story 12.7.
 ## 12.2 Scenarios
 
 Six scripted scenarios (`perf_run.rs`), played through the same code as a tap, on the phone (trigger:
-`adb shell setprop debug.rovsti.perf <name>:<n>`, read through `__system_property_get`, no JNI) and on
-the desktop (`ROVSTI_PERF=tab,keypad`). `scripts/perf-run.sh` drives them and captures logcat and
+`adb shell setprop debug.rosty.perf <name>:<n>`, read through `__system_property_get`, no JNI) and on
+the desktop (`ROSTY_PERF=tab,keypad`). `scripts/perf-run.sh` drives them and captures logcat and
 `dumpsys SurfaceFlinger --latency` of the GpuiView layer. The incall and incoming scenarios use the
 fake call walker (never Telecom). Baseline numbers: `baseline.md`.
 
@@ -90,7 +90,7 @@ fake call walker (never Telecom). Baseline numbers: `baseline.md`.
 * Photos: `the_photo_cache_stays_at_64_and_decoding_is_off_the_caller`: 5000 photos pushed through
   the cache leave 64; `want_photos` returns before anything is decoded (the work is queued on the
   background executor). The LRU insert scans 64 entries once per decoded photo, never per frame.
-* StrictMode: `RovstiPhoneApp` turns on `ThreadPolicy.detectAll().penaltyLog()` for debuggable builds
+* StrictMode: `RostyPhoneApp` turns on `ThreadPolicy.detectAll().penaltyLog()` for debuggable builds
   (not the release). All provider and photo reads already run on the background executor.
 
 ## 12.6 Glass pass cost
@@ -126,7 +126,7 @@ plus new `glass_grid`):
 
 ## Release profile
 
-`rovsti_phone` itself (the app's per-frame element building) and the crates that run on every frame
+`rosty_phone` itself (the app's per-frame element building) and the crates that run on every frame
 that changes (taffy: layout; cosmic-text, harfrust, rustybuzz: text shaping; swash, zeno: glyph
 rasterisation; tiny-skia: icon rasterisation) are added to the `opt-level = 3` list (the rest stays
 `s`; `panic = "unwind"` is unchanged). Desktop harness, LTO off, the Cargo.toml profile:
@@ -134,9 +134,9 @@ rasterisation; tiny-skia: icon rasterisation) are added to the `opt-level = 3` l
 | | tab p50 / p95 | recents p50 / p95 | keypad p50 / p95 | incall p50 / p95 | incoming p50 / p95 |
 |---|---|---|---|---|---|
 | before (`s` + gpui, kit, ui, core, android at 3) | 0.91 / 1.14 | 1.41 / 1.53 | 1.15 / 2.58 | 0.36 / 0.89 | 0.38 / 1.33 |
-| + rovsti_phone | 0.89 / 1.08 | 1.39 / 1.73 | 1.16 / 2.61 | 0.35 / 0.88 | 0.36 / 1.30 |
+| + rosty_phone | 0.89 / 1.08 | 1.39 / 1.73 | 1.16 / 2.61 | 0.35 / 0.88 | 0.36 / 1.30 |
 | + taffy, cosmic-text, harfrust, rustybuzz, swash, zeno, tiny-skia | 0.83 / 0.97 | 1.36 / 1.44 | 1.11 / 2.52 | 0.34 / 0.85 | 0.35 / 1.27 |
 
-4 to 9% less scene-build time on the first frames of each scenario; `rovsti_phone` alone is within
+4 to 9% less scene-build time on the first frames of each scenario; `rosty_phone` alone is within
 noise but is the app's own per-frame code, which the file's own comment says keeps full optimisation.
-Size cost (signed release, `librovsti_phone.so` / APK): 15,486,824 / 22,205,659 bytes before, 16,405,144 / 23,123,979 bytes after (+0.92 MB, +5.9% / +4.1%); part of it is the new glass variants, the Tab Bar view and the tests-free runtime code, most of it the opt-level 3 crates.
+Size cost (signed release, `librosty_phone.so` / APK): 15,486,824 / 22,205,659 bytes before, 16,405,144 / 23,123,979 bytes after (+0.92 MB, +5.9% / +4.1%); part of it is the new glass variants, the Tab Bar view and the tests-free runtime code, most of it the opt-level 3 crates.

@@ -1,7 +1,7 @@
-# UX completeness pass: Rovsti Stops (round 1)
+# UX completeness pass: Rosty Stops (round 1)
 
 Base: `7af5352a6096c553453c63c7f8202a867856dd8d` (main). No stash, clean tree.
-Scope: `apps/stops`, `crates/rovsti_geo`, `crates/rovsti_tiles`. No new product features, no
+Scope: `apps/stops`, `crates/rosty_geo`, `crates/rosty_tiles`. No new product features, no
 backends. Pure logic first, tested; GPUI glue thin; only GPUI APIs already used in the app.
 
 ## Audit: gaps found (from the point of view of a user holding the phone)
@@ -17,15 +17,15 @@ backends. Pure logic first, tested; GPUI glue thin; only GPUI APIs already used 
 | G7 | Low | Clear on the Trip tab drops both pins with no undo. | `trip_ui.rs::setup_cards` |
 | G8 | Low | The picker field placeholder "Paste a link or coordinates" hides that typing searches stops and saved places. | `picker.rs::pick_body` |
 | G9 | Low (deferred) | Sharing or copying a saved place out of the app. No Stops share or clipboard seam exists (`share_text` lives in the Phone telecom bridge). Adding one is a new feature: noted, not planned. |
-| G10 | Info | `rovsti_tiles`: tile server settings already have test, save and reset, with pills. No gap found. GTFS import, re-import and remove already exist with pills. |
+| G10 | Info | `rosty_tiles`: tile server settings already have test, save and reset, with pills. No gap found. GTFS import, re-import and remove already exist with pills. |
 
 Duplicated code to fold while fixing: `save_point` and `save_stop` (picker.rs) both do
 add + set gtfs_stop + save.
 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
-### S1. rovsti_geo: saved-place lookup, save with stop id, reorder (pure + tests)
-`crates/rovsti_geo/src/places.rs`:
+### S1. rosty_geo: saved-place lookup, save with stop id, reorder (pure + tests)
+`crates/rosty_geo/src/places.rs`:
 - `pub fn near(&self, coord: Coord) -> Option<&Place>`: the nearest place within
   `DUPLICATE_RADIUS_M`, or `None`.
 - `pub fn save(&mut self, name: &str, coord: Coord, gtfs_stop: Option<String>) -> Result<u64, PlaceError>`:
@@ -131,7 +131,7 @@ feedback.
 - `pick_body` placeholder: "Search stops and saved places, or paste a link".
 
 ### S8. Docs
-- `docs/roadmap.md`, Rovsti Stops: add "[x] Save and manage places from map pins, links and
+- `docs/roadmap.md`, Rosty Stops: add "[x] Save and manage places from map pins, links and
   stops (name, rename, reorder, delete with undo); history reuse (done without a device)".
 - Record G9 (share/copy out) as an open idea, not planned.
 - Update this plan file's status.
@@ -139,9 +139,9 @@ feedback.
 ## Checks (every step)
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```
 Disk: 8.7 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
 

@@ -1,4 +1,4 @@
-# util-messages: everyday utilities for Rovsti Messages (round 3)
+# util-messages: everyday utilities for Rosty Messages (round 3)
 
 baseSha: e6dfb3ed379aed3f5b37ac71b5b0675d0bc7a4d6
 
@@ -12,19 +12,19 @@ M14, M16, M21. `git stash list` is empty. Re-checked by grep for the open rows:
   builds the viewer list; `cached_image`/`cached_thumb` exist; `spam::links(body)` /
   `spam::open_links(body, max) -> Vec<OpenLink { label, url }>` find URLs. Page menus:
   `main.rs::open_wa_page_menu` (~1595, "Starred messages" row ~2600) and `open_page_menu` (~1734).
-- M15 single SMS delete: only `rovsti_android::sms::delete_thread` (Kotlin
-  `SmsQuery.deleteThread`, bridge `smsDeleteThread`, RovstiBridge.kt:381). No per-message delete.
-  SMS item keys: `rovsti_core::sms_timeline::SmsKey::{Sms(i64), Mms(i64), Local(u64)}`.
+- M15 single SMS delete: only `rosty_android::sms::delete_thread` (Kotlin
+  `SmsQuery.deleteThread`, bridge `smsDeleteThread`, RostyBridge.kt:381). No per-message delete.
+  SMS item keys: `rosty_core::sms_timeline::SmsKey::{Sms(i64), Mms(i64), Local(u64)}`.
   `Backend::delete_thread` shows the SMS-role / failure handling to copy.
 - M17 voice notes: WA audio is "Tap to save" only (`conversation.rs::body`, `saveable`); no
   playback anywhere. No Kotlin player (`KeypadTone.kt`, `AlarmSound.kt` are tone players only).
 - M18 global search: the Chats search (`main.rs::search_query`, `inbox::filter_rows`) matches
   titles/snippets only. SMS query lives in `SmsQuery.messagesJson` (Kotlin) /
-  `rovsti_android::sms::messages`; WA history only via `Gateway::messages_with_meta(chat, before_ms, limit)`.
+  `rosty_android::sms::messages`; WA history only via `Gateway::messages_with_meta(chat, before_ms, limit)`.
   `Conversation::jump_to(id, cx)` (conversation.rs:1075) glows a loaded message.
 - M19 dates: `text_detect` explicitly ignores dates (`ignores_dates_amounts_otp_and_urls`).
-  `rovsti_core::call_log::civil_from_days` is `pub(crate)`; `reminder.rs` has local-day helpers
-  (private). No calendar intent in `rovsti_android`.
+  `rosty_core::call_log::civil_from_days` is `pub(crate)`; `reminder.rs` has local-day helpers
+  (private). No calendar intent in `rosty_android`.
 - M25 link copy: links have only "Open" pills (`conversation.rs` ~3063, SMS ~980).
 - M22, M20, M23, M24, M26, M27: none.
 - Desktop: `df` showed 6.7 GB free at planning; if under 6 GB run `rm -rf target/debug/incremental`.
@@ -70,18 +70,18 @@ M14, M16, M21. `git stash list` is empty. Re-checked by grep for the open rows:
 ## Plan, round 3 (pure logic first; every step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 Library-crate items are `pub`; app-crate pure helpers not yet called use
 `#[cfg_attr(not(test), allow(dead_code))]` until a later step uses them. One focused commit per
-step, prefix `Rovsti messages: `. Never invent GPUI APIs: only calls already used in
+step, prefix `Rosty messages: `. Never invent GPUI APIs: only calls already used in
 `apps/messages`, `apps/phone`, or verified in the pinned checkout. Every action gives a pill;
-failures say what happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone.".
+failures say what happened; `rosty_android::Error::Unsupported` -> "That needs an Android phone.".
 Gateway changes (`services/wa_gateway`) are out of scope.
 
-### Step 1. Pure: chat gallery, pending deletes, date detection (rovsti_core)
-- `crates/rovsti_core/src/call_log.rs`: add `pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64`
+### Step 1. Pure: chat gallery, pending deletes, date detection (rosty_core)
+- `crates/rosty_core/src/call_log.rs`: add `pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64`
   (inverse of `civil_from_days`, test `civil_round_trip` over 1970..2100 sample days).
-- New `crates/rovsti_core/src/chat_gallery.rs` (`pub mod chat_gallery;`):
+- New `crates/rosty_core/src/chat_gallery.rs` (`pub mod chat_gallery;`):
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum GalleryKind { Image, Video, Audio, Doc, Other }`
   - `pub struct GalleryInput<'a> { pub id: &'a str, pub at_ms: i64, pub kind: Option<GalleryKind>, pub text: Option<&'a str>, pub file_name: Option<&'a str>, pub size: Option<u64> }`
     (`kind: None` = plain text message).
@@ -102,7 +102,7 @@ Gateway changes (`services/wa_gateway`) are out of scope.
   - Tests: `splits_media_links_docs`, `links_deduplicate_keep_newest`, `newest_first`,
     `month_sections_group_consecutive`, `month_label_respects_offset`, `size_labels`,
     `short_url_strips_scheme`, `empty_text_partial`.
-- New `crates/rovsti_core/src/pending_delete.rs`:
+- New `crates/rosty_core/src/pending_delete.rs`:
   - `pub const UNDO_MS: i64 = 5_000;`
   - `#[derive(Clone, Debug, Default)] pub struct PendingDeletes<K> { items: Vec<(K, i64)> }` with
     `pub fn add(&mut self, key: K, now_ms: i64)` (re-add refreshes), `pub fn undo(&mut self, key: &K) -> bool`,
@@ -111,7 +111,7 @@ Gateway changes (`services/wa_gateway`) are out of scope.
     commits everything), `K: PartialEq + Clone`.
   - `pub fn notice(count: usize) -> String`: "Message deleted" / "3 messages deleted".
   - Tests: `due_after_window`, `undo_removes`, `re_add_refreshes`, `drain_returns_all`.
-- New `crates/rovsti_core/src/date_detect.rs`:
+- New `crates/rosty_core/src/date_detect.rs`:
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub struct FoundDate { pub span: std::ops::Range<usize>, pub start_ms: i64, pub all_day: bool, pub label: String }`
   - `pub fn detect(body: &str, now_ms: i64, tz_offset_s: i32, max: usize) -> Vec<FoundDate>`:
     `d.m.yyyy`, `d/m/yyyy`, `yyyy-mm-dd` (day-first; invalid dates rejected), optional following
@@ -124,10 +124,10 @@ Gateway changes (`services/wa_gateway`) are out of scope.
   - Tests: `dotted_and_iso_dates`, `day_word_with_time`, `turkish_day_words`,
     `bare_time_needs_day_word`, `invalid_dates_rejected`, `past_dates_dropped`,
     `amounts_and_codes_are_not_dates`, `label_formats`, `respects_max`.
-- Commit: `Rovsti messages: Pure: chat gallery, pending deletes, date detection (rovsti_core)`.
+- Commit: `Rosty messages: Pure: chat gallery, pending deletes, date detection (rosty_core)`.
 
-### Step 2. Pure: voice player state and global search (rovsti_core)
-- New `crates/rovsti_core/src/voice_player.rs`:
+### Step 2. Pure: voice player state and global search (rosty_core)
+- New `crates/rosty_core/src/voice_player.rs`:
   - `#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)] pub enum Speed { #[default] X1, X1_5, X2 }`
     with `next(self)`, `factor(self) -> f32`, `label(self) -> &'static str` ("1×", "1.5×", "2×").
   - `#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)] pub struct PlayerState { pub key: String, pub playing: bool, pub position_ms: u64, pub duration_ms: u64, pub ended: bool, pub error: Option<String> }`
@@ -139,7 +139,7 @@ Gateway changes (`services/wa_gateway`) are out of scope.
     playing/paused mid-way "0:12 / 0:42", idle "0:42"; hours as "1:02:03".
   - Tests: `speed_cycles`, `parse_state_tolerates_garbage`, `progress_clamps`,
     `seek_target_clamps`, `time_labels`.
-- New `crates/rovsti_core/src/global_search.rs`:
+- New `crates/rosty_core/src/global_search.rs`:
   - `pub const MIN_QUERY_CHARS: usize = 2; pub const MAX_HITS: usize = 200;`
   - `pub struct SearchCandidate<'a> { pub chat_key: &'a str, pub chat_title: &'a str, pub message_id: &'a str, pub author: Option<&'a str>, pub text: &'a str, pub at_ms: i64 }`
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub struct SearchHit { pub chat_key: String, pub chat_title: String, pub message_id: String, pub at_ms: i64, pub snippet: String, pub highlight: std::ops::Range<usize> }`
@@ -154,10 +154,10 @@ Gateway changes (`services/wa_gateway`) are out of scope.
     "No messages found"; partial appends " · recent WhatsApp chats only".
   - Tests: `folds_case_and_diacritics`, `short_query_finds_nothing`, `newest_first_and_capped`,
     `snippet_context_and_highlight`, `snippet_multibyte_safe`, `like_pattern_escapes`, `summary_text`.
-- Commit: `Rovsti messages: Pure: voice player state and global search (rovsti_core)`.
+- Commit: `Rosty messages: Pure: voice player state and global search (rosty_core)`.
 
-### Step 3. Android seams: message delete, SMS search, voice player, calendar (rovsti_android + Kotlin)
-- `crates/rovsti_android/src/sms.rs`:
+### Step 3. Android seams: message delete, SMS search, voice player, calendar (rosty_android + Kotlin)
+- `crates/rosty_android/src/sms.rs`:
   - `pub fn delete_message(key: &str) -> Result<bool>` (`key` "sms:12" / "mms:7"; bridge
     `smsDeleteMessage`; needs the SMS role).
   - `pub fn search(like: &str, limit: usize) -> Result<String>` (bridge `smsSearch`; returns
@@ -167,8 +167,8 @@ Gateway changes (`services/wa_gateway`) are out of scope.
 - Kotlin `SmsQuery.kt`: `deleteMessage(context, key)` (`contentResolver.delete(ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI|Telephony.Mms.CONTENT_URI, id), null, null) > 0`,
   RuntimeException -> false) and `searchJson(context, like, limit)` (query `Telephony.Sms.CONTENT_URI`,
   same projection as `messagesJson`, selection `body LIKE ? ESCAPE '\'`, `"date DESC LIMIT n"`,
-  `SmsJson.page(sms, emptyList(), n)`). Wire both in `RovstiBridge.kt` next to `smsDeleteThread`.
-- New `crates/rovsti_android/src/voice.rs` (`pub mod voice;`, doc: Kotlin side `VoicePlayer`):
+  `SmsJson.page(sms, emptyList(), n)`). Wire both in `RostyBridge.kt` next to `smsDeleteThread`.
+- New `crates/rosty_android/src/voice.rs` (`pub mod voice;`, doc: Kotlin side `VoicePlayer`):
   `pub fn play(key: &str, path: &str, from_ms: u64, speed: f32) -> Result<bool>`,
   `pub fn pause() -> Result<bool>`, `pub fn seek(ms: u64) -> Result<bool>`,
   `pub fn set_speed(speed: f32) -> Result<bool>`, `pub fn stop() -> Result<bool>`,
@@ -180,22 +180,22 @@ Gateway changes (`services/wa_gateway`) are out of scope.
   (API 23+), requests transient audio focus (`AudioManager.requestAudioFocus` with
   `AudioFocusRequest`, `AUDIOFOCUS_GAIN_TRANSIENT`), `setOnCompletionListener` marks `ended`;
   `stateJson()` -> `{"key","playing","position_ms","duration_ms","ended","error"}`; errors caught
-  into `error`. Bridge methods in `RovstiBridge.kt` (`voicePlay`, `voicePause`, `voiceSeek`,
+  into `error`. Bridge methods in `RostyBridge.kt` (`voicePlay`, `voicePause`, `voiceSeek`,
   `voiceSpeed`, `voiceStop`, `voiceState`).
-- New `crates/rovsti_android/src/calendar.rs`: `pub fn insert_event(title: &str, begin_ms: i64, end_ms: i64, all_day: bool) -> Result<bool>`
+- New `crates/rosty_android/src/calendar.rs`: `pub fn insert_event(title: &str, begin_ms: i64, end_ms: i64, all_day: bool) -> Result<bool>`
   (bridge `calendarInsert`; Kotlin `Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)`
   with `EXTRA_EVENT_BEGIN_TIME`, `EXTRA_EVENT_END_TIME`, `EXTRA_EVENT_ALL_DAY`, `Events.TITLE`,
   `FLAG_ACTIVITY_NEW_TASK`; `ActivityNotFoundException` -> false). Opens the user's calendar app
   (local, no permission). Desktop test.
 - Docs: add the new bridge names to whatever list `docs/` keeps for the bridge (grep
   `smsDeleteThread` in `docs/`).
-- Commit: `Rovsti messages: Android: message delete, SMS search, voice player, calendar seams`.
+- Commit: `Rosty messages: Android: message delete, SMS search, voice player, calendar seams`.
 
 ### Step 4. UI: chat gallery and Copy link (M13, M25)
 - New `apps/messages/src/gallery_ui.rs`: `pub(crate) struct GallerySheet { tab: GalleryTab, gallery: Gallery, partial: bool }`
   and `pub(crate) fn render_gallery(...)` drawing a full-height glass sheet: header "Media, links
   and docs" + ✕, a segmented control for the three tabs (reuse the app's existing segmented /
-  tab pill helper; grep `segmented` in `rovsti_ui`), content scrollable (`.id(..).overflow_y_scroll()`):
+  tab pill helper; grep `segmented` in `rosty_ui`), content scrollable (`.id(..).overflow_y_scroll()`):
   - Media: month headers (`chat_gallery::sections`), 3-column grid of square thumbnails
     (`cached_thumb`/`cached_image`, else a kind icon tile; video tiles show `LucidePlay`).
     Tap: close sheet, emit `OpenMedia` with the viewer list positioned on that id (`viewer_items`).
@@ -214,7 +214,7 @@ Gateway changes (`services/wa_gateway`) are out of scope.
 - M25: next to each "Open link" pill in WA strip (~3063) and SMS selection pills (~980) add a
   "Copy link" pill (`LucideCopy`) for the first link -> copy + pill "Link copied".
 - Tests in `gallery_ui.rs` for any pure mapping helper (e.g. `fn kind_of(MediaKind, Option<&MediaMeta>) -> GalleryKind`).
-- Commit: `Rovsti messages: UI: media, links and docs gallery and Copy link (M13, M25)`.
+- Commit: `Rosty messages: UI: media, links and docs gallery and Copy link (M13, M25)`.
 
 ### Step 5. UI: delete one SMS/MMS with Undo, Message privately (M15, M22)
 - `backend.rs`: `pub fn delete_sms_message(&mut self, thread_id: i64, key: SmsKey, cx) ` (role check
@@ -234,10 +234,10 @@ Gateway changes (`services/wa_gateway`) are out of scope.
   `ConversationEvent::OpenChat { jid, title }` handled like `PillAction::OpenChat` (opens or
   creates the 1:1 page). Not shown for own messages.
 - `docs/messages-acceptance.md`: rows for M13, M25, M15, M22.
-- Commit: `Rovsti messages: UI: delete one SMS with Undo and Message privately (M15, M22)`.
+- Commit: `Rosty messages: UI: delete one SMS with Undo and Message privately (M15, M22)`.
 
 ### Step 6. UI: voice note and audio player (M17)
-- `prefs.rs`: `#[serde(default)] pub voice_speed: rovsti_core::voice_player::Speed` (test
+- `prefs.rs`: `#[serde(default)] pub voice_speed: rosty_core::voice_player::Speed` (test
   `old_prefs_file_defaults_speed`; `reset()` resets it).
 - New `apps/messages/src/voice_ui.rs`: `pub(crate) struct VoiceController { state: PlayerState, loading: Option<String>, poll: Option<Task<()>> }`
   owned by `MessagesApp` (shared by WA and SMS pages through a `Entity<VoiceController>` passed in
@@ -256,7 +256,7 @@ Gateway changes (`services/wa_gateway`) are out of scope.
   `mark_played` path. Keep "Save" available in the strip for audio (existing save code).
 - SMS/MMS audio parts: same row with the part file path.
 - Leaving the page or the app pausing calls `stop()`.
-- Commit: `Rovsti messages: UI: voice note player with speed and scrubbing (M17)`.
+- Commit: `Rosty messages: UI: voice note player with speed and scrubbing (M17)`.
 
 ### Step 7. UI: global message search with jump (M18)
 - New `apps/messages/src/global_search_ui.rs`: `pub(crate) struct GlobalSearch { field: Entity<TextField>, hits: Vec<SearchHit>, running: Option<Task<()>>, partial: bool, wa_cache: Vec<(String, String, Vec<RichMessage>)> }`.
@@ -273,7 +273,7 @@ Gateway changes (`services/wa_gateway`) are out of scope.
   10 pages are loaded, then `jump_to(id)` (existing glow); otherwise pill "That message is
   further back. Scroll up to load it.".
 - No SMS read permission -> SMS part skipped, footer says so; WA not linked -> WA part skipped.
-- Commit: `Rovsti messages: UI: global message search with jump (M18)`.
+- Commit: `Rosty messages: UI: global message search with jump (M18)`.
 
 ### Step 8. UI: date pills (M19), docs and backlog
 - WA strip and SMS selection pills: for the first `date_detect::detect(text, now, tz, 1)` hit a
@@ -283,7 +283,7 @@ Gateway changes (`services/wa_gateway`) are out of scope.
 - `docs/messages-acceptance.md`: rows for M17, M18, M19.
 - This file: mark shipped rows "done R3"; note deferred items; remaining backlog (M20, M23, M24,
   M26-M29) is round 4.
-- Commit: `Rovsti messages: UI: date pills (M19), docs, backlog`.
+- Commit: `Rosty messages: UI: date pills (M19), docs, backlog`.
 
 ## Round 4 backlog (leftovers)
 M20 select mode (copy/forward several), M23 local star for SMS/MMS, M24 jump to date,

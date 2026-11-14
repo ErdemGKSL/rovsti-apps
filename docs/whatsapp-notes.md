@@ -2,7 +2,7 @@
 
 Status: **resolved (decided 2026-11-05, built in `_bmad-output/plans/wa-gateway.md`).**
 WhatsApp is fully backend-based. A gateway service owns the whatsapp-rust sessions,
-and every Rovsti app offers two choices: *link WhatsApp for the first time* (QR or
+and every Rosty app offers two choices: *link WhatsApp for the first time* (QR or
 pairing code through the gateway), or *connect to an existing instance* by pasting a
 connect key that another app shows. Everything else stays local. The design is in
 [architecture.md](architecture.md#whatsapp-gateway); running it is in
@@ -17,15 +17,15 @@ ones; each now has its answer. The original analysis follows for context.
 | Waking the app? | FCM data-only push from the gateway, optional and config-gated, with no message text (AD-WA6). No foreground service. |
 | `CLAUDE.md` says no backend | Updated: local except WhatsApp. The gateway is the user's own server. |
 | Terms of service | Unchanged risk, now documented: [whatsapp-gateway.md](whatsapp-gateway.md#terms-of-service). |
-| Moving the session out of Messages | Done: `rovsti_whatsapp` is removed; the session code lives in `services/wa_gateway`. |
+| Moving the session out of Messages | Done: `rosty_whatsapp` is removed; the session code lives in `services/wa_gateway`. |
 
 Not verified on a device: linking a real account, a real call's audio quality and
 FCM delivery on HyperOS all need hardware. Only checks and unit tests ran here.
 
 ## Owner's direction (2026-11-03)
 
-- **The gateway owns the WhatsApp session** (superseded: it was Rovsti Contacts).
-  Every app, Contacts included, reaches it through `rovsti_wa_client`, and none
+- **The gateway owns the WhatsApp session** (superseded: it was Rosty Contacts).
+  Every app, Contacts included, reaches it through `rosty_wa_client`, and none
   opens its own.
 - **WhatsApp calls in Phone.** There is no server today, so the question is how
   an incoming WhatsApp call wakes the app. The owner's idea is a small backend
@@ -40,8 +40,8 @@ FCM delivery on HyperOS all need hardware. Only checks and unit tests ran here.
   second login replaces the first. Linking each app separately costs one of
   the four companion slots per app and doubles battery use. The usual shape is
   one owner process with an IPC API: a bound service, guarded by a
-  `signature`-level permission so only apps signed with the Rovsti key can bind.
-  Phone and Messages call it through `rovsti_android`.
+  `signature`-level permission so only apps signed with the Rosty key can bind.
+  Phone and Messages call it through `rosty_android`.
 - **Calls.** The whatsapp-rust 0.7 README advertises 1:1 VoIP audio calls,
   and the crate has `voip` and `handlers/call.rs` modules (offer, reject,
   terminate, relay media). We have not checked the API, its feature flags or
@@ -71,7 +71,7 @@ Rules:
   into the phone-number chat (`chat_merged` event). Details in
   `docs/whatsapp-gateway.md`, "LID resolution and chat merge".
 - Apps never format a LID as a phone number and merge by number only for real
-  `@s.whatsapp.net` JIDs (`rovsti_wa_proto::is_pn_jid`).
+  `@s.whatsapp.net` JIDs (`rosty_wa_proto::is_pn_jid`).
 - A chat that is still LID-only shows the contact name, else the WhatsApp push name,
   else "WhatsApp user" (`WHATSAPP_USER_LABEL`), never a `+`.
 - On `chat_merged`, apps move drafts, pins and mutes to the surviving id.
@@ -83,7 +83,7 @@ Rules:
   decide where the server runs, who operates it and what it may store.
 - Unofficial clients may violate WhatsApp's Terms of Service. A server-side
   session makes the account more visible to WhatsApp's enforcement.
-- Moving the session from Messages (where `rovsti_whatsapp` and the
+- Moving the session from Messages (where `rosty_whatsapp` and the
   pairing UI live today) to Contacts also moves the foreground service.
 
 ## Next step

@@ -1,6 +1,6 @@
 //! The codec side of a WhatsApp call's audio, and the per-call audio counters.
 //!
-//! The apps speak 16 kHz mono PCM (`rovsti_wa_proto::audio`). How that PCM
+//! The apps speak 16 kHz mono PCM (`rosty_wa_proto::audio`). How that PCM
 //! meets WhatsApp is [`CALL_AUDIO_MODE`]:
 //!
 //! - [`CallAudioMode::MlowPcm`] (default): whatsapp-rust's PCM audio
@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 
 use async_channel::{Receiver, Sender, TrySendError};
 use bytes::Bytes;
-use rovsti_wa_proto::audio::{STEP_SAMPLES, samples_ms};
+use rosty_wa_proto::audio::{STEP_SAMPLES, samples_ms};
 use whatsapp_rust::voip::audio::{WaOpusDecoder, WaOpusEncoder};
 use whatsapp_rust::voip::{AudioCodec, AudioFormat, AudioRtpProfile, EncodedAudioFrame};
 use whatsapp_rust::wacore::voip::rtp::RTP_PAYLOAD_TYPE_MLOW_RED;
@@ -741,7 +741,7 @@ pub async fn run_pcm_downlink(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::audio::{FRAME_SAMPLES, SAMPLE_RATE};
+    use rosty_wa_proto::audio::{FRAME_SAMPLES, SAMPLE_RATE};
 
     /// One 60 ms frame of a sine at `hz`, continuing at sample `offset`.
     fn tone(hz: f64, offset: usize) -> Frame {

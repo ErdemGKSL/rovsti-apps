@@ -1,6 +1,6 @@
 //! The Trash page, "Scan QR code" and the code that keeps deleted contacts.
 //!
-//! What the Trash holds and how it ages live in `rovsti_core::contact_trash`,
+//! What the Trash holds and how it ages live in `rosty_core::contact_trash`,
 //! the file in `trash_store`; this module is the page (Settings, "Trash"),
 //! its sheet and select mode, and the glue for restoring and deleting for
 //! good. The decisions that can be tested without a window are plain
@@ -12,14 +12,14 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     avatar,
     contact_edit::{ContactDraft, DraftField, FieldKind},
     contact_scan::Scanned,
     contact_trash::{self, Trash},
     multi_select::{self, Selection},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{flat_glass, glass_icon_button, glass_pill, large_title, list_row, section},
     sheet::Sheet,
@@ -407,7 +407,7 @@ impl ContactsApp {
                 .into_any_element()
         });
         let body = if items.is_empty() {
-            rovsti_ui::components::empty_state(
+            rosty_ui::components::empty_state(
                 theme,
                 "Trash Is Empty",
                 "Deleted contacts stay here for 30 days.",
@@ -550,7 +550,7 @@ impl ContactsApp {
             div()
                 .id("trash-select-bar")
                 .absolute()
-                .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
+                .bottom(px(rosty_ui::layout::geom::tab_bar_bottom(safe_bottom)))
                 .left(px(8.0))
                 .right(px(8.0))
                 .flex()

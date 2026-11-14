@@ -1,4 +1,4 @@
-//! Per-call notes (U8): the store lives in `rovsti_app_core::phone::notes`; this
+//! Per-call notes (U8): the store lives in `rosty_app_core::phone::notes`; this
 //! is the GPUI half that reads and writes the file off the UI thread.
 
 // The call details sheet and the in-call note (S5, S6) use the rest of this.
@@ -7,15 +7,15 @@
 use std::sync::atomic::Ordering;
 
 use gpui::Context;
-use rovsti_app_core::phone::notes;
-pub(crate) use rovsti_app_core::phone::notes::NotesStore;
+use rosty_app_core::phone::notes;
+pub(crate) use rosty_app_core::phone::notes::NotesStore;
 
 use crate::PhoneApp;
 
 impl PhoneApp {
     /// Reads `call-notes.json` in the background once the data directory is known.
     pub(crate) fn load_notes(&mut self, cx: &mut Context<Self>) {
-        let dir = rovsti_ui::storage::data_dir("phone", cx);
+        let dir = rosty_ui::storage::data_dir("phone", cx);
         cx.spawn(async move |this, cx| {
             let Ok(dir) = dir.await else { return };
             let stored = {

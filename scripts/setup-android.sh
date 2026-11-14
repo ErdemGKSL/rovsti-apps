@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time Android toolchain setup for the Rovsti apps. Safe to re-run.
+# One-time Android toolchain setup for the Rosty apps. Safe to re-run.
 set -euo pipefail
 
 SDK="${ANDROID_HOME:-$HOME/Android/Sdk}"

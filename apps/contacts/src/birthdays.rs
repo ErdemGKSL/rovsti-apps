@@ -5,9 +5,9 @@ use gpui::{
     AnyElement, Context, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
     Styled, div,
 };
-use rovsti_android::{permissions, reminders};
-use rovsti_core::birthday_reminder::{HOUR_CHOICES, hour_label};
-use rovsti_ui::{
+use rosty_android::{permissions, reminders};
+use rosty_core::birthday_reminder::{HOUR_CHOICES, hour_label};
+use rosty_ui::{
     Icon,
     components::section,
     theme,

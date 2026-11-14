@@ -1,7 +1,7 @@
 # WhatsApp gateway: running it and linking an account
 
 The gateway (`services/wa_gateway`) owns every whatsapp-rust session. The apps only
-talk to it through `rovsti_wa_client`. Design and API: `_bmad-output/plans/wa-gateway.md`
+talk to it through `rosty_wa_client`. Design and API: `_bmad-output/plans/wa-gateway.md`
 and `docs/whatsapp-notes.md`. This page covers what you do by hand.
 
 ## Run it locally
@@ -71,7 +71,7 @@ scripts/deploy-wa-gateway.sh --dry-run  # connection and bundle check only
   `X-Forwarded-For` entry, which Cloudflare appends, and the port is loopback-only.
 - FCM push: the service-account key is uploaded to `/etc/wa-gateway/service-account.json`
   (root only, mode 0600) and handed to the service with `LoadCredential=` in a drop-in
-  (`/etc/systemd/system/wa-gateway.service.d/10-rovsti.conf`), so the unprivileged service
+  (`/etc/systemd/system/wa-gateway.service.d/10-rosty.conf`), so the unprivileged service
   user never owns the file. The project id goes into `config.toml`.
 - The workspace's release profile is tuned for Android size (fat LTO). The server build
   overrides it (no LTO, `opt-level` 2) so a Raspberry Pi finishes in a reasonable time.
@@ -180,7 +180,7 @@ existing `wa.db` signs back in silently, so there is no QR the second time.
    rotates about every 20 seconds, so keep listening. Any WebSocket client works
    (`websocat -H "Authorization: Bearer rwk_..." ws://127.0.0.1:8787/v1/events`).
    The apps do this for you and draw the code.
-3. Render the payload as a QR code (the apps use `rovsti_wa_ui`) and scan it from
+3. Render the payload as a QR code (the apps use `rosty_wa_ui`) and scan it from
    WhatsApp on the phone: Settings, Linked devices, Link a device.
 4. When the phone approves, the stream sends `{"type":"state","state":"connected",...}`
    with the account's JID and push name. A history sync follows, and one
@@ -227,14 +227,14 @@ in request order. `business` and `verified_name` are optional in the reply.
   per-instance cooldown.
 - The instance must be connected, else the usual `not_connected` error.
 
-`rovsti_wa_client::Gateway::lookup_users(&[String])` wraps it. Apps look up one
+`rosty_wa_client::Gateway::lookup_users(&[String])` wraps it. Apps look up one
 contact's numbers when its card opens, never the whole address book.
 
 ## Message and chat meta
 
 `GET /v1/chats` and `GET /v1/chats/{jid}/messages` send the old fields plus a `meta`
 object (left out when empty), so older clients keep reading them as `ChatSummary` /
-`WaMessage`. The types are in `rovsti_wa_proto::meta`; the client reads them with
+`WaMessage`. The types are in `rosty_wa_proto::meta`; the client reads them with
 `chats_with_meta()` (`RichChat`) and `messages_with_meta(...)` (`RichMessage`).
 
 A message's `meta` (`MessageMeta`) can hold:
@@ -316,7 +316,7 @@ either id: the store key is the resolved id, the wire target is what the app sen
 
 Event `chat_merged {from, into}` (see below) tells clients to move local state.
 
-`rovsti_wa_proto::Timeline::apply_rich_page` and `Timeline::meta(id)` keep the meta
+`rosty_wa_proto::Timeline::apply_rich_page` and `Timeline::meta(id)` keep the meta
 next to the timeline and apply `message_meta`, `message_deleted` and `chat_cleared`.
 
 ## Acting on messages and chats
@@ -393,10 +393,10 @@ header. Older clients ignore them (no field is required, unknown fields are allo
 - **Stale answers.** When WhatsApp cannot be asked (cooldown, bucket, or a failed
   query) and every requested JID already has an answer WhatsApp really gave
   (`fetched_ms > 0`), `/v1/contacts/profiles` answers 200 with the stored profiles
-  and the header `x-rovsti-stale: rate-limited` (or `error`). Otherwise, and always
+  and the header `x-rosty-stale: rate-limited` (or `error`). Otherwise, and always
   with `refresh: true`, the error is returned; a never-fetched JID no longer comes
   back as an empty profile with `fetched_ms: 0`. A picture whose bytes the gateway
-  already holds is served the same way with `x-rovsti-stale`.
+  already holds is served the same way with `x-rosty-stale`.
 - **Logging.** Every request is logged at INFO as
   `instance=<id> <METHOD> <route template> -> <status> <ms>ms` (`/healthz` and the
   event stream at DEBUG); every contact-route 429 also at WARN as
@@ -442,13 +442,13 @@ the expiry sweep publish `{"type":"status_changed","author":"..."}` (`author` le
 when several people changed); clients refetch `GET /v1/statuses`. Older clients skip it.
 Client: `statuses()`, `status_media(id)`, `status_thumbnail(id)`,
 `mark_status_viewed(&ids)`. The wire types and the viewer's pure model
-(`StatusPlayer`) are in `rovsti_wa_proto::status`.
+(`StatusPlayer`) are in `rosty_wa_proto::status`.
 
 Posting a status is not offered: whatsapp-rust's `client.status().send_text(...)` needs
 the list of recipients (the contacts allowed to see it), which the gateway does not
 keep.
 
-### How Rovsti Messages uses it
+### How Rosty Messages uses it
 
 The Chats tab shows a "Status" row above the archived chats while anyone has a current
 update: up to three avatars with a ring (green while unseen), "N new updates" and the
@@ -494,9 +494,9 @@ Every add, send and failure publishes `{"type":"scheduled", ...item}` on
 `/v1/events`; clients that do not know the event skip it. A cancel publishes
 nothing, so clients refetch the list when they need to see cancellations.
 
-### How Rovsti Messages uses it
+### How Rosty Messages uses it
 
-`rovsti_wa_client::Gateway` has `schedule_text(&ScheduleText)`, `scheduled()` and
+`rosty_wa_client::Gateway` has `schedule_text(&ScheduleText)`, `scheduled()` and
 `cancel_scheduled(id)`. Long-pressing Send in a WhatsApp chat opens the "Send later"
 sheet (`apps/messages/src/schedule_ui.rs`); the pick becomes a `POST /v1/scheduled`.
 The chat's Scheduled strip lists the pending (and failed) items of that chat from

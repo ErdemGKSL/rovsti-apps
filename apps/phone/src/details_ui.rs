@@ -17,12 +17,12 @@ use gpui::{
     InteractiveElement, IntoElement, MouseButton, ParentElement, Role, SharedString,
     StatefulInteractiveElement, Styled, Subscription, TextInputAction, Window, div, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     call_log::EntryRef,
     call_notes::{self, CallDetails, SetOutcome},
     recents::HistoryLine,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     field::{Bare, TextField, bare_field},
     motion::press_scale,
@@ -215,7 +215,7 @@ impl PhoneApp {
             editing: false,
             field,
             blocked: vm.blocked,
-            missed: vm.line.call_type == rovsti_core::call_log::CallType::Missed,
+            missed: vm.line.call_type == rosty_core::call_log::CallType::Missed,
             armed: false,
             seen_submits: 0,
             _field_sub: sub,
@@ -356,14 +356,14 @@ impl PhoneApp {
                 if backend::copy_text(&text) != backend::Outcome::Done {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
-                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.show_notice_pill("Details copied", None, false, cx);
             }
             SHARE => {
                 let note = self.notes.get(&d.number, d.at_ms).map(|n| n.text.clone());
                 let who = d.who.clone();
                 let text = call_notes::share_text(&d.details, who.as_deref(), note.as_deref());
-                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                 let outcome = backend::share_text(&text);
                 if outcome != backend::Outcome::Done {
                     self.show_notice_pill(
@@ -392,7 +392,7 @@ impl PhoneApp {
                     let (number, at_ms) = (d.number.clone(), d.at_ms);
                     if let Some(note) = self.notes.remove(&number, at_ms) {
                         self.save_notes(cx);
-                        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                         self.show_pill_action(
                             "Note deleted",
                             "Undo",
@@ -407,7 +407,7 @@ impl PhoneApp {
                     d.number.clone(),
                     d.who.clone().unwrap_or_else(|| d.number.clone()),
                 );
-                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                 let armed = self.remind_armed(&number, cx);
                 if armed {
                     self.remind_cancel(&number, cx);
@@ -499,7 +499,7 @@ impl PhoneApp {
         let caption = d.who.is_none().then(|| {
             header_caption(
                 None,
-                rovsti_core::calling_code::country_line(&d.number, home_cc.as_deref()).as_deref(),
+                rosty_core::calling_code::country_line(&d.number, home_cc.as_deref()).as_deref(),
             )
         });
         let caption = caption.flatten();
@@ -773,7 +773,7 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::call_log::CallType;
+    use rosty_core::call_log::CallType;
 
     #[test]
     fn line_ids_round_trip_for_both_prefixes() {

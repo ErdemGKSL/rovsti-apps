@@ -13,10 +13,10 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_android::{Error as AndroidError, documents};
-use rovsti_core::wire::DocumentResult;
-use rovsti_geo::{Feed, FeedReport, Route, read_zip};
-use rovsti_ui::{
+use rosty_android::{Error as AndroidError, documents};
+use rosty_core::wire::DocumentResult;
+use rosty_geo::{Feed, FeedReport, Route, read_zip};
+use rosty_ui::{
     components::{list_row, section},
     storage, theme,
     tokens::{Theme, typography},
@@ -480,7 +480,7 @@ impl StopsApp {
 mod tests {
     use std::io::Write;
 
-    use rovsti_geo::{Coord, Pattern, Stop};
+    use rosty_geo::{Coord, Pattern, Stop};
     use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
     use super::*;

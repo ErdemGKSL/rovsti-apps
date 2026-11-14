@@ -5,11 +5,11 @@
 use std::sync::Arc;
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, StatefulInteractiveElement};
-use rovsti_core::{
+use rosty_core::{
     contact_edit::ContactDraft, contact_trash, contacts_view, search::ContactIndex,
     vcard::CardPhoto,
 };
-use rovsti_ui::tokens::Theme;
+use rosty_ui::tokens::Theme;
 
 use crate::{
     Book, ContactsApp, NoticeAction, PendingDelete, UNDO_LIFE, backend, trash_store,
@@ -99,7 +99,7 @@ fn trash_confirm_text(confirm: &Confirm) -> Option<(String, String)> {
 
 /// Title and body of the card for clearing Recently viewed.
 fn clear_viewed_text() -> (&'static str, &'static str) {
-    rovsti_core::contact_recent::CLEAR_VIEWED
+    rosty_core::contact_recent::CLEAR_VIEWED
 }
 
 /// "1 contact", "3 contacts".
@@ -156,7 +156,7 @@ fn import_added_notice(added: usize, photos: usize) -> String {
 
 /// Title and body of the card for deleting `n` selected contacts.
 fn delete_many_text(n: usize) -> (String, String) {
-    rovsti_core::contact_select::delete_confirm(n)
+    rosty_core::contact_select::delete_confirm(n)
 }
 
 /// The title of the remove-photo card.

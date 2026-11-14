@@ -1,4 +1,4 @@
-# util-messages: everyday utilities for Rovsti Messages (round 1)
+# util-messages: everyday utilities for Rosty Messages (round 1)
 
 baseSha: 9919208386bf597db36dba01c721880fe530533a
 
@@ -12,10 +12,10 @@ Already there (pre-existing, marked done below):
 - WhatsApp message strip (`conversation.rs::actions`, `quick_strip`): emoji reactions, Reply,
   Star/Unstar (`set_starred`), Edit, Delete for me / for everyone (`RevokeMessage`,
   `DeleteForMe`), Copy (`copy_text_of`), Share (`ConversationEvent::Share`), up to 3 link pills
-  (`rovsti_core::spam::open_links`), location/contact card actions (`CardAction`), tap on a quote
+  (`rosty_core::spam::open_links`), location/contact card actions (`CardAction`), tap on a quote
   jumps to it with a glow (`jump_to` -> `KeyedList::reveal`).
 - SMS bubble selection (`sms_conversation.rs::bubble`): Copy, Share, Save picture/file
-  (`saveable_parts`, `documents::export_file`), link pills, "Copy code" (`rovsti_core::otp`),
+  (`saveable_parts`, `documents::export_file`), link pills, "Copy code" (`rosty_core::otp`),
   Retry/Delete for failed sends, the segment counter (`segment_label` / `sms::segments`).
 - Chats: Pin/Unpin, Mute (lengths), Archive, Mark read/unread per chat (`ChatActionKind`), SMS
   Mute/Spam/Block/Delete (`sms_actions.rs`), inbox search over title/snippet/digits
@@ -27,15 +27,15 @@ Gaps (all confirmed absent by grep):
   no handler; images are never saved to the gallery (`save_here` excludes `Image`/`Sticker`,
   stickers aside) nor shared as images. MMS pictures are only "Save picture" via Save as.
   The header avatar (`header_avatar`) has no tap. The Phone app's `apps/phone/src/photo_viewer.rs`
-  (U1/U2 there) is the reference: `rovsti_core::zoom` math, `PinchEvent`, touch/mouse handlers,
-  `rovsti_android::media::{save_image_to_gallery, share_image}` (Kotlin `MediaShare.kt` is already
-  in the Messages build via `crates/rovsti_android/kotlin`). No new Kotlin needed.
+  (U1/U2 there) is the reference: `rosty_core::zoom` math, `PinchEvent`, touch/mouse handlers,
+  `rosty_android::media::{save_image_to_gallery, share_image}` (Kotlin `MediaShare.kt` is already
+  in the Messages build via `crates/rosty_android/kotlin`). No new Kotlin needed.
 - No search inside a conversation; no "Mark all read"; no chat export; no phone/email detection
   (only URLs and OTP codes); no forward; no starred list; no quick replies; no unread jump; no
   voice-note playback (audio is "Tap to save"); a settled SMS cannot be deleted singly
-  (`rovsti_android::sms` has `delete_thread` only).
+  (`rosty_android::sms` has `delete_thread` only).
 
-Gateway seams that exist (`rovsti_wa_client::Gateway`): `media(id)`, `thumbnail(id)`,
+Gateway seams that exist (`rosty_wa_client::Gateway`): `media(id)`, `thumbnail(id)`,
 `picture(jid, full, known_id) -> Picture::{Image{id,bytes},Unchanged,None}`, `send_text`,
 `send_media_with`, `star_message`, `messages_with_meta`, `chat_action`. No forward endpoint
 (forward = re-send text/media through `send_text`/`send_media_with`).
@@ -73,17 +73,17 @@ Gateway seams that exist (`rovsti_wa_client::Gateway`): `media(id)`, `thumbnail(
 ## Plan, round 1 (pure logic first; every step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 `df` showed 6.1 GB free at planning time: run `rm -rf target/debug/incremental` first when under 6 GB.
 Until a later step calls a new pure function, mark it `#[cfg_attr(not(test), allow(dead_code))]`
 (app crate) or leave it `pub` (library crate) and drop the attribute when it is used. One focused
-commit per step, prefix `Rovsti messages: ` (others push to main in parallel). Never invent GPUI
+commit per step, prefix `Rosty messages: ` (others push to main in parallel). Never invent GPUI
 APIs: copy only calls already used in `apps/phone/src/photo_viewer.rs`, `conversation.rs` or the
 pinned checkout; grep `gpui_icons` for every new `Icon::Lucide*` name (fallback to icons the app
 already uses).
 
-### Step 1. Pure: viewer paging and in-chat find (rovsti_core)
-- `crates/rovsti_core/src/zoom.rs` add:
+### Step 1. Pure: viewer paging and in-chat find (rosty_core)
+- `crates/rosty_core/src/zoom.rs` add:
   - `pub const PAGE_SWIPE_FRACTION: f32 = 0.25;` `pub const PAGE_FLING_PX_S: f32 = 800.0;`
   - `pub fn page_drag(dx: f32, index: usize, count: usize) -> f32`: the shown horizontal shift;
     rubber-banded by `RUBBER` when dragging past the first (dx > 0 at 0) or last page.
@@ -94,7 +94,7 @@ already uses).
     `count <= 1`.
   - Tests: `page_moves_past_a_quarter`, `page_flings_move_short_drags`, `page_stays_at_the_ends`,
     `page_drag_rubber_bands_at_the_ends`, `page_caption_hides_for_one`.
-- New `crates/rovsti_core/src/chat_find.rs` (add `pub mod chat_find;` to `lib.rs`):
+- New `crates/rosty_core/src/chat_find.rs` (add `pub mod chat_find;` to `lib.rs`):
   - `pub fn find(texts: &[&str], query: &str) -> Vec<usize>`: indices whose `search::fold(text)`
     contains the folded trimmed query (blank -> empty; Turkish fold as `search::fold`), in order.
   - `#[derive(Clone, Debug, Default, PartialEq, Eq)] pub struct FindCursor { hits: Vec<usize>, at: Option<usize> }`
@@ -110,7 +110,7 @@ already uses).
     oldest-first order), `retarget_keeps_the_current_hit`.
 
 ### Step 2. Pure: export, detection, mark-all targets
-- New `crates/rovsti_core/src/chat_export.rs` (`pub mod chat_export;`):
+- New `crates/rosty_core/src/chat_export.rs` (`pub mod chat_export;`):
   - `pub struct ExportLine<'a> { pub at_ms: i64, pub author: &'a str, pub text: &'a str }`
   - `pub fn export_text(title: &str, lines: &[ExportLine<'_>], tz_offset_s: i32) -> String`:
     header `"Chat with {title}\n"` and a `"-- 12 Nov 2026 --"` line at each local-day change, then
@@ -121,7 +121,7 @@ already uses).
     the slug is empty.
   - Tests: `export_groups_by_local_day`, `export_indents_multiline`, `export_skips_blank`,
     `file_name_slugs_title`, `file_name_without_title`.
-- New `crates/rovsti_core/src/text_detect.rs` (`pub mod text_detect;`):
+- New `crates/rosty_core/src/text_detect.rs` (`pub mod text_detect;`):
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub enum Detected { Phone(String), Email(String) }`
     (Phone holds the digits with an optional leading `+`, as dialled).
   - `pub fn detect(body: &str, max: usize) -> Vec<Detected>`: emails (`local@domain.tld`, simple
@@ -152,7 +152,7 @@ already uses).
     `Option<Arc<gpui::Image>>` (the bubble's cached image) while the full decode runs.
   - Loading on the background executor: `WaMedia` -> `Gateway::media(id)` bytes, written to
     `cache/viewer/{cache_stem(id)}.{files::ext_for_mime}`; `File` -> read the path; then
-    `rovsti_wa_ui::decode_image(&bytes, 4096)`. Errors show "Couldn't load the picture" in the
+    `rosty_wa_ui::decode_image(&bytes, 4096)`. Errors show "Couldn't load the picture" in the
     viewer with Retry.
 - `MessagesApp` (main.rs) owns `media_viewer: Option<MediaViewer>` and draws it as the top
   overlay (above sheets and pills; the pill must stay visible, so render the pill after it or
@@ -185,7 +185,7 @@ already uses).
   emit `ConversationEvent::OpenAvatar` / `SmsConversationEvent::OpenAvatar`.
 - main.rs opens the viewer with one item, new `ViewerSource::WaPicture { jid }` (background:
   `Gateway::picture(jid, true, None)`; `Picture::None` -> pill "No profile photo", viewer not
-  opened) or `ViewerSource::ContactPhoto { uri }` (`rovsti_android::providers::contact_photo(uri,
+  opened) or `ViewerSource::ContactPhoto { uri }` (`rosty_android::providers::contact_photo(uri,
   1024)` returns a PNG path; grep its result format first). Placeholder: the avatar image already
   shown (`WaAvatars::picture` / `ContactPhotos`). No photo at all -> no handler (monogram only).
 - Save name `"{slug}-photo.{ext}"`; Save and Share as in step 3.
@@ -195,7 +195,7 @@ already uses).
   routed to the open page: `begin_find(window, cx)`.
 - Each page (`conversation.rs`, `sms_conversation.rs`) gains `find: Option<FindState>` with a
   `TextField` (same `TextField::with_input(TextInputPurpose::Text, TextInputAction::Search, cx)`
-  as the inbox search), a `rovsti_core::chat_find::FindCursor`, and a bar replacing the header
+  as the inbox search), a `rosty_core::chat_find::FindCursor`, and a bar replacing the header
   subtitle row: field, `"2 of 5"`, up (older) / down (newer) glass icon buttons, ✕.
   On every edit: `chat_find::find` over `body_text`/caption (WA) or `copy_text` (SMS) of loaded
   items; reveal the current hit with the existing glow (`jump_to` logic for WA; add the same
@@ -215,7 +215,7 @@ already uses).
 - Chats title: a `LucideCheckCheck` glass icon button (grep the icon; fallback `LucideCheck`),
   only when `inbox::mark_all_targets` is non-empty. Tap asks via the existing pill-with-action
   pattern ("Mark 5 chats as read?" + "Mark") or the row-menu confirmation pattern; on confirm
-  `rovsti_android::sms::mark_read` per thread and `chat_action(jid, MarkRead{read:true}, ..)` per
+  `rosty_android::sms::mark_read` per thread and `chat_action(jid, MarkRead{read:true}, ..)` per
   chat, then pill `mark_all_text(n)`; WA chats get Undo (`MarkRead{read:false}`), SMS cannot be
   re-marked unread (no Undo when SMS were included; say so in the confirm text).
 

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Runs the scripted perf scenarios (story 12.2) on the phone and saves the
 # numbers. Needs a `perf` build installed (scripts/perf-build.sh), USB debugging,
-# the phone unlocked and Rovsti Phone in the foreground.
+# the phone unlocked and Rosty Phone in the foreground.
 #
 #   scripts/perf-run.sh                  # all scenarios, in order
 #   scripts/perf-run.sh tab keypad       # some of them
 #   OUT=docs/perf/runs/after-glass scripts/perf-run.sh all
 #
 # Per scenario it writes, under $OUT (default docs/perf/runs/<timestamp>):
-#   <name>.rovstiperf.txt      the `RovstiPerf` report line(s) from logcat
+#   <name>.rostyperf.txt      the `RostyPerf` report line(s) from logcat
 #   <name>.surfaceflinger.txt  `dumpsys SurfaceFlinger --latency` samples of the
 #                              GpuiView layer, taken once a second during the run
 #   summary.md                 the report lines and the SurfaceFlinger pacing
 #                              (p50/p95/p99/max frame gap, gaps over 1.5 x period)
 #
-# `RovstiPerf` numbers: build_ms is the CPU time to build one frame (the number
+# `RostyPerf` numbers: build_ms is the CPU time to build one frame (the number
 # the 4 ms target is judged by); interval_ms is the gap between animation frames
 # (pacing); view_cache is the cached-view hit count. Names and phone numbers are
 # never logged. The scenarios: tab, recents, keypad, incall, incoming, idle.
@@ -87,7 +87,7 @@ for name in "${names[@]}"; do
   echo "== $name"
   "${ADB[@]}" logcat -c
   : >"$OUT/$name.surfaceflinger.txt"
-  "${ADB[@]}" shell setprop debug.rovsti.perf "$name:$run$RANDOM"
+  "${ADB[@]}" shell setprop debug.rosty.perf "$name:$run$RANDOM"
   end=$((SECONDS + ${SECONDS_FOR[$name]} + 10))
   L="$(layer || true)"
   while ((SECONDS < end)); do
@@ -96,20 +96,20 @@ for name in "${names[@]}"; do
     fi
     sleep 1
     # The runner logs one report line when the scenario ends.
-    if "${ADB[@]}" logcat -d -s RovstiPerf 2>/dev/null | grep -q "report scenario=$want "; then break; fi
+    if "${ADB[@]}" logcat -d -s RostyPerf 2>/dev/null | grep -q "report scenario=$want "; then break; fi
   done
-  "${ADB[@]}" logcat -d -s RovstiPerf | grep "report scenario=$want " >"$OUT/$name.rovstiperf.txt" || true
+  "${ADB[@]}" logcat -d -s RostyPerf | grep "report scenario=$want " >"$OUT/$name.rostyperf.txt" || true
   {
     echo "## $name"
     echo
     echo '```'
-    cat "$OUT/$name.rovstiperf.txt"
+    cat "$OUT/$name.rostyperf.txt"
     echo '```'
     echo
     echo "SurfaceFlinger: $(pacing <"$OUT/$name.surfaceflinger.txt")"
     echo
   } >>"$OUT/summary.md"
-  [[ -s "$OUT/$name.rovstiperf.txt" ]] || echo "  no report for $name (is a perf build installed and in the foreground?)" >&2
+  [[ -s "$OUT/$name.rostyperf.txt" ]] || echo "  no report for $name (is a perf build installed and in the foreground?)" >&2
 done
-"${ADB[@]}" shell setprop debug.rovsti.perf ""
+"${ADB[@]}" shell setprop debug.rosty.perf ""
 echo "Done: $OUT/summary.md"

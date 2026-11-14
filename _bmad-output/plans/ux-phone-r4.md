@@ -1,7 +1,7 @@
-# UX completeness pass: Rovsti Phone (round 4)
+# UX completeness pass: Rosty Phone (round 4)
 
 Base: `0415c282fc45280618b7d02eb8211e6cf931ed55` (main, clean tree, no stash).
-Scope: `apps/phone`, `crates/rovsti_core`. No new product features and no backends. Intent comes
+Scope: `apps/phone`, `crates/rosty_core`. No new product features and no backends. Intent comes
 from the app's own planning (`apps/phone/_bmad-output/planning-artifacts/epics.md` story 20.1
 "Results sheet" and its permission footnote; 16.6 backup; 16.7/16.8 settings) and from code that
 already exists (`ContactIndex::t9` returns up to `t9::MAX_HITS` = 50 hits, `Backend::update_settings`,
@@ -20,20 +20,20 @@ strip, the WhatsApp call notices, Backup and the Settings data rows.
 | U1 | **Medium** | **"N more" on the Keypad loses the matches it promises.** The T9 strip shows three names and "4 more contacts"; tapping it puts the digits into Contacts search, but `ContactIndex::search` treats a digit query as a number substring (plus literal name match), not T9. "2973" (Ayşe) finds nothing there, so the extra matches are unreachable. Story 20.1: "+n opens the Results sheet (medium detent, up to 50 rows with highlighted matches) whose rows fill the field and whose call circles call". | `keypad.rs::t9_more`, `T9Rows`, `SheetKind` |
 | U2 | Medium | **"WhatsApp is not connected" is a dead end.** Tapping a WhatsApp row in Recents (or its call-back) while the gateway link is gone shows the danger notice with no action (`Notice::action` is `None` for `WhatsApp(_)`). The user has to know the link lives in Settings > WhatsApp. | `notice.rs::Notice::action/notice_act`, `wa_call.rs::can_place/place` |
 | U3 | Low | **The T9 strip is silent without contacts access.** With contacts denied, typing digits shows no names and no hint. Story 20.1: a one-time per-session footnote "Allow Contacts to see matches" with "Grant access". | `keypad.rs::status_line`, `t9_strip` |
-| U4 | Low | **Import cannot be taken back.** "Import" replaces settings, quick replies, speed dial and favorites order; the pill "Backup imported" has no Undo, although every other replace in Phone (speed dial, replies, block, delete) has one. | `backup_ui.rs::import_confirm`, `rovsti_core::settings::ImportPreview` |
+| U4 | Low | **Import cannot be taken back.** "Import" replaces settings, quick replies, speed dial and favorites order; the pill "Backup imported" has no Undo, although every other replace in Phone (speed dial, replies, block, delete) has one. | `backup_ui.rs::import_confirm`, `rosty_core::settings::ImportPreview` |
 | U5 | Low | **Settings have no reset.** Calls, Sounds and haptics and Display toggles can only be put back one by one (quick replies have "Reset to defaults", the rest has nothing). | `settings_ui.rs` (Data section), `Backend::update_settings` |
 | U6 | Info (not planned) | Same as round 3 T9 row: Delete contact via "Edit in Contacts"; contact ringtone gated (`Caps.CONTACT_RINGTONE = false`); in-app editor 19.7 is P3; Call details page and quality chips (21.1, 21.4) need seams and feature bits; emergency labelling (20.4) and voicemail badge need device spikes; S9/S12 device checks PENDING. Call on an empty Keypad field shakes by design (story 4.2: "with an empty field the call is not placed"); there is no redial. Missed-call notifications are the system's by design (story 5.5, PRD Q4). Diagnostics is hidden by design (long-press the Settings title). The "Missed call from {name}" pill after a missed waiting call stays without Call back (Recents has it one tap away and the user is still in a call). | — |
 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (`df` showed 6.1 GB free at planning time; if it shows under 6 GB, `rm -rf target/debug/incremental` first).
 Never invent GPUI APIs: reuse only what these files already call (`modal_sheet`, `touch_surface`,
 `overflow_y_scroll`, `uniform_list`, `show_pill_action`, `show_notice_pill`, `presses`).
 
 ### S1. Pure logic (+tests)
-`crates/rovsti_core/src/settings.rs`:
+`crates/rosty_core/src/settings.rs`:
 - `impl ImportPreview { pub fn restoring(prefs: &PrefsV2) -> Self }`: a preview whose `clean`
   sections are a copy of `prefs.settings`, `quick_replies`, `speed_dial`, `favorites_order`; all
   counts 0, `moved` empty, `clamped` false. Applying it with `apply_to` puts those four sections
@@ -115,7 +115,7 @@ Acceptance: desktop preview without a gateway link: Recents > a WhatsApp row: th
 - `backup_ui.rs::import_confirm`: before `apply_import`, take
   `let undo = ImportPreview::restoring(self.backend.read(cx).prefs())`; after it, replace the plain
   pill with `self.show_pill_action("Backup imported", "Undo", PillAction::RestorePrefs(Box::new(undo)), cx)`.
-- `block_ui.rs::PillAction` gains `RestorePrefs(Box<rovsti_core::settings::ImportPreview>)`
+- `block_ui.rs::PillAction` gains `RestorePrefs(Box<rosty_core::settings::ImportPreview>)`
   (`ImportPreview` already derives `Clone`). Its handler: `backend.apply_import(*preview, cx)`, `sync_settings_rows(cx, false)`,
   pill "Import undone".
 

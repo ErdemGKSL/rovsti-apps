@@ -1,11 +1,11 @@
-# UX completeness pass: Rovsti Stops (round 2)
+# UX completeness pass: Rosty Stops (round 2)
 
 Base: `223537392be9714fe722b4be7cb9e13d4c751faf` (main after merge). No stash, clean tree.
 Round 1 (`ux-stops.md`) is done: save from the pin menu with a prefilled name, saved names shown
 on re-pick, name fields in the confirm and stop sheets, Saved tab rename / reorder / delete with
 undo, History reuse and clear undo, Trip-tab Clear undo, picker placeholder.
-Scope: `apps/stops`, `crates/rovsti_geo`, `crates/rovsti_tiles`. No new product features, no
-backends. Pure logic first, tested; GPUI glue thin; only GPUI and `rovsti_android` APIs that already
+Scope: `apps/stops`, `crates/rosty_geo`, `crates/rosty_tiles`. No new product features, no
+backends. Pure logic first, tested; GPUI glue thin; only GPUI and `rosty_android` APIs that already
 exist (`telecom::share_text`, `ClipboardItem` + `cx.write_to_clipboard` as used in Messages/Phone).
 
 ## Re-audit: remaining gaps
@@ -22,7 +22,7 @@ exist (`telecom::share_text`, `ClipboardItem` + `cx.write_to_clipboard` as used 
 | R8 | Low | When the point is already saved, the confirm sheet still offers "Save this place" and the stop sheet still offers "Save this stop". Both only lead to "Already saved as X". They should show the saved name and offer Rename. | `picker.rs::confirm_body/stop_body` |
 | R9 | Low | Stale or wrong copy: the transit note promises "wake up 1, 2 or 3 stops before yours", but no such option exists (the trigger is the AB crossing). The Saved empty state is titled "No Saved Stops", though it holds places. Saved rows in the picker have no detail line (stop or place, distance), unlike the Saved tab. | `transit.rs`, `saved_ui.rs`, `picker.rs` |
 | R10 | Low (deferred) | Single History records cannot be deleted, only the whole list (which can be undone). Adding a per-record menu is more than completing what exists. Noted, not planned. | `settings_ui.rs` |
-| R11 | Info | `rovsti_tiles`: no UI-facing gap beyond R5. GTFS import errors have recovery text. The template editor shows "last good text is kept". | |
+| R11 | Info | `rosty_tiles`: no UI-facing gap beyond R5. GTFS import errors have recovery text. The template editor shows "last good text is kept". | |
 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
@@ -34,7 +34,7 @@ exist (`telecom::share_text`, `ClipboardItem` + `cx.write_to_clipboard` as used 
   - Tests: "Point A" used as B reads `point_label(Slot::B, ..) == "Point B"`. A record near a
     saved place that was renamed takes the new name and its `gtfs_stop`. A named far point keeps
     its label.
-- `crates/rovsti_geo/src/dest.rs`:
+- `crates/rosty_geo/src/dest.rs`:
   - `pub fn share_text(label: &str, coord: Coord) -> String`. It returns the trimmed label (when
     there is one) on its own line, then
     `https://www.openstreetmap.org/?mlat={lat:.5}&mlon={lon:.5}#map=17/{lat:.5}/{lon:.5}`.
@@ -114,8 +114,8 @@ Acceptance: none of the three loses user data on one tap, and each gives a pill.
 
 ### S6. Share a saved place (R6)
 - `saved_ui.rs`: the open row's first pill row becomes Use as A, Use as B, Share.
-  `fn share_place(&mut self, id, cx)` builds `rovsti_geo::share_text(&p.name, p.coord)` and
-  runs `rovsti_android::telecom::share_text(&text)` on the background executor. Then:
+  `fn share_place(&mut self, id, cx)` builds `rosty_geo::share_text(&p.name, p.coord)` and
+  runs `rosty_android::telecom::share_text(&text)` on the background executor. Then:
   - `Ok(true)`: no pill (the system sheet is the feedback).
   - `Ok(false)` or `Err(Unsupported)`: `cx.write_to_clipboard(ClipboardItem::new_string(text))`
     and the pill "Copied {name}".
@@ -136,7 +136,7 @@ says so.
 Acceptance: a saved point never offers Save again. The copy matches what the app does.
 
 ### S8. Docs and status
-- `docs/roadmap.md` Rovsti Stops: extend the save/manage line with "share a place; the chosen A/B
+- `docs/roadmap.md` Rosty Stops: extend the save/manage line with "share a place; the chosen A/B
   survive a restart; Stop and settings resets can be undone (done without a device)".
 - Record R10 as an open idea.
 - Append a Status section to this file listing fixed / deferred.
@@ -144,9 +144,9 @@ Acceptance: a saved point never offers Save again. The copy matches what the app
 ## Checks (every step)
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```
 Disk: 7.7 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
 

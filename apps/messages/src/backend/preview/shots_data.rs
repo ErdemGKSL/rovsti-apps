@@ -9,14 +9,14 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use rovsti_core::{
+use rosty_core::{
     Message, MessageDirection, PhoneNumber, ThreadId,
     inbox::InboxThread,
     recents::LocaleTime,
     sms::{DeliveryState, SmsBox},
     wire::{WireContact, WireNumber},
 };
-use rovsti_wa_proto::{StatusAuthor, StatusItem, StatusKind, StatusList};
+use rosty_wa_proto::{StatusAuthor, StatusItem, StatusKind, StatusList};
 
 use super::{DAY, HOUR, MINUTE, Preview};
 
@@ -437,7 +437,7 @@ pub fn statuses(now_ms: i64) -> StatusList {
             id: id.to_owned(),
             author: user_jid(author),
             timestamp_ms: now_ms - ago,
-            expires_ms: now_ms - ago + rovsti_wa_proto::status::STATUS_TTL_MS,
+            expires_ms: now_ms - ago + rosty_wa_proto::status::STATUS_TTL_MS,
             kind: StatusKind::Text,
             text: Some(text.to_owned()),
             background_argb: Some(0xFF1E_6E4F),
@@ -555,9 +555,9 @@ mod tests {
                 .clone()
         };
         for id in [3, 7, 8] {
-            assert!(rovsti_core::spam::contains_link(&body(id)), "{id}");
+            assert!(rosty_core::spam::contains_link(&body(id)), "{id}");
         }
-        assert!(rovsti_core::otp::detect(&body(2)).is_some());
+        assert!(rosty_core::otp::detect(&body(2)).is_some());
     }
 
     #[test]

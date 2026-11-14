@@ -1,4 +1,4 @@
-//! The HTTP API (route constants come from `rovsti_wa_proto::api::routes`).
+//! The HTTP API (route constants come from `rosty_wa_proto::api::routes`).
 
 use std::time::Duration;
 
@@ -10,8 +10,8 @@ use axum::http::header::{CONTENT_TYPE, HeaderValue};
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use rovsti_wa_proto::api::routes as r;
-use rovsti_wa_proto::{
+use rosty_wa_proto::api::routes as r;
+use rosty_wa_proto::{
     ChatState, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope, GatewayEvent, GroupInfo,
     InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest, LookupUsers, MAX_LOOKUP,
     MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, RichChat, RichMessage,
@@ -87,7 +87,7 @@ type ApiResult<T> = Result<T, HttpError>;
 
 /// Fresh random key material: the key to hand out once and the hash row to
 /// store.
-fn fresh_key(label: &str) -> ApiResult<(rovsti_wa_proto::ConnectKey, NewKey)> {
+fn fresh_key(label: &str) -> ApiResult<(rosty_wa_proto::ConnectKey, NewKey)> {
     let mut secret = [0u8; 32];
     let mut id = [0u8; 8];
     getrandom::fill(&mut secret)
@@ -96,7 +96,7 @@ fn fresh_key(label: &str) -> ApiResult<(rovsti_wa_proto::ConnectKey, NewKey)> {
             log::error!("no randomness: {e}");
             HttpError::new(ErrorCode::Internal, "internal error")
         })?;
-    let key = rovsti_wa_proto::ConnectKey::from_bytes(&secret);
+    let key = rosty_wa_proto::ConnectKey::from_bytes(&secret);
     let new = NewKey {
         key_id: KeyId::from_bytes(&id),
         hash: key.hash(),
@@ -933,7 +933,7 @@ mod tests {
         assert_ne!(na.key_id, nb.key_id);
         assert!(na.hash.ct_eq(&a.hash()));
         assert!(!na.hash.ct_eq(&b.hash()));
-        assert_eq!(a.as_str().len(), rovsti_wa_proto::key::KEY_LEN);
+        assert_eq!(a.as_str().len(), rosty_wa_proto::key::KEY_LEN);
     }
 
     #[test]

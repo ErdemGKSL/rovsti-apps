@@ -6,7 +6,7 @@
 [core]
 communication_language = "English"
 document_output_language = "English"
-project_name = "rovsti-phone"
+project_name = "rosty-phone"
 # Each app keeps its own BMAD workspace: apps/<app>/_bmad-output.
 # ACTIVE APP: phone. To plan another app, change "phone" below (and
 # project_name above) to "messages" or "stops"; nothing else moves.

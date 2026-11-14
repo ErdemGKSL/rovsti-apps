@@ -6,7 +6,7 @@
 //! executor. Pinch and double-tap zoom, drag to pan, swipe down to close, a tap
 //! hides the chrome, and the bottom bar saves to the gallery or shares.
 //!
-//! The maths lives in `rovsti_core::zoom`. [`PhotoViewer`] holds the gesture
+//! The maths lives in `rosty_core::zoom`. [`PhotoViewer`] holds the gesture
 //! state and the springs that animate it; [`image_rect`] is the one pure
 //! function that maps a view to the rectangle the image is drawn in.
 
@@ -25,8 +25,8 @@ use gpui::{
     RenderImage, Role, SharedString, StatefulInteractiveElement, Styled, StyledImage, TouchPhase,
     Window, canvas, div, px,
 };
-use rovsti_core::zoom::{self, Point, Size, ZoomView};
-use rovsti_ui::{
+use rosty_core::zoom::{self, Point, Size, ZoomView};
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     motion::press_scale,
@@ -69,7 +69,7 @@ pub(crate) fn image_rect(view: ZoomView, natural: Size, viewport: Size) -> (f32,
 
 /// A file name for the gallery: the person's name, safe for a file system.
 pub(crate) fn photo_file_name(title: &str) -> String {
-    match rovsti_core::number_format::file_slug_opt(title) {
+    match rosty_core::number_format::file_slug_opt(title) {
         Some(stem) => format!("{stem}-photo.png"),
         None => "photo.png".to_owned(),
     }
@@ -525,7 +525,7 @@ fn export_png(image: &RenderImage, token: u64) -> Option<PathBuf> {
         pixel.swap(0, 2);
     }
     let pixels = image::RgbaImage::from_raw(u32::try_from(w).ok()?, u32::try_from(h).ok()?, bytes)?;
-    let path = std::env::temp_dir().join(format!("rovsti-phone-viewer-{token}.png"));
+    let path = std::env::temp_dir().join(format!("rosty-phone-viewer-{token}.png"));
     pixels
         .save_with_format(&path, image::ImageFormat::Png)
         .ok()?;
@@ -595,8 +595,7 @@ impl PhoneApp {
             .iter()
             .map(|(raw, label)| (raw.as_str(), Some(label.as_str())))
             .collect();
-        let Ok(qr) = rovsti_core::number_format::contact_qr(&name, &refs, home_cc.as_deref())
-        else {
+        let Ok(qr) = rosty_core::number_format::contact_qr(&name, &refs, home_cc.as_deref()) else {
             self.show_notice_pill("Too much to fit in a QR code", None, false, cx);
             return;
         };
@@ -666,7 +665,7 @@ impl PhoneApp {
             .as_ref()
             .map(|v| match v.kind {
                 ViewerKind::Photo => photo_file_name(&v.title),
-                ViewerKind::Qr => rovsti_core::number_format::qr_file_name(&v.title),
+                ViewerKind::Qr => rosty_core::number_format::qr_file_name(&v.title),
             })
             .unwrap_or_default();
         let outcome = self

@@ -65,7 +65,7 @@ ports; `LicenceHeaderTest`; no Material3; facades keep our public API).
 
 ## Step 1 (fix F9): centre the inline title like Convx
 
-- `android/design/src/main/kotlin/dev/rovsti/design/chrome/FrostedTopBar.kt`: go back to Convx's symmetric reserve. Keep
+- `android/design/src/main/kotlin/dev/rosty/design/chrome/FrostedTopBar.kt`: go back to Convx's symmetric reserve. Keep
   the two parameters for callers (`ScreenChrome.kt:196,277,442`, `LargeTitleScaffold.kt:131`) but apply
   `padding(horizontal = max(titleSideReserve, titleEndReserve))` so the text box is centred on the bar and a long title
   still truncates before the wider side. Update the KDoc deviation note (line 10) and `docs/kotlin-ui/api-notes.md`
@@ -80,7 +80,7 @@ ports; `LicenceHeaderTest`; no Material3; facades keep our public API).
 
 ## Step 2 (E1.22 AC1): goldens of the overlay states page
 
-- New `catalog/src/test/kotlin/dev/rovsti/catalog/E122ShotTest.kt` (extends `ShotTest`, `screenTest {}` so the
+- New `catalog/src/test/kotlin/dev/rosty/catalog/E122ShotTest.kt` (extends `ShotTest`, `screenTest {}` so the
   accessibility checks run, `mainClock.autoAdvance = false` for the mid-motion shots). Drive `OverlayStatesPage` with its
   buttons, one golden per state, light and dark:
   `e1.22-states-page` (closed), `e1.22-states-menu-below`, `e1.22-states-menu-above`, `e1.22-states-popover`,

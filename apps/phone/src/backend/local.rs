@@ -5,14 +5,14 @@
 use std::sync::Arc;
 
 use gpui::Context;
-use rovsti_android::{documents, settings as android_settings, telecom, window};
-use rovsti_core::{
+use rosty_android::{documents, settings as android_settings, telecom, window};
+use rosty_core::{
     dial,
     settings::{BACKUP_KIND, Settings},
     sim::SimInfo,
     wire::{DocumentResult, EmergencyList, PhoneAccountsResponse, SettingsSync},
 };
-use rovsti_ui::storage;
+use rosty_ui::storage;
 use serde::Deserialize;
 
 use super::{APP_VERSION, Backend, Outcome, Placement, now_ms};
@@ -126,7 +126,7 @@ impl Backend {
         match result {
             Ok(true) => Placement::Placed,
             Ok(false) => Placement::Failed,
-            Err(rovsti_android::Error::Unsupported) => {
+            Err(rosty_android::Error::Unsupported) => {
                 #[cfg(not(target_os = "android"))]
                 {
                     self.preview_account = key;
@@ -158,7 +158,7 @@ impl Backend {
         }
         self.ui_ready = ready;
         if let Err(error) = window::ui_attached(ready)
-            && !matches!(error, rovsti_android::Error::Unsupported)
+            && !matches!(error, rosty_android::Error::Unsupported)
         {
             log::debug!("uiAttached failed: {error}");
         }
@@ -213,7 +213,7 @@ impl Backend {
         cx.background_executor()
             .spawn(async move {
                 if let Err(error) = android_settings::sync(&json)
-                    && !matches!(error, rovsti_android::Error::Unsupported)
+                    && !matches!(error, rosty_android::Error::Unsupported)
                 {
                     log::debug!("settingsSync failed: {error}");
                 }
@@ -223,7 +223,7 @@ impl Backend {
 
     /// Whether dial-pad tones play now: the setting, else the system's.
     pub fn keypad_tones_on(&self) -> bool {
-        rovsti_core::settings::effective_keypad_tones(
+        rosty_core::settings::effective_keypad_tones(
             self.settings.keypad_tones,
             self.facts.system_keypad_tones,
         )
@@ -294,7 +294,7 @@ impl Backend {
     /// Called whenever the settings Arc is replaced: the haptics filter and
     /// the Kotlin mirror follow.
     pub(super) fn settings_published(&mut self, cx: &mut Context<Self>) {
-        rovsti_ui::haptics::set_level(self.settings.haptics);
+        rosty_ui::haptics::set_level(self.settings.haptics);
         self.calls.set_name_format(self.settings.name_format);
         self.push_settings(cx);
     }
@@ -304,13 +304,13 @@ impl Backend {
     /// Starts "save as" for the backup. The answer is a `document_result`.
     pub fn export_backup(&mut self, cx: &mut Context<Self>) -> Outcome {
         let created = now_ms();
-        let name = rovsti_core::settings::backup_file_name(created);
+        let name = rosty_core::settings::backup_file_name(created);
         let json = storage::backup_json(&self.prefs, created, APP_VERSION);
         let outcome = Outcome::from(documents::export(&name, &json), "export document");
         #[cfg(not(target_os = "android"))]
         if outcome == Outcome::NotAvailable {
             self.preview_document(
-                rovsti_core::wire::DocumentOp::ExportBackup,
+                rosty_core::wire::DocumentOp::ExportBackup,
                 Some((&name, &json)),
                 cx,
             );
@@ -326,7 +326,7 @@ impl Backend {
         #[cfg(not(target_os = "android"))]
         if outcome == Outcome::NotAvailable {
             self.preview_document(
-                rovsti_core::wire::DocumentOp::ExportBackup,
+                rosty_core::wire::DocumentOp::ExportBackup,
                 Some((name, json)),
                 cx,
             );
@@ -341,7 +341,7 @@ impl Backend {
         let outcome = Outcome::from(documents::import(), "import document");
         #[cfg(not(target_os = "android"))]
         if outcome == Outcome::NotAvailable {
-            self.preview_document(rovsti_core::wire::DocumentOp::ImportBackup, None, cx);
+            self.preview_document(rosty_core::wire::DocumentOp::ImportBackup, None, cx);
             return Outcome::Done;
         }
         let _ = cx;
@@ -353,11 +353,11 @@ impl Backend {
     #[cfg(not(target_os = "android"))]
     fn preview_document(
         &mut self,
-        op: rovsti_core::wire::DocumentOp,
+        op: rosty_core::wire::DocumentOp,
         export: Option<(&str, &str)>,
         cx: &mut Context<Self>,
     ) {
-        let path = std::env::temp_dir().join("rovsti-phone-backup-preview.json");
+        let path = std::env::temp_dir().join("rosty-phone-backup-preview.json");
         let result = match export {
             Some((name, json)) => DocumentResult {
                 op,
@@ -366,14 +366,14 @@ impl Backend {
                 ..DocumentResult::default()
             },
             None => {
-                let text = std::env::var("ROVSTI_PREVIEW_IMPORT")
+                let text = std::env::var("ROSTY_PREVIEW_IMPORT")
                     .ok()
                     .and_then(|p| std::fs::read_to_string(p).ok())
                     .or_else(|| std::fs::read_to_string(&path).ok());
                 DocumentResult {
                     op,
                     ok: text.is_some(),
-                    name: Some("rovsti-phone-backup-preview.json".into()),
+                    name: Some("rosty-phone-backup-preview.json".into()),
                     text,
                     ..DocumentResult::default()
                 }
@@ -407,7 +407,7 @@ impl Backend {
     /// Applies a validated import (replace semantics) as one change.
     pub fn apply_import(
         &mut self,
-        preview: rovsti_core::settings::ImportPreview,
+        preview: rosty_core::settings::ImportPreview,
         cx: &mut Context<Self>,
     ) {
         self.update_prefs(cx, |prefs| preview.apply_to(prefs));
@@ -434,7 +434,7 @@ fn load_sims(preview: u8) -> SimInfo {
             .ok()
             .and_then(|e| e.into_result().ok())
             .map_or_else(SimInfo::default, |p| SimInfo::from_payload(&p)),
-        Err(rovsti_android::Error::Unsupported) => preview_sims(preview),
+        Err(rosty_android::Error::Unsupported) => preview_sims(preview),
         Err(error) => {
             log::debug!("phone accounts: {error}");
             SimInfo::default()
@@ -444,7 +444,7 @@ fn load_sims(preview: u8) -> SimInfo {
 
 /// The fake phone's SIMs for the desktop preview.
 fn preview_sims(mode: u8) -> SimInfo {
-    use rovsti_core::wire::{PhoneAccountInfo, PhoneAccounts};
+    use rosty_core::wire::{PhoneAccountInfo, PhoneAccounts};
     if mode < 2 {
         return SimInfo::default();
     }

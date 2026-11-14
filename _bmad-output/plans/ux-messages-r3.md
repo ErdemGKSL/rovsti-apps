@@ -1,10 +1,10 @@
-# UX completeness pass: Rovsti Messages (round 3)
+# UX completeness pass: Rosty Messages (round 3)
 
 Base: `6eda816d6e43540a74ffedcb625fc4c5b6c81eb0` (main, clean tree, no stash). Rounds 1
 (`ux-messages.md`, G1 to G10) and 2 (`ux-messages-r2.md`, H1 to H9) are done. This round
-re-audits as a user holding the phone. Scope as before: `apps/messages`, `rovsti_core`,
-`rovsti_wa_proto`/`rovsti_wa_client`/`rovsti_wa_ui` as used by Messages, existing
-`rovsti_android` seams. No new product features, no backends. GPUI APIs used below were
+re-audits as a user holding the phone. Scope as before: `apps/messages`, `rosty_core`,
+`rosty_wa_proto`/`rosty_wa_client`/`rosty_wa_ui` as used by Messages, existing
+`rosty_android` seams. No new product features, no backends. GPUI APIs used below were
 checked at the pinned rev: `App::open_url(&self, &str)` (`crates/gpui/src/app.rs:1500`,
 Android forwards to `openUrl` in `gpui_android/src/bridge.rs:696`).
 
@@ -15,22 +15,22 @@ Android forwards to `openUrl` in `gpui_android/src/bridge.rs:696`).
 | K1 | **High** | **The keyboard's Send key does nothing in a WhatsApp chat** (docs/ux-audit.md M24, deferred since round 0). The composer is built with `TextInputAction::Send`, but nothing reads `TextField::actions()`; the key only hides the keyboard. The SMS page already does it right. | `conversation.rs:286-290`, `on_composer_changed` (786) |
 | K2 | **High** | **A message that failed to send can only be retried.** No long-press on a failed bubble (both pages): it cannot be copied, nor removed; on WhatsApp the failed text is lost when the page closes, so the user cannot even copy it out first. | `conversation.rs::bubble` (1817-1822), `sms_conversation.rs::bubble` (736-745, 795), `selectable` (1192) |
 | K3 | Medium | **Received MMS pictures and files cannot be saved.** A picture-only MMS is not even selectable (`selectable` needs text); no Save pill exists on SMS pages, while WhatsApp media got Save in round 2 (`documents::export_file` exists). | `sms_conversation.rs::bubble`, `selectable`, `copy_text` |
-| K4 | Medium | **Links in messages cannot be opened.** The app detects links (`spam::contains_link`, the "Unknown links" rule) but a bubble with `bit.ly/...` offers only Copy/Share. | `rovsti_core::spam` (213), both bubbles' pills |
+| K4 | Medium | **Links in messages cannot be opened.** The app detects links (`spam::contains_link`, the "Unknown links" rule) but a bubble with `bit.ly/...` offers only Copy/Share. | `rosty_core::spam` (213), both bubbles' pills |
 | K5 | Medium | **Archiving (or muting) a WhatsApp chat gives no feedback and no Undo**: the row silently vanishes into Archived. SMS Mute shows a pill but no Undo. | `main.rs::chat_action` (1567), `sms_row_action` Mute (1136) |
-| K6 | Medium | **The inbox does not say when WhatsApp is offline or logged out.** Chats just stop updating (or vanish; `Unauthorized` is swallowed in `load_chats`). The only way to learn why is to open the WhatsApp tab. | `main.rs::load_chats` (757), `ChatItem`, `rovsti_wa_ui::view` (no state getter) |
+| K6 | Medium | **The inbox does not say when WhatsApp is offline or logged out.** Chats just stop updating (or vanish; `Unauthorized` is swallowed in `load_chats`). The only way to learn why is to open the WhatsApp tab. | `main.rs::load_chats` (757), `ChatItem`, `rosty_wa_ui::view` (no state getter) |
 | K7 | Low | **A failed page load is dead text** on both pages ("Leave and open the conversation to try again"); no tap to retry. | `sms_conversation.rs::top_slot`/`load_error_text`, `conversation.rs::top_slot` (1605) |
-| K8 | Low | **Restore without the SMS role dead-ends** after passphrase and preview: "Make Rovsti Messages your default SMS app to restore messages." with only OK; the opened archive is dropped, so the passphrase must be typed again. | `settings_ui.rs::confirm_restore` (507), backup section (1036) |
+| K8 | Low | **Restore without the SMS role dead-ends** after passphrase and preview: "Make Rosty Messages your default SMS app to restore messages." with only OK; the opened archive is dropped, so the passphrase must be typed again. | `settings_ui.rs::confirm_restore` (507), backup section (1036) |
 | K9 | Low | **Settings has no reset** (Phone got "Reset settings" with Undo in its round 5). Spam rules, notification switches and mutes can only be undone one by one. | `settings_ui.rs::render`, `prefs.rs` |
 | — | Info (not planned) | Full-screen picture viewer, forwarding, notification "Mark as read" action, share-into-Messages target, group member page, starred list, delete single SMS / mark SMS thread unread: new screens, new Kotlin or gateway work. Device-only checks stay in `docs/messages-acceptance.md`. |
 
 ## Plan (ordered by user impact, pure logic first; every step leaves all checks green)
 
 Checks after every step (from the task):
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free (it shows 6.5 GB at planning time), `rm -rf target/debug/incremental` first.
 
 ### Step 1. Pure logic (+tests)
-- `crates/rovsti_core/src/spam.rs`: `pub fn links(body: &str) -> Vec<String>` with the same
+- `crates/rosty_core/src/spam.rs`: `pub fn links(body: &str) -> Vec<String>` with the same
   token scanner as `contains_link` (factor the per-token test into `fn link_token(raw) ->
   Option<String>`); returns openable URLs in order, deduplicated, original case kept, with
   `https://` prepended when the token has no scheme; `contains_link` becomes
@@ -38,10 +38,10 @@ If `df` shows under 6 GB free (it shows 6.5 GB at planning time), `rm -rf target
   `"see https://x.co/a"` → `["https://x.co/a"]`, `"go to bit.ly/3abc now"` →
   `["https://bit.ly/3abc"]`, `"(Example.com)."` → `["https://Example.com"]`, two links
   in order, duplicates once, all `link_scanner` "no" cases → empty.
-- `crates/rovsti_core/src/sms_timeline.rs`: `pub fn discard(&mut self, local_id: u64) ->
+- `crates/rosty_core/src/sms_timeline.rs`: `pub fn discard(&mut self, local_id: u64) ->
   Option<String>`: removes a local `Failed` item, returns its body; `None` (nothing
   removed) for pending/sent/unknown. Test `discard_only_removes_failed_local_items`.
-- `crates/rovsti_wa_proto/src/timeline.rs`: `pub fn discard(&mut self, local_id: u64) ->
+- `crates/rosty_wa_proto/src/timeline.rs`: `pub fn discard(&mut self, local_id: u64) ->
   Option<MessageBody>`, same rule (only `ItemState::Failed { local_id }`). Test alongside
   the `restart` tests.
 - `apps/messages/src/inbox.rs`:
@@ -107,7 +107,7 @@ If `df` shows under 6 GB free (it shows 6.5 GB at planning time), `rm -rf target
   `saveable_parts(item)` add a "Save" pill (label "Save picture" for `image/*` when there
   is one part, else "Save <n>" per part) calling `self.save_part(part, cx)`:
   if `saving` → pill "Already saving a file"; else `saving = true` and on the background
-  executor `rovsti_android::documents::export_file(&name, &mime, &path)`; map with
+  executor `rosty_android::documents::export_file(&name, &mime, &path)`; map with
   `conversation::save_outcome` (make it `pub(crate)`) → `Unsupported` → "Saving needs an
   Android phone.", failure → "Couldn't save that file" and `saving = false`.
 - In `on_backend`, handle `BackendEvent::Document(r)` with `r.op ==
@@ -118,8 +118,8 @@ If `df` shows under 6 GB free (it shows 6.5 GB at planning time), `rm -rf target
 
 ### Step 5. Open links (fixes K4)
 - WhatsApp `actions()` and SMS selection pills: for the first link of
-  `rovsti_core::spam::links(text)` add an "Open link" pill (`Icon::LucideExternalLink`
-  if it exists in `rovsti_ui::Icon`, else `LucideShare2`; grep the enum first) that calls
+  `rosty_core::spam::links(text)` add an "Open link" pill (`Icon::LucideExternalLink`
+  if it exists in `rosty_ui::Icon`, else `LucideShare2`; grep the enum first) that calls
   `cx.open_url(&url)` and closes the selection; when there are more links, one pill per
   link up to 3, labelled with the host (`url` without scheme, truncated to 24 chars).
 - On desktop `open_url` opens the browser; nothing Android-only is added.
@@ -138,7 +138,7 @@ If `df` shows under 6 GB free (it shows 6.5 GB at planning time), `rm -rf target
   "Unmuted"/"Muted".
 
 ### Step 7. Inbox WhatsApp banner; tap to retry a failed load (fixes K6, K7)
-- `crates/rovsti_wa_ui/src/view.rs`: `pub fn instance_state(&self) ->
+- `crates/rosty_wa_ui/src/view.rs`: `pub fn instance_state(&self) ->
   Option<InstanceState>` = `self.model.status.as_ref().map(|s| s.state)` (doc comment;
   no other change to the shared crate).
 - `main.rs`: `ChatItem::WaBanner` shown after `RoleBanner` when

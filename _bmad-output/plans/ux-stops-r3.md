@@ -1,4 +1,4 @@
-# UX completeness pass: Rovsti Stops (round 3)
+# UX completeness pass: Rosty Stops (round 3)
 
 Base: `dc50964ffe1c73cbd5c22bf39e7ee8be9e79c09a` (main after merge). No stash, clean tree.
 Rounds 1 (`ux-stops.md`) and 2 (`ux-stops-r2.md`) are done:
@@ -12,21 +12,21 @@ Rounds 1 (`ux-stops.md`) and 2 (`ux-stops-r2.md`) are done:
 
 The owner asked for every remaining gap to be fixed, so this round also takes the gaps deferred
 earlier when they only complete what the app already has.
-Scope: `apps/stops`, `crates/rovsti_geo`, `crates/rovsti_tiles`. No new product features, no
+Scope: `apps/stops`, `crates/rosty_geo`, `crates/rosty_tiles`. No new product features, no
 backends. Pure logic first, with tests. GPUI glue stays thin. Only use GPUI APIs already used in
 this repo:
-- `cx.read_from_clipboard()` / `ClipboardItem::text()` (phone `keypad.rs`, `rovsti_wa_ui` `view.rs`)
+- `cx.read_from_clipboard()` / `ClipboardItem::text()` (phone `keypad.rs`, `rosty_wa_ui` `view.rs`)
 - `cx.write_to_clipboard`
-- `rovsti_android::telecom::share_text`
+- `rosty_android::telecom::share_text`
 
 ## Re-audit: remaining gaps
 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
-| T1 | **Medium** | A single History trip cannot be deleted (round-2 R10, deferred). The only way to remove a wrong or private trip is to clear all 500. Its points also stay in Recent trips and Recent in the picker with no way to remove them. | `settings_ui.rs::history_item`, `rovsti_geo::History` |
+| T1 | **Medium** | A single History trip cannot be deleted (round-2 R10, deferred). The only way to remove a wrong or private trip is to clear all 500. Its points also stay in Recent trips and Recent in the picker with no way to remove them. | `settings_ui.rs::history_item`, `rosty_geo::History` |
 | T2 | **Medium** | The picker has no Paste button. The hint says "paste its link here", but the field only gets clipboard text if the keyboard happens to offer it. Users are pushed to type coordinates by hand. The same applies to the tile server URL field. | `picker.rs::pick_body`, `settings_ui.rs::tiles_body` |
 | T3 | Medium | A pin on the map that is not saved cannot be shared or copied, so the coordinates are not reachable at all. Sharing exists only for saved places. | `map.rs::pin_menu`, `saved_ui.rs::share_place` |
-| T4 | Low | Downloaded map tiles are invisible to the user. Settings > Map tiles does not show how much space they take, and there is no way to clear them. Caches of servers no longer in use stay on disk forever (one directory per server). `DiskCache::total_bytes` exists but nothing in the UI uses it. | `rovsti_tiles::cache`, `tiles.rs`, `settings_ui.rs::tiles_body` |
+| T4 | Low | Downloaded map tiles are invisible to the user. Settings > Map tiles does not show how much space they take, and there is no way to clear them. Caches of servers no longer in use stay on disk forever (one directory per server). `DiskCache::total_bytes` exists but nothing in the UI uses it. | `rosty_tiles::cache`, `tiles.rs`, `settings_ui.rs::tiles_body` |
 | T5 | Low | The arriving-soon template cannot go back to the default text. An emptied field is refused ("last good text is kept"), so the user has to retype the default from memory. | `settings_ui.rs::notice_item` |
 | T6 | Low | During a running trip, Use as A / Use as B on the Saved tab jumps to the Trip tab and shows only the live card. Nothing says that the point was set for the next trip. | `saved_ui.rs::saved_item` |
 | T7 | Info (deferred) | Saved places are not drawn on the map. Picking one by tap or drop does show its name (round 1). Drawing markers would be a new map layer, not completing an existing flow. Recorded as an open idea. | `map.rs` |
@@ -34,8 +34,8 @@ this repo:
 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
-### S1. Pure helpers in rovsti_geo and apps/stops, with tests
-- `crates/rovsti_geo/src/history.rs`:
+### S1. Pure helpers in rosty_geo and apps/stops, with tests
+- `crates/rosty_geo/src/history.rs`:
   - `pub fn take(&mut self, index: usize) -> Option<TripRecord>`: removes and returns the record
     at `index`, or returns None when the index is out of range.
   - `pub fn put_back(&mut self, index: usize, record: TripRecord)`: inserts the record at
@@ -58,8 +58,8 @@ this repo:
     `"{:.1} MB"` (MiB) below 10 MB and whole MB from 10 MB up. Tests at the edges.
 Acceptance: the new tests pass. No UI change.
 
-### S2. rovsti_tiles: disk usage and clearing (pure fs, with tests)
-- `crates/rovsti_tiles/src/cache.rs`:
+### S2. rosty_tiles: disk usage and clearing (pure fs, with tests)
+- `crates/rosty_tiles/src/cache.rs`:
   - `pub fn disk_usage(root: &Path) -> u64`: the sum of the file sizes under `root`, walked
     recursively, so every server's cache is counted. A missing root counts as 0.
   - `pub fn clear_all(root: &Path) -> io::Result<()>`: `remove_dir_all(root)` and treats
@@ -69,14 +69,14 @@ Acceptance: the new tests pass. No UI change.
   - Usage counts tiles from two sources.
   - `clear_all` leaves usage at 0, and a `DiskCache::open` afterwards is empty and works.
   - `clear_all` on a missing dir is Ok.
-Acceptance: the tests pass. `cargo check -p rovsti_tiles --target aarch64-linux-android` stays
+Acceptance: the tests pass. `cargo check -p rosty_tiles --target aarch64-linux-android` stays
 green.
 
 ### S3. Delete a single History trip, with undo (T1)
 - `main.rs`:
   - Add the field `history_open: Option<usize>`, the History row whose actions are shown.
     Initialise it to None.
-  - Add `PillAction::RestoreRecord(rovsti_geo::TripRecord, usize)`. Its handler calls
+  - Add `PillAction::RestoreRecord(rosty_geo::TripRecord, usize)`. Its handler calls
     `self.restore_record(record, index, cx)`.
   - `can_go_back`/`on_back`: when on the History page with `history_open.is_some()`, Back first
     collapses the row.
@@ -140,12 +140,12 @@ Acceptance: any pin can be shared or copied in two taps. The menu fits on the id
   - `pub fn clear_disk(&mut self, cx, done: impl FnOnce(&mut StopsApp, &mut Context<StopsApp>) + 'static)`:
     - Clear the queue and memory, set `cache = None` and bump `generation`, so in-flight results
       are ignored.
-    - Spawn `rovsti_tiles::clear_all(&root)` on the background executor.
+    - Spawn `rosty_tiles::clear_all(&root)` on the background executor.
     - Then, in an update, call `set_source(self.source.clone(), cx)` to reopen an empty cache,
       followed by `done`.
 - `main.rs`: add the fields `tile_usage: Option<u64>` and `confirm_clear_tiles: bool`.
 - `settings_ui.rs`:
-  - `open_settings(MapTiles)` spawns `rovsti_tiles::disk_usage(&root)` and stores the result in
+  - `open_settings(MapTiles)` spawns `rosty_tiles::disk_usage(&root)` and stores the result in
     `tile_usage`.
   - `open_settings` resets `confirm_clear_tiles`.
   - `tiles_body` adds a section with the row "Downloaded maps", subtitle
@@ -178,7 +178,7 @@ Acceptance:
 - A pick made during a trip says where it went.
 
 ### S8. Docs and status
-- `docs/roadmap.md`, Rovsti Stops:
+- `docs/roadmap.md`, Rosty Stops:
   - Tick R10 as "[x] Delete single History trips, with undo (done without a device)".
   - Extend the save/manage line with "share any pin; paste links into the picker; downloaded map
     size and Clear in Settings > Map tiles".
@@ -189,9 +189,9 @@ Acceptance:
 ## Checks (every step)
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```
 Disk: 7.5 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
 

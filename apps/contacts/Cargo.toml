@@ -1,21 +1,21 @@
 [package]
-name = "rovsti_contacts"
+name = "rosty_contacts"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Rovsti Contacts: your address book in liquid glass, on the device only."
+description = "Rosty Contacts: your address book in liquid glass, on the device only."
 
 [dependencies]
 gpui.workspace = true
 gpui_platform.workspace = true
-rovsti_android.workspace = true
-rovsti_app_core.workspace = true
-rovsti_core.workspace = true
-rovsti_ui.workspace = true
-rovsti_wa_client.workspace = true
-rovsti_wa_proto.workspace = true
-rovsti_wa_ui.workspace = true
+rosty_android.workspace = true
+rosty_app_core.workspace = true
+rosty_core.workspace = true
+rosty_ui.workspace = true
+rosty_wa_client.workspace = true
+rosty_wa_proto.workspace = true
+rosty_wa_ui.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -24,7 +24,7 @@ image = { workspace = true, features = ["jpeg", "webp"] }
 
 [features]
 # Headless screenshot tests (`docs/screenshots.md`). Never in release.
-shots = ["rovsti_ui/shots"]
+shots = ["rosty_ui/shots"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true

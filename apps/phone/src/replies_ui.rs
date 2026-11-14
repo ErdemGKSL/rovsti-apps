@@ -17,11 +17,11 @@ use gpui::{
     IntoElement, MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement,
     Styled, TouchPhase, Window, div, prelude::*, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     call::CallState,
     settings::{self, DEFAULT_REPLIES, MAX_REPLIES, MAX_REPLY_CHARS, REPLY_COUNTER_AT},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::flat_glass,
     field::{Bare, TextField, bare_field},
@@ -164,7 +164,7 @@ impl PhoneApp {
         if self.reply_is_open() {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.reply = ReplyUi {
             call_id: Some(call_id),
             over_call,
@@ -217,7 +217,7 @@ impl PhoneApp {
             self.show_notice_pill("Couldn't decline the call", None, false, cx);
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         let viewport = window.viewport_size();
         let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
         let over_call = self.reply.over_call;
@@ -275,7 +275,7 @@ impl PhoneApp {
     /// The notification's Message action (story 18.7): open the sheet on the
     /// Incoming screen for that call, as soon as the screen has it.
     pub(crate) fn sync_ui_request(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use rovsti_core::wire::UiRequestKind;
+        use rosty_core::wire::UiRequestKind;
         let Some(request) = self.backend.read(cx).peek_ui_request().copied() else {
             return;
         };
@@ -748,7 +748,7 @@ impl PhoneApp {
             });
             self.replies_load(cx);
             self.sync_settings_rows(cx, false);
-            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         }
         self.replies_ed.confirm_reset = false;
         self.close_sheet(cx);
@@ -791,7 +791,7 @@ impl PhoneApp {
         for s in &mut self.replies_ed.shift {
             s.snap(0.0);
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         self.replies_save(cx);
     }
 
@@ -813,7 +813,7 @@ impl PhoneApp {
                         start_y: y,
                         dy: 0.0,
                     });
-                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                    rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
                 }
             }
             TouchPhase::Moved => {
@@ -1223,7 +1223,7 @@ impl PhoneApp {
                 .relative()
                 .h(px(52.0 * press_scale(press, scale::PRESS)))
                 .rounded_full()
-                .bg(rovsti_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
+                .bg(rosty_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
                 .flex()
                 .items_center()
                 .justify_center()

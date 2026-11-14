@@ -1,0 +1,36 @@
+package dev.rosty.phone.wa
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import dev.rosty.design.controls.MessageSource
+import dev.rosty.design.controls.SourceGlyph
+import dev.rosty.design.theme.RostyText
+import dev.rosty.design.theme.RostyTheme
+import dev.rosty.design.theme.Spacing
+
+/**
+ * The status line of a WhatsApp call, "WhatsApp audio", with the 14 dp WhatsApp glyph in front. The glyph says it once
+ * for the whole screen (never a pill on a row); the words are read by a screen reader, the glyph is silent.
+ */
+@Composable
+fun WaAudioLabel(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    style: TextStyle = RostyTheme.type.subheadline,
+) {
+    Row(
+        modifier.semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        SourceGlyph(MessageSource.WhatsApp, contentDescription = null, tint = color)
+        RostyText(text, style = style, color = color, maxLines = 1)
+    }
+}

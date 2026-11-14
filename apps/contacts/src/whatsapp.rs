@@ -4,23 +4,23 @@
 //! the instance's existing chats (`GET /v1/chats`, no lookup). Only when a card
 //! opens are that one contact's international numbers looked up, and presence
 //! is subscribed for the WhatsApp number. Everything that decides something is
-//! a pure function in `rovsti_app_core::contacts::whatsapp`; this is the GPUI
+//! a pure function in `rosty_app_core::contacts::whatsapp`; this is the GPUI
 //! half that applies the answers.
 
 use std::collections::HashMap;
 
 use gpui::{Context, SharedString};
-use rovsti_app_core::contacts::whatsapp::{
+use rosty_app_core::contacts::whatsapp::{
     LookupState, fetch_wa_photo, marked_contacts, wa_chip_index,
 };
-pub(crate) use rovsti_app_core::contacts::whatsapp::{WaPanel, profile_lines};
-use rovsti_core::recents::LocaleTime;
-use rovsti_wa_proto::{ChatSummary, GatewayEvent, chat_users};
+pub(crate) use rosty_app_core::contacts::whatsapp::{WaPanel, profile_lines};
+use rosty_core::recents::LocaleTime;
+use rosty_wa_proto::{ChatSummary, GatewayEvent, chat_users};
 
 use crate::ContactsApp;
 
 pub(crate) fn now_ms() -> i64 {
-    rovsti_core::clock::now_ms()
+    rosty_core::clock::now_ms()
 }
 
 impl ContactsApp {
@@ -29,7 +29,7 @@ impl ContactsApp {
         cx.spawn(async move |this, cx| {
             let raw = cx
                 .background_executor()
-                .spawn(async { rovsti_android::providers::local_time_info() })
+                .spawn(async { rosty_android::providers::local_time_info() })
                 .await;
             if let Some(locale) = raw.ok().and_then(|text| LocaleTime::parse(&text)) {
                 this.update(cx, |this, cx| {
@@ -264,7 +264,7 @@ impl ContactsApp {
         &mut self,
         id: i64,
         numbers: &[String],
-        gateway: &rovsti_wa_client::Gateway,
+        gateway: &rosty_wa_client::Gateway,
         cx: &mut Context<Self>,
     ) {
         let Some(jid) = self.wa.jid(id, numbers) else {
@@ -297,16 +297,16 @@ impl ContactsApp {
                 .background_executor()
                 .spawn(async move {
                     if call {
-                        rovsti_android::handoff::wa_call(&jid, &name)
+                        rosty_android::handoff::wa_call(&jid, &name)
                     } else {
-                        rovsti_android::handoff::wa_chat(&jid, &name)
+                        rosty_android::handoff::wa_chat(&jid, &name)
                     }
                 })
                 .await;
             let notice: Option<SharedString> = match result {
                 Ok(true) => None,
-                Ok(false) if call => Some("Install Rovsti Phone to call on WhatsApp".into()),
-                Ok(false) => Some("Install Rovsti Messages to chat on WhatsApp".into()),
+                Ok(false) if call => Some("Install Rosty Phone to call on WhatsApp".into()),
+                Ok(false) => Some("Install Rosty Messages to chat on WhatsApp".into()),
                 Err(error) => {
                     let what = if call { "call" } else { "chat" };
                     let words = crate::backend::android_words(&error);

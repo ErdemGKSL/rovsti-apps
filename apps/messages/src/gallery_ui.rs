@@ -1,5 +1,5 @@
 //! Media, links and docs: one glass sheet shared by the WhatsApp and SMS pages.
-//! The grouping lives in `rovsti_core::chat_gallery`; the pages build the
+//! The grouping lives in `rosty_core::chat_gallery`; the pages build the
 //! [`GallerySheet`], answer the [`GalleryAction`]s and close it on Back.
 
 use std::rc::Rc;
@@ -8,14 +8,14 @@ use gpui::{
     AnyElement, App, ImageSource, InteractiveElement, IntoElement, ObjectFit, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, StyledImage, Window, div, img, px,
 };
-use rovsti_core::chat_gallery::{self, DocEntry, Gallery, GalleryKind, GalleryTab, LinkEntry};
-use rovsti_ui::{
+use rosty_core::chat_gallery::{self, DocEntry, Gallery, GalleryKind, GalleryTab, LinkEntry};
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     theme,
     tokens::{Theme, metrics, radius, shadow, typography},
 };
-use rovsti_wa_proto::{MediaKind, MediaMeta};
+use rosty_wa_proto::{MediaKind, MediaMeta};
 
 /// The page's handler for [`GalleryAction`]s.
 pub(crate) type Dispatch = Rc<dyn Fn(GalleryAction, &mut Window, &mut App)>;

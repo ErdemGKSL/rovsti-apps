@@ -5,7 +5,7 @@ is open only because E5.9 (Settings) and E5.11 (Notes) never reached HEAD: their
 stashes. Steps 1-4 recover them, fix what this round's screenshot review found, and close E5. Steps 5-8 do **X.1** (owner
 request, scheduled for round 15 in epics.md "X.", before E6). **X.2** (Takumi share cards) is round 16, then E6.
 
-Owner decisions in force: Rovsti is GPL-3.0-or-later; Convx code is ported close to verbatim with its original header plus
+Owner decisions in force: Rosty is GPL-3.0-or-later; Convx code is ported close to verbatim with its original header plus
 `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`; glisse-derived code keeps the
 glisse MIT header; `android/THIRD_PARTY_NOTICES.md` lists every new source or library. Owner rules (b) no `RustNative`
 call before `Rust.init` (a `ContentProvider.onCreate` runs **before** `Application.onCreate`: it must not touch Rust),
@@ -26,7 +26,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
   - `stash@{0}` "blocked: kotlin-ui r14 r14-s5" (base `c7a32cd`): E5.11 Notes. Untracked: `notes/NotesScreen.kt`,
     `NotesViewModel.kt`, tests `E511ShotTest`, `NotesHarness`, `NotesRig`, `NotesSample`, `NotesScreenTest`,
     `NotesViewModelTest`, 10 `e5.11-*` goldens. Tracked: `PhoneApp/Container/Pages/Route.kt`, `Spacing.kt`,
-    `details/DetailsPresenter.kt`, strings en/tr, `core-bridge .../HistoryModels.kt`, `crates/rovsti_ffi/src/ops/phone/log.rs`,
+    `details/DetailsPresenter.kt`, strings en/tr, `core-bridge .../HistoryModels.kt`, `crates/rosty_ffi/src/ops/phone/log.rs`,
     shell `SettingsPage.kt`.
   - `stash@{1}` "blocked: kotlin-ui r14 r14-s3" (base `d3df23e`): E5.9b. Untracked: `settings/SettingsHost.kt`,
     `SettingsUi.kt`, `SettingsWiring.kt`, `settings/{backup,data,replies,sim,speeddial}/*`, tests `BackupViewModelTest`,
@@ -37,7 +37,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
   - `stash@{2}` "blocked: kotlin-ui r14 r14-s2" (base `6cdc462`): E5.9a. Untracked: `settings/blocked/{BlockedEntry,
     BlockedScreen,BlockedStrings,BlockedViewModel}.kt`, tests `BlockedSample`, `BlockedScreenTest`, `BlockedViewModelTest`,
     `blocked/E59ShotTest`, `test/resources/blocked-import.csv`, `platform/.../calllog/BlockPrefixes.kt` +
-    `BlockPrefixTest`, 18 `e5.9-*` goldens. Tracked: `RovstiIcons.kt` (+42), `PhoneApp/Container/Pages/Route.kt`,
+    `BlockPrefixTest`, 18 `e5.9-*` goldens. Tracked: `RostyIcons.kt` (+42), `PhoneApp/Container/Pages/Route.kt`,
     `Spacing.kt`, `data/BlockRepo.kt` (+75), strings (+70), `PhoneHost`, `PhoneRoutesTest`, `PhoneScreenTest`,
     `PushedPagesBackTest`, `platform/.../telephony/CallRegistry.kt`.
   - `stash@{3}` round-13 step-4 WIP (superseded by `c0ffc3c`), `stash@{4}` r12 S6 (recovered in round 13),
@@ -51,10 +51,10 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 - **F31 still open** (verified): `RecentsScreen.kt:710-713` and `details/PersonSheet.kt:526-529` play `haptics.confirm()`
   on `*Effect.Core` (a refusal); `KeypadScreen.kt:150` and `FavoritesScreen.kt:516` play none.
 - **X.1 groundwork in HEAD:** `wa/.../avatars/WaAvatars.kt` + `AvatarBook.kt` (per-app disk cache of WA pictures keyed by
-  JID and picture id through the core's `wa.avatars_plan` LRU, `rovsti_ffi/src/ops/wa/pure.rs:210-239`; `wa.picture` in
+  JID and picture id through the core's `wa.avatars_plan` LRU, `rosty_ffi/src/ops/wa/pure.rs:210-239`; `wa.picture` in
   `rest.rs:350`); `platform/.../identity/{CallerIds,CallerIdentity,PhoneNumbers}.kt` (F28 resolver);
   `phone/.../data/{PeopleIndex,LiveNames}.kt` (F29); `incoming/CallPhotos.kt` (photo flow, null without own photo).
-  Contacts declares a signature permission already (`dev.rovsti.permission.HANDOFF`, `contacts/AndroidManifest.xml:16-19`):
+  Contacts declares a signature permission already (`dev.rosty.permission.HANDOFF`, `contacts/AndroidManifest.xml:16-19`):
   the same pattern serves the people provider. No WorkManager dependency yet (`android/gradle/libs.versions.toml`).
 - **Disk: 3.2 GB free** (`df -h .`). Big items: `~/.gradle/caches/9.9.0` 6.9 GB (current wrapper, keep),
   `target/checks` 2.7 GB, `~/.gradle/caches/modules-2` 885 MB, `android/{catalog,phone,core-bridge,contacts}/build`
@@ -90,7 +90,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 
 1. **Disk first, every step.** `df -h .` before any build. Now (3.2 GB): `rm -rf target/checks android/*/build
    ~/.gradle/caches/build-cache-1 target/aarch64-linux-android/*/incremental`, `cargo clean -p` the deprecated GPUI crates
-   (`rovsti_phone rovsti_messages rovsti_stops rovsti_contacts rovsti_ui rovsti_wa_ui liquid_glass_kit`) and any Gradle
+   (`rosty_phone rosty_messages rosty_stops rosty_contacts rosty_ui rosty_wa_ui liquid_glass_kit`) and any Gradle
    version dir under `~/.gradle/caches/` other than `9.9.0` (and the shared `modules-2`, `jars-*`, `transforms-*`, which
    stay). That frees about 5 GB; build only at 7 GB or more, never below 6 GB. Never `cargo clean` the workspace or
    `rm -rf target`; delete `target/checks` only (CLAUDE.md). Release builds only.
@@ -111,7 +111,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
    use the product path (real `NumberDisplay`, real core ops).
 7. **Strings** in `values` + `values-tr`; `PhoneStringsTest` / Contacts strings test and lint `MissingTranslation` pass.
 8. **Check per step**: `bash scripts/kotlin-ui-check.sh` prints `ALL GREEN`. Rust changes also run
-   `cargo test -p rovsti_core -p rovsti_app_core -p rovsti_ffi` and `bash scripts/check-ffi-exports.sh`; Step 4 and Step 8
+   `cargo test -p rosty_core -p rosty_app_core -p rosty_ffi` and `bash scripts/check-ffi-exports.sh`; Step 4 and Step 8
    run the full CLAUDE.md gate.
 9. **Commits**: one per step, `Kotlin UI (E5 Phone + X.1, round 15): <step title>`, with the session attribution lines.
    Never push to `main`.
@@ -162,8 +162,8 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 ### Step 3. Recover E5.11 Notes (`stash@{0}`) and fix F38
 
 - `git stash apply --index stash@{0}`. Resolve `PhoneApp.kt`, strings. The tracked Rust change
-  (`crates/rovsti_ffi/src/ops/phone/log.rs`) and `core-bridge .../HistoryModels.kt`: keep, add or update its fixture,
-  `OPS.md`, run `cargo test -p rovsti_ffi` and `bash scripts/check-ffi-exports.sh`. Shell `SettingsPage.kt` change:
+  (`crates/rosty_ffi/src/ops/phone/log.rs`) and `core-bridge .../HistoryModels.kt`: keep, add or update its fixture,
+  `OPS.md`, run `cargo test -p rosty_ffi` and `bash scripts/check-ffi-exports.sh`. Shell `SettingsPage.kt` change:
   keep only if still needed after Steps 1-2 (the licence goldens `e3.11-*` changed in all three stashes: re-record and
   open them if the change stays).
 - Notes row in Settings (and from call details "All notes"). `SearchFocusHandoff` when a row opens its call-details sheet.
@@ -192,7 +192,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 - **Close E5:** `checklist-e5.md` has no MISSING row; "Not closed" section replaced by the recovery evidence; checklist
   A-H for Settings and Notes pages. Regenerate `docs/kotlin-ui/screenshots/phone.png` (`:phone:contactSheet`) and open it.
 - Full gate: `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace`,
-  `cargo check --release -p rovsti_android --target aarch64-linux-android`, `bash scripts/kotlin-ui-check.sh`; release
+  `cargo check --release -p rosty_android --target aarch64-linux-android`, `bash scripts/kotlin-ui-check.sh`; release
   APKs of `:phone` (plain + firebase); `dexdump` any new keep rule. State the APK paths in the commit.
 - Stash hygiene: after this commit, `stash@{0}`-`{2}` (round-14) and the round-13 `stash@{3}`/r12 `stash@{4}` are fully
   in HEAD: verify file by file (`git diff stash@{n}^3 HEAD -- <paths>`), list them in the summary as safe to drop and drop
@@ -201,16 +201,16 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 
 ### Step 5. X.1a People cache in the Rust core and the shared `:people` client module
 
-- Rust `rovsti_app_core::people` (platform-free, unit-tested): a person-info store keyed by WhatsApp JID with the E.164
+- Rust `rosty_app_core::people` (platform-free, unit-tested): a person-info store keyed by WhatsApp JID with the E.164
   number(s), LID, push/verified name, "on WhatsApp" flag, picture id, picture file name, fetched/updated times; ops
   `people.upsert` (a picture-id change marks the picture stale, a removed picture drops the file), `people.lookup`
   (by E.164 / JID / LID, offline), `people.plan` (which JIDs to refresh, which files to evict by an LRU byte cap, reusing
   the `wa.avatars_plan` rules rather than a second LRU), `people.snapshot` (compact rows for the provider). Exposed via
-  `rovsti_ffi` with fixtures, `OPS.md`, `check-ffi-exports.sh`. Tests: insert, refresh on picture-id change, removal,
+  `rosty_ffi` with fixtures, `OPS.md`, `check-ffi-exports.sh`. Tests: insert, refresh on picture-id change, removal,
   eviction under the cap, offline read, LID -> number join.
 - New Gradle module `android/people` (`:people`, Android library, depends on `:platform`, not on `:contacts`):
-  `PeopleContract` (authority `dev.rovsti.contacts.people`, columns, `openFile` URIs per picture, signature permission
-  `dev.rovsti.permission.READ_PEOPLE`), `PersonAvatar` sealed (`Own(uri)`, `WhatsApp(file, pictureId)`, `Initials`),
+  `PeopleContract` (authority `dev.rosty.contacts.people`, columns, `openFile` URIs per picture, signature permission
+  `dev.rosty.permission.READ_PEOPLE`), `PersonAvatar` sealed (`Own(uri)`, `WhatsApp(file, pictureId)`, `Initials`),
   `AvatarResolver` (own photo, else WA fallback, else initials), `PeopleIndex` in-memory index API with a `StateFlow`
   version for recomposition, `PeopleSource` interface (`ProviderSource` reading Contacts' provider, `GatewaySource`
   syncing into memory when Contacts is not installed, `PackageManager.resolveContentProvider` decides). No Rust in this
@@ -227,7 +227,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 - Contacts `people/PeopleStore` over the Step-5 ops (data in Contacts' Rust data dir, pictures in
   `filesDir/people/`), fed by `WaAvatars`/`wa.picture` downloads and gateway profile events (picture id / push name
   changes) only while WhatsApp is linked.
-- `PeopleProvider` (exported, `readPermission = dev.rovsti.permission.READ_PEOPLE`, declared `signature` in Contacts and
+- `PeopleProvider` (exported, `readPermission = dev.rosty.permission.READ_PEOPLE`, declared `signature` in Contacts and
   `uses-permission` in Phone, both apps like `HANDOFF`): `query` returns `people.snapshot` rows, `openFile` serves
   pictures read-only as `ParcelFileDescriptor`, `notifyChange` after every sync. `onCreate` does no Rust work; `query`
   awaits `Rust.init` with a short bound and returns an empty cursor if not ready (rule b).
@@ -249,7 +249,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 
 - Every avatar in Contacts goes through `AvatarResolver`: list, search results, recently viewed, groups, favorites,
   card hero (and the share/birthday card input for X.2). The WA picture crossfades in (Rule 5) with no layout change; a
-  cached picture renders on the first frame (index warmed in `RovstiContactsApp` after `Rust.init`). Never written into
+  cached picture renders on the first frame (index warmed in `RostyContactsApp` after `Rust.init`). Never written into
   the Android contact; the editor's explicit "Use WhatsApp Photo" stays.
 - Test `ContactsAvatarSurfacesTest` enumerating the surfaces (each composable takes the resolver output, none reads
   `photoUri` directly: a source scan test for `photoUri` outside the resolver), `FirstFrameAvatarTest`.
@@ -275,7 +275,7 @@ Definition of done item 6 (Turkish, launcher, notification icons, never crash on
 
 Files: `phone/.../settings/{blocked,replies,speeddial,sim,data,backup}/`, `phone/.../notes/`,
 `platform/.../calllog/BlockPrefixes.kt`, `design/.../text/LtrIsolate.kt`, the stacked list row, `android/people/`,
-`contacts/.../people/{PeopleStore,PeopleProvider,PeopleSyncWorker}.kt`, `rovsti_app_core/src/people*`. Tests:
+`contacts/.../people/{PeopleStore,PeopleProvider,PeopleSyncWorker}.kt`, `rosty_app_core/src/people*`. Tests:
 `BlockedViewModelTest`, `BlockedScreenTest`, `SettingsEndPaddingTest`, `QuickRepliesScreenTest`, `DataViewModelTest`,
 `BackupViewModelTest`, `NotesViewModelTest`, `NotesScreenTest`, `PillFeedbackTest` (F31), `ListRowStackingTest`,
 `LtrIsolateTest`, `AvatarResolverTest`, `PeopleProviderTest`, `PeopleSyncWorkerTest`, `ContactsAvatarSurfacesTest`,

@@ -104,7 +104,7 @@ API (`spring.ts:1-6,70-104`):
 
 Reading the table: structural motion (selection sliding, switch, menu) sits at zeta ~0.92-0.95, i.e. a hair under critical: one barely visible overshoot.
 Only the touch-release spring (zeta 0.37) and the menu card/press springs (0.6-0.7) are visibly bouncy.
-The constants are web-tuned to look like iOS 26; they are the right starting point for Rovsti without re-measurement.
+The constants are web-tuned to look like iOS 26; they are the right starting point for Rosty without re-measurement.
 
 ### 2.3 Port to Compose
 
@@ -151,7 +151,7 @@ glisse has no velocity input and no fling projection: a tab-bar drag release pic
 picks `value > 0.5` (`switch.tsx:163`), both from the **release point**, ignoring how fast the finger was moving. It also has no velocity-based
 squash/stretch on the selection puck (the only stretch is the button rubber-band, section 3). `convx-motion.md` section 6 (Apple projection
 `velocity/1000 * rate/(1-rate)`, rate 0.998), section 7.1 (puck squash from drag velocity) and 3 (`initialVelocity` handed to the settle spring)
-cover exactly these gaps. Rule for Rovsti: **take glisse's constants, add Convx's technique of passing the release velocity to the settle spring and
+cover exactly these gaps. Rule for Rosty: **take glisse's constants, add Convx's technique of passing the release velocity to the settle spring and
 choosing the target from the projected rest point**.
 
 ---

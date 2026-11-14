@@ -1,7 +1,7 @@
 plugins {
-    id("rovsti.android.app")
-    id("rovsti.compose")
-    id("rovsti.screenshots")
+    id("rosty.android.app")
+    id("rosty.compose")
+    id("rosty.screenshots")
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -13,12 +13,12 @@ if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google
 val coreBridge = project(":core-bridge")
 
 android {
-    namespace = "dev.rovsti.phone"
+    namespace = "dev.rosty.phone"
 
     defaultConfig {
-        applicationId = "dev.rovsti.phone"
+        applicationId = "dev.rosty.phone"
         // 100 + the CI build number, so every build installs over the last (docs/kotlin-ui/toolchain.md).
-        versionCode = 100 + (providers.environmentVariable("ROVSTI_BUILD_NUMBER").orNull?.toIntOrNull() ?: 0)
+        versionCode = 100 + (providers.environmentVariable("ROSTY_BUILD_NUMBER").orNull?.toIntOrNull() ?: 0)
         // The GPUI app's version (apps/phone/platforms/android/app/build.gradle.kts).
         versionName = "0.1.0"
     }
@@ -33,7 +33,7 @@ android {
     }
 
     lint {
-        // The dev.rovsti.bridge receivers and provider come from :platform (ARCH 7.2) and are declared here.
+        // The dev.rosty.bridge receivers and provider come from :platform (ARCH 7.2) and are declared here.
         disable += "NotificationPermission"
     }
 
@@ -41,7 +41,7 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
-                // librovsti_ffi can be loaded into one class loader per JVM (see :contacts).
+                // librosty_ffi can be loaded into one class loader per JVM (see :contacts).
                 it.forkEvery = 1
                 // The merged manifest of this test's flavor is a test input (PhoneManifestTest, E5.1).
                 val flavor = if (it.name.contains("Firebase")) "firebase" else "plain"
@@ -51,38 +51,38 @@ android {
                         "intermediates/merged_manifests/${flavor}Release/process${cap}ReleaseManifest",
                     )
                 it.dependsOn("process${cap}ReleaseManifest")
-                it.systemProperty("rovsti.flavor", flavor)
+                it.systemProperty("rosty.flavor", flavor)
                 it.systemProperty(
-                    "rovsti.mergedManifest",
+                    "rosty.mergedManifest",
                     merged
                         .get()
                         .file("AndroidManifest.xml")
                         .asFile.absolutePath,
                 )
                 val platformRes = rootProject.projectDir.resolve("platform/src/test/resources/manifest")
-                it.systemProperty("rovsti.manifestDir", platformRes.absolutePath)
+                it.systemProperty("rosty.manifestDir", platformRes.absolutePath)
                 it.inputs.dir(platformRes).withPropertyName("manifestExpectations")
                 // The GPUI manifest is the other expectation: every component the GPUI app declared must survive.
                 val gpuiManifest =
                     rootProject.projectDir.parentFile.resolve(
                         "apps/phone/platforms/android/app/src/main/AndroidManifest.xml",
                     )
-                it.systemProperty("rovsti.gpuiManifest", gpuiManifest.absolutePath)
+                it.systemProperty("rosty.gpuiManifest", gpuiManifest.absolutePath)
                 it.inputs.file(gpuiManifest).withPropertyName("gpuiManifest")
                 // The GPUI/Rust migration fixtures are copied into src/test/resources/migration; the live source is
                 // the Rust crate's, which the test compares with (a stale copy fails).
                 val rustFixtures =
-                    rootProject.projectDir.parentFile.resolve("crates/rovsti_app_core/tests/fixtures/dirs")
-                it.systemProperty("rovsti.rustFixtureDirs", rustFixtures.absolutePath)
+                    rootProject.projectDir.parentFile.resolve("crates/rosty_app_core/tests/fixtures/dirs")
+                it.systemProperty("rosty.rustFixtureDirs", rustFixtures.absolutePath)
                 it.inputs.dir(rustFixtures).withPropertyName("rustFixtureDirs")
-                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_ffi/fixtures")
-                it.systemProperty("rovsti.ffi.fixtures", ffiFixtures.absolutePath)
+                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rosty_ffi/fixtures")
+                it.systemProperty("rosty.ffi.fixtures", ffiFixtures.absolutePath)
                 it.inputs.dir(ffiFixtures).withPropertyName("ffiFixtures")
                 it.inputs.files(fileTree("src/main")).withPropertyName("mainSources")
                 // PhoneMigrationTest runs the real Rust core on the host library that :core-bridge builds (E2.6).
                 val hostLib = coreBridge.tasks.named("cargoBuildHost").flatMap { (it as CargoBuildTask).outputDir }
                 it.dependsOn(coreBridge.tasks.named("cargoBuildHost"))
-                it.systemProperty("rovsti.hostLib", hostLib.get().asFile.absolutePath)
+                it.systemProperty("rosty.hostLib", hostLib.get().asFile.absolutePath)
                 it.systemProperty("java.library.path", hostLib.get().asFile.absolutePath)
             }
         }

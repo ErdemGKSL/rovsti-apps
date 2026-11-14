@@ -1,4 +1,4 @@
-# Rovsti design system (Kotlin, `android/design`)
+# Rosty design system (Kotlin, `android/design`)
 
 A short usage guide for the `:design` module. It says what to reach for and the rules that matter; it does not repeat
 numbers (springs, radii, tints, thresholds). Those live in `.claude/skills/convx-motion-compose/` and in the code's KDoc.
@@ -19,37 +19,37 @@ Licence: the module is GPL-3.0-or-later. Ported files keep the original header p
    row starts below the top chrome. Pages never hard-code bar heights.
 3. **Press is transform-only.** Pressing scales, lifts or tints; it never changes a layout size, so nothing reflows under
    the finger (`PressNoLayoutShiftTest`). Use `scalePress`, `rowPress` or `glassPress`, not a custom `clickable` indication.
-4. **One gutter, one scale.** Spacing comes from `Spacing`, text from `RovstiTheme.type` through `RovstiText`, colour from
-   `RovstiTheme.colors`. App modules use no raw `dp` and no string literals in `Text` (convention tests).
-5. **Motion goes through `RovstiMotion`** and respects `LocalReduceMotion`. Every drag hands its release velocity to a spring.
+4. **One gutter, one scale.** Spacing comes from `Spacing`, text from `RostyTheme.type` through `RostyText`, colour from
+   `RostyTheme.colors`. App modules use no raw `dp` and no string literals in `Text` (convention tests).
+5. **Motion goes through `RostyMotion`** and respects `LocalReduceMotion`. Every drag hands its release velocity to a spring.
 6. **Glass is the backdrop engine, not a blur.** On API 33+ with default settings every glass surface samples the backdrop
-   (`GlassRealPathTest`). Surfaces that sample must live under a `RovstiBackdropRoot`/`BackdropScope` source.
+   (`GlassRealPathTest`). Surfaces that sample must live under a `RostyBackdropRoot`/`BackdropScope` source.
 7. **Text comes from `strings.xml` or Rust sentences**, time from the injected clock, no `Thread.sleep`.
 
 ## Packages
 
 ### theme
-`RovstiTheme { }` supplies `colors`, `type`, light/dark following the system. Use `Spacing.gutter/s/m/l`, `Sizes.touch`,
+`RostyTheme { }` supplies `colors`, `type`, light/dark following the system. Use `Spacing.gutter/s/m/l`, `Sizes.touch`,
 `Sizes.button`.
 ```kotlin
-RovstiText("Recents", style = RovstiTheme.type.title3, color = RovstiTheme.colors.labelSecondary)
+RostyText("Recents", style = RostyTheme.type.title3, color = RostyTheme.colors.labelSecondary)
 ```
 
 ### motion
-`RovstiMotion` holds the named springs and tweens; `Fling`, `Rubber`, `IosOverscroll` give momentum and rubber-banding.
+`RostyMotion` holds the named springs and tweens; `Fling`, `Rubber`, `IosOverscroll` give momentum and rubber-banding.
 ```kotlin
-val progress by animateFloatAsState(if (open) 1f else 0f, RovstiMotion.appear())
+val progress by animateFloatAsState(if (open) 1f else 0f, RostyMotion.appear())
 ```
 
 ### press, haptics
 `scalePress()` for buttons and tiles, `rowPress()` for list rows, `glassPress()` for glass controls.
-`rememberRovstiHaptics(mode)` for the tick on selection changes.
+`rememberRostyHaptics(mode)` for the tick on selection changes.
 ```kotlin
 Modifier.scalePress().clickable(role = Role.Button, onClick = onTap)
 ```
 
 ### glass, backdrop, ios/foundation
-`Modifier.rovstiGlass`, `panelGlass`, `sheetGlass` draw the glass; `backdrop/` is the ported engine (GlassPool, freeze
+`Modifier.rostyGlass`, `panelGlass`, `sheetGlass` draw the glass; `backdrop/` is the ported engine (GlassPool, freeze
 helpers) and `ios/foundation` the iOS materials. Apps normally use the components below and never call the engine.
 ```kotlin
 Box(Modifier.panelGlass(RoundedCornerShape(24.dp), debugTag = "my-panel")) { content() }
@@ -70,8 +70,8 @@ InsetGroupedSection(header = "Pages") { row { ListRow(title = name, onClick = op
 ```
 
 ### chrome
-`RovstiBackdropRoot` at the app root, `LargeTitleScaffold` per page (large title that collapses into the frosted bar),
-`Toolbar`/`ToolbarButton` for the capsules, `RovstiTabBar` (floating, draggable puck, folds on scroll) with an accessory slot.
+`RostyBackdropRoot` at the app root, `LargeTitleScaffold` per page (large title that collapses into the frosted bar),
+`Toolbar`/`ToolbarButton` for the capsules, `RostyTabBar` (floating, draggable puck, folds on scroll) with an accessory slot.
 ```kotlin
 LargeTitleScaffold("Contacts", listState, actions, navigation = NavigationButton { navigator.pop() }) {
     items(rows) { ListRow(title = it.name) }
@@ -91,14 +91,14 @@ controller.confirmDestructive("Delete conversation", onConfirm = ::delete, title
 IME geometry; use them instead of a bare `BasicTextField`.
 
 ### transition
-`RovstiNavHost` with `TabNavigator`: per-tab stacks, push/pop with parallax, predictive back, tab cross-fade.
-`Modifier.rovstiSharedBounds(key)` joins an avatar to its detail page.
+`RostyNavHost` with `TabNavigator`: per-tab stacks, push/pop with parallax, predictive back, tab cross-fade.
+`Modifier.rostySharedBounds(key)` joins an avatar to its detail page.
 ```kotlin
-RovstiNavHost(navigator, tabItems, ::chromeFor, overlays) { entry<Home> { HomePage() } }
+RostyNavHost(navigator, tabItems, ::chromeFor, overlays) { entry<Home> { HomePage() } }
 ```
 
 ### media
-`RowImage` loads at the size of its slot (Coil 3 loader from `rovstiImageLoader`); `OverlayController.showPhotoViewer`
+`RowImage` loads at the size of its slot (Coil 3 loader from `rostyImageLoader`); `OverlayController.showPhotoViewer`
 opens the pager with pinch/double-tap zoom and swipe-down dismiss.
 
 ## Testing a screen

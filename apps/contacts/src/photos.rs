@@ -4,7 +4,7 @@
 //! screen, decoded on the background executor to at most [`SIZE`] px, kept as
 //! an `Arc<RenderImage>` in a [`CAPACITY`]-entry LRU keyed by contact id, and
 //! faded in over the monogram. Painting an avatar never decodes: it clones an
-//! `Arc`. The same scheme as Rovsti Phone's `photos` module.
+//! `Arc`. The same scheme as Rosty Phone's `photos` module.
 
 use std::{
     collections::HashSet,
@@ -16,12 +16,12 @@ use gpui::{
     App, Context, Div, Hsla, ObjectFit, ParentElement, RenderImage, SharedString, Styled,
     StyledImage, px,
 };
-use rovsti_core::{
+use rosty_core::{
     lru::Lru,
     zoom::{self, Size, ZoomView},
 };
-use rovsti_ui::tokens::Theme;
-use rovsti_ui::{Icon, components::avatar};
+use rosty_ui::tokens::Theme;
+use rosty_ui::{Icon, components::avatar};
 
 use crate::{ContactsApp, backend};
 

@@ -15,12 +15,12 @@ use gpui::{
     MouseButton, ParentElement, Pixels, Role, SharedString, StatefulInteractiveElement, Styled,
     Window, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     dial,
     sim::{DOT_MIN_CONTRAST, SimAccount, SimInfo, argb_rgb, clamp_dot},
     wire::EmergencyList,
 };
-use rovsti_ui::{
+use rosty_ui::{
     moments::Glide,
     motion::press_scale,
     motion_tokens::scale,
@@ -234,7 +234,7 @@ impl PhoneApp {
         if dial::is_emergency(&number, &EmergencyList::default()) {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
         self.sheet.close();
         self.open_sim_chooser(ChooserFor::List, number.into(), None, cx);
     }
@@ -243,7 +243,7 @@ impl PhoneApp {
         if !self.sim_long_press_ready(cx) {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
         let number: SharedString = self.dialed.clone().into();
         self.open_sim_chooser(ChooserFor::Dial, number, None, cx);
     }
@@ -323,7 +323,7 @@ impl PhoneApp {
             self.close_sheet(cx);
         }
         if let Some(text) =
-            crate::backend::open_system(rovsti_android::telecom::SystemPage::ChangePhoneAccounts)
+            crate::backend::open_system(rosty_android::telecom::SystemPage::ChangePhoneAccounts)
                 .notice()
         {
             self.show_notice_pill(text, None, false, cx);
@@ -495,7 +495,7 @@ impl PhoneApp {
             .h(px(ROW_H))
             .w_full()
             .px(px(16.0))
-            .rounded(rovsti_ui::tokens::radius::CARD)
+            .rounded(rosty_ui::tokens::radius::CARD)
             .bg(mix(
                 Hsla {
                     a: 0.6,
@@ -665,7 +665,7 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::wire::{PhoneAccountInfo, PhoneAccounts};
+    use rosty_core::wire::{PhoneAccountInfo, PhoneAccounts};
 
     fn two() -> SimInfo {
         let account = |k: &str, label: &str, slot: u8, enabled: bool| PhoneAccountInfo {

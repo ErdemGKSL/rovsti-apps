@@ -1,9 +1,9 @@
-# Rovsti Phone wire table (v0.2)
+# Rosty Phone wire table (v0.2)
 
 The single place that lists every field exchanged between Kotlin and Rust
-(AD-4, AD-5, AD-10, AD-23 to AD-31). Rust types: `rovsti_core::wire`. Kotlin
-mirror: `crates/rovsti_android/kotlin/dev/rovsti/bridge/WireJson.kt`. Goldens:
-`crates/rovsti_core/tests/fixtures/*.json`, read by `tests/wire_golden.rs` and
+(AD-4, AD-5, AD-10, AD-23 to AD-31). Rust types: `rosty_core::wire`. Kotlin
+mirror: `crates/rosty_android/kotlin/dev/rosty/bridge/WireJson.kt`. Goldens:
+`crates/rosty_core/tests/fixtures/*.json`, read by `tests/wire_golden.rs` and
 `WireFixturesTest.kt`.
 
 **Versioning rule.** An added field keeps `"v": 1` (every new field is optional
@@ -86,7 +86,7 @@ brackets.
 A v0.1 row (no new field) parses with every new field defaulted
 (`v01_rows_default_every_new_field`).
 
-## 3. One-shot events (Kotlin to Rust, `RovstiBridge.emit`)
+## 3. One-shot events (Kotlin to Rust, `RostyBridge.emit`)
 
 | Kind | Payload | Story |
 |---|---|---|
@@ -103,7 +103,7 @@ A v0.1 row (no new field) parses with every new field defaulted
 | `keyguard_dismissed` + | none | 15.5 |
 | `ui_request` + | `UiRequest{kind,call_id?}` (`show_dialer|show_call|show_recents`) | 14.9 (shape), 16.x |
 
-## 4. Rust to Kotlin commands (static methods on `RovstiBridge`)
+## 4. Rust to Kotlin commands (static methods on `RostyBridge`)
 
 All take String, Int or Boolean only (AD-5); all return Boolean or an envelope
 string and never throw.
@@ -118,12 +118,12 @@ string and never throw.
 | `addContact(number)` = / changed | 14.4 | `ACTION_INSERT_OR_EDIT` |
 | `hearingAidCompatible()` + | 14.8 | Boolean |
 | `diagnostics(probe)` + | 14.0f | one `pass|fail|unknown` line per check |
-| `pullBlocklist()`, `blockNumber(n)`, `unblockNumber(n)`, `canBlockNumbers()`, `isNumberBlocked(n)`, `pullBlockedCalls(limit)` + | facade 14.15 (`rovsti_android::blocklist`), Kotlin `Blocklist` 17.1 | envelope / Boolean |
-| `callRejectWithMessage(id, text)`, `callRejectAndCompose(id)`, `callSilenceRinger()` + | 18.1, 18.4 (`rovsti_android::calls::{reject_with_message, reject_and_compose, silence_ringer}`) | Int (0 stale, 1 sent, 2 opened, 3 rejected only) / Boolean |
-| `exportDocument(name, json)`, `importDocument()` + | facade 14.15 (`rovsti_android::documents`), Kotlin 21.x | Boolean; the answer is the `document_result` event |
-| `callSwap()`, `callMerge()`, `callSplit(id)`, `callAnswerHolding(id)`, `callAnswerEndingHeld(id)`, `callEndAll()` + | 15.2 | Boolean, never block; `rovsti_android::calls::{swap, merge, split, answer_holding, answer_ending_held, end_all}`. Results arrive only as the next snapshot (`pending` / `pending_failed`) |
-| `isKeyguardLocked()`, `requestDismissKeyguard()` + | 15.5 | Boolean; the answer to the second is the `keyguard_dismissed` event (`rovsti_android::window`) |
-| `settingsSync(json)`, `systemFacts()` + | facade 14.15 (`rovsti_android::settings`), Kotlin 17.x | Boolean / JSON string |
+| `pullBlocklist()`, `blockNumber(n)`, `unblockNumber(n)`, `canBlockNumbers()`, `isNumberBlocked(n)`, `pullBlockedCalls(limit)` + | facade 14.15 (`rosty_android::blocklist`), Kotlin `Blocklist` 17.1 | envelope / Boolean |
+| `callRejectWithMessage(id, text)`, `callRejectAndCompose(id)`, `callSilenceRinger()` + | 18.1, 18.4 (`rosty_android::calls::{reject_with_message, reject_and_compose, silence_ringer}`) | Int (0 stale, 1 sent, 2 opened, 3 rejected only) / Boolean |
+| `exportDocument(name, json)`, `importDocument()` + | facade 14.15 (`rosty_android::documents`), Kotlin 21.x | Boolean; the answer is the `document_result` event |
+| `callSwap()`, `callMerge()`, `callSplit(id)`, `callAnswerHolding(id)`, `callAnswerEndingHeld(id)`, `callEndAll()` + | 15.2 | Boolean, never block; `rosty_android::calls::{swap, merge, split, answer_holding, answer_ending_held, end_all}`. Results arrive only as the next snapshot (`pending` / `pending_failed`) |
+| `isKeyguardLocked()`, `requestDismissKeyguard()` + | 15.5 | Boolean; the answer to the second is the `keyguard_dismissed` event (`rosty_android::window`) |
+| `settingsSync(json)`, `systemFacts()` + | facade 14.15 (`rosty_android::settings`), Kotlin 17.x | Boolean / JSON string |
 
 ## 5. Bit constants (Rust `wire::caps|props|features`, Kotlin `WireJson.kt`)
 
@@ -157,7 +157,7 @@ fixture file.
 | `SettingsSync` | `wire::SettingsSync` | `settings_sync.json` | 17.x |
 | `VoicemailInfo`, `EmergencyList` | `wire::VoicemailInfo`, `EmergencyList` | `voicemail_info.json`, `emergency_list.json` | 20.x, 19.x |
 | events `document_result`, `ringtone_result`, `ui_request` | `wire::DocumentResult`, `RingtoneResult`, `UiRequest` | `document_result_*.json`, `ringtone_result.json`, `ui_request.json` | 21.x, 17.x, 16.x |
-| event kinds `blocked_changed`, `sims_changed`, `voicemail_changed` | `rovsti_android::events::kind` | none (no payload) | 18.x, 16.3, 20.x |
+| event kinds `blocked_changed`, `sims_changed`, `voicemail_changed` | `rosty_android::events::kind` | none (no payload) | 18.x, 16.3, 20.x |
 | `prefs.json` v1 and v2, backup file | `settings::PrefsV1`, `PrefsV2`, `BackupFile` | `tests/fixtures/prefs/*.json` | never (Rust-only, AD-30) |
 
 ## 7. Manifest facts (story 14.15, AD-34), asserted by `scripts/check-apk.sh`

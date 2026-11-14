@@ -15,23 +15,23 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_android::{Error as AndroidError, trip, trip::AlarmPick, xiaomi};
-use rovsti_geo::{
+use rosty_android::{Error as AndroidError, trip, trip::AlarmPick, xiaomi};
+use rosty_geo::{
     NoticePrefs, NoticeWhen, Outcome, Stats, StopsPrefs, TripRecord,
     alarm::MIN_ALARM_VOLUME_PCT,
     next_volume,
     notice::DEFAULT_TEMPLATE,
     tiles::{DEFAULT_TILE_URL, TileSource, TileUrlError},
 };
-use rovsti_tiles::TileError;
-use rovsti_ui::{
+use rosty_tiles::TileError;
+use rosty_ui::{
     Icon,
     components::{empty_state, glass_icon_button, glass_pill, large_title, list_row, section},
     field::field_box,
     haptics, theme,
     tokens::Theme,
 };
-use rovsti_wa_proto::ChatSummary;
+use rosty_wa_proto::ChatSummary;
 
 use crate::{
     Page, StopsApp, backend, lists,
@@ -137,7 +137,7 @@ const SEARCH_FROM: usize = 8;
 
 /// "under 1 min", "18 min", "1 h 05 min".
 pub fn duration_text(ms: u64) -> String {
-    rovsti_geo::history::format_duration(ms)
+    rosty_geo::history::format_duration(ms)
 }
 
 /// "850 m" under a kilometre, then "3.4 km", "152 km" from 100 km.
@@ -298,7 +298,7 @@ pub fn visible_chats(
     selected: Option<(&str, &str)>,
     cap: usize,
 ) -> Vec<ChatRow> {
-    let folded = rovsti_core::search::fold(query.trim());
+    let folded = rosty_core::search::fold(query.trim());
     if folded.is_empty() {
         let mut out: Vec<ChatRow> = rows.iter().take(cap).cloned().collect();
         if let Some((jid, name)) = selected
@@ -328,7 +328,7 @@ pub fn visible_chats(
     let digits: String = folded.chars().filter(char::is_ascii_digit).collect();
     rows.iter()
         .filter(|r| {
-            rovsti_core::search::fold(&r.title).contains(&folded)
+            rosty_core::search::fold(&r.title).contains(&folded)
                 || (!digits.is_empty()
                     && r.jid.split('@').next().is_some_and(|user| {
                         user.split(':').next().unwrap_or(user).contains(&digits)
@@ -377,7 +377,7 @@ pub fn reload_plan(list: &ChatList) -> (bool, bool) {
 
 /// The message as it would read for a four-minute ETA to "Kadikoy".
 pub fn notice_preview(template: &str) -> String {
-    rovsti_geo::notice::render(template, PREVIEW_STOP, Some(PREVIEW_ETA))
+    rosty_geo::notice::render(template, PREVIEW_STOP, Some(PREVIEW_ETA))
 }
 
 /// The line under the "Arriving-soon message" row.
@@ -438,8 +438,8 @@ pub fn tile_test_text(result: &Result<usize, TileError>) -> String {
 }
 
 /// Why the chat list did not load, for the user. The detail goes to the log.
-pub fn chats_error_text(error: &rovsti_wa_client::ClientError) -> &'static str {
-    use rovsti_wa_client::ClientError;
+pub fn chats_error_text(error: &rosty_wa_client::ClientError) -> &'static str {
+    use rosty_wa_client::ClientError;
     match error {
         ClientError::Unauthorized | ClientError::Key(_) => {
             "The gateway refused this phone's connect key. Link WhatsApp again."
@@ -818,7 +818,7 @@ impl StopsApp {
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.run_android(
                         "App settings",
-                        rovsti_android::permissions::open_app_details,
+                        rosty_android::permissions::open_app_details,
                         cx,
                     );
                 }))
@@ -928,7 +928,7 @@ impl StopsApp {
     pub(crate) fn run_android(
         &mut self,
         what: &'static str,
-        action: impl FnOnce() -> rovsti_android::Result<bool> + Send + 'static,
+        action: impl FnOnce() -> rosty_android::Result<bool> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
@@ -990,7 +990,7 @@ impl StopsApp {
         Page::List(Box::new(list(
             state,
             cx.processor(move |this, ix: usize, window, cx| {
-                let theme = rovsti_ui::current_theme(window);
+                let theme = rosty_ui::current_theme(window);
                 this.history_item(theme, ix, window, cx)
             }),
         )))
@@ -1102,7 +1102,7 @@ impl StopsApp {
                             })),
                     );
                 }
-                let share = rovsti_geo::history_io::share_text(r, self.tz_offset_s);
+                let share = rosty_geo::history_io::share_text(r, self.tz_offset_s);
                 let copy = share.clone();
                 pills = pills
                     .child(
@@ -1146,7 +1146,7 @@ impl StopsApp {
                     .flex_col()
                     .items_center()
                     .gap(px(12.0));
-                for days in rovsti_geo::PRUNE_CHOICES_DAYS {
+                for days in rosty_geo::PRUNE_CHOICES_DAYS {
                     let n = self.history.older_than(now, days);
                     if n == 0 {
                         continue;
@@ -1154,7 +1154,7 @@ impl StopsApp {
                     let label = if self.confirm_prune == Some(days) {
                         format!("Tap again to delete {n} {}", trip_noun(n))
                     } else {
-                        rovsti_geo::prune_label(n, days)
+                        rosty_geo::prune_label(n, days)
                     };
                     col = col.child(
                         glass_pill(theme, label)
@@ -1258,17 +1258,17 @@ impl StopsApp {
             (
                 "gpx",
                 "application/gpx+xml",
-                rovsti_geo::history_io::to_gpx(&records),
+                rosty_geo::history_io::to_gpx(&records),
             )
         } else {
             (
                 "csv",
                 "text/csv",
-                rovsti_geo::history_io::to_csv(&records, self.tz_offset_s),
+                rosty_geo::history_io::to_csv(&records, self.tz_offset_s),
             )
         };
         let stamp = crate::saved_ui::export_stamp(now_ms(), self.tz_offset_s);
-        let name = rovsti_geo::history_io::export_file_name(ext, &stamp);
+        let name = rosty_geo::history_io::export_file_name(ext, &stamp);
         self.pending_export = Some(crate::saved_ui::ExportKind::History);
         if let Err(words) = backend::export_text(&name, mime, &text) {
             self.pending_export = None;
@@ -1279,8 +1279,8 @@ impl StopsApp {
     /// "Start again": the same rule as starting a saved stop.
     pub(crate) fn start_again(
         &mut self,
-        a: &rovsti_geo::Endpoint,
-        b: &rovsti_geo::Endpoint,
+        a: &rosty_geo::Endpoint,
+        b: &rosty_geo::Endpoint,
         cx: &mut Context<Self>,
     ) {
         if self.trip.is_some() {
@@ -1301,7 +1301,7 @@ impl StopsApp {
         let (Some(a), Some(b)) = (r.a.clone(), r.b.clone()) else {
             return;
         };
-        let mut name = rovsti_geo::saved_stops::suggest_name(self.gtfs.as_deref(), &a, &b);
+        let mut name = rosty_geo::saved_stops::suggest_name(self.gtfs.as_deref(), &a, &b);
         if name.trim().is_empty() {
             name = r.label.clone();
         }
@@ -1315,7 +1315,7 @@ impl StopsApp {
                     cx,
                 );
             }
-            Err(rovsti_geo::SavedStopError::Duplicate(id)) => {
+            Err(rosty_geo::SavedStopError::Duplicate(id)) => {
                 let name = self
                     .saved
                     .get(id)
@@ -1396,7 +1396,7 @@ impl StopsApp {
     /// Undo on the pill: the trip returns to its place and is saved.
     pub(crate) fn restore_record(
         &mut self,
-        record: rovsti_geo::TripRecord,
+        record: rosty_geo::TripRecord,
         index: usize,
         cx: &mut Context<Self>,
     ) {
@@ -1416,7 +1416,7 @@ impl StopsApp {
     }
 
     /// Undo on the pill: the old trips come back and are saved again.
-    pub(crate) fn restore_history(&mut self, history: rovsti_geo::History, cx: &mut Context<Self>) {
+    pub(crate) fn restore_history(&mut self, history: rosty_geo::History, cx: &mut Context<Self>) {
         self.history = history.clone();
         self.history_open = None;
         if let Some(dir) = self.dir.clone() {
@@ -1468,7 +1468,7 @@ impl StopsApp {
         if chosen {
             // A refused template adds an error line under the field.
             let text = self.template_field.read(cx).text();
-            let refused = rovsti_geo::notice::validate(text).is_err();
+            let refused = rosty_geo::notice::validate(text).is_err();
             let custom = self
                 .prefs
                 .notice
@@ -1485,7 +1485,7 @@ impl StopsApp {
         Page::List(Box::new(list(
             state,
             cx.processor(move |this, ix: usize, window, cx| {
-                let theme = rovsti_ui::current_theme(window);
+                let theme = rosty_ui::current_theme(window);
                 match items.get(ix) {
                     Some(&item) => this.notice_item(theme, item, window, cx),
                     None => div().into_any_element(),
@@ -1601,7 +1601,7 @@ impl StopsApp {
                     .unwrap_or_default();
                 let custom = template != DEFAULT_TEMPLATE;
                 let text = self.template_field.read(cx).text().to_owned();
-                let check = rovsti_geo::notice::validate(&text);
+                let check = rosty_geo::notice::validate(&text);
                 let shown = if check.is_ok() { text } else { template };
                 let hint = match check {
                     Err(error) => {
@@ -1782,7 +1782,7 @@ impl StopsApp {
                     .child(
                         glass_pill(theme, "Paste")
                             .id("tiles-paste")
-                            .text_color(rovsti_ui::theme::colors(theme).accent)
+                            .text_color(rosty_ui::theme::colors(theme).accent)
                             .on_click(cx.listener(|this, _, _, cx| this.paste_tile_url(cx))),
                     ),
             )
@@ -1815,8 +1815,8 @@ impl StopsApp {
                 .background_executor()
                 .spawn(async move {
                     (
-                        rovsti_tiles::disk_usage(&root),
-                        rovsti_tiles::usage_by_source(&root),
+                        rosty_tiles::disk_usage(&root),
+                        rosty_tiles::usage_by_source(&root),
                     )
                 })
                 .await;
@@ -1889,7 +1889,7 @@ impl StopsApp {
         cx.spawn(async move |this, cx| {
             let freed = cx
                 .background_executor()
-                .spawn(async move { rovsti_tiles::clear_except(&root, &keep) })
+                .spawn(async move { rosty_tiles::clear_except(&root, &keep) })
                 .await;
             this.update(cx, |this, cx| {
                 match freed {
@@ -2086,7 +2086,7 @@ impl StopsApp {
                     title
                 };
                 let text = format!("Alarm sound: {title}");
-                (Some(rovsti_geo::prefs::AlarmSound { uri, title }), text)
+                (Some(rosty_geo::prefs::AlarmSound { uri, title }), text)
             }
         };
         let old = std::mem::replace(&mut self.prefs.alarm_sound, new);
@@ -2115,7 +2115,7 @@ impl StopsApp {
     }
 
     /// Undo of "Reset alarm settings": puts the earlier settings back.
-    pub(crate) fn restore_prefs(&mut self, prefs: rovsti_geo::StopsPrefs, cx: &mut Context<Self>) {
+    pub(crate) fn restore_prefs(&mut self, prefs: rosty_geo::StopsPrefs, cx: &mut Context<Self>) {
         self.prefs = prefs;
         self.save_prefs(cx);
         cx.notify();
@@ -2123,7 +2123,7 @@ impl StopsApp {
 
     pub(crate) fn restore_alarm_sound(
         &mut self,
-        old: Option<rovsti_geo::prefs::AlarmSound>,
+        old: Option<rosty_geo::prefs::AlarmSound>,
         cx: &mut Context<Self>,
     ) {
         self.prefs.alarm_sound = old;
@@ -2132,7 +2132,7 @@ impl StopsApp {
     }
 
     /// Undo of "turn off": brings the message setup back.
-    pub(crate) fn restore_notice(&mut self, old: rovsti_geo::NoticePrefs, cx: &mut Context<Self>) {
+    pub(crate) fn restore_notice(&mut self, old: rosty_geo::NoticePrefs, cx: &mut Context<Self>) {
         self.prefs.notice = Some(old);
         self.save_prefs(cx);
         self.sync_template_field(cx);
@@ -2200,7 +2200,7 @@ pub(crate) fn prune_pill(n: usize) -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rovsti_geo::Coord;
+    use rosty_geo::Coord;
 
     #[test]
     fn prune_taps_arm_then_confirm() {
@@ -2355,7 +2355,7 @@ mod tests {
 
     #[test]
     fn chat_errors_read_as_sentences() {
-        use rovsti_wa_client::ClientError;
+        use rosty_wa_client::ClientError;
         let raw = ClientError::Tls("handshake failure: alert 40".into());
         let text = chats_error_text(&raw);
         assert!(text.contains("could not be reached"));
@@ -2409,7 +2409,7 @@ mod tests {
 
     #[test]
     fn a_record_row_shows_both_points() {
-        let end = |label: &str, lon: f64| rovsti_geo::Endpoint {
+        let end = |label: &str, lon: f64| rosty_geo::Endpoint {
             label: label.into(),
             coord: Coord::new(41.0, lon),
         };

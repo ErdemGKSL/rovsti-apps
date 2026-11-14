@@ -25,19 +25,19 @@
 
     <!-- Rationale sheet: title and body per group -->
     <string name="permission_rationale_phone_title">Make calls from here</string>
-    <string name="permission_rationale_phone_body">Rovsti needs the phone permission to place calls and to know when a call starts or ends. Calls never leave your phone.</string>
+    <string name="permission_rationale_phone_body">Rosty needs the phone permission to place calls and to know when a call starts or ends. Calls never leave your phone.</string>
     <string name="permission_rationale_contacts_title">See your contacts</string>
-    <string name="permission_rationale_contacts_body">Contacts lets Rovsti show names and photos instead of numbers. Your contacts stay on this phone.</string>
+    <string name="permission_rationale_contacts_body">Contacts lets Rosty show names and photos instead of numbers. Your contacts stay on this phone.</string>
     <string name="permission_rationale_notifications_title">Stay in the loop</string>
     <string name="permission_rationale_notifications_body">Notifications tell you about missed calls and new messages. You can turn them off any time.</string>
     <string name="permission_rationale_call_log_title">Show your call history</string>
-    <string name="permission_rationale_call_log_body">Rovsti reads the call history on this phone to list recent calls. Nothing is uploaded.</string>
+    <string name="permission_rationale_call_log_body">Rosty reads the call history on this phone to list recent calls. Nothing is uploaded.</string>
     <string name="permission_rationale_bluetooth_title">Use Bluetooth audio</string>
-    <string name="permission_rationale_bluetooth_body">Bluetooth lets a call move to your headset or car. Rovsti only talks to devices you already paired.</string>
+    <string name="permission_rationale_bluetooth_body">Bluetooth lets a call move to your headset or car. Rosty only talks to devices you already paired.</string>
     <string name="permission_rationale_location_title">Find where you are</string>
     <string name="permission_rationale_location_body">Your location is used to show you on the map and to wake you before your stop. It is not shared.</string>
     <string name="permission_rationale_background_location_title">Keep watching your trip</string>
-    <string name="permission_rationale_background_location_body">To wake you before your stop while the screen is off, Rovsti needs location access all the time during a trip.</string>
+    <string name="permission_rationale_background_location_body">To wake you before your stop while the screen is off, Rosty needs location access all the time during a trip.</string>
     <string name="permission_rationale_microphone_title">Speak and send voice notes</string>
     <string name="permission_rationale_microphone_body">The microphone is used for WhatsApp calls and voice notes, only while you use them.</string>
 
@@ -51,7 +51,7 @@
     <string name="special_full_screen_on">Calls can take over the screen</string>
     <string name="special_full_screen_off">Calls show as a banner only</string>
     <string name="special_battery_on">Not restricted</string>
-    <string name="special_battery_off">Android may stop Rovsti in the background</string>
+    <string name="special_battery_off">Android may stop Rosty in the background</string>
     <string name="special_background_unknown">Allow autostart so calls and messages arrive</string>
     <!-- Common settings pages -->
     <string name="settings_appearance">Appearance</string>
@@ -91,7 +91,7 @@
     <string name="settings_licences_third_party_header">Built with</string>
     <string name="settings_licences_loading">Loading licences</string>
     <string name="settings_licences_app_desc">GPL-3.0-or-later</string>
-    <string name="settings_licences_app_body">Rovsti is free software: you can redistribute it and change it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the licence or (at your option) any later version.</string>
+    <string name="settings_licences_app_body">Rosty is free software: you can redistribute it and change it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the licence or (at your option) any later version.</string>
     <string name="settings_licences_text_header">Licence text</string>
     <plurals name="settings_licences_sources">
         <item quantity="one">%1$d source</item>
@@ -122,5 +122,5 @@
     <string name="dev_logs_no_match">No lines match</string>
     <string name="dev_logs_latest">Jump to latest</string>
     <string name="dev_logs_more">More</string>
-    <string name="dev_logs_header">Rovsti log of %1$s, exported %2$s. Numbers, keys and e-mail addresses are masked.</string>
+    <string name="dev_logs_header">Rosty log of %1$s, exported %2$s. Numbers, keys and e-mail addresses are masked.</string>
 </resources>

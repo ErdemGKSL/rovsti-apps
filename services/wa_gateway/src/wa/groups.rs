@@ -1,6 +1,6 @@
 //! Group metadata to gateway types. Pure.
 
-use rovsti_wa_proto::{GroupInfo, Participant};
+use rosty_wa_proto::{GroupInfo, Participant};
 
 use super::lid::{self, LidMap};
 use whatsapp_rust::prelude::*;

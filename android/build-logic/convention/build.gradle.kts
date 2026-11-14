@@ -2,7 +2,7 @@ plugins {
     `kotlin-dsl`
 }
 
-group = "dev.rovsti.buildlogic"
+group = "dev.rosty.buildlogic"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -25,23 +25,23 @@ dependencies {
 gradlePlugin {
     plugins {
         register("androidLibrary") {
-            id = "rovsti.android.library"
+            id = "rosty.android.library"
             implementationClass = "AndroidLibraryConventionPlugin"
         }
         register("androidApp") {
-            id = "rovsti.android.app"
+            id = "rosty.android.app"
             implementationClass = "AndroidAppConventionPlugin"
         }
         register("compose") {
-            id = "rovsti.compose"
+            id = "rosty.compose"
             implementationClass = "ComposeConventionPlugin"
         }
         register("cargo") {
-            id = "rovsti.cargo"
+            id = "rosty.cargo"
             implementationClass = "CargoConventionPlugin"
         }
         register("screenshots") {
-            id = "rovsti.screenshots"
+            id = "rosty.screenshots"
             implementationClass = "ScreenshotsConventionPlugin"
         }
     }

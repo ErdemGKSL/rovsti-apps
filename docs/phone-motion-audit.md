@@ -1,4 +1,4 @@
-# Rovsti Phone: motion audit (story 11.10)
+# Rosty Phone: motion audit (story 11.10)
 
 Reduced motion = Android animation scale 0 (`Window::prefers_reduced_motion`). `Motion::frame`
 settles every spring inside one frame, so spring-driven moments become instant; time-based ones
@@ -33,10 +33,10 @@ use the 120 ms real-time `Fade`. Verified: CARGO (unit tests) and desktop previe
 * **S14** has no "card" in this app: the header shield morphs to the check shield, the check pops
   0.6 to 1.0 and the page wash gains 0.10 alpha for 600 ms. It never fires before Android's
   permission and prefs answers are in, so a launch cannot replay it.
-* **Slow frames** (AD-21): `rovsti_ui::perf::SlowFrames` sits in `Motion`. Two consecutive frames
+* **Slow frames** (AD-21): `rosty_ui::perf::SlowFrames` sits in `Motion`. Two consecutive frames
   over twice the budget (shortest frame seen, capped at 60 Hz) log one line per streak (at most
-  one a second) with the scenario name, through Kotlin to logcat tag `RovstiPerf`
-  (`adb logcat -s RovstiPerf`). Nothing is degraded or removed.
+  one a second) with the scenario name, through Kotlin to logcat tag `RostyPerf`
+  (`adb logcat -s RostyPerf`). Nothing is degraded or removed.
 * **Aura and the proximity screen-off**: the Kotlin `ProximityController` only holds the wake
   lock; the sensor state does not reach Rust, and with the display off Android delivers no
   frames. The aura and ring loops also stop whenever the window is inactive. No signal was wired.

@@ -11,8 +11,8 @@
 //!    the Spam and contact actions
 //! 3. Block (SMS number senders only) and the destructive Delete conversation
 
-use rovsti_core::mute::MuteFor;
-use rovsti_ui::menu::model::{MenuGroup, MenuItem, MenuModel};
+use rosty_core::mute::MuteFor;
+use rosty_ui::menu::model::{MenuGroup, MenuItem, MenuModel};
 
 use crate::sms_actions::{self, SmsAction, SmsActionContext};
 
@@ -319,7 +319,7 @@ mod tests {
         );
         assert_eq!(m.group_sizes(), vec![1, 4, 2]);
         let delete = item(&m, "delete");
-        assert_eq!(delete.role, rovsti_ui::menu::model::MenuRole::Destructive);
+        assert_eq!(delete.role, rosty_ui::menu::model::MenuRole::Destructive);
         // The destructive item is the very last one.
         assert_eq!(keys(&m).last(), Some(&"delete"));
     }

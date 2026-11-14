@@ -1,12 +1,12 @@
-//! Rovsti Stops: set a destination, fall asleep on the bus, get woken up
+//! Rosty Stops: set a destination, fall asleep on the bus, get woken up
 //! before your stop. Works offline: GPS fixes are compared on-device by
-//! `rovsti_geo`, no map server or account involved.
+//! `rosty_geo`, no map server or account involved.
 //!
 //! * `backend`: files, permission checks, starting and stopping the trip.
 //! * `trip_ui`: the Trip tab, the live card and the alarm screen.
 //! * `pick`: the pure picking state machine (A, B, pins, drag, hint, labels).
 //! * `map`: the map surface and its gestures; your position arrives as a `stops_location`
-//!   event from `rovsti_android::location` (a seam, no tracking).
+//!   event from `rosty_android::location` (a seam, no tracking).
 //! * `picker`: the destination sheet and the shared-location confirmation.
 //! * `saved_ui`: the Saved tab.
 //! * `settings_ui`: the Settings list, History, and the arriving-soon message page.
@@ -20,14 +20,14 @@ use gpui::{
     ParentElement, Render, SharedString, Styled, Subscription, Task, Window, WindowBounds,
     WindowOptions, div, prelude::*, px, size,
 };
-use rovsti_android::{
+use rosty_android::{
     events::{self, RawEvent, kind},
     location::{self, LocationFix, parse_location_fix},
     trip::{AlarmAction, parse_trip_alarm},
 };
-use rovsti_core::wire::{DocumentOp, DocumentResult};
-use rovsti_geo::{ActiveTrip, Coord, Feed, History, SavedStop, SavedStops, StopsPrefs};
-use rovsti_ui::{
+use rosty_core::wire::{DocumentOp, DocumentResult};
+use rosty_geo::{ActiveTrip, Coord, Feed, History, SavedStop, SavedStops, StopsPrefs};
+use rosty_ui::{
     Icon, IconAssets,
     components::large_title,
     current_theme,
@@ -40,7 +40,7 @@ use rovsti_ui::{
     tab_bar::{Tab, TabBar},
     tokens::{Theme, metrics},
 };
-use rovsti_wa_ui::{AppId, WhatsAppSettings};
+use rosty_wa_ui::{AppId, WhatsAppSettings};
 
 mod backend;
 mod headless;
@@ -89,20 +89,20 @@ pub(crate) enum PillAction {
     /// The stops, trips and settings from before a backup restore.
     UndoRestore(Box<(SavedStops, History, StopsPrefs)>),
     RestoreHistory(History),
-    RestoreRecord(rovsti_geo::TripRecord, usize),
+    RestoreRecord(rosty_geo::TripRecord, usize),
     RestoreEnds(picker::Ends),
     RestartTrip(Destination, Destination),
     RestoreTileUrl(Option<String>),
-    RestoreNotice(rovsti_geo::NoticePrefs),
+    RestoreNotice(rosty_geo::NoticePrefs),
     /// The saved stops as they were before an import.
     RestoreSaved(SavedStops),
-    RestoreAlarmSound(Option<rovsti_geo::prefs::AlarmSound>),
+    RestoreAlarmSound(Option<rosty_geo::prefs::AlarmSound>),
     /// The settings as they were before "Reset alarm settings".
     RestorePrefs(Box<StopsPrefs>),
     /// Takes back "Save as stop": the saved stop with this id.
     UndoSave(u64),
     /// Puts a saved stop's map colour back.
-    RestoreColour(u64, rovsti_geo::StopColour),
+    RestoreColour(u64, rosty_geo::StopColour),
     /// Takes a dismissed alarm back: the same trip again.
     Rearm(Destination, Destination),
 }
@@ -176,7 +176,7 @@ pub(crate) struct StopsApp {
     pub(crate) sort_anchor: AnchorSlot,
     /// The Saved tab's search text and order (not persisted).
     pub(crate) saved_query: String,
-    pub(crate) saved_sort: rovsti_geo::saved_stops::SavedSort,
+    pub(crate) saved_sort: rosty_geo::saved_stops::SavedSort,
     pub(crate) saved_field: Entity<TextField>,
     /// The ids the Saved tab shows now, in order.
     pub(crate) saved_visible: Vec<u64>,
@@ -219,7 +219,7 @@ pub(crate) struct StopsApp {
     pub(crate) history_query: String,
     pub(crate) history_field: Entity<TextField>,
     /// Which outcomes History lists; not persisted.
-    pub(crate) history_filter: rovsti_geo::OutcomeFilter,
+    pub(crate) history_filter: rosty_geo::OutcomeFilter,
     /// The record indices History shows now (`History::matching`).
     pub(crate) history_view: Vec<usize>,
     /// The export whose save dialog is open, so its answer is worded right.
@@ -313,7 +313,7 @@ impl StopsApp {
         .detach();
         cx.background_executor()
             .spawn(async {
-                let _ = rovsti_android::window::ui_attached(true);
+                let _ = rosty_android::window::ui_attached(true);
             })
             .detach();
 
@@ -331,7 +331,7 @@ impl StopsApp {
         })
         .detach();
 
-        let data_dir = rovsti_ui::storage::data_dir("stops", cx);
+        let data_dir = rosty_ui::storage::data_dir("stops", cx);
         cx.spawn(async move |this, cx| {
             let dir = match data_dir.await {
                 Ok(dir) => dir,
@@ -414,7 +414,7 @@ impl StopsApp {
             sort_menu_ui: MenuState::new(),
             sort_anchor: AnchorSlot::new(),
             saved_query: String::new(),
-            saved_sort: rovsti_geo::saved_stops::SavedSort::default(),
+            saved_sort: rosty_geo::saved_stops::SavedSort::default(),
             saved_field,
             saved_visible: Vec::new(),
             saved_list: lists::KeyedList::default(),
@@ -438,7 +438,7 @@ impl StopsApp {
             last_trip_hidden: None,
             history_query: String::new(),
             history_field,
-            history_filter: rovsti_geo::OutcomeFilter::All,
+            history_filter: rosty_geo::OutcomeFilter::All,
             history_view: Vec::new(),
             pending_export: None,
             pending_import: None,
@@ -463,11 +463,11 @@ impl StopsApp {
         cx.spawn(async move |this, cx| {
             let info = cx
                 .background_executor()
-                .spawn(async { rovsti_android::providers::local_time_info() })
+                .spawn(async { rosty_android::providers::local_time_info() })
                 .await;
             let locale = match info {
-                Ok(text) => rovsti_core::recents::LocaleTime::parse(&text),
-                Err(rovsti_android::Error::Unsupported) => None,
+                Ok(text) => rosty_core::recents::LocaleTime::parse(&text),
+                Err(rosty_android::Error::Unsupported) => None,
                 Err(error) => {
                     log::warn!("could not read the time zone: {error}");
                     None
@@ -516,7 +516,7 @@ impl StopsApp {
         cx.notify();
     }
 
-    /// `ROVSTI_STOPS_SIMULATE=1` on desktop: a synthetic fix every second,
+    /// `ROSTY_STOPS_SIMULATE=1` on desktop: a synthetic fix every second,
     /// through the same handler the Android service calls.
     fn start_simulation(&mut self, cx: &mut Context<Self>) {
         if !backend::simulate_requested() {
@@ -599,7 +599,7 @@ impl StopsApp {
                 Some(fix) => self.apply_fix(fix, false, cx),
                 None => log::warn!("unreadable stops_location event"),
             },
-            kind::OPEN_STOP => match rovsti_android::events::parse_open_stop(&event.json) {
+            kind::OPEN_STOP => match rosty_android::events::parse_open_stop(&event.json) {
                 Some(id) => self.on_open_stop(id, cx),
                 None => log::warn!("unreadable open_stop event"),
             },
@@ -810,11 +810,11 @@ impl StopsApp {
         if self.sheet.is_open() {
             let top = f32::from((insets.safe_area.top - insets.consumed.top).max(px(0.0)));
             let height = f32::from(window.viewport_size().height);
-            (height - top - 8.0 - rovsti_ui::notice_pill::HEIGHT).max(keyboard + GAP)
+            (height - top - 8.0 - rosty_ui::notice_pill::HEIGHT).max(keyboard + GAP)
         } else if keyboard > 0.0 {
             keyboard + GAP
         } else {
-            rovsti_ui::layout::geom::tab_bar_bottom(rovsti_ui::layout::safe_area(window).bottom)
+            rosty_ui::layout::geom::tab_bar_bottom(rosty_ui::layout::safe_area(window).bottom)
                 + f32::from(metrics::TAB_BAR_HEIGHT)
                 + GAP
         }
@@ -913,14 +913,14 @@ impl Render for StopsApp {
                     cx.notify();
                 }),
             )
-            .child(rovsti_ui::components::backdrop(
+            .child(rosty_ui::components::backdrop(
                 theme,
-                rovsti_ui::theme::colors(theme).orange,
+                rosty_ui::theme::colors(theme).orange,
             ))
             .child(page)
             .child(self.tabs.render(
                 theme,
-                rovsti_ui::layout::safe_area(window).bottom,
+                rosty_ui::layout::safe_area(window).bottom,
                 move |index, _, cx| {
                     entity.update(cx, |this, cx| {
                         this.tabs.press();
@@ -960,12 +960,12 @@ impl Render for StopsApp {
 }
 
 // Exports the headless JNI entry the trip service and alarm call (no UI process needed).
-rovsti_android::headless_entry!(headless::handle);
+rosty_android::headless_entry!(headless::handle);
 
 #[gpui_platform::main]
 fn main() {
     // Keeps the JNI entry points in the final library (see `bridge::keep_symbols`).
-    rovsti_android::bridge::keep_symbols();
+    rosty_android::bridge::keep_symbols();
     // Links opened with Stops and text shared to it, as raw strings; the
     // window turns them into a confirmation or a notice.
     let (share_tx, share_rx) = mpsc::unbounded::<String>();
@@ -1004,7 +1004,7 @@ fn main() {
                 app
             },
         )
-        .expect("failed to open the Rovsti Stops window");
+        .expect("failed to open the Rosty Stops window");
         cx.activate(true);
     });
 }
@@ -1031,7 +1031,7 @@ fn open_stop_outcome(saved: &SavedStops, id: u64, trip_running: bool) -> OpenSto
 #[allow(clippy::unwrap_used)]
 mod open_stop_tests {
     use super::*;
-    use rovsti_geo::{Coord, Endpoint};
+    use rosty_geo::{Coord, Endpoint};
 
     fn saved_with_one() -> (SavedStops, u64) {
         let mut saved = SavedStops::default();

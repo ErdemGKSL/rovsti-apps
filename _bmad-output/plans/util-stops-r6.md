@@ -1,4 +1,4 @@
-# util-stops: everyday utilities for Rovsti Stops (round 6)
+# util-stops: everyday utilities for Rosty Stops (round 6)
 
 baseSha: fda322eff78818bd3794e2ae2730da3285fe3a87
 
@@ -12,7 +12,7 @@ baseSha: fda322eff78818bd3794e2ae2730da3285fe3a87
     built in `map.rs` ~2035 from `SavedStop::center`, painted in `scene_paths` with `pal.saved =
     c.orange`, cache key `saved_key`). Missing: a way to hide them, and a tap on a ring does nothing
     special (`map_tap` drops a pin there). `Viewport::nearest_on_screen(&[Coord], at, max_px)`
-    already exists in `rovsti_geo::view`.
+    already exists in `rosty_geo::view`.
   - S35 (colour tag): `SavedStop` has `favourite` (serde default, skipped when false) but no colour.
     `places_io::Incoming` carries `favourite`; backup embeds `SavedStops` as is. Theme tokens
     available (`liquid_glass_kit::tokens::Colors`): `accent`, `red`, `green`, `orange` only, so the
@@ -45,22 +45,22 @@ baseSha: fda322eff78818bd3794e2ae2730da3285fe3a87
 
 ## Round 6 plan
 
-Steps 1-2 pure (unit-tested, `crates/rovsti_geo`), steps 3-6 thin GPUI, step 7 docs. No new Android
+Steps 1-2 pure (unit-tested, `crates/rosty_geo`), steps 3-6 thin GPUI, step 7 docs. No new Android
 seam is needed (share / clipboard / maps go through the existing `backend` helpers). Every step
 leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo
-check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo
+check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target
 aarch64-linux-android`.
 
 ### Step 1. Pure: arrival clock and map view links (S41, S42)
-- `crates/rovsti_geo/src/session.rs`:
+- `crates/rosty_geo/src/session.rs`:
   - `pub fn arrival_clock(now_ms: i64, eta_min: u32, tz_offset_s: i32) -> String`: local "HH:MM"
     of `now_ms + eta_min.max(1) * 60_000` (24 h, zero padded, `div_euclid`/`rem_euclid` like
     `history_io::date_time`).
   - `status_share_text` gains a last param `arrive: Option<&str>`; when Some and `eta_min` is
     Some the ETA part reads `"about 4 min (around 18:42)"`. Update the 4 existing tests and the one
     caller (`apps/stops/src/trip_ui.rs::status_text`, pass `None` in this step).
-- `crates/rovsti_geo/src/coord_format.rs`:
+- `crates/rosty_geo/src/coord_format.rs`:
   - `pub fn osm_view_url(center: Coord, zoom: f64) -> String`:
     `https://www.openstreetmap.org/#map={z}/{lat:.5}/{lon:.5}` with `z = zoom.round()` clamped to
     0..=19.
@@ -73,7 +73,7 @@ aarch64-linux-android`.
   `map_view_share_text` exact string.
 
 ### Step 2. Pure: stop colour tag and map-ring preference (S35, S40)
-- `crates/rovsti_geo/src/saved_stops.rs`:
+- `crates/rosty_geo/src/saved_stops.rs`:
   - `#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
     #[serde(rename_all = "lowercase")] pub enum StopColour { #[default] Orange, Red, Green, Blue }`
     with `pub const ALL: [StopColour; 4]`, `pub fn label(self) -> &'static str` ("Orange" ...),
@@ -86,10 +86,10 @@ aarch64-linux-android`.
     StopColour) -> bool` (for Undo).
   - `saved_key` (in `apps/stops/src/map.rs`) must also hash `colour` so the ring layer rebuilds:
     do it in this step and extend `saved_key_changes_with_the_stops_and_either_end`.
-- `crates/rovsti_geo/src/places_io.rs`: `Incoming` gains `colour: StopColour`; JSON export writes
+- `crates/rosty_geo/src/places_io.rs`: `Incoming` gains `colour: StopColour`; JSON export writes
   it (only when not default), JSON import reads it (missing -> Orange), GPX -> Orange; the merge
   applies it via `set_colour` next to the favourite.
-- `crates/rovsti_geo/src/prefs.rs`: `StopsPrefs` gains `pub show_saved_on_map: bool` (Default
+- `crates/rosty_geo/src/prefs.rs`: `StopsPrefs` gains `pub show_saved_on_map: bool` (Default
   true; the container `#[serde(default)]` covers old files). Not part of the alarm reset.
 - Tests: serde round trip with colour Red, legacy JSON without `colour` -> Orange and re-serialises
   without the key; `next` cycles through all four back to Orange; `cycle_colour` unknown id;
@@ -116,7 +116,7 @@ aarch64-linux-android`.
   - "Copy centre as" (`id "map-copy-centre"`): `self.open_copy_as("Map centre".into(), centre,
     cx)` (sheet switches to CopyAs).
   - centre = `self.map.viewport.center`, zoom = `tiles::slippy::display_zoom(&self.map.viewport)`
-    (re-exported as `rovsti_geo::tiles::display_zoom`).
+    (re-exported as `rosty_geo::tiles::display_zoom`).
   - Also in this section: toggle row "Saved stops on map" (`id "map-saved-toggle"`) bound to
     `prefs.show_saved_on_map`: flips, `save_prefs`, `forget_scene` / `cx.notify`, pill "Saved
     stops shown" / "Saved stops hidden" (pure `saved_toggle_pill(bool) -> &'static str`, tested).

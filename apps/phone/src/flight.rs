@@ -14,7 +14,7 @@ use gpui::{
     AnyElement, Bounds, Hsla, IntoElement, ObjectFit, ParentElement, Pixels, RenderImage,
     SharedString, Styled, StyledImage, Window, div, linear_color_stop, linear_gradient, px, svg,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     moments::Glide,
     motion_tokens,

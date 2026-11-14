@@ -7,7 +7,7 @@ goldens. It puts the owner fix (a) first as **Step 1 (F16)**, keeps the uncommit
 leaves Steps 3-8 as they were (copied unchanged below). Epic: **E5 Phone**, round R1. E1-E4 are done; E5.8 stays moved
 to R2 (scope change of revision 1).
 
-Owner decisions still in force: Rovsti is GPL-3.0-or-later (E1.23, `542e271`: `LICENSE`, root `Cargo.toml`, `CLAUDE.md`
+Owner decisions still in force: Rosty is GPL-3.0-or-later (E1.23, `542e271`: `LICENSE`, root `Cargo.toml`, `CLAUDE.md`
 GPL line, `android/THIRD_PARTY_NOTICES.md`). The glass bug is closed by the Convx backdrop port (E1.24-E1.26,
 `GlassRealPathTest`). Where a Convx file fits, port it close to verbatim with the original header plus `Ported from
 Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`; glisse-derived code keeps the glisse MIT
@@ -19,13 +19,13 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
 - **Uncommitted work (interrupted revision-1 Step 2), inspected and kept:**
   - `R  platform/src/test/.../telephony/FakeCalls.kt -> platform/src/testFixtures/...` (staged rename, as planned) and
     `platform/build.gradle.kts` `testFixturesImplementation(libs.robolectric)` (FakeCalls needs it).
-  - `phone/src/main/kotlin/dev/rovsti/phone/data/`: `PhoneStore` (187 lines: `load`, `updatePrefs`, `updateNotes`,
+  - `phone/src/main/kotlin/dev/rosty/phone/data/`: `PhoneStore` (187 lines: `load`, `updatePrefs`, `updateNotes`,
     `flush`, debounced `schedule`, `Mutex` `disk`, `prefsLoad/Save` + `notesLoad/Save` on IO), `RecentsRepository`
     (`recentsGroup` -> `mergeExtras` -> `recentsBuild` -> `refreshDelta` -> `missedExtras`, `extraCalls(WaCalls)`),
     `PeopleIndex` (`SearchOps` handle, `t9`, `matchNumber`, `displayName`, `idsForNumbers`, `rankByCalls`), `SimState`
     (`simBuild`/`simDot`), `BlockRepo` (`blockCheck`/`blockLines`, `BlockUndo`), `SpeedDial`
     (`speedDialOnHold`/`Assign`), `CallPlacer` + `CallLauncher`/`AndroidCallLauncher`, `DeviceLocaleTime`.
-  - `phone/src/test/kotlin/dev/rovsti/phone/data/`: `PhoneStoreTest`, `RecentsRepositoryTest`, `PeopleIndexTest`,
+  - `phone/src/test/kotlin/dev/rosty/phone/data/`: `PhoneStoreTest`, `RecentsRepositoryTest`, `PeopleIndexTest`,
     `SimStateTest`, `CallPlacerTest`, `SpeedDialTest`, `BlockRepoTest`, `DataRig`.
   - `PhoneContainer.kt` wires them lazily (`store`, `recents`, `people`, `simState`, `block`, `speedDial`, `placer`,
     `clock` seam). No TODO/FIXME. Whether it compiles and its tests pass is **not known** (not run by this planner):
@@ -45,7 +45,7 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
     Correct.
 - **F16 root cause (two parts):**
   1. `chromeFor` gives every pushed settings page `TabBarMode.Folded`
-     (`contacts/.../ContactsRoute.kt:179-199`, `phone/.../PhoneRoute.kt:112-119`), and `RovstiNavHost.kt:161` draws
+     (`contacts/.../ContactsRoute.kt:179-199`, `phone/.../PhoneRoute.kt:112-119`), and `RostyNavHost.kt:161` draws
      Folded as the selected tab's circle. Convx keeps its full floating bar on pushed routes
      (`ref/Convx/app/src/main/kotlin/com/convx/music/AppRootContent.kt:1172-1180`: album/artist routes keep
      `AppFloatingNavBar`); folding is Convx's scroll-minimise / Stops-map behaviour
@@ -62,25 +62,25 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
 
 1. **Disk first, every step.** `df -h .` before any build. Below 8 GB: `rm -rf target/debug/incremental
    target/aarch64-linux-android/debug/incremental android/*/build`. Below 7 GB: also `cargo clean -p` for the deprecated
-   GPUI crates (`rovsti_phone rovsti_messages rovsti_stops rovsti_contacts rovsti_ui rovsti_wa_ui liquid_glass_kit`),
+   GPUI crates (`rosty_phone rosty_messages rosty_stops rosty_contacts rosty_ui rosty_wa_ui liquid_glass_kit`),
    `rm -rf ~/.gradle/caches/build-cache-1` and Gradle versions under `~/.gradle/caches/` other than the wrapper's
    (9.9.0). Never build below 6 GB. Step 1 runs the 7 GB level now (4.2 GB free). `:phone` adds an APK build dir:
    clean `android/contacts/build android/catalog/build` when they are not needed for the step.
-2. **Domain logic in Rust.** Every decision the GPUI app made through `rovsti_core`/`rovsti_app_core` goes through
-   the matching op (State found). Kotlin only orders effects. A missing decision becomes a new `rovsti_ffi` op with
+2. **Domain logic in Rust.** Every decision the GPUI app made through `rosty_core`/`rosty_app_core` goes through
+   the matching op (State found). Kotlin only orders effects. A missing decision becomes a new `rosty_ffi` op with
    fixtures and `scripts/check-ffi-exports.sh`, never a Kotlin rewrite.
 3. **Screens** (ARCH 5.2): ViewModel with one `@Immutable UiState` (`ImmutableList` fields), `onAction(sealed)`,
    `stateIn(WhileSubscribed(5_000))`, one-shot `Effect`s through a `Channel`. Composables never map/sort/filter. Only
    `:design`/`:shell` components (`ScreenLazyPage`, `LargeTitleScaffold`, `SearchField`, `GlassTextField`, `ListRow`,
    `InsetGroupedSection`, `Avatar`, `SourceGlyph`, `SwipeRow`/`IosSwipeActions`, `ContextMenuEntry`/`PreviewCardEntry`,
    `ButtonMenuEntry`/`IosMenu`, `Popover`, `SheetEntry`/`IosSheet`, `Alert`/`ActionSheet`, `Toast`/undo pill,
-   `ChipRow`, `EmptyState`, `SegmentedControl`, `IosToggle`, `GlassCircleButton`, `SelectCheck`, `rovstiSharedBounds`).
+   `ChipRow`, `EmptyState`, `SegmentedControl`, `IosToggle`, `GlassCircleButton`, `SelectCheck`, `rostySharedBounds`).
    Every list gets `LocalContentInsets` bottom padding, `key` + `contentType` on every item.
 4. **Owner complaints are acceptance criteria** (ARCH 1): one 40 dp avatar per row; WhatsApp shown once per row as the
    14 dp `SourceGlyph` (never a pill); filter chips are ONE non-wrapping `LazyRow` with counts as secondary labels; 16 dp
    gutter; the last row ends above the floating tab bar; every long-press opens a host context menu that floats and
    never pushes content; the number field has caret, selection and the paste menu; nothing flows into content on tap.
-5. **Motion** (SKILL refs): push/pop and predictive back via `RovstiNavHost` (`shell-usage.md`); context menus
+5. **Motion** (SKILL refs): push/pop and predictive back via `RostyNavHost` (`shell-usage.md`); context menus
    `overlays.md` 3 (`menuLift` 0.80/420, `previewReturn` 0.75/500); button menus `overlays.md` 4.3 press-slide-release;
    sheets `overlays.md` 5 (`sheetSettle` 0.86/380, dismiss +12 % H or velocity, page pushback 5.3); swipe rows
    `motion.md` 5.3 (76 dp/action); keypad digits `motion.md` 7 glass press (glisse port in `press/GlassPress.kt`) with a
@@ -94,7 +94,7 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
    with Read and judged** (overlaps, clipped text, last row above the bar, 16 dp gutters, menus floating, one glyph per
    row); what was seen goes in the commit message and the epics Evidence line.
 7. **Check per step:** `bash scripts/kotlin-ui-check.sh` prints `ALL GREEN`; Rust changes also run
-   `cargo test -p rovsti_app_core -p rovsti_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in Step 8.
+   `cargo test -p rosty_app_core -p rosty_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in Step 8.
    `references/checklist.md` B-H for every new screen in its commit message (and `docs/kotlin-ui/checklist-e5.md` in Step 8).
 8. **Commits:** one per step, `Kotlin UI (E5 Phone, round R1 (E5.1-E5.7a)): <step title>`, ending with the session
    attribution lines. Never push to `main`.
@@ -104,7 +104,7 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
 
 ### Step 1. F16: every pushed page gets the glass back button and keeps the full tab bar (owner fix (a); Contacts + Phone)
 
-- `:design` `transition/RovstiNavHost.kt` + `TabNavigator.kt`: new `@Immutable data class PageBack(val onBack: () ->
+- `:design` `transition/RostyNavHost.kt` + `TabNavigator.kt`: new `@Immutable data class PageBack(val onBack: () ->
   Unit, val onLongClick: () -> Unit)` and `val LocalPageBack = compositionLocalOf<PageBack?> { null }` in
   `transition/PageBack.kt`. The host provides it around every entry whose `StackKey.depth > 0` (`onBack =
   navigator.pop()`, `onLongClick = navigator.select(navigator.currentTab)`, the same pair the apps build today) and
@@ -120,7 +120,7 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
   `Visible` (Convx `AppRootContent.kt:1172-1180`) or `Hidden` (full-screen pages). `contacts/.../ContactsRoute.kt`
   lines 179-199 and `phone/.../PhoneRoute.kt` lines 112-119: every `TabBarMode.Folded` -> `TabBarMode.Visible` (keep
   the large titles). Contacts select mode (`chromeFor(route, selecting)`) keeps Folded: it is a root.
-  `RovstiNavHost`: in debug builds `check(spec.tabBar != Folded || depth == 0)` with a message naming the route.
+  `RostyNavHost`: in debug builds `check(spec.tabBar != Folded || depth == 0)` with a message naming the route.
 - Pushed pages leave room for the full bar: they already read `LocalContentInsets.bottom`; verify the last row of
   `e4.15-settings-end` / `e5.1-diagnostics` ends above the bar after the change (Visible bar is taller than the circle).
 - Remove the now-redundant `onBack = pop, onBackLongClick = popToRoot` plumbing only where it is pure duplication
@@ -130,7 +130,7 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
     it; clicking pops; long press selects the tab root; explicit `onBack` wins; `showBack = false` hides it.
   - `ContactsRoutesTest` / `PhoneRoutesTest`: new invariant "no route other than a tab root maps to Folded" over every
     route object (sealed subclasses, sample args for data classes), plus the select-mode case.
-  - `PushedPagesBackTest` in `:contacts` and in `:phone` (Robolectric, real `RovstiShell` through the existing
+  - `PushedPagesBackTest` in `:contacts` and in `:phone` (Robolectric, real `RostyShell` through the existing
     `HostedSettings`/`HostedPhone` hosts): for every pushed settings route (Contacts: WhatsAppSettings, NameFormat,
     SortBy, SaveTo, Summary, ReminderTime, Appearance, Haptics, About, Licences, LicenceDetail; Phone: Settings,
     Diagnostics, WhatsAppSettings, Appearance, Haptics, About, Licences, LicenceDetail) assert one `back-button` node and
@@ -150,7 +150,7 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
 ### Step 2. Data layer: finish and verify the uncommitted work (no new screen)
 
 - Start from the tree as found (State found): keep every file; do not rewrite what works. Compile first:
-  `cd android && ./gradlew :platform:compileDebugUnitTestKotlin :phone:testPlainDebugUnitTest --tests 'dev.rovsti.phone.data.*'`;
+  `cd android && ./gradlew :platform:compileDebugUnitTestKotlin :phone:testPlainDebugUnitTest --tests 'dev.rosty.phone.data.*'`;
   fix what fails. `:platform` tests that used `FakeCalls` from `src/test` must still pass from `testFixtures`
   (`./gradlew :platform:testDebugUnitTest`).
 - Gaps against revision-1 Step 2 to close: `RecentsRepository` refresh coalesced with the existing `RebuildCoalescer`
@@ -256,11 +256,11 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
 ### Step 7. Incoming call (E5.6) and the call aura
 
 - Aura: port Convx `ArtworkMeshBackground.kt` + `AnimatedChromeMesh.kt` to `:design` `media/CallAura.kt` (Convx header +
-  "Ported from Convx ..." line), adapted: colours from the contact avatar (`rovsti_core::avatar` colour through
+  "Ported from Convx ..." line), adapted: colours from the contact avatar (`rosty_core::avatar` colour through
   `ContactsOps.avatar` or the existing `Avatar` palette) or the photo; runs only per ARCH 10 rule 5 (`MotionGate`,
   lifecycle RESUMED, <= 30 fps), static gradient otherwise.
 - `IncomingScreen(source: CallSource)` from `CallRegistry.snapshot()` (`IncomingCall`): full screen, aura, avatar
-  (`rovstiSharedBounds("call-avatar")` for the S3 flight into In-call), name/number/label, SIM chip, Answer / Decline
+  (`rostySharedBounds("call-avatar")` for the S3 flight into In-call), name/number/label, SIM chip, Answer / Decline
   circles (GlassCircleButton, green/red), secondary row: Message (decline with message -> `replyChoices` sheet ->
   `rejectWithMessage`; "Custom..." opens `rejectAndCompose`), Remind me (`CallReminders`), Silence on volume key
   (`silenceRinger`). Waiting-call card (`apps/phone/src/waiting_card.rs`) over In-call: "End & Answer"
@@ -288,7 +288,7 @@ header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
 - Close: motion audit and `references/checklist.md` A-H for every R1 screen in `docs/kotlin-ui/checklist-e5.md`;
   contact sheet `docs/kotlin-ui/screenshots/phone.png` (`:phone:contactSheet`, opened and judged). Full gate:
   `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace`,
-  `cargo check -p rovsti_android --target aarch64-linux-android`, `bash scripts/kotlin-ui-check.sh`. Build the
+  `cargo check -p rosty_android --target aarch64-linux-android`, `bash scripts/kotlin-ui-check.sh`. Build the
   plain debug APK of `:phone` (`android/phone/build/outputs/apk/plain/debug/phone-plain-debug.apk`) and rebuild
   `android/catalog/build/outputs/apk/debug/catalog-debug.apk`; state both paths. Update epics.md: E5.1-E5.7a `done`
   with Evidence lines; next planner = E5 R2.
@@ -308,7 +308,7 @@ Test classes that must exist: `PhoneManifestTest`, `PhoneRoutesTest`, `PhoneMigr
 `IncomingViewModelTest`, `IncomingScreenTest`, `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`.
 Goldens: every `e5.1-*`..`e5.7-*` name above in `android/phone/screenshots/`, light and dark. Files:
 `android/phone/src/main/AndroidManifest.xml`, `design/.../text/DialField.kt`, `design/.../media/CallAura.kt` (Convx
-header), `crates/rovsti_app_core/tests/fixtures/dirs/phone/wa-calls.json`, `docs/kotlin-ui/checklist-e5.md`,
+header), `crates/rosty_app_core/tests/fixtures/dirs/phone/wa-calls.json`, `docs/kotlin-ui/checklist-e5.md`,
 `docs/kotlin-ui/screenshots/phone.png`.
 
 Added by revision 2: `PageBackTest` (`:design`), `PushedPagesBackTest` (`:contacts` and `:phone`), the Folded invariant in

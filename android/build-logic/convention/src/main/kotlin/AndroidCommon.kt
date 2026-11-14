@@ -3,8 +3,8 @@ import org.gradle.api.JavaVersion
 
 /** Settings shared by library and application modules. */
 internal fun CommonExtension.configureCommon() {
-    compileSdk = RovstiSdk.COMPILE
-    defaultConfig.minSdk = RovstiSdk.MIN
+    compileSdk = RostySdk.COMPILE
+    defaultConfig.minSdk = RostySdk.MIN
     compileOptions.sourceCompatibility = JavaVersion.VERSION_17
     compileOptions.targetCompatibility = JavaVersion.VERSION_17
     // Compose and Roborazzi tests need merged resources and the manifest on the unit-test classpath.

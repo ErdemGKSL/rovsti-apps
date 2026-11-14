@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/cradiy/gpuiforge/main/gpuiforge.schema.json",
   "app": {
-    "name": "Rovsti Contacts"
+    "name": "Rosty Contacts"
   },
   "platforms": {
     "android": {
@@ -9,7 +9,7 @@
         "arm64-v8a",
         "x86_64"
       ],
-      "application-id": "dev.rovsti.contacts",
+      "application-id": "dev.rosty.contacts",
       "features": [
         "sharing"
       ],
@@ -29,7 +29,7 @@
         "min_sdk": "34",
         "target_sdk": "36"
       },
-      "activity": "dev.rovsti.contacts.MainActivity",
+      "activity": "dev.rosty.contacts.MainActivity",
       "signing": {
         "keystore": "/home/erdem/ownCloud/Personal/rovsti/rovsti-release.jks",
         "key-alias": "rovsti",
@@ -43,7 +43,7 @@
           "args": [
             "build",
             "-p",
-            "rovsti_contacts",
+            "rosty_contacts",
             "--profile",
             "{{cargo_profile}}"
           ],
@@ -55,7 +55,7 @@
           "args": [
             "run",
             "-p",
-            "rovsti_contacts",
+            "rosty_contacts",
             "--profile",
             "{{cargo_profile}}"
           ],

@@ -6,7 +6,7 @@ closes every open owner/coordinator item on the call screens (F17-F20, caller ph
 Phone direction), fixes a tab-bar drawing defect found in the goldens (F21), then E5.8 (WhatsApp calls, audio proven end
 to end first) and E5.7b (multi-call). E5.9-E5.14 stay for round 14.
 
-Owner decisions in force: Rovsti is GPL-3.0-or-later; Convx code is ported close to verbatim with its original header plus
+Owner decisions in force: Rosty is GPL-3.0-or-later; Convx code is ported close to verbatim with its original header plus
 `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`; glisse-derived code keeps the
 glisse MIT header; `android/THIRD_PARTY_NOTICES.md` lists any new source. Owner rules (b) wait for `Rust.init` before any
 `RustNative` call, (c) `imeOverlapPadding` only (never `imePadding` / `windowInsetsPadding(WindowInsets.ime)`), (d) R8
@@ -41,7 +41,7 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
   - `e5.6-incoming-light.png` opened: **F17 open** (number under the name is raw `+905551112233`;
     `incoming/IncomingViewModel.kt:168-169` `subtitleOf` uses `numberRaw`; the formatter exists as
     `SharedOps.render(RenderRequest(raw, NumberForm.Display, home))`, used by `PersonSheetViewModel.kt:344`).
-    **F18 open** (Answer/Decline glyphs are the stroked `RovstiIcons.Phone`, `IncomingScreen.kt:308-317`).
+    **F18 open** (Answer/Decline glyphs are the stroked `RostyIcons.Phone`, `IncomingScreen.kt:308-317`).
     **F19 open** (initials avatar dark green on the green aura). **F20 ringing open** (Remind me / Message / Silence are
     grey `GlassCircleButton` discs, `IncomingScreen.kt:278-293` through `CircleAction`).
   - `e5.7-incall-active-dark.png` opened: **F17 open** in In-call too (`+905559990000`), **F20 in-call open** (the grid
@@ -54,21 +54,21 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
   called this a harness artifact ("from the second frame of one test on, only the selected cell ... is drawn"), but it
   is the exact symptom the owner complained about (a bar collapsing to one item) and it was never root-caused. Treat it
   as a product bug until proven otherwise.
-- E5.8 starting points: `crates/rovsti_wa_client/src/audio.rs` (960 `i16` samples per binary frame over a WebSocket),
-  `android/platform/src/main/kotlin/dev/rovsti/platform/wa/WaCallAudio.kt` (AudioRecord/AudioTrack),
-  `android/wa/src/main/kotlin/dev/rovsti/wa/calls/WaCalls.kt`, `services/wa_gateway/src/wa/calls.rs` (20 ms rechunk,
+- E5.8 starting points: `crates/rosty_wa_client/src/audio.rs` (960 `i16` samples per binary frame over a WebSocket),
+  `android/platform/src/main/kotlin/dev/rosty/platform/wa/WaCallAudio.kt` (AudioRecord/AudioTrack),
+  `android/wa/src/main/kotlin/dev/rosty/wa/calls/WaCalls.kt`, `services/wa_gateway/src/wa/calls.rs` (20 ms rechunk,
   commit `457ac0f`), `phone/.../incoming/CallSource.kt`.
 - Disk: 6.9 GB free at planning time: **Rule 1 at the 7 GB level is required before the first build.**
 
 ## Rules for this round
 
 1. **Disk first, every step.** `df -h .` before any build. Below 8 GB: `rm -rf android/*/build` and
-   `target/*/incremental` dirs. Below 7 GB: also `cargo clean -p` for the deprecated GPUI crates (`rovsti_phone
-   rovsti_messages rovsti_stops rovsti_contacts rovsti_ui rovsti_wa_ui liquid_glass_kit`), `rm -rf
+   `target/*/incremental` dirs. Below 7 GB: also `cargo clean -p` for the deprecated GPUI crates (`rosty_phone
+   rosty_messages rosty_stops rosty_contacts rosty_ui rosty_wa_ui liquid_glass_kit`), `rm -rf
    ~/.gradle/caches/build-cache-1` and Gradle versions under `~/.gradle/caches/` other than the wrapper's. Never build
    below 6 GB. Never `cargo clean` the whole workspace or `rm -rf target` (toolchain.md: release-only checks).
 2. **Domain logic in Rust** (number display, call scenes, arbitration, reply choices, notice): Kotlin orders effects; a
-   missing decision becomes a `rovsti_ffi` op with fixtures and `scripts/check-ffi-exports.sh`.
+   missing decision becomes a `rosty_ffi` op with fixtures and `scripts/check-ffi-exports.sh`.
 3. **Screens** (ARCH 5.2): ViewModel, one `@Immutable UiState`, `onAction(sealed)`, `stateIn(WhileSubscribed(5_000))`,
    effects through a `Channel`; composables never map/sort/filter; only `:design`/`:shell` components.
 4. **Call screens follow iOS 26 Phone** (owner direction in epics E5.6): large thin name (`largeTitle` weight Light /
@@ -82,7 +82,7 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
    `ShotTest` light + dark (+ `-fs2` / `-rtl` where named) into `android/phone/screenshots/`. **Every new or changed PNG
    is opened with Read and judged**; what was seen goes in the commit message and the epics Evidence line.
 7. **Check per step:** `bash scripts/kotlin-ui-check.sh` prints `ALL GREEN`. Rust changes also run `cargo test -p
-   rovsti_app_core -p rovsti_ffi -p rovsti_wa_client` (and `-p rovsti_wa_gateway` when the gateway changes) and `bash
+   rosty_app_core -p rosty_ffi -p rosty_wa_client` (and `-p rosty_wa_gateway` when the gateway changes) and `bash
    scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in Step 8.
 8. **Commits:** one per step, `Kotlin UI (E5 Phone, round 13 (E5 R2 part 1)): <step title>`, ending with the session
    attribution lines. Never push to `main`.
@@ -117,11 +117,11 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
   last row above the bar, 16 dp gutters, one avatar per row, Turkish labels fit (no clipped tab labels).
 - Check `bash scripts/kotlin-ui-check.sh`. epics: E5.5 -> `done` with Evidence; drop the recovery note (say "recovered
   in round-13 step 1"). After the commit, `git branch -D wip-r12-s6` only if `git diff wip-r12-s6 -- android/phone
-  android/design/src/main/kotlin/dev/rovsti/design/list` shows nothing missing; leave `stash@{0}` in place.
+  android/design/src/main/kotlin/dev/rosty/design/list` shows nothing missing; leave `stash@{0}` in place.
 
 ### Step 2. F21: the tab bar must draw every cell in every frame (Contacts and Phone)
 
-- Reproduce first: `:design` Compose test `TabBarCellsTest` (Robolectric, `ShotTest` harness) renders `RovstiShell`
+- Reproduce first: `:design` Compose test `TabBarCellsTest` (Robolectric, `ShotTest` harness) renders `RostyShell`
   with four tabs on a pushed page, captures light, switches to dark (the second frame of the same test, the way
   `E51ShotTest` / `E415ShotTest` do), and asserts on pixels that every cell's label region is non-background (sample
   the label baseline of each of the four cells) in both frames. It must fail at `ca993e6`.
@@ -143,9 +143,9 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
   extract a shared `NumberDisplay` helper in `:phone` `data/` rather than a third copy). Same in `InCallViewModel`
   (name line, subtitle, ended summary, post-call pill) and `WaitingCallCard`. Test in `IncomingViewModelTest` /
   `InCallViewModelTest`: `+905551112233` -> `+90 555 111 22 33`.
-- F18: new `RovstiIcons.PhoneFill` (filled handset, the keypad call button's glyph; move it to `:design` if it lives in
+- F18: new `RostyIcons.PhoneFill` (filled handset, the keypad call button's glyph; move it to `:design` if it lives in
   `:phone`); Answer uses it, Decline and In-call End use it rotated 135 deg. White glyph on solid green
-  (`RovstiTheme.colors.systemGreen`) / red discs, 76 dp, no glass rim.
+  (`RostyTheme.colors.systemGreen`) / red discs, 76 dp, no glass rim.
 - F19: avatar on the aura gets a contrasting treatment: the initials disc uses a white 22 % fill with a 0.5 dp white
   40 % rim and white initials (iOS style) instead of the palette colour that can match the aura; photo avatars unchanged.
 - F20 ringing: Remind me / Message / Silence become **icon + label, no background**: white glyph 28 dp, footnote label
@@ -165,7 +165,7 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
 
 ### Step 4. In-call frosted controls (F20 in-call) and the caller photo as the call background
 
-- F20 in-call: the 3x2 grid uses a new `rovstiGlass` preset `GlassPreset.CallControl` in `:design` (backdrop blur of the
+- F20 in-call: the 3x2 grid uses a new `rostyGlass` preset `GlassPreset.CallControl` in `:design` (backdrop blur of the
   call background through the Convx `liquidGlass` path, white tint 20 % in both themes, no outer shadow, 0.5 dp white
   35 % rim, white glyph). Active toggle (mute on, speaker on, hold on) -> solid white disc with a dark (`#1C1C1E`)
   glyph, cross-fade 180 ms with the 0.8/300 spring on scale. Disabled (Add call while unavailable) -> 45 % alpha. End
@@ -212,16 +212,16 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
 
 - Trace and document in `docs/kotlin-ui/wa-call-audio.md` every hop with its format: `WaCallAudio.kt` capture
   (AudioRecord `VOICE_COMMUNICATION`, rate, channel, 960-sample frames = 20 ms at 48 kHz: verify against `audio.rs`
-  line 1) -> `RustNative.audioPush` -> `rovsti_wa_client::audio::call_audio` (`audio.rs:51`) -> gateway
+  line 1) -> `RustNative.audioPush` -> `rosty_wa_client::audio::call_audio` (`audio.rs:51`) -> gateway
   (`services/wa_gateway/src/wa/calls.rs`, 20 ms rechunk of `457ac0f`) -> WhatsApp, and back through `audioPull` ->
   AudioTrack (`USAGE_VOICE_COMMUNICATION`), `MODE_IN_COMMUNICATION`, route (earpiece/speaker/BT SCO), audio focus, mic
   permission, foreground service type `microphone|phoneCall`, start order (open audio only after `connected`).
   Fix every mismatch found (sample rate, endianness, frame size, start order, missing FGS type).
-- Tests: Rust `rovsti_wa_client` integration test with an in-process fake gateway WebSocket: push a 1 kHz tone, receive
+- Tests: Rust `rosty_wa_client` integration test with an in-process fake gateway WebSocket: push a 1 kHz tone, receive
   it on the far side (both directions), check frame size and Goertzel energy at 1 kHz; gateway test that the rechunk
   keeps 20 ms frames; Kotlin `WaCallAudioTest` (Robolectric shadows: AudioRecord/AudioTrack configured with the
   documented rate/format/usage; audio opened only after connected; FGS type in the merged manifest via `PhoneManifestTest`).
-- No screenshots. Check + `cargo test -p rovsti_wa_client -p rovsti_wa_gateway`. epics: E5.8 -> in-progress, Evidence
+- No screenshots. Check + `cargo test -p rosty_wa_client -p rosty_wa_gateway`. epics: E5.8 -> in-progress, Evidence
   "audio path proven by <tests>"; the manual device check with gateway logs stays an open item for the owner.
 
 ### Step 7. E5.8b WhatsApp calls in the UI
@@ -229,7 +229,7 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
 - `CallSource.WhatsApp` on Incoming and In-call: status line "WhatsApp audio" with the 14 dp `SourceGlyph`; controls
   Mute, Speaker, End active; Keypad/Hold/Add call/Note dimmed (45 %) with the sentence from the core on tap (toast).
   WA photo background through `WaAvatars` (Step 4 `CallBackdrop`).
-- Arbitration (AD-WA5, AD-WA10) through the core op (add `phone.wa_arbitrate` to `rovsti_ffi` if missing): WA ringing
+- Arbitration (AD-WA5, AD-WA10) through the core op (add `phone.wa_arbitrate` to `rosty_ffi` if missing): WA ringing
   during a cellular call shows the waiting card ("End & Answer", "Decline"); cellular during WA likewise.
 - Place a WA call from Recents row menu, PersonSheet and the keypad long-press Call menu (enable the R1-disabled items);
   WA hand-off JID -> number op `wa_call::handoff_number` (open item from E5.1).
@@ -246,7 +246,7 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
 
 ### Step 8. E5.7b multi-call, close the round, full gate, APKs
 
-- `rovsti_core::scene` through the bridge (`zone`, `zone_ui` ops; add to `rovsti_ffi` if missing): Add call sheet
+- `rosty_core::scene` through the bridge (`zone`, `zone_ui` ops; add to `rosty_ffi` if missing): Add call sheet
   (`addcall`: keypad, Favorites, Contacts without leaving the call; `IosSheet` large detent), swap, merge, split, end
   all, Held card above the active call (frosted `CallControl` card, tap to swap), conference panel (sheet listing
   participants with Split / End per row). Springs (skill `motion.md`): hold-away card shrink 0.86/380, swap cross-over
@@ -257,7 +257,7 @@ launcher name/icon, notification icons, never crash on platform calls) applies t
 - Screenshots OPENED: `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet` (light + dark).
 - Close: update `docs/kotlin-ui/checklist-e5.md` (A-H for every screen touched this round), regenerate
   `docs/kotlin-ui/screenshots/phone.png` (`:phone:contactSheet`) and open it. Full gate: `cargo fmt --all && cargo
-  clippy --workspace --all-targets && cargo test --workspace`, `cargo check -p rovsti_android --target
+  clippy --workspace --all-targets && cargo test --workspace`, `cargo check -p rosty_android --target
   aarch64-linux-android`, `bash scripts/kotlin-ui-check.sh`. Build the release APKs of `:phone` (plain and firebase)
   and `android/catalog`, run `dexdump` checks for keep rules, and state the paths. epics: E5.7b `done`; next planner =
   E5 R2 part 2 (E5.9-E5.14).
@@ -268,7 +268,7 @@ Files: `design/.../list/Reorder.kt` (Convx header), `phone/.../favorites/*`, `ph
 `phone/src/main/res/values-tr/strings.xml`, `design/.../controls/PlainIconAction.kt`, `design/.../controls/SlideToAnswer.kt`,
 `design/.../media/CallBackdrop.kt`, `docs/kotlin-ui/wa-call-audio.md`. Tests: `FavoritesViewModelTest`,
 `FavoritesScreenTest`, `PhoneContactsViewModelTest`, `PhoneContactsScreenTest`, `PhoneStringsTest`, `TabBarCellsTest`,
-`PlainIconActionTest`, `CallBackdropTest`, `SlideToAnswerTest`, `WaCallAudioTest`, the `rovsti_wa_client` tone loopback
+`PlainIconActionTest`, `CallBackdropTest`, `SlideToAnswerTest`, `WaCallAudioTest`, the `rosty_wa_client` tone loopback
 test, `WaCallFlowTest`, `MultiCallViewModelTest`, `AddCallSheetTest`, `GlassRealPathTest` (`CallControl` case). Goldens:
 `e5.5-*`, `e5.5-favorites-tr`, re-recorded `e5.6-*` / `e5.7-*`, `e5.6-incoming-photo`, `e5.7-incall-photo`,
 `e5.6-locked-slide-*`, `e5.8-*`, `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`, and the

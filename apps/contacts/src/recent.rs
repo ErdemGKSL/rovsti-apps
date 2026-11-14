@@ -1,21 +1,21 @@
 //! The "Recently added" row on the Contacts tab and its page.
 //!
 //! Which contacts count and how "when" reads live in
-//! `rovsti_core::contacts_view` (`recent`, `recent_when`, `show_recent`); the
+//! `rosty_core::contacts_view` (`recent`, `recent_when`, `show_recent`); the
 //! rows are built once per book pull and only drawn per frame.
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px,
 };
-use rovsti_core::{
+use rosty_core::{
     avatar,
     contact_card::ContactCard,
     contact_recent::{self, AddedMark, RecentTab, VIEWED_KEEP},
     contacts_view,
     wire::WireContact,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{empty_state, flat_glass, glass_icon_button, large_title, list_row, section},
     theme::{self, hue_pair},

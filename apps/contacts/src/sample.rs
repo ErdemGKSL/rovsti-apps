@@ -1,6 +1,6 @@
 //! Sample address book for desktop runs, where there is no provider to ask.
 
-use rovsti_core::{
+use rosty_core::{
     contact_edit::{Account, ContactDraft, DraftEvent, DraftField, EventKind, FieldKind, Group},
     wire::{CallLogEntry, CallLogKind, WireContact, WireNumber},
 };
@@ -133,7 +133,7 @@ fn base_contacts() -> Vec<WireContact> {
         vec![number("+90 532 123 45 67", Some("Mobile"), false)],
         false,
     ));
-    all.sort_by_cached_key(|c| (rovsti_core::search::fold(&c.display_name), c.id));
+    all.sort_by_cached_key(|c| (rosty_core::search::fold(&c.display_name), c.id));
     all
 }
 
@@ -369,7 +369,7 @@ pub(crate) mod rich {
         for c in &mut all {
             c.lookup_key = Some(format!("key-{}", c.id));
         }
-        all.sort_by_cached_key(|c| (rovsti_core::search::fold(&c.display_name), c.id));
+        all.sort_by_cached_key(|c| (rosty_core::search::fold(&c.display_name), c.id));
         all
     }
 
@@ -417,7 +417,7 @@ pub(crate) mod rich {
 
     #[cfg(test)]
     mod tests {
-        use rovsti_core::contact_dupes;
+        use rosty_core::contact_dupes;
 
         use super::*;
 
@@ -478,7 +478,7 @@ pub(crate) mod rich {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::contacts_view::{NameStyle, build_rows_styled};
+    use rosty_core::contacts_view::{NameStyle, build_rows_styled};
 
     use super::*;
 
@@ -527,7 +527,7 @@ mod tests {
         assert!(events.len() >= 3);
         let parsed: Vec<_> = events
             .iter()
-            .map(|e| rovsti_core::contact_dates::parse(&e.date).expect("parses"))
+            .map(|e| rosty_core::contact_dates::parse(&e.date).expect("parses"))
             .collect();
         assert!(parsed.iter().any(|d| d.year.is_none()));
         assert!(events.iter().any(|e| e.kind == EventKind::Anniversary));
@@ -559,7 +559,7 @@ mod tests {
     fn one_sample_contact_has_a_primary_number() {
         let primary = draft(4).expect("sample");
         assert_eq!(
-            rovsti_core::contact_edit::primary_of(&primary.numbers),
+            rosty_core::contact_edit::primary_of(&primary.numbers),
             Some(1)
         );
         assert!(draft(1).expect("sample").numbers.iter().all(|n| !n.primary));
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn the_sample_has_exactly_one_duplicate_group() {
         let drafts: Vec<ContactDraft> = contacts().iter().filter_map(|c| draft(c.id)).collect();
-        let groups = rovsti_core::contact_dupes::find(&drafts);
+        let groups = rosty_core::contact_dupes::find(&drafts);
         assert_eq!(groups.len(), 1);
     }
 }

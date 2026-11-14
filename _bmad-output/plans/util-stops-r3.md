@@ -1,4 +1,4 @@
-# util-stops: everyday utilities for Rovsti Stops (round 3)
+# util-stops: everyday utilities for Rosty Stops (round 3)
 
 baseSha: 290550b818cc1a25913d9feab9f9f6edd431245a
 
@@ -11,8 +11,8 @@ baseSha: 290550b818cc1a25913d9feab9f9f6edd431245a
   - S17 follow-me: `MapState::follow` only means "auto-fit"; `locate_me` (`map.rs` ~2573) jumps once to
     `STREET_MPP` and sets `follow = false`. Location outside a trip is one-shot only
     (`StopsLocation.once`, `location::request_location`); no continuous updates.
-  - S18 shortcut: `rovsti_android::shortcuts` only has `can_pin` / `pin_contact`
-    (`Shortcuts.pinContact`, `BirthdayReminders.EXTRA_CONTACT_ID`, `RovstiBridge.deliverOpenContact`).
+  - S18 shortcut: `rosty_android::shortcuts` only has `can_pin` / `pin_contact`
+    (`Shortcuts.pinContact`, `BirthdayReminders.EXTRA_CONTACT_ID`, `RostyBridge.deliverOpenContact`).
     Stops `MainActivity.kt` has no `onNewIntent`.
   - S19 Reverse / Duplicate: dropped. A gate rings when crossed in either direction and
     `SavedStops::add` already treats A/B and B/A as the same stop (`same_gate`), so neither has value.
@@ -57,12 +57,12 @@ baseSha: 290550b818cc1a25913d9feab9f9f6edd431245a
 
 Steps 1-3 pure (unit-tested), step 4 Android seam, steps 5-7 thin GPUI, step 8 docs. Every step leaves all
 checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test
---workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target
+--workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target
 aarch64-linux-android`.
 
 ### Step 1. Pure: coordinate parsing (S23)
-- `crates/rovsti_geo/src/coord_format.rs`:
+- `crates/rosty_geo/src/coord_format.rs`:
   - `pub fn plus_code_decode(code: &str) -> Option<Coord>`: full codes only (8 digits + `+` + 0..=3
     more, padding `0` allowed before `+`, case-insensitive), returns the centre of the code area;
     short codes (no 8 leading digits) -> None.
@@ -71,7 +71,7 @@ aarch64-linux-android`.
     (`N 41.0256 E 28.9767`, `S 33 52.1 E 151 12.5`), signed degrees with `°`, and a full Plus Code.
     Rules: minutes/seconds < 60, lat <= 90, lon <= 180, hemisphere letters N/S/E/W (lat first or
     detected by letter), comma or whitespace separator. Plain `lat, lon` stays in `dest::parse_pair`.
-- `crates/rovsti_geo/src/dest.rs::parse_location`: after the existing `parse_pair` line loop, try
+- `crates/rosty_geo/src/dest.rs::parse_location`: after the existing `parse_pair` line loop, try
   `coord_format::parse_coord` per line (label None); an out-of-range result -> `DestError` as today.
 - Tests: round-trip `format(c, Dms|Ddm|PlusCode)` -> `parse_coord` within 1 m for Istanbul, Sydney (S/E),
   Lima (S/W), Reykjavik (N/W); the spec example code; `S 33 52.1 E 151 12.5`; rejects `61'`, `91°N`,
@@ -79,22 +79,22 @@ aarch64-linux-android`.
   existing dest tests unchanged.
 
 ### Step 2. Pure: status text, measure export, stop shortcut spec, follow mode (S17, S18, S20, S26)
-- `crates/rovsti_geo/src/session.rs`: make `format_distance` `pub` (re-export as
-  `rovsti_geo::format_distance`) and add `pub fn status_share_text(label: &str, line_m: Option<f64>,
+- `crates/rosty_geo/src/session.rs`: make `format_distance` `pub` (re-export as
+  `rosty_geo::format_distance`) and add `pub fn status_share_text(label: &str, line_m: Option<f64>,
   eta_min: Option<u32>, here: Option<Coord>, target: Coord, crossed: bool) -> String`:
   `"On my way to Kadikoy - Moda: 1.2 km to the line, about 4 min, heading NE."`, crossed ->
   `"Arrived at Kadikoy - Moda."`, missing parts omitted (`"On my way to X."` + geo link line from
   `dest::point_qr_payload(target, Some(label))` always appended on a second line).
-- `crates/rovsti_geo/src/measure.rs`: `pub fn summary_text(&self) -> String`
+- `crates/rosty_geo/src/measure.rs`: `pub fn summary_text(&self) -> String`
   (`"1.4 km, 3 legs"`, "1 leg", empty -> ""); `pub fn to_gpx(&self, name: &str) -> String` (one `<trk>`
   with `<trkseg>` points, name escaped with the places_io helper); `pub fn as_gate(&self) ->
   Option<(Coord, Coord)>` (first and last point when `Diameter::new` accepts them); `pub fn
-  export_file_name(today: &str) -> String` -> `rovsti-stops-measure-2026-11-07.gpx`.
-- `crates/rovsti_geo/src/saved_stops.rs`: `#[derive(Serialize)] pub struct StopShortcut { id: String,
+  export_file_name(today: &str) -> String` -> `rosty-stops-measure-2026-11-07.gpx`.
+- `crates/rosty_geo/src/saved_stops.rs`: `#[derive(Serialize)] pub struct StopShortcut { id: String,
   short_label: String, long_label: String, stop_id: u64 }` and `pub fn shortcut_spec(stop: &SavedStop)
   -> StopShortcut` (id `stop-<id>`, short <= 10 chars on a char boundary with an ellipsis-free cut,
   long <= 25 chars, empty name -> "Stop").
-- `crates/rovsti_geo/src/view.rs`: `pub enum FollowMode { Off, Centred, Following }` with
+- `crates/rosty_geo/src/view.rs`: `pub enum FollowMode { Off, Centred, Following }` with
   `pub fn on_me_tap(self, has_fix: bool) -> FollowMode` (Off -> Centred; Centred -> Following;
   Following -> Off; no fix -> Centred) and `pub fn on_pan(self) -> FollowMode` (always Off),
   `pub fn watches(self) -> bool` (Following only).
@@ -103,11 +103,11 @@ aarch64-linux-android`.
   truncation on a multibyte name and JSON field names; `FollowMode` transitions table.
 
 ### Step 3. Pure: tile cache cap and per-server usage (S22)
-- `crates/rovsti_tiles/src/cache.rs`: `pub fn set_cap(&mut self, cap: u64)` (stores, evicts, marks
+- `crates/rosty_tiles/src/cache.rs`: `pub fn set_cap(&mut self, cap: u64)` (stores, evicts, marks
   dirty); `pub fn usage_by_source(root: &Path) -> Vec<(String, u64)>` (one entry per subdirectory, key =
   dir name, sorted by bytes desc); `pub fn clear_except(root: &Path, keep_key: &str) -> io::Result<u64>`
   (removes every other server dir, returns bytes freed). Re-export in `lib.rs`.
-- `crates/rovsti_geo/src/prefs.rs`: `pub const TILE_CACHE_CHOICES_MB: [u32; 4] = [128, 256, 512, 1024]`,
+- `crates/rosty_geo/src/prefs.rs`: `pub const TILE_CACHE_CHOICES_MB: [u32; 4] = [128, 256, 512, 1024]`,
   `StopsPrefs.tile_cache_mb: u32` (`#[serde(default = ..)]` 128), `pub fn next_tile_cache(&self) -> u32`
   (off-list values snap to 128), `pub fn tile_cache_bytes(&self) -> u64`.
 - Tests (tempdir under `std::env::temp_dir()` like the existing cache tests): `set_cap` lower evicts LRU
@@ -115,20 +115,20 @@ aarch64-linux-android`.
   freed size; missing root -> empty / Ok(0); prefs default 128, old JSON loads, cycle, snap.
 
 ### Step 4. Android seam: stop shortcut and live location watch (S17, S18)
-- Kotlin (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`):
-  - `Shortcuts.kt`: `const val EXTRA_STOP_ID = "dev.rovsti.stops.STOP_ID"`, `fun pinStop(ctx, specJson)`
+- Kotlin (`crates/rosty_android/kotlin/dev/rosty/bridge/`):
+  - `Shortcuts.kt`: `const val EXTRA_STOP_ID = "dev.rosty.stops.STOP_ID"`, `fun pinStop(ctx, specJson)`
     (same flow as `pinContact`, app icon, extra `stop_id` as Long).
-  - `RovstiBridge.kt`: `@JvmStatic fun pinStopShortcut(json: String): Boolean`,
+  - `RostyBridge.kt`: `@JvmStatic fun pinStopShortcut(json: String): Boolean`,
     `fun deliverOpenStop(intent: Intent?): Boolean` (posts one-shot `open_stop` `{id}`, removes the
     extra), `@JvmStatic fun watchLocation(on: Boolean): Boolean`.
   - `StopsLocation.kt`: `fun watch(ctx, on: Boolean): Boolean` (`requestLocationUpdates` on the first
     enabled provider, 2 s / 5 m, main looper, emits `stops_location` like `once`; `on = false` removes
     the listener; idempotent; false without permission).
-  - `apps/stops/platforms/android/app/src/main/kotlin/dev/rovsti/stops/MainActivity.kt`: call
-    `RovstiBridge.deliverOpenStop(intent)` in `onCreate` and a new `onNewIntent`; `onPause` calls
-    `RovstiBridge.watchLocation(false)` (the app re-arms on resume if following).
-- Rust: `crates/rovsti_android/src/shortcuts.rs::pin_stop(spec_json: &str) -> Result<bool>`;
-  `crates/rovsti_android/src/location.rs::watch_location(on: bool) -> Result<bool>`;
+  - `apps/stops/platforms/android/app/src/main/kotlin/dev/rosty/stops/MainActivity.kt`: call
+    `RostyBridge.deliverOpenStop(intent)` in `onCreate` and a new `onNewIntent`; `onPause` calls
+    `RostyBridge.watchLocation(false)` (the app re-arms on resume if following).
+- Rust: `crates/rosty_android/src/shortcuts.rs::pin_stop(spec_json: &str) -> Result<bool>`;
+  `crates/rosty_android/src/location.rs::watch_location(on: bool) -> Result<bool>`;
   `events.rs`: `kind::OPEN_STOP = "open_stop"`, `pub fn parse_open_stop(json) -> Option<u64>`.
   Desktop tests: `Error::Unsupported`; parser tests (ok, extra keys, negative / missing / bad JSON).
 - `apps/stops/src/backend.rs`: `pin_stop_shortcut(stop: &SavedStop) -> Result<bool, String>` (JSON of

@@ -5,7 +5,7 @@ default applies: blocking goes through `BlockedNumberContract` and `Caps.BLOCK_G
 
 ## What is measured
 
-Rovsti Phone is the default phone app, so Android lets it use `BlockedNumberContract`
+Rosty Phone is the default phone app, so Android lets it use `BlockedNumberContract`
 (`canCurrentUserBlockNumbers`). The open questions on HyperOS are whether a number in that list
 really never rings, whether a type-6 row appears in the call log, and whether Xiaomi's own block
 list (Phone app > Blocked) is the same list.
@@ -17,7 +17,7 @@ down. A slow provider therefore cannot delay a normal ring (`Epic17Test`).
 
 ## Owner procedure
 
-1. Make sure Rovsti Phone is the default phone app.
+1. Make sure Rosty Phone is the default phone app.
 2. Settings (gear) > Blocked numbers: type the number of the second phone and tap Block.
 3. Diagnostics (hold the Settings title) > Blocking > Run. Expect `pass: isBlocked on the newest entry`.
 4. Call this phone from the second phone. Note: did it ring (yes/no)?

@@ -4,7 +4,7 @@
 //! text shared to the app arrive through a channel fed by `main()`.
 
 use gpui::{ClipboardItem, Context, ReceivedShare};
-use rovsti_core::{
+use rosty_core::{
     contact_edit::ContactDraft,
     contact_intake::{self, Intake},
     contact_photo::CropView,
@@ -286,7 +286,7 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::{contact_edit::ContactDraft, vcard};
+    use rosty_core::{contact_edit::ContactDraft, vcard};
 
     fn card(given: &str) -> ContactDraft {
         ContactDraft {

@@ -8,17 +8,17 @@
 
 use std::{path::Path, sync::Arc};
 
-use rovsti_android::{
+use rosty_android::{
     Error as AndroidError, permissions,
     permissions::{Access, Group},
     trip::{self, AlarmAction},
     xiaomi,
 };
-use rovsti_geo::{
+use rosty_geo::{
     ActiveTrip, AlarmPlan, Diameter, DiameterError, Endpoint, Feed, FixIn, History, NoticePrefs,
     Outcome, SavedStop, SavedStops, StopsPrefs, saved_stops::load_saved_stops, shortcut_spec,
 };
-use rovsti_ui::storage;
+use rosty_ui::storage;
 use serde_json::json;
 
 use crate::{
@@ -436,9 +436,9 @@ pub fn alarm(dir: &Path, action: AlarmAction) -> AlarmReply {
 
 // ---- desktop simulation ----------------------------------------------------------
 
-/// Whether `ROVSTI_STOPS_SIMULATE=1` asks for synthetic fixes. Never on a phone.
+/// Whether `ROSTY_STOPS_SIMULATE=1` asks for synthetic fixes. Never on a phone.
 pub fn simulate_requested() -> bool {
-    !cfg!(target_os = "android") && std::env::var("ROVSTI_STOPS_SIMULATE").as_deref() == Ok("1")
+    !cfg!(target_os = "android") && std::env::var("ROSTY_STOPS_SIMULATE").as_deref() == Ok("1")
 }
 
 /// A fix `elapsed_s` seconds after the start: from [`SIM_START_M`] left of the
@@ -495,7 +495,7 @@ fn android_words(error: &AndroidError) -> String {
     }
 }
 
-fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
+fn done(result: rosty_android::Result<bool>) -> Result<(), String> {
     match result {
         Ok(true) => Ok(()),
         Ok(false) => Err("Android refused".to_owned()),
@@ -506,14 +506,14 @@ fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
 /// Whether the launcher can pin a shortcut (false on desktop).
 #[allow(dead_code)] // the pill is always shown; desktop answers with a notice
 pub fn can_pin_shortcut() -> bool {
-    rovsti_android::shortcuts::can_pin().unwrap_or(false)
+    rosty_android::shortcuts::can_pin().unwrap_or(false)
 }
 
 /// Asks the launcher to pin a home screen shortcut that opens `stop`.
 /// `Ok(false)` means the launcher did not take it.
-pub fn pin_stop_shortcut(stop: &SavedStop) -> rovsti_android::Result<bool> {
+pub fn pin_stop_shortcut(stop: &SavedStop) -> rosty_android::Result<bool> {
     match serde_json::to_string(&shortcut_spec(stop)) {
-        Ok(spec) => rovsti_android::shortcuts::pin_stop(&spec),
+        Ok(spec) => rosty_android::shortcuts::pin_stop(&spec),
         Err(_) => Ok(false),
     }
 }
@@ -540,7 +540,7 @@ fn safe_name(name: &str) -> String {
 
 fn write_temp(name: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
     let words = || "the temporary file can't be written".to_owned();
-    let dir = std::env::temp_dir().join("rovsti-stops");
+    let dir = std::env::temp_dir().join("rosty-stops");
     std::fs::create_dir_all(&dir).map_err(|_| words())?;
     let path = dir.join(safe_name(name));
     std::fs::write(&path, bytes).map_err(|_| words())?;
@@ -550,7 +550,7 @@ fn write_temp(name: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
 /// Saves `bytes` (a PNG) to the gallery as `name`.
 pub fn save_png(name: &str, bytes: &[u8]) -> Result<(), String> {
     let path = write_temp(name, bytes)?;
-    done(rovsti_android::media::save_image_to_gallery(
+    done(rosty_android::media::save_image_to_gallery(
         &path.to_string_lossy(),
         name,
         "image/png",
@@ -562,7 +562,7 @@ pub fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
     let stem = name.strip_suffix(".png").unwrap_or(name);
     let file = format!("{}.png", safe_name(stem));
     let path = write_temp(&file, bytes)?;
-    done(rovsti_android::media::share_image(
+    done(rosty_android::media::share_image(
         &path.to_string_lossy(),
         "image/png",
         &file,
@@ -574,7 +574,7 @@ pub fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
 pub fn export_text(name: &str, mime: &str, text: &str) -> Result<(), String> {
     let file = safe_name(name);
     let path = write_temp(&file, text.as_bytes())?;
-    done(rovsti_android::documents::export_file(
+    done(rosty_android::documents::export_file(
         &file,
         mime,
         &path.to_string_lossy(),
@@ -584,7 +584,7 @@ pub fn export_text(name: &str, mime: &str, text: &str) -> Result<(), String> {
 /// Opens the system file picker for a places file (up to 2 MB). The answer is
 /// a `document_result` with op `ImportMessages` and the cache copy in `path`.
 pub fn pick_import() -> Result<(), String> {
-    done(rovsti_android::documents::import_file(IMPORT_MAX_BYTES))
+    done(rosty_android::documents::import_file(IMPORT_MAX_BYTES))
 }
 
 /// Reads the picked file at `path`, then deletes the cache copy.
@@ -601,7 +601,7 @@ pub fn read_import(path: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use crate::store::test_support::tmp;
-    use rovsti_geo::{Coord, NoticeWhen, Side, TripState};
+    use rosty_geo::{Coord, NoticeWhen, Side, TripState};
 
     fn end(label: &str, lon: f64) -> Endpoint {
         Endpoint {
@@ -870,13 +870,13 @@ mod tests {
         let seed = sim_fix(&store::load_trip(&dir).unwrap().trip.diameter, 0.0, 0);
         let mut request = serde_json::to_value(seed).unwrap();
         request["dir"] = json!(dir.to_string_lossy());
-        let first: rovsti_geo::FixOut =
+        let first: rosty_geo::FixOut =
             serde_json::from_str(&crate::headless::handle("trip_fix", &request.to_string()))
                 .unwrap();
         assert!(!first.ring);
         assert_eq!(first.side, Some(Side::Left));
         let reply = simulate_tick(&dir).unwrap();
-        let out: rovsti_geo::FixOut = serde_json::from_str(&reply).unwrap();
+        let out: rosty_geo::FixOut = serde_json::from_str(&reply).unwrap();
         assert!(out.ring);
         assert_eq!(out.state, TripState::Arrived);
         assert_eq!(out.side, Some(Side::Right));
@@ -928,13 +928,13 @@ mod tests {
         let text = std::fs::read_to_string(dir.join(store::SAVED_FILE)).unwrap();
         let again = load_saved_stops(Some(&text));
         assert!(!again.discarded, "the file on disk is v2 now: {text}");
-        assert_eq!(again.stops.version, rovsti_geo::saved_stops::FORMAT_VERSION);
+        assert_eq!(again.stops.version, rosty_geo::saved_stops::FORMAT_VERSION);
         assert!(!text.contains("places"));
     }
 
     #[test]
     fn saved_stops_survive_a_save_and_load() {
-        use rovsti_geo::{Coord, Endpoint};
+        use rosty_geo::{Coord, Endpoint};
         let dir = tmp("backend-saved-round");
         let mut saved = SavedStops::default();
         let ep = |lat| Endpoint {

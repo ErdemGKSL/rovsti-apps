@@ -38,7 +38,7 @@ require(gpuiSigningMode in listOf("auto", "debug", "configured", "unsigned")) {
 }
 
 android {
-    namespace = "dev.rovsti.phone"
+    namespace = "dev.rosty.phone"
     // Android lint's release "vital" pass crashes inside a detector on this
     // toolchain (LintDriver.handleDetectorError); the build does not need it.
     lint {
@@ -57,7 +57,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "dev.rovsti.phone"
+        applicationId = "dev.rosty.phone"
         minSdk = "34".toInt()
         targetSdk = "36".toInt()
         versionCode = "1".toInt()
@@ -90,10 +90,10 @@ android {
 // apps/phone, found from the Gradle project (platforms/android) so the repo can move.
 val phoneAppDir = rootProject.projectDir.resolve("../..").canonicalFile
 
-// The shared Kotlin bridge lives in crates/rovsti_android. It is added as a source directory
+// The shared Kotlin bridge lives in crates/rosty_android. It is added as a source directory
 // instead of a symlink, which Windows checkouts do not create (core.symlinks=false).
 android.sourceSets["main"].kotlin.directories.add(
-    phoneAppDir.resolve("../../crates/rovsti_android/kotlin").canonicalPath,
+    phoneAppDir.resolve("../../crates/rosty_android/kotlin").canonicalPath,
 )
 
 for (profile in listOf("debug", "release")) {
@@ -108,7 +108,7 @@ for (profile in listOf("debug", "release")) {
             commandLine(providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"),
                 "build-android-native", "--output", output.get().asFile.absolutePath,
                 "--manifest-path", phoneAppDir.resolve("Cargo.toml").path,
-                "--library", "rovsti_phone", "--abi", abi,
+                "--library", "rosty_phone", "--abi", abi,
                 "--profile", rustProfile, "--min-sdk", "34")
             if (gpuiStagingRoot.isNotEmpty()) args("--staging-root", gpuiStagingRoot)
         }
@@ -118,7 +118,7 @@ for (profile in listOf("debug", "release")) {
 
 if (firebaseEnabled) {
     apply(plugin = "com.google.gms.google-services")
-    // RovstiMessagingService and its MESSAGING_EVENT manifest entry only exist in this build.
+    // RostyMessagingService and its MESSAGING_EVENT manifest entry only exist in this build.
     // A Kotlin source directory: built-in Kotlin does not compile .kt files from java
     // directories, which left the manifest's service without a class (crash on every push).
     android.sourceSets.getByName("main").kotlin.directories.add(file("src/firebase/kotlin").absolutePath)

@@ -222,7 +222,7 @@ fn merge(
 
 #[cfg(test)]
 mod tests {
-    use rovsti_wa_proto::{ConnectKey, KeyId, MessageBody, WaMessage};
+    use rosty_wa_proto::{ConnectKey, KeyId, MessageBody, WaMessage};
 
     use super::*;
     use crate::store::{ChatChange, NewKey, ProfileChange};

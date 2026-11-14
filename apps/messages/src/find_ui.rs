@@ -1,14 +1,14 @@
 //! The "Search in chat" bar shared by the WhatsApp and SMS pages: a field, the
 //! "2 of 5" label, older/newer buttons and a close button, plus a "Load earlier"
 //! pill when the oldest loaded hit is reached. The matching is
-//! `rovsti_core::chat_find`; the pages own what a hit reveals.
+//! `rosty_core::chat_find`; the pages own what a hit reveals.
 
 use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, TextInputAction, TextInputPurpose, Window, div, px,
 };
-use rovsti_core::chat_find::FindCursor;
-use rovsti_ui::{
+use rosty_core::chat_find::FindCursor;
+use rosty_ui::{
     Icon,
     components::{glass_icon_button, glass_pill},
     field::{TextField, field_box},

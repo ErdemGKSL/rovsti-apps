@@ -6,7 +6,7 @@ Epic file: `_bmad-output/kotlin-ui/epics.md`. Previous plans: `round-01.md`, `ro
 "never copy Convx" line there is void: port the Convx file named below instead).
 
 Owner decisions in force (user message: "tamam okey projemizi gpl yap kodları çok yüksek benzerlikte taşı" = "OK, make
-our project GPL and port the code with very high similarity"): Rovsti is GPL-3.0-or-later; Convx code is ported
+our project GPL and port the code with very high similarity"): Rosty is GPL-3.0-or-later; Convx code is ported
 **close to verbatim** with the original header plus `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx),
 GPL-3.0, <original path>`; files Convx vendored (Kyant0 backdrop/AndroidLiquidGlass/Capsule, compose-miuix-ui,
 compose-floating-tab-bar, compose-hig) keep their Apache-2.0 attributions; glisse (MIT) stays portable with its header.
@@ -14,22 +14,22 @@ Round-03 "Rules for this round" (header format, package map, no forced flat in t
 unchanged.
 
 `$CX` = `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/ref/Convx`,
-`$CXK` = `$CX/app/src/main/kotlin/com/convx/music`, `D` = `android/design/src/main/kotlin/dev/rovsti/design`,
-`DT` = `android/design/src/test/kotlin/dev/rovsti/design`, `CAT` = `android/catalog/src/{main,test}/kotlin/dev/rovsti/catalog`,
+`$CXK` = `$CX/app/src/main/kotlin/com/convx/music`, `D` = `android/design/src/main/kotlin/dev/rosty/design`,
+`DT` = `android/design/src/test/kotlin/dev/rosty/design`, `CAT` = `android/catalog/src/{main,test}/kotlin/dev/rosty/catalog`,
 `SHOTS` = `android/catalog/screenshots`.
 
 ## State found (verified in code, not trusted)
 
 - `git log`: R3 complete, `542e271` (E1.23) .. `d0ea763` (E1.29 + APK). Working tree clean. `stash@{0}` = deprecated
   GPUI layout WIP: leave it, never pop it.
-- Ported and **used**: backdrop engine (`D/backdrop/**`, `D/shapes/**`), `D/glass/{GlassEffect,TopFadeBlur,RovstiGlass,
+- Ported and **used**: backdrop engine (`D/backdrop/**`, `D/shapes/**`), `D/glass/{GlassEffect,TopFadeBlur,RostyGlass,
   GlassSettings}.kt`, `D/ios/foundation/*`, menus (`IosMenu`, `IosContextMenu`, `AppleContextMenu`, `OverlayMenu`; our
   `ButtonMenu`/`ContextMenuEntry` are facades), sheets (`SheetMath.kt` takes Convx numbers, `IosPageSheetEntry` +
   `presentPageSheet` used by `SheetsPage`), `IosToggle`/`IosSlider`/`SegmentedControl`, `IosSwipeableRow` (`SwipePage`).
   `GlassRealPathTest` (API 35, 16 cases), `GlassFallbackTest`, `NoFlatInTestsTest` exist.
 - **E1.29 is not finished** (its own evidence says so, and grep confirms): `IosTabBar`, `IosNavigationBar`, `IosList`
-  have **no caller** outside their own file; `IosButton` is used only by `SwipePage`. `D/chrome/RovstiTabBar.kt` (647
-  lines, glisse geometry on `rovstiGlass`), `LargeTitleScaffold.kt` (326), `Toolbar.kt` (167), `controls/Buttons.kt`
+  have **no caller** outside their own file; `IosButton` is used only by `SwipePage`. `D/chrome/RostyTabBar.kt` (647
+  lines, glisse geometry on `rostyGlass`), `LargeTitleScaffold.kt` (326), `Toolbar.kt` (167), `controls/Buttons.kt`
   (252), `list/ListRow.kt` / `InsetGroupedSection.kt` are still our hand-written versions (only `ListRowChevron` draws
   `IosChevron`). `overlay/Popover.kt` still uses our `MenuMorph` + `panelGlass`.
 - What Convx actually ships on device is not `ios/component/IosTabBar` (used only by `$CXK/ui/ios/IosCatalog.kt:396`)
@@ -44,10 +44,10 @@ unchanged.
 - Disk: 8.8 GB free, `~/.gradle` 6.5 GB. Two new dependency trees come this round (Navigation 3, Coil 3).
 - No Convx navigation library to port: Convx uses `androidx.navigation` `NavHost` (`$CXK/AppNavHost.kt:50-98`). ARCH 5.1
   keeps Navigation 3 (app-owned back stack, per-tab stacks); we port Convx's **transition specs and freeze wiring**
-  verbatim into `NavDisplay` specs. Our `RovstiMotion` already has Convx's push numbers (`PushMs = 400`, `PushEasing
-  (0.32, 0.72, 0, 1)`, `PushParallax 0.30`, `PushDimAlpha 0.85`, `RovstiMotion.kt:97-134`).
+  verbatim into `NavDisplay` specs. Our `RostyMotion` already has Convx's push numbers (`PushMs = 400`, `PushEasing
+  (0.32, 0.72, 0, 1)`, `PushParallax 0.30`, `PushDimAlpha 0.85`, `RostyMotion.kt:97-134`).
 - Convx has no photo viewer/zoom component (grep `detectTransformGestures|transformable` hits only
-  `ui/screens/settings/diy/DiyEditorScreen.kt`). E1.20 stays our own code (it may follow `crates/rovsti_core` zoom
+  `ui/screens/settings/diy/DiyEditorScreen.kt`). E1.20 stays our own code (it may follow `crates/rosty_core` zoom
   behaviour). Convx does have `$CXK/ui/component/AlphabetScrollBar.kt` (523) + `$CX/app/src/test/kotlin/com/convx/music/
   ui/component/AlphabetScrollBarTest.kt` (82): E1.19's rail is a port.
 
@@ -73,13 +73,13 @@ unchanged.
 
 ## Rules for this round (in addition to round-03 rules)
 
-- Facade rule: keep our public API (`RovstiTabBar`, `TabBarMinimizer`, `ChromeMetrics`, `LocalContentInsets`,
+- Facade rule: keep our public API (`RostyTabBar`, `TabBarMinimizer`, `ChromeMetrics`, `LocalContentInsets`,
   `LargeTitleScaffold`, `Toolbar*`, `BackButton`, `GlassIconButton`/`CapsuleButton`/`TextButton` in `Buttons.kt`,
   `ListRow*`, `InsetGroupedSection`) so the catalog and future apps do not churn; the drawing and motion move into the
   ported Convx files. Where a Convx number differs from ours, Convx wins and the test is updated with a citation.
 - Music specifics are removed, not stubbed: `PlayerMorph`, `LocalPlayerAwareWindowInsets` (-> our `LocalContentInsets`),
-  `LocalAmbientBackgroundColor` (-> `RovstiTheme.colors.page`), `rememberPreference(...)` keys (-> parameters or
-  `LocalGlassSettings`), `ios.compat.*` (-> `IosText`/`IosGlyph`/`RovstiIcon`, no Material3), `R.string` (-> parameters).
+  `LocalAmbientBackgroundColor` (-> `RostyTheme.colors.page`), `rememberPreference(...)` keys (-> parameters or
+  `LocalGlassSettings`), `ios.compat.*` (-> `IosText`/`IosGlyph`/`RostyIcon`, no Material3), `R.string` (-> parameters).
 - Commit prefix: `Kotlin UI (E1 R4): ...` with the session attribution lines.
 - Checks per step: `bash scripts/kotlin-ui-check.sh` prints `ALL GREEN` (record new goldens with `RECORD=1`, then verify
   without it). Disk: if `df -h .` shows < 8 GB before Steps 4 and 6, run `rm -rf android/*/build android/build
@@ -105,9 +105,9 @@ unchanged.
 
 Commit: `Kotlin UI (E1 R4): fix trigger residue under open menus; prune orphan goldens`.
 
-## Step 2 (E1.29 rest, part A): port Convx's floating tab bar; `RovstiTabBar` becomes a facade
+## Step 2 (E1.29 rest, part A): port Convx's floating tab bar; `RostyTabBar` becomes a facade
 
-Port close to verbatim into `D/chrome/floatingtabbar/` (package `dev.rovsti.design.chrome.floatingtabbar`):
+Port close to verbatim into `D/chrome/floatingtabbar/` (package `dev.rosty.design.chrome.floatingtabbar`):
 `$CXK/ui/component/floatingtabbar/{FloatingTabBar, FloatingTabBarBars, FloatingTabBarModel, FloatingTabBarMotion,
 FloatingTabBarTabs, FoldGeometry, FoldingTabBar, FoldingTabGroup, GooeyTransition, BarMotion, AccessoryHost}.kt`,
 keeping the compose-floating-tab-bar Apache-2.0 header block and Convx's modification notes, plus our "Ported from Convx"
@@ -117,12 +117,12 @@ original path: `elasticStretchLayerBlock` (`$CXK/ui/component/GlassCircleButton.
 - `AccessoryHost` loses the mini player: it becomes a generic `accessory: (@Composable () -> Unit)?` slot above/inside
   the bar (the Phone in-call pill and the Stops trip pill will use it). Keep its shared-transition morph between inline
   and expanded bars.
-- `RovstiTabBar(...)` keeps its signature and delegates: tabs -> `FloatingTabBarModel`, selection/drag -> the ported
+- `RostyTabBar(...)` keeps its signature and delegates: tabs -> `FloatingTabBarModel`, selection/drag -> the ported
   puck (`LiquidBottomTabs` press-drag, release snaps to nearest tab), minimise -> Convx's inline/expanded collapse driven
   by our `TabBarMinimizer`, fold -> `FoldingTabBar`. Keep `ChromeMetrics`, `LocalContentInsets` (bar height + accessory
   height feed the content inset), IME hides the bar, haptic on tab change. Glass via the root `LocalAppBackdrop` exactly as
   Convx (`rememberCombinedBackdrop` where the bar layers its own backdrop).
-- glisse code in the old `RovstiTabBar.kt`/`TabBarGeometry.kt`/`SelectionPuck.kt` that is no longer called is deleted
+- glisse code in the old `RostyTabBar.kt`/`TabBarGeometry.kt`/`SelectionPuck.kt` that is no longer called is deleted
   (keep the glisse header only on files that still contain glisse code).
 - `android/THIRD_PARTY_NOTICES.md`: add compose-floating-tab-bar v1.0.1 (Elyes Mansour, Apache-2.0, URL from the header).
 - Tests (existing must stay green, numbers updated with citations): `TabBarGestureTest`, `PuckBoundsTest`,
@@ -134,7 +134,7 @@ original path: `elasticStretchLayerBlock` (`$CXK/ui/component/GlassCircleButton.
   Judge: rows under the capsule are blurred (no legible doubled text, fix for the R3 finding), lens puck refracts,
   labels readable, last row above the bar, accessory aligned with the bar's width.
 
-Commit: `Kotlin UI (E1 R4): port Convx floating tab bar; RovstiTabBar facade; accessory slot`.
+Commit: `Kotlin UI (E1 R4): port Convx floating tab bar; RostyTabBar facade; accessory slot`.
 
 ## Step 3 (E1.29 rest, part B, closes E1.29): top chrome, glass buttons, list drawing, overscroll
 
@@ -142,7 +142,7 @@ Port close to verbatim: `$CXK/ui/component/{FrostedTopBar, ScreenChrome, Navigat
 GlassCircleButton}.kt` -> `D/chrome/` (GlassCircleButton -> `D/controls/`), `$CXK/ui/utils/IosOverscroll.kt` ->
 `D/motion/IosOverscroll.kt`, `$CXK/ui/utils/AppBar.kt` pieces they need. Replace music bits per the rules
 (`AppBarHeight` constant -> `Sizes`, `LocalPageMetrics` -> our `Spacing`/width cap, `LocalAccentTextColor` ->
-`RovstiTheme.colors.accent`).
+`RostyTheme.colors.accent`).
 - `LargeTitleScaffold` delegates to `ScreenLazyPage`/`ScreenScaffold` + `ScreenLargeTitle` + `FrostedTopBar` (inline
   title, `TopFadeBlur` behind it: fixes **F6**); `Toolbar` capsules use `IosToolbarGroup` (already ported in
   `IosNavigationBar.kt`) on `GlassCircleButton`; `BackButton` = `GlassCircleButton` with the chevron. Keep
@@ -169,7 +169,7 @@ Commit: `Kotlin UI (E1 R4): port Convx top chrome, glass circle button, IosList 
 ## Step 4 (E1.18): Navigation 3 scaffold with Convx push/pop specs and nav freeze
 
 Follow `round-03-e1.17-e1.22.md` Step 4 (dependencies `navigation3 = "1.2.1"` runtime + ui, kotlinx-serialization;
-`api-notes.md` rows checked with javap; `TabNavigator`, `RovstiNavHost`, `SharedBounds`, `ChromeSpec`/`chromeFor`,
+`api-notes.md` rows checked with javap; `TabNavigator`, `RostyNavHost`, `SharedBounds`, `ChromeSpec`/`chromeFor`,
 `docs/kotlin-ui/shell-usage.md`, catalog converted to two tabs "Components"/"Demo" with avatar -> detail ->
 sub-detail). Changes from that plan:
 - `D/transition/NavTransitions.kt` ports `$CXK/AppNavHost.kt:55-98` verbatim as `NavDisplay` `transitionSpec` /
@@ -180,7 +180,7 @@ sub-detail). Changes from that plan:
   shared-bounds route predicate (`fadeOut(targetAlpha = 0.7f)` under a growing tile). Header: Convx + `AppNavHost.kt`.
   Tab switch: Convx `AppRootContent.kt:990` `fadeIn(tween(220)) togetherWith fadeOut(tween(160))`.
 - Wire the already-ported `rememberNavTransitionFreeze(currentRoute, lastNavWasPop)` (`D/backdrop/backdrops/
-  NavTransitionFreeze.kt:37`) into `AppBackdropState` from `RovstiNavHost`, exactly as `$CXK/AppBackdropState.kt:66-74`,
+  NavTransitionFreeze.kt:37`) into `AppBackdropState` from `RostyNavHost`, exactly as `$CXK/AppBackdropState.kt:66-74`,
   so chrome glass freezes during a push instead of re-recording every frame.
 - Shared bounds: `Motion.sharedArtwork()` 500 ms (`$CXK/ui/utils/Motion.kt:26-31`) for the large-avatar flight;
   port `$CXK/ui/utils/SharedArtwork.kt` helpers where they are not music-specific.
@@ -212,13 +212,13 @@ Commit: `Kotlin UI (E1 R4): alphabet rail ported from Convx, swipe row group; cl
 
 ## Step 6 (E1.20): Coil 3 loader and PhotoViewer
 
-As `round-03-e1.17-e1.22.md` Step 6 (Coil 3.6.3 `coil-compose` + `coil-core`, `media/RovstiImages.kt`,
+As `round-03-e1.17-e1.22.md` Step 6 (Coil 3.6.3 `coil-compose` + `coil-core`, `media/RostyImages.kt`,
 `media/ZoomMath.kt` pure and tested, `media/PhotoViewer.kt` as an `OverlayEntry`, own pager, fake image loader in
-`ShotTest` replacing `TODO(E1.20)` at `android/testing/src/main/kotlin/dev/rovsti/testing/ShotTest.kt:46`, catalog
+`ShotTest` replacing `TODO(E1.20)` at `android/testing/src/main/kotlin/dev/rosty/testing/ShotTest.kt:46`, catalog
 `PhotosPage`). Differences: the viewer's chrome uses the ported `FrostedTopBar` + `GlassCircleButton` (Step 3) and
 the bottom toolbar uses `IosToolbarGroup`; open/close uses the shared-bounds helper from Step 4 (500 ms
-`sharedArtwork` spec) when inside `RovstiNavHost`; background dims with `1 - dismissProgress`. Convx has no viewer, so
-this is Rovsti code (GPL, our header). Add Coil (Apache-2.0) to `THIRD_PARTY_NOTICES.md` as a dependency note.
+`sharedArtwork` spec) when inside `RostyNavHost`; background dims with `1 - dismissProgress`. Convx has no viewer, so
+this is Rosty code (GPL, our header). Add Coil (Apache-2.0) to `THIRD_PARTY_NOTICES.md` as a dependency note.
 Tests: `ZoomMathTest`, `PhotoViewerTest`, `ImageSlotTest`. Screenshots OPENED: `e1.20-viewer-{fit,zoomed,dismiss-drag,
 paging}` (dark background in both themes; light variant proves the chrome tint), `e1.20-photos-grid-{light,dark}`.
 

@@ -1,7 +1,7 @@
 # Layout system
 
 One shared layout system for Phone, Messages, Contacts and Stops. Part 1 audits the
-current screens. Part 2 is the spec that `rovsti_ui` implements (`layout` tokens and
+current screens. Part 2 is the spec that `rosty_ui` implements (`layout` tokens and
 geometry, `PageHeader`, `ListRow`, `AvatarStack`, `FilterChipRow`, `SectionHeader`,
 `EmptyState`, one bottom-inset function). All numbers are dp (1 dp = 2 px in the
 412 x 915 dp headless shots).
@@ -166,7 +166,7 @@ area). The shots simulate `safe.top = 24` and `safe.bottom = 16`.
 * Content bottom inset for every scrollable view: `safe.bottom + 8 + 56 + 16 + keyboard`
   (= `safe.bottom + 80 + keyboard`). `keyboard` is the IME height not already consumed
   by the screen. There is exactly one function for this
-  (`rovsti_ui::layout::content_bottom_inset`) and a view never writes its own number.
+  (`rosty_ui::layout::content_bottom_inset`) and a view never writes its own number.
 * Views without a tab bar (conversation, editor, sheets) use `safe.bottom + 8 + keyboard`.
 
 ### 2.4 Touch targets
@@ -315,7 +315,7 @@ count and Spam badge rects in `messages/01-inbox-*`).
 Rules that follow:
 
 1. Secondary text in light mode uses the kit colour at 82 % alpha (about `#5F5F65` on white),
-   not the translucent 60 % kit value. The change is made in `rovsti_ui::theme::colors`, not
+   not the translucent 60 % kit value. The change is made in `rosty_ui::theme::colors`, not
    by apps.
 2. A solid accent fill with white text uses `accent_solid`, never the plain accent. Accent as text uses
    `theme::accent_text(theme)` (the accent adjusted with `geom::ensure_contrast`, which keeps
@@ -328,7 +328,7 @@ Rules that follow:
 ### 2.12a Avatar initials
 
 `geom::initials_size(avatar) = (avatar * 0.36).round()`: 17 dp at 48, 14 dp at 40, 10 dp
-at 28, weight 600 (not Headline bold). `rovsti_core::avatar` takes at most 2 graphemes and
+at 28, weight 600 (not Headline bold). `rosty_core::avatar` takes at most 2 graphemes and
 keeps Turkish dotted capitals ("İG", "Şİ"). The source badge centre sits on the avatar rim
 at 45 degrees (`geom::source_badge_offset`, at least `avatar / 2 * 0.95` from the avatar
 centre), so two-letter initials keep clear of it.
@@ -465,11 +465,11 @@ they act as an action list.
 | `apps/contacts/src/editor.rs:848` `photo_source_choices` | Photo source list (Take, Choose, Crop, Remove) as a sheet | Popover anchored to the avatar | contacts |
 | `apps/contacts/src/trash.rs:385-535`, `select.rs:528-583`, `cleanup.rs:252-410` `glass_pill(` | Select mode and action bars as a row of text pills (C10) | 2.16 buttons; actions beyond 3 go in a "..." popover; delete is a confirm page | contacts |
 | `apps/contacts/src/main.rs:1702-1922` `glass_pill(` | Permission, empty-state and header text pills (Select, Edit, Done, Create Contact) | 2.16 buttons and `EmptyState` actions | contacts |
-| `apps/contacts/src/ui.rs:253` `glass_pill(` | Shared contacts pill helper | Replaced by `rovsti_ui::button`; delete the helper | contacts |
+| `apps/contacts/src/ui.rs:253` `glass_pill(` | Shared contacts pill helper | Replaced by `rosty_ui::button`; delete the helper | contacts |
 
 ### 2.16 Buttons
 
-One set in `rovsti_ui::button`. Text pills built with `glass_pill(` and loose text links
+One set in `rosty_ui::button`. Text pills built with `glass_pill(` and loose text links
 are replaced by it; `glass_pill` stays only as the chrome of floating controls (header
 circles, tab bar).
 
@@ -514,9 +514,9 @@ its fill is at least 4.5:1 in both themes (2.12).
 | `filter_chip_row` | `ChatItem::Filters` wrapped chips | 2.9 |
 | `section_header`, `empty_state` | per-app text | 2.10 |
 | `layout::content_bottom_inset` | `content_bottom_inset` and `content_bottom_inset_with` | 2.3 |
-| `Menu` popover (`rovsti_ui::menu`, pure model and geometry in `menu/model.rs`) | `menu_card`, inline pill rows, `open_field_sheet` for short lists | 2.15 |
+| `Menu` popover (`rosty_ui::menu`, pure model and geometry in `menu/model.rs`) | `menu_card`, inline pill rows, `open_field_sheet` for short lists | 2.15 |
 | `GlassSpec::thick` | see-through overlay material of sheets, menus and action sheets | 2.15 |
-| `Button` (`rovsti_ui::button`: Filled, Tinted, Gray, Plain, Destructive; Large, Regular, Small) | `glass_pill(` text pills, text links | 2.16 |
+| `Button` (`rosty_ui::button`: Filled, Tinted, Gray, Plain, Destructive; Large, Regular, Small) | `glass_pill(` text pills, text links | 2.16 |
 
 ### 2.14 Migrated screens
 

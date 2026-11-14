@@ -2,7 +2,7 @@
 //! opens from it, and the signature moments S17 (route bloom) and S18 (device
 //! arrival). Stories 14.5 to 14.8, FR-41 to FR-43, AD-23.
 //!
-//! The list itself (`rovsti_core::audio::EndpointList`) is decided by the
+//! The list itself (`rosty_core::audio::EndpointList`) is decided by the
 //! core and held by the backend; this file only draws it. Everything the
 //! views show is built when data arrives ([`RouteUi::sync`]): rows and the
 //! control's caption are `SharedString`s, so rendering never formats. The
@@ -15,11 +15,11 @@ use gpui::{
     ParentElement, Pixels, Point, Role, ScrollHandle, SharedString, StatefulInteractiveElement,
     Styled, TouchPhase, Window, div, point, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     audio::{Decision, EndpointList, Row, RowKind},
     wire::AudioRoute,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     glass::{GlassSpec, glass},
     moments::{Fade, RippleRing},
@@ -610,7 +610,7 @@ impl PhoneApp {
         if !self.incall.audio_usable() {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         if self.route.face.toggle || self.route.rows.is_empty() {
             self.incall_toggle_speaker(window, cx);
         } else {
@@ -622,7 +622,7 @@ impl PhoneApp {
         if !self.incall.audio_usable() || self.route.open {
             return;
         }
-        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        rosty_ui::haptics::perform(window, HapticFeedback::LongPress);
         self.route.long_fired = true;
         self.route.control_tap.spoil();
         self.presses.release_all();
@@ -710,7 +710,7 @@ impl PhoneApp {
                     && let Some(id) = press_id(hit, &self.route)
                 {
                     self.presses.touch_down(id);
-                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                    rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                     cx.notify();
                 }
             }
@@ -776,7 +776,7 @@ impl PhoneApp {
             .backend
             .update(cx, |backend, cx| backend.route_endpoint(&id, cx));
         self.route_close(window, cx);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         if outcome.failed() {
             self.show_notice_pill(format!("Couldn't switch to {}", row.label), None, false, cx);
             return;
@@ -841,9 +841,9 @@ impl PhoneApp {
     fn route_footer(&mut self, k: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.route_close(window, cx);
         let page = if k == 0 {
-            rovsti_android::telecom::SystemPage::Bluetooth
+            rosty_android::telecom::SystemPage::Bluetooth
         } else {
-            rovsti_android::telecom::SystemPage::HearingDevices
+            rosty_android::telecom::SystemPage::HearingDevices
         };
         if let Some(text) = backend::open_system(page).notice() {
             self.show_notice_pill(text, None, false, cx);
@@ -1327,7 +1327,7 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::{
+    use rosty_core::{
         audio::MAX_ROWS,
         wire::{Endpoint, EndpointType},
     };

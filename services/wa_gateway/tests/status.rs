@@ -1,15 +1,15 @@
 #![allow(clippy::unwrap_used)]
 
 //! Status updates end to end: a real server on loopback with the scripted
-//! driver, driven by the real `rovsti_wa_client`.
+//! driver, driven by the real `rosty_wa_client`.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
-use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, subscribe};
-use rovsti_wa_proto::{
+use rosty_wa_client::{ClientError, ClientEvent, EventStream, Gateway, subscribe};
+use rosty_wa_proto::{
     AppId, ConnectKey, CreateInstance, CreatedInstance, ErrorCode, GatewayEvent, GatewayUrl,
     LinkRequest, MessageBody, STATUS_BROADCAST, StatusItem, StatusKind, StatusMedia, WaMessage,
 };

@@ -5,8 +5,8 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::call_log_query::{PruneAge, ids_older_than, prune_none_text};
-use rovsti_ui::{
+use rosty_core::call_log_query::{PruneAge, ids_older_than, prune_none_text};
+use rosty_ui::{
     Icon,
     motion::press_scale,
     motion_tokens::scale,
@@ -47,7 +47,7 @@ impl PhoneApp {
             backend::Load::Ready(log) => Some(log),
             _ => None,
         };
-        let source: &[rovsti_core::wire::CallLogEntry] = log.as_ref().map_or(&[], |l| &l.source);
+        let source: &[rosty_core::wire::CallLogEntry] = log.as_ref().map_or(&[], |l| &l.source);
         let extras = self.wa_call.read(cx).recents_extras();
         PruneAge::ALL
             .iter()

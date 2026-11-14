@@ -1,5 +1,5 @@
 //! The In-Call zone (stories 15.4 to 15.8): the slot constants every scene
-//! shares, the view-models built from `rovsti_core::scene`, and the springs of
+//! shares, the view-models built from `rosty_core::scene`, and the springs of
 //! the multi-call moments (S19 Hold-away, S20 Swap crossing, S21 Merge weave,
 //! S22 Participant eject).
 //!
@@ -11,14 +11,14 @@
 use std::{sync::Arc, time::Duration};
 
 use gpui::{Context, Render, SharedString, Window, div, prelude::*, px};
-use rovsti_core::{
+use rosty_core::{
     avatar,
     call::{caller_label, format_elapsed, format_number},
     scene::{CallScene, Control, DisabledReason, Layout},
     wire::WireCall,
 };
-use rovsti_ui::{current_theme, motion_tokens, spring::Spring, theme, tokens::typography};
-use rovsti_wa_proto::{WaControl, WaScreen};
+use rosty_ui::{current_theme, motion_tokens, spring::Spring, theme, tokens::typography};
+use rosty_wa_proto::{WaControl, WaScreen};
 
 use crate::backend::now_ms;
 
@@ -125,7 +125,7 @@ impl Party {
             .as_deref()
             .is_some_and(|n| !n.trim().is_empty());
         let secondary = named
-            .then(|| rovsti_core::PhoneNumber::parse(&call.number_raw).ok())
+            .then(|| rosty_core::PhoneNumber::parse(&call.number_raw).ok())
             .flatten()
             .map(|n| SharedString::from(middle_truncate(&format_number(&n), 28)));
         Self {
@@ -198,7 +198,7 @@ pub(crate) struct Conference {
 }
 
 impl Conference {
-    fn of(host: &WireCall, participants: &rovsti_core::scene::Participants<'_>) -> Self {
+    fn of(host: &WireCall, participants: &rosty_core::scene::Participants<'_>) -> Self {
         let rows: Vec<Row> = participants
             .iter()
             .map(|p| {
@@ -524,12 +524,12 @@ pub(crate) struct ZoneState {
     /// The "Call ended" second of a call that ended beside a live one.
     pub ended_task: Option<gpui::Task<()>>,
     /// Reduced motion: the 120 ms cross-fade that replaces S19 to S22.
-    pub cross: rovsti_ui::moments::Fade,
-    pub tap: rovsti_ui::touch::TapGuard,
+    pub cross: rosty_ui::moments::Fade,
+    pub tap: rosty_ui::touch::TapGuard,
     pub bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
 }
 
-fn sp(value: f32, params: rovsti_ui::spring::SpringParams) -> Spring {
+fn sp(value: f32, params: rosty_ui::spring::SpringParams) -> Spring {
     Spring::new(value, params).with_epsilon(0.002)
 }
 
@@ -563,8 +563,8 @@ impl ZoneState {
             press_row: None,
             synced: false,
             ended_task: None,
-            cross: rovsti_ui::moments::Fade::default(),
-            tap: rovsti_ui::touch::TapGuard::default(),
+            cross: rosty_ui::moments::Fade::default(),
+            tap: rosty_ui::touch::TapGuard::default(),
             bounds: std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::default())),
         }
     }
@@ -627,7 +627,7 @@ pub(crate) struct SceneIn {
     pub ended: Option<Party>,
     pub conference: Option<Conference>,
     pub enablement: Enablement,
-    pub failed: Option<rovsti_core::wire::PendingOp>,
+    pub failed: Option<rosty_core::wire::PendingOp>,
 }
 
 impl SceneIn {
@@ -646,7 +646,7 @@ impl SceneIn {
         }
     }
 
-    pub(crate) fn of(scene: &CallScene<'_>, failed: Option<rovsti_core::wire::PendingOp>) -> Self {
+    pub(crate) fn of(scene: &CallScene<'_>, failed: Option<rosty_core::wire::PendingOp>) -> Self {
         Self {
             face: face_of(scene),
             fg_id: scene.primary().map(|c| c.id),
@@ -712,7 +712,7 @@ pub(crate) fn conference_of(scene: &CallScene<'_>) -> Option<Conference> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::wire::{CallSnapshot, WireCallState, caps};
+    use rosty_core::wire::{CallSnapshot, WireCallState, caps};
 
     fn call(id: i32, state: WireCallState) -> WireCall {
         WireCall {
@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn an_emergency_call_dims_add_call_and_merge_with_the_emergency_reason() {
         let mut c = call(1, WireCallState::Active);
-        c.props = rovsti_core::wire::props::EMERGENCY;
+        c.props = rosty_core::wire::props::EMERGENCY;
         let s = CallSnapshot {
             calls: vec![c],
             foreground_call_id: Some(1),
@@ -854,7 +854,7 @@ mod tests {
     #[test]
     fn a_conference_builds_rows_with_actions_only_where_the_child_reports_them() {
         let mut host = call(9, WireCallState::Active);
-        host.props = rovsti_core::wire::props::CONFERENCE;
+        host.props = rosty_core::wire::props::CONFERENCE;
         host.children = vec![1, 2];
         let mut a = call(1, WireCallState::Active);
         a.parent_id = Some(9);
@@ -885,7 +885,7 @@ mod tests {
     #[test]
     fn hidden_participants_become_one_summary() {
         let mut host = call(9, WireCallState::Active);
-        host.props = rovsti_core::wire::props::CONFERENCE;
+        host.props = rosty_core::wire::props::CONFERENCE;
         host.children = vec![21, 22, 23];
         let s = CallSnapshot {
             calls: vec![host],
@@ -901,7 +901,7 @@ mod tests {
     #[test]
     fn more_than_three_participants_overflow_into_a_count() {
         let mut host = call(9, WireCallState::Active);
-        host.props = rovsti_core::wire::props::CONFERENCE;
+        host.props = rosty_core::wire::props::CONFERENCE;
         host.children = (1..=6).collect();
         let mut calls: Vec<WireCall> = (1..=6)
             .map(|i| WireCall {
@@ -923,7 +923,7 @@ mod tests {
 
     // ---- WhatsApp ------------------------------------------------------------
 
-    fn wa_screen(phase: rovsti_wa_proto::WaScreenPhase) -> WaScreen {
+    fn wa_screen(phase: rosty_wa_proto::WaScreenPhase) -> WaScreen {
         WaScreen {
             call_id: "wa1".into(),
             title: "Ayşe".into(),
@@ -947,7 +947,7 @@ mod tests {
 
     #[test]
     fn an_active_whatsapp_call_enables_mute_and_audio_only() {
-        use rovsti_wa_proto::WaScreenPhase;
+        use rosty_wa_proto::WaScreenPhase;
         let e = Enablement::of_wa(&wa_screen(WaScreenPhase::Active));
         assert!(e.enabled(Slot::Mute) && e.enabled(Slot::Audio));
         for slot in [Slot::Keypad, Slot::AddCall, Slot::HoldSwap, Slot::Merge] {
@@ -962,7 +962,7 @@ mod tests {
 
     #[test]
     fn mute_and_audio_wait_until_the_whatsapp_call_connects() {
-        use rovsti_wa_proto::WaScreenPhase;
+        use rosty_wa_proto::WaScreenPhase;
         for phase in [WaScreenPhase::Calling, WaScreenPhase::Ringing] {
             let e = Enablement::of_wa(&wa_screen(phase));
             assert_eq!(e.reason(Slot::Mute), Some(DisabledReason::Connecting));
@@ -974,7 +974,7 @@ mod tests {
 
     #[test]
     fn the_whatsapp_zone_rebuilds_when_controls_change() {
-        use rovsti_wa_proto::WaScreenPhase;
+        use rosty_wa_proto::WaScreenPhase;
         let calling = wa_key(&wa_screen(WaScreenPhase::Calling));
         assert_eq!(calling, wa_key(&wa_screen(WaScreenPhase::Calling)));
         assert_ne!(calling, wa_key(&wa_screen(WaScreenPhase::Active)));

@@ -1,13 +1,13 @@
-# Plan: Rovsti Messages, round 3
+# Plan: Rosty Messages, round 3
 
 - Base: `2390e2399e832c6c285c15660d269bf7c532016f` ("Seam: attachment pick with its own op and the MIME type")
-- Unit: Rovsti Messages. Continues `messages-r2.md` (step 1 landed at the base).
+- Unit: Rosty Messages. Continues `messages-r2.md` (step 1 landed at the base).
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android`
 
-## Step 1. Pure: outgoing media in the WhatsApp timeline (`rovsti_wa_proto`)
+## Step 1. Pure: outgoing media in the WhatsApp timeline (`rosty_wa_proto`)
 
-Round 2 step 2, pending at the base. Files: `crates/rovsti_wa_proto/src/{media.rs (new), timeline.rs, lib.rs}`.
+Round 2 step 2, pending at the base. Files: `crates/rosty_wa_proto/src/{media.rs (new), timeline.rs, lib.rs}`.
 
 - `media::classify(mime, name, head) -> (MediaKind, String)`: picker MIME wins; missing or
   `application/octet-stream` falls back to magic bytes (JPEG, PNG, WEBP, GIF, PDF, MP4), then
@@ -28,8 +28,8 @@ path, roadmap and acceptance docs.
 ## Status (re-check at `fed4ad0c86e6734d5f0c82383ca41be1050cda38`, "review fixes")
 
 Both steps landed: step 1 in `a5144fc`, step 2 in `c529631`, review fixes in `fed4ad0`.
-`git stash list` is empty. Every Rovsti Messages item in `docs/roadmap.md` is ticked, and
-`rovsti_wa_ui::WhatsAppSettings` is in Phone, Messages, Contacts and Stops. All checks pass
-at this commit (fmt, clippy `-D warnings`, workspace tests, `rovsti_android` and
-`rovsti_wa_client` for `aarch64-linux-android`). The unit is done. What remains needs a
+`git stash list` is empty. Every Rosty Messages item in `docs/roadmap.md` is ticked, and
+`rosty_wa_ui::WhatsAppSettings` is in Phone, Messages, Contacts and Stops. All checks pass
+at this commit (fmt, clippy `-D warnings`, workspace tests, `rosty_android` and
+`rosty_wa_client` for `aarch64-linux-android`). The unit is done. What remains needs a
 device (`docs/messages-acceptance.md`) or is out of scope (see "Left out" in `messages-r2.md`).

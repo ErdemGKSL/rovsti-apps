@@ -1,6 +1,6 @@
 //! The Setup button in the page header and the glass sheet it opens.
 //!
-//! The checklist comes from `rovsti_core::setup` through
+//! The checklist comes from `rosty_core::setup` through
 //! `Backend::setup_checklist`; this file only lays it out and maps each row's
 //! buttons to Android actions. The sheet is an overlay, so opening it never
 //! moves the page underneath.
@@ -11,8 +11,8 @@ use gpui::{
     AnyElement, App, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px, relative, svg,
 };
-use rovsti_core::setup::{ItemState, ItemStatus, SetupChecklist, SetupItem, can_confirm};
-use rovsti_ui::{
+use rosty_core::setup::{ItemState, ItemStatus, SetupChecklist, SetupItem, can_confirm};
+use rosty_ui::{
     Icon,
     components::glass_icon_button_scaled,
     motion::press_scale,
@@ -248,7 +248,7 @@ impl PhoneApp {
                 "In Other permissions, turn on Display pop-up windows while running in the background."
             }
             SetupItem::BatterySaver => "Choose No restrictions.",
-            SetupItem::Autostart => "Switch Rovsti Phone on.",
+            SetupItem::Autostart => "Switch Rosty Phone on.",
             _ => return None,
         };
         let tail = if self.fell_back.contains(item) {
@@ -337,7 +337,7 @@ impl PhoneApp {
         button: &Button,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let colors = rovsti_ui::theme::colors(theme);
+        let colors = rosty_ui::theme::colors(theme);
         let id = interned(Label::Button, item, index, || {
             format!("sheet-{}-{index}", item.key())
         });
@@ -388,7 +388,7 @@ impl PhoneApp {
         status: ItemStatus,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let colors = rovsti_ui::theme::colors(theme);
+        let colors = rosty_ui::theme::colors(theme);
         let done = status.state.is_done();
         let (icon, tint) = match status.state {
             ItemState::Done => (Icon::LucideCircleCheck, colors.green),
@@ -480,7 +480,7 @@ impl PhoneApp {
         list: &SetupChecklist,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let colors = rovsti_ui::theme::colors(theme);
+        let colors = rosty_ui::theme::colors(theme);
         let progress = list.progress();
         let fraction = if progress.total == 0 {
             1.0
@@ -574,7 +574,7 @@ impl PhoneApp {
         if !self.sheet.is_visible() {
             return None;
         }
-        let colors = rovsti_ui::theme::colors(theme);
+        let colors = rosty_ui::theme::colors(theme);
         let list = self.checklist(cx);
         let reveal = |index: usize, el: AnyElement| {
             let (alpha, lift) = self.sheet.rise(index);

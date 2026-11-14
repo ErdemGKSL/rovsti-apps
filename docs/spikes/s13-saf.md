@@ -12,11 +12,11 @@ picker (`ACTION_CREATE_DOCUMENT`), then asks for the same file through the "open
 ## Owner procedure
 
 1. Settings -> Data -> Export favorites and settings. Pick a place (Downloads is fine). The pill
-   says "Saved to rovsti-phone-backup-{date}.json".
+   says "Saved to rosty-phone-backup-{date}.json".
 2. Settings -> Data -> Import, choose that file: the Import preview sheet lists what it replaces.
    Cancel it.
 3. Diagnostics -> Backup -> Run: save the test file when asked, then choose it when asked again.
-4. Import a text file that is not a backup (any .txt): the red row "This isn't a Rovsti Phone
+4. Import a text file that is not a backup (any .txt): the red row "This isn't a Rosty Phone
    backup." appears and nothing changes.
 
 ## Shipped default and fallback

@@ -1,6 +1,6 @@
 //! The unified inbox: how SMS threads and WhatsApp chats become rows.
 //!
-//! Merging is `rovsti_core::inbox::merge`; this module only maps its rows to
+//! Merging is `rosty_core::inbox::merge`; this module only maps its rows to
 //! what the screen shows (title, badges, unread count, OTP chip, spam
 //! filtering) and draws one row. The mapping is pure and tested here, the
 //! drawing is a thin GPUI shell.
@@ -14,7 +14,7 @@ use gpui::{
     AnyElement, App, ClickEvent, InteractiveElement, IntoElement, LongPressEvent, ParentElement,
     RenderImage, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     Channel, PhoneNumber, ThreadId,
     blocklist::BlockSet,
     inbox::{InboxRow, InboxThread, PersonKey, merge},
@@ -27,19 +27,19 @@ use rovsti_core::{
     thread_marks::SmsMarks,
     unread_jump,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon, layout,
     menu::AnchorSlot,
     row::{BadgeTone, ListRow, SourceKind, with_source_badges},
     theme,
     tokens::{Theme, typography},
 };
-use rovsti_wa_proto::{
+use rosty_wa_proto::{
     ChatActionKind, ChatMeta, DeliveryStatus, InstanceState, MUTED_FOREVER, MessageBody,
     MessageMeta, RichChat, WaMessage, event::ReceiptKind, is_pn_jid, is_status_chat, jid_user,
-    meta::body_preview, to_rovsti,
+    meta::body_preview, to_rosty,
 };
-use rovsti_wa_ui::{display_name, photo_avatar};
+use rosty_wa_ui::{display_name, photo_avatar};
 
 use crate::conversation::civil_from_days;
 use crate::notifications::thread_tag;
@@ -583,7 +583,7 @@ fn is_archived(row: &InboxRow, wa: &HashMap<String, WaChatInfo>, marks: &SmsMark
 
 /// Only a one-to-one conversation that lives purely in SMS can be spam:
 /// anyone also on WhatsApp, a contact or a group never is. The verdict is on
-/// the newest message, like the notification path (`rovsti_core::spam`).
+/// the newest message, like the notification path (`rosty_core::spam`).
 fn is_spam(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> bool {
     if row.channels != [Channel::Sms] {
         return false;
@@ -641,7 +641,7 @@ pub fn chat_threads(chats: &[RichChat], have: &[InboxThread]) -> Vec<InboxThread
         .filter_map(|rich| {
             let chat = &rich.chat;
             let is_group = chat.is_group || chat.jid.ends_with("@g.us");
-            let mut last = to_rovsti(chat.last.as_ref()?);
+            let mut last = to_rosty(chat.last.as_ref()?);
             let id = ThreadId::WhatsApp(chat.jid.clone());
             if let Some(held) = have.iter().find(|t| t.id == id)
                 && held.last.timestamp_ms > last.timestamp_ms
@@ -669,7 +669,7 @@ pub fn chat_threads(chats: &[RichChat], have: &[InboxThread]) -> Vec<InboxThread
 /// newest message, and an incoming one counts as unread unless the chat is
 /// open. A chat not yet in the list starts a thread.
 pub fn fold_message(threads: &mut Vec<InboxThread>, message: &WaMessage, viewing: bool) {
-    let last = to_rovsti(message);
+    let last = to_rosty(message);
     let id = ThreadId::WhatsApp(message.chat.clone());
     let bump = u32::from(!message.from_me && !viewing);
     match threads.iter_mut().find(|t| t.id == id) {
@@ -897,8 +897,8 @@ pub fn bulk_facts(
     row: &RowView,
     prefs: &crate::prefs::MessagesPrefs,
     sms_only: bool,
-) -> rovsti_core::inbox_bulk::BulkFacts {
-    rovsti_core::inbox_bulk::BulkFacts {
+) -> rosty_core::inbox_bulk::BulkFacts {
+    rosty_core::inbox_bulk::BulkFacts {
         unread: row.unread > 0 || row.marked_unread,
         muted: row.muted,
         pinned: row.pinned,
@@ -1011,7 +1011,7 @@ fn contact_photo(row: &InboxRow, sms: &SmsIndex<'_>, contacts: &ContactIndex) ->
 
 /// Up to two initials; `#` for a number or an empty name.
 pub fn initials(title: &str) -> String {
-    let letters = rovsti_core::avatar::initials(title);
+    let letters = rosty_core::avatar::initials(title);
     if letters.is_empty() {
         "#".to_owned()
     } else {
@@ -1242,7 +1242,7 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::{
+    use rosty_core::{
         Message, MessageDirection, PhoneNumber,
         wire::{BlockedNumber, WireContact, WireNumber},
     };
@@ -2303,12 +2303,12 @@ mod tests {
             sender: None,
             from_me,
             timestamp_ms: ts,
-            body: rovsti_wa_proto::MessageBody::Text(id.into()),
+            body: rosty_wa_proto::MessageBody::Text(id.into()),
             reactions: vec![],
         }
     }
 
-    fn rich(chat: rovsti_wa_proto::ChatSummary) -> RichChat {
+    fn rich(chat: rosty_wa_proto::ChatSummary) -> RichChat {
         RichChat {
             chat,
             meta: ChatMeta::default(),
@@ -2319,7 +2319,7 @@ mod tests {
     #[test]
     fn the_chat_list_becomes_threads_and_keeps_newer_live_messages() {
         let chat = |jid: &str, name: Option<&str>, last: Option<WaMessage>, unread| {
-            rich(rovsti_wa_proto::ChatSummary {
+            rich(rosty_wa_proto::ChatSummary {
                 jid: jid.into(),
                 name: name.map(Into::into),
                 last,
@@ -2330,7 +2330,7 @@ mod tests {
         let jid = "905321234567@s.whatsapp.net";
         let live = vec![InboxThread {
             id: ThreadId::WhatsApp(jid.into()),
-            last: to_rovsti(&wa_message(jid, "live", false, 900)),
+            last: to_rosty(&wa_message(jid, "live", false, 900)),
             unread: 5,
             title: None,
             is_group: false,
@@ -2364,7 +2364,7 @@ mod tests {
     #[test]
     fn a_nameless_chat_takes_the_push_name_but_a_group_does_not() {
         let jid = "905321234567@s.whatsapp.net";
-        let mut one = rich(rovsti_wa_proto::ChatSummary {
+        let mut one = rich(rosty_wa_proto::ChatSummary {
             jid: jid.into(),
             name: None,
             last: Some(wa_message(jid, "a", false, 10)),
@@ -2372,7 +2372,7 @@ mod tests {
             is_group: false,
         });
         one.meta.push_name = Some("ayse".into());
-        let mut group = rich(rovsti_wa_proto::ChatSummary {
+        let mut group = rich(rosty_wa_proto::ChatSummary {
             jid: "1@g.us".into(),
             name: None,
             last: Some(wa_message("1@g.us", "g", false, 5)),
@@ -2415,7 +2415,7 @@ mod tests {
             info(
                 ChatMeta {
                     pinned: true,
-                    muted_until_ms: Some(rovsti_wa_proto::MUTED_FOREVER),
+                    muted_until_ms: Some(rosty_wa_proto::MUTED_FOREVER),
                     picture_id: Some("pic".into()),
                     ..ChatMeta::default()
                 },
@@ -2586,7 +2586,7 @@ mod tests {
             info(ChatMeta::default(), Some(l), false)
         };
         let location = MessageMeta {
-            location: Some(rovsti_wa_proto::Location {
+            location: Some(rosty_wa_proto::Location {
                 latitude: 41.0,
                 longitude: 29.0,
                 name: Some("Kadıköy".into()),
@@ -2599,7 +2599,7 @@ mod tests {
             Some("Location · Kadıköy")
         );
         let card = MessageMeta {
-            contact: Some(rovsti_wa_proto::SharedContact {
+            contact: Some(rosty_wa_proto::SharedContact {
                 display_name: "Ada".into(),
                 vcard: String::new(),
             }),
@@ -2610,7 +2610,7 @@ mod tests {
             Some("Contact · Ada")
         );
         let voice = MessageMeta {
-            media: Some(rovsti_wa_proto::MediaMeta {
+            media: Some(rosty_wa_proto::MediaMeta {
                 voice_note: true,
                 seconds: Some(75),
                 ..Default::default()
@@ -2618,7 +2618,7 @@ mod tests {
             ..MessageMeta::default()
         };
         let audio = MessageBody::Media {
-            kind: rovsti_wa_proto::MediaKind::Audio,
+            kind: rosty_wa_proto::MediaKind::Audio,
             caption: None,
             mime: "audio/ogg".into(),
             size: 1,

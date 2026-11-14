@@ -6,14 +6,14 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px, svg,
 };
-use rovsti_android::permissions::{self, Group};
-use rovsti_core::{
+use rosty_android::permissions::{self, Group};
+use rosty_core::{
     call_log::CallType,
     contact_card::ContactCard,
     contact_history::{self, CARD_LIMIT},
     recents::{HistoryLine, LocaleTime},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::section,
     theme,
@@ -267,7 +267,7 @@ impl ContactsApp {
                                 let number = number.clone();
                                 this.act(
                                     "call",
-                                    move || rovsti_android::telecom::place_call(&number),
+                                    move || rosty_android::telecom::place_call(&number),
                                     cx,
                                 );
                             }))
@@ -283,7 +283,7 @@ impl ContactsApp {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_core::call_log::EntryRef;
+    use rosty_core::call_log::EntryRef;
 
     use super::*;
 

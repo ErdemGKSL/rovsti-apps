@@ -1,6 +1,6 @@
 # Convx research: navigation, app structure, chrome, lists, search, input, haptics, accessibility
 
-Scope: how Convx (Kotlin + Jetpack Compose) structures navigation and chrome, and what Rovsti's own Compose UI should do. This is a research input for the Rovsti Kotlin UI rewrite (the GPUI apps are being deprecated).
+Scope: how Convx (Kotlin + Jetpack Compose) structures navigation and chrome, and what Rosty's own Compose UI should do. This is a research input for the Rosty Kotlin UI rewrite (the GPUI apps are being deprecated).
 
 Source: `cosmictaserdev-creator/Convx` at `$REF` = `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/ref/Convx`.
 
@@ -17,8 +17,8 @@ Sibling reports: `convx-glass.md` (glass rendering, tokens) and `convx-motion.md
 
 ## 0. Licence and provenance (read first)
 
-- Convx is GPL-3.0 (`LICENSE`; file headers such as `A/AppNavHost.kt:1-4`). Rovsti is MIT/Apache. Nothing here is a copy of Convx code. The pseudo-code in this file is written from scratch and paraphrases behaviour. Numbers (durations, stiffness, dp) are facts about a design, not expression, and may be reused.
-- Rule for the implementer: read this file, not the Convx source, while writing Rovsti code. Do not paste or lightly rename Convx functions. Names like `foldGeometry`, `SpringEasing`, `DampedDragAnimation`, `AxisStaggerSpec` are Convx identifiers; use your own names and your own code structure.
+- Convx is GPL-3.0 (`LICENSE`; file headers such as `A/AppNavHost.kt:1-4`). Rosty is MIT/Apache. Nothing here is a copy of Convx code. The pseudo-code in this file is written from scratch and paraphrases behaviour. Numbers (durations, stiffness, dp) are facts about a design, not expression, and may be reused.
+- Rule for the implementer: read this file, not the Convx source, while writing Rosty code. Do not paste or lightly rename Convx functions. Names like `foldGeometry`, `SpringEasing`, `DampedDragAnimation`, `AxisStaggerSpec` are Convx identifiers; use your own names and your own code structure.
 - Several Convx pieces are vendored from permissive upstreams, which are the only legitimate copy sources:
   - `FT/FloatingTabBar.kt:1-24` header: "FloatingTabBar v1.0.1 by Elyes Mansour ... Apache License 2.0" (`github.com/elyesmansour/compose-floating-tab-bar`), with Convx modifications on top (centred layout, draggable puck).
   - `C/backdrop/catalog/utils/DampedDragAnimation.kt:1-7`: "Copyright 2026, compose-miuix-ui contributors, Apache-2.0", ported from the Kyant0 "AndroidLiquidGlass" catalog (`LiquidBottomTabs`). Kyant0/backdrop is Apache-2.0 (see `convx-glass.md` section 0).
@@ -43,8 +43,8 @@ Sibling reports: `convx-glass.md` (glass rendering, tokens) and `convx-motion.md
 
 - Navigation Compose (`androidx.navigation.compose.NavHost`) with string routes; `AppNavHost` is a thin wrapper that supplies four transition lambdas and calls `navigationBuilder(...)` for the destination graph (`A/AppNavHost.kt:35-102`, graph in `A/ui/screens/NavigationBuilder.kt`, 807 lines). Compose BOM version 1.10.2 (`gradle/libs.versions.toml:5`).
 - Route policy lives in a single object, `AppRoutePolicy` (`A/AppRoutePolicy.kt:1-88`): sets of strings decide, per route, whether the tab bar shows (`showsNavigation`, line 68), whether the mini player shows (`showsPlayer`, line 69), whether the top blur appears, and so on. Tab roots are a fixed set (`tabRootRoutes`, line 7). Detail routes are matched by prefix (`album/`, `artist/`, `local_playlist/`, ... lines 76-88).
-- Idea worth copying: chrome visibility is a pure function of the current route (a policy object plus unit-testable functions), not scattered booleans in each screen. Idea not worth copying: stringly-typed prefixes. Rovsti should use typed routes (Navigation Compose 2.8+ `@Serializable` destinations) or a sealed `Route` hierarchy and keep the policy as a `when` over that type.
-- Navigating to a tab root uses the standard multi-back-stack recipe: pop to the graph start destination with `saveState = true`, then `launchSingleTop = true`, `restoreState = true` (`A/AppNavigation.kt:7-17`). Note the live tab click handler is slightly different: it pops to the start destination without saving state and `restoreState = false` (`A/AppRootContent.kt:784-800`), so tab state is not restored on click in practice. Two code paths with different semantics is a Convx inconsistency; Rovsti should have one.
+- Idea worth copying: chrome visibility is a pure function of the current route (a policy object plus unit-testable functions), not scattered booleans in each screen. Idea not worth copying: stringly-typed prefixes. Rosty should use typed routes (Navigation Compose 2.8+ `@Serializable` destinations) or a sealed `Route` hierarchy and keep the policy as a `when` over that type.
+- Navigating to a tab root uses the standard multi-back-stack recipe: pop to the graph start destination with `saveState = true`, then `launchSingleTop = true`, `restoreState = true` (`A/AppNavigation.kt:7-17`). Note the live tab click handler is slightly different: it pops to the start destination without saving state and `restoreState = false` (`A/AppRootContent.kt:784-800`), so tab state is not restored on click in practice. Two code paths with different semantics is a Convx inconsistency; Rosty should have one.
 - Reselecting the current tab does not navigate. It writes a `scrollToTop` flag into the current back stack entry's `SavedStateHandle`, and each list screen watches that flag and scrolls (`A/AppRootContent.kt:789-791`; consumer example `A/ui/screens/library/LibraryAlbumsScreen.kt:181-190`). The app bar's height offset is also reset.
 - Search is an overlay-like route, not a tab content page: `enterSearch` first sets a visual override so the bar can start its morph, waits `SearchNavTransitionDelayMs`, pops to the tab root if needed, then navigates with `launchSingleTop` (`A/AppSearchController.kt:138-151`). This is "animate first, navigate after" and avoids two transitions fighting.
 
@@ -75,7 +75,7 @@ Wiring in `A/AppNavHost.kt:55-98`, in words:
 - Pop exit: slides out to the right and fades.
 - The comment at `AppNavHost.kt:73-75` states the incoming screen stays opaque to avoid a see-through overlap. An opaque `background` is placed under the NavHost for the same reason (`A/AppRootContent.kt:889-890`).
 
-Pseudo-code (own words), for the Rovsti equivalent:
+Pseudo-code (own words), for the Rosty equivalent:
 
 ```
 val push = tween<IntOffset>(durationMillis = 380..400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
@@ -92,14 +92,14 @@ NavHost(
 
 ### 2.4 Glass freeze during transitions (perf pattern)
 
-Because the chrome samples a recorded backdrop, Convx freezes backdrop re-recording for a time window after a nav change (`C/backdrop/backdrops/NavTransitionFreeze.kt:17`, 330 ms; also a pager variant at line 50). This is a glass-specific cost; Rovsti only needs it if it re-implements real-time backdrop blur. If we use `RenderEffect` blur on API 31+ with a fixed layer, skip this. Take away: any effect that re-records the whole tree per frame must be suspended while a full-screen transition or fast scroll runs.
+Because the chrome samples a recorded backdrop, Convx freezes backdrop re-recording for a time window after a nav change (`C/backdrop/backdrops/NavTransitionFreeze.kt:17`, 330 ms; also a pager variant at line 50). This is a glass-specific cost; Rosty only needs it if it re-implements real-time backdrop blur. If we use `RenderEffect` blur on API 31+ with a fixed layer, skip this. Take away: any effect that re-records the whole tree per frame must be suspended while a full-screen transition or fast scroll runs.
 
 ## 3. Root layout and insets
 
 ### 3.1 Edge-to-edge
 
 - Window is edge-to-edge via `WindowCompat.setDecorFitsSystemWindows(window, false)` (`A/MainActivity.kt:156`) and `windowSoftInputMode="adjustResize"` (`AndroidManifest.xml:97`). `configChanges` handles orientation and size so rotation does not recreate the activity (`AndroidManifest.xml:93`).
-- Rovsti on current Android should use `enableEdgeToEdge()` (androidx.activity) instead, with `adjustResize` and Compose's `imePadding()`; the effect is the same but with correct system bar scrim handling for API 29+ gesture navigation.
+- Rosty on current Android should use `enableEdgeToEdge()` (androidx.activity) instead, with `adjustResize` and Compose's `imePadding()`; the effect is the same but with correct system bar scrim handling for API 29+ gesture navigation.
 
 ### 3.2 One computed inset for "player-aware" padding
 
@@ -113,7 +113,7 @@ Because the chrome samples a recorded backdrop, Convx freezes backdrop re-record
 
 Screens spend it as list `contentPadding`; the list itself spans the whole window and scrolls under the translucent chrome. This directly answers the owner's complaint "floating tab bar covering the last row": the last row can always scroll fully above the bar because the content padding includes the bar plus accessory height. The nav bar height itself animates with a bouncy spring (`NavigationBarAnimationSpec`, `Dimensions.kt:65`), so the reserved padding eases when the bar hides on a route.
 
-Known weakness: heights are constants (80, 64, 84 dp) that must match the real measured bar; the bar's actual height differs (row height 68 dp, accessory 64 dp plus spacing). Convx notes the 84 dp accessory constant exists because under-reserving clips content (`Dimensions.kt:24-27`). Better for Rovsti: measure the real bar with `onSizeChanged` and publish that as the bottom inset, so the number can never drift.
+Known weakness: heights are constants (80, 64, 84 dp) that must match the real measured bar; the bar's actual height differs (row height 68 dp, accessory 64 dp plus spacing). Convx notes the 84 dp accessory constant exists because under-reserving clips content (`Dimensions.kt:24-27`). Better for Rosty: measure the real bar with `onSizeChanged` and publish that as the bottom inset, so the number can never drift.
 
 Other inset facts:
 
@@ -124,7 +124,7 @@ Other inset facts:
 
 ### 3.3 Tablet / wide layout
 
-- At container width >= 840 dp the app switches to a floating side bar ("rail") instead of the bottom bar (`C/FloatingSideBar.kt:100`, `A/AppRootContent.kt:453-454`). Rovsti is phone-first; keep it as a later `WindowSizeClass` branch, not a day-one feature.
+- At container width >= 840 dp the app switches to a floating side bar ("rail") instead of the bottom bar (`C/FloatingSideBar.kt:100`, `A/AppRootContent.kt:453-454`). Rosty is phone-first; keep it as a later `WindowSizeClass` branch, not a day-one feature.
 
 ## 4. The floating tab bar
 
@@ -146,7 +146,7 @@ Convx has two generations in the tree. The older `FloatingTabBar` swaps three co
 - It never consumes scroll (returns zero), so it is a pure observer.
 - Scroll bookkeeping kept off snapshot state: last-scroll timestamp and an exponentially smoothed velocity (alpha 0.35) live in plain arrays because they are read in draw code (`FloatingTabBar.kt:184-187,433-444`). `isScrolling()` is true during scroll and for 120 ms after, used to freeze glass capture. Tapping the folded selected tab calls `expand()` (`FoldingTabBar.kt:150`).
 
-Compare with iOS 26: the Tab bar minimizes on scroll down and re-expands on scroll up (`tabBarMinimizeBehavior`). Convx chose the "only at top" variant for its list-heavy screens. Rovsti's choice (see recipe): expand on scroll up or at top, minimize on scroll down; it feels closer to iOS and keeps navigation reachable.
+Compare with iOS 26: the Tab bar minimizes on scroll down and re-expands on scroll up (`tabBarMinimizeBehavior`). Convx chose the "only at top" variant for its list-heavy screens. Rosty's choice (see recipe): expand on scroll up or at top, minimize on scroll down; it feels closer to iOS and keeps navigation reachable.
 
 ### 4.3 The fold: one layout, two numbers
 
@@ -192,7 +192,7 @@ Do not copy `foldGeometry`; re-derive the maths from this description and your o
 - The whole pill also nudges up to 4 dp in the drag direction (eased), with a spring (damping 1, stiffness 300, threshold 0.5) back to rest (`FloatingTabBarTabs.kt:160,205`). While pressed the pill scales up by 16 dp worth of width (`FloatingTabBarTabs.kt:294`) and the selected tab's content zooms 1.12x (lines 363, 422).
 - External selection (navigation or pager) only moves the puck; user taps and completed drags call navigation explicitly, avoiding double navigation (`FloatingTabBarTabs.kt` comments near the `LaunchedEffect`s). A pager-driven mode snaps the puck to the pager's fractional position (`snapValue`, `DampedDragAnimation.kt:184`).
 - Press-only lens: the refractive "magnifier" pass for the puck is only composed while pressed (a hidden copy of the tab row is recorded and refracted), so there is no idle cost (`FloatingTabBarTabs.kt:393-420`). Lens parameters: refraction height 10 dp, amount 14 dp, chromatic aberration 0.5, scaled by press progress; inner shadow radius 8 dp at 15% black (lines ~462-485). Rest state: a flat translucent fill at roughly 10% white (dark) or black (light) (`FloatingTabBarTabs.kt:139` for the 0.90 rest alpha variant).
-- For Rovsti: the glass/lens part is covered in `convx-glass.md`. The motion model (index-valued spring with squash/stretch and nudge) is independent and cheap, and is the part to build first.
+- For Rosty: the glass/lens part is covered in `convx-glass.md`. The motion model (index-valued spring with squash/stretch and nudge) is independent and cheap, and is the part to build first.
 
 ### 4.5 Long-press on tabs
 
@@ -229,7 +229,7 @@ Geometry helpers in `P/PlayerSheetMotion.kt`; alpha curves in `P/PlayerContainer
 - Corner radius: collapsed pill radius interpolates to the device screen corner radius, then the corners open to square over 140 ms after the sheet is fully expanded (`SCREEN_CORNER_EXPANSION_MILLIS`, `PlayerSheetMotion.kt:21`; applied `BottomSheet.kt:140-150,225-235`).
 - Progress sanitisation: NaN or out-of-range progress is clamped to 0..1 in one function used by all geometry (`PlayerSheetMotion.kt:29`). Cheap safety worth replicating.
 - Performance: progress is read in `graphicsLayer {}` lambdas so the player does not recompose per frame (`P/Player.kt:854-858` comment). The glass backdrop stays frozen through the morph and unfreezes at progress 0.75 (`BottomSheet.kt:80`).
-- The whole Convx implementation is heavy (Player.kt is 3,800 lines). A simpler Rovsti design is in the recipe (section 12).
+- The whole Convx implementation is heavy (Player.kt is 3,800 lines). A simpler Rosty design is in the recipe (section 12).
 
 ## 6. Large titles, top bar and scroll-linked effects
 
@@ -313,7 +313,7 @@ Pitfalls Convx hit (visible in comments): focus fires automatically on tablets, 
 - Buttons and bar items: custom indication scaling content to 0.94 with a medium-bouncy, medium-low-stiffness spring (`U/ModifierExt.kt:136-166`); `bounceClick` replaces ripple (lines 208-217). Multiple concurrent presses are tracked in a set so releasing one finger does not unscale while another is down (`ModifierExt.kt:176-200`).
 - "Wobble" variant for components that own an interaction source: pressed scale 0.86, spring damping 0.38 (`ModifierExt.kt:115-130`).
 - Motion tokens in `U/Motion.kt`: select spring (stiffness 750, damping 0.76) for puck and segmented thumbs; press spring (stiffness 1220, damping 0.75); appear spring (stiffness 450, no bounce) for sheets and chips; appear exit 400 ms tween (0.32, 0.72, 0, 1) for predictive-back-scrubbable leaves; icon swap 200 ms in, 160 ms out with 0.3 initial scale pop (`Motion.kt:77-131`). Springs for interruptible gesture-linked motion, tweens only where a fixed end time or scrubbing is needed.
-- Reduce-motion gate: `Motion.gate(reduce, spec)` returns `snap()` when reduced (`Motion.kt:134`). Convx wires it to its own `ReduceDynamicBlurKey` preference, not to the system setting; the only read of `ANIMATOR_DURATION_SCALE` is in the intro (`C/ConvxIntro.kt:59`). Rovsti should read the system scale (see section 11).
+- Reduce-motion gate: `Motion.gate(reduce, spec)` returns `snap()` when reduced (`Motion.kt:134`). Convx wires it to its own `ReduceDynamicBlurKey` preference, not to the system setting; the only read of `ANIMATOR_DURATION_SCALE` is in the intro (`C/ConvxIntro.kt:59`). Rosty should read the system scale (see section 11).
 
 ### 9.2 Haptics
 
@@ -339,16 +339,16 @@ What Convx actually has:
 - Dynamic type: text sizes are fixed `sp` values in design tokens, so they follow system font scale automatically, but several layouts have fixed dp heights (row 58 dp, bars 48 and 68 dp) that clip at large font scales. Convx has a density-shrinking helper for the player on short screens (`U/FittedDensity.kt:18-34`: scale density by available/design height, floor 0.7, keep font scale) which is a hack, not an accessibility feature.
 - Contributor guidance (not enforced in code): `contributor/skills/convx-android-motion/SKILL.md:38-44` says motion must remain accessible and avoid flashing; `contributor/skills/android-compose-ui/SKILL.md:214` has an accessibility section.
 
-Recommendation: treat these as gaps to fix in Rovsti (section 12.9).
+Recommendation: treat these as gaps to fix in Rosty (section 12.9).
 
-## 12. Recipe for Rovsti (how to build the equivalent in our own Compose code)
+## 12. Recipe for Rosty (how to build the equivalent in our own Compose code)
 
 All code below is design guidance, not code to paste. Keep domain logic in the existing platform-free Rust crates; this recipe is UI-only Kotlin. Module naming is a suggestion for the research-to-plan handoff.
 
 ### 12.1 Module and package layout
 
-- `:core:designsystem` (Compose only): tokens (colours, type, spacing, shapes), motion tokens, press indications, haptics, `RovstiTheme`.
-- `:core:chrome`: `RovstiTabBar`, `RovstiTopBar`, `LargeTitleScaffold`, sheet and popover host, `RovstiInsets`.
+- `:core:designsystem` (Compose only): tokens (colours, type, spacing, shapes), motion tokens, press indications, haptics, `RostyTheme`.
+- `:core:chrome`: `RostyTabBar`, `RostyTopBar`, `LargeTitleScaffold`, sheet and popover host, `RostyInsets`.
 - `:feature:phone`, `:feature:messages`, `:feature:contacts`, `:feature:stops` consume chrome. Stops is a full-screen map: its screen composes the map as the root layer and floats search, chips, locate and tab bar on top using the same chrome pieces (the tab bar can fold to a single circle by default on Stops).
 - One `:app` with a single `NavHost`, typed routes, and a route policy object (pure Kotlin, unit-tested) deciding chrome visibility.
 
@@ -372,7 +372,7 @@ All code below is design guidance, not code to paste. Keep domain logic in the e
 
 1. Static pill: capsule, equal cells, 4 dp padding, icon 28 to 32 dp plus label, bar row 56 to 64 dp, side margin 12 to 16 dp from edges, bottom margin = system bottom inset + 8 dp.
 2. Selection puck: separate node whose x is a float index driven by a spring (damping about 0.76, stiffness about 750 for taps; critically damped stiffness 1000 for the value while dragging). Tap on a tab animates the index; drag snaps the index to the finger and settles on release. Press scales puck to about 1.2 to 1.4x with squash and stretch tied to horizontal velocity (clamped to +/-0.2).
-3. Minimize on scroll: a `NestedScrollConnection` above the content. Policy for Rovsti: minimize after about 40 dp of accumulated downward scroll; expand after about 8 dp of upward scroll or when at the top; reset the accumulator when direction flips; never consume scroll; no snapshot state writes per scroll event except the single boolean.
+3. Minimize on scroll: a `NestedScrollConnection` above the content. Policy for Rosty: minimize after about 40 dp of accumulated downward scroll; expand after about 8 dp of upward scroll or when at the top; reset the accumulator when direction flips; never consume scroll; no snapshot state writes per scroll event except the single boolean.
 4. Fold animation: one `Animatable` `fold` and a custom `Layout` placing (surface, tab group, selected circle, search circle, accessory) as a pure function of `fold` and `search`. Use fixed-duration tweens with an under-damped easing (zeta about 0.6 to 0.75, about 450 to 560 ms) so every concurrent value ends on the same frame, or a single spring-driven `fold` and derive everything from it (preferred: simpler than two clocks).
 5. Accessory slot: one mini player composable instance placed by the same layout, with `isInline` restyle.
 6. Long-press menu: expose `onLongClick(boundsInWindow)`.
@@ -418,7 +418,7 @@ Test plan: Compose test with `mainClock.autoAdvance = false` stepping `fold` to 
 
 ### 12.9 Haptics
 
-- Use Compose `LocalHapticFeedback` as the default; wrap it in `RovstiHaptics` with semantic methods (`tick()`, `selection()`, `confirm()`, `reject()`, `longPress()`), implemented via `View.performHapticFeedback` constants (`CLOCK_TICK`, `CONFIRM`, `REJECT`, `LONG_PRESS`, `SEGMENT_TICK`, `TEXT_HANDLE_MOVE`) with the `FLAG_IGNORE_GLOBAL_SETTING` fallback to a `VibrationEffect.createPredefined` call when the system toggle is off, as Convx found necessary on Samsung (`AppHaptics.kt:19-26`).
+- Use Compose `LocalHapticFeedback` as the default; wrap it in `RostyHaptics` with semantic methods (`tick()`, `selection()`, `confirm()`, `reject()`, `longPress()`), implemented via `View.performHapticFeedback` constants (`CLOCK_TICK`, `CONFIRM`, `REJECT`, `LONG_PRESS`, `SEGMENT_TICK`, `TEXT_HANDLE_MOVE`) with the `FLAG_IGNORE_GLOBAL_SETTING` fallback to a `VibrationEffect.createPredefined` call when the system toggle is off, as Convx found necessary on Samsung (`AppHaptics.kt:19-26`).
 - Fire on: tab reselect (tick), puck snap to a new tab (selection), sheet snap to anchor (tick), long-press menu open (long press), toggle flips (tick), destructive confirm (confirm), invalid action (reject). Never on scroll, never continuously during drags except detents.
 - Provide a single app preference "Haptics" and honour the system setting by default.
 
@@ -495,7 +495,7 @@ Test plan: Compose test with `mainClock.autoAdvance = false` stepping `fold` to 
 
 ## 14. Mapping to the owner's complaints
 
-| Complaint | Cause in the GPUI apps (from the brief) | Convx technique | Rovsti recipe section |
+| Complaint | Cause in the GPUI apps (from the brief) | Convx technique | Rosty recipe section |
 |---|---|---|---|
 | Overlapping avatar stacks, big source pill per row, wrapping chips | no row spec | one art, two text lines, one gutter; chips in a single row | 12.7 |
 | Floating tab bar covers the last row | fixed or missing bottom padding | player-aware inset in content padding; list scrolls under chrome | 3.2, 12.3 |
@@ -506,8 +506,8 @@ Test plan: Compose test with `mainClock.autoAdvance = false` stepping `fold` to 
 
 ## 15. Open questions and risks
 
-- Convx's tab handler and navigation helper disagree on state restore (section 2.1); decide Rovsti's tab-state policy early (recommend save/restore).
-- Convx's pager-based tab hosting plus NavHost doubles the navigation model; Rovsti should pick one (NavHost only, tab content crossfade).
+- Convx's tab handler and navigation helper disagree on state restore (section 2.1); decide Rosty's tab-state policy early (recommend save/restore).
+- Convx's pager-based tab hosting plus NavHost doubles the navigation model; Rosty should pick one (NavHost only, tab content crossfade).
 - The fixed-duration spring easing trick is nice but adds a custom `Easing`; a single real spring driving `fold` is simpler and interruptible. Decide after a prototype.
 - Real glass requires API 33+ (AGSL) for the refractive puck; on lower APIs fall back to a blurred or opaque capsule. Gate on `Build.VERSION.SDK_INT`, and mind the Convx note that clip-path masks are CPU-expensive on the glass node (`FT/FloatingTabBarTabs.kt` comments around the pill graphicsLayer).
 - Verification without a device: motion maths unit tests, Compose tests with a manual clock for fold/transition positions, Roborazzi screenshots at key progress values. Haptics and IME behaviour cannot be verified on JVM; add a manual device checklist for the owner.

@@ -5,18 +5,18 @@ The contract an app follows; `:catalog` (`CatalogApp.kt`, `CatalogRoute.kt`) is 
 1. **Routes.** One `@Serializable sealed interface Route`; one class per page, data in the class (`ContactDetail(val id: Int)`).
    Tabs are `Tab("id")` values; each tab has a root route.
 2. **`chromeFor(route): ChromeSpec`.** A pure function (`ChromeSpec(tabBar = Visible | Folded | Hidden, largeTitle)`), unit-tested on the JVM
-   (`ChromeSpecTest`). `RovstiNavHost` draws the tab bar from it and gives every page its own `LocalContentInsets` (a Hidden page leaves no
+   (`ChromeSpecTest`). `RostyNavHost` draws the tab bar from it and gives every page its own `LocalContentInsets` (a Hidden page leaves no
    room for the bar and does not jump when the bar slides out while the page leaves).
 3. **`routeFor(extras)`.** A pure function from intent extras to `Pair<Tab, List<Route>>`; the activity calls
    `navigator.resetTo(tab, routes)` for a deep link.
 4. **Wiring.** `val navigator = rememberSaveable(saver = TabNavigator.saver(tabs, roots, Route.serializer())) { TabNavigator(tabs, roots) }`,
    `val overlays = remember { OverlayController() }`, then
-   `RovstiNavHost(navigator, tabItems, ::chromeFor, overlays, isMorphRoute = { ... }) { entry<Home> { ... }; entry<Detail> { r -> ... } }`.
-   The host composes, in this order: `RovstiBackdropRoot` (records the pages), `SharedTransitionLayout { NavDisplay }`, the tab bar and
+   `RostyNavHost(navigator, tabItems, ::chromeFor, overlays, isMorphRoute = { ... }) { entry<Home> { ... }; entry<Detail> { r -> ... } }`.
+   The host composes, in this order: `RostyBackdropRoot` (records the pages), `SharedTransitionLayout { NavDisplay }`, the tab bar and
    the `chrome` slot (siblings after the recording), and the overlay entries last. System back: overlay, then the tab stack, then the activity.
 5. **Pages.** A page reads `LocalContentInsets` for list padding, uses `LargeTitleScaffold(navigation = NavigationButton { navigator.pop() })`
    and collects `navigator.scrollToTop` (filter on its tab) to scroll to the top on reselect.
-6. **Shared elements.** `Modifier.rovstiSharedBounds("avatar-$id")` on both ends (500 ms `Motion.sharedArtwork()`, drawn in the overlay above both
+6. **Shared elements.** `Modifier.rostySharedBounds("avatar-$id")` on both ends (500 ms `Motion.sharedArtwork()`, drawn in the overlay above both
    pages). It is a no-op outside the host. `isTransitionActive()` lets heavy work wait for the motion.
 7. **Motion.** Push: the new page slides a full width, the old one moves 0.3 W under it and dims to 0.85; pop mirrors it; predictive back scrubs
    the pop; a tab switch is a 220/160 ms cross-fade; a `isMorphRoute` page holds the old one still and dims it to 0.7. The glass freezes for a push or
@@ -24,14 +24,14 @@ The contract an app follows; `:catalog` (`CatalogApp.kt`, `CatalogRoute.kt`) is 
 
 ## Activity, container, permissions, settings pages (E3.11)
 
-- **Activity and container.** An app's activity extends `RovstiShellActivity` (edge-to-edge, `adjustResize`, predictive back, highest refresh
+- **Activity and container.** An app's activity extends `RostyShellActivity` (edge-to-edge, `adjustResize`, predictive back, highest refresh
   mode) and its container extends `ShellContainer` (bridge, haptics, image loader, WhatsApp, permissions). `routeFor(intent)` is the pure
   deep-link function the activity feeds into `navigator.resetTo`.
 - **Permissions.** Wrap a page that needs one in `PermissionGate(group)`: the first use shows the rationale sheet, a denied state becomes a
   `PermissionRow` with the next action (ask, or open the Settings page). Nothing is asked at launch.
 - **Common settings.** The container implements `CommonSettings`: `appearance: StateFlow<Appearance?>` (Auto/Light/Dark) and
   `haptics: StateFlow<HapticsLevel?>` (Off/Light/Normal); `null` hides the row and the page. `FakeCommonSettings` (testFixtures) is the test
-  double. Feed `RovstiTheme(darkTheme = settings.rememberDarkTheme())` so Auto follows the system, and set `ShellHaptics.mode` from
+  double. Feed `RostyTheme(darkTheme = settings.rememberDarkTheme())` so Auto follows the system, and set `ShellHaptics.mode` from
   `HapticsLevel.toMode()`.
 - **Pages.** End the app's settings page with `CommonSettingsGroup(settings, onOpen)` and map `CommonSettingsPage` onto routes:
   `AppearancePage`, `HapticsPage` (plays a preview tap), `AboutPage(aboutInfo)` (`Context.aboutInfo(appName, coreVersion)` and

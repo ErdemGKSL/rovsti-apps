@@ -71,7 +71,7 @@ used for the glass shadow; AGSL has no `tanh` (written out); `Offset.isSpecified
 `androidx.compose.ui.geometry`. Flat and Frost draw no rim shader (glass.md 6); the Liquid rim shader paints the 0.5 px edge
 line itself, so the hairline is drawn only when no rim is.
 
-## E1.9 and R2 step 1: APIs added (all ORIGINAL, package `dev.rovsti.design`)
+## E1.9 and R2 step 1: APIs added (all ORIGINAL, package `dev.rosty.design`)
 
 - `glass/GlassSpec`: new field `flatAlpha: Float` (default `FLAT_ALPHA` 0.85); constants `FLAT_ALPHA_BAR` 0.96,
   `FLAT_ALPHA_POPOVER` 0.97, `FLAT_ALPHA_SHEET` 0.98; `bar()`, `popover()`, `sheet()` set theirs, `thumb()` keeps 0.85.
@@ -127,7 +127,7 @@ line itself, so the hairline is drawn only when no rim is.
 
 - `BasicTextField(state: TextFieldState, lineLimits, decorator = TextFieldDecorator, onKeyboardAction: KeyboardActionHandler, cursorBrush, interactionSource)`;
   `TextFieldLineLimits.SingleLine` / `MultiLine(minHeightInLines, maxHeightInLines)`; `TextFieldState.clearText()`, `edit { insert(i, s) }`.
-- `LocalTextSelectionColors` is provided by `RovstiTheme` (`rovstiSelectionColors`: handles accent, highlight accent at 30 %).
+- `LocalTextSelectionColors` is provided by `RostyTheme` (`rostySelectionColors`: handles accent, highlight accent at 30 %).
 - DECISION: the platform text toolbar is kept. Neither `LocalTextToolbar` nor (foundation 1.12) `LocalTextContextMenuToolbarProvider`
   is provided in production, so cut/copy/paste/select-all, the magnifier and handles are the system's. Tests provide a recording
   `TextContextMenuProvider` (`catalog/src/test/.../RecordingToolbar.kt`) to assert the request and press Paste; Robolectric draws no toolbar.
@@ -146,11 +146,11 @@ line itself, so the hairline is drawn only when no rim is.
 ## E1.24 Convx backdrop engine port (Compose BOM 2026.09, Kotlin 2.4.21)
 
 - All 42 files of Convx `ui/component/backdrop/**` and 15 of `ui/component/shapes/**` compile against BOM 2026.09 unchanged:
-  no Compose API drift was found, only package renames (`dev.rovsti.design.backdrop`, `dev.rovsti.design.shapes`) and ktlint formatting.
+  no Compose API drift was found, only package renames (`dev.rosty.design.backdrop`, `dev.rosty.design.shapes`) and ktlint formatting.
 - `.editorconfig` disables the ktlint rules kdoc, function-naming, backing-property-naming and no-consecutive-comments for
   `design/{backdrop,shapes}/**` so the ported files stay close to upstream.
 - `rememberNavTransitionFreeze(currentRoute, lastNavWasPop = { false })`: Convx's global `lastNavWasPop()` (SharedArtwork) is a parameter.
-- `LiquidToggle/Slider/BottomTabs`: `glassUsesDarkAppearance()` became `RovstiTheme.colors.isDark`.
+- `LiquidToggle/Slider/BottomTabs`: `glassUsesDarkAppearance()` became `RostyTheme.colors.isDark`.
 - `rememberAppBackdropState(baseBg, currentRoute, extraFrozen, lastNavWasPop)` replaces Convx's `pureBlack` and floating-bar connection.
 - `LayerBackdrop.staticRegions` is filled during draw, after layout. The first draw declares nothing (fail-safe: always record);
   tests need a second draw (`captureToImage` forces it under Robolectric).
@@ -165,7 +165,7 @@ line itself, so the hairline is drawn only when no rim is.
   so `libs.versions.toml` pins the newest 1.x, 1.7.3. `TopFadeBlur` (`hazeEffect`, `HazeProgressive.verticalGradient`,
   `HazeMaterials.ultraThin`, `HazeInputScale.Fixed`) compiles unchanged against BOM 2026.09; the single-pass backdrop branch is
   the one the catalog shot exercises (`TopBarBlurStyle.SinglePass`).
-- `GlassEffect.kt` is a second file of package `dev.rovsti.design.glass` until S4 deletes the old engine: its facade is renamed
+- `GlassEffect.kt` is a second file of package `dev.rosty.design.glass` until S4 deletes the old engine: its facade is renamed
   with `@file:JvmName("ConvxGlassEffect")` to avoid a duplicate `GlassEffectKt`.
 - `androidx.core.graphics.ColorUtils` calls `android.graphics.Color`, so `GlassTintTokensTest` runs under Robolectric.
 - Test fixes: `GlassTintTokensTest` expected a dark neutral tint alpha of 0.06 and dark hero opacity 0.30; the tokens are 0 on
@@ -184,10 +184,10 @@ line itself, so the hairline is drawn only when no rim is.
   `AnimatedContentTransitionScope<Scene<T>>.(Int swipeEdge) -> ContentTransform`. The scope's `initialState` / `targetState` are
   `Scene<T>`, not routes.
 - Differences from the plan: `NavEntry.key` is **private** (`NavEntry(key, contentKey, metadata, content)`), so a transition spec cannot
-  read the route from a scene's entries; `RovstiNavHost` stores its `StackKey` in `NavEntry.metadata` (`StackKeyMetadata`) and the specs
+  read the route from a scene's entries; `RostyNavHost` stores its `StackKey` in `NavEntry.metadata` (`StackKeyMetadata`) and the specs
   read `scene.metadata`. `Scene` has `key`, `entries`, `previousEntries`, `content`, `metadata`.
 - `entryProvider { entry<K> { } }` exists (`EntryProviderScope`), keyed by the back-stack element type. Because our back-stack element is
-  the wrapper `StackKey(tab, depth, route)`, the host takes its own `RovstiEntries<R>.entry<K : R>` and builds `NavEntry` directly.
+  the wrapper `StackKey(tab, depth, route)`, the host takes its own `RostyEntries<R>.entry<K : R>` and builds `NavEntry` directly.
 - `rememberSaveableStateHolderNavEntryDecorator()` is the default decorator; `contentKey` defaults to the string `"$key:${key::class}"`
   (saveable), so keys need no `Bundle` support.
 - `LocalNavAnimatedContentScope: ProvidableCompositionLocal<AnimatedContentScope>` (package `...navigation3.ui`) throws outside an entry.
@@ -208,28 +208,28 @@ line itself, so the hairline is drawn only when no rim is.
 
 ## :core-bridge (E2.6)
 
-- cargo-ndk platform is 26, not the project's ARCH level 34 (`RovstiSdk.MIN`): a shared library linked against platform 34
+- cargo-ndk platform is 26, not the project's ARCH level 34 (`RostySdk.MIN`): a shared library linked against platform 34
   refuses to load on API 26 to 33 (missing symbols/`DT_NEEDED` versions), and `scripts/android-env.sh` links for 26 as well.
   Linking low costs nothing: the `.so` only uses libc/liblog/libdl symbols that exist since 26.
-- `CargoTasks.kt` (`rovsti.cargo` convention plugin): `cargoBuildAndroid` (debug) / `cargoBuildAndroid<Variant>` register through
+- `CargoTasks.kt` (`rosty.cargo` convention plugin): `cargoBuildAndroid` (debug) / `cargoBuildAndroid<Variant>` register through
   `variant.sources.jniLibs.addGeneratedSourceDirectory(task, CargoBuildTask::outputDir)`, which also wires the task before
   `merge*JniLibFolders` and `preBuild`-equivalent consumers. Typed inputs: `crates/**/*.rs|Cargo.toml|*.json`, root `Cargo.toml`
   and `Cargo.lock`. The second run is UP-TO-DATE; the Cargo invocation after a source change is incremental.
 - `cargoBuildHost` builds with `--features test-ops` (`core.panic`, `core.emit_test`); the Android build never enables it.
 - AGP 9 built-in Kotlin: extra test sources go through `android.sourceSets.getByName("test").kotlin.directories.add(...)`;
   `.java.directories` is not compiled by Kotlin. `variant.unitTest` is not available on the library `Variant` type.
-- `testRustBridge` reuses the `testDebugUnitTest` classpath and class dirs, filters to package `dev.rovsti.core.rust` and
+- `testRustBridge` reuses the `testDebugUnitTest` classpath and class dirs, filters to package `dev.rosty.core.rust` and
   `testDebugUnitTest` excludes that package (those tests load the real `.so`, the Robolectric JVM must not).
 - Debug `.so` files are unstripped: about 36 MB per ABI, the catalog debug APK is about 108 MB. Release builds use `--release`.
 
 ## Bridge contract (E2.7, E2.8)
 
-- Fixtures: `crates/rovsti_ffi/fixtures/<op>.{request,answer}.json` (`core.version`, `core.echo`, `core.data_dir`,
+- Fixtures: `crates/rosty_ffi/fixtures/<op>.{request,answer}.json` (`core.version`, `core.echo`, `core.data_dir`,
   `core.fail.<kind>`) and `headless.<kind>.{request,answer}.json`. `core.*` answers are the full envelope bytes; headless
   answers are the handler string. Headless requests are authored inputs (`$DIR` = data dir seeded from
-  `rovsti_app_core/tests/fixtures/dirs/<app>`); the answers are generated and compared by `tests/fixtures.rs`
+  `rosty_app_core/tests/fixtures/dirs/<app>`); the answers are generated and compared by `tests/fixtures.rs`
   (`UPDATE_FIXTURES=1` rewrites). `core.version` carries the crate version, so a version bump needs one rewrite.
-- Models live in `dev.rovsti.core.model.core` and `.headless`; the registry in `ContractFixturesTest` maps every fixture stem
+- Models live in `dev.rosty.core.model.core` and `.headless`; the registry in `ContractFixturesTest` maps every fixture stem
   to a serializer. Adding an op in Rust without a fixture+model pair, or a fixture without a model, fails a test.
 - kotlinx.serialization conventions in the models: wire names via `@SerialName`; fields a fixture does not carry are
   `@EncodeDefault(NEVER)`; failure shapes (`{"ok":false,"error":..}`) decode into the same class, so success-only fields

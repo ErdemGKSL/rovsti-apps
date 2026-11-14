@@ -1,7 +1,7 @@
 //! Select mode in the Contacts list: ticking rows, the glass action bar and
 //! the bulk actions (share, save to file, add to group, star, delete). The
 //! decisions (which actions, notices, group targets) live in
-//! `rovsti_core::contact_select` and `rovsti_core::multi_select`; the work
+//! `rosty_core::contact_select` and `rosty_core::multi_select`; the work
 //! runs on the background executor.
 
 use std::collections::BTreeSet;
@@ -10,13 +10,13 @@ use gpui::{
     AnyElement, Context, Div, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, prelude::*, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_dates,
     contact_edit::account_label,
     contact_select::{self, GroupTarget, SHARE_FORMATS, SelectAction, ShareFormat},
     multi_select::{self, Selection},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{flat_glass, glass_pill, large_title},
     sheet::Sheet,
@@ -603,7 +603,7 @@ impl ContactsApp {
             div()
                 .id("contacts-select-bar")
                 .absolute()
-                .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
+                .bottom(px(rosty_ui::layout::geom::tab_bar_bottom(safe_bottom)))
                 .left(px(8.0))
                 .right(px(8.0))
                 .flex()

@@ -8,8 +8,8 @@ pub mod jwt;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use rovsti_wa_proto::WaMessage;
-use rovsti_wa_proto::push::SENDER_KEY;
+use rosty_wa_proto::WaMessage;
+use rosty_wa_proto::push::SENDER_KEY;
 
 use crate::config::FcmConfig;
 use crate::now_ms;
@@ -283,7 +283,7 @@ pub fn from_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::MessageBody;
+    use rosty_wa_proto::MessageBody;
 
     fn message(from_me: bool, ts: i64) -> WaMessage {
         WaMessage {

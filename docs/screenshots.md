@@ -13,20 +13,20 @@ The shots are test-only. They sit behind the cargo feature `shots` and every tes
 One test per app. Run from the workspace root:
 
 ```
-cargo test -p rovsti_phone    --features shots shots -- --ignored --nocapture
-cargo test -p rovsti_messages --features shots shots -- --ignored --nocapture
-cargo test -p rovsti_contacts --features shots shots -- --ignored --nocapture
-cargo test -p rovsti_stops    --features shots shots -- --ignored --nocapture
+cargo test -p rosty_phone    --features shots shots -- --ignored --nocapture
+cargo test -p rosty_messages --features shots shots -- --ignored --nocapture
+cargo test -p rosty_contacts --features shots shots -- --ignored --nocapture
+cargo test -p rosty_stops    --features shots shots -- --ignored --nocapture
 ```
 
 The shared rig has a smoke test and the text-field state gallery:
 
 ```
-cargo test -p rovsti_ui --features shots shots -- --ignored --nocapture   # smoke + fields
-cargo test -p rovsti_ui --features shots fields -- --ignored --nocapture  # fields only
-cargo test -p rovsti_ui --features shots field_touch -- --ignored --nocapture  # handles + edit menu
-cargo test -p rovsti_ui --features shots layout -- --ignored --nocapture  # layout component gallery
-cargo test -p rovsti_ui --features shots menus -- --ignored --nocapture   # menus and buttons gallery
+cargo test -p rosty_ui --features shots shots -- --ignored --nocapture   # smoke + fields
+cargo test -p rosty_ui --features shots fields -- --ignored --nocapture  # fields only
+cargo test -p rosty_ui --features shots field_touch -- --ignored --nocapture  # handles + edit menu
+cargo test -p rosty_ui --features shots layout -- --ignored --nocapture  # layout component gallery
+cargo test -p rosty_ui --features shots menus -- --ignored --nocapture   # menus and buttons gallery
 ```
 
 Each app test takes under a minute once built (about 0.5 to 2.5 s per shot). The first
@@ -36,13 +36,13 @@ space; run `df -h .` first and delete `target/debug/incremental` if it is low.
 Lint the feature-gated code too (the normal clippy run does not see it):
 
 ```
-cargo clippy -p rovsti_phone -p rovsti_messages -p rovsti_contacts -p rovsti_stops \
-  -p rovsti_ui --features shots --all-targets -- -D warnings
+cargo clippy -p rosty_phone -p rosty_messages -p rosty_contacts -p rosty_stops \
+  -p rosty_ui --features shots --all-targets -- -D warnings
 ```
 
-(With cargo's `--features` on several packages, use `rovsti_ui/shots` or run one package
+(With cargo's `--features` on several packages, use `rosty_ui/shots` or run one package
 at a time if your cargo version rejects the combined form:
-`cargo clippy -p rovsti_phone --features shots --all-targets -- -D warnings`.)
+`cargo clippy -p rosty_phone --features shots --all-targets -- -D warnings`.)
 
 ## Text-field gallery
 
@@ -57,33 +57,33 @@ caret mid-text and the full text shown. `02-field-touch-*` covers the touch stat
 
 The shots always draw the field's own handles and menu. On Android the field uses the
 host's native chrome instead, which cannot be rendered headless. The rig can force either
-with `rovsti_ui::field::set_selection_chrome(Some(SelectionChrome::Drawn))` (or `Native`,
+with `rosty_ui::field::set_selection_chrome(Some(SelectionChrome::Drawn))` (or `Native`,
 `None` for the platform default); call it before opening the window, it is per thread.
 Native-mode behaviour is covered by `#[gpui::test]`s in `field.rs`, and by the device
 checklist in `docs/android.md`. To add a state,
-append to `STATES` in `crates/rovsti_ui/src/shots/fields.rs` and raise the array length.
+append to `STATES` in `crates/rosty_ui/src/shots/fields.rs` and raise the array length.
 
 The caret blinks (530 ms on/off) on a device. The shots must be stable, so the rig calls
-`rovsti_ui::field::set_blink(false)` (the caret stays solid). Do the same in any new
+`rosty_ui::field::set_blink(false)` (the caret stays solid). Do the same in any new
 harness or test that captures a focused field.
 
 ## Layout gallery
 
-`03-layout-{dark,light}.png` (in `target/shots/rovsti_ui/`) shows the shared layout
+`03-layout-{dark,light}.png` (in `target/shots/rosty_ui/`) shows the shared layout
 building blocks on one page: page headers, a section header, the list-row variants (unread,
 muted and pinned, long title, OTP chip, avatar stack, merged SMS+WhatsApp contact), a
 filter chip row and an empty state. Thin guides mark the 16 dp margins so alignment can be
 judged by eye. The spec is `docs/design/layout.md`; the source is
-`crates/rovsti_ui/src/shots/layout.rs`.
+`crates/rosty_ui/src/shots/layout.rs`.
 
 ## Menus gallery
 
-`04-menus-*-{dark,light}.png` (in `target/shots/rovsti_ui/`) shows the `Menu` popover over a
+`04-menus-*-{dark,light}.png` (in `target/shots/rosty_ui/`) shows the `Menu` popover over a
 busy inbox with a tab-bar stand-in: `04-menus` (below the anchor, with groups and a
 destructive row), `04-menus-above` (flipped above), `04-menus-submenu` (the "Mute" page),
 `04-menus-confirm` (title, red action, Cancel) and `04-menus-buttons` (every `Button` style
 and size). The test asserts that the panel text reads over the busy backdrop (contrast) and
-that the menu stays clear of the tab bar. Source: `crates/rovsti_ui/src/shots/menus.rs`.
+that the menu stays clear of the tab bar. Source: `crates/rosty_ui/src/shots/menus.rs`.
 
 Real-app menu shots:
 
@@ -95,8 +95,8 @@ Real-app menu shots:
 ## Simulated safe area
 
 The test window has no status bar or home indicator, so `Rig::open` sets a simulated
-safe area for every shot with `rovsti_ui::layout::set_simulated_safe_area`: 24 dp on top
-and 16 dp at the bottom (`SIM_SAFE_TOP`, `SIM_SAFE_BOTTOM` in `crates/rovsti_ui/src/shots.rs`).
+safe area for every shot with `rosty_ui::layout::set_simulated_safe_area`: 24 dp on top
+and 16 dp at the bottom (`SIM_SAFE_TOP`, `SIM_SAFE_BOTTOM` in `crates/rosty_ui/src/shots.rs`).
 Headers and `layout::content_bottom_inset` read it like the real window insets on a
 device, so a scrollable view that forgets the bottom inset shows its last row under the tab
 bar. Do not set it in app code.
@@ -110,11 +110,11 @@ end and the last row must sit fully above the floating tab bar.
 already writes sRGB-encoded values, so the hardware encodes them twice and the raw readback
 is too light (accent `#0A84FF` came out as (56,190,255)). `WgpuHeadless` therefore decodes
 the readback once with an sRGB-to-linear table on R, G and B (not alpha), see
-`crates/rovsti_ui/src/shots/color.rs`. Shots now match the device's colours, so contrast
+`crates/rosty_ui/src/shots/color.rs`. Shots now match the device's colours, so contrast
 can be measured on them. Judge contrast only on shots made after this fix; earlier ones
 are too light and must not be compared with new ones.
 
-Helpers in `crates/rovsti_ui/src/shots/color.rs` (pure, unit-tested):
+Helpers in `crates/rosty_ui/src/shots/color.rs` (pure, unit-tested):
 
 - `color_probe` (ignored test): renders solid `#007AFF`, `#0A84FF` and `#3C3C43` at 74 %
   over white and asserts the centre pixels are within 3 levels.
@@ -124,7 +124,7 @@ Helpers in `crates/rovsti_ui/src/shots/color.rs` (pure, unit-tested):
 - `max_vertical_step(img, x, y0, y1)`: largest per-channel jump between neighbouring rows
   in one column. The Messages test uses it at x = 8 px (inside the margin) to prove the
   backdrop wash has no visible edge (at most 2 levels). Guard:
-`cargo test -p rovsti_ui --features shots color -- --include-ignored` (`color_probe` checks
+`cargo test -p rosty_ui --features shots color -- --include-ignored` (`color_probe` checks
 three known colours to within 3 levels).
 
 ## Output
@@ -138,7 +138,7 @@ contact_sheet.png                       every shot of the app in a grid, 1200 px
 ```
 
 `NN` is the scene number, so a directory listing is in screen order. The test prints each
-path as it is written. `target/shots/rovsti_ui/` holds `00-smoke-*` and `01-fields-*`.
+path as it is written. `target/shots/rosty_ui/` holds `00-smoke-*` and `01-fields-*`.
 
 | App | Scenes | Files |
 | --- | --- | --- |
@@ -159,7 +159,7 @@ Refresh a baseline only when the layout was changed on purpose.
   Phone, for example, otherwise opens on the tab stored in the real profile. Messages,
   Contacts and Stops seed their fixtures into this directory before the app starts.
 - **Time zone.** The same call sets `TZ=Europe/Istanbul`.
-- **Clock.** Rendered times come from `rovsti_core::clock::now_ms()`. The tests fix it to
+- **Clock.** Rendered times come from `rosty_core::clock::now_ms()`. The tests fix it to
   `2026-11-07T15:40:00+03:00` (`SHOT_NOW_MS`), so "Yesterday", "15:32" and relative times
   are identical on every run. Stops moves the clock on purpose for the running trip.
 - **Animation.** The rig uses a virtual 60 fps clock (`FrameClock::set_fixed_step`).
@@ -175,7 +175,7 @@ Refresh a baseline only when the layout was changed on purpose.
   contains `retry`. If you see that error in a new helper, call through the rig, not the
   renderer.
 - **Theme override.** `TestWindow` always reports Light. The theme comes from
-  `rovsti_ui::set_theme_override`, which `Rig::open` and `rig.theme()` set. An app that
+  `rosty_ui::set_theme_override`, which `Rig::open` and `rig.theme()` set. An app that
   sets the override itself overwrites it. Stops does (from `prefs.appearance`), so its
   test seeds `appearance` in the prefs file and the rig sets the theme again after
   construction. If a dark shot comes out light, look for this.
@@ -184,10 +184,10 @@ Refresh a baseline only when the layout was changed on purpose.
   placeholder. `target/shots/.data/stops/` must not contain downloaded tiles afterwards.
   Messages talks to a loopback fake gateway (`apps/messages/src/shots/gateway.rs`) for the
   WhatsApp scenes.
-- **One test per app.** Env vars (`XDG_DATA_HOME`, `TZ`, `ROVSTI_PREVIEW_*`) are
+- **One test per app.** Env vars (`XDG_DATA_HOME`, `TZ`, `ROSTY_PREVIEW_*`) are
   process-global and are read once. Do not add a second `#[test]` that renders; add a
   scene instead. Drive state by calling the app's `pub(crate)` methods in the scene, not
-  with env vars (`ROVSTI_PREVIEW_DIAL` and friends are not re-read).
+  with env vars (`ROSTY_PREVIEW_DIAL` and friends are not re-read).
 - **Phone devtools.** Phone on desktop draws a devtools chip strip and a "Preview data"
   caption. The shots set `PhoneApp::devtools_visible = false`.
 - **Focus.** GPUI has one focused view per window. A scene that shows a focused field must
@@ -237,17 +237,17 @@ closure gets the settled app and brings it to the state to shoot.
 3. Need data? Put it in the app's fixture (Messages: `backend/preview/shots_data.rs`,
    Contacts: `sample.rs`, Stops: the `fixture` module in `shots.rs`, seeded into the
    isolated data dir). Fixtures must be deterministic: use `SHOT_NOW_MS`, never
-   `SystemTime::now()`. Pure logic belongs in `rovsti_core` / `rovsti_geo` with unit tests.
+   `SystemTime::now()`. Pure logic belongs in `rosty_core` / `rosty_geo` with unit tests.
 4. Run the app's command above, then open the new `NN-my-screen-dark.png` and `-light.png`
    with an image viewer. A blank, white or test-pattern file means the scene failed.
 5. Run the feature-gated clippy command. Update the scene counts in the table above and, if
    the layout was meant to change, the baseline sheet.
 
 A new text-field state goes into the `STATES` table in
-`crates/rovsti_ui/src/shots/fields.rs`.
+`crates/rosty_ui/src/shots/fields.rs`.
 
 ## Pure helpers
 
-`file_name`, `sheet_layout` and `retryable` in `crates/rovsti_ui/src/shots.rs` are plain
-functions with unit tests (`cargo test -p rovsti_ui --features shots`). Each app also has a
+`file_name`, `sheet_layout` and `retryable` in `crates/rosty_ui/src/shots.rs` are plain
+functions with unit tests (`cargo test -p rosty_ui --features shots`). Each app also has a
 test that checks its scene table (numbering, unique names).

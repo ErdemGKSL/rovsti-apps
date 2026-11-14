@@ -8,8 +8,8 @@ use std::time::Instant;
 use axum::extract::{MatchedPath, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use rovsti_wa_proto::LimitSource;
-use rovsti_wa_proto::api::routes as r;
+use rosty_wa_proto::LimitSource;
+use rosty_wa_proto::api::routes as r;
 
 use crate::store::InstanceId;
 

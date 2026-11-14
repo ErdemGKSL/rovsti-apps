@@ -1,6 +1,6 @@
 //! The one facade between Android and the views (AD-15, AD-16).
 //!
-//! This is the only module that names `rovsti_android`. Views read `Arc`
+//! This is the only module that names `rosty_android`. Views read `Arc`
 //! snapshots and domain types from [`Backend`] and never see a `Result`:
 //! on desktop (`Error::Unsupported`) the backend serves sample data, and
 //! Android actions answer [`Outcome::NotAvailable`] so the UI can say
@@ -23,12 +23,12 @@ use std::{
 
 use futures::StreamExt;
 use gpui::{App, AppContext as _, Context, Entity, Task};
-use rovsti_android::{
+use rosty_android::{
     Error, calls, contacts_edit, documents,
     events::{self, RawEvent, kind},
     media, permissions, providers, reminders, roles, telecom, xiaomi,
 };
-use rovsti_core::{
+use rosty_core::{
     blocklist::BlockSet,
     call::CallModel,
     call_log::{self, RecentsRow},
@@ -42,8 +42,8 @@ use rovsti_core::{
         FavoritesPayload, WireContact, WireError, WriteError,
     },
 };
-use rovsti_core::{settings::Settings, sim::SimInfo};
-use rovsti_ui::storage::{self, Prefs, PrefsWriter};
+use rosty_core::{settings::Settings, sim::SimInfo};
+use rosty_ui::storage::{self, Prefs, PrefsWriter};
 use serde::de::DeserializeOwned;
 
 use crate::sample;
@@ -59,7 +59,7 @@ pub use preview_multi::SCENES;
 
 pub use blocking::{BlockState, ReplyOutcome};
 pub use local::SystemFacts;
-pub use rovsti_android::{
+pub use rosty_android::{
     permissions::{Access, Group},
     xiaomi::{Setting as XiaomiSetting, XiaomiOs},
 };
@@ -90,7 +90,7 @@ impl Outcome {
         }
     }
 
-    fn from(result: rovsti_android::Result<bool>, what: &str) -> Self {
+    fn from(result: rosty_android::Result<bool>, what: &str) -> Self {
         match result {
             Ok(true) => Self::Done,
             Ok(false) => Self::Declined,
@@ -127,7 +127,7 @@ impl SystemOutcome {
 
     /// Reads Kotlin's `{v, ok, error?, data?:{fallback}}` envelope.
     pub fn from_envelope(json: &str) -> Self {
-        match serde_json::from_str::<rovsti_core::wire::OpenSystemResponse>(json)
+        match serde_json::from_str::<rosty_core::wire::OpenSystemResponse>(json)
             .map(Envelope::into_result)
         {
             Ok(Ok(data)) if data.fallback => Self::Fallback,
@@ -138,7 +138,7 @@ impl SystemOutcome {
 }
 
 /// Opens a system settings page; never throws, never touches a call.
-pub fn open_system(page: rovsti_android::telecom::SystemPage) -> SystemOutcome {
+pub fn open_system(page: rosty_android::telecom::SystemPage) -> SystemOutcome {
     match telecom::open_system(page) {
         Ok(json) => SystemOutcome::from_envelope(&json),
         Err(Error::Unsupported) => SystemOutcome::NotAvailable,
@@ -267,7 +267,7 @@ pub enum Placement {
 
 /// Desktop preview switch: pretend the SIM has no voicemail number.
 fn preview_no_voicemail() -> bool {
-    std::env::var("ROVSTI_PREVIEW_NO_VOICEMAIL").is_ok_and(|v| v == "1")
+    std::env::var("ROSTY_PREVIEW_NO_VOICEMAIL").is_ok_and(|v| v == "1")
 }
 
 /// A second Call press inside this window is ignored.
@@ -283,9 +283,9 @@ pub struct Backend {
     /// WhatsApp settings entity, which owns the gateway stream.
     wa_pushes: u64,
     /// Answer / Decline taps on a WhatsApp call notification, not yet applied.
-    wa_call_actions: Vec<(String, rovsti_android::events::WaCallAction)>,
+    wa_call_actions: Vec<(String, rosty_android::events::WaCallAction)>,
     /// A WhatsApp handoff from a sibling app, not yet taken by the app root.
-    handoff: Option<rovsti_core::wire::Handoff>,
+    handoff: Option<rosty_core::wire::Handoff>,
     last_place: Option<Instant>,
     /// A number waiting for the Phone permission, and the permission pull
     /// number it was requested at (only newer pulls may judge the answer).
@@ -329,7 +329,7 @@ pub struct Backend {
     setting_failed_gen: u64,
     /// No data directory: preferences live for this session only.
     prefs_unsaved: bool,
-    document: Option<rovsti_core::wire::DocumentResult>,
+    document: Option<rosty_core::wire::DocumentResult>,
     document_gen: u64,
     /// The system blocklist (AD-27) and whether this user may use it.
     blocklist: Load<BlockState>,
@@ -340,11 +340,11 @@ pub struct Backend {
     blocked_calls_wanted: bool,
     blocked_pull: u64,
     /// The armed call-back reminders (read at start and when one fires).
-    reminders: Vec<rovsti_core::reminder::Reminder>,
+    reminders: Vec<rosty_core::reminder::Reminder>,
     /// Android refused `silenceRinger()`: the control stays a blank slot (AD-29).
     silence_refused: bool,
     /// A system-driven request for the UI that nobody has taken yet (`ui_request`).
-    ui_request: Option<rovsti_core::wire::UiRequest>,
+    ui_request: Option<rosty_core::wire::UiRequest>,
     /// Desktop preview only: the fake call reports a locked keyguard.
     #[cfg(any(not(target_os = "android"), feature = "perf", test))]
     preview_locked: bool,
@@ -357,14 +357,14 @@ pub struct Backend {
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub(crate) fn now_ms() -> i64 {
-    rovsti_core::clock::now_ms()
+    rosty_core::clock::now_ms()
 }
 
 impl Backend {
     /// Starts a session: installs the sink, pushes the call snapshot, pulls
     /// everything, and starts draining events.
     pub fn start(cx: &mut App) -> Entity<Self> {
-        rovsti_android::bridge::keep_symbols();
+        rosty_android::bridge::keep_symbols();
         let data_dir = storage::data_dir("phone", cx);
         cx.new(|cx| {
             // (1) the new sink replaces any previous session's.
@@ -406,7 +406,7 @@ impl Backend {
                 sims_pull: 0,
                 pending_account: None,
                 preview_account: None,
-                preview_sims: std::env::var("ROVSTI_PREVIEW_SIMS")
+                preview_sims: std::env::var("ROSTY_PREVIEW_SIMS")
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(1),
@@ -499,7 +499,7 @@ impl Backend {
             backend._tasks.push(prefs);
             // The sink belongs to this session; clear it when the session ends.
             cx.on_release(move |_, _| {
-                let _ = rovsti_android::window::ui_attached(false);
+                let _ = rosty_android::window::ui_attached(false);
                 events::clear_sink_if(sink_token);
             })
             .detach();
@@ -519,7 +519,7 @@ impl Backend {
     // ---- Reads: views take Arc snapshots -------------------------------
 
     /// The audio route list (story 14.2); rebuilt only when it changed.
-    pub fn endpoints(&self) -> &rovsti_core::audio::EndpointList {
+    pub fn endpoints(&self) -> &rosty_core::audio::EndpointList {
         self.calls.endpoints()
     }
 
@@ -528,7 +528,7 @@ impl Backend {
     }
 
     /// `(rev, arrivals and losses since the last call)`; consumed by the views.
-    pub fn take_route_changes(&mut self) -> (u64, rovsti_core::audio::Diff) {
+    pub fn take_route_changes(&mut self) -> (u64, rosty_core::audio::Diff) {
         (self.calls.endpoint_rev(), self.calls.take_endpoint_diff())
     }
 
@@ -556,12 +556,12 @@ impl Backend {
     }
 
     /// The pending `ui_request`, if any; the app takes it once.
-    pub fn take_ui_request(&mut self) -> Option<rovsti_core::wire::UiRequest> {
+    pub fn take_ui_request(&mut self) -> Option<rosty_core::wire::UiRequest> {
         self.ui_request.take()
     }
 
     /// A request that is waiting, without taking it.
-    pub fn peek_ui_request(&self) -> Option<&rovsti_core::wire::UiRequest> {
+    pub fn peek_ui_request(&self) -> Option<&rosty_core::wire::UiRequest> {
         self.ui_request.as_ref()
     }
 
@@ -586,7 +586,7 @@ impl Backend {
         self.permissions_known
     }
 
-    /// Whether Rovsti Phone is the default phone app. Until the first pull
+    /// Whether Rosty Phone is the default phone app. Until the first pull
     /// answers this reads `true`, so Preview mode never flashes.
     pub fn is_default_dialer(&self) -> bool {
         !self.permissions_known || self.permissions.dialer_role
@@ -621,14 +621,14 @@ impl Backend {
     }
 
     /// The armed call-back reminders.
-    pub fn reminders(&self) -> &[rovsti_core::reminder::Reminder] {
+    pub fn reminders(&self) -> &[rosty_core::reminder::Reminder] {
         &self.reminders
     }
 
     /// Replaces the in-memory reminder list (after arming or cancelling one).
     pub fn set_reminders(
         &mut self,
-        list: Vec<rovsti_core::reminder::Reminder>,
+        list: Vec<rosty_core::reminder::Reminder>,
         cx: &mut Context<Self>,
     ) {
         self.reminders = list;
@@ -905,7 +905,7 @@ impl Backend {
     #[cfg(not(target_os = "android"))]
     pub fn preview_new_call(
         &mut self,
-        kind: rovsti_core::wire::CallLogKind,
+        kind: rosty_core::wire::CallLogKind,
         cx: &mut Context<Self>,
     ) {
         sample::add_call(kind, now_ms());
@@ -931,7 +931,7 @@ impl Backend {
     }
 
     /// Whether a voicemail number is set. `true` when unknown; on desktop only
-    /// `ROVSTI_PREVIEW_NO_VOICEMAIL=1` makes it `false`.
+    /// `ROSTY_PREVIEW_NO_VOICEMAIL=1` makes it `false`.
     pub fn voicemail_configured(&self) -> bool {
         match telecom::voicemail_configured() {
             Ok(set) => set,
@@ -1015,12 +1015,12 @@ impl Backend {
 
     /// Notification actions on WhatsApp calls that arrived since the last call;
     /// the app root hands them to the WhatsApp call entity.
-    pub fn take_wa_call_actions(&mut self) -> Vec<(String, rovsti_android::events::WaCallAction)> {
+    pub fn take_wa_call_actions(&mut self) -> Vec<(String, rosty_android::events::WaCallAction)> {
         std::mem::take(&mut self.wa_call_actions)
     }
 
     /// The pending WhatsApp handoff, if any; the app root takes it once.
-    pub fn take_handoff(&mut self) -> Option<rovsti_core::wire::Handoff> {
+    pub fn take_handoff(&mut self) -> Option<rosty_core::wire::Handoff> {
         self.handoff.take()
     }
 
@@ -1073,7 +1073,7 @@ impl Backend {
                 cx.notify();
             }
             kind::WA_CALL_ACTION => {
-                match rovsti_android::events::parse_wa_call_action(&event.json) {
+                match rosty_android::events::parse_wa_call_action(&event.json) {
                     Some(action) => {
                         self.wa_call_actions.push(action);
                         cx.notify();
@@ -1081,7 +1081,7 @@ impl Backend {
                     None => log::warn!("bad wa_call_action event"),
                 }
             }
-            kind::HANDOFF => match rovsti_core::wire::parse_handoff(&event.json) {
+            kind::HANDOFF => match rosty_core::wire::parse_handoff(&event.json) {
                 Some(handoff) => {
                     self.handoff = Some(handoff);
                     cx.notify();
@@ -1091,7 +1091,7 @@ impl Backend {
             kind::SIMS_CHANGED => self.refresh_sims(cx),
             kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),
             kind::UI_REQUEST => {
-                match serde_json::from_str::<rovsti_core::wire::UiRequest>(&event.json) {
+                match serde_json::from_str::<rosty_core::wire::UiRequest>(&event.json) {
                     Ok(request) => {
                         self.ui_request = Some(request);
                         cx.notify();
@@ -1274,9 +1274,9 @@ impl Backend {
 // ---- Stateless actions (no Backend needed, callable from event handlers) --
 
 pub fn xiaomi() -> Option<XiaomiOs> {
-    // Desktop design preview of the Xiaomi rows: ROVSTI_PREVIEW_XIAOMI=1.
+    // Desktop design preview of the Xiaomi rows: ROSTY_PREVIEW_XIAOMI=1.
     #[cfg(not(target_os = "android"))]
-    if std::env::var_os("ROVSTI_PREVIEW_XIAOMI").is_some() {
+    if std::env::var_os("ROSTY_PREVIEW_XIAOMI").is_some() {
         return Some(XiaomiOs::Miui {
             version: "preview".to_owned(),
         });
@@ -1289,7 +1289,7 @@ pub fn open_xiaomi(setting: XiaomiSetting) -> Outcome {
 }
 
 /// Tells Kotlin the Incoming Call screen drew its first frame (story 5.6):
-/// it logs the ring latency under `RovstiPerf`. Fire and forget.
+/// it logs the ring latency under `RostyPerf`. Fire and forget.
 pub fn incoming_frame(call_id: i32) {
     if let Err(error) = calls::incoming_frame(call_id)
         && !matches!(error, Error::Unsupported)
@@ -1298,26 +1298,23 @@ pub fn incoming_frame(call_id: i32) {
     }
 }
 
-/// A slow-frame report (story 11.10): logcat tag `RovstiPerf` through Kotlin on
+/// A slow-frame report (story 11.10): logcat tag `RostyPerf` through Kotlin on
 /// the phone, the `log` facade on desktop. Rare (once per streak).
 pub fn perf_line(line: &str) {
     match calls::perf_log(line) {
         Ok(_) => {}
         Err(_) => {
-            log::warn!(target: "RovstiPerf", "{line}");
+            log::warn!(target: "RostyPerf", "{line}");
             // No logcat here: the desktop shows the report on stderr.
             #[cfg(not(target_os = "android"))]
-            eprintln!("RovstiPerf {line}");
+            eprintln!("RostyPerf {line}");
         }
     }
 }
 
 /// Sends the app's task to the background without finishing it (AD-3a).
 pub fn move_task_to_back() -> Outcome {
-    Outcome::from(
-        rovsti_android::window::move_task_to_back(),
-        "moving to back",
-    )
+    Outcome::from(rosty_android::window::move_task_to_back(), "moving to back")
 }
 
 pub fn request_dialer_role() -> Outcome {
@@ -1354,8 +1351,8 @@ pub fn compose_sms(number: &str, body: &str) -> Outcome {
 }
 
 /// Arms the call-back alarm for `r` (inexact; re-armed at launch).
-pub fn arm_reminder(r: &rovsti_core::reminder::Reminder) -> Outcome {
-    let json = rovsti_core::reminder::arm_json(r);
+pub fn arm_reminder(r: &rosty_core::reminder::Reminder) -> Outcome {
+    let json = rosty_core::reminder::arm_json(r);
     Outcome::from(reminders::arm(&json), "arming a reminder")
 }
 
@@ -1365,9 +1362,9 @@ pub fn disarm_reminder(id: i64) -> Outcome {
 }
 
 /// The reminders the system still holds (empty on desktop).
-pub fn armed_reminders() -> Vec<rovsti_core::reminder::Reminder> {
+pub fn armed_reminders() -> Vec<rosty_core::reminder::Reminder> {
     match reminders::armed() {
-        Ok(json) => rovsti_core::reminder::parse_list(&json),
+        Ok(json) => rosty_core::reminder::parse_list(&json),
         Err(Error::Unsupported) => Vec::new(),
         Err(error) => {
             log::warn!("reading armed reminders failed: {error}");
@@ -1389,7 +1386,7 @@ pub fn share_text(text: &str) -> Outcome {
 /// Side length of the photo shown in the full-screen viewer.
 pub const FULL_PHOTO_SIZE: u32 = 1080;
 
-/// Saves the image file at `path` to the gallery (Pictures/Rovsti) as `name`.
+/// Saves the image file at `path` to the gallery (Pictures/Rosty) as `name`.
 pub fn save_to_gallery(path: &std::path::Path, name: &str) -> Outcome {
     Outcome::from(
         media::save_image_to_gallery(&path.to_string_lossy(), name, "image/png"),
@@ -1435,7 +1432,7 @@ pub fn full_photo(uri: &str) -> Option<(image::RgbaImage, std::path::PathBuf)> {
         Err(Error::Unsupported) => {
             let image = sample::photo(uri, FULL_PHOTO_SIZE)?;
             let name: String = uri.chars().filter(char::is_ascii_alphanumeric).collect();
-            let path = std::env::temp_dir().join(format!("rovsti-phone-photo-{name}.png"));
+            let path = std::env::temp_dir().join(format!("rosty-phone-photo-{name}.png"));
             image
                 .save_with_format(&path, image::ImageFormat::Png)
                 .ok()?;
@@ -1493,7 +1490,7 @@ impl PhotoFailed {
 
 /// Reads the pixel size out of the answer of `photo_size`: `{"w":..,"h":..}`,
 /// bare or inside an envelope. A size of zero means Android could not read it.
-fn decode_size(raw: rovsti_android::Result<String>) -> Result<(u32, u32), PhotoFailed> {
+fn decode_size(raw: rosty_android::Result<String>) -> Result<(u32, u32), PhotoFailed> {
     let json = match raw {
         Ok(json) => json,
         Err(Error::Unsupported) => return Err(PhotoFailed::Unsupported),
@@ -1552,13 +1549,13 @@ const QR_SIZE: u32 = 720;
 /// from (in the photo viewer's export dir) so Save and Share have a path.
 /// Blocks: only call it on the background executor.
 pub fn qr_image(payload: &str) -> Option<(Arc<gpui::RenderImage>, std::path::PathBuf)> {
-    let png = rovsti_wa_ui::qr_png(payload, QR_SIZE)
+    let png = rosty_wa_ui::qr_png(payload, QR_SIZE)
         .map_err(|error| log::debug!("qr failed: {error}"))
         .ok()?;
     let pixels = image::load_from_memory_with_format(&png, image::ImageFormat::Png)
         .ok()?
         .into_rgba8();
-    let path = std::env::temp_dir().join("rovsti-phone-qr.png");
+    let path = std::env::temp_dir().join("rosty-phone-qr.png");
     std::fs::write(&path, &png).ok()?;
     Some((Arc::new(crate::photos::render_image(pixels)), path))
 }
@@ -1633,9 +1630,9 @@ fn load_permissions() -> PermissionFacts {
     // Desktop and not-yet-attached both fall back to the defaults.
     #[cfg_attr(target_os = "android", allow(unused_mut))]
     let mut desktop = PermissionFacts::default();
-    // Desktop design preview of Preview mode: ROVSTI_PREVIEW_ROLE=0.
+    // Desktop design preview of Preview mode: ROSTY_PREVIEW_ROLE=0.
     #[cfg(not(target_os = "android"))]
-    if std::env::var_os("ROVSTI_PREVIEW_ROLE").is_some_and(|v| v == "0") {
+    if std::env::var_os("ROSTY_PREVIEW_ROLE").is_some_and(|v| v == "0") {
         desktop.dialer_role = false;
     }
     PermissionFacts {
@@ -1674,7 +1671,7 @@ fn decode<T: DeserializeOwned + Default, U>(json: &str, build: impl FnOnce(T) ->
 
 /// Maps a pull result: Android data, sample data on desktop, or a failure state.
 fn load<U>(
-    pulled: rovsti_android::Result<String>,
+    pulled: rosty_android::Result<String>,
     parse: impl FnOnce(&str) -> Load<U>,
     sample: impl FnOnce() -> U,
 ) -> Load<U> {
@@ -1734,7 +1731,7 @@ fn build_call_log_with(
     };
     let rows = call_log::group(&entries);
     let home_cc =
-        rovsti_core::number_format::infer_home_cc(source.iter().map(|e| e.number_raw.as_str()));
+        rosty_core::number_format::infer_home_cc(source.iter().map(|e| e.number_raw.as_str()));
     CallLog {
         source,
         entries,
@@ -1757,7 +1754,7 @@ fn local_time() -> LocaleTime {
 fn load_call_log(blocked: &BlockSet) -> Load<CallLog> {
     // Desktop design preview of the Recents states.
     #[cfg(not(target_os = "android"))]
-    match std::env::var("ROVSTI_PREVIEW_RECENTS").as_deref() {
+    match std::env::var("ROSTY_PREVIEW_RECENTS").as_deref() {
         Ok("loading") => return Load::Loading,
         Ok("denied") => return Load::PermissionDenied,
         Ok("unavailable") => return Load::Unavailable,
@@ -1803,13 +1800,13 @@ fn load_contacts() -> Load<ContactIndex> {
 }
 
 /// The provider write; the desktop preview flips the sample data instead
-/// (`ROVSTI_PREVIEW_STAR_FAIL=1` rehearses a refused write).
+/// (`ROSTY_PREVIEW_STAR_FAIL=1` rehearses a refused write).
 fn write_starred(contact_id: i64, starred: bool) -> bool {
     match providers::set_starred(contact_id, starred) {
         Ok(accepted) => accepted,
         #[cfg(not(target_os = "android"))]
         Err(Error::Unsupported) => {
-            if std::env::var_os("ROVSTI_PREVIEW_STAR_FAIL").is_some() {
+            if std::env::var_os("ROSTY_PREVIEW_STAR_FAIL").is_some() {
                 return false;
             }
             std::thread::sleep(Duration::from_millis(120));
@@ -1849,10 +1846,10 @@ fn outcome_of(result: Result<String, Error>) -> WriteOutcome {
     }
 }
 
-/// `ROVSTI_PREVIEW_CALLLOG_FAIL=1` rehearses a missing permission on desktop.
+/// `ROSTY_PREVIEW_CALLLOG_FAIL=1` rehearses a missing permission on desktop.
 #[cfg(not(target_os = "android"))]
 fn preview_call_write(apply: impl FnOnce() -> u32) -> WriteOutcome {
-    if std::env::var_os("ROVSTI_PREVIEW_CALLLOG_FAIL").is_some() {
+    if std::env::var_os("ROSTY_PREVIEW_CALLLOG_FAIL").is_some() {
         return WriteOutcome::Permission;
     }
     std::thread::sleep(Duration::from_millis(120));
@@ -1970,12 +1967,11 @@ mod tests {
         assert!(PermissionFacts::default().microphone.is_granted());
     }
 
-    const LOG_OK: &str =
-        include_str!("../../../crates/rovsti_core/tests/fixtures/call_log_ok.json");
+    const LOG_OK: &str = include_str!("../../../crates/rosty_core/tests/fixtures/call_log_ok.json");
     const LOG_DENIED: &str =
-        include_str!("../../../crates/rovsti_core/tests/fixtures/call_log_permission.json");
+        include_str!("../../../crates/rosty_core/tests/fixtures/call_log_permission.json");
     const CONTACTS_OK: &str =
-        include_str!("../../../crates/rovsti_core/tests/fixtures/contacts_ok.json");
+        include_str!("../../../crates/rosty_core/tests/fixtures/contacts_ok.json");
 
     #[test]
     fn call_log_envelope_becomes_rows() {

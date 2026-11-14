@@ -8,7 +8,7 @@ use gpui::{
     IntoElement, ParentElement, Pixels, SharedString, Stateful, Styled, TextInputAction,
     TextInputPurpose, Window, canvas, div, px, svg,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::glass_pill,
     field::{Bare, TextField, bare_field},

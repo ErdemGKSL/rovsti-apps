@@ -2,7 +2,7 @@
 # /etc/systemd/system/wa-gateway.service, and config.example.toml to
 # /etc/wa-gateway/config.toml. Then: systemctl enable --now wa-gateway
 [Unit]
-Description=Rovsti WhatsApp gateway
+Description=Rosty WhatsApp gateway
 After=network-online.target
 Wants=network-online.target
 

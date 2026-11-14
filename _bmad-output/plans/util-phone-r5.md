@@ -1,4 +1,4 @@
-# util-phone: everyday utilities for Rovsti Phone (round 5)
+# util-phone: everyday utilities for Rosty Phone (round 5)
 
 baseSha: 835bcba4e24d1ff38bccdcf8c209fe3b8f223346
 
@@ -24,7 +24,7 @@ The R5 backlog rows, checked by grep at baseSha:
   and time, and `notes_ui::notes_open_row` already finds the logged call by
   `history_for(..)` + `call_notes::MATCH_WINDOW_MS` and opens Call details.
 - U38 (Blocked export/import as a file): open. No new Kotlin glue is needed. Export:
-  `backend::export_calls(name, csv)` saves any CSV. Import: `rovsti_android::documents::import_file
+  `backend::export_calls(name, csv)` saves any CSV. Import: `rosty_android::documents::import_file
   (max_bytes)` copies the file into the cache and answers `document_result` op `ImportMessages` with
   `path`. Phone ignores that op today (`backup_ui::sync_documents` `_ => {}`), so it is free in Phone,
   guarded by a pending flag.
@@ -94,16 +94,16 @@ New gaps found in this audit:
 ## Steps (round 5)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first. Make one focused commit per step
-(`Rovsti phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S3-S7. Never invent GPUI
+(`Rosty phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S3-S7. Never invent GPUI
 APIs: copy patterns that already exist in `apps/phone/src` (`Sub` pages and `prefix()`, `SheetKind` sheets
 such as `RemindPick`/`PasteChoose`/`ConfirmDelete`, `presses`, `show_notice_pill`/`show_pill_action`,
-`PillAction`, `rovsti_ui::haptics::perform`). Every utility gets a pill, every destructive one a confirm
+`PillAction`, `rosty_ui::haptics::perform`). Every utility gets a pill, every destructive one a confirm
 and/or Undo, desktop failures go through `Outcome::why_not`. No step adds Android or Kotlin glue.
 
-### S1. Pure: notes filter, contact numbers text, stats summary, older calls (`rovsti_core`)
+### S1. Pure: notes filter, contact numbers text, stats summary, older calls (`rosty_core`)
 - `call_notes.rs`: `impl Notes { pub fn has_note(&self, number: &str, first_ms: i64, last_ms: i64) ->
   bool }`: a note for that number (`PhoneNumber::matches`) inside `first_ms - MATCH_WINDOW_MS ..=
   last_ms + MATCH_WINDOW_MS`, any text. Share the window/number test with `matching` through one
@@ -140,11 +140,11 @@ and/or Undo, desktop failures go through `Outcome::why_not`. No step adds Androi
   number; `cutoff_ms` per age; `ids_older_than` boundary (`date_ms == cutoff` is kept) with log and
   extras; `prune_text` singular and plural.
 
-### S2. Pure: blocked list file, notes CSV, after-call text (`rovsti_core`)
+### S2. Pure: blocked list file, notes CSV, after-call text (`rosty_core`)
 - `blocklist.rs`: `pub const CSV_HEADER: &str = "number,name"`; `pub fn to_csv(rows: &[BlockedNumber],
   name_of: impl Fn(&str) -> Option<String>) -> String` (header + one CRLF row per number in list
   order, the raw number and the name, both through `call_log_query::cell`). `pub fn csv_file_name
-  (now_ms: i64, tz_offset_s: i32) -> String` gives `rovsti-blocked-numbers-2026-11-06.csv` (reuse the
+  (now_ms: i64, tz_offset_s: i32) -> String` gives `rosty-blocked-numbers-2026-11-06.csv` (reuse the
   date helper `csv_file_name` in `call_log_query` uses; make it `pub(crate)` if private).
 - `blocklist.rs`: `pub const IMPORT_MAX: usize = 2000`; `#[derive(Clone, Debug, Default, PartialEq,
   Eq)] pub struct FileImport { pub bulk: BulkParse, pub skipped_lines: usize, pub truncated: bool }`;
@@ -161,7 +161,7 @@ and/or Undo, desktop failures go through `Outcome::why_not`. No step adds Androi
 - `call_notes.rs`: `impl Notes { pub fn to_csv(&self, name_of: impl Fn(&str) -> Option<String>,
   tz_offset_s: i32) -> String }` with header `date,time,name,number,note`, newest first, cells
   through `call_log_query::cell`, date/time the way `call_log_query::to_csv` writes them (reuse its
-  helper). `pub fn notes_csv_file_name(now_ms, tz) -> String` -> `rovsti-call-notes-2026-11-06.csv`.
+  helper). `pub fn notes_csv_file_name(now_ms, tz) -> String` -> `rosty-call-notes-2026-11-06.csv`.
 - `call.rs`: `pub fn after_call_text(who: &str, talk_s: u64) -> String` -> `"Call with Anna Smith,
   4:32"` through `call_log::format_duration`; just `"Call ended, 4:32"` for an empty `who`.
 - Tests: `to_csv` header only for no rows, a name with a comma, a number that starts with `+` or `=`
@@ -235,7 +235,7 @@ and/or Undo, desktop failures go through `Outcome::why_not`. No step adds Androi
   no room, move Export and Import into a second row with the same recipe.
   Export: `ExportKind::Blocked`, `backend::export_calls(&blocklist::csv_file_name(..),
   &blocklist::to_csv(rows, name_of))`. Import: set `self.blocked.import_pending = true`, call
-  `rovsti_android::documents::import_file(256 * 1024)` through a new thin `backend::import_file`
+  `rosty_android::documents::import_file(256 * 1024)` through a new thin `backend::import_file`
   (`Outcome::from(.., "importing")`), failure pill `why_not("Couldn't open the file picker")`.
   `backup_ui::sync_documents`: `DocumentOp::ImportMessages` when `import_pending` (clear it): a
   cancel shows nothing, an error shows "Couldn't read the file", ok reads `result.path` with

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use rovsti_wa_proto::{GatewayEvent, ScheduledState, ScheduledText, SendText};
+use rosty_wa_proto::{GatewayEvent, ScheduledState, ScheduledText, SendText};
 use tokio::task::JoinHandle;
 
 use crate::store::InstanceId;

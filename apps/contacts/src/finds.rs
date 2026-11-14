@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use gpui::{Context, SharedString};
-use rovsti_android::permissions::{self, Group};
-use rovsti_core::{
+use rosty_android::permissions::{self, Group};
+use rosty_core::{
     contact_find::DeepHit,
     contact_frequent::{self, Frequent},
     contacts_view::{self, ContactVm, NameStyle},
@@ -189,7 +189,7 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::{
+    use rosty_core::{
         contact_find::DeepField,
         wire::{WireContact, WireNumber},
     };

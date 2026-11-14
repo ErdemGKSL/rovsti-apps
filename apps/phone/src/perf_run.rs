@@ -3,19 +3,19 @@
 //!
 //! A scenario is a list of timed [`Step`]s that go through the same code as a
 //! tap (`select_tab`, `activate`, the incoming buttons), so what is measured
-//! is what the owner feels. The runner logs one `RovstiPerf` report per
-//! scenario when it ends (`rovsti_ui::perf::Recorder`).
+//! is what the owner feels. The runner logs one `RostyPerf` report per
+//! scenario when it ends (`rosty_ui::perf::Recorder`).
 //!
 //! Start one on the phone with `scripts/perf-run.sh` (it sets the system
-//! property `debug.rovsti.perf`), on the desktop with `ROVSTI_PERF=tab,keypad`.
+//! property `debug.rosty.perf`), on the desktop with `ROSTY_PERF=tab,keypad`.
 
 #[cfg(feature = "perf")]
 use std::time::{Duration, Instant};
 
 use gpui::{Context, Window};
 #[cfg(feature = "perf")]
-use rovsti_ui::perf::Recorder;
-use rovsti_ui::perf::{self, Scenario};
+use rosty_ui::perf::Recorder;
+use rosty_ui::perf::{self, Scenario};
 
 use crate::{KEYPAD_TAB, PhoneApp, RECENTS_TAB};
 
@@ -239,9 +239,9 @@ impl PhoneApp {
 
 #[cfg(feature = "perf")]
 fn trigger_value() -> String {
-    match rovsti_android::perf::trigger() {
+    match rosty_android::perf::trigger() {
         Ok(value) => value,
-        Err(_) => std::env::var("ROVSTI_PERF").unwrap_or_default(),
+        Err(_) => std::env::var("ROSTY_PERF").unwrap_or_default(),
     }
 }
 
@@ -252,7 +252,7 @@ async fn run_scenario(
     name: &str,
 ) {
     let Some(script) = script(name) else {
-        log::warn!(target: "RovstiPerf", "unknown scenario {name}");
+        log::warn!(target: "RostyPerf", "unknown scenario {name}");
         return;
     };
     if this

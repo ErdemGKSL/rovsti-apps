@@ -1,4 +1,4 @@
-# util-contacts: everyday utilities for Rovsti Contacts (round 6)
+# util-contacts: everyday utilities for Rosty Contacts (round 6)
 
 baseSha: 2595a7856ce9d37484134c37b9e776b55e80e914
 
@@ -8,7 +8,7 @@ Rounds 1-5 (`util-contacts.md`, `-r2.md` .. `-r5.md`) are fully landed: C1-C34, 
 (last commit 2595a78 "Docs, backlog and review fixes (C33, C38-C44)", ticked in `docs/roadmap.md`
 "Utilities, round 5"). Clean tree, no stash. Disk: about 2.7 GB free at baseSha, so run
 `rm -rf target/debug/incremental` before the first build of every step (more if `df` stays under 6 GB:
-`cargo clean -p rovsti_contacts` style per-package cleans are fine).
+`cargo clean -p rosty_contacts` style per-package cleans are fine).
 
 Facts the R6 steps build on (checked at baseSha, do not re-create):
 - "Recently added" (`apps/contacts/src/recent.rs`, `contacts_view::recent`) is really "changed in the last
@@ -33,9 +33,9 @@ Facts the R6 steps build on (checked at baseSha, do not re-create):
   `Confirm::Import { cards, duplicates, unreadable }` -> Kotlin `import`). Photos on many cards are dropped.
   `backend::photo_file(&CardPhoto)`, `backend::change_photo_with(id, path, CropView::default())`.
 - Dates: `contact_dates::{age_on, next_occurrence, upcoming, EventDate}`; Upcoming page `upcoming.rs`.
-- Files: `rovsti_android::documents::export_file(name, mime, path)` (stream copy; answers op
+- Files: `rosty_android::documents::export_file(name, mime, path)` (stream copy; answers op
   `export_messages` = `DocumentOp::ExportMessages`, which Contacts does not handle yet);
-  `transfer.rs::document_op_notice`. Text share: `rovsti_android::telecom::share_text`.
+  `transfer.rs::document_op_notice`. Text share: `rosty_android::telecom::share_text`.
 
 ## Utility backlog (ordered by user value)
 
@@ -56,16 +56,16 @@ Facts the R6 steps build on (checked at baseSha, do not re-create):
 | C52 | Age / years together on the card's date rows ("12 May 1990 · 36 years") if not already shown | backlog R7 (check first) |
 | C53 | Copy every number / email of the selection (select mode "Copy") | backlog R7 |
 | C54 | Contacts without a number / without a name filters in Clean up | backlog R7 (check `contact_cleanup` first) |
-| C35 | Block / unblock a number from the card (hand-off to Rovsti Phone, which holds the dialer role) | deferred (Phone change) |
+| C35 | Block / unblock a number from the card (hand-off to Rosty Phone, which holds the dialer role) | deferred (Phone change) |
 | C37 | Last SMS with this contact on the card | dropped (READ_SMS belongs to Messages) |
 
 ## Rules for every step
 
 All checks green after each step: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
-One focused commit per step, prefix `Rovsti contacts: `. Do not change Phone / Messages behaviour (shared
-`rovsti_core` / `rovsti_android` changes keep them compiling: fix struct literals only; new `ContactDraft`
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
+One focused commit per step, prefix `Rosty contacts: `. Do not change Phone / Messages behaviour (shared
+`rosty_core` / `rosty_android` changes keep them compiling: fix struct literals only; new `ContactDraft`
 fields are `#[serde(skip_serializing_if = ...)]` + default so old JSON parses). Read
 `.claude/skills/liquid-glass-gpui/SKILL.md` before S6-S7; use only GPUI APIs already used in this repo or
 grepped in `~/.cargo/git/checkouts/gpui-fusion-*/d6c8412/crates/gpui`. Every action ends in a pill
@@ -76,7 +76,7 @@ encode, Kotlin calls) runs on the background executor.
 ## Steps (round 6)
 
 ### S1. Pure: recently added / edited and recently viewed (C45, C51)
-- New `crates/rovsti_core/src/contact_recent.rs` (+ `pub mod` in lib.rs, module doc):
+- New `crates/rosty_core/src/contact_recent.rs` (+ `pub mod` in lib.rs, module doc):
   `pub const ADDED_KEEP: usize = 50; pub const VIEWED_KEEP: usize = 8; pub const WINDOW_DAYS: u16 = 30;`
   `#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)] pub struct AddedMark { pub id:
   i64, pub ms: i64 }`.
@@ -103,7 +103,7 @@ encode, Kotlin calls) runs on the background executor.
 - Tests: first pull seeds, later pull marks new ids, deleted ids drop, window expiry, cap, max never goes
   down, `note_created` dedup; added/edited split incl. edited-after-added; entry titles; viewed
   move-to-front, cap, missing keys, hidden ids; prefs old JSON (r5 shape) still parses.
-- Acceptance: `cargo test -p rovsti_core contact_recent contacts_prefs` green; workspace compiles.
+- Acceptance: `cargo test -p rosty_core contact_recent contacts_prefs` green; workspace compiles.
 
 ### S2. Pure: add to existing contact, share selection as text (C49, C47)
 - `contact_edit.rs`:
@@ -125,7 +125,7 @@ encode, Kotlin calls) runs on the background executor.
 - Tests: from_query number / email / name; add new number, same number in another format ->
   AlreadyThere, email case, mixed, empty; notices singular/plural with Turkish names; share_text order,
   blank-line join, cap line.
-- Acceptance: `cargo test -p rovsti_core contact_edit contact_select` green.
+- Acceptance: `cargo test -p rosty_core contact_edit contact_select` green.
 
 ### S3. Pure: phonetic name, relations, calendar file, import photos (C46, C50, C48)
 - `contact_edit.rs` `ContactDraft` gains `#[serde(skip_serializing_if = "String::is_empty")] pub
@@ -146,16 +146,16 @@ encode, Kotlin calls) runs on the background executor.
   back as Custom with that label). `contact_csv.rs`: Google
   `Phonetic First Name`, `Phonetic Last Name`, `Relation N - Label`, `Relation N - Value` both ways.
   `contact_find.rs`: `DeepField::PhoneticName` and `DeepField::Relation` (after Nickname / before Note).
-- New `crates/rovsti_core/src/contact_ics.rs`: `pub struct IcsEvent { pub uid: String, pub summary:
+- New `crates/rosty_core/src/contact_ics.rs`: `pub struct IcsEvent { pub uid: String, pub summary:
   String, pub md: (u8, u8), pub year: Option<i32> }`; `pub fn events_of(drafts: &[ContactDraft]) ->
   Vec<IcsEvent>` (birthdays "Ayşe Yılmaz's birthday", anniversaries "... anniversary", other kinds by
-  title; uid `rovsti-<id>-<kind>-<mmdd>@contacts.local`; dates via `contact_dates` parse, unparsable
+  title; uid `rosty-<id>-<kind>-<mmdd>@contacts.local`; dates via `contact_dates` parse, unparsable
   skipped); `pub fn write(events: &[IcsEvent], stamp_ms: i64) -> String` (RFC 5545: CRLF, 75-octet
-  folding on char boundaries, TEXT escaping of `,;\` and newlines, `VERSION:2.0`, `PRODID:-//Rovsti//
+  folding on char boundaries, TEXT escaping of `,;\` and newlines, `VERSION:2.0`, `PRODID:-//Rosty//
   Contacts//EN`, all-day `DTSTART;VALUE=DATE:` (year from the card, else 1972 a leap year so 29 Feb
   works), `RRULE:FREQ=YEARLY` (29 Feb: `RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1`),
   `TRANSP:TRANSPARENT`, `DTSTAMP` from `stamp_ms`); `pub fn file_name(n, today) -> String`
-  (`rovsti-birthdays-<n>-YYYY-MM-DD.ics`); `pub fn saved_notice(n) -> String`.
+  (`rosty-birthdays-<n>-YYYY-MM-DD.ics`); `pub fn saved_notice(n) -> String`.
 - Import photos: `contact_edit::ImportPayload` gains `#[serde(default)] pub ids: Vec<i64>` (aligned with
   the sent drafts, 0 for a failed one; old `{added}` JSON still parses). `import_plan.rs`: `pub fn
   plan_with_photos(existing, cards: Vec<ContactDraft>, photos: Vec<Option<CardPhoto>>) -> (Plan,
@@ -167,10 +167,10 @@ encode, Kotlin calls) runs on the background executor.
   search finds a phonetic name and a relation; relation_match unique / ambiguous; ICS golden text for a
   birthday with year, without year, 29 Feb, escaping, folding of a long Turkish summary; plan_with_photos
   alignment with duplicates removed; photo_targets skips 0 and caps; ImportPayload old JSON.
-- Acceptance: `cargo test -p rovsti_core` green; workspace compiles (Phone / Messages literals fixed).
+- Acceptance: `cargo test -p rosty_core` green; workspace compiles (Phone / Messages literals fixed).
 
 ### S4. Android glue and backend wrappers (C46, C48, C50, C45)
-- `crates/rovsti_android/kotlin/dev/rovsti/bridge/ContactsEdit.kt`:
+- `crates/rosty_android/kotlin/dev/rosty/bridge/ContactsEdit.kt`:
   read `StructuredName.PHONETIC_GIVEN_NAME` / `PHONETIC_FAMILY_NAME` into `phonetic_given` /
   `phonetic_family` and `Relation` rows (`NAME`, `TYPE`, `LABEL`) into `relations` (`kindOfRelation`
   / `typeOfRelation` pairs like `kindOfEvent`) in the detail / full JSON; `insertData` writes the phonetic
@@ -215,7 +215,7 @@ encode, Kotlin calls) runs on the background executor.
 
 ### S6. UI: Recently added / edited page, phonetic name and relations (C45, C46)
 - `recent.rs`: entry row uses `contact_recent::entry_title`; the page gets a glass segmented control
-  (existing component in `rovsti_ui::components`, grep `segmented`) "Added" / "Edited", rows from
+  (existing component in `rosty_ui::components`, grep `segmented`) "Added" / "Edited", rows from
   `added` / `edited` with `recent_when`; empty state per tab ("No contacts added in the last 30 days"); the
   chosen tab is kept for the session.
 - Editor (`editor.rs`): "Phonetic name" fields (given, family) under the name, shown when non-empty or
@@ -244,13 +244,13 @@ encode, Kotlin calls) runs on the background executor.
 - Acceptance: all checks green.
 
 ### S8. Docs, backlog and review fixes (C45-C51)
-- `docs/roadmap.md` Rovsti Contacts: "Utilities, round 6 (C45-C51, done without a device)" with one line
+- `docs/roadmap.md` Rosty Contacts: "Utilities, round 6 (C45-C51, done without a device)" with one line
   per utility, plus a device-check line (import photos, .ics in Google Calendar, Relation rows written).
   `docs/architecture.md`: first-seen marks and viewed keys in `contacts-prefs.json`, Relation /
   phonetic in the edited mimes, import answers ids, `.ics` via `export_file`.
 - Update this file's backlog statuses to `done R6`; keep C52-C54 as `backlog R7`.
-- Self review of the R6 diff (`git diff 2595a78..HEAD -- apps/contacts crates/rovsti_core
-  crates/rovsti_android`): no blocking work on the UI thread, every action has a pill, Confirm on Clear
+- Self review of the R6 diff (`git diff 2595a78..HEAD -- apps/contacts crates/rosty_core
+  crates/rosty_android`): no blocking work on the UI thread, every action has a pill, Confirm on Clear
   recently viewed, Undo on Add to existing, prefs stay under `MAX_FILE_BYTES`, no Phone/Messages
   behaviour change; fix in the same commit.
 - Acceptance: all checks green.

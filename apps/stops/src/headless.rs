@@ -1,4 +1,4 @@
-//! The headless handler behind `RovstiBridge.nativeHeadless(kind, json)` lives in
-//! `rovsti_app_core::stops::headless` (shared with the Kotlin apps); this is a re-export.
+//! The headless handler behind `RostyBridge.nativeHeadless(kind, json)` lives in
+//! `rosty_app_core::stops::headless` (shared with the Kotlin apps); this is a re-export.
 
-pub use rovsti_app_core::stops::headless::*;
+pub use rosty_app_core::stops::headless::*;

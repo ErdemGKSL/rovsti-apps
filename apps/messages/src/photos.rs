@@ -1,16 +1,16 @@
 //! Address-book photos for the inbox and the conversation headers.
 //!
 //! A photo is read only for avatars on screen: Kotlin writes the thumbnail
-//! as a PNG file (`rovsti_android::providers::contact_photo`), the background
-//! executor decodes it (`rovsti_wa_ui::decode_image`), and the result is kept
+//! as a PNG file (`rosty_android::providers::contact_photo`), the background
+//! executor decodes it (`rosty_wa_ui::decode_image`), and the result is kept
 //! in a [`CAPACITY`]-entry LRU keyed by the photo URI. The same scheme as the
-//! Contacts and Phone apps; WhatsApp pictures come from `rovsti_wa_ui::WaAvatars`.
+//! Contacts and Phone apps; WhatsApp pictures come from `rosty_wa_ui::WaAvatars`.
 
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use gpui::{Context, RenderImage, SharedString};
-use rovsti_core::lru::Lru;
-use rovsti_wa_ui::avatars::{FADE, fade_in};
+use rosty_core::lru::Lru;
+use rosty_wa_ui::avatars::{FADE, fade_in};
 
 /// Longest side of a decoded thumbnail.
 const SIZE: u32 = 128;
@@ -103,13 +103,13 @@ impl ContactPhotos {
 
 /// Blocking: asks Kotlin for the thumbnail file and decodes it.
 fn read_photo(uri: &str) -> Option<Arc<RenderImage>> {
-    match rovsti_android::providers::contact_photo(uri, SIZE) {
+    match rosty_android::providers::contact_photo(uri, SIZE) {
         Ok(path) if path.is_empty() => None,
         Ok(path) => {
             let bytes = std::fs::read(&path).ok()?;
-            rovsti_wa_ui::decode_image(&bytes, SIZE)
+            rosty_wa_ui::decode_image(&bytes, SIZE)
         }
-        Err(rovsti_android::Error::Unsupported) => None,
+        Err(rosty_android::Error::Unsupported) => None,
         Err(error) => {
             log::debug!("a contact photo failed: {error}");
             None

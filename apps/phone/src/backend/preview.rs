@@ -1,17 +1,17 @@
-//! Desktop-only call preview: `cargo run -p rovsti_phone` has no Telecom, so
+//! Desktop-only call preview: `cargo run -p rosty_phone` has no Telecom, so
 //! placing a call walks a fake one through Dialing, Active and Disconnected
 //! using the same `CallModel` the Android events feed. This is what makes the
 //! In-Call screen designable on a desktop.
 //!
-//! `ROVSTI_PREVIEW_INCOMING` does the same for the Incoming Call screen: `1`
+//! `ROSTY_PREVIEW_INCOMING` does the same for the Incoming Call screen: `1`
 //! rings from an unknown number, any other value rings as that contact. Add
-//! `ROVSTI_PREVIEW_LOCKED=1` for the lock-screen look (call-only mode) and
-//! `ROVSTI_PREVIEW_MISSED=1` to let the caller give up after a few seconds.
+//! `ROSTY_PREVIEW_LOCKED=1` for the lock-screen look (call-only mode) and
+//! `ROSTY_PREVIEW_MISSED=1` to let the caller give up after a few seconds.
 
 use std::time::Duration;
 
 use gpui::Context;
-use rovsti_core::wire::{
+use rosty_core::wire::{
     AudioRoute, AudioState, CallSnapshot, DisconnectCause, Endpoint, EndpointHint, EndpointType,
     WireCall, WireCallState, caps, props,
 };
@@ -25,10 +25,10 @@ const WAITING_ID: i32 = 2;
 const ANSWER_AFTER: Duration = Duration::from_millis(1600);
 /// The record is removed this long after "disconnected" (Telecom is quick).
 const REMOVE_AFTER: Duration = Duration::from_millis(250);
-/// The fake caller gives up after this long (`ROVSTI_PREVIEW_MISSED`).
+/// The fake caller gives up after this long (`ROSTY_PREVIEW_MISSED`).
 const GIVE_UP_AFTER: Duration = Duration::from_millis(6000);
 
-/// The desktop route list (`ROVSTI_PREVIEW_ROUTES=1`, or `many` for a long one).
+/// The desktop route list (`ROSTY_PREVIEW_ROUTES=1`, or `many` for a long one).
 fn sample_endpoints(many: bool) -> Vec<Endpoint> {
     let ep = |id: &str, kind, name: Option<&str>| Endpoint {
         id: id.to_owned(),
@@ -71,7 +71,7 @@ fn select_endpoint(audio: &mut AudioState, id: &str) {
 }
 
 fn routes_preview() -> Option<bool> {
-    std::env::var("ROVSTI_PREVIEW_ROUTES")
+    std::env::var("ROSTY_PREVIEW_ROUTES")
         .ok()
         .map(|v| v == "many")
 }
@@ -180,7 +180,7 @@ impl Backend {
     }
 
     /// The debug switcher: a fake outgoing call that ends up `variant`
-    /// (`hold`, `waiting` or `mute`), like `ROVSTI_PREVIEW_CALL=<variant>`.
+    /// (`hold`, `waiting` or `mute`), like `ROSTY_PREVIEW_CALL=<variant>`.
     pub fn preview_scenario(&mut self, variant: &'static str, cx: &mut Context<Self>) {
         self.preview_variant = Some(variant);
         self.preview_start("+905551112233", cx);
@@ -191,7 +191,7 @@ impl Backend {
             .preview_variant
             .take()
             .map(str::to_owned)
-            .or_else(|| std::env::var("ROVSTI_PREVIEW_CALL").ok());
+            .or_else(|| std::env::var("ROSTY_PREVIEW_CALL").ok());
         let raw = raw.to_owned();
         let account = self.preview_account.take();
         if self

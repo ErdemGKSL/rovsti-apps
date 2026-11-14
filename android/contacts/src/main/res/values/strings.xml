@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Rovsti Contacts</string>
+    <string name="app_name">Rosty Contacts</string>
     <string name="tab_contacts">Contacts</string>
     <string name="tab_favorites">Favorites</string>
     <string name="tab_groups">Groups</string>
@@ -124,7 +124,7 @@
     <string name="contacts_cant_change_default">Can\'t change the default.</string>
     <string name="contacts_cant_change_favorite">Can\'t change the favorite.</string>
     <string name="contacts_cant_change_group">Can\'t change this group right now.</string>
-    <string name="contacts_cant_change_groups_permission">Can\'t change groups: Rovsti has no permission to change contacts.</string>
+    <string name="contacts_cant_change_groups_permission">Can\'t change groups: Rosty has no permission to change contacts.</string>
     <string name="contacts_cant_change_photo">Can\'t change the photo</string>
     <string name="contacts_cant_change_ringtone">Can\'t change the ringtone</string>
     <string name="contacts_cant_change_setting">Can\'t change this setting</string>
@@ -145,7 +145,7 @@
     <string name="contacts_cant_save_group">Can\'t save the group right now.</string>
     <string name="contacts_cant_save_here">Can\'t save a file here.</string>
     <string name="contacts_cant_save_image">Can\'t save the image</string>
-    <string name="contacts_cant_save_permission">Can\'t save: Rovsti has no permission to change contacts.</string>
+    <string name="contacts_cant_save_permission">Can\'t save: Rosty has no permission to change contacts.</string>
     <string name="contacts_cant_save_photo">Can\'t save the photo</string>
     <string name="contacts_cant_save_right_now">Can\'t save this right now.</string>
     <string name="contacts_cant_save_setting">Can\'t save the setting.</string>
@@ -221,7 +221,7 @@
     <string name="contacts_import">Import</string>
     <string name="contacts_import_contacts">Import Contacts</string>
     <string name="contacts_import_csv">Import CSV</string>
-    <string name="contacts_install_messages">Install Rovsti Messages to chat on WhatsApp</string>
+    <string name="contacts_install_messages">Install Rosty Messages to chat on WhatsApp</string>
     <string name="contacts_job_title">Job title</string>
     <string name="contacts_keep_editing">Keep Editing</string>
     <string name="contacts_label">Label</string>
@@ -328,7 +328,7 @@
     <string name="contacts_send_email">Send Email</string>
     <string name="contacts_send_to_voicemail">Send to Voicemail</string>
     <string name="contacts_set_as_default">Set as Default</string>
-    <string name="contacts_set_default_phone">Set Rovsti Phone as the default phone app to block callers.</string>
+    <string name="contacts_set_default_phone">Set Rosty Phone as the default phone app to block callers.</string>
     <string name="contacts_set_my_card">Set My Card</string>
     <string name="contacts_share">Share</string>
     <string name="contacts_share_address">Share Address</string>
@@ -483,7 +483,7 @@
     <string name="settings_people_restart_body">Progress so far is kept, but everyone is checked again. This takes longer.</string>
     <string name="settings_people_restart">Start Over</string>
     <string name="settings_people_restart_cancel">Cancel</string>
-    <string name="settings_people_footer">Names and photos of the people you meet on WhatsApp stay on this phone and are shared with Rovsti Phone. Nothing is added to your contacts. Syncing is slow on purpose so WhatsApp does not limit your account.</string>
+    <string name="settings_people_footer">Names and photos of the people you meet on WhatsApp stay on this phone and are shared with Rosty Phone. Nothing is added to your contacts. Syncing is slow on purpose so WhatsApp does not limit your account.</string>
     <string name="card_birthday_title">Happy birthday, %1$s!</string>
     <string name="card_birthday_title_nameless">Happy birthday!</string>
     <plurals name="card_birthday_age"><item quantity="one">Turning %1$d</item><item quantity="other">Turning %1$d</item></plurals>

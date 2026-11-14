@@ -28,8 +28,8 @@ Planner: PLAN agent, round 1. Base: `4b1ed22` (branch `ui-overhaul`). Epic file:
 
 - Read first: `.claude/skills/convx-motion-compose/SKILL.md`, the reference sections named in the step,
   `docs/kotlin-ui/architecture.md` sections 2-4 and 9-10, `docs/kotlin-ui/toolchain.md`.
-- Package root is `dev.rovsti.design.<pkg>` (ARCH 4.1). The skill's snippets say `dev.rovsti.ui.*`; rename to
-  `dev.rovsti.design.*` when moving them into source.
+- Package root is `dev.rosty.design.<pkg>` (ARCH 4.1). The skill's snippets say `dev.rosty.ui.*`; rename to
+  `dev.rosty.design.*` when moving them into source.
 - **Licence.** Never open Convx files while writing code; work from the skill. glisse
   (`/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/ref/glisse`, MIT) may be
   ported; every file with glisse-derived code (Kotlin or AGSL string) starts with exactly
@@ -63,21 +63,21 @@ Files:
 - `android/build-logic/settings.gradle.kts`, `android/build-logic/convention/build.gradle.kts` (kotlin-dsl; compileOnly
   AGP, Kotlin, compose-compiler and Roborazzi Gradle plugins from the catalog), and the plugins in
   `android/build-logic/convention/src/main/kotlin/`:
-  - `rovsti.android.library` / `rovsti.android.app`: `compileSdk = 37`, `minSdk = 34`, `targetSdk = 36` (app),
+  - `rosty.android.library` / `rosty.android.app`: `compileSdk = 37`, `minSdk = 34`, `targetSdk = 36` (app),
     Java/Kotlin 17 (or what AGP 9.5 requires; check), `testOptions.unitTests.isIncludeAndroidResources = true`,
-    lint `abortOnError = true`, `warningsAsErrors = false`. SDK numbers live in one `object RovstiSdk` there.
-  - `rovsti.compose`: applies `org.jetbrains.kotlin.plugin.compose`, adds the BOM, `ui`, `ui-graphics`, `foundation`,
+    lint `abortOnError = true`, `warningsAsErrors = false`. SDK numbers live in one `object RostySdk` there.
+  - `rosty.compose`: applies `org.jetbrains.kotlin.plugin.compose`, adds the BOM, `ui`, `ui-graphics`, `foundation`,
     `animation` (add `compose-animation` to `libs.versions.toml`), `ui-tooling-preview`; debug `ui-tooling`,
     `ui-test-manifest`. Compose compiler reports: when the Gradle property `composeReports` is set, set
     `composeCompiler.reportsDestination` and `metricsDestination` to `layout.buildDirectory.dir("compose_reports")`
     (AC4). Add `compose_stability.conf` hook (empty file at `android/compose_stability.conf`).
-  - `rovsti.screenshots`: applies Roborazzi, adds `robolectric`, `roborazzi`, `roborazzi-compose`,
+  - `rosty.screenshots`: applies Roborazzi, adds `robolectric`, `roborazzi`, `roborazzi-compose`,
     `roborazzi-junit-rule`, `compose-ui-test-junit4`, `junit` to `testImplementation`, sets the Roborazzi
     `outputDir` to `<module>/screenshots` (AC3), and `-Droborazzi.test.verify` handling stays the plugin's default.
 - `android/settings.gradle.kts`: `pluginManagement { includeBuild("build-logic") }`; `include(":design", ":catalog",
   ":testing")`. Root `build.gradle.kts`: add `alias(libs.plugins.kotlin.compose) apply false` already there; nothing
   else.
-- `android/testing` (`:testing`, Android library, package `dev.rovsti.testing`, `api` deps on Robolectric, Roborazzi,
+- `android/testing` (`:testing`, Android library, package `dev.rosty.testing`, `api` deps on Robolectric, Roborazzi,
   compose ui-test-junit4; used only as `testImplementation(project(":testing"))`). This is a deliberate addition to
   ARCH 2 (a test-only module avoids AGP test-fixtures Kotlin flags); add it to the module list in
   `docs/kotlin-ui/architecture.md` section 2 and `docs/kotlin-ui/toolchain.md`. Contents:
@@ -85,22 +85,22 @@ Files:
     `@Config(sdk = [35], qualifiers = "en-rUS-w411dp-h891dp-xxhdpi")`; `createComposeRule()`; `mainClock.autoAdvance =
     false`; `@Before` sets `Locale.setDefault(Locale.US)` and `TimeZone.setDefault(UTC)`.
   - `fun shot(name: String, variants: Set<ShotVariant> = emptySet(), content: @Composable () -> Unit)`: renders
-    `<name>-light.png` and `<name>-dark.png` (forces dark via a `darkTheme` parameter of `RovstiTheme`, not the
+    `<name>-light.png` and `<name>-dark.png` (forces dark via a `darkTheme` parameter of `RostyTheme`, not the
     system), plus `-fs2` (`LocalDensity` with `fontScale = 2f`), `-rtl` (`LocalLayoutDirection` Rtl),
     `-landscape` (the test method uses `RuntimeEnvironment.setQualifiers("+land-w891dp-h411dp")` before content).
     Captures with `onRoot().captureRoboImage("screenshots/$file.png", roborazziOptions = RoborazziOptions(
     compareOptions = CompareOptions(changeThreshold = 0.005f)))`. Verify the path resolves to the module's
     `screenshots/` directory both for record and verify (open the produced file to confirm).
-  - Determinism (AC6): `ShotTest` provides `LocalRovstiClock provides FixedClock(2026-01-15T10:30:00Z)` and
+  - Determinism (AC6): `ShotTest` provides `LocalRostyClock provides FixedClock(2026-01-15T10:30:00Z)` and
     `LocalGlassConditions` forced `forTests = true` (the local itself is added in step 5; in step 1 only the clock).
-    `RovstiClock` (`fun interface RovstiClock { fun nowMillis(): Long }` + `LocalRovstiClock`) lives in
-    `:design` `dev.rovsti.design.time`. Random seed: no randomness exists in R1 (avatar colours are a pure hash in
+    `RostyClock` (`fun interface RostyClock { fun nowMillis(): Long }` + `LocalRostyClock`) lives in
+    `:design` `dev.rosty.design.time`. Random seed: no randomness exists in R1 (avatar colours are a pure hash in
     step 6); document that. Fake image fetcher: not applicable until Coil arrives in E1.20; leave a `TODO(E1.20)` in
     `ShotTest` naming it.
   - `StripedBackdrop()` composable (diagonal 8-colour stripes + a soft gradient) for every glass shot.
-- `android/design` (`:design`, library, `dev.rovsti.design`): an empty `RovstiTheme` stub is enough for step 1
+- `android/design` (`:design`, library, `dev.rosty.design`): an empty `RostyTheme` stub is enough for step 1
   (real theme is step 2) so the catalog compiles.
-- `android/catalog` (`:catalog`, `dev.rovsti.catalog`, app): `CatalogActivity` (`enableEdgeToEdge()` before
+- `android/catalog` (`:catalog`, `dev.rosty.catalog`, app): `CatalogActivity` (`enableEdgeToEdge()` before
   `setContent`, manifest `windowSoftInputMode="adjustResize"`, `android:enableOnBackInvokedCallback="true"`,
   no launcher icon from Material; use an adaptive icon from a vector drawable), `CatalogApp` with an enum
   `CatalogPage` and a `rememberSaveable` current page + `BackHandler` back to home (Navigation 3 comes in E1.18).
@@ -132,8 +132,8 @@ theme page colour, list text legible, nothing under the status bar: the home pad
 ## Step 2 (E1.2): theme, typography, spacing, sizes, contrast test
 
 Spec: SKILL `navigation-layout.md` 6, 10, 11; `glass.md` 4.1-4.2; ARCH 4.1 `theme`.
-Files (`android/design/src/main/kotlin/dev/rovsti/design/theme/`):
-- `RovstiColors.kt` (ORIGINAL): `@Immutable data class RovstiColors(page, groupedBackground,
+Files (`android/design/src/main/kotlin/dev/rosty/design/theme/`):
+- `RostyColors.kt` (ORIGINAL): `@Immutable data class RostyColors(page, groupedBackground,
   groupedSurface, labelPrimary, labelSecondary, labelTertiary, separator, opaqueSeparator, fillPrimary,
   fillSecondary, fillTertiary, accent, onAccent, destructive, success, isDark)`, `LightColors`, `DarkColors`.
   Pick iOS-like system values but **secondary must reach 4.5:1** on page and grouped surface in both themes (fix X5:
@@ -141,16 +141,16 @@ Files (`android/design/src/main/kotlin/dev/rovsti/design/theme/`):
   accent with `onAccent` text >= 4.5:1 (X7).
 - `GlassTokens.kt` (PORTED FROM GLISSE, header): the `GlassTokens` data class with `Light`/`Dark` exactly as
   `glass.md` 4.1 (glisse `src/styles.css:1-89`).
-- `RovstiType.kt` (ORIGINAL): `largeTitle 34sp Bold letterSpacing -0.7sp`, `title1 28sp`, `title2 22sp`,
+- `RostyType.kt` (ORIGINAL): `largeTitle 34sp Bold letterSpacing -0.7sp`, `title1 28sp`, `title2 22sp`,
   `title3 20sp`, `headline 17sp SemiBold`, `body 17sp`, `callout 16sp`, `subheadline 15sp`, `footnote 13sp`,
   `caption1 12sp`, `caption2 11sp`; system font (`FontFamily.Default`), explicit `lineHeight` per style.
 - `Spacing.kt`: `object Spacing { gutter = 16.dp; xs = 4; s = 8; m = 12; l = 16; xl = 24; textGap = 2; sectionGap = 24 }`;
   `object Sizes { rowMin = 56; rowMinTwoLine = 64; avatar = 40; avatarLarge = 44; touch = 48; button = 44;
   sourceGlyph = 14; tabBarHeight = 60; tabBarMaxWidth = 500; contentMaxWidth = 640; sheetMaxWidth = 560 }`;
-  `RovstiShapes` (grouped 20 dp, card 22, popover 20-32, capsule) plus `concentric(outer, inset)` (floor 4 dp, pure).
-- `RovstiTheme.kt`: `RovstiTheme(darkTheme: Boolean = isSystemInDarkTheme(), content)` provides `LocalRovstiColors`,
-  `LocalRovstiType`, `LocalGlassTokens` (static locals); `object RovstiTheme { val colors; val type; val glass }`;
-  `LocalTextStyle`-like default via `ProvideTextStyle`-equivalent own local + a `RovstiText(text, style, color)`
+  `RostyShapes` (grouped 20 dp, card 22, popover 20-32, capsule) plus `concentric(outer, inset)` (floor 4 dp, pure).
+- `RostyTheme.kt`: `RostyTheme(darkTheme: Boolean = isSystemInDarkTheme(), content)` provides `LocalRostyColors`,
+  `LocalRostyType`, `LocalGlassTokens` (static locals); `object RostyTheme { val colors; val type; val glass }`;
+  `LocalTextStyle`-like default via `ProvideTextStyle`-equivalent own local + a `RostyText(text, style, color)`
   wrapper over `BasicText`. Theme colours crossfade 280 ms is not needed this round (note for later).
 - `Contrast.kt` (pure): `relativeLuminance(Color)`, `contrastRatio(fg, bg)` with alpha compositing of `fg` over `bg`
   (and of translucent backgrounds over a backdrop).
@@ -165,8 +165,8 @@ Acceptance: contrast test green; in the PNGs labels on swatches legible, the fs2
 ## Step 3 (E1.3): motion tokens, solver, fling, rubber band, reduce motion, MotionGate
 
 Spec: SKILL `motion.md` 2.1-2.5, 3, 4; `performance.md` 5.
-Files (`dev.rovsti.design.motion`):
-- `RovstiMotion.kt` (PORTED FROM GLISSE header; `motion.md` 2.3 table): `GlisseSpring(stiffness, damping)` with
+Files (`dev.rosty.design.motion`):
+- `RostyMotion.kt` (PORTED FROM GLISSE header; `motion.md` 2.3 table): `GlisseSpring(stiffness, damping)` with
   `dampingRatio` and `spec(visibilityThreshold)`, all glisse springs, all ORIGINAL picks (press 0.75/1200, select
   0.76/750, appear 1/450, morph 1/950, sheetSettle .86/380, sheetDismiss 1/400, pushBack 1/380, swipeSettle 1/500,
   menuGrowX .62/560, menuGrowY .78/330, menuLift .80/420, menuLand 1/520, previewReturn .75/500, titleCollapse 1/500,
@@ -182,14 +182,14 @@ Files (`dev.rovsti.design.motion`):
   maps any spring to `spring(1f, sameStiffness)` when reduce is on.
 - `MotionGate.kt` (ORIGINAL, `performance.md` 5) with edge-only `frozen`, `scrollConnection`, `transition()`,
   `gesture()`, 120 ms tail, plus `watch(LazyListState)` safety via `snapshotFlow { isScrollInProgress }`.
-Tests (JVM): `RovstiMotionTokensTest` (pins every number, `GlisseSpring(1024, 58.9).dampingRatio == 0.920 +- .001`);
+Tests (JVM): `RostyMotionTokensTest` (pins every number, `GlisseSpring(1024, 58.9).dampingRatio == 0.920 +- .001`);
 `SpringStateTest` (under, critical, over damped vs RK4 at 1 kHz within 1e-3; one 16 ms step == two 8 ms steps; retarget
 keeps velocity; `GlassPressUp` overshoot ~28 % +- 3 %; dt clamp 0.1 s; settles to exact target); `FlingTest`
 (`projectedDistance(1000) == 499 +- .5`, tie rules, zero velocity picks lower); `RubberTest` (odd, monotonic,
 slope ~1 at 0, below `D/0.55` at 1e9); `MotionGateTest` with `TestScope`/`StandardTestDispatcher` (edges only:
 count `frozen` writes; tail 120 ms; scroll+gesture overlap).
 Catalog: `MotionPage` that draws spring curves (normalised step response over 600 ms for GlassPressUp, SelectRest,
-Toggle, SheetSettle, MenuGrowX/Y) from `SpringState` in a `Canvas`, labelled with `RovstiText`.
+Toggle, SheetSettle, MenuGrowX/Y) from `SpringState` in a `Canvas`, labelled with `RostyText`.
 Screenshots: `e1.3-spring-curves-{light,dark}`.
 Acceptance: curves look right (GlassPressUp visibly overshoots once, Toggle never overshoots, SelectRest tiny
 overshoot), axes labelled, legible.
@@ -197,22 +197,22 @@ overshoot), axes labelled, legible.
 ## Step 4 (E1.4): press feedback, hold rule, haptics
 
 Spec: SKILL `motion.md` 7; `navigation-layout.md` 4.3, 5.4 (press colours), 6 (row press), 8.
-Files (`dev.rovsti.design.press`, `dev.rovsti.design.haptics`):
+Files (`dev.rosty.design.press`, `dev.rosty.design.haptics`):
 - `GlassPress.kt` (PORTED FROM GLISSE `src/internal/press.ts:1-118`, header): pure `pressTargets(...)` and
   `GlassPressNode` / `Modifier.glassPress(enabled)` as `motion.md` 7 (observe on `PointerEventPass.Final`, never
   consume; four `Animatable`s; release in `finally`; transform via `placeWithLayer`). Touch grow 15 dp, pointer 6 dp,
   stretch 6 dp, shift 8 dp. Also the finger glow (radial 240 dp, white .035 -> .025 -> 0, fade 220 ms) as an
   optional `glow = true` draw in the same node (`DrawModifierNode`).
-- `ScalePress.kt` (ORIGINAL): `Modifier.scalePress()` -> 0.96 with `RovstiMotion.press(0.0001f)`, `Modifier.Node`.
+- `ScalePress.kt` (ORIGINAL): `Modifier.scalePress()` -> 0.96 with `RostyMotion.press(0.0001f)`, `Modifier.Node`.
 - `RowPress.kt` (ORIGINAL): `Modifier.rowPress(interactionSource?)` draws `fillTertiary` behind content while down,
   clears on lift/cancel; no scale, no ripple.
 - `Hold.kt` (PORTED FROM GLISSE `src/internal/hold.ts:1-9`, header): `HOLD_MS = 150L`, pure
   `held(downAtMs, nowMs, moved)`, and `suspend fun AwaitPointerEventScope.awaitHoldOrScroll(down, touchSlop):
   HoldResult { Held, Scrolled, Released }` used later by tab bar/switch/slider.
-- `RovstiHaptics.kt` (ORIGINAL, `navigation-layout.md` 8): `HapticMode { Off, System, Strong }`, events `tick,
+- `RostyHaptics.kt` (ORIGINAL, `navigation-layout.md` 8): `HapticMode { Off, System, Strong }`, events `tick,
   selection, toggle(on), textHandle, longPress, confirm, reject`; System path through `View.performHapticFeedback`
-  with the platform constants; Strong path through `Vibrator` predefined effects; `LocalRovstiHaptics`
-  (`staticCompositionLocalOf`) and a `rememberRovstiHaptics(mode)` that reads `LocalView`. A `RecordingHaptics` fake
+  with the platform constants; Strong path through `Vibrator` predefined effects; `LocalRostyHaptics`
+  (`staticCompositionLocalOf`) and a `rememberRostyHaptics(mode)` that reads `LocalView`. A `RecordingHaptics` fake
   in `:testing` for tests. Add `<uses-permission android:name="android.permission.VIBRATE"/>` to the **catalog**
   manifest only (libraries declare nothing).
 Tests: JVM `PressTargetsTest` (rest = base scale on both axes, horizontal drag stretches X and shrinks Y, shift
@@ -232,7 +232,7 @@ neighbouring text; the release frame shows the overshoot; the text below never m
 ## Step 5 (E1.5): glass tiers, capture engine, Flat/Frost/Liquid, AGSL lens and rim, probe
 
 Spec: SKILL `glass.md` 1-7; ARCH 9 (Flat in tests, probe).
-Files (`dev.rovsti.design.glass`):
+Files (`dev.rosty.design.glass`):
 - `GlassTier.kt` (ORIGINAL): `GlassTier`, `GlassConditions`, `glassTier()` exactly as `glass.md` 6;
   `LocalGlassConditions` + `rememberGlassConditions()` (reads `ActivityManager.isLowRamDevice`,
   `PowerManager.isPowerSaveMode` with an `ACTION_POWER_SAVE_MODE_CHANGED` receiver registered in a
@@ -279,7 +279,7 @@ rim bright on top-left and bottom-right edges and fading toward the other corner
 
 Spec: SKILL `navigation-layout.md` 5.4, 6, 11; ARCH 1 (complaints), 4.3.
 Dependency: add `kotlinx-collections-immutable` to the catalog (`ImmutableList` params, ARCH 10.2) and to `:design`.
-Files (`dev.rovsti.design.controls`, `dev.rovsti.design.list`):
+Files (`dev.rosty.design.controls`, `dev.rosty.design.list`):
 - `Buttons.kt` (glisse geometry from `src/button.tsx`, `src/styles.css:132-227`, header):
   `GlassIconButton(icon, contentDescription, onClick, glass: GlassSource?)` 44 dp circle (48 dp touch target via
   `minimumInteractiveComponentSize`-equivalent own modifier, not Material), `CapsuleButton(text, icon?, style =
@@ -303,7 +303,7 @@ Files (`dev.rovsti.design.controls`, `dev.rovsti.design.list`):
   separate `caption1` label after the text with `Spacing.xs` gap.
 - `Badge.kt`, `EmptyState.kt` (glyph 48 dp, title `title3`, one line `subheadline`, optional `CapsuleButton`),
   `SourceGlyph.kt` (14 dp SMS / WhatsApp glyph as vector `ImageVector`s drawn by us, `contentDescription`).
-- Icons: a small `RovstiIcons` object of hand-written `ImageVector`s (chevron, plus, search, ellipsis, back, phone,
+- Icons: a small `RostyIcons` object of hand-written `ImageVector`s (chevron, plus, search, ellipsis, back, phone,
   message, person, map, gear, xmark, checkmark, trash). Do not depend on `material-icons`.
 Tests: JVM `AvatarColorTest` (deterministic, palette contrast); Robolectric `ListRowSemanticsTest` (one merged node
 with title+secondary+meta text, custom actions present, height >= 56 dp at fs1 and grows at fs2), `ChipRowTest`
@@ -321,7 +321,7 @@ fs2 rows grow instead of clipping, separators stop at the last row.
 ## Step 7 (E1.7): floating tab bar with puck, ChromeMetrics, content insets
 
 Spec: SKILL `navigation-layout.md` 1, 2, 4.1-4.4, 11; `motion.md` 3, 5.2; `glass.md` 3.2 `TabLens`, 4.2 `Bar`.
-Files (`dev.rovsti.design.chrome`):
+Files (`dev.rosty.design.chrome`):
 - `ChromeMetrics.kt` (ORIGINAL, `navigation-layout.md` 2): `ChromeMetrics` (`bottomBarPx`, `topBarPx` written only
   from `onSizeChanged`), `contentInsets()` = safe drawing + bar + 8 dp, `LocalContentInsets`, `LocalChromeMetrics`.
 - `TabBarGeometry.kt` (PORTED FROM GLISSE `src/styles.css:233-239,358-377,512-535` and
@@ -333,7 +333,7 @@ Files (`dev.rovsti.design.chrome`):
   `press`, `drag` (undispatched `snapTo`), `release` (projected target via `Fling`, `SelectRest` with initial
   velocity, lift deflates after arrival <= 400 ms), `select(index)`; squash/stretch clamped 20 %, gated by reduce
   motion (no squash, `bounceless`).
-- `RovstiTabBar.kt` (PORTED FROM GLISSE `src/tab-bar.tsx` geometry/gestures, header): `RovstiTabBar(tabs:
+- `RostyTabBar.kt` (PORTED FROM GLISSE `src/tab-bar.tsx` geometry/gestures, header): `RostyTabBar(tabs:
   ImmutableList<TabItem>, selected: Int, onSelect, onReselect, glass: GlassSource, minimizer: TabBarMinimizer?,
   folded: Boolean = false, imeVisible: () -> Boolean = { WindowInsets.isImeVisible })`; icon + label cells (10 sp
   medium label, 26 dp icon), labels drop at `fontScale >= 1.5`, centred, `widthIn(max = 500.dp)`, 16 dp sides,
@@ -348,7 +348,7 @@ Files (`dev.rovsti.design.chrome`):
 - `BottomScrim.kt`: progressive scrim under the bar (stops 0/.35/.6/.85/1, alpha 0/.15/.4/.7/1 of page colour).
 Tests: JVM `TabBarGeometryTest` (puck inside inner rect for lift 0..1 and squash 0..0.2 at first and last slot: fixes
 X4; slotUnder; tap slop 24 dp; fold geometry monotonic), `TabBarMinimizerTest` (40 dp threshold, direction reset,
-expand at 8 dp, top pull). Robolectric: `ListEndAboveBarTest` (AC3: `RovstiRootForTests` = content
+expand at 8 dp, top pull). Robolectric: `ListEndAboveBarTest` (AC3: `RostyRootForTests` = content
 `LazyColumn(contentPadding = LocalContentInsets.current)` with 50 rows tagged `row-i` + bar; `scrollToIndex(49)`;
 assert `row-49` bottom <= bar top), `TabBarGestureTest` (tap selects; drag 1.6 slots and release selects slot 2
 via projection; release > 24 dp below with a tap does nothing; vertical move before 150 ms leaves the gesture to the
@@ -364,7 +364,7 @@ visible above the bar with a gap; fs2 shows icons only, no clipped labels; bar s
 ## Step 8 (E1.8): large-title scaffold, inline bar, toolbar capsules, back button
 
 Spec: SKILL `navigation-layout.md` 10, 2, 11; `motion.md` 2.1 `titleCollapse`; ARCH 9 "Adaptive layout".
-Files (`dev.rovsti.design.chrome`):
+Files (`dev.rosty.design.chrome`):
 - `TitleCollapse.kt` (ORIGINAL): pure `titleCollapseFraction(firstIndex, firstOffsetPx, titleHeightPx): Float` and
   `LazyListState.rememberTitleCollapse(titleHeightPx: () -> Float): State<Float>` (`derivedStateOf`); smoothed by an
   `Animatable` with `titleCollapse` spring (threshold 0.001f) that is read only in `graphicsLayer`.

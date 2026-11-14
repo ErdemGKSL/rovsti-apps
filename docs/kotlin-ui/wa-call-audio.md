@@ -2,7 +2,7 @@
 
 Status: traced and tested in software (round 13, step 6). The check on a real phone is an owner item (see the end).
 
-One format runs the whole way: **16 kHz, mono, signed 16-bit little-endian PCM** (`crates/rovsti_wa_proto/src/audio.rs`).
+One format runs the whole way: **16 kHz, mono, signed 16-bit little-endian PCM** (`crates/rosty_wa_proto/src/audio.rs`).
 The microphone goes in frames of **960 samples = 1 920 bytes = 60 ms** (`FRAME_SAMPLES`, `FRAME_BYTES`; MLOW encodes
 60 ms at a time). The speaker comes in frames of **320 samples = 640 bytes = 20 ms** (`STEP_SAMPLES`), as WhatsApp's
 decoder plays them out, when the app asked for them; an app or a gateway from before that still speaks whole 60 ms
@@ -15,8 +15,8 @@ frames, see "Latency" at the end.
 | 1 | `AudioRecord`, source `VOICE_COMMUNICATION` (platform echo cancel and noise suppression), `CHANNEL_IN_MONO`, `ENCODING_PCM_16BIT`, 16 kHz, buffer at least 4 frames | PCM16 mono, reads of any size | `android/platform/.../wa/WaCallAudio.kt` (`start`, `format`, `RECORD_SOURCE`, `bufferBytes`) |
 | 2 | Thread `wa-mic` fills a `ByteArray(1920)` with whole reads, then pushes | 1 920 bytes | `WaCallAudio.pumpMic` |
 | 3 | `CallFrames.push` -> `CallAudio.push` (never the main thread) -> `RustNative.audioPush(handle, pcm)` | 1 920 bytes, JNI `byte[]` | `android/core-bridge/.../ops/WaGateway.kt`, `RustNative.kt` |
-| 4 | `Java_dev_rovsti_core_RustNative_audioPush` -> `ops::audio_push`: `decode_frame` (other sizes are dropped with a debug log), `mic.try_send` (a full queue drops its oldest frames, no added latency) | 960 `i16` | `crates/rovsti_ffi/src/jni_exports.rs`, `ops/wa/live.rs` |
-| 5 | `rovsti_wa_client::audio::call_audio`: `pump` encodes with `encode_frame` and sends one **binary WebSocket message** per frame to `wss://<gateway>/v1/calls/<id>/audio` with `Authorization: Bearer <connect key>` | 1 920 bytes per message | `crates/rovsti_wa_client/src/audio.rs` |
+| 4 | `Java_dev_rosty_core_RustNative_audioPush` -> `ops::audio_push`: `decode_frame` (other sizes are dropped with a debug log), `mic.try_send` (a full queue drops its oldest frames, no added latency) | 960 `i16` | `crates/rosty_ffi/src/jni_exports.rs`, `ops/wa/live.rs` |
+| 5 | `rosty_wa_client::audio::call_audio`: `pump` encodes with `encode_frame` and sends one **binary WebSocket message** per frame to `wss://<gateway>/v1/calls/<id>/audio` with `Authorization: Bearer <connect key>` | 1 920 bytes per message | `crates/rosty_wa_client/src/audio.rs` |
 | 6 | Gateway `audio_socket` -> `feed_mic`: `decode_frame` (wrong sizes dropped), `push` into the call's `mic` queue (`Lagging`: it was full and dropped its oldest frames) | 960 `i16` | `services/wa_gateway/src/wa/calls.rs` |
 | 7 | `MediaPlan` (gateway): in the default mode `call_audio::run_uplink` encodes each frame with libopus (`WaOpusEncoder`, 24 kb/s, DTX) and hands the packet to the engine (`encoded_audio`), which wraps it in RTP/SRTP. See "Codec mode" below | 960 `i16` frames in, one Opus packet out | `calls.rs`, `call_audio.rs` |
 
@@ -43,11 +43,11 @@ frames, see "Latency" at the end.
   `stop` clears the communication device and turns the speakerphone off.
 - **Microphone permission**: `WaCalls.place` and `accept` answer `NeedsMicrophone` without `RECORD_AUDIO` and send
   nothing to the gateway; `WaCallAudio.start` re-checks and returns false.
-- **Foreground service** (added in this step): `dev.rovsti.platform.wa.WaCallService`, declared in
+- **Foreground service** (added in this step): `dev.rosty.platform.wa.WaCallService`, declared in
   `android/phone/src/main/AndroidManifest.xml` as `foregroundServiceType="microphone|phoneCall"` with
   `FOREGROUND_SERVICE_MICROPHONE`. Android 14 stops background capture without a microphone service. At run time it
   claims `microphone`, plus `phoneCall` only when the app holds the dialer role (the system refuses the type
-  otherwise). `RovstiInCallService` keeps `phoneCall` for telecom calls. **Order (changed, see "Silent microphone"
+  otherwise). `RostyInCallService` keeps `phoneCall` for telecom calls. **Order (changed, see "Silent microphone"
   below):** `WaCalls` starts the service when the user answers or places the call (`CallAudioPump.prepare`, the app is
   in front), `AndroidCallAudioPump.start` starts it again (a no-op) **before** the recorder, and `stop` stops the
   recorder first and the service after. No R8 rule is needed: manifest components are kept by the aapt2 rules.
@@ -70,7 +70,7 @@ No mismatch in format: Kotlin, JNI, client, protocol and gateway all use 960 sam
 
 ## Tests
 
-- `crates/rovsti_wa_client/tests/call_audio.rs`: an in-process fake gateway WebSocket sends six frames of a 1 kHz tone
+- `crates/rosty_wa_client/tests/call_audio.rs`: an in-process fake gateway WebSocket sends six frames of a 1 kHz tone
   and checks the six tone frames the client sends (frame size 1 920 bytes, samples unchanged, Goertzel energy at
   1 kHz and none at 2.3 kHz, path and bearer).
 - `services/wa_gateway/tests/api.rs` `call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames`: the engine hands
@@ -167,7 +167,7 @@ means the peer's audio decoded to silence.
 
 - `services/wa_gateway/src/wa/call_audio.rs`: a 1 kHz tone encoded with
   `WaOpusEncoder::new_mlow_escape` goes through `ForeignAudio::deliver` into the speaker channel
-  and comes out as 1 kHz (Goertzel, as in `crates/rovsti_wa_client/tests/call_audio.rs`); the same
+  and comes out as 1 kHz (Goertzel, as in `crates/rosty_wa_client/tests/call_audio.rs`); the same
   for native and escaped packets through `InboundDecoder::decode_packet`; an MLOW SID decodes to
   60 ms of silence; the uplink encodes the tone and it decodes back; mute sends MLOW SID; the PCM
   downlink gate; levels; the exact summary line; peer masking; garbage counted as failed.
@@ -178,8 +178,8 @@ means the peer's audio decoded to silence.
 
 The call pushes carried the caller under the data key `from`, which FCM reserves: every `call` and
 `call_end` push failed with `FCM answered 400: Invalid data payload key: from`. The key is now
-`sender` (`rovsti_wa_proto::push::SENDER_KEY`); the apps (`android/platform` `waCallerTitle`, the
-old bridge's `WaIncoming.kt`, and `rovsti_wa_proto::push::parse_wake`) read `sender` and still
+`sender` (`rosty_wa_proto::push::SENDER_KEY`); the apps (`android/platform` `waCallerTitle`, the
+old bridge's `WaIncoming.kt`, and `rosty_wa_proto::push::parse_wake`) read `sender` and still
 accept `from`.
 
 ## Owner item: check on a real phone
@@ -203,15 +203,15 @@ opus=83 ... queue_drop=1 app=15 rms=-17.3dBFS`.
   ring's intent (`wa_call_id`) until the list has the call, the list says it ended, or `WaIncoming.RING_TIMEOUT_MS`
   passed (never longer without a call; `LockScreenGateTest`); the service starts at answer/place and before the
   recorder (`WaCallsTest`, `theRealPumpStartsTheServiceBeforeTheRecorderAndStopsItAfter`).
-- **Zero-run warning.** `SilenceWatch` in `wa-mic` logs one `Log.w` (tag `Rovsti`) after 2 s of exact zeros, naming the
-  likely causes: `adb logcat -s Rovsti | grep 'exact digital silence'`.
+- **Zero-run warning.** `SilenceWatch` in `wa-mic` logs one `Log.w` (tag `Rosty`) after 2 s of exact zeros, naming the
+  likely causes: `adb logcat -s Rosty | grep 'exact digital silence'`.
 - **15 of 83 speaker frames.** Not explained by the counters (only 1 queue drop, no decode failure; the socket was open
   for about 4 s judging by `mic app=71`). The gateway line now has three more speaker counters to settle it on the next
   call: `empty` (decoded packets with no samples), `pcm_ms` (decoded audio that reached the socket queue, in ms) and
   `stale` (queued frames thrown away when the app's socket attached). `pcm_ms` close to `app x 60` and far below the
   call length means the peer's packets decode to less audio than 60 ms each; `stale` large means the socket attached
   late. On the phone, the speaker write is now blocking (above).
-- **"Keeps ringing" after answer.** Rovsti has no ringtone, vibrator or sound for WhatsApp calls (the `wa_calls`
+- **"Keeps ringing" after answer.** Rosty has no ringtone, vibrator or sound for WhatsApp calls (the `wa_calls`
   channel has no sound since its first version), so the ring is the incoming-call notification and the Incoming
   screen: the notification was cancelled only by its own Answer/Decline buttons or a `call_end` push (sent only for a
   ring that ended unanswered), so answering in the app left the ringing `CallStyle` notification up for 60 s, and the
@@ -237,7 +237,7 @@ Four owner items, all in the app (the gateway is unchanged).
 
 - **Answer and Decline without unlocking.** SystemUI asks for the unlock before it runs an *activity* action from a
   lock-screen notification. The incoming `CallStyle`'s Answer and Decline are now broadcasts to
-  `dev.rovsti.phone.wa.WaCallActionReceiver` (not exported, `FLAG_IMMUTABLE`, installed as
+  `dev.rosty.phone.wa.WaCallActionReceiver` (not exported, `FLAG_IMMUTABLE`, installed as
   `PlatformComponents.waCallAction`); the full-screen and body intents stay the activity. The receiver runs
   `WaIncoming.takeAction` (cancels the notification, stops the ring) and hands the payload to
   `WaCallActions.submit`, which waits for `awaitRustReady` (a cold process woken by the FCM push) and for the call to
@@ -271,7 +271,7 @@ Tests: `WaRingTest`, `WaProximityTest`, `WaCallNotificationsTest` (platform), `W
 
 On the phone: Answer and Decline from the lock screen, ringtone and vibration in each ringer mode, volume key while the
 call screen shows, the screen going dark at the ear (and back on speaker), Hang up and the body of the ongoing
-notification. HyperOS: "Display pop-up windows while running in the background" and "Show on lock screen" for Rovsti
+notification. HyperOS: "Display pop-up windows while running in the background" and "Show on lock screen" for Rosty
 Phone let the call screen open directly; full-screen notifications must be allowed (Android 14).
 
 ## Audio stops after a second or two; no Opus on the way out (E5.8a follow-up 4)
@@ -292,7 +292,7 @@ call ended 4 s before that restart). Neither side logged anything, because neith
 slows for a moment (the phone's radio, the tunnel), the buffers between the two ends fill, the gateway waits in a
 speaker write and stops reading the microphone, the phone waits in a microphone write and stops reading the speaker:
 each waits for the other to read, for good. Nothing timed out and nothing reopened the socket; a second socket for
-the call was refused (409) while the stuck one held the slot. `rovsti_wa_client` test
+the call was refused (409) while the stuck one held the slot. `rosty_wa_client` test
 `the_speaker_keeps_flowing_while_microphone_writes_are_stuck` reproduces it: with the old loop the speaker starves.
 
 **Fixed (gateway and app's Rust client).**
@@ -351,7 +351,7 @@ dips to the target within the window shows the buffer is in use.
 
 **The frame size on the wire, and old versions.** The microphone direction did not change (960 samples; MLOW fixes
 it). For the speaker the app asks: it opens `/v1/calls/<id>/audio?spk_ms=20` (`SpeakerFrames::Step`,
-`rovsti_wa_client::call_audio_with`, used by `wa.call_audio_open`).
+`rosty_wa_client::call_audio_with`, used by `wa.call_audio_open`).
 
 | App | Gateway | What happens |
 |-----|---------|--------------|
@@ -378,7 +378,7 @@ parts of the delay.
   a new frame found waiting in the client queue, `cut` is old audio dropped to get back to the target, `frames` per
   10 s is about 500 with 20 ms frames and about 166 with 60 ms ones. The app writes the same line to logcat
   (`wa audio: ...`).
-- Phone, `adb logcat -s Rovsti | grep 'WA call audio'`, every 10 s:
+- Phone, `adb logcat -s Rosty | grep 'WA call audio'`, every 10 s:
   `track_fill mean=..ms min=..ms max=..ms trimmed=..ms frames=.. frame=20ms underruns=.. buffer=120ms`. `track_fill` is
   frames written minus `playbackHeadPosition` before each write: the delay the track alone adds. `trimmed` is what
   `PlayoutTrim` dropped, `underruns` is `AudioTrack.underrunCount` (it grows when the track ran dry: gaps).
@@ -388,10 +388,10 @@ not at all. After switching Wi-Fi to mobile data in the call, `cut`, `trimmed` o
 come back within a few seconds. If `underruns` climbs steadily and the voice crackles, the 40 ms target is too tight
 for that connection (`WaCallAudio.TARGET_FILL_MS`, `queue::SPEAKER_LIMITS`).
 
-**Tests.** `rovsti_wa_proto::audio` (20 ms round trip, the receiver takes 20/40/60 ms, the query), `rovsti_wa_client`
+**Tests.** `rosty_wa_proto::audio` (20 ms round trip, the receiver takes 20/40/60 ms, the query), `rosty_wa_client`
 `queue` (oldest dropped, drain to the target, a standing queue, clock drift, the waiting read) and `audio`
 (`frames_of_20_ms_and_of_60_ms_both_reach_the_speaker`, a burst from the socket), `tests/call_audio.rs`
-(`a_client_that_asks_for_20_ms_frames_plays_20_ms_and_whole_frames`), `rovsti_ffi` `tests/wa_live.rs` (pull sizes
+(`a_client_that_asks_for_20_ms_frames_plays_20_ms_and_whole_frames`), `rosty_ffi` `tests/wa_live.rs` (pull sizes
 against an old and a new gateway, the waiting pull), `wa_gateway` `call_audio` (`FreshQueue`, 20 ms frames passed on,
 a stalled socket keeps the newest audio, the counters line) and `calls`
 (`the_socket_sends_20_ms_frames_only_to_an_app_that_asked_for_them`), `tests/api.rs` (old and new app end to end),

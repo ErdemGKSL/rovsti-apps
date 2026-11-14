@@ -150,7 +150,7 @@ write_dropin() {
       echo "LoadCredential=fcm-sa:$ETC/service-account.json"
       echo "Environment=WA_GATEWAY_FCM_SA=/run/credentials/wa-gateway.service/fcm-sa"
     fi
-  } | sudo tee "$DROPIN_DIR/10-rovsti.conf" >/dev/null
+  } | sudo tee "$DROPIN_DIR/10-rosty.conf" >/dev/null
 }
 
 install_all() {

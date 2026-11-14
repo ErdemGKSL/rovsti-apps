@@ -1,9 +1,9 @@
-# UX completeness pass: Rovsti Contacts (round 1)
+# UX completeness pass: Rosty Contacts (round 1)
 
-Base: `305eb8bcfc4477c59bb3e0938f3f3adab5cc5a92` (main, "Rovsti messages: UX gap review fixes").
+Base: `305eb8bcfc4477c59bb3e0938f3f3adab5cc5a92` (main, "Rosty messages: UX gap review fixes").
 No stash, clean tree.
-Scope: `apps/contacts`, `crates/rovsti_core` (contact_card, contact_edit, contacts_view),
-`crates/rovsti_android` (contacts_edit, telecom seams and Kotlin `ContactsEdit` / `RovstiBridge`).
+Scope: `apps/contacts`, `crates/rosty_core` (contact_card, contact_edit, contacts_view),
+`crates/rosty_android` (contacts_edit, telecom seams and Kotlin `ContactsEdit` / `RostyBridge`).
 No new product features and no backends. The app already intends these flows: groups with
 members, Favorites, number-less contacts, export of the whole book, and a contact card that
 acts on its own fields.
@@ -13,7 +13,7 @@ Earlier Contacts plans (`contacts.md`, `contacts-r2.md`) closed the roadmap item
 
 GPUI rules: use only APIs the workspace already uses. These are `cx.write_to_clipboard(ClipboardItem::new_string(..))`
 (Phone `block_ui.rs:494`), `.on_long_press(..)` (Messages `conversation.rs:1927`, gpui
-`elements/div.rs:388`), `rovsti_ui::sheet::Sheet` (Contacts `photo_sheet`), `ListState`/`list`
+`elements/div.rs:388`), `rosty_ui::sheet::Sheet` (Contacts `photo_sheet`), `ListState`/`list`
 and `glass_icon_button`. The icons `LucideCopy`, `LucideEllipsis`, `LucideMail` and
 `LucideUserPlus` are already used in the workspace.
 
@@ -22,7 +22,7 @@ and `glass_icon_button`. The icons `LucideCopy`, `LucideEllipsis`, `LucideMail` 
 | # | Sev | Gap | Where |
 |---|-----|-----|-------|
 | G1 | **High** | **You cannot add people to a group from the group.** You can create a group, but its page has no "Add contacts". The empty state says to open each contact's Edit screen, tick the group and save, one contact at a time. You cannot remove a member from the group page either. This is the same shape as the Stops pin bug: the model supports membership, but the group has no UI path to it. A new group also does not open after it is created, and nothing confirms it. | `groups.rs::group_page_item`, `save_group_edit` |
-| G2 | **High** | **A starred contact without a number never shows in Favorites.** `contact_card::favorites` filters `!c.numbers.is_empty()`. Number-less contacts can be created and starred (the card's star works), but the Favorites tab drops them silently. | `rovsti_core/src/contact_card.rs:59` |
+| G2 | **High** | **A starred contact without a number never shows in Favorites.** `contact_card::favorites` filters `!c.numbers.is_empty()`. Number-less contacts can be created and starred (the card's star works), but the Favorites tab drops them silently. | `rosty_core/src/contact_card.rs:59` |
 | G3 | **High** | **Export silently leaves out contacts without a number.** Kotlin `ContactsEdit.fullJson` keeps only `numbers.length() > 0`. The app lists, creates and imports email-only and org-only contacts, but "Export to a .vcf file" loses them. The "Saved N contacts" count hides the loss. | `ContactsEdit.kt:fullJson`, `backend.rs::export_text` doc |
 | G4 | **High** | **The card's fields cannot be copied or used one by one.** Tapping a number calls it. You cannot copy a number, text a number that is not the default, or share one number. Email rows do nothing (no compose, no copy). The note cannot be copied. A contact with only an email has every action button dimmed. | `detail.rs::detail` |
 | G5 | Medium | **Favorites has no "+".** The only way to add a favorite is to open each contact and tap the star. There is no way to pick several, and there is no feedback after a star change: the star icon's dot only shows small. | `main.rs::favorites_item`, `toggle_star` |
@@ -36,19 +36,19 @@ and `glass_icon_button`. The icons `LucideCopy`, `LucideEllipsis`, `LucideMail` 
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (if `df` shows under 6 GB free, `rm -rf target/debug/incremental` first).
-Commit each step on its own with a focused message ("Rovsti Contacts: ...").
+Commit each step on its own with a focused message ("Rosty Contacts: ...").
 
-### U1. rovsti_core pure logic (+ tests) (done, `1c4220c`)
+### U1. rosty_core pure logic (+ tests) (done, `1c4220c`)
 
-Changes in `crates/rovsti_core/src/contact_card.rs`:
+Changes in `crates/rosty_core/src/contact_card.rs`:
 - `favorites` keeps every starred contact (drop the `!c.numbers.is_empty()` filter) and its
   doc says "Starred contacts, in the order given." Phone does not call it (Phone uses
   `contacts_view::order_favorites`), so only Contacts changes.
 - Update or add a test: a starred number-less contact is listed, and an unstarred one is not.
 
-Additions to `crates/rovsti_core/src/contact_edit.rs`:
+Additions to `crates/rosty_core/src/contact_edit.rs`:
 - `#[derive(Clone, Debug, Default, PartialEq, Eq)] pub struct SelectionChange { pub add: Vec<i64>, pub remove: Vec<i64> }`
 - `pub fn selection_change(initial: &[i64], chosen: &BTreeSet<i64>) -> SelectionChange`:
   - `add` is the chosen ids that were not in `initial`, and `remove` is the ids in `initial`
@@ -73,14 +73,14 @@ Tests:
 
 ### U2. Android seams: group members, email compose, export of every contact (done, `12a27a8`)
 
-Additions to `crates/rovsti_android/src/contacts_edit.rs`:
+Additions to `crates/rosty_android/src/contacts_edit.rs`:
 - `pub fn set_group_members(group_id: i64, change_json: &str) -> Result<String>` calls
   `bridge::call_string("setContactGroupMembers", &[Arg::Str(&group_id.to_string()), Arg::Str(change_json)])`.
   `change_json` is `SelectionChange`-shaped (`{"add":[..],"remove":[..]}`), and the answer is
   `{added, removed, skipped}` in the usual envelope.
 - Add it to the `desktop_is_unsupported` test.
 
-Kotlin `crates/rovsti_android/kotlin/dev/rovsti/bridge/ContactsEdit.kt`:
+Kotlin `crates/rosty_android/kotlin/dev/rosty/bridge/ContactsEdit.kt`:
 - `fun setGroupMembers(context, groupId: Long, json: String): String = guard { ... }`:
   - Read the group's account (query `Groups` by `_ID` for `ACCOUNT_TYPE`/`ACCOUNT_NAME` and
     use `accountKey`). An unknown group returns `not_found`.
@@ -95,12 +95,12 @@ Kotlin `crates/rovsti_android/kotlin/dev/rovsti/bridge/ContactsEdit.kt`:
   `if (b.numbers.length() > 0)` filter, keep the rest, and change the doc to "every contact".
   Rust `export_text` already drops nameless drafts with `validate()`.
 
-Kotlin `RovstiBridge.kt`:
+Kotlin `RostyBridge.kt`:
 - `@JvmStatic fun setContactGroupMembers(groupId: String, json: String): String`, written in the
   same style as `saveContactGroup`.
 - `@JvmStatic fun sendEmailTo(address: String): Boolean = start(Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", address, null)))`.
 
-Addition to `crates/rovsti_android/src/telecom.rs`:
+Addition to `crates/rosty_android/src/telecom.rs`:
 - `pub fn send_email_to(address: &str) -> Result<bool>` (`bridge::call_bool_str("sendEmailTo", address)`).
 - Its desktop test asserts `Unsupported`.
 
@@ -154,7 +154,7 @@ Tests (in `picker.rs`, pure helpers only):
 - The Favorites `large_title` trailing is a `LucidePlus` `glass_icon_button` with id
   `favorites-add`, shown when `Book::Ready`. It opens `Picker { for_: Favorites, initial: ids of starred contacts }`.
 - **Done for Favorites:** `selection_change`, then one background task that calls
-  `rovsti_android::providers::set_starred(id, true/false)` for each changed id.
+  `rosty_android::providers::set_starred(id, true/false)` for each changed id.
   - Count the failures; `Unsupported` on desktop counts as success and the change stays local.
     To keep the change local, apply it to `book` first, the way `toggle_star` does. Factor out
     `fn set_starred_local(&mut self, ids: &[i64], starred: bool)`.
@@ -211,7 +211,7 @@ In `apps/contacts/src/detail.rs` and `main.rs`:
 
 ### U7. Docs and plan status (done, this commit)
 
-- `docs/roadmap.md` (Rovsti Contacts):
+- `docs/roadmap.md` (Rosty Contacts):
   - Tick a "UX completeness pass" line that lists the group picker, Favorites +, the card
     field actions, export of every contact and the Save-to setting, each "(done without a
     device)".
@@ -221,7 +221,7 @@ In `apps/contacts/src/detail.rs` and `main.rs`:
 
 ## Left for round 2 (re-audit)
 
-- G10 Undo for Delete Contact: decide whether to adopt `rovsti_ui::notice_pill::NoticePill` in
+- G10 Undo for Delete Contact: decide whether to adopt `rosty_ui::notice_pill::NoticePill` in
   Contacts.
 - Re-check the flows end to end after U3 to U6: the picker with a large book, Back from each
   layer, and the notices.

@@ -1,4 +1,4 @@
-# UX completeness pass: Rovsti Stops (round 4)
+# UX completeness pass: Rosty Stops (round 4)
 
 Base: `336377f6554994566bbe66d5190c082c007be491` (main after merge). No stash, clean tree.
 Rounds 1-3 (`ux-stops.md`, `ux-stops-r2.md`, `ux-stops-r3.md`) are done and committed
@@ -18,7 +18,7 @@ places are invisible on the map today. A tap near one takes its name but keeps t
 coordinate, so a saved place cannot be picked precisely from the map. That is an incomplete pick
 flow, not a new feature. The stop-dot layer already shows how to draw such points.
 
-Scope: `apps/stops`, `crates/rovsti_geo`, `crates/rovsti_tiles`. No new product features and no
+Scope: `apps/stops`, `crates/rosty_geo`, `crates/rosty_tiles`. No new product features and no
 backends. Pure logic goes first, with tests. GPUI glue stays thin. Only GPUI APIs already used in
 this app are allowed:
 - `field_box` with `Entity<TextField>` and `cx.observe` on the field, as for `tile_field`
@@ -47,7 +47,7 @@ this app are allowed:
   as the display cap.
 - New `pub fn visible_chats(rows: &[ChatRow], query: &str, selected: Option<(&str, &str)>, cap: usize) -> Vec<ChatRow>`.
   `selected` is `(jid, chat_name)` from `prefs.notice`.
-  - Fold the query with `rovsti_core::search::fold(query.trim())`.
+  - Fold the query with `rosty_core::search::fold(query.trim())`.
   - An empty query gives the first `cap` rows.
   - Otherwise keep the rows whose folded title contains the query, or whose jid user part
     (digits) contains the query's digits when the query has any. Take `cap` of them.
@@ -196,7 +196,7 @@ import in Settings.
 
 ### S6. Docs and status
 
-`docs/roadmap.md` Rovsti Stops:
+`docs/roadmap.md` Rosty Stops:
 - Replace "[ ] Idea (open, T7): draw saved places on the map" with "[x] Saved places drawn on the
   map; a tap on one picks it exactly (done without a device)".
 - Extend the save/manage line with "search every WhatsApp chat for the arriving-soon message;
@@ -210,13 +210,13 @@ Append a Status section to this file listing fixed, deferred and by-design gaps.
 ## Checks (every step)
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```
 Disk: 9.5 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
 Other people push to main in parallel, so keep one focused commit per step, with the prefix
-"Rovsti stops:".
+"Rosty stops:".
 
 ## Status
 

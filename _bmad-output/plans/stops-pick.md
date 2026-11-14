@@ -1,4 +1,4 @@
-# Plan: Rovsti Stops, pick A and B on the map (round 1)
+# Plan: Rosty Stops, pick A and B on the map (round 1)
 
 - Base: `3878bcf99d8efe64fd45d4ca67ffe9a14ca1908e` (HEAD "WIP: carry-over before sync"; it only adds
   `_bmad-output/plans/stops-alarm-r3.md`). `git stash list` is empty. No earlier `stops-pick*.md`.
@@ -28,10 +28,10 @@
   trigger text or `DiameterError::message`, Start (enabled when the diameter is Ok).
 - `StopsApp` (`main.rs`): `ends: picker::Ends`, `active_slot: picker::Slot` (63 uses across
   `picker.rs`, `trip_ui.rs`, `map.rs`, `saved_ui.rs`, `main.rs`).
-- `rovsti_geo`: `MIN_DIAMETER_M` 20, `MAX_DIAMETER_M` 50 000, `DiameterError::{InvalidCoord,
+- `rosty_geo`: `MIN_DIAMETER_M` 20, `MAX_DIAMETER_M` 50 000, `DiameterError::{InvalidCoord,
   SamePoint, TooShort, TooLong}`, `Viewport` (`project`, `unproject`, `zoom_about`, `pan`,
   `nearest_on_screen`), `Feed::nearest`, `History::recent_pairs`, `SavedPlaces`.
-- `rovsti_android::trip`: start/stop/alarm only. There is **no idle location**: Rust never sees a
+- `rosty_android::trip`: start/stop/alarm only. There is **no idle location**: Rust never sees a
   position before a trip starts. Kotlin `TripService` already uses
   `LocationManager.getCurrentLocation`; `permissions::Group::Location` and
   `backend::Step::RequestLocation` exist.
@@ -63,7 +63,7 @@
 7. **Where the map opens.** Ends set -> fit them (existing `fit_view`); else the current position
    at street level (`STREET_MPP` = 1.5 m/px, tiles visible); else the last trip's midpoint or the
    first saved place at street level; else Istanbul centre (41.0082, 28.9784) at `CITY_MPP` = 12.
-8. **Idle location** is a new `rovsti_android` seam: last known location (sync) + one fresh fix
+8. **Idle location** is a new `rosty_android` seam: last known location (sync) + one fresh fix
    on request, delivered as a `stops_location` event. No background tracking, nothing leaves
    the phone.
 9. **Pure core** in `apps/stops/src/pick.rs` (no `gpui` import) as the spec allows; gesture and
@@ -83,7 +83,7 @@ Files: new `apps/stops/src/pick.rs` (declared in `main.rs`), `picker.rs`, `trip_
     unnamed. `offer()` keeps an unnamed pin unnamed (no `coord_text` label); update test
     `a_pin_without_a_name_is_named_by_its_coordinates` -> `a_pin_without_a_name_stays_unnamed`.
   - `Ends` stays (it is the data); `next_slot` stays.
-- `pick.rs` (pure, imports only `rovsti_geo`, `crate::picker::{Destination, Ends, Slot}`,
+- `pick.rs` (pure, imports only `rosty_geo`, `crate::picker::{Destination, Ends, Slot}`,
   `crate::trip_ui::distance_text`):
   ```rust
   pub enum Stage { Idle, HasA, HasB, HasAB }
@@ -210,9 +210,9 @@ File: `apps/stops/src/map.rs` (pure section) and tests.
 
 ### S4. Android seam: current location while idle
 
-Files: new `crates/rovsti_android/src/location.rs` (or extend `trip.rs`; keep the module doc
+Files: new `crates/rosty_android/src/location.rs` (or extend `trip.rs`; keep the module doc
 style), `lib.rs`, `events.rs` (`kind::STOPS_LOCATION = "stops_location"`), new
-`crates/rovsti_android/kotlin/dev/rovsti/bridge/StopsLocation.kt`, `RovstiBridge.kt`,
+`crates/rosty_android/kotlin/dev/rosty/bridge/StopsLocation.kt`, `RostyBridge.kt`,
 `apps/stops/src/kotlin_contract.rs`, `apps/stops/src/main.rs`.
 
 - Rust: `pub fn last_location() -> Result<Option<LocationFix>>` (bridge `lastLocation(): String`,
@@ -224,17 +224,17 @@ style), `lib.rs`, `events.rs` (`kind::STOPS_LOCATION = "stops_location"`), new
   through the existing bridge stubs.
 - Kotlin `StopsLocation`: `last(ctx)` = newest of `getLastKnownLocation` over fused (API 31+),
   gps, network, passive, guarded by permission check and `SecurityException`; `once(ctx)` =
-  `getCurrentLocation` (API 30+) else `requestSingleUpdate`, emitting via `RovstiBridge.emit(
+  `getCurrentLocation` (API 30+) else `requestSingleUpdate`, emitting via `RostyBridge.emit(
   "stops_location", json)`; pure `fixJson(lat, lon, acc, timeMs)`. `@JvmStatic` wrappers in
-  `RovstiBridge` (String/Boolean only, per the bridge rule).
+  `RostyBridge` (String/Boolean only, per the bridge rule).
 - App: on load (background executor) `last_location()` -> `map.position` when fresher than
   10 min (pure helper `fresh_enough(time_ms, now_ms) -> bool` in `pick.rs` or `map.rs`, tested);
   `on_event` handles `kind::STOPS_LOCATION` -> position + recentre. The trail is not touched.
-- Tests: `parse_location_fix` good/bad inputs (rovsti_android unit tests); kotlin_contract:
+- Tests: `parse_location_fix` good/bad inputs (rosty_android unit tests); kotlin_contract:
   `StopsLocation.kt` contains `getLastKnownLocation`, `getCurrentLocation`, `"stops_location"`,
-  `SecurityException`, and `RovstiBridge.kt` has `fun lastLocation(): String` and
+  `SecurityException`, and `RostyBridge.kt` has `fun lastLocation(): String` and
   `fun locateOnce(): Boolean`.
-- Checks include `cargo check -p rovsti_android --target aarch64-linux-android`.
+- Checks include `cargo check -p rosty_android --target aarch64-linux-android`.
 
 ### S5. GPUI glue: tap to place, pins, my-location, pick bar
 
@@ -259,7 +259,7 @@ Files: `apps/stops/src/map.rs` (glue), `apps/stops/src/trip_ui.rs`, `main.rs`. R
   then the existing notice toggle and preflight rows. The old A/B list rows become compact rows
   ("A  Kadikoy Pier" / "B  Point B") that open the sheet for that slot (`set_sheet_slot`).
 - Controls: idle shows `+`, `-`, and a my-location button (label "Me" or `Icon` from the
-  existing icon set; grep `rovsti_ui` for a locate icon before adding text) instead of `Fit`;
+  existing icon set; grep `rosty_ui` for a locate icon before adding text) instead of `Fit`;
   tap -> preflight location step (existing `backend::Step::RequestLocation`) if needed, else
   `request_location()`; desktop `Unsupported` -> pill "Location is not available here."
   `CONTROL_COUNT` stays 3.
@@ -292,18 +292,18 @@ Files: `picker.rs`, `saved_ui.rs`, `trip_ui.rs`, `docs/architecture.md`, `docs/r
   `coords_text` call sites: only details lines and the Confirm footnote remain).
 - Docs: `docs/architecture.md` AD-ST9 (decisions 1-9 above, condensed); Stops crate notes mention
   `pick.rs` and the `stops_location` seam; `docs/android.md` Stops host: `lastLocation`,
-  `locateOnce`, `stops_location`; `docs/roadmap.md` Rovsti Stops: "[x] Pick A and B on the map:
+  `locateOnce`, `stops_location`; `docs/roadmap.md` Rosty Stops: "[x] Pick A and B on the map:
   tap to drop, drag to adjust, snap to stops, my location (done without a device)" and
   "[ ] Check map picking one-handed on a phone".
-- Final run of the full check list from the task, plus `cargo check -p rovsti_wa_client` and
-  `-p rovsti_tiles` for `aarch64-linux-android`.
+- Final run of the full check list from the task, plus `cargo check -p rosty_wa_client` and
+  `-p rosty_tiles` for `aarch64-linux-android`.
 
 ## Check list (every step)
 
 ```
 df -h .    # under 6 GB free: rm -rf target/debug/incremental
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```

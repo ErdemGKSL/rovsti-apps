@@ -6,7 +6,7 @@ all of X.2 in 8 steps: a Takumi spike, static templates with the liquid-glass pa
 one-shot animated cards, the Contacts preview sheet, share and save, budgets and cancellation, then the close. E6 R1 is
 next round.
 
-Owner decisions in force: Rovsti is GPL-3.0-or-later. Convx code is ported close to verbatim, keeping its original header
+Owner decisions in force: Rosty is GPL-3.0-or-later. Convx code is ported close to verbatim, keeping its original header
 and adding `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`. glisse-derived code
 (here: the spring solver and the refraction/lens displacement maps) carries `Portions ported from glisse
 (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang`. `android/THIRD_PARTY_NOTICES.md` lists
@@ -20,10 +20,10 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 - Working tree clean. `git stash list` holds only `stash@{0}` (the deprecated GPUI WIP, never pop). The round-15 stashes
   were recovered in `3ad1c3b`, `5857821` and `8e9b12b`.
 - **X.1 verified done in code:**
-  - `crates/rovsti_app_core/src/people.rs`
+  - `crates/rosty_app_core/src/people.rs`
   - `android/people/` (`PeopleContract`, `AvatarResolver`, `PeopleIndex`, `PeopleSources`, `ui/ContactAvatar`)
   - Contacts `people/{PeopleProvider,PeopleStore,PeopleSync,PeopleSyncWorker}.kt` (`a6fa10d`). The provider is
-    guarded by `dev.rovsti.permission.READ_PEOPLE`.
+    guarded by `dev.rosty.permission.READ_PEOPLE`.
   - The Contacts avatar surfaces (`8076917`, `ContactsAvatarSurfacesTest`, `AvatarSourceScanTest`).
   - The Phone surfaces and notifications (`93bcad4`).
   - X.1 stays `done`.
@@ -32,11 +32,11 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
   - Birthday "Wish" chip on the date row: `ContactCardScreen.kt:687-704`, `ContactCardAction.Wish`
     (`ContactCardState.kt:201`).
   - Upcoming Birthdays page: `favorites/UpcomingScreen.kt`.
-  - Birthday alarms: `data/BirthdayAlarms.kt` and `dev.rovsti.bridge.BirthdayReminderReceiver`.
-  - Share provider: `dev.rovsti.bridge.RovstiShareProvider` (`${applicationId}.rovstishare`, `cache/share`).
-  - QR code: `crates/rovsti_ffi/src/ops/qr.rs` (`qrcode` is already a workspace dependency).
-  - vCard text: `rovsti_core::vcard`.
-- **No fonts are bundled anywhere** (`git ls-files` has no `.ttf/.otf/.woff2`). minSdk is 34 (`RovstiSdk.kt`).
+  - Birthday alarms: `data/BirthdayAlarms.kt` and `dev.rosty.bridge.BirthdayReminderReceiver`.
+  - Share provider: `dev.rosty.bridge.RostyShareProvider` (`${applicationId}.rostyshare`, `cache/share`).
+  - QR code: `crates/rosty_ffi/src/ops/qr.rs` (`qrcode` is already a workspace dependency).
+  - vCard text: `rosty_core::vcard`.
+- **No fonts are bundled anywhere** (`git ls-files` has no `.ttf/.otf/.woff2`). minSdk is 34 (`RostySdk.kt`).
 - **Takumi on crates.io:**
   - 2.20.0 (2026-11-08) and 2.19.0 (2026-10-29) are too new for the "at least two weeks old" rule.
   - **Pin `takumi = "=2.18.2"`** (2026-10-26, MIT OR Apache-2.0, rust-version 1.91; local rustc is 1.99.1).
@@ -61,9 +61,9 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 ## Design decisions for X.2 (apply to every step)
 
 - **Where the work lives:**
-  - Rendering is in `rovsti_app_core::cards`. It is platform-free and unit-tested, and it is the only code that names
+  - Rendering is in `rosty_app_core::cards`. It is platform-free and unit-tested, and it is the only code that names
     Takumi types.
-  - `rovsti_ffi` exposes the ops `cards.render`, `cards.render_animated`, `cards.progress` and `cards.cancel`.
+  - `rosty_ffi` exposes the ops `cards.render`, `cards.render_animated`, `cards.progress` and `cards.cancel`.
   - Kotlin keeps only the sheet, the share step and the strings.
 - **Text comes from Kotlin.** Every visible word on a card is resolved from `res/values{,-tr}/strings.xml` and sent in
   the request (`texts: { title, subtitle, age_line, date_line, ... }`). The core decides only layout, so the Turkish
@@ -73,7 +73,7 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
   picture file from `AvatarResolver`, else no photo and initials.
 - **Fonts:**
   - Bundle Inter 4.1 (SIL OFL 1.1, `github.com/rsms/inter` release `Inter-4.1.zip`) as static Regular, Semibold and
-    Bold `.ttf` (or woff2) under `crates/rovsti_app_core/assets/fonts/`, loaded with `include_bytes!`.
+    Bold `.ttf` (or woff2) under `crates/rosty_app_core/assets/fonts/`, loaded with `include_bytes!`.
   - Inter covers Turkish (ğ ş ı İ ç ö ü).
   - Add the OFL text to `THIRD_PARTY_NOTICES.md` and to `assets/fonts/OFL.txt`.
   - No system font fallback, so output is deterministic. Text with emoji is rendered without the emoji (documented);
@@ -122,11 +122,11 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 - Workspace `Cargo.toml` `[workspace.dependencies]` gets
   `takumi = { version = "=2.18.2", default-features = false, features = ["raster-backend", "png", "jpeg", "webp", "gif", "svg-source", "image-decoding"] }`.
   - Drop `rayon` if it fails the Android build or adds more than about 300 KB; record the decision.
-  - `rovsti_app_core/Cargo.toml` uses `takumi.workspace = true`.
+  - `rosty_app_core/Cargo.toml` uses `takumi.workspace = true`.
 - Read the real API in `~/.cargo/registry/src/*/takumi-2.18.2/` and `takumi-core-0.34.*` (the node tree, style, font
   loading, `render`, encoders, the animation API and the loop setting). **Do not invent APIs.** Write the call sites
   you found as comments in `cards/mod.rs`.
-- `crates/rovsti_app_core/src/cards/{mod.rs,fonts.rs}`: `Fonts::bundled()` uses `include_bytes!` for Inter.
+- `crates/rosty_app_core/src/cards/{mod.rs,fonts.rs}`: `Fonts::bundled()` uses `include_bytes!` for Inter.
   `render_probe(texts, w, h) -> Vec<u8>` renders a gradient, a frosted panel (blur and saturate only) and the text
   "Doğum günün kutlu olsun, İlkay!".
 - Tests in `cards/tests.rs`:
@@ -135,7 +135,7 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
   - the render is deterministic (two renders are byte-equal).
 - Checks:
   - `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace`
-  - `cargo check --release -p rovsti_android --target aarch64-linux-android`
+  - `cargo check --release -p rosty_android --target aarch64-linux-android`
   - Build the release `.so` once and record its size before and after in this plan file under "Measurements".
 - Notices: add Takumi (MIT OR Apache-2.0) and Inter (OFL) with their full texts to `android/THIRD_PARTY_NOTICES.md`.
 - Proof: write `target/checks/cards/probe.png`, then open it with Read. It must show a readable Turkish line on a
@@ -156,10 +156,10 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 - `cards/templates/{birthday,contact,new_number}.rs`:
   - Birthday: "Happy birthday, <name>!", the age line when the year is known (from `contact_dates`), a round photo or
     initials, the date line.
-  - Contact: name, numbers (at most 3), and a QR of the vCard from `rovsti_core::vcard` encoded with `qrcode`.
+  - Contact: name, numbers (at most 3), and a QR of the vCard from `rosty_core::vcard` encoded with `qrcode`.
   - New number: name, "My new number", the number in a large size.
 - Tests:
-  - Golden PNGs under `crates/rovsti_app_core/tests/cards/` for each template in two palettes, compared per channel with
+  - Golden PNGs under `crates/rosty_app_core/tests/cards/` for each template in two palettes, compared per channel with
     a tolerance of 2 and at most 0.1% of pixels different. Update them with `UPDATE_CARD_GOLDENS=1`.
   - Refraction maps: symmetry, and zero displacement in the centre.
   - The QR decodes back through `contact_scan::decode_luma` to the same vCard.
@@ -170,11 +170,11 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 
 ### Step 3. FFI ops and the Kotlin bridge (static)
 
-- `crates/rovsti_ffi/src/ops/cards.rs` registered in `ops/mod.rs`:
+- `crates/rosty_ffi/src/ops/cards.rs` registered in `ops/mod.rs`:
   - `cards.templates`: the template ids, sizes, palettes and the text keys each template needs.
   - `cards.render`: spec plus `out` path, answering `{ path, width, height, bytes, millis }`.
   - Errors are codes (`photo_unreadable`, `out_unwritable`, `text_missing`), never English text (F30 rule).
-- Fixtures `crates/rovsti_ffi/fixtures/cards.*.{request,answer}.json`, added to `INDEX`; documentation in `OPS.md`.
+- Fixtures `crates/rosty_ffi/fixtures/cards.*.{request,answer}.json`, added to `INDEX`; documentation in `OPS.md`.
   The answer fixtures avoid nondeterministic fields (`millis` is masked as in the other timing ops).
 - `:core-bridge`: `CardsOps.kt` with models (`CardTemplate`, `CardPalette`, `CardRenderRequest`, `CardRenderResult`,
   `CardError`) and a contract test over the fixtures, written like the other `*ContractTest`s.
@@ -223,7 +223,7 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 
 ### Step 5. Contacts preview sheet (Card Studio)
 
-- `android/contacts/src/main/kotlin/dev/rovsti/contacts/cards/`:
+- `android/contacts/src/main/kotlin/dev/rosty/contacts/cards/`:
   - `CardStudioState`, `CardStudioViewModel`: template, palette, animated on/off, render job state, last result path.
   - `CardStudioSheet.kt` (the layout under "Design decisions"). The sheet content uses `imeOverlapPadding` if a field is
     ever added (owner fix (c)); none is planned.
@@ -256,13 +256,13 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 ### Step 6. Share and save
 
 - Share writes the result to `cacheDir/share/cards/<hash>.<ext>` and sends `ACTION_SEND` through
-  `RovstiShareProvider` with `FLAG_GRANT_READ_URI_PERMISSION` and the MIME type for the format.
+  `RostyShareProvider` with `FLAG_GRANT_READ_URI_PERMISSION` and the MIME type for the format.
 - Format choice per target:
   - Still: JPEG at quality 88, or PNG for the Ink palette's transparent corners if used.
   - Animated: GIF by default. Animated WebP when the chooser's chosen component is a messaging app known to loop GIFs
     (the `ChooserTarget` callback through an `IntentSender`, recorded only). Offer "Share as still image" in the sheet's
     menu too.
-- Save writes through `MediaStore.Images` to `Pictures/Rovsti` with `IS_PENDING` (no permission on API 34+). A toast in
+- Save writes through `MediaStore.Images` to `Pictures/Rosty` with `IS_PENDING` (no permission on API 34+). A toast in
   en and tr confirms it. Failure shows the reject haptic and a toast (F31 rule).
 - Birthday notification: `BirthdayReminderReceiver`'s notification gets a "Make a Card" action. It opens Contacts on the
   contact with the Card Studio sheet open (deep link extra handled in `MainActivity`).
@@ -306,7 +306,7 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
   X.2 section.
 - Full gate:
   - `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace`
-  - `cargo check --release -p rovsti_android --target aarch64-linux-android`
+  - `cargo check --release -p rosty_android --target aarch64-linux-android`
   - `bash scripts/kotlin-ui-check.sh`
 - Build the Contacts release APK and state its path in the step summary. Run `dexdump` on any new keep rule. Record the
   `.so` and APK size growth.
@@ -317,12 +317,12 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 
 (filled in by Steps 1, 4, 7 and 8: `.so` size before/after, APK size, static and GIF render times, GIF sizes)
 
-**Step 1 (2026-11-14), `librovsti_ffi.so`, aarch64-linux-android, `cargo build --release -p rovsti_ffi` (stripped by the profile):**
+**Step 1 (2026-11-14), `librosty_ffi.so`, aarch64-linux-android, `cargo build --release -p rosty_ffi` (stripped by the profile):**
 
 | State | Bytes | Delta |
 |---|---|---|
 | HEAD without Takumi (baseline) | 10,030,336 | - |
-| Step 1 as committed: Takumi is a dependency of `rovsti_app_core` but no FFI op calls `cards` yet | 10,300,632 | +270,296 (+2.7 %) |
+| Step 1 as committed: Takumi is a dependency of `rosty_app_core` but no FFI op calls `cards` yet | 10,300,632 | +270,296 (+2.7 %) |
 | Temporary probe: one exported fn calling `cards::render_probe` (Takumi, Inter and the CSS and PNG paths linked; probe removed again) | 16,763,128 | +6,732,792 (+67 %) |
 
 - The real cost of X.2 is therefore about **6.7 MB** per APK ABI slice, of which the three Inter TTFs are 1.25 MB

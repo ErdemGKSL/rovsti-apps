@@ -25,19 +25,19 @@
 
     <!-- Rationale sheet: title and body per group -->
     <string name="permission_rationale_phone_title">Buradan arama yapın</string>
-    <string name="permission_rationale_phone_body">Rovsti, arama yapabilmek ve bir aramanın ne zaman başlayıp bittiğini bilebilmek için telefon iznine ihtiyaç duyar. Aramalar hiçbir zaman telefonunuzdan çıkmaz.</string>
+    <string name="permission_rationale_phone_body">Rosty, arama yapabilmek ve bir aramanın ne zaman başlayıp bittiğini bilebilmek için telefon iznine ihtiyaç duyar. Aramalar hiçbir zaman telefonunuzdan çıkmaz.</string>
     <string name="permission_rationale_contacts_title">Kişilerinizi görün</string>
-    <string name="permission_rationale_contacts_body">Kişiler, Rovsti\'nin numaralar yerine ad ve fotoğrafları göstermesini sağlar. Kişileriniz bu telefonda kalır.</string>
+    <string name="permission_rationale_contacts_body">Kişiler, Rosty\'nin numaralar yerine ad ve fotoğrafları göstermesini sağlar. Kişileriniz bu telefonda kalır.</string>
     <string name="permission_rationale_notifications_title">Gelişmelerden haberdar olun</string>
     <string name="permission_rationale_notifications_body">Bildirimler cevapsız aramalar ve yeni mesajlar hakkında sizi bilgilendirir. İstediğiniz zaman kapatabilirsiniz.</string>
     <string name="permission_rationale_call_log_title">Arama geçmişinizi gösterin</string>
-    <string name="permission_rationale_call_log_body">Rovsti, son aramaları listelemek için bu telefondaki arama geçmişini okur. Hiçbir şey karşıya yüklenmez.</string>
+    <string name="permission_rationale_call_log_body">Rosty, son aramaları listelemek için bu telefondaki arama geçmişini okur. Hiçbir şey karşıya yüklenmez.</string>
     <string name="permission_rationale_bluetooth_title">Bluetooth ses kullanın</string>
-    <string name="permission_rationale_bluetooth_body">Bluetooth, bir aramanın kulaklığınıza veya arabanıza geçmesini sağlar. Rovsti yalnızca daha önce eşleştirdiğiniz cihazlarla iletişim kurar.</string>
+    <string name="permission_rationale_bluetooth_body">Bluetooth, bir aramanın kulaklığınıza veya arabanıza geçmesini sağlar. Rosty yalnızca daha önce eşleştirdiğiniz cihazlarla iletişim kurar.</string>
     <string name="permission_rationale_location_title">Bulunduğunuz yeri bulun</string>
     <string name="permission_rationale_location_body">Konumunuz, sizi haritada göstermek ve durağınızdan önce uyandırmak için kullanılır. Paylaşılmaz.</string>
     <string name="permission_rationale_background_location_title">Yolculuğunuzu takip etmeye devam edin</string>
-    <string name="permission_rationale_background_location_body">Ekran kapalıyken sizi durağınızdan önce uyandırmak için Rovsti\'nin yolculuk boyunca her zaman konum erişimine ihtiyacı vardır.</string>
+    <string name="permission_rationale_background_location_body">Ekran kapalıyken sizi durağınızdan önce uyandırmak için Rosty\'nin yolculuk boyunca her zaman konum erişimine ihtiyacı vardır.</string>
     <string name="permission_rationale_microphone_title">Konuşun ve sesli not gönderin</string>
     <string name="permission_rationale_microphone_body">Mikrofon yalnızca kullandığınız sırada WhatsApp aramaları ve sesli notlar için kullanılır.</string>
 
@@ -51,7 +51,7 @@
     <string name="special_full_screen_on">Aramalar ekranı kaplayabilir</string>
     <string name="special_full_screen_off">Aramalar yalnızca bildirim olarak görünür</string>
     <string name="special_battery_on">Kısıtlı değil</string>
-    <string name="special_battery_off">Android, Rovsti\'yi arka planda durdurabilir</string>
+    <string name="special_battery_off">Android, Rosty\'yi arka planda durdurabilir</string>
     <string name="special_background_unknown">Aramaların ve mesajların gelmesi için otomatik başlatmaya izin verin</string>
     <!-- Common settings pages -->
     <string name="settings_appearance">Görünüm</string>
@@ -91,7 +91,7 @@
     <string name="settings_licences_third_party_header">Kullanılan</string>
     <string name="settings_licences_loading">Lisanslar yükleniyor</string>
     <string name="settings_licences_app_desc">GPL-3.0 veya üstü</string>
-    <string name="settings_licences_app_body">Rovsti özgür bir yazılımdır: Free Software Foundation tarafından yayımlanan GNU Genel Kamu Lisansı\'nın 3. sürümünün veya (isteğinize bağlı olarak) daha sonraki bir sürümünün koşulları altında yeniden dağıtabilir ve değiştirebilirsiniz.</string>
+    <string name="settings_licences_app_body">Rosty özgür bir yazılımdır: Free Software Foundation tarafından yayımlanan GNU Genel Kamu Lisansı\'nın 3. sürümünün veya (isteğinize bağlı olarak) daha sonraki bir sürümünün koşulları altında yeniden dağıtabilir ve değiştirebilirsiniz.</string>
     <string name="settings_licences_text_header">Lisans metni</string>
     <plurals name="settings_licences_sources">
         <item quantity="one">%1$d kaynak</item>
@@ -122,5 +122,5 @@
     <string name="dev_logs_no_match">Eşleşen satır yok</string>
     <string name="dev_logs_latest">En yeniye git</string>
     <string name="dev_logs_more">Diğer</string>
-    <string name="dev_logs_header">%1$s Rovsti günlüğü, %2$s tarihinde dışa aktarıldı. Numaralar, anahtarlar ve e-posta adresleri maskelidir.</string>
+    <string name="dev_logs_header">%1$s Rosty günlüğü, %2$s tarihinde dışa aktarıldı. Numaralar, anahtarlar ve e-posta adresleri maskelidir.</string>
 </resources>

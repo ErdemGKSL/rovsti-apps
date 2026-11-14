@@ -1,6 +1,6 @@
-# Plan: Rovsti Stops, diameter-crossing alarm (round 2)
+# Plan: Rosty Stops, diameter-crossing alarm (round 2)
 
-- Base: `2185f5511ed7e7c8d964f1933efabf55ebd9c2b9` ("Rovsti Stops: diameter crossing review fixes")
+- Base: `2185f5511ed7e7c8d964f1933efabf55ebd9c2b9` ("Rosty Stops: diameter crossing review fixes")
 - Architect: PLAN agent. No source changed by this plan. No stash entries.
 
 ## Verdict: done, no further steps
@@ -9,7 +9,7 @@ All seven steps of `stops-crossing.md` landed (commits `0ddd148` .. `2185f55`), 
 clarification ("works both ways, left->right or right->left; left->right was only an example")
 is met:
 
-- `CrossingWatch::observe` (`crates/rovsti_geo/src/crossing.rs`) fires on any confident side
+- `CrossingWatch::observe` (`crates/rosty_geo/src/crossing.rs`) fires on any confident side
   change (`was != now`) whose path segment crosses AB; tests `fires_left_to_right_and_back`,
   `trip_rings_once_each_direction`, `session::fix_out_rings_in_both_directions`,
   `headless::crossing_right_to_left_rings_too`.

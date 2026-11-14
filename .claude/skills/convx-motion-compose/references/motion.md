@@ -2,7 +2,7 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Motion: springs, interruptibility, gestures, shared elements, predictive back
 
-> **Licence.** Rovsti is GPL-3.0-or-later. Convx motion code is ported from the files named in each section (see
+> **Licence.** Rosty is GPL-3.0-or-later. Convx motion code is ported from the files named in each section (see
 > `SKILL.md` section 0 for the header). Blocks marked `PORTED FROM GLISSE` are translations of glisse (MIT) and must
 > keep the header `// Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang`
 > in whatever source file they land in.
@@ -27,7 +27,7 @@ Research reports with more detail: `_bmad-output/kotlin-ui/research/convx-motion
 
 ---
 
-## 2. Token table (Rovsti picks, with provenance)
+## 2. Token table (Rosty picks, with provenance)
 
 Compose `spring(dampingRatio, stiffness)` is a mass-1 oscillator, identical to glisse's `(stiffness, damping coefficient)`:
 `dampingRatio = damping / (2 * sqrt(stiffness))` (`G/internal/spring.ts:21-48`). Natural frequency `sqrt(k)` rad/s.
@@ -86,7 +86,7 @@ Do not inherit: Convx's push KDoc says 260 ms while the constant is 400 (`Motion
 
 ```kotlin
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
-package dev.rovsti.ui.motion
+package dev.rosty.ui.motion
 
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -103,7 +103,7 @@ data class GlisseSpring(val stiffness: Float, val damping: Float) {
         spring(dampingRatio = dampingRatio, stiffness = stiffness, visibilityThreshold = visibilityThreshold)
 }
 
-object RovstiMotion {
+object RostyMotion {
     // glisse (G/internal/press.ts, segments.tsx, switch.tsx, slider.tsx, menu.tsx)
     val GlassPressDown = GlisseSpring(515f, 27.3f)
     val GlassPressUp = GlisseSpring(250f, 11.8f)
@@ -120,7 +120,7 @@ object RovstiMotion {
     val MenuCardPress = GlisseSpring(650f, 36f)
     val MenuCardRelease = GlisseSpring(600f, 30f)
 
-    // Rovsti's own picks (numbers observed in Convx; see motion.md 2.1)
+    // Rosty's own picks (numbers observed in Convx; see motion.md 2.1)
     fun <T> press(t: T? = null) = spring(0.75f, 1200f, t)
     fun <T> select(t: T? = null) = spring(0.76f, 750f, t)
     fun <T> appear(t: T? = null) = spring(1f, 450f, t)
@@ -165,7 +165,7 @@ solver only for JVM tests (step a spring without a frame clock and compare again
 
 ```kotlin
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
-package dev.rovsti.ui.motion
+package dev.rosty.ui.motion
 
 import kotlin.math.abs
 import kotlin.math.cos
@@ -285,7 +285,7 @@ textbook `v^2/2a` (`U/utils/FlingProjection.kt:19-56`). UIKit's rubber-band cons
 
 ```kotlin
 // ORIGINAL
-package dev.rovsti.ui.motion
+package dev.rosty.ui.motion
 
 import kotlin.math.abs
 import kotlin.math.sign
@@ -366,7 +366,7 @@ APIs: `androidx.compose.ui.input.pointer.util.VelocityTracker` (`addPointerInput
 
 Alternative: foundation's `AnchoredDraggableState` + `Modifier.anchoredDraggable` (stable since 1.7) already does snapTo-while-dragging,
 `positionalThreshold` / `velocityThreshold` snapping and a settle animation. It decides by thresholds, not by 0.998 projection, and
-cannot rubber-band past the end anchor, so Rovsti uses `DragAxis` for sheets, swipe rows and pucks; reach for `AnchoredDraggable`
+cannot rubber-band past the end anchor, so Rosty uses `DragAxis` for sheets, swipe rows and pucks; reach for `AnchoredDraggable`
 only for simple two-anchor toggles where a threshold is enough (verify the pinned version's `AnchoredDraggableState` constructor).
 
 Rules:
@@ -384,7 +384,7 @@ puck to arrive (max 400 ms) before deflating (`DampedDragAnimation.kt:110-128`),
 (`U/component/floatingtabbar/FloatingTabBarTabs.kt:155-163,205`).
 
 ```kotlin
-// ORIGINAL (uses glisse constants from RovstiMotion, which lives in a file with the glisse header)
+// ORIGINAL (uses glisse constants from RostyMotion, which lives in a file with the glisse header)
 @Stable
 class SelectionPuck(initialIndex: Int, private val count: Int, private val scope: CoroutineScope) {
     val position = Animatable(initialIndex.toFloat())      // in slots
@@ -396,7 +396,7 @@ class SelectionPuck(initialIndex: Int, private val count: Int, private val scope
     fun press() {
         dragging = true
         tracker.resetTracking()
-        scope.launch { lift.animateTo(1f, RovstiMotion.LiftDrag.spec(0.001f)) }
+        scope.launch { lift.animateTo(1f, RostyMotion.LiftDrag.spec(0.001f)) }
     }
 
     fun drag(change: PointerInputChange, deltaSlots: Float, slotWidthPx: Float) {
@@ -417,17 +417,17 @@ class SelectionPuck(initialIndex: Int, private val count: Int, private val scope
         val target = rest.roundToInt().coerceIn(0, count - 1)
         scope.launch(start = CoroutineStart.UNDISPATCHED) { velocity.snapTo(vSlots) }
         scope.launch { velocity.animateTo(0f, spring(0.5f, 300f, 0.01f)) }
-        scope.launch { position.animateTo(target.toFloat(), RovstiMotion.SelectRest.spec(0.001f), initialVelocity = vSlots) }
+        scope.launch { position.animateTo(target.toFloat(), RostyMotion.SelectRest.spec(0.001f), initialVelocity = vSlots) }
         scope.launch {
             withTimeoutOrNull(400) { snapshotFlow { abs(position.value - target) < 0.025f }.first { it } }
-            lift.animateTo(0f, RovstiMotion.LiftRest.spec(0.001f))
+            lift.animateTo(0f, RostyMotion.LiftRest.spec(0.001f))
         }
         onSelect(target)
     }
 
     /** Programmatic or tap selection: same bulge as a drag. */
     fun select(index: Int) {
-        scope.launch { position.animateTo(index.toFloat(), RovstiMotion.SelectRest.spec(0.001f)) }
+        scope.launch { position.animateTo(index.toFloat(), RostyMotion.SelectRest.spec(0.001f)) }
     }
 }
 
@@ -462,7 +462,7 @@ See `overlays.md` 5 (detents, projection, 12% dismiss rule, resistance, nested s
 Behaviour (`U/utils/IosOverscroll.kt:81-376`): two accumulators per axis (raw finger pull and the part still springing
 back); displayed offset = `Rubber.band(raw + returning, viewport)`; stretch only during user-input drags, fling deltas
 pass through so leftover velocity reaches `applyToFling`; opposite-direction scroll first pays down stretch; rebound
-`animate(from, 0, initialVelocity = clamp(leftover, +-10000))` with `RovstiMotion.rebound(v)`; offsets applied in
+`animate(from, 0, initialVelocity = clamp(leftover, +-10000))` with `RostyMotion.rebound(v)`; offsets applied in
 `placeWithLayer { translationY = ... }` of a layout node; "in progress" only while the finger is down, so a returning
 list does not eat the next tap.
 
@@ -474,7 +474,7 @@ list in every app gets it at once.
 ### 5.6 Elastic floating buttons (Stops map buttons, search pill)
 
 Per-frame layer transform from the finger offset, saturating with `tanh` (behaviour in `U/component/GlassCircleButton.kt:63-91`;
-magnitudes toned down after user feedback, `U/player/FloatingMiniPlayer.kt:~254`). Rovsti uses glisse's press maths
+magnitudes toned down after user feedback, `U/player/FloatingMiniPlayer.kt:~254`). Rosty uses glisse's press maths
 instead (section 7), which already gives grow + directional stretch + 8 dp translate; it is the cheaper, MIT-portable option.
 
 ---
@@ -528,7 +528,7 @@ bounces (zeta 0.373). Layout never changes. Use on glass buttons, the Stops floa
 
 ```kotlin
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
-package dev.rovsti.ui.glass
+package dev.rosty.ui.glass
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.Modifier
@@ -547,16 +547,16 @@ import androidx.compose.ui.node.LayoutModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import dev.rovsti.ui.motion.GlisseSpring
-import dev.rovsti.ui.motion.RovstiMotion
+import dev.rosty.ui.motion.GlisseSpring
+import dev.rosty.ui.motion.RostyMotion
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
 
 internal class PressFeel(val growDp: Float, val press: GlisseSpring, val release: GlisseSpring)
-internal val TouchFeel = PressFeel(15f, RovstiMotion.GlassPressDown, RovstiMotion.GlassPressUp)
-internal val PointerFeel = PressFeel(6f, RovstiMotion.PointerPressDown, RovstiMotion.PointerPressUp)
+internal val TouchFeel = PressFeel(15f, RostyMotion.GlassPressDown, RostyMotion.GlassPressUp)
+internal val PointerFeel = PressFeel(6f, RostyMotion.PointerPressDown, RostyMotion.PointerPressUp)
 
 /** Pure (JVM-testable): [scaleX, scaleY, translateX, translateY] for a press moved by (dx, dy) from its down point. */
 fun pressTargets(width: Float, height: Float, dx0: Float, dy0: Float, grow: Float, stretchPx: Float, maxShift: Float): FloatArray {
@@ -708,7 +708,7 @@ with their normal exit; only sheets preview.
 
 ## 10. Motion review checklist
 
-- [ ] No raw spring/tween numbers at call sites: everything comes from `RovstiMotion`.
+- [ ] No raw spring/tween numbers at call sites: everything comes from `RostyMotion`.
 - [ ] Every spring passes a `visibilityThreshold`.
 - [ ] Draggable things: `snapTo` (undispatched) while dragging, `animateTo(target, spec, initialVelocity)` after, target from `Fling`.
 - [ ] Only one `Animatable` per quantity; cancellation deflates press state in `finally`.

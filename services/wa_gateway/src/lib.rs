@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-//! The Rovsti WhatsApp gateway: owns every WhatsApp session and serves the
+//! The Rosty WhatsApp gateway: owns every WhatsApp session and serves the
 //! apps over HTTP and WebSocket. See `_bmad-output/plans/wa-gateway.md`.
 
 pub mod auth;
@@ -24,9 +24,9 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rovsti_wa_proto::LookupCache;
-use rovsti_wa_proto::limit::{AuthLimiter, TokenBucket};
-use rovsti_wa_proto::{ApiError, InstanceState, LimitSource};
+use rosty_wa_proto::LookupCache;
+use rosty_wa_proto::limit::{AuthLimiter, TokenBucket};
+use rosty_wa_proto::{ApiError, InstanceState, LimitSource};
 
 use crate::config::Config;
 use crate::cooldown::{Check, Cooldown};
@@ -247,7 +247,7 @@ impl AppState {
         &self,
         instance: &InstanceId,
         jids: &[String],
-    ) -> Result<(Vec<rovsti_wa_proto::WaUser>, Vec<String>), Refused> {
+    ) -> Result<(Vec<rosty_wa_proto::WaUser>, Vec<String>), Refused> {
         let now = now_ms();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
@@ -270,7 +270,7 @@ impl AppState {
     }
 
     /// Remembers what WhatsApp answered for `instance`.
-    pub fn lookup_store(&self, instance: &InstanceId, users: &[rovsti_wa_proto::WaUser]) {
+    pub fn lookup_store(&self, instance: &InstanceId, users: &[rosty_wa_proto::WaUser]) {
         let now = now_ms();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
@@ -410,7 +410,7 @@ mod tests {
     use super::*;
     use crate::driver::FakeDriver;
     use crate::store::NewKey;
-    use rovsti_wa_proto::{ConnectKey, KeyId};
+    use rosty_wa_proto::{ConnectKey, KeyId};
 
     #[tokio::test]
     async fn restart_skips_logged_out_instances() {

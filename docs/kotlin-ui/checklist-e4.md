@@ -10,7 +10,7 @@ Method: grep of `android/contacts/src/main` for the rule, the test that proves i
 ## A. Licence and provenance
 - pass: no GPUI, no Material (`grep` for `Popup(`, `Dialog(`, `androidx.compose.material` finds nothing in `:contacts`).
 - pass: the only ported file of E4 R1 is the favorites reorder (Convx header + `Ported from Convx ...` line, and
-  `sh.calvin.reorderable` in `THIRD_PARTY_NOTICES.md`). `SelectCheck`, `SelectController`, `SelectToolbar` are Rovsti code
+  `sh.calvin.reorderable` in `THIRD_PARTY_NOTICES.md`). `SelectCheck`, `SelectController`, `SelectToolbar` are Rosty code
   written for this story (a Convx circle selector does not exist for rows); `ToolbarTextButton` sits in `Toolbar.kt`,
   which already carries the glisse and Convx header.
 
@@ -30,7 +30,7 @@ Method: grep of `android/contacts/src/main` for the rule, the test that proves i
 - n/a: Stops map items.
 
 ## C. Motion
-- pass: specs from `RovstiMotion` (`select` spring for the check circle fill and the slot width, `appear` for added
+- pass: specs from `RostyMotion` (`select` spring for the check circle fill and the slot width, `appear` for added
   editor rows, `morph` for menus).
 - pass: press changes only draw-phase properties; `ToolbarButton`/`ToolbarTextButton` use `scalePress` and the press
   fill; `ContactsListScreenTest` (row bounds unchanged while the menu opens).
@@ -54,7 +54,7 @@ Method: grep of `android/contacts/src/main` for the rule, the test that proves i
 
 ## F. Controls and input
 - pass: editor fields are `GlassTextField` (caret, selection, paste), `SearchField` in the list; IME action submits.
-- pass: haptics go through `RovstiHaptics` (alphabet rail tick, reorder, menu rows, tab bar).
+- pass: haptics go through `RostyHaptics` (alphabet rail tick, reorder, menu rows, tab bar).
 - pass: touch targets: toolbar buttons 44 x 48 dp, row min 56 dp.
 - deviation: Share in select mode shares the plain text form through the system sheet (selectExport `text`); the .vcf goes
   to the save picker through "Export .vcf" (the system share sheet needs a staged file; planned with E4.9 share formats).
@@ -99,7 +99,7 @@ contacts.png` opened again in E4.16).
 - fixed (E4.16): list separators stop 8 dp before the alphabet rail.
 
 ## C. Motion
-- pass: all specs come from `RovstiMotion`; no `tween` for position or size, no `animateContentSize`/`AnimatedVisibility`
+- pass: all specs come from `RostyMotion`; no `tween` for position or size, no `animateContentSize`/`AnimatedVisibility`
   in `:contacts` (grep).
 - pass (springs retarget mid-flight): select slot, select check, favorites/emergency reorder and sheet detents are springs
   that retarget from current value and velocity (`SelectModeScreenTest`, `FavoritesScreenTest`, sheet tests in `:design`).
@@ -121,7 +121,7 @@ contacts.png` opened again in E4.16).
 
 ## F. Controls and input
 - pass: text input is `GlassTextField`/`SearchField` (CSV mapping, intake, editor); the ringtone/voicemail/block rows
-  have 56 dp targets; haptics via `RovstiHaptics` (settings toggle `contacts.haptics` respected).
+  have 56 dp targets; haptics via `RostyHaptics` (settings toggle `contacts.haptics` respected).
 - pass: settings Appearance and Haptics rows write `ContactsPrefs` through the Rust core.
 
 ## G. Performance

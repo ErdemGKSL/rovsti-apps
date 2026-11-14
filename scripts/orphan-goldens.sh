@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/android"
 status=0
 # Every module with goldens is found by the glob (catalog, design, :wa, :shell, ...); a module that applies
-# rovsti.screenshots but has no screenshots/ directory yet (no UI, e.g. :wa before its screens) is skipped.
+# rosty.screenshots but has no screenshots/ directory yet (no UI, e.g. :wa before its screens) is skipped.
 for dir in */screenshots; do
   [[ -d "$dir" ]] || continue
   module="${dir%/screenshots}"

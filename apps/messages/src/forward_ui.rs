@@ -4,11 +4,11 @@ use gpui::{
     AnyElement, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     Channel, ThreadId,
     forward::{ForwardBody, ForwardTo, target_label},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::avatar,
     field::{TextField, field_box},

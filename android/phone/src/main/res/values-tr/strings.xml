@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Rovsti Telefon</string>
+    <string name="app_name">Rosty Telefon</string>
     <string name="tab_favorites">Favoriler</string>
     <string name="tab_recents">Son Aramalar</string>
     <string name="tab_contacts">Kişiler</string>
@@ -59,10 +59,10 @@
     <string name="setup_steps_lock_screen">Diğer izinler bölümünde Kilit ekranında göster seçeneğini açın.</string>
     <string name="setup_steps_popups">Diğer izinler bölümünde Arka planda çalışırken açılır pencere göster seçeneğini açın.</string>
     <string name="setup_steps_battery">Kısıtlama yok seçeneğini seçin.</string>
-    <string name="setup_steps_autostart">Rovsti Telefon\'u açın.</string>
+    <string name="setup_steps_autostart">Rosty Telefon\'u açın.</string>
     <string name="setup_tail_fell_back"> Bu telefon bunun yerine Uygulama bilgisini açtı; orada Diğer izinler, Otomatik başlatma veya Pil tasarrufu bölümüne bakın.</string>
     <string name="setup_tail_open_first"> Önce ayarları açın, sonra burada onaylayın.</string>
-    <string name="notice_not_default">Rovsti telefon uygulamanız değil</string>
+    <string name="notice_not_default">Rosty telefon uygulamanız değil</string>
     <string name="notice_not_default_action">Kurulumu bitirmek için dokunun</string>
 
     <!-- Settings and Diagnostics -->
@@ -75,7 +75,7 @@
     <string name="diag_copy_all">Tümünü kopyala</string>
     <string name="diag_copied">Rapor kopyalandı</string>
     <string name="diag_copy_failed">Rapor kopyalanamadı</string>
-    <string name="diag_report_title">Rovsti Telefon tanılama</string>
+    <string name="diag_report_title">Rosty Telefon tanılama</string>
     <string name="diag_section_app">Uygulama</string>
     <string name="diag_rust_core">Rust çekirdeği</string>
     <string name="diag_not_loaded">yüklenmedi</string>
@@ -91,7 +91,7 @@
     <string name="diag_call_events">Arama olayları</string>
     <string name="diag_report_none">yok</string>
     <string name="diag_none">Henüz kayıt yok</string>
-    <string name="fallback_stopped">Rovsti Telefon ekranı durdu.\nAramanız etkilenmedi.</string>
+    <string name="fallback_stopped">Rosty Telefon ekranı durdu.\nAramanız etkilenmedi.</string>
     <string name="fallback_end_call">Aramayı bitir</string>
     <string name="native_incoming">Gelen arama</string>
     <string name="native_incoming_locked">Gelen arama (kilitli)</string>
@@ -199,7 +199,7 @@
     <string name="recents_notice_copied_country">Numara ülke koduyla kopyalandı</string>
     <string name="recents_notice_call_failed">Arama yapılamadı</string>
     <string name="recents_notice_dialer_opened">Çevirici açıldı</string>
-    <string name="recents_notice_not_default">Numaraları engellemek için Rovsti\'yi varsayılan telefon uygulaması yapın</string>
+    <string name="recents_notice_not_default">Numaraları engellemek için Rosty\'yi varsayılan telefon uygulaması yapın</string>
     <string name="recents_notice_block_refused">Bu numara engellenemez</string>
     <string name="recents_notice_already_blocked">Zaten engelli</string>
     <string name="recents_notice_block_failed">Engellenemedi</string>
@@ -256,7 +256,7 @@
     <string name="details_notice_copied_all">Numaralar kopyalandı</string>
     <string name="details_notice_call_failed">Arama yapılamadı</string>
     <string name="details_notice_dialer_opened">Çevirici açıldı</string>
-    <string name="details_notice_not_default">Numaraları engellemek için Rovsti\'yi varsayılan telefon uygulaması yapın</string>
+    <string name="details_notice_not_default">Numaraları engellemek için Rosty\'yi varsayılan telefon uygulaması yapın</string>
     <string name="details_notice_block_refused">Bu numara engellenemez</string>
     <string name="details_notice_already_blocked">Zaten engelli</string>
     <string name="details_notice_block_failed">Engellenemedi</string>
@@ -482,7 +482,7 @@
     <string name="blocked_copy">Numarayı kopyala</string>
     <string name="blocked_empty_title">Engellenen numara yok</string>
     <string name="blocked_empty_message">Engellediğiniz numaralar çalmaz. Bir liste yapıştırın veya bir öneki engelleyin.</string>
-    <string name="blocked_footer_cannot">Engelleme için Rovsti\'nin varsayılan telefon uygulaması olması gerekir. Değiştirmek için Kurulum\'u açın.</string>
+    <string name="blocked_footer_cannot">Engelleme için Rosty\'nin varsayılan telefon uygulaması olması gerekir. Değiştirmek için Kurulum\'u açın.</string>
     <string name="blocked_tools_share">Listeyi paylaş</string>
     <string name="blocked_tools_export">Dosya olarak dışa aktar</string>
     <string name="blocked_tools_import">Dosyadan içe aktar</string>
@@ -511,7 +511,7 @@
     <string name="blocked_pill_unblocked_many">%1$d numaranın engeli kaldırıldı</string>
     <string name="blocked_pill_range_added">Önek engellendi</string>
     <string name="blocked_pill_range_removed">Önekin engeli kaldırıldı</string>
-    <string name="blocked_notice_unavailable">Listeyi değiştirmek için Rovsti\'yi varsayılan telefon uygulaması yapın.</string>
+    <string name="blocked_notice_unavailable">Listeyi değiştirmek için Rosty\'yi varsayılan telefon uygulaması yapın.</string>
     <string name="blocked_notice_failed">Liste değiştirilemedi.</string>
     <string name="blocked_notice_none_found">Bu metinde numara bulunamadı.</string>
     <string name="blocked_notice_emergency">Acil durum numaraları engellenemez.</string>
@@ -559,7 +559,7 @@
     <string name="sd_rejected">Hızlı arama değiştirilemedi</string>
     <string name="sd_none_to_share">Henüz atanmış kişi yok</string>
     <string name="sim_title">SIM tercihleri</string>
-    <string name="sim_footer">Telefonunuz hangi SIM\'in kullanılacağını sorduğunda Rovsti seçiminizi o numara için hatırlar ve bir dahaki sefere onu kullanır. Yeniden sorulması için numarayı unutturun.</string>
+    <string name="sim_footer">Telefonunuz hangi SIM\'in kullanılacağını sorduğunda Rosty seçiminizi o numara için hatırlar ve bir dahaki sefere onu kullanır. Yeniden sorulması için numarayı unutturun.</string>
     <string name="sim_empty_title">Hatırlanan SIM yok</string>
     <string name="sim_empty_message">Telefonunuz sorduğunda bir SIM seçin, burada listelenir.</string>
     <string name="sim_single_message">SIM tercihleri iki SIM\'li telefonlarda görünür.</string>
@@ -592,7 +592,7 @@
     <string name="data_all_message">%1$d aramanın hepsi beş saniye sonra silinecek. O ana kadar Geri al iptal eder.</string>
     <string name="data_all_pending">Tüm aramalar siliniyor\u2026</string>
     <string name="data_all_done">Arama geçmişi silindi</string>
-    <string name="data_failed">Yapılamadı. Rovsti\'nin varsayılan telefon uygulaması olduğundan emin olun.</string>
+    <string name="data_failed">Yapılamadı. Rosty\'nin varsayılan telefon uygulaması olduğundan emin olun.</string>
     <string name="data_saved_history">Arama geçmişi dışa aktarıldı</string>
     <string name="data_saved_notes">Arama notları dışa aktarıldı</string>
     <string name="data_saved_contacts">Kişiler dışa aktarıldı</string>
@@ -617,7 +617,7 @@
     <string name="backup_preview_clamped">Bazı değerler izin verilen aralığın dışındaydı ve düzeltildi.</string>
     <string name="backup_apply">Geri yükle</string>
     <string name="backup_applied">Yedek geri yüklendi</string>
-    <string name="backup_invalid">Bu dosya bir Rovsti Phone yedeği değil</string>
+    <string name="backup_invalid">Bu dosya bir Rosty Phone yedeği değil</string>
     <string name="backup_undone">Ayarlar geri konuldu</string>
     <string name="data_span_30">30 gün</string>
     <string name="data_span_90">90 gün</string>

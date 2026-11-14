@@ -1,13 +1,13 @@
-# Convx overlays: research report for Rovsti Kotlin UI
+# Convx overlays: research report for Rosty Kotlin UI
 
 Scope: popovers, context menus, dropdown menus, sheets, dialogs, toasts in Convx
 (cosmictaserdev-creator/Convx, Kotlin + Jetpack Compose). How each is triggered, how the source lifts and the page dims,
 placement and flip math, the source-to-menu morph, enter/exit specs, dismissal, submenus, preview, action sheets,
 detent sheets and drag physics, which window layer is used, z-order, focus, accessibility, list stability.
 
-Licence guard: Convx is GPL-3.0, Rovsti is MIT/Apache. Everything below is a description in our own words plus numeric
+Licence guard: Convx is GPL-3.0, Rosty is MIT/Apache. Everything below is a description in our own words plus numeric
 parameters (numbers and observed behaviour are facts, not code). Pseudo-code is original. No Convx source may be copied
-into Rovsti. Convx's `hig` module is a different case (Apache-2.0, a vendored fork of Compose Cupertino, see section 12).
+into Rosty. Convx's `hig` module is a different case (Apache-2.0, a vendored fork of Compose Cupertino, see section 12).
 
 Path prefixes used in every citation:
 - `U` = `app/src/main/kotlin/com/convx/music/ui` (example: `U/ios/component/IosMenu.kt:147`)
@@ -522,7 +522,7 @@ A 10 dp-radius box with label color at 0.92 alpha and 12/8 dp padding; no arrow,
 6. **Accessibility: effectively absent.** A search of the overlay files for `semantics`, `contentDescription`, `Role` finds
    nothing except one enum use. The library's accessibility object hard-codes high contrast and reduced transparency to
    `false`. No traversal groups, no modal semantics, no custom accessibility action for long-press menus, no
-   announcement on open, no screen reader focus move. `H/Accessibility.kt:25-35`. This is the main thing Rovsti must add.
+   announcement on open, no screen reader focus move. `H/Accessibility.kt:25-35`. This is the main thing Rosty must add.
 7. **Material is banned for new overlays** by the project's own skill: no Material menus, dialogs or bottom sheets.
    `contributor/skills/convx-android-motion/SKILL.md:34-35`. It also demands that menus feel connected to their trigger (`:28`).
 
@@ -565,7 +565,7 @@ Collected evidence; none of it is one named mechanism.
 5. Global mutable "last touch" and "slide pointer" holders (`OverlayMenu.kt:66-68`, `IosCompatMenus.kt:251-254`) break with
    multi-touch, hardware keyboard activation, and tests. Pass explicit anchors.
 6. No submenus. A search for submenu terms finds only a player menu file, not an overlay mechanism. The `hig` dropdown has no
-   nested level. If Rovsti needs one (for example contact actions with a "Send as" choice) it has to be designed fresh (section 12.7).
+   nested level. If Rosty needs one (for example contact actions with a "Send as" choice) it has to be designed fresh (section 12.7).
 7. Three different scrim values for similar surfaces (0.28 context menu, 0.18 touch-point menu, 0.12 / 0.32 sheet) and two
    different entrance scales for dialogs (1.2 and 0.96): pick a token set once.
 8. Doc/code mismatches: velocity threshold comment, alert "capsule" comment (sections 7.2, 8.1).
@@ -582,7 +582,7 @@ Collected evidence; none of it is one named mechanism.
   `OverlayMenu.kt`, `BottomSheetMenu.kt`, `IosPageSheet.kt`, `FlingProjection.kt` carry GPL-3.0 headers: do not copy.
   Re-derive from this text.
 - `H/*` is Apache-2.0 (headers at the top of each file: "Compose Cupertino project", Scott Lanoue 2025, IENGROUND 2026;
-  `hig/LICENSE`). It is a fork of the upstream open-source Compose Cupertino library. The right course for Rovsti is not to
+  `hig/LICENSE`). It is a fork of the upstream open-source Compose Cupertino library. The right course for Rosty is not to
   take the fork: either use the upstream directly as a dependency if it fits (license-compatible with MIT/Apache, needs a
   NOTICE entry) or write our own from the descriptions here. Do not pull Convx's modified files.
 - The `InteractiveHighlight` and the damped-drag numbers in the sibling reports are noted there as ported from Apache-2.0
@@ -590,11 +590,11 @@ Collected evidence; none of it is one named mechanism.
 - The 0.998 deceleration constant, the 0.55 rubber-band constant, cubic-bezier control points, and every dp/spring number
   in this report are facts and free to use.
 - The sheet pushback numbers (0.91, 32 dp, 0.22) and the menu timings are Convx's fit to an iOS reference video; they are
-  starting points, not requirements. Rovsti should validate by screenshot sequence.
+  starting points, not requirements. Rosty should validate by screenshot sequence.
 
 ---------------------------------------------------------------------------------------------------
 
-## 13. Recipe for Rovsti (Kotlin + Compose, our own code, no Material overlays)
+## 13. Recipe for Rosty (Kotlin + Compose, our own code, no Material overlays)
 
 Constraints from the owner's complaints: no layout jumps when a button is tapped; a full-screen map in Stops with controls
 floating on top; text editing with a proper selection/copy/paste menu; popovers and context menus must exist; layouts

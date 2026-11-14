@@ -1,4 +1,4 @@
-# util-contacts: everyday utilities for Rovsti Contacts (round 1)
+# util-contacts: everyday utilities for Rosty Contacts (round 1)
 
 baseSha: c54dbd79008b930dc1e1996a6ba54c2fc5d27e26
 
@@ -16,7 +16,7 @@ Already shipped, so not planned again:
   Open in Android Contacts, Delete with Undo pill (`PendingDelete`).
 - Editor: names, org, numbers, emails, note, groups, Save to account, photo choose / remove / use the
   WhatsApp photo (confirm), discard confirm.
-- vCard import (2.1/3.0/4.0, `rovsti_core::vcard::parse`, dedup by `import_plan`) and export of the
+- vCard import (2.1/3.0/4.0, `rosty_core::vcard::parse`, dedup by `import_plan`) and export of the
   whole book (`vcard::write`, vCard 3.0) from Settings.
 - WhatsApp per contact (presence, chat/call handoff), shared WhatsApp settings.
 
@@ -27,18 +27,18 @@ reads/writes only name, phone, email, org, note, group; `vcard` skips `BDAY`/`AD
 scrubber, no select mode, no recently added list, no "open address in maps".
 
 Reusable pieces already in the tree (do not re-create):
-- `rovsti_core::zoom` (`fit`, `ZoomView::{pinch, pan, double_tap, settled, is_zoomed}`,
+- `rosty_core::zoom` (`fit`, `ZoomView::{pinch, pan, double_tap, settled, is_zoomed}`,
   `dismiss_progress`, `should_dismiss`). Phone's viewer `apps/phone/src/photo_viewer.rs` (1322 lines)
   and Messages' `media_viewer.rs` are app-local patterns to adapt (do not edit them).
-- `rovsti_android::media::{save_image_to_gallery, share_image, share_file}` (Kotlin `MediaShare.kt`,
-  `RovstiShareProvider`); Contacts already compiles `crates/rovsti_android/kotlin` (build.gradle line 81)
-  but its manifest has **no** `RovstiShareProvider` entry (Phone's manifest lines 119-123 do).
-- `rovsti_core::number_format::{contact_qr, qr_file_name}` and `rovsti_wa_ui::qr::qr_png(payload,
-  min_px)` (Contacts already depends on `rovsti_wa_ui`).
-- `rovsti_core::shared_card::vcf_file_name`, `rovsti_core::multi_select::Selection`,
-  `rovsti_core::pending_delete`, `rovsti_core::search::fold`, `location_link::geo_url` (coordinates
+- `rosty_android::media::{save_image_to_gallery, share_image, share_file}` (Kotlin `MediaShare.kt`,
+  `RostyShareProvider`); Contacts already compiles `crates/rosty_android/kotlin` (build.gradle line 81)
+  but its manifest has **no** `RostyShareProvider` entry (Phone's manifest lines 119-123 do).
+- `rosty_core::number_format::{contact_qr, qr_file_name}` and `rosty_wa_ui::qr::qr_png(payload,
+  min_px)` (Contacts already depends on `rosty_wa_ui`).
+- `rosty_core::shared_card::vcf_file_name`, `rosty_core::multi_select::Selection`,
+  `rosty_core::pending_delete`, `rosty_core::search::fold`, `location_link::geo_url` (coordinates
   only; an address needs a `geo:0,0?q=` query), `cx.open_url` (used by Messages for `geo:` links).
-- `rovsti_ui::haptics` for tick feedback.
+- `rosty_ui::haptics` for tick feedback.
 
 GPUI facts at the pinned checkout (`~/.cargo/git/checkouts/gpui-fusion-*/d6c8412/crates/gpui`):
 `Div::on_pinch` with `PinchEvent.delta` (relative step), mouse `click_count` for double-tap,
@@ -84,13 +84,13 @@ GPUI facts at the pinned checkout (`~/.cargo/git/checkouts/gpui-fusion-*/d6c8412
 ## Steps (round 1)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free (it showed 6.1 GB at planning time), `rm -rf target/debug/incremental` first.
-One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `apps/phone` or `apps/messages`.
+One focused commit per step, message prefix `Rosty contacts: `. Do not touch `apps/phone` or `apps/messages`.
 
-### S1. Pure duplicates and merge: `rovsti_core::contact_dupes` (C8)
-- New `crates/rovsti_core/src/contact_dupes.rs`, `pub mod contact_dupes;` in `lib.rs`.
+### S1. Pure duplicates and merge: `rosty_core::contact_dupes` (C8)
+- New `crates/rosty_core/src/contact_dupes.rs`, `pub mod contact_dupes;` in `lib.rs`.
 - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum DupReason { SameNumber, SameEmail, SameName }`
   with `pub fn label(self) -> &'static str` ("Same number", "Same email", "Same name").
 - `#[derive(Clone, Debug, PartialEq, Eq)] pub struct DupGroup { pub ids: Vec<i64>, pub reason: DupReason }`
@@ -115,9 +115,9 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
   groups; same name with different numbers does not; transitive chain A~B~C is one group; keeper choice;
   merge dedups numbers/emails, joins notes once, keeps keeper name, drops foreign-account groups, ORs
   starred; empty input; drafts without id.
-- Acceptance: `cargo test -p rovsti_core contact_dupes` passes; no app change.
+- Acceptance: `cargo test -p rosty_core contact_dupes` passes; no app change.
 
-### S2. Pure dates and addresses: `ContactDraft` fields + `rovsti_core::contact_dates` (C5, C6, C9)
+### S2. Pure dates and addresses: `ContactDraft` fields + `rosty_core::contact_dates` (C5, C6, C9)
 - `contact_edit.rs`: add to `ContactDraft` (serde default, `skip_serializing_if = "Vec::is_empty"` so old
   JSON and Kotlin answers still parse): `pub events: Vec<DraftEvent>`, `pub addresses: Vec<DraftField>`.
   `#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)] #[serde(default)]
@@ -128,7 +128,7 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
   text) and events (drop unparsable dates, dedup by (kind, date)); `validate()` gains
   `DraftError::BadDate(usize)` ("Date {n} is not a real day."). Update `blank()`, `merge` in S1 and every
   struct literal the compiler flags (sample.rs, tests) with `..Default::default()` where needed.
-- New `crates/rovsti_core/src/contact_dates.rs`: `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct
+- New `crates/rosty_core/src/contact_dates.rs`: `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct
   Md { pub month: u8, pub day: u8 }`, `pub struct EventDate { pub year: Option<i32>, pub md: Md }`;
   `pub fn parse(s: &str) -> Option<EventDate>` (accepts `YYYY-MM-DD`, `YYYYMMDD`, `--MM-DD`, `--MMDD`,
   `YYYY-MM-DDThh:mm...` (time ignored); rejects 31 Apr, 29 Feb in a non-leap year with a year);
@@ -150,7 +150,7 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
 - Tests: every accepted/rejected date form; leap-day next occurrence; days_until across year end; age
   with and without year; `upcoming` ordering, window cut-off, tz offset moving "today"; wish text; maps
   url encodes `ç ş &` and newlines; old JSON without the new keys deserialises; `validate` BadDate.
-- Acceptance: `cargo test -p rovsti_core` passes; app compiles unchanged in behaviour.
+- Acceptance: `cargo test -p rosty_core` passes; app compiles unchanged in behaviour.
 
 ### S3. Pure vCard fields, export names and scrubber math (C7, C10, C4)
 - `vcard.rs`: parse `BDAY` (3.0 `1994-05-12`, 4.0 `19940512`, `--0512`, with `VALUE=date`),
@@ -161,7 +161,7 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
   safe). Update the module doc (photos still skipped). Fix the test at line ~499 that asserts BDAY is
   skipped.
 - `vcard.rs`: `pub fn export_name(drafts: &[ContactDraft], today: (i32,u8,u8)) -> String`: one contact
-  -> `shared_card::vcf_file_name(display_name)`; several -> `rovsti-contacts-<n>-YYYY-MM-DD.vcf`.
+  -> `shared_card::vcf_file_name(display_name)`; several -> `rosty-contacts-<n>-YYYY-MM-DD.vcf`.
 - `contacts_view.rs`: `pub fn scrubber_letters(rows: impl IntoIterator<Item = char>) -> Vec<char>`
   (section letters in order, deduped; `#` last) and `pub fn letter_at(y: f32, height: f32, count: usize)
   -> Option<usize>` (clamped, `None` for count 0) and `pub fn first_row_of(letters_of_rows: &[char],
@@ -169,10 +169,10 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
 - Tests: round-trip BDAY with/without year, X-ANNIVERSARY, ADR with comma/semicolon/newline escapes, a
   real iCloud 3.0 and a Google 4.0 sample card, unparsable BDAY is dropped not fatal; export names;
   scrubber mapping at top, bottom, out of range, empty.
-- Acceptance: `cargo test -p rovsti_core vcard contacts_view` passes.
+- Acceptance: `cargo test -p rosty_core vcard contacts_view` passes.
 
 ### S4. Android glue and backend wrappers (C2, C4, C5, C6)
-- Kotlin `crates/rovsti_android/kotlin/dev/rovsti/bridge/ContactsEdit.kt`: add
+- Kotlin `crates/rosty_android/kotlin/dev/rosty/bridge/ContactsEdit.kt`: add
   `ContactsContract.CommonDataKinds.Event` and `StructuredPostal` to `EDITED_MIMES` (so update replaces
   them; read before changing that `update` deletes only `EDITED_MIMES`). `DraftBuilder.add`: Event ->
   `events.put({date: START_DATE, kind: birthday|anniversary|other|custom, label})` (types 3/1/2/0);
@@ -182,11 +182,11 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
   (`StructuredPostal.FORMATTED_ADDRESS`, `TYPE`, `LABEL`). `toJson` emits the arrays only when non-empty.
   `fullJson` therefore exports them too.
 - `apps/contacts/platforms/android/app/src/main/AndroidManifest.xml`: register
-  `dev.rovsti.bridge.RovstiShareProvider` exactly like Phone's manifest lines 119-123.
+  `dev.rosty.bridge.RostyShareProvider` exactly like Phone's manifest lines 119-123.
 - `apps/contacts/src/backend.rs` thin wrappers, all returning `Result<_, String>` through the existing
   `done`/`android_words` helpers: `pub(crate) const FULL_PHOTO: u32 = 1080;`
   `pub(crate) fn full_photo(uri: &str) -> Option<(image::RgbaImage, PathBuf)>` (reuse `contact_photo(uri,
-  FULL_PHOTO)` and write a PNG into `std::env::temp_dir()/rovsti-contacts/` so save/share have a path;
+  FULL_PHOTO)` and write a PNG into `std::env::temp_dir()/rosty-contacts/` so save/share have a path;
   desktop uses the sample photo path the same way), `save_to_gallery(path, name)`, `share_image(path,
   title)`, `share_vcf(name, text)` (write the text to the temp dir, `media::share_file(path,
   "text/x-vcard", name)`), `share_png(name, bytes)`, `pull_full() -> Result<Vec<ContactDraft>, String>`
@@ -202,7 +202,7 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
 - Read `.claude/skills/liquid-glass-gpui/SKILL.md` first. Adapt (do not import) Phone's
   `photo_viewer.rs`: keep its `image_rect(view, natural, viewport)` pure fn with tests, its gesture flow
   (`on_pinch` -> `ZoomView::pinch`, drag -> pan when zoomed else dismiss progress with background fade,
-  release -> `settled` with `rovsti_ui::spring::Spring`, `click_count == 2` -> `double_tap`, Escape and
+  release -> `settled` with `rosty_ui::spring::Spring`, `click_count == 2` -> `double_tap`, Escape and
   Back close). Field on `ContactsApp`: `viewer: Option<PhotoViewer>`; `go_back`/`can_go_back` close it
   first; draw it above the card and sheets in `render`.
 - Open: tap on the card avatar in `detail.rs` (`photo_avatar(... 96.0 ...)`) when a photo is shown
@@ -222,7 +222,7 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
 - `detail.rs`: the Share action button opens a small glass sheet (reuse the field-sheet pattern) with
   "Share as text" (current behaviour), "Share contact file (.vcf)" (`vcard::write(&[draft])`,
   `vcard::export_name`, `backend::share_vcf`) and "Show QR code". QR: new `apps/contacts/src/qr_sheet.rs`
-  rendering the PNG from `rovsti_wa_ui::qr::qr_png(number_format::contact_qr(name, numbers, None)?
+  rendering the PNG from `rosty_wa_ui::qr::qr_png(number_format::contact_qr(name, numbers, None)?
   .payload, 720)` as a `RenderImage` on a white rounded card (QR must stay dark-on-white in dark mode)
   with Save (`backend::save_to_gallery` of the PNG written via `share_png`'s temp path,
   `number_format::qr_file_name`) and Share buttons; `QrTooBig` shows pill "Too many details for one QR
@@ -266,9 +266,9 @@ One focused commit per step, message prefix `Rovsti contacts: `. Do not touch `a
   Vec<Upcoming>` on `ContactsApp`.
 - Contacts tab: a vertical letter column on the trailing edge (only when no search text and > 20 rows),
   letters from `scrubber_letters`; mouse down/move maps `letter_at` -> `first_row_of` ->
-  `list.scroll_to_reveal_item(ix)`, a glass bubble shows the letter while dragging, `rovsti_ui::haptics`
+  `list.scroll_to_reveal_item(ix)`, a glass bubble shows the letter while dragging, `rosty_ui::haptics`
   tick on each letter change (check its public fn first).
-- Docs: `docs/roadmap.md` Rovsti Contacts section ticks C1-C10 ("done without a device"); update this
+- Docs: `docs/roadmap.md` Rosty Contacts section ticks C1-C10 ("done without a device"); update this
   file's backlog statuses to `done R1` for what landed.
 - Tests: pure helper `favorites_upcoming(&[Upcoming], 3)`; scrubber visibility rule
   `show_scrubber(rows, query) -> bool`.

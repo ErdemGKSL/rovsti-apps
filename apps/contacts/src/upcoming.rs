@@ -2,7 +2,7 @@
 //! its "See all" page, and the Contacts tab's alphabet scrubber.
 //!
 //! The rules (the next occurrence, the window, the groups, when the scrubber
-//! shows, which letter a touch hits) live in `rovsti_core`; this file reads
+//! shows, which letter a touch hits) live in `rosty_core`; this file reads
 //! the drafts once per book load and draws.
 
 use std::{collections::HashMap, iter};
@@ -12,13 +12,13 @@ use gpui::{
     MouseDownEvent, MouseMoveEvent, ParentElement, SharedString, StatefulInteractiveElement,
     Styled, TouchPhase, Window, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     avatar,
     contact_dates::{self, Upcoming},
     contact_edit::ContactDraft,
     contact_ics, contacts_view,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
     glass::{GlassSpec, glass},
@@ -263,7 +263,7 @@ impl ContactsApp {
                 let (number, text) = (number.clone(), text.clone());
                 this.act(
                     "send a message",
-                    move || rovsti_android::telecom::compose_sms(&number, &text),
+                    move || rosty_android::telecom::compose_sms(&number, &text),
                     cx,
                 );
             }))
@@ -400,7 +400,7 @@ impl ContactsApp {
             return;
         }
         self.scrub.current = Some(ix);
-        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         if let Some(row) = self
             .scrub_letters
             .get(ix)
@@ -535,7 +535,7 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::contact_edit::{DraftEvent, EventKind};
+    use rosty_core::contact_edit::{DraftEvent, EventKind};
 
     fn with_birthday(id: i64, given: &str, date: &str) -> ContactDraft {
         ContactDraft {
@@ -555,7 +555,7 @@ mod tests {
         let (name, text, count) =
             calendar_file(&drafts, &[], 1_770_000_000_000, 0).expect("two dates");
         assert_eq!(count, 2);
-        assert!(name.starts_with("rovsti-birthdays-2-") && name.ends_with(".ics"));
+        assert!(name.starts_with("rosty-birthdays-2-") && name.ends_with(".ics"));
         assert!(text.contains("BEGIN:VCALENDAR") && text.contains("Anna"));
     }
 

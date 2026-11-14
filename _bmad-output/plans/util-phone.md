@@ -1,11 +1,11 @@
-# util-phone: everyday utilities for Rovsti Phone (round 1)
+# util-phone: everyday utilities for Rosty Phone (round 1)
 
 baseSha: a7951dca4dd37e3d27138f2a2811883ed9bceb4d
 
 ## Audit (what already exists at baseSha)
 
 Already shipped, so not planned again:
-- Block/unblock with Undo pill, Blocked list page (`block_ui.rs`, `blocked_ui.rs`, `rovsti_core::blocklist`).
+- Block/unblock with Undo pill, Blocked list page (`block_ui.rs`, `blocked_ui.rs`, `rosty_core::blocklist`).
 - Delete one Recents row, delete a person's history, delete all, each with a confirm sheet and Undo
   (`history_ui.rs`, `Backend::delete_calls/restore_calls/delete_all_calls`).
 - Quick actions strip on the Number and Contact sheets: Message, Copy, Share, Block (`actions_ui.rs`,
@@ -19,8 +19,8 @@ Already shipped, so not planned again:
 Missing (the backlog below): no full-screen photo viewer, no save-to-gallery or image share, no number
 formats beyond the display form, no Recents search or filters, no CSV export (`DocumentOp::ExportCalls`
 exists in `wire.rs` but nothing uses it), no call statistics, no per-call notes, no pause/wait inserts,
-no QR share. No gallery (MediaStore) or image-share glue exists in `rovsti_android`. The phone manifest
-has no FileProvider (Messages has `dev.rovsti.bridge.MmsFileProvider` as a pattern).
+no QR share. No gallery (MediaStore) or image-share glue exists in `rosty_android`. The phone manifest
+has no FileProvider (Messages has `dev.rosty.bridge.MmsFileProvider` as a pattern).
 
 GPUI facts checked at the pinned checkout (`~/.cargo/git/checkouts/gpui-fusion-*/d6c8412/crates/gpui`):
 `Div::on_pinch(|&PinchEvent{position, delta, ..}, window, cx|)` (elements/div.rs:377),
@@ -32,7 +32,7 @@ GPUI facts checked at the pinned checkout (`~/.cargo/git/checkouts/gpui-fusion-*
 | # | Utility | Status |
 |---|---------|--------|
 | U1 | Photo viewer: tap the sheet avatar to open full screen, pinch and double-tap zoom, pan, swipe down to close | done R1 |
-| U2 | Save photo to gallery (MediaStore, Pictures/Rovsti) and share photo (share sheet) from the viewer | done R1 |
+| U2 | Save photo to gallery (MediaStore, Pictures/Rosty) and share photo (share sheet) from the viewer | done R1 |
 | U3 | Recents search (name, number digits) and filter chips: All, Missed, Incoming, Outgoing, WhatsApp | done R1 |
 | U4 | Copy as / Share as: display, E.164, national, `tel:` link, vCard (with name) | done R1 |
 | U5 | Export call log as CSV (system "save as"), from Settings > Backup | done R1 |
@@ -52,12 +52,12 @@ GPUI facts checked at the pinned checkout (`~/.cargo/git/checkouts/gpui-fusion-*
 ## Steps (round 1)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focused commit per step.
 
-### S1. Pure zoom/pan math: `rovsti_core::zoom`
-- New `crates/rovsti_core/src/zoom.rs`, `pub mod zoom;` in `lib.rs`. No deps, `f32` only, reusable by
+### S1. Pure zoom/pan math: `rosty_core::zoom`
+- New `crates/rosty_core/src/zoom.rs`, `pub mod zoom;` in `lib.rs`. No deps, `f32` only, reusable by
   the Contacts and Messages apps later.
 - Types: `#[derive(Clone, Copy, Debug, PartialEq)] pub struct Size { pub w: f32, pub h: f32 }`,
   `pub struct Point { pub x: f32, pub y: f32 }`,
@@ -83,10 +83,10 @@ If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focu
   before and after); pinch in then settle clamps to 5.0; pinch out below 1 settles to identity; pan
   past the edge rubber-bands and settles back to the edge; a centred non-zoomed image cannot pan;
   double-tap toggles in and back; dismiss thresholds (distance, fling, twitch, upward drag never).
-- Acceptance: `cargo test -p rovsti_core zoom` passes, no app code changes.
+- Acceptance: `cargo test -p rosty_core zoom` passes, no app code changes.
 
-### S2. Pure number formats: `rovsti_core::number_format`
-- New `crates/rovsti_core/src/number_format.rs`, `pub mod number_format;`.
+### S2. Pure number formats: `rosty_core::number_format`
+- New `crates/rosty_core/src/number_format.rs`, `pub mod number_format;`.
 - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum NumberForm { Display, E164, National, TelLink,
   VCard }` with `pub const ALL`, `pub fn label(self) -> &'static str` ("As shown", "International
   (E.164)", "National", "Phone link", "Contact card (vCard)").
@@ -108,10 +108,10 @@ If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focu
   frequent; none gives `None`; each form for Turkish mobile national and international, a US `+1`
   number, a short code `112`, a USSD code, an unparsable name; vCard round-trips through `vcard::parse`
   with name and number; `available` dedups.
-- Acceptance: `cargo test -p rovsti_core number_format` passes.
+- Acceptance: `cargo test -p rosty_core number_format` passes.
 
-### S3. Pure Recents query and CSV: `rovsti_core::call_log_query`
-- New `crates/rovsti_core/src/call_log_query.rs`, `pub mod call_log_query;`.
+### S3. Pure Recents query and CSV: `rosty_core::call_log_query`
+- New `crates/rosty_core/src/call_log_query.rs`, `pub mod call_log_query;`.
 - `#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)] pub enum RecentsFilter { #[default] All,
   Missed, Incoming, Outgoing, WhatsApp }` with `ALL` and `label()`; `pub fn keeps(self, row:
   &RecentsRow) -> bool` (Missed includes `CallType::Missed` and declined/rejected-as-missed per
@@ -128,14 +128,14 @@ If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focu
   make it `pub(crate)`); RFC 4180 quoting (quote fields containing `,` `"` CR LF; double quotes);
   CSV-injection guard: a cell starting with `=`, `@`, tab or CR, or with `+`/`-` not followed by a digit,
   gets a leading `'`; CRLF line ends; blocked entries included with direction `blocked`. Also
-  `pub fn csv_file_name(now_ms: i64, tz_offset_s: i32) -> String` = `rovsti-calls-YYYY-MM-DD.csv`.
+  `pub fn csv_file_name(now_ms: i64, tz_offset_s: i32) -> String` = `rosty-calls-YYYY-MM-DD.csv`.
 - Tests: each filter on a mixed set; text search by name with accents/case, by national digits matching
   an international row, by 1 digit (no digit match, name only); CSV header, quoting, injection guard,
   `+90…` numbers stay unquoted and unprefixed, merge order with WhatsApp extras, empty log is header only.
-- Acceptance: `cargo test -p rovsti_core call_log_query` passes.
+- Acceptance: `cargo test -p rosty_core call_log_query` passes.
 
-### S4. Android glue: gallery save, image share, CSV export (`rovsti_android`)
-- New `crates/rovsti_android/src/media.rs` (`pub mod media;` in `lib.rs`):
+### S4. Android glue: gallery save, image share, CSV export (`rosty_android`)
+- New `crates/rosty_android/src/media.rs` (`pub mod media;` in `lib.rs`):
   `pub fn save_image_to_gallery(path: &str, display_name: &str, mime: &str) -> Result<bool>` (Kotlin
   `saveImageToGallery`) and `pub fn share_image(path: &str, mime: &str, title: &str) -> Result<bool>`
   (Kotlin `shareImage`). Desktop: `Error::Unsupported` via the existing non-android `bridge` stubs, plus a
@@ -143,18 +143,18 @@ If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focu
 - `documents.rs`: `pub fn export_calls(name: &str, csv: &str) -> Result<bool>` (Kotlin
   `exportCallsDocument`, answer `document_result` op `export_calls`, mime `text/csv`); add to the desktop
   test.
-- Kotlin: new `crates/rovsti_android/kotlin/dev/rovsti/bridge/MediaShare.kt` with
+- Kotlin: new `crates/rosty_android/kotlin/dev/rosty/bridge/MediaShare.kt` with
   `object MediaShare { fun saveToGallery(ctx, path, name, mime): Boolean }` (MediaStore.Images insert
-  with `RELATIVE_PATH = Pictures/Rovsti`, `IS_PENDING` 1 then 0, stream copy, no permission at minSdk 34;
-  delete the row on failure) and `class RovstiShareProvider : ContentProvider` serving files from
+  with `RELATIVE_PATH = Pictures/Rosty`, `IS_PENDING` 1 then 0, stream copy, no permission at minSdk 34;
+  delete the row on failure) and `class RostyShareProvider : ContentProvider` serving files from
   `cache/share` only (safe-name check like `MmsFileProvider`, read-only, `getType` from extension).
   `shareImage` copies the file into `cache/share`, builds
-  `content://${packageName}.rovstishare/<name>`, and starts `ACTION_SEND` with `EXTRA_STREAM`,
-  `FLAG_GRANT_READ_URI_PERMISSION` through a chooser. Add `@JvmStatic` entries in `RovstiBridge.kt` next
+  `content://${packageName}.rostyshare/<name>`, and starts `ACTION_SEND` with `EXTRA_STREAM`,
+  `FLAG_GRANT_READ_URI_PERMISSION` through a chooser. Add `@JvmStatic` entries in `RostyBridge.kt` next
   to `shareText`, and `exportCallsDocument` next to `exportContactsDocument` (reuse `Documents` with a
   text payload and op `export_calls`; read `Documents.kt` first).
 - `apps/phone/platforms/android/app/src/main/AndroidManifest.xml`: register
-  `dev.rovsti.bridge.RovstiShareProvider`, authority `${applicationId}.rovstishare`,
+  `dev.rosty.bridge.RostyShareProvider`, authority `${applicationId}.rostyshare`,
   `exported=false`, `grantUriPermissions=true`. Check how the ejected host copies the bridge Kotlin
   (docs/android.md) so the new file is included.
 - `apps/phone/src/backend.rs`: thin wrappers returning `Outcome` like `share_text`:
@@ -162,7 +162,7 @@ If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focu
   `pub fn full_photo(uri: &str) -> Option<(image::RgbaImage, PathBuf)>` using
   `providers::contact_photo(uri, FULL_PHOTO_SIZE)` with `FULL_PHOTO_SIZE = 1080` (desktop: `sample::photo`
   and write a PNG to the temp dir so save/share paths exist; save/share then report Unsupported).
-- Acceptance: all checks green, including the aarch64 check of `rovsti_android`.
+- Acceptance: all checks green, including the aarch64 check of `rosty_android`.
 
 ### S5. Photo viewer screen (`apps/phone/src/photo_viewer.rs`)
 - Read `.claude/skills/liquid-glass-gpui/SKILL.md` first. New module, a full-screen overlay drawn above
@@ -175,7 +175,7 @@ If `df` shows under 6 GB free, `rm -rf target/debug/incremental` first. One focu
   thumbnail at once, load `backend::full_photo` on the background executor and swap in.
 - Gestures: `on_pinch` -> `ZoomView::pinch`; drag (mouse down/move/up as the incoming card does) ->
   `pan` when zoomed, else `dismiss_progress` with background fade; release -> `settled` animated with the
-  app's spring (`Spring` from `rovsti_ui`/`liquid_glass_kit`, as used elsewhere in the app); double-tap
+  app's spring (`Spring` from `rosty_ui`/`liquid_glass_kit`, as used elsewhere in the app); double-tap
   via `click_count == 2` -> `double_tap` animated. Map the image with an absolute `img`/`RenderImage`
   element sized `fit * scale` and offset, inside a clipped full-size box.
 - Chrome: top glass bar with Close (X) and title (contact name); bottom glass bar with Save and Share

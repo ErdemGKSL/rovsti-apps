@@ -2,24 +2,24 @@
 status: final
 stepsCompleted: [1, 2, 3, 4]
 inputDocuments:
-  - apps/phone/_bmad-output/planning-artifacts/prds/prd-rovsti-phone-2026-10-27/prd.md
-  - apps/phone/_bmad-output/planning-artifacts/prds/prd-rovsti-phone-2026-10-27/addendum.md
-  - apps/phone/_bmad-output/planning-artifacts/architecture/architecture-rovsti-phone-2026-10-27/ARCHITECTURE-SPINE.md
-  - apps/phone/_bmad-output/planning-artifacts/architecture/architecture-rovsti-phone-2026-10-27/reviews/review-reality-check.md
-  - apps/phone/_bmad-output/planning-artifacts/architecture/architecture-rovsti-phone-2026-10-27/reviews/review-adversary.md
-  - apps/phone/_bmad-output/planning-artifacts/ux-designs/ux-rovsti-phone-2026-10-27/DESIGN.md
-  - apps/phone/_bmad-output/planning-artifacts/ux-designs/ux-rovsti-phone-2026-10-27/EXPERIENCE.md
-  - apps/phone/_bmad-output/planning-artifacts/briefs/brief-rovsti-phone-2026-10-27/brief.md
+  - apps/phone/_bmad-output/planning-artifacts/prds/prd-rosty-phone-2026-10-27/prd.md
+  - apps/phone/_bmad-output/planning-artifacts/prds/prd-rosty-phone-2026-10-27/addendum.md
+  - apps/phone/_bmad-output/planning-artifacts/architecture/architecture-rosty-phone-2026-10-27/ARCHITECTURE-SPINE.md
+  - apps/phone/_bmad-output/planning-artifacts/architecture/architecture-rosty-phone-2026-10-27/reviews/review-reality-check.md
+  - apps/phone/_bmad-output/planning-artifacts/architecture/architecture-rosty-phone-2026-10-27/reviews/review-adversary.md
+  - apps/phone/_bmad-output/planning-artifacts/ux-designs/ux-rosty-phone-2026-10-27/DESIGN.md
+  - apps/phone/_bmad-output/planning-artifacts/ux-designs/ux-rosty-phone-2026-10-27/EXPERIENCE.md
+  - apps/phone/_bmad-output/planning-artifacts/briefs/brief-rosty-phone-2026-10-27/brief.md
   - apps/phone/_bmad-output/planning-artifacts/gap-analysis-2026-10-28.md
 mode: headless (no interactive confirmations; owner decisions taken from the task brief)
 appendedV02: 2026-10-28 (Epics 14-22 appended in APPEND mode from PRD v0.2 FR41-FR73, UX S17-S36, spine AD-23..AD-36; Epics 1-13 untouched)
 ---
 
-# Rovsti Phone - Epic Breakdown
+# Rosty Phone - Epic Breakdown
 
 ## Overview
 
-This document decomposes the Rovsti Phone PRD (40 FRs, 13 NFRs), the UX contract (DESIGN.md and EXPERIENCE.md, 16 signature moments S1-S16, 9 screens) and the Architecture Spine (AD-1 to AD-22, spikes S1/S2) into implementable stories for single dev-agent runs.
+This document decomposes the Rosty Phone PRD (40 FRs, 13 NFRs), the UX contract (DESIGN.md and EXPERIENCE.md, 16 signature moments S1-S16, 9 screens) and the Architecture Spine (AD-1 to AD-22, spikes S1/S2) into implementable stories for single dev-agent runs.
 
 **Goal:** a working, installable debug APK that the owner sideloads on a Xiaomi phone and uses as the default dialer, then a signed release. Epics are ordered by the architecture's de-risking order: spikes first (Epic 1), core logic with tests (2), Kotlin/Rust seam (3), P0 screens (4-6), P1 (7-9), P2 (10), signature moments (11), performance pass (12), signed release (13).
 
@@ -28,10 +28,10 @@ This document decomposes the Rovsti Phone PRD (40 FRs, 13 NFRs), the UX contract
 **Conventions used in every story**
 
 - `Covers:` FR/NFR/AD/S/UX-DR ids. `Prio:` P0/P1/P2 from PRD section 6.1 (spikes and infrastructure carry the priority of what they unblock).
-- `Verify:` one or more of `CARGO` (cargo fmt/clippy/test, pure Rust), `ANDROID-CHECK` (`cargo check -p rovsti_android --target aarch64-linux-android`), `BUILD` (`gpuiforge build android` and APK inspection), `DEVICE` (owner tests on the real Xiaomi phone; there may be no emulator), `EMU` (optional emulator with `adb emu gsm call`; DEVICE is the fallback). A story whose Verify contains DEVICE is complete in code when CARGO/BUILD pass, and is accepted after the owner's device check; the dev agent must leave a short device test script in the story's completion notes.
-- Stories depend only on earlier stories. Domain logic goes to `rovsti_core` with table-driven tests (AD-14). Only `apps/phone/src/backend.rs` calls `rovsti_android` (AD-15). No `unwrap` (workspace lint). No deferred scope (dual-SIM, blocklist, conference/swap/merge, T9, speed dial, voicemail, Bluetooth picker, contact editing/creation, delete log).
-- Always-on checks before finishing any story: `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace` and `cargo check -p rovsti_android --target aarch64-linux-android`.
-- Owner decisions applied: teal accent via `rovsti_ui::theme::set_accent`; Xiaomi "Confirm" gated on opening the settings page first; unknown/private numbers in Recents are not callable; tab-bar puck drag, Recents "New call" pill and alphabet rail are out of MVP; performance is gained by code optimisation, never by cutting visual effects (AD-21); DESIGN.md "max 4 refractive surfaces" and "flat glass at rest" are advisory only.
+- `Verify:` one or more of `CARGO` (cargo fmt/clippy/test, pure Rust), `ANDROID-CHECK` (`cargo check -p rosty_android --target aarch64-linux-android`), `BUILD` (`gpuiforge build android` and APK inspection), `DEVICE` (owner tests on the real Xiaomi phone; there may be no emulator), `EMU` (optional emulator with `adb emu gsm call`; DEVICE is the fallback). A story whose Verify contains DEVICE is complete in code when CARGO/BUILD pass, and is accepted after the owner's device check; the dev agent must leave a short device test script in the story's completion notes.
+- Stories depend only on earlier stories. Domain logic goes to `rosty_core` with table-driven tests (AD-14). Only `apps/phone/src/backend.rs` calls `rosty_android` (AD-15). No `unwrap` (workspace lint). No deferred scope (dual-SIM, blocklist, conference/swap/merge, T9, speed dial, voicemail, Bluetooth picker, contact editing/creation, delete log).
+- Always-on checks before finishing any story: `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace` and `cargo check -p rosty_android --target aarch64-linux-android`.
+- Owner decisions applied: teal accent via `rosty_ui::theme::set_accent`; Xiaomi "Confirm" gated on opening the settings page first; unknown/private numbers in Recents are not callable; tab-bar puck drag, Recents "New call" pill and alphabet rail are out of MVP; performance is gained by code optimisation, never by cutting visual effects (AD-21); DESIGN.md "max 4 refractive surfaces" and "flat glass at rest" are advisory only.
 - v0.2 (Epics 14-22) supersedes the line above that lists deferred scope: those features are now in scope. The same story format, Verify tags and always-on checks apply, plus the UIQ lines, the Spike rule and the Epic release rule defined before Epic 14. Story ids with a letter (14.0a to 14.0f) are Foundation F0 part 1 and sort before 14.1.
 
 ## Requirements Inventory
@@ -76,7 +76,7 @@ FR35: Call a Favorite with one tap (default number, single number, or chooser); 
 FR36: Tab navigation with interruptible puck spring; remembers last tab (first launch Keypad).
 FR37: Theme follows the system without restart, including In-Call.
 FR38: Desktop preview of every screen; Android-only actions say "not available"; sample data.
-FR39: Debug APK built with gpuiforge, app id dev.rovsti.phone, arm64-v8a, icon from assets/app.png.
+FR39: Debug APK built with gpuiforge, app id dev.rosty.phone, arm64-v8a, icon from assets/app.png.
 FR40: APK installs via adb and launches to Keypad with the Setup Checklist; logcat GPUI shows renderer init.
 
 ### NonFunctional Requirements
@@ -87,43 +87,43 @@ NFR3: Call control latency - effect within 300 ms, state reflected within 500 ms
 NFR4: List load time - under 1 s for about 500 contacts/500 log entries; provider queries never block the UI thread.
 NFR5: Smoothness - 60 fps scrolling and springs on the owner's phone.
 NFR6: Reliability - no crash during a Call; Call survives GPUI failure and can end from the notification.
-NFR7: Platform rules - Android logic in Kotlin behind rovsti_android; all functions compile on desktop returning Error::Unsupported; GPUI/JNI thin.
-NFR8: Testability - grouping, search, number matching, Call State model in rovsti_core with unit tests; workspace checks pass.
+NFR7: Platform rules - Android logic in Kotlin behind rosty_android; all functions compile on desktop returning Error::Unsupported; GPUI/JNI thin.
+NFR8: Testability - grouping, search, number matching, Call State model in rosty_core with unit tests; workspace checks pass.
 NFR9: Device support - Android 14+ on Xiaomi (HyperOS/MIUI); Vulkan with GLES fallback.
 NFR10: Accessibility - labels via AccessKit, 44x44 targets, font scale up to 1.3x without clipping in-call controls.
 NFR11: Single-run buildability - scope sized and ordered by priority.
 NFR12: Glass fidelity - kit backdrop refraction material; kit springs.
-NFR13: Shared foundation - new Android plumbing in rovsti_android/rovsti_ui reusable by Messages and Stops.
+NFR13: Shared foundation - new Android plumbing in rosty_android/rosty_ui reusable by Messages and Stops.
 
 ### Additional Requirements
 
 Architecture (all stories must honour; binding per story in `Covers`):
 
-- AD-1 single GPUI activity is the call surface; `CallSurface.raise()` in `RovstiInCallService`; dynamic showWhenLocked/turnScreenOn only while a call exists; Back = `moveTaskToBack(true)`.
+- AD-1 single GPUI activity is the call surface; `CallSurface.raise()` in `RostyInCallService`; dynamic showWhenLocked/turnScreenOn only while a call exists; Back = `moveTaskToBack(true)`.
 - AD-2 answerability never depends on GPUI (CallStyle notifications, registry-only actions, Kotlin-resolved display name).
 - AD-3 lock-screen call-only mode with `keyguard_locked` in every snapshot (missing = locked); blank + moveTaskToBack when locked and no calls.
 - AD-4 Kotlin `CallRegistry` owns call state; snapshot-on-attach; main-Looper mutation; `answerReplacing` pending op (2 s timeout).
-- AD-5 one native method `nativeOnEvent(kind, json)`; `RovstiBridge.emit` no-op until attached; attach order: install sink, push snapshot, re-pull providers.
+- AD-5 one native method `nativeOnEvent(kind, json)`; `RostyBridge.emit` no-op until attached; attach order: install sink, push snapshot, re-pull providers.
 - AD-6 idempotent id-addressed commands returning Boolean.
 - AD-7 elapsed time from `connect_time_ms` and wall clock.
 - AD-8 native library loaded by the activity, never by `Application`.
 - AD-9 provider data pulled as JSON off the UI thread; debounced ContentObservers; Arc-swapped indexes.
-- AD-10 wire DTOs in `rovsti_core::wire` with golden fixtures shared with Kotlin JVM tests.
+- AD-10 wire DTOs in `rosty_core::wire` with golden fixtures shared with Kotlin JVM tests.
 - AD-11 dial strings stay raw; `PhoneNumber` only for matching/display.
 - AD-12 `ACTION_DIAL` normalised to `ACTION_VIEW` in `MainActivity`.
-- AD-13 per-app accent through `rovsti_ui::theme`.
+- AD-13 per-app accent through `rosty_ui::theme`.
 - AD-14 pure logic placement and test floor.
-- AD-15 only `backend.rs` calls `rovsti_android`.
+- AD-15 only `backend.rs` calls `rosty_android`.
 - AD-16 threading rules; no Tokio.
 - AD-17 failure containment (`onGpuiError`).
 - AD-18 manifest and permission contract; `INTERNET` absent; min_sdk 34, target 36.
 - AD-19 eject once into `apps/phone/platforms/android`; shared Kotlin by symlink; `scripts/fix-eject-paths.sh`.
 - AD-20 build and signing pipeline (debug APK path after eject: `apps/phone/platforms/android/app/build/outputs/apk/debug/app-debug.apk`).
 - AD-21 performance engineered in code, never by visual cuts; kit `shader_validates` and `glass_snapshot` stay green.
-- AD-22 profiling hooks (`rovsti_ui::perf`, `FrameStats`, `RovstiPerf` logcat tag, scenarios S-tab, S-scroll-recents, S-keypad, S-incall, S-incoming).
+- AD-22 profiling hooks (`rosty_ui::perf`, `FrameStats`, `RostyPerf` logcat tag, scenarios S-tab, S-scroll-recents, S-keypad, S-incall, S-incoming).
 - Reviews: CallStyle argument order is `(person, declineIntent, answerIntent)`; Decline never starts an activity; Answer is an activity PendingIntent (no broadcast trampoline); `GpuiActivity` must be edited post-eject (Back, `onGpuiError`); `nm -D` must show both `Java_*` symbols; the InCallService needs the `android.telecom.InCallService` intent filter and no `IN_CALL_SERVICE_CAR_MODE_UI`; `canUseFullScreenIntent()` false falls back to heads-up.
 - Toolchain: `scripts/setup-android.sh` must succeed (NDK 29, GPUiForge, adb on PATH) before any BUILD verification.
-- Logging: `log` crate, Kotlin tag `Rovsti`, never log numbers/names above debug.
+- Logging: `log` crate, Kotlin tag `Rosty`, never log numbers/names above debug.
 
 ### UX Design Requirements
 
@@ -137,7 +137,7 @@ UX-DR7: Contact row, sticky section headers (28 px), "#" bucket, sticky glass se
 UX-DR8: Sheet component - medium/large detents, grabber, fling projection and rubber band, Back dismisses, never a sheet over a sheet.
 UX-DR9: Contact Sheet, Number sheet and Number chooser layouts and copy.
 UX-DR10: Favorites tile grid (2 columns, 3 at 440 dp+, height 132), monogram then photo fade-in.
-UX-DR11: Setup Checklist card, items table (9 items), progress "{done} of {total} done", unverifiable "Needs your confirmation. Rovsti can't check this setting.", header "Something changed: {item}", Settings-path help for hidden role dialog, "Setup complete" collapsed row.
+UX-DR11: Setup Checklist card, items table (9 items), progress "{done} of {total} done", unverifiable "Needs your confirmation. Rosty can't check this setting.", header "Something changed: {item}", Settings-path help for hidden role dialog, "Setup complete" collapsed row.
 UX-DR12: Empty, permission-denied, permanently-denied, loading skeleton (shown only after 150 ms) states with exact copy.
 UX-DR13: Preview banner with "Fix" scrolling to the checklist; precedence Setup Checklist > preview banner > Return-to-call pill.
 UX-DR14: In-Call Screen layout (96 px avatar, name, status, 3x2 control grid with Hold centred row 2, End 220x64), reported-state toggles with 120 ms pending look and 1 s revert, disabled Hold dim, "Call ended" 1 s / "Call failed" 2 s with reason.
@@ -200,7 +200,7 @@ NFR18: Performance of new surfaces - route changes, conference updates and T9 re
 ### v0.2 Architecture Requirements (ARCHITECTURE-SPINE.md, amended 2026-10-28)
 
 - AD-23 audio endpoints are an id-addressed list on the wire (`audio.endpoints[{id,type,name?,selected,hint?}]`, `route`/`routes` derived, `callRouteEndpoint(id)`, legacy `CallAudioState` fallback, ghost entries, hearing-aid hint best effort); AD-23 also defines the single coalesced `scheduleRebuild()` (12 ms) used by four callbacks only.
-- AD-24 multi-call model: Kotlin `Focus.of` selects foreground/background/waiting/ended, Rust renders `CallScene` (`Single|Two|Conference` + `waiting` + `ended`) with a closed `DisabledReason`; `caps`/`props` bitmasks (constants in `rovsti_core::wire` and `WireJson.kt`); lock-screen rule for Add call (`requestDismissKeyguard`).
+- AD-24 multi-call model: Kotlin `Focus.of` selects foreground/background/waiting/ended, Rust renders `CallScene` (`Single|Two|Conference` + `waiting` + `ended`) with a closed `DisabledReason`; `caps`/`props` bitmasks (constants in `rosty_core::wire` and `WireJson.kt`); lock-screen rule for Add call (`requestDismissKeyguard`).
 - AD-25 one `PendingOp` machine (`AnswerReplacing`, `Swap`, `Merge`) with per-op deadlines, `pending`/`pending_failed` on the wire, `swap()`, `merge()`, `split(child)`, `answerHolding(id)`, `endAll()`.
 - AD-26 dual SIM: `account_key` equals the call log's component+id pair, `phone_accounts()`, `place_call(raw, account_key?)`, `SimInfo::visible()` (two or more), registry safety net for `STATE_SELECT_PHONE_ACCOUNT` (`uiAttached`).
 - AD-27 blocking: system blocklist is the only store (`Blocklist.kt`, `BlockSet`, `blocked_changed`, `BLOCK_GUARD` default true until S6, emergency numbers never blockable, Recents pull excludes type 6, `pullBlockedCalls`).
@@ -210,7 +210,7 @@ NFR18: Performance of new surfaces - route changes, conference updates and T9 re
 - AD-31 provider writes: the closed list (`markMissedCallsRead`, `setStarred`, `Blocklist.block/unblock`, `CallLogWrite.delete/deleteAll/restore`, `ContactsWrite.delete/setRingtone`) with the `{v,ok,error?,data?}` envelope; `pullCallHistory`; intents for create/add contact, Message, Copy, Share.
 - AD-32 names (`names::display`, `names::sort_key`), Favorites order by `lookup_key`, `call_log::frequent`.
 - AD-33 keypad intelligence: prebuilt T9 index with `T9Scratch`, speed dial stores number plus lookup key, voicemail via `voicemail_info`, `VoicemailReceiver` disabled by default, `dial::is_emergency` with `emergency_numbers()`.
-- AD-34 manifest/permission additions: `VIBRATE`, `<queries>` block, disabled `VoicemailReceiver`; `WRITE_CALL_LOG`/`WRITE_CONTACTS` requested at first use; `SEND_SMS`, `MODIFY_PHONE_STATE`, `INTERNET` absent (`check-apk.sh` fails on `INTERNET` or `SEND_SMS`); every new `rovsti_android` function returns `Error::Unsupported` on desktop with a test per module.
+- AD-34 manifest/permission additions: `VIBRATE`, `<queries>` block, disabled `VoicemailReceiver`; `WRITE_CALL_LOG`/`WRITE_CONTACTS` requested at first use; `SEND_SMS`, `MODIFY_PHONE_STATE`, `INTERNET` absent (`check-apk.sh` fails on `INTERNET` or `SEND_SMS`); every new `rosty_android` function returns `Error::Unsupported` on desktop with a test per module.
 - AD-35 performance of v0.2 surfaces: fixed-slot constants in `incall.rs`, `SceneDiff` driven `cx.notify()`, virtualised fixed-row lists, no per-frame allocation, perf scenarios S-route, S-twocall, S-reply, S-t9, S-details, no adaptive degradation.
 - AD-36 spikes, Diagnostics page and fallback constants (`Caps.REJECT_PATH`, `BLOCK_GUARD`, `VOICEMAIL_RECEIVER`, `LEGACY_AUDIO_FORCED`); every spike ships its safe default and is confirmed from the owner's pasted report in a follow-up commit.
 - Amended: AD-2 (third notification action "Message"), AD-3 (v0.2 surfaces under call-only mode, listener not used), AD-4 (snapshot fields), AD-6 (new commands), AD-9 (write list, Recents excludes blocked), AD-10 (additive changes keep `v: 1`), AD-11 (`place_call(raw, account_key?)`), AD-18 (`VIBRATE`, queries, receiver).
@@ -277,7 +277,7 @@ Coverage check: all 40 FRs mapped; no uncovered FR. Flagged gaps are listed at t
 
 v0.2 additions (FR41-FR73; stories are listed in build order, which is numeric order):
 
-FR41: Epic 14 (14.0a, 14.0b, 14.0d, 14.1, 14.2, 14.6, 14.7); decision logic in `rovsti_core::audio` (14.0d)
+FR41: Epic 14 (14.0a, 14.0b, 14.0d, 14.1, 14.2, 14.6, 14.7); decision logic in `rosty_core::audio` (14.0d)
 FR42: Epic 14 (14.0d, 14.5, 14.6)
 FR43: Epic 14 (14.4 intents, 14.7 names row, 14.8 shortcuts and hearing-aid hint); Settings HAC value 16.10
 FR44: Epic 15 (15.1, 15.4, 15.5)
@@ -322,7 +322,7 @@ v0.2 coverage check: all 33 new FRs (FR41-FR73) are mapped; all 5 new NFRs mappe
 ## Epic List
 
 ### Epic 1: Installable Hello APK and Android De-risking Spikes
-The owner can build, sideload and launch a role-eligible Rovsti Phone APK on the Xiaomi phone, and the two architectural risks (JNI export/manifest, incoming-call surface over the lock screen) are proven or their contingency chosen.
+The owner can build, sideload and launch a role-eligible Rosty Phone APK on the Xiaomi phone, and the two architectural risks (JNI export/manifest, incoming-call surface over the lock screen) are proven or their contingency chosen.
 **FRs covered:** FR1, FR39, FR40 (NFR1, NFR2, NFR9; AD-1, AD-8, AD-18, AD-19, AD-20; spikes S1, S2)
 
 ### Epic 2: Domain Core with Tests
@@ -374,7 +374,7 @@ A signed release APK is produced without leaking secrets, all workspace checks p
 **FRs covered:** FR39 (NFR8; AD-20; SM-1..SM-4)
 
 ### Epic 14: Audio routes and devices (with Foundation F0)
-The owner can see every audio route Android offers during a call, switch to exactly one by identifier, and watch the list follow devices live; Foundation F0 delivers the wire field table, snapshot schema v0.2 with golden fixtures, the Diagnostics page, Prefs v2 migration, the new `rovsti_core` modules and the manifest additions.
+The owner can see every audio route Android offers during a call, switch to exactly one by identifier, and watch the list follow devices live; Foundation F0 delivers the wire field table, snapshot schema v0.2 with golden fixtures, the Diagnostics page, Prefs v2 migration, the new `rosty_core` modules and the manifest additions.
 **FRs covered:** FR41, FR42, FR43 (NFR14, NFR15, NFR16, NFR17, NFR18; AD-23, AD-34, AD-35, AD-36 plus F0 groundwork for AD-24 to AD-33; spike S3; moments S17, S18, S28)
 
 ### Epic 15: Multi-call and conference
@@ -413,7 +413,7 @@ Perf scenarios and code optimisation for the new surfaces, accessibility and red
 
 ## Epic 1: Installable Hello APK and Android De-risking Spikes
 
-Prove the toolchain, the ejected host, the JNI seam and the lock-screen incoming path before building features. Kotlin written in spikes 1.6 to 1.8 is the starting code for `CallRegistry`/`RovstiInCallService`, not throwaway.
+Prove the toolchain, the ejected host, the JNI seam and the lock-screen incoming path before building features. Kotlin written in spikes 1.6 to 1.8 is the starting code for `CallRegistry`/`RostyInCallService`, not throwaway.
 
 ### Story 1.1: Android toolchain ready
 
@@ -450,7 +450,7 @@ Covers: FR1, FR39, NFR1, AD-18, AD-19, AD-20, S1. Prio: P0. Verify: BUILD.
 
 **Given** `apps/phone/gpuiforge.json`
 **When** `gpuiforge platform eject android` is run once and committed
-**Then** `apps/phone/platforms/android` exists with the shared Kotlin symlink `app/src/main/kotlin/dev/rovsti/bridge` pointing at `crates/rovsti_android/kotlin/dev/rovsti/bridge`
+**Then** `apps/phone/platforms/android` exists with the shared Kotlin symlink `app/src/main/kotlin/dev/rosty/bridge` pointing at `crates/rosty_android/kotlin/dev/rosty/bridge`
 **And** `scripts/fix-eject-paths.sh` re-writes the baked absolute paths in `app/build.gradle.kts`.
 
 **Given** the permission list in `gpuiforge.json`
@@ -460,13 +460,13 @@ Covers: FR1, FR39, NFR1, AD-18, AD-19, AD-20, S1. Prio: P0. Verify: BUILD.
 
 **Given** the built APK
 **When** `aapt2 dump badging` and `aapt2 dump permissions` run
-**Then** package is `dev.rovsti.phone`, `arm64-v8a` is present, and `INTERNET` is absent (if the generated host adds it, it is removed in the ejected manifest).
+**Then** package is `dev.rosty.phone`, `arm64-v8a` is present, and `INTERNET` is absent (if the generated host adds it, it is removed in the ejected manifest).
 
 ### Story 1.3: Manifest components for role eligibility
 
 As the owner,
 I want the manifest to declare the components Android needs for the default phone role,
-So that the system picker lists Rovsti Phone.
+So that the system picker lists Rosty Phone.
 
 Covers: FR1, AD-12 (filters), AD-18, review notes. Prio: P0. Verify: BUILD.
 
@@ -474,10 +474,10 @@ Covers: FR1, AD-12 (filters), AD-18, review notes. Prio: P0. Verify: BUILD.
 
 **Given** the ejected `AndroidManifest.xml`
 **When** edited
-**Then** it holds `RovstiInCallService` (exported, `BIND_INCALL_SERVICE`, meta-data `android.telecom.IN_CALL_SERVICE_UI=true`, `foregroundServiceType="phoneCall"`, the `android.telecom.InCallService` intent filter, and no `IN_CALL_SERVICE_RINGING` or `IN_CALL_SERVICE_CAR_MODE_UI`)
-**And** `MainActivity` (singleTop, MAIN/LAUNCHER, `ACTION_DIAL` with and without `tel:` data, `VIEW` `tel` BROWSABLE), a non-exported `CallActionReceiver`, and `android:name=".RovstiPhoneApp"`.
+**Then** it holds `RostyInCallService` (exported, `BIND_INCALL_SERVICE`, meta-data `android.telecom.IN_CALL_SERVICE_UI=true`, `foregroundServiceType="phoneCall"`, the `android.telecom.InCallService` intent filter, and no `IN_CALL_SERVICE_RINGING` or `IN_CALL_SERVICE_CAR_MODE_UI`)
+**And** `MainActivity` (singleTop, MAIN/LAUNCHER, `ACTION_DIAL` with and without `tel:` data, `VIEW` `tel` BROWSABLE), a non-exported `CallActionReceiver`, and `android:name=".RostyPhoneApp"`.
 
-**Given** stub Kotlin classes `RovstiPhoneApp`, `MainActivity` (extends `GpuiActivity`), `RovstiInCallService` (empty callbacks), `CallActionReceiver`
+**Given** stub Kotlin classes `RostyPhoneApp`, `MainActivity` (extends `GpuiActivity`), `RostyInCallService` (empty callbacks), `CallActionReceiver`
 **When** the APK is built
 **Then** the merged manifest passes `aapt2 dump xmltree` inspection for each filter above and the build has no lint-blocking errors.
 
@@ -488,7 +488,7 @@ Covers: FR1, AD-12 (filters), AD-18, review notes. Prio: P0. Verify: BUILD.
 ### Story 1.4: Install, launch and verify the role picker (spike S1 on device)
 
 As the owner,
-I want to install the hello APK and see Rovsti Phone in the default phone app picker,
+I want to install the hello APK and see Rosty Phone in the default phone app picker,
 So that I know the foundation works on my phone.
 
 Covers: FR1, FR40, NFR9, S1. Prio: P0. Verify: DEVICE.
@@ -502,7 +502,7 @@ Covers: FR1, FR40, NFR9, S1. Prio: P0. Verify: DEVICE.
 
 **Given** Settings, Default apps, Phone app
 **When** the owner opens the picker
-**Then** "Rovsti Phone" is listed and selectable, or the failure is recorded with the manifest dump for fixing in 1.3.
+**Then** "Rosty Phone" is listed and selectable, or the failure is recorded with the manifest dump for fixing in 1.3.
 
 **Given** the app is not yet default
 **When** it launches
@@ -518,11 +518,11 @@ Covers: NFR1, AD-5, AD-8, AD-18, S1. Prio: P0. Verify: BUILD, ANDROID-CHECK.
 
 **Acceptance Criteria:**
 
-**Given** `RovstiBridge.kt`
-**When** a `nativeOnEvent(kind: String, json: String)` stub (logs only) is added next to `nativeInit`, `RovstiBridge.install(app)` no longer calls `System.loadLibrary`, and `attachNative()` is called from `MainActivity.onCreate` after `super.onCreate`
-**Then** `cargo check -p rovsti_android --target aarch64-linux-android` passes and the Rust `Java_dev_rovsti_bridge_RovstiBridge_nativeInit` and `..._nativeOnEvent` are `#[no_mangle] extern "system"`.
+**Given** `RostyBridge.kt`
+**When** a `nativeOnEvent(kind: String, json: String)` stub (logs only) is added next to `nativeInit`, `RostyBridge.install(app)` no longer calls `System.loadLibrary`, and `attachNative()` is called from `MainActivity.onCreate` after `super.onCreate`
+**Then** `cargo check -p rosty_android --target aarch64-linux-android` passes and the Rust `Java_dev_rosty_bridge_RostyBridge_nativeInit` and `..._nativeOnEvent` are `#[no_mangle] extern "system"`.
 
-**Given** the built `librovsti_phone.so`
+**Given** the built `librosty_phone.so`
 **When** `scripts/check-apk.sh` runs `nm -D` on it
 **Then** both `Java_*` symbols are listed; if missing, the script fails with the S1 remedy (force a reference from `backend.rs` or `RegisterNatives`) and the dev applies it.
 
@@ -540,14 +540,14 @@ Covers: FR1, NFR6, AD-1, AD-4 (minimal), AD-18, S2. Prio: P0. Verify: DEVICE (EM
 
 **Acceptance Criteria:**
 
-**Given** Rovsti Phone is the default phone app (owner sets it via the picker proven in 1.4)
+**Given** Rosty Phone is the default phone app (owner sets it via the picker proven in 1.4)
 **When** a call arrives or is placed
-**Then** `RovstiInCallService.onCallAdded` fires, a minimal `CallRegistry` (main-Looper only, stable `call_id`) logs add/state/remove with tag `Rovsti`, and `startForeground(ONGOING_ID, n, FOREGROUND_SERVICE_TYPE_PHONE_CALL)` succeeds with no `ForegroundServiceStartNotAllowedException`
+**Then** `RostyInCallService.onCallAdded` fires, a minimal `CallRegistry` (main-Looper only, stable `call_id`) logs add/state/remove with tag `Rosty`, and `startForeground(ONGOING_ID, n, FOREGROUND_SERVICE_TYPE_PHONE_CALL)` succeeds with no `ForegroundServiceStartNotAllowedException`
 **And** the foreground service stops when the last call is removed.
 
 **Given** the app process is cold (not running)
 **When** a call arrives
-**Then** the service starts without loading the native library (AD-8) and `RovstiBridge.emit` is a no-op without throwing.
+**Then** the service starts without loading the native library (AD-8) and `RostyBridge.emit` is a no-op without throwing.
 
 **Given** the spike results
 **When** done
@@ -603,7 +603,7 @@ Covers: FR22, AD-3, NFR2, review items 6(d)(e), 9. Prio: P0. Verify: DEVICE.
 
 ## Epic 2: Domain Core with Tests
 
-All logic below lives in `crates/rovsti_core` (depends on serde and thiserror only), is table-driven, and runs with `cargo test -p rovsti_core`. Verify for every story in this epic: CARGO.
+All logic below lives in `crates/rosty_core` (depends on serde and thiserror only), is table-driven, and runs with `cargo test -p rosty_core`. Verify for every story in this epic: CARGO.
 
 ### Story 2.1: Wire DTOs with golden fixtures
 
@@ -615,11 +615,11 @@ Covers: AD-10, AD-4 (snapshot fields), NFR8. Prio: P0. Verify: CARGO.
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_core::wire`
+**Given** `rosty_core::wire`
 **When** `CallSnapshot { v, seq, now_ms, keyguard_locked, audio{muted,route,routes[]}, foreground_call_id, waiting_call_id, calls[]{id,state,number_raw,normalized,display_name?,contact_id?,connect_time_ms,can_hold,is_incoming,disconnect_cause?} }`, `CallLogPayload`, `ContactsPayload`, `FavoritesPayload` and the `{v, ok, error?, data?}` envelope are defined
 **Then** each has snake_case serde, ignores unknown fields, and every enum has a `#[serde(other)] Unknown` variant that still renders.
 
-**Given** golden fixtures in `crates/rovsti_core/tests/fixtures/*.json`
+**Given** golden fixtures in `crates/rosty_core/tests/fixtures/*.json`
 **When** deserialised and re-serialised in tests
 **Then** they round-trip, an unknown state does not drop the snapshot, `connect_time_ms == 0` means not connected, and `ok:false,error:"permission"` maps to a permission error value.
 
@@ -637,7 +637,7 @@ Covers: FR13, FR14, FR15, FR17, AD-4, AD-14. Prio: P0. Verify: CARGO.
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_core::call::{CallModel, CallState, AudioRoute}` (`Dialing | Ringing | Active | Holding | Disconnected{cause} | Unknown`)
+**Given** `rosty_core::call::{CallModel, CallState, AudioRoute}` (`Dialing | Ringing | Active | Holding | Disconnected{cause} | Unknown`)
 **When** `apply(snapshot)` is called with a snapshot whose `seq` is lower than the held one
 **Then** it is ignored; an equal or higher `seq` replaces the state.
 
@@ -797,7 +797,7 @@ Covers: AD-22, NFR5. Prio: P0 (infra). Verify: CARGO.
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_core::perf::FrameStats` (fixed-size ring, no heap use after construction)
+**Given** `rosty_core::perf::FrameStats` (fixed-size ring, no heap use after construction)
 **When** 10,000 samples are pushed
 **Then** p50/p95/p99/max and `over_budget(budget_ms)` / `over_double_budget` counts are correct for a known distribution and no panics occur at wrap-around.
 
@@ -809,9 +809,9 @@ Covers: AD-22, NFR5. Prio: P0 (infra). Verify: CARGO.
 
 ## Epic 3: Kotlin/Rust Seam and Backend
 
-Generic, app-agnostic plumbing in `rovsti_android` (reusable by Messages and Stops). Every Rust function compiles on desktop and returns `Error::Unsupported` there.
+Generic, app-agnostic plumbing in `rosty_android` (reusable by Messages and Stops). Every Rust function compiles on desktop and returns `Error::Unsupported` there.
 
-### Story 3.1: Event channel and `RovstiBridge.emit`
+### Story 3.1: Event channel and `RostyBridge.emit`
 
 As a developer,
 I want one Kotlin-to-Rust event path,
@@ -821,11 +821,11 @@ Covers: AD-5, AD-8, AD-16, NFR7, NFR13. Prio: P0. Verify: CARGO, ANDROID-CHECK, 
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_android::events` with `install_sink() -> Receiver<RawEvent>` and the JNI `nativeOnEvent(kind, json)`
+**Given** `rosty_android::events` with `install_sink() -> Receiver<RawEvent>` and the JNI `nativeOnEvent(kind, json)`
 **When** an event arrives with no sink
 **Then** it is dropped without panic; with a sink it is enqueued only (no GPUI types touched); installing a new sink replaces the old one and `clear_sink()` sets `None`.
 
-**Given** Kotlin `RovstiBridge.emit(kind, json)`
+**Given** Kotlin `RostyBridge.emit(kind, json)`
 **When** called before `attachNative()` or when `nativeOnEvent` throws `LinkageError`
 **Then** it returns silently (volatile flag, try/catch), and `CallRegistry` calls only `emit`, never `nativeOnEvent`.
 
@@ -843,7 +843,7 @@ Covers: FR14-FR18, FR20, FR24, NFR3, AD-4, AD-6, AD-7. Prio: P0. Verify: ANDROID
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_android::calls` with `snapshot() -> String` and `answer, reject, disconnect, hold(on), mute(on), route(name), dtmf(char)`
+**Given** `rosty_android::calls` with `snapshot() -> String` and `answer, reject, disconnect, hold(on), mute(on), route(name), dtmf(char)`
 **When** called with an unknown or stale `call_id`
 **Then** they return `Ok(false)` and do nothing; on desktop they return `Error::Unsupported`.
 
@@ -860,20 +860,20 @@ Covers: FR14-FR18, FR20, FR24, NFR3, AD-4, AD-6, AD-7. Prio: P0. Verify: ANDROID
 ### Story 3.3: Permissions and settings bridge
 
 As a developer,
-I want permission and settings calls behind `rovsti_android`,
+I want permission and settings calls behind `rosty_android`,
 So that Setup and list screens can check and request access.
 
 Covers: FR5, FR6, FR26 (empty state), NFR7, NFR13, AD-5. Prio: P0. Verify: ANDROID-CHECK, CARGO, DEVICE.
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_android::permissions::{has(group), request(group), open_app_details(), open_default_apps(), can_use_full_screen_intent(), open_full_screen_intent_settings()}`
+**Given** `rosty_android::permissions::{has(group), request(group), open_app_details(), open_default_apps(), can_use_full_screen_intent(), open_full_screen_intent_settings()}`
 **When** called on Android
 **Then** groups map to `PHONE (CALL_PHONE, READ_PHONE_STATE, READ_CALL_LOG, WRITE_CALL_LOG)`, `CONTACTS (READ_CONTACTS, WRITE_CONTACTS)`, `NOTIFICATIONS` and results return as Boolean; permanently denied is reported distinctly.
 
 **Given** `MainActivity.onResume`
 **When** it runs
-**Then** it emits `permissions_changed` (the only emitter) via `RovstiBridge.emit`.
+**Then** it emits `permissions_changed` (the only emitter) via `RostyBridge.emit`.
 
 **Given** a desktop build
 **When** any function is called
@@ -890,7 +890,7 @@ Covers: FR26, FR30, FR34, NFR4, AD-9, AD-10. Prio: P0 (call log), P1 (contacts, 
 **Acceptance Criteria:**
 
 **Given** Kotlin `CallLogQuery` (limit 500, `DATE DESC`) and `ContactsQuery` (`HAS_PHONE_NUMBER`, `CommonDataKinds.Phone`, `STARRED`, `LOOKUP`, super-primary flag, label) plus `lookup(number)`
-**When** `rovsti_android::providers::{call_log(limit), contacts(), favorites()}` run on `cx.background_executor()`
+**When** `rosty_android::providers::{call_log(limit), contacts(), favorites()}` run on `cx.background_executor()`
 **Then** each returns one JSON envelope `{v, ok, data|error}` and a `SecurityException` returns `ok:false,error:"permission"`, never an exception.
 
 **Given** the `ContentObserver`s for `CallLog.Calls` and `ContactsContract`
@@ -919,9 +919,9 @@ Covers: FR38 (base), AD-5 (attach order), AD-15, AD-16, NFR7. Prio: P0. Verify: 
 **When** attaching
 **Then** the order is (1) install the new sink, (2) push `calls::snapshot()` through the same channel, (3) pull permissions and providers; the sink is cleared when the session closes; events drain in a `cx.spawn` task on the main thread.
 
-**Given** `cargo run -p rovsti_phone` on desktop
+**Given** `cargo run -p rosty_phone` on desktop
 **When** any Android-only action is triggered
-**Then** the UI shows "Not available on this platform" and does not panic; `rg "rovsti_android" apps/phone/src` matches only `backend.rs`.
+**Then** the UI shows "Not available on this platform" and does not panic; `rg "rosty_android" apps/phone/src` matches only `backend.rs`.
 
 ### Story 3.6: Local preferences store
 
@@ -933,7 +933,7 @@ Covers: FR8, FR36, FR27, NFR1, AD (State convention), NFR13. Prio: P1. Verify: C
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_ui::storage` with `Prefs { last_tab, missed_seen_ms, xiaomi_confirmed{item: version}, app_version }`
+**Given** `rosty_ui::storage` with `Prefs { last_tab, missed_seen_ms, xiaomi_confirmed{item: version}, app_version }`
 **When** saved and loaded through a temp dir in tests
 **Then** it round-trips, a corrupt or missing file yields defaults, and writes are atomic (temp file + rename) and written by Rust only.
 
@@ -955,13 +955,13 @@ Covers: FR37, UX-DR1, AD-13, NFR13. Prio: P0 (theme base). Verify: CARGO, DEVICE
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_ui::theme::{AccentPair, set_accent, colors}`
+**Given** `rosty_ui::theme::{AccentPair, set_accent, colors}`
 **When** `set_accent` is called in Phone's `main()` with light `#08806E`, dark `#2DD4B4`, glow `#14C8A8`
 **Then** `colors(theme).accent` returns the pair, all other colors equal `Theme::colors()`, and `liquid_glass_kit` is unmodified.
 
 **Given** phone code
 **When** built
-**Then** `apps/phone` and `rovsti_ui` call only `rovsti_ui::theme::colors`; the workspace `disallowed-methods` ban is enabled for `rovsti_ui` and `apps/phone` (workspace-wide ban for Messages/Stops is a flagged follow-up).
+**Then** `apps/phone` and `rosty_ui` call only `rosty_ui::theme::colors`; the workspace `disallowed-methods` ban is enabled for `rosty_ui` and `apps/phone` (workspace-wide ban for Messages/Stops is a flagged follow-up).
 
 **Given** the system theme changes while the app is open (`FOLLOW_SYSTEM_THEME`)
 **When** it flips
@@ -1007,7 +1007,7 @@ Covers: FR10, FR11, AD-11, UX-DR3 (debounce). Prio: P0. Verify: ANDROID-CHECK, C
 
 **Given** `CALL_PHONE` is missing
 **When** a call is requested
-**Then** the permission is requested and the call is placed after it is granted; if denied, the status line reads "Allow Phone access so Rovsti Phone can place calls." with "Grant access" and no call is placed.
+**Then** the permission is requested and the call is placed after it is granted; if denied, the status line reads "Allow Phone access so Rosty Phone can place calls." with "Grant access" and no call is placed.
 
 **Given** the registry sees `STATE_SELECT_PHONE_ACCOUNT`
 **When** the call is added
@@ -1034,7 +1034,7 @@ Covers: FR3, AD-12. Prio: P0. Verify: CARGO (parser), DEVICE.
 **Then** the Keypad opens empty.
 
 **Given** `tel:` URIs with `%23`, `*`, `,` or spaces
-**When** parsed by a pure helper in `rovsti_core::dial`
+**When** parsed by a pure helper in `rosty_core::dial`
 **Then** the field gets the decoded dial string; `adb shell am start -a android.intent.action.DIAL -d tel:...` is the documented DEVICE test.
 
 ### Story 4.5: In-Call Screen rendering
@@ -1163,7 +1163,7 @@ Covers: NFR6, AD-17, AD-1 (Back). Prio: P0. Verify: BUILD, DEVICE.
 **When** edited
 **Then** `onCreate` routes `GpuiSession.setOnError` to an overridable `onGpuiError(error)` which `MainActivity` implements by keeping the call notification and showing a native message only; `CallRegistry` has no GPUI dependency.
 
-**Given** a debug-only broadcast `dev.rovsti.phone.DEBUG_KILL_GPUI`
+**Given** a debug-only broadcast `dev.rosty.phone.DEBUG_KILL_GPUI`
 **When** sent during a call
 **Then** the call continues and can be ended from the notification; the owner records the result.
 
@@ -1297,7 +1297,7 @@ Covers: NFR2, AD-1, SM-C1, UX-DR16 fallback. Prio: P0. Verify: DEVICE.
 
 **Acceptance Criteria:**
 
-**Given** logging at `onCallAdded` and first GPUI frame (tag `RovstiPerf`)
+**Given** logging at `onCallAdded` and first GPUI frame (tag `RostyPerf`)
 **When** 5 warm and 5 cold incoming calls are made, locked and unlocked
 **Then** min/median/max are tabulated in `docs/spikes/s2-incoming.md` against 1.5 s / 3 s.
 
@@ -1429,7 +1429,7 @@ Covers: FR5, UX-DR11, UX-DR13, UX-DR20, NFR13. Prio: P1. Verify: CARGO, DEVICE.
 
 **Acceptance Criteria:**
 
-**Given** `setup::derive` (2.8) and `rovsti_android::xiaomi::detect`
+**Given** `setup::derive` (2.8) and `rosty_android::xiaomi::detect`
 **When** the card renders at the top of each tab (scrolls with the page, not pinned)
 **Then** it lists items in FR-5 order with state icon (open circle / check / "needs confirmation"), title, one-line reason (UX copy), progress "{done} of {total} done", and Xiaomi items only on Xiaomi.
 
@@ -1465,7 +1465,7 @@ Covers: FR6, UX-DR11. Prio: P1. Verify: ANDROID-CHECK, DEVICE.
 
 As the owner,
 I want one tap to become the default phone app,
-So that Rovsti Phone handles every call.
+So that Rosty Phone handles every call.
 
 Covers: FR1, FR2, UX-DR11. Prio: P1. Verify: DEVICE.
 
@@ -1477,7 +1477,7 @@ Covers: FR1, FR2, UX-DR11. Prio: P1. Verify: DEVICE.
 
 **Given** the request returns false or the dialog does not appear
 **When** the result is handled
-**Then** the item expands with "Your phone didn't show the dialog. Open Settings, Apps, Manage apps, Default apps, Phone, then choose Rovsti Phone." and an "Open default apps" button (`ACTION_MANAGE_DEFAULT_APPS_SETTINGS`).
+**Then** the item expands with "Your phone didn't show the dialog. Open Settings, Apps, Manage apps, Default apps, Phone, then choose Rosty Phone." and an "Open default apps" button (`ACTION_MANAGE_DEFAULT_APPS_SETTINGS`).
 
 **Given** the role is held
 **When** the item renders
@@ -1525,7 +1525,7 @@ Covers: FR8, UX-Q3 (gated Confirm), UX-DR11. Prio: P1. Verify: CARGO, DEVICE.
 
 **Given** the unverifiable item
 **When** read by TalkBack
-**Then** it says "needs confirmation" and the visual copy is "Needs your confirmation. Rovsti can't check this setting."
+**Then** it says "needs confirmation" and the visual copy is "Needs your confirmation. Rosty can't check this setting."
 
 ### Story 7.6: Preview mode
 
@@ -1605,7 +1605,7 @@ Covers: UX-DR8, NFR12, AD-21. Prio: P1. Verify: CARGO, DEVICE.
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_ui::sheet`
+**Given** `rosty_ui::sheet`
 **When** opened
 **Then** it rises to a medium detent (about 55%) with a 36x5 grabber and 38 radius, drags to large (about 92%) using the kit's `gesture::project` and `rubber_band`, dismisses by drag-down, dim-tap or Back, and is never nested.
 
@@ -1873,11 +1873,11 @@ As a developer,
 I want every screen previewable on desktop,
 So that I can iterate on UI without a phone.
 
-Covers: FR38, UX-DR22. Prio: P2. Verify: CARGO (cargo run -p rovsti_phone).
+Covers: FR38, UX-DR22. Prio: P2. Verify: CARGO (cargo run -p rosty_phone).
 
 **Acceptance Criteria:**
 
-**Given** `cargo run -p rovsti_phone` on Linux
+**Given** `cargo run -p rosty_phone` on Linux
 **When** Recents, Contacts, Favorites, Incoming and In-Call (with mute/hold/waiting variants) are opened via a debug switcher
 **Then** each shows sample data with the caption "Preview data" in tertiary-label under the title; the debug switcher is compiled only for desktop.
 
@@ -1933,7 +1933,7 @@ Covers: UX-DR21, UX-DR24, AD-21. Prio: P2. Verify: CARGO.
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_ui::moments`
+**Given** `rosty_ui::moments`
 **When** built
 **Then** it provides `ReducedMotion` detection (system animation scale 0 / `prefers_reduced_motion`), a `RippleRing` (RELEASE_RING bezier [0,0,0.2,1]), a collision scheduler (max two concurrent, later waits 120 ms, S3/S8 exempt), and spring-token wrappers using fixed-size arrays (no per-frame allocation).
 
@@ -2135,7 +2135,7 @@ Covers: UX-DR21, UX-DR25 (P-8 reinterpreted), AD-21. Prio: P2. Verify: CARGO, DE
 
 **Given** two consecutive frames exceed 2x budget
 **When** detected
-**Then** a `RovstiPerf` warning is logged with the scenario name; no visual effect, glass or aura is degraded or removed (AD-21 overrides UX P-8); only the S15 theme snap rule above applies.
+**Then** a `RostyPerf` warning is logged with the scenario name; no visual effect, glass or aura is degraded or removed (AD-21 overrides UX P-8); only the S15 theme snap rule above applies.
 
 ---
 
@@ -2143,7 +2143,7 @@ Covers: UX-DR21, UX-DR25 (P-8 reinterpreted), AD-21. Prio: P2. Verify: CARGO, DE
 
 Performance is achieved by optimising code, not by cutting effects (AD-21). Order of measures: idle discipline, allocation discipline, virtualised lists, glass pass cost, kit tests green.
 
-### Story 12.1: Perf feature and RovstiPerf logging
+### Story 12.1: Perf feature and RostyPerf logging
 
 As the owner,
 I want frame timing recorded on the phone,
@@ -2153,13 +2153,13 @@ Covers: AD-22, NFR5. Prio: P0 (tooling). Verify: CARGO, ANDROID-CHECK, DEVICE.
 
 **Acceptance Criteria:**
 
-**Given** Cargo feature `perf` on `rovsti_phone` (off in release)
+**Given** Cargo feature `perf` on `rosty_phone` (off in release)
 **When** enabled in debug/perf builds
-**Then** `rovsti_ui::perf` calls `Window::set_frame_diagnostics_enabled(true)` and pushes `build_time`, `platform_draw_time` and `view_cache` into `FrameStats` each frame with no allocation.
+**Then** `rosty_ui::perf` calls `Window::set_frame_diagnostics_enabled(true)` and pushes `build_time`, `platform_draw_time` and `view_cache` into `FrameStats` each frame with no allocation.
 
 **Given** leaving a scenario
 **When** the report is emitted
-**Then** logcat tag `RovstiPerf` prints p50/p95/p99/max, over-budget and over-2x counts, refresh rate and thermal state (`App::on_thermal_state_change`), with no names or numbers logged.
+**Then** logcat tag `RostyPerf` prints p50/p95/p99/max, over-budget and over-2x counts, refresh rate and thermal state (`App::on_thermal_state_change`), with no names or numbers logged.
 
 ### Story 12.2: Scripted perf scenarios
 
@@ -2173,7 +2173,7 @@ Covers: AD-22, UX-DR25. Prio: P0 (tooling). Verify: DEVICE.
 
 **Given** a debug-only scenario runner
 **When** S-tab (20 ping-pongs), S-scroll-recents (500 rows down/up), S-keypad (6 keys/s), S-incall (controls + timer) and S-incoming (entrance + rings) run
-**Then** each logs one `RovstiPerf` report and `adb shell dumpsys SurfaceFlinger --latency` on the `GpuiView` layer is captured by a documented script `scripts/perf-run.sh`.
+**Then** each logs one `RostyPerf` report and `adb shell dumpsys SurfaceFlinger --latency` on the `GpuiView` layer is captured by a documented script `scripts/perf-run.sh`.
 
 **Given** the baseline run
 **When** completed
@@ -2191,7 +2191,7 @@ Covers: NFR5, AD-21(1), UX-DR25 P-7. Prio: P0. Verify: CARGO, DEVICE.
 
 **Given** no spring moving and no call
 **When** idle for 30 s on each tab
-**Then** `RovstiPerf` reports 0 frames requested and no timers other than the call timer exist.
+**Then** `RostyPerf` reports 0 frames requested and no timers other than the call timer exist.
 
 **Given** static subtrees (Tab Bar, list rows, checklist)
 **When** `cached` views and `view_cache` hit rate are checked
@@ -2306,12 +2306,12 @@ Covers: FR39, AD-20, SM-3. Prio: P1. Verify: BUILD, DEVICE.
 **Acceptance Criteria:**
 
 **Given** `source ~/.config/rovsti/signing.env`
-**When** `gpuiforge build android --release` runs (feature `perf` off, R8/minify off, `proguard-rovsti.pro` retained)
+**When** `gpuiforge build android --release` runs (feature `perf` off, R8/minify off, `proguard-rosty.pro` retained)
 **Then** the APK is signed (`apksigner verify --print-certs` succeeds) and `scripts/check-apk.sh` passes (no `INTERNET`, both `Java_*` symbols).
 
 **Given** the release APK
 **When** installed over the debug build is refused for a different key
-**Then** the documented step is `adb uninstall dev.rovsti.phone` then install, and the role/Setup state is re-verified.
+**Then** the documented step is `adb uninstall dev.rosty.phone` then install, and the role/Setup state is re-verified.
 
 ### Story 13.3: Final workspace checks
 
@@ -2324,12 +2324,12 @@ Covers: NFR8, SM-4. Prio: P0 (gate). Verify: CARGO, ANDROID-CHECK, BUILD.
 **Acceptance Criteria:**
 
 **Given** the workspace
-**When** `cargo fmt --all && cargo clippy --workspace --all-targets -- -D clippy::unwrap_used -D clippy::disallowed_methods && cargo test --workspace` and `cargo check -p rovsti_android --target aarch64-linux-android` run
-**Then** all pass for Phone-owned crates; the CLAUDE.md checks list is updated to include the extra clippy flags only after the Messages/Stops migration to `rovsti_ui::theme::colors` is done (flagged gap).
+**When** `cargo fmt --all && cargo clippy --workspace --all-targets -- -D clippy::unwrap_used -D clippy::disallowed_methods && cargo test --workspace` and `cargo check -p rosty_android --target aarch64-linux-android` run
+**Then** all pass for Phone-owned crates; the CLAUDE.md checks list is updated to include the extra clippy flags only after the Messages/Stops migration to `rosty_ui::theme::colors` is done (flagged gap).
 
 **Given** grep audits
 **When** run
-**Then** `rg "rovsti_android" apps/phone/src` matches only `backend.rs`, and no `INTERNET`, analytics or network crate appears in phone dependencies.
+**Then** `rg "rosty_android" apps/phone/src` matches only `backend.rs`, and no `INTERNET`, analytics or network crate appears in phone dependencies.
 
 ### Story 13.4: Owner acceptance checklist
 
@@ -2363,15 +2363,15 @@ Epics 14 to 22 extend the finished v0.1 app (Epics 1 to 13) to PRD v0.2. They fo
 - **UIQ-4 Accessibility and reduced motion (NFR-10, UX-DR32).** Labels, roles and states per EXPERIENCE.md; TalkBack custom actions for every gesture or drag; font scale 1.3x clips nothing; the moment's stated reduced-motion and reduced-transparency fallback is implemented.
 - **UIQ-5 Fail-soft (NFR-16).** Every new Android API call is capability-gated and degrades visibly (disabled control with a reason, or a system-page fallback); it can never crash, block a Call or leave the In-Call Screen without End. On desktop the action reads "Not available on this platform".
 - **Spike rule (AD-36).** A spike story builds the shipped default (the safe path), adds its probe to the Diagnostics page, and writes `docs/spikes/s{n}-{name}.md` with the procedure and a PENDING result table. It never waits for the phone. When the owner pastes the Diagnostics report, a follow-up commit records the result and flips the `Caps` constant if the spike passed (task for the Epic 22 reconciliation story, or earlier at the owner's convenience).
-- **Epic release rule.** The last story of each epic ends with `bash scripts/build-release.sh` (signed release APK to `~/Downloads/rovsti-phone-release.apk`, never run while another gpuiforge or gradle build is active, no password in any output) and reports the path (Epics 19 and 20 share one release at 20.4 because 19.7 is optional; Epic 22 ends with the v0.2 release). Always-on checks stay as in the v0.1 conventions plus `scripts/check-apk.sh` (fails on `INTERNET` or `SEND_SMS`).
+- **Epic release rule.** The last story of each epic ends with `bash scripts/build-release.sh` (signed release APK to `~/Downloads/rosty-phone-release.apk`, never run while another gpuiforge or gradle build is active, no password in any output) and reports the path (Epics 19 and 20 share one release at 20.4 because 19.7 is optional; Epic 22 ends with the v0.2 release). Always-on checks stay as in the v0.1 conventions plus `scripts/check-apk.sh` (fails on `INTERNET` or `SEND_SMS`).
 - **Spike ids versus moment ids.** The spine's spikes S3 to S14 and DESIGN's signature moments S1 to S36 share the letter S. In `Covers:` lines a bare S-number after the AD/NFR list is a spike; moments are written `UX-DR30 (S17)`; in prose a moment is written "moment S3" or by name when it could be confused.
-- **Kotlin tests.** Pure Kotlin helpers get JVM unit tests; wire fixtures in `crates/rovsti_core/tests/fixtures/` are read by both Rust and Kotlin tests (AD-10).
+- **Kotlin tests.** Pure Kotlin helpers get JVM unit tests; wire fixtures in `crates/rosty_core/tests/fixtures/` are read by both Rust and Kotlin tests (AD-10).
 
 ---
 
 ## Epic 14: Audio routes and devices (with Foundation F0)
 
-The owner can see every audio route Android offers during a call (earpiece, speaker, wired headset, each Bluetooth device by name), switch to exactly one, and watch the list follow devices as they connect and disconnect. The same epic lays Foundation F0: the consolidated wire field table, snapshot schema v0.2 with golden fixtures, the Diagnostics page that runs the spikes on the release APK, Prefs v2 migration, the new `rovsti_core` modules and the manifest additions, so every later epic builds on tested plumbing. F0 part 1 (14.0a to 14.0f) is only what audio needs; F0 part 2 (14.9 to 14.16) follows the first release so the owner gets the audio fix first.
+The owner can see every audio route Android offers during a call (earpiece, speaker, wired headset, each Bluetooth device by name), switch to exactly one, and watch the list follow devices as they connect and disconnect. The same epic lays Foundation F0: the consolidated wire field table, snapshot schema v0.2 with golden fixtures, the Diagnostics page that runs the spikes on the release APK, Prefs v2 migration, the new `rosty_core` modules and the manifest additions, so every later epic builds on tested plumbing. F0 part 1 (14.0a to 14.0f) is only what audio needs; F0 part 2 (14.9 to 14.16) follows the first release so the owner gets the audio fix first.
 
 ### Foundation F0, part 1 (needed by audio)
 
@@ -2390,7 +2390,7 @@ Covers: AD-10 (amended), AD-23, AD-24, AD-26, AD-27, AD-30, AD-31, NFR-8. Prio: 
 **Then** it lists, per direction (Kotlin to Rust snapshot, provider pulls, one-shot events, Rust to Kotlin commands), every field with name, type, optionality, owner, introducing story id and the default when absent
 **And** it marks which fields are additive (keep `v: 1`) and states the rule that a changed or removed field bumps `v`.
 
-**Given** `rovsti_core::wire`
+**Given** `rosty_core::wire`
 **When** the constants are added
 **Then** `caps` (hold=1, support_hold=2, merge=4, swap=8, manage=16, split=32, disconnect_participant=64, respond_via_text=128, mute=256, add_participant=512), `props` (conference=1, hd=2, wifi=4, emergency=8) and log `features` (hd=1, wifi=2, volte=4, video=8) exist as `const` with doc comments
 **And** a unit test pins each value and a second test asserts no two bits of one mask overlap.
@@ -2409,12 +2409,12 @@ Covers: AD-4 (amended), AD-10, AD-23, AD-24, AD-25, AD-26, NFR-8. Prio: P1. Veri
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_core::wire::CallSnapshot`
+**Given** `rosty_core::wire::CallSnapshot`
 **When** extended
 **Then** it carries `audio.endpoints[{id,type,name?,selected,hint?}]`, snapshot `background_call_id?`, `waiting_call_id?`, `ended_call_id?`, `can_add_call`, `can_merge`, `can_swap`, `pending?`, `pending_failed?`, `ringer_silenced?`, `silenced_by?`, `selecting_account?`, `accounts?[]`, and per call `parent_id?`, `children[]`, `caps`, `props`, `account_key?`, `display_name_alt?`, `hold_since_ms?`, all `serde(default)`, with `#[serde(other)] Unknown` on the endpoint type, pending and silenced_by enums
 **And** `v` stays 1 and a snapshot without any new field still parses to the v0.1 behaviour (a test with an existing v0.1 fixture).
 
-**Given** fixtures `audio_endpoints.json`, `two_calls.json`, `conference.json`, `selecting_account.json` in `crates/rovsti_core/tests/fixtures/`
+**Given** fixtures `audio_endpoints.json`, `two_calls.json`, `conference.json`, `selecting_account.json` in `crates/rosty_core/tests/fixtures/`
 **When** the golden tests run
 **Then** parse, re-serialise and compare equal; an unknown endpoint type and an unknown extra field both parse without dropping the snapshot
 **And** a snapshot with `v` higher than known is rejected by the parser helper so the last good snapshot stays displayed.
@@ -2436,7 +2436,7 @@ Covers: AD-10, AD-24, AD-36, NFR-8, NFR-16. Prio: P1. Verify: BUILD (gradle JVM 
 **Given** `WireJson.kt` (in the phone Kotlin package) 
 **When** added
 **Then** it holds the same bit constants as 14.0a, the endpoint JSON builder and a test-visible `buildSnapshot` helper
-**And** JVM unit tests (extending the existing `WireFixturesTest.kt` pattern under `app/src/test/java/dev/rovsti/bridge`) read the four 14.0b fixtures and rebuild matching JSON from structured inputs (order-insensitive equality).
+**And** JVM unit tests (extending the existing `WireFixturesTest.kt` pattern under `app/src/test/java/dev/rosty/bridge`) read the four 14.0b fixtures and rebuild matching JSON from structured inputs (order-insensitive equality).
 
 **Given** `Caps.kt`
 **When** added
@@ -2448,7 +2448,7 @@ Covers: AD-10, AD-24, AD-36, NFR-8, NFR-16. Prio: P1. Verify: BUILD (gradle JVM 
 **Then** it keeps a 50-entry ring of (elapsed ms, event name, call id, state name, caps mask, counts) and never stores numbers or names
 **And** a JVM test proves the ring wraps and holds no strings from a number or name field.
 
-### Story 14.0d: `rovsti_core::audio` endpoint list
+### Story 14.0d: `rosty_core::audio` endpoint list
 
 As a developer agent,
 I want the endpoint ordering and arrival/loss diff as pure, tested Rust,
@@ -2492,7 +2492,7 @@ Covers: AD-23, AD-35, NFR-3, NFR-18. Prio: P1. Verify: ANDROID-CHECK, BUILD, DEV
 
 **Given** a burst of 20 endpoint callbacks in 10 ms
 **When** run on the phone or emulator
-**Then** at most two snapshots are emitted and the last one is correct; the completion notes record the count seen in `RovstiSpike` logcat (ids and booleans only).
+**Then** at most two snapshots are emitted and the last one is correct; the completion notes record the count seen in `RostySpike` logcat (ids and booleans only).
 
 ### Story 14.0f: Diagnostics page skeleton and report
 
@@ -2509,10 +2509,10 @@ Covers: AD-36, NFR-16, NFR-17. Prio: P1 (unblocks every spike). Verify: CARGO, A
 **Then** a Diagnostics page opens (local only, no navigation entry elsewhere until 16.1 moves the trigger to the Settings title) listing probe groups Audio, Calls, SIM, Blocking, Reject text, Silence, Voicemail, Emergency, Contacts, Call log, TalkBack/system (each group a button that is inert and reads "Not built yet" until its spike story registers it)
 **And** the page honours UIQ-1, UIQ-2 (fixed row heights) and UIQ-4.
 
-**Given** `rovsti_android::diagnostics::run(probe: &str) -> Result<String, Error>` and shared `SpikeProbes.kt`
+**Given** `rosty_android::diagnostics::run(probe: &str) -> Result<String, Error>` and shared `SpikeProbes.kt`
 **When** a probe is registered
 **Then** it returns one `pass`, `fail` or `unknown` line per check with a short reason, runs off the UI thread, and returns `Error::Unsupported` on desktop with a desktop test
-**And** the logcat tag `RovstiSpike` carries ids and booleans only.
+**And** the logcat tag `RostySpike` carries ids and booleans only.
 
 **Given** "Copy report"
 **When** tapped
@@ -2533,7 +2533,7 @@ Covers: FR41, AD-23, AD-6 (amended), AD-36, NFR-16, S3. Prio: P1. Verify: ANDROI
 
 **Acceptance Criteria:**
 
-**Given** `RovstiInCallService`
+**Given** `RostyInCallService`
 **When** `onAvailableCallEndpointsChanged` and `onCallEndpointChanged` fire
 **Then** `AudioPath` rebuilds `Map<String, CallEndpoint>` on the main Looper, sends `audio.endpoints` (id from `CallEndpoint.getIdentifier().toString()`, type, name for bluetooth/wired/unknown, selected, `hint:"hearing_aid"` only when `AudioManager.getAvailableCommunicationDevices()` holds a `TYPE_HEARING_AID` device whose product name equals the endpoint name), omits `TYPE_STREAMING`, and keeps `route`/`routes` derived
 **And** `callRouteEndpoint(id: String): Boolean` calls `requestCallEndpointChange(endpoint, executor, OutcomeReceiver)`; an unknown id returns false; a `CallEndpointException` forces an immediate rebuild so the UI reverts.
@@ -2547,7 +2547,7 @@ Covers: FR41, AD-23, AD-6 (amended), AD-36, NFR-16, S3. Prio: P1. Verify: ANDROI
 **When** run during a call
 **Then** for 20 s it prints type, name length, id tail and `selected` of each endpoint every second, and "names present with BLUETOOTH_CONNECT denied: pass/fail", "id stable while connected: pass/fail", "selected moved within 500 ms after a route request: pass/fail"
 **And** `docs/spikes/s3-audio.md` exists with the owner procedure (connect and disconnect earbuds, a wired headset, the hearing aid if any, tap each in the picker once 14.5 ships), the pass criterion, the shipped default (legacy type-only list; names row asks for `BLUETOOTH_CONNECT`; no hearing-aid hint) and a PENDING result table
-**And** `rovsti_android::calls::route_endpoint(id)` returns `Error::Unsupported` on desktop with a test, and `BLUETOOTH_CONNECT` is not requested at startup.
+**And** `rosty_android::calls::route_endpoint(id)` returns `Error::Unsupported` on desktop with a test, and `BLUETOOTH_CONNECT` is not requested at startup.
 
 ### Story 14.2: Endpoint model in the backend and v0.1 controls kept working
 
@@ -2569,7 +2569,7 @@ Covers: FR41, AD-15, AD-23, AD-4 (amended), NFR-3. Prio: P1. Verify: CARGO, ANDR
 **Then** it behaves exactly as before (pending look 120 ms, revert after 1 s if unreported, state always from the next snapshot)
 **And** desktop sample data provides a Phone/Speaker/two-Bluetooth/wired list so every later audio story can be exercised without a phone.
 
-**Given** `rovsti_core::call` tests
+**Given** `rosty_core::call` tests
 **When** extended
 **Then** they cover a snapshot whose `selected` endpoint disappears while a route request is pending (the pending look clears on the next snapshot, never sticks).
 
@@ -2583,7 +2583,7 @@ Covers: UX-DR29, UX-DR30 (S28), UX-DR26, NFR-14, NFR-15. Prio: P1. Verify: CARGO
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_ui` (kit-level, reusable by Messages and Stops)
+**Given** `rosty_ui` (kit-level, reusable by Messages and Stops)
 **When** `NoticePill` is added
 **Then** it is a 48 px flat-glass capsule, 16 px side inset, one line (middle ellipsis for numbers), optional trailing accent text button (44 px target), a 2 px bottom hairline (accent at 60%) shrinking over the lifetime (info 2 s, Undo 5 s, 10 s with TalkBack on), rising 16 px with fade on `appear` and leaving on `sheet_dismiss`
 **And** one pill at a time, a new one replaces the old in place (the old one's Undo is committed, not run), a finger on the pill holds the timer, Undo acts on finger-up and rewinds the hairline.
@@ -2611,7 +2611,7 @@ Covers: FR43, FR60 (intent), FR63 (intents), AD-31, AD-34, NFR-16. Prio: P1. Ver
 
 **Acceptance Criteria:**
 
-**Given** shared Kotlin and `rovsti_android::telecom`
+**Given** shared Kotlin and `rosty_android::telecom`
 **When** added
 **Then** `open_system(page)` (pages: `Bluetooth`, `HearingDevices`, `Accessibility`, `Sound`, `DefaultApps`, `CallSettings`, `CallAccessibility`, `ChangePhoneAccounts`, `EmergencyInfo`, `AppDetails`) returns `{v,ok,error?,data?}`; each page uses its public action constant or the literal `android.settings.HEARING_DEVICES_SETTINGS` / `android.telephony.action.EMERGENCY_ASSISTANCE`, tries `startActivity` in try/catch and falls back to `ACTION_APPLICATION_DETAILS_SETTINGS` reporting `fallback:true`
 **And** `send_sms_to(number)` (`ACTION_SENDTO smsto:`), `copy_text(text)` (`ClipboardManager.setPrimaryClip`), `share_text(text)` (`ACTION_SEND text/plain`) return Boolean, and `add_contact(number)` builds `ACTION_INSERT_OR_EDIT` with `Contacts.CONTENT_ITEM_TYPE` and `Insert.PHONE`.
@@ -2755,7 +2755,7 @@ Covers: AD-10, AD-26, AD-27, AD-30, AD-31, AD-32, AD-33, NFR-8. Prio: P1. Verify
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_core::wire`
+**Given** `rosty_core::wire`
 **When** extended
 **Then** it has: `Envelope<T>{v,ok,error?,data?}` with `error` in `permission|unavailable|refused|not_found|unknown`; contact fields `lookup_key`, `display_name_alt`, `sort_key`, `sort_key_alt`; call-log row fields `account_key`, `duration_s`, `kind` including `voicemail` and `blocked`, `block_reason` (`user|system|unknown`) and details-only `features` bitmask; `PhoneAccounts{accounts[{key,label,slot_index?,color_argb,sim,enabled}],default_key?,ask}`; blocklist rows; `SettingsSync{proximity,flip_to_silence,vibrate_connect,vibrate_end,has_replies,keypad_tones,haptics,name_format}`; `VoicemailInfo`, `EmergencyList`; one-shot events `document_result{op,ok,name?,text?,error?}`, `ringtone_result`, `ui_request{kind,call_id?}`; new event kinds `blocked_changed`, `sims_changed`, `voicemail_changed`
 **And** every struct has a golden fixture and test, ignores unknown fields, and uses `Unknown` safe enums.
@@ -2768,7 +2768,7 @@ Covers: AD-10, AD-26, AD-27, AD-30, AD-31, AD-32, AD-33, NFR-8. Prio: P1. Verify
 **When** the shared fixtures are listed in `docs/phone-wire.md`
 **Then** each names the Kotlin JVM test that reads it (added by the story that builds the Kotlin side).
 
-### Story 14.10: `rovsti_core::scene` and `SceneDiff`
+### Story 14.10: `rosty_core::scene` and `SceneDiff`
 
 As a developer agent,
 I want the call scene and the disabled-reason logic as pure, tested Rust,
@@ -2793,7 +2793,7 @@ Covers: FR44 to FR48, AD-24, AD-14, AD-35, NFR-14, NFR-18. Prio: P1. Verify: CAR
 **Then** it returns a `SceneDiff` (primary, held, waiting, endpoints, participants flags), applies every snapshot in `seq` order even when no frame is drawn, ignores equal or lower `seq`, and keeps a transient `disconnected`/`ended_call_id` snapshot for the Ended overlay
 **And** a test asserts a pure timer tick changes nothing in the diff.
 
-### Story 14.11: `rovsti_core::settings` PrefsV2 and upgrade chain
+### Story 14.11: `rosty_core::settings` PrefsV2 and upgrade chain
 
 As the owner,
 I want my existing preferences to survive the upgrade and new settings to have safe defaults,
@@ -2803,7 +2803,7 @@ Covers: FR49 (store), FR57, FR64, FR66, FR71, FR72, AD-30, NFR-17, NFR-8. Prio: 
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_core::settings::PrefsV2`
+**Given** `rosty_core::settings::PrefsV2`
 **When** defined
 **Then** it has `schema_version: 2`, `ui{last_tab, missed_seen_ms, app_version, xiaomi_confirmed, hint_counters}`, `settings{haptics, proximity, flip_to_silence, vibrate_connect, vibrate_end, keypad_tones: Option<bool>, sort_by, name_format, show_frequent}`, `quick_replies: Vec<String>`, `speed_dial: BTreeMap<u8, SpeedDialEntry{lookup_key, number_raw, name}>`, `favorites_order: Vec<String>`
 **And** defaults reproduce v0.1 (proximity true, haptics Normal, flip/vibrate off, keypad tones follow system, show_frequent true, the three default replies as constants).
@@ -2814,10 +2814,10 @@ Covers: FR49 (store), FR57, FR64, FR66, FR71, FR72, AD-30, NFR-17, NFR-8. Prio: 
 
 **Given** `PrefsV1` (flat v0.1 file, no `schema_version`)
 **When** converted by `From<PrefsV1> for PrefsV2`
-**Then** every v0.1 field maps (last tab, missed-seen time, app version, Xiaomi confirmations) and fixtures under `crates/rovsti_core/tests/fixtures/prefs/` (v1 typical, v1 minimal, v2 typical, v2 with unknown extra field) cover round trips
+**Then** every v0.1 field maps (last tab, missed-seen time, app version, Xiaomi confirmations) and fixtures under `crates/rosty_core/tests/fixtures/prefs/` (v1 typical, v1 minimal, v2 typical, v2 with unknown extra field) cover round trips
 **And** `haptics`' filter (`Light` allows tick-class kinds only) is a pure function with tests.
 
-**Given** `BackupFile{v:1, kind:"rovsti-phone-backup", created_ms, app_version, settings, quick_replies, speed_dial, favorites_order}`
+**Given** `BackupFile{v:1, kind:"rosty-phone-backup", created_ms, app_version, settings, quick_replies, speed_dial, favorites_order}`
 **When** built and checked
 **Then** `ImportPreview::from(&BackupFile, &current)` validates kind, `v` and bounds and yields the section counts (replace semantics; a duplicated speed-dial digit moves with a "moved from" note); there is no `ui` or Xiaomi confirmation in it, and tests cover the invalid and foreign file cases.
 
@@ -2831,7 +2831,7 @@ Covers: FR49, AD-30, NFR-17, NFR-6. Prio: P1. Verify: CARGO, ANDROID-CHECK, BUIL
 
 **Acceptance Criteria:**
 
-**Given** `rovsti_ui::storage`
+**Given** `rosty_ui::storage`
 **When** loading `prefs.json` from the no-backup data dir
 **Then** it reads `Probe{schema_version}` (missing = 1), converts `PrefsV1` through `From`, and the first v2 save copies a version-1 file to `prefs.json.bak-v1`
 **And** a higher version than the build knows loads best effort after a copy to `prefs.json.bak-v{n}`, and a corrupt file loads defaults after a copy to `prefs.json.corrupt` before the first save.
@@ -2849,7 +2849,7 @@ Covers: FR49, AD-30, NFR-17, NFR-6. Prio: P1. Verify: CARGO, ANDROID-CHECK, BUIL
 **When** the signed release APK is installed over the previous one
 **Then** the app starts on the remembered tab with Xiaomi confirmations intact (device script in the completion notes).
 
-### Story 14.13: `rovsti_core::names` and `blocklist::BlockSet`
+### Story 14.13: `rosty_core::names` and `blocklist::BlockSet`
 
 As a developer agent,
 I want name ordering and block-set matching as pure code,
@@ -2913,7 +2913,7 @@ Covers: AD-34, AD-18 (amended), NFR-1, NFR-7, NFR-16, NFR-17. Prio: P1. Verify: 
 **Then** it additionally fails if `SEND_SMS` or `INTERNET` is in the merged manifest, verifies `VIBRATE` and the `<queries>` entries, and verifies the receiver is disabled by default
 **And** it still checks the two `Java_*` symbols.
 
-**Given** `rovsti_android`
+**Given** `rosty_android`
 **When** the v0.2 modules exist as empty facades (`blocklist`, `documents`, `settings`; `diagnostics` already exists from 14.0f; `telecom` and `calls` additions land with their stories)
 **Then** each compiles on desktop with a test asserting `Error::Unsupported`, so later stories fill bodies without changing the desktop contract (NFR-7).
 
@@ -2975,7 +2975,7 @@ Covers: FR45, FR46, FR47, FR48, AD-25, AD-6 (amended), NFR-3, NFR-16. Prio: P1. 
 **Given** the commands
 **When** called
 **Then** `swap()` uses `swapConference()` when the foreground has `caps.swap`, else `unhold()` on the held call (and a `hold()` on the former active call if it is still Active after 1 s, then failure); `merge()` uses `mergeConference()` or `foreground.conference(other)` taken from `conferenceableCalls`; `split(child_id)` is `splitFromConference()` only with `caps.split`; `disconnect(child_id)` ends one participant; End on a conference is `disconnect(host_id)`; `answerHolding(id)` is `answer(id)` offered only when the current call has `caps.hold` and no held call exists (otherwise the choice is relabelled "End held call and answer"); `endAll()` ends every non-ringing top-level call
-**And** all return Boolean, stale ids are no-ops, none blocks the main Looper, and `rovsti_android::calls::{swap, merge, split, answer_holding, end_all}` exist with desktop `Unsupported` tests.
+**And** all return Boolean, stale ids are no-ops, none blocks the main Looper, and `rosty_android::calls::{swap, merge, split, answer_holding, end_all}` exist with desktop `Unsupported` tests.
 
 **Given** JVM tests with a fake clock and fake calls
 **When** run
@@ -3228,12 +3228,12 @@ Covers: FR49, FR71 (plumbing), AD-30, NFR-17, NFR-16. Prio: P1. Verify: CARGO, A
 
 **Given** the 14.12 store
 **When** a setting changes
-**Then** `Backend::update_prefs` applies it to `Arc<Settings>`, observers re-render only what depends on it, and `rovsti_android::settings::sync(json)` pushes the `SettingsSync` struct on attach and after every change
+**Then** `Backend::update_prefs` applies it to `Arc<Settings>`, observers re-render only what depends on it, and `rosty_android::settings::sync(json)` pushes the `SettingsSync` struct on attach and after every change
 **And** a failed save reverts the value and shows the Notice "Couldn't save setting".
 
 **Given** `SettingsMirror.kt` (shared)
 **When** it receives `settingsSync`
-**Then** it stores the values in `SharedPreferences("rovsti_phone_settings")`, adds `flip_supported` (sensor present) and `system_keypad_tones` (`Settings.System.DTMF_TONE_WHEN_DIALING`), and `system_facts()` reports them back through the `permissions_changed` pull path
+**Then** it stores the values in `SharedPreferences("rosty_phone_settings")`, adds `flip_supported` (sensor present) and `system_keypad_tones` (`Settings.System.DTMF_TONE_WHEN_DIALING`), and `system_facts()` reports them back through the `permissions_changed` pull path
 **And** before the first push the Kotlin defaults equal v0.1 behaviour; Rust remains the only writer of truth.
 
 **Given** the one-shot mailbox
@@ -3257,12 +3257,12 @@ Covers: FR50, FR11 (superseded), AD-26, AD-11 (amended), AD-36, NFR-16, S5. Prio
 **Given** `SimAccounts.kt` and `telecom::phone_accounts()`
 **When** called (runtime `READ_PHONE_STATE`)
 **Then** it returns the 14.9 `PhoneAccounts` (`account_key = "{ComponentName.flattenToString()}#{handle.id}"`, label, `highlightColor`, slot from `SubscriptionManager.getActiveSubscriptionInfoList()` matched via `createForPhoneAccountHandle(h).subscriptionId`, `default_key` from `getUserSelectedOutgoingPhoneAccount()`, `ask = default_key == null && accounts >= 2`) and refreshes on resume, after each placement and on `sims_changed` (`OnSubscriptionsChangedListener` registered in `MainActivity.onStart`, removed in `onStop`)
-**And** Rust calls `RovstiBridge.uiAttached(true)` once its session is live and `MainActivity` is resumed and `uiAttached(false)` when the session closes, and keeps `Arc<SimInfo>` with `SimInfo::visible()` = two or more accounts gating every SIM element (core unit tests incl. one SIM, two SIMs, missing default).
+**And** Rust calls `RostyBridge.uiAttached(true)` once its session is live and `MainActivity` is resumed and `uiAttached(false)` when the session closes, and keeps `Arc<SimInfo>` with `SimInfo::visible()` = two or more accounts gating every SIM element (core unit tests incl. one SIM, two SIMs, missing default).
 
 **Given** `telecom::place_call(raw, account_key: Option<&str>)`
 **When** a key is given
 **Then** `TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE` is added to the `placeCall` extras; emergency numbers never get a key; the app never calls `setUserSelectedOutgoingPhoneAccount`
-**And** the registry safety net handles `STATE_SELECT_PHONE_ACCOUNT` from other apps: auto-select as v0.1 when `!uiReady` (keyguard locked, or Rust has not called `RovstiBridge.uiAttached(true)`) or after 10 s, otherwise report `dialing` with `selecting_account:true` and `accounts` and answer `callSelectAccount(call_id, key)` with `phoneAccountSelected(handle, false)`.
+**And** the registry safety net handles `STATE_SELECT_PHONE_ACCOUNT` from other apps: auto-select as v0.1 when `!uiReady` (keyguard locked, or Rust has not called `RostyBridge.uiAttached(true)`) or after 10 s, otherwise report `dialing` with `selecting_account:true` and `accounts` and answer `callSelectAccount(call_id, key)` with `phoneAccountSelected(handle, false)`.
 
 **Given** the Diagnostics "SIM" group (spike S5)
 **When** run
@@ -3315,7 +3315,7 @@ Covers: FR51, UX-DR29 (chip, chip row), UX-DR27, AD-26, NFR-14. Prio: P1. Verify
 
 **Given** the Recents pull
 **When** it carries `account_key`
-**Then** the chip is resolved through a pure `rovsti_core` lookup built once per call-log swap, never per frame
+**Then** the chip is resolved through a pure `rosty_core` lookup built once per call-log swap, never per frame
 **And** TalkBack reads "Call on SIM 1, {carrier}" and chips are not interactive nor the only carrier of meaning.
 
 **Given** tests
@@ -3332,15 +3332,15 @@ Covers: FR73, AD-30, NFR-17, NFR-16, S13. Prio: P1. Verify: CARGO, ANDROID-CHECK
 
 **Acceptance Criteria:**
 
-**Given** `Documents.kt` (shared) and `rovsti_android::documents`
+**Given** `Documents.kt` (shared) and `rosty_android::documents`
 **When** Export runs
-**Then** `exportDocument(name, json)` uses a pending slot and `ACTION_CREATE_DOCUMENT` (`application/json`, name `rovsti-phone-backup-{yyyy-mm-dd}.json`), `MainActivity` forwards `onActivityResult` to `RovstiBridge.handleActivityResult`, and the result arrives as the `document_result` event through the mailbox; no storage permission is used
+**Then** `exportDocument(name, json)` uses a pending slot and `ACTION_CREATE_DOCUMENT` (`application/json`, name `rosty-phone-backup-{yyyy-mm-dd}.json`), `MainActivity` forwards `onActivityResult` to `RostyBridge.handleActivityResult`, and the result arrives as the `document_result` event through the mailbox; no storage permission is used
 **And** success shows the Notice "Saved to {file name}".
 
 **Given** Import
 **When** `importDocument()` (`ACTION_OPEN_DOCUMENT`, json/plain/octet-stream) returns text (read on a worker thread, at most 256 KB)
-**Then** `rovsti_ui::storage` parses it outside core, `ImportPreview` (14.11) feeds the Import preview sheet (large detent) "This will replace: settings (n), favorites order (n), speed dial (n), quick replies (n)." with "Import" accent and "Cancel", and one line says it cannot be undone
-**And** an invalid or foreign file (over 256 KB, other kind, bad `v`) shows the inline red row "This isn't a Rovsti Phone backup." and changes nothing; a duplicated speed-dial digit shows "{digit} moved from {name}".
+**Then** `rosty_ui::storage` parses it outside core, `ImportPreview` (14.11) feeds the Import preview sheet (large detent) "This will replace: settings (n), favorites order (n), speed dial (n), quick replies (n)." with "Import" accent and "Cancel", and one line says it cannot be undone
+**And** an invalid or foreign file (over 256 KB, other kind, bad `v`) shows the inline red row "This isn't a Rosty Phone backup." and changes nothing; a duplicated speed-dial digit shows "{digit} moved from {name}".
 
 **Given** the Data section
 **When** rendered
@@ -3464,10 +3464,10 @@ Covers: FR53, FR54, AD-27, AD-31, AD-36, NFR-16, S6. Prio: P1. Verify: ANDROID-C
 
 **Acceptance Criteria:**
 
-**Given** shared Kotlin `Blocklist` and `rovsti_android::blocklist`
+**Given** shared Kotlin `Blocklist` and `rosty_android::blocklist`
 **When** called
 **Then** `canBlock()` = `BlockedNumberContract.canCurrentUserBlockNumbers`, `list()` reads `BlockedNumbers.CONTENT_URI` (`COLUMN_ID`, `COLUMN_ORIGINAL_NUMBER`, `COLUMN_E164_NUMBER`), `block(raw)` inserts `COLUMN_ORIGINAL_NUMBER` (a duplicate replaces), `unblock(raw)` is `BlockedNumberContract.unblock`, `isBlocked(raw)` is `BlockedNumberContract.isBlocked`, each returning the AD-31 envelope and never throwing; a `SecurityException` maps to `unavailable` when `!canBlock()`, else `permission`
-**And** emergency numbers are refused by Kotlin (`refused`), and every `rovsti_android::blocklist` function returns `Error::Unsupported` on desktop with a test.
+**And** emergency numbers are refused by Kotlin (`refused`), and every `rosty_android::blocklist` function returns `Error::Unsupported` on desktop with a test.
 
 **Given** `Caps.BLOCK_GUARD = true`
 **When** a ringing call arrives
@@ -3634,7 +3634,7 @@ Covers: FR56, AD-28, AD-6 (amended), AD-36, NFR-16, NFR-17, S7. Prio: P1. Verify
 **Then** it is `reject(false, null)` plus an empty `smsto:` compose for "Write your own..."
 **And** no SMS permission is declared or requested (`SEND_SMS` stays absent, checked by `check-apk.sh`).
 
-**Given** `rovsti_android::calls::{reject_with_message, reject_and_compose}`
+**Given** `rosty_android::calls::{reject_with_message, reject_and_compose}`
 **When** compiled for desktop
 **Then** they return `Error::Unsupported` with tests, and a Kotlin JVM test covers the result-code mapping and the 160-character guard.
 
@@ -3689,7 +3689,7 @@ Covers: FR57, UX-DR29, UX-DR26, UX-DR32, AD-30, NFR-17, NFR-15. Prio: P1. Verify
 
 **Given** the three defaults
 **When** first run or reset
-**Then** they are "Can't talk now. I'll call you back.", "I'm in a meeting. Call you later.", "Can you text me instead?" (constants in `rovsti_core::settings`) and core validation clamps length and count
+**Then** they are "Can't talk now. I'll call you back.", "I'm in a meeting. Call you later.", "Can you text me instead?" (constants in `rosty_core::settings`) and core validation clamps length and count
 **And** `has_replies` reaches the Kotlin mirror so the notification action in 18.7 can appear or not.
 
 **Given** TalkBack
@@ -3716,7 +3716,7 @@ Covers: FR58, AD-29, AD-36, NFR-16, S8. Prio: P1. Verify: ANDROID-CHECK, BUILD, 
 **Then** it registers `Sensor.TYPE_GRAVITY` (fallback `TYPE_ACCELEROMETER`) at `SENSOR_DELAY_NORMAL`, triggers when z < -7.0 m/s2 on two consecutive samples after at least one sample at or above -3.0 (a phone already face down at ring start never silences), calls `silenceRinger()` once, plays the flip haptic and unregisters; every exit path unregisters
 **And** no sensor reports `flip_supported:false`; a JVM test with a fake sensor feed covers the trigger rule and the exit paths; P-22 confirms the listener exists only while ringing.
 
-**Given** `rovsti_android::calls::silence_ringer`
+**Given** `rosty_android::calls::silence_ringer`
 **When** compiled for desktop
 **Then** it returns `Error::Unsupported` with a test.
 
@@ -3845,7 +3845,7 @@ Covers: FR61, FR63 (ringtone gate), FR72 (name order check), UX-DR26, UX-DR32, A
 
 **Given** `ContactsWrite.delete(lookup_key)` (shared Kotlin, AD-31 envelope)
 **When** called after the runtime `WRITE_CONTACTS` group `ContactsWrite` is requested at first use (never at startup; the dialer role normally grants it)
-**Then** it deletes `Contacts.CONTENT_LOOKUP_URI/{lookup_key}` (all raw contacts; synced accounts remove it at next sync), returns `permission` with no side effect when not granted, and `rovsti_android::providers` mirrors it with desktop `Unsupported` tests
+**Then** it deletes `Contacts.CONTENT_LOOKUP_URI/{lookup_key}` (all raw contacts; synced accounts remove it at next sync), returns `permission` with no side effect when not granted, and `rosty_android::providers` mirrors it with desktop `Unsupported` tests
 **And** it never runs on the UI thread or in render code.
 
 **Given** the Contact Sheet
@@ -4062,7 +4062,7 @@ Covers: FR67, UX-DR29, AD-33, AD-34, AD-36, NFR-16, S9. Prio: P2. Verify: CARGO,
 
 **Given** `VoicemailReceiver` (disabled in the manifest, 14.15)
 **When** the Diagnostics "Voicemail" group (spike S9) enables it via `setComponentEnabledSetting`
-**Then** a new voicemail triggers `ACTION_SHOW_VOICEMAIL_NOTIFICATION`, the report records the count (may be absent; 0 clears), whether Rovsti's own "New voicemail" notification posted (tap uses `EXTRA_CALL_VOICEMAIL_INTENT`) and whether the system notification was suppressed, and it can disable the receiver again
+**Then** a new voicemail triggers `ACTION_SHOW_VOICEMAIL_NOTIFICATION`, the report records the count (may be absent; 0 clears), whether Rosty's own "New voicemail" notification posted (tap uses `EXTRA_CALL_VOICEMAIL_INTENT`) and whether the system notification was suppressed, and it can disable the receiver again
 **And** with `Caps.VOICEMAIL_RECEIVER = false` (default) there is no unread badge, never a guessed one; if S9 passes the badge is an 8 px accent dot on the `1` key (never a number), enabled by flipping the constant; `docs/spikes/s9-voicemail.md` records the procedure and a PENDING table.
 
 ### Story 20.4: Emergency numbers and spike S10
@@ -4147,7 +4147,7 @@ Covers: FR70, UX-DR26, UX-DR32, AD-31, AD-34, NFR-16, S12. Prio: P2. Verify: CAR
 **Given** `CallLogWrite` (shared Kotlin, AD-31 envelope)
 **When** `delete(ids)` runs
 **Then** it deletes with `_id IN (...)` in chunks of 400 after the runtime `WRITE_CALL_LOG` group `CallLogWrite` is requested at first use (never at startup), returns `permission` with no side effect when missing, and `restore(entries[])` re-inserts `NUMBER, TYPE, DATE, DURATION, PHONE_ACCOUNT_ID, PHONE_ACCOUNT_COMPONENT_NAME, FEATURES, IS_READ=1, NEW=0` in one call; a refusal is `refused` ("Couldn't restore")
-**And** `rovsti_android::providers` mirrors both with desktop `Unsupported` tests and the missed badge follows the normal `call_log_changed` re-pull.
+**And** `rosty_android::providers` mirrors both with desktop `Unsupported` tests and the missed badge follows the normal `call_log_changed` re-pull.
 
 **Given** the Recents row menu "Delete entry" (danger, finger-up only) and a Details history row menu "Delete entry"
 **When** used on a single entry or a grouped row
@@ -4231,7 +4231,7 @@ Covers: AD-35, AD-22, NFR-5, NFR-18, UX-DR33 (P-11, P-15), UX-DR25. Prio: P1 (to
 
 **Given** the debug-only scenario runner (12.2)
 **When** extended
-**Then** it adds S-route (open the popover 20 times and apply 5 Bluetooth arrive/leave updates), S-twocall (Hold-away, Swap x10, Merge weave, participant list of 6), S-reply (open the reply sheet, choose, drag the incoming card 30 times), S-t9 (typing at 6 keys/s over 2,000 contacts), S-details (500-row history scroll, delete, Undo) and an S-incoming run warm with a contacts index swap in flight, each logging one `RovstiPerf` report
+**Then** it adds S-route (open the popover 20 times and apply 5 Bluetooth arrive/leave updates), S-twocall (Hold-away, Swap x10, Merge weave, participant list of 6), S-reply (open the reply sheet, choose, drag the incoming card 30 times), S-t9 (typing at 6 keys/s over 2,000 contacts), S-details (500-row history scroll, delete, Undo) and an S-incoming run warm with a contacts index swap in flight, each logging one `RostyPerf` report
 **And** `scripts/perf-run.sh` is extended to run them and capture SurfaceFlinger latency for the `GpuiView` layer.
 
 **Given** a desktop headless harness
@@ -4352,13 +4352,13 @@ Covers: NFR-1, NFR-7, NFR-8, NFR-16, NFR-17, AD-34. Prio: P0 (gate). Verify: CAR
 **Acceptance Criteria:**
 
 **Given** the workspace
-**When** `cargo fmt --all && cargo clippy --workspace --all-targets -- -D clippy::unwrap_used -D clippy::disallowed_methods && cargo test --workspace` and `cargo check -p rovsti_android --target aarch64-linux-android` run
+**When** `cargo fmt --all && cargo clippy --workspace --all-targets -- -D clippy::unwrap_used -D clippy::disallowed_methods && cargo test --workspace` and `cargo check -p rosty_android --target aarch64-linux-android` run
 **Then** all pass for Phone-owned crates (the Messages/Stops exception from 13.3 stays flagged) and the Kotlin JVM tests pass
 **And** the wire fixture test list in `docs/phone-wire.md` matches the fixtures on disk (no orphan fixture, no untested field).
 
 **Given** grep and manifest audits
 **When** run
-**Then** `rg "rovsti_android" apps/phone/src` matches only `backend.rs`, no network crate or `INTERNET` or `SEND_SMS` appears, `scripts/check-apk.sh` passes on the release APK, every new `rovsti_android` function has a desktop `Unsupported` test, and no unwrap is added
+**Then** `rg "rosty_android" apps/phone/src` matches only `backend.rs`, no network crate or `INTERNET` or `SEND_SMS` appears, `scripts/check-apk.sh` passes on the release APK, every new `rosty_android` function has a desktop `Unsupported` test, and no unwrap is added
 **And** the new permission requests (`WRITE_CALL_LOG`, `WRITE_CONTACTS` at first use, `BLUETOOTH_CONNECT` only if S3 needs it) are each justified in `docs/phone-device-notes.md`.
 
 ### Story 22.8: Owner acceptance document for v0.2
@@ -4392,7 +4392,7 @@ Covers: NFR-6, NFR-8, NFR-16, AD-17, AD-25, AD-27, AD-30. Prio: P0. Verify: CARG
 
 **Given** the diff from the v0.1 release commit to the current head
 **When** `bmad-code-review` runs in a fresh context (a different agent session or model than the builders)
-**Then** several independent reviewers cover: call safety (a Call can always be ended, no new crash path, `PendingOp` races, notification registry-only actions), data safety (Prefs migration backups, backup import bounds, destructive provider writes), privacy and manifest (no `INTERNET`/`SEND_SMS`, no number or name in logs, `RovstiSpike` only ids), threading (no JNI in render or key handlers, main-Looper turns), and performance (allocation in per-frame paths)
+**Then** several independent reviewers cover: call safety (a Call can always be ended, no new crash path, `PendingOp` races, notification registry-only actions), data safety (Prefs migration backups, backup import bounds, destructive provider writes), privacy and manifest (no `INTERNET`/`SEND_SMS`, no number or name in logs, `RostySpike` only ids), threading (no JNI in render or key handlers, main-Looper turns), and performance (allocation in per-frame paths)
 **And** findings are triaged blocker/major/minor and written to `docs/phone-review-notes.md` (appending a v0.2 section).
 
 **Given** blocker and major findings
@@ -4411,8 +4411,8 @@ Covers: FR39 (extended), AD-20, NFR-1, SM-3. Prio: P0. Verify: BUILD, DEVICE.
 **Acceptance Criteria:**
 
 **Given** `source ~/.config/rovsti/signing.env` and no other gpuiforge or gradle build running
-**When** `bash scripts/build-release.sh` runs (feature `perf` off, R8/minify off, `proguard-rovsti.pro` retained, app version bumped to 0.2.0 in `gpuiforge.json` and the Setup version-reset logic untouched)
-**Then** the APK is signed with the owner's key (`apksigner verify --print-certs` succeeds), `scripts/check-apk.sh` passes (no `INTERNET`, no `SEND_SMS`, both `Java_*` symbols, `VIBRATE`, queries, disabled receiver) and the file lands at `~/Downloads/rovsti-phone-release.apk`
+**When** `bash scripts/build-release.sh` runs (feature `perf` off, R8/minify off, `proguard-rosty.pro` retained, app version bumped to 0.2.0 in `gpuiforge.json` and the Setup version-reset logic untouched)
+**Then** the APK is signed with the owner's key (`apksigner verify --print-certs` succeeds), `scripts/check-apk.sh` passes (no `INTERNET`, no `SEND_SMS`, both `Java_*` symbols, `VIBRATE`, queries, disabled receiver) and the file lands at `~/Downloads/rosty-phone-release.apk`
 **And** no password appears in any output, log or tracked file (`git status` shows no secrets).
 
 **Given** an install over the previous release
@@ -4424,7 +4424,7 @@ Covers: FR39 (extended), AD-20, NFR-1, SM-3. Prio: P0. Verify: BUILD, DEVICE.
 
 ## Flagged Gaps and Decisions
 
-1. **AD-13 lint ban vs Messages/Stops.** The workspace-wide `Theme::colors` ban requires migrating callers in `apps/messages` and `apps/stops`, which this run must not edit. Story 4.1 enables the ban for `rovsti_ui` and `apps/phone` only; 13.3 adds the extra clippy flags to CLAUDE.md only after Messages/Stops migrate. Follow-up needed in their own planning.
+1. **AD-13 lint ban vs Messages/Stops.** The workspace-wide `Theme::colors` ban requires migrating callers in `apps/messages` and `apps/stops`, which this run must not edit. Story 4.1 enables the ban for `rosty_ui` and `apps/phone` only; 13.3 adds the extra clippy flags to CLAUDE.md only after Messages/Stops migrate. Follow-up needed in their own planning.
 2. **PRD vs AD-20 APK path.** FR-39 names `target/gpuiforge/android/...`; after eject the artifact is `apps/phone/platforms/android/app/build/outputs/apk/debug/app-debug.apk`. Handled in 1.2 and `check-apk.sh`; the PRD text is stale.
 3. **UX P-2 and P-8 vs AD-21.** The 4-refractive-surface limit, "flat glass at rest" and automatic flat-glass degradation are advisory/overridden: no story enforces or implements a visual degrade (see 11.10 and 12.6). UX-DR25 is satisfied for P-1, P-3..P-7, P-9, P-10.
 4. **Snapshot `contact_id`.** Hue pairs (S6, UX-DR23) need a stable key; AD-4's field list has no `contact_id`. Story 2.1 adds it as an optional field (additive, v1) and 11.5 falls back to the normalized number.
@@ -4450,7 +4450,7 @@ Covers: FR39 (extended), AD-20, NFR-1, SM-3. Prio: P0. Verify: BUILD, DEVICE.
 - Starter/eject check: Epic 1 Story 1.2 is the eject and hello-APK story (the architecture's "starter" equivalent).
 - Entities created when needed: wire DTOs in 2.1 are shared contracts; provider pulls are created in 3.4 only for data the lists use.
 - Forward dependencies: none; each story uses only earlier stories (6.3 and 8.8 explicitly handle the Contact Sheet arriving later).
-- File churn: Epics 4/5 both touch `RovstiInCallService`/`CallRegistry`; the split is justified by the risk boundary (outgoing/in-call vs lock-screen incoming) and the S2 spike feedback loop.
+- File churn: Epics 4/5 both touch `RostyInCallService`/`CallRegistry`; the split is justified by the risk boundary (outgoing/in-call vs lock-screen incoming) and the S2 spike feedback loop.
 - Story count: 89 stories in 13 epics.
 
 ### v0.2 addendum (appended 2026-10-28)

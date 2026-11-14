@@ -1,4 +1,4 @@
-# Building Rovsti Phone
+# Building Rosty Phone
 
 Environment (owner machine):
 
@@ -26,9 +26,9 @@ Install: `adb install -r <apk>`, or `gpuiforge run android --device <serial>`.
 
 `apps/phone/platforms/android` is owned by us (`gpuiforge platform eject android`).
 
-- Namespace is `dev.rovsti.phone`; phone Kotlin is in `app/src/main/kotlin/dev/rovsti/phone`.
-  `gpuiforge.json` sets `activity` to `dev.rovsti.phone.MainActivity`.
-- The shared Kotlin (`crates/rovsti_android/kotlin`) is a Gradle source directory added in
+- Namespace is `dev.rosty.phone`; phone Kotlin is in `app/src/main/kotlin/dev/rosty/phone`.
+  `gpuiforge.json` sets `activity` to `dev.rosty.phone.MainActivity`.
+- The shared Kotlin (`crates/rosty_android/kotlin`) is a Gradle source directory added in
   `app/build.gradle.kts`, not a symlink, so Windows checkouts build too.
 - Permissions live in both `gpuiforge.json` and `app/src/main/AndroidManifest.xml`; keep them equal.
 - The eject bakes absolute paths into `app/build.gradle.kts`. After moving the repo run
@@ -53,15 +53,15 @@ use it or Android refuses the update as a package conflict. `gpuiforge.json` poi
 and `scripts/signing.sh` (sourced by the build scripts) loads `ANDROID_STORE_PASSWORD` /
 `ANDROID_KEY_PASSWORD` from `signing.env` beside it, never printing them.
 
-Override the key with `ROVSTI_SIGNING_DIR` (folder with `rovsti-release.jks` + `signing.env`),
-or `ROVSTI_SIGNING_ENV` / `ROVSTI_KEYSTORE` / `ROVSTI_KEY_ALIAS`; the scripts then build from a
+Override the key with `ROSTY_SIGNING_DIR` (folder with `rovsti-release.jks` + `signing.env`),
+or `ROSTY_SIGNING_ENV` / `ROSTY_KEYSTORE` / `ROSTY_KEY_ALIAS`; the scripts then build from a
 temporary `.gpuiforge-signing.json` copy. The older Linux key (2026-10-27,
 SHA-256 `01bd06dd...89c1bb4`) stays in `~/.config/rovsti` as
-`ROVSTI_SIGNING_DIR=$HOME/.config/rovsti`, but it cannot update the installed apps.
+`ROSTY_SIGNING_DIR=$HOME/.config/rovsti`, but it cannot update the installed apps.
 `versionCode` is fixed at 1 in each `app/build.gradle.kts`; raise it on every machine
 together, since Android refuses a lower versionCode than the installed one.
 
-Check the key of an installed app: `adb pull "$(adb shell pm path dev.rovsti.phone | head -1 | cut -d: -f2)" installed.apk`,
+Check the key of an installed app: `adb pull "$(adb shell pm path dev.rosty.phone | head -1 | cut -d: -f2)" installed.apk`,
 then `apksigner verify --print-certs installed.apk` (the same works on any APK).
 
 ## Performance builds

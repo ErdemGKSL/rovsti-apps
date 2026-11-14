@@ -2,8 +2,8 @@
 //! (month and day steppers), quick chips and Go. The pages own the state.
 
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
-use rovsti_core::date_jump::{DayPick, quick_picks};
-use rovsti_ui::{
+use rosty_core::date_jump::{DayPick, quick_picks};
+use rosty_ui::{
     Icon, theme,
     tokens::{Theme, metrics, typography},
 };

@@ -1,13 +1,13 @@
-# util-phone: everyday utilities for Rovsti Phone (round 2)
+# util-phone: everyday utilities for Rosty Phone (round 2)
 
 baseSha: ca837b65b5fb0475775b60b6f4c7385569e64d2f
 
 ## Audit (what exists at baseSha)
 
 Round 1 (82abee0..ca837b6) shipped U1-U6 as planned in `util-phone.md`. These are in the tree:
-`rovsti_core::{zoom, number_format, call_log_query}`, `rovsti_android::media`
+`rosty_core::{zoom, number_format, call_log_query}`, `rosty_android::media`
 (`save_image_to_gallery`, `share_image`), `documents::export_calls`, `MediaShare.kt` with
-`RovstiShareProvider`, `apps/phone/src/photo_viewer.rs` (full screen, pinch, double-tap, pan, swipe to
+`RostyShareProvider`, `apps/phone/src/photo_viewer.rs` (full screen, pinch, double-tap, pan, swipe to
 close, Save, Share), Recents search and filter chips, the Copy as / Share as chooser
 (`SheetKind::CopyAs`), CSV export in Settings > Backup, and pause/wait long-press on `*` and `#`.
 Earlier work also shipped: block/unblock and the Blocked list, delete with Undo, the Recents row menu
@@ -20,19 +20,19 @@ Still missing:
 - No per-call notes. Sheet history lines (`recents::HistoryVm`, `history_section`) can only be deleted in
   Edit mode, and tapping a line does nothing. No call-details view exists (`blocked_ui.rs:450` points
   at a future "Call details").
-- No QR. `rovsti_wa_ui::qr_png(payload, min_px) -> Result<Vec<u8>, QrError>` is public and Phone already
-  depends on `rovsti_wa_ui`, so no new dependency is needed.
+- No QR. `rosty_wa_ui::qr_png(payload, min_px) -> Result<Vec<u8>, QrError>` is public and Phone already
+  depends on `rosty_wa_ui`, so no new dependency is needed.
 - The photo viewer cannot set, replace or remove a photo. The building blocks exist:
   `documents::pick_contact_photo`, `contacts_edit::{photo_size, set_photo, remove_photo}`,
-  `rovsti_core::contact_photo::plan`, `DocumentOp::ContactPhoto`, and a working pattern in
+  `rosty_core::contact_photo::plan`, `DocumentOp::ContactPhoto`, and a working pattern in
   `apps/contacts/src/backend.rs` (`change_photo`, `decode_size`, `photo_words`). The Phone manifest
   already has `WRITE_CONTACTS`.
 - The in-call screen has no note and no copy-number. Its 3x2 grid is full: mute, keypad, audio / add,
   hold, merge.
 
 Persistence facts: the app's own JSON files sit next to `prefs.json` through
-`rovsti_ui::storage::{save_json, load_json}` (see `wa_call.rs` `HISTORY_FILE`). The data dir comes from
-`rovsti_ui::storage::data_dir`/the Backend's prefs writer. Notes use the same pattern, so the
+`rosty_ui::storage::{save_json, load_json}` (see `wa_call.rs` `HISTORY_FILE`). The data dir comes from
+`rosty_ui::storage::data_dir`/the Backend's prefs writer. Notes use the same pattern, so the
 Android layer is not needed for them.
 
 ## Utility backlog (ordered by user value)
@@ -66,15 +66,15 @@ Android layer is not needed for them.
 ## Steps (round 2)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first. Make one focused commit per step
-(`Rovsti phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8. Never invent GPUI
+(`Rosty phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8. Never invent GPUI
 APIs: copy patterns already in `apps/phone/src` (sheets, `touch_surface`, `presses`, pills,
 `SearchField`).
 
-### S1. Pure call statistics: `rovsti_core::call_stats`
-- New `crates/rovsti_core/src/call_stats.rs`, `pub mod call_stats;` in `lib.rs`. No new deps.
+### S1. Pure call statistics: `rosty_core::call_stats`
+- New `crates/rosty_core/src/call_stats.rs`, `pub mod call_stats;` in `lib.rs`. No new deps.
 - Input type (so both sources feed one path):
   `#[derive(Clone, Debug, PartialEq, Eq)] pub struct StatCall { pub number: String /*raw*/, pub name:
   Option<String>, pub date_ms: i64, pub duration_s: u64, pub dir: StatDir, pub whatsapp: bool }` with
@@ -83,7 +83,7 @@ APIs: copy patterns already in `apps/phone/src` (sheets, `touch_surface`, `press
   It skips `Blocked` and `Unknown`, counts `Rejected` and `Voicemail` as `Missed`, and extras map by
   `missed`. `ExtraCall` (recents.rs:242, not serde, built in 8 places) has no direction today. Add
   `pub outgoing: bool` to it. Fill it in `apps/phone/src/wa_call.rs::extra_calls` from
-  `record.direction == CallDirection::Out` (`rovsti_wa_proto::history::WaCallRecord.direction`), and
+  `record.direction == CallDirection::Out` (`rosty_wa_proto::history::WaCallRecord.direction`), and
   set it at every other construction site, which are tests and samples (`grep -rn "ExtraCall {"`).
   `into_row` can then use `CallType::Outgoing`/`Incoming` instead of `Unknown` only if the existing
   recents tests still pass; otherwise leave `into_row` as it is.
@@ -113,10 +113,10 @@ APIs: copy patterns already in `apps/phone/src` (sheets, `touch_surface`, `press
   bars across a tz offset (a call at 23:30 local lands on the right day with `tz_offset_s = 10800`); a
   week boundary on Monday 00:00 local; `last_days(…, 7)` always has 7 bars, including empty ones;
   talk_text edges (0, 59, 60, 3599, 3600, 3900); top_people ordering, ties and limit.
-- Acceptance: `cargo test -p rovsti_core call_stats` passes, and the app is unchanged.
+- Acceptance: `cargo test -p rosty_core call_stats` passes, and the app is unchanged.
 
-### S2. Pure call notes and call details: `rovsti_core::call_notes`
-- New `crates/rovsti_core/src/call_notes.rs`, `pub mod call_notes;`. It uses serde (already a dep).
+### S2. Pure call notes and call details: `rosty_core::call_notes`
+- New `crates/rosty_core/src/call_notes.rs`, `pub mod call_notes;`. It uses serde (already a dep).
 - `#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)] pub struct CallNote { pub number:
   String /*raw as dialed*/, pub at_ms: i64 /*call start*/, pub text: String, pub edited_ms: i64 }`.
   The key is number + time, not `EntryRef`, because call-log ids change after a backup restore and a
@@ -156,10 +156,10 @@ APIs: copy patterns already in `apps/phone/src` (sheets, `touch_surface`, `press
   oldest; remove then restore round-trips; JSON round-trip, and garbage gives empty; details text in dmy
   and mdy order, 12 h and 24 h, a missed call has no duration, WhatsApp channel; CSV with notes has the
   column and an injection-guarded note `=cmd`.
-- Acceptance: `cargo test -p rovsti_core call_notes call_log_query` passes.
+- Acceptance: `cargo test -p rosty_core call_notes call_log_query` passes.
 
-### S3. Pure contact QR payload: `rovsti_core::number_format::contact_qr`
-- Add to `crates/rovsti_core/src/number_format.rs`: `pub const QR_MAX_BYTES: usize = 1200` and
+### S3. Pure contact QR payload: `rosty_core::number_format::contact_qr`
+- Add to `crates/rosty_core/src/number_format.rs`: `pub const QR_MAX_BYTES: usize = 1200` and
   `pub fn contact_qr(name: &str, numbers: &[(&str /*raw*/, Option<&str> /*label*/)], home_cc:
   Option<&str>) -> Result<String, QrTooBig>`. It builds one vCard 3.0 through `vcard::write` with a
   `ContactDraft` (`given` = name and the rest empty; check how `vcard::write` emits `FN`/`N`). Each
@@ -169,26 +169,26 @@ APIs: copy patterns already in `apps/phone/src` (sheets, `touch_surface`, `press
   `QrTooBig` comes back only when even one number does not fit. Return the count kept in a small struct
   `ContactQr { pub payload: String, pub kept: usize, pub dropped: usize }` instead of `String` so the UI
   can say "2 numbers left out".
-- Also add `pub fn qr_file_name(name: &str) -> String` (`rovsti-<slug>-qr.png`, the same slug rules as
+- Also add `pub fn qr_file_name(name: &str) -> String` (`rosty-<slug>-qr.png`, the same slug rules as
   `photo_viewer::photo_file_name`; move that slug helper here as `pub fn file_slug(name) -> String`
   and have `photo_file_name` call it).
 - Tests: the payload parses back through `vcard::parse` with name and all numbers in E.164; duplicates
   (national plus international of the same number) appear once; a long list is trimmed to fit, with the
   right `kept`/`dropped`; a name with commas, semicolons and non-ASCII is escaped and round-trips;
   `file_slug` for Turkish characters, emoji and an empty name (`"contact"`).
-- Acceptance: `cargo test -p rovsti_core number_format` passes, and `photo_viewer` tests still pass.
+- Acceptance: `cargo test -p rosty_core number_format` passes, and `photo_viewer` tests still pass.
 
 ### S4. Glue: notes store, QR image, contact photo edit (`apps/phone/src/backend.rs`, new `notes.rs`)
 - New `apps/phone/src/notes.rs`: `pub(crate) struct NotesStore { notes: call_notes::Notes, dir:
   Option<PathBuf>, rev: u64 }` held on `PhoneApp` (or the Backend entity, whichever already owns
-  `data_dir`; follow `wa_call.rs`: load in the background with `rovsti_ui::storage::load_json(dir,
+  `data_dir`; follow `wa_call.rs`: load in the background with `rosty_ui::storage::load_json(dir,
   call_notes::FILE)`, save off the UI thread with `save_json`, and bump `rev` on change so views rebuild
   their glyph flags only when `rev` moves). Methods: `get(number, at) -> Option<&CallNote>`, `set(..) ->
   SetOutcome`, `remove(..) -> Option<CallNote>`, `restore(note)`, `snapshot() -> call_notes::Notes`
   (for CSV). Include notes in nothing else (not prefs backup this round; write that in docs).
 - Backup export (U19): `backup_ui.rs`'s CSV export calls `to_csv_with_notes` with the store snapshot.
 - QR image: `pub fn qr_image(payload: &str) -> Option<(Arc<RenderImage>, PathBuf)>` in `backend.rs`.
-  It calls `rovsti_wa_ui::qr_png(payload, 720)`, writes the PNG into the temp/cache dir the photo viewer
+  It calls `rosty_wa_ui::qr_png(payload, 720)`, writes the PNG into the temp/cache dir the photo viewer
   already uses for its export (`photo_viewer::export_png`'s dir; reuse or lift that helper), and
   decodes it into a `RenderImage` the same way `photo_viewer` builds one. Desktop works fully (save and
   share then report Unsupported through the existing `save_to_gallery`/`share_image` wrappers).
@@ -211,7 +211,7 @@ APIs: copy patterns already in `apps/phone/src` (sheets, `touch_surface`, `press
 - `recents.rs` `history_section`: each history line becomes a tap target (id `sheet-nhl-{i}` /
   `sheet-chl-{i}`, routed through `history_edit_act`'s prefix logic) that opens the details sheet. In
   Edit mode the trash button keeps priority. Lines with a note show a small `Icon::LucideStickyNote`
-  (or the nearest existing Lucide icon in `rovsti_ui::Icon`; grep the enum) before the detail text.
+  (or the nearest existing Lucide icon in `rosty_ui::Icon`; grep the enum) before the detail text.
   `HistoryVm` gains `pub(crate) number: SharedString`, `pub(crate) date_ms: i64` and `pub(crate) note:
   bool`, filled once in `history_for`/`blocked_history_for` from `NotesStore::for_calls`.
 - New `SheetKind::CallDetails` and `apps/phone/src/details_ui.rs`: `pub(crate) struct DetailsSheet {

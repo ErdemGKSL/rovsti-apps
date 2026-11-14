@@ -8,8 +8,8 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_core::wire::CallLogKind;
-use rovsti_ui::{
+use rosty_core::wire::CallLogKind;
+use rosty_ui::{
     theme,
     tokens::{Theme, metrics},
 };
@@ -165,9 +165,9 @@ impl PhoneApp {
             .into_any_element()
     }
 
-    /// Desktop preview: plays a script of presses (ROVSTI_PREVIEW_KEYS), one
-    /// step every ROVSTI_PREVIEW_KEYS_MS (default 350) after
-    /// ROVSTI_PREVIEW_KEYS_AT ms (default 2500). Digits, `*` and `#` press keys,
+    /// Desktop preview: plays a script of presses (ROSTY_PREVIEW_KEYS), one
+    /// step every ROSTY_PREVIEW_KEYS_MS (default 350) after
+    /// ROSTY_PREVIEW_KEYS_AT ms (default 2500). Digits, `*` and `#` press keys,
     /// `c` Call, `d` Delete, `a` Answer, `x` Decline, `e` End, `f` the first
     /// Favorites tile, `r` the first Recents row, `t<n>` selects tab n and
     /// `.` waits one step, `m` Mute, `h` Hold, `w` Waiting, `k` a call, `n` a new missed call,
@@ -186,8 +186,8 @@ impl PhoneApp {
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(default)
         };
-        let step = std::time::Duration::from_millis(env_ms("ROVSTI_PREVIEW_KEYS_MS", 350));
-        let start = std::time::Duration::from_millis(env_ms("ROVSTI_PREVIEW_KEYS_AT", 2500));
+        let step = std::time::Duration::from_millis(env_ms("ROSTY_PREVIEW_KEYS_MS", 350));
+        let start = std::time::Duration::from_millis(env_ms("ROSTY_PREVIEW_KEYS_AT", 2500));
         cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(start).await;
             let mut chars = script.chars().peekable();
@@ -307,7 +307,7 @@ impl PhoneApp {
             'p' => self.diag_copy(cx),
             's' => self.contact_sheet_act("sheet-cstar", window, cx),
             // Settings: `Q` opens the page, `Z` closes it, `I` taps the next row id of
-            // ROVSTI_PREVIEW_TAPS (comma separated, e.g. `set-proximity,set-sort-1`).
+            // ROSTY_PREVIEW_TAPS (comma separated, e.g. `set-proximity,set-sort-1`).
             'Q' => self.settings_open(window, cx),
             'Z' => self.settings_close(window, cx),
             'I' => {

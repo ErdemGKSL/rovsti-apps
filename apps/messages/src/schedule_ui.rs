@@ -12,18 +12,18 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, TextInputAction, TextInputPurpose, Window,
     div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     PhoneNumber,
     schedule::{self, FiredSms, MIN_LEAD_MS, ScheduleTarget, ScheduledSms},
 };
-use rovsti_ui::{
+use rosty_ui::{
     components::{glass_pill, list_row},
     field::{TextField, field_box},
     sheet::Sheet,
     theme,
     tokens::{Theme, typography},
 };
-use rovsti_wa_proto::{ScheduledState, ScheduledText};
+use rosty_wa_proto::{ScheduledState, ScheduledText};
 use serde::Deserialize;
 
 use crate::{
@@ -715,7 +715,7 @@ impl ScheduleSheet {
                     .text_color(colors.secondary_label)
                     .child(
                         gpui::svg()
-                            .path(rovsti_ui::Icon::LucideAlarmClock.path())
+                            .path(rosty_ui::Icon::LucideAlarmClock.path())
                             .size(px(14.0))
                             .text_color(colors.secondary_label),
                     )

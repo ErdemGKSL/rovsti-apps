@@ -3,7 +3,7 @@
 baseSha: b9336113a340ababa33a5da1a66a733200ef28c0
 
 ## Status after round 1
-Round 1 (S1 to S7, commits 0e3a8cf..b933611) is in: the pure `rovsti_core::keypad_layout`
+Round 1 (S1 to S7, commits 0e3a8cf..b933611) is in: the pure `rosty_core::keypad_layout`
 module with tests, per-frame layout, the clipped section boxes, number fit with a leading
 ellipsis (`elided_head`), the capped matches strip, the scrolling actions row, the bottom safe
 area and the docs. The tree is clean and nothing is stashed.
@@ -40,7 +40,7 @@ GPUI APIs to use (all already used in this repo, or checked at
 ## Steps
 
 ### S1. Pure: the header budget holds the title block in every mode
-- `crates/rovsti_core/src/keypad_layout.rs`:
+- `crates/rosty_core/src/keypad_layout.rs`:
   - Add `pub const TITLE_BLOCK_MIN: f32 = 49.0;` (LARGE_TITLE line 41 + bottom padding 8) and
     `pub const LANDSCAPE_HEADER_H: f32 = 48.0;` (it replaces `LANDSCAPE_HEADER_MAX`; it holds the
     44 px gear/setup row plus 2 px above and below).
@@ -58,7 +58,7 @@ GPUI APIs to use (all already used in this repo, or checked at
     and `<= grid.y`.
   - Extend `sweep_of_viewports_stays_sane` so it also runs with `insets.top = 32, bottom = 24`.
     `assert_sane` already checks the header for overlaps.
-- Acceptance: `cargo test -p rovsti_core keypad_layout` passes. The phone app builds unchanged
+- Acceptance: `cargo test -p rosty_core keypad_layout` passes. The phone app builds unchanged
   (add `header_compact` wherever a `KeypadLayout` literal exists, if any). All checks green.
 
 ### S2. View: one coordinate origin, and the header drawn inside its rect
@@ -109,16 +109,16 @@ GPUI APIs to use (all already used in this repo, or checked at
     and a long `dialed` (typing never moves the keys).
 - This test fails on HEAD (keys about 105 px low) and passes after S2. If S2 was done first,
   check it by temporarily reverting the `top_0` change locally. Do not commit that revert.
-- Acceptance: `cargo test -p rovsti_phone keypad_draws_inside` passes. All checks green.
+- Acceptance: `cargo test -p rosty_phone keypad_draws_inside` passes. All checks green.
 
 ### S4. Docs and final verification
 - `docs/ux-audit.md` (keypad entry): note the header budget (`TITLE_BLOCK_MIN`, landscape
   one-row header) and the headless bounds test. `docs/phone-acceptance.md`: add "landscape:
   title is a single row, nothing overlaps the number".
 - Run the full checks from the task: `cargo fmt --all && cargo clippy --workspace
-  --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android
-  --target aarch64-linux-android && cargo check -p rovsti_wa_client --target
-  aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`. If
+  --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android
+  --target aarch64-linux-android && cargo check -p rosty_wa_client --target
+  aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`. If
   `df` shows < 6 GB free, run `rm -rf target/debug/incremental` first.
 - Commit with the attribution lines from the session.
 - Acceptance: all checks green, and the working tree is clean.

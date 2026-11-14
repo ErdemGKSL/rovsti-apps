@@ -1,26 +1,26 @@
-# Plan: Rovsti Contacts
+# Plan: Rosty Contacts
 
 - Base: `a31040abb2188baca724499085e2815bed01d068` ("WIP: carry-over before sync")
-- Unit: Rovsti Contacts. Architect: PLAN agent. No source changed by this plan.
+- Unit: Rosty Contacts. Architect: PLAN agent. No source changed by this plan.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android`
 - Nothing runs on a device here. Kotlin is checked by reading only; every Kotlin change keeps
   the strings-only JNI seam and the Rust side returns `Error::Unsupported` on desktop.
 
 ## What the code already has (source of truth at the base)
 
-Most of the brief has landed (`docs/roadmap.md`, "Rovsti Contacts"):
+Most of the brief has landed (`docs/roadmap.md`, "Rosty Contacts"):
 
-- Ejected Android host `apps/contacts/platforms/android` with `RovstiBridge` (shared Kotlin in
-  `crates/rovsti_android/kotlin` as a Gradle source dir). Done.
-- Name format and sort persisted: `rovsti_core::contacts_prefs::ContactsPrefs`
+- Ejected Android host `apps/contacts/platforms/android` with `RostyBridge` (shared Kotlin in
+  `crates/rosty_android/kotlin` as a Gradle source dir). Done.
+- Name format and sort persisted: `rosty_core::contacts_prefs::ContactsPrefs`
   (`contacts-prefs.json`), read and written by `apps/contacts/src/prefs.rs`. Done.
-- In-app create, edit, delete: `rovsti_core::contact_edit::{ContactDraft, DraftError, ...}`,
-  Kotlin `ContactsEdit.kt`, Rust `rovsti_android::contacts_edit`, app `editor.rs`. Done.
+- In-app create, edit, delete: `rosty_core::contact_edit::{ContactDraft, DraftError, ...}`,
+  Kotlin `ContactsEdit.kt`, Rust `rosty_android::contacts_edit`, app `editor.rs`. Done.
 - Photos on list and card (`apps/contacts/src/photos.rs`, `providers::contact_photo`), groups
-  (`groups.rs`, Groups tab), vCard import/export (`rovsti_core::{vcard, import_plan}`,
+  (`groups.rs`, Groups tab), vCard import/export (`rosty_core::{vcard, import_plan}`,
   `transfer.rs`, SAF). Done.
-- Shared WhatsApp settings: `rovsti_wa_ui::WhatsAppSettings::new(AppId::Contacts, "contacts", cx)`
+- Shared WhatsApp settings: `rosty_wa_ui::WhatsAppSettings::new(AppId::Contacts, "contacts", cx)`
   is pushed from Settings (`main.rs` `whatsapp_page`); two options (link first time / connect
   with key), keys hashed at rest on the gateway, revocable, stored in `whatsapp-link.json`. Done.
 
@@ -37,15 +37,15 @@ Still open, and what this plan delivers:
 5. Bugs found while studying: the Contacts manifest has **no `INTERNET` permission**, so the
    shared WhatsApp settings cannot reach the gateway on a phone (Messages declares it; Phone
    gets it only if a merged library does, check it in step 7). `docs/whatsapp-notes.md` line 27
-   still says "Rovsti Contacts owns the WhatsApp session" (superseded by the gateway).
+   still says "Rosty Contacts owns the WhatsApp session" (superseded by the gateway).
 
 Not doable without a device (stays open): "Check the editor, groups and vCard flows on a phone".
 
 ## Decisions (AD-CT)
 
 - **AD-CT1 Pure first.** Draft rules, accounts, photo crop plan, the handoff payload, presence
-  text, the WhatsApp target of a contact and the lookup cache are pure (`rovsti_core`,
-  `rovsti_wa_proto`) with unit tests. Kotlin and GPUI only map.
+  text, the WhatsApp target of a contact and the lookup cache are pure (`rosty_core`,
+  `rosty_wa_proto`) with unit tests. Kotlin and GPUI only map.
 - **AD-CT2 Number-less contacts are Contacts-only.** Phone keeps `pullContacts` (numbers only).
   Contacts switches to a new `pullContactsAll` (every visible contact, numbers may be empty,
   first email for the subtitle). A draft needs a name or organisation; numbers become optional.
@@ -58,21 +58,21 @@ Not doable without a device (stays open): "Check the editor, groups and vCard fl
 - **AD-CT4 Photos.** Android Photo Picker (`MediaStore.ACTION_PICK_IMAGES`, minSdk is 34, no
   permission), copied to cache (cap 20 MiB) and answered as `document_result` op
   `contact_photo`. Rust asks Kotlin for the decoded size, computes a centred square crop and an
-  output side (max 720 px) with `rovsti_core::contact_photo::plan`, and Kotlin decodes with
+  output side (max 720 px) with `rosty_core::contact_photo::plan`, and Kotlin decodes with
   `ImageDecoder` (EXIF applied), crops, scales, writes JPEG q90 to
   `RawContacts.DisplayPhoto.CONTENT_DIRECTORY` of the primary raw contact. Remove deletes the
   `Photo.CONTENT_ITEM_TYPE` data row.
 - **AD-CT5 WhatsApp from Contacts goes through the apps that own it.** Calls need Phone's
   In-Call screen and `WaCallAudio`, chats need Messages' conversation. Contacts hands off with an
-  explicit intent (`dev.rovsti.action.WA_CALL` / `WA_CHAT`, extras `jid`, `name`). The target
-  activity-alias is exported with permission `dev.rovsti.permission.HANDOFF`
-  (`protectionLevel="signature"`), so only same-signed Rovsti apps can make Phone place a call.
+  explicit intent (`dev.rosty.action.WA_CALL` / `WA_CHAT`, extras `jid`, `name`). The target
+  activity-alias is exported with permission `dev.rosty.permission.HANDOFF`
+  (`protectionLevel="signature"`), so only same-signed Rosty apps can make Phone place a call.
   Kotlin `Handoff.start` resolves by action through `<queries>` and keeps only packages whose
   signature matches (`PackageManager.checkSignatures == SIGNATURE_MATCH`), which also covers
   Phone's debug `.perf` suffix. The receiving app turns it into a one-shot `handoff`
   (mailbox, survives a cold start). Phone places the call with its existing
   `WaCall::place`; Messages opens `wa:<jid>` like a notification tap. When the app is missing,
-  Contacts says "Install Rovsti Phone to call on WhatsApp" (or Messages).
+  Contacts says "Install Rosty Phone to call on WhatsApp" (or Messages).
 - **AD-CT6 Availability is lazy.** Contacts never sends the whole address book to WhatsApp. It
   marks list rows from the instance's existing chats (`GET /v1/chats`, no usync), and only when a
   card opens asks `POST /v1/contacts/lookup` for that contact's numbers (at most 12) and
@@ -84,9 +84,9 @@ Not doable without a device (stays open): "Check the editor, groups and vCard fl
 
 ## Steps
 
-### Step 1. Pure: number-optional drafts, accounts, photo plan, prefs (`rovsti_core`)
+### Step 1. Pure: number-optional drafts, accounts, photo plan, prefs (`rosty_core`)
 
-Files: `crates/rovsti_core/src/{contact_edit.rs, contacts_view.rs, wire.rs, contacts_prefs.rs, contact_photo.rs (new), lib.rs}`, `crates/rovsti_core/src/vcard.rs` (tests only), `apps/contacts/src/{prefs.rs, main.rs, editor.rs}` (compile fixes only).
+Files: `crates/rosty_core/src/{contact_edit.rs, contacts_view.rs, wire.rs, contacts_prefs.rs, contact_photo.rs (new), lib.rs}`, `crates/rosty_core/src/vcard.rs` (tests only), `apps/contacts/src/{prefs.rs, main.rs, editor.rs}` (compile fixes only).
 
 - `contact_edit`: remove `DraftError::NoNumber`; `validate` needs a name or organisation, numbers
   optional; `ContactDraft::blank()` unchanged (one empty mobile row, dropped by `clean` if left
@@ -118,12 +118,12 @@ Files: `crates/rovsti_core/src/{contact_edit.rs, contacts_view.rs, wire.rs, cont
 
 Acceptance: tests pass, `apps/contacts` builds unchanged in behaviour, all checks green.
 
-### Step 2. Pure WhatsApp: presence text, contact target, lookup wire and cache, handoff payload (`rovsti_wa_proto`, `rovsti_core`)
+### Step 2. Pure WhatsApp: presence text, contact target, lookup wire and cache, handoff payload (`rosty_wa_proto`, `rosty_core`)
 
-Files: `crates/rovsti_wa_proto/src/{presence.rs (new), lookup.rs (new), api.rs, lib.rs}`, `crates/rovsti_core/src/wire.rs`, `apps/messages/src/conversation.rs`.
+Files: `crates/rosty_wa_proto/src/{presence.rs (new), lookup.rs (new), api.rs, lib.rs}`, `crates/rosty_core/src/wire.rs`, `apps/messages/src/conversation.rs`.
 
 - Move `presence_label` (and the `clock` / `day_label` helpers it needs) from
-  `apps/messages/src/conversation.rs` to `rovsti_wa_proto::presence`:
+  `apps/messages/src/conversation.rs` to `rosty_wa_proto::presence`:
   `pub fn presence_label(available: bool, last_seen_ms: Option<i64>, now_ms: i64, offset_s: i32) -> Option<String>`.
   Messages calls the moved function; its tests move with it.
 - `presence::PresenceBook` (bounded map, 256 entries, oldest dropped):
@@ -137,7 +137,7 @@ Files: `crates/rovsti_wa_proto/src/{presence.rs (new), lookup.rs (new), api.rs, 
   `enum WaTarget { Chat(String), Number(String), NeedsCountryCode, None }`: a number that
   `PhoneNumber::matches` an existing 1:1 chat's user wins, else the first international number as
   `user_jid`, else `NeedsCountryCode` when numbers exist. `lookup::chat_users(chats: &[ChatSummary]) -> Vec<String>` (1:1 only).
-- `rovsti_core::wire::Handoff { action: HandoffAction, jid: String, name: Option<String> }`,
+- `rosty_core::wire::Handoff { action: HandoffAction, jid: String, name: Option<String> }`,
   `enum HandoffAction { WaCall, WaChat, #[serde(other)] Unknown }`, `parse_handoff(json) -> Option<Handoff>`
   (rejects empty or non-`@s.whatsapp.net` jids).
 - Tests: presence label table (moved), `book_keeps_latest_and_is_bounded`,
@@ -147,9 +147,9 @@ Files: `crates/rovsti_wa_proto/src/{presence.rs (new), lookup.rs (new), api.rs, 
 
 Acceptance: Messages behaviour unchanged (moved code only), all checks green.
 
-### Step 3. Gateway and client: `POST /v1/contacts/lookup` (`services/wa_gateway`, `rovsti_wa_client`)
+### Step 3. Gateway and client: `POST /v1/contacts/lookup` (`services/wa_gateway`, `rosty_wa_client`)
 
-Files: `services/wa_gateway/src/{driver.rs, routes.rs, lib.rs, wa/session.rs}`, `services/wa_gateway/tests/api.rs`, `crates/rovsti_wa_client/src/http.rs`, `docs/whatsapp-gateway.md`.
+Files: `services/wa_gateway/src/{driver.rs, routes.rs, lib.rs, wa/session.rs}`, `services/wa_gateway/tests/api.rs`, `crates/rosty_wa_client/src/http.rs`, `docs/whatsapp-gateway.md`.
 
 - `WaDriver::lookup_users(&self, instance: &InstanceId, jids: Vec<String>) -> BoxFuture<'_, Result<Vec<WaUser>, DriverError>>`
   with a default body `Err(DriverError::NotConnected)` (so `UnlinkedDriver` needs nothing).
@@ -174,11 +174,11 @@ Files: `services/wa_gateway/src/{driver.rs, routes.rs, lib.rs, wa/session.rs}`, 
 
 Acceptance: gateway tests pass; client still checks for `aarch64-linux-android`.
 
-### Step 4. Android seam: all contacts, accounts, photo pick and write, handoff (`rovsti_android` + shared Kotlin)
+### Step 4. Android seam: all contacts, accounts, photo pick and write, handoff (`rosty_android` + shared Kotlin)
 
-Files: `crates/rovsti_android/src/{providers.rs, contacts_edit.rs, documents.rs, handoff.rs (new), events.rs, lib.rs}`, `crates/rovsti_android/kotlin/dev/rovsti/bridge/{ContactsQuery.kt, ContactsEdit.kt, ContactPhotos.kt, Documents.kt, Handoff.kt (new), RovstiBridge.kt}`.
+Files: `crates/rosty_android/src/{providers.rs, contacts_edit.rs, documents.rs, handoff.rs (new), events.rs, lib.rs}`, `crates/rosty_android/kotlin/dev/rosty/bridge/{ContactsQuery.kt, ContactsEdit.kt, ContactPhotos.kt, Documents.kt, Handoff.kt (new), RostyBridge.kt}`.
 
-- `providers::contacts_all() -> Result<String>` -> `RovstiBridge.pullContactsAll()`:
+- `providers::contacts_all() -> Result<String>` -> `RostyBridge.pullContactsAll()`:
   `ContactsQuery.allContactsJson` queries `Contacts.CONTENT_URI` (id, display names, sort keys,
   starred, photo, lookup key) and merges the `Phone` rows and the first `Email` per contact into
   the same `ProviderJson.contacts` envelope (numbers may be empty, `email` set).
@@ -194,15 +194,15 @@ Files: `crates/rovsti_android/src/{providers.rs, contacts_edit.rs, documents.rs,
   (decode with `ImageDecoder`, crop by the plan, `Bitmap.createScaledBitmap`, JPEG 90, write
   through `openAssetFileDescriptor(displayPhotoUri, "rw")`; delete the cached file afterwards).
 - Handoff: `handoff::wa_call(jid, name) -> Result<bool>`, `handoff::wa_chat(jid, name) -> Result<bool>`
-  -> `RovstiBridge.handoff(action, jid, name)`; `Handoff.kt` with `ACTION_WA_CALL`,
-  `ACTION_WA_CHAT`, `EXTRA_JID`, `EXTRA_NAME`, `PERMISSION = "dev.rovsti.permission.HANDOFF"`,
+  -> `RostyBridge.handoff(action, jid, name)`; `Handoff.kt` with `ACTION_WA_CALL`,
+  `ACTION_WA_CHAT`, `EXTRA_JID`, `EXTRA_NAME`, `PERMISSION = "dev.rosty.permission.HANDOFF"`,
   `start(context, action, jid, name)` (resolve by action, keep signature-matching packages,
-  `FLAG_ACTIVITY_NEW_TASK`, false when none) and `RovstiBridge.deliverHandoff(intent): Boolean`
+  `FLAG_ACTIVITY_NEW_TASK`, false when none) and `RostyBridge.deliverHandoff(intent): Boolean`
   (posts one-shot `handoff` `{action, jid, name}`, removes the extras). `events::kind::HANDOFF = "handoff"`.
 - Desktop tests (`#[cfg(all(test, not(target_os = "android")))]`): every new function returns
   `Error::Unsupported`.
 
-Acceptance: `cargo check -p rovsti_android --target aarch64-linux-android` and desktop tests
+Acceptance: `cargo check -p rosty_android --target aarch64-linux-android` and desktop tests
 green; Kotlin compiles by inspection (no new dependencies).
 
 ### Step 5. Contacts app: number-less contacts and "Save to" account with its groups
@@ -231,7 +231,7 @@ items ("Contacts without a phone number", "Groups of a synced account for a new 
 
 Files: `apps/contacts/src/{editor.rs, transfer.rs, photos.rs, backend.rs}`.
 
-- Editor header: tap the avatar for a small sheet (rovsti_ui `sheet` as Messages uses it):
+- Editor header: tap the avatar for a small sheet (rosty_ui `sheet` as Messages uses it):
   "Choose photo", "Remove photo" (only when the contact has one). New contacts get the photo
   after the first save (the save returns the id; keep the picked path pending until then).
 - `transfer.rs::on_document_result` routes `DocumentOp::ContactPhoto`: check
@@ -247,17 +247,17 @@ contact's photo" (done without a device).
 
 ### Step 7. Phone and Messages accept the WhatsApp handoff; manifests
 
-Files: `apps/phone/platforms/android/app/src/main/{AndroidManifest.xml, kotlin/dev/rovsti/phone/MainActivity.kt}`,
-`apps/messages/platforms/android/app/src/main/{AndroidManifest.xml, kotlin/dev/rovsti/messages/MainActivity.kt}`,
+Files: `apps/phone/platforms/android/app/src/main/{AndroidManifest.xml, kotlin/dev/rosty/phone/MainActivity.kt}`,
+`apps/messages/platforms/android/app/src/main/{AndroidManifest.xml, kotlin/dev/rosty/messages/MainActivity.kt}`,
 `apps/phone/src/{backend.rs, main.rs}`, `apps/messages/src/{backend.rs, main.rs}`.
 
-- Both manifests: `<permission android:name="dev.rovsti.permission.HANDOFF" android:protectionLevel="signature"/>`
-  and an exported `<activity-alias android:name=".WaHandoff" android:targetActivity=".MainActivity" android:permission="dev.rovsti.permission.HANDOFF">`
+- Both manifests: `<permission android:name="dev.rosty.permission.HANDOFF" android:protectionLevel="signature"/>`
+  and an exported `<activity-alias android:name=".WaHandoff" android:targetActivity=".MainActivity" android:permission="dev.rosty.permission.HANDOFF">`
   with the action filter (`WA_CALL` on Phone, `WA_CHAT` on Messages, category DEFAULT). Check
   Phone has `INTERNET` after the manifest merge; add it explicitly if not.
-- `MainActivity.onCreate` / `onNewIntent`: `RovstiBridge.deliverHandoff(intent)` before other
+- `MainActivity.onCreate` / `onNewIntent`: `RostyBridge.deliverHandoff(intent)` before other
   forwarding.
-- Phone: the `handoff` one-shot (`rovsti_core::wire::parse_handoff`) with `WaCall` calls
+- Phone: the `handoff` one-shot (`rosty_core::wire::parse_handoff`) with `WaCall` calls
   `WaCall::place(&dial_number(jid), cx)` (existing `wa_call::dial_number`), errors as the existing
   call-error notice. Messages: `WaChat` -> `on_open_tag(&format!("wa:{jid}"))`; check that a
   `wa:` jid with no chat yet opens an empty conversation with the contact name as title (pass
@@ -271,11 +271,11 @@ Acceptance: checks green; no change for intents without the extras.
 
 Files: `apps/contacts/src/{whatsapp.rs (new), detail.rs, main.rs, transfer.rs}`,
 `apps/contacts/platforms/android/app/src/main/AndroidManifest.xml`,
-`apps/contacts/platforms/android/app/src/main/kotlin/dev/rovsti/contacts/MainActivity.kt`,
+`apps/contacts/platforms/android/app/src/main/kotlin/dev/rosty/contacts/MainActivity.kt`,
 `docs/{roadmap.md, architecture.md, whatsapp-notes.md}`.
 
-- Manifest: `INTERNET`; `<uses-permission android:name="dev.rovsti.permission.HANDOFF"/>` plus the
-  same `<permission>` declaration (whichever Rovsti app installs first defines it);
+- Manifest: `INTERNET`; `<uses-permission android:name="dev.rosty.permission.HANDOFF"/>` plus the
+  same `<permission>` declaration (whichever Rosty app installs first defines it);
   `<queries>` with the two handoff actions. No FCM: Contacts does not register push.
 - `whatsapp.rs`: `struct WaPanel { chat_users: Vec<String>, book: PresenceBook, lookups: HashMap<i64 /*contact*/, LookupState> }`
   with `enum LookupState { Checking, Done(Vec<WaUser>), Failed }`. On connect and on `Resync`:
@@ -288,7 +288,7 @@ Files: `apps/contacts/src/{whatsapp.rs (new), detail.rs, main.rs, transfer.rs}`,
   "Add the country code to check WhatsApp"), and two glass actions "Chat" and "Call"
   (`Icon::LucideMessageCircle`, `Icon::LucidePhone`, both already used in the apps at
   d6c8412) calling `handoff::wa_chat` / `wa_call` on the background executor; a `false` answer
-  shows "Install Rovsti Messages/Phone to ..."; desktop shows the Unsupported notice. Hidden when
+  shows "Install Rosty Messages/Phone to ..."; desktop shows the Unsupported notice. Hidden when
   WhatsApp is not connected (a one-line hint links to the WhatsApp settings page instead).
 - List: a small WhatsApp mark on rows whose number matches a known chat (computed once per pull
   and chats refresh, never per frame).

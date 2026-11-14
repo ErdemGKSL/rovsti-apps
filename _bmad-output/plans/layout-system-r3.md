@@ -12,7 +12,7 @@ FilterChipRow, SectionHeader, EmptyState, the tab-bar inset, the puck, colour ro
 honest shots all landed (`7deff5f..2fb3dc4`). The fresh `messages/01-inbox-dark.png` matches
 the spec. What the shared system still lacks is exactly what the owner names: a real
 **anchored popover / context menu**, an overlay material you cannot read through, and
-**one button set**. This round adds those to `rovsti_ui` and proves them on two screens:
+**one button set**. This round adds those to `rosty_ui` and proves them on two screens:
 the Messages row menu, which is the system unit's proof screen, and the Stops Saved
 inline action row, which is the clearest "flows into content" case. The per-app units
 migrate every other site from the inventory written in step 1.
@@ -74,7 +74,7 @@ migrate every other site from the inventory written in step 1.
   `sheet` optics, blur 24, and a tint of `background` at 0.86 (dark) / 0.82 (light).
   The scrim behind a popover is transparent but catches taps (tap outside = dismiss).
   The scrim behind a sheet stays at its current alpha.
-- **Buttons (one set, `rovsti_ui::button`):**
+- **Buttons (one set, `rosty_ui::button`):**
   - Styles: `Filled` (accent fill, `readable_on` ink), `Tinted` (accent at 0.16 alpha,
     `accent_text` ink), `Gray` (`secondary_background`, label ink), `Plain` (no fill,
     `accent_text`), and `Destructive` as a role that switches the colour to red in any style.
@@ -106,7 +106,7 @@ migrate every other site from the inventory written in step 1.
 `open_field_sheet`. All checks pass.
 
 ### 2. Pure menu model and popover geometry (platform-free, unit-tested)
-- `crates/rovsti_ui/src/layout.rs`, `geom`: add a pure
+- `crates/rosty_ui/src/layout.rs`, `geom`: add a pure
   `place_popover(anchor: Rect, menu: Size, viewport: Size, top: f32, bottom: f32, margin: f32, gap: f32) -> Placement { rect: Rect, below: bool, max_h: f32 }`
   and `popover_width(longest_label_dp: f32, viewport_w: f32) -> f32`. Use the plain
   `Rect` / `Size` f32 structs already in `geom` (add them if they are missing; no gpui types).
@@ -116,20 +116,20 @@ migrate every other site from the inventory written in step 1.
   (long-press point).
 - `menu_height(groups: &[usize]) -> f32` = 44 x items + 8 x (groups - 1) + 2 x 6 dp
   vertical padding. Test it.
-- Add a pure model `crates/rovsti_ui/src/menu/model.rs` (no gpui imports):
+- Add a pure model `crates/rosty_ui/src/menu/model.rs` (no gpui imports):
   `MenuItem { key: &'static str, label, icon_name, role: Normal|Destructive, enabled, checked, submenu: bool }`,
   `MenuGroup(Vec<MenuItem>)`, and `MenuModel::new(groups)`. The constructor drops empty
   groups and **debug-asserts unique keys**. Add `MenuModel::dedup_by_key` for callers that
   merge two sources. Tests cover the dedupe, the empty-group removal and the order kept.
-**Acceptance:** `cargo test -p rovsti_ui geom menu` passes with at least 10 new tests. All
+**Acceptance:** `cargo test -p rosty_ui geom menu` passes with at least 10 new tests. All
 checks pass.
 
 ### 3. `Overlay` material and the `Menu` popover component
 - `crates/liquid_glass_kit/src/glass.rs`: add `GlassSpec::thick(theme)` built from
   `sheet(theme)` with only existing fields changed (blur 24, tint = theme background at
-  0.86 dark / 0.82 light). `crates/rovsti_ui/src/sheet.rs` panel and `menu_card` users
+  0.86 dark / 0.82 light). `crates/rosty_ui/src/sheet.rs` panel and `menu_card` users
   switch to it in step 6. `Sheet` switches now (one line), and its shots are re-rendered.
-- `crates/rovsti_ui/src/menu.rs` (gpui):
+- `crates/rosty_ui/src/menu.rs` (gpui):
   - `AnchorSlot`: an `Rc<Cell<Option<Bounds<Pixels>>>>`, filled by a `canvas` prepaint
     child exactly as `field.rs` stores `content`, with `AnchorSlot::point(Point)` for
     long-press positions.
@@ -149,10 +149,10 @@ checks pass.
     `deferred`, `canvas`, `occlude`, `on_mouse_down_out` if used). Do not invent any.
 - `#[gpui::test]`s: open, then tap outside, closes the menu; selecting an item calls
   `on_select` with its key once; Back from a submenu returns to the root.
-**Acceptance:** `cargo test -p rovsti_ui menu` passes. All checks pass.
+**Acceptance:** `cargo test -p rosty_ui menu` passes. All checks pass.
 
 ### 4. `Button` set
-- `crates/rovsti_ui/src/button.rs`: `Button::new(id, label).style(..).size(..).icon(..).destructive().full_width().disabled()`
+- `crates/rosty_ui/src/button.rs`: `Button::new(id, label).style(..).size(..).icon(..).destructive().full_width().disabled()`
   with the 2.16 numbers. It returns a `Stateful<Div>` so callers add `on_click`. The
   hit area is always at least 44 dp (`Small` pads invisibly).
 - Pure `button_width(label_dp, icon: bool, size) -> f32` and `buttons_row_widths(n, avail, gap) -> f32`
@@ -162,10 +162,10 @@ checks pass.
   themes.
 - `components::glass_pill` gets a doc line: "Prefer `Button`; kept for migration". Do
   not delete it.
-**Acceptance:** `cargo test -p rovsti_ui button theme` passes. All checks pass.
+**Acceptance:** `cargo test -p rosty_ui button theme` passes. All checks pass.
 
 ### 5. Gallery `04-menus` proves the components headless
-- `crates/rovsti_ui/src/shots/menus.rs` (feature `shots`) renders
+- `crates/rosty_ui/src/shots/menus.rs` (feature `shots`) renders
   `04-menus-{dark,light}.png` over a busy fake inbox, so legibility is tested. It shows:
   (a) a 2-group row menu below a mid-screen anchor, (b) the same menu flipped above an
   anchor near the tab bar, (c) the "Mute for" submenu page, (d) the delete Confirm page,
@@ -174,12 +174,12 @@ checks pass.
 - Asserts in the test, using `shots/color.rs`: `contrast_in` over a 40 x 16 dp patch of
   menu body with no labels is under 1.6 (nothing reads through). Label text inside rows
   is at least 4.5. The menu rect stays inside [safe.top + 8, viewport - content_bottom_inset].
-- Run `cargo test -p rovsti_ui --features shots menus -- --ignored --nocapture`, then
+- Run `cargo test -p rosty_ui --features shots menus -- --ignored --nocapture`, then
   **open both PNGs**.
 **Acceptance:** the PNGs show crisp, opaque popovers with grouped 44 dp rows, a visible 8 dp
 band between groups, leading icons aligned at x = 16 dp and labels at 48 dp, and no list
 text showing through. Buttons have equal heights per size and no clipped labels. The
-asserts pass. `cargo clippy -p rovsti_ui --features shots --all-targets -- -D warnings` is clean.
+asserts pass. `cargo clippy -p rosty_ui --features shots --all-targets -- -D warnings` is clean.
 
 ### 6. Proof screen: the Messages row menu becomes an anchored popover
 - `apps/messages/src/main.rs`: `open_row_menu` takes an `AnchorSlot`, either the row's
@@ -228,7 +228,7 @@ plus the shots clippy line pass.
 **Acceptance:** open `stops/06-saved-list-*`, `06b`, `06c` and `07-saved-stop-sheet-*`.
 The header is title + one 40 dp "..." button, the search and sort row is a single 44 dp
 line, the list rows never grow on tap, and the menus are anchored and opaque.
-`cargo test -p rovsti_stops` passes, as do all checks and the shots clippy line.
+`cargo test -p rosty_stops` passes, as do all checks and the shots clippy line.
 
 ### 8. Docs, baselines, full verification
 - `docs/design/layout.md` 2.13 checklist: add Menu, Button and `GlassSpec::thick`. In 2.14,
@@ -236,10 +236,10 @@ line, the list rows never grow on tap, and the menus are anchored and opaque.
   are done.
 - `docs/screenshots.md`: document the `menus` gallery command and the new 11b/11c and
   06b/06c shots.
-- Refresh `docs/screenshots/baseline/messages.png`, `stops.png` and the `rovsti_ui` sheet.
+- Refresh `docs/screenshots/baseline/messages.png`, `stops.png` and the `rosty_ui` sheet.
   Phone and Contacts change only through the `Sheet` material; refresh them too and say
   so in the commit.
-- Confirm `rovsti_ui/01-fields-*` and `02-field-touch-*` are unchanged; the field edit
+- Confirm `rosty_ui/01-fields-*` and `02-field-touch-*` are unchanged; the field edit
   menu must not move.
 - Run every check in the unit list plus the shots clippy line. Watch disk (6.2 GB free
   at plan time): clean `target/debug/incremental` and stale test binaries first.

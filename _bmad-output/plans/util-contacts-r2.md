@@ -1,4 +1,4 @@
-# util-contacts: everyday utilities for Rovsti Contacts (round 2)
+# util-contacts: everyday utilities for Rosty Contacts (round 2)
 
 baseSha: bc9e0c726730ca433397955ff2d43781d1efb767
 
@@ -8,7 +8,7 @@ Round 1 (`util-contacts.md`, S1-S8) is fully landed (commits f68d778 .. bc9e0c7)
 No stash entries, clean tree.
 
 Shipped in R1 and reusable now (do not re-create):
-- `rovsti_core::{contact_dupes, contact_dates}`; `ContactDraft.{events, addresses}`; vCard BDAY,
+- `rosty_core::{contact_dupes, contact_dates}`; `ContactDraft.{events, addresses}`; vCard BDAY,
   ANNIVERSARY/X-ANNIVERSARY, ADR; `vcard::export_name(drafts, today)`; `contacts_view::{scrubber_letters,
   show_scrubber, letter_at, first_row_of}`.
 - App: `photo_viewer.rs` (zoom/pan/save/share/change/remove), `qr_sheet.rs`, `dupes.rs` (find + merge +
@@ -22,9 +22,9 @@ Shipped in R1 and reusable now (do not re-create):
 - Android seams: `documents::export_contacts(name, text)` (any name), `documents::pick_contact_photo`
   (`document_result` op `contact_photo`), `contacts_edit::set_photo(id, path, plan_json)` (Kotlin
   `ContactPhotos` crops by `PhotoPlan`), `telecom::{copy_text, share_text, compose_sms, send_email_to}`,
-  `media::*`, `RovstiShareProvider` (read-only, `openFile` refuses mode != "r") registered in the
+  `media::*`, `RostyShareProvider` (read-only, `openFile` refuses mode != "r") registered in the
   Contacts manifest.
-- `rovsti_core::multi_select::{Selection, title, star_all, starred_notice, deleted_notice, cap_notice}`,
+- `rosty_core::multi_select::{Selection, title, star_all, starred_notice, deleted_notice, cap_notice}`,
   `contact_edit::SelectionChange { add, remove }`, `pending_delete`.
 - WhatsApp Chat / Call exist once per card (the contact's first WhatsApp JID), not per number row.
 
@@ -32,7 +32,7 @@ Not present yet: select mode in lists; export one contact to a file; copy whole 
 `WireContact` has no last-updated time (Kotlin `ContactsQuery.CONTACT_PROJECTION` lacks
 `CONTACT_LAST_UPDATED_TIMESTAMP`), so no "Recently added"; websites / nickname / job title are neither
 read (`ContactsEdit.EDITED_MIMES`) nor in `ContactDraft` nor in vCard; `PhotoPlan` is centred-only, no
-rotation, no user crop; no camera capture anywhere in `crates/rovsti_android/kotlin`.
+rotation, no user crop; no camera capture anywhere in `crates/rosty_android/kotlin`.
 
 ## Utility backlog (ordered by user value)
 
@@ -74,16 +74,16 @@ rotation, no user crop; no camera capture anywhere in `crates/rovsti_android/kot
 ## Steps (round 2)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free (7.6 GB at planning time), `rm -rf target/debug/incremental` first. One
-focused commit per step, prefix `Rovsti contacts: `. Do not touch `apps/phone` or `apps/messages` source
-(a shared `rovsti_core`/`rovsti_android` change must keep them compiling; fix struct literals only).
+focused commit per step, prefix `Rosty contacts: `. Do not touch `apps/phone` or `apps/messages` source
+(a shared `rosty_core`/`rosty_android` change must keep them compiling; fix struct literals only).
 Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8; use only GPUI APIs already used in
 `apps/contacts` (`on_long_press`, `on_click`, `on_pinch`, `ListState`, `RenderImage`, `cx.open_url`).
 
 ### S1. Pure: selection, contact text, recent list (C11, C12, C15, C16)
-- New `crates/rovsti_core/src/contact_select.rs` (`pub mod contact_select;` in `lib.rs`):
+- New `crates/rosty_core/src/contact_select.rs` (`pub mod contact_select;` in `lib.rs`):
   - `pub const MAX_SELECTED: usize = 500;`
   - `pub fn export_ids(selected: &BTreeSet<i64>, hidden: Option<i64>) -> Vec<i64>` (ascending, drops the
     pending-delete id).
@@ -112,7 +112,7 @@ Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8; use only GPUI API
   notices singular/plural; full_text field order, skips empties, includes address and birthday; recent
   window, ordering, dedup, missing timestamps; recent_when day boundaries with tz offset; old
   `WireContact` JSON without `updated_ms` parses.
-- Acceptance: `cargo test -p rovsti_core contact_select contacts_view wire` green; no app behaviour change.
+- Acceptance: `cargo test -p rosty_core contact_select contacts_view wire` green; no app behaviour change.
 
 ### S2. Pure: websites, nickname, job title (C18)
 - `contact_edit.rs` `ContactDraft`: `#[serde(skip_serializing_if = "String::is_empty")] pub nickname:
@@ -128,7 +128,7 @@ Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8; use only GPUI API
   websites.
 - Tests: `web_url` cases (`example.com`, `HTTP://x.y`, `ftp://x`, `a b.com`, empty); vCard round trip of
   all three; `NICKNAME:Annie,Ann` takes "Annie"; old draft JSON parses; merge unions websites.
-- Acceptance: `cargo test -p rovsti_core` green.
+- Acceptance: `cargo test -p rosty_core` green.
 
 ### S3. Pure: crop and rotate plan (C13, C14)
 - `contact_photo.rs`: `PhotoPlan` gains `#[serde(default)] pub turns: u8` (quarter turns clockwise,
@@ -145,7 +145,7 @@ Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8; use only GPUI API
 - Tests: default view equals `plan`; rotate swaps sizes; four rotations return to the start; pan clamps
   at every edge; pinch clamps at 1 and max; `plan_for` stays inside the image at every corner and zoom;
   TooSmall when max zoom would cross `MIN_SIDE`; old `PhotoPlan` JSON without `turns` parses.
-- Acceptance: `cargo test -p rovsti_core contact_photo` green.
+- Acceptance: `cargo test -p rosty_core contact_photo` green.
 
 ### S4. Android glue and backend wrappers (C12, C13, C14, C15, C18)
 - Kotlin `ContactsQuery.kt`: add `Contacts.CONTACT_LAST_UPDATED_TIMESTAMP` to `CONTACT_PROJECTION` and
@@ -160,14 +160,14 @@ Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8; use only GPUI API
   decoded bitmap before the crop (`PhotoPlan` coordinates are in rotated space). Also honour EXIF
   orientation only if it is already handled; do not add a new library.
 - Camera: Kotlin `Documents.kt` `startPhotoCapture(activity)`: create `cache/share/camera-<ms>.jpg`,
-  `Intent(MediaStore.ACTION_IMAGE_CAPTURE)` with `EXTRA_OUTPUT` = a `RovstiShareProvider` URI and
-  `FLAG_GRANT_WRITE_URI_PERMISSION`; extend `RovstiShareProvider.openFile` to allow mode "w"/"wt"
+  `Intent(MediaStore.ACTION_IMAGE_CAPTURE)` with `EXTRA_OUTPUT` = a `RostyShareProvider` URI and
+  `FLAG_GRANT_WRITE_URI_PERMISSION`; extend `RostyShareProvider.openFile` to allow mode "w"/"wt"
   **only** for names matching `camera-<digits>.jpg` (pure helper `MediaShare.writable(name)`), keep "r"
   for the rest. On RESULT_OK reply `document_result` op `contact_photo` with `path`, `mime =
   "image/jpeg"` (same as the photo picker, so the existing hand-back runs); on cancel ok=false without
   error. No `CAMERA` permission in the manifest (declaring it would make the intent need it).
-  `ActivityNotFoundException` -> `false`. Rust: `rovsti_android::documents::capture_photo() ->
-  Result<bool>` (`bridge::call_bool0("capturePhoto")`, Unsupported on desktop) + the `RovstiBridge`
+  `ActivityNotFoundException` -> `false`. Rust: `rosty_android::documents::capture_photo() ->
+  Result<bool>` (`bridge::call_bool0("capturePhoto")`, Unsupported on desktop) + the `RostyBridge`
   static.
 - `contacts_edit::set_photo` doc mentions `turns`. No signature change (plan is JSON).
 - `apps/contacts/src/backend.rs`: `start_capture_photo()`, `change_photo_with(id, path, view:
@@ -249,8 +249,8 @@ Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S5-S8; use only GPUI API
   empty, `within_days = 30`, max 50) showing the count; it opens a page (same pattern as the Upcoming
   page in `upcoming.rs`) listing rows with `recent_when` as the subtitle; tap opens the card. Rows built
   once per pull, never per frame.
-- Docs: `docs/roadmap.md` Rovsti Contacts section ticks C11-C18 ("done without a device"), adds the camera
-  provider write rule to `docs/architecture.md` where `RovstiShareProvider` is described; update this
+- Docs: `docs/roadmap.md` Rosty Contacts section ticks C11-C18 ("done without a device"), adds the camera
+  provider write rule to `docs/architecture.md` where `RostyShareProvider` is described; update this
   file's backlog statuses to `done R2` for what landed.
 - Tests: pure `show_recent(rows_query, recent_len) -> bool`.
 - Acceptance: all checks green.

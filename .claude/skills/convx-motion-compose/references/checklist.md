@@ -1,4 +1,4 @@
-# Review checklist for any new or changed Rovsti Compose screen
+# Review checklist for any new or changed Rosty Compose screen
 
 Run it before calling a screen done. Every unchecked box needs a fix or a written reason in the PR description.
 Section numbers point into the other reference files.
@@ -28,7 +28,7 @@ Section numbers point into the other reference files.
 
 ## C. Motion (`motion.md`)
 
-- [ ] All specs come from `RovstiMotion`; every spring has a `visibilityThreshold`.
+- [ ] All specs come from `RostyMotion`; every spring has a `visibilityThreshold`.
 - [ ] Pressing anything changes only transform/alpha/overlay: **no layout shift** (bounds test before/after press and open).
 - [ ] Drags: `snapTo` undispatched during the drag, release `animateTo(target, spec, initialVelocity)`, target from `Fling` projection.
 - [ ] Interruptions retarget the same `Animatable`; press state deflates in `finally`; late callbacks guarded.
@@ -60,7 +60,7 @@ Section numbers point into the other reference files.
 - [ ] Switch/slider/segmented follow the glisse geometry and gesture rules; toggles give haptic feedback.
 - [ ] Text fields are `BasicTextField(TextFieldState)`: tap places caret, long-press selects with handles and magnifier,
       platform cut/copy/paste toolbar appears, IME action submits, field stays above the keyboard, clear keeps focus.
-- [ ] Haptics through `RovstiHaptics` only, on the events listed in `navigation-layout.md` 8, never during scroll.
+- [ ] Haptics through `RostyHaptics` only, on the events listed in `navigation-layout.md` 8, never during scroll.
 - [ ] Touch targets >= 48 dp; semantics merged per row; custom actions for swipe actions.
 
 ## G. Performance (`performance.md` 11)

@@ -2,21 +2,21 @@
 //! entries and the Settings page.
 //!
 //! Who is "me" and who is on the emergency list lives in
-//! `rovsti_core::contact_me` (lookup keys saved in `ContactsPrefs`); this file
+//! `rosty_core::contact_me` (lookup keys saved in `ContactsPrefs`); this file
 //! maps it to rows and texts and draws the pages.
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     avatar, calling_code,
     contact_card::ContactCard,
     contact_me,
     contacts_prefs::MAX_EMERGENCY,
     wire::{NameFormat, WireContact},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
     theme::{self, hue_pair},
@@ -351,7 +351,7 @@ impl ContactsApp {
         let text = contact_me::emergency_text(owner.as_deref(), &entries);
         self.act(
             "share",
-            move || rovsti_android::telecom::share_text(&text),
+            move || rosty_android::telecom::share_text(&text),
             cx,
         );
     }
@@ -502,11 +502,7 @@ impl ContactsApp {
             .id(("emergency-call", n))
             .on_click(cx.listener(move |this, _, _, cx| {
                 let raw = raw.clone();
-                this.act(
-                    "call",
-                    move || rovsti_android::telecom::place_call(&raw),
-                    cx,
-                );
+                this.act("call", move || rosty_android::telecom::place_call(&raw), cx);
             }));
         let remove = glass_icon_button(theme, Icon::LucideTrash2, 0.0, false)
             .id(("emergency-remove", n))
@@ -528,7 +524,7 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::wire::WireNumber;
+    use rosty_core::wire::WireNumber;
 
     fn contact(id: i64, name: &str, key: Option<&str>, number: Option<&str>) -> WireContact {
         WireContact {

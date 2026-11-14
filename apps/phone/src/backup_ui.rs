@@ -6,13 +6,13 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     settings::ImportPreview,
     wire::{DocumentOp, DocumentResult},
 };
 
 use crate::block_ui::PillAction;
-use rovsti_ui::{
+use rosty_ui::{
     motion::press_scale,
     motion_tokens::scale,
     storage, theme,
@@ -103,10 +103,8 @@ impl PhoneApp {
                 .background_executor()
                 .spawn(async move {
                     (
-                        rovsti_core::call_log_query::csv_file_name(now_ms, tz),
-                        rovsti_core::call_log_query::to_csv_with_notes(
-                            &source, &extras, tz, &notes,
-                        ),
+                        rosty_core::call_log_query::csv_file_name(now_ms, tz),
+                        rosty_core::call_log_query::to_csv_with_notes(&source, &extras, tz, &notes),
                     )
                 })
                 .await;
@@ -360,7 +358,7 @@ impl PhoneApp {
             self.show_notice_pill("That image can't be read", None, false, cx);
             return;
         };
-        if !rovsti_core::contact_photo::accepts(result.mime.as_deref()) {
+        if !rosty_core::contact_photo::accepts(result.mime.as_deref()) {
             self.show_notice_pill("That is not an image", None, false, cx);
             return;
         }
@@ -403,7 +401,7 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::settings::PrefsV2;
+    use rosty_core::settings::PrefsV2;
 
     #[test]
     fn export_row_text_and_states() {

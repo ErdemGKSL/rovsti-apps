@@ -1,7 +1,7 @@
 //! Status updates (stories), schema v5: kept apart from the chats, one row
 //! per update, gone when it expires.
 
-use rovsti_wa_proto::{StatusItem, StatusKind};
+use rosty_wa_proto::{StatusItem, StatusKind};
 use rusqlite::{OptionalExtension, params};
 
 use super::{InstanceId, MAX_THUMBNAIL_BYTES, Store, StoreError};
@@ -281,7 +281,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::store::NewKey;
-    use rovsti_wa_proto::{ConnectKey, KeyId, STATUS_TTL_MS, StatusMedia};
+    use rosty_wa_proto::{ConnectKey, KeyId, STATUS_TTL_MS, StatusMedia};
 
     const NOW: i64 = 1_800_000_000_000;
 

@@ -1,4 +1,4 @@
-# Plan: Rovsti Stops, pick A and B on the map (round 2)
+# Plan: Rosty Stops, pick A and B on the map (round 2)
 
 - Base: `edef1af64535ca8457cd92c8a708d5f8132f1fe6`. `git stash list` is empty. Round 1 plan:
   `stops-pick.md` (S1-S7), all landed (commits 29ad5d9 .. c680b00).
@@ -8,8 +8,8 @@
 ## Verified at the base
 
 - All checks green: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test --workspace`, `cargo check --target aarch64-linux-android` for `rovsti_android`,
-  `rovsti_wa_client`, `rovsti_tiles`.
+  `cargo test --workspace`, `cargo check --target aarch64-linux-android` for `rosty_android`,
+  `rosty_wa_client`, `rosty_tiles`.
 - Pure `apps/stops/src/pick.rs`: `Picking` (Idle/HasA/HasB/HasAB, tap/place/remove/clear/
   begin_move/menu/drag_*), `Hint` texts ("Tap the map to set A/B", "A-B 850 m", friendly
   too-close/too-far from MIN/MAX_DIAMETER_M), `point_label`, `pair_text`, `details_text`,
@@ -19,7 +19,7 @@
   `STREET_MPP`), `fallback_centre`, `pin_menu_rect`, scene pins + invalid segment; all tested.
 - Glue: idle map always shown (`IDLE_MAP_HEIGHT`), tap drops A then B with stop snapping, pins
   with name captions, pin menu (Move / Remove / Lines / details line), "Me" button with the
-  `rovsti_android::location` seam (`last_location`, `request_location`, `stops_location` event),
+  `rosty_android::location` seam (`last_location`, `request_location`, `stops_location` event),
   pick bar (hint, Clear, Swap, Start gated by `can_start`), secondary sources row, A/B rows,
   Back closes the menu, tiles with radar fallback, theme palette.
 - Raw lat/lon only in details lines (`details_text`: pin menu, confirm/offer row, stop sheet).
@@ -68,7 +68,7 @@ no longer assigns `viewport` unconditionally.
 ```
 df -h .    # under 6 GB free: rm -rf target/debug/incremental
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```

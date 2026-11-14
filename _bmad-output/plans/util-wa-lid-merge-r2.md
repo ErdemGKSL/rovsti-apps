@@ -11,7 +11,7 @@ Round 1 (`util-wa-lid-merge.md`) S1-S7 are implemented and committed (d31f512..c
   migration), after history sync, on `DeviceListUpdate`/`ContactNumberChanged`, and a per-message
   merge in on_message; end-to-end test in `services/wa_gateway/tests/api.rs`.
 - Proto/apps: `is_pn_jid`/`is_lid_jid`, "WhatsApp user" label, `ChatMerged` handled in timeline,
-  Messages (drafts/prefs/inbox rekey), Phone, Contacts, rovsti_wa_ui.
+  Messages (drafts/prefs/inbox rekey), Phone, Contacts, rosty_wa_ui.
 
 Remaining gap found in review: `apps/messages/src/status_ui.rs::author_title` (line ~181) still
 calls `contacts.match_number(&format!("+{}", jid_user(&author.author)))` for every status author,
@@ -22,17 +22,17 @@ so a LID author (`96413459456093@lid`) is matched as the number +96413459456093.
 
 ### S1 Guard the status author lookup and finish green
 - `apps/messages/src/status_ui.rs::author_title`: only call `match_number` when
-  `rovsti_wa_proto::is_pn_jid(&author.author)` (same `is_pn_jid(..).then(..).flatten()` pattern as
+  `rosty_wa_proto::is_pn_jid(&author.author)` (same `is_pn_jid(..).then(..).flatten()` pattern as
   `apps/messages/src/inbox.rs:420`). Extract the pure part as
   `fn author_number(author: &str) -> Option<String>` (`Some("+<digits>")` for PN JIDs, device suffix
   dropped via `jid_user`, `None` for `@lid`/groups/broadcast) and add a unit test in the file's
   test module: `author_number("905551234567@s.whatsapp.net") == Some("+905551234567")`,
   `author_number("96413459456093@lid") == None`, and
-  `rovsti_wa_ui::display_name(None, None, "96413459456093@lid")` contains no '+'.
+  `rosty_wa_ui::display_name(None, None, "96413459456093@lid")` contains no '+'.
 - Run all checks (rm -rf target/debug/incremental first if df < 6 GB): fmt, clippy
   `-D warnings`, `cargo test --workspace`, the three `aarch64-linux-android` checks.
 - Update the status line of `_bmad-output/plans/util-wa-lid-merge.md` and this file; commit
-  ("Rovsti wa-lid-merge: status author lookup only for phone JIDs"). Working tree clean.
+  ("Rosty wa-lid-merge: status author lookup only for phone JIDs"). Working tree clean.
 - Acceptance: all checks green, `git status` clean.
 
 ### S2 Deploy the gateway (last)

@@ -6,7 +6,7 @@ baseSha: 48b20e914a089f5951733f77f4cea5b242c1c450
 
 Round 1 (0e3a8cf..b933611) and round 2 (03bf6b1, 857e714, 475faef, 48b20e9) cover the whole goal:
 
-- Pure, unit-tested size math: `crates/rovsti_core/src/keypad_layout.rs` (`keypad_layout(&KeypadInput)
+- Pure, unit-tested size math: `crates/rosty_core/src/keypad_layout.rs` (`keypad_layout(&KeypadInput)
   -> KeypadLayout`, `key_style`, `number_fit`, `match_plan`). It has 15 tests: 360x640 with insets,
   412x915, tall dp-scaled sizes, raw-pixel clamps, landscape, a tiny compact layout without letters,
   long input, "typing never moves the keys", a sweep of viewports with and without insets, the header
@@ -25,7 +25,7 @@ Round 1 (0e3a8cf..b933611) and round 2 (03bf6b1, 857e714, 475faef, 48b20e9) cove
   and do not move while typing.
 
 Verified at HEAD: `cargo fmt --all --check` passes, clippy with `-D warnings` is clean,
-`rovsti_core keypad_layout` passes 15/15, and `keypad_draws_inside_its_layout_rects` passes.
+`rosty_core keypad_layout` passes 15/15, and `keypad_draws_inside_its_layout_rects` passes.
 
 Optional follow-ups (outside the owner's report, not planned): the headless test could also rebuild T9
 for a dialed value with matches, and could run with non-zero insets.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the perf-realistic APK of Rovsti Phone (story 12.7): Rust release
+# Builds the perf-realistic APK of Rosty Phone (story 12.7): Rust release
 # profile, the `perf` feature (frame recorder and scripted scenarios), signed
 # with the automatic DEBUG key. For measuring on the phone only: it is never
 # copied to ~/Downloads and never handed over; the signed release APK comes from
@@ -18,7 +18,7 @@ MANIFEST="$ROOT/apps/phone/Cargo.toml"
 BACKUP="$(mktemp)"
 cp "$MANIFEST" "$BACKUP"
 trap 'cp "$BACKUP" "$MANIFEST"; rm -f "$BACKUP"' EXIT
-sed -i 's/^perf = \["rovsti_ui\/perf"\]/default = ["perf"]\nperf = ["rovsti_ui\/perf"]/' "$MANIFEST"
+sed -i 's/^perf = \["rosty_ui\/perf"\]/default = ["perf"]\nperf = ["rosty_ui\/perf"]/' "$MANIFEST"
 grep -q '^default = \["perf"\]' "$MANIFEST" || { echo "Could not enable the perf feature." >&2; exit 1; }
 
 cd "$ROOT/apps/phone"

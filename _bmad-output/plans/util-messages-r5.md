@@ -1,4 +1,4 @@
-# util-messages: everyday utilities for Rovsti Messages (round 5)
+# util-messages: everyday utilities for Rosty Messages (round 5)
 
 baseSha: 6df9a5604c3cf4e7dff9baab23238f94f003e77a
 
@@ -15,21 +15,21 @@ is empty. Re-checked by grep for the open rows:
   `inbox::RowView` has `unread`, `marked_unread`, `badges`, `wa_chat`, `sms_thread`,
   `sms_sender` (None for a group SMS thread). Nothing filters by channel or unread.
 - M31 swipe to reply: none. WA bubbles use `on_click`/`on_long_press`; reply is
-  `Conversation::begin_reply(id, cx)` (~846). `rovsti_core::gesture` is the Phone answer
+  `Conversation::begin_reply(id, cx)` (~846). `rosty_core::gesture` is the Phone answer
   swipe (vertical), not reusable as is. GPUI: `MouseMoveEvent::pressed_button`,
   `MouseMoveEvent::dragging()` exist (gpui `interactive.rs` ~531/548); the media viewer
   already drives drags with `on_mouse_down/move/up` (`media_viewer.rs` ~1186).
-  Haptics: `rovsti_ui::haptics::perform(window, HapticFeedback::Selection)`.
+  Haptics: `rosty_ui::haptics::perform(window, HapticFeedback::Selection)`.
 - M32 double-tap react: none. `ClickEvent::click_count()` exists (gpui `interactive.rs` ~456;
   gpui_android passes the count, `bridge.rs` ~1737); `media_viewer.rs` ~1040 uses it.
   Reactions: `Conversation::react(message_id, from_me, sender, emoji, cx)` (~1854),
   `timeline.own_reaction(&id)`, `QUICK_EMOJIS[0] == "👍"` (~97).
-- M33 remind me on a message: none. Phone has call-back reminders: `rovsti_core::reminder`
+- M33 remind me on a message: none. Phone has call-back reminders: `rosty_core::reminder`
   (`Slot::{In15Min, In1Hour, Tonight, TomorrowMorning}`, `due_ms`, `label`, `clock`),
-  `rovsti_android::reminders` -> Kotlin `CallReminders.kt` (`ReminderStore`, inexact
+  `rosty_android::reminders` -> Kotlin `CallReminders.kt` (`ReminderStore`, inexact
   `setAndAllowWhileIdle`, receiver declared in the Phone manifest only, tap = ACTION_DIAL).
   Messages notification taps: `MessageNotifications.openIntent` puts `EXTRA_TAG`
-  ("open_thread_tag"); `RovstiBridge` ~469 posts `open_thread {tag}`;
+  ("open_thread_tag"); `RostyBridge` ~469 posts `open_thread {tag}`;
   `notifications::OpenTag { tag }`; `main.rs::on_open_tag` (~3480). Jump to a message:
   `main.rs::pending_jump: Option<global_search::JumpTarget { id, at_ms }>` consumed on open
   (~1137 WA, ~1252 SMS).
@@ -97,20 +97,20 @@ is empty. Re-checked by grep for the open rows:
 ## Plan, round 5 (pure logic first; every step leaves all checks green)
 
 Conventions as in R4: library-crate items are `pub` with doc comments; each new
-`rovsti_core` module is added to `crates/rovsti_core/src/lib.rs` (`pub mod …;`) in
+`rosty_core` module is added to `crates/rosty_core/src/lib.rs` (`pub mod …;`) in
 alphabetical order; app-crate pure helpers that are not called yet get
 `#[cfg_attr(not(test), allow(dead_code))]` until the UI step that uses them, then the
 attribute is removed. Never invent GPUI APIs: grep
 `~/.cargo/git/checkouts/gpui-fusion-141089add1664e03/d6c8412/crates/gpui` before using one.
 Before building, if `df -h /` shows < 6 GB free, run `rm -rf target/debug/incremental`.
 Every step ends green on the full check list:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
-Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`; one focused
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
+Commit messages: `Rosty messages: <Pure|Android seams|UI>: <what> (Mxx)`; one focused
 commit per step (others push to main in parallel).
 
-### S1 Pure: inbox filters and local SMS thread marks (rovsti_core) (M30, M36-M38)
+### S1 Pure: inbox filters and local SMS thread marks (rosty_core) (M30, M36-M38)
 
-- `crates/rovsti_core/src/inbox_filter.rs` (new):
+- `crates/rosty_core/src/inbox_filter.rs` (new):
   - `#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)] pub enum InboxFilter {
     #[default] All, Unread, WhatsApp, Sms, Groups }`, `pub const ALL: [InboxFilter; 5]`,
     `label(self) -> &'static str` ("All", "Unread", "WhatsApp", "SMS", "Groups").
@@ -126,7 +126,7 @@ commit per step (others push to main in parallel).
     for 0), "WhatsApp 12".
   - `pub fn empty_text(filter) -> &'static str`: "No unread chats", "No WhatsApp chats",
     "No SMS conversations", "No group chats", All -> "No conversations".
-- `crates/rovsti_core/src/thread_marks.rs` (new): local marks for SMS threads.
+- `crates/rosty_core/src/thread_marks.rs` (new): local marks for SMS threads.
   - `pub const MAX_LOCAL_PINS: usize = 5;`
   - `#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)] pub struct
     SmsMarks { #[serde(default)] pub pinned: BTreeSet<i64>, #[serde(default)] pub archived:
@@ -146,11 +146,11 @@ commit per step (others push to main in parallel).
   `counts`; `visible` (one channel only hides WhatsApp/SMS, Groups hidden at 0, tiny
   inbox hides all); `chip_label`; `empty_text`; pin cap and pin-unarchives/archive-unpins;
   `clear_unread`, `forget`, `rekey`; serde round-trip and an empty `{}` loading.
-- Commit: `Rovsti messages: Pure: inbox filters and local SMS thread marks (rovsti_core)`.
+- Commit: `Rosty messages: Pure: inbox filters and local SMS thread marks (rosty_core)`.
 
-### S2 Pure: bubble gestures, text size, location links, message reminders (rovsti_core) (M31-M35)
+### S2 Pure: bubble gestures, text size, location links, message reminders (rosty_core) (M31-M35)
 
-- `crates/rovsti_core/src/bubble_gesture.rs` (new):
+- `crates/rosty_core/src/bubble_gesture.rs` (new):
   - Constants `LOCK_PX = 12.0`, `COMMIT_PX = 64.0`, `MAX_OFFSET_PX = 96.0`.
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum Axis { Undecided, Horizontal,
     Vertical }`.
@@ -166,20 +166,20 @@ commit per step (others push to main in parallel).
     `release(&self) -> bool` (reply when horizontal and offset >= COMMIT_PX).
   - `pub fn double_tap_reaction(own: Option<&str>, quick: &str) -> String`: `quick` unless
     our reaction already is `quick` (then `""` = remove).
-- `crates/rovsti_core/src/text_scale.rs` (new):
+- `crates/rosty_core/src/text_scale.rs` (new):
   - `#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")] pub enum ChatTextSize { Small, #[default] Default,
     Large, Larger }`, `ALL`, `label()` ("Small", "Default", "Large", "Larger"),
     `factor()` (0.875, 1.0, 1.15, 1.3), `pub fn scaled(self, base: f32) -> f32` rounded to
     0.5 px, `pub fn preview_text() -> &'static str` ("The quick brown fox…" sample line).
-- `crates/rovsti_core/src/location_link.rs` (new):
+- `crates/rosty_core/src/location_link.rs` (new):
   - `pub fn osm_url(lat: f64, lon: f64) -> String` ->
     `https://www.openstreetmap.org/?mlat=41.008200&mlon=28.978400#map=17/41.008200/28.978400`
     (6 decimals, clamps lat to ±90 and wraps lon to ±180).
   - `pub fn share_text(name: Option<&str>, address: Option<&str>, lat, lon) -> String`:
     trimmed non-empty name, address, then the link, one per line.
   - `pub fn is_valid(lat, lon) -> bool` (finite, in range; (0,0) counts as invalid).
-- `crates/rovsti_core/src/message_reminder.rs` (new), reusing `reminder::Slot` and
+- `crates/rosty_core/src/message_reminder.rs` (new), reusing `reminder::Slot` and
   `reminder::clock`:
   - `#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)] pub struct
     MessageReminder { pub id: i64, pub tag: String /* "sms:12" | "wa:<jid>" */, pub
@@ -199,13 +199,13 @@ commit per step (others push to main in parallel).
   serde "large"); osm_url format, clamping/wrap, share_text skipping blanks, is_valid;
   reminder new/None cases, arm_json keys, parse_list skipping garbage, set_text same-day vs
   tomorrow with tz offsets.
-- Commit: `Rovsti messages: Pure: bubble gestures, text size, location links, message reminders (rovsti_core)`.
+- Commit: `Rosty messages: Pure: bubble gestures, text size, location links, message reminders (rosty_core)`.
 
-### S3 Android seams and prefs: message reminders, marks, text size (rovsti_android, Kotlin, prefs.rs)
+### S3 Android seams and prefs: message reminders, marks, text size (rosty_android, Kotlin, prefs.rs)
 
-- Kotlin `crates/rovsti_android/kotlin/dev/rovsti/bridge/MessageReminders.kt` (new), modelled
+- Kotlin `crates/rosty_android/kotlin/dev/rosty/bridge/MessageReminders.kt` (new), modelled
   on `CallReminders.kt` and reusing its `ReminderStore` class (generic over the JSON; give
-  it the prefs name `rovsti_message_reminders`):
+  it the prefs name `rosty_message_reminders`):
   - `data class MessageReminderItem(id, tag, messageId, messageAtMs, atMs, title, body, raw)`
     with a pure `parse` (null for id <= 0, blank tag or message id). If `ReminderStore` is
     typed to `ReminderItem`, make it generic `ReminderStore<T>(read, write, parse: (JSONObject)
@@ -216,14 +216,14 @@ commit per step (others push to main in parallel).
     `EXTRA_MESSAGE_ID = "open_message_id"` and `EXTRA_MESSAGE_AT = "open_message_at"`;
     after posting it forgets the item and emits `message_reminder_fired {id}`.
   - `class MessageReminderReceiver : BroadcastReceiver` (same `goAsync` pattern).
-- `RovstiBridge.kt`: `armMessageReminder(json)`, `disarmMessageReminder(id: String)`,
+- `RostyBridge.kt`: `armMessageReminder(json)`, `disarmMessageReminder(id: String)`,
   `armedMessageReminders()`, `rearmMessageReminders()`; the open-intent handler (~469) reads
   the two new extras (removing them like `EXTRA_TAG`) and adds `message_id` / `at_ms` to the
   `open_thread` JSON when present.
 - `apps/messages/platforms/android/app/src/main/AndroidManifest.xml`: `<receiver
-  android:name="dev.rovsti.bridge.MessageReminderReceiver" android:exported="false" />` next
+  android:name="dev.rosty.bridge.MessageReminderReceiver" android:exported="false" />` next
   to `ScheduledSmsReceiver` (~109).
-- `crates/rovsti_android/src/reminders.rs`: `pub fn arm_message(json: &str) -> Result<bool>`,
+- `crates/rosty_android/src/reminders.rs`: `pub fn arm_message(json: &str) -> Result<bool>`,
   `disarm_message(id: i64) -> Result<bool>`, `armed_messages() -> Result<String>`,
   `rearm_messages() -> Result<bool>` with doc comments; extend the desktop
   `Error::Unsupported` test.
@@ -231,11 +231,11 @@ commit per step (others push to main in parallel).
   String` and `#[serde(default)] pub at_ms: i64`; test that the old `{tag}` JSON still parses
   and the new keys land.
 - `apps/messages/src/prefs.rs`: `#[serde(default)] pub sms_marks:
-  rovsti_core::thread_marks::SmsMarks` (kept by `reset()`, like `sms_stars`: they are data, not
-  settings) and `#[serde(default)] pub chat_text_size: rovsti_core::text_scale::ChatTextSize`
+  rosty_core::thread_marks::SmsMarks` (kept by `reset()`, like `sms_stars`: they are data, not
+  settings) and `#[serde(default)] pub chat_text_size: rosty_core::text_scale::ChatTextSize`
   (reset to default). `rekey_thread` also calls `sms_marks.rekey`. Tests: old prefs file
   loads; reset keeps marks and resets text size; rekey carries marks.
-- Commit: `Rovsti messages: Android seams: message reminders; prefs: SMS marks, text size`.
+- Commit: `Rosty messages: Android seams: message reminders; prefs: SMS marks, text size`.
 
 ### S4 UI: inbox filter chips and SMS pin / archive / mark unread (M30, M36-M38)
 
@@ -277,14 +277,14 @@ commit per step (others push to main in parallel).
   - Check that `update_prefs` bumps `backend_epoch` (~450) so `InboxKey` rebuilds; if not,
     bump it in these handlers.
 - `docs/messages-acceptance.md`: rows for M30, M36, M37, M38.
-- Commit: `Rovsti messages: UI: inbox filters, SMS pin/archive/mark unread (M30, M36-M38)`.
+- Commit: `Rosty messages: UI: inbox filters, SMS pin/archive/mark unread (M30, M36-M38)`.
 
 ### S5 UI: swipe to reply and double-tap to react in WhatsApp chats (M31, M32)
 
 - `apps/messages/src/conversation.rs`:
   - Fields `swipe: Option<(String, SwipeReply)>` (message id) and `swipe_back:
     Option<(String, Spring)>` for the snap-back (use the spring already used for the
-    selection/glow animations, or `rovsti_ui::motion`; grep, do not invent).
+    selection/glow animations, or `rosty_ui::motion`; grep, do not invent).
   - On each selectable, non-revoked, non-pending bubble row (not in select mode, not while
     the viewer is open): `on_mouse_down(MouseButton::Left)` starts `SwipeReply::new(x, y)`
     with `event.position`; `on_mouse_move` with `event.pressed_button ==
@@ -292,7 +292,7 @@ commit per step (others push to main in parallel).
     `offset` (relative left margin/`left(px(offset))`, as the media viewer offsets its
     image), show a reply glyph (`Icon::LucideReply`) fading in by `offset / COMMIT_PX`, and
     call `cx.stop_propagation()` only while horizontal so vertical list scrolling keeps
-    working; `crossed` -> `rovsti_ui::haptics::perform(window, HapticFeedback::Selection)`.
+    working; `crossed` -> `rosty_ui::haptics::perform(window, HapticFeedback::Selection)`.
     `on_mouse_up` -> `release()` true -> `begin_reply(&id, cx)`; always start the snap-back
     spring; mark the following click as consumed (`swallow_click: bool`) so a swipe does not
     open media or the strip; long-press is ignored once horizontal.
@@ -301,12 +301,12 @@ commit per step (others push to main in parallel).
     `react(id, from_me, sender, double_tap_reaction(own, QUICK_EMOJIS[0]), cx)`; existing
     react failure pill stays. Show a short pop (the reaction chip appears immediately via
     `set_own_reaction`). A single click keeps today's behaviour.
-  - Reduced motion (`rovsti_ui` reduced-motion flag as used elsewhere in the file): no
+  - Reduced motion (`rosty_ui` reduced-motion flag as used elsewhere in the file): no
     rubber band animation, snap back without spring.
 - Keep logic in `bubble_gesture`; the glue only maps events.
 - `docs/messages-acceptance.md`: rows for M31, M32 (incl. "vertical scroll unaffected",
   "left swipe does nothing", "double-tap media opens the viewer").
-- Commit: `Rovsti messages: UI: swipe to reply and double-tap to react (M31, M32)`.
+- Commit: `Rosty messages: UI: swipe to reply and double-tap to react (M31, M32)`.
 
 ### S6 UI: Remind me on a message (M33)
 
@@ -314,9 +314,9 @@ commit per step (others push to main in parallel).
   `label(now, tz)`, plus a "Cancel reminder" danger row when `message_reminder::for_message`
   finds one; emits `RemindEvent::{Set(Slot), Cancel}`.
 - `apps/messages/src/backend.rs`: `message_reminders: Vec<MessageReminder>`, loaded at start
-  with `rovsti_android::reminders::armed_messages()` + `parse_list` (Unsupported -> empty),
+  with `rosty_android::reminders::armed_messages()` + `parse_list` (Unsupported -> empty),
   `rearm_messages()` once at launch; `arm_message_reminder(r, cx) -> Task<Result<bool,
-  rovsti_android::Error>>`, `disarm_message_reminder(id, cx)`; on the `message_reminder_fired`
+  rosty_android::Error>>`, `disarm_message_reminder(id, cx)`; on the `message_reminder_fired`
   event drop the item and notify.
 - WA strip (`conversation.rs` quick strip) and SMS selection pills (`sms_conversation.rs`):
   "Remind me" pill (`Icon::LucideAlarmClock`, already used in the app) opens the sheet via
@@ -331,7 +331,7 @@ commit per step (others push to main in parallel).
   Some(JumpTarget { id, at_ms })` before `open_thread`, so the existing jump/glow runs.
 - `docs/messages-acceptance.md`: rows for M33 (set, badge, cancel with confirm, notification
   tap opens and glows, desktop pill).
-- Commit: `Rovsti messages: UI: Remind me on a message (M33)`.
+- Commit: `Rosty messages: UI: Remind me on a message (M33)`.
 
 ### S7 UI: chat text size and location sharing (M34, M35)
 
@@ -353,7 +353,7 @@ commit per step (others push to main in parallel).
   / "Sharing needs an Android phone."; Copy link -> existing Copy event with the "Link
   copied" pill. Invalid coordinates keep only Copy. Update the `card_actions` unit tests.
 - `docs/messages-acceptance.md`: rows for M34, M35.
-- Commit: `Rovsti messages: UI: chat text size and location sharing (M34, M35)`.
+- Commit: `Rosty messages: UI: chat text size and location sharing (M34, M35)`.
 
 ### S8 Docs and backlog
 
@@ -364,7 +364,7 @@ commit per step (others push to main in parallel).
   Undo on SMS archive, pills on every action, desktop Unsupported pills). All of
   M30-M38 shipped in R5; nothing deferred. Device verification of the gesture rows
   (142, 143) and the reminder notification (147) is still pending (no device).
-- Commit: `Rovsti messages: utilities R5 docs and backlog`.
+- Commit: `Rosty messages: utilities R5 docs and backlog`.
 
 ## Round 6 backlog
 

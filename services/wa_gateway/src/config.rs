@@ -176,7 +176,7 @@ pub enum Cli {
 }
 
 pub const USAGE: &str = "\
-wa_gateway: WhatsApp gateway for the Rovsti apps
+wa_gateway: WhatsApp gateway for the Rosty apps
 
 USAGE:
     wa_gateway [--config <file.toml>]

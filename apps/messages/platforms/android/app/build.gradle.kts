@@ -38,7 +38,7 @@ require(gpuiSigningMode in listOf("auto", "debug", "configured", "unsigned")) {
 }
 
 android {
-    namespace = "dev.rovsti.messages"
+    namespace = "dev.rosty.messages"
     // Android lint's release "vital" pass crashes inside a detector on this
     // toolchain (LintDriver.handleDetectorError); the build does not need it.
     lint {
@@ -57,7 +57,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "dev.rovsti.messages"
+        applicationId = "dev.rosty.messages"
         minSdk = "34".toInt()
         targetSdk = "36".toInt()
         versionCode = "1".toInt()
@@ -87,10 +87,10 @@ android {
 // apps/messages, found from the Gradle project (platforms/android) so the repo can move.
 val messagesAppDir = rootProject.projectDir.resolve("../..").canonicalFile
 
-// The shared Kotlin bridge lives in crates/rovsti_android. It is added as a source
+// The shared Kotlin bridge lives in crates/rosty_android. It is added as a source
 // directory instead of a symlink, which Windows checkouts do not create.
 android.sourceSets["main"].kotlin.directories.add(
-    messagesAppDir.resolve("../../crates/rovsti_android/kotlin").canonicalPath,
+    messagesAppDir.resolve("../../crates/rosty_android/kotlin").canonicalPath,
 )
 
 for (profile in listOf("debug", "release")) {
@@ -105,7 +105,7 @@ for (profile in listOf("debug", "release")) {
             commandLine(providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"),
                 "build-android-native", "--output", output.get().asFile.absolutePath,
                 "--manifest-path", messagesAppDir.resolve("Cargo.toml").path,
-                "--library", "rovsti_messages", "--abi", abi,
+                "--library", "rosty_messages", "--abi", abi,
                 "--profile", rustProfile, "--min-sdk", "34")
             if (gpuiStagingRoot.isNotEmpty()) args("--staging-root", gpuiStagingRoot)
         }
@@ -115,7 +115,7 @@ for (profile in listOf("debug", "release")) {
 
 if (firebaseEnabled) {
     apply(plugin = "com.google.gms.google-services")
-    // RovstiMessagingService and its MESSAGING_EVENT manifest entry only exist in this build.
+    // RostyMessagingService and its MESSAGING_EVENT manifest entry only exist in this build.
     android.sourceSets["main"].kotlin.directories.add(file("src/firebase/kotlin").absolutePath)
     for (type in listOf("debug", "release")) {
         android.sourceSets.getByName(type).manifest.srcFile(file("src/firebase/AndroidManifest.xml"))

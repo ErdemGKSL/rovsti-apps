@@ -43,8 +43,8 @@ matches, actions and call row, and the right column holds the 4-row grid.
 
 ## Steps
 
-### S1. Pure `rovsti_core::keypad_layout` module with tests
-- New `crates/rovsti_core/src/keypad_layout.rs`, `pub mod keypad_layout;` in `lib.rs`. No deps,
+### S1. Pure `rosty_core::keypad_layout` module with tests
+- New `crates/rosty_core/src/keypad_layout.rs`, `pub mod keypad_layout;` in `lib.rs`. No deps,
   no allocation, all types `Copy + Debug + PartialEq`.
 - Types:
   - `pub struct Rect { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }` with `right()`,
@@ -104,11 +104,11 @@ matches, actions and call row, and the right column holds the 4-row grid.
   - sweep: widths 280..=1400 step 40 x heights 280..=2400 step 40, `assert_sane`
   - unit tests for `key_style`, `number_fit` (monotone non-increasing font with length, never
     below 22) and `match_plan`
-- Acceptance: `cargo test -p rovsti_core keypad_layout` passes. The phone app is untouched. All
+- Acceptance: `cargo test -p rosty_core keypad_layout` passes. The phone app is untouched. All
   checks green.
 
 ### S2. Compute the layout every frame and place keypad sections at its rects
-- `apps/phone/src/main.rs`: add the field `kp_layout: rovsti_core::keypad_layout::KeypadLayout`
+- `apps/phone/src/main.rs`: add the field `kp_layout: rosty_core::keypad_layout::KeypadLayout`
   (initialise it from a 412x915 input). In `render`, before `self.font.set_target`, build
   `KeypadInput` from `window.viewport_size()`, `window.insets().effective()` (convert
   `Edges<Pixels>` to `Insets` via `f32::from`), `self.dialed.chars().count()`, `header_h = 56.0 +
@@ -127,7 +127,7 @@ matches, actions and call row, and the right column holds the 4-row grid.
   `pt(24)`/`gap(12)` stacking.
 - `dial_pad`: replace `const ROW_GAP` with a `row_gap: f32` parameter. Update the callers in
   `incall.rs:2154` (pass 12.0) and `addcall.rs:593` (pass 12.0).
-- `dial_key`: use `rovsti_core::keypad_layout::key_style(size)` for glyph and caption height,
+- `dial_key`: use `rosty_core::keypad_layout::key_style(size)` for glyph and caption height,
   and render `key.letters` only when `style.letters` (keep the voicemail icon on "1" when
   letters are shown). Keep `KEY_SIZE` only for the in-call/addcall callers, or delete it if unused.
 - `field_font`: return `self.kp_layout.number_fit.font` (S3 replaces it).
@@ -195,7 +195,7 @@ matches, actions and call row, and the right column holds the 4-row grid.
 - `docs/phone-acceptance.md` (keypad section) and `docs/ux-audit.md`: describe the layout
   budget, modes (Portrait/Compact/Landscape), the thresholds (KEY 36..78, letters ≥ 60, number
   font ≥ 22 then leading ellipsis) and the pure module path. Mention in `docs/architecture.md`
-  next to the other rovsti_core modules if it lists them.
+  next to the other rosty_core modules if it lists them.
 - Run the full checks from the task (fmt, clippy `-D warnings`, test, the three aarch64 checks).
   If `df` shows < 6 GB free, `rm -rf target/debug/incremental` first. Commit with the
   attribution lines.

@@ -1,4 +1,4 @@
-# Rovsti Phone performance (Epic 12)
+# Rosty Phone performance (Epic 12)
 
 Performance comes from cheaper code, never from fewer effects (AD-21). Every glass
 surface, refraction, dispersion and all 16 signature moments stay.
@@ -7,7 +7,7 @@ surface, refraction, dispersion and all 16 signature moments stay.
 
 | Piece | Where |
 |---|---|
-| Frame recorder (`RovstiPerf` reports) | `rovsti_ui::perf::Recorder`, Cargo feature `perf` on `rovsti_phone` |
+| Frame recorder (`RostyPerf` reports) | `rosty_ui::perf::Recorder`, Cargo feature `perf` on `rosty_phone` |
 | Scripted scenarios (tab, recents, keypad, incall, incoming, idle) | `apps/phone/src/perf_run.rs` |
 | Phone driver: sets the trigger, collects logcat and SurfaceFlinger | `scripts/perf-run.sh` |
 | Perf APK (release profile, `perf` feature, debug key) | `scripts/perf-build.sh` |
@@ -15,7 +15,7 @@ surface, refraction, dispersion and all 16 signature moments stay.
 | Glass pixel tests and the glass timing bench | `crates/liquid_glass_kit/tests/` |
 
 The signed release APK has none of the recorder: the `perf` feature is off, and
-`debug.rovsti.perf` is never read.
+`debug.rosty.perf` is never read.
 
 ## Measuring on the phone (story 12.7, DEVICE)
 
@@ -32,7 +32,7 @@ The signed release APK has none of the recorder: the `perf` feature is off, and
    (It is the same as `cd apps/phone && gpuiforge build android --abi arm64-v8a --rust-profile release`
    with `default = ["perf"]` added to `apps/phone/Cargo.toml` for the build; the script does that and
    restores the file.)
-2. Open Rovsti Phone, unlock the phone, leave the screen on, plug the cable. Optionally pin the
+2. Open Rosty Phone, unlock the phone, leave the screen on, plug the cable. Optionally pin the
    refresh rate you want to judge (Settings, Display, Smooth display), and let the phone cool for a
    minute: the thermal state is in every report.
 3. Run the scenarios:
@@ -46,23 +46,23 @@ The signed release APK has none of the recorder: the `perf` feature is off, and
 
    ```bash
    adb logcat -c
-   adb shell setprop debug.rovsti.perf "tab:1"      # any of tab recents keypad incall incoming idle all
-   adb logcat -s RovstiPerf                          # one `report scenario=...` line when it ends
+   adb shell setprop debug.rosty.perf "tab:1"      # any of tab recents keypad incall incoming idle all
+   adb logcat -s RostyPerf                          # one `report scenario=...` line when it ends
    adb shell dumpsys SurfaceFlinger --list | grep -i GpuiView
    adb shell dumpsys SurfaceFlinger --latency "<the GpuiView layer name>"
-   adb shell setprop debug.rovsti.perf ""
+   adb shell setprop debug.rosty.perf ""
    ```
 
    The number after the colon only has to change to run the same scenario again.
 4. The scripts write `docs/perf/runs/<timestamp>/summary.md`. Copy the numbers into the tables
    below and into `docs/perf/final.md`.
 5. Cold start and incoming times (not scripted):
-   `adb shell am force-stop dev.rovsti.phone.perf; adb shell am start -W -n dev.rovsti.phone.perf/dev.rovsti.phone.MainActivity`
-   (the perf build has the application ID `dev.rovsti.phone.perf`, so it installs next to the release)
-   (`TotalTime` is cold start to first frame); the ring latency is the `RovstiPerf` line the
+   `adb shell am force-stop dev.rosty.phone.perf; adb shell am start -W -n dev.rosty.phone.perf/dev.rosty.phone.MainActivity`
+   (the perf build has the application ID `dev.rosty.phone.perf`, so it installs next to the release)
+   (`TotalTime` is cold start to first frame); the ring latency is the `RostyPerf` line the
    Incoming screen already logs (stories 5.6, 5.7), warm and with the app killed.
 6. StrictMode: a debuggable build logs violations under tag `StrictMode`
-   (`adb logcat -s StrictMode`). There must be none from `RovstiBridge`, the providers or photos.
+   (`adb logcat -s StrictMode`). There must be none from `RostyBridge`, the providers or photos.
 
 ### Reading a report
 
@@ -87,12 +87,12 @@ over=.. over2x=.. interval_ms p50=.. p95=.. p99=.. max=.. over=.. over2x=.. view
 
 | Target | Value | Measured by |
 |---|---|---|
-| p95 `build_ms` inside one display frame | 16.6 / 11.1 / 8.3 ms at 60 / 90 / 120 Hz | `RovstiPerf` `build_ms p95` |
+| p95 `build_ms` inside one display frame | 16.6 / 11.1 / 8.3 ms at 60 / 90 / 120 Hz | `RostyPerf` `build_ms p95` |
 | CPU frame work | under 4 ms | `build_ms p50` and `p95` |
 | Frames over budget | under 1%, none over 2x in tab, scroll, key, call flows | `over`, `over2x`, SurfaceFlinger |
 | Idle | 0 frames in 30 s on each tab | `idle` report, `renders=0` |
 | Cold start to first interactive frame | under 1.2 s | `am start -W` TotalTime |
-| Warm / cold incoming ring | under 1.5 s / 3 s | Incoming `RovstiPerf` line |
+| Warm / cold incoming ring | under 1.5 s / 3 s | Incoming `RostyPerf` line |
 
 ### Phone table (fill in; story 12.7 stays in backlog until this is done)
 
@@ -119,8 +119,8 @@ measured with the headless harness and the glass bench:
 
 ```bash
 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_OPT_LEVEL=3 \
-  cargo test --release -p rovsti_phone perf_harness::tests::measure -- --ignored --nocapture
-ALLOC_SCENARIO=recents cargo test --release -p rovsti_phone perf_harness::tests::alloc_sites -- --ignored --nocapture
+  cargo test --release -p rosty_phone perf_harness::tests::measure -- --ignored --nocapture
+ALLOC_SCENARIO=recents cargo test --release -p rosty_phone perf_harness::tests::alloc_sites -- --ignored --nocapture
 cargo test --release -p liquid_glass_kit --test glass_grid -- --ignored --nocapture pad_cost
 ```
 

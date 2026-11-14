@@ -1,0 +1,268 @@
+package dev.rosty.contacts.settings
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.rosty.contacts.R
+import dev.rosty.contacts.data.Book
+import dev.rosty.contacts.data.BookRepository
+import dev.rosty.contacts.data.ContactsStore
+import dev.rosty.contacts.people.PeopleSyncControl
+import dev.rosty.core.Outcome
+import dev.rosty.core.model.contacts.Account
+import dev.rosty.core.model.contacts.AccountLabelRequest
+import dev.rosty.core.model.contacts.DraftsRequest
+import dev.rosty.core.model.contacts.ReminderAnswer
+import dev.rosty.core.model.contacts.ReminderRequest
+import dev.rosty.core.ops.ContactsOps
+import dev.rosty.design.text.UiText
+import dev.rosty.platform.contacts.ContactResult
+import dev.rosty.platform.contacts.ContactsRepository
+import dev.rosty.platform.system.permissions.NextAction
+import dev.rosty.platform.system.permissions.PermissionState
+import dev.rosty.platform.system.permissions.nextAction
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+/**
+ * The Contacts settings (E4.15). The name format, the sort order, the account new contacts are saved to and the
+ * birthday reminders are fields of `contacts-prefs.json` ([ContactsStore]); the lists read the same flow, so changing
+ * the name format re-sorts the Contacts tab through `contacts.view` at once. The words of the summary and of the hour
+ * rows are the core's (`contacts.stats`, `contacts.birthday_reminders`). The alarms themselves are armed by
+ * `BirthdayAlarms`, which follows the switch and the hour.
+ *
+ * Turning reminders on asks for the notification permission first when [notifications] says Android still shows the
+ * dialog; the page launches it and answers with [SettingsAction.NotificationsAnswered]. Sync Now and Continue start the
+ * sync at once and, when the permission was never asked, ask it once through the same dialog so the sync's ongoing
+ * notification can show (people sync v2 S11); the sync runs whatever the answer.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class ContactsSettingsViewModel(
+    private val book: BookRepository,
+    private val store: ContactsStore,
+    private val repo: ContactsRepository,
+    private val ops: ContactsOps,
+    private val notifications: () -> PermissionState,
+    private val hour12: () -> Boolean = { false },
+    private val worker: CoroutineDispatcher = Dispatchers.Default,
+    /** The WhatsApp names and photos sync; null: no rows. */
+    private val people: PeopleSyncControl? = null,
+    /** "5 min. ago" for the time of the last sync. */
+    private val formatTime: (Long) -> String = { relativeTime(it, System::currentTimeMillis) },
+    private val clock: () -> Long = System::currentTimeMillis,
+    /** How often the sync rows are worded again (a limit's ETA counts down). */
+    private val tickMs: Long = TICK_MS,
+) : ViewModel() {
+    private val accounts = MutableStateFlow<List<AccountOption>>(emptyList())
+    private val outbox = Channel<SettingsEffect>(Channel.UNLIMITED)
+
+    /** The open dialog was asked for the sync's notification, not for reminders: its answer turns nothing on. */
+    private var askingForSync = false
+
+    val state: StateFlow<ContactsSettingsState> =
+        combine(
+            store.prefs,
+            book.book,
+            accounts,
+            people?.status?.let { status ->
+                combine(status, ticker()) { it, now -> peopleSyncUi(it, now, formatTime) }
+            } ?: flowOf(null),
+        ) { p, b, a, sync -> Inputs(p, b, a, sync) }
+            .conflate()
+            .mapLatest { build(it.prefs, it.book, it.accounts).copy(peopleSync = it.sync) }
+            .flowOn(worker)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ContactsSettingsState())
+
+    val effects: Flow<SettingsEffect> = outbox.receiveAsFlow()
+
+    init {
+        viewModelScope.launch {
+            store.load()
+            accounts.value = loadAccounts()
+        }
+    }
+
+    fun onAction(action: SettingsAction) {
+        when (action) {
+            is SettingsAction.SetNameFormat -> save { it.copy(nameFormat = action.value) }
+            is SettingsAction.SetSortBy -> save { it.copy(sortBy = action.value) }
+            is SettingsAction.SetSaveTo -> save { it.copy(saveTo = action.key) }
+            is SettingsAction.SetHour -> save { it.copy(reminderHour = action.hour.coerceIn(0, LAST_HOUR)) }
+            is SettingsAction.SetReminders -> setReminders(action.on)
+            is SettingsAction.NotificationsAnswered -> answered(action.granted)
+            SettingsAction.SyncPeopleNow -> startPeople(PeopleSyncControl::syncNow)
+            SettingsAction.ContinuePeople -> startPeople(PeopleSyncControl::resume)
+            SettingsAction.StopPeople -> people?.stop()
+        }
+    }
+
+    private class Inputs(
+        val prefs: dev.rosty.core.model.contacts.ContactsPrefs,
+        val book: Book,
+        val accounts: List<AccountOption>,
+        val sync: PeopleSyncUi?,
+    )
+
+    /** The clock, now and then every [tickMs]. */
+    private fun ticker(): Flow<Long> =
+        flow {
+            while (true) {
+                emit(clock())
+                delay(tickMs)
+            }
+        }
+
+    private fun save(
+        change: (dev.rosty.core.model.contacts.ContactsPrefs) -> dev.rosty.core.model.contacts.ContactsPrefs,
+    ) {
+        viewModelScope.launch {
+            if (store.update(change) is Outcome.Err) outbox.trySend(SettingsEffect.Toast(CANT_SAVE))
+        }
+    }
+
+    private fun setReminders(on: Boolean) {
+        if (!on) {
+            viewModelScope.launch { turn(false) }
+            return
+        }
+        when (nextAction(notifications())) {
+            NextAction.None -> viewModelScope.launch { turn(true) }
+            NextAction.Ask -> askForReminders()
+            NextAction.OpenSettings -> outbox.trySend(SettingsEffect.Toast(DENIED))
+        }
+    }
+
+    private fun startPeople(start: (PeopleSyncControl) -> Unit) {
+        val sync = people ?: return
+        start(sync)
+        askForSyncNotice()
+    }
+
+    private fun askForReminders() {
+        askingForSync = false
+        outbox.trySend(SettingsEffect.AskNotifications)
+    }
+
+    /** Once: only while Android has never shown the dialog; a refusal is never asked again from here. */
+    private fun askForSyncNotice() {
+        if (notifications() != PermissionState.NeverAsked) return
+        askingForSync = true
+        outbox.trySend(SettingsEffect.AskNotifications)
+    }
+
+    private fun answered(granted: Boolean) {
+        if (askingForSync) {
+            askingForSync = false
+            return
+        }
+        if (granted) viewModelScope.launch { turn(true) } else outbox.trySend(SettingsEffect.Toast(DENIED))
+    }
+
+    private suspend fun turn(on: Boolean) {
+        val saved = store.update { it.copy(birthdayReminders = on) }
+        if (saved is Outcome.Err) {
+            outbox.trySend(SettingsEffect.Toast(CANT_SAVE))
+            return
+        }
+        val label = (saved as Outcome.Ok).value.reminderHour.let { hourLabel(it) }
+        outbox.trySend(
+            SettingsEffect.Toast(
+                if (on) {
+                    UiText.Res(
+                        R.string.contacts_birthday_reminders_on,
+                        listOf(label),
+                    )
+                } else {
+                    UiText.Res(R.string.contacts_birthday_reminders_off)
+                },
+            ),
+        )
+    }
+
+    private suspend fun hourLabel(hour: Int): String = reminder(emptyList(), hour)?.hourLabel.orEmpty()
+
+    private suspend fun reminder(
+        drafts: List<dev.rosty.core.model.contacts.ContactDraft>,
+        hour: Int,
+    ): ReminderAnswer? =
+        (
+            ops.birthdayReminders(
+                ReminderRequest(drafts, 0L, 0, hour.coerceIn(0, LAST_HOUR), hour12(), emptyList()),
+            ) as? Outcome.Ok
+        )?.value
+
+    private suspend fun loadAccounts(): List<AccountOption> {
+        val list = (repo.accounts() as? ContactResult.Ok)?.value.orEmpty().ifEmpty { listOf(Account()) }
+        return list.map { AccountOption(it.key, labelOf(it)) }
+    }
+
+    private suspend fun labelOf(account: Account): String =
+        (ops.accountLabel(AccountLabelRequest(account.key)) as? Outcome.Ok)?.value?.label ?: account.name
+
+    private suspend fun build(
+        prefs: dev.rosty.core.model.contacts.ContactsPrefs,
+        b: Book,
+        list: List<AccountOption>,
+    ): ContactsSettingsState {
+        val chosen =
+            list.firstOrNull { it.key == prefs.saveTo } ?: list.firstOrNull { it.key.isEmpty() } ?: list.firstOrNull()
+        val plan = reminder(emptyList(), prefs.reminderHour)
+        val ready = b as? Book.Ready
+        val stats = ready?.let { (ops.stats(DraftsRequest(it.drafts)) as? Outcome.Ok)?.value }
+        return ContactsSettingsState(
+            nameFormat = prefs.nameFormat,
+            sortBy = prefs.sortBy,
+            accounts = list.toImmutableList(),
+            saveTo = chosen?.key.orEmpty(),
+            saveToLabel = chosen?.label.orEmpty(),
+            summaryText = stats?.totalText.orEmpty(),
+            summary =
+                stats?.let { SummaryUi(it.totalText, it.rows.toImmutableList(), it.accounts.toImmutableList()) }
+                    ?: SummaryUi(),
+            reminders = prefs.birthdayReminders,
+            hour = prefs.reminderHour.coerceIn(0, LAST_HOUR),
+            hourLabel = plan?.hourLabel.orEmpty(),
+            hours = plan?.hours.orEmpty().toImmutableList(),
+            hasContacts = ready?.drafts?.isNotEmpty() == true,
+        )
+    }
+
+    companion object {
+        /** `5 min. ago`, `Yesterday`, or the date for an older time; in the phone's language. */
+        fun relativeTime(
+            ms: Long,
+            now: () -> Long,
+        ): String =
+            android.text.format.DateUtils
+                .getRelativeTimeSpanString(
+                    ms,
+                    now(),
+                    android.text.format.DateUtils.MINUTE_IN_MILLIS,
+                    android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE,
+                ).toString()
+
+        const val STOP_TIMEOUT_MS = 5_000L
+
+        /** The sync rows' ticker: a limit's ETA is in minutes. */
+        const val TICK_MS = 60_000L
+        val DENIED: UiText = UiText.Res(R.string.contacts_notifications_off)
+        val CANT_SAVE: UiText = UiText.Res(R.string.contacts_cant_save_setting)
+        private const val LAST_HOUR = 23
+    }
+}

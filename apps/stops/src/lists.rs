@@ -10,7 +10,7 @@
 //! a header that appears). Content that keeps the height (a renamed place)
 //! needs no new key: visible items are rebuilt every frame anyway.
 //!
-//! [`grouped`] gives one row the look of `rovsti_ui::components::section`
+//! [`grouped`] gives one row the look of `rosty_ui::components::section`
 //! (inset, rounded group background), so a section can be split into items.
 
 use std::ops::Range;
@@ -19,7 +19,7 @@ use gpui::{
     AnyElement, Div, IntoElement, ListAlignment, ListOffset, ListState, ParentElement, Pixels,
     Styled, div, px,
 };
-use rovsti_ui::{
+use rosty_ui::{
     theme,
     tokens::{Theme, metrics, radius, typography},
 };

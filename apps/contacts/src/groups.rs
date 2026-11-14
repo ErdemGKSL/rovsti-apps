@@ -11,7 +11,7 @@ use gpui::{
     AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px, svg,
 };
-use rovsti_core::{
+use rosty_core::{
     contact_dates,
     contact_edit::{
         ContactDraft, Group, account_label, group_join_hint, group_subtitle, group_title,
@@ -20,7 +20,7 @@ use rovsti_core::{
     group_tools::Kind,
     vcard,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
     current_theme,

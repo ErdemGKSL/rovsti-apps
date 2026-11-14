@@ -26,8 +26,8 @@ use gpui::{
     MouseUpEvent, ParentElement, Path, PathBuilder, Pixels, Point, StatefulInteractiveElement,
     Styled, Task, TouchEvent, TouchPhase, Window, canvas, div, point, px, quad,
 };
-use rovsti_android::location;
-use rovsti_geo::{
+use rosty_android::location;
+use rosty_geo::{
     Coord, Diameter, EARTH_RADIUS_M, Feed, History, Measure, SavedStop, SavedStops, Side, Stop,
     StopColour,
     tiles::{
@@ -36,7 +36,7 @@ use rovsti_geo::{
     },
     view::{FollowMode, Viewport},
 };
-use rovsti_ui::{
+use rosty_ui::{
     components::{flat_glass, glass_pill},
     haptics, motion_tokens,
     spring::Spring,
@@ -363,7 +363,7 @@ pub fn fallback_centre(history: &History, saved: &SavedStops) -> Option<Coord> {
 /// The `geo:` link that opens a point in any maps app.
 pub fn maps_url(coord: Coord, label: &str) -> String {
     let label = label.trim();
-    rovsti_geo::dest::point_qr_payload(coord, (!label.is_empty()).then_some(label))
+    rosty_geo::dest::point_qr_payload(coord, (!label.is_empty()).then_some(label))
 }
 
 /// Number of rows of the pin menu: Share, Copy, QR code, Open in maps, Measure
@@ -2293,7 +2293,7 @@ impl StopsApp {
             .as_deref()
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
         let here = self.map.position.map(|(c, _)| c);
-        let from_you = here.map(|h| rovsti_geo::coord_format::from_you_text(h, dest.coord));
+        let from_you = here.map(|h| rosty_geo::coord_format::from_you_text(h, dest.coord));
         let no_trip = self.trip.is_none();
         let measure_coord = dest.coord;
         let rect = pin_menu_rect_h(
@@ -2661,7 +2661,7 @@ impl StopsApp {
             self.map.take_over();
             if self.map.measure_tap(at) == MeasureTap::Full {
                 self.show_pill(
-                    format!("Up to {} points", rovsti_geo::measure::MAX_POINTS),
+                    format!("Up to {} points", rosty_geo::measure::MAX_POINTS),
                     None,
                     cx,
                 );
@@ -2755,7 +2755,7 @@ impl StopsApp {
             let words = match result {
                 Ok(true) => return,
                 Ok(false) => "Allow location to follow you.",
-                Err(rovsti_android::Error::Unsupported) => "Following works on the phone only.",
+                Err(rosty_android::Error::Unsupported) => "Following works on the phone only.",
                 Err(_) => "Could not follow you. Try again.",
             };
             this.update(cx, |this, cx| {
@@ -2816,7 +2816,7 @@ impl StopsApp {
                     (Some(step), _) => step.message(),
                     (None, Some(Ok(true))) => "Looking for your location...",
                     (None, Some(Ok(false))) => "Turn on location to see where you are.",
-                    (None, Some(Err(rovsti_android::Error::Unsupported))) => {
+                    (None, Some(Err(rosty_android::Error::Unsupported))) => {
                         "Location is not available here."
                     }
                     (None, _) => "Could not get your location.",
@@ -2839,7 +2839,7 @@ impl StopsApp {
                 .background_executor()
                 .spawn(async { Preflight::gather() })
                 .await;
-            if pre.location == Some(rovsti_android::permissions::Access::Granted) {
+            if pre.location == Some(rosty_android::permissions::Access::Granted) {
                 this.update(cx, |this, cx| this.locate_me(cx)).ok();
             }
         })
@@ -2862,7 +2862,7 @@ impl StopsApp {
     }
 
     /// A fix arrived: move the dot and extend the trail.
-    pub(crate) fn map_fix(&mut self, at: rovsti_geo::FixPos) {
+    pub(crate) fn map_fix(&mut self, at: rosty_geo::FixPos) {
         let coord = Coord::new(at.lat, at.lon);
         self.map.position = Some((coord, at.accuracy_m));
         let trip = self.trip.as_ref().map(|t| t.id);
@@ -2873,7 +2873,7 @@ impl StopsApp {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use rovsti_geo::{Pattern, Route};
+    use rosty_geo::{Pattern, Route};
 
     use super::*;
 
@@ -3110,7 +3110,7 @@ mod tests {
 
     /// A saved stop whose gate runs from `a` to `b`.
     fn add_gate(saved: &mut SavedStops, name: &str, a: Coord, b: Coord) -> u64 {
-        let end = |coord| rovsti_geo::Endpoint {
+        let end = |coord| rosty_geo::Endpoint {
             label: String::new(),
             coord,
         };
@@ -3786,7 +3786,7 @@ mod tests {
     fn the_point_cap_stops_taps_and_ending_forgets_the_points() {
         let mut map = MapState::default();
         map.start_measure();
-        for _ in 0..rovsti_geo::measure::MAX_POINTS {
+        for _ in 0..rosty_geo::measure::MAX_POINTS {
             assert_eq!(map.measure_tap((0.0, 0.0)), MeasureTap::Added);
         }
         assert_eq!(map.measure_tap((0.0, 0.0)), MeasureTap::Full);
@@ -4130,11 +4130,11 @@ mod tests {
         let first = fallback_centre(&history, &saved).unwrap();
         assert!((first.lat - 40.002).abs() < 1e-9 && (first.lon - 30.0).abs() < 1e-9);
 
-        let ep = |lat, lon| rovsti_geo::Endpoint {
+        let ep = |lat, lon| rosty_geo::Endpoint {
             label: String::new(),
             coord: Coord::new(lat, lon),
         };
-        history.push(rovsti_geo::TripRecord {
+        history.push(rosty_geo::TripRecord {
             a: Some(ep(41.0, 29.0)),
             b: Some(ep(41.2, 29.2)),
             ..Default::default()
@@ -4270,11 +4270,11 @@ mod tests {
     // -- map tiles --
 
     const FIXTURE: &[u8] =
-        include_bytes!("../../../crates/rovsti_geo/src/tiles/testdata/osm-14-9520-6130.mvt");
+        include_bytes!("../../../crates/rosty_geo/src/tiles/testdata/osm-14-9520-6130.mvt");
 
     fn fixture_tile() -> TileGeometry {
         TileGeometry::from_bytes(
-            rovsti_geo::tiles::TileId::new(14, 9520, 6130).unwrap(),
+            rosty_geo::tiles::TileId::new(14, 9520, 6130).unwrap(),
             FIXTURE,
         )
         .unwrap()
@@ -4320,7 +4320,7 @@ mod tests {
     #[test]
     fn tile_features_land_where_the_tile_transform_puts_them() {
         let tile = fixture_tile();
-        let centre = rovsti_geo::tiles::frac_to_coord(14, 9520.5, 6130.5);
+        let centre = rosty_geo::tiles::frac_to_coord(14, 9520.5, 6130.5);
         let vp = Viewport::new(centre, 3.6);
         let trail = Breadcrumb::default();
         let tiles = [&tile];
@@ -4343,7 +4343,7 @@ mod tests {
 
         // A vertex of the tile that is inside the view is in the layer, same class,
         // at the transformed position.
-        let tf = rovsti_geo::tiles::TileTransform::new(tile.id, tile.extent, &vp);
+        let tf = rosty_geo::tiles::TileTransform::new(tile.id, tile.extent, &vp);
         let wanted = tile.groups.iter().find_map(|(class, g)| {
             let rings = g.lines.iter().chain(g.polygons.iter().flatten());
             rings

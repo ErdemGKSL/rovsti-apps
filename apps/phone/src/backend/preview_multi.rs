@@ -7,9 +7,7 @@
 use std::time::Duration;
 
 use gpui::Context;
-use rovsti_core::wire::{
-    AudioRoute, CallSnapshot, PendingOp, WireCall, WireCallState, caps, props,
-};
+use rosty_core::wire::{AudioRoute, CallSnapshot, PendingOp, WireCall, WireCallState, caps, props};
 
 use super::{
     Backend, now_ms,
@@ -79,7 +77,7 @@ fn host(id: i32, children: Vec<i32>, ago_s: i64, with_swap: bool) -> WireCall {
     }
 }
 
-/// The scene names the debug switcher and `ROVSTI_PREVIEW_SCENE` accept.
+/// The scene names the debug switcher and `ROSTY_PREVIEW_SCENE` accept.
 pub const SCENES: [&str; 8] = [
     "single", "two", "conf", "conf4", "hidden", "waiting", "nomerge", "three",
 ];
@@ -196,7 +194,7 @@ impl Backend {
         if is_child {
             self.preview_apply(cx, move |s| drop_child(s, id, false));
         } else {
-            self.preview_end_id(id, rovsti_core::wire::DisconnectCause::Local, cx);
+            self.preview_end_id(id, rosty_core::wire::DisconnectCause::Local, cx);
         }
     }
 

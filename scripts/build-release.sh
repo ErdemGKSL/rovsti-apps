@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Builds a release APK for Rovsti Phone signed with the release key the installed
+# Builds a release APK for Rosty Phone signed with the release key the installed
 # apps carry (scripts/signing.sh: ~/ownCloud/Personal/rovsti by default, override
-# with ROVSTI_SIGNING_DIR). Passwords are loaded from signing.env and never printed.
+# with ROSTY_SIGNING_DIR). Passwords are loaded from signing.env and never printed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,7 +20,7 @@ gpuiforge --config "$(signing_config "$ROOT/apps/phone")" build android --releas
 
 APK="$(find platforms/android/app/build/outputs/apk/release -name '*.apk' | head -1)"
 [[ -n "$APK" ]] || { echo "No release APK found" >&2; exit 1; }
-OUT="${1:-$HOME/Downloads/rovsti-phone-release.apk}"
+OUT="${1:-$HOME/Downloads/rosty-phone-release.apk}"
 cp "$APK" "$OUT"
 echo "Release APK: $OUT ($(du -h "$OUT" | cut -f1))"
 "$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)" verify --print-certs "$OUT" | grep -E "Signer.*certificate (DN|SHA-256)"

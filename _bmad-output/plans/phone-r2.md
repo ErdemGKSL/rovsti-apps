@@ -1,30 +1,30 @@
-# Plan: Rovsti Phone, round 2 (cold-start WhatsApp calls)
+# Plan: Rosty Phone, round 2 (cold-start WhatsApp calls)
 
-- Base: `bdb3c7884c10499e6aa85bf7000bdfcd0a04cc0f` ("Rovsti Phone: review fixes")
-- Unit: Rovsti Phone. Architect plan, no source changed.
+- Base: `bdb3c7884c10499e6aa85bf7000bdfcd0a04cc0f` ("Rosty Phone: review fixes")
+- Unit: Rosty Phone. Architect plan, no source changed.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android`
 
 ## State at the base
 
 Round 1 (`_bmad-output/plans/phone.md`) landed all 8 steps (commits `3fca1aa`..`bdb3c78`),
 no stash. Checks are green at the base. Present and wired:
 
-- Speed dial + long-press 1 voicemail (`rovsti_core::speed_dial`, `speed_dial_ui.rs`,
+- Speed dial + long-press 1 voicemail (`rosty_core::speed_dial`, `speed_dial_ui.rs`,
   `Backend::call_voicemail`), T9 suggestions on the keypad (`keypad.rs`, `visible_suggestions`).
 - WhatsApp calls on the glass Incoming and In-Call screens (`CallSource::WhatsApp`,
-  `rovsti_wa_proto::call::{WaScreen, arbitrate}`), Speaker (`wa::call_audio_speaker`),
+  `rosty_wa_proto::call::{WaScreen, arbitrate}`), Speaker (`wa::call_audio_speaker`),
   placing from Recents, Contact sheet (`sheet-cw-*`) and the keypad chip.
 - FCM: `WaIncoming` CallStyle notification from `WaPush.onMessage(kind=call)`, the
   `wa_call_action` event, `AnswerOnce`, optional Firebase source set in the Phone host.
-- WhatsApp calls in Recents (`WaCallHistory` in `wa-calls.json`, `rovsti_core::recents` extras).
-- Shared settings (`rovsti_wa_ui::WhatsAppSettings`, link / connect with key) in Phone,
+- WhatsApp calls in Recents (`WaCallHistory` in `wa-calls.json`, `rosty_core::recents` extras).
+- Shared settings (`rosty_wa_ui::WhatsAppSettings`, link / connect with key) in Phone,
   Messages, Contacts and Stops.
 
 ## Gaps found against the goal ("incoming WhatsApp call woken by FCM")
 
 1. **Answer from a cold notification does nothing.** A cold process starts the event
-   stream with `rovsti_wa_client::subscribe(url, key, None)` (`rovsti_wa_ui/src/view.rs`
+   stream with `rosty_wa_client::subscribe(url, key, None)` (`rosty_wa_ui/src/view.rs`
    `subscribe`), and the hub sends no replay for `after = None`
    (`services/wa_gateway/src/hub.rs` `subscribe`). The `CallUpdate { phase: Ringing }` was
    published before the app connected, so `Tracker` never shows the call and
@@ -47,9 +47,9 @@ Not in scope (device or owner decision): on-device acceptance, video/group calls
 
 ## Steps
 
-### Step 1. Pure: call snapshot and `call_end` wake (`rovsti_wa_proto`)
+### Step 1. Pure: call snapshot and `call_end` wake (`rosty_wa_proto`)
 
-Files: `crates/rovsti_wa_proto/src/event.rs` (or `api.rs`), `push.rs`, `history.rs`, `lib.rs`.
+Files: `crates/rosty_wa_proto/src/event.rs` (or `api.rs`), `push.rs`, `history.rs`, `lib.rs`.
 
 - `api.rs`/`event.rs`:
   ```rust
@@ -74,12 +74,12 @@ Files: `crates/rovsti_wa_proto/src/event.rs` (or `api.rs`), `push.rs`, `history.
   `record_summary` live -> false, ended missed incoming -> missed record, duplicate -> false,
   a call already recorded by `record_end` is not recorded twice.
 
-Acceptance: `cargo test -p rovsti_wa_proto` passes; proto and client still check for Android.
+Acceptance: `cargo test -p rosty_wa_proto` passes; proto and client still check for Android.
 
 ### Step 2. Gateway: `GET /v1/calls`, longer ended retention, `call_end` push (+ client)
 
 Files: `services/wa_gateway/src/wa/calls.rs`, `services/wa_gateway/src/push/mod.rs`,
-`push/fcm.rs` (only if it matches on `PushKind`), `crates/rovsti_wa_client/src/http.rs`.
+`push/fcm.rs` (only if it matches on `PushKind`), `crates/rosty_wa_client/src/http.rs`.
 
 - `CallEntry` gets `started_ms: i64` (`crate::now_ms()` in `CallEntry::new`) and
   `ended_ms: Option<i64>` (set in `apply` where `ended_at` is set). `Calls::list(&self) ->
@@ -107,12 +107,12 @@ Files: `services/wa_gateway/src/wa/calls.rs`, `services/wa_gateway/src/push/mod.
   Client: a path/JSON decode test like the existing ones in `http.rs`.
 
 Acceptance: checks green; `cargo test -p wa_gateway` covers the cases above;
-`cargo check -p rovsti_wa_client --target aarch64-linux-android` green.
+`cargo check -p rosty_wa_client --target aarch64-linux-android` green.
 
 ### Step 3. Android: `call_end` cancels the ringing notification and posts a missed call
 
-Files: `crates/rovsti_android/kotlin/dev/rovsti/bridge/WaPush.kt`, `WaIncoming.kt`,
-`apps/phone/platforms/android/app/src/test/java/dev/rovsti/bridge/WaIncomingTest.kt`.
+Files: `crates/rosty_android/kotlin/dev/rosty/bridge/WaPush.kt`, `WaIncoming.kt`,
+`apps/phone/platforms/android/app/src/test/java/dev/rosty/bridge/WaIncomingTest.kt`.
 
 - `WaPush.onMessage`: `kind=call_end` -> `WaIncoming.cancel(app, callId)`; when `missed=="1"`
   also `WaIncoming.showMissed(app, notice)`. Then emit `wa_push` as today (Rust re-syncs).
@@ -123,8 +123,8 @@ Files: `crates/rovsti_android/kotlin/dev/rovsti/bridge/WaPush.kt`, `WaIncoming.k
   ("Missed WhatsApp call", auto-cancel, content intent = launch activity), id derived from the
   call id but distinct from the ringing one.
 - JVM tests: `WaMissedNotice.of` for missed 1/0, missing id, title fallbacks.
-- No Rust API change is needed (`rovsti_android::wa::cancel_incoming` already exists). Rust
-  side only: `rovsti_wa_ui::WhatsAppSettings::wake` already reconnects on any `wa_push`.
+- No Rust API change is needed (`rosty_android::wa::cancel_incoming` already exists). Rust
+  side only: `rosty_wa_ui::WhatsAppSettings::wake` already reconnects on any `wa_push`.
 
 Acceptance: Rust checks green (no Rust change beyond Step 1's `Wake` match updates); Kotlin
 consistent with the existing bridge style (not built here).
@@ -132,7 +132,7 @@ consistent with the existing bridge style (not built here).
 ### Step 4. Phone: sync calls from the snapshot (cold Answer, missed calls into Recents)
 
 Files: `apps/phone/src/wa_call.rs`, `apps/phone/src/main.rs` (wake / action plumbing near
-lines 320-340), `crates/rovsti_wa_ui/src/view.rs` only if a "connected" notification hook is
+lines 320-340), `crates/rosty_wa_ui/src/view.rs` only if a "connected" notification hook is
 missing.
 
 - Pure, in `wa_call.rs`:

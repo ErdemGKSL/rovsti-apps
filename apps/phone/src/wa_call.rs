@@ -8,8 +8,8 @@
 //! card works, there is just no sound.
 //!
 //! [`Tracker`], [`status_line`] and the other rules live in
-//! `rovsti_app_core::phone::wa_call`; [`mic_step`] and [`play_available`] stay
-//! here because they take `rovsti_android` results. [`WaCallUi`] is the thin
+//! `rosty_app_core::phone::wa_call`; [`mic_step`] and [`play_available`] stay
+//! here because they take `rosty_android` results. [`WaCallUi`] is the thin
 //! GPUI entity around all of them.
 
 use std::{
@@ -26,24 +26,24 @@ use gpui::{
     AnyElement, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Role,
     SharedString, StatefulInteractiveElement, Styled, Task, Window, div, px,
 };
-use rovsti_android::{Error as AndroidError, events::WaCallAction};
-pub(crate) use rovsti_app_core::phone::wa_call::{
+use rosty_android::{Error as AndroidError, events::WaCallAction};
+pub(crate) use rosty_app_core::phone::wa_call::{
     AnswerOnce, Change, NOT_CONNECTED, Tracker, can_place, dial_number, extra_calls,
     handoff_number, load_history, save_history, status_line,
 };
-use rovsti_core::recents::ExtraCall;
-use rovsti_ui::{
+use rosty_core::recents::ExtraCall;
+use rosty_ui::{
     components::flat_glass,
     current_theme,
     theme::{call_colors, colors},
     tokens::{Theme, typography},
 };
-use rovsti_wa_client::{CallAudio, ClientError};
-use rovsti_wa_proto::{
+use rosty_wa_client::{CallAudio, ClientError};
+use rosty_wa_proto::{
     CallPhase, CallSummary, CallUpdate, ConnectKey, GatewayEvent, GatewayUrl, WaCallHistory,
     WaCallRecord, WaCallView, WaScreen, plan_snapshot, tracked_end,
 };
-use rovsti_wa_ui::{StoredLink, WaAvatars, WhatsAppSettings};
+use rosty_wa_ui::{StoredLink, WaAvatars, WhatsAppSettings};
 
 /// An ended call stays on screen this long, so "Call ended" can be read.
 const ENDED_HOLD: Duration = Duration::from_millis(2000);
@@ -63,7 +63,7 @@ pub enum MicStep {
     Unavailable,
 }
 
-pub fn mic_step(read: rovsti_android::Result<Option<Vec<i16>>>) -> MicStep {
+pub fn mic_step(read: rosty_android::Result<Option<Vec<i16>>>) -> MicStep {
     match read {
         Ok(Some(frame)) => MicStep::Frame(frame),
         Ok(None) => MicStep::Idle,
@@ -77,7 +77,7 @@ pub fn mic_step(read: rovsti_android::Result<Option<Vec<i16>>>) -> MicStep {
 
 /// Whether the speaker can still be fed after a play attempt. `Ok(false)` is a
 /// full queue (the frame is dropped), not a failure.
-pub fn play_available(played: &rovsti_android::Result<bool>) -> bool {
+pub fn play_available(played: &rosty_android::Result<bool>) -> bool {
     !matches!(
         played,
         Err(AndroidError::Unsupported | AndroidError::NotInitialized)
@@ -86,7 +86,7 @@ pub fn play_available(played: &rovsti_android::Result<bool>) -> bool {
 
 /// Whether a speaker request took effect. Without Android (desktop) there is
 /// nothing to switch, so the screen still shows the chosen state.
-pub fn speaker_applied(result: &rovsti_android::Result<bool>) -> bool {
+pub fn speaker_applied(result: &rosty_android::Result<bool>) -> bool {
     matches!(
         result,
         Ok(true) | Err(AndroidError::Unsupported | AndroidError::NotInitialized)
@@ -105,8 +105,8 @@ pub(crate) enum MicAsk {
 }
 
 /// Maps the microphone permission state to the next step.
-pub(crate) fn mic_ask(access: rovsti_android::permissions::Access) -> MicAsk {
-    use rovsti_android::permissions::Access;
+pub(crate) fn mic_ask(access: rosty_android::permissions::Access) -> MicAsk {
+    use rosty_android::permissions::Access;
     match access {
         Access::Granted => MicAsk::Ready,
         Access::Denied => MicAsk::Ask,
@@ -116,7 +116,7 @@ pub(crate) fn mic_ask(access: rovsti_android::permissions::Access) -> MicAsk {
 
 /// Whether the microphone start counts as started. Without Android (desktop)
 /// or on any error there is nothing to wait for, so the call carries on.
-pub(crate) fn mic_started(result: &rovsti_android::Result<bool>) -> bool {
+pub(crate) fn mic_started(result: &rosty_android::Result<bool>) -> bool {
     !matches!(result, Ok(false))
 }
 
@@ -142,7 +142,7 @@ async fn pump(mut audio: CallAudio, muted: Arc<AtomicBool>, timer: impl Fn(Durat
             frame = frame => {
                 let Some(frame) = frame else { break };
                 if speaker_on {
-                    let played = rovsti_android::wa::call_audio_play(&frame);
+                    let played = rosty_android::wa::call_audio_play(&frame);
                     speaker_on = play_available(&played);
                 }
             }
@@ -151,7 +151,7 @@ async fn pump(mut audio: CallAudio, muted: Arc<AtomicBool>, timer: impl Fn(Durat
                     continue;
                 }
                 for _ in 0..MIC_BURST {
-                    match mic_step(rovsti_android::wa::call_audio_read()) {
+                    match mic_step(rosty_android::wa::call_audio_read()) {
                         MicStep::Frame(frame) => {
                             if muted.load(Ordering::Relaxed) {
                                 continue;
@@ -190,8 +190,8 @@ fn parse_link(link: &StoredLink) -> Result<(GatewayUrl, ConnectKey), ClientError
 /// The flag says whether the microphone started (see [`mic_started`]).
 fn open_call_audio(link: &StoredLink, call_id: &str) -> Result<(CallAudio, bool), ClientError> {
     let (url, key) = parse_link(link)?;
-    let audio = rovsti_wa_client::call_audio(url, key, call_id)?;
-    let started = rovsti_android::wa::call_audio_start();
+    let audio = rosty_wa_client::call_audio(url, key, call_id)?;
+    let started = rosty_android::wa::call_audio_start();
     match &started {
         Ok(true) => {}
         Ok(false) => log::warn!("call audio did not start: is RECORD_AUDIO granted?"),
@@ -203,7 +203,7 @@ fn open_call_audio(link: &StoredLink, call_id: &str) -> Result<(CallAudio, bool)
 /// Asks Android for the microphone when it is not allowed yet. The call is
 /// never held back by the dialog.
 fn ask_mic() {
-    use rovsti_android::permissions::{self, Group};
+    use rosty_android::permissions::{self, Group};
     if let Ok(MicAsk::Ask) = permissions::state(Group::Microphone).map(mic_ask) {
         let _ = permissions::request(Group::Microphone);
     }
@@ -274,7 +274,7 @@ impl WaCallUi {
         })
         .detach();
         // The history is a small file: read it off the UI thread, then show it.
-        let dir = rovsti_ui::storage::data_dir("phone", cx);
+        let dir = rosty_ui::storage::data_dir("phone", cx);
         cx.spawn(async move |this, cx| {
             let Ok(dir) = dir.await else { return };
             let read = {
@@ -350,7 +350,7 @@ impl WaCallUi {
         self.speaker = on;
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::wa::call_audio_speaker(on) });
+            .spawn(async move { rosty_android::wa::call_audio_speaker(on) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             if speaker_applied(&result) {
@@ -419,7 +419,7 @@ impl WaCallUi {
         let call_id = call_id.to_owned();
         cx.background_executor()
             .spawn(async move {
-                if let Err(error) = rovsti_android::wa::cancel_incoming(&call_id) {
+                if let Err(error) = rosty_android::wa::cancel_incoming(&call_id) {
                     log::debug!("no notification to cancel: {error}");
                 }
             })
@@ -642,7 +642,7 @@ impl WaCallUi {
         if self.session.take().is_some() {
             cx.background_executor()
                 .spawn(async {
-                    if let Err(error) = rovsti_android::wa::call_audio_stop() {
+                    if let Err(error) = rosty_android::wa::call_audio_stop() {
                         log::debug!("stopping call audio: {error}");
                     }
                 })
@@ -723,7 +723,7 @@ impl WaCallUi {
             // Starting the audio may have reset the route: set it again.
             cx.background_executor()
                 .spawn(async {
-                    if let Err(error) = rovsti_android::wa::call_audio_speaker(true) {
+                    if let Err(error) = rosty_android::wa::call_audio_speaker(true) {
                         log::debug!("speaker: {error}");
                     }
                 })
@@ -743,7 +743,7 @@ impl WaCallUi {
         }
         let task = cx
             .background_executor()
-            .spawn(async { rovsti_android::wa::call_audio_start() });
+            .spawn(async { rosty_android::wa::call_audio_start() });
         cx.spawn(async move |this, cx| {
             let started = task.await;
             this.update(cx, |this, cx| {
@@ -772,7 +772,7 @@ impl WaCallUi {
         ask_mic();
         let number = number.to_owned();
         let place = cx.background_executor().spawn(async move {
-            let jid = rovsti_wa_proto::user_jid(&number).map_err(|e| e.to_string())?;
+            let jid = rosty_wa_proto::user_jid(&number).map_err(|e| e.to_string())?;
             let started = gateway.place_call(&jid).map_err(|e| e.to_string())?;
             Ok::<_, String>((jid, started.call_id, gateway))
         });
@@ -946,7 +946,7 @@ impl Render for WaCallUi {
         let theme = current_theme(window);
         let palette = colors(theme);
         let calls = call_colors(theme);
-        let neutral = rovsti_ui::tokens::mix(palette.label, palette.background, 0.78);
+        let neutral = rosty_ui::tokens::mix(palette.label, palette.background, 0.78);
 
         let buttons = if view.is_ringing_in() {
             vec![
@@ -1049,7 +1049,7 @@ mod tests {
 
     #[test]
     fn mic_ask_follows_access() {
-        use rovsti_android::permissions::Access;
+        use rosty_android::permissions::Access;
         assert_eq!(mic_ask(Access::Granted), MicAsk::Ready);
         assert_eq!(mic_ask(Access::Denied), MicAsk::Ask);
         assert_eq!(mic_ask(Access::PermanentlyDenied), MicAsk::OpenSettings);
@@ -1083,7 +1083,7 @@ mod tests {
             mic_step(Err(AndroidError::NotInitialized)),
             MicStep::Unavailable
         );
-        let bad = rovsti_wa_proto::audio::FrameError::BadBase64;
+        let bad = rosty_wa_proto::audio::FrameError::BadBase64;
         assert_eq!(mic_step(Err(AndroidError::Frame(bad))), MicStep::Idle);
     }
 

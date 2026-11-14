@@ -1,9 +1,9 @@
-//! Rovsti Messages: SMS/MMS and WhatsApp in one inbox.
+//! Rosty Messages: SMS/MMS and WhatsApp in one inbox.
 //!
-//! WhatsApp runs on the Rovsti gateway (`services/wa_gateway`): the WhatsApp
-//! tab hosts the shared settings screen (`rovsti_wa_ui`) that links this app to
+//! WhatsApp runs on the Rosty gateway (`services/wa_gateway`): the WhatsApp
+//! tab hosts the shared settings screen (`rosty_wa_ui`) that links this app to
 //! an instance, and chats and live messages come from the gateway through
-//! `rovsti_wa_client`. SMS stays on the phone.
+//! `rosty_wa_client`. SMS stays on the phone.
 
 mod access;
 mod backend;
@@ -56,11 +56,11 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, TextInputAction,
     TextInputPurpose, Window, WindowBounds, WindowOptions, div, list, px, size,
 };
-use rovsti_core::inbox_bulk::{self, BulkAction};
-use rovsti_core::inbox_filter::{self, InboxFilter};
-use rovsti_core::multi_select::{self, Selection};
-use rovsti_core::mute::MuteFor;
-use rovsti_core::{
+use rosty_core::inbox_bulk::{self, BulkAction};
+use rosty_core::inbox_filter::{self, InboxFilter};
+use rosty_core::multi_select::{self, Selection};
+use rosty_core::mute::MuteFor;
+use rosty_core::{
     Message, MessageDirection, PhoneNumber, ThreadId, blocklist,
     inbox::InboxThread,
     notify::NotificationSpec,
@@ -68,7 +68,7 @@ use rovsti_core::{
     spam,
     wire::{EmergencyList, Handoff},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon, IconAssets,
     chips::{ChipSpec, filter_chip_row},
     components::{empty_state, glass_icon_button, glass_pill, large_title, list_row},
@@ -93,12 +93,12 @@ use keyed_list::{KeyedList, key_of};
 use new_conversation::{NewConversation, NewConversationEvent, Recipient};
 use notifications::{Arrival, Digests, Reply, SmsReceived, Switches};
 use photos::ContactPhotos;
-use rovsti_wa_client::ClientError;
-use rovsti_wa_proto::{
+use rosty_wa_client::ClientError;
+use rosty_wa_proto::{
     ChatAction, ChatActionKind, ChatMeta, GatewayEvent, ScheduleText, ScheduledText, SendText,
-    WaMessage, is_pn_jid, is_status_chat, jid_user, to_rovsti,
+    WaMessage, is_pn_jid, is_status_chat, jid_user, to_rosty,
 };
-use rovsti_wa_ui::{AppId, WaAvatars, WhatsAppSettings, display_name};
+use rosty_wa_ui::{AppId, WaAvatars, WhatsAppSettings, display_name};
 use schedule_ui::{Dest, Draft, ScheduleSheet, StripKey, StripTarget};
 use settings_ui::{SettingsEvent, SettingsUndo, SettingsView};
 use sms_conversation::{SmsConversation, SmsConversationEvent};
@@ -247,7 +247,7 @@ enum PillAction {
     /// Opens the chat a message was just forwarded to.
     OpenThread { thread: ThreadId, title: String },
     /// Brings back an SMS/MMS deleted a moment ago.
-    UndoSmsDelete(Vec<rovsti_core::sms_timeline::SmsKey>),
+    UndoSmsDelete(Vec<rosty_core::sms_timeline::SmsKey>),
     /// Sets an SMS thread's local archive mark back.
     SmsArchive { thread: i64, archived: bool },
     /// Cancels the message reminder just set.
@@ -298,8 +298,8 @@ enum Open {
 
 struct MessagesApp {
     tabs: TabBar,
-    motion: rovsti_ui::motion::Motion,
-    page: rovsti_ui::motion::Entrance,
+    motion: rosty_ui::motion::Motion,
+    page: rosty_ui::motion::Entrance,
     whatsapp: Entity<WhatsAppSettings>,
     settings: Entity<SettingsView>,
     backend: Entity<Backend>,
@@ -395,7 +395,7 @@ struct MessagesApp {
     /// The Messages section of the search.
     global: global_search_ui::GlobalSearch,
     /// The message the next opened thread jumps to.
-    pending_jump: Option<rovsti_core::global_search::JumpTarget>,
+    pending_jump: Option<rosty_core::global_search::JumpTarget>,
     /// The OTP code that was just copied.
     copied: Option<SharedString>,
     open: Open,
@@ -1438,7 +1438,7 @@ impl MessagesApp {
                 cx,
             ),
             SmsConversationEvent::Deleted(keys) => this.show_pill_action(
-                rovsti_core::pending_delete::notice(keys.len()),
+                rosty_core::pending_delete::notice(keys.len()),
                 "Undo",
                 PillAction::UndoSmsDelete(keys.clone()),
                 cx,
@@ -1531,9 +1531,9 @@ impl MessagesApp {
             .collect();
         let users: Vec<&str> = users.iter().map(String::as_str).collect();
         let title = recipient.title.clone();
-        match rovsti_wa_proto::wa_target(&[recipient.number.as_str()], &users) {
-            rovsti_wa_proto::WaTarget::Chat(jid) => self.open_chat(jid, title, cx),
-            rovsti_wa_proto::WaTarget::Number(jid) => {
+        match rosty_wa_proto::wa_target(&[recipient.number.as_str()], &users) {
+            rosty_wa_proto::WaTarget::Chat(jid) => self.open_chat(jid, title, cx),
+            rosty_wa_proto::WaTarget::Number(jid) => {
                 let task = cx
                     .background_executor()
                     .spawn(async move { gateway.lookup_users(&[jid]) });
@@ -1551,7 +1551,7 @@ impl MessagesApp {
                 })
                 .detach();
             }
-            rovsti_wa_proto::WaTarget::NeedsCountryCode | rovsti_wa_proto::WaTarget::None => {
+            rosty_wa_proto::WaTarget::NeedsCountryCode | rosty_wa_proto::WaTarget::None => {
                 self.show_pill("Add the country code to message on WhatsApp");
                 cx.notify();
             }
@@ -1727,7 +1727,7 @@ impl MessagesApp {
             backend.update_prefs(cx, |p| p.set_muted_until(&tag, until))
         });
         let tz = self.backend.read(cx).locale().tz_offset_s;
-        let text = rovsti_core::mute::muted_notice(until, now, tz);
+        let text = rosty_core::mute::muted_notice(until, now, tz);
         self.show_pill_action(text, "Undo", PillAction::SmsMute(id, false), cx);
     }
 
@@ -1814,7 +1814,7 @@ impl MessagesApp {
                 p.sms_marks.set_archived(id, archived);
             })
         });
-        let text = rovsti_core::thread_marks::archive_notice(archived);
+        let text = rosty_core::thread_marks::archive_notice(archived);
         if undo {
             self.show_pill(text);
         } else {
@@ -1854,7 +1854,7 @@ impl MessagesApp {
                 PillAction::Unspam { sender, mark },
                 cx,
             ),
-            Some(Err(rovsti_core::spam::RuleError::TooMany)) => {
+            Some(Err(rosty_core::spam::RuleError::TooMany)) => {
                 self.show_pill(sms_actions::TOO_MANY_RULES)
             }
             _ => self.show_pill("Couldn't move that to Spam"),
@@ -1899,10 +1899,10 @@ impl MessagesApp {
                 });
                 match result {
                     Ok(_) => {
-                        let text = rovsti_core::thread_marks::pin_notice(pin);
+                        let text = rosty_core::thread_marks::pin_notice(pin);
                         self.show_pill(text);
                     }
-                    Err(_) => self.show_pill(rovsti_core::thread_marks::TOO_MANY_PINS),
+                    Err(_) => self.show_pill(rosty_core::thread_marks::TOO_MANY_PINS),
                 }
             }
             SmsAction::Archive | SmsAction::Unarchive => {
@@ -1929,7 +1929,7 @@ impl MessagesApp {
                 if on_page {
                     self.close_page(cx);
                 }
-                self.show_pill(rovsti_core::thread_marks::unread_notice());
+                self.show_pill(rosty_core::thread_marks::unread_notice());
             }
             // The lengths are the popover's "Mute for" page; `mute_for_key` acts.
             SmsAction::Mute => {}
@@ -1960,13 +1960,13 @@ impl MessagesApp {
                 if let Some(contact_id) = sms.contact_id {
                     let task = cx
                         .background_executor()
-                        .spawn(async move { rovsti_android::telecom::edit_contact(contact_id) });
+                        .spawn(async move { rosty_android::telecom::edit_contact(contact_id) });
                     cx.spawn(async move |this, cx| {
                         let result = task.await;
                         this.update(cx, |this, cx| {
                             match result {
                                 Ok(true) => {}
-                                Err(rovsti_android::Error::Unsupported) => {
+                                Err(rosty_android::Error::Unsupported) => {
                                     this.show_pill("Contacts need an Android phone.");
                                 }
                                 Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
@@ -2126,13 +2126,13 @@ impl MessagesApp {
             (sms_actions::SmsAction::AddContact, Some(contact_id)) => {
                 let task = cx
                     .background_executor()
-                    .spawn(async move { rovsti_android::telecom::edit_contact(contact_id) });
+                    .spawn(async move { rosty_android::telecom::edit_contact(contact_id) });
                 cx.spawn(async move |this, cx| {
                     let result = task.await;
                     this.update(cx, |this, cx| {
                         match result {
                             Ok(true) => {}
-                            Err(rovsti_android::Error::Unsupported) => {
+                            Err(rosty_android::Error::Unsupported) => {
                                 this.show_pill("Contacts need an Android phone.");
                             }
                             Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
@@ -2236,13 +2236,13 @@ impl MessagesApp {
         };
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::telecom::edit_contact(contact_id) });
+            .spawn(async move { rosty_android::telecom::edit_contact(contact_id) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {}
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("Contacts need an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
@@ -2258,10 +2258,10 @@ impl MessagesApp {
     /// open the contact when its first number already matches one.
     fn add_card_contact(
         &mut self,
-        card: rovsti_core::shared_card::CardView,
+        card: rosty_core::shared_card::CardView,
         cx: &mut Context<Self>,
     ) {
-        if let Some(number) = rovsti_core::shared_card::primary_number(&card)
+        if let Some(number) = rosty_core::shared_card::primary_number(&card)
             && self
                 .backend
                 .read(cx)
@@ -2272,16 +2272,16 @@ impl MessagesApp {
             self.add_or_open_contact(number.to_owned(), cx);
             return;
         }
-        let json = rovsti_core::shared_card::insert_json(&card);
+        let json = rosty_core::shared_card::insert_json(&card);
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::telecom::insert_contact(&json) });
+            .spawn(async move { rosty_android::telecom::insert_contact(&json) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {}
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("Contacts need an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("Couldn't open Contacts"),
@@ -2303,14 +2303,14 @@ impl MessagesApp {
         cx: &mut Context<Self>,
     ) {
         let task = cx.background_executor().spawn(async move {
-            rovsti_android::calendar::insert_event(&title, start_ms, end_ms, all_day)
+            rosty_android::calendar::insert_event(&title, start_ms, end_ms, all_day)
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {}
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("That needs an Android phone.");
                     }
                     Ok(false) => this.show_pill("No calendar app found"),
@@ -2327,13 +2327,13 @@ impl MessagesApp {
     fn email_to(&mut self, address: String, cx: &mut Context<Self>) {
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::telecom::send_email_to(&address) });
+            .spawn(async move { rosty_android::telecom::send_email_to(&address) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {}
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("That needs an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("No mail app answered"),
@@ -2355,9 +2355,9 @@ impl MessagesApp {
         let call = action == sms_actions::SmsAction::Call;
         let task = cx.background_executor().spawn(async move {
             if call {
-                rovsti_android::telecom::place_call(&number)
+                rosty_android::telecom::place_call(&number)
             } else {
-                rovsti_android::telecom::add_contact(&number)
+                rosty_android::telecom::add_contact(&number)
             }
         });
         cx.spawn(async move |this, cx| {
@@ -2365,7 +2365,7 @@ impl MessagesApp {
             this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {}
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("That needs an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill(if call {
@@ -2409,7 +2409,7 @@ impl MessagesApp {
         let number = raw.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::blocklist::block(&number) });
+            .spawn(async move { rosty_android::blocklist::block(&number) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -2424,7 +2424,7 @@ impl MessagesApp {
                             cx,
                         );
                     }
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("Blocking needs an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("Android refused that change."),
@@ -2548,7 +2548,7 @@ impl MessagesApp {
             PillAction::Unblock(raw) => {
                 let task = cx
                     .background_executor()
-                    .spawn(async move { rovsti_android::blocklist::unblock(&raw) });
+                    .spawn(async move { rosty_android::blocklist::unblock(&raw) });
                 cx.spawn(async move |this, cx| {
                     let result = task.await;
                     this.update(cx, |this, cx| {
@@ -2576,7 +2576,7 @@ impl MessagesApp {
         let number = raw.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::blocklist::unblock(&number) });
+            .spawn(async move { rosty_android::blocklist::unblock(&number) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -2586,7 +2586,7 @@ impl MessagesApp {
                             .update(cx, |backend, cx| backend.pull_blocked(cx));
                         this.show_pill_action("Unblocked", "Undo", PillAction::Reblock(raw), cx);
                     }
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("Unblocking needs an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("Couldn't unblock that number"),
@@ -2602,7 +2602,7 @@ impl MessagesApp {
     fn reblock(&mut self, raw: String, cx: &mut Context<Self>) {
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::blocklist::block(&raw) });
+            .spawn(async move { rosty_android::blocklist::block(&raw) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -2654,7 +2654,7 @@ impl MessagesApp {
             SettingsUndo::QuickReply(index, text) => {
                 self.backend.update(cx, |backend, cx| {
                     backend.update_prefs(cx, |p| {
-                        rovsti_core::quick_replies::restore(&mut p.quick_replies, index, text);
+                        rosty_core::quick_replies::restore(&mut p.quick_replies, index, text);
                     });
                 });
                 self.show_pill("Reply restored");
@@ -2756,7 +2756,7 @@ impl MessagesApp {
         let notice = match action {
             ChatActionKind::Mute { until_ms } => {
                 let tz = self.backend.read(cx).locale().tz_offset_s;
-                Some(rovsti_core::mute::muted_notice(until_ms, now_ms(), tz))
+                Some(rosty_core::mute::muted_notice(until_ms, now_ms(), tz))
             }
             _ => inbox::action_notice(&action).map(str::to_owned),
         };
@@ -3379,13 +3379,13 @@ impl MessagesApp {
         target: forward_ui::ForwardTarget,
         cx: &mut Context<Self>,
     ) {
-        use rovsti_core::forward::{ForwardPlan, plan};
+        use rosty_core::forward::{ForwardPlan, plan};
         let title = target.title.to_string();
         let thread = target.thread.clone();
         let wa_gateway = self.whatsapp.read(cx).gateway();
         let sms_ready = self.backend.read(cx).sms_role_held();
         let dir = self.backend.read(cx).data_dir().map_or_else(
-            || std::env::temp_dir().join("rovsti-forward"),
+            || std::env::temp_dir().join("rosty-forward"),
             |dir| dir.join("cache"),
         );
         let (caption, picture) = match plan(&item.body, target.to()) {
@@ -3397,7 +3397,7 @@ impl MessagesApp {
                 match &thread {
                     ThreadId::Sms(id) => {
                         if !sms_ready {
-                            self.show_pill("Set Rovsti as the SMS app to forward by SMS");
+                            self.show_pill("Set Rosty as the SMS app to forward by SMS");
                             return;
                         }
                         let id = *id;
@@ -3432,7 +3432,7 @@ impl MessagesApp {
             return;
         };
         if matches!(thread, ThreadId::Sms(_)) && !sms_ready {
-            self.show_pill("Set Rovsti as the SMS app to forward by SMS");
+            self.show_pill("Set Rosty as the SMS app to forward by SMS");
             return;
         }
         if matches!(thread, ThreadId::WhatsApp(_)) && wa_gateway.is_none() {
@@ -3458,10 +3458,10 @@ impl MessagesApp {
                     gateway
                         .send_media_with(
                             &chat,
-                            rovsti_wa_proto::MediaKind::Image,
+                            rosty_wa_proto::MediaKind::Image,
                             &mime,
                             caption.as_deref(),
-                            &rovsti_wa_proto::MediaOptions::default(),
+                            &rosty_wa_proto::MediaOptions::default(),
                             bytes,
                         )
                         .map_err(|error| log::warn!("forwarding a picture failed: {error}"))
@@ -3513,7 +3513,7 @@ impl MessagesApp {
 
     /// "Forwarded to Ada" with an Open action, or the failure.
     fn finish_forward(&mut self, title: &str, thread: ThreadId, ok: bool) {
-        let text = rovsti_core::forward::notice(title, ok);
+        let text = rosty_core::forward::notice(title, ok);
         if ok {
             self.pill_action_later(text, thread, title.to_owned());
         } else {
@@ -3886,7 +3886,7 @@ impl MessagesApp {
 
     /// Label of the open page's "Next unread" chip.
     fn next_unread_label(&self, cx: &App) -> Option<String> {
-        rovsti_core::unread_jump::next_unread_label(self.next_unread_pick(cx).1)
+        rosty_core::unread_jump::next_unread_label(self.next_unread_pick(cx).1)
     }
 
     /// The chip was tapped: close the page like Back (drafts kept) and open
@@ -3935,8 +3935,8 @@ impl MessagesApp {
         };
         cx.background_executor()
             .spawn(async move {
-                match rovsti_android::notify::show(&json) {
-                    Ok(_) | Err(rovsti_android::Error::Unsupported) => {}
+                match rosty_android::notify::show(&json) {
+                    Ok(_) | Err(rosty_android::Error::Unsupported) => {}
                     Err(error) => log::warn!("showing a notification failed: {error}"),
                 }
             })
@@ -3949,8 +3949,8 @@ impl MessagesApp {
         self.digests.clear(&tag);
         cx.background_executor()
             .spawn(async move {
-                match rovsti_android::notify::cancel(&tag) {
-                    Ok(_) | Err(rovsti_android::Error::Unsupported) => {}
+                match rosty_android::notify::cancel(&tag) {
+                    Ok(_) | Err(rosty_android::Error::Unsupported) => {}
                     Err(error) => log::warn!("cancelling a notification failed: {error}"),
                 }
             })
@@ -3990,7 +3990,7 @@ impl MessagesApp {
 
     /// A live WhatsApp message: notify unless it is mine or its chat is open.
     fn notify_whatsapp(&mut self, message: &WaMessage, cx: &mut Context<Self>) {
-        let incoming = to_rovsti(message);
+        let incoming = to_rosty(message);
         // The open chat stays quiet only while the user is looking at it.
         let open = self
             .window_active
@@ -4248,7 +4248,7 @@ impl MessagesApp {
                         .wa_info
                         .get(jid)
                         .and_then(|info| info.meta.muted_until_ms)
-                        .filter(|&u| u != rovsti_wa_proto::MUTED_FOREVER),
+                        .filter(|&u| u != rosty_wa_proto::MUTED_FOREVER),
                     ThreadId::Sms(_) => None,
                 };
                 remote.or(local)
@@ -4488,7 +4488,7 @@ impl MessagesApp {
                                 this.show_pill("Scheduled message cancelled");
                             }
                             Err(ClientError::Api(api))
-                                if api.code == rovsti_wa_proto::ErrorCode::NotFound =>
+                                if api.code == rosty_wa_proto::ErrorCode::NotFound =>
                             {
                                 this.remote_scheduled.retain(|t| t.id != id);
                                 this.show_pill("Scheduled message cancelled");
@@ -4539,7 +4539,7 @@ impl MessagesApp {
         if self.open_thread_id(cx).is_some() || !matches!(self.open, Open::None) {
             return GAP + 72.0;
         }
-        let bar = rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)
+        let bar = rosty_ui::layout::geom::tab_bar_bottom(safe_bottom)
             + f32::from(metrics::TAB_BAR_HEIGHT);
         // The bulk action bar is taller than the tab bar.
         bar + GAP
@@ -4583,7 +4583,7 @@ impl MessagesApp {
         out.extend(self.forward_overlay(theme, window, cx));
         out.extend(self.pill.render(
             theme,
-            self.pill_bottom(rovsti_ui::layout::safe_area(window).bottom, cx),
+            self.pill_bottom(rosty_ui::layout::safe_area(window).bottom, cx),
             {
                 let entity = cx.entity();
                 move |pointer, position, _, cx| {
@@ -4618,13 +4618,13 @@ impl MessagesApp {
     fn share_text(&mut self, text: String, cx: &mut Context<Self>) {
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::telecom::share_text(&text) });
+            .spawn(async move { rosty_android::telecom::share_text(&text) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {}
-                    Err(rovsti_android::Error::Unsupported) => {
+                    Err(rosty_android::Error::Unsupported) => {
                         this.show_pill("Sharing isn't available here");
                     }
                     Ok(false) | Err(_) => {
@@ -4657,7 +4657,7 @@ impl MessagesApp {
         let text = code.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::notify::copy_to_clipboard(&text, sensitive) });
+            .spawn(async move { rosty_android::notify::copy_to_clipboard(&text, sensitive) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let copied = this
@@ -4665,7 +4665,7 @@ impl MessagesApp {
                     match result {
                         Ok(true) => this.copied = sensitive.then(|| code.clone()),
                         // Desktop preview: the window's own clipboard.
-                        Err(rovsti_android::Error::Unsupported) => {
+                        Err(rosty_android::Error::Unsupported) => {
                             cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
                             this.copied = sensitive.then(|| code.clone());
                         }
@@ -4832,14 +4832,14 @@ impl MessagesApp {
         )
     }
 
-    /// The read-only banner shown while Rovsti Messages is not the default SMS app.
+    /// The read-only banner shown while Rosty Messages is not the default SMS app.
     fn role_banner(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
         div()
             .mx(px(16.0))
             .mb(px(8.0))
             .p(px(12.0))
-            .rounded(rovsti_ui::tokens::radius::CARD)
+            .rounded(rosty_ui::tokens::radius::CARD)
             .bg(colors.orange.opacity(0.16))
             .flex()
             .flex_col()
@@ -4849,7 +4849,7 @@ impl MessagesApp {
                     .text_size(typography::SUBHEADLINE.size)
                     .text_color(colors.label)
                     .child(
-                        "Read-only: Rovsti Messages is not your default SMS app, so it can't \
+                        "Read-only: Rosty Messages is not your default SMS app, so it can't \
                          send, receive or mark messages read yet.",
                     ),
             )
@@ -5259,7 +5259,7 @@ impl MessagesApp {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.backend.update(cx, |backend, cx| {
                             backend
-                                .ask_access(rovsti_android::permissions::Group::Notifications, cx);
+                                .ask_access(rosty_android::permissions::Group::Notifications, cx);
                         });
                     }))
                     .into_any_element()
@@ -5580,7 +5580,7 @@ impl MessagesApp {
                         .child(empty_state(
                             theme,
                             "SMS Access Is Off",
-                            "Allow SMS access for Rovsti Messages in the system settings to see your messages.",
+                            "Allow SMS access for Rosty Messages in the system settings to see your messages.",
                         ))
                         .child(
                             glass_pill(theme, if held { "Open settings" } else { "Make default" })
@@ -5653,7 +5653,7 @@ impl Render for MessagesApp {
             return div()
                 .size_full()
                 .relative()
-                .child(rovsti_ui::components::backdrop(theme, accent))
+                .child(rosty_ui::components::backdrop(theme, accent))
                 .child(div().size_full().opacity(self.page.progress()).child(page))
                 .children(overlays)
                 .into_any_element();
@@ -5702,12 +5702,12 @@ impl Render for MessagesApp {
         };
 
         let bottom = if self.inbox_select.is_some() {
-            self.bulk_bar(rovsti_ui::layout::safe_area(window).bottom, theme, cx)
+            self.bulk_bar(rosty_ui::layout::safe_area(window).bottom, theme, cx)
         } else {
             self.tabs
                 .render(
                     theme,
-                    rovsti_ui::layout::safe_area(window).bottom,
+                    rosty_ui::layout::safe_area(window).bottom,
                     move |index, _, cx| {
                         entity.update(cx, |this, cx| {
                             this.tabs.press();
@@ -5737,10 +5737,7 @@ impl Render for MessagesApp {
                     cx.notify();
                 }),
             )
-            .child(rovsti_ui::components::backdrop(
-                theme,
-                theme.colors().accent,
-            ))
+            .child(rosty_ui::components::backdrop(theme, theme.colors().accent))
             .child(page)
             .child(bottom)
             .children(overlays)
@@ -5753,7 +5750,7 @@ impl Render for MessagesApp {
 /// Blocking: run it on the background executor.
 fn forward_file(
     picture: &media_viewer::ViewerItem,
-    gateway: Option<&rovsti_wa_client::Gateway>,
+    gateway: Option<&rosty_wa_client::Gateway>,
     cache: &Path,
 ) -> Option<std::path::PathBuf> {
     match &picture.source {
@@ -5869,7 +5866,7 @@ pub(crate) fn menu_card(
 }
 
 // Cold receivers (SMS, inline reply, FCM digest) ask Rust for decisions here (AD-MSG4).
-rovsti_android::headless_entry!(headless::handle);
+rosty_android::headless_entry!(headless::handle);
 
 #[gpui_platform::main]
 fn main() {
@@ -5897,7 +5894,7 @@ fn main() {
                     app
                 },
             )
-            .expect("failed to open the Rovsti Messages window");
+            .expect("failed to open the Rosty Messages window");
             cx.activate(true);
         });
 }

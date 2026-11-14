@@ -10,13 +10,13 @@ use gpui::{
     AnyElement, Context, HapticFeedback, Hsla, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_core::{
+use rosty_core::{
     call_log::{EntryRef, blocked_ids_for_numbers, ids_for_numbers},
     call_log_query::{PruneAge, ids_older_than, prune_text},
     recents::extra_ids_for_numbers,
     wire::CallLogEntry,
 };
-use rovsti_ui::{
+use rosty_ui::{
     motion::press_scale,
     motion_tokens::scale,
     theme::{self, call_colors},
@@ -87,7 +87,7 @@ pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String
             ("Delete all call history?".to_owned(), body)
         }
         DeleteScope::Selected { rows, calls, .. } => {
-            rovsti_core::call_log_query::delete_selected_text(*rows, *calls)
+            rosty_core::call_log_query::delete_selected_text(*rows, *calls)
         }
         DeleteScope::Older { age, .. } => {
             let (title, mut body) = prune_text(*age, count);
@@ -186,7 +186,7 @@ impl PhoneApp {
 
     /// Settings > Data > Delete all call history, after the confirm sheet.
     fn delete_all_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
         let entries: Vec<CallLogEntry> = match self.backend.read(cx).call_log() {
             backend::Load::Ready(log) => log.source.to_vec(),
             _ => Vec::new(),
@@ -264,7 +264,7 @@ impl PhoneApp {
                 .relative()
                 .h(px(52.0 * press_scale(press, scale::PRESS)))
                 .rounded_full()
-                .bg(rovsti_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
+                .bg(rosty_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -277,7 +277,7 @@ impl PhoneApp {
                     cx.listener(move |this, _, window, cx| {
                         this.presses.down(id);
                         if id == YES {
-                            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                            rosty_ui::haptics::perform(window, HapticFeedback::Confirm);
                         }
                         this.history_sheet_act(id, window, cx);
                     }),

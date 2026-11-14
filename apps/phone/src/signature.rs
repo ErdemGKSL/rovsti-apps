@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use rovsti_ui::{moments::Tween, motion_tokens, spring::Spring, tokens::Theme};
+use rosty_ui::{moments::Tween, motion_tokens, spring::Spring, tokens::Theme};
 
 /// The wash brightens by this much of alpha (S14).
 pub const CELEBRATE_ALPHA: f32 = 0.10;
@@ -22,7 +22,7 @@ const CELEBRATE_LENGTH: Duration = Duration::from_millis(600);
 /// The veil never starts fully opaque, so the new screen is hinted at once.
 const VEIL_START: f32 = 0.9;
 
-fn spring(value: f32, params: rovsti_ui::spring::SpringParams) -> Spring {
+fn spring(value: f32, params: rosty_ui::spring::SpringParams) -> Spring {
     Spring::new(value, params).with_epsilon(0.002)
 }
 

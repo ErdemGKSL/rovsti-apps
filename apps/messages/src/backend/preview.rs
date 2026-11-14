@@ -1,4 +1,4 @@
-//! Desktop sample data, so `cargo run -p rovsti_messages` shows a living inbox
+//! Desktop sample data, so `cargo run -p rosty_messages` shows a living inbox
 //! instead of "needs an Android phone". Nothing here runs on a phone: the
 //! backend only builds a [`Preview`] when the provider answers `Unsupported`.
 //!
@@ -6,7 +6,7 @@
 //! counts are derived from them, and a preview send or a mark-read edits them,
 //! so the inbox and the conversation stay consistent while you click around.
 
-use rovsti_core::{
+use rosty_core::{
     Message, MessageDirection, PhoneNumber, ThreadId,
     inbox::InboxThread,
     sms::{
@@ -205,7 +205,7 @@ impl Preview {
         ]
     }
 
-    /// One or two SIMs (`ROVSTI_PREVIEW_SIMS`, default 2 so the chip shows).
+    /// One or two SIMs (`ROSTY_PREVIEW_SIMS`, default 2 so the chip shows).
     pub fn sims(count: u32) -> SmsSimsPayload {
         let sims: Vec<SmsSim> = (0..count.min(2))
             .map(|slot| SmsSim {

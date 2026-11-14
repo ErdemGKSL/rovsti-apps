@@ -1,0 +1,255 @@
+package dev.rosty.contacts.photo
+
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.res.stringResource
+import dev.rosty.contacts.R
+import dev.rosty.core.Outcome
+import dev.rosty.core.model.contacts.CropView
+import dev.rosty.core.model.contacts.PhotoAcceptsRequest
+import dev.rosty.core.model.contacts.PhotoPlan
+import dev.rosty.core.model.contacts.PhotoPlanRequest
+import dev.rosty.core.ops.ContactsOps
+import dev.rosty.design.media.crop.CropSession
+import dev.rosty.design.text.UiText
+import dev.rosty.platform.contacts.ContactResult
+import dev.rosty.platform.contacts.ContactsRepository
+import dev.rosty.platform.files.FileResult
+import dev.rosty.platform.files.FilesRepository
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+@Immutable
+data class PhotoUiState(
+    /** The crop page is open for this picture. */
+    val crop: CropSession? = null,
+    /** A WhatsApp picture is being fetched. */
+    val busy: Boolean = false,
+    /** A new contact holds a cropped picture until its first Save (the file; null when there is none). */
+    val pendingPath: String? = null,
+)
+
+sealed interface PhotoEffect {
+    data class Toast(
+        val text: UiText,
+    ) : PhotoEffect
+
+    /** The contact's stored photo changed (the book follows by itself). */
+    data object Changed : PhotoEffect
+}
+
+/**
+ * The photo of one contact in the editor (E4.4 AC2). A picture arrives from the Photo Picker (no media permission), the
+ * camera ([FileResult] with a path) or WhatsApp; the Rust core decides whether it is usable (`contacts.photo_accepts`,
+ * `contacts.photo_plan`), the crop page lets the owner move and scale it, and `contacts.photo_plan` turns what was
+ * shown into the square to cut, which the provider cuts and stores ([ContactsRepository.setPhoto]). A saved contact
+ * gets the photo at once; a new one ([contactId] null) holds it until the first Save returns the id ([applyPending]).
+ */
+class ContactPhotoModel(
+    private val contactId: Long?,
+    private val repo: ContactsRepository,
+    private val ops: ContactsOps,
+    private val files: FilesRepository,
+    private val waPhotos: WaPhotoPort,
+    private val cacheDir: File,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val scope: CoroutineScope,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) {
+    private val ui = MutableStateFlow(PhotoUiState())
+    val state: StateFlow<PhotoUiState> = ui.asStateFlow()
+
+    private val outbox = Channel<PhotoEffect>(Channel.UNLIMITED)
+    val effects: Flow<PhotoEffect> = outbox.receiveAsFlow()
+
+    private var pendingPlan: PhotoPlan? = null
+
+    private fun say(text: UiText) {
+        outbox.trySend(PhotoEffect.Toast(text))
+    }
+
+    /** The answer of the picker or the camera. */
+    fun picked(result: FileResult) {
+        scope.launch {
+            when (result) {
+                FileResult.Cancelled -> {
+                    Unit
+                }
+
+                FileResult.TooLarge -> {
+                    say(UiText.Res(R.string.contacts_picture_too_large))
+                }
+
+                is FileResult.Failed -> {
+                    say(
+                        UiText.Res(R.string.contacts_cant_change_photo_reason, listOf(words(result.reason))),
+                    )
+                }
+
+                is FileResult.Ok -> {
+                    open(result)
+                }
+            }
+        }
+    }
+
+    private suspend fun open(result: FileResult.Ok) {
+        val limits = (ops.photoAccepts(PhotoAcceptsRequest(null, clock())) as? Outcome.Ok)?.value
+        var path = result.path
+        var mime = result.mime
+        val uri = result.uri
+        if (path == null && uri != null) {
+            val cap = (limits?.maxPickBytes ?: DEFAULT_CAP).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            when (val read = files.readUri(uri, cap)) {
+                is FileResult.Ok -> {
+                    path = read.path
+                    mime = read.mime ?: mime
+                }
+
+                FileResult.TooLarge -> {
+                    return say(UiText.Res(R.string.contacts_picture_too_large))
+                }
+
+                is FileResult.Failed -> {
+                    return say(UiText.Res(R.string.contacts_cant_change_photo_reason, listOf(words(read.reason))))
+                }
+
+                FileResult.Cancelled -> {
+                    return
+                }
+            }
+        }
+        if (path == null) return say(UiText.Res(R.string.contacts_photo_not_available))
+        begin(path, mime)
+    }
+
+    /** Checks the picture at [path] and opens the crop page for it. */
+    private suspend fun begin(
+        path: String,
+        mime: String?,
+    ) {
+        val accepts = (ops.photoAccepts(PhotoAcceptsRequest(mime, clock())) as? Outcome.Ok)?.value?.accepts ?: false
+        if (!accepts) {
+            discard(path)
+            return say(UiText.Res(R.string.contacts_not_picture))
+        }
+        val size = repo.photoSize(path)
+        if (size.width <= 0 || size.height <= 0) {
+            discard(path)
+            return say(UiText.Res(R.string.contacts_picture_unreadable))
+        }
+        val plan = (ops.photoPlan(PhotoPlanRequest(size.width, size.height)) as? Outcome.Ok)?.value
+        if (plan == null || plan.plan == null) {
+            discard(path)
+            return say(plan?.error?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_picture_unusable))
+        }
+        ui.update { it.copy(crop = CropSession(path, size.width, size.height, plan.maxZoom)) }
+    }
+
+    /** "Use WhatsApp Photo": fetches the large picture of [jid] and opens the crop page for it. */
+    fun useWhatsApp(jid: String) {
+        if (ui.value.busy) return
+        scope.launch {
+            ui.update { it.copy(busy = true) }
+            val target = waPhotoFile(cacheDir, contactId ?: 0L)
+            val fetched = waPhotos.fetch(jid, target)
+            ui.update { it.copy(busy = false) }
+            when (fetched) {
+                is WaPhotoResult.Saved -> begin(fetched.path, "image/jpeg")
+                WaPhotoResult.NoPicture -> say(UiText.Res(R.string.contacts_no_whatsapp_photo))
+                WaPhotoResult.Unreachable -> say(UiText.Res(R.string.contacts_wa_unreachable))
+                WaPhotoResult.CannotStore -> say(UiText.Res(R.string.contacts_photo_not_stored))
+            }
+        }
+    }
+
+    /** Choose on the crop page: [view] is what the owner saw. */
+    fun cropChosen(view: CropView) {
+        val session = ui.value.crop ?: return
+        scope.launch {
+            ui.update { it.copy(crop = null) }
+            val answer =
+                (ops.photoPlan(PhotoPlanRequest(session.width, session.height, view)) as? Outcome.Ok)?.value
+            val plan = answer?.plan
+            if (plan == null) {
+                discard(session.path)
+                return@launch say(
+                    answer?.error?.let { UiText.Literal(it) } ?: UiText.Res(R.string.contacts_picture_unusable),
+                )
+            }
+            val id = contactId
+            if (id == null) {
+                pendingPlan = plan
+                ui.update { it.copy(pendingPath = session.path) }
+                return@launch
+            }
+            when (repo.setPhoto(id, session.path, plan)) {
+                is ContactResult.Ok -> outbox.trySend(PhotoEffect.Changed)
+                is ContactResult.Failed -> say(UiText.Res(R.string.contacts_cant_change_photo))
+            }
+        }
+    }
+
+    /** Cancel (or Back) on the crop page. */
+    fun cropCancelled() {
+        val session = ui.value.crop ?: return
+        ui.update { it.copy(crop = null) }
+        scope.launch { discard(session.path) }
+    }
+
+    /** "Remove Photo": a saved contact loses its stored photo, a new one drops the picture it was holding. */
+    fun remove() {
+        scope.launch {
+            val id = contactId
+            if (id == null) {
+                ui.value.pendingPath?.let { discard(it) }
+                pendingPlan = null
+                ui.update { it.copy(pendingPath = null) }
+                return@launch
+            }
+            when (repo.removePhoto(id)) {
+                is ContactResult.Ok -> outbox.trySend(PhotoEffect.Changed)
+                is ContactResult.Failed -> say(UiText.Res(R.string.contacts_cant_remove_photo))
+            }
+        }
+    }
+
+    /** The first Save of a new contact returned [id]: the picture it was holding becomes its photo. */
+    suspend fun applyPending(id: Long) {
+        val path = ui.value.pendingPath ?: return
+        val plan = pendingPlan ?: return
+        pendingPlan = null
+        ui.update { it.copy(pendingPath = null) }
+        when (repo.setPhoto(id, path, plan)) {
+            is ContactResult.Ok -> outbox.trySend(PhotoEffect.Changed)
+            is ContactResult.Failed -> say(UiText.Res(R.string.contacts_saved_photo_not))
+        }
+    }
+
+    private suspend fun discard(path: String) {
+        withContext(io) { File(path).delete() }
+    }
+
+    private fun words(reason: String): UiText =
+        UiText.Res(
+            when (reason) {
+                "permission" -> R.string.contacts_reason_permission
+                "unavailable" -> R.string.contacts_reason_unavailable
+                else -> R.string.contacts_reason_other
+            },
+        )
+
+    private companion object {
+        const val DEFAULT_CAP = 20L * 1024 * 1024
+    }
+}

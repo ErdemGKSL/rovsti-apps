@@ -2,19 +2,19 @@
 //! No device is needed: the Kotlin source and the manifest are read as text.
 
 const TRIP_SERVICE: &str =
-    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/TripService.kt");
+    include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/TripService.kt");
 const TRIP_ALARM: &str =
-    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/TripAlarm.kt");
+    include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/TripAlarm.kt");
 const BRIDGE: &str =
-    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt");
+    include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/RostyBridge.kt");
 const ALARM_OPTIONS: &str =
-    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/AlarmOptions.kt");
+    include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/AlarmOptions.kt");
 const STOPS_LOCATION: &str =
-    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/StopsLocation.kt");
+    include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/StopsLocation.kt");
 const SHORTCUTS: &str =
-    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/Shortcuts.kt");
+    include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/Shortcuts.kt");
 const MAIN_ACTIVITY: &str =
-    include_str!("../platforms/android/app/src/main/kotlin/dev/rovsti/stops/MainActivity.kt");
+    include_str!("../platforms/android/app/src/main/kotlin/dev/rosty/stops/MainActivity.kt");
 const TRIP_SERVICE_RECOVER: &str = "TripAlarm.recover(this)";
 const MANIFEST: &str = include_str!("../platforms/android/app/src/main/AndroidManifest.xml");
 
@@ -53,7 +53,7 @@ fn trip_alarm_delegates_to_alarm_sound_and_recovers_volume() {
     assert!(TRIP_ALARM.matches("TripAlarm.recover(context)").count() >= 1);
     assert!(TRIP_SERVICE.contains(TRIP_SERVICE_RECOVER));
     let bridge =
-        include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt");
+        include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/RostyBridge.kt");
     assert!(bridge.contains("TripAlarm.recover("));
     // The old inline player is gone.
     assert!(!TRIP_ALARM.contains("MediaPlayer"));
@@ -61,10 +61,10 @@ fn trip_alarm_delegates_to_alarm_sound_and_recovers_volume() {
 
 #[test]
 fn background_location_is_declared_and_mapped() {
-    use rovsti_android::permissions::Group;
+    use rosty_android::permissions::Group;
     assert!(MANIFEST.contains("android.permission.ACCESS_BACKGROUND_LOCATION"));
     let key = format!("\"{}\"", Group::BackgroundLocation.key());
-    assert!(BRIDGE.contains(&key), "RovstiBridge.kt lacks {key}");
+    assert!(BRIDGE.contains(&key), "RostyBridge.kt lacks {key}");
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn idle_location_seam_is_in_kotlin() {
     assert!(BRIDGE.contains("fun lastLocation(): String"));
     assert!(BRIDGE.contains("fun locateOnce(): Boolean"));
     assert_eq!(
-        rovsti_android::events::kind::STOPS_LOCATION,
+        rosty_android::events::kind::STOPS_LOCATION,
         "stops_location"
     );
 }
@@ -92,16 +92,15 @@ fn idle_location_seam_is_in_kotlin() {
 #[test]
 fn share_provider_is_declared_like_the_phone_app() {
     for token in [
-        "dev.rovsti.bridge.RovstiShareProvider",
-        "${applicationId}.rovstishare",
+        "dev.rosty.bridge.RostyShareProvider",
+        "${applicationId}.rostyshare",
         "android:exported=\"false\"",
         "android:grantUriPermissions=\"true\"",
     ] {
         assert!(MANIFEST.contains(token), "manifest lacks {token}");
     }
-    let share =
-        include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/MediaShare.kt");
-    assert!(share.contains("\"${context.packageName}.rovstishare\""));
+    let share = include_str!("../../../crates/rosty_android/kotlin/dev/rosty/bridge/MediaShare.kt");
+    assert!(share.contains("\"${context.packageName}.rostyshare\""));
 }
 
 #[test]
@@ -112,7 +111,7 @@ fn the_bridge_has_the_alarm_option_functions() {
         "fun previewVibration(",
         "fun previewAlarmSound(",
     ] {
-        assert!(BRIDGE.contains(name), "RovstiBridge.kt lacks {name}");
+        assert!(BRIDGE.contains(name), "RostyBridge.kt lacks {name}");
     }
 }
 
@@ -125,14 +124,14 @@ fn the_alarm_picker_is_an_alarm_picker_and_answers_once() {
     assert!(BRIDGE.contains("AlarmOptions.handle("));
     assert!(BRIDGE.contains(&format!(
         "postOneShot(\"{}\"",
-        rovsti_android::events::kind::ALARM_SOUND_PICKED
+        rosty_android::events::kind::ALARM_SOUND_PICKED
     )));
 }
 
 #[test]
 fn shortcut_and_live_location_names_match_rust() {
     for token in [
-        "const val EXTRA_STOP_ID = \"dev.rovsti.stops.STOP_ID\"",
+        "const val EXTRA_STOP_ID = \"dev.rosty.stops.STOP_ID\"",
         "fun pinStop(",
     ] {
         assert!(SHORTCUTS.contains(token), "Shortcuts.kt lacks {token}");
@@ -143,9 +142,9 @@ fn shortcut_and_live_location_names_match_rust() {
         "fun watchLocation(",
         "postOneShot(\"open_stop\"",
     ] {
-        assert!(BRIDGE.contains(token), "RovstiBridge.kt lacks {token}");
+        assert!(BRIDGE.contains(token), "RostyBridge.kt lacks {token}");
     }
-    assert_eq!(rovsti_android::events::kind::OPEN_STOP, "open_stop");
+    assert_eq!(rosty_android::events::kind::OPEN_STOP, "open_stop");
     for token in [
         "fun watch(",
         "requestLocationUpdates(",
@@ -159,9 +158,9 @@ fn shortcut_and_live_location_names_match_rust() {
         );
     }
     for token in [
-        "RovstiBridge.deliverOpenStop(intent)",
+        "RostyBridge.deliverOpenStop(intent)",
         "override fun onNewIntent",
-        "RovstiBridge.watchLocation(false)",
+        "RostyBridge.watchLocation(false)",
         "override fun onPause",
     ] {
         assert!(

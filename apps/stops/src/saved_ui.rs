@@ -11,15 +11,15 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, Window, div, list, px, svg,
 };
-use rovsti_android::Error as AndroidError;
-use rovsti_core::wire::DocumentResult;
-use rovsti_geo::{
+use rosty_android::Error as AndroidError;
+use rosty_core::wire::DocumentResult;
+use rosty_geo::{
     Coord, SavedStop, SavedStops, StopColour,
     backup::{self, Backup},
     places_io::{self, MergePlan},
     saved_stops::{self, SavedSort},
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     button::{Button, ButtonSize, ButtonStyle},
     components::{empty_state, glass_pill, list_row, section},
@@ -281,7 +281,7 @@ pub fn more_text(total: usize) -> Option<String> {
 
 /// The date in an export's file name, on the phone's calendar.
 pub fn export_stamp(now_ms: i64, tz_offset_s: i32) -> String {
-    let (y, m, d) = rovsti_core::contact_dates::local_ymd(now_ms, tz_offset_s);
+    let (y, m, d) = rosty_core::contact_dates::local_ymd(now_ms, tz_offset_s);
     format!("{y:04}-{m:02}-{d:02}")
 }
 
@@ -375,7 +375,7 @@ impl StopsApp {
         Page::List(Box::new(list(
             state,
             cx.processor(move |this, ix: usize, window, cx| {
-                let theme = rovsti_ui::current_theme(window);
+                let theme = rosty_ui::current_theme(window);
                 match ix.checked_sub(1) {
                     None => this.saved_header(theme, window, cx),
                     Some(_) if this.saved_visible.is_empty() => {
@@ -468,7 +468,7 @@ impl StopsApp {
         let usage = self
             .history
             .usage_of(stop.a.coord, stop.b.coord)
-            .map(|u| rovsti_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
+            .map(|u| rosty_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
         let detail = stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
         // Orange is the default and shows no dot, but the slot stays so every
         // title starts on the same x.
@@ -760,7 +760,7 @@ impl StopsApp {
         label: &str,
         cx: &mut Context<Self>,
     ) {
-        let text = rovsti_geo::share_text(label, coord);
+        let text = rosty_geo::share_text(label, coord);
         self.share_out(name, text, cx);
     }
 
@@ -769,7 +769,7 @@ impl StopsApp {
         let Some(stop) = self.saved.get(id) else {
             return;
         };
-        let text = rovsti_geo::dest::stop_share_text(&stop.name, stop.a.coord, stop.b.coord);
+        let text = rosty_geo::dest::stop_share_text(&stop.name, stop.a.coord, stop.b.coord);
         let name = stop.name.clone();
         self.share_out(name, text, cx);
     }
@@ -805,7 +805,7 @@ impl StopsApp {
         let Some(stop) = self.saved.get(id) else {
             return;
         };
-        let payload = rovsti_geo::dest::stop_share_text(&stop.name, stop.a.coord, stop.b.coord);
+        let payload = rosty_geo::dest::stop_share_text(&stop.name, stop.a.coord, stop.b.coord);
         match qr_sheet::make_card(&payload, &stop.name) {
             Ok(card) => {
                 self.sheet_mode = SheetMode::Qr(card);
@@ -822,7 +822,7 @@ impl StopsApp {
             let sent = text.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { rovsti_android::telecom::share_text(&sent) })
+                .spawn(async move { rosty_android::telecom::share_text(&sent) })
                 .await;
             this.update(cx, |this, cx| match share_outcome(&result, &name) {
                 ShareOutcome::Shared => {}
@@ -1057,8 +1057,8 @@ impl StopsApp {
     pub(crate) fn apply_snapshot(
         &mut self,
         saved: SavedStops,
-        history: rovsti_geo::History,
-        prefs: rovsti_geo::StopsPrefs,
+        history: rosty_geo::History,
+        prefs: rosty_geo::StopsPrefs,
         cx: &mut Context<Self>,
     ) {
         self.saved = saved;
@@ -1193,7 +1193,7 @@ mod tests {
         assert_eq!(pin_pill(&Ok(false)), "The launcher did not add it");
         assert!(pin_pill(&Err(AndroidError::Unsupported)).contains("phone only"));
     }
-    use rovsti_geo::{Endpoint, SavedStops};
+    use rosty_geo::{Endpoint, SavedStops};
 
     fn stop(name: &str, lat_b: f64) -> SavedStop {
         let mut s = SavedStops::default();
@@ -1235,7 +1235,7 @@ mod tests {
         // Disabled, never hidden.
         assert_eq!(row_menu_model(false, false).item_count(), 5);
         let delete = m.find("delete").unwrap();
-        assert_eq!(delete.role, rovsti_ui::menu::model::MenuRole::Destructive);
+        assert_eq!(delete.role, rosty_ui::menu::model::MenuRole::Destructive);
         assert_eq!(delete_prompt("Home"), "Delete Home?");
     }
 
@@ -1436,8 +1436,8 @@ mod tests {
         assert_eq!(ImportKind::default(), ImportKind::Places);
         let file = Backup::new(
             SavedStops::default(),
-            rovsti_geo::History::default(),
-            rovsti_geo::StopsPrefs::default(),
+            rosty_geo::History::default(),
+            rosty_geo::StopsPrefs::default(),
             1_793_000_000_000,
         );
         let body = restore_sheet_body(&file, 0);

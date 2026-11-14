@@ -1,9 +1,9 @@
-# Plan: Rovsti Stops, adaptive polling and alarm-clock-grade alarm (round 2)
+# Plan: Rosty Stops, adaptive polling and alarm-clock-grade alarm (round 2)
 
 - Base: `d5fc511ef962ef7d8f9669c567988f95960153cc`
 - Architect: PLAN agent. No source changed by this plan.
 - Checks for every step (all must stay green):
-  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+  `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 - No device and no Gradle. Kotlin is verified by reading and by `apps/stops/src/kotlin_contract.rs`.
   Disk: if `df` shows < 6 GB free, `rm -rf target/debug/incremental` first.
 
@@ -11,10 +11,10 @@
 
 All 8 steps of `stops-alarm.md` landed (commits 0131b91 .. 5ce0040, docs b6b5594):
 
-- `rovsti_geo::poll` (`poll_interval`, `retry_after`, `MIN_POLL 3 s`, `MAX_POLL 300 s`,
+- `rosty_geo::poll` (`poll_interval`, `retry_after`, `MIN_POLL 3 s`, `MAX_POLL 300 s`,
   `IDLE_POLL 60 s`) with monotonic / cap / floor / no-skip / unknown-input tests; `crossing.rs`
-  delegates to it. `FixOut.retry_ms`. `rovsti_geo::alarm` (`AlarmPlan`, `SoundSource`,
-  `volume_target`, `ramp_volume`, ring timeout, re-ring cap). `cargo test -p rovsti_geo`: 212 pass.
+  delegates to it. `FixOut.retry_ms`. `rosty_geo::alarm` (`AlarmPlan`, `SoundSource`,
+  `volume_target`, `ramp_volume`, ring timeout, re-ring cap). `cargo test -p rosty_geo`: 212 pass.
 - `AlarmSound.kt`: `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` + abandon, one `USAGE_ALARM` attribute
   set (no preferred device, no STREAM_MUSIC), STREAM_ALARM raised to >= 80 % with a 4 s ramp and
   restored (saved in prefs, `TripAlarm.recover` after process death), fallback user alarm ->
@@ -68,22 +68,22 @@ All 8 steps of `stops-alarm.md` landed (commits 0131b91 .. 5ce0040, docs b6b5594
 
 ## Steps
 
-### 1. `Group::BackgroundLocation` facade (rovsti_android, pure Rust + map entry)
+### 1. `Group::BackgroundLocation` facade (rosty_android, pure Rust + map entry)
 
-- `crates/rovsti_android/src/permissions.rs`: add
-  `/// ACCESS_BACKGROUND_LOCATION ("Allow all the time"), Rovsti Stops only; not in ALL. Android 11+ answers a request with the app's location page.`
+- `crates/rosty_android/src/permissions.rs`: add
+  `/// ACCESS_BACKGROUND_LOCATION ("Allow all the time"), Rosty Stops only; not in ALL. Android 11+ answers a request with the app's location page.`
   `BackgroundLocation` to `Group`; `key()` -> `"background_location"`. `Group::ALL` unchanged.
   Extend the desktop test: `state(Group::BackgroundLocation)` and `request(...)` are
   `Err(Error::Unsupported)`; a test that every `Group` key is unique and `ALL` excludes
   `Location` and `BackgroundLocation`.
-- `RovstiBridge.kt` `groups`: `"background_location" to listOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)`.
+- `RostyBridge.kt` `groups`: `"background_location" to listOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)`.
 - `apps/stops/platforms/android/app/src/main/AndroidManifest.xml`: add
   `<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />` after
   `ACCESS_COARSE_LOCATION`.
 - `kotlin_contract.rs`: new test `background_location_is_declared_and_mapped` (manifest contains
-  `ACCESS_BACKGROUND_LOCATION`; `RovstiBridge.kt` contains `"background_location"`; equals
-  `Group::BackgroundLocation.key()`). Add a `const BRIDGE: &str = include_str!(".../RovstiBridge.kt")`.
-- Acceptance: checks green; `grep -n BackgroundLocation crates/rovsti_android/src/permissions.rs`.
+  `ACCESS_BACKGROUND_LOCATION`; `RostyBridge.kt` contains `"background_location"`; equals
+  `Group::BackgroundLocation.key()`). Add a `const BRIDGE: &str = include_str!(".../RostyBridge.kt")`.
+- Acceptance: checks green; `grep -n BackgroundLocation crates/rosty_android/src/permissions.rs`.
 
 ### 2. Stops pure logic: preflight row, `searching`, `restart` (apps/stops, Rust, tested)
 

@@ -1,4 +1,4 @@
-# Rovsti Stops: vector map tiles under the radar map (plan, round 1)
+# Rosty Stops: vector map tiles under the radar map (plan, round 1)
 
 Base: `f763d18` (nothing tile-related exists yet: no `tiles` module, no MVT code,
 no tile setting; `docs/roadmap.md` still says "decided: vector radar map, no tiles").
@@ -7,10 +7,10 @@ Checks after every step (all must pass):
 
 ```
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-cargo check -p rovsti_android --target aarch64-linux-android
-cargo check -p rovsti_wa_client --target aarch64-linux-android
+cargo check -p rosty_android --target aarch64-linux-android
+cargo check -p rosty_wa_client --target aarch64-linux-android
 # from step 6 on, also:
-cargo check -p rovsti_tiles --target aarch64-linux-android
+cargo check -p rosty_tiles --target aarch64-linux-android
 ```
 
 If `df` shows under 6 GB free: `rm -rf target/debug/incremental` before building.
@@ -33,10 +33,10 @@ If `df` shows under 6 GB free: `rm -rf target/debug/incremental` before building
   `move_to/line_to/close`, `build()`. Vertex buffers are `u16`: keep each built path
   under ~8 000 input points (chunk). `gpui::rgba(0xRRGGBBAA) -> Rgba`, `Hsla: From<Rgba>`.
   `window.with_content_mask(Some(ContentMask { bounds }), |w| ..)` exists.
-- `apps/stops/src/main.rs` `render` calls `rovsti_ui::current_theme(window)` every frame
+- `apps/stops/src/main.rs` `render` calls `rosty_ui::current_theme(window)` every frame
   and `map_card(theme, ..)` builds `Palette::new(theme)`, so a theme-keyed map style
   switches instantly with the system theme (FOLLOW_SYSTEM_THEME) for free.
-- `rovsti_wa_client::http::build_agent` is the TLS template: `TlsConfig` with
+- `rosty_wa_client::http::build_agent` is the TLS template: `TlsConfig` with
   `TlsProvider::Rustls`, `unversioned_rustls_crypto_provider(Arc::new(rustls_graviola::default_provider()))`,
   `RootCerts::WebPki`; `Config::builder().http_status_as_error(false)` + timeouts.
   ureq 3.5 has a `gzip` feature (flate2, pure Rust backend).
@@ -93,12 +93,12 @@ boundary 1.5. Width at display zoom `dz` = `w14 * 2^(clamp(dz - 14, -3, 2))`, at
 
 ## Architecture decisions
 
-- **Pure logic in `rovsti_geo::tiles`** (new module dir `crates/rovsti_geo/src/tiles/`):
+- **Pure logic in `rosty_geo::tiles`** (new module dir `crates/rosty_geo/src/tiles/`):
   slippy math, URL/source, MVT decoder (hand-written, no prost; flate2 is already a dep
   for gzip), Shortbread classification, style tables, clipping and simplification,
   per-tile draw geometry, the LRU index and the fetch queue. All unit-tested.
-- **I/O in a new crate `crates/rovsti_tiles`**: blocking HTTP over ureq + rustls-graviola
-  (same approach as `rovsti_wa_client`, own small agent builder, not a dependency on the
+- **I/O in a new crate `crates/rosty_tiles`**: blocking HTTP over ureq + rustls-graviola
+  (same approach as `rosty_wa_client`, own small agent builder, not a dependency on the
   WhatsApp client), and the on-disk cache. Platform-free (no GPUI, no JNI), compiles for
   `aarch64-linux-android`.
 - **`apps/stops/src/map.rs` stays thin**: picks the tiles for the view, asks a loader,
@@ -112,10 +112,10 @@ boundary 1.5. Width at display zoom `dz` = `w14 * 2^(clamp(dz - 14, -3, 2))`, at
 
 ## Steps
 
-### Step 1. Slippy tile math and the tile source setting (rovsti_geo, pure)
+### Step 1. Slippy tile math and the tile source setting (rosty_geo, pure)
 
-Files: `crates/rovsti_geo/src/tiles/mod.rs`, `tiles/slippy.rs`, `tiles/source.rs`,
-`crates/rovsti_geo/src/lib.rs` (`pub mod tiles;`), `crates/rovsti_geo/src/prefs.rs`.
+Files: `crates/rosty_geo/src/tiles/mod.rs`, `tiles/slippy.rs`, `tiles/source.rs`,
+`crates/rosty_geo/src/lib.rs` (`pub mod tiles;`), `crates/rosty_geo/src/prefs.rs`.
 
 `tiles/slippy.rs`:
 ```rust
@@ -181,12 +181,12 @@ owner URLs, rejects empty, `ftp://`, missing `{y}`, duplicate `{z}`, spaces;
 URL) and differs for the maltepe URL; prefs round trip with and without `tile_url`, an
 old prefs JSON without the field loads with `None`.
 
-Acceptance: checks green; only `crates/rovsti_geo` changes.
+Acceptance: checks green; only `crates/rosty_geo` changes.
 
-### Step 2. Mapbox Vector Tile decoder with a real fixture (rovsti_geo, pure)
+### Step 2. Mapbox Vector Tile decoder with a real fixture (rosty_geo, pure)
 
-Files: `crates/rovsti_geo/src/tiles/mvt.rs`,
-`crates/rovsti_geo/src/tiles/testdata/osm-14-9520-6130.mvt` (download once with
+Files: `crates/rosty_geo/src/tiles/mvt.rs`,
+`crates/rosty_geo/src/tiles/testdata/osm-14-9520-6130.mvt` (download once with
 `curl -sS -o ... https://tiles.versatiles.org/tiles/osm/14/9520/6130`, uncompressed,
 ~6.5 KB; mention source + licence "© OpenStreetMap contributors, ODbL" in a
 `testdata/README.md`).
@@ -217,9 +217,9 @@ kinds; truncated buffers at every prefix length of the fixture return `Err` and 
 panic; an 11-byte varint is `Err(Varint)`; a geometry command count larger than the data
 is `Err(Geometry)`.
 
-### Step 3. Shortbread classes and the colorful/eclipse style table (rovsti_geo, pure)
+### Step 3. Shortbread classes and the colorful/eclipse style table (rosty_geo, pure)
 
-Files: `crates/rovsti_geo/src/tiles/shortbread.rs`, `tiles/style.rs`.
+Files: `crates/rosty_geo/src/tiles/shortbread.rs`, `tiles/style.rs`.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -264,9 +264,9 @@ map to the expected StreetKinds, `street_labels`/`pois`/`mountain_peaks` -> None
 maritime -> None, admin_level 4 -> state, `tunnel=true` street -> tunnel flag;
 paint order sorts Ocean < Land < Building < Street < Boundary; `line_width` clamps.
 
-### Step 4. Clipping, simplification and per-tile draw geometry (rovsti_geo, pure)
+### Step 4. Clipping, simplification and per-tile draw geometry (rosty_geo, pure)
 
-Files: `crates/rovsti_geo/src/tiles/clip.rs`, `tiles/geometry.rs`.
+Files: `crates/rosty_geo/src/tiles/clip.rs`, `tiles/geometry.rs`.
 
 `clip.rs` (f32 points):
 ```rust
@@ -316,9 +316,9 @@ centred on the tile keeps every point inside the clip rect, puts groups in paint
 honours `max_vertices` by dropping buildings first; a view far away yields no groups;
 `stand_in` picks the nearest ancestor.
 
-### Step 5. LRU index and the bounded fetch queue (rovsti_geo, pure)
+### Step 5. LRU index and the bounded fetch queue (rosty_geo, pure)
 
-File: `crates/rovsti_geo/src/tiles/queue.rs` (and `tiles/lru.rs`).
+File: `crates/rosty_geo/src/tiles/queue.rs` (and `tiles/lru.rs`).
 
 ```rust
 /// Size-capped LRU bookkeeping (no I/O): the disk cache and the in-memory tile cache use it.
@@ -352,18 +352,18 @@ serde round trip; queue never hands out more than 4 at once, dedupes repeated wa
 in-flight ids, View beats Prefetch, `set_view` discards stale view items but keeps
 prefetch, a failed tile is skipped until RETRY_AFTER_MS passes, `clear` resets.
 
-### Step 6. `rovsti_tiles` crate: HTTP fetch and disk cache (platform-free I/O)
+### Step 6. `rosty_tiles` crate: HTTP fetch and disk cache (platform-free I/O)
 
-New crate `crates/rovsti_tiles` (lib; add to root `[workspace.dependencies]` as
-`rovsti_tiles = { path = "crates/rovsti_tiles" }`; `[lints] workspace = true`;
+New crate `crates/rosty_tiles` (lib; add to root `[workspace.dependencies]` as
+`rosty_tiles = { path = "crates/rosty_tiles" }`; `[lints] workspace = true`;
 `#![cfg_attr(test, allow(clippy::unwrap_used))]`).
-Deps: `rovsti_geo`, `thiserror`, `log`, `serde`, `serde_json`,
+Deps: `rosty_geo`, `thiserror`, `log`, `serde`, `serde_json`,
 `ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "gzip"] }`,
-`rustls-graviola = "0.4"` (same versions as rovsti_wa_client; no `ring`/`aws-lc-rs`).
+`rustls-graviola = "0.4"` (same versions as rosty_wa_client; no `ring`/`aws-lc-rs`).
 
 - `src/http.rs`:
   ```rust
-  pub const USER_AGENT: &str = concat!("RovstiStops/", env!("CARGO_PKG_VERSION"), " (offline arrival alarm; map tiles)");
+  pub const USER_AGENT: &str = concat!("RostyStops/", env!("CARGO_PKG_VERSION"), " (offline arrival alarm; map tiles)");
   pub enum Fetched { Tile(Vec<u8>), Empty /* 204, 404 */ }
   #[derive(Debug, thiserror::Error)] pub enum TileError { Http(String), Status(u16), TooLarge, Decode(#[from] MvtError), Io(#[from] std::io::Error) }
   #[derive(Clone)] pub struct TileClient { agent: ureq::Agent }
@@ -399,11 +399,11 @@ from files, empty tiles round-trip; `fetch` against a local plain-HTTP server on
 captured request contains the `User-Agent` and no `Cookie`; `test_server` on the fixture
 server returns Ok and on a server returning garbage returns Err(Decode); `load` with
 `offline_only` and an empty cache returns an error without touching the network.
-Add `cargo check -p rovsti_tiles --target aarch64-linux-android` to the checks.
+Add `cargo check -p rosty_tiles --target aarch64-linux-android` to the checks.
 
 ### Step 7. Draw the tiles under the map, attribution, prefetch on trip start (apps/stops)
 
-Files: `apps/stops/Cargo.toml` (+`rovsti_tiles`), new `apps/stops/src/tiles.rs`,
+Files: `apps/stops/Cargo.toml` (+`rosty_tiles`), new `apps/stops/src/tiles.rs`,
 `apps/stops/src/map.rs`, `apps/stops/src/main.rs`, `apps/stops/src/trip_ui.rs`.
 
 - `tiles.rs` (`pub struct MapTiles` in `StopsApp`): holds `TileSource`, `Arc<DiskCache>`
@@ -459,8 +459,8 @@ Files: `apps/stops/src/settings_ui.rs`, `apps/stops/src/main.rs`, `CLAUDE.md`,
   map item (Shortbread vector tiles from a settable VersaTiles-compatible server,
   colorful/eclipse, disk cache with prefetch around the trip circle, radar fallback;
   done without a device) and an open item "check tile drawing speed on a phone".
-- `docs/architecture.md`: add `crates/rovsti_tiles` to the layer diagram, a bullet on
-  map tiles (pure `rovsti_geo::tiles`, I/O in `rovsti_tiles`, only network traffic
+- `docs/architecture.md`: add `crates/rosty_tiles` to the layer diagram, a bullet on
+  map tiles (pure `rosty_geo::tiles`, I/O in `rosty_tiles`, only network traffic
   besides the WhatsApp gateway), and update the Storage bullet (`tiles/<server key>/`
   cache in the data dir, capped at 128 MiB).
 

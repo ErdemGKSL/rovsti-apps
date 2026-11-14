@@ -1,4 +1,4 @@
-# util-messages: everyday utilities for Rovsti Messages (round 2)
+# util-messages: everyday utilities for Rosty Messages (round 2)
 
 baseSha: 107b960e91cb2a98e5b6301e5cbf1ab70061228e
 
@@ -75,16 +75,16 @@ Round 1 (`util-messages.md`, commits 5d053ee..20cf993) shipped M1-M8: `media_vie
 ## Plan, round 2 (pure logic first; every step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 `df` showed 5.6 GB free at planning time: run `rm -rf target/debug/incremental` before building.
 Library-crate items are `pub` (no dead-code issue); app-crate pure helpers not yet called use
 `#[cfg_attr(not(test), allow(dead_code))]` until a later step uses them. One focused commit per
-step, prefix `Rovsti messages: `. Never invent GPUI APIs: only calls already used in the app,
+step, prefix `Rosty messages: `. Never invent GPUI APIs: only calls already used in the app,
 `apps/phone`, or verified in the pinned checkout. Every action gives a pill; failures say what
-happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone.".
+happened; `rosty_android::Error::Unsupported` -> "That needs an Android phone.".
 
-### Step 1. Pure: forward plan and message info (rovsti_core)
-- New `crates/rovsti_core/src/forward.rs` (`pub mod forward;` in `lib.rs`):
+### Step 1. Pure: forward plan and message info (rosty_core)
+- New `crates/rosty_core/src/forward.rs` (`pub mod forward;` in `lib.rs`):
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub enum ForwardBody { Text(String), Picture { caption: Option<String> } }`
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum ForwardTo { Sms, WhatsApp }`
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub enum ForwardPlan { Text(String), Picture { caption: Option<String> }, Nothing }`
@@ -98,7 +98,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
     person has both channels in the chooser, "Ada · WhatsApp" / "Ada · SMS".
   - Tests: `blank_text_forwards_nothing`, `caption_is_trimmed_and_optional`,
     `pictures_go_to_both_channels`, `notice_names_the_chat`, `label_names_the_channel_when_both`.
-- New `crates/rovsti_core/src/message_info.rs` (`pub mod message_info;`):
+- New `crates/rosty_core/src/message_info.rs` (`pub mod message_info;`):
   - `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum InfoState { Pending, Sent, Delivered, Read, Played, Failed, Received }`
     with `pub fn label(self) -> &'static str` ("Sending", "Sent", "Delivered", "Read", "Played",
     "Not sent", "Received").
@@ -115,8 +115,8 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   - Tests: `incoming_wa_rows`, `outgoing_sms_shows_status_sim_and_segments`,
     `edited_and_forwarded_flags`, `unknown_fields_are_left_out`, `info_text_joins_lines`.
 
-### Step 2. Pure: unread jump, quick replies, starred rows (rovsti_core)
-- New `crates/rovsti_core/src/unread_jump.rs`:
+### Step 2. Pure: unread jump, quick replies, starred rows (rosty_core)
+- New `crates/rosty_core/src/unread_jump.rs`:
   - `#[derive(Clone, Debug, Default, PartialEq, Eq)] pub struct JumpState { away: bool, unseen: u32 }`
     with `pub fn scrolled(&mut self, at_end: bool)` (at end: `away=false, unseen=0`),
     `pub fn arrived(&mut self, incoming: u32)` (counts only while `away`),
@@ -128,7 +128,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   - `pub fn divider_label(unread: u32) -> String`: "1 unread message" / "5 unread messages".
   - Tests: `badge_counts_only_while_away`, `badge_caps_at_99`, `reaching_the_end_clears`,
     `divider_before_the_last_unread_incoming`, `divider_with_fewer_loaded`, `divider_label_plural`.
-- New `crates/rovsti_core/src/quick_replies.rs`:
+- New `crates/rosty_core/src/quick_replies.rs`:
   - `pub const MAX_REPLIES: usize = 20; pub const MAX_REPLY_CHARS: usize = 500;`
   - `pub fn defaults() -> Vec<String>`: "On my way.", "Can I call you later?",
     "I'm driving, I'll reply soon.", "Thanks!", "Running 10 minutes late."
@@ -146,7 +146,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   - Tests: `add_trims_and_rejects_blank`, `add_rejects_duplicates_folded`, `add_stops_when_full`,
     `remove_then_restore_round_trips`, `move_up_swaps`, `insert_appends_with_space`,
     `chip_label_shortens`.
-- New `crates/rovsti_core/src/starred.rs`:
+- New `crates/rosty_core/src/starred.rs`:
   - `pub struct StarCandidate<'a> { pub id: &'a str, pub author: &'a str, pub preview: &'a str, pub at_ms: i64, pub starred: bool }`
   - `#[derive(Clone, Debug, PartialEq, Eq)] pub struct StarredRow { pub id: String, pub author: String, pub preview: String, pub at_ms: i64 }`
   - `pub fn starred_rows(items: &[StarCandidate<'_>]) -> Vec<StarredRow>`: starred only, newest first,
@@ -188,7 +188,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   - Text to WA: background `gateway.send_text(&SendText { chat, text, quoted_id: None })`.
   - Text to SMS: new `Backend::forward_sms(&mut self, thread_id: i64, text: String, image_path: Option<String>, cx) -> bool`
     (body of `reply_sms` without its Notice; `image_path` -> `send_mms`). `false` -> fail pill
-    (also when the SMS role is not held: "Set Rovsti as the SMS app to forward by SMS").
+    (also when the SMS role is not held: "Set Rosty as the SMS app to forward by SMS").
   - Picture: first a local file: `ViewerSource::File` path, or `Gateway::media(id)` written to
     `cache/forward/{cache_stem}.{files::ext_for_mime}` (reuse the viewer's cache file if it
     exists). WA target: `send_media_with(chat, MediaKind::Image, mime, caption, &MediaOptions::default(), bytes)`;
@@ -197,7 +197,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
     `PillAction::OpenThread { thread: ThreadId, title: String }` calling `open_thread`).
   - While sending show "Forwarding…" pill; a second forward while one runs is allowed (each task
     reports its own pill).
-- Commit: `Rovsti messages: UI: forward messages and pictures (M9)`.
+- Commit: `Rosty messages: UI: forward messages and pictures (M9)`.
 
 ### Step 4. UI: Starred messages list (M10)
 - `main.rs::open_wa_page_menu`: row "Starred messages" (`Icon::LucideStar`) -> `page.open_starred(cx)`.
@@ -213,7 +213,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
 - Bubble: if not already drawn, a small `LucideStar` glyph (12 px, secondary colour) next to the
   time for starred messages (grep the meta line in `bubble`/`body` first).
 - `go_back` closes the starred sheet first.
-- Commit: `Rovsti messages: UI: starred messages list (M10)`.
+- Commit: `Rosty messages: UI: starred messages list (M10)`.
 
 ### Step 5. UI: scroll-to-bottom button and unread divider (M12)
 - `keyed_list.rs`: `pub(crate) fn at_end(&self) -> bool { self.state.is_scrolled_to_end().unwrap_or(true) }`.
@@ -231,10 +231,10 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   `!outgoing`) and insert a new `Entry::Unread(u32)` (WA) / equivalent SMS row before that item,
   drawn as a centred capsule "5 unread messages" (`divider_label`), and `list.reveal(index)`
   instead of scrolling to the end. Removed when the user sends a message or leaves the chat.
-- Commit: `Rovsti messages: UI: scroll-to-bottom button and unread divider (M12)`.
+- Commit: `Rosty messages: UI: scroll-to-bottom button and unread divider (M12)`.
 
 ### Step 6. UI: Quick replies (M11)
-- `prefs.rs`: `#[serde(default = "rovsti_core::quick_replies::defaults")] pub quick_replies: Vec<String>`
+- `prefs.rs`: `#[serde(default = "rosty_core::quick_replies::defaults")] pub quick_replies: Vec<String>`
   in `MessagesPrefs` and `Default`; `reset()` keeps the user's quick replies (like
   `sim_choices`); update `RESET_CONFIRM` ("…Blocked numbers, quick replies and the WhatsApp link
   stay."). Test `old_prefs_file_gets_default_replies` (deserialise `{}`) and
@@ -251,7 +251,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   close the row, keep focus. Empty list: one chip "Add quick replies in Settings" that switches to
   the Settings tab (emit an event). The pages read the list from `backend.read(cx).prefs()` (grep
   the accessor) at render.
-- Commit: `Rovsti messages: UI: quick reply templates (M11)`.
+- Commit: `Rosty messages: UI: quick reply templates (M11)`.
 
 ### Step 7. UI: Message info and Select text (M14, M16)
 - New `apps/messages/src/info_ui.rs`: `pub(crate) struct InfoSheet { title: SharedString, rows: Vec<InfoRow>, text: Option<SharedString>, selection: gpui::TextSelectionHandle, select_mode: bool }`
@@ -274,7 +274,7 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   `SmsKey`, `DeliveryState` mapped (`None`+incoming -> Received).
 - Pages emit `ConversationEvent::Info(InfoSheet)` / `SmsConversationEvent::Info(..)` or own the
   sheet themselves; prefer the page owning it (like `delete_confirm`), closed by Back first.
-- Commit: `Rovsti messages: UI: message info and select text (M14, M16)`.
+- Commit: `Rosty messages: UI: message info and select text (M14, M16)`.
 
 ### Deferred / notes (after step 8)
 - Round 3: M13, M15, M17-M20, M22-M27 stay open (see backlog table).
@@ -290,4 +290,4 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
   pill to expect, desktop `Unsupported` pills).
 - This file: mark the shipped rows "done R2", note anything deferred; the remaining backlog
   (M13, M15, M17-M20, M22-M27) is round 3.
-- Commit: `Rovsti messages: UI: inbox avatar viewer (M21), docs, backlog`.
+- Commit: `Rosty messages: UI: inbox avatar viewer (M21), docs, backlog`.

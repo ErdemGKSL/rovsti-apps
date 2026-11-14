@@ -12,7 +12,7 @@ use gpui::{
     Bounds, Context, Hsla, IntoElement, ParentElement, Pixels, Point, Render, Styled, Window, div,
     px,
 };
-use rovsti_ui::{
+use rosty_ui::{
     current_theme,
     moments::{Anchors, Flights, RippleRing, square_at},
     motion::Motion,

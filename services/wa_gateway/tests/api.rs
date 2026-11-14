@@ -1,25 +1,25 @@
 #![allow(clippy::unwrap_used)]
 
 //! End to end: a real server on loopback with the scripted driver, driven by
-//! the real `rovsti_wa_client`.
+//! the real `rosty_wa_client`.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
-use rovsti_wa_client::Picture;
-use rovsti_wa_client::{
+use rosty_wa_client::Picture;
+use rosty_wa_client::{
     ClientError, ClientEvent, EventStream, Gateway, call_audio, call_audio_with, subscribe,
 };
-use rovsti_wa_proto::audio::SpeakerFrames;
-use rovsti_wa_proto::{
+use rosty_wa_proto::audio::SpeakerFrames;
+use rosty_wa_proto::{
     AppId, CallPhase, ChatState, ConnectKey, CreateInstance, CreatedInstance, EndReason, ErrorCode,
     EventEnvelope, GatewayEvent, GatewayUrl, GroupInfo, InstanceState, LinkRequest, MarkRead,
     MediaKind, MessageBody, Participant, ScheduleText, ScheduledState, ScheduledText, SendReaction,
     SendText, TypingState,
 };
-use rovsti_wa_proto::{
+use rosty_wa_proto::{
     ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
     MediaOptions, MessageMeta, RevokeMessage, StarMessage, WaMessage,
 };
@@ -448,7 +448,7 @@ async fn push_registration_and_healthz() {
     let server = start(4).await;
     let (gateway, _) = create(&server).await;
     blocking(move || {
-        gateway.register_push(&rovsti_wa_proto::PushRegistration {
+        gateway.register_push(&rosty_wa_proto::PushRegistration {
             app: AppId::Phone,
             token: "fcm-token".into(),
         })
@@ -1705,7 +1705,7 @@ async fn incoming_extras_thumbnails_and_push_names() {
     };
     let meta = MessageMeta {
         sender_name: Some("Hans".into()),
-        media: Some(rovsti_wa_proto::MediaMeta {
+        media: Some(rosty_wa_proto::MediaMeta {
             thumbnail: true,
             ..Default::default()
         }),
@@ -1911,7 +1911,7 @@ async fn chat_actions_and_app_state_from_other_devices() {
     let chats = blocking(move || g.chats_with_meta()).await.unwrap();
     let meta = &chats[0].meta;
     assert!(meta.pinned && meta.archived && meta.is_muted(0));
-    assert_eq!(meta.muted_until_ms, Some(rovsti_wa_proto::MUTED_FOREVER));
+    assert_eq!(meta.muted_until_ms, Some(rosty_wa_proto::MUTED_FOREVER));
 
     let g = gateway.clone();
     let past = blocking(move || {
@@ -2150,12 +2150,12 @@ async fn profiles_surface_upstream_rate_limit() {
     .await;
     assert_eq!(status, 429, "{body}");
     assert!(head.contains("\r\nretry-after: 60"), "{head}");
-    let error: rovsti_wa_proto::ApiError = serde_json::from_str(&body).unwrap();
+    let error: rosty_wa_proto::ApiError = serde_json::from_str(&body).unwrap();
     assert_eq!(error.code, ErrorCode::RateLimited);
     assert_eq!(error.retry_after_ms, Some(60_000));
     assert_eq!(
         error.limit_source,
-        Some(rovsti_wa_proto::LimitSource::Whatsapp)
+        Some(rosty_wa_proto::LimitSource::Whatsapp)
     );
 }
 
@@ -2175,8 +2175,8 @@ async fn profiles_serve_stale_when_every_jid_was_fetched() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
-    assert!(head.contains("x-rovsti-stale: rate-limited"), "{head}");
-    let profiles: Vec<rovsti_wa_proto::WaProfile> = serde_json::from_str(&body).unwrap();
+    assert!(head.contains("x-rosty-stale: rate-limited"), "{head}");
+    let profiles: Vec<rosty_wa_proto::WaProfile> = serde_json::from_str(&body).unwrap();
     assert_eq!(profiles[0].about.as_deref(), Some("old"));
     assert!(profiles[0].fetched_ms > 0);
     // The client keeps working as before: a 200 with the stored profile.
@@ -2229,7 +2229,7 @@ async fn profiles_other_driver_error_is_not_silent() {
     )
     .await;
     assert_eq!(status, 200);
-    assert!(head.contains("x-rovsti-stale: error"), "{head}");
+    assert!(head.contains("x-rosty-stale: error"), "{head}");
 }
 
 #[tokio::test]
@@ -2252,7 +2252,7 @@ async fn lookup_upstream_rate_limit_is_429_not_500() {
             assert_eq!(api.retry_after_ms, Some(90_000));
             assert_eq!(
                 api.limit_source,
-                Some(rovsti_wa_proto::LimitSource::Whatsapp)
+                Some(rosty_wa_proto::LimitSource::Whatsapp)
             );
         }
         other => panic!("expected a 429, got {other:?}"),
@@ -2291,7 +2291,7 @@ async fn cooldown_stops_upstream_calls() {
                 assert_eq!(api.code, ErrorCode::RateLimited);
                 assert_eq!(
                     api.limit_source,
-                    Some(rovsti_wa_proto::LimitSource::Whatsapp)
+                    Some(rosty_wa_proto::LimitSource::Whatsapp)
                 );
                 assert!(api.retry_after_ms.unwrap() <= 60_000);
             }
@@ -2320,10 +2320,7 @@ async fn gateway_bucket_429_has_source_gateway() {
     match blocking(move || g.lookup_users(&fresh)).await.unwrap_err() {
         ClientError::Api(api) => {
             assert_eq!(api.code, ErrorCode::RateLimited);
-            assert_eq!(
-                api.limit_source,
-                Some(rovsti_wa_proto::LimitSource::Gateway)
-            );
+            assert_eq!(api.limit_source, Some(rosty_wa_proto::LimitSource::Gateway));
             // One token a second.
             let wait = api.retry_after_ms.unwrap();
             assert!((1..=1_000).contains(&wait), "{wait}");

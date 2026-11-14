@@ -1,6 +1,6 @@
 # Performance: recomposition, frame time, lists, images, tiles, ambient motion, threading
 
-> **Licence.** Rovsti is GPL-3.0-or-later. Convx performance code (`GlassPool.kt`, `BackdropFreeze.kt`,
+> **Licence.** Rosty is GPL-3.0-or-later. Convx performance code (`GlassPool.kt`, `BackdropFreeze.kt`,
 > `NavTransitionFreeze.kt`, `BackdropStaticRegion.kt`) is ported with the header from `SKILL.md` section 0.
 
 Prefix: Convx `A/` = `app/src/main/kotlin/com/convx/music/`, `UI/` = `A/ui/`.
@@ -76,7 +76,7 @@ Traps:
 - Observe scroll with `snapshotFlow { state.isScrollInProgress }` in an effect, not by keying composition on offsets
   (`UI/player/Thumbnail.kt:360-395`).
 - Tabs hosted in a pager: never animate across several pages (intermediate pages compose inside animation frames); jump to
-  the neighbour in one frame, then animate one page (`UI/screens/MainTabsPager.kt:23-47`). Rovsti prefers NavHost + crossfade.
+  the neighbour in one frame, then animate one page (`UI/screens/MainTabsPager.kt:23-47`). Rosty prefers NavHost + crossfade.
 
 ## 4. Images, avatars, map tiles
 
@@ -89,9 +89,9 @@ Traps:
 - Guard degenerate sizes (Coil throws on size <= 0, measured crash, `UI/player/PlayerArtworkMorph.kt:200-206`).
 - Initials avatars: colour from a pure function (Rust or Kotlin), text drawn with a cached `TextLayoutResult` in
   `drawWithCache`, not a `Text` per row.
-- **Stops map tiles** (Rovsti's own design): one `Canvas`/draw node draws visible tiles from an in-memory bitmap LRU; camera
+- **Stops map tiles** (Rosty's own design): one `Canvas`/draw node draws visible tiles from an in-memory bitmap LRU; camera
   (pan/zoom/rotation) in a holder read in the draw phase only, so a pinch recomposes nothing; fetch/decode through
-  `rovsti_tiles` on IO/Default with a bounded queue that cancels tiles leaving the viewport; draw the parent zoom scaled while
+  `rosty_tiles` on IO/Default with a bounded queue that cancels tiles leaving the viewport; draw the parent zoom scaled while
   children load; never decode on Main. Markers/clusters computed off-main when the camera settles
   (`snapshotFlow { camera }.debounce(...)`), drawn in the same pass. Controls observe coarse state (selected stop, sheet detent),
   never the camera.
@@ -141,7 +141,7 @@ Run only when all hold: visible (bounds in window non-empty), lifecycle RESUMED 
 delta clamped to 100 ms so a stall never jumps; the phase is a `mutableFloatStateOf` read in draw. Expensive backgrounds render
 to a small bitmap on `Dispatchers.Default`, double-buffered (`UI/component/ArtworkMeshBackground.kt:118-175`). One shared
 shimmer `InfiniteTransition` per screen, stopped when real content arrives (1400 ms linear, `UI/component/Skeletons.kt:40-80`).
-Rovsti has no music: candidates are call-duration tickers, "connecting" pulses, skeletons. Tickers emit once per displayed
+Rosty has no music: candidates are call-duration tickers, "connecting" pulses, skeletons. Tickers emit once per displayed
 change (once per second for a clock), `flowOn(Default)`, `conflate()`.
 
 ## 7. Compositing details
@@ -162,7 +162,7 @@ change (once per second for a clock), `flowOn(Default)`, `conflate()`.
   current mode (avoid reflow); user toggle to force 60 Hz (`A/AppStartupEffects.kt:67-105`).
 - Convx never uses frame-rate hints. On the compileSdk we pin, check for window/view frame-rate category APIs (for example
   `View.setRequestedFrameRate` on API 35) in the SDK sources before use; give static screens a low category, animating ones high.
-- Name custom nodes in traces (`androidx.tracing.trace("RovstiGlass") { }`) so Perfetto shows them.
+- Name custom nodes in traces (`androidx.tracing.trace("RostyGlass") { }`) so Perfetto shows them.
 
 ## 9. Threading, JNI, startup, release
 
@@ -170,7 +170,7 @@ change (once per second for a clock), `flowOn(Default)`, `conflate()`.
   crate; results as `Flow`/`suspend`, mapped to `@Immutable` UI models on `Default`. Debug-only `assertNotMain()` in bridge calls.
 - ViewModels: `stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initial)`; UI collects with
   `collectAsStateWithLifecycle` (Convx: 531 vs 139 plain `collectAsState`).
-- WhatsApp connection state (gateway via `rovsti_wa_client`): app-scope collector with `distinctUntilChanged()`, coarse UI state.
+- WhatsApp connection state (gateway via `rosty_wa_client`): app-scope collector with `distinctUntilChanged()`, coarse UI state.
 - Startup: `Application.onCreate` does only what the first frame needs (debug logging, non-blocking prefs snapshot, Rust library load);
   everything else after first frame. No `runBlocking` on Main (Convx keeps one guarded fallback, `A/utils/DataStore.kt:25-68`).
 - StrictMode thread + VM policies in debug only (`A/App.kt:93-112`); strip `Log.v/d` in release with `-assumenosideeffects`.

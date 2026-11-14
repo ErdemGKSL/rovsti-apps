@@ -2,7 +2,7 @@
 //! into [`StoredStatus`] rows instead of chat messages. Pure, like
 //! [`super::convert`]; the live and history paths both come through here.
 
-use rovsti_wa_proto::{StatusItem, StatusKind, StatusMedia};
+use rosty_wa_proto::{StatusItem, StatusKind, StatusMedia};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;

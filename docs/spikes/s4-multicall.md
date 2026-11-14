@@ -20,7 +20,7 @@ registry measures the timings itself while you use the app (`CallRegistry.multiC
 | Children and their split/disconnect bits are reported | the conference parent's `children[]` is not empty and the children carry bits 32 and 64 (counts are printed) |
 | Hold-and-answer holds the first call | after "Hold and answer" the first call moves to Holding (pass) or Disconnected (fail) |
 
-The call event ring (no numbers, no names) is appended to "Copy report". Logcat tag `RovstiSpike`.
+The call event ring (no numbers, no names) is appended to "Copy report". Logcat tag `RostySpike`.
 
 ## Owner procedure
 

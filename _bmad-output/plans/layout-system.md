@@ -21,9 +21,9 @@ More text-box work cannot be justified from headless shots.
 - Owner device shot (`054d28c4-image.jpg`, Messages inbox, dark).
 - `target/shots/messages/01-inbox-{dark,light}.png` (rendered at HEAD, 412x915 dp @2x).
 - `docs/screenshots/baseline/{phone,stops}.png` contact sheets.
-- Code: `crates/rovsti_ui/src/{components,tab_bar,theme,shots}.rs`,
+- Code: `crates/rosty_ui/src/{components,tab_bar,theme,shots}.rs`,
   `crates/liquid_glass_kit/src/tokens.rs`, `apps/messages/src/{main,inbox,status_ui}.rs`,
-  `crates/rovsti_core/src/inbox_filter.rs`.
+  `crates/rosty_core/src/inbox_filter.rs`.
 - No `docs/design/` exists yet, and there are no earlier `layout-system*` plans and no stash.
 
 ## Problems seen, with causes in the code
@@ -101,8 +101,8 @@ line.
 **Acceptance:** the file exists, every audit item names a PNG, and all checks pass
 (nothing compiled changes).
 
-### 2. `rovsti_ui::layout`: tokens and pure geometry with tests
-Add `crates/rovsti_ui/src/layout.rs` (module docs explain the grid) with these parts:
+### 2. `rosty_ui::layout`: tokens and pure geometry with tests
+Add `crates/rosty_ui/src/layout.rs` (module docs explain the grid) with these parts:
 - `pub mod space` (the scale above), `MARGIN`, `ROW_MIN_H = 72`, `AVATAR = 48`,
   `BUTTON = 40`, `HIT = 44`, `CHIP_H = 32`, `SOURCE_BADGE = 16`.
 - `pub mod geom`: plain `f32` functions with no gpui types:
@@ -119,14 +119,14 @@ Add `crates/rovsti_ui/src/layout.rs` (module docs explain the grid) with these p
 - Unit tests: a 3-ring stack at 26/-16 fits its returned width; the puck stays inside the
   bar at press 1.2 and sx 1.3; content_bottom = 8+56+16+safe+kbd; the contrast of a known
   pair is 21:1 for black/white.
-**Acceptance:** `cargo test -p rovsti_ui layout` is green and all checks pass. No PNG
+**Acceptance:** `cargo test -p rosty_ui layout` is green and all checks pass. No PNG
 changes yet.
 
 ### 3. Safe-area-aware tab bar, one inset function, every caller migrated
 - `TabBar::render`, `TabBarView` and `bar_body` take `safe_bottom` and anchor at
   `safe_bottom + space::S`. The puck uses `geom::puck_rect`.
 - Replace `content_bottom_inset()` and `content_bottom_inset_with()` with one function,
-  `rovsti_ui::layout::content_bottom_inset(window) -> Pixels`, which includes the keyboard
+  `rosty_ui::layout::content_bottom_inset(window) -> Pixels`, which includes the keyboard
   (`ime - consumed`). Migrate every caller: messages `main.rs` 5698 and 5778,
   contacts `main.rs`, `photo_viewer.rs`, `photo_crop.rs`, phone `notice.rs`,
   `recents.rs`, `contacts.rs`, and stops `main.rs`.
@@ -140,14 +140,14 @@ changes yet.
 row sits fully above the bar.
 
 ### 4. PageHeader, SectionHeader, EmptyState, and a component gallery
-In `crates/rovsti_ui/src/components.rs`, or a new `crates/rovsti_ui/src/page.rs`:
+In `crates/rosty_ui/src/components.rs`, or a new `crates/rosty_ui/src/page.rs`:
 - `PageHeader { title, actions: Vec<HeaderAction>, subtitle }`. Actions are 40 dp glass
   circles with a 22 dp icon in a 44 dp hit box, 8 dp gap, and at most 2 visible.
 - `section_header`.
 - `empty_state(icon, title, body, action)` with sizes per spec.
 - Keep `large_title` as a thin wrapper so the other apps compile unchanged.
-- Add a shots gallery test `layout` in `rovsti_ui` that writes
-  `target/shots/rovsti_ui/03-layout-{dark,light}.png`. It shows a header with 1 and 2
+- Add a shots gallery test `layout` in `rosty_ui` that writes
+  `target/shots/rosty_ui/03-layout-{dark,light}.png`. It shows a header with 1 and 2
   actions, a section header and an empty state.
 **Acceptance:** open both PNGs. Everything aligns to the 16 dp margin, the buttons are
 centred with the title, and nothing clips. All checks pass, and the
@@ -170,7 +170,7 @@ centred with the title, and nothing clips. All checks pass, and the
 separators start at 76 dp, and the stack does not touch the title. All checks pass.
 
 ### 6. FilterChipRow
-- Pure: `rovsti_core::inbox_filter::chip_parts(filter, count) -> (&str, Option<String>)`
+- Pure: `rosty_core::inbox_filter::chip_parts(filter, count) -> (&str, Option<String>)`
   (counts over 999 show as "999+"), with tests. Keep `chip_label` for TalkBack
   ("SMS, 277").
 - `filter_chip_row(id, chips, selected, on_select)` uses `overflow_x_scroll` (it exists in
@@ -208,6 +208,6 @@ All checks pass.
 - Update `docs/design/layout.md` with a "Migrated screens" table: Messages inbox done,
   the rest assigned to the per-app units. Refresh `docs/screenshots/baseline/messages.png`.
 - Run every check in the unit's list plus the `shots` clippy line, and confirm that
-  `rovsti_ui/01-fields-*.png` and `02-field-touch-*.png` are unchanged (text-box
+  `rosty_ui/01-fields-*.png` and `02-field-touch-*.png` are unchanged (text-box
   regression guard).
 **Acceptance:** all checks pass, the baselines are committed, and the docs match the code.

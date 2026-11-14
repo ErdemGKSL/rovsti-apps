@@ -1,6 +1,6 @@
-//! Headless screenshots of Rovsti Stops (`docs/screenshots.md`).
+//! Headless screenshots of Rosty Stops (`docs/screenshots.md`).
 //!
-//! `cargo test -p rovsti_stops --features shots shots -- --ignored --nocapture`
+//! `cargo test -p rosty_stops --features shots shots -- --ignored --nocapture`
 //!
 //! The data directory is seeded before the app starts: saved stops, history
 //! and prefs. The prefs point the tile server at a closed local port, so no
@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 
 use futures::channel::mpsc;
 use gpui::{AppContext as _, Context, Window};
-use rovsti_geo::{
+use rosty_geo::{
     Appearance, Coord, Endpoint, History, Outcome, SavedStops, StopColour, StopsPrefs, TripRecord,
 };
-use rovsti_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
-use rovsti_ui::tokens::Theme;
+use rosty_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
+use rosty_ui::tokens::Theme;
 
 use crate::{
     StopsApp, backend, pick::dest_from_endpoint, picker::Slot, settings_ui::SettingsPage, store,
@@ -121,7 +121,7 @@ mod fixture {
         let mut saved = SavedStops::default();
         for (i, place) in PLACES.iter().enumerate() {
             let (a, b) = endpoints(place);
-            let created = now_ms - (PLACES.len() - i) as i64 * rovsti_geo::DAY_MS;
+            let created = now_ms - (PLACES.len() - i) as i64 * rosty_geo::DAY_MS;
             let id = saved
                 .add(place.name, a, b, created)
                 .expect("the fixture gate is valid");
@@ -147,7 +147,7 @@ mod fixture {
         let mut history = History::default();
         for (n, &(place, days, outcome, minutes, km, snoozes, sent)) in TRIPS.iter().enumerate() {
             let (a, b) = endpoints(&PLACES[place]);
-            let ended_ms = now_ms - days * rovsti_geo::DAY_MS - 3_600_000;
+            let ended_ms = now_ms - days * rosty_geo::DAY_MS - 3_600_000;
             history.records.push(TripRecord {
                 id: 100 + n as u64,
                 label: format!("{} to {}", a.label, b.label),
@@ -180,8 +180,8 @@ mod fixture {
 
 /// Writes the fixture files where the app reads them on start.
 fn seed(dir: &Path, theme: Theme) {
-    use rovsti_ui::storage::save_json;
-    let dir = dir.join("rovsti").join("stops");
+    use rosty_ui::storage::save_json;
+    let dir = dir.join("rosty").join("stops");
     std::fs::create_dir_all(&dir).expect("create the app data dir");
     save_json(&dir, store::PREFS_FILE, &fixture::prefs(theme)).expect("seed prefs");
     save_json(&dir, store::SAVED_FILE, &fixture::saved(SHOT_NOW_MS)).expect("seed saved stops");
@@ -189,7 +189,7 @@ fn seed(dir: &Path, theme: Theme) {
 }
 
 fn open(spec: ShotSpec) -> Rig<StopsApp> {
-    rovsti_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
+    rosty_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
     let (_tx, rx) = mpsc::unbounded();
     let mut rig = Rig::open(spec, move |window, cx| {
         cx.new(|cx| StopsApp::new(rx, window, cx))
@@ -226,12 +226,12 @@ fn run_trip(app: &mut StopsApp, cx: &mut Context<StopsApp>, ago_s: i64, fixes_s:
     app.set_saved_trip(Some(trip), cx);
     app.map.follow = true;
     for &s in fixes_s {
-        rovsti_core::clock::set_fixed_now_ms(Some(started + s * 1_000));
+        rosty_core::clock::set_fixed_now_ms(Some(started + s * 1_000));
         if let Some(json) = backend::simulate_tick(&dir) {
             app.on_status_json(&json, cx);
         }
     }
-    rovsti_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
+    rosty_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
 }
 
 /// Every main screen and important sheet, in shot order.
@@ -374,7 +374,7 @@ mod tests {
             let (a, b) = fixture::endpoints(place);
             let metres = a.coord.distance_m(b.coord);
             assert!((300.0..600.0).contains(&metres), "{}: {metres}", place.name);
-            assert!(rovsti_geo::Diameter::new(a.coord, b.coord).is_ok());
+            assert!(rosty_geo::Diameter::new(a.coord, b.coord).is_ok());
         }
     }
 
@@ -420,10 +420,10 @@ mod tests {
 
     #[test]
     fn the_seeded_files_read_back() {
-        let dir = std::env::temp_dir().join(format!("rovsti-stops-seed-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rosty-stops-seed-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         seed(&dir, Theme::Dark);
-        let data = backend::load(&dir.join("rovsti").join("stops"));
+        let data = backend::load(&dir.join("rosty").join("stops"));
         assert_eq!(data.saved.stops.len(), 6);
         assert_eq!(data.history.records.len(), 5);
         assert_eq!(data.prefs.appearance, Appearance::Dark);

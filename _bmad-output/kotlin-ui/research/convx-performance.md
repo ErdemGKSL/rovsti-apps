@@ -1,19 +1,19 @@
 # Convx performance and smoothness engineering: research report
 
 Topic: performance (recomposition, lists, images, profiles, R8, refresh rate, threading, Gradle setup, testing).
-Author: research agent. Audience: whoever writes the Rovsti Kotlin/Compose UI and its performance skill.
+Author: research agent. Audience: whoever writes the Rosty Kotlin/Compose UI and its performance skill.
 
 ## 0. Licence rule and how to read this report
 
-- Convx is GPL-3.0 (`LICENSE`; every Convx-authored file header says "Licensed under GPL-3.0"). Rovsti is MIT/Apache.
+- Convx is GPL-3.0 (`LICENSE`; every Convx-authored file header says "Licensed under GPL-3.0"). Rosty is MIT/Apache.
   Everything below is a technique, a parameter or an architecture idea described in my own words. No Convx source is
-  reproduced; the pseudo-code is written fresh. When we implement, we write our own code from the "Recipe for Rovsti"
+  reproduced; the pseudo-code is written fresh. When we implement, we write our own code from the "Recipe for Rosty"
   section and never open a Convx file while typing the implementation.
 - Some Convx code is NOT Convx-authored: `app/src/main/kotlin/com/convx/music/ui/component/backdrop/**` is vendored from
   Kyant0/backdrop v2.0.0 under Apache-2.0 (header of `backdrop/Platform.kt:1-9`, `backdrop/RuntimeShaderCache.kt:1-9`), and the
   app depends on Haze (`dev.chrisbanes.haze`, `gradle/libs.versions.toml` `haze = "1.3.1"`). Convx's own edits to the vendored
   files (freeze, pool, static regions: `GlassPool.kt`, `BackdropFreeze.kt`, `NavTransitionFreeze.kt`) are carried under GPL.
-  Rovsti can legally depend on the upstream Apache-2.0 artifacts directly (`io.github.kyant0:backdrop`, Haze). Re-check each
+  Rosty can legally depend on the upstream Apache-2.0 artifacts directly (`io.github.kyant0:backdrop`, Haze). Re-check each
   upstream licence at the version we pin before depending on it. Do not copy Convx's modified versions.
 - Path shorthand. `CONVX` = `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/ref/Convx`.
   `A/` = `CONVX/app/src/main/kotlin/com/convx/music/`. `UI/` = `A/ui/`. Line numbers are from the checked-out tree.
@@ -57,7 +57,7 @@ Author: research agent. Audience: whoever writes the Rovsti Kotlin/Compose UI an
    fallback below, a user toggle to force 60 Hz. No frame-rate API (`Surface.setFrameRate`) is used.
 9. Weak spots to NOT copy: no measured profile, no benchmarks, no screenshot tests, a wildcard profile, over-broad ProGuard keeps,
    a few main-thread tickers, one `composed {}` modifier still in use, a probably broken compose-metrics flag.
-10. For Rovsti we can reach the same smoothness with far less machinery, because we do not need liquid-glass refraction on every
+10. For Rosty we can reach the same smoothness with far less machinery, because we do not need liquid-glass refraction on every
     surface. The expensive subset (full-screen Stops map plus floating controls, popovers, sheets) needs exactly the same freeze and
     deferred-read discipline. Section 13 turns this into a build recipe.
 
@@ -217,7 +217,7 @@ The visual recipe is covered by other research files (convx-glass.md, convx-over
 - Haze (used for hero top blur): `blurRadius = 36.dp`, `inputScale = HazeInputScale.Fixed(0.33f)`, `noiseFactor = 0f`, progressive gradient, alpha driven by the draw-phase scroll state (`UI/component/HeroArtwork.kt:222-243`). Below API 33 it falls back to a plain page-colour scrim.
 - "Hero background blur baked once instead of per frame" (`.github/release-notes/2.0.0-nightly.md:69`) corresponds to `HeroScrollBlur`: three pre-blurred plates at 0.3x/0.6x/1x radius crossfaded by alpha (`HeroArtwork.kt:268-320`, `decodeSize = 160`).
 
-### 5.2 Freeze clocks (the idea Rovsti should adopt)
+### 5.2 Freeze clocks (the idea Rosty should adopt)
 
 Principle: the source content under glass changes every frame while scrolling, but the user cannot see a blur lag by ~100 ms. So when content is moving, glass keeps drawing its last capture, then re-captures when motion stops.
 
@@ -253,7 +253,7 @@ Principle: the source content under glass changes every frame while scrolling, b
 ## 7. High refresh rate and frame pacing
 
 - One effect keyed on a user preference `enableHighRefreshRate` (`A/AppStartupEffects.kt:67-105`): on API 30+ it sets `window.attributes.preferredDisplayModeId` to the highest-refresh mode whose physical width/height equal the current mode ("so refresh rate changes do not reflow the UI"); `0` means no preference. When the toggle is off it picks the mode closest to 60 Hz. Below API 30 it sets `preferredRefreshRate` to the max of `supportedRefreshRates` (or 60).
-- Not used: `Surface.setFrameRate`, `Window.setFrameRate`, the frame-rate category APIs (`FRAME_RATE_CATEGORY_*`), `View.setRequestedFrameRate`. Therefore on devices with LTPO/VRR panels Convx never tells the system "this content only needs 30 fps" or "this can idle", it only picks a display mode. For Rovsti, add `Modifier`-level or window-level frame-rate hints only after verifying API availability (grep in the Android SDK, do not invent).
+- Not used: `Surface.setFrameRate`, `Window.setFrameRate`, the frame-rate category APIs (`FRAME_RATE_CATEGORY_*`), `View.setRequestedFrameRate`. Therefore on devices with LTPO/VRR panels Convx never tells the system "this content only needs 30 fps" or "this can idle", it only picks a display mode. For Rosty, add `Modifier`-level or window-level frame-rate hints only after verifying API availability (grep in the Android SDK, do not invent).
 - Frame budget awareness: authors reason against 8.33 ms (120 Hz) (`HomeSectionOrder.kt:61-65`, `Player_v2.kt:1582`, `IosSheetPresentation.kt:74-75`). The 120 fps task acceptance criteria require a verified 120 Hz mode, scripted scenarios and p50/p90/p99 + jank count via Macrobenchmark/Perfetto (`automation/tasks/005-perf-120fps-pass.md:17-30`), and a process lesson that Android Studio device mirroring alone swung numbers more than any fix (`automation/progress/005-perf-120fps-pass.md`, "next round" item 1). They never ran it because the device was busy, so no pacing numbers exist in the repo.
 - Transition clocks line up: nav push tween is 260 ms, freeze windows are 300-330 ms ("plus frame-delivery slop") (`NavTransitionFreeze.kt:15-17`, `BackdropFreeze.kt:16-20`); tests pin the token values (`app/src/test/.../MotionTokensTest.kt`).
 
@@ -272,7 +272,7 @@ Principle: the source content under glass changes every frame while scrolling, b
 ## 9. Startup, baseline profile, R8 and release build
 
 - `app/src/main/baseline-prof.txt` (13 lines) is a wildcard profile: mark every method in `com.convx.music.**` and `com.music.innertube.**` hot-startup-compiled (`HSPL...->**(**)**` plus class lines). Header (lines 1-9): the APK shipped only library profiles, so app code ran interpreted and JIT-compiled through launch and first scrolls (traced on one phone: `status=verify`, JIT thread busy 4.3 s of the first 4 s). Sideloaded installs have no Play cloud profile, so `profileinstaller` (arrives transitively via Compose) installs it and dexopt compiles it. The header itself says: replace with a Macrobenchmark-generated profile (launch + Home scroll + open player) if odex size or install-time dexopt matters.
-  Cost: a wildcard grows the odex and install-time dexopt time; benefit for them is eliminating first-minute jank on sideload. Rovsti ships sideloaded too, so the argument transfers, but we should write targeted rules.
+  Cost: a wildcard grows the odex and install-time dexopt time; benefit for them is eliminating first-minute jank on sideload. Rosty ships sideloaded too, so the argument transfers, but we should write targeted rules.
 - No `baselineprofile` Gradle plugin, no `:benchmark`/macrobenchmark module, no Startup Profile, no `androidx.startup`/`ProfileVerifier` (grep: 0 matches for roborazzi/paparazzi/macrobenchmark/baselineprofile/profileinstaller/leakcanary across `*.kts`, `*.toml`, `*.kt`, `*.yml`).
 - Splash: `androidx.core:core-splashscreen` is a dependency (`app/build.gradle.kts:` `libs.androidx.core.splashscreen`).
 - R8: release `isMinifyEnabled = true`, `isShrinkResources = true`, `isCrunchPngs = false`, `proguard-android-optimize.txt` (`app/build.gradle.kts:138-152`). `dependenciesInfo.includeInApk = false` (187-190). `packaging.jniLibs.useLegacyPackaging = false` (uncompressed native libs memory-mapped from the APK) and a few `keepDebugSymbols` (210-217). ABI splits via product flavors (arm64, arm32, x86_64, universal) rather than only AAB splits (68-109).
@@ -297,7 +297,7 @@ Principle: the source content under glass changes every frame while scrolling, b
 - Initialisation-order regression test using an isolated ClassLoader (`ScreensInitializationTest`).
 - No Compose UI tests (`createComposeRule` 0 matches), no screenshot tests (no Roborazzi/Paparazzi), no golden images, no Macrobenchmark, no baseline-profile generation. The full-suite status in the review doc: 262 tests, 3 failing (`GlassTintTokensTest` x2, `BotDetectionMitigatorTest`) (`CODEBASE_REVIEW_2026-10.md:82`). `GlassTintTokensTest` failing means even the colour policy tests were not gating merges.
 - Visual verification at Convx is by eye on a device ("Motion was reviewed on an emulator or device", `convx-android-motion/SKILL.md` checklist) and by the automation loop's device screenshot diff.
-- Consequence for Rovsti: we cannot copy a screenshot-testing setup from Convx. We must design our own (section 13.9), keeping the Convx idea of pure, pinned, testable motion/perf tokens.
+- Consequence for Rosty: we cannot copy a screenshot-testing setup from Convx. We must design our own (section 13.9), keeping the Convx idea of pure, pinned, testable motion/perf tokens.
 
 ## 12. What not to copy (summary of Convx weak spots)
 
@@ -306,11 +306,11 @@ Principle: the source content under glass changes every frame while scrolling, b
 3. Plain `List<Pair<..>>` arguments built inline per recomposition (`rememberHeroSource`); `GlassEffectConfig` with 25 fields copied per composition.
 4. Main-thread tickers in services; `String.format` building log strings in hot paths.
 5. `Modifier.composed {}` remnants; zero-valued effect lambdas (`graphicsLayer { alpha = 1f }`).
-6. Glass everywhere as a design assumption (needs pooled capture, freeze clocks, region clipping, low-RAM fallback and a user "reduce blur" setting just to stay smooth). Rovsti should use real glass only on a few chrome surfaces.
+6. Glass everywhere as a design assumption (needs pooled capture, freeze clocks, region clipping, low-RAM fallback and a user "reduce blur" setting just to stay smooth). Rosty should use real glass only on a few chrome surfaces.
 7. Metrics flag using an object in a string path; reliance on hand-run on-device scripts.
 8. State polled by timers: the 120 ms `appMotionFrozen` poll and 48 ms thaw poll are workarounds for plain-lambda freeze clocks that cannot invalidate. A cleaner design drives the freeze with an explicit state/`snapshotFlow` on scroll-in-progress and asks the draw node to invalidate on thaw.
 
-## 13. Recipe for Rovsti (how to build the equivalent in our own Compose code)
+## 13. Recipe for Rosty (how to build the equivalent in our own Compose code)
 
 Scope: four apps (Phone, Messages, Contacts, Stops), Kotlin + Compose, domain logic in Rust crates reached via JNI/UniFFI-style bindings, WhatsApp via our gateway, Stops with a FULL-SCREEN map and floating controls. No device available, so verification is Gradle builds, JVM/Robolectric tests, Compose UI tests and screenshot tests. All code below is to be written fresh; pseudo-code describes behaviour only.
 
@@ -357,7 +357,7 @@ Scope: four apps (Phone, Messages, Contacts, Stops), Kotlin + Compose, domain lo
 
 - Decision: real backdrop blur/refraction on at most a small number of chrome elements (tab bar, floating map controls, sheet grabber area, top bar once scrolled). Everything else is a flat translucent surface with a hairline. The map and lists are the content; glass over a full-screen map that pans every frame is the worst case, so for Stops prefer a tinted translucent surface with a cheap blur only on the bottom sheet and only when the map is idle.
 - If we implement backdrop blur: depend on the upstream Apache-2.0 `io.github.kyant0:backdrop` and/or Haze (after re-checking licence and API at the pinned version), do not copy Convx's vendored variants. Use the same cost levers (all re-derived from first principles, they are general GPU facts): capture at 1/3 to 1/2 resolution when the radius is large; share one captured+blurred layer across all surfaces; restrict re-record to the region covered; gate on API 31/33 and `isLowRamDevice`; provide a "reduce transparency/blur" setting; fall back to a solid tint.
-- Freeze clock design for Rovsti (own version, fix Convx's polling smell): a small `class MotionGate` with three inputs — scroll-in-progress (from a `NestedScrollConnection` on the main scroll container), navigation/transition running (from the nav host), gesture-active (sheet/popover drag). It exposes `val frozen: State<Boolean>` backed by a snapshot state that changes only on edges (start/stop), plus a short tail (about 100-150 ms) implemented with a delayed state write in a coroutine, so there is no per-frame state write and no polling loop. Glass draw nodes observe `frozen` and, when it flips to false, call `invalidateDraw()` themselves. All ambient animations (mesh, shimmer, glow) also take `frozen`.
+- Freeze clock design for Rosty (own version, fix Convx's polling smell): a small `class MotionGate` with three inputs — scroll-in-progress (from a `NestedScrollConnection` on the main scroll container), navigation/transition running (from the nav host), gesture-active (sheet/popover drag). It exposes `val frozen: State<Boolean>` backed by a snapshot state that changes only on edges (start/stop), plus a short tail (about 100-150 ms) implemented with a delayed state write in a coroutine, so there is no per-frame state write and no polling loop. Glass draw nodes observe `frozen` and, when it flips to false, call `invalidateDraw()` themselves. All ambient animations (mesh, shimmer, glow) also take `frozen`.
 - Popovers and context menus (owner complaint: none existed; tapping pushed content): host them in a top-level overlay layer (a `Popup` or a dedicated `Box` at the root) so opening never changes layout of the content. Content scale/alpha/offset animate through a node reading a single `Animatable` in `graphicsLayer {}`; origin = the trigger's anchor corner; open spring about 0.35-0.45 s duration with low bounce; close shorter and non-bouncy; dismiss on outside tap with a scrim whose alpha is a layer property, not a composition value. Measure the anchor with `onGloballyPositioned` once and store it in a plain holder; do not recompose the trigger when the popover opens. Test the placement function (anchor rect + screen rect + content size to final rect and origin) on the JVM.
 - Sheets: progress as `() -> Float` shared by the sheet and the content behind it (scale/dim in a layer block), as in the Convx `progressProvider` overload idea; sheet content is lazily composed only when the detent is not "hidden".
 - Buttons that "flowed into content" (owner complaint): never animate size/padding of a sibling with `animateContentSize` on the content column. Animate `graphicsLayer` scale/alpha/translation of the control only, or reserve its final space; reading animation values in a layout lambda is fine, in composition is not.
@@ -377,7 +377,7 @@ Scope: four apps (Phone, Messages, Contacts, Stops), Kotlin + Compose, domain lo
 ### 13.8 Startup, profiles and R8
 
 - Add the `androidx.profileinstaller` dependency explicitly. Start with a small hand-written rules file (class and method rules for the app's `MainActivity`, Application, theme, the first screen's composables, `LazyColumn` row composables, popover host, the map view) rather than a package wildcard. Generate a real profile later with a Baseline Profile Gradle plugin + Macrobenchmark when a device or managed emulator is available; document the command in the repo (`docs/profiling`). Until then keep the wildcard fallback only for `:feature-*` UI packages and delete it once a generated profile exists.
-- Startup: `Application.onCreate` does only what must happen before the first frame: logging in debug, a non-blocking preference snapshot read, Rust bridge library load. Everything else after first frame: `applicationScope.launch(Dispatchers.Default)` or `androidx.startup` initialisers. A prefs snapshot mirror like Convx's (settings readable synchronously after a one-time warmup, writes async) fits Rovsti, but keep it small and typed (a settings holder object), not a global map.
+- Startup: `Application.onCreate` does only what must happen before the first frame: logging in debug, a non-blocking preference snapshot read, Rust bridge library load. Everything else after first frame: `applicationScope.launch(Dispatchers.Default)` or `androidx.startup` initialisers. A prefs snapshot mirror like Convx's (settings readable synchronously after a one-time warmup, writes async) fits Rosty, but keep it small and typed (a settings holder object), not a global map.
 - R8 on release with `isShrinkResources`; keep rules minimal: JNI native method owners, serialization, the exact reflection targets. Add a CI step that runs `assembleRelease` and fails on R8 warnings introduced by new keep rules. Strip `Log.v/d` via `-assumenosideeffects`.
 - StrictMode (thread: disk, network, custom slow calls; VM: leaked closables) in debug only. Add `penaltyLog` in debug and `penaltyDeath` in a dedicated "strict" variant used by instrumented tests when available.
 
@@ -398,7 +398,7 @@ Scope: four apps (Phone, Messages, Contacts, Stops), Kotlin + Compose, domain lo
 - Performance regression gates without a device: (a) compiler-report check for skippability of named composables; (b) a JVM test that builds the lazy item key/contentType functions and asserts uniqueness; (c) a build-time check that ambient-animation composables take a `frozen`/`paused` parameter (lint or a convention test); (d) APK size and method count tracked in CI via `assembleRelease` + `bundletool`/size report.
 - When a device becomes available: add a `:benchmark` Macrobenchmark module (startup cold/warm, scroll each list, open popover, pan map) and a Baseline Profile generator that uses the same scripted journeys; record frame-time p50/p90/p99 and janky-frame counts, and check the display is truly in the high-refresh mode before trusting numbers. Keep the discipline recorded in Convx's progress doc: one change per trace pair, clean tree, fixed script, A/B the previous APK.
 
-### 13.11 A short checklist the Rovsti UI skill can embed
+### 13.11 A short checklist the Rosty UI skill can embed
 
 1. No per-frame value reaches composition; read it in a layer/draw/layout lambda.
 2. Every lazy item has `key` and `contentType`; no allocation of collections inside items.

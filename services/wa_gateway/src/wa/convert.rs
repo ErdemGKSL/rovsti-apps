@@ -2,8 +2,8 @@
 //! path ([`message`]) and the history path ([`crate::wa::history`]) both go
 //! through [`convert`], so a message looks the same however it arrived.
 
-use rovsti_wa_proto::meta::body_preview;
-use rovsti_wa_proto::{
+use rosty_wa_proto::meta::body_preview;
+use rosty_wa_proto::{
     DeliveryStatus, Location, MediaKind, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction,
     SharedContact, WaMessage, WaUser,
 };
@@ -92,7 +92,7 @@ pub enum Converted {
         edited_ms: i64,
     },
     /// An earlier message was deleted for everyone, at `at_ms` by `by`
-    /// ([`rovsti_wa_proto::DELETED_BY_ME`] or the JID of who deleted it).
+    /// ([`rosty_wa_proto::DELETED_BY_ME`] or the JID of who deleted it).
     Revoke {
         chat: String,
         target_id: String,
@@ -419,7 +419,7 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
 /// admin) or the other person of a one-to-one chat.
 fn revoked_by<'a>(origin: &Origin<'a>) -> &'a str {
     if origin.from_me {
-        rovsti_wa_proto::DELETED_BY_ME
+        rosty_wa_proto::DELETED_BY_ME
     } else {
         origin.sender.unwrap_or(origin.chat)
     }
@@ -745,7 +745,7 @@ mod tests {
             Converted::Revoke {
                 chat: CHAT.into(),
                 target_id: "T".into(),
-                by: rovsti_wa_proto::DELETED_BY_ME.into(),
+                by: rosty_wa_proto::DELETED_BY_ME.into(),
                 at_ms: 1_700_000_000_000,
             }
         );

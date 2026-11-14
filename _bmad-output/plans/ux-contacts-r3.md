@@ -1,6 +1,6 @@
-# UX completeness pass: Rovsti Contacts (round 3)
+# UX completeness pass: Rosty Contacts (round 3)
 
-Base: `a33acaf5b488b497f34c7aba8424084d8dc28037` (main, "Rovsti contacts: Docs and plan status").
+Base: `a33acaf5b488b497f34c7aba8424084d8dc28037` (main, "Rosty contacts: Docs and plan status").
 The tree is clean and there is no stash. Round 1 (`ux-contacts.md`, U1 to U7) and round 2
 (`ux-contacts-r2.md`, V1 to V5) are done.
 
@@ -26,9 +26,9 @@ GPUI rules: add no new GPUI calls. Use only what the app already uses: `cx.spawn
 ## Plan (ordered by user impact; each step leaves all checks green)
 
 Run these checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first.
-Commit each step on its own, with a focused message ("Rovsti contacts: ...").
+Commit each step on its own, with a focused message ("Rosty contacts: ...").
 
 ### W1. The Undo notice survives navigation and never goes stale (S1, S2) (done, 516c0cf)
 
@@ -96,7 +96,7 @@ Acceptance: the `keeps_undo` tests pass. `grep -n "notice = None" apps/contacts/
 
 ### W3. Docs and plan status (done, this commit)
 
-- `docs/roadmap.md` (Rovsti Contacts): add a ticked line "UX completeness pass, round 3: the
+- `docs/roadmap.md` (Rosty Contacts): add a ticked line "UX completeness pass, round 3: the
   Undo of a delete survives navigation and goes away when the delete commits; export says
   when there is nothing to export (done without a device)".
 - `docs/ux-audit.md` (if it tracks Contacts items): note S1 to S3.

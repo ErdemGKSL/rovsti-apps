@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
-use rovsti_wa_proto::{EventEnvelope, EventLog, GatewayEvent, KeyId, Since};
+use rosty_wa_proto::{EventEnvelope, EventLog, GatewayEvent, KeyId, Since};
 use tokio::sync::broadcast;
 
 use crate::store::InstanceId;

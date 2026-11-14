@@ -6,7 +6,7 @@ E5.9-E5.14, after first fixing the open screenshot and owner items F22-F24 plus 
 (F25, F26). The cross-app stories **X.1** (WhatsApp photo fallback avatar) and **X.2** (Takumi share cards) are round 15,
 before E6.
 
-Owner decisions in force: Rovsti is GPL-3.0-or-later; Convx code is ported close to verbatim with its original header plus
+Owner decisions in force: Rosty is GPL-3.0-or-later; Convx code is ported close to verbatim with its original header plus
 `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`; glisse-derived code keeps the
 glisse MIT header; `android/THIRD_PARTY_NOTICES.md` lists any new source. Owner rules (b) wait for `Rust.init` before any
 `RustNative` call, (c) `imeOverlapPadding` only (never `imePadding` / `windowInsetsPadding(WindowInsets.ime)`), (d) R8
@@ -16,14 +16,14 @@ notification of this round.
 
 ## State found at `50c6204` (verified in code, not trusted)
 
-- Working tree clean. Stashes: `stash@{0}` "WIP on ui-overhaul: cade24b" (step-4 WIP of round 13: `RovstiGlass.kt`,
+- Working tree clean. Stashes: `stash@{0}` "WIP on ui-overhaul: cade24b" (step-4 WIP of round 13: `RostyGlass.kt`,
   `GlassEffect.kt`, `InCallScreen.kt`, `IncomingScreen.kt`, `GlassRealPathTest.kt`, `InCallScreenTest.kt`, ...;
   superseded by `c0ffc3c`, whose `GlassRealPathTest` has the `CallControlButton` case at line 212), `stash@{1}` "blocked:
   kotlin-ui r12 S6" (E5.5, recovered in round-13 step 1), `stash@{2}` deprecated GPUI WIP (never pop). Branch
   `wip-r12-s6` is gone.
 - **Round 13 verified in code:** `design/.../list/Reorder.kt`, `phone/src/main/res/values-tr/strings.xml`,
   `design/.../controls/PlainIconAction.kt`, `SlideToAnswer.kt`, `design/.../media/CallBackdrop.kt`,
-  `docs/kotlin-ui/wa-call-audio.md`, `crates/rovsti_wa_client/tests/call_audio.rs`; tests `FavoritesViewModelTest`
+  `docs/kotlin-ui/wa-call-audio.md`, `crates/rosty_wa_client/tests/call_audio.rs`; tests `FavoritesViewModelTest`
   (phone), `PhoneStringsTest`, `TabBarCellsTest`, `PlainIconActionTest`, `CallBackdropTest`, `SlideToAnswerTest`,
   `WaCallAudioTest`, `WaCallFlowTest`, `MultiCallViewModelTest`, `AddCallSheetTest`, `GlassRealPathTest`; goldens
   `e5.5-*`, `e5.6-*` (incl. `-photo`, `locked-slide-*`), `e5.7-*` (incl. `hold-two-calls`, `conference`,
@@ -37,7 +37,7 @@ notification of this round.
     The goldens must show the real path (`hostDisplay(...)`, `IncomingRig.kt:254`).
   - `e5.7-incall-keypad-dark`: **F23 still open**: "Mert Kaya" is clipped at the descenders by the "4821" digits line
     (reads "Mert Kava").
-  - **F25 (new):** the in-call name is `RovstiTheme.type.largeTitle` bold (`InCallScreen.kt:370`), while Incoming uses
+  - **F25 (new):** the in-call name is `RostyTheme.type.largeTitle` bold (`InCallScreen.kt:370`), while Incoming uses
     the iOS 26 Light 36 sp name: the answer morph jumps weight. iOS 26 keeps the thin name in call.
   - **F26 (new):** the in-call "Audio" control shows a phone handset on earpiece (`audioIcon(ui.route)`,
     `InCallScreen.kt:508`); iOS shows a speaker glyph (Bluetooth glyph when BT is the route). The handset reads as "call".
@@ -46,7 +46,7 @@ notification of this round.
 - **E5.9-E5.14 inventory (GPUI app, feature list only):** `apps/phone/src/settings_ui.rs`, `blocked_ui.rs`,
   `prune_ui.rs`, `backup_ui.rs`, `replies_ui.rs`, `speed_dial_ui.rs`, `sim_ui.rs`, `stats_ui.rs`, `notes_ui.rs`,
   `remind_ui.rs`, `setup_ui.rs`, `photo_viewer.rs`, `photo_edit.rs`, `photos.rs`. Core ops already exported
-  (`rovsti_ffi`): `blocklist.{lines,parse_input,parse_many,parse_file,check,call_line}`, `recents.blocked_history`,
+  (`rosty_ffi`): `blocklist.{lines,parse_input,parse_many,parse_file,check,call_line}`, `recents.blocked_history`,
   `call_log.{csv,prune_plan,counts,frequent,query}`, `call_notes.{rows,export,remove,restore,set,details}`,
   `call_stats.{overview,bucket,person}`, `speed_dial.*`, `setup.{checklist,steps,xiaomi,reopened}`,
   `phone.{backup_export,backup_import,prefs_load,prefs_save,reply_choices}`. Existing Kotlin: `PhoneRoute` has
@@ -57,12 +57,12 @@ notification of this round.
 ## Rules for this round
 
 1. **Disk first, every step.** `df -h .` before any build. Below 8 GB: `rm -rf android/*/build` and
-   `target/*/incremental`. Below 7 GB: also `cargo clean -p` the deprecated GPUI crates (`rovsti_phone rovsti_messages
-   rovsti_stops rovsti_contacts rovsti_ui rovsti_wa_ui liquid_glass_kit`), `rm -rf ~/.gradle/caches/build-cache-1` and
+   `target/*/incremental`. Below 7 GB: also `cargo clean -p` the deprecated GPUI crates (`rosty_phone rosty_messages
+   rosty_stops rosty_contacts rosty_ui rosty_wa_ui liquid_glass_kit`), `rm -rf ~/.gradle/caches/build-cache-1` and
    Gradle versions under `~/.gradle/caches/` other than the wrapper's. Never build below 6 GB. Never `cargo clean` the
    whole workspace or `rm -rf target` (release-only checks, `docs/kotlin-ui/toolchain.md`).
 2. **Domain logic in Rust**: parsing, plans, CSV, stats buckets, notes search live in the core ops listed above; a missing
-   decision becomes a `rovsti_ffi` op with fixtures, `OPS.md` and `scripts/check-ffi-exports.sh`.
+   decision becomes a `rosty_ffi` op with fixtures, `OPS.md` and `scripts/check-ffi-exports.sh`.
 3. **Screens** (ARCH 5.2): ViewModel, one `@Immutable UiState`, `onAction(sealed)`, `stateIn(WhileSubscribed(5_000))`,
    effects through a `Channel`; composables never map/sort/filter; only `:design`/`:shell` components (inset-grouped
    `IosList` rows, `FrostedTopBar` with the `LocalPageBack` glass back button on every pushed page, full tab bar on
@@ -80,7 +80,7 @@ notification of this round.
 7. **Strings:** every new string in `values/strings.xml` and `values-tr/strings.xml`; `PhoneStringsTest` and lint
    `MissingTranslation` pass.
 8. **Check per step:** `bash scripts/kotlin-ui-check.sh` prints `ALL GREEN`. Rust changes also run `cargo test -p
-   rovsti_core -p rovsti_app_core -p rovsti_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in Step 8.
+   rosty_core -p rosty_app_core -p rosty_ffi` and `bash scripts/check-ffi-exports.sh`. Full `CLAUDE.md` gate in Step 8.
 9. **Commits:** one per step, `Kotlin UI (E5 Phone, round 14 (E5 R2 part 2)): <step title>`, ending with the session
    attribution lines. Never push to `main`.
 
@@ -103,8 +103,8 @@ notification of this round.
 - **F25:** in-call name uses the same style as Incoming (`largeTitle` with `FontWeight.Light`, 36 sp, two lines then
   shrink-to-fit): extract `CallNameText` into `phone/.../incoming/CallHeader.kt` (shared by Incoming, In-call, WA) so
   the answer morph keeps the weight.
-- **F26:** `audioIcon(route)`: earpiece and speaker -> `RovstiIcons.Speaker` (wave glyph, add to `:design` if missing),
-  Bluetooth -> `RovstiIcons.Bluetooth`, wired headset -> `RovstiIcons.Headphones`; active (speaker on) -> solid white
+- **F26:** `audioIcon(route)`: earpiece and speaker -> `RostyIcons.Speaker` (wave glyph, add to `:design` if missing),
+  Bluetooth -> `RostyIcons.Bluetooth`, wired headset -> `RostyIcons.Headphones`; active (speaker on) -> solid white
   disc as now. Unit test of the mapping.
 - **F24:** new `:design` `text/SearchFocusHandoff.kt`: `rememberSearchFocusHandoff(focusRequester)` with
   `onResultOpened()` (clears focus, `SoftwareKeyboardController.hide()`) and `onSheetDismissed()` (requests focus, caret
@@ -187,7 +187,7 @@ notification of this round.
 ### Step 6. E5.12 Reminders, missed-call notifications, setup flows
 
 - **U13 call reminders:** "Remind me" choices (in 15 min, 1 h, this evening, tomorrow morning, pick time) from
-  `rovsti_core::reminder`; `CallReminderReceiver` (manifest component, already declared) posts the reminder notification
+  `rosty_core::reminder`; `CallReminderReceiver` (manifest component, already declared) posts the reminder notification
   (kind icon, accent, contact photo large icon) with Call / Message actions; reminders survive reboot (boot receiver
   re-arms from the store); exact-alarm permission missing -> inexact with a settings row. Replace the round-12 action
   sheet with the `ButtonMenuEntry` menu (`e5.12-remind-later-menu`).
@@ -235,7 +235,7 @@ notification of this round.
   the summary as safe to drop (do not drop `stash@{2}`).
 - Regenerate `docs/kotlin-ui/screenshots/phone.png` (`:phone:contactSheet`) and open it.
 - Full gate: `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace`, `cargo check -p
-  rovsti_android --target aarch64-linux-android`, `bash scripts/kotlin-ui-check.sh`. Release APKs of `:phone` (plain and
+  rosty_android --target aarch64-linux-android`, `bash scripts/kotlin-ui-check.sh`. Release APKs of `:phone` (plain and
   firebase) and `android/catalog`; `dexdump` keep-rule checks; state the paths.
 - epics: E5.14 -> `done`, E5 header "DONE (R2)"; next planner = round 15: X.1 then X.2, then E6.
 

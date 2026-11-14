@@ -7,7 +7,7 @@ Base: 1f5520e9d19e51c08054f19638fab4cd5fae5357. Stash list empty, working tree c
 Round 1 (`util-stops-pair.md`, commits 116f2eb..1f5520e) implemented the whole goal:
 
 1. Two-point saved stop
-   - `crates/rovsti_geo/src/saved_stops.rs`: `SavedStop {id, name, a, b, created_ms}`,
+   - `crates/rosty_geo/src/saved_stops.rs`: `SavedStop {id, name, a, b, created_ms}`,
      `SavedStops` (format v2, order = Vec position), add/rename/remove/move_by/restore/find_gate,
      `load_saved_stops` discards old/unknown content, `suggest_name` (nearest GTFS stop to the
      midpoint, else label, else ""). Tests cover all of these.
@@ -27,5 +27,5 @@ Round 1 (`util-stops-pair.md`, commits 116f2eb..1f5520e) implemented the whole g
      Taps keep tap-to-snap within 40 px.
    - The rule is documented in `docs/stops-saved-and-snapping.md`.
 
-Checks at base: fmt, clippy -D warnings, rovsti_geo + rovsti_stops tests (226 + 228 passed),
-aarch64-linux-android checks of rovsti_android, rovsti_wa_client and rovsti_tiles: all pass.
+Checks at base: fmt, clippy -D warnings, rosty_geo + rosty_stops tests (226 + 228 passed),
+aarch64-linux-android checks of rosty_android, rosty_wa_client and rosty_tiles: all pass.

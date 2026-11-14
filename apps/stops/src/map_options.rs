@@ -6,7 +6,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_geo::{
+use rosty_geo::{
     Appearance,
     coord_format::{map_view_share_text, osm_view_url},
     tiles::{
@@ -14,7 +14,7 @@ use rovsti_geo::{
         tiles_for_area,
     },
 };
-use rovsti_ui::{
+use rosty_ui::{
     components::{glass_pill, list_row, section},
     theme,
     tokens::{Theme, typography},
@@ -81,7 +81,7 @@ pub fn area_confirm_title(plan: &AreaPlan) -> String {
 impl StopsApp {
     /// Makes the window follow `prefs.appearance` now.
     pub(crate) fn apply_appearance(&mut self, cx: &mut Context<Self>) {
-        rovsti_ui::set_theme_override(theme_override(self.prefs.appearance));
+        rosty_ui::set_theme_override(theme_override(self.prefs.appearance));
         cx.notify();
     }
 
@@ -298,7 +298,7 @@ impl StopsApp {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rovsti_geo::tiles::TileId;
+    use rosty_geo::tiles::TileId;
 
     fn plan(n: usize, top_zoom: u8, capped: bool) -> AreaPlan {
         AreaPlan {

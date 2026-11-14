@@ -2,7 +2,7 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Glass: material recipe, AGSL lens and rim, tokens, fallbacks
 
-> **Licence.** Rovsti is GPL-3.0-or-later, so Convx's glass stack is ported close to verbatim: the engine
+> **Licence.** Rosty is GPL-3.0-or-later, so Convx's glass stack is ported close to verbatim: the engine
 > `app/src/main/kotlin/com/convx/music/ui/component/backdrop/**` (Kyant0 backdrop v2.0.0, Apache-2.0, modified by Convx),
 > `ui/component/GlassEffect.kt`, `TopFadeBlur.kt`, `GlassPool.kt`, the freeze files, `ui/theme/AppleTokens.kt`,
 > `GlassTintTokens.kt` and `ui/ios/foundation/*`. Keep upstream headers and add the Convx line (SKILL.md section 0).
@@ -24,11 +24,11 @@ a two-sided specular rim, an outer hairline and a soft shadow (`B/highlight/*`, 
 **sibling drawn after** the content subtree, never inside it (a source-code comment gives recursive RenderNode drawing as the reason, `AppRootContent.kt:~1194`).
 
 glisse gets the same optics on the web with only `blur(3px) + saturate(1.5) + translucent fill` (`G/styles.css:91-130`)
-plus its lens bend and rim; the optical character comes from the lens and rim, not from heavy blur. Rovsti follows that:
+plus its lens bend and rim; the optical character comes from the lens and rim, not from heavy blur. Rosty follows that:
 small blur, real lens, measured rim.
 
 API levels: `RenderEffect` blur/chain 31, `RuntimeShader`/`createRuntimeShaderEffect` 33 (AGSL), Compose
-`GraphicsLayer`/`rememberGraphicsLayer`/`requireGraphicsContext` compose-ui 1.7. Rovsti minSdk 34: all available.
+`GraphicsLayer`/`rememberGraphicsLayer`/`requireGraphicsContext` compose-ui 1.7. Rosty minSdk 34: all available.
 
 ---
 
@@ -39,7 +39,7 @@ API levels: `RenderEffect` blur/chain 31, `RuntimeShader`/`createRuntimeShaderEf
 
 ```kotlin
 // ORIGINAL
-package dev.rovsti.ui.glass
+package dev.rosty.ui.glass
 
 /** One per screen root. The content subtree records itself into [layer]; glass siblings replay it. */
 @Stable
@@ -132,7 +132,7 @@ Rules learned from Convx:
   element, take the sampling offset from the *unscaled* parent position and draw the replay inside
   `withTransform({ inset/scale by the inverse of the press values about the centre })`. Verify with a screenshot of a
   pressed button over a striped backdrop: stripes must not move.
-- Stops: if the map is drawn by our own Compose tile painter (`rovsti_tiles` + `Canvas`), it can be the glass source.
+- Stops: if the map is drawn by our own Compose tile painter (`rosty_tiles` + `Canvas`), it can be the glass source.
   A `SurfaceView`/`TextureView` map cannot be recorded into a `GraphicsLayer`; then map chrome uses the Frost-from-tint
   or Flat tier (open risk noted in `convx-glass.md` 12; Convx skips capture over WebView routes, `AppRootContent.kt:~900`).
 
@@ -180,7 +180,7 @@ Tuning table (copy as-is; `G/internal/refraction.ts:14-24`, `segments.tsx:73-95`
 ```kotlin
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
 // Lens shape after glisse's implementation of Aave's web glass (dome slope, erf falloff).
-package dev.rovsti.ui.glass
+package dev.rosty.ui.glass
 
 import kotlin.math.*
 
@@ -440,10 +440,10 @@ data class GlassTokens(
 ```
 
 Theme follows the system (`isSystemInDarkTheme()`), matching glisse's `prefers-color-scheme` rule (`G/styles.css:31,60-61`) and
-Rovsti's `FOLLOW_SYSTEM_THEME`. Crossfade theme colours over 280 ms read in the draw phase so effects are not rebuilt
+Rosty's `FOLLOW_SYSTEM_THEME`. Crossfade theme colours over 280 ms read in the draw phase so effects are not rebuilt
 (`C/GlassEffect.kt:356-361`).
 
-### 4.2 Rovsti presets (ORIGINAL picks; numbers observed in Convx and glisse)
+### 4.2 Rosty presets (ORIGINAL picks; numbers observed in Convx and glisse)
 
 | Preset | Blur | Saturation | Lens | Fill (light / dark) | Rim | Corner | Source evidence |
 |---|---|---|---|---|---|---|---|

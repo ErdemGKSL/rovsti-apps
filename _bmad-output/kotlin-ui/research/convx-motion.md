@@ -1,8 +1,8 @@
-# Convx motion system: research report for Rovsti Kotlin UI
+# Convx motion system: research report for Rosty Kotlin UI
 
 Scope: how Convx (cosmictaserdev-creator/Convx, Kotlin + Jetpack Compose) makes its motion, and why it feels fluid.
-Licence guard: Convx is GPL-3.0, Rovsti is MIT/Apache. Everything below is a description in our own words plus
-numeric parameters (facts and numbers are not code). Pseudo-code is original. No Convx source is to be copied into Rovsti.
+Licence guard: Convx is GPL-3.0, Rosty is MIT/Apache. Everything below is a description in our own words plus
+numeric parameters (facts and numbers are not code). Pseudo-code is original. No Convx source is to be copied into Rosty.
 Where Convx itself says a file is ported from an Apache-2.0 upstream (see section 11), prefer going to that upstream
 directly and re-implementing from the description here.
 
@@ -557,7 +557,7 @@ No per-item list stagger (cascade) was found; lists use `Modifier.animateItem()`
   (`DampedDragAnimation.kt:1-8` cites compose-miuix-ui contributors, SPDX Apache-2.0) and
   `hig/src/main/kotlin/zone/ien/hig/utils/DampedDragAnimation.kt:32-36` carries the same constants. `FloatingTabBarMotion`
   comments name `Kyant0/AndroidLiquidGlass`. So the *puck* physics (spring 1/1000, 0.6/250, 0.7/250, 0.5/300 and the
-  velocity-squash formula) come from an Apache-2.0 upstream. For Rovsti, if we want that exact behaviour, go to the
+  velocity-squash formula) come from an Apache-2.0 upstream. For Rosty, if we want that exact behaviour, go to the
   upstream project directly for the code, honour its licence in NOTICE, and cross-check against the values in this
   report. Otherwise re-implement from section 5.1 (the numbers are facts, the code is ours).
 - The `hig` module (`hig/LICENSE`) is a separate vendored Cupertino library; its licence should be read before any reuse. We do not need it.
@@ -572,9 +572,9 @@ No per-item list stagger (cascade) was found; lists use `Modifier.animateItem()`
 
 ---------------------------------------------------------------------------------------------------
 
-## 12. Recipe for Rovsti (Kotlin + Compose, our own code)
+## 12. Recipe for Rosty (Kotlin + Compose, our own code)
 
-Package suggestion: `rovsti.ui.motion` in a `:core-ui` module. Rule: **one place defines every spec; no call site
+Package suggestion: `rosty.ui.motion` in a `:core-ui` module. Rule: **one place defines every spec; no call site
 writes a raw number.**
 
 ### 12.1 Tokens (our own set, derived from the table in section 2)
@@ -624,7 +624,7 @@ Always set `visibilityThreshold` (0.001 for unit values, 0.5 px for offsets) so 
   block. Never change layout size on press. This directly fixes "tapping made buttons flow INTO the content and push it":
   all feedback is transform/alpha in the layer, so layout is untouched.
 
-**b) `RovstiOverscroll` (rubber-band for every scroller)**
+**b) `RostyOverscroll` (rubber-band for every scroller)**
 - Implement `OverscrollEffect` with two accumulators (raw + returning), curve
   `y = (1 - 1/(x*0.55/D + 1)) * D/0.55`, spring(1, k) rebound seeded with leftover fling velocity, offsets applied in
   `placeWithLayer`. Provide via `LocalOverscrollFactory`. Do not consume fling deltas into stretch. Only treat the
@@ -661,7 +661,7 @@ Always set `visibilityThreshold` (0.001 for unit values, 0.5 px for offsets) so 
 - Tab bar must not cover content: reserve its height as content padding (`WindowInsets` + measured height) and let
   lists scroll under it with fade; bar auto-minimise on scroll uses hysteresis (collapse threshold larger than expand
   threshold, accumulated scroll reset on direction flip, smoothed velocity EMA 0.35) (`FloatingTabBar.kt:187,448-470`).
-  For Rovsti a simple version is enough: translate down ~40 dp and fade 35% on downward scroll, spring(0.9, 500).
+  For Rosty a simple version is enough: translate down ~40 dp and fade 35% on downward scroll, spring(0.9, 500).
 
 **g) Switch, slider, stepper**
 - Switch: 51x31 dp, knob 27 dp, travel 20 dp, `Knob` spring, colour tween 200 ms; make the whole thumb draggable using DragPuck
@@ -700,13 +700,13 @@ Always set `visibilityThreshold` (0.001 for unit values, 0.5 px for offsets) so 
 2. Baseline profile + `JankStats` in debug builds; budget: no recomposition counts > 1 during a 1-second drag
    (verify with Layout Inspector / `Modifier.recomposeHighlighter` in a debug-only wrapper).
 3. Avoid path clips on moving shapes (use `RoundedCornerShape` clip or no clip), avoid `Offscreen` compositing unless needed.
-4. Gate infinite animations on visibility; avoid marquee in every list row (for Rovsti: no marquee in lists at all).
+4. Gate infinite animations on visibility; avoid marquee in every list row (for Rosty: no marquee in lists at all).
 5. If we use blur/glass: cap blur radius while scrolling and reuse last capture for ~120 ms after scroll end.
 6. Always provide reduce-motion path through the token gate.
 
 ### 12.6 Suggested order of implementation
 1. Tokens + helpers + pure-function tests (JVM).
-2. `pressable` + `RovstiOverscroll` (affects every screen immediately).
+2. `pressable` + `RostyOverscroll` (affects every screen immediately).
 3. `ModalSheet` + presentation scale-back + predictive back.
 4. Popover/context menu + swipe row.
 5. `DragPuck` -> tab bar, segmented control, switch, slider.

@@ -1,8 +1,8 @@
 //! The QR code sheet for a map point: the code on a white card, then Save (to
 //! Photos) and Share image.
 //!
-//! The payload is a `geo:` link (`rovsti_geo::dest::point_qr_payload`), drawn
-//! by `rovsti_wa_ui::qr_png`. The card stays dark-on-white in dark mode, since
+//! The payload is a `geo:` link (`rosty_geo::dest::point_qr_payload`), drawn
+//! by `rosty_wa_ui::qr_png`. The card stays dark-on-white in dark mode, since
 //! scanners need the contrast.
 
 use std::sync::Arc;
@@ -11,8 +11,8 @@ use gpui::{
     AnyElement, Context, Image, ImageFormat, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, div, img, px,
 };
-use rovsti_core::number_format::file_slug_opt;
-use rovsti_ui::{
+use rosty_core::number_format::file_slug_opt;
+use rosty_ui::{
     components::glass_pill,
     theme,
     tokens::{Theme, radius, typography},
@@ -49,7 +49,7 @@ impl PartialEq for QrCard {
 /// The gallery name of a point's QR image.
 pub fn file_name(name: &str) -> String {
     let slug = file_slug_opt(name).unwrap_or_else(|| "point".to_owned());
-    format!("rovsti-stops-{slug}-qr.png")
+    format!("rosty-stops-{slug}-qr.png")
 }
 
 /// The caption under the code: the name, or a plain fallback.
@@ -62,7 +62,7 @@ pub fn caption(name: &str) -> String {
 
 /// Draws the card for `payload`, or says why not.
 pub fn make_card(payload: &str, name: &str) -> Result<QrCard, &'static str> {
-    let png = rovsti_wa_ui::qr_png(payload, QR_PX).map_err(|error| {
+    let png = rosty_wa_ui::qr_png(payload, QR_PX).map_err(|error| {
         log::warn!("rendering the point QR failed: {error}");
         "Could not draw the QR code"
     })?;
@@ -161,9 +161,9 @@ mod tests {
 
     #[test]
     fn file_names_are_slugs_with_a_fallback() {
-        assert_eq!(file_name("Home stop"), "rovsti-stops-Home-stop-qr.png");
-        assert_eq!(file_name("😀"), "rovsti-stops-point-qr.png");
-        assert_eq!(file_name(""), "rovsti-stops-point-qr.png");
+        assert_eq!(file_name("Home stop"), "rosty-stops-Home-stop-qr.png");
+        assert_eq!(file_name("😀"), "rosty-stops-point-qr.png");
+        assert_eq!(file_name(""), "rosty-stops-point-qr.png");
     }
 
     #[test]

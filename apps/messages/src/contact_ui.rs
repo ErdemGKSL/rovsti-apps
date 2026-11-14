@@ -1,5 +1,5 @@
 //! The "View contact" sheet of a shared contact card, used by the WhatsApp and
-//! SMS pages. The card comes from `rovsti_core::shared_card`; each page owns the
+//! SMS pages. The card comes from `rosty_core::shared_card`; each page owns the
 //! sheet and answers its `SheetAction`s.
 
 use std::path::Path;
@@ -8,8 +8,8 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_core::shared_card::{self, CardField, CardView};
-use rovsti_ui::{
+use rosty_core::shared_card::{self, CardField, CardView};
+use rosty_ui::{
     components::glass_pill,
     glass::{GlassSpec, glass},
     theme,
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn reads_a_small_vcf_and_refuses_junk() {
-        let dir = std::env::temp_dir().join(format!("rovsti-vcf-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rosty-vcf-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("test io");
         let ok = dir.join("a.vcf");
         std::fs::write(

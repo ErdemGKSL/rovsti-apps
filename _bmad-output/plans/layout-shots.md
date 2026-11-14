@@ -6,7 +6,7 @@ baseSha: ebeaac24cc6b23dab3790c7c9f98cc14ed92f3ce
 
 The user's own message for this run is (Turkish): *"For God's sake code the mechanics of
 these text boxes properly, even the default HTML input works better."* That is about the
-**text field behaviour** (`crates/rovsti_ui/src/field.rs`), not the layout overhaul the
+**text field behaviour** (`crates/rosty_ui/src/field.rs`), not the layout overhaul the
 workflow assigned to this unit. This unit still builds the screenshot tool, because a text
 field rework needs it to show its result. The tool also gets a text-field state gallery
 (step 7) so it can prove that rework. The field behaviour itself is NOT fixed here. A
@@ -41,11 +41,11 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
      the frame"* (Stops map). The adapter must retry, up to 4 times, when the error text
      contains `retry`.
   2. `TestWindow::appearance()` is always Light. The theme comes from
-     `rovsti_ui::set_theme_override`. **Stops** overwrites the override from its own prefs
+     `rosty_ui::set_theme_override`. **Stops** overwrites the override from its own prefs
      (`map_options::apply_appearance` and `prefs.appearance`), so the first spike shot
      requested dark and came out light. Stops must be given its appearance through its
      prefs, or the override must be set again after construction.
-  3. Apps persist prefs under `$XDG_DATA_HOME/rovsti/<app>`. Without isolation, Phone came
+  3. Apps persist prefs under `$XDG_DATA_HOME/rosty/<app>`. Without isolation, Phone came
      back on the tab stored in the developer's real profile, not the one the shot asked for.
      Every shot needs a fresh data dir.
   4. **Stops downloaded real tiles through the proxy.** Tests must point the tile source at
@@ -53,8 +53,8 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
   5. Phone on desktop draws the `devtools` chip strip ("Ring Ayşe, Call, Hold ...") and a
      "Preview data" caption, and the caption overlaps the search field. Shots must hide
      both.
-  6. `ROVSTI_PREVIEW_*` env vars are read once at construction and are process-global. In
-     the spike, `ROVSTI_PREVIEW_DIAL` did not open the Keypad. Scenes must drive the state
+  6. `ROSTY_PREVIEW_*` env vars are read once at construction and are process-global. In
+     the spike, `ROSTY_PREVIEW_DIAL` did not open the Keypad. Scenes must drive the state
      by calling crate-private app methods, not env vars.
   7. The preview data uses wall-clock `now`. The result is non-deterministic times
      ("Yesterday", "4 Nov", "15:32") in `messages/backend.rs` + `conversation.rs`,
@@ -73,11 +73,11 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
 
 ## Steps
 
-### 1. `rovsti_ui` feature `shots`: the shared rig
-- `crates/rovsti_ui/Cargo.toml`: optional deps `gpui_wgpu`, `image`, and
+### 1. `rosty_ui` feature `shots`: the shared rig
+- `crates/rosty_ui/Cargo.toml`: optional deps `gpui_wgpu`, `image`, and
   `feature shots = ["gpui/test-support", "dep:gpui_wgpu", "dep:image"]`. Do not use them
   on Android: the feature is never enabled there.
-- New `crates/rovsti_ui/src/shots.rs` behind `#[cfg(feature = "shots")] pub mod shots;`:
+- New `crates/rosty_ui/src/shots.rs` behind `#[cfg(feature = "shots")] pub mod shots;`:
   - `WgpuHeadless` (copied from `liquid_glass_kit/tests/headless_frames.rs`) plus a retry
     loop on errors whose text contains `retry` (pitfall 1).
   - `pub struct Rig<V>`. `Rig::open(spec: ShotSpec, build: impl FnOnce(&mut Window, &mut App) -> Entity<V>)`
@@ -99,20 +99,20 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
   - Output root: `$CARGO_TARGET_DIR` or `<workspace>/target`, then `/shots`.
 - Pure helpers, unit-tested under the feature: `file_name(nn, screen, theme, small)`,
   `sheet_layout(n, tile_w, tile_h, cols) -> (w, h, positions)`, and `retryable(&err)`.
-- Smoke `#[ignore]` test in `rovsti_ui`: it renders the shared `tab_bar` with
-  `components::backdrop` and one `field_box` to `target/shots/rovsti_ui/00-smoke-{dark,light}.png`.
+- Smoke `#[ignore]` test in `rosty_ui`: it renders the shared `tab_bar` with
+  `components::backdrop` and one `field_box` to `target/shots/rosty_ui/00-smoke-{dark,light}.png`.
   Read both images. Note whether the backdrop's hard edge (pitfall 8) appears with only the
   backdrop on screen, and add one sentence on it to docs/screenshots.md under
   "Known renderer differences".
 - Acceptance: both smoke PNGs show glass and the tab bar, and are not blank. All
-  workspace checks pass, plus `cargo clippy -p rovsti_ui --features shots --all-targets -- -D warnings`
-  and `cargo test -p rovsti_ui --features shots`.
+  workspace checks pass, plus `cargo clippy -p rosty_ui --features shots --all-targets -- -D warnings`
+  and `cargo test -p rosty_ui --features shots`.
 
 ### 2. Determinism seams (small, tested, shared)
-- `rovsti_core::clock` (new, platform-free): `now_ms()` reads an `AtomicI64` override, or
+- `rosty_core::clock` (new, platform-free): `now_ms()` reads an `AtomicI64` override, or
   `SystemTime` when it is 0. `set_fixed_now_ms(Option<i64>)`. Unit tests cover both paths.
   Replace `SystemTime::now()` only at the call sites that feed rendered text: the files in
-  pitfall 7, `rovsti_wa_ui/src/avatars.rs::now_ms`, and the Messages
+  pitfall 7, `rosty_wa_ui/src/avatars.rs::now_ms`, and the Messages
   `locale().tz_offset_s` source on desktop. Fixed instant: `2026-11-07T15:40:00+03:00`.
 - Phone: replace the `#[cfg(not(target_os = "android"))]` devtools strip and the
   "Preview data" caption with a runtime gate, `PhoneApp::devtools_visible` (default true on
@@ -120,18 +120,18 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
 - Stops: a test-only way to start offline. Seed `stops-prefs.json` in the isolated dir
   with the tile server set to `http://127.0.0.1:9/{z}/{x}/{y}` (connection refused, so no
   network), and with `appearance` set to the shot's theme (pitfall 2). Use the existing
-  prefs format and do not add a new code path. If `rovsti_tiles` retries with backoff, make
+  prefs format and do not add a new code path. If `rosty_tiles` retries with backoff, make
   sure the placeholder is visible within `settle`.
 - Acceptance: `cargo test --workspace` is green, and new unit tests cover `clock`. Two
   successive phone smoke renders are byte-identical (`cmp`).
 
-### 3. Phone shots (`apps/phone`, feature `shots = ["rovsti_ui/shots"]`, `src/shots.rs`)
+### 3. Phone shots (`apps/phone`, feature `shots = ["rosty_ui/shots"]`, `src/shots.rs`)
 - `main.rs`: `#[cfg(all(test, feature = "shots"))] mod shots;`. One
   `#[test] #[ignore] fn shots()`. Construct the app with `Backend::start` as
   `perf_harness::Rig::with_size` does (the sample/preview backend).
 - Scenes (NN-screen), each in dark and light at 412x915:
   01-keypad-empty, 02-keypad-long-number (`+90 532 123 45 67 891 234`, via the keypad
-  model, not env), 03-recents (`ROVSTI_PREVIEW_TAB` replaced by `tabs.jump_to(1)`),
+  model, not env), 03-recents (`ROSTY_PREVIEW_TAB` replaced by `tabs.jump_to(1)`),
   04-recents-missed-filter, 05-contacts-list, 06-contacts-search-typing ("Ayş" in the search
   field, focused), 07-favorites, 08-contact-detail (person_ui, Ayşe Yılmaz),
   09-call-details (details_ui), 10-incall (preview scene `call`), 11-incoming,
@@ -153,7 +153,7 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
   bubble, an OTP), 05-conversation-whatsapp-group (sender names, reply quote, media
   placeholder), 06-composer-typing (focused, 2 lines of Turkish), 07-new-conversation,
   08-global-search, 09-status, 10-spam-folder, 11-row-menu (RowMenu sheet), 12-settings,
-  13-whatsapp-link (connect key / QR sheet from `rovsti_wa_ui`). Small-phone: 01-inbox
+  13-whatsapp-link (connect key / QR sheet from `rosty_wa_ui`). Small-phone: 01-inbox
   360x640 dark.
 - Acceptance: 27 PNGs plus a contact sheet. Open 01, 04, 05 and 06 (dark). In 01 the
   Status row, two rows of chips and at least 10 rows are visible, so the device problems
@@ -173,7 +173,7 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
   colour tags and Turkish names ("Kadıköy İskele", "Üsküdar Marmaray"), 5 history trips.
 - Scenes, dark and light: 01-trip-idle (map placeholder), 02-trip-a-set,
   03-trip-a-b-set (gate A and gate B rings, distance), 04-trip-running (live card with
-  arrival clock; use `ROVSTI_STOPS_SIMULATE`'s fix source by calling it directly, not via
+  arrival clock; use `ROSTY_STOPS_SIMULATE`'s fix source by calling it directly, not via
   env), 05-alarm-ringing, 06-saved-list, 07-saved-stop-sheet, 08-history,
   09-map-options, 10-pick (stop picker), 11-settings, 12-qr-sheet. Small-phone:
   01-trip-idle 360x640 dark.
@@ -181,7 +181,7 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
   (proof that nothing was downloaded). Open 01, 03 and 05 (dark) and 01 (light).
 
 ### 7. Text field state gallery (for the user's text-box request)
-- In the `rovsti_ui` shots test, add scene `01-fields-{dark,light}`: one 412x915 page that
+- In the `rosty_ui` shots test, add scene `01-fields-{dark,light}`: one 412x915 page that
   stacks `field_box` in each state. The states are: placeholder, focused empty, focused with
   short text, focused with a long Turkish URL ("https://örnek.com.tr/çok/uzun/bir/adres?ş=1"),
   unfocused with long text, composing (marked) text, secret, and a Phone-purpose field. Each
@@ -189,18 +189,18 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
 - Purpose: the baseline for the text-field mechanics unit. Today it shows the end-anchored
   caret and the start ellipsis. That unit adds mid-text caret and selection states to the
   same gallery.
-- Acceptance: `target/shots/rovsti_ui/01-fields-dark.png` is opened and every state is
+- Acceptance: `target/shots/rosty_ui/01-fields-dark.png` is opened and every state is
   legible.
 
 ### 8. Docs, baseline, verification
 - `docs/screenshots.md` covers:
-  - the commands: `cargo test -p rovsti_<app> --features shots shots -- --ignored --nocapture`
-    for each app, and `cargo test -p rovsti_ui --features shots shots -- --ignored --nocapture`;
+  - the commands: `cargo test -p rosty_<app> --features shots shots -- --ignored --nocapture`
+    for each app, and `cargo test -p rosty_ui --features shots shots -- --ignored --nocapture`;
   - output paths, naming (`NN-screen-theme[-small].png`), and the isolated data dir;
   - the pitfalls above (retry, theme override, offline tiles, single test per app);
   - "Known renderer differences" (from step 1);
   - how to add a screen: a new `scene(rig, "14-name", |app, window, cx| ...)` line;
-  - the extra lint: `cargo clippy -p rovsti_<app> --features shots --all-targets -- -D warnings`.
+  - the extra lint: `cargo clippy -p rosty_<app> --features shots --all-targets -- -D warnings`.
 - Baseline: copy each `contact_sheet.png`, downscaled to at most 1200 px wide, to
   `docs/screenshots/baseline/{phone,messages,contacts,stops}.png`. Keep each one under about
   1.5 MB (PNG, 8-bit RGB).
@@ -333,19 +333,19 @@ dedicated unit should do it next. What is wrong today (read in `field.rs`):
 - target/shots/stops/12-qr-sheet-light.png (824x1830)
 - target/shots/stops/contact_sheet.png (1200x2665)
 
-### rovsti_ui
+### rosty_ui
 
-- target/shots/rovsti_ui/00-smoke-dark.png (824x1830)
-- target/shots/rovsti_ui/00-smoke-light.png (824x1830)
-- target/shots/rovsti_ui/01-fields-dark.png (824x1830)
-- target/shots/rovsti_ui/01-fields-light.png (824x1830)
+- target/shots/rosty_ui/00-smoke-dark.png (824x1830)
+- target/shots/rosty_ui/00-smoke-light.png (824x1830)
+- target/shots/rosty_ui/01-fields-dark.png (824x1830)
+- target/shots/rosty_ui/01-fields-light.png (824x1830)
 
 Committed baselines: docs/screenshots/baseline/{phone,messages,contacts,stops}.png (contact sheets, 1200 px wide; messages 1000 px).
 
 
-## Step 1 result (rovsti_ui `shots` rig)
+## Step 1 result (rosty_ui `shots` rig)
 
-Produced: target/shots/rovsti_ui/00-smoke-dark.png and 00-smoke-light.png (824x1830).
+Produced: target/shots/rosty_ui/00-smoke-dark.png and 00-smoke-light.png (824x1830).
 Both opened: the Turkish heading, a glass field_box ("Ara") and the floating tab bar with
 its puck are visible in both themes (the glass refracts the backdrop; not blank).
 
@@ -363,7 +363,7 @@ GPUI reports a leaked entity handle.
 
 ## Step 4 result (Messages shots)
 
-`cargo test -p rovsti_messages --features shots shots -- --ignored --nocapture` writes 27 PNGs
+`cargo test -p rosty_messages --features shots shots -- --ignored --nocapture` writes 27 PNGs
 (13 scenes x dark/light at 412x915, plus `01-inbox-dark-small.png` at 360x640) and
 `target/shots/messages/contact_sheet.png`. Fixture: `backend/preview/shots_data.rs` (24 threads,
 badges 1/2/3/12/120, OTP, 3 spam, 3 status authors). Scenes 05 and 09 run against a loopback fake
@@ -372,9 +372,9 @@ preview), and 08 shows the search row with "SMS search not available" on desktop
 
 ## Step 7 result (text field gallery)
 
-`cargo test -p rovsti_ui --features shots fields -- --ignored --nocapture` writes
-`target/shots/rovsti_ui/01-fields-dark.png` and `01-fields-light.png` (824x1830). Code:
-`crates/rovsti_ui/src/shots/fields.rs`; `field.rs` is unchanged. Eight captioned `field_box` rows
+`cargo test -p rosty_ui --features shots fields -- --ignored --nocapture` writes
+`target/shots/rosty_ui/01-fields-dark.png` and `01-fields-light.png` (824x1830). Code:
+`crates/rosty_ui/src/shots/fields.rs`; `field.rs` is unchanged. Eight captioned `field_box` rows
 (`STATES` table): placeholder, focused empty, focused short text, focused long Turkish URL,
 unfocused long text, composing text, secret, phone purpose. GPUI has one focus per window, so the
 page is drawn once per focused row and each row's band is composed from the frame where it had

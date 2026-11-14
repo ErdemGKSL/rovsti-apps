@@ -1,13 +1,13 @@
-//! Headless screenshots of Rovsti Contacts (`docs/screenshots.md`).
+//! Headless screenshots of Rosty Contacts (`docs/screenshots.md`).
 //!
-//! `cargo test -p rovsti_contacts --features shots shots -- --ignored --nocapture`
+//! `cargo test -p rosty_contacts --features shots shots -- --ignored --nocapture`
 
 use std::path::PathBuf;
 
 use futures::channel::mpsc;
 use gpui::{AppContext as _, Context, Window};
-use rovsti_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
-use rovsti_ui::tokens::Theme;
+use rosty_ui::shots::{PHONE, Rig, SMALL_PHONE, ShotSpec, contact_sheet, isolate_data_dir};
+use rosty_ui::tokens::Theme;
 
 use crate::{
     CONTACTS_TAB, ContactsApp, FAVORITES_TAB, GROUPS_TAB, SETTINGS_TAB,
@@ -21,7 +21,7 @@ pub(crate) const SHOT_NOW_MS: i64 = 1_794_055_200_000;
 const AYSE: i64 = 1;
 
 fn open(spec: ShotSpec) -> Rig<ContactsApp> {
-    rovsti_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
+    rosty_core::clock::set_fixed_now_ms(Some(SHOT_NOW_MS));
     rich::enable();
     let (_tx, rx) = mpsc::unbounded();
     let mut rig = Rig::open(spec, move |window, cx| {
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn the_shot_instant_is_the_birthday_the_fixture_celebrates() {
         // 2026-11-07 in Istanbul (UTC+3) is "--11-07" in the fixture.
-        let (_, month, day) = rovsti_core::contact_dates::local_ymd(SHOT_NOW_MS, 3 * 3600);
+        let (_, month, day) = rosty_core::contact_dates::local_ymd(SHOT_NOW_MS, 3 * 3600);
         assert_eq!(format!("--{month:02}-{day:02}"), rich::BIRTHDAY_TODAY);
     }
 }

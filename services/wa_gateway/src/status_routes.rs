@@ -9,9 +9,9 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use rovsti_wa_proto::api::routes as r;
-use rovsti_wa_proto::status::MAX_STATUS_IDS;
-use rovsti_wa_proto::{GatewayEvent, MarkStatusViewed, StatusKind, StatusList, group_statuses};
+use rosty_wa_proto::api::routes as r;
+use rosty_wa_proto::status::MAX_STATUS_IDS;
+use rosty_wa_proto::{GatewayEvent, MarkStatusViewed, StatusKind, StatusList, group_statuses};
 use tokio::task::JoinHandle;
 
 use crate::AppState;

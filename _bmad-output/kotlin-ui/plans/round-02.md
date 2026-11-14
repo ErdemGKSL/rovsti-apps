@@ -9,14 +9,14 @@ not repeated here, except where this file changes them).
 - `git log`: R1 landed as one commit per story: E1.1 `6cf6b37`, E1.2 `5905fcb`, E1.3 `e43ae0a`, E1.4 `7499f54`,
   E1.5 `8fe7a78`, E1.6 `f930a74`, E1.7 `4792edf`, E1.8 `7959075`, review fixes `c46d5dc`.
 - Code checked against the R1 stories: every file named in the E1.1-E1.8 evidence lines exists under
-  `android/design/src/main/kotlin/dev/rovsti/design/{theme,motion,press,haptics,glass,controls,list,icons,chrome,time}`,
+  `android/design/src/main/kotlin/dev/rosty/design/{theme,motion,press,haptics,glass,controls,list,icons,chrome,time}`,
   `android/testing`, `android/catalog`; 46 test classes under `src/test` (JVM and Robolectric, incl. `ContrastTest`,
   `SpringStateTest`, `PressNoLayoutShiftTest`, `GlassTierTest`, `LensPullTest`, `RimTwinTest`, `ListEndAboveBarTest`,
   `PuckBoundsTest`, `TabBarGestureTest`, `ScaffoldTest`, `ScaffoldWideTest`, `DeterminismTest`); 90 goldens in
   `android/catalog/screenshots/`. E1.1-E1.8 stay `done`; their evidence lines now name the commits instead of
   "uncommitted".
 - **No overlay or text code exists**: no `overlay/` or `text/` package in `:design`. The only forward reference is
-  `TODO(E1.10)` in `android/catalog/src/main/kotlin/dev/rovsti/catalog/LargeTitlePage.kt:67` (overflow anchor is stored
+  `TODO(E1.10)` in `android/catalog/src/main/kotlin/dev/rosty/catalog/LargeTitlePage.kt:67` (overflow anchor is stored
   but nothing opens).
 - `:design` does **not** depend on `activity-compose` (only `:catalog` does, `android/catalog/build.gradle.kts:26`);
   the overlay host needs `BackHandler`/`PredictiveBackHandler` (present in `activity-compose-1.13.0`:
@@ -43,8 +43,8 @@ F1 and F2 are fixed in step 1 before any overlay work (overlays will sit on the 
 
 ## Rules changed or added for this round
 
-- Package for overlays: `dev.rovsti.design.overlay`; text: `dev.rovsti.design.text` (ARCH 4.1). Skill snippets say
-  `dev.rovsti.ui.overlay`: rename.
+- Package for overlays: `dev.rosty.design.overlay`; text: `dev.rosty.design.text` (ARCH 4.1). Skill snippets say
+  `dev.rosty.ui.overlay`: rename.
 - `Popup(` and `Dialog(` stay forbidden (ARCH 4.5). Every overlay is an `OverlayEntry`.
 - Overlay screenshots render in `:catalog` through a real `OverlayHost` placed as the last child of the page root, with
   `mainClock.autoAdvance = false` and `mainClock.advanceTimeBy(ms)` per frame. Frame shots use the names in the
@@ -90,7 +90,7 @@ of high-contrast row text shows through; the collapsed top scrim peaks at 0.94 (
 
 ### 1c. E1.9 Overlay host and placement
 
-Files (`android/design/src/main/kotlin/dev/rovsti/design/overlay/`, all ORIGINAL, no glisse header):
+Files (`android/design/src/main/kotlin/dev/rosty/design/overlay/`, all ORIGINAL, no glisse header):
 - `OverlayHost.kt`: `OverlayController` (`present(entry)`, `dismiss(entry)`, `dismissTop(): Boolean`, internal
   `entries: SnapshotStateList`, `removeFinished()`), `abstract class OverlayEntry(val modal: Boolean, val title: String,
   val dismissOnBack: Boolean = true)` with `state = MutableTransitionState(false)` and `@Composable abstract fun
@@ -131,14 +131,14 @@ Commit: `Kotlin UI (E1): Flat legibility, title hand-off, OverlayHost and placeP
 ## Step 2 (E1.10 part 1): menu morph maths and the button-anchored menu
 
 Files (`overlay/`):
-- `MenuMorph.kt` (**glisse header** + "Rovsti extension: `upward`"): `MenuMorphFrame`, `menuMorphFrame(...)`,
+- `MenuMorph.kt` (**glisse header** + "Rosty extension: `upward`"): `MenuMorphFrame`, `menuMorphFrame(...)`,
   `menuResistance`, `menuPressScale` ported from `glisse/src/menu.tsx:31-124,187-195` as in SKILL overlays 4.1.
-- `MenuModel.kt` (ORIGINAL): `sealed interface MenuItem { data class Action(label, icon: RovstiIcon?, destructive,
+- `MenuModel.kt` (ORIGINAL): `sealed interface MenuItem { data class Action(label, icon: RostyIcon?, destructive,
   enabled, checked: Boolean?, onClick); data object Separator }` as `ImmutableList`; `MenuMetrics` object (card 220 dp,
   radius 20, padding 6, row min 44, row padding 6/12, gap 10, row radius 14, separator 0.5 dp margin 7/11, disabled
   0.38) from SKILL overlays 4.2.
 - `ButtonMenu.kt` (glisse header, rendering is ours): `ButtonMenuEntry(anchor: Rect, items, trailing, triggerGlyph)`
-  : `OverlayEntry(modal = true, title = "Menu")`. One `Animatable` `t`; open `RovstiMotion.MenuMorphOpen` (600/46),
+  : `OverlayEntry(modal = true, title = "Menu")`. One `Animatable` `t`; open `RostyMotion.MenuMorphOpen` (600/46),
   close `MenuMorphClose` (900/57), retargeted (never restarted) on direction change. The card box has its final size
   from frame 1; surface drawn in `drawBehind` from the frame; content column in `graphicsLayer` (scale, origin, alpha,
   `BlurEffect(contentBlurPx)`, rounded clip while not settled); clip and effects cleared when `settled`. Glass:
@@ -171,13 +171,13 @@ Commit: `Kotlin UI (E1): button menu morph (glisse) and menu model`.
 
 - `MenuPanel.kt` (glisse header for the plate and card-press parts from `menu.tsx:128-262`): one pointer observer
   over the panel (never consumes); row rects measured once after layout into a plain `FloatArray`; `hoveredRow(y)` pure
-  hit-test; highlight plate slides with `RovstiMotion.menuPlate()` (100 ms, PlateEasing), first highlight appears in
+  hit-test; highlight plate slides with `RostyMotion.menuPlate()` (100 ms, PlateEasing), first highlight appears in
   place; card follows the finger with `menuResistance`, press scale `menuPressScale` with `MenuCardPress`, release
   `MenuCardRelease`; pressed sheen 0.11 -> 0.025 over 120 ms.
 - Slide from the trigger: `OverlayController.beginSlide(entry, positions: Flow<Offset>)`, fed by the trigger's
   `menuTrigger` modifier while the same finger stays down; lift over an enabled row = dismiss then run the action.
   No global pointer singleton.
-- Haptics: `HapticEvent` row change (`SegmentTick`/`TextHandleMove` per `RovstiHaptics`), commit `Confirm` for
+- Haptics: `HapticEvent` row change (`SegmentTick`/`TextHandleMove` per `RostyHaptics`), commit `Confirm` for
   destructive. Keyboard: arrow keys move the plate with wrap, Enter commits, Escape dismisses; first enabled row
   focused on open.
 - Semantics: rows `Role.Button`, checkmark rows `Role.Checkbox` + `selected`, destructive word in the label, 48 dp
@@ -236,14 +236,14 @@ it carries the glisse header):
 - `PopoverEntry(anchor, maxWidth = 320 dp, content: @Composable () -> Unit)`; `modal = true`, scrim transparent but
   input-eating; measured content height capped at `panelMaxHeight`, content in a
   `verticalScroll` when taller; arrowless; placed by `placePanel`.
-- Catalog: a "Date" toolbar button opens a popover with a small form (two `RovstiText` rows + a segmented-like row of
+- Catalog: a "Date" toolbar button opens a popover with a small form (two `RostyText` rows + a segmented-like row of
   capsules; real text fields arrive in step 7, use plain rows here) and a "Long" button opens 30 rows.
 - Tests: `PopoverTest` (opening never moves the page content: bounds of three page nodes equal before/after (AC2);
   tall content scrolls: `performScrollToNode` on the last row succeeds; placement above when anchored near the bottom).
 
 Dialogs (`overlay/Alert.kt`, `ActionSheet.kt`, ORIGINAL; SKILL overlays 6):
 - `AlertEntry(title, message, actions)`: 270 dp, min 110 dp, title headline + message footnote centred, buttons in a
-  row (column if > 2 or any label wraps, decided by measuring), enter scale 1.2 -> 1 + fade with `RovstiMotion.appear`,
+  row (column if > 2 or any label wraps, decided by measuring), enter scale 1.2 -> 1 + fade with `RostyMotion.appear`,
   exit 150 ms fade; scrim 0.4 dark / 0.2 light; outside tap does nothing; back dismisses only if a cancel action exists.
 - `ActionSheetEntry(title?, actions, cancel)`: max 500 dp, 8 dp side padding, 56 dp rows, separate cancel group,
   bottom inset nav bar + 8 dp, enter translate 400 ms `(0.2833, 0.99, 0.31833, 0.99)`, exit 150 ms EaseIn.
@@ -295,15 +295,15 @@ Commit: `Kotlin UI (E1): sheets with detents, pushback, predictive back`.
 
 ## Step 7 (E1.16): text field, search field, composer field
 
-Files (`android/design/src/main/kotlin/dev/rovsti/design/text/`):
+Files (`android/design/src/main/kotlin/dev/rosty/design/text/`):
 - `GlassTextField.kt` and `SearchField.kt` (**glisse header**, from `glisse/src/input.tsx:26-62`,
   `search-field.tsx:1-20`, `styles.css:571-651`) as SKILL navigation-layout 7: `BasicTextField(state: TextFieldState)`,
   44 dp min height, capsule fill animated in draw (`focusFill()` 200 ms), `TextFieldDecorator` row (leading glyph,
   placeholder, inner field, 32 dp clear button with `focusProperties { canFocus = false }` that keeps the caret),
   tapping anywhere on the pill focuses the field, `cursorBrush = SolidColor(accent)`.
-  Search glyph and clear glyph as `RovstiIcons` vectors on the glisse 16-unit grid.
-- `TextSelection.kt` (ORIGINAL): `RovstiTextSelectionColors` (handle = accent, background = accent 0.3) provided by
-  `RovstiTheme` for the whole tree (AC4).
+  Search glyph and clear glyph as `RostyIcons` vectors on the glisse 16-unit grid.
+- `TextSelection.kt` (ORIGINAL): `RostyTextSelectionColors` (handle = accent, background = accent 0.3) provided by
+  `RostyTheme` for the whole tree (AC4).
 - `ComposerField.kt` (ORIGINAL): multiline `TextFieldLineLimits.MultiLine(1, 6)`, internal scroll after 6 lines, send
   button (enabled only with non-blank text) that keeps focus, `onKeyboardAction` for Send and hardware Enter
   (`onPreviewKeyEvent`: Enter sends, Shift+Enter inserts a newline), docks with `imePadding()` in a bottom container.
@@ -333,7 +333,7 @@ Commit: `Kotlin UI (E1): GlassTextField, SearchField (glisse), ComposerField`.
 - `overlay/Toast.kt` (ORIGINAL; SKILL overlays 6): `ToastController` inside `OverlayController` (one visible, a new
   toast replaces the current one with its exit), dark capsule (label 0.92, page-coloured subheadline text, max 2 lines,
   padding 18/12, outer 16/8), placed above the **measured** tab bar from `LocalChromeMetrics` (or the nav inset + 8 dp
-  without a bar), 3 s default timed by `LocalRovstiClock`-independent `delay` (manual clock in tests), swipe down or
+  without a bar), 3 s default timed by `LocalRostyClock`-independent `delay` (manual clock in tests), swipe down or
   sideways to dismiss (`Fling` projection), `liveRegion = Polite`, not modal (page keeps input).
 - `UndoPill`: toast with a tint action "Undo" and a countdown ring (draw-phase arc, 5 s); action runs once and dismisses.
 - Catalog page `ToastsPage` with the tab bar present.

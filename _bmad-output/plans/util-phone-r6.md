@@ -1,4 +1,4 @@
-# util-phone: everyday utilities for Rovsti Phone (round 6)
+# util-phone: everyday utilities for Rosty Phone (round 6)
 
 baseSha: 191b3bc88af97859cc51801258d7417ac1ee1ca9
 
@@ -26,7 +26,7 @@ The R6 backlog rows, checked by grep at baseSha:
   whenever WhatsApp is connected.
 
 New gaps found in this audit:
-- An unknown international number shows only digits. Nothing in `rovsti_core` maps a calling code
+- An unknown international number shows only digits. Nothing in `rosty_core` maps a calling code
   to a country (`number_format` only knows `infer_home_cc` / `clean_cc`), so a "+49 ..." caller is
   not labelled "Germany" anywhere (Recents, Number sheet, Call details, Incoming).
 - The in-call keypad sends one tone per tap (`ik-{d}` -> `CallCommand::Dtmf` + `DtmfStop`). A
@@ -98,19 +98,19 @@ New gaps found in this audit:
 ## Steps (round 6)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first. Make one focused commit per step
-(`Rovsti phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S3-S7. Never invent GPUI
+(`Rosty phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S3-S7. Never invent GPUI
 APIs: copy patterns that already exist in `apps/phone/src` (`SheetKind` sheets such as `RemindPick` /
 `PruneAge` / `ConfirmDelete`, `presses`, `touch_surface`, `show_notice_pill` / `show_pill_action`,
-`PillAction`, `rovsti_ui::haptics::perform`, `cx.background_executor().timer(..)` as in `blocked_ui.rs`
+`PillAction`, `rosty_ui::haptics::perform`, `cx.background_executor().timer(..)` as in `blocked_ui.rs`
 ~line 361, `cx.read_from_clipboard()` as in `keypad.rs` ~line 775). Every utility gets a pill, every
 destructive one a confirm and/or Undo, desktop failures go through `Outcome::why_not`. No step adds
 Android or Kotlin glue (DTMF uses the existing `calls::dtmf` / `calls::dtmf_stop`).
 
-### S1. Pure: calling codes and the tone plan (`rovsti_core`)
-- New module `crates/rovsti_core/src/calling_code.rs` (add `pub mod calling_code;` in `lib.rs`).
+### S1. Pure: calling codes and the tone plan (`rosty_core`)
+- New module `crates/rosty_core/src/calling_code.rs` (add `pub mod calling_code;` in `lib.rs`).
   `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct Country { pub cc: &'static str, pub name:
   &'static str }`. A sorted `const COUNTRIES: &[(&str, &str)]` table of ITU calling codes to an
   English short name, covering at least every 2-digit code and the common 3-digit ones (Europe,
@@ -145,7 +145,7 @@ Android or Kotlin glue (DTMF uses the existing `calls::dtmf` / `calls::dtmf_stop
   `"+90 (532) 111-22-33"` (digits only), letters only (empty plan), 41 digits (40 + `truncated`);
   `tones_text` singular, plural, truncated; `paste_tones_label` with `None`, junk, a long PIN.
 
-### S2. Pure: selection numbers and the stats bucket list (`rovsti_core`)
+### S2. Pure: selection numbers and the stats bucket list (`rosty_core`)
 - `call_log_query.rs`: `impl Selection { pub fn numbers(&self, rows: &[RecentsRow]) ->
   Vec<String> }`: the `number_raw` of each selected, `callable` row in row order, without repeats
   (by `PhoneNumber::matches`; a row whose number does not parse is compared as trimmed text).
@@ -197,7 +197,7 @@ Android or Kotlin glue (DTMF uses the existing `calls::dtmf` / `calls::dtmf_stop
 ### S4. UI: Recents select mode Block and Share (U45)
 - `recents.rs`: `pub(crate) const SEL_BLOCK: &str = "rc-sel-block";`, `pub(crate) const SEL_SHARE:
   &str = "rc-sel-share";`. In `select_bar`, two icon buttons left of Delete (36 px circles, the
-  glass control recipe the bar already uses; icons from `rovsti_ui` the Blocked page and Share
+  glass control recipe the bar already uses; icons from `rosty_ui` the Blocked page and Share
   pills already use, grep `IconName` there), aria labels `"Block"` / `"Share"`, dimmed and inert
   when `select.numbers(rows)` is empty. Check the bar still fits at 360 dp with the title
   `"12 selected"` truncating (it is `flex_1` + `min_w_0` + `truncate` already).

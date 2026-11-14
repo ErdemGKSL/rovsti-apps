@@ -1,8 +1,8 @@
 //! One WhatsApp conversation: history from the gateway, live events, and a
-//! text composer. The merge logic lives in `rovsti_wa_proto::timeline`; this
+//! text composer. The merge logic lives in `rosty_wa_proto::timeline`; this
 //! module is the thin GPUI shell around it plus a few pure text helpers.
 
-use rovsti_core::text_detect::{self, DetectAction};
+use rosty_core::text_detect::{self, DetectAction};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -15,8 +15,8 @@ use gpui::{
     InteractiveElement, IntoElement, ListAlignment, ObjectFit, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, StyledImage, Window, div, img, list, prelude::*, px,
 };
-use rovsti_android::{Error as AndroidError, documents};
-use rovsti_core::{
+use rosty_android::{Error as AndroidError, documents};
+use rosty_core::{
     ThreadId,
     bubble_gesture::{self, SwipeReply},
     chat_export::{self, ExportLine},
@@ -30,7 +30,7 @@ use rovsti_core::{
     unread_jump::{self, JumpState},
     wire::DocumentOp,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{glass_icon_button, glass_pill},
     current_theme,
@@ -41,12 +41,12 @@ use rovsti_ui::{
     theme,
     tokens::{Theme, radius, typography},
 };
-use rovsti_wa_client::Gateway;
+use rosty_wa_client::Gateway;
 
 use crate::text_size::bubble_text;
 use crate::voice_ui::{VoiceEvent, VoiceSource, player_row};
-pub(crate) use rovsti_wa_proto::presence::{civil_from_days, clock, day_label, presence_label};
-use rovsti_wa_ui::{WaAvatars, display_name, photo_avatar};
+pub(crate) use rosty_wa_proto::presence::{civil_from_days, clock, day_label, presence_label};
+use rosty_wa_ui::{WaAvatars, display_name, photo_avatar};
 
 use crate::{
     backend::{Backend, BackendEvent},
@@ -59,7 +59,7 @@ use crate::{
     schedule_ui::{self, StripItem, StripKey},
     ticks::{Tick, read_color, ticks},
 };
-use rovsti_wa_proto::{
+use rosty_wa_proto::{
     ChatState, DeleteForMe, EditMessage, GatewayEvent, Item, ItemState, Location, MarkRead,
     MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, Quoted, RevokeMessage,
     SendReaction, SendText, Sent, StarMessage, Timeline, TypingState, TypingThrottle, WaMessage,
@@ -110,7 +110,7 @@ pub(crate) fn copy_code_parts(
         return None;
     }
     let text = copy_text_of(body, meta)?;
-    rovsti_core::otp::detect(&text).map(|o| o.code)
+    rosty_core::otp::detect(&text).map(|o| o.code)
 }
 
 /// Whether the place found in `text` is exactly the link `url` (a Maps link):
@@ -258,7 +258,7 @@ pub struct Setup {
     /// Unread incoming messages when the chat was opened (the divider's count).
     pub unread: u32,
     /// A message to show once it is loaded (a global search hit).
-    pub jump: Option<rovsti_core::global_search::JumpTarget>,
+    pub jump: Option<rosty_core::global_search::JumpTarget>,
 }
 
 /// The message the composer answers.
@@ -336,7 +336,7 @@ pub struct Conversation {
     /// slot, then one item per [`Entry`].
     list: KeyedList,
     /// The text size the list was last measured at.
-    measured_text_size: rovsti_core::text_scale::ChatTextSize,
+    measured_text_size: rosty_core::text_scale::ChatTextSize,
     /// Day breaks and messages in timeline order, rebuilt when `rows_dirty`.
     entries: Vec<Entry>,
     /// The timeline, its media or the reaction strip changed since `entries`.
@@ -421,8 +421,8 @@ pub struct Conversation {
     /// The Delete menu.
     delete_confirm: Option<DeleteTarget>,
     /// Where the header's bell and more buttons were painted, for their popovers.
-    mute_anchor: rovsti_ui::menu::AnchorSlot,
-    more_anchor: rovsti_ui::menu::AnchorSlot,
+    mute_anchor: rosty_ui::menu::AnchorSlot,
+    more_anchor: rosty_ui::menu::AnchorSlot,
     /// Select mode: the ticked message ids.
     select: Option<Selection<String>>,
     /// Select mode's "Delete {n} messages for you?" card is open.
@@ -430,7 +430,7 @@ pub struct Conversation {
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
     /// The header's copy choices (name, number, ID), while their sheet is open.
-    header_sheet: Option<Vec<rovsti_core::copy_choices::CopyChoice>>,
+    header_sheet: Option<Vec<rosty_core::copy_choices::CopyChoice>>,
     /// The "View contact" sheet of a shared card.
     card_sheet: Option<CardView>,
     /// The message a quote tap jumped to (it glows for a moment).
@@ -442,13 +442,13 @@ pub struct Conversation {
     /// The "Media, links and docs" sheet.
     gallery: Option<crate::gallery_ui::GallerySheet>,
     /// The message a search hit opened the chat for, until it is shown.
-    goto: Option<rovsti_core::global_search::JumpTarget>,
+    goto: Option<rosty_core::global_search::JumpTarget>,
     /// Older pages loaded while working towards `goto`.
     goto_pages: usize,
     /// The "Jump to date" sheet, with the day picked so far.
-    date_sheet: Option<rovsti_core::date_jump::DayPick>,
+    date_sheet: Option<rosty_core::date_jump::DayPick>,
     /// The day being worked towards and the older pages loaded for it.
-    date_goto: Option<(rovsti_core::date_jump::DayPick, usize)>,
+    date_goto: Option<(rosty_core::date_jump::DayPick, usize)>,
     /// When the mute ends (header line), if it is timed.
     muted_until: Option<i64>,
     /// The scroll-to-bottom button and its count of new messages.
@@ -588,8 +588,8 @@ impl Conversation {
             reminders: HashMap::new(),
             hidden: HashSet::new(),
             delete_confirm: None,
-            mute_anchor: rovsti_ui::menu::AnchorSlot::new(),
-            more_anchor: rovsti_ui::menu::AnchorSlot::new(),
+            mute_anchor: rosty_ui::menu::AnchorSlot::new(),
+            more_anchor: rosty_ui::menu::AnchorSlot::new(),
             select: None,
             select_delete: false,
             info_sheet: None,
@@ -678,12 +678,12 @@ impl Conversation {
 
     /// The chat title shown in the header.
     /// Where the header's bell button was painted.
-    pub fn mute_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+    pub fn mute_anchor(&self) -> rosty_ui::menu::AnchorSlot {
         self.mute_anchor.clone()
     }
 
     /// Where the header's more button was painted.
-    pub fn more_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+    pub fn more_anchor(&self) -> rosty_ui::menu::AnchorSlot {
         self.more_anchor.clone()
     }
 
@@ -881,7 +881,7 @@ impl Conversation {
     }
 
     fn select_forward(&mut self, cx: &mut Context<Self>) {
-        use rovsti_core::forward::ForwardBody;
+        use rosty_core::forward::ForwardBody;
         let ids = self.selected_ids();
         let single = match ids.as_slice() {
             [one] => self
@@ -985,7 +985,7 @@ impl Conversation {
         self.strip = None;
         self.swipe_shift = step.offset;
         if step.crossed {
-            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+            rosty_ui::haptics::perform(window, HapticFeedback::Selection);
         }
         cx.notify();
     }
@@ -1354,7 +1354,7 @@ impl Conversation {
     /// "Jump to date" on the page menu: opens the sheet on today.
     pub fn open_date_sheet(&mut self, cx: &mut Context<Self>) {
         let (now, tz) = (self.frame_now, self.locale.tz_offset_s);
-        self.date_sheet = Some(rovsti_core::date_jump::DayPick::today(now, tz));
+        self.date_sheet = Some(rosty_core::date_jump::DayPick::today(now, tz));
         cx.notify();
     }
 
@@ -1382,9 +1382,7 @@ impl Conversation {
     /// Works towards the first message of the picked day: shows it, loads one more
     /// older page, or says why it stopped.
     fn continue_date_goto(&mut self, cx: &mut Context<Self>) {
-        use rovsti_core::date_jump::{
-            DateStep, date_notice, date_step, later_notice, starts_later,
-        };
+        use rosty_core::date_jump::{DateStep, date_notice, date_step, later_notice, starts_later};
         let Some((day, pages)) = self.date_goto else {
             return;
         };
@@ -1449,10 +1447,10 @@ impl Conversation {
 
     /// The gallery of the loaded, non-hidden, non-revoked messages.
     fn build_gallery(&self) -> crate::gallery_ui::GallerySheet {
-        use rovsti_core::chat_gallery::{self, GalleryInput};
+        use rosty_core::chat_gallery::{self, GalleryInput};
         struct Row {
             text: Option<String>,
-            kind: Option<rovsti_core::chat_gallery::GalleryKind>,
+            kind: Option<rosty_core::chat_gallery::GalleryKind>,
             name: Option<String>,
             size: Option<u64>,
         }
@@ -1562,7 +1560,7 @@ impl Conversation {
         let wanted: Vec<String> = self
             .gallery
             .as_ref()
-            .filter(|g| g.tab == rovsti_core::chat_gallery::GalleryTab::Media)
+            .filter(|g| g.tab == rosty_core::chat_gallery::GalleryTab::Media)
             .map(|g| {
                 g.gallery
                     .media
@@ -1726,7 +1724,7 @@ impl Conversation {
                                 .flex_col()
                                 .px(px(16.0))
                                 .py(px(8.0))
-                                .min_h(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .min_h(rosty_ui::tokens::metrics::MIN_HIT)
                                 .rounded(px(14.0))
                                 .hover(|s| s.bg(colors.label.opacity(0.06)))
                                 .child(
@@ -1758,7 +1756,7 @@ impl Conversation {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .size(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .size(rosty_ui::tokens::metrics::MIN_HIT)
                                 .child(
                                     gpui::svg()
                                         .path(Icon::LucideStar.path())
@@ -1813,7 +1811,7 @@ impl Conversation {
     /// Works towards the message a search hit asked for: shows it, loads one
     /// more older page, or says why it stopped.
     fn continue_goto(&mut self, cx: &mut Context<Self>) {
-        use rovsti_core::global_search::{JumpStep, jump_notice, jump_step};
+        use rosty_core::global_search::{JumpStep, jump_notice, jump_step};
         let Some(target) = self.goto.clone() else {
             return;
         };
@@ -2127,7 +2125,7 @@ impl Conversation {
         message: &WaMessage,
         meta: Option<&MessageMeta>,
     ) -> Option<crate::forward_ui::ForwardItem> {
-        use rovsti_core::forward::ForwardBody;
+        use rosty_core::forward::ForwardBody;
         let text = copy_text_of(&message.body, meta);
         let picture = match &message.body {
             MessageBody::Media {
@@ -2322,7 +2320,7 @@ impl Conversation {
         let task = cx.background_executor().spawn(async move {
             let path = download.await?;
             Ok::<_, String>(
-                rovsti_android::media::share_file(&path.to_string_lossy(), &mime, &name)
+                rosty_android::media::share_file(&path.to_string_lossy(), &mime, &name)
                     .map_err(|e| matches!(e, AndroidError::Unsupported)),
             )
         });
@@ -2726,7 +2724,7 @@ impl Conversation {
             return Some("typing…".to_owned());
         }
         if let Some(line) =
-            rovsti_core::mute::header_line(self.muted_until, now, self.locale.tz_offset_s)
+            rosty_core::mute::header_line(self.muted_until, now, self.locale.tz_offset_s)
         {
             return Some(line);
         }
@@ -2939,7 +2937,7 @@ impl Conversation {
             MediaError::Gone => "The file is gone; attach it again".into(),
             MediaError::TooLarge => format!(
                 "That file is over {} MB",
-                rovsti_wa_proto::MAX_SEND_BYTES / (1024 * 1024)
+                rosty_wa_proto::MAX_SEND_BYTES / (1024 * 1024)
             )
             .into(),
             MediaError::Gateway(message) => {
@@ -4190,7 +4188,7 @@ impl Conversation {
             ));
         }
         if !revoked && let Some(text) = copy_text_of(&message.body, meta) {
-            for (n, link) in rovsti_core::spam::open_links(&text, 3)
+            for (n, link) in rosty_core::spam::open_links(&text, 3)
                 .into_iter()
                 .enumerate()
             {
@@ -4248,7 +4246,7 @@ impl Conversation {
         }
         if !revoked
             && let Some(text) = copy_text_of(&message.body, meta)
-            && let Some(link) = rovsti_core::spam::open_links(&text, 1).into_iter().next()
+            && let Some(link) = rosty_core::spam::open_links(&text, 1).into_iter().next()
             && !place
                 .as_ref()
                 .is_some_and(|(t, p)| place_is_link(t, p, &link.url))
@@ -4267,14 +4265,14 @@ impl Conversation {
         if !revoked
             && let Some(text) = copy_text_of(&message.body, meta)
             && let Some(found) =
-                rovsti_core::date_detect::detect(&text, now_ms(), self.locale.tz_offset_s, 1)
+                rosty_core::date_detect::detect(&text, now_ms(), self.locale.tz_offset_s, 1)
                     .into_iter()
                     .next()
         {
-            let title = rovsti_core::date_detect::event_title(&self.title, &text);
-            let matched = rovsti_core::date_detect::matched_text(&text, &found).to_owned();
+            let title = rosty_core::date_detect::event_title(&self.title, &text);
+            let matched = rosty_core::date_detect::matched_text(&text, &found).to_owned();
             let label = format!("Add to calendar · {}", found.label);
-            let end_ms = rovsti_core::date_detect::calendar_end_ms(&found);
+            let end_ms = rosty_core::date_detect::calendar_end_ms(&found);
             row = row.child(
                 pill("add-calendar", Icon::LucideCalendarClock, &label, false).on_click(
                     cx.listener(move |this, _, _, cx| {
@@ -4423,8 +4421,8 @@ impl Conversation {
         item: &Item,
         meta: Option<&MessageMeta>,
         cx: &gpui::App,
-    ) -> Vec<rovsti_core::message_info::InfoRow> {
-        use rovsti_core::message_info::{InfoChannel, InfoInput, rows};
+    ) -> Vec<rosty_core::message_info::InfoRow> {
+        use rosty_core::message_info::{InfoChannel, InfoInput, rows};
         let message = &item.message;
         let state = (message.from_me || meta.is_some_and(|m| m.status.is_some())).then(|| {
             crate::info_ui::wa_state(message.from_me, item.state, meta.and_then(|m| m.status))
@@ -4547,9 +4545,9 @@ impl Conversation {
     }
 
     /// The copy choices of this chat's header (name, number, WhatsApp ID).
-    fn header_choices(&self) -> Vec<rovsti_core::copy_choices::CopyChoice> {
+    fn header_choices(&self) -> Vec<rosty_core::copy_choices::CopyChoice> {
         let number = is_pn_jid(&self.chat).then(|| format!("+{}", jid_user(&self.chat)));
-        rovsti_core::copy_choices::header_choices(&self.title, number.as_deref(), Some(&self.chat))
+        rosty_core::copy_choices::header_choices(&self.title, number.as_deref(), Some(&self.chat))
     }
 
     /// Title hold: the sheet of copy choices.
@@ -5329,7 +5327,7 @@ pub(crate) fn header_bar_with(
                 .flex_col()
                 .when_some(on_title_hold, |col, hold| {
                     col.on_long_press(move |_, window, cx| {
-                        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                        rosty_ui::haptics::perform(window, HapticFeedback::Selection);
                         hold(window, cx);
                     })
                 })
@@ -5425,7 +5423,7 @@ pub(crate) fn composer_bar(
 }
 
 pub(crate) fn now_ms() -> i64 {
-    rovsti_core::clock::now_ms()
+    rosty_core::clock::now_ms()
 }
 
 /// The read receipts the open chat owes: none while the window is not in
@@ -6025,7 +6023,7 @@ mod tests {
         assert!(super::LOAD_ERROR.ends_with("Tap to try again."));
     }
 
-    use rovsti_wa_proto::{DeliveryStatus, WaMessage};
+    use rosty_wa_proto::{DeliveryStatus, WaMessage};
 
     use super::*;
 
@@ -6087,7 +6085,7 @@ mod tests {
         );
 
         let card = |vcard: &str| MessageMeta {
-            contact: Some(rovsti_wa_proto::SharedContact {
+            contact: Some(rosty_wa_proto::SharedContact {
                 display_name: "Ada".into(),
                 vcard: vcard.into(),
             }),

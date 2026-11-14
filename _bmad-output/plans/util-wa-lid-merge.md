@@ -10,9 +10,9 @@ The same person shows up twice in Messages: 'Annem' (a phone-number JID) and '+9
 `prefer_pn`/`chat_and_sender`, `session.rs::on_receipt`, `history.rs::conversation_jid`,
 `status.rs::live`, `app_state.rs::chat_of`, `groups.rs::participant_jid`, `calls.rs::on_incoming`)
 maps LID to PN only when the message carries `sender_alt`/`recipient_alt`. The app then turns the
-LID into a "phone number": `rovsti_core::inbox::resolve_jid` does `PhoneNumber::parse("+" + jid_user)`
+LID into a "phone number": `rosty_core::inbox::resolve_jid` does `PhoneNumber::parse("+" + jid_user)`
 for every non-group JID (a 14-digit LID parses as +964...). The same happens in
-`rovsti_wa_proto::api::to_rovsti` (sender), `lookup::chat_users` (LID users count as numbers),
+`rosty_wa_proto::api::to_rosty` (sender), `lookup::chat_users` (LID users count as numbers),
 `apps/messages/src/inbox.rs` (`contact_photo`, `match_number(+jid_user)`),
 `apps/messages/src/conversation.rs:1753`, `apps/contacts/src/whatsapp.rs::marked_contacts`.
 
@@ -29,40 +29,40 @@ for every non-group JID (a 14-digit LID parses as +964...). The same happens in
   stored LID chats on connect, after each history sync and on those two events.
 - `MessageContext { message, info, client: Arc<Client> }`: the client is available in `on_message`.
 - `Jid::is_lid()`, `Jid::is_pn()`, `Jid::to_non_ad()`, `Jid::is_group()`.
-- Old clients skip unknown event types (`rovsti_wa_client::events` logs "undecodable event").
+- Old clients skip unknown event types (`rosty_wa_client::events` logs "undecodable event").
 
 ## Steps
 
 ### S1 Pure: never treat a LID as a phone number (proto + core + apps call sites)
-- `crates/rovsti_wa_proto/src/api.rs`: add `pub fn is_pn_jid(jid: &str) -> bool` (server
+- `crates/rosty_wa_proto/src/api.rs`: add `pub fn is_pn_jid(jid: &str) -> bool` (server
   `s.whatsapp.net`, digits-only user, device suffix allowed) and `pub fn is_lid_jid(jid: &str) -> bool`
   (server `lid`); re-export from lib.rs; add `pub const WHATSAPP_USER_LABEL: &str = "WhatsApp user";`.
-  `to_rovsti`: sender is `Some(PhoneNumber)` only when `is_pn_jid(jid)`.
-- `crates/rovsti_wa_proto/src/lookup.rs::chat_users`: keep only PN JIDs.
-- `crates/rovsti_core/src/inbox.rs::resolve_jid`: `@g.us` -> Group (as now); PN JID ->
+  `to_rosty`: sender is `Some(PhoneNumber)` only when `is_pn_jid(jid)`.
+- `crates/rosty_wa_proto/src/lookup.rs::chat_users`: keep only PN JIDs.
+- `crates/rosty_core/src/inbox.rs::resolve_jid`: `@g.us` -> Group (as now); PN JID ->
   resolve_number; anything else (`@lid`, broadcast) -> `PersonKey::Group(ThreadId::WhatsApp(jid))`
   (never merges). Title fallback for `PersonKey::Group(ThreadId::WhatsApp(jid))` when the JID is
-  not a group: "WhatsApp user" (local copy of the LID check, rovsti_core cannot depend on proto).
+  not a group: "WhatsApp user" (local copy of the LID check, rosty_core cannot depend on proto).
   `person_for_jid` still returns `None` for LID (keep its contract; adjust doc).
-- `crates/rovsti_wa_ui/src/names.rs::number_label`: LID (and any non-PN, non-group JID) gives
+- `crates/rosty_wa_ui/src/names.rs::number_label`: LID (and any non-PN, non-group JID) gives
   "WhatsApp user"; groups keep their user part. `display_name` therefore shows contact name,
   then push name, then "WhatsApp user".
 - Apps: guard every `format!("+{}", jid_user(..))` / `match_number` on a JID with `is_pn_jid`:
   `apps/messages/src/inbox.rs` (contact_photo, group sender at ~421), `apps/messages/src/conversation.rs`
   (~1148 compare, ~1753), `apps/messages/src/main.rs` (scheduled title fallback ~848 use
   display_name), `apps/contacts/src/whatsapp.rs::marked_contacts` (input is chat_users: already PN
-  only, add a unit test), `crates/rovsti_wa_ui/src/view.rs:933` (own_jid only when PN).
+  only, add a unit test), `crates/rosty_wa_ui/src/view.rs:933` (own_jid only when PN).
 - Tests: names.rs `lid_is_never_a_number` (`display_name(None,None,"96413459456093@lid") ==
-  "WhatsApp user"`, push name wins, no '+'); rovsti_core inbox: a PN chat and a LID chat with the
+  "WhatsApp user"`, push name wins, no '+'); rosty_core inbox: a PN chat and a LID chat with the
   same digits do NOT merge, LID row title is "WhatsApp user" or its thread title; proto:
-  `is_pn_jid`/`is_lid_jid` table test, `to_rovsti` LID sender is None, `chat_users` drops LID.
+  `is_pn_jid`/`is_lid_jid` table test, `to_rosty` LID sender is None, `chat_users` drops LID.
 
 ### S2 Proto event + pure client-side rekeying
-- `crates/rovsti_wa_proto/src/event.rs`: new variant `ChatMerged { from: String, into: String }`
+- `crates/rosty_wa_proto/src/event.rs`: new variant `ChatMerged { from: String, into: String }`
   (doc: "a LID chat was merged into the phone-number chat; move local state from `from` to `into`
   and refetch chats. Older clients skip it"). Serde round-trip test
   `{"type":"chat_merged","from":"1@lid","into":"2@s.whatsapp.net"}`.
-- `crates/rovsti_wa_proto/src/timeline.rs`: handle `ChatMerged` like `ChatDeleted` for `from`
+- `crates/rosty_wa_proto/src/timeline.rs`: handle `ChatMerged` like `ChatDeleted` for `from`
   (and refetch if the open chat is `from`); test.
 - `apps/messages/src/drafts.rs`: `pub fn rekey(&mut self, from: &ThreadId, into: &ThreadId)`
   (moves the draft; if both exist keep the `into` draft unless empty; bumps rev). Tests.
@@ -75,7 +75,7 @@ for every non-group JID (a 14-digit LID parses as +964...). The same happens in
   apply_merge, drafts.rekey, prefs.rekey_thread via backend.update_prefs, swap `self.open` and
   `row_menu` from -> into, then the same reload as `Resync`. `apps/messages/src/conversation.rs`:
   an open conversation on `from` switches its chat id to `into` and reloads. Phone
-  (`apps/phone/src/wa_call.rs`), Contacts (`apps/contacts/src/whatsapp.rs`), `rovsti_wa_ui`
+  (`apps/phone/src/wa_call.rs`), Contacts (`apps/contacts/src/whatsapp.rs`), `rosty_wa_ui`
   (`model.rs`, `avatars.rs`): treat `ChatMerged` like `Resync` (refetch). Keep the GPUI part thin.
 
 ### S3 Gateway pure resolver (`services/wa_gateway/src/wa/lid.rs`, register in wa/mod.rs)

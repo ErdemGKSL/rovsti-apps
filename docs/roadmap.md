@@ -7,15 +7,15 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 
 - [x] Cargo workspace on gpui-fusion `d6c8412` with `gpui_android`
 - [x] Liquid-glass kit, shared tab bar and components
-- [x] Phone number normalisation and matching (`rovsti_core`)
-- [x] Arrival-alarm state machine with adaptive GPS polling (`rovsti_geo`)
+- [x] Phone number normalisation and matching (`rosty_core`)
+- [x] Arrival-alarm state machine with adaptive GPS polling (`rosty_geo`)
 - [x] WhatsApp companion session, QR PNG rendering, share sheet hook (superseded by the gateway below)
 - [x] JNI bridge: roles, place call, Xiaomi deep links, battery optimisation
 - [ ] First APK on a device through GPUiForge (needs NDK r29 + GPUiForge)
-- [ ] Eject Android hosts and add `RovstiBridge` + `Application` to each app
+- [ ] Eject Android hosts and add `RostyBridge` + `Application` to each app
 - [ ] CI: fmt, clippy, tests, Android `cargo check`
 
-## Rovsti Phone
+## Rosty Phone
 
 Ticked here means built and covered by tests; the on-phone check is the acceptance
 list in `docs/phone-acceptance.md`.
@@ -24,7 +24,7 @@ list in `docs/phone-acceptance.md`.
 - [x] Full-screen incoming-call UI, including on the lock screen
 - [x] Call log (`CallLog.Calls`) grouped by person, with missed-call badges
 - [x] Contacts (`ContactsContract`) with search and favourites
-- [x] T9 search on the keypad (`rovsti_core::t9`)
+- [x] T9 search on the keypad (`rosty_core::t9`)
 - [x] Speed dial, long-press `1` for voicemail
 - [x] Dual-SIM picker (`PhoneAccountHandle`), which Xiaomi phones commonly have
 - [x] Blocklist through `BlockedNumberContract`
@@ -53,7 +53,7 @@ list in `docs/phone-acceptance.md`.
 - [x] Voicemail: glyph on the Keypad `1` key and "No voicemail number set" with Open call
       settings when none is configured (done without a device; the S9 device check is PENDING)
 
-## Rovsti Messages
+## Rosty Messages
 
 - [x] SMS/MMS read and write through the Telephony provider once `ROLE_SMS` is held
       (done without a device)
@@ -63,7 +63,7 @@ list in `docs/phone-acceptance.md`.
       (done without a device)
 - [x] WhatsApp through the gateway: link by QR or pairing code, history sync, text,
       media, reactions, groups and presence all run server-side; Messages shows chats
-      and live messages from `rovsti_wa_client`
+      and live messages from `rosty_wa_client`
 - [x] WhatsApp conversation view with composer, media and reactions in the UI; send pictures, video, audio and documents
 - [x] No foreground service: FCM push wakes the app (needs `google-services.json` in
       the host, see `docs/android.md`)
@@ -92,8 +92,8 @@ list in `docs/phone-acceptance.md`.
 
 ## WhatsApp gateway (`services/wa_gateway`)
 
-- [x] `rovsti_wa_proto`, `rovsti_wa_client` (builds for Android without the NDK),
-      `rovsti_wa_ui` (two options: link for the first time, or connect with a key)
+- [x] `rosty_wa_proto`, `rosty_wa_client` (builds for Android without the NDK),
+      `rosty_wa_ui` (two options: link for the first time, or connect with a key)
 - [x] Instances and revocable connect keys, hashed at rest
 - [x] Resumable event WebSocket, history sync, text, media, reactions, groups, presence
 - [x] Voice calls: gateway `voip-mlow` bridge, call audio over a WebSocket, Kotlin
@@ -105,21 +105,21 @@ list in `docs/phone-acceptance.md`.
 - [x] Packaging the gateway (Dockerfile, systemd unit, Caddyfile, example config in
       `services/wa_gateway/deploy/`) and the key list/revoke UI
 
-## Rovsti Contacts
+## Rosty Contacts
 
 - [x] Scaffold: sectioned list with search, Favorites, contact card (call,
       message, share, edit, star), name format and sort settings, desktop sample
-- [x] Eject the Android host and package `RovstiBridge` (contacts pull, intents).
-      The host adds `crates/rovsti_android/kotlin` as a Gradle source directory, so
+- [x] Eject the Android host and package `RostyBridge` (contacts pull, intents).
+      The host adds `crates/rosty_android/kotlin` as a Gradle source directory, so
       it needs no symlink and builds on Windows.
 - [x] Persist name format and sort (`contacts-prefs.json` in the app data dir;
-      `rovsti_core::contacts_prefs`, read and written by `apps/contacts/src/prefs.rs`)
-- [x] Create, edit and delete contacts in-app (`rovsti_core::contact_edit` checks the
+      `rosty_core::contacts_prefs`, read and written by `apps/contacts/src/prefs.rs`)
+- [x] Create, edit and delete contacts in-app (`rosty_core::contact_edit` checks the
       form; Kotlin `ContactsEdit` writes through the primary raw contact). The system
       editor stays as "Open in Android Contacts".
 - [x] Photos on the list and the card, groups (Groups tab, join a group in the edit
-      form, create, rename, delete), vCard import and export (`rovsti_core::vcard`,
-      duplicates skipped by `rovsti_core::import_plan`, files through the Storage
+      form, create, rename, delete), vCard import and export (`rosty_core::vcard`,
+      duplicates skipped by `rosty_core::import_plan`, files through the Storage
       Access Framework)
 - [x] Choose or change a contact's photo (done without a device)
 - [x] Contacts without a phone number (done without a device)
@@ -127,7 +127,7 @@ list in `docs/phone-acceptance.md`.
 - [x] WhatsApp: the shared settings screen (resolved, see `docs/whatsapp-notes.md`)
 - [x] WhatsApp availability on the card (on WhatsApp or not, online or last seen) and a
       WhatsApp mark in the list for contacts with a chat (done without a device)
-- [x] Chat and call on WhatsApp from the card, through Rovsti Messages and Phone
+- [x] Chat and call on WhatsApp from the card, through Rosty Messages and Phone
       (done without a device)
 - [x] UX completeness pass: add and remove group members from the group page with a
       contact picker, Favorites "+" with the same picker, per-field actions on the card
@@ -199,7 +199,7 @@ list in `docs/phone-acceptance.md`.
 - [ ] Check vCard photos (share, save, import), CSV in Google Contacts, Frequently contacted, My card and Emergency contacts on a phone: written without a device
 - [ ] Check multi-card import photos, the .ics file in Google Calendar, Relation and phonetic rows written to the provider, Add to a contact with Undo and the Added / Edited tabs on a phone: written without a device
 
-## Rovsti Stops
+## Rosty Stops
 
 - [x] Foreground location service → `CrossingTrip::update`, using `next_fix_in` for battery
       (done without a device)

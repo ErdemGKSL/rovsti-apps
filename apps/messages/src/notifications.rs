@@ -3,21 +3,21 @@
 //! Kotlin posts its own notifications when no activity is attached. While the
 //! UI is attached it tells Kotlin so (`uiAttached(true)`), and this module
 //! decides what to show: [`should_notify`] filters, [`Digests`] keeps the last
-//! lines per conversation, and `rovsti_core::notify::build` makes the spec that
-//! `rovsti_android::notify::show` renders. All of it is platform-free.
+//! lines per conversation, and `rosty_core::notify::build` makes the spec that
+//! `rosty_android::notify::show` renders. All of it is platform-free.
 
 use std::collections::HashMap;
 
-use rovsti_core::{
+use rosty_core::{
     Message, MessageDirection, ThreadId,
     notify::{self, Incoming, MAX_LINES, NotificationSpec},
     otp,
     wire::{Handoff, HandoffAction},
 };
-use rovsti_wa_proto::jid_user;
+use rosty_wa_proto::jid_user;
 use serde::Deserialize;
 
-pub use rovsti_app_core::messages::tags::{parse_tag, thread_tag};
+pub use rosty_app_core::messages::tags::{parse_tag, thread_tag};
 
 /// The conversation tag a WhatsApp chat handoff opens (`wa:<jid>`); `None` for any other action.
 pub fn handoff_tag(handoff: &Handoff) -> Option<String> {
@@ -83,9 +83,9 @@ pub struct OpenTag {
 
 impl OpenTag {
     /// The message to glow after opening the chat: set by a message-reminder tap only.
-    pub fn jump_target(&self) -> Option<rovsti_core::global_search::JumpTarget> {
+    pub fn jump_target(&self) -> Option<rosty_core::global_search::JumpTarget> {
         let id = self.message_id.trim();
-        (!id.is_empty()).then(|| rovsti_core::global_search::JumpTarget {
+        (!id.is_empty()).then(|| rosty_core::global_search::JumpTarget {
             id: id.to_owned(),
             at_ms: self.at_ms,
         })

@@ -33,7 +33,7 @@ Branch: `ui-overhaul` (never push to `main`).
      story says otherwise, and **every new or changed PNG was opened with the Read tool and judged**
      (ARCH 9). What was seen goes in the Evidence line.
   4. `references/checklist.md` sections that apply are ticked or have a written reason.
-  5. Licence (R3 owner decision: Rovsti is GPL-3.0-or-later): Convx code is ported close to verbatim with its original
+  5. Licence (R3 owner decision: Rosty is GPL-3.0-or-later): Convx code is ported close to verbatim with its original
      header plus the "Ported from Convx" line; glisse-derived files carry the glisse header; `android/THIRD_PARTY_NOTICES.md`
      updated for any new third-party code.
   6. Owner rules from 2026-11-10 (apply to every app, Phone included from round 12 on, and to Messages and Stops):
@@ -41,7 +41,7 @@ Branch: `ui-overhaul` (never push to `main`).
        a natural Turkish entry in `res/values-tr/strings.xml`; Android lint `MissingTranslation` must pass. English stays
        the default; a Turkish phone shows Turkish automatically.
      - **Launcher name and icon:** the manifest label is `@string/launcher_name` (`res/values/launcher.xml`), plain
-       "Phone"/"Messages"/"Stops" in English and "Telefon"/"Mesajlar"/"Duraklar" in `values-tr` (no "Rovsti").
+       "Phone"/"Messages"/"Stops" in English and "Telefon"/"Mesajlar"/"Duraklar" in `values-tr` (no "Rosty").
        The icon is the same scheme as Contacts and Phone: a liquid-glass glyph art from the image-gen skill
        (`drawable-nodpi/ic_launcher_art.webp`, inset 20%) over a vector gradient background, with a flat white vector
        glyph as the monochrome layer.
@@ -67,7 +67,7 @@ named in the E1.9-E1.16 evidence lines exists; 166 goldens). R3 first plan -> `_
 step back; Navigation 3 1.2.1 and Coil 3.6.3 checked usable with BOM 2026.09.00). Only its Step 1 (F3/F4) was
 implemented (`6bebfbe`, verified in code: `SheetMath.kt` `stackedTopPx`/`upperDetentOffset`, `SheetGestureTest`
 step-back tests, `ActionSheetTest` haze patch). **R3 re-planned** -> `_bmad-output/kotlin-ui/plans/round-03.md`
-(planned 2026-11-08 at base `6bebfbe`) after the owner decisions: Rovsti becomes GPL-3.0-or-later and Convx code is
+(planned 2026-11-08 at base `6bebfbe`) after the owner decisions: Rosty becomes GPL-3.0-or-later and Convx code is
 ported close to verbatim; no liquid glass shows on a real phone, so the hand-written glass engine (E1.5) is replaced by
 Convx's backdrop stack; Convx's iOS component library replaces our hand-written overlays/controls/chrome where it is
 better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 move to R4. R3 implemented in
@@ -81,7 +81,7 @@ R4 implemented in `8bd4989`..`86c994f`, verified in code by the round-5 planner:
 **R5** -> `_bmad-output/kotlin-ui/plans/round-05.md` (planned 2026-11-08 at base `86c994f`): fix F9 (inline title off
 centre: asymmetric title reserve in `FrostedTopBar.kt`, Convx pads 96 dp both sides), finish E1.22, close E1.
 **E1 done (R5)**, implemented in `29c7154`..`7851cf2` plus the close commit. **Next planner: start E2 R1 (Rust bridge,
-`crates/rovsti_app_core`, `crates/rovsti_ffi`, `:core-bridge`) and E3 R1 (`:platform`, `:wa`, `:shell`; they need
+`crates/rosty_app_core`, `crates/rosty_ffi`, `:core-bridge`) and E3 R1 (`:platform`, `:wa`, `:shell`; they need
 E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned in parallel.**
 
 | Story | Title | Round | Status |
@@ -117,9 +117,9 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 | E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4/R5 | done (R5; evidence below) |
 
 ### E1.1 Modules, convention plugins, screenshot harness, catalog shell
-- AC1 `android/build-logic` with convention plugins (`rovsti.android.library`, `rovsti.android.app`, `rovsti.compose`,
-  `rovsti.screenshots`); SDK levels minSdk 34 / targetSdk 36 / compileSdk 37 (ARCH 3) in one place.
-- AC2 `:design` and `:catalog` (applicationId `dev.rovsti.catalog`, debug only) exist; `settings.gradle.kts` includes them;
+- AC1 `android/build-logic` with convention plugins (`rosty.android.library`, `rosty.android.app`, `rosty.compose`,
+  `rosty.screenshots`); SDK levels minSdk 34 / targetSdk 36 / compileSdk 37 (ARCH 3) in one place.
+- AC2 `:design` and `:catalog` (applicationId `dev.rosty.catalog`, debug only) exist; `settings.gradle.kts` includes them;
   `docs/kotlin-ui/toolchain.md` module names match ARCH 2.
 - AC3 Roborazzi output dir is `<module>/screenshots/`; `ShotTest` helper renders light and dark and optional
   `FontScale2`, `Rtl`; a sample shot is recorded and verified.
@@ -130,8 +130,8 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - AC5 `docs/kotlin-ui/api-notes.md` lists each Compose/Navigation API the skill names, checked against the pinned
   sources (name, artifact, version, file).
 - Screenshots: `e1.1-catalog-home-{light,dark}`.
-- Evidence (E1.1, commit 6cf6b37): `android/build-logic` (plugins `rovsti.android.library|app`, `rovsti.compose`,
-  `rovsti.screenshots`, `RovstiSdk` 37/34/36), `:design` (`RovstiTheme` stub, `RovstiClock`), `:testing` (`ShotTest`,
+- Evidence (E1.1, commit 6cf6b37): `android/build-logic` (plugins `rosty.android.library|app`, `rosty.compose`,
+  `rosty.screenshots`, `RostySdk` 37/34/36), `:design` (`RostyTheme` stub, `RostyClock`), `:testing` (`ShotTest`,
   `FixedClock`, `StripedBackdrop`, `ShotVariant`), `:catalog` (`CatalogActivity`, `CatalogPage`, `CatalogApp`).
   Opened with Read: `e1.1-catalog-home-light.png` and `-dark.png` (title, subtitle, Pages and Planned sections on the
   page colour; first line sits below the simulated 28 dp status bar, last row ends well above the simulated gesture bar,
@@ -143,7 +143,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
   and must be the last `shot()` of a test.
 
 ### E1.2 Theme
-- AC1 `RovstiTheme` with light and dark colour sets, follows the system theme; page, grouped background, labels
+- AC1 `RostyTheme` with light and dark colour sets, follows the system theme; page, grouped background, labels
   (primary, secondary, tertiary), separators, fills, accent, destructive, glass presets.
 - AC2 Typography in `sp` on the system font (large title 34 sp bold, title, headline 17 sp semibold, body 17,
   callout, subheadline 15, footnote 13, caption) (SKILL navigation-layout 10-11).
@@ -152,16 +152,16 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - AC4 JVM test: every label colour on every background and glass preset is >= 4.5:1 in light and dark (fixes X5, X7 of
   `docs/design/layout.md`).
 - Screenshots: `e1.2-palette`, `e1.2-type-scale`, `e1.2-type-scale-fs2`.
-- Evidence (E1.2, commit 5905fcb): `android/design/.../theme/` `RovstiColors`, `GlassTokens` (glisse header), `RovstiType`, `Spacing`/`Sizes`/`RovstiShapes`/`concentric`,
-  `RovstiTheme` + `RovstiText`, `Contrast.kt`; JVM `ContrastTest`, `ConcentricTest`, `SpacingTokensTest` green; catalog `PalettePage`/`TypeScalePage`
+- Evidence (E1.2, commit 5905fcb): `android/design/.../theme/` `RostyColors`, `GlassTokens` (glisse header), `RostyType`, `Spacing`/`Sizes`/`RostyShapes`/`concentric`,
+  `RostyTheme` + `RostyText`, `Contrast.kt`; JVM `ContrastTest`, `ConcentricTest`, `SpacingTokensTest` green; catalog `PalettePage`/`TypeScalePage`
   with `ThemePageTest`. Design decision: glass fills over white/black backdrops cannot give 4.5:1 to labels (dark glass over white is 4.3:1 for pure
-  white), so `RovstiColors.glassScrim` (white or black at 40 %) sits under every glass fill; E1.5 must paint it. Accent/destructive/success are 4.5:1 on
+  white), so `RostyColors.glassScrim` (white or black at 40 %) sits under every glass fill; E1.5 must paint it. Accent/destructive/success are 4.5:1 on
   flat surfaces and 3:1 on glass (glyph or bold text). Opened e1.2-palette-{light,dark}, e1.2-type-scale-{light,dark}, e1.2-type-scale-fs2-{light,dark}:
   measured ratios drawn on the swatches are legible (secondary 7.4-12.6:1 on page, tertiary 4.3+ light, glass tiles 3.3-21:1), selected pill reads, fs2 wraps
   to three lines without clipping (page scrolls, lower styles checked by `everyTypeStyleIsListedAtFontScale2`).
 
 ### E1.3 Motion
-- AC1 `RovstiMotion` holds every spring/tween token of SKILL motion 2.1-2.3, each spring with `visibilityThreshold`;
+- AC1 `RostyMotion` holds every spring/tween token of SKILL motion 2.1-2.3, each spring with `visibilityThreshold`;
   a test pins the values.
 - AC2 Ported glisse analytic spring solver (header present) with tests: step response vs RK4 per regime; retarget mid-flight
   keeps velocity.
@@ -169,16 +169,16 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - AC4 Reduce-motion gate `.gated()` (no squash, parallax, bounce when on) and `MotionGate` (edge-only freeze, SKILL
   performance 5) with tests.
 - Screenshots: none (pure); `e1.3-spring-curves` chart drawn by a test canvas to eyeball the curves.
-- Evidence (E1.3, commit e43ae0a): `android/design/.../motion/` `RovstiMotion` (glisse header, all tokens of motion.md 2.1-2.3, thresholds required), `SpringState` (ported, header), `Fling`, `Rubber`, `ReduceMotion` (reads `ANIMATOR_DURATION_SCALE` directly, observer-driven; `bounceless` only touches under-damped springs), `MotionGate`. JVM tests: token pin, RK4 at 1 kHz (3 regimes), step splitting, retarget, GlassPressUp overshoot 28 %, Fling 499, Rubber, MotionGate edges. Catalog `MotionPage`; `e1.3-spring-curves-{light,dark,fs2-*}.png` opened: GlassPressUp (red) overshoots once, then dips slightly under, Toggle never overshoots, axes labelled (time ms, progress, target line), legend shows computed ratio/stiffness/overshoot. `scripts/kotlin-ui-check.sh` ALL GREEN.
+- Evidence (E1.3, commit e43ae0a): `android/design/.../motion/` `RostyMotion` (glisse header, all tokens of motion.md 2.1-2.3, thresholds required), `SpringState` (ported, header), `Fling`, `Rubber`, `ReduceMotion` (reads `ANIMATOR_DURATION_SCALE` directly, observer-driven; `bounceless` only touches under-damped springs), `MotionGate`. JVM tests: token pin, RK4 at 1 kHz (3 regimes), step splitting, retarget, GlassPressUp overshoot 28 %, Fling 499, Rubber, MotionGate edges. Catalog `MotionPage`; `e1.3-spring-curves-{light,dark,fs2-*}.png` opened: GlassPressUp (red) overshoots once, then dips slightly under, Toggle never overshoots, axes labelled (time ms, progress, target line), legend shows computed ratio/stiffness/overshoot. `scripts/kotlin-ui-check.sh` ALL GREEN.
 
 ### E1.4 Press, hold, haptics
 - AC1 Glass press node ported from glisse `press.ts` (grow, stretch toward finger, release bounce), scale press 0.96,
   flat row press; all `Modifier.Node`.
 - AC2 Hold rule 150 ms (glisse `hold.ts`) as a pure function + node.
 - AC3 A Compose test asserts that pressing changes no layout bounds (complaint: "buttons flowed into the content").
-- AC4 `RovstiHaptics` (Off/System/Strong) with the event list of SKILL navigation-layout 8.
+- AC4 `RostyHaptics` (Off/System/Strong) with the event list of SKILL navigation-layout 8.
 - Screenshots: `e1.4-press-rest`, `e1.4-press-down-+60ms`, `e1.4-press-release-+120ms`.
-- Evidence (E1.4, commit 7499f54): `android/design/.../press/` `GlassPress.kt` (glisse header; pure `pressTargets`, `GlassPressNode` observing Final without consuming, four `Animatable`s, release in `finally` via shared `observePress`, `placeWithLayer`, optional 240 dp glow fading 220 ms), `ScalePress.kt` (0.96, `RovstiMotion.press`), `RowPress.kt` (`fillTertiary` behind content, optional `InteractionSource`, no ripple), `Hold.kt` (glisse header; `HOLD_MS`, `held`, `awaitHoldOrScroll`); `.../haptics/RovstiHaptics.kt` (Off/System/Strong, `HapticEvent`, `PlatformHaptics`, `LocalRovstiHaptics`), `:testing` `RecordingHaptics`, VIBRATE in catalog manifest only. Tests: `PressTargetsTest`, `HoldTest` (149/150 ms), `HapticEventTest`, Robolectric `PressNoLayoutShiftTest` (target and neighbour layout bounds identical before/during/after for glass, scale, row; inner visual does move), `HapticsTest`, `PressPageTest`. Catalog `PressPage`; `e1.4-press-{rest,down-+60ms,release-+120ms}-{light,dark}` and `e1.4-press-scale-row-held-*` opened: pressed button grows and shifts right toward the finger with a faint glow, release frame is slightly below rest size (overshoot), text below never moves; card shrinks, row shows flat grey fill.
+- Evidence (E1.4, commit 7499f54): `android/design/.../press/` `GlassPress.kt` (glisse header; pure `pressTargets`, `GlassPressNode` observing Final without consuming, four `Animatable`s, release in `finally` via shared `observePress`, `placeWithLayer`, optional 240 dp glow fading 220 ms), `ScalePress.kt` (0.96, `RostyMotion.press`), `RowPress.kt` (`fillTertiary` behind content, optional `InteractionSource`, no ripple), `Hold.kt` (glisse header; `HOLD_MS`, `held`, `awaitHoldOrScroll`); `.../haptics/RostyHaptics.kt` (Off/System/Strong, `HapticEvent`, `PlatformHaptics`, `LocalRostyHaptics`), `:testing` `RecordingHaptics`, VIBRATE in catalog manifest only. Tests: `PressTargetsTest`, `HoldTest` (149/150 ms), `HapticEventTest`, Robolectric `PressNoLayoutShiftTest` (target and neighbour layout bounds identical before/during/after for glass, scale, row; inner visual does move), `HapticsTest`, `PressPageTest`. Catalog `PressPage`; `e1.4-press-{rest,down-+60ms,release-+120ms}-{light,dark}` and `e1.4-press-scale-row-held-*` opened: pressed button grows and shifts right toward the finger with a faint glow, release frame is slightly below rest size (overshoot), text below never moves; card shrinks, row shows flat grey fill.
 
 ### E1.5 Glass
 - AC1 `glassTier(GlassConditions)` exactly as SKILL glass 6, table-tested.
@@ -209,10 +209,10 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - AC5 `Badge`, `EmptyState` (glyph, title, one line, optional action), source glyph (14 dp) for SMS/WhatsApp.
 - Screenshots: `e1.6-buttons`, `e1.6-rows`, `e1.6-rows-fs2`, `e1.6-grouped-section`, `e1.6-avatars`,
   `e1.6-chip-row-overflowing`, `e1.6-empty-state`.
-- Evidence (E1.6, commit f930a74): `android/design/.../controls/` (`Buttons.kt` glisse header, `PressFill.kt`, `ChipRow.kt`, `Badge.kt`, `EmptyState.kt`, `SourceGlyph.kt`), `list/` (`ListRow.kt`, `SectionHeader.kt`, `InsetGroupedSection.kt`, `Avatar.kt`), `icons/` (`RovstiIcons.kt`, `RovstiIcon.kt`); `kotlinx-collections-immutable` 0.4.0 in the catalog and `api` of `:design`. Tests: JVM `AvatarColorTest` (palette >= 4.5:1 with white, stable colour, initials, badge text), Robolectric `ListRowSemanticsTest` (one merged node, custom action, >= 56/64 dp, grows at fs2), `ChipRowTest` (chips share one top, row scrolls, one selected), `GroupedSectionTest` (2 separators for 3 rows, none after the last, inset 72 dp). Catalog pages Buttons, Rows, Grouped sections, Avatars, Chips, Empty states; home and toolchain rebuilt on `ListRow` + `InsetGroupedSection`. Opened `e1.6-*` light/dark and `e1.1-catalog-home-dark`: text column aligned at 72 dp in every row, 16 dp gutters, group avatar is one split circle, chips on one line and the fifth cut by the right edge, selected chip white on accent legible in light, fs2 rows grow (titles ellipsize rather than clip), separators stop before the last row, buttons 44 dp with disabled at 35 %. Known: glass buttons render in the Flat tier in screenshots by design (JVM renderer); on a plain page they read as white discs with a hairline.
+- Evidence (E1.6, commit f930a74): `android/design/.../controls/` (`Buttons.kt` glisse header, `PressFill.kt`, `ChipRow.kt`, `Badge.kt`, `EmptyState.kt`, `SourceGlyph.kt`), `list/` (`ListRow.kt`, `SectionHeader.kt`, `InsetGroupedSection.kt`, `Avatar.kt`), `icons/` (`RostyIcons.kt`, `RostyIcon.kt`); `kotlinx-collections-immutable` 0.4.0 in the catalog and `api` of `:design`. Tests: JVM `AvatarColorTest` (palette >= 4.5:1 with white, stable colour, initials, badge text), Robolectric `ListRowSemanticsTest` (one merged node, custom action, >= 56/64 dp, grows at fs2), `ChipRowTest` (chips share one top, row scrolls, one selected), `GroupedSectionTest` (2 separators for 3 rows, none after the last, inset 72 dp). Catalog pages Buttons, Rows, Grouped sections, Avatars, Chips, Empty states; home and toolchain rebuilt on `ListRow` + `InsetGroupedSection`. Opened `e1.6-*` light/dark and `e1.1-catalog-home-dark`: text column aligned at 72 dp in every row, 16 dp gutters, group avatar is one split circle, chips on one line and the fifth cut by the right edge, selected chip white on accent legible in light, fs2 rows grow (titles ellipsize rather than clip), separators stop before the last row, buttons 44 dp with disabled at 35 %. Known: glass buttons render in the Flat tier in screenshots by design (JVM renderer); on a plain page they read as white discs with a hairline.
 
 ### E1.7 Tab bar and insets
-- AC1 `RovstiTabBar` geometry and puck ported from glisse (REST/DRAG springs, hold 150 ms, tap slop 24 dp, drag start
+- AC1 `RostyTabBar` geometry and puck ported from glisse (REST/DRAG springs, hold 150 ms, tap slop 24 dp, drag start
   6 dp, squash/stretch), `Role.Tab` + `selected`, labels drop at font scale >= 1.5, minimise on scroll, folded circle
   variant (Stops).
 - AC2 `ChromeMetrics` + `LocalContentInsets`; bar bottom margin = system inset + 8 dp; bar hides while the IME is up.
@@ -221,7 +221,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - Screenshots: `e1.7-tabbar-rest`, `e1.7-tabbar-drag-mid`, `e1.7-tabbar-minimised`, `e1.7-tabbar-folded`,
   `e1.7-list-end-above-bar`, `e1.7-tabbar-fs2`.
 
-- Evidence (E1.7, commit 4792edf): `android/design/.../chrome/` (`ChromeMetrics.kt`, `TabBarGeometry.kt` and `RovstiTabBar.kt` with glisse headers, `SelectionPuck.kt`, `TabBarMinimizer.kt`, `BottomScrim.kt`); `press/Hold.kt` gained `awaitHold` (also returns the release position). Tests: JVM `TabBarGeometryTest` (puck inside inner rect for lift 0..1, squash 0..0.2, positions past both ends), `TabBarMinimizerTest`, `ChromeMetricsTest`; Robolectric `ListEndAboveBarTest` (row-49 bottom <= bar top; bar 8 dp above the nav inset), `TabBarGestureTest` (tap, reselect, 1.6-slot drag lands on slot 2, release >= 24 dp off ignored, vertical move before 150 ms scrolls the parent, haptics), `TabBarSemanticsTest`, `PuckBoundsTest` (real layout bounds while flicked), `ImeHidesBarTest`. Catalog pages Tab bar and Tab bar: folded. Opened `e1.7-*` light/dark: puck inside the bar and centred in rest, mid-drag puck between two tabs inside the bar, last row fully above the bar, fs2 icons only, folded circle bottom-start. Known: glass renders Flat in screenshots (lens not visible, lifted puck is a raised fill); minimised bar translates 40 dp so it is partly cut by the screen edge (spec look); content inset keeps the expanded bar height while minimised (no relayout during scroll); the bar is a sibling above the list, so a vertical swipe on it does not scroll the list (a parent scroll container still gets it).
+- Evidence (E1.7, commit 4792edf): `android/design/.../chrome/` (`ChromeMetrics.kt`, `TabBarGeometry.kt` and `RostyTabBar.kt` with glisse headers, `SelectionPuck.kt`, `TabBarMinimizer.kt`, `BottomScrim.kt`); `press/Hold.kt` gained `awaitHold` (also returns the release position). Tests: JVM `TabBarGeometryTest` (puck inside inner rect for lift 0..1, squash 0..0.2, positions past both ends), `TabBarMinimizerTest`, `ChromeMetricsTest`; Robolectric `ListEndAboveBarTest` (row-49 bottom <= bar top; bar 8 dp above the nav inset), `TabBarGestureTest` (tap, reselect, 1.6-slot drag lands on slot 2, release >= 24 dp off ignored, vertical move before 150 ms scrolls the parent, haptics), `TabBarSemanticsTest`, `PuckBoundsTest` (real layout bounds while flicked), `ImeHidesBarTest`. Catalog pages Tab bar and Tab bar: folded. Opened `e1.7-*` light/dark: puck inside the bar and centred in rest, mid-drag puck between two tabs inside the bar, last row fully above the bar, fs2 icons only, folded circle bottom-start. Known: glass renders Flat in screenshots (lens not visible, lifted puck is a raised fill); minimised bar translates 40 dp so it is partly cut by the screen edge (spec look); content inset keeps the expanded bar height while minimised (no relayout during scroll); the bar is a sibling above the list, so a vertical swipe on it does not scroll the list (a parent scroll container still gets it).
 
 ### E1.8 Large-title scaffold
 - AC1 `LargeTitleScaffold`: title as item 0, collapse fraction pure and tested, inline bar fades in, large title lifts
@@ -297,7 +297,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - AC1 Capsule above the measured tab bar, 3 s, swipe to dismiss, live region; undo pill with action and countdown;
   one at a time with replace semantics.
 - Screenshots: `e1.15-toast-above-bar`, `e1.15-undo-pill`.
-- Evidence (E1.15): `android/design/.../overlay/Toast.kt` (ORIGINAL; `ToastEntry`, `OverlayController.showToast/showUndo` with replace semantics via `OverlayController.toast`), `ToastMath.kt` (pure: swipe outcome by `Fling` projection, bar gap, ring sweep, upward rubber). Capsule `labelPrimary` 0.92 with page-coloured subheadline, max 2 lines, padding 18/12, radius 24, max 420 dp, 350 ms rise / 180 ms exit, liveRegion Polite + `dismiss` action, not modal (`OverlayEntry.passesBack`: Back is never taken by a toast). Placement reads `OverlayController.chromeMetrics` (registered by `RovstiTabBar`, since entries are composed outside the bar's locals) in the layout phase: bar top - 8 dp, or nav inset + 8 dp without a bar. Timer runs on the frame clock (animator scale cannot cut it short) and holds under a finger; ring is a draw-phase arc; Undo runs once and is dead once the pill is leaving; the action takes the opposite theme's accent (the capsule is an inverted surface; contrast >= 4.5 in a JVM test). Catalog `ToastsPage` with the tab bar. Tests: JVM `ToastMathTest`; Robolectric `ToastTest` (3 s auto-dismiss, replace + fresh timer, swipe down/sideways, short drag springs back, timer holds under finger, undo once, double tap same frame, dead after 5 s while fading, dead once replaced, bottom <= bar top - 8 dp and within 2 px, long toast 2 lines, no-bar placement, live region + page still takes input, Back not swallowed). Opened `e1.15-toast-above-bar`, `-undo-pill`, `-toast-long-fs2` light/dark: dark capsule with 8 dp clear of the bar and its shadow over the bar's top edge only; dark theme gives a light capsule with dark text; the Undo label and ring read clearly in both; ring about 60 % full at 2 s of 5; at font scale 2 the long text clips to two lines with an ellipsis and the capsule spans the gutters above the bar. Known: the toast does not animate when the bar minimises (it follows instantly); a 3 s toast is short for TalkBack users (no extended timeout yet).
+- Evidence (E1.15): `android/design/.../overlay/Toast.kt` (ORIGINAL; `ToastEntry`, `OverlayController.showToast/showUndo` with replace semantics via `OverlayController.toast`), `ToastMath.kt` (pure: swipe outcome by `Fling` projection, bar gap, ring sweep, upward rubber). Capsule `labelPrimary` 0.92 with page-coloured subheadline, max 2 lines, padding 18/12, radius 24, max 420 dp, 350 ms rise / 180 ms exit, liveRegion Polite + `dismiss` action, not modal (`OverlayEntry.passesBack`: Back is never taken by a toast). Placement reads `OverlayController.chromeMetrics` (registered by `RostyTabBar`, since entries are composed outside the bar's locals) in the layout phase: bar top - 8 dp, or nav inset + 8 dp without a bar. Timer runs on the frame clock (animator scale cannot cut it short) and holds under a finger; ring is a draw-phase arc; Undo runs once and is dead once the pill is leaving; the action takes the opposite theme's accent (the capsule is an inverted surface; contrast >= 4.5 in a JVM test). Catalog `ToastsPage` with the tab bar. Tests: JVM `ToastMathTest`; Robolectric `ToastTest` (3 s auto-dismiss, replace + fresh timer, swipe down/sideways, short drag springs back, timer holds under finger, undo once, double tap same frame, dead after 5 s while fading, dead once replaced, bottom <= bar top - 8 dp and within 2 px, long toast 2 lines, no-bar placement, live region + page still takes input, Back not swallowed). Opened `e1.15-toast-above-bar`, `-undo-pill`, `-toast-long-fs2` light/dark: dark capsule with 8 dp clear of the bar and its shadow over the bar's top edge only; dark theme gives a light capsule with dark text; the Undo label and ring read clearly in both; ring about 60 % full at 2 s of 5; at font scale 2 the long text clips to two lines with an ellipsis and the capsule spans the gutters above the bar. Known: the toast does not animate when the bar minimises (it follows instantly); a 3 s toast is short for TalkBack users (no extended timeout yet).
 
 ### E1.16 Text fields
 - AC1 `GlassTextField` and `SearchField` ported from glisse `input.tsx` / `search-field.tsx` (header), over
@@ -333,28 +333,28 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 
 ### E1.24 Backdrop engine (Step 2)
 - AC1 All 42 files of Convx `ui/component/backdrop/**` and `ui/component/shapes/**` ported close to verbatim under
-  `dev.rovsti.design.backdrop` / `.shapes`, upstream headers kept + "Ported from Convx" line; `AppBackdropState`.
+  `dev.rosty.design.backdrop` / `.shapes`, upstream headers kept + "Ported from Convx" line; `AppBackdropState`.
 - AC2 JVM freeze/static-region tests; Robolectric `BackdropEngineTest` proves blur and lens run.
 - Screenshots: `e1.24-backdrop-engine`.
 
 ### E1.25 Glass layer, tokens, iOS foundation (Step 3)
 - AC1 `liquidGlass`, `GlassEffectConfig`, `glassResolutionScale`, `isGlassAllowed`, `TopFadeBlur`, `AppleTokens`,
   `GlassTintTokens`, `IosGlass`, `IosMenuMaterial`, `IosTheme`, `IosColors`, `IosDesignSystem` ported; IosColors fed from
-  `RovstiTheme`; `GlassSettings` replaces Convx preferences.
+  `RostyTheme`; `GlassSettings` replaces Convx preferences.
 - AC2 Convx tests `GlassEffectTest`, `GlassTintTokensTest`, `AppleColorsTest` ported and green.
 - Screenshots: `e1.25-ios-glass-materials`.
 
 ### E1.26 Root backdrop, migration, real-path proof (Step 4)
-- AC1 `RovstiBackdropRoot`: content records into one `LayerBackdrop`; chrome and `OverlayHost` are siblings after it and
+- AC1 `RostyBackdropRoot`: content records into one `LayerBackdrop`; chrome and `OverlayHost` are siblings after it and
   sample it (as Convx's chrome and popups do).
 - AC2 Every former `Modifier.glass` caller migrated; `D/glass` old engine and its tests deleted; no test forces Flat.
 - AC3 `GlassRealPathTest` (API 33 and 36, default settings): every glass surface on every catalog page and overlay draws
   through a `LayerBackdrop` with a render effect. Fallback only for reduce transparency / pre-31 / low RAM, as Convx.
 - AC4 Catalog APK rebuilt; path in the evidence.
 - Screenshots: all goldens re-recorded; `e1.26-liquid-glass-over-stripes`, `e1.26-overlays-over-stripes`.
-- Evidence: `RovstiBackdropRoot` + `BackdropScope` (`chrome/RovstiRoot.kt`; a layer cannot sample itself, so chrome inside a page
+- Evidence: `RostyBackdropRoot` + `BackdropScope` (`chrome/RostyRoot.kt`; a layer cannot sample itself, so chrome inside a page
   uses a local scope, content-level controls paint a flat fill as Convx's `forceFlat`); `OverlayHost` split into
-  `OverlayProvider`/`OverlayPage`/`OverlayEntries`; `rovstiGlass`/`panelGlass`/`sheetGlass` over `liquidGlass`/`iosMenuSurface`/`iosGlass`;
+  `OverlayProvider`/`OverlayPage`/`OverlayEntries`; `rostyGlass`/`panelGlass`/`sheetGlass` over `liquidGlass`/`iosMenuSurface`/`iosGlass`;
   `BackdropDebug` records; `GlassRealPathTest` (API 35 only: minSdk is 34, the 34 jar was rate-limited, API 36 fails on this JRE),
   `GlassFallbackTest`, `NoFlatInTestsTest`, `TranslucentFallbackLegibilityTest`. Toast is now glass; sheets have no lens (seam at the screen edge).
 
@@ -376,7 +376,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 
 ### E1.29 Tab bar, navigation bar, buttons, list, swipe (Step 8)
 - AC1 Convx `IosTabBar` (+ `LiquidBottomTabs` puck), `IosNavigationBar`, `IosButton`, `IosList`, `IosSwipeActions`
-  ported; `RovstiTabBar`, `LargeTitleScaffold`, `Toolbar`, `Buttons`, `ListRow` are facades; inset, IME and
+  ported; `RostyTabBar`, `LargeTitleScaffold`, `Toolbar`, `Buttons`, `ListRow` are facades; inset, IME and
   list-end tests green.
 - AC2 Catalog APK rebuilt at round close.
 - Screenshots: `e1.7-tabbar-*`, `e1.8-*`, `e1.6-buttons*`, `e1.29-swipe-revealed`, `e1.29-swipe-full`.
@@ -387,7 +387,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
   to its bounds; one `confirm` haptic on full swipe; `CustomAccessibilityAction` per action. `ListRowChevron` now draws
   `IosChevron`. `SwipePage` in the catalog shows swipe rows and the six `IosButtonStyle`s. `SwipeRowTest` (5 tests: reveal,
   full swipe fires first trailing action once with haptic, small drag settles back, accessibility actions) is green.
-  NOT done: `RovstiTabBar`, `LargeTitleScaffold`, `Toolbar` and `Buttons.kt` were not turned into facades; they keep their
+  NOT done: `RostyTabBar`, `LargeTitleScaffold`, `Toolbar` and `Buttons.kt` were not turned into facades; they keep their
   existing Convx-glass drawing (glass capsule plus lens puck, already on `liquidGlass`) and their tests stay green. The
   IosTabBar/IosNavigationBar/IosButton ports are compiled but only IosButton and the swipe row are exercised in the catalog.
   Opened: e1.7-tabbar-rest-light and drag-mid-light (glass capsule, lens puck, bar covers rows only by scroll overlap, list-end
@@ -397,7 +397,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - Verified by the round-4 planner (grep at `d0ea763`): `IosTabBar`, `IosNavigationBar`, `IosList` have no caller; `IosButton`
   only in `SwipePage`. Convx's on-device chrome is `ui/component/floatingtabbar/**` (vendored compose-floating-tab-bar,
   Apache-2.0, + Convx puck/fold) and `FrostedTopBar`/`ScreenChrome`/`GlassCircleButton`, not the `ios/component` catalog
-  versions, so R4 Step 2 ports the floating tab bar under `RovstiTabBar` and Step 3 the top chrome, buttons and list drawing
+  versions, so R4 Step 2 ports the floating tab bar under `RostyTabBar` and Step 3 the top chrome, buttons and list drawing
   under `LargeTitleScaffold`/`Toolbar`/`Buttons`/`ListRow`. Screens judged: `e1.7-tabbar-rest-light` (row text doubled through
   the capsule: blur too weak), `e1.8-title-collapsed-dark` (inline title over legible rows: F6), `e1.28-page-sheet-light`
   (row at a second inset: F7), `e1.27-menu-open-light` + `e1.26-overlays-over-stripes-light` (stray square at the hidden
@@ -414,7 +414,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
   (44 dp circle, 48 dp touch target); `CapsuleButton`/`TextButton` -> `IosButton` (Glass, BorderedProminent, Borderless; flat
   Bordered when the button sits inside recorded content); `InsetGroupedSection` -> `IosCardSection` (new, in `IosList.kt`) which
   draws through `IosListRowContainer` (card radius 26 dp and 0.33 dp separators are Convx numbers; `GroupedSectionTest` updated);
-  `ListRowChevron` is `IosChevron`. Kept Rovsti's own `TitleCollapse` maths (spring smoothing and the cross-fade that guarantees
+  `ListRowChevron` is `IosChevron`. Kept Rosty's own `TitleCollapse` maths (spring smoothing and the cross-fade that guarantees
   never two titles); Convx's collapse is linear and lets the inline title show over the large one. Additions beyond Convx:
   blur and a page-colour wash (peak 0.8) over the bar band follow the collapse, since Convx blurs always, which blurred the
   expanded large title; asymmetric title reserves centre the inline title between the back button and the toolbar.
@@ -434,9 +434,9 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 - AC3 Shared-bounds helper (avatar -> detail) (SKILL motion 8).
 - AC4 `chromeFor(route)` pattern documented in `:shell` usage notes.
 - Screenshots: `e1.18-push-mid`, `e1.18-predictive-back-50pct`, `e1.18-shared-avatar-mid`, `e1.18-tab-switch-mid`.
-- Evidence (R4-4): `design/transition/{TabNavigator,NavTransitions,RovstiNavHost,SharedBounds,ChromeSpec,ArtworkMotion}.kt`;
+- Evidence (R4-4): `design/transition/{TabNavigator,NavTransitions,RostyNavHost,SharedBounds,ChromeSpec,ArtworkMotion}.kt`;
   `NavTransitions` ports Convx `AppNavHost.kt:55-98` and `AppRootContent.kt:990` (one deviation: pop-enter parallax sign, see
-  `api-notes.md`); `rememberNavTransitionFreeze` is wired through `RovstiBackdropRoot(route, lastNavWasPop)`; catalog has the
+  `api-notes.md`); `rememberNavTransitionFreeze` is wired through `RostyBackdropRoot(route, lastNavWasPop)`; catalog has the
   Components/Demo tabs with avatar -> detail -> notes. Tests: `TabNavigatorTest`, `ChromeSpecTest`, `NavTest` (11), `NavFreezeTest` (3),
   `CatalogNavigationTest`. Docs: `docs/kotlin-ui/shell-usage.md`, `api-notes.md`. PNGs opened: push-mid shows the detail 8 % from the left edge over
   the list shifted 0.3 W left, no blank band, tab bar kept (detail is Visible); predictive-back-50pct shows the detail almost gone (the iOS curve
@@ -518,29 +518,29 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 
 ---
 
-## E2. Rust bridge (`crates/rovsti_app_core`, `crates/rovsti_ffi`, `:core-bridge`) - DONE (R2)
+## E2. Rust bridge (`crates/rosty_app_core`, `crates/rosty_ffi`, `:core-bridge`) - DONE (R2)
 
 Goal: the Kotlin apps can call every domain function they need, off the main thread, with typed models, contract
 tests and the cold-path `headless` entry. Spec: ARCH 6.
 
 Round plans: **R1** -> `_bmad-output/kotlin-ui/plans/round-06.md` (planned 2026-11-08 at base `a9f189c`): E2.1-E2.8 in
 8 steps (app_core + storage + Stops store/pick/snap; wa_link; Messages prefs/drafts/access; Contacts/Phone pure halves;
-headless handlers with golden answers; `rovsti_ffi`; `:core-bridge` with `testRustBridge`; contract fixtures, Kotlin
-models and fallback, catalog APK with `librovsti_ffi.so`). E1 re-verified done by this planner (R5 review fix of the
+headless handlers with golden answers; `rosty_ffi`; `:core-bridge` with `testRustBridge`; contract fixtures, Kotlin
+models and fallback, catalog APK with `librosty_ffi.so`). E1 re-verified done by this planner (R5 review fix of the
 inline title judged: it slides off centre only when a centred title would run under a wide toolbar).
 **R2** -> `_bmad-output/kotlin-ui/plans/round-07.md` (planned 2026-11-08 at base `09a4343`): E2.9-E2.14 in 8 steps (op
 registry + `OPS.md` inventory + typed Kotlin facades + shared number ops; Phone + `ContactIndex` handle and the 5 000-contact
 bench; Contacts + `qr.*`; Messages core; Messages chat tools; Stops + `ActiveTrip`; tiles binary buffer
 (`docs/kotlin-ui/tile-buffer.md`) and offline jobs; WhatsApp ops, events, call audio, close E2). R1 re-verified done (42
-fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack serde (plan Rule 3).
+fixtures, 8 exports, `testRustBridge`); found that most `rosty_core` types lack serde (plan Rule 3).
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E2.1 | `rovsti_app_core` crate, storage, Stops logic moved (store, pick, snap, headless) | R1 | done (round-06 steps 1 and 5) |
+| E2.1 | `rosty_app_core` crate, storage, Stops logic moved (store, pick, snap, headless) | R1 | done (round-06 steps 1 and 5) |
 | E2.2 | Messages logic moved (prefs, drafts, access, headless) | R1 | done (round-06 step 3) |
 | E2.3 | Contacts and Phone logic moved (trash store, prefs, WhatsApp glue, notes, WA call tracker) | R1 | done (round-06 step 4) |
 | E2.4 | `wa_link` moved (link file, headless send) | R1 | done (round-06 step 2) |
-| E2.5 | `rovsti_ffi`: exports, envelope, panic guard, handles, event sink, desktop build | R1 | done (round-06 step 6) |
+| E2.5 | `rosty_ffi`: exports, envelope, panic guard, handles, event sink, desktop build | R1 | done (round-06 step 6) |
 | E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | done (round-06 step 7) |
 | E2.7 | Contract fixtures and Kotlin models | R1 | done (round-06 step 8) |
 | E2.8 | `headless` entry compatible with today's receivers | R1 | done (round-06 steps 5 and 8) |
@@ -553,7 +553,7 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | done (round-07 step 8; evidence below) |
 
 #### Evidence, E2.14 (round-07 step 8)
-- Rust, `rovsti_ffi/src/ops/wa/`: `mod.rs` (`wa.open {url, key?, cache_dir?}` -> a `Gateway` handle; `ClientError` -> envelope kinds in `map_error`: `network`,
+- Rust, `rosty_ffi/src/ops/wa/`: `mod.rs` (`wa.open {url, key?, cache_dir?}` -> a `Gateway` handle; `ClientError` -> envelope kinds in `map_error`: `network`,
   `auth` for 401 and 403, `invalid` with the gateway's sentence and `detail.code`, `parse`), `rest.rs` (one op per `Gateway` method: instance create/status/relink/delete,
   keys mint/list/revoke, register_push, chats(_with_meta), messages(_with_meta), send_text, schedule_text/scheduled/cancel_scheduled, send_media(_with),
   media/thumbnail/status_media/status_thumbnail/picture as base64 or, over 1 MiB, a temp file in the handle's cache dir, react, mark_read, mark_played, presence,
@@ -571,16 +571,16 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
   with `unauthorized`, release stops it; audio loopback: 6 frames pushed come back identical and in order, wrong sizes dropped, ended call -> -1), unit tests in `ops/wa/*`.
 - Gate (round-07 step 8, disk 14 GB free before; the workspace test ran with `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0` because the debug-info build of the GPUI crates
   fills the disk): `cargo fmt --all`, `cargo clippy --workspace --all-targets` (0 warnings), `cargo test --workspace` (3602 passed, 0 failed),
-  `cargo check -p rovsti_android --target aarch64-linux-android` ok. `cargo test -p rovsti_ffi`: 65 unit + 3 fixtures (978 stems) + 3 inventory + 2 bench (1 ignored, the release
+  `cargo check -p rosty_android --target aarch64-linux-android` ok. `cargo test -p rosty_ffi`: 65 unit + 3 fixtures (978 stems) + 3 inventory + 2 bench (1 ignored, the release
   bench: p95 0.74 ms `search.query` from E2.9) + 4 `wa_live`. `bash scripts/kotlin-ui-check.sh` ALL GREEN (Kotlin-facing crates 2178 Rust tests; `:core-bridge`
   `testDebugUnitTest` 65, `testRustBridge` 73, 0 failures). No `:design` / `:catalog` UI code changed, so no screenshot is new (E2 has none).
-- Catalog APK (218 864 819 bytes, 209 MiB, debug): `android/catalog/build/outputs/apk/debug/catalog-debug.apk` carries `lib/arm64-v8a/librovsti_ffi.so` and `lib/x86_64/librovsti_ffi.so`
+- Catalog APK (218 864 819 bytes, 209 MiB, debug): `android/catalog/build/outputs/apk/debug/catalog-debug.apk` carries `lib/arm64-v8a/librosty_ffi.so` and `lib/x86_64/librosty_ffi.so`
   (`scripts/check-catalog-apk.sh` green).
-- Not in this story, by design: `AvatarBook` (the in-memory fetch policy of `rovsti_app_core::wa_link::avatars`) and `WaPanel` are state machines the Kotlin `:wa` module ports with their
-  Rust unit tests (E3); the ops here are the disk plan, names, target and link file. The loopback audio test lives in `rovsti_ffi/tests/wa_live.rs` (it needs the handle registry)
-  instead of `rovsti_wa_client/tests`.
+- Not in this story, by design: `AvatarBook` (the in-memory fetch policy of `rosty_app_core::wa_link::avatars`) and `WaPanel` are state machines the Kotlin `:wa` module ports with their
+  Rust unit tests (E3); the ops here are the disk plan, names, target and link file. The loopback audio test lives in `rosty_ffi/tests/wa_live.rs` (it needs the handle registry)
+  instead of `rosty_wa_client/tests`.
 - Hand-off: next planner starts E3 R1 (`:platform`, `:wa`, `:shell`; `:shell` begins with `Rust.init` in `Application.onCreate`, `HeadlessClient` in `:platform`, `WaGateway` /
-  `WaEvents` / `CallAudio` in `:wa`) and may plan the E4-E7 app epics against the finished ops (`crates/rovsti_ffi/OPS.md` is the list of what is Rust and what is Kotlin).
+  `WaEvents` / `CallAudio` in `:wa`) and may plan the E4-E7 app epics against the finished ops (`crates/rosty_ffi/OPS.md` is the list of what is Rust and what is Kotlin).
 
 - Kotlin: `model.wa` (`WaModels`, `WaEventModels`: `GatewayEvent` with the gateway's `type` tag, `WaRequests`: flat `WithHandleSerializer`), `WaOps` / `NativeWaOps` (generated
   1:1 from the op list), `WaGateway : RustHandle` (all methods, `startEvents` -> `WaEventStream`, `openCallAudio` -> `CallAudio`), `WaEvents.feed()` (sink overflow -> one
@@ -590,7 +590,7 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 #### Evidence, E2.13 (round-07 step 7)
 - Format: `docs/kotlin-ui/tile-buffer.md` (`RVT1` v1, little-endian; header, class records, parts of tile-local f32 points; flags bit 0 dark,
   bit 1 cache only; paint ids, casing as bit 15 of the id; polygon = exterior then holes by ring orientation, filled even-odd per polygon).
-- Rust: `rovsti_ffi/src/tile_buffer.rs` (encoder, reference decoder, self-decode tests on `osm-14-9520-6130.mvt`: vertex count equals
+- Rust: `rosty_ffi/src/tile_buffer.rs` (encoder, reference decoder, self-decode tests on `osm-14-9520-6130.mvt`: vertex count equals
   `TileGeometry::vertices`) and `src/ops/tiles.rs` (`tiles.{open, usage, usage_by_source, clear_all, clear_except, set_cap, test_server,
   stand_in, encode_mvt, offline_start, offline_cancel}`); the `tile` JNI export reads the `tiles.open` handle (cache hit or download,
   `TileGeometry::from_bytes`, style, encode; errors stay envelopes, told apart by the magic). The offline job runs four workers, emits
@@ -603,13 +603,13 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
   seeded dir, cache ops, offline progress and cancel against a localhost server).
 
 #### Evidence, E2.12 (round-07 step 6)
-- Rust: `rovsti_ffi/src/ops/stops/{trip,pick,places,history,store,misc,view}.rs`, 69 ops. `stops.trip_*` is a handle over
-  `rovsti_geo::ActiveTrip` (start, restore, fix -> `FixOut`, notice result, snooze, timeout, dismiss, status share, end); a `dir` makes
-  the op also write `trip.json` under `rovsti_app_core::stops::store::lock()`, the lock of the headless service (headless fixtures
+- Rust: `rosty_ffi/src/ops/stops/{trip,pick,places,history,store,misc,view}.rs`, 69 ops. `stops.trip_*` is a handle over
+  `rosty_geo::ActiveTrip` (start, restore, fix -> `FixOut`, notice result, snooze, timeout, dismiss, status share, end); a `dir` makes
+  the op also write `trip.json` under `rosty_app_core::stops::store::lock()`, the lock of the headless service (headless fixtures
   unchanged). Also `crossing_{validate, read}` (`DiameterError::message` in the envelope message), `dest_{parse, share}`,
   `pick_{replay, labels, save_offer}` and `snap`, `saved_{load, edit, list, suggest_name, shortcut}`, `places_{export, import}`,
   `history_{list, edit, prune_plan, usage, recent, export, text}`, `stats`, `store_*`, `prefs_{load, save, edit, choices}`,
-  `notice_{render, validate}`, `alarm_plan`, `poll`, `gtfs_{import, search}` (tiny zip `rovsti_ffi/tests/data/gtfs-tiny.zip`),
+  `notice_{render, validate}`, `alarm_plan`, `poll`, `gtfs_{import, search}` (tiny zip `rosty_ffi/tests/data/gtfs-tiny.zip`),
   `coord_{format, parse}`, `measure`, `backup_{export, parse}`, `arrival_clock`, `format_distance`; `view.{project, step, tiles,
   frac_to_coord, follow}` are the `MapCamera` cross-check fixtures for E7.
 - OPS.md: no `todo` row of the stops domain (`stops` joins `DONE_DOMAINS`); the `tiles` rows stay for E2.13.
@@ -618,7 +618,7 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
   gtfs import).
 
 #### Evidence, E2.11b (round-07 step 5)
-- Rust: `rovsti_ffi/src/ops/chat/{search,gallery,jump,marks,detect}.rs` (44 ops, all stateless; offsets into a body or snippet are
+- Rust: `rosty_ffi/src/ops/chat/{search,gallery,jump,marks,detect}.rs` (44 ops, all stateless; offsets into a body or snippet are
   UTF-16): `chat_find.{find, cursor}`, `global_search.{search, prepare, footer, jump}`, `chat_gallery.{build, tabs}` (media / links /
   docs with month sections), `chat_export.{text, block, notice}`, `multi_select.plan`, `date_jump.{pick, step}`,
   `unread_jump.{state, divider, next}`, `voice_player.{speeds, toggle, view}`, `thread_marks.edit`, `mute.{choices, status}`,
@@ -626,31 +626,31 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
   `location_link.{find, share}`, `shared_card.{read, mime}`, `message_info.rows`, `message_reminder.{make, slots, list}` and the
   Phone app's `call_reminder.{make, list}` (the `reminder` module rows were `todo` under the messages domain). `OPS.md`: no `todo` row
   is left in the `messages` domain (`DONE_DOMAINS` now lists it); `multi_select::Selection` is `kotlin` (per-tap set), `lru` and
-  `JumpTarget` are `none`. 138 fixture stems (`crates/rovsti_ffi/fixtures`), including the error cases (`invalid` with
+  `JumpTarget` are `none`. 138 fixture stems (`crates/rosty_ffi/fixtures`), including the error cases (`invalid` with
   `detail.reason` for a refused quick reply, `rekey` without a target, a blank reminder, a forward of nothing).
 - Kotlin: `ChatOps`/`NativeChatOps`, models `model.chat` (`FindModels`, `GalleryModels`, `JumpModels`, `MarksModels`,
   `DetectModels`), contract models `ChatContracts`; `ChatModelsTest` (JVM) and `ChatOpsNativeTest` (real library, 12 cases) in
   `testRustBridge`. No UI, so no screenshots.
 
 #### Evidence, E2.11a (round-07 step 4)
-- Rust: `rovsti_ffi/src/ops/messages/{inbox,sms,spam,schedule,backup,store}.rs` (43 ops: `inbox.{merge, preferred_channel,
+- Rust: `rosty_ffi/src/ops/messages/{inbox,sms,spam,schedule,backup,store}.rs` (43 ops: `inbox.{merge, preferred_channel,
   person_for_number, person_for_jid, filter, bulk, pending_delete}` (merge and `person_for_*` take a `search.index_new` handle),
   `sms.{segments, to_message, key}`, `sms_timeline.build` (replays page / pending / status / retry / discard / remove / adopt events),
   `mms_pdu.{parse, build_send_req, build_notify_resp}` (base64 bytes), `otp.find` (UTF-16 offsets), `spam.{classify, add_rule,
   insert_rule, remove_rule, links, open_links, contains_link}`, `notify.build`, `schedule.{validate, add, cancel, reconcile, due_soon,
   load, quick_times}` (stateless `queue_json`, reason in `OPS.md`), `msg_backup.{export, parse, plan, strength}` (Kotlin supplies salt and
   nonce), `messages.{prefs_load, prefs_save, prefs_edit, drafts_load, drafts_save, drafts_put, drafts_rekey, access, tag}`). Serde
-  derives added to the plain data types in `rovsti_core` / `rovsti_app_core` (no existing on-disk format changed). `OPS.md`: every
+  derives added to the plain data types in `rosty_core` / `rosty_app_core` (no existing on-disk format changed). `OPS.md`: every
   Messages row of these modules is op or none; the chat-tool rows were finished in step 5 (E2.11b).
 - Kotlin: `MessagesOps`/`NativeMessagesOps`, models `model.messages` (externally tagged `ThreadId`, `PersonKey`, `SmsKey`,
   `SpamRule`, `ScheduleTarget` via `ExternallyTagged`), contract models `MessagesContracts`; `MessagesModelsTest` (JVM) and
   `MessagesOpsNativeTest` (real library) in `testRustBridge`. No UI, so no screenshots.
 
 #### Evidence, E2.10 (round-07 step 3)
-- Rust: `rovsti_ffi/src/ops/contacts/{draft,files,lists,store}.rs` (66 ops: `contacts.draft_*`, dates/age/event line, `card`, `dupes`,
+- Rust: `rosty_ffi/src/ops/contacts/{draft,files,lists,store}.rs` (66 ops: `contacts.draft_*`, dates/age/event line, `card`, `dupes`,
   `merge_plan`, `cleanup`, `avatar`, `stats`, `quick`, csv/ics/vcard/`import_plan`/`intake`/`scan`/`photo_*`, `view`, `select_*`,
   `groups_*`, `recent_*`, `history`, `frequent`, `me_*`, `birthday_reminders`, `options`, `pin_shortcut`, `deep_index_new` +
-  `deep_find` (handle over `DeepIndex`), `trash_*` and `prefs_*` over `rovsti_app_core::contacts` with a `dir` or the init data dir;
+  `deep_find` (handle over `DeepIndex`), `trash_*` and `prefs_*` over `rosty_app_core::contacts` with a `dir` or the init data dir;
   fixture cases use the `contacts` seed dir) and `ops/qr.rs` (`qr.encode`, `qr.decode` over `qrcode` / `rqrr`; format in `OPS.md`;
   round-trip test at 4 px per module with a quiet zone). The WhatsApp panel decisions (`contacts::whatsapp`) moved to the `wa` domain
   (step 8). `OPS.md`: every contacts and qr row is op or none (`DONE_DOMAINS` += contacts, qr); `shared_card` rows moved to messages.
@@ -659,10 +659,10 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
   `ContactsOpsNativeTest`, `QrOpsNativeTest` (Kotlin draws the matrix, Rust reads it back) in `testRustBridge`.
 
 #### Evidence, E2.9 (round-07 step 2)
-- Rust: `rovsti_ffi/src/ops/search.rs` (`search.{index_new, index_replace, set_call_counts, query, query_loose, match_number, fold}`,
+- Rust: `rosty_ffi/src/ops/search.rs` (`search.{index_new, index_replace, set_call_counts, query, query_loose, match_number, fold}`,
   `t9.query`: a handle over `ContactIndex` + `T9Scratch`) and `ops/phone/{log,people,dial,calls,store}.rs` (74 ops: `recents.*`,
   `call_log.*`, `call_notes.*`, `call_stats.*`, `speed_dial.*`, `blocklist.*`, `dial.*`, `sim.*`, `setup.*`, `audio.*`, `scene.*`,
-  `phone.*` incl. `phone.wa_tracker_*`). Serde derives added to the `rovsti_core` types they carry (Rule 3), no DTO copies except
+  `phone.*` incl. `phone.wa_tracker_*`). Serde derives added to the `rosty_core` types they carry (Rule 3), no DTO copies except
   `scene`, `audio`, `sim`. `OPS.md`: every phone, search and t9 row is op, kotlin or none (`DONE_DOMAINS` += phone, search, t9).
 - Fixtures: cases may open a handle first (`Case::after`); the fixture test swaps `PLACEHOLDER_HANDLE` for the live handle.
 - Bench (`tests/search_bench.rs`, 5 000 seeded Latin/Turkish/Cyrillic contacts, 20 queries, JSON both ways): release p95
@@ -672,43 +672,43 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 
 #### Evidence, E2 R1 (E2.1-E2.8 done, round-06)
 - E2.1-E2.4: commits `07ab3a5` (app_core, storage, Stops store/pick/snap), `e099053` (`wa_link`), `eadb490` (Messages prefs, drafts,
-  access), `1eaba7c` (Contacts and Phone pure halves), `0e8fcb0` (headless handlers). `rovsti_app_core` has no gpui/jni
-  dependency (`crates/rovsti_app_core/tests/deps.rs`); `cargo test -p rovsti_app_core`: 210 lib tests + the store, headless
+  access), `1eaba7c` (Contacts and Phone pure halves), `0e8fcb0` (headless handlers). `rosty_app_core` has no gpui/jni
+  dependency (`crates/rosty_app_core/tests/deps.rs`); `cargo test -p rosty_app_core`: 210 lib tests + the store, headless
   golden (14) and deps tests, all green.
-- E2.5: `7f72cca`. `cargo test -p rovsti_ffi`: 20 lib tests (envelope per `ErrorKind`, panic guard, 10 000-handle leak test,
-  1 000-event sink order) + 2 fixture tests; `scripts/check-ffi-exports.sh` lists the 8 `Java_dev_rovsti_core_RustNative_*`
+- E2.5: `7f72cca`. `cargo test -p rosty_ffi`: 20 lib tests (envelope per `ErrorKind`, panic guard, 10 000-handle leak test,
+  1 000-event sink order) + 2 fixture tests; `scripts/check-ffi-exports.sh` lists the 8 `Java_dev_rosty_core_RustNative_*`
   symbols in the aarch64 `.so` (also run on the packaged `.so` by `scripts/check-catalog-apk.sh`).
 - E2.6: `8cd30b5`. `:core-bridge:testRustBridge` (real host `.so`: version, 1 MB echo, error kinds, `core.panic`, headless golden,
   1 000 events in order) and `FakeRustCoreTest` pass in one Gradle invocation.
-- E2.7: `crates/rovsti_ffi/tests/fixtures.rs` writes/compares 11 `core.*` and 10 `headless.*` pairs in
-  `crates/rovsti_ffi/fixtures/` (42 files; `UPDATE_FIXTURES=1` rewrites; a stray file or a differing byte fails).
+- E2.7: `crates/rosty_ffi/tests/fixtures.rs` writes/compares 11 `core.*` and 10 `headless.*` pairs in
+  `crates/rosty_ffi/fixtures/` (42 files; `UPDATE_FIXTURES=1` rewrites; a stray file or a differing byte fails).
   `ContractFixturesTest` (6 tests): every fixture decodes strictly (`ignoreUnknownKeys = false`) into
-  `dev.rovsti.core.model.{core,headless}` and re-encodes to equal JSON; a fixture without a model and a model without a
+  `dev.rosty.core.model.{core,headless}` and re-encodes to equal JSON; a fixture without a model and a model without a
   fixture both fail. `RustErrorTest` (4 tests): all 8 kinds map, unknown kind -> `RustError.Unknown`, malformed envelopes ->
   `Parse`. Models are listed in `android/compose_stability.conf`.
-- E2.8: Rust half in `0e8fcb0` (goldens now live in `crates/rovsti_ffi/fixtures/headless.<kind>.*`, read by
-  `rovsti_app_core/tests/headless_golden.rs`). Kotlin half: `HeadlessClient` (`HeadlessClientTest`, 9 tests: library missing,
+- E2.8: Rust half in `0e8fcb0` (goldens now live in `crates/rosty_ffi/fixtures/headless.<kind>.*`, read by
+  `rosty_app_core/tests/headless_golden.rs`). Kotlin half: `HeadlessClient` (`HeadlessClientTest`, 9 tests: library missing,
   link error at call time, panic/empty answer, `RustError`, runtime error -> `null`; cancellation propagates).
 - Rust gate (full, disk 11 GB free before): `cargo fmt --all`, `cargo clippy --workspace --all-targets` (0 warnings; the moved
-  tests got a crate-level `cfg_attr(test, allow(clippy::unwrap_used))` in `rovsti_app_core`), `cargo test --workspace` (3547 passed,
-  0 failed), `cargo check -p rovsti_android --target aarch64-linux-android` ok. `bash scripts/kotlin-ui-check.sh` ALL GREEN.
-- Catalog APK (109 237 553 bytes, 104 MiB): `android/catalog/build/outputs/apk/debug/catalog-debug.apk` carries `lib/{arm64-v8a,x86_64}/librovsti_ffi.so`.
+  tests got a crate-level `cfg_attr(test, allow(clippy::unwrap_used))` in `rosty_app_core`), `cargo test --workspace` (3547 passed,
+  0 failed), `cargo check -p rosty_android --target aarch64-linux-android` ok. `bash scripts/kotlin-ui-check.sh` ALL GREEN.
+- Catalog APK (109 237 553 bytes, 104 MiB): `android/catalog/build/outputs/apk/debug/catalog-debug.apk` carries `lib/{arm64-v8a,x86_64}/librosty_ffi.so`.
 - Hand-off: next planner does E2 R2 (E2.9-E2.14 domain ops, each op with a fixture pair and a Kotlin model, or the
   fixture test fails) and/or E3 R1 (`:shell` starts with `Rust.init` in `Application.onCreate` and `HeadlessClient` in `:platform`).
 
 ### E2.1-E2.4 Move app logic out of the GPUI crates
 - AC1 Each moved module keeps its unit tests; the GPUI app now calls the moved function (no duplicate copy).
-- AC2 `rovsti_app_core` has no GPUI, no JNI, no `rovsti_ui` dependency; it takes the data dir as a `&Path`.
+- AC2 `rosty_app_core` has no GPUI, no JNI, no `rosty_ui` dependency; it takes the data dir as a `&Path`.
 - AC3 File names and schemas unchanged (ARCH 7.1 table); a test per store reads a fixture written by the old code.
 - AC4 `cargo test --workspace`, `cargo clippy --workspace --all-targets` and the Android `cargo check` from `CLAUDE.md`
   pass; GPUI apps still build.
 - Moves: E2.1 `apps/stops/src/{store,pick,snap,headless}.rs` (pure parts); E2.2
   `apps/messages/src/{prefs,drafts,access,headless}.rs`; E2.3 `apps/contacts/src/{trash_store,prefs,whatsapp}.rs`,
   `apps/phone/src/{notes,wa_call}.rs` (non-drawing parts) and Phone prefs/backup glue; E2.4
-  `rovsti_wa_ui::headless`, the link file, and the pure halves of `rovsti_wa_ui::{avatar_book, names}` (profile-picture fetch plan, 429 back-off, disk naming/pruning, display-name rule).
+  `rosty_wa_ui::headless`, the link file, and the pure halves of `rosty_wa_ui::{avatar_book, names}` (profile-picture fetch plan, 429 back-off, disk naming/pruning, display-name rule).
 - Screenshots: none.
 
-### E2.5 `rovsti_ffi`
+### E2.5 `rosty_ffi`
 - AC1 Exports of ARCH 6.3; every export in `catch_unwind`; envelope of ARCH 6.5; `op` dispatch per domain module.
 - AC2 Handle registry with release; a leak test (create/release 10 000 handles).
 - AC3 Event sink: a test thread emits 1 000 events into a JVM-side fake (host JVM test in E2.6).
@@ -721,10 +721,10 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 - AC3 A **plain JUnit** test (no Robolectric, task `testRustBridge`, ARCH 6.7 "Classloader trap") loads the host `.so`, calls
   `init` with a temp dir and a round-trip op. A second test proves a Robolectric test in the same Gradle invocation still
   passes with a fake facade (the split works).
-- AC4 APK of `:catalog` (or a test app) contains `lib/arm64-v8a/librovsti_ffi.so`; export list checked.
+- AC4 APK of `:catalog` (or a test app) contains `lib/arm64-v8a/librosty_ffi.so`; export list checked.
 
 ### E2.7 Contract fixtures
-- AC1 `crates/rovsti_ffi/fixtures/<op>.{request,answer}.json` written by a Rust test; `UPDATE_FIXTURES=1` rewrites.
+- AC1 `crates/rosty_ffi/fixtures/<op>.{request,answer}.json` written by a Rust test; `UPDATE_FIXTURES=1` rewrites.
 - AC2 Kotlin JVM test decodes and re-encodes every fixture; unknown keys fail.
 - AC3 `RustError` mapping tested for every `kind`.
 
@@ -745,7 +745,7 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
   `docs/kotlin-ui/tile-buffer.md`, versioned); styles colorful/eclipse by flag.
 - AC2 Cache ops: usage total and per server, clear, clear-except, cap change; offline area job with progress events and
   cancel.
-- AC3 Kotlin decoder test reads a buffer made from `rovsti_geo/src/tiles/testdata`.
+- AC3 Kotlin decoder test reads a buffer made from `rosty_geo/src/tiles/testdata`.
 
 ### E2.14 WhatsApp client
 - AC1 Ops for link/relink, keys, chats, messages, send text/media, react, mark read, chat state, groups, presence,
@@ -753,7 +753,7 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 - AC2 Event stream handle: start, `reconnect_now`, stop; events through the sink with instance id.
 - AC2b `wa.avatars` / `wa.names` ops (ARCH 6.6).
 - AC3 Call audio: `audioPush`/`audioPull` with 1 920-byte frames; a loopback test against a fake gateway in
-  `rovsti_wa_client` tests.
+  `rosty_wa_client` tests.
 
 ---
 
@@ -765,15 +765,15 @@ WhatsApp settings screen and app shell exist. Spec: ARCH 7, 5.
 Round plans: **R1** -> `_bmad-output/kotlin-ui/plans/round-08.md` (planned 2026-11-09 at base `115be3b`): E3.1-E3.7 in
 8 steps (`:platform` module + seams `PlatformEvents`/`Headless`/`PlatformComponents`/`ProviderChanges`, system helpers
 and convention tests; contacts; call log/blocklist/SIM; SMS/MMS/scheduled; telecom core with the incoming-order test;
-notifications/reminders; location/trip/alarm and `kotlin_contract.rs` moved to `rovsti_app_core`; WhatsApp seams,
+notifications/reminders; location/trip/alarm and `kotlin_contract.rs` moved to `rosty_app_core`; WhatsApp seams,
 FQCN and PendingIntent contract, port inventory `docs/kotlin-ui/platform-port.md`). No screenshots in R1. E2 re-verified
 done by this planner (ops modules, fixtures incl. the headless pairs, `:core-bridge` facades and wire models).
 **R2** -> `_bmad-output/kotlin-ui/plans/round-09.md` (planned 2026-11-09 at base `840588c`; E3 R1 re-verified done in code):
-E3.8a-E3.11 in 8 steps (`platform.files` + `RovstiShareProvider`; `PermissionState`/`PermissionController`/`SpecialAccess` and
-the HANDOFF permission lists; the WhatsApp settings machine moved from `rovsti_wa_ui::model` to `rovsti_app_core::wa_link::settings`
+E3.8a-E3.11 in 8 steps (`platform.files` + `RostyShareProvider`; `PermissionState`/`PermissionController`/`SpecialAccess` and
+the HANDOFF permission lists; the WhatsApp settings machine moved from `rosty_wa_ui::model` to `rosty_app_core::wa_link::settings`
 with the stateless op `wa.settings_apply`; `:wa` repository, calls, avatars; the settings screen with `e3.10-*` goldens; `:shell`
 activity/container/permission UI; common settings pages ported from Convx `IosSettingsGroup`/`SettingsPage`/`AboutScreen`, licences,
-close E3). Haptics levels are Off/Light/Normal (`rovsti_core::wire::HapticsLevel`), not Off/System/Strong.
+close E3). Haptics levels are Off/Light/Normal (`rosty_core::wire::HapticsLevel`), not Off/System/Strong.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -788,11 +788,11 @@ close E3). Haptics levels are Off/Light/Normal (`rovsti_core::wire::HapticsLevel
 | E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | done (round-09 step 2) |
 | E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | done (round-09 steps 3-5) |
 | E3.10 | Shared WhatsApp settings screen | R2 | done (round-09 steps 3 and 6) |
-| E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | done (round-09 steps 7-8) |
+| E3.11 | `:shell`: RostyRoot, base activity, containers, permission UI, common settings, licences | R2 | done (round-09 steps 7-8) |
 
 Next planner: **E3 is done** (R1 and R2). Plan **E4 R1** (E4.1-E4.8, Contacts) next. E4.1's merged-manifest test uses
 `android/platform/src/test/resources/manifest/contacts.permissions.txt` (round-09 step 2); the app container implements
-`CommonSettings` (`:shell`, `dev.rovsti.shell.settings`) for its Appearance and Haptics prefs and puts `CommonSettingsGroup`
+`CommonSettings` (`:shell`, `dev.rosty.shell.settings`) for its Appearance and Haptics prefs and puts `CommonSettingsGroup`
 at the end of its settings page. The apps get the whole platform through `:shell`.
 
 #### Evidence, E4 R1 (E4.1-E4.8 done, round-10)
@@ -802,13 +802,13 @@ at the end of its settings page. The apps get the whole platform through `:shell
 - E4.3 (commit b60888b): card; `ContactCardViewModelTest`, `ContactCardScreenTest`, `E43ShotTest`; `e4.3-*` opened.
 - E4.4, E4.5 (commits 1006c5f, c5062a3): editor, photo, delete, Undo, Trash; `ContactEditor*Test`, `PhotoCropTest`, `Trash*Test`, `UndoPillTest`, shots `e4.4-*`, `e4.5-*` opened.
 - E4.6, E4.7 (commit 5c2439b): Favorites, frequent, upcoming, Groups; `FavoritesViewModelTest`, `UpcomingTest`, `GroupsViewModelTest`, `FavoritesScreenTest`, `GroupsScreenTest`; `e4.6-*`, `e4.7-*` opened.
-- E4.8 (commit: round-10 step 8, "Select mode (E4.8)"): `SelectModeViewModelTest` (10: enter from a row or the toolbar, bar words and actions from the core, toggle and select all, share text, .vcf export, Copy Numbers, Star both ways, add to group, multi-delete with ONE undo restoring all three), `SelectModeScreenTest` (8, including Back leaves select mode not the tab, last row above the toolbar), `E48ShotTest`. Opened `e4.8-select-mode-light` (title "3 selected", Select All / Cancel capsule, filled circles on Ada and Burak, the third selected row is below, folded tab-bar circle with the five-button toolbar beside it) and `e4.8-select-actions-menu-dark` (the "..." card above its button). `contacts-debug.apk`: `android/contacts/build/outputs/apk/debug/contacts-debug.apk`. Checklist A-H: `docs/kotlin-ui/checklist-e4.md`. Design additions: `RovstiNavHost`/`RovstiShell` `accessory` slot, `LargeTitleScaffold.actionsContent`, `ToolbarTextButton`, `ToolbarButton(enabled)`, `SelectCheck`.
+- E4.8 (commit: round-10 step 8, "Select mode (E4.8)"): `SelectModeViewModelTest` (10: enter from a row or the toolbar, bar words and actions from the core, toggle and select all, share text, .vcf export, Copy Numbers, Star both ways, add to group, multi-delete with ONE undo restoring all three), `SelectModeScreenTest` (8, including Back leaves select mode not the tab, last row above the toolbar), `E48ShotTest`. Opened `e4.8-select-mode-light` (title "3 selected", Select All / Cancel capsule, filled circles on Ada and Burak, the third selected row is below, folded tab-bar circle with the five-button toolbar beside it) and `e4.8-select-actions-menu-dark` (the "..." card above its button). `contacts-debug.apk`: `android/contacts/build/outputs/apk/debug/contacts-debug.apk`. Checklist A-H: `docs/kotlin-ui/checklist-e4.md`. Design additions: `RostyNavHost`/`RostyShell` `accessory` slot, `LargeTitleScaffold.actionsContent`, `ToolbarTextButton`, `ToolbarButton(enabled)`, `SelectCheck`.
 
 Next planner: **E4 R2** (E4.9-E4.16: share and shortcuts, import paths, duplicates and Clean up, photo viewer on the card, ringtone/voicemail/block, My card/emergency/recent, settings, polish). Known carry-overs: share as a staged .vcf file in the share sheet (E4.9), row separators under the alphabet rail (E4.16), custom accessibility actions on the row menu (E4.16).
 
 #### Evidence, E5 R1 (E5.1 done, round-12 step 2)
 
-- E5.1 data layer (`447ee0d` files, step 2 tests and gaps): `dev.rovsti.phone.data` `PhoneStore` (debounced single write, `flush` from `MainActivity.onStop`), `RecentsRepository` (builds on the scope's Default dispatcher, bursts coalesced by `RebuildCoalescer`, `RecentsModel.error` set when an op fails and cleared by the next good build; the default `extras` is `flowOf(emptyList())`, the first version's `emptyFlow()` never emitted), `PeopleIndex` (handle released on READ_CONTACTS revoke, new handle on re-grant), `SimState`, `BlockRepo`, `SpeedDial`, `CallPlacer`. `FakeCalls` lives only in `platform/src/testFixtures`. Tests: `PhoneStoreTest` (concurrent edits are one write, nothing lost), `RecentsRepositoryTest` (failed build keeps rows and says why, off the main thread), `PeopleIndexTest`, `SimStateTest`, `CallPlacerTest` (emergency never asks for a SIM, two SIMs without default NeedsSim, default Placed with its handle, invalid carries the core sentence), `SpeedDialTest`, `BlockRepoTest`, `PhoneContainerTest` (owner rule b: store, recents, people and the rest issue no core call until the gate, standing for `Rust.init`, opens).
+- E5.1 data layer (`447ee0d` files, step 2 tests and gaps): `dev.rosty.phone.data` `PhoneStore` (debounced single write, `flush` from `MainActivity.onStop`), `RecentsRepository` (builds on the scope's Default dispatcher, bursts coalesced by `RebuildCoalescer`, `RecentsModel.error` set when an op fails and cleared by the next good build; the default `extras` is `flowOf(emptyList())`, the first version's `emptyFlow()` never emitted), `PeopleIndex` (handle released on READ_CONTACTS revoke, new handle on re-grant), `SimState`, `BlockRepo`, `SpeedDial`, `CallPlacer`. `FakeCalls` lives only in `platform/src/testFixtures`. Tests: `PhoneStoreTest` (concurrent edits are one write, nothing lost), `RecentsRepositoryTest` (failed build keeps rows and says why, off the main thread), `PeopleIndexTest`, `SimStateTest`, `CallPlacerTest` (emergency never asks for a SIM, two SIMs without default NeedsSim, default Placed with its handle, invalid carries the core sentence), `SpeedDialTest`, `BlockRepoTest`, `PhoneContainerTest` (owner rule b: store, recents, people and the rest issue no core call until the gate, standing for `Rust.init`, opens).
 
 #### Evidence, E4 R2 (E4.9-E4.16 done, round-11)
 
@@ -823,28 +823,28 @@ Next planner: **E4 R2** (E4.9-E4.16: share and shortcuts, import paths, duplicat
   `scrollingRecomposesEachRowAtMostOnceAndNeverTheOnesThatStay` and the typing test count row compositions; motion audit and
   checklist A-H for every R2 screen in `docs/kotlin-ui/checklist-e4.md`; contact sheet `docs/kotlin-ui/screenshots/contacts.png`
   (`:contacts:contactSheet`, 12 columns of the light goldens, opened: consistent chrome, no overlap, nothing under the floating
-  bars). Gate: cargo fmt/clippy/test --workspace, `cargo check -p rovsti_android --target aarch64-linux-android`, `scripts/kotlin-ui-check.sh`
+  bars). Gate: cargo fmt/clippy/test --workspace, `cargo check -p rosty_android --target aarch64-linux-android`, `scripts/kotlin-ui-check.sh`
   green. APKs: `android/contacts/build/outputs/apk/debug/contacts-debug.apk`, `android/catalog/build/outputs/apk/debug/catalog-debug.apk`.
 
 Next planner: **E5 R1** (Phone, E5.1-E5.8). E4 is done.
 
 #### Evidence, E3 R2 (E3.8a-E3.11 done, round-09)
 
-- E3.8a (commit 6323952): `platform.files` (`Documents`, `MediaShare`, `RovstiShareProvider`, clipboard, Photo Picker, camera); `FqcnTest` (13 names), `NoMediaPermissionTest`, `PortInventoryTest`.
+- E3.8a (commit 6323952): `platform.files` (`Documents`, `MediaShare`, `RostyShareProvider`, clipboard, Photo Picker, camera); `FqcnTest` (13 names), `NoMediaPermissionTest`, `PortInventoryTest`.
 - E3.8b (commit 96cc308): `PermissionState`, `PermissionController`, `SpecialAccess`; `PermissionStateTest`, `PermissionControllerTest`, `HandoffPermissionsTest`.
 - E3.9 (commits 288f0fb, c66376a): `:wa` `WaLinkStore`, `WaRepository`, `WaCalls`, `WaAvatars`; `WaRepositoryTest`, `WaCallsTest`, `WaAvatarsTest`, `WaLinkStoreTest`.
 - E3.10 (commit b299c48): `WhatsAppSettingsScreen`; `WhatsAppSettingsViewModelTest`, `WhatsAppSettingsScreenTest`, `E310ShotTest`; `android/wa/screenshots/e3.10-*` opened in that step.
-- E3.11 (commit e840c38, and round-09 step 8): `:shell` activity, container, permission UI, then `dev.rovsti.shell.settings`: `IosSettingsGroup`, `SettingsPage`, `AboutPage` (Convx ports with headers), `CommonSettings` + `FakeCommonSettings`, `AppearancePage`, `HapticsPage`, `LicencesPage`/`LicenceDetailPage`, `NoticesParser`; Gradle task `copyLicenceAssets`. Tests: `NoticesParserTest`, `CommonSettingsTest`, `SettingsPagesTest` (incl. last licence row clears the inset), `LicenceAssetsTest`, `E311SettingsShotTest`, `PermissionGateTest`, `RefreshRateTest`, `PortInventoryTest` (no `R2`/`todo` rows). PNGs opened in `android/shell/screenshots/`: `e3.11-settings-appearance` (segmented control full width in its card, footer wraps), `e3.11-settings-haptics` (radio rows, tick on the chosen one, no chevrons, Try it row with a tile), `e3.11-licences` and `e3.11-licences-fs2-light` (tiles aligned, "Kyant0/AndroidLiquidGlass (kmp branch)" wraps and the chevron stays), `e3.11-licence-detail` (glisse notice and full MIT text, clear of the bottom), `e3.11-about` (title, version pill, rows with tiles, Licences row), all light and dark. Found and fixed from the first shots: `ScreenPage` kept its large title blurred under the top fade (it did not pass `collapse` as `ScreenLazyPage` does), and radio rows showed chevrons.
+- E3.11 (commit e840c38, and round-09 step 8): `:shell` activity, container, permission UI, then `dev.rosty.shell.settings`: `IosSettingsGroup`, `SettingsPage`, `AboutPage` (Convx ports with headers), `CommonSettings` + `FakeCommonSettings`, `AppearancePage`, `HapticsPage`, `LicencesPage`/`LicenceDetailPage`, `NoticesParser`; Gradle task `copyLicenceAssets`. Tests: `NoticesParserTest`, `CommonSettingsTest`, `SettingsPagesTest` (incl. last licence row clears the inset), `LicenceAssetsTest`, `E311SettingsShotTest`, `PermissionGateTest`, `RefreshRateTest`, `PortInventoryTest` (no `R2`/`todo` rows). PNGs opened in `android/shell/screenshots/`: `e3.11-settings-appearance` (segmented control full width in its card, footer wraps), `e3.11-settings-haptics` (radio rows, tick on the chosen one, no chevrons, Try it row with a tile), `e3.11-licences` and `e3.11-licences-fs2-light` (tiles aligned, "Kyant0/AndroidLiquidGlass (kmp branch)" wraps and the chevron stays), `e3.11-licence-detail` (glisse notice and full MIT text, clear of the bottom), `e3.11-about` (title, version pill, rows with tiles, Licences row), all light and dark. Found and fixed from the first shots: `ScreenPage` kept its large title blurred under the top fade (it did not pass `collapse` as `ScreenLazyPage` does), and radio rows showed chevrons.
 
 #### Evidence, E3 R1 (E3.1-E3.7 done, round-08)
 
-- E3.1 (commits 974206c, step 8): `android/platform`, `PlatformEvents`, `Headless`, `PlatformComponents`, `ProviderChanges`, system helpers; tests `LibraryManifestTest`, `PrefsNamesTest`, `PlatformConventionTest`, `WireModelsTest`, `WireFixturesTest`, `WireV2Test`, `SettingsMirrorTest`, `SystemPagesTest`, `XiaomiOpsTest`, `LocaleTimeInfoTest`, `MessagesSeamTest`; step 8 adds `PortInventoryTest` (every bridge file has a row), `FqcnTest` (12 components, `RovstiShareProvider` is R2 E3.8a) and `PendingIntentContractTest`.
+- E3.1 (commits 974206c, step 8): `android/platform`, `PlatformEvents`, `Headless`, `PlatformComponents`, `ProviderChanges`, system helpers; tests `LibraryManifestTest`, `PrefsNamesTest`, `PlatformConventionTest`, `WireModelsTest`, `WireFixturesTest`, `WireV2Test`, `SettingsMirrorTest`, `SystemPagesTest`, `XiaomiOpsTest`, `LocaleTimeInfoTest`, `MessagesSeamTest`; step 8 adds `PortInventoryTest` (every bridge file has a row), `FqcnTest` (12 components, `RostyShareProvider` is R2 E3.8a) and `PendingIntentContractTest`.
 - E3.2 (commit 983b09e): `ContactsRepository`, `ShortcutsRepository`, `ContactsEdit`; tests `AndroidContactsRepositoryTest` (every `EDITED_MIMES` row), `FakeContactsRepositoryTest`, `ContactPhotosTest`, `ShortcutsTest`, `ContactCallOptionsTest`.
 - E3.3 (commit e69063c): `CallLogRepository`, `BlocklistRepository`, `SimRepository`; tests `AndroidCallLogRepositoryTest`, `BlocklistTest`, `RejectPolicyTest`, `SimRepositoryTest`.
 - E3.4 (commit 395589e): SMS/MMS provider, send, `ScheduledSms`; tests `AndroidSmsRepositoryTest`, `SmsSendTest`, `MmsCodecTest`, `MmsInboxTest`, `ScheduledSmsTest`, `SmsRulesTest`, `MessagesHostTest`.
 - E3.5 (commit bf0d946): telecom core; tests `IncomingOrderTest`, `IncomingCallTest`, `OngoingCallTest`, `MultiCallTest`, `AudioPathTest`, `ProximityPolicyTest`, `CallEventRingTest`, `RebuildCoalescerTest`, `FlipRuleTest`, `DialIntentsTest`, `CallNotificationsChannelsTest`.
 - E3.6 (commit 157b05c): notifications, reminders, reply receiver; tests `NotificationChannelsTest`, `MessageRemindersTest`, `CallRemindersTest`, `BirthdayRemindersTest`, `ReplyReceiverTest`, `HeadlessFixturesTest`.
-- E3.7 (commit 72d4345): location, `TripService`, `TripAlarm`, `AlarmActivity`; tests `LocationRepositoryTest`, `TripServiceTest`, `TripAlarmTest`, `TripStatusTest`, `AlarmOptionsTest`, `TripStartResultTest`, and `kotlin_contract.rs` in `rovsti_app_core`.
+- E3.7 (commit 72d4345): location, `TripService`, `TripAlarm`, `AlarmActivity`; tests `LocationRepositoryTest`, `TripServiceTest`, `TripAlarmTest`, `TripStatusTest`, `AlarmOptionsTest`, `TripStartResultTest`, and `kotlin_contract.rs` in `rosty_app_core`.
 - Step 8 also ports the WhatsApp seams (`WaIncomingTest` moved, plus frame-size, `takeAction` and wake-event cases).
 
 ### E3.1 Port
@@ -862,16 +862,16 @@ Next planner: **E5 R1** (Phone, E5.1-E5.8). E4 is done.
   `ContactsEdit.EDITED_MIMES`, call log delete/restore, SMS insert/read, scheduled alarm set/fire).
 - AC3 E3.5 keeps the incoming order of ARCH 8.2: notification first, UI after; `CallRegistry` tests (`MultiCallTest`,
   `IncomingCallTest`, `OngoingCallTest`) green.
-- AC4 E3.7 keeps AD-SA1 to AD-SA9; the Kotlin contract with the Rust alarm plan (moved to `crates/rovsti_app_core/tests/kotlin_contract.rs`) is
-  moved to `rovsti_app_core` and still checks the Kotlin defaults.
+- AC4 E3.7 keeps AD-SA1 to AD-SA9; the Kotlin contract with the Rust alarm plan (moved to `crates/rosty_app_core/tests/kotlin_contract.rs`) is
+  moved to `rosty_app_core` and still checks the Kotlin defaults.
 - AC5 E3.8b `PermissionController` exposes state per group as `StateFlow` and asks through the activity result API;
-  rationale and "open settings" decisions come from the pure access rules (`rovsti_app_core::messages::access` style).
+  rationale and "open settings" decisions come from the pure access rules (`rosty_app_core::messages::access` style).
   `PermissionState` covers never asked / granted / denied once / denied for good / revoked while running (ARCH 7.5);
   table-tested per app. Special access (full-screen intent, exact alarm, battery optimisation, role) has one
   `SpecialAccess` interface with a fake; role checks use `RoleManager.isRoleHeld`.
 - AC6 E3.8b The HANDOFF signature permission declarations and `uses-permission` lines are exactly those of the GPUI
   manifests (ARCH 7.2); a test lists them. Foreground-service start failures map to a UI state (ARCH 7.5 rules).
-- AC7 E3.8a Camera capture uses `ACTION_IMAGE_CAPTURE` with a `FileProvider`-style `RovstiShareProvider` URI (no `CAMERA`
+- AC7 E3.8a Camera capture uses `ACTION_IMAGE_CAPTURE` with a `FileProvider`-style `RostyShareProvider` URI (no `CAMERA`
   permission); Photo Picker is used instead of storage permissions everywhere (`READ_MEDIA_*` are not requested).
 
 ### E3.9 `:wa`
@@ -889,7 +889,7 @@ Next planner: **E5 R1** (Phone, E5.1-E5.8). E4 is done.
   (with a pasted key and selection), `e3.10-wa-connected`, `e3.10-wa-key-list-menu-open`, `e3.10-wa-logged-out`.
 
 ### E3.11 `:shell`
-- AC1 `RovstiRoot` (content -> chrome -> overlay host), base activity (edge-to-edge, `adjustResize`, predictive back,
+- AC1 `RostyRoot` (content -> chrome -> overlay host), base activity (edge-to-edge, `adjustResize`, predictive back,
   highest refresh mode), `ShellContainer` base, `routeFor(intent)` pattern.
 - AC2 Permission request UI (rationale sheet, denied state row, open settings), common settings pages (Appearance
   Auto/Light/Dark, Haptics Off/Light/Normal, About with versions, Licences listing `THIRD_PARTY_NOTICES.md`).
@@ -900,7 +900,7 @@ Next planner: **E5 R1** (Phone, E5.1-E5.8). E4 is done.
 
 ## E4. Contacts (`:contacts`) - DONE (R2)
 
-Goal: parity with `apps/contacts` (roadmap "Rovsti Contacts", `util-contacts*.md` C1-C54), then polish.
+Goal: parity with `apps/contacts` (roadmap "Rosty Contacts", `util-contacts*.md` C1-C54), then polish.
 
 Round plans: **R1** -> `_bmad-output/kotlin-ui/plans/round-10.md` (planned 2026-11-09 at base `ed92dda`; E3 R2 re-verified
 done in code, all hard dependencies `done`): E4.1-E4.8 in 8 steps (`:contacts` module, manifest parity with a reusable
@@ -918,7 +918,7 @@ Also fixes from the R1 goldens: **F12** menu items without glyphs (`e4.2-row-con
 touching (`e4.1-settings`), **F14** card numbers in mixed display formats (`e4.3-card-full`).
 
 **F16 Evidence (round-12 rev 2 step 1, owner fix a):** `design/transition/PageBack.kt` (`PageBack`, `LocalPageBack`);
-`RovstiNavHost` provides it around every entry with `StackKey.depth > 0` (pop / `select(currentTab)` for the long press, null
+`RostyNavHost` provides it around every entry with `StackKey.depth > 0` (pop / `select(currentTab)` for the long press, null
 on tab roots) and `check`s that a pushed route is never `TabBarMode.Folded`. The fallback lives in `ScreenChromeBox`
 (not `FrostedTopBar`, so `PhotoViewer`'s own bar is unaffected): explicit `onBack` wins, `showBack = false` (new on
 `ScreenPage` / `ScreenLazyPage` / `ScreenScaffold` / `ScreenChromeBox`) hides it; `LargeTitleScaffold` takes the host's button as
@@ -926,7 +926,7 @@ its `navigation` so the title starts below it, and `SettingsPage` / `SettingsLaz
 row (it used to run under the circle). `ContactsRoute.kt` / `PhoneRoute.kt`: every pushed page is `Visible`; only select mode on the
 Contacts root stays `Folded`. Tests: `PageBackTest` (:design, 6: root none, pushed shows one and click pops, long press to root,
 explicit wins, `showBack=false`, Folded on a pushed page fails), `ContactsRoutesTest` / `PhoneRoutesTest`
-(`noNonRootRouteMapsToFolded`), `PushedPagesBackTest` in :contacts (11 pushed routes) and :phone (7) on the real `RovstiShell`
+(`noNonRootRouteMapsToFolded`), `PushedPagesBackTest` in :contacts (11 pushed routes) and :phone (7) on the real `RostyShell`
 host: one `back-button` and all four tab labels. Goldens opened: `e4.15-name-format` (+ new `-rtl`), `e4.15-accounts-summary`
 (+fs2), `e4.15-whatsapp`, `e5.1-settings`, `e5.1-diagnostics`: glass back circle top-left at the 16 dp gutter (mirrored chevron
 at the right in RTL), large title below it, full four-tab bar in the first (light) frame of each test. Known harness
@@ -978,8 +978,8 @@ list ends above the tab bar, one avatar per row, chip rows never wrap, every lon
 host, every destructive action confirms or offers Undo as the GPUI app does.
 
 ### E4.1 App module
-- AC1 `applicationId dev.rovsti.contacts`, versionCode >= 100, release signing from env, component FQCNs and filters of
-  the GPUI manifest (vCard SEND/VIEW, `RovstiShareProvider`), permissions READ/WRITE_CONTACTS, INTERNET, HANDOFF,
+- AC1 `applicationId dev.rosty.contacts`, versionCode >= 100, release signing from env, component FQCNs and filters of
+  the GPUI manifest (vCard SEND/VIEW, `RostyShareProvider`), permissions READ/WRITE_CONTACTS, INTERNET, HANDOFF,
   READ_CALL_LOG, POST_NOTIFICATIONS (asked only on use, AD-CT7); manifest test against the committed list.
 - AC2 Container, routes, `routeFor(intent)` for `EXTRA_CONTACT_ID` and shared files (tested).
 - AC3 Migration test: fixture `contacts-prefs.json`, `contacts-trash.json`, `whatsapp-link.json` load.
@@ -1003,7 +1003,7 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 ### E4.4 Editor
 - AC1 All fields of the parity row; add/remove field rows; field labels picker (popover); account chooser; groups chooser.
 - AC2 Photo: menu (Choose, Take photo, Use WhatsApp photo, Remove) -> crop/rotate screen -> save.
-- AC3 Validation sentences from `rovsti_core::contact_edit`; discard confirm on dirty back; Undo pill after save.
+- AC3 Validation sentences from `rosty_core::contact_edit`; discard confirm on dirty back; Undo pill after save.
 - AC4 Every field is a `GlassTextField` (caret, selection, paste work); keyboard types per field (phone, email, url).
 - Screenshots: `e4.4-editor-new`, `e4.4-editor-filled`, `e4.4-editor-keyboard-open`, `e4.4-editor-label-popover`,
   `e4.4-photo-menu`, `e4.4-crop`, `e4.4-discard-confirm`, `e4.4-validation-error`.
@@ -1030,8 +1030,8 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 - Screenshots: `e4.9-share-menu`, `e4.9-qr-sheet`.
 
 ### E4.10 Import
-- AC1 Intake decides through `rovsti_core::contact_intake`; preview sheet "Add these contacts?" with counts and dedup;
-  CSV mapping via `rovsti_core::contact_csv`; Add to existing contact picker with Undo.
+- AC1 Intake decides through `rosty_core::contact_intake`; preview sheet "Add these contacts?" with counts and dedup;
+  CSV mapping via `rosty_core::contact_csv`; Add to existing contact picker with Undo.
 - Screenshots: `e4.10-import-preview`, `e4.10-scan-result`, `e4.10-add-to-existing-picker`.
 - Evidence (round 11 step 2): `intake/IntakeViewModel` + `IntakeScreen` replace the placeholder; sources are the VIEW/SEND
   `Intake(uri)` route, Settings "Import from a File" and "Paste Contact" (clipboard read on tap, "Nothing to paste" toast).
@@ -1067,7 +1067,7 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 
 **Status: DONE (R2)** (round 15 step 4; no MISSING row in `docs/kotlin-ui/checklist-e5.md`).
 
-Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56, `phone.md`), then polish.
+Goal: parity with `apps/phone` (roadmap "Rosty Phone", `util-phone*.md` U1-U56, `phone.md`), then polish.
 
 **R1** -> `_bmad-output/kotlin-ui/plans/round-12.md` (planned 2026-11-09 at base `c34b155`; E4 R2 re-verified done in
 code): E5.1-E5.7a in 8 steps (module, manifest, components, setup sheet, diagnostics, migration; data layer; keypad
@@ -1120,7 +1120,7 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
 
 | Features | Story |
 |---|---|
-| App, ROLE_DIALER, manifest (DIAL, VIEW tel, InCallService, receivers, FCM flavor, share provider), tabs (Favorites, Recents, Contacts, Keypad), setup sheet checklist (`rovsti_core::setup`), hidden Diagnostics page, notice line | E5.1 |
+| App, ROLE_DIALER, manifest (DIAL, VIEW tel, InCallService, receivers, FCM flavor, share provider), tabs (Favorites, Recents, Contacts, Keypad), setup sheet checklist (`rosty_core::setup`), hidden Diagnostics page, notice line | E5.1 |
 | Keypad: number field (paste works), T9 suggestions, speed dial (long-press digit), voicemail on 1 (glyph, "No voicemail number set"), U6 pause/wait, U14/U53 field menu (Copy, Paste, Clear+Undo, Share, Copy as +E.164), U29 add/create contact, U31 redial, U32 smart paste chooser, U47 long-press Call: SIM / WhatsApp, Message, WhatsApp chip, keypad tones, dual-SIM chooser sheet when no SIM is remembered (`sim_ui`, `sim-choices.json`) | E5.2 |
 | Recents: grouped by person, missed badges, U15 date sections, U3 search + filter chips (All, Missed, Incoming, Outgoing, WhatsApp) + U35 With notes, U21 notes search, U39 mark missed seen, row menu (call back, message, WhatsApp call, U20 quick reply, U13 remind later, U25/U56 copy number/country, U4 copy/share as, add to contacts, block, delete with Undo), U12/U45 select mode (delete, block, share), U48 country of unknown number, WhatsApp calls with badge, SIM chip on rows of a dual-SIM phone (S26), Block flow with confirmation and Undo (`block_ui`, S27) | E5.3 |
 | Contact/Number sheets: quick actions (Message, Copy, Share, Block), history lines, U11 call details (copy, share, U8 note, delete this call, U44 remind me), U7 per-person stats, U16 export person CSV, U18 share stats, U26 share details, U36 copy all numbers, U9 QR (`qr.encode`), Delete call history confirm sheet (`history_ui`), per-person quick reply and CSV export (`person_ui`) | E5.4 |
@@ -1153,7 +1153,7 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
 > returned before it finished, not because of failing code. The stash also captured another agent's edits that are
 > ALREADY COMMITTED in 5f51e2c (CLAUDE.md, Cargo.toml, build-logic, scripts/*, contacts/core-bridge/phone
 > build.gradle.kts, QrSheetTest.kt): do not re-apply those. Recover only the Phone files (android/phone/src/**,
-> android/phone/screenshots/e5.5-*, phone strings.xml), `android/design/src/main/kotlin/dev/rovsti/design/list/Reorder.kt`,
+> android/phone/screenshots/e5.5-*, phone strings.xml), `android/design/src/main/kotlin/dev/rosty/design/list/Reorder.kt`,
 > `android/design/build.gradle.kts`, `android/contacts/.../favorites/FavoritesReorder.kt` and
 > `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
 > (definition of done item 6).
@@ -1166,21 +1166,21 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
 | E5.14 | Polish | R2 | done (round 14 step 8 + round 15 step 4: F31, F35, F36, E5 closed) |
 
 ### E5.1 App module
-- AC1 `dev.rovsti.phone`, arm64-v8a release, every component FQCN of the GPUI manifest (`MainActivity` with DIAL/VIEW
-  filters and the activity-alias, `RovstiInCallService`, `CallActionReceiver`, `VoicemailReceiver`,
-  `CallReminderReceiver`, provider, firebase `RovstiMessagingService`); role request flow; manifest test.
+- AC1 `dev.rosty.phone`, arm64-v8a release, every component FQCN of the GPUI manifest (`MainActivity` with DIAL/VIEW
+  filters and the activity-alias, `RostyInCallService`, `CallActionReceiver`, `VoicemailReceiver`,
+  `CallReminderReceiver`, provider, firebase `RostyMessagingService`); role request flow; manifest test.
 - AC2 Migration test with fixture `prefs.json` (PrefsV2), `wa-calls.json`, `call-notes.json`, `whatsapp-link.json`
-  (Phone has no `sim-choices.json`: that is the Messages legacy SIM file, `rovsti_app_core/src/messages/prefs.rs:22`).
+  (Phone has no `sim-choices.json`: that is the Messages legacy SIM file, `rosty_app_core/src/messages/prefs.rs:22`).
 - Screenshots: `e5.1-setup-sheet`, `e5.1-diagnostics`, `e5.1-notice-line`, `e5.1-tabs` (+ `e5.1-settings`, `e5.1-setup-sheet-fs2`).
-- Evidence (step 1): `PhoneManifestTest` (both flavors), `PhoneRoutesTest`, `PhoneMigrationTest`, `InCallServiceTest`, `SetupSheetViewModelTest` (real core) pass. Setup sheet scrolls and stacks buttons at 2x font; notice line sits in its own card under the Recents title. Open item (closed in round-13 step 7: `phone.wa_handoff_number`): WA hand-off JID to number needs a `rovsti_ffi` op (`wa_call::handoff_number`).
+- Evidence (step 1): `PhoneManifestTest` (both flavors), `PhoneRoutesTest`, `PhoneMigrationTest`, `InCallServiceTest`, `SetupSheetViewModelTest` (real core) pass. Setup sheet scrolls and stacks buttons at 2x font; notice line sits in its own card under the Recents title. Open item (closed in round-13 step 7: `phone.wa_handoff_number`): WA hand-off JID to number needs a `rosty_ffi` op (`wa_call::handoff_number`).
 
 ### E5.2 Keypad
-- AC1 Keypad layout from Kotlin pure layout maths (not `rovsti_core::keypad_layout`), sized to the viewport; digits are
+- AC1 Keypad layout from Kotlin pure layout maths (not `rosty_core::keypad_layout`), sized to the viewport; digits are
   press-feedback buttons with tones; the number is a `BasicTextField` with the soft keyboard suppressed, caret and
   selection working, paste working.
 - AC2 T9 suggestion list above the keypad from the `ContactIndex` handle.
 - Built (round-12 step 3): `:design` `text/DialField.kt` (`BasicTextField(TextFieldState)` under `InterceptPlatformTextInput`,
-  36 to 24 sp fit, `DialAlphabet`, caret edit helpers), `RovstiIcons.Backspace/Voicemail`, `HapticEvent.KeyboardTap`;
+  36 to 24 sp fit, `DialAlphabet`, caret edit helpers), `RostyIcons.Backspace/Voicemail`, `HapticEvent.KeyboardTap`;
   `:phone` `keypad/` (`KeypadLayout`, `KeypadViewModel`, `KeypadScreen`, `DialKeys`, `KeypadStrings`). Tests:
   `DialFieldTest`, `KeypadLayoutTest`, `KeypadViewModelTest` (real core), `KeypadScreenTest`, `E52ShotTest`.
 - Screenshots: `e5.2-sim-chooser-sheet`, `e5.2-keypad-empty`, `e5.2-keypad-typing-t9`, `e5.2-keypad-field-menu`, `e5.2-keypad-selection`,
@@ -1218,7 +1218,7 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
   background and nearly vanishes; give it a contrasting fill or a light ring.
 - **Evidence (round-13 step 3, F17-F19, F20 ringing: done):** F17 `phone/.../data/NumberDisplay.kt` (Rust `NumberForm.Display`, used by
   `IncomingViewModel`, `InCallViewModel`, the waiting card and the post-call pill; `IncomingViewModelTest`,
-  `InCallViewModelTest` assert `+905551112233` -> `+90 555 111 22 33`). F18 `RovstiIcons.PhoneFill` (`:design`), Answer, Decline
+  `InCallViewModelTest` assert `+905551112233` -> `+90 555 111 22 33`). F18 `RostyIcons.PhoneFill` (`:design`), Answer, Decline
   and End on solid 76 dp green/red discs. F19 `Avatar(onAura = true)`: white 22 % fill, 0.5 dp white 40 % rim. F20 ringing
   `:design` `controls/PlainIconAction.kt` (`PlainIconActionTest`, `IncomingScreenTest` no disc / 0.5 press / >= 48 dp);
   iOS 26 layout (Light 36 sp name shrinking after two lines, 96 dp avatar, discs at 1/4 and 3/4). Goldens `e5.6-*` re-recorded
@@ -1236,7 +1236,7 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
     Decline stay solid green/red discs.
   - **In-call screen after answering (E5.7a):** the control grid (mute, keypad, speaker, add call, video, contacts) uses
     translucent **frosted glass** discs: white tint about 18-22% alpha in both themes (the call background is always a
-    deep colour), real backdrop blur of the gradient (`rovstiGlass` button preset, light tint, no outer shadow), 0.5 dp
+    deep colour), real backdrop blur of the gradient (`rostyGlass` button preset, light tint, no outer shadow), 0.5 dp
     light rim, white glyphs; an active toggle (mute on, speaker on) becomes solid white with a dark glyph. End call stays
     solid red.
 - **Owner request (2026-11-10): the caller's photo is the call background.** When the caller has a contact photo (or a
@@ -1279,7 +1279,7 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
   Contacts and Recents searches and the Contacts app list. Goldens `e5.7-*`, `e5.8-*`, `e5.6-waiting-call-card*`,
   `e5.7-incall-keypad`, new `e5.5-contacts-search-sheet-open`.
 - **(F27, owner review 2026-11-12, `e5.12-setup-tr-*`): the Turkish setup sheet is half English.** The row titles and
-  subtitles ("Default phone app", "Lets Rovsti Phone place and answer calls", "Phone and call log", "Autostart",
+  subtitles ("Default phone app", "Lets Rosty Phone place and answer calls", "Phone and call log", "Autostart",
   "Battery saver", …) and the "4 of 9" counter stay English while the help texts and buttons are Turkish; translate them
   (and every other `SetupItem`/special-access string) and extend `TurkishCoverageTest` to the setup rows. Also a missing
   space: "Kısıtlama yok seçeneğini seçin.Önce ayarları açın" (two sentences joined without a space). Do it before E5 closes.
@@ -1290,10 +1290,10 @@ in code: F22-F26, E5.10, E5.12, E5.13, E5.14 in HEAD; E5.9 and E5.11 only in sta
 
 ### E5.7b In-call (multi-call)
 - **Status: done** (round-13 step 8). Evidence: `MultiCallViewModelTest`, `AddCallSheetTest`, `InCallScreenTest` multi-call cases, goldens `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`; next planner = E5 R2 part 2 (E5.9-E5.14).
-- AC1 Multi-call scenes from `rovsti_core::scene` through the bridge; springs of hold-away, swap, merge.
+- AC1 Multi-call scenes from `rosty_core::scene` through the bridge; springs of hold-away, swap, merge.
 - Screenshots: `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`.
 
-**F21 Evidence (round-13 step 2):** `:design` `TabBarCellsTest` (ShotTest harness, `RovstiNavHost` with the Recents tab and a
+**F21 Evidence (round-13 step 2):** `:design` `TabBarCellsTest` (ShotTest harness, `RostyNavHost` with the Recents tab and a
 `ScreenPage` pushed, light then dark in one test, pixel contrast of each of the four cell label bands; `:design` now has
 `testImplementation(project(":testing"))`). It failed at `ca993e6` (favorites band contrast 0.14 = bar fill only) and passes
 now. Cause, narrowed by bisection (not by the plan's guess): not `fold`/label alpha (both read 1.0), not the glass, the
@@ -1312,7 +1312,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 - **Owner-reported bug in the GPUI app (2026-11-10), must not come back:** WhatsApp calls could be answered, declined
   and ended, but **no audio flowed either way** (the owner heard nothing and was not heard), while normal calls worked.
   Before building the UI, trace the whole audio path and prove it end to end: mic capture (AudioRecord, VOICE_COMMUNICATION,
-  sample rate/frames the gateway expects) -> `RustNative.audioPush` -> `rovsti_wa_client` call audio socket -> gateway
+  sample rate/frames the gateway expects) -> `RustNative.audioPush` -> `rosty_wa_client` call audio socket -> gateway
   (services/wa_gateway call audio, the 20 ms frame rechunk of commit 457ac0f) -> WhatsApp; and back: gateway ->
   `audioPull` -> AudioTrack (USAGE_VOICE_COMMUNICATION) with the audio mode/route set (MODE_IN_COMMUNICATION, speaker
   and earpiece, Bluetooth SCO). Check sample format and rate on every hop, the start order (audio session opened only
@@ -1321,7 +1321,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   far side (both directions), plus a manual check on the owner's phone listed in the evidence with gateway logs.
 - **Status: done** (round-13 step 7; the manual audio check below stays an owner acceptance item). E5.8a (audio chain, no UI) is done in software; E5.8b (call screens) is done.
 - **Evidence (E5.8a, round-13 step 6):** `docs/kotlin-ui/wa-call-audio.md` lists every hop and format (16 kHz mono PCM16,
-  960 samples / 1 920 bytes / 60 ms; the gateway rechunks the engine's 20 ms frames). Tests: `rovsti_wa_client/tests/call_audio.rs`
+  960 samples / 1 920 bytes / 60 ms; the gateway rechunks the engine's 20 ms frames). Tests: `rosty_wa_client/tests/call_audio.rs`
   (fake gateway WebSocket, 1 kHz tone both directions, frame size and Goertzel energy), `wa_gateway` `call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames`,
   `WaCallAudioTest` (Robolectric: rate, format, usage, mode, focus, service types, audio opens only after the call is connected), `WaCallsTest`,
   `PhoneManifestTest` (service type `microphone|phoneCall`). Fixed: incoming calls opened audio at accept instead of
@@ -1330,7 +1330,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   of audio, earpiece / speaker / Bluetooth, music pausing, background and screen-off operation, and gateway logs
   (checklist at the end of `wa-call-audio.md`).
 - **Evidence (E5.8b, round-13 step 7):** the core ops `phone.wa_arbitrate`, `phone.wa_screen` (enabled controls and the
-  sentence "Not available on WhatsApp calls") and `phone.wa_handoff_number` (`rovsti_ffi/src/ops/phone/wa_screen.rs`, fixtures
+  sentence "Not available on WhatsApp calls") and `phone.wa_handoff_number` (`rosty_ffi/src/ops/phone/wa_screen.rs`, fixtures
   `phone.wa_*`, `OPS.md`). Kotlin: `phone/.../wa/WaCallSource.kt` folds the WhatsApp call into the registry snapshot (id from `WaIdBook`,
   the core's arbitration decides who owns the screen), `WaCallsRouter` routes the screens' commands (answer, decline, end, mute,
   speaker, "End & Answer" both ways) to `WaCalls`, `WaCallLauncher` places calls (Recents row menu, More menu of the person sheet,
@@ -1399,13 +1399,13 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | in-progress (plan `plans/round-16.md`) |
 
 ### X.1 WhatsApp photo fallback avatar
-- **X.1a (round 15, step 5) done:** `rovsti_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
+- **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
   `people.*`, `OPS.md`) and the `:people` module (`PeopleContract`, `PersonAvatar`, `AvatarResolver`, `PeopleIndex` with a
   `StateFlow` version, `PeopleSource` = `ProviderSource` / `GatewaySource` chosen by `PeopleSources.choose`). WorkManager
-  2.11.0 is pinned in `libs.versions.toml` for X.1b. Evidence: `crates/rovsti_app_core/src/people.rs` tests,
+  2.11.0 is pinned in `libs.versions.toml` for X.1b. Evidence: `crates/rosty_app_core/src/people.rs` tests,
   `android/people/src/test/**`.
 - **X.1d (round 15, step 8) done:** Phone reads the `:people` resolver everywhere. `ContactAvatar` moved to `:people`
-  (`dev.rovsti.people.ui`) and Phone wraps it as `PhoneAvatar` (own photo from `ContactPhotoBook` by contact id or
+  (`dev.rosty.people.ui`) and Phone wraps it as `PhoneAvatar` (own photo from `ContactPhotoBook` by contact id or
   number, else the WhatsApp picture, else initials); used by Recents, Favorites (and the speed dial picker), the
   Contacts tab, keypad suggestions, statistics top people, notes, the person sheet, call details (also for an unknown
   number on WhatsApp) and the `WaitingCallCard`. The incoming and in-call photo background uses `knownCallPhoto`
@@ -1419,7 +1419,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   WhatsApp number instead of the initials (lists, card, favorites, recents, call screens incl. the photo background).
 - It is a **fallback only**: never written into the Android contact (the existing editor action "Use WhatsApp Photo"
   stays the explicit way to adopt it). Stored in a separate app-private cache shared by both apps through the Rust core
-  (`rovsti_app_core`, reuse `wa_link` avatar plan / names from E2.4): keyed by WhatsApp JID and picture id, with the
+  (`rosty_app_core`, reuse `wa_link` avatar plan / names from E2.4): keyed by WhatsApp JID and picture id, with the
   picture id from the gateway's profile events so a changed photo refreshes and a removed one is dropped; size-capped
   (LRU), readable offline, refreshed in the background (never blocks a list or the ringing screen).
 - Only for numbers that resolve to a WhatsApp account the linked instance can see; no lookups when WhatsApp is not
@@ -1434,12 +1434,12 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   One shared avatar resolver (own photo, else WA fallback, else initials) is used by every one of these, so no surface
   can be missed; a test enumerates the surfaces. Unknown numbers (not in contacts) that are on WhatsApp get the picture
   too. When the WA photo arrives later the avatar crossfades in without a layout change.
-- **Owner, 2026-11-13: the Contacts app owns the local person cache; the other apps read it instantly.** Each Rovsti app
+- **Owner, 2026-11-13: the Contacts app owns the local person cache; the other apps read it instantly.** Each Rosty app
   is its own APK with its own Rust core data dir, so a cache "shared through the Rust core" is not shared at all. Instead:
   Contacts keeps everything about people that Android's contacts provider does not hold (WhatsApp push/verified names,
   WhatsApp photos and their picture ids, JID/LID -> number maps, "on WhatsApp" flags, later what Messages needs) in its
   own store, keeps it fresh in the background from the gateway (only while WhatsApp is linked), and exposes it through a
-  read-only `ContentProvider` guarded by a **signature** permission (only Rovsti apps signed with the same key can read
+  read-only `ContentProvider` guarded by a **signature** permission (only Rosty apps signed with the same key can read
   it; photos served as file descriptors via `openFile`). Phone and Messages keep an in-memory index warmed at process
   start and refreshed on the provider's change notifications, so rows, call screens and notifications never wait or pop
   in late. **Without Contacts (owner, 2026-11-13):** every app still works on its own, with no persistent cache: at
@@ -1472,7 +1472,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   each case.
 - **(F30-F34, audit 2026-11-13, owner asked for a sweep; do in round 15 with F28/F29):**
   **(F30, done in 90f0288)** Rust core error texts reach the UI in English: `PlaceResult.Invalid(reason)` and `Core(text)` toasts (e.g.
-  "nothing to dial", `crates/rovsti_core/src/dial.rs:22`; shown in `KeypadScreen`, `PersonSheet`, `RecentsScreen`,
+  "nothing to dial", `crates/rosty_core/src/dial.rs:22`; shown in `KeypadScreen`, `PersonSheet`, `RecentsScreen`,
   `FavoritesScreen`). Return error codes from the core and word them in Kotlin resources (en + tr).
   **(F31, done in round 15 step 4: `playRefusalHaptic` -> `reject()` on the four `*Effect.Core`, `PillFeedbackTest`)** Failure effects play the success haptic: `haptics.confirm()` on `PersonEffect.Core`/`RecentsEffect.Core`
   (they carry failures such as an invalid number); use `reject()` or none.
@@ -1511,7 +1511,7 @@ checklist, full gate, close X.2. Next planner after X.2: F40. E6 and E7 run in p
 
 - Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least
   two weeks old, check its current API on docs.rs) inside the Rust core to render designed cards from node trees to
-  **JPEG** (and PNG where transparency matters). New module `rovsti_app_core::cards`, ops exposed through `rovsti_ffi`
+  **JPEG** (and PNG where transparency matters). New module `rosty_app_core::cards`, ops exposed through `rosty_ffi`
   (`cards.render`), general-purpose so Phone/Messages/Stops can add templates later.
 - First templates in Contacts: **birthday card** ("Happy birthday, <name>!", age if known, photo or WA fallback avatar,
   date), **contact card** (name, numbers, QR of the vCard), maybe **new number** announcement. Liquid-glass look in the
@@ -1566,7 +1566,7 @@ checklist, full gate, close X.2. Next planner after X.2: F40. E6 and E7 run in p
 > `ui-overhaul`. Planners on `ui-overhaul` skip E6 (do not plan, edit `android/messages` or change E6 statuses).
 > E8 still needs E6 done.
 
-Goal: parity with `apps/messages` (roadmap "Rovsti Messages", `util-messages*.md` M1-M50, `messages.md`, AD-MSG1 to
+Goal: parity with `apps/messages` (roadmap "Rosty Messages", `util-messages*.md` M1-M50, `messages.md`, AD-MSG1 to
 AD-MSG9, AD-WA11), then polish.
 
 ### Parity table
@@ -1581,7 +1581,7 @@ AD-MSG9, AD-WA11), then polish.
 | Conversation tools: M5 search with jump + glow, M24 jump to date (popover), M12 scroll-to-bottom with count + unread divider, M43 next unread, M13 media/links/docs gallery, M6 export .txt / share text, M48 export .zip, M27 clear chat, M42 header long-press copy, M29 mute override, M50 group sender mini card, M22 message privately | E6.6 |
 | M1 image viewer, M3 swipe between images "3 of 7", M2 save/share, M4 header photo, M26 shared contact card sheet (save .vcf, add to contacts), M28 non-image attachment copy/share, Status viewer | E6.7 |
 | New conversation (number or contact, SMS or WhatsApp), forward chooser, share-in (text, images), `sms:`/`smsto:`/`mms:`/`mmsto:` intents, contact handoff `WA_CHAT` (AD-CT5) | E6.8 |
-| Notifications: per-conversation digest (`rovsti_core::notify`), MessagingStyle, inline reply SMS and WhatsApp (cold through `headless`), OTP copy action, M41 remind in 1 hour, `uiAttached` rule, FCM wake (AD-MSG5) | E6.9 |
+| Notifications: per-conversation digest (`rosty_core::notify`), MessagingStyle, inline reply SMS and WhatsApp (cold through `headless`), OTP copy action, M41 remind in 1 hour, `uiAttached` rule, FCM wake (AD-MSG5) | E6.9 |
 | Scheduled send (AD-MSG6): long-press Send sheet, Scheduled strip, SMS alarms, WhatsApp gateway items, fired settle | E6.10 |
 | Spam (AD-MSG8): rules, allow list, system blocklist, Spam folder, not spam, move sender to Spam, M47 delete codes after copying | E6.11 |
 | Settings: M11 quick replies (+ composer chip row), M34 chat text size, notifications, WhatsApp, encrypted backup export/import with preview (AD-MSG7), default SMS app ask | E6.12 |
@@ -1633,12 +1633,12 @@ AD-MSG9, AD-WA11), then polish.
 Owner: "the old app fetched WhatsApp live from the server every time; I want to read WhatsApp messages even without
 internet: cache old messages on the device and only ask the gateway for new ones." Do this before the inbox (E6.2) and
 the thread (E6.4a): both read WhatsApp **only from the local store**; the network only fills the store.
-- **Store (platform-free, Rust, `rovsti_app_core::wa_sync`):** SQLite on the device (rusqlite, bundled) with chats,
+- **Store (platform-free, Rust, `rosty_app_core::wa_sync`):** SQLite on the device (rusqlite, bundled) with chats,
   messages (gateway id, chat JID, sender, timestamp, kind, text, quoted id, reactions, ticks/status, edit/delete flags),
   media metadata (thumbnail bytes inline, full media as a cached file path), contacts/names/avatars refs, and a
   `sync_state` row per linked instance. Schema versioned with migrations and tests. One store per app install; it is
   keyed by the connect key's instance, so re-linking another instance never mixes data.
-- **Per-device sync cursor:** each install keeps its own last event `seq` (the gateway `EventLog`, crates/rovsti_wa_proto
+- **Per-device sync cursor:** each install keeps its own last event `seq` (the gateway `EventLog`, crates/rosty_wa_proto
   `log.rs` `since()`), plus per chat the newest and oldest stored message. On (re)connect: ask the gateway for events
   `since(seq)` and apply them in order (idempotent upserts by gateway message id; the timeline echo/confirm dedupe in
   `timeline.rs` must hold). On `Since::Gap` (gateway restarted or ring trimmed) run a **resync**: refresh the chat list,
@@ -1723,7 +1723,7 @@ the thread (E6.4a): both read WhatsApp **only from the local store**; the networ
 > `ui-overhaul`. Planners on `ui-overhaul` skip E7 (do not plan, edit `android/stops` or change E7 statuses).
 > E8 still needs E7 done.
 
-Goal: parity with `apps/stops` (roadmap "Rovsti Stops", `util-stops*.md` S1-S44, `stops*.md`, AD-ST1 to AD-ST9, AD-SA1
+Goal: parity with `apps/stops` (roadmap "Rosty Stops", `util-stops*.md` S1-S44, `stops*.md`, AD-ST1 to AD-ST9, AD-SA1
 to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (ARCH 8.4), then polish.
 
 ### Parity table
@@ -1731,7 +1731,7 @@ to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (A
 | Features | Story |
 |---|---|
 | App, manifest (TripService location FGS, AlarmActivity, boot, `geo:`/maps VIEW, SEND text/plain, exact alarm, full-screen intent), full-screen map home with floating chrome, folded tab bar, sheet host | E7.1 |
-| Tile map: own renderer over `rovsti_tiles` (camera, pan, pinch, fling, double-tap zoom: E7.2a; bitmap LRU, parent stand-ins, colorful/eclipse by theme, radar look where tiles are missing, attribution, S28 scale bar: E7.2b) | E7.2a / E7.2b |
+| Tile map: own renderer over `rosty_tiles` (camera, pan, pinch, fling, double-tap zoom: E7.2a; bitmap LRU, parent stand-ins, colorful/eclipse by theme, radar look where tiles are missing, attribution, S28 scale bar: E7.2b) | E7.2a / E7.2b |
 | Radar layers: A and B pins, circle + diameter line + halves, position + accuracy, breadcrumb, GTFS stops and line, S40 saved stops on the map (toggle, tap opens the stop) | E7.3 |
 | Picking (AD-ST9): first tap A, second B, circle at once, third tap hint, pin drag (`PIN_GRAB_PX`, second finger -> pinch), snap to GTFS stop on flick, Move, Swap, Clear, labels "Point A"/"A-B 850 m"; pin menu: S1 copy as (decimal, DMS, DDM, Plus Code, geo:, OSM), S3 QR, S4 open in maps, S34 distance from you + Measure from here, save as stop | E7.4 |
 | Trip: start/stop, preflight (location, background recommended row AD-SA7, notifications, exact alarm, full-screen intent, battery), live card (distance, S9 bearing arrow, S41 arrival clock, the line-aware "N stops before" alarm from imported GTFS, `transit.rs`), S20 copy/share status, arriving-soon toggle per trip, restart refused handling (AD-SA8) | E7.5 |
@@ -1768,7 +1768,7 @@ control floats over the map as glass chrome; the sheet at peek and medium lets t
 buttons ride the sheet by translation only; camera padding follows the settled sheet detent.
 
 ### E7.1 App module and home skeleton
-- AC1 `dev.rovsti.stops`, components `TripService`, `AlarmActivity`, `BootReceiver`, VIEW `geo:` + maps links, SEND
+- AC1 `dev.rosty.stops`, components `TripService`, `AlarmActivity`, `BootReceiver`, VIEW `geo:` + maps links, SEND
   text/plain; manifest test.
 - AC2 Home: map layer (fake tile source in tests), search/pick pill, button column, folded tab bar, sheet host; Saved,
   History, Settings open as sheets or pushed pages over the map.
@@ -1777,7 +1777,7 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 - AC4 (E3 AC4) Re-target the manifest and `MainActivity` assertions that stayed in `apps/stops/src/kotlin_contract.rs` at
   `android/stops/src/main/AndroidManifest.xml` and the Kotlin `MainActivity` (location FGS type and permissions, background
   location, share provider, shortcut and `geo:` intents), in a Rust test beside
-  `crates/rovsti_app_core/tests/kotlin_contract.rs` (which already reads the `android/platform` sources).
+  `crates/rosty_app_core/tests/kotlin_contract.rs` (which already reads the `android/platform` sources).
 - Screenshots: `e7.1-home-idle`, `e7.1-home-idle-dark`, `e7.1-home-sheet-peek`, `e7.1-home-sheet-medium`,
   `e7.1-home-landscape`, `e7.1-home-fs2`.
 
@@ -1796,7 +1796,7 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 
 ### E7.4 Picking
 - AC1 Gesture tests: tap drops A then B; drag near a pin grabs it immediately (no long-press); second finger cancels into
-  pinch; flick snaps to a GTFS stop; map tap never moves the view; labels from `rovsti_app_core::stops::pick`.
+  pinch; flick snaps to a GTFS stop; map tap never moves the view; labels from `rosty_app_core::stops::pick`.
 - Screenshots: `e7.4-pick-a`, `e7.4-pick-ab`, `e7.4-pin-dragging`, `e7.4-pin-menu-open`, `e7.4-copy-as-menu`,
   `e7.4-third-tap-hint`.
 
@@ -1879,14 +1879,14 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 
 ### E8.5 Docs
 - AC1 `docs/architecture.md` points to the Kotlin UI architecture for the UI; GPUI sections marked historical.
-- AC2 `CLAUDE.md` updated: Kotlin UI rules, the only JNI crate is `rovsti_ffi`, checks are `scripts/kotlin-ui-check.sh`.
+- AC2 `CLAUDE.md` updated: Kotlin UI rules, the only JNI crate is `rosty_ffi`, checks are `scripts/kotlin-ui-check.sh`.
 - AC3 `android/THIRD_PARTY_NOTICES.md` audited (glisse, any Apache-2.0 dependency notices); every glisse-derived file has
   the header (grep test).
 
 ### E8.6 Remove GPUI from the default build
-- AC1 Workspace `default-members` exclude `apps/*`, `rovsti_ui`, `rovsti_wa_ui`, `liquid_glass_kit`; owner decides delete
-  vs `legacy/` (recorded); unused `rovsti_core` UI modules (ARCH 6.6 "Not exposed") removed or kept with a reason;
-  `rovsti_android` Rust side retired once nothing uses it.
+- AC1 Workspace `default-members` exclude `apps/*`, `rosty_ui`, `rosty_wa_ui`, `liquid_glass_kit`; owner decides delete
+  vs `legacy/` (recorded); unused `rosty_core` UI modules (ARCH 6.6 "Not exposed") removed or kept with a reason;
+  `rosty_android` Rust side retired once nothing uses it.
 - AC2 All checks green without the GPUI dependency (`cargo test --workspace` no longer fetches gpui-fusion).
 
 ### E8.7 Owner device acceptance
@@ -1903,10 +1903,10 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 
 ## Future (not scheduled): Stops on iOS
 
-**Planners: do not pick this up.** Owner note 2026-11-10: if Rovsti ever goes to iOS, only **Stops** goes (Phone and
+**Planners: do not pick this up.** Owner note 2026-11-10: if Rosty ever goes to iOS, only **Stops** goes (Phone and
 SMS cannot be default apps on iOS). Kept here as a future plan, not part of this rewrite.
-- Reuse the platform-free Rust core (`rovsti_app_core` Stops store/pick/snap/trip, `rovsti_geo`, `rovsti_tiles`) via a
-  Swift binding (UniFFI or a thin C ABI next to `rovsti_ffi`), built for `aarch64-apple-ios` and the simulator.
+- Reuse the platform-free Rust core (`rosty_app_core` Stops store/pick/snap/trip, `rosty_geo`, `rosty_tiles`) via a
+  Swift binding (UniFFI or a thin C ABI next to `rosty_ffi`), built for `aarch64-apple-ios` and the simulator.
 - UI in SwiftUI with the system Liquid Glass (iOS 26) rather than porting the Compose glass engine.
 - iOS replacements: Core Location region monitoring and significant-change updates for the arrival alarm (no
   foreground service), critical or time-sensitive notifications for the alarm, MapLibre iOS with the same tile cache

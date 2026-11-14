@@ -12,11 +12,11 @@ use std::{
 };
 
 use gpui::Context;
-use rovsti_geo::tiles::{
+use rosty_geo::tiles::{
     AreaDownload, FetchQueue, LruIndex, Priority, TileCover, TileGeometry, TileId, TileSource,
     stand_in,
 };
-use rovsti_tiles::{DEFAULT_CAP_BYTES, DiskCache, TileClient, TileError, load};
+use rosty_tiles::{DEFAULT_CAP_BYTES, DiskCache, TileClient, TileError, load};
 
 use crate::{StopsApp, store::now_ms};
 
@@ -144,7 +144,7 @@ impl MapTiles {
             if let Some(root) = root {
                 let cleared = cx
                     .background_executor()
-                    .spawn(async move { rovsti_tiles::clear_all(&root) })
+                    .spawn(async move { rosty_tiles::clear_all(&root) })
                     .await;
                 if let Err(error) = cleared {
                     log::warn!("cannot clear the tile cache: {error}");

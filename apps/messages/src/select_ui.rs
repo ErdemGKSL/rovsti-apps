@@ -1,12 +1,12 @@
 //! The look of select mode, shared by the WhatsApp and SMS conversations: a glass
 //! bar (Close, count, Select all, bulk actions) and the round check in front of
-//! a ticked row. The state and the decisions live in `rovsti_core::multi_select`.
+//! a ticked row. The state and the decisions live in `rosty_core::multi_select`.
 
 use gpui::{
     AnyElement, ClickEvent, Div, InteractiveElement, IntoElement, ParentElement, Styled, Window,
     div, prelude::*, px,
 };
-use rovsti_ui::{
+use rosty_ui::{
     Icon,
     components::{glass_icon_button, glass_pill},
     theme,
@@ -107,7 +107,7 @@ pub fn bottom_bar(theme: Theme, safe_bottom: f32, actions: Vec<BarAction>) -> An
     let body = if actions.is_empty() {
         div()
             .py(px(10.0))
-            .text_size(rovsti_ui::tokens::typography::SUBHEADLINE.size)
+            .text_size(rosty_ui::tokens::typography::SUBHEADLINE.size)
             .text_color(colors.secondary_label)
             .child("Tick chats to act on them")
             .into_any_element()
@@ -117,15 +117,15 @@ pub fn bottom_bar(theme: Theme, safe_bottom: f32, actions: Vec<BarAction>) -> An
     div()
         .id("inbox-select-bar")
         .absolute()
-        .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
+        .bottom(px(rosty_ui::layout::geom::tab_bar_bottom(safe_bottom)))
         .left(px(8.0))
         .right(px(8.0))
         .flex()
         .justify_center()
-        .rounded(rovsti_ui::tokens::radius::CARD)
+        .rounded(rosty_ui::tokens::radius::CARD)
         .child(
-            rovsti_ui::components::flat_glass(theme, None)
-                .rounded(rovsti_ui::tokens::radius::CARD)
+            rosty_ui::components::flat_glass(theme, None)
+                .rounded(rosty_ui::tokens::radius::CARD)
                 .flex()
                 .justify_center()
                 .child(body),

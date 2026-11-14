@@ -1,0 +1,18 @@
+[package]
+name = "rosty_geo"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Offline geometry and the arrival-alarm state machine behind Rosty Stops."
+
+[dependencies]
+rosty_core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+flate2.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

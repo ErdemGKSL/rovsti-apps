@@ -1,4 +1,4 @@
-# util-phone: everyday utilities for Rovsti Phone (round 4)
+# util-phone: everyday utilities for Rosty Phone (round 4)
 
 baseSha: 53e0513746b31a6868d296925af0c1204b6216eb
 
@@ -6,7 +6,7 @@ baseSha: 53e0513746b31a6868d296925af0c1204b6216eb
 
 Round 3 (ae48e3b..53e0513) shipped every R3 row of the backlog: notes search, Recents select mode
 with multi-delete, Undo for Delete all, the quick reply on missed calls, per-person CSV, call-back
-reminders (`rovsti_core::reminder`, `rovsti_android::reminders`, `CallReminders.kt`, `remind_ui.rs`),
+reminders (`rosty_core::reminder`, `rosty_android::reminders`, `CallReminders.kt`, `remind_ui.rs`),
 the keypad field menu and Speed dial Share/Clear all. `git stash list` is empty. Disk had 7.0 GB free.
 
 The R3 backlog rows still open, checked by grep at baseSha:
@@ -18,7 +18,7 @@ The R3 backlog rows still open, checked by grep at baseSha:
   `call_notes::details_text`) but no Share.
 - U27: the Blocked page (`blocked_ui.rs`, `Sub::Blocked`, prefix `set-bk-`) unblocks one row at a time
   (`unblock_pill`, `PillAction::Block` Undo). It has no Share list and no Unblock all.
-  `rovsti_core::blocklist` has `numbers_line`, `parse_input`, `can_block`.
+  `rosty_core::blocklist` has `numbers_line`, `parse_input`, `can_block`.
 - U28: the Stats page (`stats_ui.rs`, `Sub::Stats`, `Range::{Week, Days7, Weeks8}`, `top_people`) has
   no export. Only a person's stats can be shared (`NUMBER_SHARE`/`CONTACT_SHARE`).
 - U29 is already done. The keypad has `kp-add` ("Add to contacts", `backend::add_contact`), and the
@@ -83,17 +83,17 @@ New gaps found in this audit:
 ## Steps (round 4)
 
 Every step leaves all checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
-&& cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`.
+&& cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`.
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first. Make one focused commit per step
-(`Rovsti phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S3-S8. Never invent GPUI
+(`Rosty phone: ...`). Read `.claude/skills/liquid-glass-gpui/SKILL.md` before S3-S8. Never invent GPUI
 APIs: copy patterns that already exist in `apps/phone/src` (`Sub` pages and their `prefix()`, sheets with
 `SheetKind`, `presses`, `show_notice_pill`/`show_pill_action`, `PillAction`, `SearchField`,
-`rovsti_ui::haptics::perform`, `uniform_list`). Every utility gets a pill. Every destructive one gets a
+`rosty_ui::haptics::perform`, `uniform_list`). Every utility gets a pill. Every destructive one gets a
 confirm and an Undo. No step needs new Android glue: `share_text`, `export_calls` (CSV mime), `block` and
 `unblock` exist already.
 
-### S1. Pure: day sections, blocked list text, stats CSV, details share (`rovsti_core`)
+### S1. Pure: day sections, blocked list text, stats CSV, details share (`rosty_core`)
 - `call_log.rs`: `pub fn day_section(now_ms: i64, at_ms: i64, tz_offset_s: i32) -> String` gives
   `"Today"`, `"Yesterday"`, the weekday (`"Monday"`) for 2-6 days back, and `"3 Nov"` (or
   `"3 Nov 2025"` in another year) further back. Use local civil days, the same day maths as
@@ -112,7 +112,7 @@ confirm and an Undo. No step needs new Android glue: `share_text`, `export_calls
   `name,number,calls,incoming,outgoing,missed,talk_seconds,longest_seconds,range`. Escape it the way
   `call_log_query`'s CSV does (reuse its escaper; make it `pub(crate)` if it is private). Also `pub fn
   stats_csv_file_name(range: Range, now_ms, tz) -> String`, for example
-  `rovsti-call-stats-this-week-2026-11-06.csv`.
+  `rosty-call-stats-this-week-2026-11-06.csv`.
 - `call_notes.rs`: `pub fn share_text(d: &CallDetails, who: Option<&str>, note: Option<&str>) -> String`
   gives `"Call with Anna Smith\n"` + `details_text(d, note)`, and leaves out the header for `None` or an
   empty `who`.
@@ -121,7 +121,7 @@ confirm and an Undo. No step needs new Android glue: `share_text`, `export_calls
   unblock_all singular and plural; CSV header, a comma or quote in a name, an empty list (header only);
   the file name per range; share_text with and without who.
 
-### S2. Pure: smart paste, redial, bulk block, notes list (`rovsti_core`)
+### S2. Pure: smart paste, redial, bulk block, notes list (`rosty_core`)
 - `dial.rs`: `pub fn extract_numbers(text: &str) -> Vec<String>` splits the text into runs that look
   like phone numbers. A run is digits with `+ ( ) - . space` inside it. It ends at a letter, a newline,
   `,`/`;`/`/` followed by a space, or " or ". Each run is cleaned through `normalise_paste`, and a run

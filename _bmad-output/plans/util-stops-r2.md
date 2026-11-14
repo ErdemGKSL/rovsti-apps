@@ -1,4 +1,4 @@
-# util-stops: everyday utilities for Rovsti Stops (round 2)
+# util-stops: everyday utilities for Rosty Stops (round 2)
 
 baseSha: 10f349dcac419c32b66ae7e95a7dc0759752b031
 
@@ -9,12 +9,12 @@ baseSha: 10f349dcac419c32b66ae7e95a7dc0759752b031
 - Disk had 2.3 GB free at planning time: run `rm -rf target/debug/incremental` before every build.
 - Still missing (checked in code):
   - Alarm: only Sound / Vibration on-off, Snooze length and "Test alarm" (`settings_ui.rs::settings_main`).
-    `AlarmPlan` (`rovsti_geo::alarm`) is always `AlarmPlan::default()` (`backend::start_spec`), so
+    `AlarmPlan` (`rosty_geo::alarm`) is always `AlarmPlan::default()` (`backend::start_spec`), so
     vibration pattern, volume and sound are fixed. Kotlin `AlarmSound.uriFor("user_alarm")` uses the
     system default alarm. The test ring (`TripAlarm.ring(test = true)`) reads the *last trip's* plan from
     `TripPrefs` and the sound/vibrate flags from `stops-prefs.json` in that trip's dir, so before the
     first trip it ignores the user's settings.
-  - Theme: Stops follows the system only; `rovsti_ui::set_theme_override` exists (Phone uses it) and the
+  - Theme: Stops follows the system only; `rosty_ui::set_theme_override` exists (Phone uses it) and the
     map palette already follows `Theme` (`map.rs::Palette::new`).
   - Tiles: `MapTiles::prefetch` only for the trip circle; `FetchQueue` cannot drop prefetch work;
     `tiles_for_circle` is the only area helper; the Map tiles page shows size + two-tap Clear.
@@ -24,7 +24,7 @@ baseSha: 10f349dcac419c32b66ae7e95a7dc0759752b031
   `transit::date_text`/`civil_from_days` (app-local), `gtfs::fold`, `pick::dest_from_endpoint`,
   `request_start`, `start_saved_stop` rule ("Not while a trip is running"),
   `ContactOptions.kt` ringtone picker (TYPE_RINGTONE, request code `Documents.REQUEST_RINGTONE`,
-  one-shot `postOneShot`), `rovsti_android::events::kind`.
+  one-shot `postOneShot`), `rosty_android::events::kind`.
 - The document_result op `ExportMessages` always says "Saved stops exported": history export needs the
   app to remember what it exported.
 
@@ -56,12 +56,12 @@ baseSha: 10f349dcac419c32b66ae7e95a7dc0759752b031
 
 Steps 1-3 pure (unit-tested), step 4 Android seam, steps 5-7 thin GPUI, step 8 docs. Every step leaves all
 checks green: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test
---workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p
-rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target
+--workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p
+rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target
 aarch64-linux-android`.
 
 ### Step 1. Pure: alarm customisation and appearance prefs (S11-S14)
-- `crates/rovsti_geo/src/alarm.rs`:
+- `crates/rosty_geo/src/alarm.rs`:
   - `pub enum VibrationPattern { Standard, Pulse, Long, Heartbeat }` (serde snake_case, Default
     Standard) with `ALL`, `label()`, `next()`, `pattern_ms() -> &'static [u64]` (Standard ==
     `VIBRATION_MS`; Pulse `[0,250,250,250,250,250,1000]`; Long `[0,1500,700]`; Heartbeat
@@ -70,7 +70,7 @@ aarch64-linux-android`.
     (values below 80 snap to 80).
   - `AlarmPlan` gains `#[serde(default, skip_serializing_if = "Option::is_none")] pub user_sound_uri:
     Option<String>`; default `None` (default JSON unchanged, so the Kotlin contract test stays green).
-- `crates/rovsti_geo/src/prefs.rs`:
+- `crates/rosty_geo/src/prefs.rs`:
   - `pub enum Appearance { Auto, Light, Dark }` (Default Auto) with `ALL`, `label()`, `next()`.
   - `pub struct AlarmSound { pub uri: String, pub title: String }`.
   - `StopsPrefs` new fields (all `#[serde(default)]`): `appearance: Appearance`,
@@ -86,13 +86,13 @@ aarch64-linux-android`.
   Appearance cycle and serde names.
 
 ### Step 2. Pure: offline map area (S10)
-- `crates/rovsti_geo/src/tiles/slippy.rs`: `pub struct AreaPlan { pub tiles: Vec<TileId>,
+- `crates/rosty_geo/src/tiles/slippy.rs`: `pub struct AreaPlan { pub tiles: Vec<TileId>,
   pub top_zoom: u8, pub capped: bool }` and `pub fn tiles_for_area(corners: &[Coord], min_zoom: u8,
   max_zoom: u8, budget: usize) -> AreaPlan` (reuses `Span::around(.., 0)` / `tiles_if`; coarse first,
   nearest the centre first; stops at the highest zoom whose cumulative count fits `budget`; `capped` when
   it stopped below `max_zoom.min(MAX_TILE_ZOOM)`). Constants `AREA_MIN_ZOOM = 8`,
   `AREA_TILE_BUDGET = 2500`, `AVG_TILE_BYTES = 30_000` and `pub fn estimate_bytes(tiles: usize) -> u64`.
-- New `crates/rovsti_geo/src/tiles/offline.rs` (`pub mod offline;`): `pub struct AreaDownload { total,
+- New `crates/rosty_geo/src/tiles/offline.rs` (`pub mod offline;`): `pub struct AreaDownload { total,
   done, failed, pending: BTreeSet<TileId>, cancelled: bool }` with `new(ids)`, `record(id, ok) -> bool`
   (true when the id belonged to it), `cancel()`, `is_finished()`, `fraction() -> f32`,
   `progress_text()` ("Downloading 120 of 900 tiles"), `finished_text()` ("Map area ready offline. 897
@@ -105,11 +105,11 @@ aarch64-linux-android`.
   `drop_prefetch` keeps View items and returns the count.
 
 ### Step 3. Pure: history search, filter, export (S15, S16)
-- `crates/rovsti_geo/src/history.rs`: `pub enum OutcomeFilter { All, Arrived, Cancelled }` with
+- `crates/rosty_geo/src/history.rs`: `pub enum OutcomeFilter { All, Arrived, Cancelled }` with
   `label()`, `next()`; `pub fn matching(&self, query: &str, filter: OutcomeFilter) -> Vec<usize>`
   (indices into `records`, newest first; query folded with `gtfs::fold`, matches the label and the A/B
   labels); `TripRecord::pair(&self) -> Option<(Endpoint, Endpoint)>`.
-- New `crates/rovsti_geo/src/history_io.rs` (`pub mod history_io;`):
+- New `crates/rosty_geo/src/history_io.rs` (`pub mod history_io;`):
   - `pub fn to_csv(records: &[TripRecord], tz_offset_s: i32) -> String`: header
     `started,ended,duration_min,outcome,label,a_lat,a_lon,b_lat,b_lon,travelled_m,snoozes,notice_sent`,
     ISO local time `2026-11-07 08:15`, RFC 4180 quoting (comma, quote, newline), CRLF line ends, empty
@@ -118,14 +118,14 @@ aarch64-linux-android`.
     places_io XML escaping, make it `pub(crate)`), `<desc>` with outcome and date; records without
     points are skipped.
   - `pub fn export_file_name(ext: &str, today: &str) -> String` ->
-    `rovsti-stops-history-2026-11-07.csv`.
+    `rosty-stops-history-2026-11-07.csv`.
   - A small private `civil_from_days` (Howard Hinnant) for the ISO date.
 - Tests: CSV header + one row exact text, quoting of `a,"b"` labels, timezone shift across midnight,
   legacy record; GPX parses back through `places_io::parse_import` into the same pairs; `matching`
   with filter, accent-insensitive query, empty query = all.
 
 ### Step 4. Android seam: alarm sound picker, previews, test ring with prefs (S12-S14)
-- Kotlin (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`):
+- Kotlin (`crates/rosty_android/kotlin/dev/rosty/bridge/`):
   - `AlarmSound.kt`: `AlarmPlan` parses `user_sound_uri`; `uriFor("user_alarm")` returns it when set,
     else `getActualDefaultRingtoneUri(TYPE_ALARM)` (a missing file falls through the order as today).
     New `fun preview(ms: Long)` path: start sound, stop + `restoreVolume` after `ms` (main handler).
@@ -136,10 +136,10 @@ aarch64-linux-android`.
     `previewVibration(context, pattern: LongArray)` (one-shot waveform, repeat -1, alarm attributes).
   - `TripAlarm.ring(context, test, planOverride: String? = null)`: test ring parses `planOverride` for the
     plan and `alarmChannels(planOverride)` for sound/vibrate when given.
-  - `RovstiBridge.kt`: `tripTestAlarm(json)`, `pickAlarmSound(current, hasCurrent)`,
+  - `RostyBridge.kt`: `tripTestAlarm(json)`, `pickAlarmSound(current, hasCurrent)`,
     `previewVibration(csv)`, `previewAlarmSound(planJson, ms)`; add `AlarmOptions.handle` to the
     `onActivityResult` chain next to `ContactOptions.handle`.
-- Rust `crates/rovsti_android/src/trip.rs`: `pub fn test_alarm(spec_json: &str) -> Result<bool>`,
+- Rust `crates/rosty_android/src/trip.rs`: `pub fn test_alarm(spec_json: &str) -> Result<bool>`,
   `pub fn pick_alarm_sound(current: Option<&str>) -> Result<bool>`,
   `pub fn preview_vibration(pattern_ms: &[u64]) -> Result<bool>` (comma-separated string arg),
   `pub fn preview_alarm_sound(plan_json: &str, ms: u32) -> Result<bool>` (string arg);
@@ -150,7 +150,7 @@ aarch64-linux-android`.
   `self.prefs.alarm_plan()` (update `start_trip` signature / its callers and tests).
 - `apps/stops/src/kotlin_contract.rs`: tests that `AlarmSound.kt` reads `user_sound_uri`, that the bridge
   has the four new `@JvmStatic` functions, `AlarmOptions.kt` uses `TYPE_ALARM` and posts
-  `alarm_sound_picked`, and `RovstiBridge` chains `AlarmOptions.handle`.
+  `alarm_sound_picked`, and `RostyBridge` chains `AlarmOptions.handle`.
 
 ### Step 5. UI: alarm settings (S12-S14)
 - `settings_ui.rs::settings_main`, Alarm section:
@@ -167,7 +167,7 @@ aarch64-linux-android`.
 - Pure helpers with tests: `volume_text(pct)`, `alarm_rows_visible(prefs) -> (bool pattern_row)`.
 
 ### Step 6. UI: map options sheet: appearance and offline area (S10, S11)
-- Appearance: on prefs load and on change call `rovsti_ui::set_theme_override` (map `Appearance` to
+- Appearance: on prefs load and on change call `rosty_ui::set_theme_override` (map `Appearance` to
   `Option<Theme>` in an app helper `theme_override(Appearance)` with a test) and `window.refresh()` as
   Phone does (`apps/phone/src/main.rs` ~756; grep it). Settings row "Appearance" cycling Auto/Light/Dark.
 - Map: a fifth control button "Map" (idle map only, under Ruler) opens `SheetMode::MapOptions` (new):

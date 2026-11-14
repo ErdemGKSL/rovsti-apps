@@ -10,8 +10,8 @@ use std::{
     thread,
 };
 
-use rovsti_core::{MessageDirection, ThreadId, inbox::InboxThread};
-use rovsti_wa_proto::{
+use rosty_core::{MessageDirection, ThreadId, inbox::InboxThread};
+use rosty_wa_proto::{
     ChatMeta, ChatSummary, DeliveryStatus, GroupInfo, InstanceState, InstanceStatus, MediaKind,
     MediaMeta, MessageBody, MessageMeta, Participant, Quoted, RichChat, RichMessage, StatusList,
     WaMessage,

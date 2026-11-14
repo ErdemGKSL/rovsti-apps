@@ -18,8 +18,8 @@
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
     <uses-feature android:name="android.hardware.location" android:required="false" />
     <application
-        android:name=".RovstiStopsApp"
-        android:label="Rovsti Stops"
+        android:name=".RostyStopsApp"
+        android:label="Rosty Stops"
         android:icon="@drawable/gpui_app_icon"
         android:roundIcon="@drawable/gpui_app_icon"
         android:theme="@style/GpuiTheme"
@@ -80,23 +80,23 @@
 
         <!-- The trip: location updates while the app is closed (AD-ST2). -->
         <service
-            android:name="dev.rovsti.bridge.TripService"
+            android:name="dev.rosty.bridge.TripService"
             android:exported="false"
             android:foregroundServiceType="location" />
         <receiver
-            android:name="dev.rovsti.bridge.TripWatchdogReceiver"
+            android:name="dev.rosty.bridge.TripWatchdogReceiver"
             android:exported="false" />
 
         <!-- The alarm (AD-ST3): native Views over the lock screen, no GPUI. -->
         <activity
-            android:name="dev.rovsti.bridge.AlarmActivity"
+            android:name="dev.rosty.bridge.AlarmActivity"
             android:exported="false"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:excludeFromRecents="true"
             android:launchMode="singleInstance" />
         <receiver
-            android:name="dev.rovsti.bridge.TripAlarmReceiver"
+            android:name="dev.rosty.bridge.TripAlarmReceiver"
             android:exported="false" />
 
         <!-- A reboot leaves a stale trip: end it. -->
@@ -109,8 +109,8 @@
         </receiver>
         <!-- Images handed to the share sheet (cache/share only, read-only). -->
         <provider
-            android:name="dev.rovsti.bridge.RovstiShareProvider"
-            android:authorities="${applicationId}.rovstishare"
+            android:name="dev.rosty.bridge.RostyShareProvider"
+            android:authorities="${applicationId}.rostyshare"
             android:exported="false"
             android:grantUriPermissions="true" />
     </application>

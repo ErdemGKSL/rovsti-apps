@@ -32,9 +32,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt};
-use rovsti_wa_proto::api::routes as r;
-use rovsti_wa_proto::audio::{Rechunker, SpeakerFrames, decode_frame, encode_speaker_frame};
-use rovsti_wa_proto::{
+use rosty_wa_proto::api::routes as r;
+use rosty_wa_proto::audio::{Rechunker, SpeakerFrames, decode_frame, encode_speaker_frame};
+use rosty_wa_proto::{
     CallDirection, CallInput, CallMachine, CallPhase, CallStarted, CallSummary, CallUpdate,
     ErrorCode, GatewayEvent, PlaceCall, SetMuted,
 };
@@ -290,7 +290,7 @@ pub fn feed_mic(bytes: &[u8], mic: &FreshQueue) -> MicOutcome {
     }
 }
 
-/// A report line of the app (its queue depths, see `rovsti_wa_client`) made
+/// A report line of the app (its queue depths, see `rosty_wa_client`) made
 /// safe to log: printable ASCII only, at most [`APP_REPORT_MAX`] characters.
 pub fn clean_report(text: &str) -> String {
     text.chars()
@@ -1000,7 +1000,7 @@ where
     log::info!(
         "{}: attached, {} ms speaker frames",
         ports.label,
-        rovsti_wa_proto::audio::samples_ms(ports.frames.samples())
+        rosty_wa_proto::audio::samples_ms(ports.frames.samples())
     );
     let (mut sink, mut stream) = socket.split();
     let writer = async {
@@ -1787,8 +1787,8 @@ pub mod fake {
 mod tests {
     use super::fake::{FakeCalls, offer};
     use super::*;
-    use rovsti_wa_proto::audio::{FRAME_SAMPLES, encode_frame};
-    use rovsti_wa_proto::{EndReason, ErrorCode, GatewayEvent};
+    use rosty_wa_proto::audio::{FRAME_SAMPLES, encode_frame};
+    use rosty_wa_proto::{EndReason, ErrorCode, GatewayEvent};
 
     const FROM: &str = "905321234567@s.whatsapp.net";
 

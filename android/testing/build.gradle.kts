@@ -1,10 +1,10 @@
 plugins {
-    id("rovsti.android.library")
-    id("rovsti.compose")
+    id("rosty.android.library")
+    id("rosty.compose")
 }
 
 android {
-    namespace = "dev.rovsti.testing"
+    namespace = "dev.rosty.testing"
 }
 
 // Test-only support: apps and libraries use it as `testImplementation(project(":testing"))`.

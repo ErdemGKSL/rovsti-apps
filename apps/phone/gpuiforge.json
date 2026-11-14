@@ -1,14 +1,14 @@
 {
   "$schema": "https://raw.githubusercontent.com/cradiy/gpuiforge/main/gpuiforge.schema.json",
   "app": {
-    "name": "Rovsti Phone"
+    "name": "Rosty Phone"
   },
   "platforms": {
     "android": {
       "abis": [
         "arm64-v8a"
       ],
-      "application-id": "dev.rovsti.phone",
+      "application-id": "dev.rosty.phone",
       "features": [
         "notifications",
         "audio-routing",
@@ -42,7 +42,7 @@
         "min_sdk": "34",
         "target_sdk": "36"
       },
-      "activity": "dev.rovsti.phone.MainActivity",
+      "activity": "dev.rosty.phone.MainActivity",
       "signing": {
         "keystore": "/home/erdem/ownCloud/Personal/rovsti/rovsti-release.jks",
         "key-alias": "rovsti",
@@ -56,7 +56,7 @@
           "args": [
             "build",
             "-p",
-            "rovsti_phone",
+            "rosty_phone",
             "--profile",
             "{{cargo_profile}}"
           ],
@@ -68,7 +68,7 @@
           "args": [
             "run",
             "-p",
-            "rovsti_phone",
+            "rosty_phone",
             "--profile",
             "{{cargo_profile}}"
           ],

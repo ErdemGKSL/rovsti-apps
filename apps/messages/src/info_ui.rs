@@ -1,5 +1,5 @@
 //! Message info and Select text: one glass bottom sheet shared by the WhatsApp
-//! and SMS pages. The rows come from `rovsti_core::message_info`; the pages own
+//! and SMS pages. The rows come from `rosty_core::message_info`; the pages own
 //! the sheet and close it on Back.
 
 use std::ops::Range;
@@ -9,18 +9,18 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, StyledText, TextSelectionHandle, Window, div,
     px,
 };
-use rovsti_core::{
+use rosty_core::{
     message_info::{InfoChannel, InfoRow, InfoState, info_text},
     sms::DeliveryState,
     sms_timeline::SmsKey,
 };
-use rovsti_ui::{
+use rosty_ui::{
     components::glass_pill,
     glass::{GlassSpec, glass},
     theme,
     tokens::{Theme, shadow, typography},
 };
-use rovsti_wa_proto::{DeliveryStatus, ItemState};
+use rosty_wa_proto::{DeliveryStatus, ItemState};
 
 /// The pill shown when Copy selection finds nothing selected.
 pub(crate) const SELECT_FIRST: &str = "Select some text first";
@@ -287,7 +287,7 @@ pub(crate) fn info_overlay(
 /// pill per choice, then Close. `pick(i)` is the tap on choice `i`.
 pub(crate) fn choices_overlay(
     theme: Theme,
-    choices: &[rovsti_core::copy_choices::CopyChoice],
+    choices: &[rosty_core::copy_choices::CopyChoice],
     close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     pick: impl Fn(usize) -> Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
 ) -> AnyElement {

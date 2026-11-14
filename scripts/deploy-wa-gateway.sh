@@ -49,7 +49,7 @@ CALL_WAIT="${CALL_WAIT:-1800}"
 
 # The workspace crates the gateway needs (its path dependencies, direct and indirect).
 # `cargo metadata` on the bundle (below) fails if this list falls behind.
-CRATES="rovsti_core rovsti_wa_proto rovsti_wa_client"
+CRATES="rosty_core rosty_wa_proto rosty_wa_client"
 
 REMOTE_SCRIPT="$ROOT/services/wa_gateway/deploy/remote-install.sh"
 

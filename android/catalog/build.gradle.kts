@@ -1,15 +1,15 @@
 plugins {
-    id("rovsti.android.app")
-    id("rovsti.compose")
-    id("rovsti.screenshots")
+    id("rosty.android.app")
+    id("rosty.compose")
+    id("rosty.screenshots")
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "dev.rovsti.catalog"
+    namespace = "dev.rosty.catalog"
 
     defaultConfig {
-        applicationId = "dev.rovsti.catalog"
+        applicationId = "dev.rosty.catalog"
         versionCode = 1
         versionName = "0.1"
     }

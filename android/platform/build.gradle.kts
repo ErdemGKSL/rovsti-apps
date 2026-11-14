@@ -1,10 +1,10 @@
 plugins {
-    id("rovsti.android.library")
+    id("rosty.android.library")
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "dev.rovsti.platform"
+    namespace = "dev.rosty.platform"
     // R8 rules for what this module reaches by name (WaPush reads the FCM token by reflection).
     defaultConfig { consumerProguardFiles("consumer-rules.pro") }
     testFixtures { enable = true }
@@ -15,18 +15,18 @@ android {
                 // Source-scanning tests (PlatformConventionTest, PrefsNamesTest) read src/main: re-run when it changes.
                 it.inputs.files(fileTree("src/main")).withPropertyName("mainSources")
                 it.systemProperty(
-                    "rovsti.wire.fixtures",
+                    "rosty.wire.fixtures",
                     rootProject.projectDir.parentFile
-                        .resolve("crates/rovsti_core/tests/fixtures")
+                        .resolve("crates/rosty_core/tests/fixtures")
                         .absolutePath,
                 )
                 it.inputs
                     .dir(
-                        rootProject.projectDir.parentFile.resolve("crates/rovsti_core/tests/fixtures"),
+                        rootProject.projectDir.parentFile.resolve("crates/rosty_core/tests/fixtures"),
                     ).withPropertyName("wireFixtures")
                 // The headless goldens shared with Rust (HeadlessFixturesTest).
-                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_ffi/fixtures")
-                it.systemProperty("rovsti.ffi.fixtures", ffiFixtures.absolutePath)
+                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rosty_ffi/fixtures")
+                it.systemProperty("rosty.ffi.fixtures", ffiFixtures.absolutePath)
                 it.inputs.dir(ffiFixtures).withPropertyName("ffiFixtures")
             }
         }

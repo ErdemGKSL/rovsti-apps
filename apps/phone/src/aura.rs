@@ -15,7 +15,7 @@ use gpui::{
     Bounds, Context, GradientKind, Hsla, IntoElement, Render, Styled, Task, Window, canvas, fill,
     linear_color_stop, linear_gradient, point, px, size,
 };
-use rovsti_ui::{
+use rosty_ui::{
     current_theme,
     motion::Motion,
     motion_tokens,
@@ -86,7 +86,7 @@ pub struct Aura {
     drift_timer: Option<Task<()>>,
 }
 
-fn spring(value: f32, params: rovsti_ui::spring::SpringParams) -> Spring {
+fn spring(value: f32, params: rosty_ui::spring::SpringParams) -> Spring {
     Spring::new(value, params).with_epsilon(0.002)
 }
 

@@ -1,11 +1,11 @@
 //! Sample data for desktop runs (FR-38), where there is no phone to ask.
 //! Nothing here touches Android; `backend.rs` decides when to serve it.
 
-use rovsti_core::wire::{
+use rosty_core::wire::{
     BlockReason, BlockedNumber, CallLogEntry, CallLogKind, WireContact, WireNumber,
 };
 #[cfg(not(target_os = "android"))]
-use rovsti_core::{
+use rosty_core::{
     call_log::{DateOrder, TimeFormat},
     recents::LocaleTime,
 };
@@ -62,7 +62,7 @@ pub fn set_starred(id: i64, starred: bool) {
 pub fn contacts() -> Vec<WireContact> {
     let mut all = base_contacts();
     // The provider sorts by name; so does the sample.
-    all.sort_by_cached_key(|c| (rovsti_core::search::fold(&c.display_name), c.id));
+    all.sort_by_cached_key(|c| (rosty_core::search::fold(&c.display_name), c.id));
     if let Ok(changes) = STARRED.lock() {
         for (id, starred) in changes.iter() {
             if let Some(c) = all.iter_mut().find(|c| c.id == *id) {
@@ -74,7 +74,7 @@ pub fn contacts() -> Vec<WireContact> {
 }
 
 fn base_contacts() -> Vec<WireContact> {
-    if std::env::var_os("ROVSTI_PREVIEW_BIGCONTACTS").is_some() {
+    if std::env::var_os("ROSTY_PREVIEW_BIGCONTACTS").is_some() {
         return long_contacts(600);
     }
     vec![
@@ -298,9 +298,9 @@ pub fn call_log(now_ms: i64) -> Vec<CallLogEntry> {
 }
 
 /// The log the desktop preview shows: the short hand-made one, or 500 entries
-/// with `ROVSTI_PREVIEW_BIGLOG=1` (scroll and frame-time checks).
+/// with `ROSTY_PREVIEW_BIGLOG=1` (scroll and frame-time checks).
 pub fn preview_call_log(now_ms: i64) -> Vec<CallLogEntry> {
-    let mut log = if std::env::var_os("ROVSTI_PREVIEW_BIGLOG").is_some() {
+    let mut log = if std::env::var_os("ROSTY_PREVIEW_BIGLOG").is_some() {
         long_call_log(now_ms, 500)
     } else {
         call_log(now_ms)

@@ -1,14 +1,14 @@
-# UX completeness pass: Rovsti Messages (round 1)
+# UX completeness pass: Rosty Messages (round 1)
 
 Base: `6eee2b5a87d22e8d3e3ccb539042353ad91e1e68` (main, clean tree, no stash).
-Scope: `apps/messages`, `crates/rovsti_core`, `rovsti_wa_client` / `rovsti_wa_proto` as used by
-Messages, `crates/rovsti_android` seams Messages already has. No new product features and no
-backends. Intent comes from code and docs that exist: `rovsti_android::sms::delete_thread`
+Scope: `apps/messages`, `crates/rosty_core`, `rosty_wa_client` / `rosty_wa_proto` as used by
+Messages, `crates/rosty_android` seams Messages already has. No new product features and no
+backends. Intent comes from code and docs that exist: `rosty_android::sms::delete_thread`
 (Kotlin `SmsQuery.deleteThread`, planned in `messages.md` step 5) has no caller;
 `notify::copy_to_clipboard`, `telecom::{place_call, add_contact}`, `blocklist::block`,
-`Gateway::lookup_users`, `rovsti_wa_proto::{user_jid, lookup::wa_target}` exist; architecture
+`Gateway::lookup_users`, `rosty_wa_proto::{user_jid, lookup::wa_target}` exist; architecture
 AD-MSG8 says spam is never lost (so it must be recoverable from the Spam folder); roadmap
-"Unified inbox" and "Chat ... on WhatsApp ... through Rovsti Messages"; `docs/ux-audit.md` M21
+"Unified inbox" and "Chat ... on WhatsApp ... through Rosty Messages"; `docs/ux-audit.md` M21
 (one number per contact) was skipped there as "a feature", it is a pick-vs-type gap here.
 
 ## Audit: gaps found (as a user holding the phone)
@@ -30,7 +30,7 @@ AD-MSG8 says spam is never lost (so it must be recoverable from the Spam folder)
 ## Plan (ordered by user impact, pure logic first; each step leaves all checks green)
 
 Checks after every step:
-`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rovsti_android --target aarch64-linux-android && cargo check -p rovsti_wa_client --target aarch64-linux-android && cargo check -p rovsti_tiles --target aarch64-linux-android`
+`cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && cargo check -p rosty_android --target aarch64-linux-android && cargo check -p rosty_wa_client --target aarch64-linux-android && cargo check -p rosty_tiles --target aarch64-linux-android`
 (`df` showed 6.2 GB free at planning time; under 6 GB run `rm -rf target/debug/incremental` first).
 Never invent GPUI APIs: reuse only what these files already call (`menu_card`, `menu_item`,
 `glass_pill`, `glass_icon_button`, `list_row`, `on_long_press`, `NoticePill::{show, pointer,
@@ -50,7 +50,7 @@ New `apps/messages/src/sms_actions.rs` (add `mod sms_actions;` in `main.rs`), pu
   "Block", "Call", "Add to contacts", "Delete conversation"); `pub fn is_danger(action) -> bool` (Block, Delete).
 - `pub fn delete_prompt(title: &str) -> String`: "Delete the conversation with {title}? Its messages are removed from this phone." (blank title → "this number").
 - `pub fn sender_of(addresses: &[String]) -> Option<&str>`: the only non-blank address trimmed; `None` for none or for a group (2+ distinct).
-- `pub const NEEDS_ROLE: &str = "Make Rovsti Messages your default SMS app to delete messages";`
+- `pub const NEEDS_ROLE: &str = "Make Rosty Messages your default SMS app to delete messages";`
 - Tests: row actions for unread/muted/spam/group combinations; page actions for unknown vs known contact and blocked; labels non-empty and unique; prompt with and without title; `sender_of` empty, one, blank+one, two.
 
 `apps/messages/src/inbox.rs`:
@@ -64,7 +64,7 @@ New `apps/messages/src/drafts.rs` (pure): `#[derive(Default)] pub struct Drafts(
 `take(&mut self, thread: &ThreadId) -> Option<String>`, `forget(&mut self, thread: &ThreadId)`. Tests: put/take round trip, blank removes, negative SMS id ignored, take empties.
 
 Copy helpers:
-- `sms_conversation.rs`: `pub fn copy_text(item: &SmsItem) -> Option<String>` (body trimmed, `None` when empty); `pub fn copy_code(item: &SmsItem) -> Option<String>` (`rovsti_core::otp::detect` on the body, incoming only). Tests.
+- `sms_conversation.rs`: `pub fn copy_text(item: &SmsItem) -> Option<String>` (body trimmed, `None` when empty); `pub fn copy_code(item: &SmsItem) -> Option<String>` (`rosty_core::otp::detect` on the body, incoming only). Tests.
 - `conversation.rs`: `fn copy_text_of(body: &MessageBody, meta: Option<&MessageMeta>) -> Option<String>`: text, or a media caption; `None` for revoked, media without caption, location/contact cards. Test in the existing test module.
 
 `apps/messages/src/new_conversation.rs::options`: one `Recipient` per non-blank number of a contact (default first, then provider order), deduped by digits; `detail` = `"{label} · {raw}"` when `WireNumber.label` is non-blank, else `raw`. Keep `LIMIT`. Update/extend tests: a two-number contact gives two rows with labels; duplicate digits give one.
@@ -72,7 +72,7 @@ Copy helpers:
 `apps/messages/src/prefs.rs`: `pub fn unallow_sender(&mut self, sender: &str) -> bool` (case-insensitive remove; for Undo). Test.
 
 ### S2. SMS rows get a menu; delete a conversation with confirmation (fixes G1, G4)
-- `backend.rs`: `pub fn delete_thread(&mut self, thread_id: i64, cx) -> Task<Result<(), &'static str>>`-style flow (or a callback event, follow `cancel_scheduled`'s pattern): refuse with `sms_actions::NEEDS_ROLE` when `!sms_role_held()` and not preview; background `rovsti_android::sms::delete_thread`; `Ok(true)` → `pull_threads`, drop `prefs.muted` tag and `sim_choices` entry via `update_prefs`; `Ok(false)`/`Err` → "Couldn't delete that conversation". Preview (`is_preview()`): remove the row from the preview thread list and notify.
+- `backend.rs`: `pub fn delete_thread(&mut self, thread_id: i64, cx) -> Task<Result<(), &'static str>>`-style flow (or a callback event, follow `cancel_scheduled`'s pattern): refuse with `sms_actions::NEEDS_ROLE` when `!sms_role_held()` and not preview; background `rosty_android::sms::delete_thread`; `Ok(true)` → `pull_threads`, drop `prefs.muted` tag and `sim_choices` entry via `update_prefs`; `Ok(false)`/`Err` → "Couldn't delete that conversation". Preview (`is_preview()`): remove the row from the preview thread list and notify.
 - `backend.rs::mark_read` already exists: used by "Mark as read".
 - `main.rs`: `RowMenu` gains `sms: Option<SmsRowMenu { thread_id, sender: Option<String>, unread, muted, in_spam }>` and `wa: Option<..>` (existing fields move into it) so a merged person shows both sets (WhatsApp items, then the SMS items under them). `inbox_row` attaches the long press when `row.wa_chat.is_some() || row.sms_thread.is_some()`. SMS items come from `sms_actions::actions` (row context), labels from `label`, red for `is_danger`.
 - Delete opens a second `menu_card` step ("delete_confirm: bool" on `RowMenu`, like `mute_choices`) with the `delete_prompt` title and a red "Delete" item plus "Cancel"; Back steps back to the menu (extend `go_back`). On success: close an open page showing that thread, `dismiss_notification`, pill "Conversation deleted". Mute/Unmute call `backend.update_prefs(|p| p.set_muted(tag, ..))` and show a pill ("Muted" / "Unmuted").
@@ -99,10 +99,10 @@ Copy helpers:
 
 ### S7. New message: every number, and WhatsApp when linked (fixes G8, G9)
 - G9 is done by S1's `options` change; the row shows the detail line.
-- `open_recipient`: when `whatsapp.gateway()` is `Some`, compute `wa_target(&[number], chat users of wa_threads)` (`rovsti_wa_proto::lookup::wa_target`, as Contacts does in `apps/contacts/src/whatsapp.rs`). Show a `menu_card` titled with the recipient: "SMS" and "WhatsApp". WhatsApp with an existing chat → `open_chat(jid, title)`; with a bare number → background `Gateway::lookup_users(&[user_jid(number)?])`; on WhatsApp → `open_chat`; not on WhatsApp → pill "{title} is not on WhatsApp"; `user_jid` error (no country code) → pill "Add the country code to message on WhatsApp". Not linked → straight to SMS as today. Pure helper in `new_conversation.rs`: `pub fn channel_choice(linked: bool, sms_thread: Option<i64>) -> bool` (ask or not) only if it removes a branch; otherwise keep the logic inline and thin.
+- `open_recipient`: when `whatsapp.gateway()` is `Some`, compute `wa_target(&[number], chat users of wa_threads)` (`rosty_wa_proto::lookup::wa_target`, as Contacts does in `apps/contacts/src/whatsapp.rs`). Show a `menu_card` titled with the recipient: "SMS" and "WhatsApp". WhatsApp with an existing chat → `open_chat(jid, title)`; with a bare number → background `Gateway::lookup_users(&[user_jid(number)?])`; on WhatsApp → `open_chat`; not on WhatsApp → pill "{title} is not on WhatsApp"; `user_jid` error (no country code) → pill "Add the country code to message on WhatsApp". Not linked → straight to SMS as today. Pure helper in `new_conversation.rs`: `pub fn channel_choice(linked: bool, sms_thread: Option<i64>) -> bool` (ask or not) only if it removes a branch; otherwise keep the logic inline and thin.
 
 ### S8. Undo for Settings deletes; docs (fixes G10)
-- `settings_ui.rs`: `SettingsView` emits `SettingsEvent::Undoable { text: SharedString, undo: SettingsUndo }` (`SettingsUndo::{Rule(usize, SpamRule), Allow(String), Block(String), Mute(String)}`) after a rule delete, allow removal, unblock, unmute; `main.rs` subscribes and shows `show_pill_action(text, "Undo", PillAction::Settings(undo))`; firing re-inserts the rule at its index (add `SpamRules::insert_rule(&mut self, index: usize, rule: SpamRule)` next to `remove_rule` in `crates/rovsti_core/src/spam.rs`, clamped index, with a test), re-allows, re-blocks, re-mutes.
+- `settings_ui.rs`: `SettingsView` emits `SettingsEvent::Undoable { text: SharedString, undo: SettingsUndo }` (`SettingsUndo::{Rule(usize, SpamRule), Allow(String), Block(String), Mute(String)}`) after a rule delete, allow removal, unblock, unmute; `main.rs` subscribes and shows `show_pill_action(text, "Undo", PillAction::Settings(undo))`; firing re-inserts the rule at its index (add `SpamRules::insert_rule(&mut self, index: usize, rule: SpamRule)` next to `remove_rule` in `crates/rosty_core/src/spam.rs`, clamped index, with a test), re-allows, re-blocks, re-mutes.
 - Docs: `docs/messages-acceptance.md` new section "M. Managing conversations" (rows: delete with confirm, Not spam + Undo, Block + Undo, copy text/code, Call/Add contact from the page, draft survives Back, search, new WhatsApp chat from New message, two numbers per contact, Settings Undo); `docs/ux-audit.md` M21 marked fixed; `docs/roadmap.md` Messages: one ticked line "Manage conversations: delete, not spam, block, copy, search, drafts (done without a device)". Status section at the end of this file.
 
 ## Status

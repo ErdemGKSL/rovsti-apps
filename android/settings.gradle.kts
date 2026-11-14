@@ -15,7 +15,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "rovsti-android"
+rootProject.name = "rosty-android"
 
 include(":core-bridge")
 include(":design")

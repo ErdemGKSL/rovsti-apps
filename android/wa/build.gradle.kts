@@ -1,12 +1,12 @@
 plugins {
-    id("rovsti.android.library")
-    id("rovsti.compose")
-    id("rovsti.screenshots")
+    id("rosty.android.library")
+    id("rosty.compose")
+    id("rosty.screenshots")
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "dev.rovsti.wa"
+    namespace = "dev.rosty.wa"
     testFixtures { enable = true }
     testOptions {
         unitTests {
@@ -15,8 +15,8 @@ android {
                 // Source-scanning tests (WaManifestTest, FakeWaGatewayTest) read src/main: re-run when it changes.
                 it.inputs.files(fileTree("src/main")).withPropertyName("mainSources")
                 // The wa.link_* request and answer goldens shared with Rust (WaLinkStoreTest).
-                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_ffi/fixtures")
-                it.systemProperty("rovsti.ffi.fixtures", ffiFixtures.absolutePath)
+                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rosty_ffi/fixtures")
+                it.systemProperty("rosty.ffi.fixtures", ffiFixtures.absolutePath)
                 it.inputs.dir(ffiFixtures).withPropertyName("ffiFixtures")
             }
         }

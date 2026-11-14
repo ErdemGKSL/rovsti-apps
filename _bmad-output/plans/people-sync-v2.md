@@ -1,8 +1,8 @@
 # People sync v2: slow, resumable, observable
 
 Status: done (2026-11-14, branch `ui-overhaul`): S1 to S11 done; see the notes under each step.
-Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
-`crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
+Scope: `services/wa_gateway`, `crates/rosty_wa_proto`, `crates/rosty_wa_client`, `crates/rosty_app_core`,
+`crates/rosty_core`, `crates/rosty_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
 
 ## 1. Root cause
@@ -44,7 +44,7 @@ service, syncing groups, the GPUI Messages/Stops apps (they are replaced in E6/E
 
 | # | Decision | Rejected alternative, why |
 | --- | --- | --- |
-| D1 | The sync planner (work selection, cursor, pacing, backoff, state machine) is pure Rust in `rovsti_app_core::people_sync`, driven step by step through `people.sync_*` ops. Kotlin only performs the gateway call the planner asks for and reports the answer. | Keep growing `PeopleSync.kt` (605 lines): violates "domain logic in platform-free crates", cannot be shared with Phone standalone, and timing logic is hard to test in Robolectric. |
+| D1 | The sync planner (work selection, cursor, pacing, backoff, state machine) is pure Rust in `rosty_app_core::people_sync`, driven step by step through `people.sync_*` ops. Kotlin only performs the gateway call the planner asks for and reports the answer. | Keep growing `PeopleSync.kt` (605 lines): violates "domain logic in platform-free crates", cannot be shared with Phone standalone, and timing logic is hard to test in Robolectric. |
 | D2 | The cursor is **set based**, not an index: per run, the sets of JIDs already looked up / profiled / pictured. Remaining work = current targets minus done sets. | Index into a stored list: breaks when the contact list changes between slices. Storing the target list: a second copy of the address book on disk for no gain. |
 | D3 | Checkpoint is one JSON file `people-sync.json` next to `people.json` (temp file + rename, same helper as `people::save`). Every report commits `people.json` first, then the checkpoint. A crash between the two repeats one batch; upserts are idempotent. | SharedPreferences (`apply()` is not durable, not atomic with the book, Kotlin-only). SQLite: nothing else here uses it. |
 | D4 | One pacer for all usync traffic (lookups + profiles share a gap), one for pictures. No burst. Constants in section 6. | Mirroring the gateway's token buckets (today): the gateway's numbers are guesses, and a burst is exactly what trips WhatsApp. |
@@ -53,13 +53,13 @@ service, syncing groups, the GPUI Messages/Stops apps (they are replaced in E6/E
 | D7 | "Sync now" = new run (re-checks everything). "Continue" = same run, skips done sets. The 6 h worker resumes a resumable run, otherwise starts an incremental run (honours negative-lookup and profile freshness TTLs). | One button that guesses: the user asked for both, and a restart during a WhatsApp penalty is harmful (D8). |
 | D8 | While WhatsApp's penalty is running (`not_before_ms` in the future) both buttons are disabled and the row shows the ETA; the continuation is scheduled automatically. | Letting the user retry: every early retry risks extending the penalty or flagging the account. |
 | D9 | Progress reaches Phone through the existing provider notification, sent after every committed part (coalesced to at most one per 3 s, trailing edge guaranteed). | A new broadcast or a bound service: more surface, same result. `ProviderSource` + `PeopleIndex.attach` already reload on notify (conflated). |
-| D10 | Rust logs reach the Logs screen by **pull**: `rovsti_ffi` keeps a bounded ring, Kotlin drains it with `core.logs_drain`. | Pushing each line through the event sink: a JNI call per log line from any thread, and `events::emit` itself logs on failure (recursion). |
-| D11 | Developer mode, the log store and the Logs page live in shared modules: facade + ring + file + masking in `:core-bridge` (`dev.rovsti.core.log`, the lowest module every app module depends on; `:design` must stay Rust-free and gets nothing), UI in `:shell/settings/dev`. | A new `:devtools` module: one more module for ~6 files; `:shell` already owns the About page with the version row and is used by Contacts and Phone. |
+| D10 | Rust logs reach the Logs screen by **pull**: `rosty_ffi` keeps a bounded ring, Kotlin drains it with `core.logs_drain`. | Pushing each line through the event sink: a JNI call per log line from any thread, and `events::emit` itself logs on failure (recursion). |
+| D11 | Developer mode, the log store and the Logs page live in shared modules: facade + ring + file + masking in `:core-bridge` (`dev.rosty.core.log`, the lowest module every app module depends on; `:design` must stay Rust-free and gets nothing), UI in `:shell/settings/dev`. | A new `:devtools` module: one more module for ~6 files; `:shell` already owns the About page with the version row and is used by Contacts and Phone. |
 | D12 | Phone without Contacts uses the same engine and the same `people.*` store in Phone's own data dir (supersedes X.1d "memory only"). See open question Q2; until answered, step S10 is the last step and can be dropped. | Leaving `StandalonePeople` unpaced: it is a second source of 429s on the same account. |
 
 ## 4. Checkpoint data model
 
-New module `crates/rovsti_app_core/src/people_sync.rs` (no Android, no network; `serde`, `std::fs` like `people.rs`).
+New module `crates/rosty_app_core/src/people_sync.rs` (no Android, no network; `serde`, `std::fs` like `people.rs`).
 
 ```rust
 pub const FILE: &str = "people-sync.json";
@@ -242,7 +242,7 @@ An incremental run with nothing new: one `PlanPictures`, seconds.
    `RateLimited { retry_after_s: backoff }`, else `Failed`. (whatsapp-rust 0.7 `request.rs:113`; check how
    `ContactError` wraps `IqError` at the pinned version and match by type; keep a string fallback on
    `"code=429"` covered by a test.)
-2. `rovsti_wa_proto::ApiError`: two optional fields, `retry_after_ms: Option<u64>` and
+2. `rosty_wa_proto::ApiError`: two optional fields, `retry_after_ms: Option<u64>` and
    `source: Option<LimitSource>` (`"whatsapp" | "gateway"`), `#[serde(default, skip_serializing_if = "Option::is_none")]`.
    Old clients ignore unknown fields (no `deny_unknown_fields`; add a test that pins this).
 3. `error.rs`: `From<DriverError>` maps `RateLimited` to `ErrorCode::RateLimited`; `IntoResponse` adds a
@@ -255,12 +255,12 @@ An incremental run with nothing new: one `PlanPictures`, seconds.
 5. `rich_routes.rs::profiles`: on `Err(DriverError::RateLimited)` (or `Charge::Cooldown/Bucket`): call
    `note_upstream_limit`; if `req.refresh` or any requested JID has no stored answer with `fetched_ms > 0`, answer
    429 with `retry_after_ms` and `source`; otherwise serve the stored (stale) profiles with 200 and the response
-   header `x-rovsti-stale: rate-limited`. Other driver errors: keep serving stored data only under the same
+   header `x-rosty-stale: rate-limited`. Other driver errors: keep serving stored data only under the same
    "every JID has a real answer" rule, else return the error (today's silent default profiles disappear).
 6. `routes.rs::lookup_users` and `rich_routes.rs::fetch_picture`: upstream 429 now arrives as `RateLimited`
    through `?`; add `note_upstream_limit` and the `retry_after_ms`/`source` fields. Gateway bucket refusals carry
    `source: gateway` and `retry_after_ms` from the bucket's refill time (add `TokenBucket::wait_ms(n, now)` in
-   `rovsti_wa_proto::limit`, unit tested).
+   `rosty_wa_proto::limit`, unit tested).
 7. Logging: one `axum::middleware::from_fn` layer `log_request` in `lib.rs`: at INFO
    `instance=<id> <METHOD> <matched route template> -> <status> <ms>ms` (uses `MatchedPath`, so no JID or query
    string is logged; `/health` and the event stream at DEBUG). Every 429 at WARN:
@@ -278,23 +278,23 @@ Compatibility matrix:
 
 ## 8. Client, FFI and Kotlin wiring
 
-- `rovsti_wa_client`: no API change (`ClientError::Api(ApiError)` now carries the new fields). Unit test in
+- `rosty_wa_client`: no API change (`ClientError::Api(ApiError)` now carries the new fields). Unit test in
   `error.rs` for a 429 body with and without the fields.
-- `rovsti_ffi::ops::wa::map_error`: detail becomes `{ "code", "retry_after_ms"?, "source"? }`.
-- `rovsti_ffi::ops::people`: new ops `people.sync_status`, `people.sync_begin`, `people.sync_next`,
+- `rosty_ffi::ops::wa::map_error`: detail becomes `{ "code", "retry_after_ms"?, "source"? }`.
+- `rosty_ffi::ops::people`: new ops `people.sync_status`, `people.sync_begin`, `people.sync_next`,
   `people.sync_report`, `people.sync_stop` with fixture cases (same pattern as `people.upsert`); the `Session`
-  lives in a `Mutex<Option<Session>>` in `state.rs`. Update `crates/rovsti_ffi/OPS.md` and run
+  lives in a `Mutex<Option<Session>>` in `state.rs`. Update `crates/rosty_ffi/OPS.md` and run
   `scripts/check-ffi-exports.sh`.
 - Kotlin models in `android/core-bridge/.../model/people/SyncModels.kt` (+ contract fixtures), `PeopleOps` gets
   the five calls, `RustError.rateLimit(): RateLimit?` (`retryAfterMs`, `source`) replaces the boolean
   `isRateLimited()` (kept as a thin wrapper for `WaAvatars`).
-- Runner: `android/people/src/main/kotlin/dev/rovsti/people/sync/PeopleSyncRunner.kt` (shared by Contacts and,
+- Runner: `android/people/src/main/kotlin/dev/rosty/people/sync/PeopleSyncRunner.kt` (shared by Contacts and,
   in S10, Phone). `PeopleStore` moves from `:contacts` to `:people` unchanged (it has no Contacts dependency).
 
 ```kotlin
 class PeopleSyncRunner(store: PeopleStore, ops: PeopleOps, wa: WaRepository, numbers: suspend () -> List<String>,
     codec: AvatarCodec, clock: () -> Long, pause: suspend (Long) -> Unit, random: () -> Int,
-    onPart: () -> Unit, log: RovstiLog) {
+    onPart: () -> Unit, log: RostyLog) {
     val status: StateFlow<PeopleSyncStatus>
     suspend fun run(start: Start, sliceMs: Long?): SliceResult   // loop: next -> perform -> report
     fun cancel()
@@ -381,39 +381,39 @@ the ETA text refreshes once a minute from a ticker in the view model (no per-sec
 
 ## 10. Logging pipeline and developer mode
 
-### Log store (`android/core-bridge/src/main/kotlin/dev/rovsti/core/log/`)
+### Log store (`android/core-bridge/src/main/kotlin/dev/rosty/core/log/`)
 
-- `RovstiLog` (object facade): `d/i/w/e(tag: String, msg: String, t: Throwable? = null)` and
+- `RostyLog` (object facade): `d/i/w/e(tag: String, msg: String, t: Throwable? = null)` and
   `event(tag, name, vararg fields: Pair<String, Any?>)` which renders `name k=v k=v` (the structured form the sync
-  uses). Always also writes to logcat (`android.util.Log`) under tag `rovsti` in debuggable builds only.
+  uses). Always also writes to logcat (`android.util.Log`) under tag `rosty` in debuggable builds only.
 - `LogEntry(seq: Long, timeMs: Long, level: Level, tag: String, source: Source /* Kotlin | Rust */, text: String)`.
 - `LogRing(capacity = 2 000)`: lock-protected ring, always on (memory only), `snapshot()`, `StateFlow<Long>` of
   the last seq for the UI. Lines are capped at 2 000 chars.
-- `LogFile(dir = noBackupFilesDir/logs, maxBytes = 512 KiB, files = 2)`: `rovsti-0.log` rotates to
-  `rovsti-1.log`; written by one background thread from a bounded queue (drop-oldest, never blocks a caller);
+- `LogFile(dir = noBackupFilesDir/logs, maxBytes = 512 KiB, files = 2)`: `rosty-0.log` rotates to
+  `rosty-1.log`; written by one background thread from a bounded queue (drop-oldest, never blocks a caller);
   **only while developer mode is on**; deleted when it is turned off and by "Clear".
 - `LogMask.mask(text)`: applied at write time, before the ring and the file, to Kotlin and (again, defensively)
   Rust lines. Rules: `rwk_[A-Za-z0-9_-]+` -> `rwk_***`; `Authorization`/`key=` values -> `***`; JIDs
   `(\d{7,15})@(s\.whatsapp\.net|lid)` and bare phone-like runs (`\+?\d{7,15}`, not part of a longer number,
   not a timestamp field named `*_ms`/`ms=`) -> first two digits + `***` + last two (`90***67@s.whatsapp.net`);
   group JIDs keep only the suffix; e-mail local parts -> `***`. Names and message text are never logged by policy
-  (review rule, plus a source-scan test like `AvatarSourceScanTest` that forbids `RovstiLog` calls with
+  (review rule, plus a source-scan test like `AvatarSourceScanTest` that forbids `RostyLog` calls with
   `name`/`pushName`/`body` arguments in `people` and `wa`).
-- The same rules exist in Rust as `rovsti_core::redact::mask(&str) -> Cow<str>` (pure, unit tested). Both sides
-  are checked against one fixture, `crates/rovsti_core/tests/data/redact_cases.json`, which the Kotlin test reads
+- The same rules exist in Rust as `rosty_core::redact::mask(&str) -> Cow<str>` (pure, unit tested). Both sides
+  are checked against one fixture, `crates/rosty_core/tests/data/redact_cases.json`, which the Kotlin test reads
   from the repo path the way `QrMatrixTest` reads its contract fixture.
 
-### Rust logs (today: `crates/rovsti_ffi/src/logger.rs` writes to logcat tag `rovsti` only)
+### Rust logs (today: `crates/rosty_ffi/src/logger.rs` writes to logcat tag `rosty` only)
 
 - `logger.rs`: `log()` additionally pushes `{seq, time_ms, level, target, text: redact::mask(msg)}` into
-  `logbuf` (new `crates/rovsti_ffi/src/logbuf.rs`: `Mutex<VecDeque>`, capacity 2 000, `try_lock` so logging never
-  blocks or deadlocks; a dropped line increments a counter). Filter: targets starting with `rovsti` at Debug,
+  `logbuf` (new `crates/rosty_ffi/src/logbuf.rs`: `Mutex<VecDeque>`, capacity 2 000, `try_lock` so logging never
+  blocks or deadlocks; a dropped line increments a counter). Filter: targets starting with `rosty` at Debug,
   everything else at Warn and above (keeps `ureq`/`rustls` chatter and their URLs out).
 - New op `core.logs_drain { after_seq, max }` -> `{ entries, dropped, last_seq }` (read-only, fixture case).
 - Kotlin `RustLogPump` (core-bridge): while developer mode is on, drains every 1 s (and once when it is switched
   on, which brings the history since process start) into `LogRing` with `source = Rust`. Off: no polling, zero
   cost beyond the Rust ring.
-- `people_sync` logs through `log::info!(target: "rovsti::sync", ...)`.
+- `people_sync` logs through `log::info!(target: "rosty::sync", ...)`.
 
 ### What the sync logs (tag `sync`, structured, masked)
 
@@ -424,13 +424,13 @@ the ETA text refreshes once a minute from a ticker in the view model (no per-sec
 `error kind= message=` · `commit changed= dropped=` · `notify parts=` ·
 `slice_end outcome= stage= done= total= waited_ms= batches= next_at=` · `worker result= continue_in_ms=`.
 Also `wa` (link state changes, gateway call + status + duration from `WaGateway.guarded`) and `core` (Rust).
-The existing 68 `android.util.Log` call sites move to `RovstiLog` module by module (mechanical; a detekt/konsist
+The existing 68 `android.util.Log` call sites move to `RostyLog` module by module (mechanical; a detekt/konsist
 rule or a source-scan test then forbids new direct `android.util.Log` use in `src/main`).
 
 ### Developer mode
 
-- State: `DevMode` in `:core-bridge` (`dev.rovsti.core.log.DevMode`): `enabled: StateFlow<Boolean>`, persisted in
-  SharedPreferences file `rovsti_dev` (add the name to the pinned set in `PrefsNamesTest`/`PlatformPrefs` if that
+- State: `DevMode` in `:core-bridge` (`dev.rosty.core.log.DevMode`): `enabled: StateFlow<Boolean>`, persisted in
+  SharedPreferences file `rosty_dev` (add the name to the pinned set in `PrefsNamesTest`/`PlatformPrefs` if that
   test scans `:core-bridge`; otherwise pin it in a new `DevPrefsTest`). Per app (each app has its own data).
 - Toggle: the **Version** row of the shared About page (`android/shell/.../settings/AboutPage.kt`, the
   `settings_about_version` item; used by Contacts `ContactsSettings.kt:115` and Phone
@@ -451,7 +451,7 @@ rule or a source-scan test then forbids new direct `android.util.Log` use in `sr
   multi-select; `LazyColumn` with stable keys (`seq`), monospace caption style, level-coloured leading dot (not
   colour alone: the level letter is in the text), newest at the bottom, auto-follow while scrolled to the end and
   a "jump to latest" pill otherwise; tap expands a long line. Toolbar menu: Copy (filtered view to the clipboard,
-  capped at 256 KiB, toast "Copied"), Share (writes the filtered view to `cacheDir/logs/rovsti-log-<time>.txt` and
+  capped at 256 KiB, toast "Copied"), Share (writes the filtered view to `cacheDir/logs/rosty-log-<time>.txt` and
   starts `ACTION_SEND` `text/plain` through the app's FileProvider with a read grant; verify each app declares one,
   else add a `logs` path to a shared provider in `:shell`'s manifest), Clear (alert first). The share sheet is the
   only way anything leaves the device; the header of the exported file says the content is masked.
@@ -464,7 +464,7 @@ rule or a source-scan test then forbids new direct `android.util.Log` use in `sr
 
 ## 11. Tests
 
-Rust, `rovsti_app_core::people_sync` (pure, fake clock, fixed `rand`):
+Rust, `rosty_app_core::people_sync` (pure, fake clock, fixed `rand`):
 `fresh_run_walks_lookup_profiles_pictures`, `batches_are_at_most_usync_batch`, `gap_and_jitter_bounds`,
 `no_burst_first_two_batches_are_a_gap_apart`, `lookups_and_profiles_share_the_usync_gap`,
 `rate_limit_doubles_gap_halves_batch`, `retry_after_is_never_undercut`, `backoff_caps_at_max`,
@@ -478,17 +478,17 @@ Rust, `rovsti_app_core::people_sync` (pure, fake clock, fixed `rand`):
 `negative_and_profile_ttls`, `picture_failures_cap`, `rate_limited_picture_is_not_a_failure`,
 `report_is_idempotent` (same report twice = same state), `crash_between_book_and_checkpoint_repeats_one_batch`,
 `damaged_or_oversized_file_reads_as_default`, `newer_schema_reads_as_default`, `status_progress_per_stage`,
-`live_pictures_do_not_touch_run`. Plus `people.sync_*` fixture cases in `rovsti_ffi` and a serde round-trip.
+`live_pictures_do_not_touch_run`. Plus `people.sync_*` fixture cases in `rosty_ffi` and a serde round-trip.
 
-Rust, others: `rovsti_core::redact` (fixture cases: connect key, JID, bare number, number inside a longer id is
-left alone, `_ms` fields are left alone, e-mail, idempotent masking); `rovsti_ffi::logbuf` (capacity, drain after
-seq, dropped counter, non-`rovsti` debug filtered); `rovsti_wa_proto` (`ApiError` old JSON still parses, new
-fields skipped when `None`, `TokenBucket::wait_ms`); `rovsti_wa_client::error` (429 body with fields);
-`rovsti_ffi::ops::wa` (`map_error` detail carries `retry_after_ms` and `source`).
+Rust, others: `rosty_core::redact` (fixture cases: connect key, JID, bare number, number inside a longer id is
+left alone, `_ms` fields are left alone, e-mail, idempotent masking); `rosty_ffi::logbuf` (capacity, drain after
+seq, dropped counter, non-`rosty` debug filtered); `rosty_wa_proto` (`ApiError` old JSON still parses, new
+fields skipped when `None`, `TokenBucket::wait_ms`); `rosty_wa_client::error` (429 body with fields);
+`rosty_ffi::ops::wa` (`map_error` detail carries `retry_after_ms` and `source`).
 
 Gateway (`services/wa_gateway`, `FakeDriver` gains `fail_next(op, DriverError)`):
 `tests/api.rs`: `profiles_surface_upstream_rate_limit` (never-fetched JID: 429, `retry_after_ms`, `source=whatsapp`,
-`Retry-After` header), `profiles_serve_stale_when_every_jid_was_fetched` (200 + `x-rovsti-stale`),
+`Retry-After` header), `profiles_serve_stale_when_every_jid_was_fetched` (200 + `x-rosty-stale`),
 `profiles_refresh_true_is_never_stale`, `lookup_upstream_rate_limit_is_429_not_500`,
 `picture_upstream_rate_limit_is_429`, `cooldown_stops_upstream_calls` (driver call counter stays flat),
 `cooldown_expires`, `gateway_bucket_429_has_source_gateway`, `profiles_other_driver_error_is_not_silent`.
@@ -520,7 +520,7 @@ Kotlin (JVM/Robolectric, existing rigs):
 ## 12. Implementation order (each step builds green and can ship alone)
 
 Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile checks && cargo test --workspace
---profile checks`, `cargo check --release -p rovsti_android --target aarch64-linux-android`, and for Kotlin steps
+--profile checks`, `cargo check --release -p rosty_android --target aarch64-linux-android`, and for Kotlin steps
 `scripts/kotlin-ui-check.sh` (release only; never a debug build, never `cargo clean`).
 
 - **S1 Gateway truth (highest value, ship first).** Section 7 items 1-8 + proto fields + client/ffi detail + tests.
@@ -532,18 +532,18 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   cooldown refusal: otherwise every early retry during a pause would add a strike and extend the pause without end.
   A cooldown refusal carries `source: whatsapp` (the pause is WhatsApp's), a bucket refusal `source: gateway`.
   (c) The picture route also applies stale-if-error: when it holds the bytes of the known picture it serves them with
-  `x-rovsti-stale: rate-limited` instead of a 429 (D5's reasoning; only a never-held picture gets the 429).
+  `x-rosty-stale: rate-limited` instead of a 429 (D5's reasoning; only a never-held picture gets the 429).
   (d) The Rust field is `ApiError::limit_source` with `#[serde(rename = "source")]`: `thiserror` treats a field
   named `source` as the error's cause. `LimitSource` has a `#[serde(other)] Other` so a newer source never breaks
   parsing. (e) The cooldown is a pure `services/wa_gateway/src/cooldown.rs` (unit tests cover expiry, doubling, cap,
   hint and strike reset); `cooldown_expires` is a unit test there, not an api test (the api tests run on the real
   clock and the first pause is 60 s). (f) The WARN 429 line is written by the contact handlers (they know `n`); the
   INFO request line by the `request_log` middleware (instance id filled in by the `Authed` extractor).
-- **S2 Logging core.** `rovsti_core::redact`, `rovsti_ffi::logbuf` + `core.logs_drain`, Kotlin `RovstiLog`,
+- **S2 Logging core.** `rosty_core::redact`, `rosty_ffi::logbuf` + `core.logs_drain`, Kotlin `RostyLog`,
   `LogRing`, `LogMask`, `LogFile`, `DevMode`, `RustLogPump` (no UI yet; ring only). `PeopleSync` (still v1) gets
   log lines for run start, each batch, each 429, outcome and the NotLinked case. Tests.
   *Done (notes):* `redact::mask` is a one-pass ASCII scanner (no regex crate); `LogMask` is a line-for-line port and
-  both pass `redact_cases.json` (the Kotlin test reads it through the `rovsti.redact` system property). In
+  both pass `redact_cases.json` (the Kotlin test reads it through the `rosty.redact` system property). In
   `logbuf` a busy ring drops the line but its seq is used, so `core.logs_drain`'s `dropped` counts every lost line
   from the gap; the fixture case asks after a seq far ahead, so its answer is the same in any process. `DevLog`
   (core-bridge) ties `DevMode` to the file sink and the pump; `ShellContainer.devLog` starts it off the main thread
@@ -552,12 +552,12 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
 - **S3 Developer mode UI.** `holdToToggle` on the version row, Developer group, `LogsPage`, share/copy/clear,
   strings en/tr, catalog page, shots. From here a failed sync can be diagnosed on the phone.
   *Done (notes, deviations):* `DevMode` reaches the shell pages through `LocalDevMode` (provided by
-  `RovstiShellActivity` from `ShellContainer.devLog`), so `AboutPage` and `CommonSettingsGroup` need no new
+  `RostyShellActivity` from `ShellContainer.devLog`), so `AboutPage` and `CommonSettingsGroup` need no new
   parameters and the apps only map `CommonSettingsPage.Logs` to their `Logs(tag)` route (Contacts, Phone). The tag
   filter is single-select (`ChipRow` is single-select; "All" plus one tag), not multi-select. The Logs page opens on
   the filters and follows new lines only while the end is in view (the "Jump to latest" pill otherwise); opening
   scrolled to the end clipped the filter row's touch targets at font scale 2. Share stages the file through the
-  existing `RovstiShareProvider` (`FilesRepository.stageForShare`), which both apps already declare. "Sync Details"
+  existing `RostyShareProvider` (`FilesRepository.stageForShare`), which both apps already declare. "Sync Details"
   (open Logs on `sync`) is left to S7 with the new settings group; the route already takes the tag.
 - **S4 Honest outcomes in v1 (small).** `NotLinked` no longer stored as Failed; link-settle wait
   (`WaRepository.settled`); profiles with `fetched_ms == 0` counted as unanswered -> Partial. This fixes the
@@ -578,7 +578,7 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   chains it), not a `Mutex<Option<Session>>` in `state.rs`; `people.sync_stop` releases it. (c) The process-death rule
   needs no `fresh_process` flag: the first `people.sync_*` call for a directory in a process turns a stored `Running`
   into `Interrupted(ProcessDeath)`. (d) `LinkId.gateway` is FNV-1a 64 of the URL (trailing `/` ignored), not SHA-256:
-  stable across builds and no new dependency for `rovsti_app_core`. (e) A link change also clears `last`. (f) A profile
+  stable across builds and no new dependency for `rosty_app_core`. (e) A link change also clears `last`. (f) A profile
   an old gateway leaves unanswered three times in one run (`MAX_UNANSWERED`) is given up for that run, so a mixed batch
   cannot loop forever; a whole unanswered batch is the D6 throttle and does not count against the JIDs. (g) A
   non-network gateway error on one picture fails only that picture (as v1), not the run. (h) With the backoff doubling
@@ -592,7 +592,7 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
 - **S6 Runner + Contacts switch-over.** `PeopleStore` to `:people`, `PeopleSyncRunner`, `PartNotifier`,
   `PeopleSync` delegates, worker continuation work, one-time migration of the old prefs, removal of
   `Allowance/Wait/Paced/PeopleSyncLog`. Sync log lines complete (section 10). Rewritten and new Kotlin tests.
-  *Done (notes, deviations):* (a) `PeopleStore` moved to `:people` as `dev.rovsti.people.sync.PeopleStore` with one
+  *Done (notes, deviations):* (a) `PeopleStore` moved to `:people` as `dev.rosty.people.sync.PeopleStore` with one
   addition, an optional `dataDir` passed as `dir` to every `people.*` request (tests give each container its own book);
   `:people` now depends on `:wa`. (b) The Kotlin tests drive the **real** planner: `PeopleTestContainer.useRealPeople()`
   routes `people.*` to the host library (`RoutingCore`), the gateway stays the scripted fake, so the planner is not
@@ -602,7 +602,7 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   long limit ends the slice and refuses until the ETA, rate-limited picture, legacy-200 throttle),
   `PeopleSyncWorkerTest` (schedule, continuation, result mapping) and `PeopleSyncLiveTest`; `PartNotifierTest` in
   `:people`. (c) Concurrent writers of `people.json` (a live profile upsert during a report) are serialized **in Rust**
-  (`book_lock` in `rovsti_ffi::ops::people` around `people.upsert` and every `people.sync_*`), not by a Kotlin commit
+  (`book_lock` in `rosty_ffi::ops::people` around `people.upsert` and every `people.sync_*`), not by a Kotlin commit
   mutex: `RustDispatcher` runs four calls at once, and the lock also covers Phone. (d) The legacy prefs are not
   migrated into the checkpoint (no op for it): `PeopleSync` shows their last sync until the first v2 run finishes, then
   clears them. (e) The worker maps `LinkNotReady` to `retry()` (as S4), everything else to `success()`; continuation
@@ -629,14 +629,14 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   `x1-people-sync-row-{never,stopped,tr}-{light,dark}.png`.
 - **S8 Live pass on the shared pace** (`Start.LivePictures`), commit mutex. (Can merge into S6 if small.)
   *Done in S6* (see S6 note h; the commit mutex is the Rust `book_lock`, note c).
-- **S9 Mechanical:** move remaining `android.util.Log` sites to `RovstiLog`, add the source-scan rule; docs:
-  `docs/whatsapp-gateway.md`, `docs/architecture.md` (people sync + logging paragraphs), `crates/rovsti_ffi/OPS.md`.
+- **S9 Mechanical:** move remaining `android.util.Log` sites to `RostyLog`, add the source-scan rule; docs:
+  `docs/whatsapp-gateway.md`, `docs/architecture.md` (people sync + logging paragraphs), `crates/rosty_ffi/OPS.md`.
   *Done (notes, deviations):* every direct `android.util.Log` call in `src/main` (`:phone`, `:platform`) now goes
-  through `RovstiLog` with a domain tag (`phone`, `call`, `wa`, `trip`, `permissions`) instead of `Rovsti`. Two files
-  keep logcat on purpose and are allowed by the scan: `IncomingPerf.kt` (`scripts/perf-run.sh` reads its `RovstiPerf`
-  report from a release build's logcat) and `ContactResult.kt` (its tests read the `RovstiContacts` tag through
+  through `RostyLog` with a domain tag (`phone`, `call`, `wa`, `trip`, `permissions`) instead of `Rosty`. Two files
+  keep logcat on purpose and are allowed by the scan: `IncomingPerf.kt` (`scripts/perf-run.sh` reads its `RostyPerf`
+  report from a release build's logcat) and `ContactResult.kt` (its tests read the `RostyContacts` tag through
   `ShadowLog`). The rule is a source scan in `:core-bridge` (`LogSourceScanTest`, no detekt/konsist in the build), which
-  also forbids `RovstiLog` calls with a name or message-text argument in `people` and `wa` code. Note: `RovstiLog`
+  also forbids `RostyLog` calls with a name or message-text argument in `people` and `wa` code. Note: `RostyLog`
   writes logcat only in debuggable builds, so release builds no longer print these warnings to logcat; they are in the
   ring and, in developer mode, the Logs page. OPS.md was updated with S5.
 - **S10 Phone standalone on the engine** (pending Q2): `StandalonePeople` becomes a thin wrapper over

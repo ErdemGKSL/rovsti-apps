@@ -6,7 +6,7 @@ incoming calls, live WhatsApp sockets and arrival alarms.
 
 ## Detection
 
-`rovsti_android::xiaomi::detect()` reads system properties directly in Rust:
+`rosty_android::xiaomi::detect()` reads system properties directly in Rust:
 
 - `ro.mi.os.version.name` → HyperOS (`OS1.0`, `OS2.0`, …)
 - `ro.miui.ui.version.name` → MIUI (`V125`, `V140`, …)

@@ -11,7 +11,7 @@
 //! Numbers for the docs:
 //!
 //!   CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_OPT_LEVEL=3 \
-//!     cargo test --release -p rovsti_phone perf_harness::measure -- --ignored --nocapture
+//!     cargo test --release -p rosty_phone perf_harness::measure -- --ignored --nocapture
 //!
 //! A desktop CPU is not the phone's, so absolute milliseconds only compare
 //! runs on the same machine; allocation and render counts transfer.
@@ -27,7 +27,7 @@ use std::{
 use futures::channel::mpsc;
 use gpui::{AnyWindowHandle, AppContext as _, HeadlessAppContext, WindowHandle, px, size};
 use gpui_wgpu::CosmicTextSystem;
-use rovsti_ui::{IconAssets, perf::Recorder, spring::FrameClock};
+use rosty_ui::{IconAssets, perf::Recorder, spring::FrameClock};
 
 use crate::{
     PhoneApp,
@@ -536,7 +536,7 @@ mod tests {
 
     #[test]
     fn springs_and_presses_do_not_allocate_per_frame() {
-        use rovsti_ui::{
+        use rosty_ui::{
             motion::{Entrance, Presses},
             spring::Spring,
             tab_bar::{Tab, TabBar},
@@ -547,10 +547,10 @@ mod tests {
         presses.down("key-6");
         let mut entrance = Entrance::default();
         entrance.restart();
-        let mut spring = Spring::new(0.0, rovsti_ui::motion_tokens::press());
+        let mut spring = Spring::new(0.0, rosty_ui::motion_tokens::press());
         spring.set_target(1.0);
         let mut bar =
-            TabBar::new((0..4).map(|i| Tab::new(rovsti_ui::Icon::LucideStar, format!("t{i}"))));
+            TabBar::new((0..4).map(|i| Tab::new(rosty_ui::Icon::LucideStar, format!("t{i}"))));
         bar.select(3);
         let n = allocs_in(|| {
             for frame in 0..600 {
@@ -574,7 +574,7 @@ mod tests {
     fn timer_and_press_text_are_built_on_the_stack() {
         let n = allocs_in(|| {
             for i in 0..500 {
-                let elapsed = rovsti_core::call::format_elapsed(1_000_000 + i * 1000, 1_000);
+                let elapsed = rosty_core::call::format_elapsed(1_000_000 + i * 1000, 1_000);
                 std::hint::black_box(elapsed.as_str());
                 let key = crate::recents::press_key(i as usize, crate::recents::Zone::Row);
                 std::hint::black_box(key.as_str());
@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn the_frame_ring_never_allocates() {
-        let mut stats = rovsti_core::perf::FrameStats::default();
+        let mut stats = rosty_core::perf::FrameStats::default();
         let n = allocs_in(|| {
             for i in 0..5000 {
                 stats.push(i as f32 * 0.001);
@@ -613,10 +613,10 @@ mod tests {
         rig.cx
             .update_window(any, |_, window, _| {
                 // The first observation may size nothing; the next ones must not.
-                recorder.observe(window, rovsti_ui::perf::Scenario::Tab, true, FRAME);
+                recorder.observe(window, rosty_ui::perf::Scenario::Tab, true, FRAME);
                 observed = allocs_in(|| {
                     for _ in 0..200 {
-                        recorder.observe(window, rovsti_ui::perf::Scenario::Tab, true, FRAME);
+                        recorder.observe(window, rosty_ui::perf::Scenario::Tab, true, FRAME);
                     }
                 });
             })
@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn a_filtered_list_maps_positions_to_the_right_rows() {
-        use rovsti_core::call_log_query::{Query, RecentsFilter};
+        use rosty_core::call_log_query::{Query, RecentsFilter};
         let mut rig = recents_with_500_rows();
         rig.with_app(|app, _, _| {
             let all = app.recents.row_count();
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn changing_the_filter_scrolls_to_the_top() {
-        use rovsti_core::call_log_query::{Query, RecentsFilter};
+        use rosty_core::call_log_query::{Query, RecentsFilter};
         let mut rig = recents_with_500_rows();
         rig.apply(Action::Scroll(9_000.0));
         rig.draw();
@@ -814,8 +814,7 @@ mod tests {
                 crate::backend::Load::Ready(log) => log.locale,
                 _ => Default::default(),
             };
-            let expected =
-                rovsti_core::call_notes::details(&vm.line, &vm.number, None, locale).when;
+            let expected = rosty_core::call_notes::details(&vm.line, &vm.number, None, locale).when;
             app.recents.number = Some(row);
             app.sheet_kind = crate::SheetKind::Number;
             app.sheet.open();
@@ -856,7 +855,7 @@ mod tests {
         let (rect, viewport, full) = rig.with_app(|app, window, _| {
             let viewer = app.viewer.as_ref().expect("the viewer is open");
             let size = window.viewport_size();
-            let viewport = rovsti_core::zoom::Size {
+            let viewport = rosty_core::zoom::Size {
                 w: f32::from(size.width),
                 h: f32::from(size.height),
             };
@@ -924,8 +923,8 @@ mod tests {
         }
     }
 
-    fn rect(b: gpui::Bounds<gpui::Pixels>) -> rovsti_core::keypad_layout::Rect {
-        rovsti_core::keypad_layout::Rect {
+    fn rect(b: gpui::Bounds<gpui::Pixels>) -> rosty_core::keypad_layout::Rect {
+        rosty_core::keypad_layout::Rect {
             x: f32::from(b.origin.x),
             y: f32::from(b.origin.y),
             w: f32::from(b.size.width),
@@ -938,7 +937,7 @@ mod tests {
     #[test]
     fn keypad_draws_inside_its_layout_rects() {
         use crate::fx::{A_CALL, A_FIELD, A_KEY};
-        use rovsti_core::keypad_layout::Rect;
+        use rosty_core::keypad_layout::Rect;
         const LONG: &str = "+90555123456789012345678901234567890";
         for (w, h) in [
             (360.0, 640.0),

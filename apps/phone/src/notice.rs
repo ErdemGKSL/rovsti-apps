@@ -10,8 +10,8 @@ use gpui::{
     Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::call::format_elapsed;
-use rovsti_ui::{
+use rosty_core::call::format_elapsed;
+use rosty_ui::{
     Icon,
     glass::{GlassInteraction, GlassSpec, glass_interactive},
     theme::{self, call_colors},
@@ -30,7 +30,7 @@ const DROP: f32 = 18.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Notice {
-    /// Rovsti Phone is not the default phone app (FR-4).
+    /// Rosty Phone is not the default phone app (FR-4).
     Preview,
     /// A call went through the system phone app.
     System,
@@ -170,7 +170,7 @@ impl PhoneApp {
             .aria_label(SharedString::from(notice.text()))
             .absolute()
             .bottom(
-                px(rovsti_ui::layout::geom::content_bottom(
+                px(rosty_ui::layout::geom::content_bottom(
                     self.safe_bottom,
                     0.0,
                 )) + px(ABOVE_BAR - DROP * (1.0 - v)
@@ -254,7 +254,7 @@ impl PhoneApp {
         let stacked = if banner && pill { BANNER_H + 8.0 } else { 0.0 };
         Some(
             window.viewport_size().height
-                - px(rovsti_ui::layout::geom::content_bottom(
+                - px(rosty_ui::layout::geom::content_bottom(
                     self.safe_bottom,
                     0.0,
                 ))
@@ -295,7 +295,7 @@ impl PhoneApp {
         let answer = call_colors(theme).answer;
         let press = self.presses.value("rp-pill").clamp(0.0, 1.0);
         let spec = GlassSpec::control(theme).lerp(GlassSpec::lens(theme), press * 0.6);
-        let k = rovsti_ui::motion::press_scale(press, rovsti_ui::motion_tokens::scale::PRESS);
+        let k = rosty_ui::motion::press_scale(press, rosty_ui::motion_tokens::scale::PRESS);
         Some(
             div()
                 .id("rp-pill")
@@ -303,7 +303,7 @@ impl PhoneApp {
                 .aria_label(self.pill_text.clone())
                 .absolute()
                 .bottom(
-                    px(rovsti_ui::layout::geom::content_bottom(
+                    px(rosty_ui::layout::geom::content_bottom(
                         self.safe_bottom,
                         0.0,
                     )) + px(ABOVE_BAR - DROP * (1.0 - v)),

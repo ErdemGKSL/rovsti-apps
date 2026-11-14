@@ -230,3 +230,51 @@ pattern, debounce and no request while moving, an overtaken request, the two box
 
 **Note for the merge.** `StopsOps` has a new abstract method: any other implementation of the interface (a fake in
 another module) must add `gtfsView`. `PickOps` likewise gained `gtfsView`.
+
+### Line-aware alarm data
+
+**What the "N stops before" alarm is today.** It no longer exists as an alarm rule, in the GPUI app either.
+`docs/architecture.md` AD-ST6: GTFS "names stops (a point source for A or B) and draws them and their lines on the
+map; it has no alarm rule", and "the earlier radius, ETA and 'N stops before' rules are gone" (the trigger is the
+crossing of the circle on AB). `_bmad-output/plans/stops-crossing.md` turned the stop sheet's "N stops before" rows
+into "Use as A" / "Use as B". What is left of it in `apps/stops` is: the list of lines that call at a stop, each with
+"N stops earlier on this line"; choosing one draws that line on the map and stores its pattern on the picked point
+(`Destination.pattern`). `trip_ui.rs` computes nothing line-aware: at trip start it only keeps
+`b.pattern.or(a.pattern)` as the line to draw. **So `stops.trip_start` needs nothing new**: `TripStartRequest` takes
+A and B and that is the whole alarm. The parity row "the line-aware 'N stops before' alarm from imported GTFS" is,
+in today's product, the stop sheet's line list plus the drawn line.
+
+**Moved to `rosty_geo::transit`** (from `apps/stops/src/transit.rs` and `picker.rs`; the app re-exports and calls
+them): `route_name`, `natural_key`, `LineChoice`, `lines_through`, `MAX_LINES`, `grouped`, `feed_summary`,
+`civil_from_days`, `date_text`, `imported_text`, `line_title`, `earlier_text`. The file import/remove and the GPUI
+sections stay in the app. Their five tests moved with them and fourteen were added: empty feed and unknown stop,
+a stop on no pattern, a stop first on every pattern, loops (the first call at a stop counts; a ring's terminal is
+its first stop, so its closing call is not offered), forty variants of one line collapsing to the longest, ties,
+the limit in reading order, a pattern with a missing route, route name fall-backs, natural order with letters,
+empty names, leading zeros and numbers too big for the key, grouping, the civil calendar around leap centuries,
+dates before 1970 and at `i64::MIN`/`MAX`, and offsets from -12 to +14 including quarter and half hours.
+
+**What the trip UI (and the stop sheet, Settings) should call**
+
+| Need | Call | Answer |
+|---|---|---|
+| The lines at a stop, for the stop sheet / line picker | `StopsOps.gtfsLines(GtfsLinesRequest(stop = index))` or `(stopId = dest.gtfsStop)` (`limit`, `dir` optional) | `GtfsLinesAnswer(hasFeed, stop: GtfsViewStop?, lines: List<GtfsLineChoice>, maxLines)`; each `GtfsLineChoice(pattern, name, headsign, before, title, earlier)`: `title` = "Line 34 to Kadıköy", `earlier` = "3 stops earlier on this line" (ready to show; English) |
+| Choosing a line | no call: put `line.pattern` on the point, `Destination(label, coord, gtfsStop = stop.id, pattern = line.pattern)`, then `PickController.place(slot, dest)` | the map draws the line by itself: `PickController` asks `stops.gtfs_view` with the pattern of A (else B) |
+| "Choose another line" | `place` the same destination with `pattern = null` | the line disappears |
+| Starting the trip | `StopsOps.tripStart(TripStartRequest(id, a, b, startedMs, notice?))` with the endpoints from `PickUiState` / `pick_labels` | unchanged; no line, no "N stops" field. Keep `ends.b?.pattern ?: ends.a?.pattern` yourself if the line should stay drawn during the trip and put it back with `pick.radar.update { it.copy(line = ...) }` from `gtfsView(GtfsViewRequest(bbox, cap, pattern))` |
+| Settings > Transit data row | `StopsOps.gtfsSummary(GtfsSummaryRequest(nowMs, tzOffsetS, skippedRows?))` | `GtfsSummaryAnswer(hasFeed, summary = "1 234 stops, 87 lines", imported = "Imported 5 Nov[, 1 200 unusable rows skipped]", importedMs, stops, routes, patterns)` |
+| After an import | `StopsOps.gtfsImport(GtfsImportRequest(zip, nowMs, save = true))`, then `gtfsSummary(..., skippedRows = answer.report.skippedRows)` and `pick.refreshTransit()` | the import's own failure text is the `RustError` message (`GtfsError` verbatim) |
+
+`tzOffsetS` is seconds east of UTC (`TimeZone.getDefault().getOffset(nowMs) / 1000`).
+
+**Found on the way, left as they are (parity)**
+- `lines_through` counts the stops before the *first* call at a stop, so the terminal of a ring line (first and last
+  stop of the pattern) is offered no line. Changing it changes what GPUI shows.
+- `imported_text` says "1 unusable rows skipped" for one row.
+- All of these texts are English (Rust has no localisation), like `pick_labels`.
+- The GPUI Stops app compiles (`cargo check -p rosty_stops --profile checks --all-targets`) but its test binary does
+  not link on this machine (`-lxkbcommon` is not installed), so the app's own remaining tests were not run here.
+- **The shared `target/` is unsafe between worktrees**: cargo keys artifacts by workspace-relative path, so a crate
+  built from the other worktree looks "fresh" here. `rosty_ffi` was compiled against the other worktree's
+  `rosty_geo` (without the new module) until the sources were touched. Touch the crate sources before building, or
+  give each worktree its own `CARGO_TARGET_DIR`.

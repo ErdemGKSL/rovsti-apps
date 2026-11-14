@@ -964,7 +964,7 @@ impl StopsApp {
         let lines = self.stop_lines(&feed, stop);
         match chosen.and_then(|p| lines.iter().find(|l| l.pattern == p)) {
             Some(line) => {
-                let title = line_title(&line.name, &line.headsign);
+                let title = transit::line_title(&line.name, &line.headsign);
                 body = body.child(section(
                     theme,
                     Some("Drawn on the map".into()),
@@ -986,12 +986,8 @@ impl StopsApp {
             None if !lines.is_empty() => {
                 let rows = lines.into_iter().map(|line| {
                     let pattern = line.pattern;
-                    let title = line_title(&line.name, &line.headsign);
-                    let before = if line.before == 1 {
-                        "1 stop earlier on this line".to_owned()
-                    } else {
-                        format!("{} stops earlier on this line", line.before)
-                    };
+                    let title = transit::line_title(&line.name, &line.headsign);
+                    let before = transit::earlier_text(line.before);
                     list_row(theme, None, title, Some(before.into()), None)
                         .id(("stop-line", pattern as usize))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1217,14 +1213,6 @@ impl StopsApp {
 }
 
 /// "Line 34 to Kadikoy", or "Line 34" without a headsign.
-fn line_title(name: &str, headsign: &str) -> String {
-    if headsign.is_empty() {
-        format!("Line {name}")
-    } else {
-        format!("Line {name} to {headsign}")
-    }
-}
-
 /// Text that was meant as a link or as coordinates, not as a name to search.
 fn looks_like_link(text: &str) -> bool {
     let t = text.trim_start().to_ascii_lowercase();
@@ -1473,12 +1461,6 @@ mod tests {
         let k = PickItem::NoMatch("abc".into()).key();
         assert_ne!(k, PickItem::Hint.key());
         assert_ne!(k, PickItem::Refusal("abc").key());
-    }
-
-    #[test]
-    fn line_titles_drop_an_empty_headsign() {
-        assert_eq!(line_title("34", "Kadikoy"), "Line 34 to Kadikoy");
-        assert_eq!(line_title("34", ""), "Line 34");
     }
 
     #[test]

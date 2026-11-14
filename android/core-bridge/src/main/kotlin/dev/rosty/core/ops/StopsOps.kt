@@ -36,8 +36,12 @@ import dev.rosty.core.model.stops.FracToCoordAnswer
 import dev.rosty.core.model.stops.FracToCoordRequest
 import dev.rosty.core.model.stops.GtfsImportAnswer
 import dev.rosty.core.model.stops.GtfsImportRequest
+import dev.rosty.core.model.stops.GtfsLinesAnswer
+import dev.rosty.core.model.stops.GtfsLinesRequest
 import dev.rosty.core.model.stops.GtfsSearchAnswer
 import dev.rosty.core.model.stops.GtfsSearchRequest
+import dev.rosty.core.model.stops.GtfsSummaryAnswer
+import dev.rosty.core.model.stops.GtfsSummaryRequest
 import dev.rosty.core.model.stops.GtfsViewAnswer
 import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.HistoryEditAnswer
@@ -278,6 +282,12 @@ interface StopsOps {
     /** The transit stops in a map view and the line of one pattern. */
     suspend fun gtfsView(req: GtfsViewRequest): Outcome<GtfsViewAnswer>
 
+    /** The lines that call at a stop, for the stop sheet. */
+    suspend fun gtfsLines(req: GtfsLinesRequest): Outcome<GtfsLinesAnswer>
+
+    /** The Settings row of the imported feed. */
+    suspend fun gtfsSummary(req: GtfsSummaryRequest): Outcome<GtfsSummaryAnswer>
+
     /** A coordinate in every format, with the view links. */
     suspend fun coordFormat(req: CoordFormatRequest): Outcome<CoordFormatAnswer>
 
@@ -365,6 +375,8 @@ interface StopsOps {
                 "stops.gtfs_import",
                 "stops.gtfs_search",
                 "stops.gtfs_view",
+                "stops.gtfs_lines",
+                "stops.gtfs_summary",
                 "stops.coord_format",
                 "stops.coord_parse",
                 "stops.measure",
@@ -538,6 +550,12 @@ class NativeStopsOps(
 
     override suspend fun gtfsView(req: GtfsViewRequest) =
         core.call("stops.gtfs_view", req, GtfsViewRequest.serializer(), GtfsViewAnswer.serializer())
+
+    override suspend fun gtfsLines(req: GtfsLinesRequest) =
+        core.call("stops.gtfs_lines", req, GtfsLinesRequest.serializer(), GtfsLinesAnswer.serializer())
+
+    override suspend fun gtfsSummary(req: GtfsSummaryRequest) =
+        core.call("stops.gtfs_summary", req, GtfsSummaryRequest.serializer(), GtfsSummaryAnswer.serializer())
 
     override suspend fun coordFormat(req: CoordFormatRequest) =
         core.call("stops.coord_format", req, CoordFormatRequest.serializer(), CoordFormatAnswer.serializer())

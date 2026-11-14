@@ -13,6 +13,7 @@ pub mod events;
 pub mod guard;
 pub mod handles;
 pub mod jni_exports;
+pub mod logbuf;
 pub mod logger;
 pub mod ops;
 pub mod state;

@@ -2,8 +2,10 @@
 
 use super::registry::{Case, OpSpec};
 use crate::envelope::{ErrorKind, FfiError};
+use crate::logbuf;
 use crate::op;
 use crate::state;
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub(super) const OPS: &[OpSpec] = &[
@@ -11,12 +13,43 @@ pub(super) const OPS: &[OpSpec] = &[
     op!("core.echo", Value, Value, echo, echo_cases),
     op!("core.data_dir", Value, Value, data_dir, data_dir_cases),
     op!("core.fail", Value, Value, fail, fail_cases),
+    op!(
+        "core.logs_drain",
+        DrainReq,
+        logbuf::Drained,
+        logs_drain,
+        logs_drain_cases
+    ),
     // Test-only ops: reachable in unit tests and with the `test-ops` feature, never fixtures.
     #[cfg(any(test, feature = "test-ops"))]
     op!("core.panic", Value, Value, panic_op, no_cases),
     #[cfg(any(test, feature = "test-ops"))]
     op!("core.emit_test", Value, Value, emit_test, no_cases),
 ];
+
+/// `core.logs_drain {after_seq, max?}`: the masked Rust log lines after `after_seq`.
+#[derive(Deserialize)]
+pub(super) struct DrainReq {
+    #[serde(default)]
+    after_seq: u64,
+    #[serde(default = "default_drain")]
+    max: usize,
+}
+
+fn default_drain() -> usize {
+    logbuf::MAX_DRAIN
+}
+
+fn logs_drain(req: DrainReq) -> Result<logbuf::Drained, FfiError> {
+    Ok(logbuf::drain(req.after_seq, req.max))
+}
+
+/// A reader far ahead of the ring: nothing new, nothing lost, the same seq back (deterministic in any process).
+fn logs_drain_cases() -> Vec<Case> {
+    vec![Case::new(
+        json!({"after_seq": 1_000_000_000_000u64, "max": 100}),
+    )]
+}
 
 fn version(_: Value) -> Result<Value, FfiError> {
     Ok(state::version())
@@ -143,6 +176,29 @@ mod tests {
             panic!()
         };
         assert_eq!(e.kind, ErrorKind::Parse);
+    }
+
+    #[test]
+    fn logs_drain_answers_masked_lines_in_order() {
+        crate::logger::init();
+        let Answer::Ok(start) = answer("core.logs_drain", r#"{"after_seq":0,"max":500}"#) else {
+            panic!()
+        };
+        let after = start["last_seq"].as_u64().unwrap();
+        log::info!(target: "rovsti::sync", "batch n=1 jid=905321234567@s.whatsapp.net");
+        let request = json!({"after_seq": after}).to_string();
+        let Answer::Ok(got) = answer("core.logs_drain", &request) else {
+            panic!()
+        };
+        let lines = got["entries"].as_array().unwrap();
+        let mine = lines
+            .iter()
+            .find(|e| e["target"] == "rovsti::sync")
+            .expect("the line is in the ring");
+        assert_eq!(mine["text"], "batch n=1 jid=90***67@s.whatsapp.net");
+        assert_eq!(mine["level"], "info");
+        assert!(got["last_seq"].as_u64().unwrap() > after);
+        assert!(got["dropped"].is_u64());
     }
 
     #[test]

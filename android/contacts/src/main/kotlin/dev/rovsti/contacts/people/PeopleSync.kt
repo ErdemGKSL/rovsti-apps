@@ -3,6 +3,9 @@ package dev.rovsti.contacts.people
 import android.content.SharedPreferences
 import android.util.Base64
 import dev.rovsti.core.Outcome
+import dev.rovsti.core.RustError
+import dev.rovsti.core.log.LogLevel
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.core.model.people.PersonRow
 import dev.rovsti.core.model.people.PersonUpdate
 import dev.rovsti.core.model.wa.GatewayEvent
@@ -14,7 +17,7 @@ import dev.rovsti.wa.WaLinkState
 import dev.rovsti.wa.WaRepository
 import dev.rovsti.wa.avatars.AvatarCodec
 import dev.rovsti.wa.avatars.BitmapAvatarCodec
-import dev.rovsti.wa.avatars.isRateLimited
+import dev.rovsti.wa.avatars.rateLimit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -210,20 +213,46 @@ class PeopleSync(
     /** A full sync (the worker, "Sync now"). */
     suspend fun run(): SyncResult =
         lock.withLock {
-            if (wa.linkState.value !is WaLinkState.Connected) return@withLock SyncResult.NotLinked
+            val link = wa.linkState.value
+            if (link !is WaLinkState.Connected) {
+                RovstiLog.event(TAG, "run_skipped", "reason" to "not_linked", "link" to link.javaClass.simpleName)
+                return@withLock SyncResult.NotLinked
+            }
             state.value = state.value.copy(running = true, linked = true)
+            val started = clock()
+            RovstiLog.event(TAG, "run_begin", "mode" to "v1", "wa_state" to link.status.state)
             val result =
                 try {
                     sync()
-                } catch (_: IOException) {
+                } catch (e: IOException) {
+                    RovstiLog.event(LogLevel.Warn, TAG, "error", "kind" to "io", "message" to e.message)
                     SyncResult.Failed
                 }
+            val (people, downloaded) =
+                when (result) {
+                    is SyncResult.Synced -> result.people to result.downloaded
+                    is SyncResult.Partial -> result.people to result.downloaded
+                    else -> null to null
+                }
+            RovstiLog.event(
+                if (result == SyncResult.Failed) LogLevel.Warn else LogLevel.Info,
+                TAG,
+                "run_end",
+                "outcome" to result.label(),
+                "people" to people,
+                "downloaded" to downloaded,
+                "ms" to clock() - started,
+            )
             finish(result)
             result
         }
 
     private suspend fun sync(): SyncResult {
-        val gateway = wa.gateway() ?: return SyncResult.Failed
+        val gateway =
+            wa.gateway() ?: run {
+                RovstiLog.event(LogLevel.Warn, TAG, "error", "kind" to "no_gateway")
+                return SyncResult.Failed
+            }
         var changed = 0
         var dropped = 0
         var answered = 0
@@ -235,11 +264,20 @@ class PeopleSync(
         val deferred = log.deferred()
         val unknown = asked.filter { it.first !in known }.sortedBy { it.first in deferred }
         val numberOf = asked.toMap()
+        RovstiLog.event(
+            TAG,
+            "targets",
+            "numbers" to asked.size,
+            "known" to known.size,
+            "to_lookup" to unknown.size,
+            "deferred" to deferred.size,
+        )
         val lookups = Allowance(LOOKUP_BURST, LOOKUP_PER_SEC, Wait(pause, LOOKUP_WAIT_MS), clock)
         val looked = HashSet<String>()
         for (batch in unknown.map { it.first }.chunked(BATCH)) {
+            val began = clock()
             val users =
-                when (val answer = paced(lookups, batch.size) { gateway.lookupUsers(batch) }) {
+                when (val answer = paced(STAGE_LOOKUP, lookups, batch.size) { gateway.lookupUsers(batch) }) {
                     is Paced.Done -> {
                         answer.value
                     }
@@ -256,6 +294,15 @@ class PeopleSync(
             answered++
             looked += batch
             val found = users.filter { it.onWhatsapp }
+            val took = clock() - began
+            RovstiLog.event(
+                TAG,
+                "batch",
+                "stage" to STAGE_LOOKUP,
+                "n" to batch.size,
+                "found" to found.size,
+                "ms" to took,
+            )
             val answer =
                 store.upsert(
                     found.map {
@@ -276,8 +323,9 @@ class PeopleSync(
         val queries = Allowance(PROFILE_BURST, PROFILE_PER_SEC, Wait(pause, RUN_WAIT_MS - lookups.waitedMs), clock)
         val people = store.snapshot().filter { it.onWhatsapp }
         for (batch in people.map { it.jid }.chunked(BATCH)) {
+            val began = clock()
             val profiles =
-                when (val answer = paced(queries, batch.size) { gateway.profiles(batch) }) {
+                when (val answer = paced(STAGE_PROFILES, queries, batch.size) { gateway.profiles(batch) }) {
                     is Paced.Done -> {
                         answer.value
                     }
@@ -292,13 +340,26 @@ class PeopleSync(
                     }
                 }
             answered++
+            RovstiLog.event(
+                TAG,
+                "batch",
+                "stage" to STAGE_PROFILES,
+                "n" to batch.size,
+                "answered" to profiles.count(::isAnswered),
+                "unanswered" to batch.size - profiles.count(::isAnswered),
+                "ms" to clock() - began,
+            )
             val answer = store.upsert(profiles.map(::profileUpdate)) ?: return SyncResult.Failed
             changed += answer.changed
             dropped += answer.dropFiles.size
         }
 
         // 3. the pictures that changed, and what to drop
-        val pictures = pictures(gateway, queries) ?: return SyncResult.Failed
+        val pictures =
+            pictures(gateway, queries) ?: run {
+                RovstiLog.event(LogLevel.Warn, TAG, "error", "kind" to "core", "message" to "people.plan failed")
+                return SyncResult.Failed
+            }
         dropped += pictures.dropped
         answered += pictures.answered
         short = short || pictures.short
@@ -336,8 +397,13 @@ class PeopleSync(
             val row = rows[refresh.jid]
             // A stale picture is asked for with no known id, so the bytes come; a held one revalidates for free.
             val known = refresh.pictureId?.takeIf { row?.pictureStale != true && row?.pictureFile != null }
+            val fetch: suspend () -> Outcome<PictureAnswer> = {
+                gateway.picture(
+                    PictureBody(refresh.jid, knownId = known),
+                )
+            }
             val answer =
-                when (val got = paced(allowance, 1) { gateway.picture(PictureBody(refresh.jid, knownId = known)) }) {
+                when (val got = paced(STAGE_PICTURES, allowance, 1, fetch)) {
                     is Paced.Done -> {
                         got.value
                     }
@@ -388,6 +454,16 @@ class PeopleSync(
         }
         store.delete(plan.remove)
         dropped += plan.remove.size
+        RovstiLog.event(
+            TAG,
+            "pictures",
+            "planned" to plan.refresh.size,
+            "answered" to answered,
+            "downloaded" to downloaded,
+            "failures" to failures,
+            "removed" to plan.remove.size,
+            "short" to short,
+        )
         return PictureRun(downloaded, dropped, answered, short)
     }
 
@@ -396,18 +472,57 @@ class PeopleSync(
      * at most [MAX_RETRIES] times; [Paced.OutOfTime] when the run's waiting budget cannot pay for the wait.
      */
     private suspend fun <T> paced(
+        stage: String,
         allowance: Allowance,
         cost: Int,
         call: suspend () -> Outcome<T>,
     ): Paced<T> {
-        repeat(MAX_RETRIES + 1) {
-            if (!allowance.take(cost)) return Paced.OutOfTime
+        repeat(MAX_RETRIES + 1) { attempt ->
+            if (!allowance.take(cost)) {
+                RovstiLog.event(TAG, "out_of_time", "stage" to stage, "attempt" to attempt)
+                return Paced.OutOfTime
+            }
             when (val answer = call()) {
-                is Outcome.Ok -> return Paced.Done(answer.value)
-                is Outcome.Err -> if (answer.error.isRateLimited()) allowance.empty() else return Paced.Error
+                is Outcome.Ok -> {
+                    return Paced.Done(answer.value)
+                }
+
+                is Outcome.Err -> {
+                    val limit = answer.error.rateLimit()
+                    if (limit != null) {
+                        RovstiLog.event(
+                            LogLevel.Warn,
+                            TAG,
+                            "rate_limited",
+                            "stage" to stage,
+                            "source" to (limit.source ?: "unknown"),
+                            "retry_after_ms" to limit.retryAfterMs,
+                            "attempt" to attempt,
+                            "n" to cost,
+                        )
+                        allowance.empty()
+                    } else {
+                        logError(stage, answer.error)
+                        return Paced.Error
+                    }
+                }
             }
         }
         return Paced.OutOfTime
+    }
+
+    private fun logError(
+        stage: String,
+        error: RustError,
+    ) {
+        RovstiLog.event(
+            LogLevel.Warn,
+            TAG,
+            "error",
+            "stage" to stage,
+            "kind" to error.javaClass.simpleName,
+            "message" to error.message,
+        )
     }
 
     private suspend fun saveBytes(
@@ -476,6 +591,12 @@ class PeopleSync(
     }
 
     companion object {
+        /** The log tag of everything the sync writes. */
+        const val TAG = "sync"
+        private const val STAGE_LOOKUP = "lookup"
+        private const val STAGE_PROFILES = "profiles"
+        private const val STAGE_PICTURES = "pictures"
+
         /** How often the worker runs. */
         const val PERIOD_MS = 6L * 3_600_000
 
@@ -511,6 +632,17 @@ class PeopleSync(
             val digits = e164.removePrefix("+")
             return if (digits.length in 7..15 && digits.all { it in '0'..'9' }) digits + PHONE_SUFFIX else null
         }
+
+        /** WhatsApp really answered for this profile (an old gateway answers a throttled one with `fetched_ms: 0`). */
+        fun isAnswered(profile: WaProfile): Boolean = profile.fetchedMs > 0 || profile.pictureId != null
+
+        private fun SyncResult.label(): String =
+            when (this) {
+                SyncResult.NotLinked -> "not_linked"
+                SyncResult.Failed -> "failed"
+                is SyncResult.Synced -> "synced"
+                is SyncResult.Partial -> "partial"
+            }
 
         private fun profileUpdate(profile: WaProfile): PersonUpdate {
             val hasAnswer = profile.pictureId != null || profile.fetchedMs > 0

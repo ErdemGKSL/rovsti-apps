@@ -25,8 +25,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.IOException
 
@@ -432,6 +432,23 @@ class WaAvatars(
 }
 
 /** A 429 from the gateway: an `invalid` error whose detail says `rate_limited`. */
-fun RustError.isRateLimited(): Boolean =
-    this is RustError.Invalid &&
-        ((detail as? JsonObject)?.get("code")?.jsonPrimitive?.contentOrNull == "rate_limited")
+fun RustError.isRateLimited(): Boolean = rateLimit() != null
+
+/**
+ * What a gateway 429 said: wait [retryAfterMs] (null: an older gateway gave no hint), the limit is [source]'s
+ * (`whatsapp`, `gateway`; null: not said).
+ */
+data class RateLimit(
+    val retryAfterMs: Long?,
+    val source: String?,
+)
+
+/** The gateway's 429 (`detail.code == "rate_limited"`), or null for any other error. */
+fun RustError.rateLimit(): RateLimit? {
+    if (this !is RustError.Invalid) return null
+    val detail = detail as? JsonObject ?: return null
+
+    fun field(name: String) = (detail[name] as? JsonPrimitive)?.contentOrNull
+    if (field("code") != "rate_limited") return null
+    return RateLimit(retryAfterMs = field("retry_after_ms")?.toLongOrNull(), source = field("source"))
+}

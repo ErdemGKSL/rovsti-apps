@@ -68,3 +68,30 @@ data class OkEnvelope<T>(
 data class ErrEnvelope(
     val err: ErrorBody,
 )
+
+/** `core.logs_drain` request: the Rust log lines after [afterSeq], at most [max] (Rust caps it at 500). */
+@Serializable
+data class LogsDrainRequest(
+    @SerialName("after_seq") val afterSeq: Long,
+    val max: Int,
+)
+
+/** One Rust log line, already masked by `rovsti_core::redact`. */
+@Serializable
+data class RustLogLine(
+    val seq: Long,
+    @SerialName("time_ms") val timeMs: Long,
+    /** `error`, `warn`, `info`, `debug` or `trace`. */
+    val level: String,
+    /** The Rust module path, e.g. `rovsti::sync`. */
+    val target: String,
+    val text: String,
+)
+
+/** `core.logs_drain` answer: [dropped] lines after the asked seq were lost; ask after [lastSeq] next time. */
+@Serializable
+data class LogsDrainAnswer(
+    val entries: List<RustLogLine>,
+    val dropped: Long,
+    @SerialName("last_seq") val lastSeq: Long,
+)

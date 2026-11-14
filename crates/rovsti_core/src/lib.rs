@@ -97,6 +97,7 @@ pub mod perf;
 pub mod phone_number;
 pub mod quick_replies;
 pub mod recents;
+pub mod redact;
 pub mod reminder;
 pub mod scene;
 pub mod schedule;

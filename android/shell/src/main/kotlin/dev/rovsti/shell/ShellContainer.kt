@@ -7,6 +7,7 @@ import android.view.View
 import coil3.ImageLoader
 import dev.rovsti.core.Rust
 import dev.rovsti.core.RustCore
+import dev.rovsti.core.log.DevLog
 import dev.rovsti.core.ops.NativeWaOps
 import dev.rovsti.core.ops.WaOps
 import dev.rovsti.design.haptics.HapticEvent
@@ -33,6 +34,7 @@ import dev.rovsti.wa.avatars.waAvatars
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -83,6 +85,18 @@ abstract class ShellContainer(
     val clipboard: ClipboardRepository by lazy { SystemClipboardRepository(context) }
 
     val files: FilesRepository by lazy { AndroidFilesRepository(context, Dispatchers.IO) }
+
+    /**
+     * Developer mode and the log behind the Logs page. Started off the main thread when the container is created, so
+     * a background start (the people-sync worker) writes the log file too while developer mode is on.
+     */
+    val devLog: DevLog by lazy { createDevLog() }
+
+    init {
+        scope.launch { devLog.start() }
+    }
+
+    protected open fun createDevLog(): DevLog = DevLog.create(context, { rust }, scope)
 
     protected open fun createRust(): RustCore {
         Rust.init(

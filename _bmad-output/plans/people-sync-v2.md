@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1 done; see the notes under each step.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1, S2 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -542,6 +542,13 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
 - **S2 Logging core.** `rovsti_core::redact`, `rovsti_ffi::logbuf` + `core.logs_drain`, Kotlin `RovstiLog`,
   `LogRing`, `LogMask`, `LogFile`, `DevMode`, `RustLogPump` (no UI yet; ring only). `PeopleSync` (still v1) gets
   log lines for run start, each batch, each 429, outcome and the NotLinked case. Tests.
+  *Done (notes):* `redact::mask` is a one-pass ASCII scanner (no regex crate); `LogMask` is a line-for-line port and
+  both pass `redact_cases.json` (the Kotlin test reads it through the `rovsti.redact` system property). In
+  `logbuf` a busy ring drops the line but its seq is used, so `core.logs_drain`'s `dropped` counts every lost line
+  from the gap; the fixture case asks after a seq far ahead, so its answer is the same in any process. `DevLog`
+  (core-bridge) ties `DevMode` to the file sink and the pump; `ShellContainer.devLog` starts it off the main thread
+  when the container is created, so a worker-only process writes the file too. `RustError.rateLimit()` sits next to
+  `isRateLimited()` in `:wa` (`WaAvatars.kt`), where the only callers are, instead of `:core-bridge`.
 - **S3 Developer mode UI.** `holdToToggle` on the version row, Developer group, `LogsPage`, share/copy/clear,
   strings en/tr, catalog page, shots. From here a failed sync can be diagnosed on the phone.
 - **S4 Honest outcomes in v1 (small).** `NotLinked` no longer stored as Failed; link-settle wait

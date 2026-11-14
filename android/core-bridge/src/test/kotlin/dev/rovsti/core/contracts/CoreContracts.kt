@@ -5,6 +5,8 @@ import dev.rovsti.core.model.core.DataDirInfo
 import dev.rovsti.core.model.core.EchoProbe
 import dev.rovsti.core.model.core.ErrEnvelope
 import dev.rovsti.core.model.core.FailRequest
+import dev.rovsti.core.model.core.LogsDrainAnswer
+import dev.rovsti.core.model.core.LogsDrainRequest
 import dev.rovsti.core.model.core.OkEnvelope
 import dev.rovsti.core.model.core.VersionInfo
 import kotlinx.serialization.KSerializer
@@ -20,6 +22,8 @@ object CoreContracts : ContractModels {
             put("core.data_dir.answer", OkEnvelope.serializer(DataDirInfo.serializer()))
             put("core.echo.request", EchoProbe.serializer())
             put("core.echo.answer", OkEnvelope.serializer(EchoProbe.serializer()))
+            put("core.logs_drain.request", LogsDrainRequest.serializer())
+            put("core.logs_drain.answer", OkEnvelope.serializer(LogsDrainAnswer.serializer()))
             for (kind in RustErrorKinds.wire) {
                 put("core.fail.$kind.request", FailRequest.serializer())
                 put("core.fail.$kind.answer", ErrEnvelope.serializer())

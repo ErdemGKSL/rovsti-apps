@@ -29,11 +29,16 @@ val rustTestPackage = "dev.rovsti.core.rust"
 // The contract fixtures E2.7 (crates/rovsti_ffi/fixtures): ContractFixturesTest reads them as a plain directory.
 val contractFixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_ffi/fixtures")
 
+// The masking cases `rovsti_core::redact` and `LogMask` both pass (people sync v2, section 10).
+val redactCases = rootProject.projectDir.parentFile.resolve("crates/rovsti_core/tests/data/redact_cases.json")
+
 android {
     testOptions {
         unitTests.all {
             it.systemProperty("rovsti.contract", contractFixtures.absolutePath)
             it.inputs.dir(contractFixtures).withPropertyName("contractFixtures")
+            it.systemProperty("rovsti.redact", redactCases.absolutePath)
+            it.inputs.file(redactCases).withPropertyName("redactCases")
             if (it.name == "testDebugUnitTest" || it.name == "testReleaseUnitTest") {
                 it.filter.excludeTestsMatching("$rustTestPackage.*")
             }

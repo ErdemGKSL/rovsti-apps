@@ -1,4 +1,5 @@
-//! A 20-line logger: logcat on Android (through `liblog`, no extra crate), stderr elsewhere.
+//! A small logger: logcat on Android (through `liblog`, no extra crate), stderr elsewhere, and the
+//! masked in-memory ring Kotlin drains for the developer-mode Logs page ([`crate::logbuf`]).
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
@@ -13,7 +14,9 @@ impl Log for Logger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            write(record.level(), &format!("{}", record.args()));
+            let text = format!("{}", record.args());
+            crate::logbuf::push(record.level(), record.target(), &text);
+            write(record.level(), &text);
         }
     }
 

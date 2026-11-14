@@ -270,6 +270,7 @@ core.fail.not_found
 core.fail.panic
 core.fail.parse
 core.fail.unsupported
+core.logs_drain
 core.version
 date_detect.detect
 date_detect.detect.all_day

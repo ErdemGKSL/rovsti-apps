@@ -97,6 +97,11 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 - `tiles.encode_mvt {mvt, z, x, y, flags}` is the pure half of `tile` (no cache, no network); its fixtures hold the real `.mvt` of
   `crates/rovsti_geo/src/tiles/testdata` and the buffer it becomes, which the Kotlin `TileBuffer` test decodes.
 
+Logs (people sync v2, S2): `core.logs_drain {after_seq, max?}` answers `{entries: [{seq, time_ms, level, target, text}], dropped,
+last_seq}`: the Rust log lines after `after_seq` (oldest first, at most `max`, 500 at most), already masked by
+`rovsti_core::redact::mask`. `rovsti*` targets are kept from `debug`, every other target from `warn`; the ring holds 2 000 lines.
+`dropped` counts lines after `after_seq` that were lost (pushed out, or dropped while the ring was busy); pass `last_seq` next time.
+
 WhatsApp (E2.14): `wa.open {url, key?, cache_dir?}` answers `{handle}`, a `rovsti_wa_client::Gateway`; every network op is `wa.<verb>` with `{handle, ...flat fields of the
 `rovsti_wa_proto` request}` and answers the proto type (field names are the gateway's). The client call runs outside the registry lock. Errors: `network`, `auth` (401 and 403),
 `invalid` with the gateway's own sentence (`detail.code` is its error code; a `rate_limited` one may add `detail.retry_after_ms` and
@@ -116,6 +121,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(bridge) core.echo` | - | bridge | op | core.echo |
 | `(bridge) core.data_dir` | - | bridge | op | core.data_dir |
 | `(bridge) core.fail` | - | bridge | op | core.fail |
+| `(bridge) core.logs_drain` | - | bridge | op | core.logs_drain |
 | `(bridge) core.panic` | - | bridge | op | core.panic |
 | `(bridge) core.emit_test` | - | bridge | op | core.emit_test |
 | `(qr) qr.encode` | contacts | qr | op | qr.encode |

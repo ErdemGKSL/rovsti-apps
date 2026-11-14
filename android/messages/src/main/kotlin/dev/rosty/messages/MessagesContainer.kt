@@ -16,8 +16,13 @@ import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
 import dev.rosty.messages.data.ContactBook
 import dev.rosty.messages.data.MessagesStore
-import dev.rosty.messages.wa.GatewayWaChats
+import dev.rosty.messages.wa.GatewayWaRemote
+import dev.rosty.messages.wa.StoreWaChats
 import dev.rosty.messages.wa.WaChats
+import dev.rosty.messages.wa.WaOffline
+import dev.rosty.messages.wa.WaRemote
+import dev.rosty.messages.wa.realWaOffline
+import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.AvatarResolver
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.PeopleSources
@@ -104,10 +109,25 @@ open class MessagesContainer(
         ContactBook(contacts, permissions.state(PermissionGroup.CONTACTS), search, scope)
     }
 
-    /** The WhatsApp chats of the inbox and their actions. */
+    /** Every gateway call of the WhatsApp sync, outbox and Status (E6.4s); tests swap in a fake. */
+    val waRemote: WaRemote by lazy { createWaRemote() }
+
+    /** The offline store of the linked WhatsApp instance with its sync and outbox (E6.4s), following the link. */
+    val waOffline: WaOffline by lazy { createWaOffline().also { it.start() } }
+
+    /** The WhatsApp Status updates, for the Status row and the viewer. */
+    val statusFeed: StatusFeed by lazy {
+        StatusFeed(scope, waOffline, waRemote, java.io.File(context.cacheDir, "wa-status")).also { it.start() }
+    }
+
+    /** The WhatsApp chats of the inbox and their actions, read from the offline store. */
     val waChats: WaChats by lazy { createWaChats() }
 
-    protected open fun createWaChats(): WaChats = GatewayWaChats(wa)
+    protected open fun createWaRemote(): WaRemote = GatewayWaRemote(wa)
+
+    protected open fun createWaOffline(): WaOffline = realWaOffline(this, waRemote)
+
+    protected open fun createWaChats(): WaChats = StoreWaChats(waOffline, waRemote)
 
     @Volatile private var peopleStarted = false
 

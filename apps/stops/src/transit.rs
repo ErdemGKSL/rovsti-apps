@@ -4,8 +4,8 @@
 //! The feed never leaves the phone. Kotlin copies the file the user picked into
 //! the app cache and answers with a `document_result` (op `import_gtfs`); the
 //! feed is parsed on the background executor, saved as `gtfs.json` and the
-//! cache copy is deleted. The pure pieces (the rule from a pattern, the
-//! report row, the date) are plain functions with unit tests.
+//! cache copy is deleted. The pure pieces (the lines through a stop, the
+//! report row, the date) are `rosty_geo::transit`.
 
 use std::{fs::File, path::Path, sync::Arc};
 
@@ -15,7 +15,13 @@ use gpui::{
 };
 use rosty_android::{Error as AndroidError, documents};
 use rosty_core::wire::DocumentResult;
-use rosty_geo::{Feed, FeedReport, Route, read_zip};
+use rosty_geo::{Feed, FeedReport, read_zip};
+// The pure pieces (lines through a stop, the report row, the date) live in `rosty_geo::transit`, shared with the
+// Kotlin app through `stops.gtfs_lines` and `stops.gtfs_summary`.
+pub use rosty_geo::transit::{
+    LineChoice, MAX_LINES, date_text, earlier_text, feed_summary, imported_text, line_title,
+    lines_through,
+};
 use rosty_ui::{
     components::{list_row, section},
     storage, theme,
@@ -26,160 +32,6 @@ use crate::{StopsApp, store};
 
 /// The biggest feed the picker copies in (Kotlin enforces the same cap).
 const MAX_FEED_BYTES: u64 = 64 * 1024 * 1024;
-/// Most lines listed for one stop.
-pub const MAX_LINES: usize = 20;
-
-// ---- pure: lines through a stop ------------------------------------------------
-
-/// "34", or the long name when the route has no short one, or its id.
-pub fn route_name(route: &Route) -> String {
-    [&route.short_name, &route.long_name, &route.id]
-        .into_iter()
-        .map(|s| s.trim())
-        .find(|s| !s.is_empty())
-        .unwrap_or("?")
-        .to_owned()
-}
-
-/// One line that calls at a stop, as the stop sheet lists it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LineChoice {
-    /// The pattern to build the alarm from.
-    pub pattern: u32,
-    pub name: String,
-    pub headsign: String,
-    /// Stops before this one on the pattern.
-    pub before: usize,
-}
-
-/// Sorts "2" before "10" before "34A" before "M4".
-fn natural_key(name: &str) -> (u32, String) {
-    let digits: String = name.chars().take_while(char::is_ascii_digit).collect();
-    (
-        digits.parse().unwrap_or(u32::MAX),
-        name.to_ascii_lowercase(),
-    )
-}
-
-/// The lines calling at `stop` that have a stop before it, one entry per
-/// (line, headsign): of several patterns with the same face the one with the
-/// most stops before `stop` wins, so all of 1, 2 and 3 are on offer when any
-/// variant allows them.
-pub fn lines_through(feed: &Feed, stop: u32, limit: usize) -> Vec<LineChoice> {
-    let mut lines: Vec<LineChoice> = Vec::new();
-    for pattern in feed.patterns_through(stop) {
-        let Some(p) = feed.patterns.get(pattern as usize) else {
-            continue;
-        };
-        let Some(route) = feed.routes.get(p.route as usize) else {
-            continue;
-        };
-        // The longest run of stops before the first call at `stop`.
-        let Some(before) = p.stops.iter().position(|&s| s == stop).filter(|&i| i > 0) else {
-            continue;
-        };
-        let name = route_name(route);
-        match lines
-            .iter_mut()
-            .find(|l| l.name == name && l.headsign == p.headsign)
-        {
-            Some(existing) if existing.before >= before => {}
-            Some(existing) => {
-                existing.pattern = pattern;
-                existing.before = before;
-            }
-            None => lines.push(LineChoice {
-                pattern,
-                name,
-                headsign: p.headsign.clone(),
-                before,
-            }),
-        }
-    }
-    lines.sort_by(|a, b| {
-        natural_key(&a.name)
-            .cmp(&natural_key(&b.name))
-            .then_with(|| a.headsign.cmp(&b.headsign))
-    });
-    lines.truncate(limit);
-    lines
-}
-
-// ---- pure: the report row ----------------------------------------------------------
-
-/// `1234567` as "1 234 567".
-pub fn grouped(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(' ');
-        }
-        out.push(c);
-    }
-    out
-}
-
-/// "1 234 stops, 87 lines".
-pub fn feed_summary(feed: &Feed) -> String {
-    let plural = |n: usize, one: &str, many: &str| {
-        format!("{} {}", grouped(n), if n == 1 { one } else { many })
-    };
-    format!(
-        "{}, {}",
-        plural(feed.stops.len(), "stop", "stops"),
-        plural(feed.routes.len(), "line", "lines")
-    )
-}
-
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-/// (year, month 1..=12, day) of a Unix day number, proleptic Gregorian.
-fn civil_from_days(days: i64) -> (i64, usize, i64) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, month as usize, day)
-}
-
-/// "5 Nov" for a moment in the current year, "5 Nov 2025" otherwise, on the
-/// phone's calendar (`tz_offset_s` east of UTC, e.g. 10 800 in Turkey).
-pub fn date_text(ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
-    let local_day = |ms: i64| {
-        ms.saturating_add(i64::from(tz_offset_s) * 1_000)
-            .div_euclid(86_400_000)
-    };
-    let (year, month, day) = civil_from_days(local_day(ms));
-    let (this_year, _, _) = civil_from_days(local_day(now_ms));
-    if year == this_year {
-        format!("{day} {}", MONTHS[month - 1])
-    } else {
-        format!("{day} {} {year}", MONTHS[month - 1])
-    }
-}
-
-/// "Imported 5 Nov", with a note when the import dropped rows.
-pub fn imported_text(feed: &Feed, skipped_rows: u64, now_ms: i64, tz_offset_s: i32) -> String {
-    let mut text = format!(
-        "Imported {}",
-        date_text(feed.imported_ms, now_ms, tz_offset_s)
-    );
-    if skipped_rows > 0 {
-        text.push_str(&format!(
-            ", {} unusable rows skipped",
-            grouped(usize::try_from(skipped_rows).unwrap_or(usize::MAX))
-        ));
-    }
-    text
-}
 
 // ---- background: reading the picked file --------------------------------------------
 
@@ -480,151 +332,10 @@ impl StopsApp {
 mod tests {
     use std::io::Write;
 
-    use rosty_geo::{Coord, Pattern, Stop};
     use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
     use super::*;
     use crate::store::test_support::tmp;
-
-    fn stop(id: &str, name: &str, lat: f64) -> Stop {
-        Stop {
-            id: id.into(),
-            name: name.into(),
-            coord: Coord::new(lat, 29.0),
-            parent: None,
-        }
-    }
-
-    fn route(id: &str, short: &str, long: &str) -> Route {
-        Route {
-            id: id.into(),
-            short_name: short.into(),
-            long_name: long.into(),
-            kind: 3,
-        }
-    }
-
-    /// Stops 0..5 north to south; line "34" runs 0,1,2,3,4 to "Kadikoy";
-    /// line "M4" runs 2,3 and 4,3,2 back; one short variant of 34 runs 3,4.
-    fn feed() -> Feed {
-        Feed::new(
-            (0..5)
-                .map(|i| {
-                    stop(
-                        &format!("s{i}"),
-                        &format!("Stop {i}"),
-                        41.0 - f64::from(i) * 0.01,
-                    )
-                })
-                .collect(),
-            vec![
-                route("r1", "34", "Kadikoy - Sogutlucesme"),
-                route("r2", "", "Metro 4"),
-            ],
-            vec![
-                Pattern {
-                    route: 0,
-                    headsign: "Kadikoy".into(),
-                    stops: vec![0, 1, 2, 3, 4],
-                },
-                Pattern {
-                    route: 0,
-                    headsign: "Kadikoy".into(),
-                    stops: vec![3, 4],
-                },
-                Pattern {
-                    route: 1,
-                    headsign: "Tavsantepe".into(),
-                    stops: vec![2, 3],
-                },
-            ],
-            1_730_764_800_000,
-        )
-    }
-
-    #[test]
-    fn lines_keep_the_variant_with_the_most_stops_before() {
-        let f = feed();
-        // Stop 4 is on both variants of 34; the long one (pattern 0) wins.
-        let lines = lines_through(&f, 4, 20);
-        assert_eq!(
-            lines,
-            vec![LineChoice {
-                pattern: 0,
-                name: "34".into(),
-                headsign: "Kadikoy".into(),
-                before: 4
-            }]
-        );
-        // Stop 3: 34 (3 before) and the metro (1 before), numbers first.
-        let names: Vec<_> = lines_through(&f, 3, 20)
-            .into_iter()
-            .map(|l| l.name)
-            .collect();
-        assert_eq!(names, ["34", "Metro 4"]);
-        // The first stop of every pattern has nothing before it.
-        assert!(lines_through(&f, 0, 20).is_empty());
-        assert_eq!(lines_through(&f, 3, 1).len(), 1);
-    }
-
-    #[test]
-    fn line_names_sort_the_way_people_read_them() {
-        let mut names = ["M4", "34A", "10", "2", "34"];
-        names.sort_by_key(|n| natural_key(n));
-        assert_eq!(names, ["2", "10", "34", "34A", "M4"]);
-    }
-
-    #[test]
-    fn the_report_row_reads_like_a_sentence() {
-        let f = feed();
-        assert_eq!(feed_summary(&f), "5 stops, 2 lines");
-        let one = Feed::new(
-            vec![stop("a", "A", 1.0)],
-            vec![route("r", "1", "")],
-            vec![],
-            0,
-        );
-        assert_eq!(feed_summary(&one), "1 stop, 1 line");
-        assert_eq!(grouped(0), "0");
-        assert_eq!(grouped(999), "999");
-        assert_eq!(grouped(1_234), "1 234");
-        assert_eq!(grouped(1_234_567), "1 234 567");
-    }
-
-    #[test]
-    fn dates_drop_the_year_only_for_this_year() {
-        // 2024-11-05 00:00 UTC and 2025-11-05 (a year of 365 days later).
-        let nov5_2024 = 1_730_764_800_000;
-        let nov5_2025 = nov5_2024 + 365 * 86_400_000;
-        assert_eq!(date_text(nov5_2025, nov5_2025 + 5_000, 0), "5 Nov");
-        assert_eq!(date_text(nov5_2024, nov5_2025, 0), "5 Nov 2024");
-        assert_eq!(date_text(0, nov5_2025, 0), "1 Jan 1970");
-        // Leap day, and the last second of a year.
-        assert_eq!(date_text(1_709_164_800_000, nov5_2024, 0), "29 Feb");
-        assert_eq!(date_text(1_735_689_599_000, nov5_2024, 0), "31 Dec");
-        let f = feed();
-        assert_eq!(imported_text(&f, 0, nov5_2024, 0), "Imported 5 Nov");
-        assert_eq!(
-            imported_text(&f, 1_200, nov5_2024, 0),
-            "Imported 5 Nov, 1 200 unusable rows skipped"
-        );
-    }
-
-    #[test]
-    fn dates_follow_the_phone_time_zone() {
-        const TURKEY: i32 = 3 * 3_600;
-        // 2024-11-04 22:30 UTC is already 5 Nov 01:30 in Istanbul.
-        let late = 1_730_764_800_000 - 90 * 60_000;
-        assert_eq!(date_text(late, late, 0), "4 Nov");
-        assert_eq!(date_text(late, late, TURKEY), "5 Nov");
-        // 31 Dec 23:00 UTC is New Year in Istanbul: the year follows too.
-        let new_year = 1_735_689_600_000 - 3_600_000;
-        assert_eq!(date_text(new_year, new_year, TURKEY), "1 Jan");
-        assert_eq!(
-            date_text(new_year, new_year - 86_400_000, TURKEY),
-            "1 Jan 2025"
-        );
-    }
 
     fn zip_bytes(files: &[(&str, &str)]) -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));

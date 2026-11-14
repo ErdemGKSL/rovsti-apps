@@ -1507,7 +1507,7 @@ contact with vCard QR, new number) and the glass panel with glisse-ported refrac
 5 Contacts Card Studio sheet (menu, birthday row chip, Upcoming); 6 share and save (share provider, MediaStore, birthday
 notification action); 7 budgets and cancellation; 8 **F40** (X.1 goldens use featureless gradient "photos" that cannot
 prove the WhatsApp picture, e.g. `x1-wa-avatar-incoming-dark` looks like an aura: use recognisable test portraits),
-checklist, full gate, close X.2. Next planner after X.2: F40, then **E7 R1** (E6 runs in a parallel session, see E6).
+checklist, full gate, close X.2. Next planner after X.2: F40. E6 and E7 run in parallel sessions (see E6, E7); after F40 the `ui-overhaul` workflow plans no E6/E7 rounds.
 
 - Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least
   two weeks old, check its current API on docs.rs) inside the Rust core to render designed cards from node trees to
@@ -1563,8 +1563,8 @@ checklist, full gate, close X.2. Next planner after X.2: F40, then **E7 R1** (E6
 
 > **Runs in a parallel session (owner decision, 2026-11-14).** E6 is built on branch `messages-kotlin` by a separate
 > session, which merges `ui-overhaul` into its branch regularly; its finished rounds are merged back into
-> `ui-overhaul`. Planners on `ui-overhaul` skip E6 (do not plan, edit `android/messages` or change E6 statuses);
-> after X.2 and F40 they continue with E7. E8 still needs E6 done.
+> `ui-overhaul`. Planners on `ui-overhaul` skip E6 (do not plan, edit `android/messages` or change E6 statuses).
+> E8 still needs E6 done.
 
 Goal: parity with `apps/messages` (roadmap "Rovsti Messages", `util-messages*.md` M1-M50, `messages.md`, AD-MSG1 to
 AD-MSG9, AD-WA11), then polish.
@@ -1717,6 +1717,11 @@ the thread (E6.4a): both read WhatsApp **only from the local store**; the networ
 ---
 
 ## E7. Stops (`:stops`)
+
+> **Runs in a parallel session (owner decision, 2026-11-14).** E7 is built on branch `stops-kotlin` by a separate
+> session, which merges `ui-overhaul` into its branch regularly; its finished rounds are merged back into
+> `ui-overhaul`. Planners on `ui-overhaul` skip E7 (do not plan, edit `android/stops` or change E7 statuses).
+> E8 still needs E7 done.
 
 Goal: parity with `apps/stops` (roadmap "Rovsti Stops", `util-stops*.md` S1-S44, `stops*.md`, AD-ST1 to AD-ST9, AD-SA1
 to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (ARCH 8.4), then polish.

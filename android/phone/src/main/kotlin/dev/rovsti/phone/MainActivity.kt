@@ -17,9 +17,17 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import dev.rovsti.core.model.phone.CallPhase
 import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.design.transition.Tab
+import dev.rovsti.people.ui.LocalAvatarResolver
+import dev.rovsti.phone.data.People
+import dev.rovsti.phone.people.LocalContactPhotos
+import dev.rovsti.phone.people.rememberContactPhotos
+import dev.rovsti.platform.identity.PhoneNumbers
 import dev.rovsti.platform.telephony.AnswerOnce
 import dev.rovsti.platform.telephony.CallNotifications
 import dev.rovsti.platform.telephony.CallRegistry
@@ -184,7 +192,16 @@ class MainActivity :
 
     @Composable
     override fun Content() {
-        PhoneApp(container = container, navigator = navigator)
+        // Every avatar goes through the resolver (own photo, else the WhatsApp picture, else initials; X.1d).
+        val contacts by container.people.people.collectAsState()
+        val photos =
+            rememberContactPhotos((contacts as? People.Ready)?.contacts) { PhoneNumbers.e164(it, container.homeRegion) }
+        CompositionLocalProvider(
+            LocalAvatarResolver provides container.avatarResolver,
+            LocalContactPhotos provides photos,
+        ) {
+            PhoneApp(container = container, navigator = navigator)
+        }
     }
 
     // ---- Intents -----------------------------------------------------------------------------------------------

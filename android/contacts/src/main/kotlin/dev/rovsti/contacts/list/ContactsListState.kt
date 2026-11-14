@@ -6,12 +6,12 @@ import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.DraftSeed
 import dev.rovsti.contacts.R
 import dev.rovsti.contacts.UiConfirm
-import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.core.model.contacts.Addition
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.core.model.contacts.QuickAction
 import dev.rovsti.core.model.contacts.SelectAction
 import dev.rovsti.design.text.UiText
+import dev.rovsti.people.ui.AvatarFace
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.ImmutableSet

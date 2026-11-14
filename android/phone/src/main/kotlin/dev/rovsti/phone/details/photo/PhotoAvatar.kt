@@ -13,6 +13,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import dev.rovsti.design.list.Avatar
+import dev.rovsti.people.ui.AvatarFace
+import dev.rovsti.people.ui.ContactAvatar
 import dev.rovsti.phone.R
 
 /** Test tag of the tappable avatar of the Person and Call details sheets. */
@@ -30,10 +32,13 @@ fun PersonPhotoAvatar(
     size: Dp,
     photo: PersonPhoto?,
     modifier: Modifier = Modifier,
+    /** The numbers of the person: the WhatsApp picture is looked up by them when the contact has no photo (X.1d). */
+    numbers: List<String> = emptyList(),
 ) {
     val opener = LocalPersonPhotoOpener.current
     if (photo == null || opener == null) {
-        Avatar(name = name, size = size, colorKey = colorKey, modifier = modifier)
+        // No photo of their own to open: the WhatsApp picture of the number, else initials.
+        ContactAvatar(name, AvatarFace(numbers = numbers), modifier, size, colorKey)
         return
     }
     val bounds = remember { arrayOfNulls<Rect>(1) }

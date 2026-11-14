@@ -2,10 +2,10 @@ package dev.rovsti.contacts.cleanup
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.contacts.R
-import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.design.controls.ChipModel
 import dev.rovsti.design.text.UiText
+import dev.rovsti.people.ui.AvatarFace
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.persistentListOf

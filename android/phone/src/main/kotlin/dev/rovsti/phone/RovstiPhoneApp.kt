@@ -46,6 +46,11 @@ class RovstiPhoneApp :
             // built on the first lookup, off the main thread.
             CallerLookup.install { number -> container.identifyBlocking(number) }
         }
+        // The people cache (names and WhatsApp pictures) follows its source from the start, so the incoming screen
+        // and the notifications find a known caller's picture in memory (X.1d). Off the main thread.
+        step("people") {
+            Thread({ runCatching { container.startPeople() } }, "people-start").start()
+        }
         // Old contact photos go, off the main thread.
         step("prune") {
             Thread({ ContactPhotos.prune(this, SystemRovstiClock.nowMillis()) }, "photo-prune").start()

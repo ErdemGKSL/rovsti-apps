@@ -38,6 +38,8 @@ import dev.rovsti.design.text.rememberSearchFocusHandoff
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.people.ui.AvatarFace
+import dev.rovsti.people.ui.ContactAvatar
 import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RootLinks
@@ -198,10 +200,10 @@ private fun PersonRow(
             secondary = row.subtitle,
             modifier = Modifier.testTag(PeopleTags.row(row.id)),
             leading = {
-                Avatar(
+                ContactAvatar(
                     row.name,
+                    AvatarFace(own = row.photoUri, numbers = row.numbers),
                     size = Sizes.avatar,
-                    photoModel = row.photoUri,
                     colorKey = row.id.toString(),
                 )
             },

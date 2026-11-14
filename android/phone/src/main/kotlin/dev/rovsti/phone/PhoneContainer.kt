@@ -27,6 +27,11 @@ import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
 import dev.rovsti.core.ops.SharedOps
+import dev.rovsti.people.AvatarResolver
+import dev.rovsti.people.PeopleIdentitySource
+import dev.rovsti.people.PeopleSource
+import dev.rovsti.people.PeopleSources
+import dev.rovsti.people.ProviderSource
 import dev.rovsti.phone.data.AndroidCallLauncher
 import dev.rovsti.phone.data.BlockRepo
 import dev.rovsti.phone.data.CallLauncher
@@ -57,6 +62,7 @@ import dev.rovsti.phone.incoming.IncomingViewModel
 import dev.rovsti.phone.incoming.NamedCallSource
 import dev.rovsti.phone.incoming.RegistryCallSource
 import dev.rovsti.phone.notes.NotesViewModel
+import dev.rovsti.phone.people.StandalonePeople
 import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
 import dev.rovsti.phone.setup.SetupFactsSource
@@ -122,6 +128,7 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /** A number the Keypad is asked to show: a `tel:` link decoded by `dial.fromTelUri`, or a WhatsApp hand-off. */
 data class DialRequest(
@@ -262,6 +269,66 @@ open class PhoneContainer(
 
     /** The home region (SIM, network, locale, else TR) that national numbers are normalized in. */
     val homeRegion: String by lazy { PhoneNumbers.homeRegion(context) }
+
+    /** The people cache in memory (X.1d): names and WhatsApp pictures by number, read without blocking by every surface. */
+    val peopleIndex: dev.rovsti.people.PeopleIndex by lazy {
+        dev.rovsti.people.PeopleIndex
+            .forRegion(homeRegion)
+    }
+
+    /** Own photo, else the WhatsApp picture, else initials: the one place a Phone avatar is decided. */
+    val avatarResolver: AvatarResolver by lazy { AvatarResolver(peopleIndex) }
+
+    /** Phone without Contacts: the gateway's people held in memory, started by [startPeople] only then. */
+    val standalonePeople: StandalonePeople by lazy {
+        StandalonePeople(
+            wa = wa,
+            numbers = ::peopleNumbers,
+            wantPicture = { jid, id -> avatars.want(jid, id) },
+            pictureFile = { jid -> avatars.file(jid) },
+            pictureChanges = avatars.revision,
+            scope = scope,
+        )
+    }
+
+    /** Which source feeds [peopleIndex]: Contacts' provider when it is installed, else the gateway (null before [startPeople]). */
+    @Volatile var peopleSource: PeopleSource? = null
+        private set
+
+    /**
+     * Follows the people source once `Rust.init` is done (rule b): Contacts' provider when installed, else the
+     * gateway synced into memory at start and whenever WhatsApp is linked. Idempotent; safe to call early.
+     */
+    fun startPeople() {
+        synchronized(this) {
+            if (peopleSource != null) return
+            peopleSource =
+                PeopleSources.choose(
+                    context.packageManager,
+                    provider = { ProviderSource(context.contentResolver) },
+                    gateway = { standalonePeople.source },
+                )
+        }
+        val source = peopleSource ?: return
+        scope.launch {
+            if (source === standalonePeople.source) {
+                runCatching { awaitRustReady() }
+                standalonePeople.start()
+            }
+            peopleIndex.attach(this, source)
+        }
+    }
+
+    /** E.164 numbers worth asking WhatsApp about: the recent callers first, then the address book. */
+    protected open suspend fun peopleNumbers(): List<String> =
+        withContext(Dispatchers.IO) {
+            val recent = callLog.entries(PEOPLE_RECENT_CALLS).first().map { it.normalized }
+            val book =
+                (people.people.value as? People.Ready)?.contacts.orEmpty().flatMap { c ->
+                    c.numbers.map { it.normalized ?: PhoneNumbers.e164(it.raw, homeRegion).orEmpty() }
+                }
+            (recent + book).filter { it.startsWith("+") }.distinct()
+        }
 
     /**
      * Who a number is (F28, F29), for every surface that shows a person for a number: the device contacts through the
@@ -647,6 +714,8 @@ open class PhoneContainer(
                     homeCc = ::homeCc,
                     name = { people.displayName(it) },
                 ),
+                // WhatsApp names and pictures from the people cache: they only add what a contact lacks (X.1d).
+                PeopleIdentitySource(peopleIndex),
             ),
         )
 
@@ -693,3 +762,6 @@ open class PhoneContainer(
 
 /** How many contact numbers the home-country guess reads. */
 private const val HOME_CC_SAMPLE = 200
+
+/** How many recent calls the people sync reads numbers from. */
+private const val PEOPLE_RECENT_CALLS = 300

@@ -2,12 +2,17 @@
 package dev.rovsti.phone.incoming
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import dev.rovsti.people.AvatarResolver
+import dev.rovsti.people.PersonAvatar
+import dev.rovsti.people.ui.LocalAvatarResolver
+import dev.rovsti.phone.people.ContactPhotoBook
+import dev.rovsti.phone.people.LocalContactPhotos
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.onStart
 
 /**
  * Where the call screens get the photo of a caller: the contacts provider's photo URI for a contact id (WhatsApp
@@ -25,34 +30,56 @@ fun interface CallPhotos {
 }
 
 /**
- * The photo model of a caller, null until it is known and for a caller without one: the contacts photo of [contactId],
- * else (a WhatsApp call, also one from a contact without a photo) the profile picture of [jid].
+ * The picture of a caller that is known without waiting (X.1d): the contact's own photo from [book], else the WhatsApp
+ * picture the people cache holds for the caller's [number] or [jid]. Memory only: it never suspends, never reads the
+ * disk or Rust, so the incoming screen draws it on its first frame. Null when nothing is known yet.
+ */
+fun knownCallPhoto(
+    resolver: AvatarResolver?,
+    book: ContactPhotoBook,
+    contactId: Long?,
+    number: String?,
+    jid: String?,
+): String? {
+    book.ofContact(contactId)?.let { return it }
+    book.ofNumber(number)?.let { return it }
+    val numbers = listOfNotNull(number?.takeIf { it.isNotBlank() })
+    val byNumber = resolver?.resolve(null, numbers) as? PersonAvatar.WhatsApp
+    val found = byNumber ?: jid?.let { resolver?.resolveJid(it) as? PersonAvatar.WhatsApp }
+    return found?.uri
+}
+
+/**
+ * The photo model of a caller, null until it is known and for a caller without one. In order: what memory knows at once
+ * ([knownCallPhoto]: the contact's photo, else the WhatsApp picture of the number), then the contacts photo of
+ * [contactId] as it loads, then (a WhatsApp call) the profile picture of [jid] as the avatar cache stores it.
  */
 @Composable
 fun rememberCallPhoto(
     photos: CallPhotos,
     contactId: Long?,
     jid: String? = null,
+    number: String? = null,
 ): Any? {
-    val photo by produceState<Any?>(null, photos, contactId, jid) {
+    val resolver = LocalAvatarResolver.current
+    val book = LocalContactPhotos.current
+    val version = resolver?.version?.collectAsState()?.value ?: 0L
+    val known =
+        remember(
+            resolver,
+            version,
+            book,
+            contactId,
+            number,
+            jid,
+        ) { knownCallPhoto(resolver, book, contactId, number, jid) }
+    val own by produceState<String?>(null, photos, contactId) {
         value = null
-        val own = contactId?.let { photos.photoOf(it) }
-        val wa = jid?.let { photos.photoOfJid(it) }
-        when {
-            // The contact's own photo first; without one, the WhatsApp picture of a WhatsApp call (F39, X.1).
-            own != null && wa != null -> {
-                combine(own, wa.onStart { emit(null) }) { mine, theirs -> mine?.takeIf(String::isNotBlank) ?: theirs }
-                    .collect { value = it }
-            }
-
-            own != null -> {
-                own.collect { value = it?.takeIf(String::isNotBlank) }
-            }
-
-            wa != null -> {
-                wa.collect { value = it }
-            }
-        }
+        contactId?.let { photos.photoOf(it) }?.collect { value = it?.takeIf(String::isNotBlank) }
     }
-    return photo
+    val wa by produceState<Any?>(null, photos, jid) {
+        value = null
+        jid?.let { photos.photoOfJid(it) }?.collect { value = it }
+    }
+    return own ?: known ?: wa
 }

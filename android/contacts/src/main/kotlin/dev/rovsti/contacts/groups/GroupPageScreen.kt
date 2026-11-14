@@ -13,7 +13,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.R
-import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.contacts.people.presentContactPicker
 import dev.rovsti.design.chrome.LargeTitleScaffold
@@ -40,6 +39,7 @@ import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.people.ui.ContactAvatar
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 

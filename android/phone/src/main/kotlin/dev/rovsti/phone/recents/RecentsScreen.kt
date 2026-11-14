@@ -96,6 +96,7 @@ import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RecentsMetrics
 import dev.rovsti.phone.RootLinks
+import dev.rovsti.phone.people.PhoneAvatar
 import dev.rovsti.phone.playRefusalHaptic
 import dev.rovsti.phone.remind.RemindStrings
 import dev.rovsti.phone.remind.RemindTime
@@ -452,8 +453,10 @@ private fun RowBody(
             .padding(start = Spacing.gutter, end = Spacing.gutter, top = Spacing.s, bottom = Spacing.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(
+        // Own photo of the contact, else the WhatsApp picture of the number (also a stranger's), else initials (X.1d).
+        PhoneAvatar(
             name = if (row.named) row.title else "",
+            number = row.number,
             size = Sizes.avatar,
             colorKey = row.number.ifEmpty { row.title },
         )

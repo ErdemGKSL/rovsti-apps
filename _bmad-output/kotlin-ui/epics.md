@@ -1395,7 +1395,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | in-progress (X.1a done: Rust `people.*` cache + `:people` client module; X.1b-d open) |
+| X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | todo |
 
 ### X.1 WhatsApp photo fallback avatar
@@ -1404,6 +1404,17 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   `StateFlow` version, `PeopleSource` = `ProviderSource` / `GatewaySource` chosen by `PeopleSources.choose`). WorkManager
   2.11.0 is pinned in `libs.versions.toml` for X.1b. Evidence: `crates/rovsti_app_core/src/people.rs` tests,
   `android/people/src/test/**`.
+- **X.1d (round 15, step 8) done:** Phone reads the `:people` resolver everywhere. `ContactAvatar` moved to `:people`
+  (`dev.rovsti.people.ui`) and Phone wraps it as `PhoneAvatar` (own photo from `ContactPhotoBook` by contact id or
+  number, else the WhatsApp picture, else initials); used by Recents, Favorites (and the speed dial picker), the
+  Contacts tab, keypad suggestions, statistics top people, notes, the person sheet, call details (also for an unknown
+  number on WhatsApp) and the `WaitingCallCard`. The incoming and in-call photo background uses `knownCallPhoto`
+  (memory only, first frame). `PeopleIdentitySource` adds WhatsApp names and pictures to `CallerIds`, so
+  `NotifyPhotos.photoOf` gives the ringing, missed-call, ongoing and reminder notifications the contact photo, else the
+  WhatsApp picture. Without Contacts `StandalonePeople` (`GatewaySource`) syncs into memory at start and when linked
+  and writes nothing to disk. Evidence: `PhoneAvatarSurfacesTest`, `NotificationLargeIconTest`, `StandaloneSourceTest`,
+  `IncomingFirstFrameTest`, shots `x1-wa-avatar-recents|incoming|person-sheet` (light + dark). Next planner: X.2
+  (round 16), then E6.
 - When a contact has **no photo of its own**, Contacts and Phone show the WhatsApp profile photo of the contact's
   WhatsApp number instead of the initials (lists, card, favorites, recents, call screens incl. the photo background).
 - It is a **fallback only**: never written into the Android contact (the existing editor action "Use WhatsApp Photo"

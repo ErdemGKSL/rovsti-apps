@@ -1,5 +1,6 @@
 plugins {
     id("rovsti.android.library")
+    id("rovsti.compose")
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -21,6 +22,8 @@ dependencies {
     api(project(":core-bridge"))
     // PhoneNumbers: the home-region normalization of the numbers the index is asked about.
     implementation(project(":platform"))
+    // ContactAvatar (the one avatar composable of every app) draws through the design system.
+    implementation(project(":design"))
     api(libs.coroutines.core)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)

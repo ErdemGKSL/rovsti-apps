@@ -5,8 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import dev.rovsti.contacts.people.LocalAvatarResolver
 import dev.rovsti.design.transition.Tab
+import dev.rovsti.people.ui.LocalAvatarResolver
 import dev.rovsti.platform.contacts.Shortcuts
 import dev.rovsti.shell.NavSpec
 import dev.rovsti.shell.RovstiShellActivity

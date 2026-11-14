@@ -56,6 +56,7 @@ import dev.rovsti.design.time.LocalRovstiClock
 import dev.rovsti.phone.DetailsMetrics
 import dev.rovsti.phone.details.photo.PersonPhoto
 import dev.rovsti.phone.details.photo.PersonPhotoAvatar
+import dev.rovsti.phone.people.rememberWhatsAppPicture
 import dev.rovsti.phone.remind.RemindStrings
 import dev.rovsti.phone.remind.RemindTime
 import dev.rovsti.phone.remind.menuAnchor
@@ -126,12 +127,15 @@ fun ColumnScope.CallDetailsContent(
                 Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).padding(top = Spacing.s),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (photo != null) {
+                // A number that is nobody's but on WhatsApp gets its picture here too (X.1d).
+                val waPicture = rememberWhatsAppPicture(ui.number)
+                if (photo != null || waPicture) {
                     PersonPhotoAvatar(
                         name = who.orEmpty(),
                         size = DetailsMetrics.CallAvatar,
                         colorKey = ui.number.ifEmpty { ui.title },
                         photo = photo,
+                        numbers = listOf(ui.number),
                         modifier = Modifier.padding(bottom = Spacing.m),
                     )
                 }

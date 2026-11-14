@@ -11,6 +11,7 @@ import dev.rovsti.contacts.card.HostedCard
 import dev.rovsti.contacts.list.HostedList
 import dev.rovsti.contacts.list.ListHarness
 import dev.rovsti.contacts.list.SampleBook
+import dev.rovsti.people.ui.LocalAvatarResolver
 import dev.rovsti.testing.ShotTest
 import org.junit.After
 import org.junit.Test

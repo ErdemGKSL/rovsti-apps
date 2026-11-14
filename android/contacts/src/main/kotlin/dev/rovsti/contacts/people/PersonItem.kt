@@ -2,6 +2,7 @@ package dev.rovsti.contacts.people
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.core.model.contacts.ContactRow
+import dev.rovsti.people.ui.AvatarFace
 
 /**
  * One person as a Favorites, Frequently contacted, group or picker row: everything the row draws, already decided.

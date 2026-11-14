@@ -93,6 +93,7 @@ dependencies {
     // :shell exposes :design, :platform, :wa and :core-bridge to the app (api).
     implementation(project(":shell"))
     implementation(project(":design"))
+    implementation(project(":people"))
     implementation(project(":platform"))
     implementation(project(":wa"))
     implementation(project(":core-bridge"))

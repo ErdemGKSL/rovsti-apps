@@ -43,6 +43,8 @@ data class PersonRowUi(
     val name: String,
     val subtitle: String?,
     val photoUri: String?,
+    /** The contact's numbers (raw): the WhatsApp picture is looked up by them when there is no photo of its own. */
+    val numbers: List<String> = emptyList(),
     val starred: Boolean,
     val letter: String,
     /** First row of its letter section (never while searching). */
@@ -168,6 +170,7 @@ private fun ContactRow.toUi() =
         name = name,
         subtitle = subtitle,
         photoUri = photoUri,
+        numbers = numbers.map { it.raw },
         starred = starred,
         letter = letter,
         header = header,

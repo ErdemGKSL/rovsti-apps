@@ -82,6 +82,7 @@ import dev.rovsti.phone.R
 import dev.rovsti.phone.STACK_FONT_SCALE
 import dev.rovsti.phone.StatsMetrics
 import dev.rovsti.phone.StatsMotion
+import dev.rovsti.phone.people.PhoneAvatar
 import dev.rovsti.shell.settings.IosSettingsGroup
 import dev.rovsti.shell.settings.IosSettingsItem
 import dev.rovsti.shell.settings.SettingsPage
@@ -457,7 +458,12 @@ private fun PeopleGroup(
             state.people.map { person ->
                 IosSettingsItem(
                     leadingContent = {
-                        Avatar(person.title, size = StatsMetrics.PersonAvatar, colorKey = person.number)
+                        PhoneAvatar(
+                            person.title,
+                            person.number,
+                            size = StatsMetrics.PersonAvatar,
+                            colorKey = person.number,
+                        )
                     },
                     title = {
                         IosText(

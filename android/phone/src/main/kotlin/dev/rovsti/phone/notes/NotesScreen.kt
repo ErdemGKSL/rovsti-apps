@@ -54,6 +54,7 @@ import dev.rovsti.phone.PhoneMetrics
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RecentsMetrics
 import dev.rovsti.phone.details.CallDetailsTarget
+import dev.rovsti.phone.people.PhoneAvatar
 import dev.rovsti.shell.settings.SettingsLazyPage
 import kotlinx.collections.immutable.persistentListOf
 
@@ -215,7 +216,14 @@ private fun RowBody(
             title = row.title.rtlSafe(),
             secondary = row.subtitle?.rtlSafe(),
             secondaryMaxLines = 2,
-            leading = { Avatar(row.name ?: row.title, size = NotesMetrics.Avatar, colorKey = row.number) },
+            leading = {
+                PhoneAvatar(
+                    row.name ?: row.title,
+                    row.number,
+                    size = NotesMetrics.Avatar,
+                    colorKey = row.number,
+                )
+            },
             onClick = onClick,
         )
     }

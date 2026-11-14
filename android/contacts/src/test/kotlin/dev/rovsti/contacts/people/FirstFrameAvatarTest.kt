@@ -8,6 +8,11 @@ import androidx.compose.ui.test.onNodeWithTag
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.people.AvatarResolver
 import dev.rovsti.people.PeopleIndex
+import dev.rovsti.people.ui.AvatarFace
+import dev.rovsti.people.ui.AvatarKind
+import dev.rovsti.people.ui.AvatarPictureAlpha
+import dev.rovsti.people.ui.ContactAvatar
+import dev.rovsti.people.ui.LocalAvatarResolver
 import dev.rovsti.testing.ShotTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

@@ -35,6 +35,7 @@ import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.ANSWER_GREEN
 import dev.rovsti.phone.DECLINE_RED
 import dev.rovsti.phone.IncomingMetrics
+import dev.rovsti.phone.people.PhoneAvatar
 import dev.rovsti.phone.wa.WaAudioLabel
 
 /**
@@ -77,7 +78,12 @@ private fun CardBody(
         verticalArrangement = Arrangement.spacedBy(IncomingMetrics.CardGap),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
-            Avatar(name = ui.title, size = IncomingMetrics.CardAvatar, colorKey = ui.avatarKey)
+            PhoneAvatar(
+                name = ui.title,
+                number = ui.number,
+                size = IncomingMetrics.CardAvatar,
+                colorKey = ui.avatarKey,
+            )
             Column(Modifier.weight(1f)) {
                 RovstiText(
                     strings.waiting(ui.title),

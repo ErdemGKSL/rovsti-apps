@@ -1,9 +1,9 @@
 package dev.rovsti.contacts.card
 
 import androidx.compose.runtime.Immutable
-import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.core.model.contacts.TitleDetail
 import dev.rovsti.design.text.UiText
+import dev.rovsti.people.ui.AvatarFace
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 

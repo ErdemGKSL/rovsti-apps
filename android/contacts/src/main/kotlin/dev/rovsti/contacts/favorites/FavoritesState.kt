@@ -1,10 +1,10 @@
 package dev.rovsti.contacts.favorites
 
 import androidx.compose.runtime.Immutable
-import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.contacts.people.PersonItem
 import dev.rovsti.core.model.contacts.EventKind
 import dev.rovsti.design.text.UiText
+import dev.rovsti.people.ui.AvatarFace
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 

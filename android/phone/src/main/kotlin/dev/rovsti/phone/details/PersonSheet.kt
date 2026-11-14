@@ -267,6 +267,7 @@ private fun Header(ui: PersonUi) {
             size = DetailsMetrics.HeaderAvatar,
             colorKey = ui.colorKey.ifEmpty { ui.title },
             photo = ui.photo,
+            numbers = ui.numbers.map { it.raw },
         )
         RovstiText(
             ui.title,

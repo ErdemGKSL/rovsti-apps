@@ -117,7 +117,7 @@ fun IncomingScreen(
     photos: CallPhotos = CallPhotos.None,
 ) {
     val ui by model.state.collectAsState()
-    val photo = rememberCallPhoto(photos, ui.caller?.contactId, ui.caller?.photoJid)
+    val photo = rememberCallPhoto(photos, ui.caller?.contactId, ui.caller?.photoJid, ui.caller?.number)
     IncomingContent(ui, IncomingStrings.current(), model::onAction, modifier, aura, photo)
 }
 

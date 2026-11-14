@@ -26,6 +26,8 @@ data class IncomingCaller(
     /** A WhatsApp call (AD-WA5): the screen says "WhatsApp audio" and shows the profile picture of [photoJid]. */
     val whatsapp: Boolean = false,
     val photoJid: String? = null,
+    /** The raw number: the WhatsApp picture is looked up by it (X.1d); empty for a private caller. */
+    val number: String = "",
 )
 
 /** A second caller while a call is live: the card with four ways to handle it. */
@@ -42,6 +44,8 @@ data class WaitingUi(
     val canMessage: Boolean,
     /** The waiting call is a WhatsApp call: End & Answer and Decline only. */
     val whatsapp: Boolean = false,
+    /** The raw number of the waiting caller (its WhatsApp picture, X.1d). */
+    val number: String = "",
 )
 
 @Immutable

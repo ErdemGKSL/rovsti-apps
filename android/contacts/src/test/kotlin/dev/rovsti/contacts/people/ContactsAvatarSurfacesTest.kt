@@ -15,6 +15,10 @@ import dev.rovsti.contacts.list.ListHarness
 import dev.rovsti.contacts.list.SampleBook
 import dev.rovsti.people.AvatarResolver
 import dev.rovsti.people.PeopleIndex
+import dev.rovsti.people.ui.AvatarFace
+import dev.rovsti.people.ui.AvatarKind
+import dev.rovsti.people.ui.ContactAvatar
+import dev.rovsti.people.ui.LocalAvatarResolver
 import dev.rovsti.testing.ShotTest
 import kotlinx.collections.immutable.toImmutableList
 import org.junit.Assert.assertEquals

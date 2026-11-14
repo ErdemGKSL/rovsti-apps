@@ -1,4 +1,4 @@
-package dev.rovsti.contacts.people
+package dev.rovsti.people.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -66,6 +66,8 @@ fun ContactAvatar(
     size: Dp = Sizes.avatar,
     colorKey: String = name,
     contentDescription: String? = null,
+    /** On a call's aura the initials sit on a white disc (the design system's rule); photos are unchanged. */
+    onAura: Boolean = false,
 ) {
     val resolver = LocalAvatarResolver.current
     val version = resolver?.version?.collectAsState()?.value ?: 0L
@@ -104,6 +106,7 @@ fun ContactAvatar(
             colorKey = colorKey,
             contentDescription = contentDescription,
             photoModel = (avatar as? PersonAvatar.Own)?.uri,
+            onAura = onAura,
         )
         if (picture != null) {
             RowImage(

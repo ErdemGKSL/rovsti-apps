@@ -923,7 +923,7 @@ object CallRegistry : CallsApi {
                 null
             }
         val text = PhoneNumbers.forReading(number, PhoneNumbers.homeRegion(context))
-        val photo = who?.contactId?.let { NotifyPhotos.icon(context, it) }
+        val photo = who?.let { NotifyPhotos.photoOf(context, it) }
         return Named(who?.title, who?.contactId, text, photo)
     }
 

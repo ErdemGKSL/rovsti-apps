@@ -45,7 +45,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rovsti.contacts.R
-import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.core.model.contacts.QuickAction
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.ToolbarAction
@@ -88,6 +87,7 @@ import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
 import dev.rovsti.design.transition.rovstiSharedBounds
+import dev.rovsti.people.ui.ContactAvatar
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList

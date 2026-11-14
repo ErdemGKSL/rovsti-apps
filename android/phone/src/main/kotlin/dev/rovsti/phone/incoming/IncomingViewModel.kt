@@ -172,6 +172,7 @@ class IncomingViewModel(
                         canHold = it.id !in wa && (relabelled || live?.canHold == true),
                         canMessage = it.numberRaw.isNotBlank() && it.id !in wa,
                         whatsapp = it.id in wa,
+                        number = it.numberRaw.trim(),
                     )
                 },
             locked = snapshot.keyguardLocked,
@@ -193,6 +194,7 @@ class IncomingViewModel(
         sim,
         whatsapp = wa != null,
         photoJid = wa?.jid,
+        number = call.numberRaw.trim(),
     )
 
     private fun titleOf(call: WireCall): String =

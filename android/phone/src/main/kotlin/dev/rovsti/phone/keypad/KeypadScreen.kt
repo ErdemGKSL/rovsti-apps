@@ -78,6 +78,7 @@ import dev.rovsti.phone.KeypadMetrics
 import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RootLinks
+import dev.rovsti.phone.people.PhoneAvatar
 import dev.rovsti.phone.playRefusalHaptic
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -460,7 +461,13 @@ private fun SuggestionRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
-        Avatar(name = item.name, size = KeypadMetrics.SuggestionAvatar, colorKey = item.contactId.toString())
+        PhoneAvatar(
+            name = item.name,
+            number = item.number,
+            size = KeypadMetrics.SuggestionAvatar,
+            colorKey = item.contactId.toString(),
+            contactId = item.contactId,
+        )
         Column(Modifier.weight(1f)) {
             BasicText(
                 text = highlighted(item),

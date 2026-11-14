@@ -36,8 +36,36 @@ object NotifyPhotos {
             } catch (_: RuntimeException) {
                 null
             } ?: return NotifyPerson(null, null)
-        return NotifyPerson(who.title, who.contactId?.let { icon(context, it) })
+        return NotifyPerson(who.title, photoOf(context, who))
     }
+
+    /**
+     * The round photo for [who]: the contact's own photo first, else (a stranger on WhatsApp, or a contact without a
+     * photo) their WhatsApp picture from the people cache, else null (X.1d). Blocking: off the main thread.
+     */
+    fun photoOf(
+        context: Context,
+        who: dev.rovsti.platform.identity.CallerIdentity,
+        contactPhoto: (Long) -> Icon? = { icon(context, it) },
+    ): Icon? = who.contactId?.let(contactPhoto) ?: who.waPhotoUri?.let { icon(context, Uri.parse(it)) }
+
+    /** The round picture behind [uri] (a `file:` or `content:` URI); null when it cannot be read or decoded. */
+    fun icon(
+        context: Context,
+        uri: Uri,
+    ): Icon? =
+        try {
+            context.contentResolver
+                .openInputStream(uri)
+                ?.use { BitmapFactory.decodeStream(it) }
+                ?.let { Icon.createWithBitmap(circle(it)) }
+        } catch (_: java.io.IOException) {
+            null
+        } catch (_: SecurityException) {
+            null
+        } catch (_: RuntimeException) {
+            null
+        }
 
     /** The round photo of contact [contactId] for a notification; null without one. */
     fun icon(

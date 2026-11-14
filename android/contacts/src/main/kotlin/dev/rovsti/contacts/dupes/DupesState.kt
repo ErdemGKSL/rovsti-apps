@@ -2,8 +2,8 @@ package dev.rovsti.contacts.dupes
 
 import androidx.compose.runtime.Immutable
 import dev.rovsti.contacts.intake.PreviewSection
-import dev.rovsti.contacts.people.AvatarFace
 import dev.rovsti.design.text.UiText
+import dev.rovsti.people.ui.AvatarFace
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 

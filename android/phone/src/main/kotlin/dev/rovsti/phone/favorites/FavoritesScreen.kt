@@ -61,6 +61,7 @@ import dev.rovsti.phone.PhoneTags
 import dev.rovsti.phone.R
 import dev.rovsti.phone.RecentsMetrics
 import dev.rovsti.phone.RootLinks
+import dev.rovsti.phone.people.PhoneAvatar
 import dev.rovsti.phone.playRefusalHaptic
 import dev.rovsti.phone.rootToolbar
 import dev.rovsti.phone.setup.SetupUiState
@@ -382,7 +383,14 @@ internal fun PersonListRow(
         secondary = person.label,
         modifier = modifier,
         leading = {
-            Avatar(person.name, size = Sizes.avatar, photoModel = person.photoUri, colorKey = person.colorKey)
+            PhoneAvatar(
+                person.name,
+                person.number,
+                size = Sizes.avatar,
+                colorKey = person.colorKey,
+                own = person.photoUri,
+                contactId = person.contactId,
+            )
         },
         trailing = trailing,
         onClick = onClick,

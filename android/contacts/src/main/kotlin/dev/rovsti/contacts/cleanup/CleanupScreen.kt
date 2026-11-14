@@ -28,7 +28,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import dev.rovsti.contacts.R
 import dev.rovsti.contacts.orNoName
-import dev.rovsti.contacts.people.ContactAvatar
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -58,6 +57,7 @@ import dev.rovsti.design.text.resolve
 import dev.rovsti.design.text.text
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.people.ui.ContactAvatar
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.Flow
 

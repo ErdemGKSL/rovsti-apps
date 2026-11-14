@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.width
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.core.model.phone.CallLogKind
 import dev.rovsti.design.list.ListRow
+import dev.rovsti.people.ui.AvatarFace
 import dev.rovsti.platform.system.permissions.PermissionState
 import dev.rovsti.testing.ShotTest
 import org.junit.After

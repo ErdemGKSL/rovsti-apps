@@ -228,6 +228,7 @@ internal object PeopleUiSample {
                 name = name,
                 subtitle = "mobile  +90 555 ${100 + i} 22 33",
                 photoUri = null,
+                numbers = listOf("+90 555 ${100 + i} 22 33"),
                 starred = name in setOf("Ayse Yilmaz", "Deniz Aksoy", "Zeynep Celik"),
                 letter = letter,
                 header = header,

@@ -76,6 +76,7 @@ import kotlin.math.roundToInt
  * sheet that cannot close, drops to its lowest detent); closing clears the focus so the keyboard goes away.
  *
  * [content] fills the space under the grabber; it is given the [SheetState] to dismiss or move the sheet.
+ * [compactLargeOnly] false keeps the short detents in a window under 480 dp tall (the map sheet in landscape).
  */
 class SheetEntry(
     title: String,
@@ -86,6 +87,7 @@ class SheetEntry(
     private val onDismissed: () -> Unit = {},
     private val canDismiss: () -> Boolean = { true },
     private val onDismissBlocked: () -> Unit = {},
+    private val compactLargeOnly: Boolean = true,
     private val content: @Composable ColumnScope.(SheetState) -> Unit,
 ) : OverlayEntry(modal = modal, title = title) {
     private var sheetRef by mutableStateOf<SheetState?>(null)
@@ -111,7 +113,7 @@ class SheetEntry(
         val gapPx = SheetMetrics.StackMinGap.value * density.density
         val offsets =
             remember(height, host.safe.top, density.density, detents) {
-                detentOffsets(detents, height, host.safe.top, density.density)
+                detentOffsets(detents, height, host.safe.top, density.density, compactLargeOnly)
                     .map { upperDetentOffset(it, lowerTop, stepBackPx, gapPx) }
                     .distinct()
                     .toFloatArray()
@@ -119,7 +121,7 @@ class SheetEntry(
         val initialOffset =
             remember(height, host.safe.top, density.density, initialDetent) {
                 upperDetentOffset(
-                    detentOffsets(listOf(initialDetent), height, host.safe.top, density.density)[0],
+                    detentOffsets(listOf(initialDetent), height, host.safe.top, density.density, compactLargeOnly)[0],
                     lowerTop,
                     stepBackPx,
                     gapPx,

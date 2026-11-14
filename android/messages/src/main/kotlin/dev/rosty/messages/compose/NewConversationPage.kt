@@ -1,6 +1,8 @@
 package dev.rosty.messages.compose
 
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
@@ -16,6 +18,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import dev.rosty.design.chrome.ScaffoldSpec
+import dev.rosty.design.chrome.ScreenLargeTitle
 import dev.rosty.design.chrome.ScreenLazyPage
 import dev.rosty.design.controls.EmptyState
 import dev.rosty.design.icons.RostyIcons
@@ -122,7 +126,16 @@ fun NewConversationScreen(
     onPick: (RecipientOption) -> Unit,
 ) {
     val title = stringResource(if (share) R.string.new_share_title else R.string.new_conversation_title)
-    ScreenLazyPage(title = title, onBack = onBack, modifier = Modifier.testTag(NewConversationTags.Page)) {
+    ScreenLazyPage(
+        title = title,
+        onBack = onBack,
+        modifier = Modifier.testTag(NewConversationTags.Page),
+        largeTitle = {
+            // ScreenLazyPage leaves the status bar to the title block; the bar row belongs to the back button.
+            Spacer(Modifier.statusBarsPadding())
+            ScreenLargeTitle(title, top = ScaffoldSpec.BarHeight)
+        },
+    ) {
         item(key = "field", contentType = "field") {
             GlassTextField(
                 field,

@@ -1,5 +1,6 @@
 package dev.rosty.messages.inbox
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
@@ -72,13 +73,14 @@ class E62ShotTest : ShotTest() {
 
     @Test fun swipe() =
         snap("e6.2-inbox-swipe", after = {
+            // A slow drag of a quarter row: its projected end stays short of fullSwipeFraction, so the row rests
+            // open on its actions instead of committing the last one.
             compose.onNodeWithTag(InboxTags.row("mert")).performTouchInput {
-                swipeLeft(
-                    startX = right * 0.9f,
-                    endX =
-                        right * 0.35f,
-                    durationMillis = 300,
-                )
+                down(Offset(right * 0.95f, centerY))
+                repeat(STEPS) { step ->
+                    moveTo(Offset(right * (0.95f - 0.25f * (step + 1) / STEPS), centerY), delayMillis = 40)
+                }
+                up()
             }
             advance(900)
         })
@@ -102,3 +104,5 @@ class E62ShotTest : ShotTest() {
 
     @Test fun rightToLeft() = snap("e6.2-inbox-rtl", rtl = true)
 }
+
+private const val STEPS = 24

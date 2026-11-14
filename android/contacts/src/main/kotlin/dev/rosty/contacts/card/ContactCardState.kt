@@ -79,6 +79,13 @@ data class FieldMenuItem(
     val op: FieldOp,
 )
 
+/** The date a birthday card prints and the age it reaches, when the year is known. */
+@Immutable
+data class BirthdayInfo(
+    val dateLine: String,
+    val ageYears: Int?,
+)
+
 /** A number, e-mail, date, address ... row. [title] is the value, [label] the small caption above/below it. */
 @Immutable
 data class CardRow(
@@ -93,6 +100,8 @@ data class CardRow(
     /** Text of the birthday "Wish" chip, sent as an SMS to [wishNumber]. */
     val wish: String? = null,
     val wishNumber: String? = null,
+    /** Set on a birthday row: what Card Studio prints, and the cue for the "Card" chip next to "Wish". */
+    val birthday: BirthdayInfo? = null,
     /** What a tap does; null for rows that only copy (note, nickname). */
     val tap: FieldOp? = null,
     /** A relation row opens the card of the person or searches for the name. */
@@ -203,6 +212,9 @@ sealed interface ContactCardAction {
         val text: String,
     ) : ContactCardAction
 
+    /** "Make a Card..." of the "..." menu and the "Card" chip of the birthday row: opens Card Studio (X.2). */
+    data object MakeCard : ContactCardAction
+
     /** The "..." menu: Share as Text, Share as File, Show QR Code. */
     data object ShareText : ContactCardAction
 
@@ -301,6 +313,11 @@ sealed interface ContactCardEffect {
     /** Open the QR sheet for [model]. */
     data class ShowQr(
         val model: QrSheetModel,
+    ) : ContactCardEffect
+
+    /** Open Card Studio for [subject]. */
+    data class OpenCardStudio(
+        val subject: dev.rosty.contacts.cards.CardStudioSubject,
     ) : ContactCardEffect
 
     /** The contact is gone: leave the page. */

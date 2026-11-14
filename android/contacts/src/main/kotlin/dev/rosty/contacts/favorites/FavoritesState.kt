@@ -122,6 +122,12 @@ sealed interface FavoritesAction {
         val onPage: Boolean = false,
     ) : FavoritesAction
 
+    /** Card Studio for the contact of [item]; [onPage] as for [Wish]. */
+    data class MakeCard(
+        val item: UpcomingItem,
+        val onPage: Boolean = false,
+    ) : FavoritesAction
+
     data object SaveCalendar : FavoritesAction
 }
 
@@ -142,6 +148,11 @@ sealed interface FavoritesEffect {
         val text: String,
         val count: Int,
         val notice: String,
+    ) : FavoritesEffect
+
+    /** Open Card Studio for [subject]. */
+    data class OpenCardStudio(
+        val subject: dev.rosty.contacts.cards.CardStudioSubject,
     ) : FavoritesEffect
 
     data class Toast(

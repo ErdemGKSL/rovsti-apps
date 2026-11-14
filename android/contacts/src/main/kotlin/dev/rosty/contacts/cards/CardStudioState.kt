@@ -1,0 +1,173 @@
+package dev.rosty.contacts.cards
+
+import android.content.Context
+import androidx.compose.runtime.Immutable
+import dev.rosty.contacts.R
+import dev.rosty.core.ops.CardPalette
+import dev.rosty.core.ops.CardSpec
+import dev.rosty.core.ops.CardTemplate
+import dev.rosty.design.text.UiText
+
+/** Test tags of the Card Studio sheet. */
+object CardStudioTags {
+    const val Sheet = "card-studio"
+    const val Templates = "card-studio-templates"
+    const val Preview = "card-studio-preview"
+    const val Ring = "card-studio-ring"
+    const val Swatches = "card-studio-swatches"
+    const val Animated = "card-studio-animated"
+    const val Share = "card-studio-share"
+    const val Save = "card-studio-save"
+
+    fun swatch(palette: CardPalette) = "card-studio-swatch-${palette.name.lowercase()}"
+}
+
+/**
+ * Who the card is for, as the entry points know them: the card page and the Upcoming rows both build one. [birthday]
+ * is whether the contact has a birthday (the Birthday template needs it), [dateLine] the date it prints and [ageYears]
+ * the age it reaches, when the year is known. [photo] is a readable picture URI or null (initials are drawn then).
+ */
+@Immutable
+data class CardStudioSubject(
+    val contactId: Long,
+    val name: String,
+    val birthday: Boolean,
+    val dateLine: String? = null,
+    val ageYears: Int? = null,
+    val photo: String? = null,
+    val numbers: List<String> = emptyList(),
+    val vcard: String? = null,
+) {
+    /** The template the sheet opens on: Birthday for a contact with one, else Contact. */
+    val defaultTemplate: CardTemplate get() = if (birthday) CardTemplate.Birthday else CardTemplate.Contact
+
+    /** The templates the picker offers: no Birthday card for somebody without a birthday. */
+    val templates: List<CardTemplate>
+        get() = CardTemplate.entries.filter { it != CardTemplate.Birthday || birthday }
+
+    val initials: String
+        get() =
+            name
+                .split(' ', ' ')
+                .filter { it.isNotBlank() }
+                .let { parts ->
+                    (
+                        parts.firstOrNull().orEmpty().take(1) +
+                            parts
+                                .drop(1)
+                                .lastOrNull()
+                                .orEmpty()
+                                .take(1)
+                    )
+                }.uppercase()
+}
+
+/** The finished picture on screen: the file and its pixel size. */
+@Immutable
+data class CardPreview(
+    val path: String,
+    val width: Int,
+    val height: Int,
+    val animated: Boolean,
+)
+
+/** Everything the sheet shows. [preview] stays while the next render runs, so the box never empties. */
+@Immutable
+data class CardStudioState(
+    val subject: CardStudioSubject,
+    val template: CardTemplate,
+    val palette: CardPalette = CardPalette.Dawn,
+    val animated: Boolean = false,
+    val rendering: Boolean = false,
+    val preview: CardPreview? = null,
+    val failed: Boolean = false,
+) {
+    /** The Still / Animated switch only exists for templates that move. */
+    val canAnimate: Boolean get() = template.animatable
+
+    /** True when Share and Save have something to send. */
+    val ready: Boolean get() = preview != null && !rendering
+}
+
+sealed interface CardStudioAction {
+    data class PickTemplate(
+        val template: CardTemplate,
+    ) : CardStudioAction
+
+    data class PickPalette(
+        val palette: CardPalette,
+    ) : CardStudioAction
+
+    data class SetAnimated(
+        val on: Boolean,
+    ) : CardStudioAction
+
+    data object Share : CardStudioAction
+
+    data object Save : CardStudioAction
+
+    /** The sheet left the screen: cancels the running render. */
+    data object Close : CardStudioAction
+}
+
+sealed interface CardStudioEffect {
+    data class Share(
+        val uri: android.net.Uri,
+        val mime: String,
+        val name: String,
+    ) : CardStudioEffect
+
+    data class Toast(
+        val text: UiText,
+    ) : CardStudioEffect
+}
+
+/** The words printed on the card, resolved from string resources so Turkish needs no second table in Rust. */
+internal fun cardTexts(
+    context: Context,
+    subject: CardStudioSubject,
+    template: CardTemplate,
+): Map<String, String> =
+    buildMap {
+        put("name", subject.name)
+        when (template) {
+            CardTemplate.Birthday -> {
+                put(
+                    "title",
+                    if (subject.name.isBlank()) {
+                        context.getString(R.string.card_birthday_title_nameless)
+                    } else {
+                        context.getString(R.string.card_birthday_title, subject.name)
+                    },
+                )
+                subject.ageYears?.takeIf { it > 0 }?.let {
+                    put("age_line", context.resources.getQuantityString(R.plurals.card_birthday_age, it, it))
+                }
+                subject.dateLine?.let { put("date_line", it) }
+            }
+
+            CardTemplate.Contact -> {
+                put("title", subject.name)
+                put("numbers", subject.numbers.take(MAX_NUMBERS).joinToString("\n"))
+            }
+
+            CardTemplate.NewNumber -> {
+                put("title", subject.name)
+                put("subtitle", context.getString(R.string.card_new_number_subtitle))
+                put("numbers", subject.numbers.take(1).joinToString("\n"))
+            }
+        }
+    }
+
+internal fun CardStudioState.toSpec(texts: Map<String, String>): CardSpec =
+    CardSpec(
+        template = template,
+        palette = palette,
+        animated = animated && template.animatable,
+        texts = texts,
+        photo = subject.photo,
+        initials = subject.initials,
+        qr = if (template == CardTemplate.Contact) subject.vcard else null,
+    )
+
+private const val MAX_NUMBERS = 3

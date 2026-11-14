@@ -24,6 +24,8 @@ import androidx.compose.ui.res.stringResource
 import dev.rosty.contacts.ContactsContainer
 import dev.rosty.contacts.ContactsRoute
 import dev.rosty.contacts.R
+import dev.rosty.contacts.cards.CardStudioSubject
+import dev.rosty.contacts.cards.openCardStudio
 import dev.rosty.contacts.editor.contactEditorExtras
 import dev.rosty.contacts.editor.contactEditorModel
 import dev.rosty.contacts.editor.presentContactEditor
@@ -144,6 +146,7 @@ fun ContactCardPage(
             )
         },
         onDelete = { deleteId -> container.deletion.ask(overlays, deleteId) {} },
+        onCardStudio = { subject -> overlays.openCardStudio(context, container, subject) },
     ) { query -> container.pendingSearch.value = query }
     val calls = rememberCallOptionsModel(container, id, state.header?.name.orEmpty())
     val callsState by calls.state.collectAsState()
@@ -332,6 +335,7 @@ fun ContactCardEffects(
     onEdit: ((Long) -> Unit)? = null,
     onDelete: ((Long) -> Unit)? = null,
     onExport: ((ContactCardEffect.ExportVcf) -> Unit)? = null,
+    onCardStudio: ((CardStudioSubject) -> Unit)? = null,
     onSearch: (String) -> Unit,
 ) {
     val latestOverlays = rememberUpdatedState(overlays)
@@ -339,6 +343,7 @@ fun ContactCardEffects(
     val latestEdit = rememberUpdatedState(onEdit)
     val latestSearch = rememberUpdatedState(onSearch)
     val latestExport = rememberUpdatedState(onExport)
+    val latestStudio = rememberUpdatedState(onCardStudio)
     LaunchedEffect(model, navigator) {
         model.effects.collect { effect ->
             val toast: (String) -> Unit = { text -> latestOverlays.value.showToast(text) }
@@ -422,6 +427,10 @@ fun ContactCardEffects(
                     latestOverlays.value.presentQrSheet(context, effect.model) { uri ->
                         start(context, ShareIntents.image(uri, QrSheetModel.MIME, effect.model.name), toast)
                     }
+                }
+
+                is ContactCardEffect.OpenCardStudio -> {
+                    latestStudio.value?.invoke(effect.subject)
                 }
 
                 ContactCardEffect.Close -> {

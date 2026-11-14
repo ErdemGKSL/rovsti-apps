@@ -57,6 +57,7 @@ import dev.rosty.design.theme.Spacing
 import dev.rosty.people.ui.ContactAvatar
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 
@@ -76,6 +77,8 @@ object FavTags {
     fun star(id: Long) = "frequent-star-$id"
 
     fun wish(key: String) = "upcoming-wish-$key"
+
+    fun card(key: String) = "upcoming-card-$key"
 
     fun upcomingRow(key: String) = "upcoming-row-$key"
 }
@@ -428,17 +431,35 @@ private fun FrequentRow(
     }
 }
 
-/** One date: avatar, name, "In 4 days . Turns 36", and the Wish button when the contact has a number. */
+/**
+ * One date: avatar, name, "In 4 days . Turns 36", the Wish button when the contact has a number and, on the See All page,
+ * a Card button (X.2). A long press opens a menu with Make a Card and Wish; a tap opens the contact.
+ */
 @Composable
 internal fun UpcomingRow(
     event: UpcomingItem,
     separated: Boolean,
     withDate: Boolean,
     onAction: (FavoritesAction) -> Unit,
+    overlays: OverlayController? = LocalOverlayOrNull.current,
 ) {
     val wish = stringResource(R.string.card_wish)
-    Column {
-        if (separated) RowSeparator(inset = TextStartWithLeading)
+    val card = stringResource(R.string.card_studio_chip)
+    val makeCard = stringResource(R.string.card_studio_menu)
+    val open = { onAction(FavoritesAction.Open(event.contactId)) }
+    val items =
+        remember(event, wish, makeCard, onAction) {
+            val list = ArrayList<MenuItem>()
+            list += MenuItem.Action(makeCard, RostyIcons.Document) { onAction(FavoritesAction.MakeCard(event)) }
+            if (event.canWish) {
+                list +=
+                    MenuItem.Action(wish, RostyIcons.Message) {
+                        onAction(FavoritesAction.Wish(event.contactId, event.kind, event.name))
+                    }
+            }
+            list.toImmutableList()
+        }
+    val body: @Composable (Boolean) -> Unit = { interactive ->
         ListRow(
             title = event.name,
             secondary = if (withDate) event.pageLine else event.sectionLine,
@@ -452,19 +473,53 @@ internal fun UpcomingRow(
                 )
             },
             trailing =
-                if (event.canWish) {
+                if (event.canWish || withDate) {
                     {
-                        CapsuleButton(
-                            wish,
-                            { onAction(FavoritesAction.Wish(event.contactId, event.kind, event.name)) },
-                            Modifier.testTag(FavTags.wish(event.key)),
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                            if (withDate) {
+                                CapsuleButton(
+                                    card,
+                                    { onAction(FavoritesAction.MakeCard(event)) },
+                                    Modifier.testTag(FavTags.card(event.key)),
+                                )
+                            }
+                            if (event.canWish) {
+                                CapsuleButton(
+                                    wish,
+                                    { onAction(FavoritesAction.Wish(event.contactId, event.kind, event.name)) },
+                                    Modifier.testTag(FavTags.wish(event.key)),
+                                )
+                            }
+                        }
                     }
                 } else {
                     null
                 },
-            onClick = { onAction(FavoritesAction.Open(event.contactId)) },
+            onClick = if (interactive) null else open,
         )
+    }
+    Column {
+        if (separated) RowSeparator(inset = TextStartWithLeading)
+        if (overlays != null) {
+            Box(
+                Modifier.longPressMenu(
+                    controller = overlays,
+                    items = items,
+                    style =
+                        ContextMenuStyle.Lifted(
+                            preview = {
+                                ListRow(
+                                    title = event.name,
+                                    secondary = if (withDate) event.pageLine else event.sectionLine,
+                                )
+                            },
+                        ),
+                    onTap = open,
+                ),
+            ) { body(true) }
+        } else {
+            body(false)
+        }
     }
 }
 

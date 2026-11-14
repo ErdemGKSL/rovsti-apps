@@ -80,6 +80,14 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   the antimeridian), at most `cap`, the ones nearest the middle of the box when there are more (`total` counts all of them), in feed
   order; `line` is the coordinates of the stops of `pattern` in travel order, null without one or for an unknown pattern. It replaces
   the GPUI `stops_in_view` and pattern lookup of `apps/stops/src/map.rs` (`rosty_geo::Feed::box_hits`, `pattern_line`).
+- `stops.gtfs_lines {stop? | stop_id?, limit?, dir?}` answers the stop sheet's line list: `{has_feed, stop, lines: [{pattern, name,
+  headsign, before, title, earlier}], max_lines}` (`rosty_geo::transit::lines_through`: one entry per line and headsign, the variant
+  with the most stops before this one, numbers before names; `title` is "Line 34 to Kadıköy", `earlier` "3 stops earlier on this
+  line"). `pattern` goes on the picked point as `Destination.pattern`; `stops.gtfs_view {pattern}` then answers its line. GTFS has no
+  alarm rule (AD-ST6): the alarm is the crossing of the circle on AB, so `stops.trip_start` takes nothing from here.
+- `stops.gtfs_summary {now_ms, tz_offset_s?, skipped_rows?, dir?}` answers the Settings row of the imported feed: `{has_feed, summary,
+  imported, imported_ms, stops, routes, patterns}` ("1 234 stops, 87 lines", "Imported 5 Nov, 1 200 unusable rows skipped";
+  `skipped_rows` is `report.skipped_rows` of the import just done).
 - `view.*` (`project`, `step`, `tiles`, `frac_to_coord`, `follow`) wrap `rosty_geo::view` and the slippy maths of `rosty_geo::tiles`.
   Their fixtures are the cross-check data for the Kotlin `MapCamera` (E7): same centre, scale and pixel in, same coordinate or tile set out.
 
@@ -696,7 +704,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::DiameterError` | stops | stops | op | stops.crossing_validate, stops.crossing_read |
 | `rosty_geo::EARTH_RADIUS_M` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rosty_geo::Endpoint` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
-| `rosty_geo::Feed` | stops | stops | op | stops.gtfs_import, stops.gtfs_search, stops.gtfs_view |
+| `rosty_geo::Feed` | stops | stops | op | stops.gtfs_import, stops.gtfs_search, stops.gtfs_view, stops.gtfs_lines, stops.gtfs_summary |
 | `rosty_geo::FeedReport` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
 | `rosty_geo::Fix` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
 | `rosty_geo::FixIn` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
@@ -710,14 +718,14 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::Outcome` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
 | `rosty_geo::OutcomeFilter` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
 | `rosty_geo::PRUNE_CHOICES_DAYS` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
-| `rosty_geo::Pattern` | stops | stops | op | stops.gtfs_import, stops.gtfs_search, stops.gtfs_view |
-| `rosty_geo::Route` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
+| `rosty_geo::Pattern` | stops | stops | op | stops.gtfs_import, stops.gtfs_search, stops.gtfs_view, stops.gtfs_lines, stops.gtfs_summary |
+| `rosty_geo::Route` | stops | stops | op | stops.gtfs_import, stops.gtfs_search, stops.gtfs_lines, stops.gtfs_summary |
 | `rosty_geo::SavedStop` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
 | `rosty_geo::SavedStopError` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
 | `rosty_geo::SavedStops` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
 | `rosty_geo::Side` | stops | stops | op | stops.crossing_validate, stops.crossing_read |
 | `rosty_geo::Stats` | stops | stops | op | stops.stats |
-| `rosty_geo::Stop` | stops | stops | op | stops.gtfs_import, stops.gtfs_search, stops.gtfs_view |
+| `rosty_geo::Stop` | stops | stops | op | stops.gtfs_import, stops.gtfs_search, stops.gtfs_view, stops.gtfs_lines, stops.gtfs_summary |
 | `rosty_geo::StopColour` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
 | `rosty_geo::StopsPrefs` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
 | `rosty_geo::TripRecord` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |

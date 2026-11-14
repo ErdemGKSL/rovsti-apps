@@ -18,7 +18,7 @@ use rosty_geo::prefs::{
 use rosty_geo::tiles::{ATTRIBUTION, DEFAULT_TILE_URL, TileSource};
 use rosty_geo::{
     AlarmSound, BBox, Coord, Feed, History, Measure, SavedStops, StopsPrefs, backup, notice,
-    read_zip,
+    read_zip, transit,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -70,6 +70,14 @@ pub(super) const OPS: &[OpSpec] = &[
         search_cases
     ),
     op!("stops.gtfs_view", ViewReq, Value, gtfs_view, view_cases),
+    op!("stops.gtfs_lines", LinesReq, Value, gtfs_lines, lines_cases),
+    op!(
+        "stops.gtfs_summary",
+        SummaryReq,
+        Value,
+        gtfs_summary,
+        summary_cases
+    ),
     op!(
         "stops.coord_format",
         FormatReq,
@@ -585,6 +593,130 @@ fn view_cases() -> Vec<Case> {
         )
         .seeded("stops_gtfs"),
         Case::named("no_feed", json!({"dir": "$DIR", "bbox": around, "cap": 300, "pattern": 0})).seeded("stops_files"),
+    ]
+}
+
+#[derive(Deserialize)]
+struct LinesReq {
+    #[serde(default)]
+    dir: Option<String>,
+    /// The stop by its index in the feed (`stops.gtfs_search` and `stops.gtfs_view` answer it) ...
+    #[serde(default)]
+    stop: Option<u32>,
+    /// ... or by its GTFS id (a picked point keeps it as `gtfs_stop`). The index wins when both are given.
+    #[serde(default)]
+    stop_id: Option<String>,
+    /// The most lines to list; `transit::MAX_LINES` when absent.
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// The lines that call at a stop and have a stop before it, as the stop sheet lists them: one entry per line and
+/// headsign (the variant with the most stops before this one), in reading order. `pattern` is what a picked point
+/// carries as `Destination.pattern` so the line is drawn (`stops.gtfs_view`). A stop the feed does not have answers
+/// `stop: null` and no lines.
+fn gtfs_lines(req: LinesReq) -> Result<Value, FfiError> {
+    let feed: Option<Feed> = storage::load_json(&data_dir(&req.dir)?, GTFS_FILE);
+    let Some(feed) = feed else {
+        return Ok(
+            json!({"has_feed": false, "stop": null, "lines": [], "max_lines": transit::MAX_LINES}),
+        );
+    };
+    let index = req
+        .stop
+        .or_else(|| {
+            let id = req.stop_id.as_deref()?;
+            u32::try_from(feed.stops.iter().position(|s| s.id == id)?).ok()
+        })
+        .filter(|&i| (i as usize) < feed.stops.len());
+    let Some(index) = index else {
+        return Ok(
+            json!({"has_feed": true, "stop": null, "lines": [], "max_lines": transit::MAX_LINES}),
+        );
+    };
+    let stop = &feed.stops[index as usize];
+    let lines: Vec<Value> =
+        transit::lines_through(&feed, index, req.limit.unwrap_or(transit::MAX_LINES))
+            .into_iter()
+            .map(|l| {
+                json!({
+                    "pattern": l.pattern,
+                    "name": l.name,
+                    "headsign": l.headsign,
+                    "before": l.before,
+                    "title": transit::line_title(&l.name, &l.headsign),
+                    "earlier": transit::earlier_text(l.before),
+                })
+            })
+            .collect();
+    Ok(json!({
+        "has_feed": true,
+        "stop": {"index": index, "id": stop.id, "name": stop.name, "coord": stop.coord},
+        "lines": lines,
+        "max_lines": transit::MAX_LINES,
+    }))
+}
+
+fn lines_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"dir": "$DIR", "stop": 1})).seeded("stops_gtfs"),
+        Case::named("by_id", json!({"dir": "$DIR", "stop_id": "B", "limit": 1}))
+            .seeded("stops_gtfs"),
+        Case::named("first_stop", json!({"dir": "$DIR", "stop": 0})).seeded("stops_gtfs"),
+        Case::named("unknown_stop", json!({"dir": "$DIR", "stop_id": "nope"})).seeded("stops_gtfs"),
+        Case::named("out_of_range", json!({"dir": "$DIR", "stop": 99})).seeded("stops_gtfs"),
+        Case::named("no_feed", json!({"dir": "$DIR", "stop": 1})).seeded("stops_files"),
+    ]
+}
+
+#[derive(Deserialize)]
+struct SummaryReq {
+    #[serde(default)]
+    dir: Option<String>,
+    now_ms: i64,
+    /// Seconds east of UTC of the phone's calendar.
+    #[serde(default)]
+    tz_offset_s: i32,
+    /// Rows the import dropped (`report.skipped_rows` of `stops.gtfs_import`), for the note after an import.
+    #[serde(default)]
+    skipped_rows: u64,
+}
+
+/// The Settings row of the imported feed: "1 234 stops, 87 lines" and "Imported 5 Nov" (with the year when it is not
+/// this year, and the skipped rows when the import dropped any).
+fn gtfs_summary(req: SummaryReq) -> Result<Value, FfiError> {
+    let feed: Option<Feed> = storage::load_json(&data_dir(&req.dir)?, GTFS_FILE);
+    let Some(feed) = feed else {
+        return Ok(
+            json!({"has_feed": false, "summary": null, "imported": null, "imported_ms": null,
+                         "stops": 0, "routes": 0, "patterns": 0}),
+        );
+    };
+    Ok(json!({
+        "has_feed": true,
+        "summary": transit::feed_summary(&feed),
+        "imported": transit::imported_text(&feed, req.skipped_rows, req.now_ms, req.tz_offset_s),
+        "imported_ms": feed.imported_ms,
+        "stops": feed.stops.len(),
+        "routes": feed.routes.len(),
+        "patterns": feed.patterns.len(),
+    }))
+}
+
+fn summary_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"dir": "$DIR", "now_ms": NOW, "tz_offset_s": TZ})).seeded("stops_gtfs"),
+        Case::named(
+            "skipped_rows",
+            json!({"dir": "$DIR", "now_ms": NOW, "tz_offset_s": TZ, "skipped_rows": 1200}),
+        )
+        .seeded("stops_gtfs"),
+        Case::named(
+            "another_year",
+            json!({"dir": "$DIR", "now_ms": NOW + 400 * 86_400_000_i64, "tz_offset_s": -36_000}),
+        )
+        .seeded("stops_gtfs"),
+        Case::named("no_feed", json!({"dir": "$DIR", "now_ms": NOW})).seeded("stops_files"),
     ]
 }
 

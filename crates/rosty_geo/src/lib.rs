@@ -23,6 +23,7 @@ pub mod prefs;
 pub mod saved_stops;
 mod session;
 pub mod tiles;
+pub mod transit;
 mod trip;
 pub mod view;
 

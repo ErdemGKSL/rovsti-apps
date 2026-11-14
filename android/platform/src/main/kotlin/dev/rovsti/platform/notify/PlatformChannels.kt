@@ -32,6 +32,9 @@ object PlatformChannels {
     const val INCOMING_CALL = "incoming"
     const val MISSED_CALLS = "missed_calls"
 
+    /** The WhatsApp names and photos sync while it runs (people sync v2 S11): low, silent, no badge. */
+    const val PEOPLE_SYNC = "people_sync"
+
     /** The channel the destination alarm used before `trip_alarm_v2`; `TripAlarm` deletes it. */
     const val TRIP_ALARM_OLD = "trip_alarm"
 
@@ -141,6 +144,17 @@ object PlatformChannels {
                 NotificationManager.IMPORTANCE_DEFAULT,
                 R.string.notif_missed_channel_desc,
             ),
+            Spec(
+                PEOPLE_SYNC,
+                R.string.channel_people_sync,
+                NotificationManager.IMPORTANCE_LOW,
+                R.string.channel_people_sync_desc,
+            ) {
+                setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
+                enableLights(false)
+            },
         )
 
     private val byId = all.associateBy { it.id }

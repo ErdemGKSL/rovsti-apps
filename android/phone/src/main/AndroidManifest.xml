@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Phone without Contacts runs its people sync as a dataSync foreground service (people sync v2 S11). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -124,6 +126,28 @@
             android:name="dev.rovsti.platform.wa.WaCallService"
             android:exported="false"
             android:foregroundServiceType="microphone|phoneCall" />
+
+        <!-- People sync v2 S11 (Phone without Contacts): WorkManager runs the foreground PhonePeopleSyncWorker in its own
+             service, as dataSync (the call services above keep their own types); the notification's Stop action is
+             :people's receiver. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+        <!-- WorkManager starts on demand (RovstiPhoneApp is its Configuration.Provider), not at every process start:
+             a cold start for a ringing call must not open its database. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+        <receiver
+            android:name="dev.rovsti.people.sync.PeopleSyncStopReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".CallActionReceiver"

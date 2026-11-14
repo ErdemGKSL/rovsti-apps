@@ -29,6 +29,8 @@
     <string name="channel_trip_problem">Trip paused</string>
     <string name="channel_trip">Trip in progress</string>
     <string name="channel_trip_desc">Shown while Stops follows your trip</string>
+    <string name="channel_people_sync">WhatsApp sync</string>
+    <string name="channel_people_sync_desc">Shown while WhatsApp names and photos are synced</string>
     <string name="channel_trip_alarm">Destination alarm</string>
     <string name="channel_trip_alarm_desc">Rings when you are about to arrive</string>
     <string name="channel_ongoing">Ongoing call</string>

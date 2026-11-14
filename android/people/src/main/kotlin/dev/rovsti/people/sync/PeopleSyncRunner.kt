@@ -98,6 +98,8 @@ data class RunnerState(
     val progress: SyncProgress? = null,
     /** The slice waits (pace or rate limit) until then; null while a request is under way. */
     val sleepingUntilMs: Long? = null,
+    /** The wait until [sleepingUntilMs] is a short rate-limit pause (WhatsApp's limit), not the normal pace. */
+    val limited: Boolean = false,
     /** The planner's status, re-read after every slice and every committed part. */
     val stored: SyncStatus? = null,
 )
@@ -113,8 +115,10 @@ data class RunnerState(
  * only performs.
  *
  * One slice at a time: a second [run] while one is active answers [SliceResult.AlreadyRunning] at once, and a file
- * lock ([lockFile]) guards against a second process. A cancelled slice (the worker was stopped, [cancel]) still
- * reports `cancelled` and ends the slice, so the stored run is never left `running`.
+ * lock ([lockFile]) guards against a second process. A cancelled slice still ends the slice, so the stored run is never
+ * left `running`: stopped by [cancel] (the Stop button and the notification's Stop) it ends `interrupted(cancelled)`;
+ * cancelled from outside (the system stopped the worker, people sync v2 S11) it ends `interrupted(slice_budget)`,
+ * which the worker continues by itself.
  */
 class PeopleSyncRunner(
     private val store: PeopleStore,
@@ -136,6 +140,11 @@ class PeopleSyncRunner(
 
     @Volatile private var job: Job? = null
 
+    private val stopCount = MutableStateFlow(0L)
+
+    /** Counts [cancel] calls: compared before and after a slice or a wait, it tells a Stop from the system's stop. */
+    val stops: StateFlow<Long> = stopCount.asStateFlow()
+
     /** What the runner is doing, and the planner's last status. */
     val status: StateFlow<RunnerState> = state.asStateFlow()
 
@@ -146,15 +155,24 @@ class PeopleSyncRunner(
         return stored
     }
 
-    /** Stops the active slice (the "Stop" button, the worker's `onStopped`): it ends `interrupted(cancelled)`. */
+    /** Stops the active slice (the "Stop" button, the notification's Stop): it ends `interrupted(cancelled)`. */
     fun cancel() {
+        stopCount.update { it + 1 }
         job?.cancel(CancellationException("people sync cancelled"))
     }
 
     /** WhatsApp was unlinked: a stored run becomes `interrupted(wa_disconnected)` (dropped when another link begins). */
     suspend fun unlinked() {
         cancel()
-        val req = SyncStopRequest(dir = store.dataDir, nowMs = clock(), reason = SyncWire.WA_DISCONNECTED)
+        interruptStored(SyncWire.WA_DISCONNECTED)
+    }
+
+    /**
+     * Interrupts the stored run with [reason] (`SyncWire` interrupt reason) while no slice holds it: the worker's Stop
+     * during a rate limit's wait between two slices.
+     */
+    suspend fun interruptStored(reason: String) {
+        val req = SyncStopRequest(dir = store.dataDir, nowMs = clock(), reason = reason)
         (ops.syncStop(req) as? Outcome.Ok)?.value?.let { stored -> state.update { it.copy(stored = stored) } }
     }
 
@@ -171,19 +189,20 @@ class PeopleSyncRunner(
         }
         try {
             job = currentCoroutineContext()[Job]
+            val stopsAtStart = stopCount.value
             val lock = lockFile?.let(::tryLock)
             if (lockFile != null && lock == null) {
                 RovstiLog.event(TAG, "slice_skipped", "reason" to "file_lock", "start" to start)
                 return SliceResult.AlreadyRunning
             }
             try {
-                return slice(start, sliceMs)
+                return slice(start, sliceMs, stopsAtStart)
             } finally {
                 lock?.let(::release)
             }
         } finally {
             job = null
-            state.update { it.copy(active = false, live = false, sleepingUntilMs = null) }
+            state.update { it.copy(active = false, live = false, sleepingUntilMs = null, limited = false) }
             running.unlock()
         }
     }
@@ -191,6 +210,7 @@ class PeopleSyncRunner(
     private suspend fun slice(
         start: String,
         sliceMs: Long?,
+        stopsAtStart: Long,
     ): SliceResult {
         val waitStart = clock()
         val settled = withTimeoutOrNull(LINK_WAIT_MS) { wa.settled.first { it } } != null
@@ -252,6 +272,7 @@ class PeopleSyncRunner(
         }
         var parts = 0
         var stopped: SyncStopped? = null
+        var stopReason = SyncWire.CANCELLED
         try {
             while (stopped == null) {
                 val step =
@@ -273,9 +294,9 @@ class PeopleSyncRunner(
                     SyncWire.STEP_SLEEP -> {
                         val ms = step.ms ?: 0
                         RovstiLog.event(TAG, "pace", "sleep_ms" to ms, "why" to step.why)
-                        state.update { it.copy(sleepingUntilMs = clock() + ms) }
+                        state.update { it.copy(sleepingUntilMs = clock() + ms, limited = step.why == WHY_RATE_LIMIT) }
                         pause(ms)
-                        state.update { it.copy(sleepingUntilMs = null) }
+                        state.update { it.copy(sleepingUntilMs = null, limited = false) }
                     }
 
                     else -> {
@@ -308,13 +329,19 @@ class PeopleSyncRunner(
             }
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
-                ops.syncReport(SyncReportRequest(handle, clock(), rand(), SyncReport.cancelled))
-                end(parts, SyncStopped(SyncWire.INTERRUPTED, reason = SyncWire.CANCELLED))
+                if (stopCount.value != stopsAtStart) {
+                    ops.syncReport(SyncReportRequest(handle, clock(), rand(), SyncReport.cancelled))
+                } else {
+                    // Not our Stop: the system stopped the worker (its time budget, a constraint). The step under way
+                    // is asked again on resume; the worker schedules the continuation.
+                    stopReason = SyncWire.SLICE_BUDGET
+                }
+                end(parts, SyncStopped(SyncWire.INTERRUPTED, reason = stopReason))
             }
             throw e
         } finally {
             withContext(NonCancellable) {
-                val req = SyncStopRequest(handle = handle, nowMs = clock(), reason = SyncWire.CANCELLED)
+                val req = SyncStopRequest(handle = handle, nowMs = clock(), reason = stopReason)
                 (ops.syncStop(req) as? Outcome.Ok)?.value?.let { stored -> state.update { it.copy(stored = stored) } }
             }
         }
@@ -550,7 +577,10 @@ class PeopleSyncRunner(
         /** How long a slice waits for the stored link to be read ([WaRepository.settled]). */
         const val LINK_WAIT_MS = 20_000L
 
-        /** The worker's slice budget (`people_sync::WORKER_SLICE_MS`): WorkManager stops a worker at 10 min. */
+        /**
+         * The worker's slice budget (`people_sync::WORKER_SLICE_MS`): WorkManager stops a background worker at 10 min.
+         * A foreground worker (S11) runs without one; this is its fallback when it could not become foreground.
+         */
         const val WORKER_SLICE_MS = 8L * 60_000
 
         /** Between background slices when nothing is throttled (`people_sync::CONTINUE_DELAY_MS`). */
@@ -561,6 +591,9 @@ class PeopleSyncRunner(
 
         /** Numbers asked about per run (`people_sync::MAX_NUMBERS`). */
         const val MAX_NUMBERS = 2_000
+
+        /** `people_sync::Why::RateLimit` on the wire: a sleep step that waits out a short limit inline. */
+        const val WHY_RATE_LIMIT = "rate_limit"
 
         private const val PICTURE_PX = 256
         private const val NOT_CONNECTED = "not_connected"

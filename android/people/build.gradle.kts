@@ -27,9 +27,12 @@ dependencies {
     // The people sync runner (people sync v2) talks to the gateway through the app's WaRepository.
     implementation(project(":wa"))
     api(libs.coroutines.core)
+    // The foreground sync worker (people sync v2 S11) the apps subclass; WorkManager is part of its API.
+    api(libs.work.runtime.ktx)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.coroutines.test)
+    testImplementation(libs.work.testing)
     testImplementation(testFixtures(project(":core-bridge")))
     testImplementation(testFixtures(project(":wa")))
 }

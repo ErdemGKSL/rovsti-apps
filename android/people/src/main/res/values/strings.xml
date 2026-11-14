@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The ongoing notification of the WhatsApp names and photos sync (people sync v2 S11). -->
+    <string name="people_sync_notice_title">Syncing WhatsApp names and photos</string>
+    <string name="people_sync_notice_starting">Starting…</string>
+    <string name="people_sync_notice_lookup">Checking numbers %1$d/%2$d</string>
+    <string name="people_sync_notice_profiles">Getting names %1$d/%2$d</string>
+    <string name="people_sync_notice_pictures">Downloading photos %1$d/%2$d</string>
+    <plurals name="people_sync_notice_limit">
+        <item quantity="one">WhatsApp limit, continues in %d min</item>
+        <item quantity="other">WhatsApp limit, continues in %d min</item>
+    </plurals>
+    <string name="people_sync_notice_stop">Stop</string>
+</resources>

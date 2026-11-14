@@ -101,12 +101,15 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.collections.immutable)
     implementation(libs.navigation3.runtime)
+    // The people sync of Phone without Contacts runs as a foreground worker (people sync v2 S11).
+    implementation(libs.work.runtime.ktx)
     add("firebaseImplementation", libs.firebase.messaging)
 
     testImplementation(project(":testing"))
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.coroutines.test)
+    testImplementation(libs.work.testing)
     testImplementation(libs.compose.ui.test.junit4)
     testImplementation(testFixtures(project(":core-bridge")))
     testImplementation(testFixtures(project(":platform")))

@@ -128,6 +128,35 @@ class ContactsSettingsViewModelTest {
         )
     }
 
+    /** People sync v2 S11: Sync Now starts at once and asks for notifications once, without touching the reminders. */
+    @Test fun syncNowAsksForTheNotificationOnceAndTheAnswerTurnsNothingOn() {
+        val r = rig()
+        val sync = FakeSync()
+        val vm =
+            ContactsSettingsViewModel(
+                r.book,
+                r.store,
+                r.repo,
+                r.host.ops,
+                notifications = { permission },
+                people = sync,
+            )
+        r.ready(vm)
+        vm.onAction(SettingsAction.SyncPeopleNow)
+        assertEquals("the sync does not wait for the answer", listOf("sync"), sync.calls)
+        assertEquals(SettingsEffect.AskNotifications, r.next(vm))
+        vm.onAction(SettingsAction.NotificationsAnswered(false))
+        assertFalse("no reminder is switched on", r.store.prefs.value.birthdayReminders)
+
+        // Asked once: Android answered, so the next tap starts the sync and asks nothing.
+        permission = PermissionState.DeniedOnce
+        vm.onAction(SettingsAction.ContinuePeople)
+        assertEquals(listOf("sync", "resume"), sync.calls)
+        // A reminder switch still asks, and its answer is the reminder's (no toast was queued by the sync's answer).
+        vm.onAction(SettingsAction.SetReminders(true))
+        assertEquals(SettingsEffect.AskNotifications, r.next(vm))
+    }
+
     @Test fun theDefaultsAreFirstLastByFirstNameWithRemindersOff() {
         val r = rig()
         val vm = r.settings()

@@ -13,3 +13,4 @@ trip_alarm_v2	4	Destination alarm
 ongoing	2	Ongoing call
 incoming	4	Incoming calls
 missed_calls	3	Missed calls
+people_sync	2	WhatsApp sync

@@ -3,6 +3,7 @@ package dev.rovsti.phone
 import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.os.StrictMode
+import androidx.work.Configuration
 import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.phone.wa.WaCallActionReceiver
@@ -16,12 +17,16 @@ import dev.rovsti.shell.HasContainer
 /**
  * The `Application` of Rovsti Phone (FQCN kept from the GPUI build, ARCH 7.2). It runs for every process start,
  * including the ones for an incoming call or a push, so it does only Kotlin work and never loads the native library:
- * the container is lazy and the Rust core starts on first use (AD-8).
+ * the container is lazy and the Rust core starts on first use (AD-8). WorkManager (the people sync of Phone without
+ * Contacts, people sync v2 S11) starts on demand through [workManagerConfiguration], not from a startup provider.
  */
 class RovstiPhoneApp :
     Application(),
-    HasContainer<PhoneContainer> {
+    HasContainer<PhoneContainer>,
+    Configuration.Provider {
     override val container: PhoneContainer by lazy { PhoneContainer(this) }
+
+    override val workManagerConfiguration: Configuration get() = Configuration.Builder().build()
 
     override fun onCreate() {
         super.onCreate()

@@ -60,6 +60,15 @@ class ContactsManifestTest {
         assertFalse(manifest.components.any { it.name.endsWith("PeopleSyncWorker") })
     }
 
+    /** People sync v2 S11: WorkManager's foreground service runs the sync as dataSync; Stop is not exported. */
+    @Test fun theSyncRunsAsADataSyncForegroundServiceWithAPrivateStop() {
+        val service = manifest.component("androidx.work.impl.foreground.SystemForegroundService")
+        assertEquals("service", service.kind)
+        assertEquals("dataSync", service.attributes["foregroundServiceType"])
+        assertTrue("android.permission.FOREGROUND_SERVICE_DATA_SYNC" in manifest.usesPermissions)
+        assertEquals(false, manifest.component("dev.rovsti.people.sync.PeopleSyncStopReceiver").exported)
+    }
+
     @Test fun applicationFlags() {
         val app = manifest.application
         assertEquals("dev.rovsti.contacts.RovstiContactsApp", app["name"])
@@ -125,6 +134,7 @@ class ContactsManifestTest {
                 "dev.rovsti.contacts.people.PeopleProvider",
                 "dev.rovsti.bridge.BirthdayReminderReceiver",
                 "dev.rovsti.bridge.RovstiShareProvider",
+                "dev.rovsti.people.sync.PeopleSyncStopReceiver",
             ),
             ours,
         )

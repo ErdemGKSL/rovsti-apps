@@ -99,7 +99,7 @@ class StandaloneSourceTest {
         ): ByteArray? = bytes
     }
 
-    private fun people(): StandalonePeople {
+    private fun people(request: ((String) -> Unit)? = null): StandalonePeople {
         val host = HostRust("standalone")
         val ops = NativePeopleOps(host.core)
         val store = PeopleStore(ops, NativeWaOps(host.core), pictures, clock = { now }, dataDir = data.absolutePath)
@@ -119,6 +119,7 @@ class StandaloneSourceTest {
             pause = { now += it },
             random = { 20 },
             notifyMinMs = 0,
+            request = request,
         )
     }
 
@@ -141,6 +142,21 @@ class StandaloneSourceTest {
             assertTrue(asked.isEmpty())
             assertEquals(false, p.sync())
         }
+
+    /** People sync v2 S11: in the app a link hands its run to the foreground worker, not to the process. */
+    @Test fun withAWorkerALinkRequestsARunAndAsksNothingItself() {
+        val starts = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val p = people(request = { starts += it })
+        p.start()
+        connect()
+        waitFor("the worker was asked") { starts.isNotEmpty() }
+        assertEquals(listOf(dev.rovsti.core.model.people.SyncWire.START_AUTO), starts.toList())
+        assertTrue("nothing asked in the process", asked.isEmpty())
+        // The worker's slice is the host's: it fills the same cache.
+        val result = runBlocking { p.runSlice(dev.rovsti.core.model.people.SyncWire.START_AUTO, null) }
+        assertEquals(dev.rovsti.people.sync.SliceResult.Done, result)
+        assertEquals(onWhatsapp, runBlocking { p.source.load() }.map { it.jid }.toSet())
+    }
 
     @Test fun linkingSyncsWhoIsOnWhatsAppIntoItsOwnCacheWithThePictures() {
         val p = people()

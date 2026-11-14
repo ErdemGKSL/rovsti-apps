@@ -48,7 +48,9 @@ import kotlinx.coroutines.launch
  * `BirthdayAlarms`, which follows the switch and the hour.
  *
  * Turning reminders on asks for the notification permission first when [notifications] says Android still shows the
- * dialog; the page launches it and answers with [SettingsAction.NotificationsAnswered].
+ * dialog; the page launches it and answers with [SettingsAction.NotificationsAnswered]. Sync Now and Continue start the
+ * sync at once and, when the permission was never asked, ask it once through the same dialog so the sync's ongoing
+ * notification can show (people sync v2 S11); the sync runs whatever the answer.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ContactsSettingsViewModel(
@@ -69,6 +71,9 @@ class ContactsSettingsViewModel(
 ) : ViewModel() {
     private val accounts = MutableStateFlow<List<AccountOption>>(emptyList())
     private val outbox = Channel<SettingsEffect>(Channel.UNLIMITED)
+
+    /** The open dialog was asked for the sync's notification, not for reminders: its answer turns nothing on. */
+    private var askingForSync = false
 
     val state: StateFlow<ContactsSettingsState> =
         combine(
@@ -101,8 +106,8 @@ class ContactsSettingsViewModel(
             is SettingsAction.SetHour -> save { it.copy(reminderHour = action.hour.coerceIn(0, LAST_HOUR)) }
             is SettingsAction.SetReminders -> setReminders(action.on)
             is SettingsAction.NotificationsAnswered -> answered(action.granted)
-            SettingsAction.SyncPeopleNow -> people?.syncNow()
-            SettingsAction.ContinuePeople -> people?.resume()
+            SettingsAction.SyncPeopleNow -> startPeople(PeopleSyncControl::syncNow)
+            SettingsAction.ContinuePeople -> startPeople(PeopleSyncControl::resume)
             SettingsAction.StopPeople -> people?.stop()
         }
     }
@@ -138,12 +143,34 @@ class ContactsSettingsViewModel(
         }
         when (nextAction(notifications())) {
             NextAction.None -> viewModelScope.launch { turn(true) }
-            NextAction.Ask -> outbox.trySend(SettingsEffect.AskNotifications)
+            NextAction.Ask -> askForReminders()
             NextAction.OpenSettings -> outbox.trySend(SettingsEffect.Toast(DENIED))
         }
     }
 
+    private fun startPeople(start: (PeopleSyncControl) -> Unit) {
+        val sync = people ?: return
+        start(sync)
+        askForSyncNotice()
+    }
+
+    private fun askForReminders() {
+        askingForSync = false
+        outbox.trySend(SettingsEffect.AskNotifications)
+    }
+
+    /** Once: only while Android has never shown the dialog; a refusal is never asked again from here. */
+    private fun askForSyncNotice() {
+        if (notifications() != PermissionState.NeverAsked) return
+        askingForSync = true
+        outbox.trySend(SettingsEffect.AskNotifications)
+    }
+
     private fun answered(granted: Boolean) {
+        if (askingForSync) {
+            askingForSync = false
+            return
+        }
         if (granted) viewModelScope.launch { turn(true) } else outbox.trySend(SettingsEffect.Toast(DENIED))
     }
 

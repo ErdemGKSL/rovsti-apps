@@ -123,6 +123,19 @@ class PhoneManifestTest {
         assertTrue("android.permission.RECORD_AUDIO" in manifest.usesPermissions)
     }
 
+    /** People sync v2 S11: the sync runs as dataSync next to the call services, and WorkManager starts on demand. */
+    @Test fun thePeopleSyncRunsAsADataSyncForegroundServiceBesideTheCallServices() {
+        val service = manifest.component("androidx.work.impl.foreground.SystemForegroundService")
+        assertEquals("dataSync", service.attributes["foregroundServiceType"])
+        assertEquals("phoneCall", manifest.component("$pkg.RovstiInCallService").attributes["foregroundServiceType"])
+        assertEquals(false, manifest.component("dev.rovsti.people.sync.PeopleSyncStopReceiver").exported)
+        val startup = manifest.components.firstOrNull { it.name == "androidx.startup.InitializationProvider" }
+        assertFalse(
+            "WorkManager is not initialised at every process start",
+            startup?.metaData?.containsKey("androidx.work.WorkManagerInitializer") == true,
+        )
+    }
+
     @Test fun receiversAndTheShareProviderKeepTheirNames() {
         val action = manifest.component("$pkg.CallActionReceiver")
         assertEquals(false, action.exported)
@@ -229,6 +242,7 @@ class PhoneManifestTest {
                 "dev.rovsti.bridge.CallReminderReceiver",
                 "$pkg.BootReceiver",
                 "dev.rovsti.bridge.RovstiShareProvider",
+                "dev.rovsti.people.sync.PeopleSyncStopReceiver",
             )
         assertEquals(if (flavor == "firebase") expected + "$pkg.RovstiMessagingService" else expected, ours)
         assertTrue(manifest.component("$pkg.MainActivity").filters.isNotEmpty())

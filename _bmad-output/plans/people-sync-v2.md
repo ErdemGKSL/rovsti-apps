@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: done (2026-11-14, branch `ui-overhaul`): S1 to S10 done; see the notes under each step.
+Status: done (2026-11-14, branch `ui-overhaul`): S1 to S11 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -651,6 +651,35 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   name (`noBackupFilesDir/people-sync.lock`, per app). `StandaloneSourceTest` runs the real planner on the host library
   (not linked, sync into the on-disk cache with pictures, index and identity answers, a second start asks nothing,
   live profile, unlink deletes).
+- **S11 Foreground sync** (user request, stability first): while a run is under way the worker is a `dataSync`
+  foreground service with an ongoing notification, so a sync started from the UI keeps going in the background.
+  *Done (notes, deviations):* (a) The worker is `:people`'s `ForegroundPeopleSyncWorker` (Contacts' `PeopleSyncWorker`
+  keeps its class name for stored work; Phone gets `PhonePeopleSyncWorker`); both apps reach their sync through
+  `PeopleSyncHost` (`PeopleSync`, `StandalonePeople`). Every start goes through WorkManager: Sync Now, Continue and the
+  foreground trigger (Contacts), the link/reconnect start (Phone) are expedited unique work `people-sync-now` (`KEEP`),
+  continuations stay `people-sync-continue` (`REPLACE`); the runner's mutex and file lock still keep one slice at a
+  time. In tests (no `request`) runs stay in-process. (b) `setForeground(ForegroundInfo(..., DATA_SYNC))` first; a
+  refusal (`ForegroundServiceStartNotAllowedException` from the background, a `SecurityException`) is logged
+  (`foreground_refused`, tag `sync`) and the worker falls back to the 8-minute slices. (c) Foreground: no slice budget;
+  after a `Waiting`/`Refused` of at most 5 min (`ForegroundSyncPlan.SHORT_WAIT_MS`) the worker waits on the sync's own
+  clock and resumes (`START_AUTO`); a longer limit ends the run and enqueues the continuation (the row shows
+  "Continues in N min"). The Rust planner is unchanged (its 90 s inline sleep stays; the worker waits the rest).
+  (d) Stop (row and notification, `PeopleSyncStopReceiver`, same `runner.cancel()` path) ends
+  `interrupted(cancelled)` and schedules nothing; Stop during the worker's limit wait interrupts the stored run with
+  `people.sync_stop`. A cancellation that is not a Stop (Android 15's dataSync budget: WorkManager 2.11 handles
+  `Service.onTimeout` by stopping the work; constraints; process shutdown) now ends `interrupted(slice_budget)`
+  (the row says "continues automatically") and the worker enqueues the continuation after `CONTINUE_DELAY_MS`.
+  `RunnerState.limited` marks the planner's inline rate-limit sleep. (e) Notification: channel `people_sync`
+  (`PlatformChannels`, LOW, silent, no badge; "WhatsApp sync"/"WhatsApp eşitleme"), WhatsApp glyph, title, stage with
+  x/y and a determinate bar (`SyncNotice` pure, `SyncNotices` builds), "WhatsApp limit, continues in N min" during a
+  short limit, Stop action, tap opens Contacts' Settings tab (`OPEN_PEOPLE_SYNC`) or Phone; updated at most every 2 s.
+  Ongoing + `FLAG_NO_CLEAR`; Android 14+ still lets the user swipe an FGS notification away (the run continues). Android
+  defers an FGS notification by up to 10 s, so a quick incremental run shows none. (f) POST_NOTIFICATIONS: Contacts asks
+  once (only while never asked) on Sync Now/Continue through the existing dialog; the answer changes nothing else.
+  Phone asks nothing new. (g) Manifests: `FOREGROUND_SERVICE_DATA_SYNC`, WorkManager's `SystemForegroundService` with
+  `foregroundServiceType="dataSync"` (`tools:node="merge"`), the Stop receiver; Phone's call services keep their types,
+  and Phone initialises WorkManager on demand (`Configuration.Provider`, startup initializer removed) so a cold start for
+  a ringing call does not open WorkManager's database. No UI rows changed (no new shots).
 
 ## 13. Risks and device verification
 

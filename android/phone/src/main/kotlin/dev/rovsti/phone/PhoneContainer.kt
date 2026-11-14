@@ -65,6 +65,7 @@ import dev.rovsti.phone.incoming.IncomingViewModel
 import dev.rovsti.phone.incoming.NamedCallSource
 import dev.rovsti.phone.incoming.RegistryCallSource
 import dev.rovsti.phone.notes.NotesViewModel
+import dev.rovsti.phone.people.PhonePeopleSyncWorker
 import dev.rovsti.phone.people.StandalonePeople
 import dev.rovsti.phone.setup.AndroidSetupFacts
 import dev.rovsti.phone.setup.InMemorySetupMemory
@@ -304,7 +305,22 @@ open class PhoneContainer(
             },
             gatewayUrl = { (WaLinkStore(waOps).read() as? Outcome.Ok)?.value?.gatewayUrl.orEmpty() },
             lockFile = File(context.noBackupFilesDir, PEOPLE_LOCK),
+            // Runs go to the foreground worker (people sync v2 S11), so a long first sync outlives the app's screens.
+            request = { start -> PhonePeopleSyncWorker.startNow(context, start) },
         )
+
+    /**
+     * The people sync the worker runs: Phone's own ([standalonePeople]) once Rust is up, or null when Contacts is
+     * installed (Phone reads its provider then and syncs nothing). Starts following the source when the worker wakes a
+     * process with no UI.
+     */
+    suspend fun standaloneSync(): StandalonePeople? {
+        startPeople()
+        val source = peopleSource
+        if (source == null || source is ProviderSource) return null
+        awaitRustReady()
+        return standalonePeople
+    }
 
     /** Which source feeds [peopleIndex]: Contacts' provider when it is installed, else the gateway (null before [startPeople]). */
     @Volatile var peopleSource: PeopleSource? = null

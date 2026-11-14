@@ -32,6 +32,11 @@ class ContactsRoutesTest {
         assertEquals(ContactsTab to listOf<ContactsRoute>(ContactsRoute.ContactCard(7L)), route)
     }
 
+    /** People sync v2 S11: a tap on the sync notification opens the Settings tab with the sync rows. */
+    @Test fun theSyncNotificationOpensSettings() {
+        assertEquals(SettingsTab to emptyList<ContactsRoute>(), contactsRouteFor(OPEN_PEOPLE_SYNC, null, null, null))
+    }
+
     @Test fun aVcardSendOrViewOpensTheImportPage() {
         assertEquals(
             ContactsTab to listOf<ContactsRoute>(ContactsRoute.Intake("content://x/a.vcf")),

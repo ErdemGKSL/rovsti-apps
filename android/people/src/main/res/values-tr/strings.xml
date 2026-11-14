@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="people_sync_notice_title">WhatsApp adları ve fotoğrafları eşitleniyor</string>
+    <string name="people_sync_notice_starting">Başlatılıyor…</string>
+    <string name="people_sync_notice_lookup">Numaralar denetleniyor %1$d/%2$d</string>
+    <string name="people_sync_notice_profiles">Adlar alınıyor %1$d/%2$d</string>
+    <string name="people_sync_notice_pictures">Fotoğraflar indiriliyor %1$d/%2$d</string>
+    <plurals name="people_sync_notice_limit">
+        <item quantity="one">WhatsApp sınırı, %d dk sonra devam edecek</item>
+        <item quantity="other">WhatsApp sınırı, %d dk sonra devam edecek</item>
+    </plurals>
+    <string name="people_sync_notice_stop">Durdur</string>
+</resources>

@@ -10,6 +10,7 @@ import dev.rovsti.core.model.wa.WaProfile
 import dev.rovsti.core.ops.PeopleOps
 import dev.rovsti.people.sync.PartNotifier
 import dev.rovsti.people.sync.PeopleStore
+import dev.rovsti.people.sync.PeopleSyncHost
 import dev.rovsti.people.sync.PeopleSyncRunner
 import dev.rovsti.people.sync.RunnerState
 import dev.rovsti.people.sync.SliceResult
@@ -101,9 +102,11 @@ interface PeopleSyncControl {
 
 /**
  * Contacts' people sync (X.1b, people sync v2 S6): follows the link and the gateway's live `profile` events, and runs
- * the shared [PeopleSyncRunner] (the planner in Rust does the pacing, the backoff and the resumption) for the worker,
- * "Sync now", "Continue" and the foreground trigger. Every committed part reaches the provider's readers through a
- * [PartNotifier] (at most one notification per [notifyMinMs], the last one guaranteed).
+ * the shared [PeopleSyncRunner] (the planner in Rust does the pacing, the backoff and the resumption) for the worker.
+ * "Sync now", "Continue" and the foreground trigger hand their start to [request], which in the app enqueues the
+ * foreground worker (people sync v2 S11), so a run started from the UI outlives the activity; without one (tests) the
+ * run happens in [scope]. Every committed part reaches the provider's readers through a [PartNotifier] (at most one
+ * notification per [notifyMinMs], the last one guaranteed).
  *
  * [legacy] is the v1 prefs file (`people-sync`): its last sync is shown until the first v2 run finishes, then it is
  * cleared (the file name stays reserved).
@@ -124,11 +127,15 @@ class PeopleSync(
     lockFile: File? = null,
     notifyMinMs: Long = NOTIFY_MIN_MS,
     private val onChanged: suspend () -> Unit = {},
-) : PeopleSyncControl {
+    /** Starts a run (`SyncWire.START_*`) in the worker; null runs it in [scope]. */
+    private val request: ((String) -> Unit)? = null,
+) : PeopleSyncControl,
+    PeopleSyncHost {
     private val notifier = PartNotifier(scope, notifyMinMs) { onChanged() }
+    private val sleep = pause
 
     /** The engine; the worker and the tests reach it directly. */
-    val runner =
+    override val runner =
         PeopleSyncRunner(
             store = store,
             ops = ops,
@@ -137,7 +144,7 @@ class PeopleSync(
             gatewayUrl = gatewayUrl,
             codec = codec,
             clock = clock,
-            pause = pause,
+            pause = sleep,
             random = random,
             onPart = notifier::part,
             lockFile = lockFile,
@@ -180,17 +187,27 @@ class PeopleSync(
     }
 
     /** "Sync now": a new full run that checks everyone again. */
-    override fun syncNow() {
-        scope.launch { run(SyncWire.START_RESTART, null) }
-    }
+    override fun syncNow() = start(SyncWire.START_RESTART)
 
     /** "Continue where it left off". */
-    override fun resume() {
-        scope.launch { run(SyncWire.START_RESUME, null) }
-    }
+    override fun resume() = start(SyncWire.START_RESUME)
 
-    /** "Stop": the active run ends `interrupted(cancelled)` and stays resumable. */
+    /** "Stop" (and the notification's Stop): the active run ends `interrupted(cancelled)` and stays resumable. */
     override fun stop() = runner.cancel()
+
+    override fun now(): Long = clock()
+
+    override suspend fun pause(ms: Long) = sleep(ms)
+
+    override suspend fun runSlice(
+        start: String,
+        sliceMs: Long?,
+    ): SliceResult = run(start, sliceMs)
+
+    private fun start(start: String) {
+        val worker = request
+        if (worker != null) worker(start) else scope.launch { run(start, null) }
+    }
 
     /** The foreground trigger: continues a resumable run, or syncs when the last one is older than [maxAgeMs]. */
     fun syncIfStale(maxAgeMs: Long = PERIOD_MS) {
@@ -200,7 +217,10 @@ class PeopleSync(
             val penalty = (stored?.notBeforeMs ?: 0) > clock()
             val resumable = run?.resumable == true && run.phase.kind != SyncWire.FAILED
             val last = stored?.last?.atMs ?: legacyStatus.value.lastMs
-            if (!penalty && (resumable || clock() - last >= maxAgeMs)) run(SyncWire.START_AUTO, null)
+            if (!penalty && (resumable || clock() - last >= maxAgeMs)) {
+                val worker = request
+                if (worker != null) worker(SyncWire.START_AUTO) else run(SyncWire.START_AUTO, null)
+            }
         }
     }
 

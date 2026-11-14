@@ -13,6 +13,7 @@ import dev.rovsti.contacts.data.ReminderPort
 import dev.rovsti.contacts.data.StoreCommonSettings
 import dev.rovsti.contacts.data.WaMarks
 import dev.rovsti.contacts.people.PeopleSync
+import dev.rovsti.contacts.people.PeopleSyncWorker
 import dev.rovsti.contacts.photo.GatewayWaPhotoPort
 import dev.rovsti.contacts.photo.WaPhotoPort
 import dev.rovsti.contacts.trash.ContactDeletion
@@ -226,6 +227,8 @@ open class ContactsContainer(
                 peopleStore.notifyChanged(context.contentResolver)
                 refreshPeopleIndex()
             },
+            // Sync Now, Continue and the foreground trigger run in the foreground worker (people sync v2 S11).
+            request = { start -> PeopleSyncWorker.startNow(context, start) },
         )
 
     /** E.164 numbers worth asking WhatsApp about: the recent callers first, then the address book. */

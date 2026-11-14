@@ -7,6 +7,7 @@ import dev.rovsti.core.ops.PeopleOps
 import dev.rovsti.people.GatewaySource
 import dev.rovsti.people.sync.PartNotifier
 import dev.rovsti.people.sync.PeopleStore
+import dev.rovsti.people.sync.PeopleSyncHost
 import dev.rovsti.people.sync.PeopleSyncRunner
 import dev.rovsti.people.sync.SliceResult
 import dev.rovsti.wa.WaLinkState
@@ -29,9 +30,11 @@ import kotlin.random.Random
  * Rust data directory, pictures in [PeopleStore.dir]) and fills it with the same slow, resumable engine as Contacts
  * ([PeopleSyncRunner]), so the two apps never add up to a burst against WhatsApp's limit from the same account.
  *
- * Phone has no worker: a slice runs (without a time budget) when the link is read at start, when WhatsApp becomes
- * linked or reconnects, and again when a rate limit's wait ends while the process lives; the next start resumes the
- * rest. Live `profile` events update a person at once and fetch a changed picture shortly after. On unlink the stored
+ * A run starts when the link is read at start and when WhatsApp becomes linked or reconnects. In the app it goes to
+ * [request], which enqueues Phone's foreground worker (`PhonePeopleSyncWorker`, people sync v2 S11: ongoing
+ * notification, no time budget, a long rate limit continues through WorkManager), the same worker as Contacts'. Without
+ * one (tests) the slice runs in [scope] and a rate limit's end is waited for while the process lives. Live `profile`
+ * events update a person at once and fetch a changed picture shortly after. On unlink the stored
  * run is interrupted and the cache is deleted ([clear]): Phone keeps nobody's name for a link that is gone.
  * [source] is what the app's `PeopleIndex` follows; it is told after every committed part (at most one per
  * [notifyMinMs], the last one guaranteed).
@@ -48,11 +51,13 @@ class StandalonePeople(
     gatewayUrl: suspend () -> String = { "" },
     codec: AvatarCodec = BitmapAvatarCodec,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val pause: suspend (Long) -> Unit = { delay(it) },
+    pause: suspend (Long) -> Unit = { delay(it) },
     random: () -> Int = { Random.nextInt(0, Int.MAX_VALUE) },
     lockFile: File? = null,
     notifyMinMs: Long = NOTIFY_MIN_MS,
-) {
+    /** Starts a run (`SyncWire.START_*`) in the worker; null runs it in [scope]. */
+    private val request: ((String) -> Unit)? = null,
+) : PeopleSyncHost {
     /** The cache as the app's `PeopleIndex` reads it: the store's rows, pictures from its folder. */
     val source: GatewaySource =
         GatewaySource(
@@ -61,9 +66,10 @@ class StandalonePeople(
         )
 
     private val notifier = PartNotifier(scope, notifyMinMs) { source.changed() }
+    private val sleep = pause
 
     /** The engine (shared with Contacts' code in `:people`). */
-    val runner =
+    override val runner =
         PeopleSyncRunner(
             store = store,
             ops = ops,
@@ -72,7 +78,7 @@ class StandalonePeople(
             gatewayUrl = gatewayUrl,
             codec = codec,
             clock = clock,
-            pause = pause,
+            pause = sleep,
             random = random,
             onPart = notifier::part,
             lockFile = lockFile,
@@ -101,7 +107,8 @@ class StandalonePeople(
                         val key = connected.status.instanceId + connected.status.state.name
                         if (key != syncedFor) {
                             syncedFor = key
-                            scope.launch { sync() }
+                            val worker = request
+                            if (worker != null) worker(SyncWire.START_AUTO) else scope.launch { sync() }
                         }
                     }
 
@@ -134,9 +141,14 @@ class StandalonePeople(
         }
     }
 
+    override fun now(): Long = clock()
+
+    override suspend fun pause(ms: Long) = sleep(ms)
+
     /**
-     * One slice: resumes a stored run or starts an incremental one (fresh answers are not asked again). A rate limit
-     * schedules the next slice for its end while the process lives. False when nothing could start.
+     * One slice in this process (no worker): resumes a stored run or starts an incremental one (fresh answers are not
+     * asked again). A rate limit schedules the next slice for its end while the process lives. False when nothing
+     * could start.
      */
     suspend fun sync(): Boolean {
         val result = runner.run(SyncWire.START_AUTO, null)
@@ -155,7 +167,7 @@ class StandalonePeople(
         later?.cancel()
         later =
             scope.launch {
-                pause((untilMs - clock()).coerceAtLeast(PeopleSyncRunner.CONTINUE_DELAY_MS))
+                sleep((untilMs - clock()).coerceAtLeast(PeopleSyncRunner.CONTINUE_DELAY_MS))
                 if (wa.linkState.value is WaLinkState.Connected) sync()
             }
     }

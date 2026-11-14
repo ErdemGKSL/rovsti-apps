@@ -1,108 +1,85 @@
 package dev.rovsti.contacts.people
 
 import android.content.Context
+import android.content.Intent
 import androidx.work.BackoffPolicy
-import androidx.work.Constraints
-import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dev.rovsti.contacts.ContactsContainer
-import dev.rovsti.core.log.RovstiLog
-import dev.rovsti.core.model.people.SyncWire
-import dev.rovsti.people.sync.PeopleSyncRunner
+import dev.rovsti.contacts.MainActivity
+import dev.rovsti.contacts.OPEN_PEOPLE_SYNC
+import dev.rovsti.people.sync.ForegroundPeopleSyncWorker
+import dev.rovsti.people.sync.ForegroundSyncPlan
+import dev.rovsti.people.sync.PeopleSyncHost
+import dev.rovsti.people.sync.PeopleSyncWork
 import dev.rovsti.people.sync.SliceResult
 import dev.rovsti.shell.HasContainer
 import java.util.concurrent.TimeUnit
 
 /**
- * The people sync in the background (X.1b, people sync v2 S6). WorkManager creates it by name
- * (`PeopleSyncWorker(Context, WorkerParameters)`), so R8 keeps that constructor (`proguard-rules.pro`). Every start
- * runs one slice of at most [PeopleSyncRunner.WORKER_SLICE_MS] ([PeopleSync.runSlice]: resume, else an incremental
- * run). The planner owns the timing, so a slice that stops with work left does not ask WorkManager for its back-off:
- * it enqueues the unique one-time work [CONTINUE_NAME] for when the planner says (a rate limit's end, or
- * [PeopleSyncRunner.CONTINUE_DELAY_MS]) and succeeds. A failed run succeeds too (its reason is stored); the next period
- * tries again.
+ * Contacts' people sync worker (X.1b, people sync v2 S6, S11). WorkManager creates it by name
+ * (`PeopleSyncWorker(Context, WorkerParameters)`, kept by `proguard-rules.pro`: a periodic request stored in its
+ * database survives an update), so the class keeps its name; the work itself is the shared
+ * [ForegroundPeopleSyncWorker]: a `dataSync` foreground service with the ongoing notification while a run is under way,
+ * the 8-minute slices only when Android refuses the foreground service.
+ *
+ * Every start comes here: the periodic work ([UNIQUE_NAME]), its continuation ([CONTINUE_NAME], enqueued for when the
+ * planner says) and the starts of the app ([startNow]: Sync Now, Continue, the foreground trigger), which are
+ * expedited unique work, so a run started from the UI survives the app going to the background.
  */
 class PeopleSyncWorker(
     context: Context,
     params: WorkerParameters,
-) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        val container =
-            (applicationContext as? HasContainer<*>)?.container as? ContactsContainer ?: return Result.failure()
-        val result = container.peopleSync.runSlice()
-        val now = System.currentTimeMillis()
-        val next = continueInMs(result, now)
-        RovstiLog.event(
-            PeopleSync.TAG,
-            "worker",
-            "result" to result.javaClass.simpleName,
-            "continue_in_ms" to next,
-        )
-        if (next != null) continueLater(applicationContext, next)
-        // A cold process whose stored link was not read in time: try again soon with WorkManager's back-off.
-        return if (result == SliceResult.LinkNotReady) Result.retry() else Result.success()
-    }
+) : ForegroundPeopleSyncWorker(context, params) {
+    override suspend fun host(): PeopleSyncHost? =
+        ((applicationContext as? HasContainer<*>)?.container as? ContactsContainer)?.peopleSync
+
+    /** The notification opens the Settings tab, where the sync rows are. */
+    override fun openIntent(): Intent =
+        Intent(applicationContext, MainActivity::class.java)
+            .setAction(OPEN_PEOPLE_SYNC)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+    override fun continueLater(delayMs: Long) = continueLater(applicationContext, delayMs)
 
     companion object {
         /** The name of the unique periodic work. */
         const val UNIQUE_NAME = "people-sync"
 
         /** The one-time work that continues a run between periods. */
-        const val CONTINUE_NAME = "people-sync-continue"
+        const val CONTINUE_NAME = PeopleSyncWork.CONTINUE_NAME
+
+        /** The app's own starts (Sync Now, Continue, the foreground trigger): expedited, one at a time. */
+        const val NOW_NAME = PeopleSyncWork.NOW_NAME
 
         /** A slice that could not reach WhatsApp is tried again after this. */
-        const val OFFLINE_DELAY_MS = 15L * 60_000
+        const val OFFLINE_DELAY_MS = ForegroundSyncPlan.OFFLINE_DELAY_MS
 
         /**
-         * When the next slice should run after [result], or null when the periodic work is enough (done, not linked,
-         * failed, or another slice is running).
+         * When the next slice should run after [result] in the background, or null when the periodic work is enough
+         * ([ForegroundSyncPlan.continueInMs]).
          */
         fun continueInMs(
             result: SliceResult,
             nowMs: Long,
-        ): Long? =
-            when (result) {
-                is SliceResult.Waiting -> {
-                    (result.untilMs - nowMs).coerceAtLeast(PeopleSyncRunner.CONTINUE_DELAY_MS)
-                }
-
-                is SliceResult.Refused -> {
-                    result.untilMs?.let { (it - nowMs).coerceAtLeast(PeopleSyncRunner.CONTINUE_DELAY_MS) }
-                }
-
-                is SliceResult.Interrupted -> {
-                    when (result.reason) {
-                        SyncWire.WA_DISCONNECTED, SyncWire.NETWORK -> OFFLINE_DELAY_MS
-                        else -> PeopleSyncRunner.CONTINUE_DELAY_MS
-                    }
-                }
-
-                SliceResult.Done, SliceResult.NotLinked, SliceResult.LinkNotReady, SliceResult.AlreadyRunning,
-                is SliceResult.Failed,
-                -> {
-                    null
-                }
-            }
+        ): Long? = ForegroundSyncPlan.continueInMs(result, nowMs)
 
         /** The request WorkManager repeats: about every six hours, on a network, not while the battery is low. */
         fun request(): androidx.work.PeriodicWorkRequest =
             PeriodicWorkRequestBuilder<PeopleSyncWorker>(PeopleSync.PERIOD_MS, TimeUnit.MILLISECONDS)
-                .setConstraints(constraints(batteryNotLow = true))
+                .setConstraints(PeopleSyncWork.network(batteryNotLow = true))
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_MINUTES, TimeUnit.MINUTES)
                 .build()
 
         /** The continuation: once, after [delayMs], on a network; a newer one replaces it. */
         fun continueRequest(delayMs: Long): androidx.work.OneTimeWorkRequest =
-            OneTimeWorkRequestBuilder<PeopleSyncWorker>()
-                .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
-                .setConstraints(constraints(batteryNotLow = false))
-                .build()
+            PeopleSyncWork.continueRequest(PeopleSyncWorker::class.java, delayMs)
+
+        /** A start of the app: expedited (a normal job when the quota is spent), on a network, with its [start]. */
+        fun nowRequest(start: String): androidx.work.OneTimeWorkRequest =
+            PeopleSyncWork.nowRequest(PeopleSyncWorker::class.java, start)
 
         /** Makes sure the periodic work exists; an existing one keeps its schedule (`KEEP`). */
         fun schedule(context: Context) {
@@ -115,18 +92,16 @@ class PeopleSyncWorker(
         fun continueLater(
             context: Context,
             delayMs: Long,
-        ) {
-            WorkManager
-                .getInstance(context)
-                .enqueueUniqueWork(CONTINUE_NAME, ExistingWorkPolicy.REPLACE, continueRequest(delayMs))
-        }
+        ) = PeopleSyncWork.continueLater(context, PeopleSyncWorker::class.java, delayMs)
 
-        private fun constraints(batteryNotLow: Boolean) =
-            Constraints
-                .Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .setRequiresBatteryNotLow(batteryNotLow)
-                .build()
+        /**
+         * Starts a run now (`SyncWire.START_*`). `KEEP`: while a start of the app is pending or running, a second tap
+         * adds nothing (one run at a time; the runner refuses a second slice anyway).
+         */
+        fun startNow(
+            context: Context,
+            start: String,
+        ) = PeopleSyncWork.startNow(context, PeopleSyncWorker::class.java, start)
 
         private const val BACKOFF_MINUTES = 30L
     }

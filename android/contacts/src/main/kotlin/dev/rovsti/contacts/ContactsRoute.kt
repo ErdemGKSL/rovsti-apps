@@ -279,6 +279,9 @@ fun chromeFor(
         if (selecting && route == ContactsRoute.ContactsList) it.copy(tabBar = TabBarMode.Folded) else it
     }
 
+/** The intent action of the people sync notification's tap. */
+const val OPEN_PEOPLE_SYNC = "dev.rovsti.contacts.OPEN_PEOPLE_SYNC"
+
 /**
  * The deep link an intent carries (AD-CT8), as a pure function so it is tested without an activity. [open] is the
  * `open_contact_id` extra shared by birthday notifications and pinned shortcuts; [streamUri] is `EXTRA_STREAM` of a
@@ -290,6 +293,8 @@ fun contactsRouteFor(
     streamUri: String?,
     extras: Bundle?,
 ): Pair<Tab, List<ContactsRoute>>? {
+    // The people sync's notification (people sync v2 S11): the Settings tab, where the sync rows are.
+    if (action == OPEN_PEOPLE_SYNC) return SettingsTab to emptyList()
     val contact = contactIdOf(extras)
     if (contact != null) {
         return ContactsTab to listOf(ContactsRoute.ContactCard(contact))

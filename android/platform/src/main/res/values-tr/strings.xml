@@ -28,6 +28,8 @@
     <string name="channel_trip_problem">Yolculuk duraklatıldı</string>
     <string name="channel_trip">Süren yolculuk</string>
     <string name="channel_trip_desc">Stops yolculuğunuzu izlerken görünür</string>
+    <string name="channel_people_sync">WhatsApp eşitleme</string>
+    <string name="channel_people_sync_desc">WhatsApp adları ve fotoğrafları eşitlenirken görünür</string>
     <string name="channel_trip_alarm">Varış alarmı</string>
     <string name="channel_trip_alarm_desc">Varmak üzereyken çalar</string>
     <string name="channel_ongoing">Süren arama</string>

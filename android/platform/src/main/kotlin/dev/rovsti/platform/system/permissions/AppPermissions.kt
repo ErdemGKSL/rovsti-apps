@@ -44,6 +44,7 @@ class AppPermissions(
 
         private const val FSI = "android.permission.USE_FULL_SCREEN_INTENT"
         private const val BATTERY = "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        private const val DATA_SYNC = "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
 
         val phone =
             AppPermissions(
@@ -86,12 +87,16 @@ class AppPermissions(
                         "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
                         // WaCallService: background microphone during a WhatsApp call (docs/kotlin-ui/wa-call-audio.md).
                         "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+                        // The people sync of Phone without Contacts runs as a foreground worker (people sync v2 S11).
+                        DATA_SYNC,
                         Manifest.permission.VIBRATE,
                         Manifest.permission.WAKE_LOCK,
                         Manifest.permission.INTERNET,
                     ),
                 specialPermissions = setOf(FSI, BATTERY, "android.permission.SCHEDULE_EXACT_ALARM"),
                 peopleUses = true,
+                // work-runtime (the people sync, S11) merges this one; the other three it adds are listed above.
+                libraryPermissions = setOf("android.permission.ACCESS_NETWORK_STATE"),
             )
 
         val messages =
@@ -134,7 +139,8 @@ class AppPermissions(
                     ),
                 groups = listOf(PermissionGroup.CONTACTS, PermissionGroup.CALL_LOG, PermissionGroup.NOTIFICATIONS),
                 special = emptySet(),
-                installTime = setOf(Manifest.permission.VIBRATE, Manifest.permission.INTERNET),
+                // The people sync runs as a dataSync foreground worker while a run is under way (people sync v2 S11).
+                installTime = setOf(Manifest.permission.VIBRATE, Manifest.permission.INTERNET, DATA_SYNC),
                 specialPermissions = emptySet(),
                 handoffUses = true,
                 // work-runtime (the people sync, X.1b) merges these four.

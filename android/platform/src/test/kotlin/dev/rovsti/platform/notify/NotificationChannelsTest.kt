@@ -30,7 +30,7 @@ class NotificationChannelsTest {
             .filter { it.isNotBlank() && !it.startsWith("#") }
             .map { line -> line.split('\t').let { Row(it[0], it[1].toInt(), it[2]) } }
 
-    @Test fun theTableHasTwelveChannels() = assertEquals(12, table.size)
+    @Test fun theTableHasThirteenChannels() = assertEquals(13, table.size)
 
     @Test fun ensuringEveryChannelGivesExactlyTheCommittedIdsAndImportances() {
         for (row in table) assertTrue(PlatformChannels.ensure(app, row.id))
@@ -65,6 +65,17 @@ class NotificationChannelsTest {
             assertEquals(listOf(row.id), created.map { it.id })
             assertEquals(row.importance, created.single().importance)
         }
+    }
+
+    /** People sync v2 S11: the sync's ongoing notification is low, silent and leaves no badge. */
+    @Test fun thePeopleSyncChannelIsLowAndSilent() {
+        PlatformChannels.ensure(app, PlatformChannels.PEOPLE_SYNC)
+        val channel = manager.getNotificationChannel(PlatformChannels.PEOPLE_SYNC)
+        assertEquals(NotificationManager.IMPORTANCE_LOW, channel.importance)
+        assertEquals(null, channel.sound)
+        assertEquals(false, channel.shouldVibrate())
+        assertEquals(false, channel.canShowBadge())
+        assertEquals("WhatsApp sync", channel.name.toString())
     }
 
     @Test fun anExistingChannelKeepsTheUsersImportance() {

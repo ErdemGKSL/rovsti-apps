@@ -16,6 +16,7 @@ import android.os.PowerManager
 import dev.rovsti.bridge.AlarmActivity
 import dev.rovsti.bridge.TripAlarmReceiver
 import dev.rovsti.bridge.TripService
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.Headless
 import dev.rovsti.platform.PlatformEvents
 import dev.rovsti.platform.R
@@ -171,7 +172,7 @@ object TripAlarm {
                 if (wantSound) out.start()
                 if (vibrate) out.vibrate()
             } catch (e: RuntimeException) {
-                android.util.Log.w("Rovsti", "alarm start failed", e)
+                RovstiLog.w("trip", "alarm start failed", e)
             }
             holdWakeLock(app, ringPlan.ringTimeoutMs)
             val cap = Runnable { onRingTimeout(app) }
@@ -379,7 +380,7 @@ object TripAlarm {
         PlatformChannels.ensure(context, CHANNEL)
         val fullScreenOk =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || manager.canUseFullScreenIntent()
-        if (!fullScreenOk) android.util.Log.w("Rovsti", "full-screen intent not allowed; heads-up only")
+        if (!fullScreenOk) RovstiLog.w("trip", "full-screen intent not allowed; heads-up only")
         val (title, text) = message(context)
         val screen =
             PendingIntent.getActivity(
@@ -421,7 +422,7 @@ object TripAlarm {
         try {
             manager.notify(NOTIFICATION_ID, notification)
         } catch (e: SecurityException) {
-            android.util.Log.w("Rovsti", "alarm notification refused", e)
+            RovstiLog.w("trip", "alarm notification refused", e)
         }
         return fullScreenOk
     }

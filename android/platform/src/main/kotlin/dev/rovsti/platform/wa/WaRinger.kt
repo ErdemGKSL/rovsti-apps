@@ -14,7 +14,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.notify.PlatformChannels
 import dev.rovsti.platform.telephony.CallRegistry
 
@@ -204,7 +204,7 @@ internal class AndroidRingOutputs(
             r.play()
             ringtone = r
         } catch (e: RuntimeException) {
-            Log.w(TAG, "WA ring: the ringtone could not play", e)
+            RovstiLog.w(TAG, "WA ring: the ringtone could not play", e)
         }
     }
 
@@ -215,7 +215,7 @@ internal class AndroidRingOutputs(
                 VibrationAttributes.createForUsage(VibrationAttributes.USAGE_RINGTONE),
             )
         } catch (e: RuntimeException) {
-            Log.w(TAG, "WA ring: no vibration", e)
+            RovstiLog.w(TAG, "WA ring: no vibration", e)
         }
     }
 
@@ -226,7 +226,7 @@ internal class AndroidRingOutputs(
                     it.startTone(ToneGenerator.TONE_SUP_CALL_WAITING)
                 }
         } catch (e: RuntimeException) {
-            Log.w(TAG, "WA ring: no call-waiting tone", e)
+            RovstiLog.w(TAG, "WA ring: no call-waiting tone", e)
         }
     }
 
@@ -321,7 +321,7 @@ object WaRinger {
         try {
             ring(context).start(callId)
         } catch (e: RuntimeException) {
-            Log.w("Rovsti", "WA ring could not start", e)
+            RovstiLog.w("wa", "WA ring could not start", e)
             null
         }
 

@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.PlatformEvents
 import dev.rovsti.platform.PlatformPrefs
 import dev.rovsti.platform.wire.WIRE_VERSION
@@ -62,7 +63,7 @@ class PermissionController(
                 try {
                     refreshNow { activity.shouldShowRequestPermissionRationale(it) }
                 } catch (e: RuntimeException) {
-                    android.util.Log.w("Rovsti", "permission check failed", e)
+                    RovstiLog.w("permissions", "permission check failed", e)
                 }
             }
         } catch (_: RejectedExecutionException) {

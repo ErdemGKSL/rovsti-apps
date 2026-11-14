@@ -12,7 +12,7 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.os.Build
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.core.ops.CallAudio
 import java.util.concurrent.locks.LockSupport
 
@@ -407,7 +407,7 @@ object WaCallAudio {
         try {
             out.setStartThresholdInFrames(startThresholdFrames(out.bufferSizeInFrames))
         } catch (error: RuntimeException) {
-            Log.w(TAG, "WA call audio: the start threshold was refused: ${error.message}")
+            RovstiLog.w(TAG, "WA call audio: the start threshold was refused: ${error.message}")
         }
     }
 
@@ -511,7 +511,7 @@ object WaCallAudio {
                 filled += n
             }
             if (silence.frame(frame)) {
-                Log.w(
+                RovstiLog.w(
                     TAG,
                     "WA call microphone: 2 s of exact digital silence. Android silences capture for an app it counts " +
                         "as background (no visible activity, or the microphone foreground service was not started " +
@@ -567,7 +567,7 @@ object WaCallAudio {
                 val now = System.nanoTime()
                 if (now - logged >= LOG_EVERY_MS * 1_000_000L) {
                     logged = now
-                    Log.i(TAG, log.line(out.underrunCount, capacity * 1000 / SAMPLE_RATE))
+                    RovstiLog.i(TAG, log.line(out.underrunCount, capacity * 1000 / SAMPLE_RATE))
                 }
             }
         } catch (_: RuntimeException) {

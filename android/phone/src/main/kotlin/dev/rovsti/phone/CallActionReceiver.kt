@@ -6,7 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.telecom.TelecomManager
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.telephony.CallNotifications
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.platform.telephony.MissedCallNotifications
@@ -47,7 +47,7 @@ class CallActionReceiver : BroadcastReceiver() {
                 }
             }
         } catch (e: RuntimeException) {
-            Log.e("Rovsti", "call action failed", e)
+            RovstiLog.e("phone", "call action failed", e)
         }
     }
 
@@ -63,7 +63,7 @@ class CallActionReceiver : BroadcastReceiver() {
                 ?.placeCall(Uri.fromParts("tel", number, null), Bundle())
         } catch (e: SecurityException) {
             // CALL_PHONE was taken back: the call stays in Recents.
-            Log.w("Rovsti", "call back refused", e)
+            RovstiLog.w("phone", "call back refused", e)
         }
         MissedCallNotifications.dismiss(context, number)
     }

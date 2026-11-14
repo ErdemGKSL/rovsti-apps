@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -20,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.core.model.phone.CallPhase
 import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.design.transition.Tab
@@ -84,7 +84,7 @@ class MainActivity :
     /** Main-thread jobs of this activity instance (the WhatsApp call list, the keyguard). */
     private val jobs =
         MainScope() +
-            CoroutineExceptionHandler { _, e -> Log.e("Rovsti", "Following the WhatsApp calls failed", e) }
+            CoroutineExceptionHandler { _, e -> RovstiLog.e("phone", "Following the WhatsApp calls failed", e) }
 
     /** Unlocking or the screen going off changes the Incoming screen (slide or buttons) while no cellular call runs. */
     private val keyguardReceiver =
@@ -101,7 +101,7 @@ class MainActivity :
             post = { r, delay -> main.postDelayed(r, delay) },
             cancel = { r -> main.removeCallbacks(r) },
             onStuck = { id ->
-                Log.e("Rovsti", "The Incoming screen of call $id drew nothing; showing the native screen")
+                RovstiLog.e("phone", "The Incoming screen of call $id drew nothing; showing the native screen")
                 uiFailed = true
                 showNativeFallback()
             },
@@ -129,7 +129,7 @@ class MainActivity :
             super.onCreate(savedInstanceState)
         } catch (e: RuntimeException) {
             // The call lives in CallRegistry and the notifications; only the screen is lost (AD-17).
-            Log.e("Rovsti", "The screen could not start; calls are unaffected", e)
+            RovstiLog.e("phone", "The screen could not start; calls are unaffected", e)
             uiFailed = true
             showNativeFallback()
         }

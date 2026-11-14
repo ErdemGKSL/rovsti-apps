@@ -4,7 +4,7 @@ package dev.rovsti.platform.telephony
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.PlatformComponents
 
 /**
@@ -24,7 +24,7 @@ object CallSurface {
             )
             true
         } catch (e: RuntimeException) {
-            Log.w("Rovsti", "raising the call screen was refused", e)
+            RovstiLog.w("call", "raising the call screen was refused", e)
             false
         }
 }

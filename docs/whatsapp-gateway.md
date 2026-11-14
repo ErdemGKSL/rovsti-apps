@@ -403,6 +403,13 @@ header. Older clients ignore them (no field is required, unknown fields are allo
   `instance=<id> rate limited source=<whatsapp|gateway> route=<template>
   retry_after_ms=<n> n=<jids>`, cooldown start and end at INFO. No JID, number or
   query string is logged.
+- **How the apps use it.** The people sync (Contacts, and Phone without Contacts) asks
+  for 15 JIDs at a time, 20 s apart (lookups and profiles share the gap), and one
+  picture every 3 s; a 429 halves the batch, doubles the gap and waits at least the
+  `retry_after_ms` hint (a minute, doubling, at most 30 min), and the settings row
+  shows the time until it continues. A 200 profile with `fetched_ms: 0` (an older
+  gateway) counts as a throttle, not an answer. See `docs/architecture.md`, "People
+  sync".
 
 `GET /v1/groups` and `GET /v1/groups/{jid}` now also carry the group `description`,
 `announce` (only admins may send) and each participant's `name` (push name or saved

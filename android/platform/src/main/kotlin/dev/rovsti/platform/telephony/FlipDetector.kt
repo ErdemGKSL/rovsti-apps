@@ -7,7 +7,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 
 /**
  * Flip to silence (story 18.4, ProximityController pattern): listens to the gravity sensor (the
@@ -35,7 +35,7 @@ class FlipDetector(
             try {
                 manager?.registerListener(this, s, SensorManager.SENSOR_DELAY_NORMAL) == true
             } catch (e: RuntimeException) {
-                Log.w("Rovsti", "flip sensor refused", e)
+                RovstiLog.w("call", "flip sensor refused", e)
                 false
             }
         return registered

@@ -3,7 +3,7 @@ package dev.rovsti.phone
 import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.os.StrictMode
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.design.time.SystemRovstiClock
 import dev.rovsti.phone.wa.WaCallActionReceiver
 import dev.rovsti.platform.PlatformComponents
@@ -64,7 +64,7 @@ class RovstiPhoneApp :
         try {
             block()
         } catch (e: RuntimeException) {
-            Log.e("Rovsti", "start-up step $name failed", e)
+            RovstiLog.e("phone", "start-up step $name failed", e)
         }
     }
 

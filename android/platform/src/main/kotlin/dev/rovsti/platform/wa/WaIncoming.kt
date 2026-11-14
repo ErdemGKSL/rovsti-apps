@@ -9,7 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
 import android.telephony.PhoneNumberUtils
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.R
 import dev.rovsti.platform.identity.PhoneNumbers
@@ -197,7 +197,7 @@ object WaIncoming {
         return try {
             if (!manager.canUseFullScreenIntent()) {
                 // Android 14+: without "full screen notifications" the call is only a heads-up, never over the lock screen.
-                Log.w(
+                RovstiLog.w(
                     TAG,
                     "WA call: full-screen intents are not allowed for this app; the call screen cannot open itself",
                 )
@@ -260,7 +260,7 @@ object WaIncoming {
         try {
             context.startActivity(launchIntent(context, callId, null))
         } catch (e: RuntimeException) {
-            Log.w(TAG, "WA call: could not open the call screen", e)
+            RovstiLog.w(TAG, "WA call: could not open the call screen", e)
         }
     }
 
@@ -349,7 +349,7 @@ object WaIncoming {
         try {
             context.startActivity(launch)
         } catch (e: RuntimeException) {
-            Log.w(TAG, "WA call: could not open the answered call", e)
+            RovstiLog.w(TAG, "WA call: could not open the answered call", e)
         }
         val interactive = context.getSystemService(PowerManager::class.java)?.isInteractive == true
         val locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != false
@@ -378,7 +378,7 @@ object WaIncoming {
                     .build()
             manager.notify(answeringNotificationId(callId), notice)
         } catch (e: RuntimeException) {
-            Log.w(TAG, "WA call: no answering notice", e)
+            RovstiLog.w(TAG, "WA call: no answering notice", e)
         }
     }
 

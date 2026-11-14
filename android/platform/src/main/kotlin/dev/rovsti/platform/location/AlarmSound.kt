@@ -17,6 +17,7 @@ import android.os.SystemClock
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.VibratorManager
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.PlatformPrefs
 import org.json.JSONException
 import org.json.JSONObject
@@ -188,7 +189,7 @@ internal class AlarmSound(
         try {
             manager.requestAudioFocus(request)
         } catch (e: RuntimeException) {
-            android.util.Log.w("Rovsti", "alarm focus failed", e)
+            RovstiLog.w("trip", "alarm focus failed", e)
         }
     }
 
@@ -274,7 +275,7 @@ internal class AlarmSound(
         try {
             p.setAudioAttributes(ALARM_ATTRS)
             p.setOnErrorListener { _, what, extra ->
-                android.util.Log.w("Rovsti", "alarm player error $what/$extra")
+                RovstiLog.w("trip", "alarm player error $what/$extra")
                 // A failure after start moves on to the next source (posted: never release inside the callback).
                 main.post { if (active && player === p && sourceIndex == index) playFrom(index + 1) }
                 true
@@ -286,9 +287,9 @@ internal class AlarmSound(
             player = p
             return true
         } catch (e: java.io.IOException) {
-            android.util.Log.w("Rovsti", "alarm sound failed", e)
+            RovstiLog.w("trip", "alarm sound failed", e)
         } catch (e: RuntimeException) {
-            android.util.Log.w("Rovsti", "alarm sound failed", e)
+            RovstiLog.w("trip", "alarm sound failed", e)
         }
         p.release()
         return false
@@ -299,7 +300,7 @@ internal class AlarmSound(
             try {
                 ToneGenerator(AudioManager.STREAM_ALARM, 100)
             } catch (e: RuntimeException) {
-                android.util.Log.w("Rovsti", "alarm tone failed", e)
+                RovstiLog.w("trip", "alarm tone failed", e)
                 return false
             }
         tone = generator
@@ -347,7 +348,7 @@ internal class AlarmSound(
                 manager.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0)
             } catch (e: SecurityException) {
                 // e.g. a Do Not Disturb policy: ring at the user's level
-                android.util.Log.w("Rovsti", "alarm volume refused", e)
+                RovstiLog.w("trip", "alarm volume refused", e)
             }
         }
 

@@ -458,6 +458,29 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   `{"kind":"call","call_id","from","name"}` or `{"kind":"message","chat","count"}`.
   The app wakes, opens the event socket and fetches. Firebase is optional in the app;
   see [android.md](android.md#whatsapp-push-and-call-audio).
+- **People sync (people sync v2).** The names and photos of the people the apps meet
+  on WhatsApp live in `people.json` (`rovsti_app_core::people`), filled by a slow,
+  resumable sync whose planner is pure Rust (`rovsti_app_core::people_sync`, driven
+  step by step through the `people.sync_*` ops). The planner chooses the work (set-based
+  cursor: the JIDs done per run), paces it (one gap for lookups and profiles, both usync
+  queries on WhatsApp's side, one for pictures; no burst), backs off on a 429 without
+  undercutting the gateway's `retry_after_ms`, and keeps everything it learned in
+  `people-sync.json` (saved after the book, so a crash repeats one idempotent batch).
+  Kotlin's `PeopleSyncRunner` (`:people`) only performs the gateway call a step asks
+  for. Contacts runs it from WorkManager in 8-minute slices with a one-time
+  continuation, from "Sync Now" / "Continue" / "Stop" in its settings, and for live
+  picture changes; Phone without Contacts runs the same engine on its own data
+  directory. Writers of `people.json` are serialized in Rust. Decision record:
+  `_bmad-output/plans/people-sync-v2.md`.
+- **Logging and developer mode.** App code logs through `RovstiLog`
+  (`:core-bridge`, `dev.rovsti.core.log`; a source scan forbids direct
+  `android.util.Log`): every line is masked (`LogMask`, the same rules as
+  `rovsti_core::redact`, one shared fixture), kept in a memory ring, and written to
+  `noBackupFilesDir/logs` only while developer mode is on. Rust logs go to a bounded
+  ring in `rovsti_ffi` that Kotlin drains (`core.logs_drain`) while developer mode is
+  on. Holding the Version row of About for 10 s toggles developer mode; its Logs page
+  filters, copies and shares (the only way a line leaves the phone). Names and message
+  text are never logged.
   **`call_end`.** For an incoming call that rang and was pushed, the gateway sends
   `{"kind":"call_end","call_id","missed","from","name"}` when the ring ends without the
   call being answered here. `missed` is `"1"` when the caller hung up or the ring timed

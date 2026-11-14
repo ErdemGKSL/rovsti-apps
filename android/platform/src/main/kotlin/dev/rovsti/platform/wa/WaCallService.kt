@@ -11,8 +11,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.util.Log
 import androidx.core.content.ContextCompat
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.PlatformComponents
 import dev.rovsti.platform.R
 import dev.rovsti.platform.notify.NotificationIcon
@@ -71,7 +71,7 @@ class WaCallService : Service() {
         } catch (e: RuntimeException) {
             // Started from the background without an exemption, or a type the app may not use: the call still
             // works while its screen is open.
-            Log.w("Rovsti", "WA call foreground service refused", e)
+            RovstiLog.w("wa", "WA call foreground service refused", e)
             false
         }
 

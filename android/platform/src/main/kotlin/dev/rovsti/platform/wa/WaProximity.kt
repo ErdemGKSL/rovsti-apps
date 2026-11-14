@@ -4,7 +4,7 @@ import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.PowerManager
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -84,7 +84,7 @@ class AndroidProximityLock(
         try {
             lock?.acquire(MAX_HOLD_MS)
         } catch (e: RuntimeException) {
-            Log.w("Rovsti", "WA call: no proximity lock", e)
+            RovstiLog.w("wa", "WA call: no proximity lock", e)
         }
     }
 
@@ -121,7 +121,7 @@ fun communicationOnEarpiece(context: Context): Flow<Boolean> =
                 true
             } catch (e: RuntimeException) {
                 // No route to follow: never hold the proximity lock rather than guess.
-                Log.w("Rovsti", "WA call: the audio route cannot be followed", e)
+                RovstiLog.w("wa", "WA call: the audio route cannot be followed", e)
                 trySend(false)
                 false
             }

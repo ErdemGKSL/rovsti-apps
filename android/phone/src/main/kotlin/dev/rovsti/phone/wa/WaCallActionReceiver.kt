@@ -3,7 +3,7 @@ package dev.rovsti.phone.wa
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.phone.PhoneContainer
 import dev.rovsti.platform.wa.WaCallService
 import dev.rovsti.platform.wa.WaIncoming
@@ -47,7 +47,7 @@ class WaCallActionReceiver : BroadcastReceiver() {
                 }
             }
         } catch (e: RuntimeException) {
-            Log.e("Rovsti", "WhatsApp call action failed", e)
+            RovstiLog.e("wa", "WhatsApp call action failed", e)
         }
     }
 

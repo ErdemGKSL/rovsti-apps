@@ -8,7 +8,7 @@ import android.telecom.CallAudioState
 import android.telecom.CallEndpoint
 import android.telecom.CallEndpointException
 import android.telecom.InCallService
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.telephony.CallRegistry
 import dev.rovsti.platform.telephony.InCallHost
 import java.util.concurrent.Executor
@@ -74,7 +74,7 @@ class RovstiInCallService :
         try {
             block()
         } catch (e: RuntimeException) {
-            Log.e("Rovsti", "$name failed; the call goes on", e)
+            RovstiLog.e("phone", "$name failed; the call goes on", e)
         }
     }
 }

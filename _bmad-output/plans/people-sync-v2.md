@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S8 done; see the notes under each step.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1 to S9 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -631,6 +631,14 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   *Done in S6* (see S6 note h; the commit mutex is the Rust `book_lock`, note c).
 - **S9 Mechanical:** move remaining `android.util.Log` sites to `RovstiLog`, add the source-scan rule; docs:
   `docs/whatsapp-gateway.md`, `docs/architecture.md` (people sync + logging paragraphs), `crates/rovsti_ffi/OPS.md`.
+  *Done (notes, deviations):* every direct `android.util.Log` call in `src/main` (`:phone`, `:platform`) now goes
+  through `RovstiLog` with a domain tag (`phone`, `call`, `wa`, `trip`, `permissions`) instead of `Rovsti`. Two files
+  keep logcat on purpose and are allowed by the scan: `IncomingPerf.kt` (`scripts/perf-run.sh` reads its `RovstiPerf`
+  report from a release build's logcat) and `ContactResult.kt` (its tests read the `RovstiContacts` tag through
+  `ShadowLog`). The rule is a source scan in `:core-bridge` (`LogSourceScanTest`, no detekt/konsist in the build), which
+  also forbids `RovstiLog` calls with a name or message-text argument in `people` and `wa` code. Note: `RovstiLog`
+  writes logcat only in debuggable builds, so release builds no longer print these warnings to logcat; they are in the
+  ring and, in developer mode, the Logs page. OPS.md was updated with S5.
 - **S10 Phone standalone on the engine** (pending Q2): `StandalonePeople` becomes a thin wrapper over
   `PeopleStore` + `PeopleSyncRunner` in Phone's data dir; `GatewaySource` reads the store; pictures from the store.
 

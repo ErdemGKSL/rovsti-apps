@@ -4,7 +4,7 @@ package dev.rovsti.platform.telephony
 
 import android.content.Context
 import android.os.PowerManager
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.wire.CallInfo
 import dev.rovsti.platform.wire.Focus
 
@@ -52,7 +52,7 @@ class ProximityController(
                     setReferenceCounted(false)
                 }
             } else {
-                Log.w("Rovsti", "no proximity wake lock on this device")
+                RovstiLog.w("call", "no proximity wake lock on this device")
                 null
             }
         }
@@ -74,7 +74,7 @@ class ProximityController(
                 wl.release(if (callInProgress) 0 else PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY)
             }
         } catch (e: RuntimeException) {
-            Log.w("Rovsti", "proximity lock failed", e)
+            RovstiLog.w("call", "proximity lock failed", e)
         }
     }
 

@@ -26,6 +26,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.Headless
 import dev.rovsti.platform.PlatformEvents
 import dev.rovsti.platform.R
@@ -120,7 +121,7 @@ class TripService : Service() {
             }
         } catch (e: RuntimeException) {
             // Not allowed to start a foreground service now, or no location permission.
-            android.util.Log.w("Rovsti", "trip service could not go foreground", e)
+            RovstiLog.w("trip", "trip service could not go foreground", e)
             if (background) {
                 // Keep the saved trip: only the user's Stop or Rust's `ended` clears it.
                 emitStatus(tripRestartErrorJson())
@@ -434,7 +435,7 @@ class TripService : Service() {
             try {
                 context.startForegroundService(Intent(context, TripService::class.java).setAction(ACTION_WATCHDOG))
             } catch (e: RuntimeException) {
-                android.util.Log.w("Rovsti", "trip watchdog could not wake the service", e)
+                RovstiLog.w("trip", "trip watchdog could not wake the service", e)
             }
         }
 
@@ -457,7 +458,7 @@ class TripService : Service() {
                 context.startForegroundService(Intent(context, TripService::class.java).putExtra(EXTRA_SPEC, specJson))
                 StartResult.Started
             } catch (e: RuntimeException) {
-                android.util.Log.w("Rovsti", "trip service start refused", e)
+                RovstiLog.w("trip", "trip service start refused", e)
                 startFailure(e)
             }
         }

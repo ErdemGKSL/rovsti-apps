@@ -4,7 +4,7 @@ import android.app.AlarmManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.platform.notify.CallReminders
 
 /**
@@ -21,7 +21,7 @@ class BootReceiver : BroadcastReceiver() {
         try {
             CallReminders.rearmAll(context.applicationContext)
         } catch (e: RuntimeException) {
-            Log.e("Rovsti", "re-arming the reminders failed", e)
+            RovstiLog.e("phone", "re-arming the reminders failed", e)
         }
     }
 

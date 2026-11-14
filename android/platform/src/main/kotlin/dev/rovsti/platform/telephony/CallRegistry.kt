@@ -24,8 +24,8 @@ import android.telecom.CallEndpoint
 import android.telecom.CallEndpointException
 import android.telecom.TelecomManager
 import android.telecom.VideoProfile
-import android.util.Log
 import dev.rovsti.core.Envelope
+import dev.rovsti.core.log.RovstiLog
 import dev.rovsti.core.model.phone.CallSnapshot
 import dev.rovsti.core.model.phone.WireCall
 import dev.rovsti.design.time.RovstiClock
@@ -128,7 +128,7 @@ object CallRegistry : CallsApi {
                 try {
                     super.dispatchMessage(msg)
                 } catch (e: RuntimeException) {
-                    Log.e("Rovsti", "call registry task failed; the call goes on", e)
+                    RovstiLog.e("call", "call registry task failed; the call goes on", e)
                 }
             }
         }
@@ -141,7 +141,7 @@ object CallRegistry : CallsApi {
         try {
             block()
         } catch (e: RuntimeException) {
-            Log.e("Rovsti", "$what failed; the call goes on", e)
+            RovstiLog.e("call", "$what failed; the call goes on", e)
         }
     }
 
@@ -341,7 +341,7 @@ object CallRegistry : CallsApi {
             if (body != null) intent.putExtra("sms_body", body)
             context.startActivity(intent)
         } catch (e: RuntimeException) {
-            Log.w("Rovsti", "no app to compose the reply", e)
+            RovstiLog.w("call", "no app to compose the reply", e)
         }
     }
 
@@ -919,7 +919,7 @@ object CallRegistry : CallsApi {
             try {
                 CallerLookup.of(context).identify(number)
             } catch (e: RuntimeException) {
-                Log.w("Rovsti", "caller lookup failed", e)
+                RovstiLog.w("call", "caller lookup failed", e)
                 null
             }
         val text = PhoneNumbers.forReading(number, PhoneNumbers.homeRegion(context))
@@ -1330,7 +1330,7 @@ object CallRegistry : CallsApi {
             }
         }
         // Ids and booleans only (spike logs): the burst test counts these lines.
-        Log.d(
+        RovstiLog.d(
             "RovstiSpike",
             "snapshot seq=$seq calls=${calls.size} endpoints=${audioInfo.endpoints.size} legacy=${audio.legacy}",
         )
@@ -1429,7 +1429,7 @@ object CallRegistry : CallsApi {
         try {
             if (first && !manager.areNotificationsEnabled()) CallSurface.raise(context)
         } catch (e: RuntimeException) {
-            Log.w("Rovsti", "raising the incoming call failed", e)
+            RovstiLog.w("call", "raising the incoming call failed", e)
         }
     }
 
@@ -1442,7 +1442,7 @@ object CallRegistry : CallsApi {
             manager.notify(CallNotifications.INCOMING_ID, build())
             true
         } catch (e: RuntimeException) {
-            Log.w("Rovsti", "incoming-call notification failed", e)
+            RovstiLog.w("call", "incoming-call notification failed", e)
             false
         }
 
@@ -1498,7 +1498,7 @@ object CallRegistry : CallsApi {
         } catch (e: RuntimeException) {
             // Foreground start can be refused (background start rules, missing
             // notification permission); the call itself is unaffected.
-            Log.w("Rovsti", "ongoing-call notification failed", e)
+            RovstiLog.w("call", "ongoing-call notification failed", e)
             ongoingKey = null
         }
     }

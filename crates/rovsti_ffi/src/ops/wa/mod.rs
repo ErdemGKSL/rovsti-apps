@@ -142,7 +142,14 @@ pub(crate) fn map_error(error: ClientError) -> FfiError {
             "the gateway rejected the connect key".to_owned(),
         ),
         ClientError::Api(api) => {
-            FfiError::invalid(api.message.clone()).with_detail(json!({ "code": api.code }))
+            let mut detail = json!({ "code": api.code });
+            if let Some(ms) = api.retry_after_ms {
+                detail["retry_after_ms"] = json!(ms);
+            }
+            if let Some(source) = api.limit_source {
+                detail["source"] = json!(source);
+            }
+            FfiError::invalid(api.message).with_detail(detail)
         }
         ClientError::Url(error) => FfiError::invalid(error.to_string()),
         ClientError::Key(error) => FfiError::invalid(error.to_string()),
@@ -267,6 +274,16 @@ mod tests {
         assert_eq!(api.kind, ErrorKind::Invalid);
         assert_eq!(api.message, "too many instances");
         assert_eq!(api.detail, Some(json!({"code": "limit_reached"})));
+        let limited = map_error(ClientError::Api(ApiError::rate_limited(
+            "slow",
+            Some(61_000),
+            rovsti_wa_proto::LimitSource::Whatsapp,
+        )));
+        assert_eq!(limited.kind, ErrorKind::Invalid);
+        assert_eq!(
+            limited.detail,
+            Some(json!({"code": "rate_limited", "retry_after_ms": 61_000, "source": "whatsapp"}))
+        );
     }
 
     #[test]

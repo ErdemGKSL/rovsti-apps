@@ -2063,3 +2063,271 @@ async fn lid_sweep_merges_the_lid_chat_into_the_pn_chat_once() {
     let chats = blocking(move || gateway.chats()).await.unwrap();
     assert_eq!(chats.len(), 1);
 }
+
+// --- WhatsApp's own rate limit ---------------------------------------------
+
+/// A raw request, to see headers the client does not expose. Answers the
+/// status, the header block (lower-cased) and the body.
+async fn raw(
+    server: &Server,
+    key: &str,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> (u16, String, String) {
+    let authority = server.url.as_str().replace("http://", "");
+    let mut stream = tokio::net::TcpStream::connect(authority.trim_end_matches('/'))
+        .await
+        .unwrap();
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {key}\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut text = String::new();
+    stream.read_to_string(&mut text).await.unwrap();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap();
+    let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+    (status, head.to_ascii_lowercase(), body.to_owned())
+}
+
+fn profiles_body(jids: &[&str], refresh: bool) -> String {
+    serde_json::json!({ "jids": jids, "refresh": refresh }).to_string()
+}
+
+fn upstream_429() -> DriverError {
+    DriverError::RateLimited {
+        retry_after_s: None,
+    }
+}
+
+fn count(server: &Server, prefix: &str) -> usize {
+    server
+        .driver
+        .ops()
+        .iter()
+        .filter(|o| o.starts_with(prefix))
+        .count()
+}
+
+/// Stores a real answer for `jid` fetched `age_ms` ago.
+async fn plant_profile(server: &Server, created: &CreatedInstance, jid: &str, age_ms: i64) {
+    server
+        .state
+        .store()
+        .change_profile(
+            instance(created),
+            jid.to_owned(),
+            ProfileChange::Fetched(FetchedProfile {
+                jid: jid.to_owned(),
+                about: Some("old".into()),
+                picture_id: Some("p0".into()),
+                business: false,
+                verified_name: None,
+            }),
+            wa_gateway::now_ms() - age_ms,
+        )
+        .await
+        .unwrap();
+}
+
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+#[tokio::test]
+async fn profiles_surface_upstream_rate_limit() {
+    let server = start(4).await;
+    let (_gateway, created) = create(&server).await;
+    server.driver.fail_next("profiles", upstream_429());
+    let body = profiles_body(&[&wa_jid(1)], false);
+    let (status, head, body) = raw(
+        &server,
+        &created.key,
+        "POST",
+        "/v1/contacts/profiles",
+        &body,
+    )
+    .await;
+    assert_eq!(status, 429, "{body}");
+    assert!(head.contains("\r\nretry-after: 60"), "{head}");
+    let error: rovsti_wa_proto::ApiError = serde_json::from_str(&body).unwrap();
+    assert_eq!(error.code, ErrorCode::RateLimited);
+    assert_eq!(error.retry_after_ms, Some(60_000));
+    assert_eq!(
+        error.limit_source,
+        Some(rovsti_wa_proto::LimitSource::Whatsapp)
+    );
+}
+
+#[tokio::test]
+async fn profiles_serve_stale_when_every_jid_was_fetched() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let jid = wa_jid(1);
+    plant_profile(&server, &created, &jid, 2 * DAY_MS).await;
+    server.driver.fail_next("profiles", upstream_429());
+    let (status, head, body) = raw(
+        &server,
+        &created.key,
+        "POST",
+        "/v1/contacts/profiles",
+        &profiles_body(&[&jid], false),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(head.contains("x-rovsti-stale: rate-limited"), "{head}");
+    let profiles: Vec<rovsti_wa_proto::WaProfile> = serde_json::from_str(&body).unwrap();
+    assert_eq!(profiles[0].about.as_deref(), Some("old"));
+    assert!(profiles[0].fetched_ms > 0);
+    // The client keeps working as before: a 200 with the stored profile.
+    let g = gateway.clone();
+    let ask = vec![jid.clone()];
+    let again = blocking(move || g.profiles(&ask)).await.unwrap();
+    assert_eq!(again[0].about.as_deref(), Some("old"));
+    // ...and nothing reached WhatsApp during the cooldown.
+    assert_eq!(count(&server, "profiles"), 1);
+}
+
+#[tokio::test]
+async fn profiles_refresh_true_is_never_stale() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let jid = wa_jid(1);
+    plant_profile(&server, &created, &jid, 2 * DAY_MS).await;
+    server.driver.fail_next("profiles", upstream_429());
+    let g = gateway.clone();
+    let ask = vec![jid];
+    let err = blocking(move || g.refresh_profiles(&ask))
+        .await
+        .unwrap_err();
+    assert!(is_code(&err, ErrorCode::RateLimited), "{err:?}");
+}
+
+#[tokio::test]
+async fn profiles_other_driver_error_is_not_silent() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let (old, new) = (wa_jid(1), wa_jid(2));
+    plant_profile(&server, &created, &old, 2 * DAY_MS).await;
+    server
+        .driver
+        .fail_next("profiles", DriverError::Failed("boom".into()));
+    let g = gateway.clone();
+    let ask = vec![old.clone(), new];
+    let err = blocking(move || g.profiles(&ask)).await.unwrap_err();
+    assert!(is_code(&err, ErrorCode::Internal), "{err:?}");
+    // With only real (old) answers asked for, the stored data stands in.
+    server
+        .driver
+        .fail_next("profiles", DriverError::Failed("boom".into()));
+    let (status, head, _) = raw(
+        &server,
+        &created.key,
+        "POST",
+        "/v1/contacts/profiles",
+        &profiles_body(&[&old], false),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(head.contains("x-rovsti-stale: error"), "{head}");
+}
+
+#[tokio::test]
+async fn lookup_upstream_rate_limit_is_429_not_500() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    server.driver.fail_next(
+        "lookup",
+        DriverError::RateLimited {
+            retry_after_s: Some(90),
+        },
+    );
+    let g = gateway.clone();
+    let ask = vec![wa_jid(1)];
+    let err = blocking(move || g.lookup_users(&ask)).await.unwrap_err();
+    match err {
+        ClientError::Api(api) => {
+            assert_eq!(api.code, ErrorCode::RateLimited);
+            // WhatsApp's hint (90 s) beats the first cooldown step (60 s).
+            assert_eq!(api.retry_after_ms, Some(90_000));
+            assert_eq!(
+                api.limit_source,
+                Some(rovsti_wa_proto::LimitSource::Whatsapp)
+            );
+        }
+        other => panic!("expected a 429, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn picture_upstream_rate_limit_is_429() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    server.driver.set_picture(DM, Some(("p1", b"small")));
+    server.driver.fail_next("picture", upstream_429());
+    let g = gateway.clone();
+    let err = blocking(move || g.picture(DM, false, None))
+        .await
+        .unwrap_err();
+    assert!(is_code(&err, ErrorCode::RateLimited), "{err:?}");
+}
+
+#[tokio::test]
+async fn cooldown_stops_upstream_calls() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    server.driver.fail_next("lookup", upstream_429());
+    let g = gateway.clone();
+    let ask = vec![wa_jid(1)];
+    assert!(blocking(move || g.lookup_users(&ask)).await.is_err());
+    let before = server.driver.ops().len();
+    // Lookups, profiles and pictures all wait; none reaches WhatsApp.
+    for _ in 0..3 {
+        let g = gateway.clone();
+        let ask = vec![wa_jid(2)];
+        let err = blocking(move || g.lookup_users(&ask)).await.unwrap_err();
+        match err {
+            ClientError::Api(api) => {
+                assert_eq!(api.code, ErrorCode::RateLimited);
+                assert_eq!(
+                    api.limit_source,
+                    Some(rovsti_wa_proto::LimitSource::Whatsapp)
+                );
+                assert!(api.retry_after_ms.unwrap() <= 60_000);
+            }
+            other => panic!("expected a 429, got {other:?}"),
+        }
+    }
+    let g = gateway.clone();
+    let ask = vec![wa_jid(3)];
+    assert!(blocking(move || g.profiles(&ask)).await.is_err());
+    let g = gateway.clone();
+    assert!(blocking(move || g.picture(DM, false, None)).await.is_err());
+    assert_eq!(server.driver.ops().len(), before);
+}
+
+#[tokio::test]
+async fn gateway_bucket_429_has_source_gateway() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    for (from, to) in [(0u32, 50u32), (50, 60)] {
+        let g = gateway.clone();
+        let jids: Vec<String> = (from..to).map(wa_jid).collect();
+        blocking(move || g.lookup_users(&jids)).await.unwrap();
+    }
+    let g = gateway.clone();
+    let fresh = vec![wa_jid(100)];
+    match blocking(move || g.lookup_users(&fresh)).await.unwrap_err() {
+        ClientError::Api(api) => {
+            assert_eq!(api.code, ErrorCode::RateLimited);
+            assert_eq!(
+                api.limit_source,
+                Some(rovsti_wa_proto::LimitSource::Gateway)
+            );
+            // One token a second.
+            let wait = api.retry_after_ms.unwrap();
+            assert!((1..=1_000).contains(&wait), "{wait}");
+        }
+        other => panic!("expected a 429, got {other:?}"),
+    }
+}

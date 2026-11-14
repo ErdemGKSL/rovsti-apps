@@ -85,6 +85,29 @@ mod tests {
     }
 
     #[test]
+    fn rate_limit_bodies_carry_the_hint_when_sent() {
+        use rovsti_wa_proto::LimitSource;
+        let body = br#"{"code":"rate_limited","message":"slow","retry_after_ms":60000,"source":"whatsapp"}"#;
+        assert_eq!(
+            from_status(429, body),
+            ClientError::Api(ApiError::rate_limited(
+                "slow",
+                Some(60_000),
+                LimitSource::Whatsapp
+            ))
+        );
+        // An older gateway sends neither field.
+        let body = br#"{"code":"rate_limited","message":"too many number lookups"}"#;
+        match from_status(429, body) {
+            ClientError::Api(api) => {
+                assert_eq!(api.code, ErrorCode::RateLimited);
+                assert_eq!((api.retry_after_ms, api.limit_source), (None, None));
+            }
+            other => panic!("expected an API error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn unknown_bodies_keep_the_status() {
         assert_eq!(
             from_status(502, b"<html>bad gateway</html>"),

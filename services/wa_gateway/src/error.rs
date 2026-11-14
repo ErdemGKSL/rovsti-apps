@@ -2,8 +2,9 @@
 
 use axum::Json;
 use axum::http::StatusCode;
+use axum::http::header::{HeaderValue, RETRY_AFTER};
 use axum::response::{IntoResponse, Response};
-use rovsti_wa_proto::{ApiError, ErrorCode};
+use rovsti_wa_proto::{ApiError, ErrorCode, LimitSource};
 
 use crate::driver::DriverError;
 use crate::store::StoreError;
@@ -42,9 +43,21 @@ pub fn status_of(code: ErrorCode) -> StatusCode {
     }
 }
 
+/// `Retry-After` in whole seconds, rounded up.
+fn retry_after_secs(ms: u64) -> u64 {
+    ms.div_ceil(1000)
+}
+
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        (self.status(), Json(self.0)).into_response()
+        let retry = self.0.retry_after_ms.map(retry_after_secs);
+        let mut response = (self.status(), Json(self.0)).into_response();
+        if let Some(secs) = retry {
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from(secs));
+        }
+        response
     }
 }
 
@@ -74,6 +87,11 @@ impl From<DriverError> for HttpError {
                 log::error!("driver: {msg}");
                 Self::new(ErrorCode::Internal, "WhatsApp request failed")
             }
+            DriverError::RateLimited { retry_after_s } => Self(ApiError::rate_limited(
+                "WhatsApp rate limit reached",
+                retry_after_s.map(|s| u64::from(s) * 1000),
+                LimitSource::Whatsapp,
+            )),
         }
     }
 }
@@ -98,5 +116,29 @@ mod tests {
             HttpError::from(DriverError::NotConnected).0.code,
             ErrorCode::NotConnected
         );
+        let limited = HttpError::from(DriverError::RateLimited {
+            retry_after_s: Some(7),
+        });
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(limited.0.retry_after_ms, Some(7_000));
+        assert_eq!(limited.0.limit_source, Some(LimitSource::Whatsapp));
+    }
+
+    #[test]
+    fn retry_after_header_is_whole_seconds_rounded_up() {
+        assert_eq!(retry_after_secs(0), 0);
+        assert_eq!(retry_after_secs(1), 1);
+        assert_eq!(retry_after_secs(1_000), 1);
+        assert_eq!(retry_after_secs(1_001), 2);
+        let response = HttpError(ApiError::rate_limited(
+            "x",
+            Some(2_500),
+            LimitSource::Gateway,
+        ))
+        .into_response();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[RETRY_AFTER], "3");
+        let plain = HttpError::new(ErrorCode::RateLimited, "x").into_response();
+        assert!(plain.headers().get(RETRY_AFTER).is_none());
     }
 }

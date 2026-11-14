@@ -22,7 +22,7 @@ use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::auth::Authed;
-use crate::driver::SendMedia;
+use crate::driver::{DriverError, SendMedia};
 use crate::error::HttpError;
 use crate::hub::Replay;
 use crate::media_cache::{DEFAULT_MAX_BYTES, MediaCache};
@@ -79,6 +79,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::wa::calls::routes())
         .merge(crate::rich_routes::routes())
         .merge(crate::status_routes::routes())
+        .layer(axum::middleware::from_fn(crate::request_log::log_request))
         .with_state(state)
 }
 
@@ -796,9 +797,23 @@ async fn lookup_users(
     let jids = check_lookup(req)?;
     let (mut users, misses) = state
         .lookup_cached(&auth.instance, &jids)
-        .ok_or_else(|| HttpError::new(ErrorCode::RateLimited, "too many number lookups"))?;
+        .map_err(|refused| {
+            state.refused(&auth.instance, r::CONTACTS_LOOKUP, refused, jids.len())
+        })?;
     if !misses.is_empty() {
-        let fresh = state.driver().lookup_users(&auth.instance, misses).await?;
+        let asked = misses.len();
+        let fresh = match state.driver().lookup_users(&auth.instance, misses).await {
+            Ok(fresh) => fresh,
+            Err(DriverError::RateLimited { retry_after_s }) => {
+                return Err(state.upstream_limited(
+                    &auth.instance,
+                    r::CONTACTS_LOOKUP,
+                    retry_after_s,
+                    asked,
+                ));
+            }
+            Err(e) => return Err(e.into()),
+        };
         state.lookup_store(&auth.instance, &fresh);
         users.extend(fresh);
     }

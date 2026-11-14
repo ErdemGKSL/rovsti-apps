@@ -122,6 +122,10 @@ pub enum DriverError {
     BadRequest(String),
     #[error("{0}")]
     Failed(String),
+    /// WhatsApp answered "rate-overlimit" (code 429); `retry_after_s` is its
+    /// `backoff` hint, when it sent one.
+    #[error("WhatsApp rate limit reached")]
+    RateLimited { retry_after_s: Option<u32> },
 }
 
 /// What a driver talks back through. Cloneable and bound to one instance: it
@@ -982,6 +986,7 @@ mod fake {
         profiles: Mutex<HashMap<String, FetchedProfile>>,
         pictures: Mutex<HashMap<String, (String, Vec<u8>)>>,
         lids: Mutex<crate::wa::lid::LidMap>,
+        failures: Mutex<HashMap<&'static str, std::collections::VecDeque<DriverError>>>,
     }
 
     impl std::fmt::Debug for FakeDriver {
@@ -1041,6 +1046,20 @@ mod fake {
         /// What `profiles` answers for `profile.jid`.
         pub fn set_profile(&self, profile: FetchedProfile) {
             lock(&self.profiles).insert(profile.jid.clone(), profile);
+        }
+
+        /// Makes the next call of `op` (`"lookup"`, `"profiles"` or
+        /// `"picture"`) fail with `error`; several calls queue up. The call
+        /// still counts in [`Self::ops`]: it reached "WhatsApp".
+        pub fn fail_next(&self, op: &'static str, error: DriverError) {
+            lock(&self.failures).entry(op).or_default().push_back(error);
+        }
+
+        fn scripted_failure(&self, op: &str) -> Result<(), DriverError> {
+            match lock(&self.failures).get_mut(op).and_then(|q| q.pop_front()) {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
         }
 
         /// The picture `fetch_picture` finds for `jid` (`None` removes it).
@@ -1426,6 +1445,7 @@ mod fake {
         ) -> BoxFuture<'_, Result<Vec<WaUser>, DriverError>> {
             let result = self
                 .record(instance, format!("lookup {}", jids.len()))
+                .and_then(|()| self.scripted_failure("lookup"))
                 .map(|()| {
                     let registered = self.registered.lock().unwrap_or_else(|e| e.into_inner());
                     jids.into_iter()
@@ -1520,6 +1540,7 @@ mod fake {
         ) -> BoxFuture<'_, Result<Vec<FetchedProfile>, DriverError>> {
             let result = self
                 .record(instance, format!("profiles {}", jids.len()))
+                .and_then(|()| self.scripted_failure("profiles"))
                 .map(|()| {
                     let known = lock(&self.profiles);
                     jids.into_iter()
@@ -1542,25 +1563,26 @@ mod fake {
             known_id: Option<String>,
         ) -> BoxFuture<'_, Result<PictureFetch, DriverError>> {
             let size = if preview { "preview" } else { "full" };
-            let result =
-                self.record(instance, format!("picture {jid} {size}"))
-                    .map(|()| match lock(&self.pictures).get(&jid) {
-                        None => PictureFetch::None,
-                        Some((id, _)) if Some(id) == known_id.as_ref() => PictureFetch::Unchanged,
-                        Some((id, bytes)) => {
-                            // The full picture is the preview bytes twice, so tests
-                            // can tell them apart.
-                            let bytes = if preview {
-                                bytes.clone()
-                            } else {
-                                [bytes.as_slice(), bytes.as_slice()].concat()
-                            };
-                            PictureFetch::New {
-                                id: id.clone(),
-                                bytes,
-                            }
+            let result = self
+                .record(instance, format!("picture {jid} {size}"))
+                .and_then(|()| self.scripted_failure("picture"))
+                .map(|()| match lock(&self.pictures).get(&jid) {
+                    None => PictureFetch::None,
+                    Some((id, _)) if Some(id) == known_id.as_ref() => PictureFetch::Unchanged,
+                    Some((id, bytes)) => {
+                        // The full picture is the preview bytes twice, so tests
+                        // can tell them apart.
+                        let bytes = if preview {
+                            bytes.clone()
+                        } else {
+                            [bytes.as_slice(), bytes.as_slice()].concat()
+                        };
+                        PictureFetch::New {
+                            id: id.clone(),
+                            bytes,
                         }
-                    });
+                    }
+                });
             Box::pin(async move { result })
         }
 

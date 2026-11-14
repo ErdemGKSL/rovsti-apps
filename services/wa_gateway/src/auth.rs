@@ -11,6 +11,7 @@ use rovsti_wa_proto::{ConnectKey, ErrorCode, KeyId};
 use crate::AppState;
 use crate::error::HttpError;
 use crate::now_ms;
+use crate::request_log::RequestInstance;
 use crate::store::InstanceId;
 
 /// A request that carried a live connect key.
@@ -77,7 +78,12 @@ impl FromRequestParts<AppState> for Authed {
             return Err(rejected(state, parts));
         };
         match state.store().instance_for_key(key.hash(), now_ms()).await? {
-            Some((instance, key_id)) => Ok(Self { instance, key_id }),
+            Some((instance, key_id)) => {
+                if let Some(slot) = parts.extensions.get::<RequestInstance>() {
+                    slot.set(&instance);
+                }
+                Ok(Self { instance, key_id })
+            }
             None => Err(rejected(state, parts)),
         }
     }

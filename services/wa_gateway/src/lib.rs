@@ -5,11 +5,13 @@
 
 pub mod auth;
 pub mod config;
+pub mod cooldown;
 pub mod driver;
 pub mod error;
 pub mod hub;
 pub mod media_cache;
 pub mod push;
+pub mod request_log;
 pub mod rich_routes;
 pub mod routes;
 pub mod schedule;
@@ -22,12 +24,14 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rovsti_wa_proto::InstanceState;
 use rovsti_wa_proto::LookupCache;
 use rovsti_wa_proto::limit::{AuthLimiter, TokenBucket};
+use rovsti_wa_proto::{ApiError, InstanceState, LimitSource};
 
 use crate::config::Config;
+use crate::cooldown::{Check, Cooldown};
 use crate::driver::{EventSink, WaDriver};
+use crate::error::HttpError;
 use crate::hub::Hub;
 use crate::push::{NoopPusher, Pusher};
 use crate::store::{InstanceId, Store};
@@ -59,6 +63,9 @@ struct Lookups {
     bucket: TokenBucket,
     /// Profile and picture queries.
     profiles: TokenBucket,
+    /// The pause after WhatsApp itself rate-limited the instance; shared by
+    /// lookups, profiles and pictures.
+    upstream: Cooldown,
 }
 
 impl Lookups {
@@ -67,8 +74,66 @@ impl Lookups {
             cache: LookupCache::new(LOOKUP_CACHE_ENTRIES, LOOKUP_TTL_MS),
             bucket: TokenBucket::new(LOOKUP_BURST, LOOKUP_REFILL_PER_SEC),
             profiles: TokenBucket::new(PROFILE_BURST, PROFILE_REFILL_PER_SEC),
+            upstream: Cooldown::default(),
         }
     }
+
+    /// The running WhatsApp pause, announcing its end once.
+    fn paused(&mut self, instance: &InstanceId, now: i64) -> Option<Refused> {
+        match self.upstream.check(now) {
+            Check::Paused { left_ms } => Some(Refused::Cooldown { left_ms }),
+            Check::Ended => {
+                log::info!("instance={instance} cooldown ended");
+                None
+            }
+            Check::Clear => None,
+        }
+    }
+}
+
+/// Why a contact query was not sent to WhatsApp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refused {
+    /// Over the gateway's own allowance; tokens are back in `retry_after_ms`.
+    Bucket { retry_after_ms: u64 },
+    /// WhatsApp rate-limited the instance; the pause ends in `left_ms`.
+    Cooldown { left_ms: u64 },
+}
+
+impl Refused {
+    pub fn source(self) -> LimitSource {
+        match self {
+            Self::Bucket { .. } => LimitSource::Gateway,
+            Self::Cooldown { .. } => LimitSource::Whatsapp,
+        }
+    }
+
+    pub fn retry_after_ms(self) -> u64 {
+        match self {
+            Self::Bucket { retry_after_ms } => retry_after_ms,
+            Self::Cooldown { left_ms } => left_ms,
+        }
+    }
+}
+
+/// A 429 with its hint, and the WARN line every 429 gets. No JID is logged.
+fn rate_limited(
+    instance: &InstanceId,
+    route: &str,
+    source: LimitSource,
+    retry_after_ms: u64,
+    jids: usize,
+    message: &str,
+) -> HttpError {
+    log::warn!(
+        "instance={instance} rate limited source={} route={route} retry_after_ms={retry_after_ms} n={jids}",
+        request_log::source_name(source)
+    );
+    HttpError(ApiError::rate_limited(
+        message,
+        Some(retry_after_ms),
+        source,
+    ))
 }
 
 pub fn now_ms() -> i64 {
@@ -176,22 +241,32 @@ impl AppState {
 
     /// Splits `jids` into cached lookup answers and the JIDs still to ask
     /// WhatsApp for. The misses are charged to the instance's lookup bucket,
-    /// all or nothing: `None` means the instance is over its allowance.
+    /// all or nothing; nothing is charged (and the misses are refused) while
+    /// WhatsApp's pause runs or the instance is over its allowance.
     pub fn lookup_cached(
         &self,
         instance: &InstanceId,
         jids: &[String],
-    ) -> Option<(Vec<rovsti_wa_proto::WaUser>, Vec<String>)> {
+    ) -> Result<(Vec<rovsti_wa_proto::WaUser>, Vec<String>), Refused> {
         let now = now_ms();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
         let (hits, misses) = entry.cache.split(jids, now);
+        if misses.is_empty() {
+            return Ok((hits, misses));
+        }
+        if let Some(refused) = entry.paused(instance, now) {
+            return Err(refused);
+        }
         let cost = u32::try_from(misses.len()).unwrap_or(u32::MAX);
-        let paid = cost == 0
-            || entry
-                .bucket
-                .try_take_n(cost, u64::try_from(now).unwrap_or(0));
-        paid.then_some((hits, misses))
+        let at = u64::try_from(now).unwrap_or(0);
+        if entry.bucket.try_take_n(cost, at) {
+            Ok((hits, misses))
+        } else {
+            Err(Refused::Bucket {
+                retry_after_ms: entry.bucket.wait_ms(cost, at),
+            })
+        }
     }
 
     /// Remembers what WhatsApp answered for `instance`.
@@ -204,18 +279,82 @@ impl AppState {
         }
     }
 
-    /// Charges `n` profile or picture queries to the instance; false (and
-    /// nothing charged) when it is over its allowance.
-    pub fn charge_profiles(&self, instance: &InstanceId, n: usize) -> bool {
+    /// Charges `n` profile or picture queries to the instance; refused (and
+    /// nothing charged) while WhatsApp's pause runs or over the allowance.
+    pub fn charge_profiles(&self, instance: &InstanceId, n: usize) -> Result<(), Refused> {
         if n == 0 {
-            return true;
+            return Ok(());
         }
-        let now = u64::try_from(now_ms()).unwrap_or(0);
+        let now = now_ms();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
-        entry
-            .profiles
-            .try_take_n(u32::try_from(n).unwrap_or(u32::MAX), now)
+        if let Some(refused) = entry.paused(instance, now) {
+            return Err(refused);
+        }
+        let cost = u32::try_from(n).unwrap_or(u32::MAX);
+        let at = u64::try_from(now).unwrap_or(0);
+        if entry.profiles.try_take_n(cost, at) {
+            Ok(())
+        } else {
+            Err(Refused::Bucket {
+                retry_after_ms: entry.profiles.wait_ms(cost, at),
+            })
+        }
+    }
+
+    /// Records that WhatsApp rate-limited `instance` (its hint in
+    /// `retry_after_s`) and starts or extends the pause. Returns the pause.
+    pub fn note_upstream_limit(&self, instance: &InstanceId, retry_after_s: Option<u32>) -> u64 {
+        let now = now_ms();
+        let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
+        let hint = retry_after_s.map(|s| u64::from(s) * 1000);
+        let wait = entry.upstream.note(hint, now);
+        log::info!("instance={instance} cooldown started wait_ms={wait}");
+        wait
+    }
+
+    /// The 429 for a refused contact query on `route` (a route template),
+    /// logged at WARN. `jids` is how many JIDs the request asked about.
+    pub fn refused(
+        &self,
+        instance: &InstanceId,
+        route: &str,
+        refused: Refused,
+        jids: usize,
+    ) -> HttpError {
+        let message = match refused {
+            Refused::Bucket { .. } => "too many requests for this instance",
+            Refused::Cooldown { .. } => "WhatsApp rate limit reached; waiting it out",
+        };
+        rate_limited(
+            instance,
+            route,
+            refused.source(),
+            refused.retry_after_ms(),
+            jids,
+            message,
+        )
+    }
+
+    /// WhatsApp answered 429 to a contact query on `route`: starts the pause
+    /// and returns the 429 for the app, logged at WARN.
+    pub fn upstream_limited(
+        &self,
+        instance: &InstanceId,
+        route: &str,
+        retry_after_s: Option<u32>,
+        jids: usize,
+    ) -> HttpError {
+        let wait = self.note_upstream_limit(instance, retry_after_s);
+        rate_limited(
+            instance,
+            route,
+            LimitSource::Whatsapp,
+            wait,
+            jids,
+            "WhatsApp rate limit reached",
+        )
     }
 
     /// Forgets the lookups of a deleted instance.

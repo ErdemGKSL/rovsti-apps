@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: plan only (2026-11-14, branch `ui-overhaul`). No code changed yet.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -526,6 +526,19 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
 - **S1 Gateway truth (highest value, ship first).** Section 7 items 1-8 + proto fields + client/ffi detail + tests.
   Deploy with `scripts/deploy-wa-gateway.sh`, then check the journal shows request lines and, on the next sync, the
   WARN 429 line. The current app build immediately reports `Partial` instead of a fake success.
+  *Done (implementation notes, deviations):* (a) `lookup_cached` / `charge_profiles` return
+  `Result<_, Refused>` with `Refused::{Bucket{retry_after_ms}, Cooldown{left_ms}}` instead of a `Charge::Ok` variant
+  (same information, idiomatic). (b) `note_upstream_limit` runs only on a real upstream 429, not on a bucket or
+  cooldown refusal: otherwise every early retry during a pause would add a strike and extend the pause without end.
+  A cooldown refusal carries `source: whatsapp` (the pause is WhatsApp's), a bucket refusal `source: gateway`.
+  (c) The picture route also applies stale-if-error: when it holds the bytes of the known picture it serves them with
+  `x-rovsti-stale: rate-limited` instead of a 429 (D5's reasoning; only a never-held picture gets the 429).
+  (d) The Rust field is `ApiError::limit_source` with `#[serde(rename = "source")]`: `thiserror` treats a field
+  named `source` as the error's cause. `LimitSource` has a `#[serde(other)] Other` so a newer source never breaks
+  parsing. (e) The cooldown is a pure `services/wa_gateway/src/cooldown.rs` (unit tests cover expiry, doubling, cap,
+  hint and strike reset); `cooldown_expires` is a unit test there, not an api test (the api tests run on the real
+  clock and the first pause is 60 s). (f) The WARN 429 line is written by the contact handlers (they know `n`); the
+  INFO request line by the `request_log` middleware (instance id filled in by the `Authed` extractor).
 - **S2 Logging core.** `rovsti_core::redact`, `rovsti_ffi::logbuf` + `core.logs_drain`, Kotlin `RovstiLog`,
   `LogRing`, `LogMask`, `LogFile`, `DevMode`, `RustLogPump` (no UI yet; ring only). `PeopleSync` (still v1) gets
   log lines for run start, each batch, each 429, outcome and the NotLinked case. Tests.

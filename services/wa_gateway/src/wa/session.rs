@@ -26,6 +26,7 @@ use whatsapp_rust::wacore::types::events::{ConnectFailureReason, Receipt};
 use whatsapp_rust::wacore::types::presence::{ChatPresence, ChatPresenceMedia, ReceiptType};
 use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;
+use whatsapp_rust::{ContactError, IqError};
 
 use super::calls::{CallBackend, WaCalls};
 use super::convert;
@@ -66,6 +67,34 @@ impl std::fmt::Debug for WaRuntime {
 
 fn failed(e: impl std::fmt::Display) -> DriverError {
     DriverError::Failed(e.to_string())
+}
+
+/// WhatsApp's "rate-overlimit" answer to a contact query (usync lookup,
+/// user info, profile picture).
+const RATE_LIMIT_CODE: u16 = 429;
+
+/// A failed contact query: WhatsApp's 429 becomes [`DriverError::RateLimited`]
+/// (with its `backoff` hint), everything else [`DriverError::Failed`].
+fn contact_failed(e: ContactError) -> DriverError {
+    match &e {
+        ContactError::Iq(IqError::ServerError { code, backoff, .. })
+            if *code == RATE_LIMIT_CODE =>
+        {
+            DriverError::RateLimited {
+                retry_after_s: *backoff,
+            }
+        }
+        _ => rate_limited_text(&e.to_string()).unwrap_or_else(|| failed(e)),
+    }
+}
+
+/// Fallback should the 429 arrive wrapped in another error type: the
+/// `IqError` text is `received a server error response: code=429, ...`.
+fn rate_limited_text(text: &str) -> Option<DriverError> {
+    text.contains("code=429")
+        .then_some(DriverError::RateLimited {
+            retry_after_s: None,
+        })
 }
 
 fn status(
@@ -1120,7 +1149,7 @@ impl WaDriver for WaRuntime {
                 .contacts()
                 .is_on_whatsapp(&parsed)
                 .await
-                .map_err(failed)?;
+                .map_err(contact_failed)?;
             let answers = found.into_iter().map(|r| {
                 let jid = r.pn_jid.unwrap_or(r.jid).to_non_ad().to_string();
                 let verified_name = r.verified_name.and_then(|v| v.name);
@@ -1324,7 +1353,7 @@ impl WaDriver for WaRuntime {
                     .contacts()
                     .get_user_info(&users)
                     .await
-                    .map_err(failed)?;
+                    .map_err(contact_failed)?;
                 for jid in &users {
                     let key = jid.to_non_ad();
                     let info = infos
@@ -1351,7 +1380,7 @@ impl WaDriver for WaRuntime {
                     .contacts()
                     .get_profile_picture(group, true)
                     .await
-                    .map_err(failed)?;
+                    .map_err(contact_failed)?;
                 out.push(FetchedProfile {
                     jid: group.to_non_ad().to_string(),
                     picture_id: picture.map(|p| p.id).filter(|id| !id.is_empty()),
@@ -1377,7 +1406,7 @@ impl WaDriver for WaRuntime {
                 .contacts()
                 .get_profile_picture(&jid, preview)
                 .await
-                .map_err(failed)?
+                .map_err(contact_failed)?
                 .filter(|p| !p.id.is_empty() && !p.url.is_empty())
             else {
                 return Ok(PictureFetch::None);
@@ -1447,6 +1476,56 @@ mod tests {
             body: MessageBody::Text(text.into()),
             reactions: vec![],
         }
+    }
+
+    fn server_error(code: u16, backoff: Option<u32>) -> ContactError {
+        ContactError::Iq(IqError::ServerError {
+            code,
+            text: "rate-overlimit".into(),
+            error_type: None,
+            backoff,
+        })
+    }
+
+    #[test]
+    fn whatsapp_429_is_rate_limited() {
+        assert_eq!(
+            contact_failed(server_error(429, Some(30))),
+            DriverError::RateLimited {
+                retry_after_s: Some(30)
+            }
+        );
+        assert_eq!(
+            contact_failed(server_error(429, None)),
+            DriverError::RateLimited {
+                retry_after_s: None
+            }
+        );
+        assert!(matches!(
+            contact_failed(server_error(500, None)),
+            DriverError::Failed(_)
+        ));
+        assert!(matches!(
+            contact_failed(ContactError::Iq(IqError::Timeout)),
+            DriverError::Failed(_)
+        ));
+        assert!(matches!(
+            contact_failed(ContactError::InvalidJid("x".into())),
+            DriverError::Failed(_)
+        ));
+    }
+
+    #[test]
+    fn a_wrapped_429_is_found_by_its_text() {
+        let text = server_error(429, Some(5)).to_string();
+        assert!(text.contains("code=429"), "{text}");
+        assert_eq!(
+            rate_limited_text(&format!("usync: {text}")),
+            Some(DriverError::RateLimited {
+                retry_after_s: None
+            })
+        );
+        assert_eq!(rate_limited_text("code=500, text='x'"), None);
     }
 
     #[test]

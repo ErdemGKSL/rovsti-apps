@@ -221,10 +221,10 @@ mod tests {
         assert!(!retry(ClientError::Unauthorized));
         assert!(!retry(ClientError::Decode("x".into())));
         assert!(!retry(ClientError::Closed));
-        assert!(!retry(ClientError::Api(ApiError {
-            code: ErrorCode::Unauthorized,
-            message: "no".into(),
-        })));
+        assert!(!retry(ClientError::Api(ApiError::new(
+            ErrorCode::Unauthorized,
+            "no"
+        ))));
     }
 
     #[test]

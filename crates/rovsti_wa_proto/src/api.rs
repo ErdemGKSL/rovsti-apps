@@ -352,6 +352,27 @@ pub enum ErrorCode {
 pub struct ApiError {
     pub code: ErrorCode,
     pub message: String,
+    /// With `rate_limited`: how long to wait before asking again, in ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
+    /// With `rate_limited`: who set the limit (`source` on the wire; the
+    /// Rust name keeps `thiserror` from taking it for an error source).
+    #[serde(rename = "source", default, skip_serializing_if = "Option::is_none")]
+    pub limit_source: Option<LimitSource>,
+}
+
+/// Who refused a request for being too fast.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitSource {
+    /// WhatsApp's servers answered "rate-overlimit" (or the gateway is
+    /// waiting out such an answer).
+    Whatsapp,
+    /// The gateway's own per-instance allowance.
+    Gateway,
+    /// A source a newer gateway reports that this build does not know.
+    #[serde(other)]
+    Other,
 }
 
 impl ApiError {
@@ -359,6 +380,21 @@ impl ApiError {
         Self {
             code,
             message: message.into(),
+            retry_after_ms: None,
+            limit_source: None,
+        }
+    }
+
+    /// A `rate_limited` error: wait `retry_after_ms`, the limit is `source`'s.
+    pub fn rate_limited(
+        message: impl Into<String>,
+        retry_after_ms: Option<u64>,
+        source: LimitSource,
+    ) -> Self {
+        Self {
+            retry_after_ms,
+            limit_source: Some(source),
+            ..Self::new(ErrorCode::RateLimited, message)
         }
     }
 }
@@ -491,6 +527,32 @@ mod tests {
     }
 
     #[test]
+    fn api_error_stays_compatible_both_ways() {
+        // An old gateway's body still parses.
+        let old: ApiError =
+            serde_json::from_str(r#"{"code":"rate_limited","message":"too many"}"#).unwrap();
+        assert_eq!(old, ApiError::new(ErrorCode::RateLimited, "too many"));
+        // An old client (no new fields, no deny_unknown_fields) still parses a new body.
+        #[derive(serde::Deserialize)]
+        struct OldApiError {
+            code: ErrorCode,
+            message: String,
+        }
+        let new = to_json(&ApiError::rate_limited("x", Some(5), LimitSource::Whatsapp));
+        let parsed: OldApiError = serde_json::from_str(&new).unwrap();
+        assert_eq!(
+            (parsed.code, parsed.message.as_str()),
+            (ErrorCode::RateLimited, "x")
+        );
+        // A source this build does not know is not an error.
+        let future: ApiError = serde_json::from_str(
+            r#"{"code":"rate_limited","message":"x","source":"cloud","extra":1}"#,
+        )
+        .unwrap();
+        assert_eq!(future.limit_source, Some(LimitSource::Other));
+    }
+
+    #[test]
     fn tagged_types_are_pinned() {
         pinned(&[
             (LinkRequest::Qr, r#"{"type":"qr"}"#),
@@ -521,10 +583,20 @@ mod tests {
             },
             r#"{"link":{"type":"qr"},"app":"stops"}"#,
         )]);
-        pinned(&[(
-            ApiError::new(ErrorCode::NotConnected, "offline"),
-            r#"{"code":"not_connected","message":"offline"}"#,
-        )]);
+        pinned(&[
+            (
+                ApiError::new(ErrorCode::NotConnected, "offline"),
+                r#"{"code":"not_connected","message":"offline"}"#,
+            ),
+            (
+                ApiError::rate_limited("slow down", Some(61_000), LimitSource::Whatsapp),
+                r#"{"code":"rate_limited","message":"slow down","retry_after_ms":61000,"source":"whatsapp"}"#,
+            ),
+            (
+                ApiError::rate_limited("slow down", None, LimitSource::Gateway),
+                r#"{"code":"rate_limited","message":"slow down","source":"gateway"}"#,
+            ),
+        ]);
         pinned(&[(SetMuted { muted: true }, r#"{"muted":true}"#)]);
         pinned(&[
             (ScheduledState::Pending, r#"{"status":"pending"}"#),

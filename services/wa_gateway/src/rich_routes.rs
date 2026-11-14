@@ -291,11 +291,22 @@ pub fn profile_is_stale(profile: Option<&WaProfile>, refresh: bool, now: i64) ->
             .is_none_or(|p| p.fetched_ms <= 0 || now.saturating_sub(p.fetched_ms) >= PROFILE_TTL_MS)
 }
 
+/// Response header on answers served from storage because WhatsApp could
+/// not be asked: `rate-limited` or `error`.
+pub const STALE_HEADER: &str = "x-rovsti-stale";
+
+/// Whether every JID has an answer WhatsApp really gave (`fetched_ms > 0`),
+/// so stored data may stand in when WhatsApp cannot be asked.
+fn all_answered(jids: &[String], known: &[WaProfile]) -> bool {
+    jids.iter()
+        .all(|jid| known.iter().any(|p| &p.jid == jid && p.fetched_ms > 0))
+}
+
 async fn profiles(
     State(state): State<AppState>,
     auth: Authed,
     Json(req): Json<ProfilesRequest>,
-) -> ApiResult<Json<Vec<WaProfile>>> {
+) -> ApiResult<Response> {
     let jids = check_profiles(&req)?;
     let store = state.store();
     let mut known = store.profiles(auth.instance.clone(), jids.clone()).await?;
@@ -305,29 +316,48 @@ async fn profiles(
         .filter(|jid| profile_is_stale(known.iter().find(|p| &p.jid == *jid), req.refresh, now))
         .cloned()
         .collect();
+    let mut served_stale = None;
     if !stale.is_empty() {
-        if !state.charge_profiles(&auth.instance, stale.len()) {
-            return Err(HttpError::new(
-                ErrorCode::RateLimited,
-                "too many profile requests",
-            ));
-        }
-        match state.driver().profiles(&auth.instance, stale).await {
-            Ok(fetched) => {
-                let sink = state.sink(&auth.instance);
-                for profile in fetched {
-                    let jid = profile.jid.clone();
-                    sink.change_profile(&jid, ProfileChange::Fetched(profile))
-                        .await;
+        let asked = stale.len();
+        let failure = match state.charge_profiles(&auth.instance, asked) {
+            Err(refused) => Some((
+                state.refused(&auth.instance, r::PROFILES, refused, asked),
+                "rate-limited",
+            )),
+            Ok(()) => match state.driver().profiles(&auth.instance, stale).await {
+                Ok(fetched) => {
+                    let sink = state.sink(&auth.instance);
+                    for profile in fetched {
+                        let jid = profile.jid.clone();
+                        sink.change_profile(&jid, ProfileChange::Fetched(profile))
+                            .await;
+                    }
+                    known = store.profiles(auth.instance.clone(), jids.clone()).await?;
+                    None
                 }
-                known = store.profiles(auth.instance.clone(), jids.clone()).await?;
+                Err(DriverError::BadRequest(message)) => {
+                    return Err(HttpError::bad_request(message));
+                }
+                Err(DriverError::RateLimited { retry_after_s }) => Some((
+                    state.upstream_limited(&auth.instance, r::PROFILES, retry_after_s, asked),
+                    "rate-limited",
+                )),
+                Err(e) => {
+                    log::warn!("instance={} profile query failed", auth.instance);
+                    Some((HttpError::from(e), "error"))
+                }
+            },
+        };
+        if let Some((error, why)) = failure {
+            // Older real answers may stand in; a JID never answered (or an
+            // explicit refresh) must not get an empty profile that looks real.
+            if req.refresh || !all_answered(&jids, &known) {
+                return Err(error);
             }
-            Err(DriverError::BadRequest(message)) => return Err(HttpError::bad_request(message)),
-            // Serve what is known; the next request asks again.
-            Err(e) => log::warn!("{}: profile query failed: {e}", auth.instance),
+            served_stale = Some(why);
         }
     }
-    let ordered = jids
+    let ordered: Vec<WaProfile> = jids
         .into_iter()
         .map(|jid| {
             known
@@ -340,7 +370,13 @@ async fn profiles(
                 })
         })
         .collect();
-    Ok(Json(ordered))
+    let mut response = Json(ordered).into_response();
+    if let Some(why) = served_stale {
+        response
+            .headers_mut()
+            .insert(STALE_HEADER, HeaderValue::from_static(why));
+    }
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
@@ -449,17 +485,37 @@ async fn fetch_picture(
     held: Option<(String, Vec<u8>)>,
     headers: &HeaderMap,
 ) -> ApiResult<Response> {
-    if !state.charge_profiles(&auth.instance, 1) {
-        return Err(HttpError::new(
-            ErrorCode::RateLimited,
-            "too many profile picture requests",
-        ));
-    }
+    let refusal = match state.charge_profiles(&auth.instance, 1) {
+        Err(refused) => Some(state.refused(&auth.instance, r::PICTURE, refused, 1)),
+        Ok(()) => None,
+    };
     let known_id = held.as_ref().map(|(id, _)| id.clone());
-    let fetched = state
-        .driver()
-        .fetch_picture(&auth.instance, jid.clone(), preview, known_id)
-        .await?;
+    let fetched = match refusal {
+        Some(error) => Err(error),
+        None => match state
+            .driver()
+            .fetch_picture(&auth.instance, jid.clone(), preview, known_id)
+            .await
+        {
+            Ok(fetched) => Ok(fetched),
+            Err(DriverError::RateLimited { retry_after_s }) => {
+                Err(state.upstream_limited(&auth.instance, r::PICTURE, retry_after_s, 1))
+            }
+            Err(e) => return Err(e.into()),
+        },
+    };
+    let fetched = match (fetched, &held) {
+        (Ok(fetched), _) => fetched,
+        // Rate limited: the cached copy of the known picture stands in.
+        (Err(_), Some((id, bytes))) => {
+            let mut response = picture_response(headers, id, bytes.clone());
+            response
+                .headers_mut()
+                .insert(STALE_HEADER, HeaderValue::from_static("rate-limited"));
+            return Ok(response);
+        }
+        (Err(error), None) => return Err(error),
+    };
     let sink = state.sink(&auth.instance);
     match (fetched, held) {
         (PictureFetch::None, _) => {

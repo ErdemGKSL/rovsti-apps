@@ -222,6 +222,9 @@ in request order. `business` and `verified_name` are optional in the reply.
   second). A request that needs more tokens than are left is refused whole with
   429 `rate_limited`; retry later or ask for fewer numbers. Cached numbers are
   always answered.
+- WhatsApp's own limit (it answers `rate-overlimit`, code 429) is a 429 too, never
+  a 500. See "Rate limits" below for the body, the `Retry-After` header and the
+  per-instance cooldown.
 - The instance must be connected, else the usual `not_connected` error.
 
 `rovsti_wa_client::Gateway::lookup_users(&[String])` wraps it. Apps look up one
@@ -367,6 +370,39 @@ own HTTPS hosts.
 Profile and picture queries that reach WhatsApp share a per-instance bucket of 120
 tokens (two come back every second), separate from the lookup bucket; over it the
 answer is 429 `rate_limited`. Stored answers never cost a token.
+
+### Rate limits
+
+Every 429 `rate_limited` from the contact routes (`/v1/contacts/lookup`,
+`/v1/contacts/profiles`, `/v1/pictures/{jid}`) carries two optional fields and a
+header. Older clients ignore them (no field is required, unknown fields are allowed):
+
+```json
+{"code": "rate_limited", "message": "...", "retry_after_ms": 60000, "source": "whatsapp"}
+```
+
+- `source`: `whatsapp` when WhatsApp itself refused (or the gateway is waiting out
+  such a refusal), `gateway` when the gateway's own bucket is empty.
+- `retry_after_ms`: when to ask again. `Retry-After` has the same in whole seconds,
+  rounded up.
+- **Cooldown.** After WhatsApp's 429 the instance pauses all lookup, profile and
+  picture queries to WhatsApp: at least WhatsApp's own `backoff` hint and at least
+  60 s, doubling with every further 429 (capped at 30 min). The strikes are forgotten
+  10 minutes after a pause ends without a new 429. During the pause nothing is sent
+  to WhatsApp; cached and stored answers are still served.
+- **Stale answers.** When WhatsApp cannot be asked (cooldown, bucket, or a failed
+  query) and every requested JID already has an answer WhatsApp really gave
+  (`fetched_ms > 0`), `/v1/contacts/profiles` answers 200 with the stored profiles
+  and the header `x-rovsti-stale: rate-limited` (or `error`). Otherwise, and always
+  with `refresh: true`, the error is returned; a never-fetched JID no longer comes
+  back as an empty profile with `fetched_ms: 0`. A picture whose bytes the gateway
+  already holds is served the same way with `x-rovsti-stale`.
+- **Logging.** Every request is logged at INFO as
+  `instance=<id> <METHOD> <route template> -> <status> <ms>ms` (`/healthz` and the
+  event stream at DEBUG); every contact-route 429 also at WARN as
+  `instance=<id> rate limited source=<whatsapp|gateway> route=<template>
+  retry_after_ms=<n> n=<jids>`, cooldown start and end at INFO. No JID, number or
+  query string is logged.
 
 `GET /v1/groups` and `GET /v1/groups/{jid}` now also carry the group `description`,
 `announce` (only admins may send) and each participant's `name` (push name or saved

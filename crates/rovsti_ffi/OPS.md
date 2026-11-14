@@ -99,7 +99,8 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 
 WhatsApp (E2.14): `wa.open {url, key?, cache_dir?}` answers `{handle}`, a `rovsti_wa_client::Gateway`; every network op is `wa.<verb>` with `{handle, ...flat fields of the
 `rovsti_wa_proto` request}` and answers the proto type (field names are the gateway's). The client call runs outside the registry lock. Errors: `network`, `auth` (401 and 403),
-`invalid` with the gateway's own sentence (`detail.code` is its error code) and `parse`. Bytes (`wa.media`, `wa.thumbnail`, `wa.status_media`, `wa.status_thumbnail`, `wa.picture`)
+`invalid` with the gateway's own sentence (`detail.code` is its error code; a `rate_limited` one may add `detail.retry_after_ms` and
+`detail.source` = `whatsapp` | `gateway`) and `parse`. Bytes (`wa.media`, `wa.thumbnail`, `wa.status_media`, `wa.status_thumbnail`, `wa.picture`)
 answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the handle's cache directory (Kotlin deletes it). `wa.send_media(_with)` takes `data_b64` or a `path`.
 `wa.events_start {handle, instance, after?}` answers a stream handle and emits every socket message as event `wa.event` `{instance, event}` with `event.kind` one of `connected`,
 `event` (`seq`, `at_ms`, `event` = the gateway event, tagged `type`), `disconnected {reason}`, `unauthorized`; `wa.events_reconnect_now`, `RustNative.release` stops it. `wa.call_audio_open

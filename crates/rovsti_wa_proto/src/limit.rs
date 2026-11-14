@@ -47,6 +47,23 @@ impl TokenBucket {
         }
     }
 
+    /// How long until `n` tokens are available, in ms (0 when they are now).
+    /// `n` above the capacity is treated as the capacity; a bucket that
+    /// never refills answers `u64::MAX`. Takes nothing.
+    pub fn wait_ms(&self, n: u32, now_ms: u64) -> u64 {
+        let mut copy = self.clone();
+        copy.refill(now_ms);
+        let missing = f64::from(n).min(copy.capacity) - copy.tokens;
+        if missing <= 0.0 {
+            return 0;
+        }
+        if copy.refill_per_sec <= 0.0 {
+            return u64::MAX;
+        }
+        // Rounded up so waiting exactly this long is always enough.
+        (missing / copy.refill_per_sec * 1000.0).ceil() as u64
+    }
+
     /// True when the bucket has refilled completely (safe to forget).
     fn is_idle(&self, now_ms: u64) -> bool {
         let mut copy = self.clone();
@@ -124,6 +141,25 @@ mod tests {
         assert!(b.try_take_n(2, 0));
         assert!(!b.try_take_n(1, 0));
         assert!(b.try_take_n(2, 2_000));
+    }
+
+    #[test]
+    fn wait_ms_tells_when_tokens_are_back() {
+        let mut b = TokenBucket::new(10, 2.0);
+        assert_eq!(b.wait_ms(10, 0), 0);
+        assert!(b.try_take_n(10, 0));
+        // Two tokens a second: 3 tokens take 1.5 s.
+        assert_eq!(b.wait_ms(3, 0), 1_500);
+        assert_eq!(b.wait_ms(3, 1_000), 500);
+        assert_eq!(b.wait_ms(3, 1_500), 0);
+        // Asking does not take anything.
+        assert_eq!(b.wait_ms(3, 0), 1_500);
+        // More than the capacity waits for a full bucket.
+        assert_eq!(b.wait_ms(50, 0), 5_000);
+        assert!(b.try_take_n(3, 1_500));
+        let mut never = TokenBucket::new(1, 0.0);
+        assert!(never.try_take(0));
+        assert_eq!(never.wait_ms(1, 10), u64::MAX);
     }
 
     #[test]

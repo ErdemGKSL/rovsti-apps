@@ -6,6 +6,7 @@
  * Changes for Rovsti: package dev.rovsti.shell.settings and imports (our shapes, IosTheme tokens and IosText/IosChevron/IosBadge
  * from :design). The group itself is as written; the numeric dp literals are named in SettingsMetrics (ConventionTest bans raw dp in :shell).
  * Rovsti change (F35): a row with trailing content uses :design's StackingTrailingRow, which puts the action under the text at large fonts.
+ * Rovsti change (people sync v2): IosSettingsItem takes an optional row modifier.
  */
 
 package dev.rovsti.shell.settings
@@ -115,6 +116,7 @@ private fun IosSettingsItemRow(item: IosSettingsItem) {
     val rowModifier =
         Modifier
             .fillMaxWidth()
+            .then(item.modifier)
             .iosRowPress(
                 enabled = item.enabled,
                 onClick = item.onClick?.let { click -> { click() } },
@@ -243,6 +245,8 @@ data class IosSettingsItem(
     val iconShape: Shape? = null,
     val enabled: Boolean = true,
     val onClick: (() -> Unit)? = null,
+    /** Extra behaviour of the whole row (Rovsti: the About Version row's hold for developer mode). */
+    val modifier: Modifier = Modifier,
 ) {
     internal val hasLeading: Boolean get() = icon != null || leadingContent != null
 }

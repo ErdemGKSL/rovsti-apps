@@ -34,6 +34,7 @@ import dev.rovsti.shell.settings.LicenceDetailPage
 import dev.rovsti.shell.settings.LicencesPage
 import dev.rovsti.shell.settings.SettingsPage
 import dev.rovsti.shell.settings.aboutInfo
+import dev.rovsti.shell.settings.dev.LogsPage
 import dev.rovsti.shell.settings.rememberCoreVersion
 import dev.rovsti.shell.settings.rememberLicenceData
 import dev.rovsti.wa.WaLinkStore
@@ -113,6 +114,25 @@ fun AboutEntry(
     val coreVersion = rememberCoreVersion(container.rust).value
     val info = remember(context, appName, coreVersion) { context.aboutInfo(appName, coreVersion) }
     AboutPage(info, onOpenLicences = onOpenLicences, onBack = onBack, onBackLongClick = onBackLongClick)
+}
+
+/** Developer mode's Logs page of Contacts. */
+@Composable
+fun LogsEntry(
+    container: ContactsContainer,
+    tag: String?,
+    onBack: () -> Unit,
+    onBackLongClick: () -> Unit,
+) {
+    LogsPage(
+        devLog = container.devLog,
+        clipboard = container.clipboard,
+        files = container.files,
+        appName = LocalResources.current.getString(R.string.app_name),
+        onBack = onBack,
+        onBackLongClick = onBackLongClick,
+        initialTag = tag,
+    )
 }
 
 @Composable

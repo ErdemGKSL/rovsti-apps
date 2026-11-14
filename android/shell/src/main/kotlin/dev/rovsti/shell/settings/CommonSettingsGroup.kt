@@ -12,13 +12,15 @@ import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.ios.component.IosChevron
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.shell.R
+import dev.rovsti.shell.settings.dev.DeveloperSettingsGroup
+import dev.rovsti.shell.settings.dev.LocalDevMode
 
 /** The pages the common rows open; an app maps them onto its own back-stack keys. */
-enum class CommonSettingsPage { Appearance, Haptics, About, Licences }
+enum class CommonSettingsPage { Appearance, Haptics, About, Licences, Logs }
 
 /**
  * The common rows every app's settings page ends with: Appearance and Haptics (each hidden when its preference is null),
- * then About. Put it inside a `SettingsPage`.
+ * then About; while developer mode is on ([LocalDevMode]) the Developer group follows. Put it inside a `SettingsPage`.
  */
 @Composable
 fun CommonSettingsGroup(
@@ -53,6 +55,9 @@ fun CommonSettingsGroup(
                 ),
             ),
     )
+    LocalDevMode.current?.let { devMode ->
+        DeveloperSettingsGroup(devMode, onOpenLogs = { onOpen(CommonSettingsPage.Logs) })
+    }
 }
 
 /** The value on the right of a row that also opens a page: iOS shows the value, then the chevron. */

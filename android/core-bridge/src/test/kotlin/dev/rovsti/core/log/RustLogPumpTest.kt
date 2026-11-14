@@ -52,7 +52,7 @@ class RustLogPumpTest {
         runTest {
             val got = mutableListOf<Got>()
             val source = FakeSource((1L..3L).map { line(it) })
-            val pump = RustLogPump(source, this) { _, level, tag, text -> got += Got(level, tag, text) }
+            val pump = RustLogPump(source, this, sink = { _, level, tag, text -> got += Got(level, tag, text) })
             assertTrue(pump.pumpOnce())
             assertEquals(listOf("line 1", "line 2", "line 3"), got.map { it.text })
             assertEquals(3L, pump.afterSeq)
@@ -67,7 +67,7 @@ class RustLogPumpTest {
         runTest {
             val got = mutableListOf<Got>()
             val source = FakeSource(listOf(line(5)), dropped = 4)
-            val pump = RustLogPump(source, this) { _, level, tag, text -> got += Got(level, tag, text) }
+            val pump = RustLogPump(source, this, sink = { _, level, tag, text -> got += Got(level, tag, text) })
             pump.pumpOnce()
             assertEquals(Got(LogLevel.Warn, "core", "rust_logs_lost n=4"), got.last())
             source.fail = true
@@ -79,7 +79,7 @@ class RustLogPumpTest {
     fun pollsOnlyWhileStarted() {
         val scope = TestScope(StandardTestDispatcher())
         val source = FakeSource()
-        val pump = RustLogPump(source, scope, intervalMs = 1_000) { _, _, _, _ -> }
+        val pump = RustLogPump(source, scope, intervalMs = 1_000, sink = { _, _, _, _ -> })
         pump.start()
         scope.runCurrent()
         scope.advanceTimeBy(2_500)

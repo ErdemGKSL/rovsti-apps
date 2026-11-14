@@ -113,6 +113,7 @@ fun ContactsApp(
                                 CommonSettingsPage.Haptics -> ContactsRoute.Haptics
                                 CommonSettingsPage.About -> ContactsRoute.About
                                 CommonSettingsPage.Licences -> ContactsRoute.Licences
+                                CommonSettingsPage.Logs -> ContactsRoute.Logs()
                             },
                         )
                     },
@@ -156,6 +157,7 @@ fun ContactsApp(
             LicencesEntry(onOpen = { navigator.push(ContactsRoute.LicenceDetail(it)) }, pop, popToRoot)
         }
         entry<ContactsRoute.LicenceDetail> { route -> LicenceDetailEntry(route.id, pop, popToRoot) }
+        entry<ContactsRoute.Logs> { route -> LogsEntry(container, route.tag, pop, popToRoot) }
         entry<ContactsRoute.Intake> { route -> IntakePage(container, route, navigator) }
         // The pages below arrive with E4.2-E4.9; until then a route that a link or a later screen can reach still shows
         // an honest placeholder instead of nothing.

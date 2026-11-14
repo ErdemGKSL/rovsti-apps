@@ -97,4 +97,30 @@
         <item quantity="one">%1$d source</item>
         <item quantity="other">%1$d sources</item>
     </plurals>
+    <!-- Developer mode (people sync v2, S3): hold the Version row of About for 10 seconds. -->
+    <string name="dev_mode_on">Developer mode on</string>
+    <string name="dev_mode_off">Developer mode off</string>
+    <string name="dev_group">Developer</string>
+    <string name="dev_mode">Developer Mode</string>
+    <string name="dev_logs">Logs</string>
+    <string name="dev_logs_desc">What the app did, masked</string>
+    <string name="dev_logs_search">Search logs</string>
+    <string name="dev_logs_all">All</string>
+    <string name="dev_logs_info">Info</string>
+    <string name="dev_logs_warn">Warn</string>
+    <string name="dev_logs_error">Error</string>
+    <string name="dev_logs_copy">Copy</string>
+    <string name="dev_logs_share">Share</string>
+    <string name="dev_logs_clear">Clear</string>
+    <string name="dev_logs_clear_title">Clear logs?</string>
+    <string name="dev_logs_clear_body">Every line kept in memory and on this phone is deleted.</string>
+    <string name="dev_logs_cancel">Cancel</string>
+    <string name="dev_logs_copied">Copied</string>
+    <string name="dev_logs_copy_failed">Could not copy</string>
+    <string name="dev_logs_share_failed">Could not share the logs</string>
+    <string name="dev_logs_empty">No log lines yet</string>
+    <string name="dev_logs_no_match">No lines match</string>
+    <string name="dev_logs_latest">Jump to latest</string>
+    <string name="dev_logs_more">More</string>
+    <string name="dev_logs_header">Rovsti log of %1$s, exported %2$s. Numbers, keys and e-mail addresses are masked.</string>
 </resources>

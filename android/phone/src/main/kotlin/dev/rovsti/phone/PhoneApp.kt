@@ -729,6 +729,7 @@ fun PhoneApp(
                                         CommonSettingsPage.Haptics -> PhoneRoute.Haptics
                                         CommonSettingsPage.About -> PhoneRoute.About
                                         CommonSettingsPage.Licences -> PhoneRoute.Licences
+                                        CommonSettingsPage.Logs -> PhoneRoute.Logs()
                                     },
                                 )
                             },
@@ -816,6 +817,7 @@ fun PhoneApp(
                 PhoneLicencesEntry(onOpen = { navigator.push(PhoneRoute.LicenceDetail(it)) }, pop, popToRoot)
             }
             entry<PhoneRoute.LicenceDetail> { route -> PhoneLicenceDetailEntry(route.id, pop, popToRoot) }
+            entry<PhoneRoute.Logs> { route -> PhoneLogsEntry(container, route.tag, pop, popToRoot) }
             // Incoming (E5.6): the full-screen call screen. Its sheets, toasts and leaving run in IncomingEffects above.
             entry<PhoneRoute.Incoming> { IncomingScreen(incoming, photos = container.callPhotos) }
             // InCall (E5.7a): the page of the single call. Back and the chevron collapse it into the mini pill.

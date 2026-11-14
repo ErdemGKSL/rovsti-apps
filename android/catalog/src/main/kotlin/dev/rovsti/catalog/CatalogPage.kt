@@ -36,4 +36,5 @@ enum class CatalogPage(
     Toasts("Toasts"),
     OverlayStates("Overlay states"),
     WhatsAppSettings("WhatsApp settings"),
+    DevLogs("Developer logs"),
 }

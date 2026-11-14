@@ -6,7 +6,8 @@
  * Changes for Rovsti: the rows and the header of AboutScreen, on SettingsPage and IosSettingsGroup. Convx's developer, GitHub,
  * Discord and donation rows and its logo are dropped. Rovsti's rows are installed date, version name and code, the Rust core
  * version (RustCore.version()) and Licences (dp literals live in SettingsMetrics). The Material typography and colours became IosTheme tokens; the SF Symbols became
- * RovstiIcons; the page is a pure function of AboutInfo.
+ * RovstiIcons; the page is a pure function of AboutInfo. Holding the Version row for 10 s switches developer mode when the app
+ * provides LocalDevMode (people sync v2).
  */
 
 package dev.rovsti.shell.settings
@@ -30,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,6 +42,10 @@ import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.shell.R
+import dev.rovsti.shell.settings.dev.DevTags
+import dev.rovsti.shell.settings.dev.LocalDevMode
+import dev.rovsti.shell.settings.dev.holdToToggle
+import dev.rovsti.shell.settings.dev.rememberDevModeToggle
 import java.text.DateFormat
 import java.util.Date
 
@@ -161,6 +167,8 @@ fun AboutPage(
                         icon = tilePainter(RovstiIcons.Info),
                         title = { IosText(stringResource(R.string.settings_about_version)) },
                         description = { IosText(info.versionName.ifEmpty { unknown }) },
+                        // Hidden: holding the row for 10 s switches developer mode (people sync v2, S3).
+                        modifier = versionModifier(),
                     ),
                     IosSettingsItem(
                         icon = tilePainter(RovstiIcons.Gear),
@@ -195,6 +203,13 @@ fun AboutPage(
         )
         Spacer(modifier = Modifier.height(SettingsMetrics.S20))
     }
+}
+
+/** The Version row's hold for developer mode, when the app provides [LocalDevMode]. */
+@Composable
+private fun versionModifier(): Modifier {
+    val devMode = LocalDevMode.current ?: return Modifier.testTag(DevTags.Version)
+    return Modifier.testTag(DevTags.Version).holdToToggle(onToggle = rememberDevModeToggle(devMode))
 }
 
 @Composable

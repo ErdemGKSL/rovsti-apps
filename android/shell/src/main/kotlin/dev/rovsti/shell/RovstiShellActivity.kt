@@ -22,6 +22,7 @@ import dev.rovsti.design.transition.Tab
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.permissions.LocalPermissionController
 import dev.rovsti.shell.permissions.LocalSpecialAccess
+import dev.rovsti.shell.settings.dev.LocalDevMode
 import dev.rovsti.shell.settings.rememberDarkTheme
 import dev.rovsti.shell.settings.toMode
 import kotlinx.serialization.KSerializer
@@ -102,6 +103,7 @@ abstract class RovstiShellActivity<R : Any> : ComponentActivity() {
                     LocalRovstiImageLoader provides container.imageLoader,
                     LocalPermissionController provides container.permissions,
                     LocalSpecialAccess provides container.specialAccess,
+                    LocalDevMode provides container.devLog.devMode,
                 ) {
                     ThemeMelt(dark) { Content() }
                 }

@@ -21,6 +21,7 @@ import dev.rovsti.shell.settings.HapticsPage
 import dev.rovsti.shell.settings.LicenceDetailPage
 import dev.rovsti.shell.settings.LicencesPage
 import dev.rovsti.shell.settings.aboutInfo
+import dev.rovsti.shell.settings.dev.LogsPage
 import dev.rovsti.shell.settings.rememberCoreVersion
 import dev.rovsti.shell.settings.rememberLicenceData
 import dev.rovsti.wa.WaLinkStore
@@ -98,6 +99,25 @@ fun PhoneAboutEntry(
     val coreVersion = rememberCoreVersion(container.rust).value
     val info = remember(context, appName, coreVersion) { context.aboutInfo(appName, coreVersion) }
     AboutPage(info, onOpenLicences = onOpenLicences, onBack = onBack, onBackLongClick = onBackLongClick)
+}
+
+/** Developer mode's Logs page of Phone. */
+@Composable
+fun PhoneLogsEntry(
+    container: PhoneContainer,
+    tag: String?,
+    onBack: () -> Unit,
+    onBackLongClick: () -> Unit,
+) {
+    LogsPage(
+        devLog = container.devLog,
+        clipboard = container.clipboard,
+        files = container.files,
+        appName = stringResource(R.string.app_name),
+        onBack = onBack,
+        onBackLongClick = onBackLongClick,
+        initialTag = tag,
+    )
 }
 
 @Composable

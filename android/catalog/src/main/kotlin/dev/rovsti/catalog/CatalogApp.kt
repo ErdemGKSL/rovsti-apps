@@ -106,6 +106,7 @@ private fun PageContent(page: CatalogPage) {
         CatalogPage.Toasts -> ToastsPage()
         CatalogPage.OverlayStates -> OverlayStatesPage()
         CatalogPage.WhatsAppSettings -> WhatsAppSettingsPage()
+        CatalogPage.DevLogs -> DevLogsPage()
     }
 }
 

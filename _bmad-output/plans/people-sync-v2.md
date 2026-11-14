@@ -1,6 +1,6 @@
 # People sync v2: slow, resumable, observable
 
-Status: in progress (2026-11-14, branch `ui-overhaul`): S1, S2 done; see the notes under each step.
+Status: in progress (2026-11-14, branch `ui-overhaul`): S1, S2, S3 done; see the notes under each step.
 Scope: `services/wa_gateway`, `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `crates/rovsti_app_core`,
 `crates/rovsti_core`, `crates/rovsti_ffi`, `android/{core-bridge,people,shell,contacts,phone}`.
 Priority order: correctness and account safety, then stability, then speed.
@@ -551,6 +551,14 @@ Per step: `cargo fmt --all && cargo clippy --workspace --all-targets --profile c
   `isRateLimited()` in `:wa` (`WaAvatars.kt`), where the only callers are, instead of `:core-bridge`.
 - **S3 Developer mode UI.** `holdToToggle` on the version row, Developer group, `LogsPage`, share/copy/clear,
   strings en/tr, catalog page, shots. From here a failed sync can be diagnosed on the phone.
+  *Done (notes, deviations):* `DevMode` reaches the shell pages through `LocalDevMode` (provided by
+  `RovstiShellActivity` from `ShellContainer.devLog`), so `AboutPage` and `CommonSettingsGroup` need no new
+  parameters and the apps only map `CommonSettingsPage.Logs` to their `Logs(tag)` route (Contacts, Phone). The tag
+  filter is single-select (`ChipRow` is single-select; "All" plus one tag), not multi-select. The Logs page opens on
+  the filters and follows new lines only while the end is in view (the "Jump to latest" pill otherwise); opening
+  scrolled to the end clipped the filter row's touch targets at font scale 2. Share stages the file through the
+  existing `RovstiShareProvider` (`FilesRepository.stageForShare`), which both apps already declare. "Sync Details"
+  (open Logs on `sync`) is left to S7 with the new settings group; the route already takes the tag.
 - **S4 Honest outcomes in v1 (small).** `NotLinked` no longer stored as Failed; link-settle wait
   (`WaRepository.settled`); profiles with `fetched_ms == 0` counted as unanswered -> Partial. This fixes the
   misleading row before the larger rewrite lands.

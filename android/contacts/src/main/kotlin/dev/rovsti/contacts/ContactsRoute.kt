@@ -124,6 +124,12 @@ sealed interface ContactsRoute {
     data class LicenceDetail(
         val id: String,
     ) : ContactsRoute
+
+    /** Developer mode's Logs page; [tag] preselects a tag (`sync` for "Sync Details"). */
+    @Serializable
+    data class Logs(
+        val tag: String? = null,
+    ) : ContactsRoute
 }
 
 internal val ContactsTab = Tab("contacts")
@@ -253,6 +259,10 @@ fun chromeFor(
 
         is ContactsRoute.LicenceDetail -> {
             ChromeSpec(TabBarMode.Visible)
+        }
+
+        is ContactsRoute.Logs -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.contacts_logs)))
         }
     }
 

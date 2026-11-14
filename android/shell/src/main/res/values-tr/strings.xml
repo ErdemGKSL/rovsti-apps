@@ -97,4 +97,30 @@
         <item quantity="one">%1$d kaynak</item>
         <item quantity="other">%1$d kaynak</item>
     </plurals>
+    <!-- Geliştirici modu (people sync v2, S3): Hakkında'daki Sürüm satırına 10 saniye basılı tutun. -->
+    <string name="dev_mode_on">Geliştirici modu açık</string>
+    <string name="dev_mode_off">Geliştirici modu kapalı</string>
+    <string name="dev_group">Geliştirici</string>
+    <string name="dev_mode">Geliştirici Modu</string>
+    <string name="dev_logs">Günlükler</string>
+    <string name="dev_logs_desc">Uygulamanın yaptıkları, maskeli</string>
+    <string name="dev_logs_search">Günlüklerde ara</string>
+    <string name="dev_logs_all">Tümü</string>
+    <string name="dev_logs_info">Bilgi</string>
+    <string name="dev_logs_warn">Uyarı</string>
+    <string name="dev_logs_error">Hata</string>
+    <string name="dev_logs_copy">Kopyala</string>
+    <string name="dev_logs_share">Paylaş</string>
+    <string name="dev_logs_clear">Temizle</string>
+    <string name="dev_logs_clear_title">Günlükler temizlensin mi?</string>
+    <string name="dev_logs_clear_body">Bellekte ve bu telefonda tutulan tüm satırlar silinir.</string>
+    <string name="dev_logs_cancel">Vazgeç</string>
+    <string name="dev_logs_copied">Kopyalandı</string>
+    <string name="dev_logs_copy_failed">Kopyalanamadı</string>
+    <string name="dev_logs_share_failed">Günlükler paylaşılamadı</string>
+    <string name="dev_logs_empty">Henüz günlük satırı yok</string>
+    <string name="dev_logs_no_match">Eşleşen satır yok</string>
+    <string name="dev_logs_latest">En yeniye git</string>
+    <string name="dev_logs_more">Diğer</string>
+    <string name="dev_logs_header">%1$s Rovsti günlüğü, %2$s tarihinde dışa aktarıldı. Numaralar, anahtarlar ve e-posta adresleri maskelidir.</string>
 </resources>

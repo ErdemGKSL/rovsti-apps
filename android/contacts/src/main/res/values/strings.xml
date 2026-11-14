@@ -227,6 +227,7 @@
     <string name="contacts_label">Label</string>
     <string name="contacts_last_name_field">Last name</string>
     <string name="contacts_launcher_no_shortcuts">Your launcher can\'t add shortcuts</string>
+    <string name="contacts_logs">Logs</string>
     <string name="contacts_licences">Licences</string>
     <string name="contacts_link_copied">Link copied</string>
     <string name="contacts_looking_in_file">Looking for people in the file.</string>
@@ -458,4 +459,8 @@
     <string name="settings_people_sync_now">Sync Now</string>
     <string name="settings_people_syncing">Syncing…</string>
     <string name="settings_people_footer">Names and photos of the people you meet on WhatsApp stay on this phone and are shared with Rovsti Phone. Nothing is added to your contacts.</string>
+    <string name="card_birthday_title">Happy birthday, %1$s!</string>
+    <string name="card_birthday_title_nameless">Happy birthday!</string>
+    <plurals name="card_birthday_age"><item quantity="one">Turning %1$d</item><item quantity="other">Turning %1$d</item></plurals>
+    <string name="card_new_number_subtitle">My new number</string>
 </resources>

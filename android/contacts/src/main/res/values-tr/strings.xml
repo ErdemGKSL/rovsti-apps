@@ -227,6 +227,7 @@
     <string name="contacts_label">Etiket</string>
     <string name="contacts_last_name_field">Soyad</string>
     <string name="contacts_launcher_no_shortcuts">Ana ekranınız kısayol ekleyemiyor</string>
+    <string name="contacts_logs">Günlükler</string>
     <string name="contacts_licences">Lisanslar</string>
     <string name="contacts_link_copied">Bağlantı kopyalandı</string>
     <string name="contacts_looking_in_file">Dosyadaki kişiler aranıyor</string>
@@ -458,4 +459,8 @@
     <string name="settings_people_sync_now">Şimdi Eşitle</string>
     <string name="settings_people_syncing">Eşitleniyor…</string>
     <string name="settings_people_footer">WhatsApp\'ta tanıştığınız kişilerin adları ve fotoğrafları bu telefonda kalır ve Rovsti Phone ile paylaşılır. Kişilerinize hiçbir şey eklenmez.</string>
+    <string name="card_birthday_title">Doğum günün kutlu olsun, %1$s!</string>
+    <string name="card_birthday_title_nameless">Doğum günün kutlu olsun!</string>
+    <plurals name="card_birthday_age"><item quantity="one">%1$d yaşına giriyorsun</item><item quantity="other">%1$d yaşına giriyorsun</item></plurals>
+    <string name="card_new_number_subtitle">Yeni numaram</string>
 </resources>

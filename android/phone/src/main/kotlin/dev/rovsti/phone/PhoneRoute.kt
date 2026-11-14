@@ -72,6 +72,12 @@ sealed interface PhoneRoute {
         val id: String,
     ) : PhoneRoute
 
+    /** Developer mode's Logs page; [tag] preselects a tag. */
+    @Serializable
+    data class Logs(
+        val tag: String? = null,
+    ) : PhoneRoute
+
     // The pages Settings opens (E5.9): each is pushed with the glass back button and the full tab bar.
     @Serializable
     data object Blocked : PhoneRoute
@@ -148,6 +154,7 @@ fun chromeFor(route: PhoneRoute): ChromeSpec =
         PhoneRoute.About -> ChromeSpec(TabBarMode.Visible, largeTitle = "About")
         PhoneRoute.Licences -> ChromeSpec(TabBarMode.Visible, largeTitle = "Licences")
         is PhoneRoute.LicenceDetail -> ChromeSpec(TabBarMode.Visible)
+        is PhoneRoute.Logs -> ChromeSpec(TabBarMode.Visible, largeTitle = "Logs")
         PhoneRoute.Blocked -> ChromeSpec(TabBarMode.Visible, largeTitle = "Blocked numbers")
         PhoneRoute.QuickReplies -> ChromeSpec(TabBarMode.Visible, largeTitle = "Quick replies")
         PhoneRoute.SpeedDialPage -> ChromeSpec(TabBarMode.Visible, largeTitle = "Speed dial")

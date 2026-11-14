@@ -11,6 +11,8 @@ import dev.rosty.core.model.stops.Endpoint
 import dev.rosty.core.model.stops.FixIn
 import dev.rosty.core.model.stops.GtfsBbox
 import dev.rosty.core.model.stops.GtfsImportRequest
+import dev.rosty.core.model.stops.GtfsLinesRequest
+import dev.rosty.core.model.stops.GtfsSummaryRequest
 import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.PickEvent
 import dev.rosty.core.model.stops.PickReplayRequest
@@ -266,6 +268,71 @@ class StopsOpsNativeTest {
                     it.id
                 },
             )
+        }
+
+    @Test
+    fun theSavedFeedListsTheLinesAtAStopAndItsSettingsRow() =
+        runBlocking {
+            val fixtures = System.getProperty("rosty.contract")
+            val zip = File(fixtures, "../tests/data/gtfs-tiny.zip").canonicalPath
+            val dir =
+                java.nio.file.Files
+                    .createTempDirectory("gtfs-lines")
+                    .toFile()
+                    .apply { deleteOnExit() }
+                    .absolutePath
+            assertFalse(ops.gtfsLines(GtfsLinesRequest(stop = 1, dir = dir)).getOrOk().hasFeed)
+            assertNull(ops.gtfsSummary(GtfsSummaryRequest(nowMs = 2_000, dir = dir)).getOrOk().summary)
+
+            // Imported on 1 Jan 1970 at 00:00:01 UTC, with rows the import says it dropped.
+            val report = ops.gtfsImport(GtfsImportRequest(zip, nowMs = 1_000, save = true, dir = dir)).getOrOk().report
+            assertEquals(0L, report.skippedRows)
+
+            // Kadıköy (B) is the second stop of the first trip, Bostancı (C) of the second: one stop earlier each.
+            val kadikoy = ops.gtfsLines(GtfsLinesRequest(stopId = "B", dir = dir)).getOrOk()
+            assertTrue(kadikoy.hasFeed)
+            assertEquals("Kadıköy", kadikoy.stop!!.name)
+            assertEquals(1, kadikoy.stop!!.index)
+            assertEquals(20, kadikoy.maxLines)
+            val line = kadikoy.lines.single()
+            assertEquals(1, line.before)
+            assertEquals("Kadıköy", line.headsign)
+            assertEquals("Line ${line.name} to Kadıköy", line.title)
+            assertEquals("1 stop earlier on this line", line.earlier)
+            val bostanci =
+                ops
+                    .gtfsLines(GtfsLinesRequest(stop = 2, dir = dir))
+                    .getOrOk()
+                    .lines
+                    .single()
+            assertEquals("Bostancı", bostanci.headsign)
+            // The two trips are two patterns of one route: each stop is offered its own.
+            assertTrue(bostanci.pattern != line.pattern)
+            assertEquals(line.name, bostanci.name)
+            // Moda is the first stop of both: nothing before it, so no line is offered.
+            val moda = ops.gtfsLines(GtfsLinesRequest(stopId = "A", dir = dir)).getOrOk()
+            assertEquals("Moda İskele", moda.stop!!.name)
+            assertTrue(moda.lines.isEmpty())
+            // A stop the feed does not have, by id and by index.
+            assertNull(ops.gtfsLines(GtfsLinesRequest(stopId = "Z", dir = dir)).getOrOk().stop)
+            assertNull(ops.gtfsLines(GtfsLinesRequest(stop = 3, dir = dir)).getOrOk().stop)
+            assertTrue(
+                ops
+                    .gtfsLines(GtfsLinesRequest(stop = 2, limit = 0, dir = dir))
+                    .getOrOk()
+                    .lines
+                    .isEmpty(),
+            )
+
+            val day = 86_400_000L
+            val row = ops.gtfsSummary(GtfsSummaryRequest(nowMs = 5 * day, dir = dir)).getOrOk()
+            assertEquals("3 stops, 1 line", row.summary)
+            assertEquals("Imported 1 Jan", row.imported)
+            assertEquals(1_000L, row.importedMs)
+            assertEquals(listOf(3, 1, 2), listOf(row.stops, row.routes, row.patterns))
+            // Another year, a calendar west of UTC (still 31 Dec there), and rows the import dropped.
+            val later = GtfsSummaryRequest(nowMs = 400 * day, tzOffsetS = -5 * 3_600, skippedRows = 1_200, dir = dir)
+            assertEquals("Imported 31 Dec 1969, 1 200 unusable rows skipped", ops.gtfsSummary(later).getOrOk().imported)
         }
 
     private fun <T> Outcome<T>.getOrOk(): T = (this as? Outcome.Ok)?.value ?: error("failed: $this")

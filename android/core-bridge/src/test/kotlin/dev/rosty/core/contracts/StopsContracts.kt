@@ -34,8 +34,12 @@ import dev.rosty.core.model.stops.FracToCoordAnswer
 import dev.rosty.core.model.stops.FracToCoordRequest
 import dev.rosty.core.model.stops.GtfsImportAnswer
 import dev.rosty.core.model.stops.GtfsImportRequest
+import dev.rosty.core.model.stops.GtfsLinesAnswer
+import dev.rosty.core.model.stops.GtfsLinesRequest
 import dev.rosty.core.model.stops.GtfsSearchAnswer
 import dev.rosty.core.model.stops.GtfsSearchRequest
+import dev.rosty.core.model.stops.GtfsSummaryAnswer
+import dev.rosty.core.model.stops.GtfsSummaryRequest
 import dev.rosty.core.model.stops.GtfsViewAnswer
 import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.HistoryEditAnswer
@@ -341,6 +345,14 @@ object StopsContracts : ContractModels {
             op<GtfsSearchRequest, GtfsSearchAnswer>(
                 "stops.gtfs_search",
                 ok = listOf("no_feed"),
+            )
+            op<GtfsLinesRequest, GtfsLinesAnswer>(
+                "stops.gtfs_lines",
+                ok = listOf("by_id", "first_stop", "no_feed", "out_of_range", "unknown_stop"),
+            )
+            op<GtfsSummaryRequest, GtfsSummaryAnswer>(
+                "stops.gtfs_summary",
+                ok = listOf("another_year", "no_feed", "skipped_rows"),
             )
             op<GtfsViewRequest, GtfsViewAnswer>(
                 "stops.gtfs_view",

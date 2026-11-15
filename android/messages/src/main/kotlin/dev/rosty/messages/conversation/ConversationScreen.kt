@@ -42,12 +42,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.rosty.design.chrome.ScreenScaffold
@@ -55,6 +59,7 @@ import dev.rosty.design.chrome.topBarContentPadding
 import dev.rosty.design.controls.CapsuleButton
 import dev.rosty.design.controls.CapsuleStyle
 import dev.rosty.design.controls.GlassIconButton
+import dev.rosty.design.haptics.LocalRostyHaptics
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.media.SizedImage
@@ -72,6 +77,7 @@ import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
+import dev.rosty.messages.schedule.sendLongPress
 import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.messages.ui.MessagesAvatar
 import kotlinx.collections.immutable.ImmutableList
@@ -140,8 +146,17 @@ fun ConversationScreen(
     olderLabel: String,
     tools: ToolsUi = ToolsUi(),
     labels: ToolLabels? = null,
+    /** A long press on Send with the composer's text (E6.10 "Send later"); null: Send has no long press. */
+    onSendLongPress: ((String) -> Unit)? = null,
+    /** What a screen reader calls the long press ("Send later"). */
+    sendLaterLabel: String? = null,
+    /** Drawn between the list and the composer (the Scheduled strip). */
+    aboveComposer: (@Composable () -> Unit)? = null,
 ) {
     val overlays = LocalOverlayOrNull.current
+    val sendLater by rememberUpdatedState(onSendLongPress)
+    val haptics = LocalRostyHaptics.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     // Find, jump to date: scroll the target into view once, then let the tools know.
     LaunchedEffect(tools.scrollTo) {
         val target = tools.scrollTo ?: return@LaunchedEffect
@@ -262,6 +277,7 @@ fun ConversationScreen(
             }
             when (val mode = state.composer) {
                 is ComposerMode.Ready -> {
+                    aboveComposer?.invoke()
                     if (mode.simLabel != null || mode.counter != null) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
@@ -290,7 +306,30 @@ fun ConversationScreen(
                     ComposerField(
                         state = composer,
                         onSend = actions.onSend,
-                        fieldModifier = Modifier.testTag(ConversationTags.Composer),
+                        fieldModifier =
+                            Modifier
+                                .testTag(ConversationTags.Composer)
+                                .then(
+                                    if (onSendLongPress == null) {
+                                        Modifier
+                                    } else {
+                                        Modifier
+                                            .sendLongPress(rtl, armed = { composer.text.isNotBlank() }) {
+                                                haptics.longPress()
+                                                sendLater?.invoke(composer.text.toString())
+                                            }.semantics {
+                                                if (sendLaterLabel != null) {
+                                                    customActions =
+                                                        listOf(
+                                                            CustomAccessibilityAction(sendLaterLabel) {
+                                                                sendLater?.invoke(composer.text.toString())
+                                                                true
+                                                            },
+                                                        )
+                                                }
+                                            }
+                                    },
+                                ),
                         placeholder = mode.placeholder,
                         sendLabel = sendLabel,
                     )

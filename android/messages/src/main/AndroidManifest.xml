@@ -126,6 +126,9 @@
 
         <!-- Shared :platform receivers (they keep the dev.rosty.bridge names, ARCH 7.2). None is exported. -->
         <receiver android:name="dev.rosty.bridge.ReplyReceiver" android:exported="false" />
+        <!-- The actions of the notifications the app builds itself (E6.9): reply, copy code, mark as read, remind me.
+             ReplyReceiver above stays for notifications posted before an update. -->
+        <receiver android:name=".notify.MessageActionReceiver" android:exported="false" />
         <receiver android:name="dev.rosty.bridge.ScheduledSmsReceiver" android:exported="false" />
         <receiver android:name="dev.rosty.bridge.MessageReminderReceiver" android:exported="false" />
         <receiver android:name="dev.rosty.bridge.SmsStatusReceiver" android:exported="false" />

@@ -235,4 +235,53 @@
     <string name="inbox_results_no_sms">SMS aranmadı (erişim yok)</string>
     <string name="tools_message_gone">Bu mesaj artık burada değil</string>
     <string name="conversation_forwarded">İletildi</string>
+    <!-- E6.9 / E6.10 -->
+    <string name="notify_you">Siz</string>
+    <string name="notify_reply">Yanıtla</string>
+    <string name="notify_copy_code">Kodu kopyala</string>
+    <string name="notify_mark_read">Okundu olarak işaretle</string>
+    <string name="notify_remind_hour">1 saat sonra hatırlat</string>
+    <string name="notify_reminder_set">Hatırlatıcı kuruldu</string>
+    <string name="notify_reply_failed">Yanıt gönderilemedi</string>
+    <string name="notify_summary_line">%1$s: %2$s</string>
+    <plurals name="notify_summary_chats">
+        <item quantity="one">%d sohbet</item>
+        <item quantity="other">%d sohbet</item>
+    </plurals>
+    <string name="schedule_title">Sonra gönder</string>
+    <string name="schedule_in_hour">1 saat sonra</string>
+    <string name="schedule_this_evening">Bu akşam</string>
+    <string name="schedule_tomorrow_evening">Yarın akşam</string>
+    <string name="schedule_tomorrow_morning">Yarın sabah</string>
+    <string name="schedule_tomorrow">Yarın</string>
+    <string name="schedule_day">Gün</string>
+    <string name="schedule_time">Saat</string>
+    <string name="schedule_day_earlier">Bir gün önce</string>
+    <string name="schedule_day_later">Bir gün sonra</string>
+    <string name="schedule_time_earlier">15 dakika önce</string>
+    <string name="schedule_time_later">15 dakika sonra</string>
+    <string name="schedule_confirm">%1$s için zamanla</string>
+    <string name="schedule_too_soon">En az bir dakika sonrasını seçin</string>
+    <string name="schedule_late_note">Android birkaç dakika geç gönderebilir. Tam zamanlı alarmlara izin vermek için dokunun.</string>
+    <string name="schedule_type_first">Önce mesajı yazın, sonra Gönder\'e basılı tutun</string>
+    <string name="schedule_one_to_one">Zamanlama yalnızca birebir sohbetlerde çalışır</string>
+    <string name="schedule_done">%1$s için zamanlandı</string>
+    <string name="schedule_failed">Mesaj zamanlanamadı</string>
+    <string name="schedule_cancelled">Zamanlanmış mesaj iptal edildi</string>
+    <string name="schedule_cancel_failed">Mesaj iptal edilemedi</string>
+    <string name="schedule_cancel_for">%1$s için zamanlanan mesajı iptal et</string>
+    <string name="schedule_strip_title">Zamanlandı</string>
+    <string name="schedule_strip_waiting">%1$s · %2$s</string>
+    <string name="schedule_strip_not_sent">Gönderilemedi · %1$s</string>
+    <plurals name="schedule_strip_more">
+        <item quantity="one">%d tane daha göster</item>
+        <item quantity="other">%d tane daha göster</item>
+    </plurals>
+    <string name="schedule_failed_to">%1$s numarasına zamanlanan mesaj gönderilemedi</string>
+    <plurals name="schedule_failed_many">
+        <item quantity="one">Zamanlanmış %d mesaj gönderilemedi</item>
+        <item quantity="other">Zamanlanmış %d mesaj gönderilemedi</item>
+    </plurals>
+    <string name="schedule_wa_failed">%1$s kişisine zamanlanan WhatsApp mesajı gönderilemedi</string>
+    <string name="schedule_reopen">Aç</string>
 </resources>

@@ -44,6 +44,9 @@ import dev.rosty.messages.conversation.rememberToolLabels
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.ResourceInboxWords
 import dev.rosty.messages.inbox.numberOfJid
+import dev.rosty.messages.notify.TrackOpenConversation
+import dev.rosty.messages.schedule.ScheduledStrip
+import dev.rosty.messages.schedule.rememberWaScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
 import kotlinx.collections.immutable.ImmutableList
@@ -220,6 +223,8 @@ fun WaThreadPage(
     val toolsState by host.tools.state.collectAsState()
     val labels = rememberToolLabels()
     val number = remember(route.jid) { numberOfJid(route.jid) }
+    TrackOpenConversation(model.tag)
+    val schedule = rememberWaScheduleHost(container, overlays, route.jid, composer)
     val actions =
         remember(model, res, onBack, host, state.title) {
             ConversationActions(
@@ -262,6 +267,9 @@ fun WaThreadPage(
                 ),
             tools = toolsState,
             labels = labels,
+            onSendLongPress = schedule::ask,
+            sendLaterLabel = schedule.words.title,
+            aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
         )
     }
 }

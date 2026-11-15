@@ -36,6 +36,9 @@ import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.compose.presentForward
 import dev.rosty.messages.inbox.rememberInboxViewModel
+import dev.rosty.messages.notify.TrackOpenConversation
+import dev.rosty.messages.schedule.ScheduledStrip
+import dev.rosty.messages.schedule.rememberSmsScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.messages.viewer.picturesOf
@@ -180,6 +183,8 @@ fun SmsThreadPage(
         overlays.presentForward(context, inbox.state.value.rows, model.tag, bubble.text, onOpen)
     }
     val labels = rememberToolLabels()
+    TrackOpenConversation(model.tag)
+    val schedule = rememberSmsScheduleHost(container, overlays, route, composer)
     val actions =
         remember(model, res, onBack, overlays, host, state.title) {
             ConversationActions(
@@ -244,6 +249,9 @@ fun SmsThreadPage(
                 ),
             tools = toolsState,
             labels = labels,
+            onSendLongPress = schedule::ask,
+            sendLaterLabel = schedule.words.title,
+            aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
         )
     }
 }

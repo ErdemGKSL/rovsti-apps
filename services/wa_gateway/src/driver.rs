@@ -6,8 +6,9 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use rosty_wa_proto::{
     ChatAction, ChatState, DELETED_BY_ME, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
-    IdentitySource, LinkRequest, MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage,
-    SendReaction, SendText, Sent, WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
+    HistorySyncType, IdentitySource, LinkRequest, MarkRead, MediaKind, MessageMeta, Reaction,
+    RevokeMessage, SendReaction, SendText, Sent, WaMessage, WaProfile, WaUser, event::ReceiptKind,
+    is_status_chat,
 };
 
 use crate::hub::Hub;
@@ -70,7 +71,7 @@ pub const MAX_PAIR_EVENTS: usize = 200;
 /// one `resync` when there are more than [`MAX_PAIR_EVENTS`].
 pub fn pair_events(learned: &[LearnedPair]) -> Vec<GatewayEvent> {
     if learned.len() > MAX_PAIR_EVENTS {
-        return vec![GatewayEvent::Resync];
+        return vec![GatewayEvent::Resync { epoch: None }];
     }
     learned
         .iter()
@@ -218,6 +219,8 @@ impl EventSink {
                 if let Err(e) = saved {
                     log::warn!("{}: saving state failed: {e}", self.instance);
                 }
+                self.publish_state(status.clone()).await;
+                return;
             }
             GatewayEvent::Message(message) => {
                 let extras = MessageExtras {
@@ -230,6 +233,57 @@ impl EventSink {
             _ => {}
         }
         self.hub.publish(&self.instance, now_ms(), event);
+    }
+
+    /// Publishes a `state` event with what only the gateway knows added: the
+    /// process epoch, the account epoch and the history sync. The fields the
+    /// driver set stay as it set them.
+    async fn publish_state(&self, mut status: rosty_wa_proto::InstanceStatus) {
+        status.epoch = Some(self.hub.epoch().to_owned());
+        match self.store.instance_status(self.instance.clone()).await {
+            Ok(Some(stored)) => {
+                status.account_epoch = stored.account_epoch;
+                status.history = stored.history;
+            }
+            Ok(None) => {}
+            Err(e) => log::warn!("{}: reading the status failed: {e}", self.instance),
+        }
+        self.hub
+            .publish(&self.instance, now_ms(), GatewayEvent::State(status));
+    }
+
+    /// The account `pn` (a phone-number JID) linked or connected. When the
+    /// instance holds the data of another number, that data is cleared and
+    /// the account epoch raised; `cleanup` then runs (the driver deletes the
+    /// account's cached files there) and only after it the apps hear
+    /// `account_changed`. Nothing happens when either number is unknown or
+    /// they are the same.
+    ///
+    /// `paired` is set for a new pairing and says whether the full history
+    /// was asked for ([`Store::link_account`]).
+    pub async fn account_linked<F>(&self, pn: Option<String>, paired: Option<bool>, cleanup: F)
+    where
+        F: AsyncFnOnce(),
+    {
+        let change = match self
+            .store
+            .link_account(self.instance.clone(), pn, paired)
+            .await
+        {
+            Ok(change) => change,
+            Err(e) => {
+                log::warn!("{}: checking the linked account failed: {e}", self.instance);
+                return;
+            }
+        };
+        let Some(change) = change else {
+            return;
+        };
+        cleanup().await;
+        self.publish(GatewayEvent::AccountChanged {
+            old_pn: Some(change.old_pn),
+            new_pn: change.new_pn,
+        });
     }
 
     /// Records a reaction (an empty emoji removes it) and publishes the
@@ -353,27 +407,50 @@ impl EventSink {
             })
     }
 
-    /// Stores history-sync chats in one transaction and announces them with a
-    /// single `HistorySynced` event (not one event per message).
+    /// Stores the chats of one history-sync chunk, in bounded transactions
+    /// ([`Store::import_history`]). The chunk is announced by
+    /// [`Self::history_synced`] once all of it is stored. `None` when the
+    /// store failed.
     pub async fn import_history(
         &self,
         chats: Vec<crate::store::HistoryChat>,
-        progress: Option<u32>,
-    ) {
+    ) -> Option<crate::store::HistoryImport> {
         match self
             .store
             .import_history(self.instance.clone(), chats)
             .await
         {
-            Ok(chats) => {
-                self.hub.publish(
-                    &self.instance,
-                    now_ms(),
-                    GatewayEvent::HistorySynced { chats, progress },
-                );
+            Ok(report) => Some(report),
+            Err(e) => {
+                log::warn!("{}: saving history failed: {e}", self.instance);
+                None
             }
-            Err(e) => log::warn!("{}: saving history failed: {e}", self.instance),
         }
+    }
+
+    /// One chunk of a history sync is stored: remembers how far the sync got
+    /// (kept across a restart) and announces the chunk with a single
+    /// `HistorySynced` event (not one event per message).
+    pub async fn history_synced(
+        &self,
+        sync_type: HistorySyncType,
+        progress: Option<u32>,
+        report: crate::store::HistoryImport,
+    ) {
+        let noted = self
+            .store
+            .note_history(self.instance.clone(), sync_type, progress, now_ms())
+            .await;
+        if let Err(e) = noted {
+            log::warn!("{}: saving the history state failed: {e}", self.instance);
+        }
+        self.publish(GatewayEvent::HistorySynced {
+            chats: report.chats,
+            progress,
+            sync_type: Some(sync_type),
+            messages: report.messages,
+            oldest_ms: report.oldest_ms,
+        });
     }
 
     /// The stored chats addressed by a LID.
@@ -1324,6 +1401,9 @@ mod fake {
                     own_jid: Some(own_jid(&instance)),
                     push_name: Some("Fake".to_owned()),
                     own_lid: None,
+                    epoch: None,
+                    account_epoch: None,
+                    history: None,
                 }))
                 .await;
                 Ok(())
@@ -1355,6 +1435,9 @@ mod fake {
                         own_jid: None,
                         push_name: None,
                         own_lid: None,
+                        epoch: None,
+                        account_epoch: None,
+                        history: None,
                     }))
                     .await;
                 }
@@ -1827,7 +1910,7 @@ mod tests {
         // A whole table at once: the apps page the mappings instead.
         assert_eq!(
             pair_events(&learned(MAX_PAIR_EVENTS + 1)),
-            [GatewayEvent::Resync]
+            [GatewayEvent::Resync { epoch: None }]
         );
     }
 

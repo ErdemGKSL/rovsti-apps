@@ -13,10 +13,15 @@ use rosty_wa_proto::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+mod account;
 mod identity;
 mod merge;
 mod rich;
 mod status;
+pub use account::{
+    ACCOUNT_TABLES, AccountChange, AccountCheck, HISTORY_STALE_MS, HistoryMark, account_check,
+    advance, history_view, is_history_chunk,
+};
 pub use identity::{IdentityPage, LearnedPair, MAX_IDENTITY_PAGE, NewPair};
 pub use merge::MergeReport;
 pub use rich::{
@@ -103,6 +108,86 @@ pub struct HistoryChat {
     pub messages: Vec<HistoryMessage>,
     /// Archive, pin, mute and unread mark at sync time.
     pub settings: ChatSettings,
+}
+
+/// What storing one chunk of a history sync did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HistoryImport {
+    /// Chats the chunk wrote.
+    pub chats: u32,
+    /// Messages that were not stored before.
+    pub messages: u32,
+    /// Time of the oldest message in the chunk (unix ms).
+    pub oldest_ms: Option<i64>,
+}
+
+impl HistoryImport {
+    /// Adds what another piece of the same chunk did.
+    pub fn absorb(&mut self, other: Self) {
+        self.chats = self.chats.saturating_add(other.chats);
+        self.messages = self.messages.saturating_add(other.messages);
+        self.oldest_ms = match (self.oldest_ms, other.oldest_ms) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+    }
+}
+
+/// Message rows one transaction of a history import writes at most. A full
+/// history is hundreds of thousands of rows: in pieces of this size the
+/// database is free for the apps' requests between two of them.
+pub const HISTORY_ROWS_PER_TX: usize = 2000;
+
+/// Cuts `chats` into pieces of at most `max_rows` messages each, in order. A
+/// chat with more messages than that goes into several pieces, each carrying
+/// the chat's own fields again (writing them twice changes nothing).
+pub fn history_batches(chats: Vec<HistoryChat>, max_rows: usize) -> Vec<Vec<HistoryChat>> {
+    let max_rows = max_rows.max(1);
+    let mut batches = Vec::new();
+    let mut batch: Vec<HistoryChat> = Vec::new();
+    let mut rows = 0;
+    for mut chat in chats {
+        loop {
+            let room = max_rows - rows;
+            if chat.messages.len() <= room {
+                rows += chat.messages.len();
+                batch.push(chat);
+                break;
+            }
+            let rest = chat.messages.split_off(room);
+            let tail = HistoryChat {
+                messages: rest,
+                ..chat.clone_without_messages()
+            };
+            batch.push(chat);
+            batches.push(std::mem::take(&mut batch));
+            rows = 0;
+            chat = tail;
+        }
+        if rows >= max_rows {
+            batches.push(std::mem::take(&mut batch));
+            rows = 0;
+        }
+    }
+    if !batch.is_empty() {
+        batches.push(batch);
+    }
+    batches
+}
+
+impl HistoryChat {
+    /// The chat's own fields, for the next piece of its messages.
+    fn clone_without_messages(&self) -> Self {
+        Self {
+            jid: self.jid.clone(),
+            name: self.name.clone(),
+            is_group: self.is_group,
+            unread: self.unread,
+            last_ms: self.last_ms,
+            messages: Vec::new(),
+            settings: self.settings,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -313,6 +398,21 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE messages ADD COLUMN wire_chat TEXT;
     ALTER TABLE messages ADD COLUMN wire_sender TEXT;
     ALTER TABLE instances ADD COLUMN own_lid TEXT;
+    ",
+    // v8: the account and its history sync. `account_epoch` goes up each
+    // time another WhatsApp account (own number) is linked to the instance;
+    // the rows of the account before are cleared then. `full_history` says
+    // the device was paired asking for the full history. The `history_*`
+    // columns hold the last chunk of chat history that arrived (its kind,
+    // WhatsApp's progress for it, the progress over the whole sync and when),
+    // so the sync state survives a restart; NULL until a chunk arrives.
+    "
+    ALTER TABLE instances ADD COLUMN account_epoch INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE instances ADD COLUMN full_history INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE instances ADD COLUMN history_type TEXT;
+    ALTER TABLE instances ADD COLUMN history_progress INTEGER;
+    ALTER TABLE instances ADD COLUMN history_overall INTEGER;
+    ALTER TABLE instances ADD COLUMN history_ms INTEGER;
     ",
 ];
 
@@ -575,14 +675,19 @@ impl Store {
         .await
     }
 
+    /// The stored status of an instance, with its account epoch and history
+    /// sync. `epoch` is the process's and is added by whoever sends it.
     pub async fn instance_status(
         &self,
         id: InstanceId,
     ) -> Result<Option<InstanceStatus>, StoreError> {
+        let now_ms = crate::now_ms();
         self.run(move |conn| {
             let row = conn
                 .query_row(
-                    "SELECT state, own_jid, push_name, own_lid FROM instances WHERE id = ?1",
+                    "SELECT state, own_jid, push_name, own_lid, account_epoch, full_history,
+                     history_type, history_progress, history_overall, history_ms
+                     FROM instances WHERE id = ?1",
                     [id.as_str()],
                     |r| {
                         Ok((
@@ -590,17 +695,22 @@ impl Store {
                             r.get::<_, Option<String>>(1)?,
                             r.get::<_, Option<String>>(2)?,
                             r.get::<_, Option<String>>(3)?,
+                            account::account_row(r, 4),
                         ))
                     },
                 )
                 .optional()?;
-            row.map(|(state, own_jid, push_name, own_lid)| {
+            row.map(|(state, own_jid, push_name, own_lid, account)| {
+                let account = account?;
                 Ok(InstanceStatus {
                     instance_id: id.to_string(),
                     state: from_tag(&state)?,
                     own_jid,
                     push_name,
                     own_lid,
+                    epoch: None,
+                    account_epoch: Some(account.account_epoch),
+                    history: Some(account::history_status(conn, &id, &account, now_ms)?),
                 })
             })
             .transpose()
@@ -972,10 +1082,40 @@ impl Store {
         .await
     }
 
-    /// Chats and messages from a history sync, written in one transaction.
-    /// Messages already stored are kept as they are. Returns how many chats
-    /// were written.
+    /// Chats and messages from a history sync, written in transactions of at
+    /// most [`HISTORY_ROWS_PER_TX`] messages. Messages already stored are
+    /// kept as they are, so a sync that stopped half way (a crash, a failed
+    /// transaction) is simply imported again.
     pub async fn import_history(
+        &self,
+        instance: InstanceId,
+        chats: Vec<HistoryChat>,
+    ) -> Result<HistoryImport, StoreError> {
+        // Status updates are stored apart, never as a chat.
+        let chats: Vec<HistoryChat> = chats
+            .into_iter()
+            .filter(|c| !is_status_chat(&c.jid))
+            .collect();
+        let mut report = HistoryImport {
+            chats: u32::try_from(chats.len()).unwrap_or(u32::MAX),
+            messages: 0,
+            oldest_ms: chats
+                .iter()
+                .flat_map(|c| &c.messages)
+                .map(|m| m.message.timestamp_ms)
+                .filter(|&ts| ts > 0)
+                .min(),
+        };
+        for batch in history_batches(chats, HISTORY_ROWS_PER_TX) {
+            let fresh = self.import_history_batch(instance.clone(), batch).await?;
+            report.messages = report.messages.saturating_add(fresh);
+        }
+        Ok(report)
+    }
+
+    /// One transaction of [`Self::import_history`]. Returns how many of the
+    /// messages were new.
+    async fn import_history_batch(
         &self,
         instance: InstanceId,
         chats: Vec<HistoryChat>,
@@ -983,8 +1123,7 @@ impl Store {
         self.run(move |conn| {
             let tx = conn.transaction()?;
             let mut written = 0u32;
-            // Status updates are stored apart, never as a chat.
-            for chat in chats.iter().filter(|c| !is_status_chat(&c.jid)) {
+            for chat in &chats {
                 tx.execute(
                     "INSERT INTO chats (instance_id, jid, name, is_group, unread, last_ms)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -1022,8 +1161,8 @@ impl Store {
                             ],
                         )?;
                     }
+                    written += 1;
                 }
-                written += 1;
             }
             tx.commit()?;
             Ok(written)
@@ -1368,6 +1507,206 @@ mod tests {
         assert_eq!(version, MIGRATIONS.len() as u32);
     }
 
+    /// A v7 database (the release before the account epoch) upgrades in
+    /// place: its rows stay, the new columns start at their defaults.
+    #[tokio::test]
+    async fn v7_database_upgrades_to_the_account_epoch_and_keeps_its_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+            let tx = conn.transaction().unwrap();
+            for sql in &MIGRATIONS[..7] {
+                tx.execute_batch(sql).unwrap();
+            }
+            tx.execute_batch("PRAGMA user_version = 7").unwrap();
+            tx.execute(
+                "INSERT INTO instances (id, created_ms, state, own_jid, push_name, own_lid)
+                 VALUES ('old', 1, 'connected', '100000000001@s.whatsapp.net', 'Ada', '9@lid')",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO chats (instance_id, jid, last_ms)
+                 VALUES ('old', '100000000002@s.whatsapp.net', 7)",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO messages (instance_id, chat, id, from_me, ts_ms, body_json)
+                 VALUES ('old', '100000000002@s.whatsapp.net', 'M', 0, 7, '{\"text\":\"hi\"}')",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let status = store
+            .instance_status(InstanceId::new("old"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            status,
+            InstanceStatus {
+                instance_id: "old".into(),
+                state: InstanceState::Connected,
+                own_jid: Some("100000000001@s.whatsapp.net".into()),
+                push_name: Some("Ada".into()),
+                own_lid: Some("9@lid".into()),
+                epoch: None,
+                account_epoch: Some(0),
+                history: Some(rosty_wa_proto::HistoryStatus {
+                    state: rosty_wa_proto::HistoryState::Idle,
+                    progress: None,
+                    chats: 1,
+                    messages: 1,
+                    oldest_ms: Some(7),
+                }),
+            }
+        );
+        // The same account connecting after the upgrade clears nothing.
+        assert_eq!(
+            store
+                .link_account(
+                    InstanceId::new("old"),
+                    Some("100000000001@s.whatsapp.net".into()),
+                    None
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(store.chats(InstanceId::new("old")).await.unwrap().len(), 1);
+        let conn = Connection::open(&path).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 8);
+    }
+
+    fn history_chat(jid: &str, ids: std::ops::Range<i64>) -> HistoryChat {
+        HistoryChat {
+            jid: jid.into(),
+            name: Some("n".into()),
+            is_group: false,
+            unread: 2,
+            last_ms: ids.end,
+            messages: ids
+                .map(|n| HistoryMessage {
+                    message: text(jid, &format!("M{n}"), 1000 + n, false),
+                    extras: MessageExtras::default(),
+                    reactions: vec![],
+                })
+                .collect(),
+            settings: ChatSettings::default(),
+        }
+    }
+
+    #[test]
+    fn history_is_cut_into_bounded_pieces() {
+        let sizes = |batches: &[Vec<HistoryChat>]| {
+            batches
+                .iter()
+                .map(|b| b.iter().map(|c| c.messages.len()).collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        };
+        let chats = vec![
+            history_chat("a@s.whatsapp.net", 0..3),
+            history_chat("b@s.whatsapp.net", 0..9),
+            history_chat("c@s.whatsapp.net", 0..0),
+            history_chat("d@s.whatsapp.net", 0..4),
+        ];
+        let batches = history_batches(chats.clone(), 4);
+        // No piece holds more than four messages; the big chat is cut and
+        // every piece of it still names the chat.
+        assert_eq!(sizes(&batches), [vec![3, 1], vec![4], vec![4], vec![0, 4]]);
+        assert!(
+            batches
+                .iter()
+                .all(|b| { b.iter().map(|c| c.messages.len()).sum::<usize>() <= 4 })
+        );
+        assert_eq!(batches[1][0].jid, "b@s.whatsapp.net");
+        assert_eq!(batches[1][0].name.as_deref(), Some("n"));
+        // Nothing is lost or reordered.
+        let ids = |chats: &[HistoryChat]| {
+            chats
+                .iter()
+                .flat_map(|c| {
+                    c.messages
+                        .iter()
+                        .map(|m| (c.jid.clone(), m.message.id.clone()))
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&batches.concat()), ids(&chats));
+
+        assert_eq!(
+            sizes(&history_batches(chats.clone(), usize::MAX)),
+            [vec![3, 9, 0, 4]]
+        );
+        // A limit of zero still makes progress, one message at a time.
+        assert_eq!(history_batches(chats, 0).len(), 16);
+        assert!(history_batches(Vec::new(), 4).is_empty());
+    }
+
+    /// More rows than one transaction takes: all of them arrive, the report
+    /// counts what was new, and a second import of the same chunk adds none.
+    #[tokio::test]
+    async fn a_large_history_is_imported_in_several_transactions() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        let rows = HISTORY_ROWS_PER_TX as i64 * 2 + 500;
+        let chats = vec![
+            history_chat("a@s.whatsapp.net", 0..rows),
+            history_chat("b@s.whatsapp.net", 0..10),
+        ];
+        let report = store.import_history(id(1), chats.clone()).await.unwrap();
+        assert_eq!(
+            report,
+            HistoryImport {
+                chats: 2,
+                messages: rows as u32 + 10,
+                oldest_ms: Some(1000),
+            }
+        );
+        let history = store
+            .instance_status(id(1))
+            .await
+            .unwrap()
+            .unwrap()
+            .history
+            .unwrap();
+        assert_eq!((history.chats, history.messages), (2, rows as u64 + 10));
+        assert_eq!(history.oldest_ms, Some(1000));
+        let summaries = store.chats(id(1)).await.unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert!(summaries.iter().all(|c| c.unread == 2));
+
+        let again = store.import_history(id(1), chats).await.unwrap();
+        assert_eq!((again.chats, again.messages), (2, 0));
+
+        let mut total = report;
+        total.absorb(again);
+        total.absorb(HistoryImport {
+            chats: 1,
+            messages: 1,
+            oldest_ms: Some(5),
+        });
+        assert_eq!(
+            total,
+            HistoryImport {
+                chats: 5,
+                messages: rows as u32 + 11,
+                oldest_ms: Some(5),
+            }
+        );
+    }
+
     #[tokio::test]
     async fn v5_drops_the_status_chat_an_older_gateway_stored() {
         let dir = tempfile::tempdir().unwrap();
@@ -1442,7 +1781,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(written, 0);
+        assert_eq!(written, HistoryImport::default());
         assert!(store.chats(id(1)).await.unwrap().is_empty());
         assert!(store.chats_rich(id(1)).await.unwrap().is_empty());
     }

@@ -13,6 +13,12 @@ max_instances = 4
 # Believe X-Forwarded-For. Only behind a proxy that overwrites the header.
 trust_proxy = false
 
+# Pair new devices asking WhatsApp for the full chat history, not only the recent
+# messages. The device then registers like WhatsApp's Windows client and the phone
+# lists it as Windows. Decided when a device is paired: an account that is already
+# linked must be unlinked and linked again for a change to take effect.
+full_history = true
+
 # FCM push for incoming calls and messages. Set both keys or neither.
 # fcm_project_id = "my-firebase-project"
 # fcm_service_account = "/etc/wa-gateway/service-account.json"

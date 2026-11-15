@@ -1,8 +1,12 @@
 //! History sync: WhatsApp's `HistorySync` protobuf to store rows.
 
-use rosty_wa_proto::{DeliveryStatus, MUTED_FOREVER, MessageBody, Reaction, is_status_chat};
+use rosty_wa_proto::{
+    DeliveryStatus, HistorySyncType, MUTED_FOREVER, MessageBody, Reaction, is_status_chat,
+};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::history_sync::HistorySyncError;
+use whatsapp_rust::wacore::store::DevicePropsOverride;
+use whatsapp_rust::wacore::store::device::default_history_sync_config;
 use whatsapp_rust::wacore::types::events::LazyHistorySync;
 use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::waproto::whatsapp::web_message_info::Status as WebStatus;
@@ -11,6 +15,53 @@ use super::convert::{self, Converted, Origin};
 use super::lid::{self, LidMap, Pair};
 use super::status;
 use crate::store::{ChatSettings, HistoryChat, HistoryMessage, StoredStatus};
+
+/// How far back a full history is asked for, in days: the number WhatsApp's
+/// own Windows client sends (the `win_hybrid` row of the table on
+/// `wacore::store::device::DEVICE_PROPS`). The phone decides what it sends.
+pub const FULL_SYNC_DAYS: u32 = 365;
+
+/// The device props to pair with. `None` leaves the library's defaults: a
+/// browser-like companion that gets the recent messages only.
+///
+/// With `full_history` the device registers the way the Windows desktop
+/// client does, the only official companion that asks for the full history:
+/// its platform type, `require_full_sync`, the days limit and the on-demand
+/// flags are one decision there and are set together here (see
+/// `DevicePropsOverride::with_require_full_sync`). The phone then lists the
+/// device as Windows.
+///
+/// The props travel in the registration payload only
+/// (`Device::get_registration_payload`), so they take effect when a device
+/// is paired: an account that is already linked keeps the sync it was paired
+/// with until it is linked again.
+pub fn device_props(full_history: bool) -> Option<DevicePropsOverride> {
+    full_history.then(|| {
+        DevicePropsOverride::new()
+            .with_os("Windows")
+            .with_platform_type(wa::device_props::PlatformType::UWP)
+            .with_require_full_sync(true)
+            .with_history_sync_config(wa::device_props::HistorySyncConfig {
+                full_sync_days_limit: Some(FULL_SYNC_DAYS),
+                on_demand_ready: Some(true),
+                complete_on_demand_ready: Some(true),
+                ..default_history_sync_config()
+            })
+    })
+}
+
+/// The kind of a history chunk, from `LazyHistorySync::sync_type` (the
+/// numbers of `Message.HistorySyncType` in WhatsApp's protobuf).
+pub fn sync_kind(raw: i32) -> HistorySyncType {
+    match raw {
+        0 => HistorySyncType::Initial,
+        2 => HistorySyncType::Full,
+        3 => HistorySyncType::Recent,
+        6 => HistorySyncType::OnDemand,
+        // Status updates, push names, non-blocking data and newer kinds.
+        _ => HistorySyncType::Other,
+    }
+}
 
 /// Chats that are not conversations the apps show.
 fn is_skipped(jid: &str) -> bool {
@@ -303,6 +354,8 @@ fn push_name_lids(sync: &wa::HistorySync) -> impl Iterator<Item = Jid> {
 /// What one history sync holds for the store.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Drained {
+    /// The conversations; empty when they were handed out in batches
+    /// ([`drain_in_batches`]).
     pub chats: Vec<HistoryChat>,
     pub push_names: Vec<(String, String)>,
     /// Status updates from the `status@broadcast` conversation.
@@ -389,15 +442,52 @@ pub fn drain(
     own_pn: Option<&str>,
     map: &LidMap,
 ) -> Result<Drained, HistorySyncError> {
+    let mut chats = Vec::new();
+    let mut drained = drain_in_batches(lazy, now_ms, own_pn, map, usize::MAX, |batch| {
+        chats.extend(batch);
+        true
+    })?;
+    drained.chats = chats;
+    Ok(drained)
+}
+
+/// [`drain`] for a large sync: the conversations are handed to `emit` in
+/// batches of about `max_messages` messages (a batch is closed once it holds
+/// that many; one conversation is never split), so neither the inflated blob
+/// nor all of its decoded conversations sit in memory at once. `emit`
+/// returns false to stop the walk. The returned [`Drained`] holds the rest
+/// (push names, status updates) and no chats.
+pub fn drain_in_batches(
+    lazy: &LazyHistorySync,
+    now_ms: i64,
+    own_pn: Option<&str>,
+    map: &LidMap,
+    max_messages: usize,
+    mut emit: impl FnMut(Vec<HistoryChat>) -> bool,
+) -> Result<Drained, HistorySyncError> {
     let mut stream = lazy.stream();
     let mut chats = Vec::new();
+    let mut held = 0usize;
     let mut statuses = Vec::new();
     while let Some(conv) = stream.next_conversation()? {
         if is_status_chat(&conv.id) {
             statuses.extend(status::from_history(&conv, own_pn));
             continue;
         }
-        chats.extend(conversation(&conv, now_ms, map));
+        let Some(chat) = conversation(&conv, now_ms, map) else {
+            continue;
+        };
+        held = held.saturating_add(chat.messages.len());
+        chats.push(chat);
+        if held >= max_messages {
+            held = 0;
+            if !emit(std::mem::take(&mut chats)) {
+                return Ok(Drained::default());
+            }
+        }
+    }
+    if !chats.is_empty() && !emit(std::mem::take(&mut chats)) {
+        return Ok(Drained::default());
     }
     // Push names are optional: a sync whose tail does not decode still
     // delivers its chats.
@@ -419,6 +509,140 @@ pub fn drain(
 mod tests {
     use super::*;
     use crate::store::{InstanceId, Store};
+
+    /// The props reach the payload a device registers with, and only that
+    /// one: a device that is already paired logs in without them.
+    #[test]
+    fn a_full_history_is_asked_for_when_a_device_registers() {
+        use whatsapp_rust::wacore::store::Device;
+        use whatsapp_rust::waproto::whatsapp::device_props::PlatformType;
+
+        assert!(device_props(false).is_none());
+        let props = device_props(true).unwrap();
+        assert_eq!(props.require_full_sync, Some(true));
+        assert_eq!(props.platform_type, Some(PlatformType::UWP));
+        assert_eq!(props.os.as_deref(), Some("Windows"));
+        let config = props.history_sync_config.clone().unwrap();
+        assert_eq!(config.full_sync_days_limit, Some(FULL_SYNC_DAYS));
+        assert_eq!(config.on_demand_ready, Some(true));
+        assert_eq!(config.complete_on_demand_ready, Some(true));
+        // The library's defaults stay next to them.
+        assert_eq!(config.support_group_history, Some(true));
+
+        let mut device = Device::new();
+        device.set_device_props(props);
+        let registering = device.get_client_payload();
+        assert!(
+            registering
+                .device_pairing_data
+                .as_option()
+                .is_some_and(|data| data.device_props.is_some())
+        );
+        device.pn = Some("100000000001@s.whatsapp.net".parse().unwrap());
+        assert!(device.get_client_payload().device_pairing_data.is_unset());
+    }
+
+    #[test]
+    fn sync_kinds_follow_whatsapps_numbers() {
+        use wa::message::HistorySyncType as Wire;
+        let cases = [
+            (Wire::INITIAL_BOOTSTRAP, HistorySyncType::Initial),
+            (Wire::RECENT, HistorySyncType::Recent),
+            (Wire::FULL, HistorySyncType::Full),
+            (Wire::ON_DEMAND, HistorySyncType::OnDemand),
+            (Wire::INITIAL_STATUS_V3, HistorySyncType::Other),
+            (Wire::PUSH_NAME, HistorySyncType::Other),
+            (Wire::NON_BLOCKING_DATA, HistorySyncType::Other),
+        ];
+        for (wire, kind) in cases {
+            assert_eq!(sync_kind(wire as i32), kind);
+        }
+        assert_eq!(sync_kind(99), HistorySyncType::Other);
+        assert_eq!(sync_kind(-1), HistorySyncType::Other);
+    }
+
+    /// `raw` as a zlib stream of stored (uncompressed) deflate blocks, which
+    /// is all a test needs to feed the library's inflater.
+    fn zlib_stored(raw: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x78, 0x01];
+        let mut blocks = raw.chunks(usize::from(u16::MAX)).peekable();
+        if blocks.peek().is_none() {
+            out.extend([1, 0, 0, 0xff, 0xff]);
+        }
+        while let Some(block) = blocks.next() {
+            let len = block.len() as u16;
+            out.push(u8::from(blocks.peek().is_none()));
+            out.extend(len.to_le_bytes());
+            out.extend((!len).to_le_bytes());
+            out.extend(block);
+        }
+        let (mut a, mut b) = (1u32, 0u32);
+        for &byte in raw {
+            a = (a + u32::from(byte)) % 65521;
+            b = (b + a) % 65521;
+        }
+        out.extend(((b << 16) | a).to_be_bytes());
+        out
+    }
+
+    fn lazy(sync: &wa::HistorySync) -> LazyHistorySync {
+        let raw = sync.encode_to_vec();
+        LazyHistorySync::new(zlib_stored(&raw).into(), raw.len(), 3, None, Some(50))
+    }
+
+    /// A big chunk comes out in bounded batches, in order, and holds the
+    /// same rows as the walk in one go.
+    #[test]
+    fn a_large_sync_is_handed_out_in_batches() {
+        let conversations = (0..7)
+            .map(|c| wa::Conversation {
+                id: format!("10000000000{c}@s.whatsapp.net"),
+                messages: (0..3)
+                    .map(|m| web_message(&format!("C{c}M{m}"), false, 1_700_000_000 + m, "x", None))
+                    .collect(),
+                ..Default::default()
+            })
+            .collect();
+        let sync = wa::HistorySync {
+            conversations,
+            pushnames: vec![wa::Pushname {
+                id: Some("100000000001@s.whatsapp.net".into()),
+                pushname: Some("Ada".into()),
+            }],
+            ..Default::default()
+        };
+        let lazy = lazy(&sync);
+        let map = LidMap::default();
+
+        let whole = drain(&lazy, 0, None, &map).unwrap();
+        assert_eq!(whole.chats.len(), 7);
+        assert_eq!(whole.push_names.len(), 1);
+
+        let mut batches = Vec::new();
+        let rest = drain_in_batches(&lazy, 0, None, &map, 5, |batch| {
+            batches.push(batch);
+            true
+        })
+        .unwrap();
+        // Two chats (six messages) close a batch of five; the last one is
+        // what is left.
+        assert_eq!(
+            batches.iter().map(Vec::len).collect::<Vec<_>>(),
+            [2, 2, 2, 1]
+        );
+        assert!(rest.chats.is_empty());
+        assert_eq!(rest.push_names, whole.push_names);
+        assert_eq!(batches.concat(), whole.chats);
+
+        // The receiver went away: the walk stops at once.
+        let mut seen = 0;
+        drain_in_batches(&lazy, 0, None, &map, 5, |_| {
+            seen += 1;
+            false
+        })
+        .unwrap();
+        assert_eq!(seen, 1);
+    }
     use rosty_wa_proto::{ConnectKey, KeyId};
     use whatsapp_rust::waproto::buffa::MessageField;
 
@@ -549,7 +773,11 @@ mod tests {
                 .import_history(id.clone(), chats.clone())
                 .await
                 .unwrap(),
-            2
+            crate::store::HistoryImport {
+                chats: 2,
+                messages: 3,
+                oldest_ms: Some(1_700_000_000_000),
+            }
         );
 
         let summaries = store.chats(id.clone()).await.unwrap();
@@ -575,7 +803,8 @@ mod tests {
         assert_eq!(messages[1].body, MessageBody::Text("selam".into()));
 
         // A second import of the same sync changes nothing.
-        store.import_history(id.clone(), chats).await.unwrap();
+        let again = store.import_history(id.clone(), chats).await.unwrap();
+        assert_eq!((again.chats, again.messages), (2, 0));
         let again = store
             .messages(id, "905321234567@s.whatsapp.net".into(), None, 10)
             .await

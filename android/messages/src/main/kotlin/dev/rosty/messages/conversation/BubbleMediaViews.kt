@@ -148,7 +148,8 @@ private fun PictureMedia(
             !media.local && media.model == null -> Unit
             !media.local -> Mark { MarkIcon(RostyIcons.Download) }
         }
-        if (video && media.detail != null) {
+        // The length of a video, or that a file is no longer available.
+        if (media.detail != null) {
             RostyText(
                 media.detail,
                 modifier =

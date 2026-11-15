@@ -195,6 +195,7 @@ fun WhatsAppPage(
     val viewModel = rememberWaInboxViewModel(container)
     val state by viewModel.state.collectAsState()
     val online by offline.online.collectAsState()
+    val history by offline.history.collectAsState()
     val listState = rememberLazyListState()
     val searchState = rememberTextFieldState()
     val base = rememberInboxStrings()
@@ -284,21 +285,27 @@ fun WhatsAppPage(
                     statusTitle = statusWords.title,
                     offline = !online,
                     onStatus = { presentStatus(overlays, status, statusWords, viewerWords, viewer) },
+                    history = WaHistoryUi.of(history),
                 )
             },
         )
     }
 }
 
-/** The rows above the search field of the WhatsApp tab: the offline line (when the gateway is away) and Status. */
+/**
+ * The rows above the search field of the WhatsApp tab: the history progress (while the history arrives), the offline
+ * line (when the gateway is away) and Status.
+ */
 @Composable
 fun WaBanner(
     status: StatusRowUi,
     statusTitle: String,
     offline: Boolean,
     onStatus: () -> Unit,
+    history: WaHistoryUi? = null,
 ) {
     Column(Modifier.fillMaxWidth()) {
+        history?.let { WaHistoryRow(it) }
         if (offline) {
             RostyText(
                 stringResource(R.string.wa_tab_offline),

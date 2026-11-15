@@ -402,6 +402,14 @@ class ScheduleCenter(
         }
     }
 
+    /**
+     * The WhatsApp account is another one, or the link is gone: the scheduled texts in memory belonged to it (the
+     * gateway dropped its own rows with the account).
+     */
+    fun forgetWhatsApp() {
+        stateFlow.update { if (it.remote.isEmpty()) it else it.copy(remote = emptyList()) }
+    }
+
     private suspend fun onRemote(event: GatewayEvent.Scheduled) {
         val item =
             keyed(ScheduledText(event.id, event.chat, event.text, event.sendAtMs, event.createdMs, event.state))

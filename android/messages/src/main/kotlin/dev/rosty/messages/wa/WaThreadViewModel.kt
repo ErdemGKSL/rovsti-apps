@@ -15,6 +15,7 @@ import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncChat
 import dev.rosty.core.model.wa.WaSyncCursor
 import dev.rosty.core.model.wa.WaSyncKind
+import dev.rosty.core.model.wa.WaSyncMediaState
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncRowState
 import dev.rosty.design.text.UiText
@@ -90,6 +91,9 @@ interface WaWords {
 
     /** "1.2 MB": the size of a file as people read it. */
     fun size(bytes: Long): String
+
+    /** What a bubble says about a file the gateway no longer has. */
+    val gone: String get() = ""
 }
 
 /** What a tap on a bubble's media asks the page to do (the page owns the viewer, the pickers and the intents). */
@@ -368,8 +372,10 @@ class WaThreadViewModel(
     }
 
     /**
-     * Loads what the loaded messages still miss, one after the other: the thumbnails of pictures and videos, then
-     * (connected) the pictures themselves. Each message is tried once per connection.
+     * Loads what the loaded messages still miss: the thumbnails of pictures and videos one after the other, then
+     * (connected) the files the store's auto-download rules allow on this network (photos, voice notes, on Wi-Fi
+     * stickers). A file the cap took, a video and a document wait for a tap. Each message is offered once per
+     * connection.
      */
     private fun prefetch() {
         val media = sources.media ?: return
@@ -382,7 +388,10 @@ class WaThreadViewModel(
             }
         val files =
             if (sources.offline.online.value) {
-                stored.filter { it.kind in PICTURE_KINDS && it.mediaPath == null && it.id !in filesTried }
+                stored.filter {
+                    it.kind in MEDIA_KINDS && it.mediaPath == null && it.id !in filesTried &&
+                        (it.mediaState == null || it.mediaState == WaSyncMediaState.None)
+                }
             } else {
                 emptyList()
             }
@@ -395,11 +404,9 @@ class WaThreadViewModel(
                     if (media.ensureThumb(row)) fresh = true
                 }
                 if (fresh) publish()
-                for (row in files) {
-                    filesTried += row.id
-                    // A finished download tells the store, and the store's change reads the page again.
-                    media.fetch(row)
-                }
+                filesTried += files.map { it.id }
+                // A finished download tells the store, and the store's change reads the page again.
+                media.want(files)
             }
     }
 
@@ -564,6 +571,8 @@ class WaThreadViewModel(
         val label = mediaLabel(row)
         val length = meta?.seconds?.let(::duration)
         val size = row.size?.takeIf { it > 0 }?.let(words::size)
+        // The gateway no longer has the file: the bubble says so where it would say the size or the length.
+        val gone = words.gone.takeIf { local == null && row.mediaState == WaSyncMediaState.Gone && it.isNotEmpty() }
         return when (row.kind) {
             WaSyncKind.Image, WaSyncKind.Sticker -> {
                 BubbleMedia(
@@ -572,6 +581,7 @@ class WaThreadViewModel(
                     isImage = true,
                     aspect = aspectOf(meta),
                     kind = BubbleMediaKind.Picture,
+                    detail = gone,
                     busy = busy,
                     local = local != null,
                 )
@@ -584,7 +594,7 @@ class WaThreadViewModel(
                     isImage = false,
                     aspect = aspectOf(meta),
                     kind = BubbleMediaKind.Video,
-                    detail = listOfNotNull(length, size).joinToString(" · ").ifEmpty { null },
+                    detail = gone ?: listOfNotNull(length, size).joinToString(" · ").ifEmpty { null },
                     busy = busy,
                     local = local != null,
                 )
@@ -596,7 +606,7 @@ class WaThreadViewModel(
                     label = label,
                     isImage = false,
                     kind = BubbleMediaKind.Voice,
-                    detail = length ?: size,
+                    detail = gone ?: length ?: size,
                     busy = busy,
                     local = local != null,
                 )
@@ -611,7 +621,7 @@ class WaThreadViewModel(
                     label = name ?: label,
                     isImage = false,
                     kind = BubbleMediaKind.File,
-                    detail = listOfNotNull(type?.uppercase(), size).joinToString(" · ").ifEmpty { null },
+                    detail = gone ?: listOfNotNull(type?.uppercase(), size).joinToString(" · ").ifEmpty { null },
                     busy = busy,
                     local = local != null,
                 )
@@ -871,7 +881,9 @@ class WaThreadViewModel(
         if (row.state in OUTBOX_STATES) return local
         val file = sources.media?.fetch(row) ?: local
         if (file == null) {
-            effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_media_cant_download)))
+            val gone = sources.media?.gone(row) == true
+            val why = if (gone) R.string.wa_media_gone else R.string.wa_media_cant_download
+            effectChannel.trySend(ConversationEffect.Toast(UiText.Res(why)))
         }
         return file
     }

@@ -5,6 +5,7 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.messages.DirRequest
 import dev.rosty.core.model.messages.DraftsAnswer
+import dev.rosty.core.model.messages.DraftsPutRequest
 import dev.rosty.core.model.messages.DraftsRekeyRequest
 import dev.rosty.core.model.messages.DraftsSaveRequest
 import dev.rosty.core.model.messages.MessagesPrefs
@@ -47,10 +48,22 @@ internal class RekeyPrefsCore(
             val rest = req.drafts - req.from
             Outcome.Ok(DraftsAnswer(if (from == null || req.into in rest) rest else rest + (req.into to from)))
         }
-        // `MessagesPrefs::rekey_thread`: the mute and its end follow the chat.
+        // `Drafts::put`: blank text removes the draft.
+        core.onTyped("messages.drafts_put", DraftsPutRequest.serializer(), DraftsAnswer.serializer()) { req ->
+            Outcome.Ok(
+                DraftsAnswer(
+                    if (req.text.isBlank()) req.drafts - req.thread else req.drafts + (req.thread to req.text),
+                ),
+            )
+        }
+        // `MessagesPrefs::rekey_thread`: the mute and its end follow the chat. `unmute`: both go.
         core.onTyped("messages.prefs_edit", PrefsEditRequest.serializer(), PrefsEditAnswer.serializer()) { req ->
-            check(req.edit == "rekey") { "unexpected edit ${req.edit}" }
             val p = req.prefs
+            if (req.edit == "unmute") {
+                val next = p.copy(muted = p.muted - req.tag, muteUntil = p.muteUntil - req.tag)
+                return@onTyped Outcome.Ok(PrefsEditAnswer(next, next != p, null))
+            }
+            check(req.edit == "rekey") { "unexpected edit ${req.edit}" }
             val muted = if (req.from in p.muted) (p.muted - req.from + req.into).distinct() else p.muted
             val until =
                 p.muteUntil[req.from]?.let { p.muteUntil - req.from + (req.into to it) } ?: p.muteUntil

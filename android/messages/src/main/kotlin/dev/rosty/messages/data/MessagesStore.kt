@@ -123,6 +123,27 @@ class MessagesStore(
         if (draftsDirty || prefsDirty) schedule()
     }
 
+    /**
+     * Forgets what is kept for every thread whose tag starts with [prefix] (`wa:`: the WhatsApp account they belonged
+     * to is gone): the drafts (`drafts_put` with nothing) and the mutes with their ends (the prefs' `unmute`).
+     */
+    suspend fun forgetThreads(prefix: String) {
+        if (load() is Outcome.Err) return
+        for (thread in draftsState.value.keys.filter { it.startsWith(prefix) }) putDraft(thread, "")
+        val before = prefsState.value
+        if (before == null || readOnly) return
+        var prefs: MessagesPrefs = before
+        for (tag in (prefs.muted + prefs.muteUntil.keys).filter { it.startsWith(prefix) }.distinct()) {
+            val edited = (ops.prefsEdit(PrefsEditRequest(prefs, "unmute", tag = tag)) as? Outcome.Ok)?.value
+            if (edited != null) prefs = edited.prefs
+        }
+        if (prefs != before) {
+            prefsState.value = prefs
+            prefsDirty = true
+            schedule()
+        }
+    }
+
     /** Writes what is pending now; false when a write failed. */
     suspend fun flush(): Boolean {
         saver?.cancel()

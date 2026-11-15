@@ -24,6 +24,8 @@ import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.ios.component.IosText
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
+import dev.rosty.messages.wa.UnlinkingWaRepository
+import dev.rosty.messages.wa.rememberWaSettingsBlocks
 import dev.rosty.shell.settings.AboutPage
 import dev.rosty.shell.settings.AppearancePage
 import dev.rosty.shell.settings.CommonSettings
@@ -58,7 +60,8 @@ fun WhatsAppSettingsEntry(container: MessagesContainer) {
                             machine = NativeWaSettingsOps(container.rust),
                             ops = container.waOps,
                             store = WaLinkStore(container.waOps),
-                            repo = container.wa,
+                            // Unlink also deletes the offline store, its media and what is kept per chat.
+                            repo = UnlinkingWaRepository(container.wa) { container.waOffline },
                             qr = container.qr,
                             clipboard = container.clipboard,
                             files = container.files,
@@ -70,7 +73,7 @@ fun WhatsAppSettingsEntry(container: MessagesContainer) {
                 }
             ViewModelProvider(owner, factory)[WhatsAppSettingsViewModel::class.java]
         }
-    WhatsAppSettingsRoute(viewModel)
+    WhatsAppSettingsRoute(viewModel, linked = rememberWaSettingsBlocks(container))
 }
 
 @Composable

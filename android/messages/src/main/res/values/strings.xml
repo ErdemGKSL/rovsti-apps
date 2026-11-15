@@ -297,6 +297,33 @@
     <string name="wa_media_saved">Saved</string>
     <string name="wa_media_not_saved">Couldn\'t save the file</string>
     <string name="wa_media_cant_share">Couldn\'t share the file</string>
+    <string name="wa_media_gone">No longer available</string>
+    <string name="wa_history_title">Loading your WhatsApp history…</string>
+    <string name="wa_history_title_percent">Loading your WhatsApp history · %1$d%%</string>
+    <string name="wa_history_counts">%1$s · %2$s so far</string>
+    <plurals name="wa_history_chats">
+        <item quantity="one">%1$d chat</item>
+        <item quantity="other">%1$d chats</item>
+    </plurals>
+    <plurals name="wa_history_messages">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <string name="wa_history_usable">You can keep using the app while it loads.</string>
+    <string name="wa_history_relink_note">The full history loads only for a link made after this update. To load it, unlink and link again.</string>
+    <string name="wa_history_device_note">Your phone lists this device as Windows under Linked devices.</string>
+    <string name="wa_storage_title">Storage and data</string>
+    <string name="wa_storage_used">Media on this phone</string>
+    <string name="wa_storage_cap">Keep at most</string>
+    <string name="wa_storage_no_limit">No limit</string>
+    <string name="wa_storage_cap_choose">Keep at most: %1$s. Change</string>
+    <string name="wa_storage_cap_note">Over the limit, the files opened longest ago are removed. Starred and saved files stay. A removed file keeps its preview and downloads again when you tap it.</string>
+    <string name="wa_auto_title">Automatic download</string>
+    <string name="wa_auto_wifi">Wi-Fi</string>
+    <string name="wa_auto_wifi_kinds">Photos, voice notes, stickers</string>
+    <string name="wa_auto_mobile">Mobile data</string>
+    <string name="wa_auto_mobile_kinds">Photos, voice notes</string>
+    <string name="wa_auto_note">Videos and documents download when you tap them. Nothing downloads by itself while roaming, with Data Saver on, or when the phone is low on space.</string>
     <string name="wa_voice_cant_play">Couldn\'t play the voice message</string>
     <string name="wa_voice_play">Play</string>
     <string name="wa_voice_pause">Pause</string>

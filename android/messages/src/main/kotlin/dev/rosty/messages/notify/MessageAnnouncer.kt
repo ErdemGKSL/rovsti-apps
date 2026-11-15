@@ -69,6 +69,12 @@ class Digests(
         byTag.remove(tag)
     }
 
+    /** Forgets every conversation whose tag starts with [prefix]. */
+    @Synchronized
+    fun clearAll(prefix: String) {
+        byTag.keys.removeAll { it.startsWith(prefix) }
+    }
+
     companion object {
         /** `rosty_core::notify::MAX_LINES`. */
         const val MAX_LINES = 6
@@ -137,6 +143,9 @@ class MessageAnnouncer(
         from: String,
         into: String,
     ) = digests.rekey(from, into)
+
+    /** The WhatsApp account is another one, or the link is gone: the lines collected for its chats are dropped. */
+    fun forgetWhatsApp() = digests.clearAll(WaRekeys.tagOf(""))
 
     /** One live WhatsApp message: notify unless it is mine, old, muted, or its chat is on screen. */
     internal suspend fun onWhatsApp(message: GatewayEvent.Message): Boolean {

@@ -95,7 +95,11 @@ class WaMediaShotTest : ShotTest() {
     @After fun stop() = scope.cancel()
 
     private fun kit(): Pair<WaTestKit, MediaStoreOps> =
-        WaTestKit.withMedia(CoroutineScope(scope.coroutineContext + Dispatchers.Unconfined), graceMs = 0)
+        WaTestKit.withMedia(
+            CoroutineScope(scope.coroutineContext + Dispatchers.Unconfined),
+            graceMs = 0,
+            mediaDir = File(folder.root, "wa-media"),
+        )
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
@@ -127,7 +131,7 @@ class WaMediaShotTest : ShotTest() {
                         WaMedia(
                             kit.offline,
                             kit.remote,
-                            File(folder.root, "wa-media"),
+                            checkNotNull(kit.downloads),
                             { kit.now },
                             io = Dispatchers.Unconfined,
                         ),

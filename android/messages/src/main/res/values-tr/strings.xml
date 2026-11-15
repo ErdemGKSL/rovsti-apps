@@ -281,6 +281,33 @@
     <string name="wa_media_saved">Kaydedildi</string>
     <string name="wa_media_not_saved">Dosya kaydedilemedi</string>
     <string name="wa_media_cant_share">Dosya paylaşılamadı</string>
+    <string name="wa_media_gone">Artık kullanılamıyor</string>
+    <string name="wa_history_title">WhatsApp geçmişiniz yükleniyor…</string>
+    <string name="wa_history_title_percent">WhatsApp geçmişiniz yükleniyor · %%%1$d</string>
+    <string name="wa_history_counts">Şimdiye kadar %1$s · %2$s</string>
+    <plurals name="wa_history_chats">
+        <item quantity="one">%1$d sohbet</item>
+        <item quantity="other">%1$d sohbet</item>
+    </plurals>
+    <plurals name="wa_history_messages">
+        <item quantity="one">%1$d mesaj</item>
+        <item quantity="other">%1$d mesaj</item>
+    </plurals>
+    <string name="wa_history_usable">Yüklenirken uygulamayı kullanmaya devam edebilirsiniz.</string>
+    <string name="wa_history_relink_note">Tüm geçmiş yalnızca bu güncellemeden sonra yapılan bağlantılarda yüklenir. Yüklemek için bağlantıyı kaldırıp yeniden bağlayın.</string>
+    <string name="wa_history_device_note">Telefonunuz bu cihazı Bağlı cihazlar altında Windows olarak listeler.</string>
+    <string name="wa_storage_title">Depolama ve veri</string>
+    <string name="wa_storage_used">Bu telefondaki medya</string>
+    <string name="wa_storage_cap">En fazla sakla</string>
+    <string name="wa_storage_no_limit">Sınır yok</string>
+    <string name="wa_storage_cap_choose">En fazla sakla: %1$s. Değiştir</string>
+    <string name="wa_storage_cap_note">Sınır aşılınca en uzun süredir açılmayan dosyalar kaldırılır. Yıldızlı ve kaydedilmiş dosyalar kalır. Kaldırılan dosyanın önizlemesi kalır; dokununca yeniden indirilir.</string>
+    <string name="wa_auto_title">Otomatik indirme</string>
+    <string name="wa_auto_wifi">Wi-Fi</string>
+    <string name="wa_auto_wifi_kinds">Fotoğraflar, sesli mesajlar, çıkartmalar</string>
+    <string name="wa_auto_mobile">Mobil veri</string>
+    <string name="wa_auto_mobile_kinds">Fotoğraflar, sesli mesajlar</string>
+    <string name="wa_auto_note">Videolar ve belgeler dokununca indirilir. Dolaşımdayken, Veri Tasarrufu açıkken veya telefonda yer azken hiçbir şey kendiliğinden indirilmez.</string>
     <string name="wa_voice_cant_play">Sesli mesaj oynatılamadı</string>
     <string name="wa_voice_play">Oynat</string>
     <string name="wa_voice_pause">Duraklat</string>

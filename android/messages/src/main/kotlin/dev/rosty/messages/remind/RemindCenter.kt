@@ -143,6 +143,13 @@ class RemindCenter(
         }
     }
 
+    /** Takes back every reminder set on a message of a conversation whose tag starts with [prefix]. */
+    suspend fun forget(prefix: String) {
+        withContext(io) {
+            for (item in repo.armed().first().filter { it.tag.startsWith(prefix) }) repo.disarm(item.id)
+        }
+    }
+
     /** Takes the reminder [id] back. */
     suspend fun cancel(id: Long): Boolean = withContext(io) { repo.disarm(id) }
 

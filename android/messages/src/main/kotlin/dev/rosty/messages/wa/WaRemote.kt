@@ -97,6 +97,10 @@ interface WaRemote {
 
     suspend fun thumbnail(messageId: String): Outcome<BytesAnswer>
 
+    /**
+     * The full file of a message. [RustError.NotFound] means the gateway no longer has it (a download settles as
+     * gone); every other error may work later.
+     */
     suspend fun media(messageId: String): Outcome<BytesAnswer>
 
     suspend fun statuses(): Outcome<StatusList>
@@ -248,7 +252,11 @@ class GatewayWaRemote(
 
     override suspend fun thumbnail(messageId: String): Outcome<BytesAnswer> = call { it.thumbnail(messageId) }
 
-    override suspend fun media(messageId: String): Outcome<BytesAnswer> = call { it.media(messageId) }
+    override suspend fun media(messageId: String): Outcome<BytesAnswer> {
+        // Not linked is not "the file is gone": the download stays queued.
+        val gateway = repo.gateway() ?: return Outcome.Err(RustError.Network("WhatsApp is not linked"))
+        return gateway.media(messageId)
+    }
 
     override suspend fun statuses(): Outcome<StatusList> = call { it.statuses() }
 

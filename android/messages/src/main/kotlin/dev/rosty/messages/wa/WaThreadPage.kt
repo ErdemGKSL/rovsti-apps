@@ -97,6 +97,8 @@ class ResourceWaWords(
     override fun unread(count: Int) = res.getQuantityString(R.plurals.conversation_unread, count, count)
 
     override fun size(bytes: Long) = sizeOf(bytes)
+
+    override val gone = res.getString(R.string.wa_media_gone)
 }
 
 /** "512 B", "340 KB", "1.2 MB": a file size without a context (1024-based, one decimal from a megabyte up). */

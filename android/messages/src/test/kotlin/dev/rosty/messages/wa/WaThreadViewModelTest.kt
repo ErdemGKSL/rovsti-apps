@@ -49,6 +49,7 @@ import java.util.Locale
 /** The words of a WhatsApp thread in English, for JVM tests (the same text as `values/strings.xml`). */
 object EnglishWaWords : WaWords {
     override val placeholder = "Message"
+    override val gone = "No longer available"
     override val sending = "Sending…"
     override val waiting = "Waiting for connection"
     override val notSent = "Not sent · Tap to retry"

@@ -16,6 +16,7 @@ import dev.rosty.shell.settings.dev.DevTags
 import dev.rosty.stops.home.HomeMapTag
 import dev.rosty.stops.home.HomeSheetTags
 import dev.rosty.stops.home.HomeTags
+import dev.rosty.stops.saved.SavedTags
 import dev.rosty.stops.settings.SettingsTags
 import dev.rosty.testing.ShotTest
 import org.junit.Assert.assertEquals
@@ -104,7 +105,7 @@ class StopsAppTest : ShotTest() {
         compose.onAllNodesWithTag("tab-saved", useUnmergedTree = true).onFirst().performClick()
         advance(2000)
         assertEquals(StopsRoute.Home, fixture.navigator.current)
-        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertExists()
     }
 
     @Test fun tripOnAPushedPageGoesBackToTheMap() {
@@ -143,11 +144,11 @@ class StopsAppTest : ShotTest() {
         advance(1500)
         compose.onNodeWithTag(HomeSheetTags.SavedRow).performClick()
         advance(1200)
-        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertExists()
         // Back closes the modal sheet; the map sheet stays.
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
         advance(1500)
-        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag(HomeSheetTags.Title).assertIsDisplayed()
         compose.onNodeWithTag(HomeSheetTags.HistoryRow).performClick()
         advance(1200)
@@ -165,7 +166,7 @@ class StopsAppTest : ShotTest() {
         advance(800)
         compose.onAllNodesWithTag("tab-saved", useUnmergedTree = true).onFirst().performClick()
         advance(1200)
-        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertExists()
     }
 
     @Test fun aSharedLinkOpensThePickSheetOnce() {

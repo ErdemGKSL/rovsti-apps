@@ -5,6 +5,7 @@ import android.content.Context
 import dev.rosty.core.FakeRustCore
 import dev.rosty.core.Outcome
 import dev.rosty.core.RustCore
+import dev.rosty.core.model.contacts.PinShortcut
 import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.phone.DirRequest
 import dev.rosty.core.model.stops.Coord
@@ -16,12 +17,14 @@ import dev.rosty.core.model.stops.PrefsLoadAnswer
 import dev.rosty.core.model.stops.PrefsSaveRequest
 import dev.rosty.core.model.stops.SavedStop
 import dev.rosty.core.model.stops.SavedStops
+import dev.rosty.core.model.stops.ShortcutAnswer
 import dev.rosty.core.model.stops.StopsPrefs
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripLoadAnswer
 import dev.rosty.core.model.stops.StoreWriteRequest
 import dev.rosty.core.model.stops.TripRecord
+import dev.rosty.platform.contacts.ShortcutsRepository
 import dev.rosty.platform.location.FakeLocationRepository
 import dev.rosty.platform.location.FakeTripRepository
 import dev.rosty.platform.location.Fix
@@ -97,8 +100,13 @@ class FakeStopsCore(
     var saved: SavedStops? = SampleStops.saved,
     var history: History? = SampleStops.history,
     var transitImportedMs: Long? = 1_790_000_000_000L,
+    /** The real core behind the scripted ops ([HostCore.real]); null keeps the fake alone. */
+    private val real: RustCore? = null,
 ) {
     val core = FakeRustCore()
+
+    /** What the container calls: the fake, or the fake in front of the real core. */
+    val rust: RustCore get() = real?.let { HybridCore(core, it) } ?: core
     val savedPrefs = mutableListOf<StopsPrefs>()
     val writes = mutableListOf<StoreWriteRequest>()
 
@@ -132,6 +140,7 @@ class FakeStopsCore(
         }
         core.onTyped("stops.store_write", StoreWriteRequest.serializer(), Empty.serializer()) {
             writes += it
+            if (it.file == "saved") saved = Json.decodeFromJsonElement(SavedStops.serializer(), it.value)
             Outcome.Ok(Empty)
         }
         core.onTyped("stops.gtfs_search", GtfsSearchRequest.serializer(), GtfsSearchAnswer.serializer()) {
@@ -160,7 +169,11 @@ open class TestStopsContainer(
     val fakeLocation = FakeLocationRepository(last = SampleStops.here)
     val fakeTrips = FakeTripRepository()
 
-    override fun createRust(): RustCore = fake.core
+    override fun createRust(): RustCore = fake.rust
+
+    val fakeShortcuts = FakeShortcuts()
+
+    override fun createShortcuts(): ShortcutsRepository = fakeShortcuts
 
     override fun createWa(): WaRepository = FakeWaRepository()
 
@@ -174,6 +187,17 @@ open class TestStopsContainer(
     val tileSource = FakeTileSource.city()
 
     override fun createTileSource(): TileSource = tileSource
+}
+
+/** The launcher: says yes to every stop shortcut and keeps them. */
+class FakeShortcuts : ShortcutsRepository {
+    val pinned = mutableListOf<ShortcutAnswer>()
+
+    override fun canPin(): Boolean = true
+
+    override fun pinContact(spec: PinShortcut): Boolean = false
+
+    override fun pinStop(spec: ShortcutAnswer): Boolean = pinned.add(spec)
 }
 
 /** An `Application` whose container is a [TestStopsContainer] (the activity tests). */

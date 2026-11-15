@@ -10,13 +10,17 @@ import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.StopsOps
 import dev.rosty.core.ops.TileHandle
 import dev.rosty.core.ops.TilesOps
+import dev.rosty.platform.contacts.AndroidShortcutsRepository
+import dev.rosty.platform.contacts.ShortcutsRepository
 import dev.rosty.platform.location.AndroidLocationRepository
 import dev.rosty.platform.location.AndroidTripRepository
 import dev.rosty.platform.location.LocationRepository
+import dev.rosty.platform.location.TripClock
 import dev.rosty.platform.location.TripRepository
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.shell.ShellContainer
 import dev.rosty.shell.settings.CommonSettings
+import dev.rosty.stops.data.SavedStore
 import dev.rosty.stops.data.StopsCommonSettings
 import dev.rosty.stops.data.StopsStore
 import dev.rosty.stops.data.StopsTiles
@@ -80,6 +84,12 @@ open class StopsContainer(
     /** What the first screen reads (prefs, trip, saved stops, history, GTFS). */
     val homeData: HomeData by lazy { createHomeData() }
 
+    /** The saved stops (E7.7): one `saved.json` for the list, the map markers and "Save as stop". */
+    val saved: SavedStore by lazy { SavedStore(ops, nowMs = TripClock::nowMillis) }
+
+    /** S18: stop shortcuts on the Home screen. */
+    val shortcuts: ShortcutsRepository by lazy { createShortcuts() }
+
     /** A link an intent brought (a shared place, a stop shortcut); the home consumes and clears it. */
     val pendingLink: MutableStateFlow<StopsLink?> = MutableStateFlow(null)
 
@@ -100,6 +110,8 @@ open class StopsContainer(
     protected open fun createTrips(): TripRepository = AndroidTripRepository(context)
 
     protected open fun createHomeData(): HomeData = CoreHomeData(ops, store)
+
+    protected open fun createShortcuts(): ShortcutsRepository = AndroidShortcutsRepository(context)
 
     private companion object {
         /** `rosty_stops::tiles::cache_root`: the GPUI app's cache, one folder per server under it. */

@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import dev.rosty.core.model.stops.Destination
 import dev.rosty.design.motion.MotionGate
 import dev.rosty.platform.location.Fix
 import dev.rosty.platform.location.LocationRepository
@@ -145,14 +146,41 @@ fun PlaceFirstView(
         }.first { it }
         map.placed = true
         when (val view = firstView(state, location.lastKnown())) {
-            is FirstView.Fit -> map.camera.fitPoints(view.latLon, marginPx = FIT_MARGIN_DP * map.camera.density)
-            is FirstView.Centre -> map.camera.centreOn(view.lat, view.lon)
-            FirstView.Default -> Unit
+            is FirstView.Fit -> {
+                map.camera.fitPoints(view.latLon, marginPx = FIT_MARGIN_DP * map.camera.density)
+            }
+
+            is FirstView.Centre -> {
+                // GPUI `Viewport::new(at, STREET_MPP)`: the position opens at street scale, then clears the chrome.
+                map.camera.setView(view.lat, view.lon, STREET_METRES_PER_DP)
+                map.camera.centreOn(view.lat, view.lon)
+            }
+
+            FirstView.Default -> {
+                Unit
+            }
         }
     }
 }
 
 private const val FIT_MARGIN_DP = 48f
+
+/** The scale of a view on one place (GPUI `map::STREET_MPP`). */
+private const val STREET_METRES_PER_DP = 1.5
+
+/** Both ends of a saved stop (or a recent trip) go on the map and the view fits them (GPUI `choose_pair`). */
+fun HomeMap.showPair(
+    a: Destination,
+    b: Destination,
+) {
+    pick.setPair(a, b)
+    if (camera.widthPx > 0 && camera.heightPx > 0) {
+        camera.fitPoints(
+            doubleArrayOf(a.coord.lat, a.coord.lon, b.coord.lat, b.coord.lon),
+            marginPx = FIT_MARGIN_DP * camera.density,
+        )
+    }
+}
 
 /** Where the first view goes. */
 sealed interface FirstView {

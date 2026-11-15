@@ -817,7 +817,7 @@ class DemoSettingsMachine : WaSettingsOps {
         }
 
     private companion object {
-        const val DEFAULT_URL = "https://rovsti.erdemdev.tr"
+        const val DEFAULT_URL = "https://rosty.erdemdev.tr"
         const val REJECTED = "The gateway did not accept this connect key"
         const val BANNED = "WhatsApp banned this number. Nothing this app can do."
     }

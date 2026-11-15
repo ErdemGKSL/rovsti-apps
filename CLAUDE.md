@@ -12,6 +12,8 @@
   component anatomy: `docs/design/layout.md`.
   Product choices are set in `crates/rosty_ui/src/lib.rs`
   (`ANIMATED_RESIZE = false`, `FOLLOW_SYSTEM_THEME = true`).
+- Screenshot review: when the code follows Convx, blur, smear and glass-tint nuances are expected, not bugs. Do
+  not open fix rounds for them. Review layout instead: fit or overflow, clipping, unwanted wraps, alignment, safe area.
 - Rust style follows `.claude/skills/rust-best-practices`.
 - Keep domain logic in platform-free crates (`rosty_core`, `rosty_geo`) with unit
   tests. GPUI and JNI code stay thin.

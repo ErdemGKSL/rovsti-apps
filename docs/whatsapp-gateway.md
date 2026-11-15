@@ -52,13 +52,9 @@ Ready-made files live in [`services/wa_gateway/deploy/`](../services/wa_gateway/
 it needs, not the apps), builds it there with cargo (it installs rustup for that user the
 first time), installs `/usr/local/bin/wa_gateway` and the unit from this folder, writes
 `/etc/wa-gateway/config.toml`, and waits for `GET /healthz`. The gateway listens on
-`127.0.0.1:7218`; a Cloudflare tunnel public hostname (`https://rovsti.erdemdev.tr`) points
-at `http://localhost:7218`.
-
-> **TODO (rename to Rosty).** The public hostname still carries the project's old name:
-> no DNS record or tunnel hostname exists yet for a Rosty name. Once one is set up on the
-> server, add it as a second tunnel hostname, switch the apps' default gateway URL, and keep
-> `rovsti.erdemdev.tr` routed until every linked app has moved over.
+`127.0.0.1:7218`; a Cloudflare tunnel public hostname (`https://rosty.erdemdev.tr`, the apps'
+default) points at `http://localhost:7218`. The old name `rovsti.erdemdev.tr` routes to the same
+gateway and stays until every linked app has moved over.
 
 ```
 scripts/deploy-wa-gateway.sh            # build and (re)install

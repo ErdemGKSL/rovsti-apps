@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use super::{Error, Result};
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// v1: the instance row, chats, the per-chat cursor and messages.
 const V1: &str = "
@@ -108,7 +108,12 @@ CREATE TABLE outbox (
 CREATE INDEX outbox_by_chat ON outbox (chat, seq);
 ";
 
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2];
+/// v3: the starred messages of every chat, newest first, without reading the whole table.
+const V3: &str = "
+CREATE INDEX messages_starred ON messages (ts DESC, chat DESC, id DESC) WHERE starred = 1;
+";
+
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3];
 
 /// The version of the file.
 pub(super) fn version(conn: &Connection) -> Result<u32> {

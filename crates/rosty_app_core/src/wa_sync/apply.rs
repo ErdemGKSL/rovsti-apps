@@ -294,9 +294,16 @@ pub(super) fn upsert(
 ) -> Result<Upsert> {
     let existing = load(conn, chat, id)?;
     let was_new = existing.is_none();
-    let Some(merged) = merge(existing.clone(), incoming) else {
+    let Some(mut merged) = merge(existing.clone(), incoming) else {
         return Ok(Upsert::Unknown);
     };
+    // A star still in the outbox holds against what the gateway says until it went out.
+    if let Some(was) = &existing
+        && merged.starred != was.starred
+        && let Some(wish) = outbox::pending_star(conn, chat, id)?
+    {
+        merged.starred = wish;
+    }
     if existing.as_ref() == Some(&merged) {
         return Ok(Upsert::Same);
     }

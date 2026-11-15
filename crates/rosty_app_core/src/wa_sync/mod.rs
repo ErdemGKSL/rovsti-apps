@@ -32,8 +32,8 @@ mod tests;
 
 pub use media::{Evicted, Eviction, MediaInfo};
 pub use model::{
-    AppliedEvents, ChatRow, Kind, MessageRow, PendingOp, RowState, StoredChats, StoredPage,
-    ThreadCursor, ThreadPage,
+    AppliedEvents, ChatRow, Kind, MessageRow, PendingOp, RowState, StarredCursor, StarredPage,
+    StoredChats, StoredPage, ThreadCursor, ThreadPage,
 };
 pub use outbox::{
     Action, BACKOFF_BASE_MS, BACKOFF_MAX_MS, Due, ErrorKind, OutboxItem, OutboxState, Outcome,

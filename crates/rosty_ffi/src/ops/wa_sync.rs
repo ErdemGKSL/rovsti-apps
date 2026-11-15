@@ -13,7 +13,8 @@ use crate::state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
     self, Action, AppliedEvents, ChatRow, Due, Eviction, FetchPage, MessageRow, Opened, OutboxItem,
-    Outcome, Settled, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor, ThreadPage,
+    Outcome, Settled, StarredCursor, StarredPage, Store, StoredChats, StoredPage, SyncPlan,
+    ThreadCursor, ThreadPage,
 };
 use rosty_wa_proto::{EventEnvelope, RichChat, RichMessage};
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,13 @@ pub(super) const OPS: &[OpSpec] = &[
         MessageAns,
         message,
         message_cases
+    ),
+    op!(
+        "wa_sync.starred",
+        StarredReq,
+        StarredPage,
+        starred,
+        starred_cases
     ),
     op!(
         "wa_sync.outbox_enqueue",
@@ -648,6 +656,49 @@ fn message_cases() -> Vec<Case> {
     ]
 }
 
+// ---- wa_sync.starred
+
+#[derive(Deserialize)]
+struct StarredReq {
+    handle: i64,
+    limit: u32,
+    /// The `next` of the page before; left out for the newest page.
+    #[serde(default)]
+    before: Option<StarredCursor>,
+}
+
+fn starred(req: StarredReq) -> Result<StarredPage, FfiError> {
+    with(req.handle, |store| {
+        store.starred(req.limit, req.before.as_ref())
+    })
+}
+
+fn star_req(client_id: &str, chat: &str, id: &str, starred: bool) -> Value {
+    json!({"handle": H, "now_ms": NOW, "client_id": client_id, "chat": chat,
+        "action": {"kind": "star", "message_id": id, "starred": starred}})
+}
+
+fn starred_cases() -> Vec<Case> {
+    // Stars of two chats that still wait in the outbox: they are listed at once, the newest message first.
+    let on_starred = |case: Case| {
+        on_sample(case)
+            .after("wa_sync.outbox_enqueue", star_req("s1", ALI, "A1", true))
+            .after("wa_sync.outbox_enqueue", star_req("s2", GROUP, "G1", true))
+    };
+    vec![
+        on_starred(Case::new(json!({"handle": H, "limit": 1}))),
+        on_starred(Case::named(
+            "older",
+            json!({"handle": H, "limit": 1,
+                "before": {"timestamp_ms": NOW - 1_000, "chat": GROUP, "id": "G1"}}),
+        )),
+        // The unstar took the star back before it went out.
+        on_starred(Case::named("unstarred", json!({"handle": H, "limit": 50})))
+            .after("wa_sync.outbox_enqueue", star_req("s3", ALI, "A1", false)),
+        on_sample(Case::named("empty", json!({"handle": H, "limit": 50}))),
+    ]
+}
+
 // ---- wa_sync.outbox_enqueue
 
 #[derive(Deserialize)]
@@ -693,6 +744,10 @@ fn outbox_enqueue_cases() -> Vec<Case> {
         queue(
             "mark_read",
             json!({"kind": "mark_read", "sender": ALI, "ids": ["A1", "A3"]}),
+        ),
+        queue(
+            "star",
+            json!({"kind": "star", "message_id": "A1", "starred": true}),
         ),
         on_sample(Case::named(
             "no_chat",
@@ -775,6 +830,17 @@ fn outbox_settle_cases() -> Vec<Case> {
         )),
         // Its echo confirmed it meanwhile (or it was cancelled): done, nothing to send again.
         on_sample(Case::named("gone", settle(json!({"kind": "sent"})))),
+        // A refused star is undone and dropped: no failed row stays behind.
+        on_sample(Case::named(
+            "star_rejected",
+            json!({"handle": H, "now_ms": NOW + 500, "client_id": "s1",
+                "outcome": {"kind": "error", "error": "rejected", "message": "no such message"}}),
+        ))
+        .after("wa_sync.outbox_enqueue", star_req("s1", ALI, "A1", true))
+        .after(
+            "wa_sync.outbox_due",
+            json!({"handle": H, "now_ms": NOW + 10}),
+        ),
     ]
 }
 

@@ -245,6 +245,54 @@ mod tests {
     }
 
     #[test]
+    fn the_notification_follows_the_phone_language_and_the_trip_keeps_it() {
+        let dir = tmp("hl-lang");
+        store::save_trip(&dir, &trip(1)).unwrap();
+        let handle =
+            |json: String| -> FixOut { serde_json::from_str(&trip_fix("", &json)).unwrap() };
+        let request = |metres_north: f64, at_ms: i64, locale: &str| {
+            let f = fix(metres_north, at_ms);
+            format!(
+                r#"{{"dir": {:?}, "lat": {}, "lon": {}, "accuracy_m": 10.0, "speed_mps": 10.0, "at_ms": {at_ms}{locale}}}"#,
+                dir.to_string_lossy(),
+                f.lat,
+                f.lon
+            )
+        };
+
+        // A trip stored before languages existed, asked without one: English.
+        let english = handle(request(5_000.0, 1, ""));
+        assert!(
+            english.text.starts_with("Outside the circle, "),
+            "{}",
+            english.text
+        );
+
+        // The service names the phone's locale: Turkish from now on, and the trip remembers it.
+        let turkish = handle(request(5_000.0, 2, r#", "locale": "tr-TR""#));
+        assert!(
+            turkish.text.starts_with("Çemberin dışında, "),
+            "{}",
+            turkish.text
+        );
+        assert_eq!(store::load_trip(&dir).unwrap().lang, Lang::Tr);
+        let kept = handle(request(300.0, 3, ""));
+        assert!(kept.text.starts_with("Sol taraf, "), "{}", kept.text);
+        assert!(kept.text.contains(" çizgisine 300 m"), "{}", kept.text);
+        let crossed = handle(request(-300.0, 4, r#", "locale": null"#));
+        assert!(
+            crossed.title.starts_with("Çizgi geçildi: "),
+            "{}",
+            crossed.title
+        );
+
+        // An unknown locale is English, and it switches back.
+        let unknown = handle(request(-200.0, 5, r#", "locale": "xx-YY""#));
+        assert!(unknown.title.starts_with("Crossed "), "{}", unknown.title);
+        assert_eq!(store::load_trip(&dir).unwrap().lang, Lang::En);
+    }
+
+    #[test]
     fn crossing_left_to_right_rings_exactly_once_and_persists_the_state() {
         let dir = tmp("hl-ring");
         store::save_trip(&dir, &trip(1)).unwrap();

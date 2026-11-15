@@ -44,13 +44,10 @@ impl fmt::Display for TemplateError {
 impl std::error::Error for TemplateError {}
 
 impl TemplateError {
-    /// A sentence for the user.
+    /// A sentence for the user (English is the `Display` text).
     pub fn message_in(self, lang: Lang) -> String {
         match (lang, self) {
-            (Lang::En, Self::Empty) => "The message is empty.".to_owned(),
-            (Lang::En, Self::TooLong) => {
-                format!("The message is longer than {MAX_CHARS} characters.")
-            }
+            (Lang::En, _) => self.to_string(),
             (Lang::Tr, Self::Empty) => "Mesaj boş.".to_owned(),
             (Lang::Tr, Self::TooLong) => format!("Mesaj {MAX_CHARS} karakterden uzun."),
         }

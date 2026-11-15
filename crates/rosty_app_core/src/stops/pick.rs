@@ -839,4 +839,114 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn every_sentence_in_both_languages() {
+        use Lang::{En, Tr};
+        assert_eq!(
+            no_match_text_in(Tr, " moda ", true),
+            "\u{201c}moda\u{201d} ile eşleşen durak ya da kayıtlı durak yok."
+        );
+        assert_eq!(
+            no_match_text_in(Tr, "moda", false),
+            "\u{201c}moda\u{201d} ile eşleşen kayıtlı durak yok. Durakları da aramak için Ayarlar'dan bir GTFS verisi içe aktarın."
+        );
+        assert_eq!(
+            no_match_text_in(En, "moda", true),
+            no_match_text("moda", true)
+        );
+
+        let hints = [
+            (
+                Hint::SetA,
+                "Tap the map to set A",
+                "A için haritaya dokunun",
+            ),
+            (
+                Hint::SetB,
+                "Tap the map to set B",
+                "B için haritaya dokunun",
+            ),
+            (
+                Hint::Moving(Slot::A),
+                "Tap the map to move A",
+                "A'yı taşımak için haritaya dokunun",
+            ),
+            (
+                Hint::Moving(Slot::B),
+                "Tap the map to move B",
+                "B'yi taşımak için haritaya dokunun",
+            ),
+            (Hint::Ready { metres: 850.0 }, "A-B 850 m", "A-B 850 m"),
+            (Hint::Ready { metres: 1_240.0 }, "A-B 1.2 km", "A-B 1,2 km"),
+            (Hint::Ready { metres: 0.0 }, "A-B 0 m", "A-B 0 m"),
+            (Hint::Ready { metres: f64::NAN }, "A-B 0 m", "A-B 0 m"),
+            (
+                Hint::Invalid(DiameterError::TooShort),
+                "A and B are too close. Drag a pin at least 20 m away.",
+                "A ve B çok yakın. Bir iğneyi en az 20 m uzağa sürükleyin.",
+            ),
+            (
+                Hint::Invalid(DiameterError::SamePoint),
+                "A and B are too close. Drag a pin at least 20 m away.",
+                "A ve B çok yakın. Bir iğneyi en az 20 m uzağa sürükleyin.",
+            ),
+            (
+                Hint::Invalid(DiameterError::TooLong),
+                "A and B are more than 50 km apart. Move a pin closer.",
+                "A ile B arasında 50 km'den fazla var. Bir iğneyi yaklaştırın.",
+            ),
+            (
+                Hint::Invalid(DiameterError::InvalidCoord),
+                "These coordinates are not on Earth.",
+                "Bu koordinatlar Dünya üzerinde değil.",
+            ),
+        ];
+        for (hint, en, tr) in hints {
+            assert_eq!(hint.text_in(En), en);
+            assert_eq!(hint.text_in(Tr), tr);
+            assert_eq!(hint.text(), en);
+        }
+
+        let named = stop("Kadıköy");
+        let dropped = at(100.0);
+        assert_eq!(point_label_in(Tr, Slot::A, Some(&named)), "Kadıköy");
+        assert_eq!(point_label_in(En, Slot::A, Some(&dropped)), "Point A");
+        assert_eq!(point_label_in(Tr, Slot::A, Some(&dropped)), "A noktası");
+        assert_eq!(point_label_in(Tr, Slot::B, None), "B noktası");
+        assert_eq!(
+            queued_text_in(En, Slot::B, &named),
+            "Kadıköy is B for your next trip"
+        );
+        assert_eq!(
+            queued_text_in(Tr, Slot::B, &named),
+            "Sonraki yolculuğunuzda B: Kadıköy"
+        );
+        assert_eq!(
+            queued_text_in(Tr, Slot::A, &dropped),
+            "Sonraki yolculuğunuzda A: A noktası"
+        );
+        assert_eq!(row_label_in(En, "  "), "Point");
+        assert_eq!(row_label_in(Tr, "  "), "Nokta");
+        assert_eq!(row_label_in(Tr, " Pier "), "Pier");
+        assert_eq!(named.title_in(En), "Use Kadıköy");
+        assert_eq!(named.title_in(Tr), "Kullan: Kadıköy");
+        assert_eq!(dropped.title_in(En), "Use this point");
+        assert_eq!(dropped.title_in(Tr), "Bu noktayı kullan");
+        assert_eq!(Slot::A.picker_title_in(Tr), "A'yı seç");
+        assert_eq!(Slot::B.picker_title_in(Tr), "B'yi seç");
+        assert_eq!(Slot::B.picker_title_in(En), "Choose B");
+
+        // An end stored under the generic name of either language is a dropped point again, and
+        // a trip's end is stored under the name the user saw.
+        assert_eq!(trip_endpoint_in(Tr, Slot::A, &dropped).label, "A noktası");
+        assert_eq!(trip_endpoint_in(En, Slot::B, &dropped).label, "Point B");
+        for label in ["A noktası", "Point B", "Nokta", " "] {
+            let ep = Endpoint {
+                label: label.into(),
+                coord: dropped.coord,
+            };
+            assert!(!dest_from_endpoint(&ep).is_named(), "{label}");
+        }
+    }
 }

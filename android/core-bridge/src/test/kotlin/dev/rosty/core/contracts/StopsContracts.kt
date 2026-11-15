@@ -53,6 +53,8 @@ import dev.rosty.core.model.stops.HistoryTextRequest
 import dev.rosty.core.model.stops.MeasureAnswer
 import dev.rosty.core.model.stops.MeasureRequest
 import dev.rosty.core.model.stops.NameAnswer
+import dev.rosty.core.model.stops.NoticeChatsAnswer
+import dev.rosty.core.model.stops.NoticeChatsRequest
 import dev.rosty.core.model.stops.NoticeRenderRequest
 import dev.rosty.core.model.stops.NoticeResultAnswer
 import dev.rosty.core.model.stops.NoticeResultRequest
@@ -360,6 +362,10 @@ object StopsContracts : ContractModels {
             op<NoticeValidateRequest, NoticeValidateAnswer>(
                 "stops.notice_validate",
                 err = listOf("empty", "too_long", "tr_empty"),
+            )
+            op<NoticeChatsRequest, NoticeChatsAnswer>(
+                "stops.notice_chats",
+                ok = listOf("empty", "tr"),
             )
             op<AlarmPlanRequest, AlarmPlanAnswer>(
                 "stops.alarm_plan",

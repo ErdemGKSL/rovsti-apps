@@ -185,6 +185,47 @@ data class NoticeValidateAnswer(
     val trimmed: String,
 )
 
+/** One chat of `stops.notice_chats`, with what is known about the person behind it (each absent when unknown). */
+@Serializable
+data class NoticeChatInput(
+    val jid: String,
+    @EncodeDefault(NEVER) val group: Boolean = false,
+    /** The saved contact name. */
+    @EncodeDefault(NEVER) val contact: String? = null,
+    /** The verified business name. */
+    @EncodeDefault(NEVER) val verified: String? = null,
+    /** The name the person set on WhatsApp. */
+    @EncodeDefault(NEVER) val push: String? = null,
+    /** The name stored with the chat (a group's subject). */
+    @SerialName("chat_name") @EncodeDefault(NEVER) val chatName: String? = null,
+)
+
+@Serializable
+data class NoticeChatsRequest(
+    val chats: List<NoticeChatInput>,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
+)
+
+/**
+ * A chat as the arriving-soon picker lists it: [name] by the shared rule (contact, verified business, push name,
+ * the chat's own name, the number, else "WhatsApp user"), [tier] says which of them it is (`contact`, `verified`,
+ * `push`, `stored_chat`, `number`, `unknown`), [number] is the second line (null for a group and a bare number).
+ */
+@Serializable
+data class NamedNoticeChat(
+    val jid: String,
+    val name: String,
+    val tier: String,
+    val number: String?,
+    val group: Boolean,
+)
+
+@Serializable
+data class NoticeChatsAnswer(
+    val chats: List<NamedNoticeChat>,
+)
+
 @Serializable
 data class AlarmPlanRequest(
     val prefs: StopsPrefs,

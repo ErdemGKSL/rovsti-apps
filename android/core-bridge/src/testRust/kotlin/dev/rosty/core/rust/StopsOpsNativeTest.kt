@@ -15,6 +15,8 @@ import dev.rosty.core.model.stops.GtfsImportRequest
 import dev.rosty.core.model.stops.GtfsLinesRequest
 import dev.rosty.core.model.stops.GtfsSummaryRequest
 import dev.rosty.core.model.stops.GtfsViewRequest
+import dev.rosty.core.model.stops.NoticeChatInput
+import dev.rosty.core.model.stops.NoticeChatsRequest
 import dev.rosty.core.model.stops.PickEvent
 import dev.rosty.core.model.stops.PickReplayRequest
 import dev.rosty.core.model.stops.PlacesExportRequest
@@ -386,6 +388,29 @@ class StopsOpsNativeTest {
                 val kept = it.fix(fix(41.2, 29.4, 4_000)).getOrOk().out
                 assertTrue(kept.text, kept.text.startsWith("Outside the circle, "))
             }
+        }
+
+    @Test
+    fun theArrivingSoonChatsAreNamedByContactThenWhatsAppThenNumber() =
+        runBlocking {
+            val chats =
+                listOf(
+                    NoticeChatInput("905550001122@s.whatsapp.net", contact = "Ayşe Demir", push = "ayse"),
+                    NoticeChatInput("905550003344@s.whatsapp.net", verified = "Corner Bakery", push = "shop"),
+                    NoticeChatInput("905550005566@s.whatsapp.net"),
+                    NoticeChatInput("120363000000000001@g.us", group = true, chatName = "Family"),
+                    NoticeChatInput("98765432101234@lid"),
+                )
+            val named = ops.noticeChats(NoticeChatsRequest(chats)).getOrOk().chats
+            assertEquals(
+                listOf("Ayşe Demir", "Corner Bakery", "+905550005566", "Family", "WhatsApp user"),
+                named.map { it.name },
+            )
+            assertEquals(listOf("contact", "verified", "number", "stored_chat", "unknown"), named.map { it.tier })
+            // The number is a second line only under a name; a group and a hidden id have none.
+            assertEquals(listOf("+905550001122", "+905550003344", null, null, null), named.map { it.number })
+            val turkish = NativeStopsOps(TestRust.core) { "tr" }.noticeChats(NoticeChatsRequest(chats)).getOrOk()
+            assertEquals("WhatsApp kullanıcısı", turkish.chats.last().name)
         }
 
     @Test

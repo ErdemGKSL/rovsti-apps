@@ -55,6 +55,8 @@ import dev.rosty.core.model.stops.HistoryTextRequest
 import dev.rosty.core.model.stops.MeasureAnswer
 import dev.rosty.core.model.stops.MeasureRequest
 import dev.rosty.core.model.stops.NameAnswer
+import dev.rosty.core.model.stops.NoticeChatsAnswer
+import dev.rosty.core.model.stops.NoticeChatsRequest
 import dev.rosty.core.model.stops.NoticeRenderRequest
 import dev.rosty.core.model.stops.NoticeResultAnswer
 import dev.rosty.core.model.stops.NoticeResultRequest
@@ -276,6 +278,9 @@ interface StopsOps {
     /** Checks a template (`RustError.Invalid` with the reason). */
     suspend fun noticeValidate(req: NoticeValidateRequest): Outcome<NoticeValidateAnswer>
 
+    /** The chats the arriving-soon message can go to, named by the shared rule (contact, WhatsApp's name, number). */
+    suspend fun noticeChats(req: NoticeChatsRequest): Outcome<NoticeChatsAnswer>
+
     /** What the service needs to ring, from the preferences. */
     suspend fun alarmPlan(req: AlarmPlanRequest): Outcome<AlarmPlanAnswer>
 
@@ -381,6 +386,7 @@ interface StopsOps {
                 "stops.prefs_choices",
                 "stops.notice_render",
                 "stops.notice_validate",
+                "stops.notice_chats",
                 "stops.alarm_plan",
                 "stops.poll",
                 "stops.gtfs_import",
@@ -669,6 +675,14 @@ class NativeStopsOps(
             req.copy(locale = req.locale ?: tag()),
             NoticeValidateRequest.serializer(),
             NoticeValidateAnswer.serializer(),
+        )
+
+    override suspend fun noticeChats(req: NoticeChatsRequest) =
+        core.call(
+            "stops.notice_chats",
+            req.copy(locale = req.locale ?: tag()),
+            NoticeChatsRequest.serializer(),
+            NoticeChatsAnswer.serializer(),
         )
 
     override suspend fun alarmPlan(req: AlarmPlanRequest) =

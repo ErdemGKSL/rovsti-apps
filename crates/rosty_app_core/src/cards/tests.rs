@@ -92,7 +92,6 @@ fn writes_probe_png_for_review() {
     std::fs::write(dir.join("probe.png"), png).unwrap();
 }
 
-
 // ---- the card templates (X.2 step 2, round 16 step 8 layout fixes)
 
 use std::collections::BTreeMap;
@@ -135,7 +134,9 @@ fn number_contact() -> CardSpec {
         &[("title", NUMBER_NAME), ("numbers", NUMBER_NAME)],
     );
     s.initials = "+9".to_owned();
-    s.qr = Some(format!("BEGIN:VCARD\nVERSION:3.0\nTEL:{NUMBER_NAME}\nEND:VCARD\n"));
+    s.qr = Some(format!(
+        "BEGIN:VCARD\nVERSION:3.0\nTEL:{NUMBER_NAME}\nEND:VCARD\n"
+    ));
     s
 }
 
@@ -186,7 +187,10 @@ fn every_template_and_palette_renders_a_card_of_the_right_size() {
             s.qr = Some("BEGIN:VCARD\nFN:Ayşe Yılmaz\nEND:VCARD".into());
             let out = dir.join(format!("{template:?}-{palette:?}.png").to_lowercase());
             let done = render(&s, &out, &|| false).unwrap();
-            assert_eq!((done.width, done.height, done.frames), (STILL.0, STILL.1, 1));
+            assert_eq!(
+                (done.width, done.height, done.frames),
+                (STILL.0, STILL.1, 1)
+            );
             let img = decode_png(&out);
             assert_eq!(img.dimensions(), STILL);
             assert_eq!(done.bytes, std::fs::metadata(&out).unwrap().len());
@@ -201,7 +205,11 @@ fn a_long_turkish_headline_wraps_inside_the_panel() {
         assert_text_inside(&long, w, h);
         let prepared = Prepared::new(&long, w, h).unwrap();
         let boxes = prepared.text_boxes().unwrap();
-        let first = boxes.iter().find(|(t, _)| t.starts_with("Doğum")).unwrap().1;
+        let first = boxes
+            .iter()
+            .find(|(t, _)| t.starts_with("Doğum"))
+            .unwrap()
+            .1;
         let title_lines = boxes
             .iter()
             .filter(|(_, r)| (r.h - first.h).abs() < 0.5)
@@ -236,9 +244,19 @@ fn an_endless_name_shrinks_then_ends_in_an_ellipsis_inside_the_panel() {
         }
         assert_text_inside(&s, STILL.0, STILL.1);
         let prepared = Prepared::new(&s, STILL.0, STILL.1).unwrap();
-        assert!(prepared.text_boxes().unwrap().iter().any(|(t, _)| t.contains('…')));
-        render(&s, &review_dir().join(format!("{template:?}-endless.png").to_lowercase()), &|| false)
-            .unwrap();
+        assert!(
+            prepared
+                .text_boxes()
+                .unwrap()
+                .iter()
+                .any(|(t, _)| t.contains('…'))
+        );
+        render(
+            &s,
+            &review_dir().join(format!("{template:?}-endless.png").to_lowercase()),
+            &|| false,
+        )
+        .unwrap();
     }
 }
 
@@ -256,13 +274,27 @@ fn a_contact_named_with_its_number_and_no_birthday_renders_every_template() {
         &[("title", &format!("Doğum günün kutlu olsun, {NUMBER_NAME}!"))],
     );
     assert_text_inside(&birthday, STILL.0, STILL.1);
-    render(&birthday, &review_dir().join("birthday-number-name.png"), &|| false).unwrap();
+    render(
+        &birthday,
+        &review_dir().join("birthday-number-name.png"),
+        &|| false,
+    )
+    .unwrap();
     let number = spec(
         Template::NewNumber,
         Palette::Ink,
-        &[("title", NUMBER_NAME), ("subtitle", "Yeni numaram"), ("numbers", NUMBER_NAME)],
+        &[
+            ("title", NUMBER_NAME),
+            ("subtitle", "Yeni numaram"),
+            ("numbers", NUMBER_NAME),
+        ],
     );
-    render(&number, &review_dir().join("newnumber-number-name.png"), &|| false).unwrap();
+    render(
+        &number,
+        &review_dir().join("newnumber-number-name.png"),
+        &|| false,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -351,7 +383,10 @@ fn a_moving_card_plays_once_and_ends_on_the_still_render() {
             far += 1;
         }
     }
-    assert!(far * 1000 < raw.len() / 4, "{far} pixels of the last frame differ from the still");
+    assert!(
+        far * 1000 < raw.len() / 4,
+        "{far} pixels of the last frame differ from the still"
+    );
 
     // Contact moves too; New number is still only.
     let mut contact = number_contact();
@@ -361,7 +396,10 @@ fn a_moving_card_plays_once_and_ends_on_the_still_render() {
     let mut number = spec(
         Template::NewNumber,
         Palette::Dusk,
-        &[("subtitle", "My new number"), ("numbers", "+90 532 000 11 22")],
+        &[
+            ("subtitle", "My new number"),
+            ("numbers", "+90 532 000 11 22"),
+        ],
     );
     number.animated = true;
     let done = render(&number, &dir.join("newnumber-still.png"), &|| false).unwrap();
@@ -413,4 +451,80 @@ fn writes_birthday_frames_for_review() {
         takumi::write_image(&bitmap, &mut png, OutputFormat::Png).unwrap();
         std::fs::write(dir.join(format!("birthday-{i:02}.png")), png).unwrap();
     }
+}
+
+/// The cards the Contacts screenshots show (`StudioSamples` in the Contacts tests): their texts as `cardTexts` builds
+/// them in English and Turkish. Kept in `tests/cards/`; `UPDATE_CARD_GOLDENS=1` rewrites them.
+fn golden_specs() -> Vec<(&'static str, CardSpec)> {
+    let vcard = "BEGIN:VCARD\nFN:Ayşe Yılmaz\nEND:VCARD";
+    let mut contact = spec(
+        Template::Contact,
+        Palette::Dawn,
+        &[
+            ("name", "Ayşe Yılmaz"),
+            ("title", "Ayşe Yılmaz"),
+            ("numbers", "+90 532 000 11 22"),
+        ],
+    );
+    contact.qr = Some(vcard.to_owned());
+    vec![
+        (
+            "birthday-dawn-en",
+            spec(
+                Template::Birthday,
+                Palette::Dawn,
+                &[
+                    ("name", "Ayşe Yılmaz"),
+                    ("title", "Happy birthday, Ayşe Yılmaz!"),
+                    ("age_line", "Turning 36"),
+                    ("date_line", "October 3"),
+                ],
+            ),
+        ),
+        (
+            "birthday-dawn-tr",
+            spec(
+                Template::Birthday,
+                Palette::Dawn,
+                &[
+                    ("name", "Ayşe Yılmaz"),
+                    ("title", "Doğum günün kutlu olsun, Ayşe Yılmaz!"),
+                    ("age_line", "36 yaşına giriyorsun"),
+                    ("date_line", "3 Ekim"),
+                ],
+            ),
+        ),
+        ("contact-dawn-en", contact),
+    ]
+}
+
+#[test]
+fn card_goldens_match() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cards");
+    let update = std::env::var("UPDATE_CARD_GOLDENS").is_ok_and(|v| v == "1");
+    let tmp = std::env::temp_dir().join(format!("rosty-cards-golden-{}", std::process::id()));
+    for (name, s) in golden_specs() {
+        assert_text_inside(&s, STILL.0, STILL.1);
+        let golden = dir.join(format!("{name}.png"));
+        if update {
+            std::fs::create_dir_all(&dir).unwrap();
+            render(&s, &golden, &|| false).unwrap();
+            continue;
+        }
+        let out = tmp.join(format!("{name}.png"));
+        render(&s, &out, &|| false).unwrap();
+        let (a, b) = (decode_png(&golden), decode_png(&out));
+        assert_eq!(a.dimensions(), b.dimensions(), "{name}");
+        let off = a
+            .pixels()
+            .zip(b.pixels())
+            .filter(|(p, q)| (0..4).any(|c| p[c].abs_diff(q[c]) > 2))
+            .count();
+        let total = (a.width() * a.height()) as usize;
+        assert!(
+            off * 1000 <= total,
+            "{name}: {off} of {total} pixels differ (UPDATE_CARD_GOLDENS=1 rewrites)"
+        );
+    }
+    let _ = std::fs::remove_dir_all(tmp);
 }

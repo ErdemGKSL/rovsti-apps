@@ -25,7 +25,11 @@ import javax.imageio.ImageIO
 class CardsOpsNativeTest {
     private val dir: File = Files.createTempDirectory("rosty-cards").toFile().apply { deleteOnExit() }
     private val asked = mutableListOf<String>()
-    private val ops = NativeCardsOps(TestRust.core) { uri -> asked += uri; null }
+    private val ops =
+        NativeCardsOps(TestRust.core) { uri ->
+            asked += uri
+            null
+        }
 
     @Before
     fun load() = TestRust.ensure()

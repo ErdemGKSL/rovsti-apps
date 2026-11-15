@@ -24,8 +24,8 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use takumi::prelude::{
-    AnimatedGifOptions, AnimationFrame, Bitmap, ImageData, ImageSource, ImageSourceInput, Node, OutputFormat,
-    RenderOptions, RgbaImage, StyleSheet, Viewport,
+    AnimatedGifOptions, AnimationFrame, Bitmap, ImageData, ImageSource, ImageSourceInput, Node,
+    OutputFormat, RenderOptions, RgbaImage, StyleSheet, Viewport,
 };
 
 use super::fit::{Fitted, TextRule, fit};
@@ -607,8 +607,8 @@ fn read_photo(path: &Path) -> Option<Vec<u8>> {
 /// A QR code of `text` as straight RGBA pixels, at most `room` pixels a side, a whole number of pixels per module
 /// and no quiet zone (the white box around it is the quiet zone). `None` when the text does not fit a code.
 fn qr_pixels(text: &str, room: u32) -> Option<(Vec<u8>, u32)> {
-    let code = qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M)
-        .ok()?;
+    let code =
+        qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M).ok()?;
     let side = code.width() as u32;
     let px = (room / side).max(1);
     let dim = side * px;

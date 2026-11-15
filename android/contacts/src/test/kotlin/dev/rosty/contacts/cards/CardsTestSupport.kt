@@ -18,10 +18,11 @@ import java.io.FileOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * A stand-in for the Rust renderer: draws a card-shaped PNG (palette gradient, a frosted panel and the card's own
- * words) at [req.out]. The Rust goldens of X.2 step 2 do not exist in this tree yet, so the screenshots use these
- * pictures; the sheet's behaviour does not depend on what the core draws. [gate] holds a render open (the progress ring
- * state); [failWith] answers an error.
+ * A stand-in for the Rust renderer. A spec the Rust card goldens cover (`crates/rosty_app_core/tests/cards`, written by
+ * `card_goldens_match` from the same texts [cardTexts] builds) gets that golden copied to [req.out], so the screenshots
+ * show the real card; any other spec gets a card-shaped placeholder drawn here. The real op is proven by
+ * `CardsOpsNativeTest` (`:core-bridge` `testRustBridge`). [gate] holds a render open (the progress ring state);
+ * [fail] answers an error.
  */
 internal class FakeCardsOps : CardsOps {
     val renders = CopyOnWriteArrayList<CardRenderRequest>()
@@ -42,6 +43,12 @@ internal class FakeCardsOps : CardsOps {
             )
         }
         File(req.out).parentFile?.mkdirs()
+        golden(req)?.let { file ->
+            file.copyTo(File(req.out), overwrite = true)
+            return Outcome.Ok(
+                CardRenderResult(req.out, GOLDEN_W, GOLDEN_H, file.length(), if (req.spec.animated) 24 else 1),
+            )
+        }
         val bitmap = draw(req)
         FileOutputStream(req.out).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         return Outcome.Ok(
@@ -57,6 +64,20 @@ internal class FakeCardsOps : CardsOps {
 
     override suspend fun cancel(out: String) {
         cancelled += out
+    }
+
+    /** The Rust golden of this spec, if one exists (Dawn, Ayşe Yılmaz, English or Turkish). */
+    private fun golden(req: CardRenderRequest): File? {
+        val spec = req.spec
+        if (spec.palette != CardPalette.Dawn || spec.texts["name"] != StudioSamples.birthday.name) return null
+        val title = spec.texts["title"].orEmpty()
+        val name =
+            when (spec.template) {
+                CardTemplate.Birthday -> if (title.startsWith("Doğum")) "birthday-dawn-tr" else "birthday-dawn-en"
+                CardTemplate.Contact -> "contact-dawn-en"
+                CardTemplate.NewNumber -> null
+            } ?: return null
+        return File(GOLDENS, "$name.png").takeIf { it.isFile }
     }
 
     private fun draw(req: CardRenderRequest): Bitmap {
@@ -112,6 +133,11 @@ internal class FakeCardsOps : CardsOps {
     }
 }
 
+/** The Rust card goldens, from the module directory the tests run in. */
+private val GOLDENS = File("../../crates/rosty_app_core/tests/cards")
+private const val GOLDEN_W = 720
+private const val GOLDEN_H = 900
+
 /** Samples for the tests and shots. */
 internal object StudioSamples {
     val birthday =
@@ -121,9 +147,15 @@ internal object StudioSamples {
             birthday = true,
             dateLine = "October 3",
             ageYears = 36,
+            birthMonth = 10,
+            birthDay = 3,
             numbers = listOf("+90 532 000 11 22"),
             vcard = "BEGIN:VCARD\nFN:Ayşe Yılmaz\nEND:VCARD",
         )
 
-    val plain = birthday.copy(birthday = false, dateLine = null, ageYears = null)
+    val plain = birthday.copy(birthday = false, dateLine = null, ageYears = null, birthMonth = null, birthDay = null)
+
+    /** The owner's device report: the name is the number itself and there is no birthday. */
+    val numberNamed =
+        plain.copy(contactId = 7, name = "+90 555 000 12 34", numbers = listOf("+90 555 000 12 34"), vcard = null)
 }

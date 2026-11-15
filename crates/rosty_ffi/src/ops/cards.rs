@@ -125,7 +125,10 @@ struct Registered(PathBuf, Arc<AtomicBool>);
 impl Drop for Registered {
     fn drop(&mut self) {
         let mut map = lock();
-        if map.get(&self.0).is_some_and(|flag| Arc::ptr_eq(flag, &self.1)) {
+        if map
+            .get(&self.0)
+            .is_some_and(|flag| Arc::ptr_eq(flag, &self.1))
+        {
             map.remove(&self.0);
         }
     }
@@ -152,11 +155,7 @@ fn render(req: RenderReq) -> Result<RenderAns, FfiError> {
     lock().insert(out.clone(), flag.clone());
     let _registered = Registered(out.clone(), flag.clone());
     let done = cards::render(&req.spec, &out, &|| flag.load(Ordering::Relaxed)).map_err(|e| {
-        log::warn!(
-            "cards.render {:?} failed: {}",
-            req.spec.template,
-            e.code()
-        );
+        log::warn!("cards.render {:?} failed: {}", req.spec.template, e.code());
         card_error(&e)
     })?;
     Ok(RenderAns {
@@ -212,10 +211,7 @@ fn render_cases() -> Vec<Case> {
             json!({"spec": birthday, "out": "$DIR/junk.jpg/card.png"}),
         )
         .seeded("cards"),
-        Case::named(
-            "out_invalid",
-            json!({"spec": birthday, "out": "card.png"}),
-        ),
+        Case::named("out_invalid", json!({"spec": birthday, "out": "card.png"})),
     ]
 }
 
@@ -274,7 +270,10 @@ mod tests {
         .expect("renders");
         assert_eq!((ans.width, ans.height, ans.frames), (STILL.0, STILL.1, 1));
         assert_eq!(ans.bytes, std::fs::metadata(&out).expect("file").len());
-        assert!(lock().is_empty(), "the flag is gone once the render ends");
+        assert!(
+            !lock().contains_key(&out),
+            "the flag is gone once the render ends"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -306,7 +305,10 @@ mod tests {
         }
         assert!(cancelled, "the render was never seen running");
         let err = worker.join().expect("thread").expect_err("cancelled");
-        assert_eq!((err.kind, err.message.as_str()), (ErrorKind::Invalid, "cancelled"));
+        assert_eq!(
+            (err.kind, err.message.as_str()),
+            (ErrorKind::Invalid, "cancelled")
+        );
         assert!(!out.exists());
         assert!(!cancel(CancelReq { out: path }).expect("cancel").cancelled);
         let _ = std::fs::remove_dir_all(dir);

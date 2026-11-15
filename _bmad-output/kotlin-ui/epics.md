@@ -1564,6 +1564,42 @@ the real `cards.*` FFI op, `NativeCardsOps` and the Rust templates exist only in
 the animated cards have no glisse refraction/glint yet, and the committed `x2-*` goldens still show the Kotlin stand-in
 (cut headline, "October 3" in Turkish). Round 17 (`plans/round-17.md`) finishes it; then the next planner is **E8 R1**.
 
+**Fix evidence (2026-11-15, commit "X.2: cards renderer, cards.* ops and the native bridge (carry-over landed)", on top
+of `3a03c05`/`6d8f44b`):** the e04 root cause is fixed and the carry-over is landed and reviewed.
+- Native path: `rosty_ffi` `cards.templates` / `cards.render` / `cards.cancel` (`src/ops/cards.rs`, 8 fixtures in
+  `INDEX`, `OPS.md` rows and prose; errors are codes: `text_missing`, `out_invalid`, `out_unwritable`, `cancelled`,
+  `render_failed`). `:core-bridge` `NativeCardsOps` goes through `NativeRustCore.call` (gated on `Rust.init`), and
+  `ContactsContainer.createCards()` returns it (content-URI photos copied and downsized by `CardPhotos`). Models are
+  `@Serializable` (plugin serializers, no reflection), so no new keep rule.
+- Proof without fakes: `CardsOpsNativeTest` (`:core-bridge:testRustBridge`, real host `librosty_ffi` built with
+  `--features test-ops`) renders a Birthday card (long Turkish name), the owner's case (contact named
+  "+90 555 000 12 34", no birthday, a `content://` photo that resolves to nothing) on Contact, Birthday and New number,
+  and a one-shot GIF: 4/4 passed; every PNG decodes at 720 x 900, the GIF at 540 x 675 with no NETSCAPE block.
+  `CardsWiringGuardTest` fails if the container is not `NativeCardsOps` or any production source names
+  `UnavailableCardsOps`. `ContractFixturesTest` covers the `cards.*` fixtures.
+- Layout: `cards/fit.rs` fits every text block to the panel's inner box (wrap on 2-3 lines, shrink to a floor, then a
+  measured "…"; Takumi's own `line-clamp` ellipsis was found to overflow the line, so it is not used). Render tests
+  `a_long_turkish_headline_wraps_inside_the_panel`, `an_endless_name_shrinks_then_ends_in_an_ellipsis_inside_the_panel`
+  (all templates), `a_contact_named_with_its_number_and_no_birthday_renders_every_template` and `card_goldens_match`
+  (`tests/cards/{birthday-dawn-en,birthday-dawn-tr,contact-dawn-en}.png`) check every text run against the panel box
+  for still and animated sizes.
+- Locale and template: `cardDate` prints the birthday in the app locale ("3 Ekim" / "October 3", `CardTextsTest`);
+  the card page and Upcoming pass month and day; a birthday without a readable month and day no longer counts, so such a
+  contact opens on Contact (`aNumberNamedContactWithoutABirthdayOpensOnContact`).
+- Goldens: the 18 `x2-card-preview-*` / `x2-share-*` shots re-recorded; the fake now copies the Rust goldens. Opened
+  `x2-share-still-menu-tr-light`, `x2-share-animated-fs2-light`, `x2-card-preview-contact-dark`,
+  `x2-card-preview-birthday-tr-dark`: the headline wraps inside the panel with padding, "3 Ekim" in Turkish, nothing
+  touches the panel edge. Rust review PNGs (`target/checks/cards/`) and GIF frames 0/6/18 opened.
+- Release APK: `:contacts:assembleRelease` -> `contacts-release-unsigned.apk` 24,227,399 bytes (was 17,624,083);
+  `lib/arm64-v8a/librosty_ffi.so` 19,105,832 bytes (was 12,519,024; Takumi is now linked, as the Step 1 probe
+  predicted). `llvm-nm -D` shows `Java_dev_rosty_core_RustNative_call` (the entry `NativeCardsOps` uses); the `.so`
+  holds the `cards.*` op names and the Inter fonts; `dexdump` keeps `RustNative` and the `CardRenderRequest` /
+  `CardRenderResult` / `CardSpec` serializers.
+- **Known open items after this fix:** R17-F2..F4 (menu dim, menu covering the toggle, toggle thumb), glisse optics
+  (round 17 step 4), and the animated preview: Card Studio decodes the GIF with `BitmapFactory`, which shows frame 0
+  (the panel mid-drop, faded) instead of playing it. Why the owner's number-named contact counted as having a birthday
+  was not reproduced; the stricter month/day check covers a birthday row with an unreadable date.
+
 **Round-16 Evidence (kept for history):**
 **Evidence (step 8, uncommitted at the time of writing):**
 - F40: `:testing` `portraitImage` (`android/testing/src/main/kotlin/dev/rosty/testing/PortraitImage.kt`) draws a
@@ -1581,7 +1617,8 @@ the animated cards have no glisse refraction/glint yet, and the committed `x2-*`
   aarch64-linux-android, Gradle spotless, lint, unit tests, shot verification, APK JNI export check, stability, orphans).
 - Size: `librosty_ffi.so` (arm64-v8a, release) 12,519,024 bytes vs 10,030,336 before Takumi (+2,488,688, +24.8 %).
   Contacts release APK `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk` 17,624,083 bytes.
-- **Known open item (not fixed in step 8's F40 scope):** the card headline in the x2 goldens is wider than the inner
+- **Known open item (not fixed in step 8's F40 scope; the layout and date parts are fixed, see "Fix evidence"
+  above):** the card headline in the x2 goldens is wider than the inner
   panel / cut off in Turkish, and the date line is not localised ("October 3"); the Card Studio preview description lacks
   the template and person name. Both are listed in the checklist record; the layout fix needs its own render test and a
   re-record of the x2 goldens.

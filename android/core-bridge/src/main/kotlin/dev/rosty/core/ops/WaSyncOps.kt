@@ -7,6 +7,7 @@ import dev.rosty.core.call
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.WaIdParseRequest
 import dev.rosty.core.model.wa.WaIdParsed
+import dev.rosty.core.model.wa.WaSyncAccountChangedRequest
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
@@ -22,13 +23,29 @@ import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncHandleRequest
+import dev.rosty.core.model.wa.WaSyncHistoryAnswer
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncMedia
+import dev.rosty.core.model.wa.WaSyncMediaCap
+import dev.rosty.core.model.wa.WaSyncMediaCapRequest
+import dev.rosty.core.model.wa.WaSyncMediaDue
+import dev.rosty.core.model.wa.WaSyncMediaDueRequest
+import dev.rosty.core.model.wa.WaSyncMediaEnqueueRequest
+import dev.rosty.core.model.wa.WaSyncMediaKeepRequest
+import dev.rosty.core.model.wa.WaSyncMediaKept
+import dev.rosty.core.model.wa.WaSyncMediaPolicy
+import dev.rosty.core.model.wa.WaSyncMediaPolicyRequest
+import dev.rosty.core.model.wa.WaSyncMediaQueued
 import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
+import dev.rosty.core.model.wa.WaSyncMediaSettleRequest
+import dev.rosty.core.model.wa.WaSyncMediaSettled
+import dev.rosty.core.model.wa.WaSyncMediaStats
+import dev.rosty.core.model.wa.WaSyncMediaStatsRequest
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncNoteStatusRequest
 import dev.rosty.core.model.wa.WaSyncNumbersAnswer
 import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
@@ -39,6 +56,8 @@ import dev.rosty.core.model.wa.WaSyncOutboxAnswer
 import dev.rosty.core.model.wa.WaSyncOutboxEditRequest
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncReconcileRequest
+import dev.rosty.core.model.wa.WaSyncReconciled
 import dev.rosty.core.model.wa.WaSyncRekeyedAnswer
 import dev.rosty.core.model.wa.WaSyncRekeyedRequest
 import dev.rosty.core.model.wa.WaSyncResolveRequest
@@ -48,12 +67,15 @@ import dev.rosty.core.model.wa.WaSyncSettleRequest
 import dev.rosty.core.model.wa.WaSyncSettled
 import dev.rosty.core.model.wa.WaSyncStarredPage
 import dev.rosty.core.model.wa.WaSyncStarredRequest
+import dev.rosty.core.model.wa.WaSyncStatusNoted
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.model.wa.WaSyncStorePageRequest
 import dev.rosty.core.model.wa.WaSyncStoredChats
 import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.model.wa.WaSyncWipeRequest
+import dev.rosty.core.model.wa.WaSyncWiped
 import kotlinx.serialization.builtins.nullable
 
 /**
@@ -117,8 +139,44 @@ interface WaSyncOps {
 
     suspend fun media(req: WaSyncMediaRequest): Outcome<WaSyncMedia>
 
-    /** Brings the media cache under a cap; answers the files to delete. */
+    /** Brings the media cache under a cap (the stored one when none is named); answers the files to delete. */
     suspend fun mediaEvict(req: WaSyncEvictRequest): Outcome<WaSyncEviction>
+
+    /** What the auto-download rules say about the file of a message on a network. */
+    suspend fun mediaPolicy(req: WaSyncMediaPolicyRequest): Outcome<WaSyncMediaPolicy>
+
+    /** Asks for the full file of a message: a tap, or the rules under the network named. */
+    suspend fun mediaEnqueue(req: WaSyncMediaEnqueueRequest): Outcome<WaSyncMediaQueued>
+
+    /** The downloads to make now; each is `downloading` until settled. */
+    suspend fun mediaDue(req: WaSyncMediaDueRequest): Outcome<WaSyncMediaDue>
+
+    /** Reports how a download ended. */
+    suspend fun mediaSettle(req: WaSyncMediaSettleRequest): Outcome<WaSyncMediaSettled>
+
+    /** Pins a file or records where the user saved a copy: such a file is never evicted. */
+    suspend fun mediaKeep(req: WaSyncMediaKeepRequest): Outcome<WaSyncMediaKept>
+
+    /** Puts rows and files back in step when the store opens; answers the files to delete. */
+    suspend fun mediaReconcile(req: WaSyncReconcileRequest): Outcome<WaSyncReconciled>
+
+    /** The media cache in numbers. */
+    suspend fun mediaStats(req: WaSyncMediaStatsRequest): Outcome<WaSyncMediaStats>
+
+    /** Reads the media cap, or sets it first. */
+    suspend fun mediaCap(req: WaSyncMediaCapRequest): Outcome<WaSyncMediaCap>
+
+    /** Takes in the gateway's epoch, account epoch, own ids and history progress. */
+    suspend fun noteStatus(req: WaSyncNoteStatusRequest): Outcome<WaSyncStatusNoted>
+
+    /** Takes in the gateway's announcement that another account was linked. */
+    suspend fun accountChanged(req: WaSyncAccountChangedRequest): Outcome<WaSyncIdentityApplied>
+
+    /** The history progress the gateway last reported. */
+    suspend fun history(req: WaSyncHandleRequest): Outcome<WaSyncHistoryAnswer>
+
+    /** Closes a store and deletes its files (unlink). */
+    suspend fun wipe(req: WaSyncWipeRequest): Outcome<WaSyncWiped>
 
     /** The key an id's chat is stored under, its kind and its wire form; null when the text is not a JID. */
     suspend fun identityResolve(req: WaSyncResolveRequest): Outcome<WaSyncResolved?>
@@ -163,6 +221,18 @@ interface WaSyncOps {
                 "wa_sync.media_set",
                 "wa_sync.media",
                 "wa_sync.media_evict",
+                "wa_sync.media_policy",
+                "wa_sync.media_enqueue",
+                "wa_sync.media_due",
+                "wa_sync.media_settle",
+                "wa_sync.media_keep",
+                "wa_sync.media_reconcile",
+                "wa_sync.media_stats",
+                "wa_sync.media_cap",
+                "wa_sync.note_status",
+                "wa_sync.account_changed",
+                "wa_sync.history",
+                "wa_sync.wipe",
                 "wa_sync.identity_resolve",
                 "wa_sync.rekeyed_since",
                 "wa_sync.identity_numbers",
@@ -239,6 +309,62 @@ class NativeWaSyncOps(
 
     override suspend fun mediaEvict(req: WaSyncEvictRequest) =
         core.call("wa_sync.media_evict", req, WaSyncEvictRequest.serializer(), WaSyncEviction.serializer())
+
+    override suspend fun mediaPolicy(req: WaSyncMediaPolicyRequest) =
+        core.call(
+            "wa_sync.media_policy",
+            req,
+            WaSyncMediaPolicyRequest.serializer(),
+            WaSyncMediaPolicy.serializer(),
+        )
+
+    override suspend fun mediaEnqueue(req: WaSyncMediaEnqueueRequest) =
+        core.call(
+            "wa_sync.media_enqueue",
+            req,
+            WaSyncMediaEnqueueRequest.serializer(),
+            WaSyncMediaQueued.serializer(),
+        )
+
+    override suspend fun mediaDue(req: WaSyncMediaDueRequest) =
+        core.call("wa_sync.media_due", req, WaSyncMediaDueRequest.serializer(), WaSyncMediaDue.serializer())
+
+    override suspend fun mediaSettle(req: WaSyncMediaSettleRequest) =
+        core.call(
+            "wa_sync.media_settle",
+            req,
+            WaSyncMediaSettleRequest.serializer(),
+            WaSyncMediaSettled.serializer(),
+        )
+
+    override suspend fun mediaKeep(req: WaSyncMediaKeepRequest) =
+        core.call("wa_sync.media_keep", req, WaSyncMediaKeepRequest.serializer(), WaSyncMediaKept.serializer())
+
+    override suspend fun mediaReconcile(req: WaSyncReconcileRequest) =
+        core.call("wa_sync.media_reconcile", req, WaSyncReconcileRequest.serializer(), WaSyncReconciled.serializer())
+
+    override suspend fun mediaStats(req: WaSyncMediaStatsRequest) =
+        core.call("wa_sync.media_stats", req, WaSyncMediaStatsRequest.serializer(), WaSyncMediaStats.serializer())
+
+    override suspend fun mediaCap(req: WaSyncMediaCapRequest) =
+        core.call("wa_sync.media_cap", req, WaSyncMediaCapRequest.serializer(), WaSyncMediaCap.serializer())
+
+    override suspend fun noteStatus(req: WaSyncNoteStatusRequest) =
+        core.call("wa_sync.note_status", req, WaSyncNoteStatusRequest.serializer(), WaSyncStatusNoted.serializer())
+
+    override suspend fun accountChanged(req: WaSyncAccountChangedRequest) =
+        core.call(
+            "wa_sync.account_changed",
+            req,
+            WaSyncAccountChangedRequest.serializer(),
+            WaSyncIdentityApplied.serializer(),
+        )
+
+    override suspend fun history(req: WaSyncHandleRequest) =
+        core.call("wa_sync.history", req, WaSyncHandleRequest.serializer(), WaSyncHistoryAnswer.serializer())
+
+    override suspend fun wipe(req: WaSyncWipeRequest) =
+        core.call("wa_sync.wipe", req, WaSyncWipeRequest.serializer(), WaSyncWiped.serializer())
 
     override suspend fun identityResolve(req: WaSyncResolveRequest) =
         core.call(

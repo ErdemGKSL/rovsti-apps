@@ -380,6 +380,11 @@ for the GPUI apps until E8 and are then deleted or kept only if another crate us
 - The Android `.so` must not need the NDK sysroot at link time beyond what `scripts/android-env.sh` already
   configures (TLS is rustls + graviola, no OpenSSL or `ring`: `rosty_wa_client`, `rosty_tiles` Cargo.toml). A new
   dependency of `rosty_ffi` that needs a C toolchain, OpenSSL or a system library is refused in review.
+  One exception, accepted 2026-11-15 (E6.4s): `rusqlite` with its `bundled` feature, the SQLite of the WhatsApp offline
+  store (`rosty_app_core::wa_sync`). Its C source ships inside the crate and builds with the NDK clang that
+  `scripts/android-env.sh` already sets up (no system library, nothing to install), and the store needs a real
+  embedded database: per-chat paging, an outbox and a media LRU over thousands of rows, crash-safe writes. A second C
+  dependency still needs its own reason here.
 - ABIs: `arm64-v8a` for release (Phone already ships arm64 only, `apps/phone/gpuiforge.json`), `x86_64` added for
   debug and emulator builds. One `.so` per ABI shared by all four APKs (each APK packages its own copy).
 - Strip and LTO in the release profile; the symbol list is checked by a test that the 8 exports exist

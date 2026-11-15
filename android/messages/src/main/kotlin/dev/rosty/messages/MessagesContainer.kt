@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import dev.rosty.core.Rust
+import dev.rosty.core.model.wa.MessageMeta
+import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.core.ops.MessagesOps
 import dev.rosty.core.ops.NativeChatOps
@@ -14,25 +16,48 @@ import dev.rosty.core.ops.NativeSharedOps
 import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
+import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.messages.data.ContactBook
 import dev.rosty.messages.data.MessagesStore
+import dev.rosty.messages.inbox.ResourceInboxWords
+import dev.rosty.messages.inbox.waPreview
+import dev.rosty.messages.notify.AnnouncerSources
+import dev.rosty.messages.notify.MessageAnnouncer
+import dev.rosty.messages.notify.ReplyRouter
+import dev.rosty.messages.remind.RemindCenter
+import dev.rosty.messages.schedule.FileQueueStore
+import dev.rosty.messages.schedule.GatewayWaScheduleRemote
+import dev.rosty.messages.schedule.ScheduleCenter
+import dev.rosty.messages.spam.CodeCleanup
+import dev.rosty.messages.spam.CodeCleanupWorker
+import dev.rosty.messages.spam.SpamActions
+import dev.rosty.messages.starred.StarCenter
+import dev.rosty.messages.starred.realStarCenter
 import dev.rosty.messages.wa.GatewayWaRemote
 import dev.rosty.messages.wa.StoreWaChats
 import dev.rosty.messages.wa.WaChats
+import dev.rosty.messages.wa.WaMedia
 import dev.rosty.messages.wa.WaOffline
+import dev.rosty.messages.wa.WaRecentEmoji
 import dev.rosty.messages.wa.WaRemote
+import dev.rosty.messages.wa.WaVoiceNotes
 import dev.rosty.messages.wa.realWaOffline
+import dev.rosty.messages.wa.realWaVoice
 import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.AvatarResolver
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.PeopleSources
 import dev.rosty.people.ProviderSource
+import dev.rosty.platform.calllog.AndroidBlocklistRepository
+import dev.rosty.platform.calllog.BlocklistRepository
 import dev.rosty.platform.contacts.AndroidContactsRepository
 import dev.rosty.platform.contacts.ContactsRepository
 import dev.rosty.platform.identity.PhoneNumbers
+import dev.rosty.platform.notify.ReminderRepositories
 import dev.rosty.platform.sms.AndroidScheduledSmsRepository
 import dev.rosty.platform.sms.AndroidSmsRepository
 import dev.rosty.platform.sms.ScheduledSmsRepository
+import dev.rosty.platform.sms.SmsQuery
 import dev.rosty.platform.sms.SmsRepository
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionGroup
@@ -43,6 +68,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * What Rosty Messages adds to the shared [ShellContainer] (ARCH 5.3). Every member is lazy and built by a `create*`
@@ -120,8 +147,93 @@ open class MessagesContainer(
         StatusFeed(scope, waOffline, waRemote, java.io.File(context.cacheDir, "wa-status")).also { it.start() }
     }
 
+    /** The system blocklist (shared with Phone); the default SMS app may write it. */
+    val blocklist: BlocklistRepository by lazy { createBlocklist() }
+
+    /** Spam rules, allow list and blocklist changes (E6.11, AD-MSG8). */
+    val spamActions: SpamActions by lazy { SpamActions(store, ops, blocklist) }
+
+    /** M47: passcode messages deleted 24 h after their code was copied. */
+    val codeCleanup: CodeCleanup by lazy { createCodeCleanup() }
+
     /** The WhatsApp chats of the inbox and their actions, read from the offline store. */
     val waChats: WaChats by lazy { createWaChats() }
+
+    /** Thumbnails, downloads and the files to send of WhatsApp messages (E6.4b), kept through the store's LRU. */
+    val waMedia: WaMedia by lazy {
+        WaMedia(waOffline, waRemote, java.io.File(context.filesDir, "wa-media"), System::currentTimeMillis)
+    }
+
+    /** The voice note player (M17): one note at a time. */
+    val waVoice: WaVoiceNotes by lazy { realWaVoice(this) }
+
+    /** The emoji used last for reactions (M49). */
+    val waEmoji: WaRecentEmoji by lazy { WaRecentEmoji(java.io.File(context.filesDir, "recent-reactions.json")) }
+
+    /** Where a reply typed into a notification goes while the UI is attached (E6.9). */
+    val replies: ReplyRouter by lazy { createReplies() }
+
+    /** The notifications the app makes while its process runs: WhatsApp from the event stream, the switches (E6.9). */
+    val announcer: MessageAnnouncer by lazy { createAnnouncer() }
+
+    /** Scheduled send (E6.10, AD-MSG6): the local SMS queue with its alarms and the gateway's WhatsApp items. */
+    val schedule: ScheduleCenter by lazy { createSchedule() }
+
+    /** Stars (E6.13): SMS/MMS in the prefs (M23), WhatsApp through the gateway (M10), and the Starred list. */
+    val stars: StarCenter by lazy { createStars().also { it.start() } }
+
+    /** "Remind me" on a message (M33): Rust's slots and payload, `:platform`'s alarms. */
+    val reminders: RemindCenter by lazy { createReminders().also { it.start() } }
+
+    protected open fun createStars(): StarCenter = realStarCenter(this)
+
+    protected open fun createReminders(): RemindCenter =
+        RemindCenter(chat, ReminderRepositories.messages(context), scope, System::currentTimeMillis)
+
+    protected open fun createReplies(): ReplyRouter =
+        ReplyRouter(
+            sms = sms,
+            wa = { jid, text -> waOffline.enqueue(jid, WaSyncAction.SendText(text)) },
+            recipients = { thread -> withContext(Dispatchers.IO) { SmsQuery.addressesFor(context, thread) } },
+            sim = { thread ->
+                store.prefs.value
+                    ?.simChoices
+                    ?.get(thread)
+            },
+            now = System::currentTimeMillis,
+        )
+
+    protected open fun createAnnouncer(): MessageAnnouncer {
+        val words = ResourceInboxWords(context.resources)
+        return MessageAnnouncer(
+            context,
+            scope,
+            AnnouncerSources(
+                ops = ops,
+                prefs = store.prefs,
+                loadPrefs = { store.load() },
+                live = waOffline.live,
+                chatOf = { jid ->
+                    withTimeoutOrNull(CHAT_LOOKUP_MS) { waChats.chats.first() }?.firstOrNull { it.jid == jid }
+                },
+                nameOf = { number -> book.owner(number)?.displayName },
+                preview = { body -> waPreview(body, MessageMeta(), words) },
+                pushWake = context.resources.getBoolean(R.bool.push_wake),
+                now = System::currentTimeMillis,
+            ),
+        )
+    }
+
+    protected open fun createSchedule(): ScheduleCenter =
+        ScheduleCenter(
+            scope = scope,
+            ops = ops,
+            alarms = scheduledSms,
+            remote = GatewayWaScheduleRemote(wa),
+            live = waOffline.live,
+            queue = FileQueueStore(context.noBackupFilesDir),
+            now = System::currentTimeMillis,
+        )
 
     protected open fun createWaRemote(): WaRemote = GatewayWaRemote(wa)
 
@@ -163,6 +275,17 @@ open class MessagesContainer(
 
     protected open fun createOps(): MessagesOps = NativeMessagesOps(rust)
 
+    protected open fun createBlocklist(): BlocklistRepository = AndroidBlocklistRepository(context, Dispatchers.IO)
+
+    protected open fun createCodeCleanup(): CodeCleanup =
+        CodeCleanup(
+            file = java.io.File(context.noBackupFilesDir, CodeCleanup.FILE),
+            sms = sms,
+            roleHeld = { readSmsRole() },
+            wake = { delay -> CodeCleanupWorker.schedule(context, delay) },
+            now = SystemRostyClock::nowMillis,
+        )
+
     protected open fun createChat(): ChatOps = NativeChatOps(rust)
 
     protected open fun createSearch(): SearchOps = NativeSearchOps(rust)
@@ -170,4 +293,8 @@ open class MessagesContainer(
     protected open fun createSharedOps(): SharedOps = NativeSharedOps(rust)
 
     protected open fun createQr(): QrOps = NativeQrOps(rust)
+
+    private companion object {
+        const val CHAT_LOOKUP_MS = 2_000L
+    }
 }

@@ -49,6 +49,9 @@ object SmsQuery {
     private val ADDRESSES_URI: Uri = Uri.parse("content://mms-sms/canonical-addresses")
     private val MMS_PART_URI: Uri = Uri.parse("content://mms/part")
 
+    /** Message ids per `IN (...)` of a part query, under SQLite's oldest bound-argument limit (999). */
+    private const val IN_CHUNK = 400
+
     private val SMS_PROJECTION =
         arrayOf("_id", "thread_id", "address", "body", "date", "type", "read", "sub_id", "status")
 
@@ -234,15 +237,112 @@ object SmsQuery {
         return RestoreOutcome(inserted, skipped)
     }
 
+    /** Where a backup page stops: the provider's raw `date` (ms for SMS, seconds for MMS) and `_id` of its last row. */
+    data class PageKey(
+        val date: Long,
+        val id: Long,
+    )
+
+    /**
+     * One page of every SMS for a backup: the [limit] rows after [after] in `date DESC, _id DESC` order (null: from
+     * the newest). Keyed on `(date, _id)`, so rows of the same date across a page boundary are neither lost nor read
+     * twice.
+     */
+    fun backupSms(
+        context: Context,
+        after: PageKey?,
+        limit: Int,
+    ): List<SmsRow> {
+        val (selection, args) = keyset(after)
+        return readSms(context, selection, args, limit.coerceAtLeast(1), "date DESC, _id DESC")
+    }
+
+    /**
+     * One page of every MMS for a backup, in the order and paging of [backupSms] (MMS dates are seconds). Only the
+     * addresses and the text parts are read: no part file is opened and nothing is written to the cache.
+     */
+    fun backupMms(
+        context: Context,
+        after: PageKey?,
+        limit: Int,
+    ): List<MmsRow> {
+        val (selection, args) = keyset(after)
+        val heads = ArrayList<MmsRow>()
+        context.contentResolver
+            .query(
+                Telephony.Mms.CONTENT_URI,
+                arrayOf("_id", "thread_id", "date", "msg_box", "read", "sub_id"),
+                selection,
+                args,
+                "date DESC, _id DESC LIMIT ${limit.coerceAtLeast(1)}",
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val (from, to) = mmsAddresses(context, id)
+                    heads +=
+                        MmsRow(
+                            id = id,
+                            threadId = c.getLong(1),
+                            addresses = to,
+                            from = from,
+                            dateMs = c.getLong(2) * 1000,
+                            outgoing = c.getInt(3) != Telephony.Mms.MESSAGE_BOX_INBOX,
+                            read = c.getInt(4) != 0,
+                            parts = emptyList(),
+                            subId = c.getInt(5).takeIf { it >= 0 },
+                        )
+                }
+            }
+        val texts = textParts(context, heads.map { it.id })
+        return heads.map { it.copy(parts = texts[it.id].orEmpty()) }
+    }
+
+    /** The rows strictly after [after] in `date DESC, _id DESC` order; no selection for the first page. */
+    private fun keyset(after: PageKey?): Pair<String?, Array<String>?> =
+        if (after == null) {
+            null to null
+        } else {
+            val date = after.date.toString()
+            "(date < ? OR (date = ? AND _id < ?))" to arrayOf(date, date, after.id.toString())
+        }
+
+    /** The `text/` parts of [mmsIds] by message, in part order: one query per [IN_CHUNK] messages. */
+    private fun textParts(
+        context: Context,
+        mmsIds: List<Long>,
+    ): Map<Long, List<MmsPart>> {
+        val out = HashMap<Long, MutableList<MmsPart>>()
+        for (chunk in mmsIds.chunked(IN_CHUNK)) {
+            val marks = chunk.joinToString(",") { "?" }
+            context.contentResolver
+                .query(
+                    MMS_PART_URI,
+                    arrayOf("mid", "ct", "text"),
+                    "mid IN ($marks) AND ct LIKE 'text/%'",
+                    chunk.map { it.toString() }.toTypedArray(),
+                    "mid, _id",
+                )?.use { c ->
+                    while (c.moveToNext()) {
+                        val type = c.getString(1) ?: continue
+                        // Checked again: the selection is the provider's to honour.
+                        if (!type.startsWith("text/", ignoreCase = true)) continue
+                        out.getOrPut(c.getLong(0)) { ArrayList() } += MmsPart(type, c.getString(2) ?: "", null)
+                    }
+                }
+        }
+        return out
+    }
+
     private fun readSms(
         context: Context,
-        selection: String,
-        args: Array<String>,
+        selection: String?,
+        args: Array<String>?,
         limit: Int,
+        order: String = "date DESC",
     ): List<SmsRow> {
         val sms = ArrayList<SmsRow>()
         context.contentResolver
-            .query(Telephony.Sms.CONTENT_URI, SMS_PROJECTION, selection, args, "date DESC LIMIT $limit")
+            .query(Telephony.Sms.CONTENT_URI, SMS_PROJECTION, selection, args, "$order LIMIT $limit")
             ?.use { c ->
                 while (c.moveToNext()) {
                     val box = c.getInt(5)

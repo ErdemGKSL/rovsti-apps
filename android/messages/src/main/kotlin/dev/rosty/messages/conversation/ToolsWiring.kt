@@ -54,15 +54,21 @@ import dev.rosty.messages.R
 import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.platform.files.ExportDocument
 import dev.rosty.platform.files.FileResult
+import dev.rosty.platform.files.FilesRepository
 import dev.rosty.platform.files.ShareIntents
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /** The labels of the tools in the app's language. */
 @Composable
@@ -95,6 +101,8 @@ class ToolHost(
     val copy: (String) -> Unit,
     /** "Now", from the injected clock (tests fix it). */
     val clock: RostyClock = SystemRostyClock,
+    /** M48: shares a zip of the chat text and its files (null: the page offers no zip). */
+    val shareZip: (suspend (ExportedChat, List<File>) -> Boolean)? = null,
 ) {
     /** Today in the phone's zone. */
     fun today(): LocalDate = Instant.ofEpochMilli(clock.nowMillis()).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -133,6 +141,17 @@ fun headerMenu(
                 }
             }
         }
+    host.shareZip?.let { share ->
+        items +=
+            MenuItem.Action(c.getString(R.string.tools_export_zip), RostyIcons.Document) {
+                host.scope.launch {
+                    val exported = host.tools.export(host.title(), c.getString(R.string.tools_me))
+                    if (exported == null || !share(exported, host.tools.mediaFiles())) {
+                        host.overlays.showToast(c.getString(R.string.tools_export_failed))
+                    }
+                }
+            }
+    }
     if (copyables.isNotEmpty()) {
         items += MenuItem.Separator
         for ((label, value) in copyables) items += MenuItem.Action(label, RostyIcons.Copy) { host.copy(value) }
@@ -377,6 +396,7 @@ fun rememberToolHost(
                 save.launch(file.fileName)
             },
             clock = clock,
+            shareZip = { chat, files -> shareChatZip(context, container.files, chat, files) },
             copy = { text ->
                 container.clipboard.copy(text)
                 overlays.showToast(res.getString(R.string.conversation_copied))
@@ -388,3 +408,48 @@ fun rememberToolHost(
 /** The bubbles of [items], newest first as listed. */
 fun bubblesOf(items: List<ConversationItem>): List<BubbleUi> =
     items.mapNotNull { (it as? ConversationItem.Bubble)?.bubble }
+
+/**
+ * M48: the chat text and the loaded files in one zip (`<name>.zip` holding `<name>.txt` and `media/`), handed to the
+ * share sheet. False when nothing could be written or shared.
+ */
+internal suspend fun shareChatZip(
+    c: Context,
+    files: FilesRepository,
+    chat: ExportedChat,
+    media: List<File>,
+): Boolean {
+    val base = chat.fileName.substringBeforeLast('.')
+    val zip =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val out = File(File(c.cacheDir, "exports").apply { mkdirs() }, "$base.zip")
+                ZipOutputStream(out.outputStream().buffered()).use { z ->
+                    z.putNextEntry(ZipEntry(chat.fileName))
+                    z.write(chat.text.toByteArray())
+                    z.closeEntry()
+                    val used = HashSet<String>()
+                    for (f in media.filter { it.isFile }) {
+                        var name = f.name
+                        var n = 1
+                        while (!used.add(name)) name = "${n++}-${f.name}"
+                        z.putNextEntry(ZipEntry("media/$name"))
+                        f.inputStream().use { it.copyTo(z) }
+                        z.closeEntry()
+                    }
+                }
+                out
+            }.getOrNull()
+        } ?: return false
+    val uri = files.stageForShare(zip.absolutePath, zip.name) ?: return false
+    return try {
+        c.startActivity(
+            Intent
+                .createChooser(ShareIntents.file(uri, "application/zip", zip.name), null)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    } catch (_: android.content.ActivityNotFoundException) {
+        false
+    }
+}

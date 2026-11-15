@@ -122,6 +122,7 @@ fun rememberWaInboxViewModel(container: MessagesContainer): InboxViewModel {
                             ops = container.ops,
                             chat = container.chat,
                             now = System::currentTimeMillis,
+                            names = container.names,
                         ),
                         InboxBuilder(words, time),
                         words,
@@ -333,23 +334,14 @@ private fun statusRowState(
     list: StatusList,
     words: StatusWords,
     clock: RostyClock,
-) = produceState(StatusRowUi(subtitle = words.none), list, words) {
-    val names = HashMap<String, String?>()
-    for (author in list.authors) {
-        val number = numberOfJid(author.author) ?: continue
-        names[author.author] =
-            container.book
-                .owner(number)
-                ?.displayName
-                ?.takeIf { it.isNotBlank() }
+): androidx.compose.runtime.State<StatusRowUi> {
+    // Moves when a contact is saved or a WhatsApp name that was asked for arrives: the people are named again.
+    val revision by container.names.changes.collectAsState(0L)
+    return produceState(StatusRowUi(subtitle = words.none), list, words, revision) {
+        val names = HashMap<String, String>()
+        for (author in list.authors) names[author.author] = container.names.sender(author.author, author.name)
+        value = statusRowOf(list, words, clock.nowMillis()) { jid, _ -> names[jid] ?: jid.substringBefore('@') }
     }
-    value =
-        statusRowOf(list, words, clock.nowMillis()) { jid, carried ->
-            names[jid]
-                ?: carried?.takeIf { it.isNotBlank() }
-                ?: numberOfJid(jid)
-                ?: jid.substringBefore('@')
-        }
 }
 
 /** Opens the Status list as a sheet; a person opens the viewer on their updates. */

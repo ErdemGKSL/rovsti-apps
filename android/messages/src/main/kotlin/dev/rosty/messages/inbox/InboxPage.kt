@@ -69,6 +69,7 @@ fun rememberInboxViewModel(container: MessagesContainer): InboxViewModel {
                             spam = container.spamActions,
                             blocked = container.blocklist.numbers(),
                             cleanup = container.codeCleanup,
+                            names = container.names,
                         ),
                         InboxBuilder(words, time),
                         words,

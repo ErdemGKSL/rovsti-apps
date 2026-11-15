@@ -41,6 +41,7 @@ import dev.rosty.messages.conversation.ReplyTags
 import dev.rosty.messages.conversation.VoiceUi
 import dev.rosty.messages.conversation.rememberToolLabels
 import dev.rosty.messages.inbox.ResourceInboxWords
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaTestKit.Companion.ADA
 import dev.rosty.messages.wa.WaTestKit.Companion.GROUP
 import dev.rosty.messages.wa.WaTestKit.Companion.MERT
@@ -120,8 +121,7 @@ class WaMediaShotTest : ShotTest() {
                     offline = kit.offline,
                     remote = kit.remote,
                     drafts = MemoryDrafts(),
-                    nameOf = { book[it] },
-                    bookChanges = MutableStateFlow(Unit),
+                    names = PersonNames({ book[it] }, MutableStateFlow(Unit)),
                     now = { kit.now },
                     media =
                         WaMedia(

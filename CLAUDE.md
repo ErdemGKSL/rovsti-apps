@@ -32,6 +32,9 @@
   (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>` (or the glisse line); list new sources in
   `android/THIRD_PARTY_NOTICES.md`.
 
+- The GPUI apps (`apps/*`) are retired: the Kotlin apps under `android/` are the product. Never fix, extend or
+  build `apps/*`; if they stop compiling, run Rust checks on the other packages (the close gate's package set).
+
 Checks before you finish:
 
 ```

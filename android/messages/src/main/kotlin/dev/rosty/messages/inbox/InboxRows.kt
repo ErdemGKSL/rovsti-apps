@@ -113,6 +113,11 @@ data class InboxInputs(
     /** One-to-one SMS threads whose sender is on the system blocklist. */
     val blockedThreads: Set<Long> = emptySet(),
     val otps: Map<String, String> = emptyMap(),
+    /**
+     * Row key to title for the rows no contact owns, by the name-order rule (WhatsApp name, else the number as
+     * people read it); a row without an entry keeps the merge's title.
+     */
+    val titles: Map<String, String> = emptyMap(),
     val nowMs: Long = 0,
 )
 
@@ -159,10 +164,12 @@ class InboxBuilder(
         val contactId = (row.key as? PersonKey.Contact)?.id
         val contact = contactId?.let(inputs.contacts::get)
         val tags = threads.map(::tagOf)
+        val key = keyOf(row.key)
         val title =
-            row.title.ifBlank {
-                smsRow?.addresses?.takeIf { it.isNotEmpty() }?.let(words::joined) ?: chat?.name.orEmpty()
-            }
+            inputs.titles[key]
+                ?: row.title.ifBlank {
+                    smsRow?.addresses?.takeIf { it.isNotEmpty() }?.let(words::joined) ?: chat?.name.orEmpty()
+                }
         val latest = row.channels.firstOrNull() ?: threads.first().channel
         val draft = tags.firstNotNullOfOrNull { tag -> inputs.drafts[tag]?.takeIf { it.isNotBlank() } }
         val snippet =
@@ -180,7 +187,6 @@ class InboxBuilder(
         val numbers =
             (contact?.numbers?.map { it.raw }.orEmpty() + listOfNotNull(sender) + listOfNotNull(wa?.let(::numberOfJid)))
                 .distinct()
-        val key = keyOf(row.key)
         return InboxRowUi(
             key = key,
             title = title,

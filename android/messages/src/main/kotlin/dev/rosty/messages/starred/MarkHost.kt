@@ -2,7 +2,6 @@ package dev.rosty.messages.starred
 
 import android.content.res.Resources
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -205,16 +204,6 @@ class MarkHost(
     fun marked(state: ConversationUi): ConversationUi {
         val starMarks by remember(this) { stars.marks(tag) }.collectAsState(StarMarks())
         val badges by remember(this) { reminders.badges(tag) }.collectAsState(emptyMap())
-        if (tag.startsWith(WA_TAG)) {
-            // What the store says about the loaded messages settles the stars made on this phone.
-            LaunchedEffect(state.items) {
-                val stored =
-                    state.items
-                        .mapNotNull { (it as? ConversationItem.Bubble)?.bubble }
-                        .associate { (it.markId ?: it.key) to it.starred }
-                stars.seen(tag.removePrefix(WA_TAG), stored)
-            }
-        }
         return remember(state, starMarks, badges) { state.withMarks(starMarks, badges.mapValues { clock(it.value) }) }
     }
 }

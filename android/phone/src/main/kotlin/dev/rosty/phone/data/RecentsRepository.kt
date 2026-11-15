@@ -25,6 +25,7 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -33,6 +34,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -68,7 +71,12 @@ data class RecentsModel(
  * Names are the current contacts' ([ids], F29): each build matches the log's numbers to the contacts, and a change of
  * the contacts ([idsChanged]) rebuilds, so a renamed or newly saved contact shows at once. The log's cached name
  * names only a number no contact owns; [savedNameOf] keeps it for the call details.
+ *
+ * [callLogGranted] is whether READ_CALL_LOG is held, as the permission controller last read it. The log is queried
+ * again each time it changes: a read made before the grant answers an empty list, and granting the permission sends no
+ * provider change, so without this the first process after a fresh install kept an empty Recents until it restarted.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class RecentsRepository(
     private val callLog: CallLogRepository,
     private val ops: PhoneOps,
@@ -80,6 +88,7 @@ class RecentsRepository(
     private val windowMs: Long = RebuildCoalescer.WINDOW_MS,
     private val ids: CallerIds? = null,
     private val idsChanged: Flow<Long> = flowOf(0L),
+    private val callLogGranted: Flow<Boolean> = flowOf(true),
 ) {
     private val state = MutableStateFlow(RecentsModel())
     private val pending = Channel<Unit>(Channel.CONFLATED)
@@ -132,7 +141,8 @@ class RecentsRepository(
             for (ignored in pending) build()
         }
         scope.launch {
-            combine(callLog.entries(), extras, idsChanged) { log, extra, _ -> log to extra }.collect { (log, extra) ->
+            val logs = callLogGranted.distinctUntilChanged().flatMapLatest { callLog.entries() }
+            combine(logs, extras, idsChanged) { log, extra, _ -> log to extra }.collect { (log, extra) ->
                 val first = !state.value.ready
                 entries = log
                 wa = extra

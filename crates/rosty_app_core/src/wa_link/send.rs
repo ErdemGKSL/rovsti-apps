@@ -100,7 +100,36 @@ fn digest(json: &str) -> Option<String> {
         .map_or_else(|| input.chat.ends_with("@g.us"), |c| c.is_group);
     let title = chat.as_ref().and_then(|c| c.name.as_deref());
     let spec = build_digest(&input.chat, title, is_group, &messages)?;
-    serde_json::to_string(&spec).ok()
+    let mut out = serde_json::to_value(&spec).ok()?;
+    if is_group {
+        // Who wrote each line, so the app can put the name it knows (a saved contact first) before the text.
+        out["senders"] = digest_senders(&messages, spec.lines.len()).into();
+    }
+    serde_json::to_string(&out).ok()
+}
+
+/// The sender of each of the `lines` newest notified messages, oldest first like [`build_digest`]'s lines: the bare
+/// user JID (`<number>@<server>`, no device part), empty when the message names nobody. In a group every line of
+/// the digest starts with `<number>: `; the caller swaps that for the name it shows everywhere else.
+pub fn digest_senders(messages: &[WaMessage], lines: usize) -> Vec<String> {
+    let mut notified: Vec<&WaMessage> = messages
+        .iter()
+        .filter(|m| !m.from_me && !matches!(m.body, MessageBody::Unsupported))
+        .collect();
+    notified.sort_by_key(|m| m.timestamp_ms);
+    let skip = notified.len().saturating_sub(lines);
+    notified[skip..]
+        .iter()
+        .map(|m| m.sender.as_deref().map(bare_jid).unwrap_or_default())
+        .collect()
+}
+
+/// `905320000000:3@s.whatsapp.net` as `905320000000@s.whatsapp.net`.
+fn bare_jid(jid: &str) -> String {
+    match jid.split_once('@') {
+        Some((_, server)) => format!("{}@{server}", jid_user(jid)),
+        None => jid_user(jid).to_owned(),
+    }
 }
 
 /// `{dir, chat, text}` in; `{"ok":true|false}` out.
@@ -279,6 +308,31 @@ mod tests {
         let spec = build_digest("120363@g.us", None, true, &msgs).unwrap();
         assert_eq!(spec.title, "120363");
         assert_eq!(spec.lines, vec!["905320000000: hi"]);
+    }
+
+    #[test]
+    fn digest_senders_follow_the_lines_oldest_first_without_the_device_part() {
+        let msgs = vec![
+            text("4", false, 40, "d", Some("905320000002@s.whatsapp.net")),
+            text("3", true, 30, "mine", None),
+            text("2", false, 20, "b", None),
+            text("1", false, 10, "a", Some("905320000001:3@s.whatsapp.net")),
+        ];
+        let spec = build_digest("120363@g.us", Some("Flatmates"), true, &msgs).unwrap();
+        assert_eq!(spec.lines, vec!["905320000001: a", "b", "905320000002: d"]);
+        assert_eq!(
+            digest_senders(&msgs, spec.lines.len()),
+            vec![
+                "905320000001@s.whatsapp.net",
+                "",
+                "905320000002@s.whatsapp.net"
+            ]
+        );
+        // Only the lines the digest kept (its newest ones).
+        assert_eq!(
+            digest_senders(&msgs, 1),
+            vec!["905320000002@s.whatsapp.net"]
+        );
     }
 
     #[test]

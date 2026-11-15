@@ -29,6 +29,7 @@ import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
 import dev.rosty.people.AvatarResolver
+import dev.rosty.people.FileLiveNameStore
 import dev.rosty.people.LiveWaNames
 import dev.rosty.people.PeopleIdentitySource
 import dev.rosty.people.PeopleSource
@@ -418,6 +419,8 @@ open class PhoneContainer(
             gateway = { wa.gateway() },
             e164 = { PhoneNumbers.e164(it, homeRegion) },
             scope = scope,
+            // Kept between runs, so a restart does not ask WhatsApp for the same numbers again.
+            store = FileLiveNameStore(File(context.noBackupFilesDir, "wa-live-names.json")),
         )
     }
 
@@ -647,7 +650,7 @@ open class PhoneContainer(
 
     protected open fun createCallSource(): CallSource =
         WaMergedCallSource(
-            base = RegistryCallSource(registryCalls, CallRegistry.state, scope),
+            base = RegistryCallSource(registryCalls, CallRegistry.snapshotSeq, scope),
             waCalls = waCallsNamed,
             muted = waCalls.mutedCalls,
             speaker = waCalls.speakerOn,
@@ -802,6 +805,8 @@ open class PhoneContainer(
             extras = waCalls.calls.map { RecentsRepository.extraCalls(it) },
             ids = callerIds,
             idsChanged = callerIdsChanged,
+            // Re-reads the log when READ_CALL_LOG is granted while the process runs (first launch after install).
+            callLogGranted = permissions.state(PermissionGroup.CALL_LOG).map { it == PermissionState.Granted },
             locale = { DeviceLocaleTime.now(context, clock()) },
             lastSeenMs = { store.prefs.value.ui.missedSeenMs },
         ).also { it.start() }

@@ -127,6 +127,8 @@ pub mod thread_marks;
 pub mod unread_jump;
 pub mod vcard;
 pub mod voice_player;
+/// WhatsApp identity: LID and phone-number ids of one person, the canonical key, the name rule.
+pub mod wa_identity;
 pub mod wire;
 pub mod zoom;
 

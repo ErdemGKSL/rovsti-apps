@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import java.util.Locale
 
 /** One row of the pick sheet (GPUI `PickItem`); every text is made by the core. */
 @Immutable
@@ -190,15 +191,26 @@ sealed interface PickAction {
 }
 
 /**
- * Rules the core does not answer yet; the pick sheet asks them here so a Rust op can replace them without a UI change.
- * [showRefusal]: whether a typed query that is no location gets its reason (GPUI `looks_like_link`, an app-local rule
- * in `apps/stops/src/picker.rs`). The stub says no: typing a name searches below without an explanation.
+ * The pick sheet's own rules, kept apart so a Rust op can replace them without a UI change.
+ * [showRefusal]: whether a typed query that is no location gets its reason. Only text that [looksLikeLink] does:
+ * typing a name searches below without an explanation.
  */
 interface PickRules {
-    fun showRefusal(query: String): Boolean = false
+    fun showRefusal(query: String): Boolean = looksLikeLink(query)
 
     companion object {
         val Core: PickRules = object : PickRules {}
+
+        /**
+         * Whether [text] was meant as a link or as coordinates and not as a name: a `geo:` URI, anything with a
+         * scheme, or text that starts with a digit or a minus sign (pure).
+         */
+        fun looksLikeLink(text: String): Boolean {
+            val trimmed = text.trimStart().lowercase(Locale.ROOT)
+            val first = trimmed.firstOrNull()
+            return trimmed.startsWith("geo:") || "://" in trimmed || first == '-' ||
+                (first != null && first in '0'..'9')
+        }
     }
 }
 

@@ -1,17 +1,22 @@
 package dev.rosty.stops.trip
 
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import dev.rosty.core.model.stops.Ends
 import dev.rosty.platform.location.TripStatus
 import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.shell.permissions.permissionActionTag
 import dev.rosty.stops.AppFixture
+import dev.rosty.stops.SampleStops
+import dev.rosty.stops.saved.SavedTags
 import dev.rosty.stops.saved.settleRust
 import dev.rosty.testing.ShotTest
 import kotlinx.serialization.json.Json
@@ -59,6 +64,50 @@ class TripAppTest : ShotTest() {
         }
         assertEquals(1, fixture.container.fakeTrips.started.size)
         return fixture
+    }
+
+    /** The owner's flow: A and B picked, "Save as stop" on the plan, a name of one's own, no trip at all. */
+    @Test fun thePlanSavesThePairAsAStopWithoutATrip() {
+        val fixture = TripFixtures.app()
+        fixture.container.fake.saved =
+            SampleStops.saved.copy(stops = SampleStops.saved.stops.filter { it.name == "School" })
+        start(fixture)
+        click(TripTags.Save)
+        compose.onNodeWithTag(SavedTags.RenameField, useUnmergedTree = true).assertTextContains("Pier West")
+        // An empty name cannot be saved: Save waits.
+        compose.onNodeWithTag(SavedTags.RenameField, useUnmergedTree = true).performTextReplacement("   ")
+        settleRust(300)
+        click(SavedTags.RenameSave)
+        compose.onNodeWithTag(SavedTags.RenameField, useUnmergedTree = true).assertExists()
+        assertEquals(
+            1,
+            fixture.container.fake.saved!!
+                .stops.size,
+        )
+        compose.onNodeWithTag(SavedTags.RenameField, useUnmergedTree = true).performTextReplacement("Morning ferry")
+        settleRust(300)
+        click(SavedTags.RenameSave)
+        val stops =
+            fixture.container.fake.saved!!
+                .stops
+        assertEquals(listOf("School", "Morning ferry"), stops.map { it.name })
+        assertTrue(
+            fixture.container.fakeTrips.started
+                .isEmpty(),
+        )
+        compose.onNode(hasTestTag("toast-text") and hasText("Saved as Morning ferry")).assertExists()
+        // The plan now says which stop this pair is, and offers no second save.
+        compose.onNodeWithTag(TripTags.Save, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag(TripTags.Saved, useUnmergedTree = true).assertExists()
+        // Undo takes the stop away and the offer comes back.
+        compose.onNodeWithText("Undo").performClick()
+        settleRust()
+        assertEquals(
+            1,
+            fixture.container.fake.saved!!
+                .stops.size,
+        )
+        compose.onNodeWithTag(TripTags.Save, useUnmergedTree = true).assertExists()
     }
 
     @Test fun startRunsTheTripWhenNothingBlocks() {

@@ -165,11 +165,20 @@ data class SavedListAnswer(
     val colours: List<ColourChoice>,
 )
 
+/**
+ * Asks for a name to prefill when saving the stop AB. The answer is never empty and none of [names]; with no
+ * [feed] the core reads the imported one itself.
+ */
 @Serializable
 data class SuggestNameRequest(
     val a: Endpoint,
     val b: Endpoint,
     @EncodeDefault(NEVER) val feed: GtfsFeed? = null,
+    @EncodeDefault(NEVER) val dir: String? = null,
+    /** The names saved already. */
+    @EncodeDefault(NEVER) val names: List<String> = emptyList(),
+    /** The language of a numbered name ("Stop 3" / "Durak 3"), a locale tag; absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable

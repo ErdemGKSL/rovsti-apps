@@ -463,12 +463,13 @@ class PickControllerTest {
         val stop = SavedStop(1, "Pier", Endpoint("", ends.a!!.coord), Endpoint("", ends.b!!.coord), 0)
         pick.savedStops = SavedStops(2, 2, listOf(stop))
         assertFalse(runBlocking { pick.pinMenuModel(Slot.A) }!!.canSave)
-        // Without a position and without saved stops the rows are simply not there.
+        // Without a position there is no distance row. Without a saved file (a first run) the list is empty,
+        // so the pair can be saved.
         pick.radar.update { it.copy(position = null) }
         pick.savedStops = null
         val bare = runBlocking { pick.pinMenuModel(Slot.B) }!!
         assertNull(bare.fromYou)
-        assertFalse(bare.canSave)
+        assertTrue(bare.canSave)
         pick.remove(Slot.B)
         settle()
         assertNull(runBlocking { pick.pinMenuModel(Slot.B) })

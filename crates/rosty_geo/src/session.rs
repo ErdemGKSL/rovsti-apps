@@ -197,9 +197,23 @@ impl ActiveTrip {
         })
     }
 
-    /// "A – B".
+    /// "A – B" in the trip's language. An end with no name of its own (a dropped pin, a measured
+    /// point) reads "Point A" / "B noktası", so the label is never a bare dash.
     pub fn label(&self) -> String {
-        format!("{} – {}", self.a.label, self.b.label)
+        self.label_in(self.lang)
+    }
+
+    /// [`Self::label`] in `lang`.
+    pub fn label_in(&self, lang: Lang) -> String {
+        let name = |end: &Endpoint, letter: &str| {
+            let label = end.label.trim();
+            if crate::history::is_generic_label(label) {
+                crate::history::point_name(lang, letter)
+            } else {
+                label.to_owned()
+            }
+        };
+        format!("{} – {}", name(&self.a, "A"), name(&self.b, "B"))
     }
 
     pub fn on_fix(&mut self, fix: Fix, _at_ms: i64) -> FixOutcome {
@@ -595,6 +609,15 @@ mod tests {
     #[test]
     fn label_joins_both_ends() {
         assert_eq!(trip().label(), "Home – Work");
+        // Ends without a name never leave a bare dash.
+        let mut unnamed = trip();
+        unnamed.a.label = String::new();
+        unnamed.b.label = "  ".into();
+        assert_eq!(unnamed.label(), "Point A – Point B");
+        assert_eq!(unnamed.label_in(Lang::Tr), "A noktası – B noktası");
+        unnamed.b.label = "Pier".into();
+        unnamed.lang = Lang::Tr;
+        assert_eq!(unnamed.label(), "A noktası – Pier");
     }
 
     #[test]

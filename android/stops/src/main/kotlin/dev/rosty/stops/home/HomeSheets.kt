@@ -43,9 +43,7 @@ object HomeSheetTags {
     const val SavedRow = "home-sheet-saved"
     const val HistoryRow = "home-sheet-history"
     const val TransitRow = "home-sheet-transit"
-    const val Saved = "sheet-saved"
     const val History = "sheet-history"
-    const val Pick = "sheet-pick"
 }
 
 /** The map sheet's detents, tallest first: index 0 Large, 1 Medium, 2 Peek ([SheetState.detentOffsets] order). */
@@ -168,66 +166,5 @@ internal fun MapSheetContent(
     }
 }
 
-/** Which placeholder sheet to open over the map. */
-enum class HomeSheet { Saved, History, Pick }
-
-/**
- * Presents one of the modal sheets that later stories fill (Saved: E7.7, History: E7.11, Pick: E7.8) over the map
- * sheet; [onDismissed] runs when it has left. [shared] is the text of a link handed to the app (shown by Pick).
- */
-internal fun OverlayController.presentHomeSheet(
-    which: HomeSheet,
-    title: String,
-    shared: String? = null,
-    onDismissed: () -> Unit = {},
-): SheetEntry =
-    SheetEntry(
-        title = title,
-        detents = persistentListOf(Detent.Medium, Detent.Large),
-        onDismissed = onDismissed,
-    ) { _ -> PlaceholderSheet(which, title, shared) }.also { present(it) }
-
-@Composable
-private fun PlaceholderSheet(
-    which: HomeSheet,
-    title: String,
-    shared: String?,
-) {
-    val tag =
-        when (which) {
-            HomeSheet.Saved -> HomeSheetTags.Saved
-            HomeSheet.History -> HomeSheetTags.History
-            HomeSheet.Pick -> HomeSheetTags.Pick
-        }
-    val message =
-        when (which) {
-            HomeSheet.Saved -> {
-                stringResource(R.string.sheet_saved_message)
-            }
-
-            HomeSheet.History -> {
-                stringResource(R.string.sheet_history_message)
-            }
-
-            HomeSheet.Pick -> {
-                shared?.let { stringResource(R.string.sheet_pick_shared, it) }
-                    ?: stringResource(R.string.sheet_pick_message)
-            }
-        }
-    val icon =
-        when (which) {
-            HomeSheet.Saved -> StopsIcons.Bookmark
-            HomeSheet.History -> RostyIcons.Clock
-            HomeSheet.Pick -> RostyIcons.Search
-        }
-    Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(tag)) {
-        RostyText(title, style = RostyTheme.type.title2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(Spacing.xl))
-        EmptyState(
-            icon = icon,
-            title = stringResource(R.string.sheet_coming),
-            message = message,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
+/** The modal sheets the home opens over the map sheet. */
+enum class HomeSheet { Saved, History }

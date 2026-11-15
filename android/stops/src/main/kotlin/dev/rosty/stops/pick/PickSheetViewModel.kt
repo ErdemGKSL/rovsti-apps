@@ -24,12 +24,12 @@ import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.ops.StopsOps
 import dev.rosty.design.text.UiText
 import dev.rosty.stops.R
+import dev.rosty.stops.data.Latest
 import dev.rosty.stops.data.SavedStore
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -224,7 +224,7 @@ class PickSheetViewModel(
     val effects: Flow<PickEffect> = effectChannel.receiveAsFlow()
 
     private var ends = Ends()
-    private var rowsJob: Job? = null
+    private val listing = Latest(work)
 
     /** The sheet opens for [onMap]: an empty field, the rows of no query. */
     fun open(onMap: Ends) {
@@ -335,14 +335,12 @@ class PickSheetViewModel(
     }
 
     private fun relist(delayMs: Long) {
-        rowsJob?.cancel()
         val query = mutable.value.query.trim()
-        rowsJob =
-            work.launch {
-                if (delayMs > 0) delay(delayMs)
-                val rows = rowsFor(query)
-                mutable.value = mutable.value.copy(rows = rows.toImmutableList(), loading = false)
-            }
+        listing.launch {
+            if (delayMs > 0) delay(delayMs)
+            val rows = rowsFor(query)
+            publish { mutable.value = mutable.value.copy(rows = rows.toImmutableList(), loading = false) }
+        }
     }
 
     /** GPUI `pick_rows`: the typed point, stops, saved stops; with no query, the recent trips and points. */

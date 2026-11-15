@@ -19,12 +19,12 @@ import dev.rosty.core.ops.StopsOps
 import dev.rosty.design.text.UiText
 import dev.rosty.stops.R
 import dev.rosty.stops.data.HistoryStore
+import dev.rosty.stops.data.Latest
 import dev.rosty.stops.saved.toDestination
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -173,7 +173,7 @@ class HistoryViewModel(
     private val effectChannel = Channel<HistoryEffect>(Channel.BUFFERED)
     val effects: Flow<HistoryEffect> = effectChannel.receiveAsFlow()
 
-    private var listJob: Job? = null
+    private val listing = Latest(work)
 
     fun onAction(action: HistoryAction) {
         when (action) {
@@ -315,30 +315,29 @@ class HistoryViewModel(
         debounce: Boolean,
         withStats: Boolean = false,
     ) {
-        listJob?.cancel()
-        listJob =
-            work.launch {
-                if (debounce) delay(QUERY_DEBOUNCE_MS)
-                val history = store.history.value ?: store.reload()
-                val now = ui.value
-                val list =
-                    (
-                        ops.historyList(
-                            HistoryListRequest(history, nowMs(), now.query.takeIf { it.isNotBlank() }, now.filter.wire),
-                        ) as? Outcome.Ok
-                    )?.value
-                var stats = now.stats
-                var prune = now.prune
-                if (withStats || now.loading) {
-                    stats = (ops.stats(StatsRequest(history, nowMs())) as? Outcome.Ok)?.value
-                    prune =
-                        (ops.historyPrunePlan(PrunePlanRequest(history, nowMs())) as? Outcome.Ok)
-                            ?.value
-                            ?.choices
-                            ?.filter { it.enabled && it.count > 0 }
-                            .orEmpty()
-                            .toImmutableList()
-                }
+        listing.launch {
+            if (debounce) delay(QUERY_DEBOUNCE_MS)
+            val history = store.history.value ?: store.reload()
+            val now = ui.value
+            val list =
+                (
+                    ops.historyList(
+                        HistoryListRequest(history, nowMs(), now.query.takeIf { it.isNotBlank() }, now.filter.wire),
+                    ) as? Outcome.Ok
+                )?.value
+            var stats = now.stats
+            var prune = now.prune
+            if (withStats || now.loading) {
+                stats = (ops.stats(StatsRequest(history, nowMs())) as? Outcome.Ok)?.value
+                prune =
+                    (ops.historyPrunePlan(PrunePlanRequest(history, nowMs())) as? Outcome.Ok)
+                        ?.value
+                        ?.choices
+                        ?.filter { it.enabled && it.count > 0 }
+                        .orEmpty()
+                        .toImmutableList()
+            }
+            publish {
                 ui.update {
                     it.copy(
                         loading = false,
@@ -349,6 +348,7 @@ class HistoryViewModel(
                     )
                 }
             }
+        }
     }
 
     companion object {

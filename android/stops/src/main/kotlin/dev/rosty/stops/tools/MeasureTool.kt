@@ -7,16 +7,15 @@ import dev.rosty.core.model.stops.FormatDistanceRequest
 import dev.rosty.core.model.stops.MeasureGate
 import dev.rosty.core.model.stops.MeasureRequest
 import dev.rosty.core.ops.StopsOps
+import dev.rosty.stops.data.Latest
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 
 /** What `stops.measure` answered for [points], with the distances already in words (`stops.format_distance`). */
 @Immutable
@@ -49,7 +48,8 @@ enum class MeasureTap { Added, Full, Off }
  * total, GPX, the gate of the first and last point). The core keeps the cap: a point past it is refused, and the
  * answer's `accepted` trims what was sent. [today] names the GPX file (`2026-09-21`).
  *
- * Call from the main thread; every Rust call runs on [scope] and only the answer for the current points is kept.
+ * Call from the main thread; every Rust call runs on [scope] and only the answer for the latest points is kept
+ * ([Latest]).
  */
 class MeasureTool(
     private val ops: StopsOps,
@@ -63,7 +63,7 @@ class MeasureTool(
     val on: Boolean get() = ui.value.on
 
     private var points: List<Coord> = emptyList()
-    private var job: Job? = null
+    private val latest = Latest(scope)
 
     /** Turns the tool on, starting at [from] when given (S34 "Measure from here"). */
     fun start(from: Coord? = null) {
@@ -72,7 +72,7 @@ class MeasureTool(
 
     /** Turns the tool off and forgets its points. */
     fun done() {
-        job?.cancel()
+        latest.launch {}
         points = emptyList()
         ui.value = MeasureUiState(maxPoints = ui.value.maxPoints)
     }
@@ -109,32 +109,36 @@ class MeasureTool(
         points = next
         val shown = next.toImmutableList()
         ui.update { it.copy(on = on, points = shown, result = it.result?.takeIf { r -> r.points == shown }) }
-        job?.cancel()
-        if (next.size < 2) return
-        job =
-            scope.launch {
-                val stamp = today()
-                val answer =
-                    (ops.measure(MeasureRequest(next, name = gpxName(stamp), today = stamp)) as? Outcome.Ok)?.value
-                        ?: return@launch
-                if (answer.accepted < next.size) {
-                    // Past the core's cap: keep what it kept.
-                    points = next.take(answer.accepted)
+        if (next.size < 2) {
+            // A listing still on its way for the old points must not land.
+            latest.launch {}
+            return
+        }
+        latest.launch {
+            val stamp = today()
+            val answer =
+                (ops.measure(MeasureRequest(next, name = gpxName(stamp), today = stamp)) as? Outcome.Ok)?.value
+                    ?: return@launch
+            if (answer.accepted < next.size) {
+                // Past the core's cap: keep what it kept (the cap is known from now on).
+                val kept = next.take(answer.accepted).toImmutableList()
+                publish {
                     ui.update { it.copy(maxPoints = answer.maxPoints) }
-                    set(points)
-                    return@launch
+                    set(kept)
                 }
-                val result =
-                    MeasureResult(
-                        points = shown,
-                        total = distance(answer.totalM),
-                        legs = answer.legsM.map { distance(it) }.toImmutableList(),
-                        gate = answer.gate,
-                        gpx = answer.gpx,
-                        fileName = answer.fileName,
-                    )
-                if (points == next) ui.update { it.copy(result = result, maxPoints = answer.maxPoints) }
+                return@launch
             }
+            val result =
+                MeasureResult(
+                    points = shown,
+                    total = distance(answer.totalM),
+                    legs = answer.legsM.map { distance(it) }.toImmutableList(),
+                    gate = answer.gate,
+                    gpx = answer.gpx,
+                    fileName = answer.fileName,
+                )
+            publish { ui.update { it.copy(result = result, maxPoints = answer.maxPoints) } }
+        }
     }
 
     private suspend fun distance(metres: Double): String =

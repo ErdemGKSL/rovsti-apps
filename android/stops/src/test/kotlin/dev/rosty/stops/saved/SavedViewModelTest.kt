@@ -30,7 +30,10 @@ class SavedViewModelTest {
     private val ops = NativeStopsOps(fake.rust)
     private val store = SavedStore(ops, nowMs = { NOW })
     private var here: Coord? = Coord(SampleStops.here.lat, SampleStops.here.lon)
-    private val model = SavedViewModel(store, ops, { here }, { NOW }, { 0 }, scope)
+
+    // Built on first use, so a test sets [here] before the model's first listing reads it (no listing with a stale
+    // position can come first).
+    private val model by lazy { SavedViewModel(store, ops, { here }, { NOW }, { 0 }, scope) }
 
     @After fun tearDown() = scope.cancel()
 
@@ -54,9 +57,7 @@ class SavedViewModelTest {
 
     @Test fun noPositionNoDistance() {
         here = null
-        // The model may have listed once with the old position before the line above: list again.
-        model.refresh()
-        val state = settled { it.rows.size == 2 && it.nearest == null }
+        val state = settled { it.rows.size == 2 }
         assertTrue(state.rows.all { it.distance == null })
     }
 

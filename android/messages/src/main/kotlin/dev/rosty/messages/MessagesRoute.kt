@@ -55,6 +55,10 @@ sealed interface MessagesRoute {
     @Serializable
     data object WhatsAppSettings : MessagesRoute
 
+    /** Settings, Spam filter: rules, allow list, blocked numbers, M47 (E6.11). */
+    @Serializable
+    data object SpamSettings : MessagesRoute
+
     // The common settings pages (shell CommonSettingsPage + the licence detail).
     @Serializable
     data object Appearance : MessagesRoute
@@ -139,6 +143,10 @@ fun chromeFor(
 
         MessagesRoute.WhatsAppSettings -> {
             ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
+        }
+
+        MessagesRoute.SpamSettings -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.settings_spam_row)))
         }
 
         MessagesRoute.Appearance -> {

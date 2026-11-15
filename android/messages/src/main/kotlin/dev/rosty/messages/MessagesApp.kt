@@ -27,6 +27,7 @@ import dev.rosty.messages.settings.LogsEntry
 import dev.rosty.messages.settings.MessagesSettingsPage
 import dev.rosty.messages.settings.SettingsLinks
 import dev.rosty.messages.settings.WhatsAppSettingsEntry
+import dev.rosty.messages.spam.SpamSettingsEntry
 import dev.rosty.messages.wa.WaThreadPage
 import dev.rosty.messages.wa.WhatsAppPage
 import dev.rosty.messages.wa.rememberWaInboxViewModel
@@ -92,6 +93,7 @@ fun MessagesApp(
                 links =
                     SettingsLinks(
                         openWhatsApp = { navigator.push(MessagesRoute.WhatsAppSettings) },
+                        openSpam = { navigator.push(MessagesRoute.SpamSettings) },
                         openCommon = { page -> navigator.push(page.route()) },
                     ),
                 onRoleResult = { container.refreshSmsRole() },
@@ -101,6 +103,7 @@ fun MessagesApp(
         entry<MessagesRoute.WaThread> { route -> WaThreadPage(container, route, navigator, pop) }
         entry<MessagesRoute.NewConversation> { route -> NewConversationPage(container, route, navigator, pop) }
         entry<MessagesRoute.WhatsAppSettings> { WhatsAppSettingsEntry(container) }
+        entry<MessagesRoute.SpamSettings> { SpamSettingsEntry(container, pop, popToRoot) }
         entry<MessagesRoute.Appearance> { AppearanceEntry(container.commonSettings, pop, popToRoot) }
         entry<MessagesRoute.Haptics> { HapticsEntry(container.commonSettings, pop, popToRoot) }
         entry<MessagesRoute.About> {

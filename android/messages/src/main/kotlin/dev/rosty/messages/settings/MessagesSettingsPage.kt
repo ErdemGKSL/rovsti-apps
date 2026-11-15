@@ -33,12 +33,15 @@ object SettingsTags {
     const val Page = "messages-settings-page"
     const val Access = "messages-settings-access"
     const val WhatsAppRow = "messages-settings-whatsapp"
+    const val SpamRow = "messages-settings-spam"
 }
 
 /** Where the rows of the settings page lead. */
 class SettingsLinks(
     val openWhatsApp: () -> Unit,
     val openCommon: (CommonSettingsPage) -> Unit,
+    /** Settings, Spam filter (E6.11). */
+    val openSpam: () -> Unit = {},
 )
 
 /**
@@ -105,6 +108,13 @@ fun MessagesSettingsPage(
                             )
                         },
                         onClick = links.openWhatsApp,
+                    ),
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RostyIcons.Shield),
+                        title = {
+                            IosText(stringResource(R.string.settings_spam_row), Modifier.testTag(SettingsTags.SpamRow))
+                        },
+                        onClick = links.openSpam,
                     ),
                 ),
         )

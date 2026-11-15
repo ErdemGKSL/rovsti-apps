@@ -158,6 +158,13 @@ pub(super) const OPS: &[OpSpec] = &[
         rekeyed_since_cases
     ),
     op!(
+        "wa_sync.identity_numbers",
+        ResolveReq,
+        NumbersAns,
+        identity_numbers,
+        identity_numbers_cases
+    ),
+    op!(
         "wa_sync.identity_catch_up",
         CatchUpReq,
         WithHandle<IdentityCaughtUp>,
@@ -1258,6 +1265,45 @@ fn rekeyed_since_cases() -> Vec<Case> {
         on_merged(Case::new(json!({"handle": H, "seq": 0}))),
         on_merged(Case::named("followed", json!({"handle": H, "seq": 1}))),
         on_sample(Case::named("none", json!({"handle": H}))),
+    ]
+}
+
+// ---- wa_sync.identity_numbers
+
+#[derive(Serialize)]
+struct NumbersAns {
+    /// `+<digits>`: the current number first, then the former ones, newest first.
+    numbers: Vec<String>,
+}
+
+fn identity_numbers(req: ResolveReq) -> Result<NumbersAns, FfiError> {
+    with(req.handle, |store| Ok(store.identity_numbers(&req.id)))
+        .map(|numbers| NumbersAns { numbers })
+}
+
+fn identity_numbers_cases() -> Vec<Case> {
+    let moved = json!({"handle": H, "events": [event(
+        11,
+        json!({"old_pn": ALI, "new_pn": "100000000002@s.whatsapp.net", "new_lid": ALI_LID}),
+        "identity_number_changed",
+    )]});
+    vec![
+        // Asked by the LID: the number the person is known by.
+        on_merged(Case::new(json!({"handle": H, "id": ALI_LID}))),
+        // After a number change: the new number first, then the one a contact may still hold.
+        on_merged(Case::named("former", json!({"handle": H, "id": ALI_LID})))
+            .after("wa_sync.apply_events", moved),
+        // A LID nobody mapped has no number, whatever its digits.
+        on_store(Case::named(
+            "unknown_lid",
+            json!({"handle": H, "id": "777000000000005@lid"}),
+        )),
+        // A number the store has not met is its own number.
+        on_store(Case::named(
+            "unknown_number",
+            json!({"handle": H, "id": "100000000009:3@s.whatsapp.net"}),
+        )),
+        on_store(Case::named("group", json!({"handle": H, "id": GROUP}))),
     ]
 }
 

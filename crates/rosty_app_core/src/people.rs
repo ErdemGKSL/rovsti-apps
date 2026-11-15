@@ -188,10 +188,19 @@ impl Default for Book {
     }
 }
 
-/// `+905321234567` from any spelling with digits; `None` without at least 5 digits.
-pub fn e164(raw: &str) -> Option<String> {
-    let digits: String = raw.chars().filter(char::is_ascii_digit).collect();
-    (digits.len() >= 5).then(|| format!("+{digits}"))
+/// `+905321234567` from a number as people write it, by the one number rule of the apps
+/// ([`rosty_core::caller_id::e164_of`]): an international spelling (`+90 532…`, `0090 532…`, `+90 (0) 532…`) reads
+/// on its own, a national one (`0532…`, `532…`) needs the home calling code `home_cc` (`"90"`). `None` for text
+/// that is no number, a short code and a national number without a home calling code.
+pub fn e164(raw: &str, home_cc: Option<&str>) -> Option<String> {
+    rosty_core::caller_id::e164_of(raw, None, home_cc)
+}
+
+/// The E.164 number a phone JID carries: its user part is the number in international form.
+fn jid_number(jid: &str) -> Option<String> {
+    let user = user_part(jid);
+    let digits = !user.is_empty() && user.bytes().all(|b| b.is_ascii_digit());
+    (jid.ends_with(PHONE_SUFFIX) && digits).then(|| format!("+{user}"))
 }
 
 /// The part of a JID before `@` (and before a device suffix `:12`).
@@ -220,8 +229,15 @@ fn non_empty(text: &str) -> Option<String> {
 }
 
 impl Book {
-    /// The person with this E.164 number, this JID (phone or LID) or this bare LID.
+    /// The person with this number, this JID (phone or LID) or this bare LID. A number must be international
+    /// (`+90 532…`); [`Self::lookup_in`] also reads a national one.
     pub fn lookup(&self, key: &str) -> Option<&Person> {
+        self.lookup_in(key, None)
+    }
+
+    /// [`Self::lookup`] where a number may be written the national way (`0532…`) in the region of the calling
+    /// code `home_cc`.
+    pub fn lookup_in(&self, key: &str, home_cc: Option<&str>) -> Option<&Person> {
         let key = key.trim();
         if key.is_empty() {
             return None;
@@ -235,18 +251,30 @@ impl Book {
                         && p.numbers.iter().any(|n| n.trim_start_matches('+') == user))
             });
         }
-        let number = e164(key);
+        let number = e164(key, home_cc);
         self.people
             .iter()
             .find(|p| number.as_ref().is_some_and(|n| p.numbers.contains(n)))
             .or_else(|| self.people.iter().find(|p| p.lid.as_deref() == Some(key)))
     }
 
-    /// Applies what is known about people. Joins a LID record into the phone record once both are known.
+    /// Applies what is known about people. Joins a LID record into the phone record once both are known. A
+    /// number that is not international is skipped; [`Self::upsert_in`] reads it in a home region.
     pub fn upsert(&mut self, updates: &[Update], now_ms: i64) -> Upserted {
+        self.upsert_in(updates, now_ms, None)
+    }
+
+    /// [`Self::upsert`] where an update's number may be written the national way in the region of the calling
+    /// code `home_cc`.
+    pub fn upsert_in(
+        &mut self,
+        updates: &[Update],
+        now_ms: i64,
+        home_cc: Option<&str>,
+    ) -> Upserted {
         let mut out = Upserted::default();
         for update in updates {
-            self.apply(update, now_ms, &mut out);
+            self.apply(update, now_ms, home_cc, &mut out);
         }
         if self.people.len() > MAX_PEOPLE {
             self.people.sort_by_key(|p| std::cmp::Reverse(p.updated_ms));
@@ -259,8 +287,8 @@ impl Book {
         out
     }
 
-    fn apply(&mut self, update: &Update, now_ms: i64, out: &mut Upserted) {
-        let number = update.number.as_deref().and_then(e164);
+    fn apply(&mut self, update: &Update, now_ms: i64, home_cc: Option<&str>, out: &mut Upserted) {
+        let number = update.number.as_deref().and_then(|raw| e164(raw, home_cc));
         let lid = update
             .lid
             .as_deref()
@@ -268,12 +296,7 @@ impl Book {
             .or_else(|| lid_of(&update.jid).map(str::to_owned))
             .filter(|l| !l.is_empty());
         // The key the person ends up under: phone JID when a number is known.
-        let own_number = if update.jid.ends_with(PHONE_SUFFIX) {
-            e164(user_part(&update.jid))
-        } else {
-            None
-        };
-        let number = number.or(own_number);
+        let number = number.or_else(|| jid_number(&update.jid));
         let key = match (&number, update.jid.contains('@')) {
             (Some(n), _) => phone_jid(n).unwrap_or_else(|| update.jid.clone()),
             (None, true) => update.jid.clone(),
@@ -572,6 +595,89 @@ mod tests {
         );
         assert_eq!(again.changed, 0);
         assert_eq!(book.people.len(), 1);
+    }
+
+    /// The international spellings of [`JID`]'s number, readable without a home region.
+    const INTERNATIONAL: [&str; 4] = [
+        "+90 532 123 45 67",
+        "+905321234567",
+        "0090 532 123 45 67",
+        "+90 (0) 532 123 45 67",
+    ];
+    /// The national spellings: a number only in the region of the calling code 90.
+    const NATIONAL: [&str; 3] = ["0532 123 45 67", "532 123 45 67", "0 (532) 123-45-67"];
+
+    #[test]
+    fn e164_reads_a_number_by_the_one_number_rule() {
+        for raw in INTERNATIONAL {
+            assert_eq!(e164(raw, None).as_deref(), Some("+905321234567"), "{raw}");
+            assert_eq!(
+                e164(raw, Some("90")).as_deref(),
+                Some("+905321234567"),
+                "{raw}"
+            );
+            // An international number does not move to another home region.
+            assert_eq!(
+                e164(raw, Some("1")).as_deref(),
+                Some("+905321234567"),
+                "{raw}"
+            );
+        }
+        for raw in NATIONAL {
+            assert_eq!(
+                e164(raw, Some("90")).as_deref(),
+                Some("+905321234567"),
+                "{raw}"
+            );
+            // Without a home region a national number is no E.164 number: never `+0532…`.
+            assert_eq!(e164(raw, None), None, "{raw}");
+        }
+        // The same digits in another home region are another number.
+        assert_ne!(
+            e164("0532 123 45 67", Some("44")).as_deref(),
+            Some("+905321234567")
+        );
+        for raw in ["", "abc", "112", "4477"] {
+            assert_eq!(e164(raw, Some("90")), None, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn lookup_reads_every_spelling_in_the_home_region() {
+        let mut book = Book::default();
+        book.upsert(&[upd(JID)], NOW);
+        for raw in INTERNATIONAL {
+            assert_eq!(book.lookup(raw).map(|p| p.jid.as_str()), Some(JID), "{raw}");
+        }
+        for raw in NATIONAL {
+            assert_eq!(
+                book.lookup_in(raw, Some("90")).map(|p| p.jid.as_str()),
+                Some(JID),
+                "{raw}"
+            );
+            assert!(book.lookup(raw).is_none(), "{raw}");
+            // Wrong country, same tail.
+            assert!(book.lookup_in(raw, Some("44")).is_none(), "{raw}");
+        }
+        assert!(book.lookup("+1 532 123 4567").is_none());
+    }
+
+    #[test]
+    fn upsert_reads_a_national_number_in_the_home_region_only() {
+        let national = Update {
+            lid: Some("555@lid".into()),
+            number: Some("0532 123 45 67".into()),
+            ..upd("555@lid")
+        };
+        let mut book = Book::default();
+        book.upsert_in(std::slice::from_ref(&national), NOW, Some("90"));
+        assert_eq!(book.people[0].jid, JID);
+        assert_eq!(book.people[0].numbers, ["+905321234567"]);
+        // Without one the number is not guessed: the person stays under the LID.
+        let mut book = Book::default();
+        book.upsert(std::slice::from_ref(&national), NOW);
+        assert_eq!(book.people[0].jid, "555@lid");
+        assert!(book.people[0].numbers.is_empty());
     }
 
     #[test]

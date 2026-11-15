@@ -463,6 +463,8 @@ otp.find.after_emoji
 otp.find.none
 people.lookup
 people.lookup.by_lid
+people.lookup.national
+people.lookup.national_without_home
 people.lookup.unknown
 people.plan
 people.plan.nothing_to_do
@@ -1104,6 +1106,11 @@ wa_sync.close.not_open
 wa_sync.identity_catch_up
 wa_sync.identity_catch_up.done
 wa_sync.identity_catch_up.rejected
+wa_sync.identity_numbers
+wa_sync.identity_numbers.former
+wa_sync.identity_numbers.group
+wa_sync.identity_numbers.unknown_lid
+wa_sync.identity_numbers.unknown_number
 wa_sync.identity_observe
 wa_sync.identity_observe.nothing
 wa_sync.identity_resolve

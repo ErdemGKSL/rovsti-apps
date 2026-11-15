@@ -1,5 +1,6 @@
 package dev.rosty.messages.conversation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -29,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -42,12 +45,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.rosty.design.chrome.ScreenScaffold
@@ -55,16 +63,17 @@ import dev.rosty.design.chrome.topBarContentPadding
 import dev.rosty.design.controls.CapsuleButton
 import dev.rosty.design.controls.CapsuleStyle
 import dev.rosty.design.controls.GlassIconButton
+import dev.rosty.design.haptics.LocalRostyHaptics
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.media.SizedImage
-import dev.rosty.design.overlay.ContextMenuStyle
 import dev.rosty.design.overlay.LocalOverlayOrNull
 import dev.rosty.design.overlay.MenuItem
-import dev.rosty.design.overlay.longPressMenu
 import dev.rosty.design.overlay.menuTrigger
+import dev.rosty.design.overlay.popoverTrigger
 import dev.rosty.design.text.ComposerField
 import dev.rosty.design.text.SearchField
+import dev.rosty.design.text.imeOverlapPadding
 import dev.rosty.design.text.rtlSafe
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
@@ -72,10 +81,17 @@ import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
+import dev.rosty.messages.schedule.sendLongPress
+import dev.rosty.messages.settings.replies.QuickReplyRow
+import dev.rosty.messages.settings.replies.ReplyChip
+import dev.rosty.messages.settings.textsize.scaledBy
+import dev.rosty.messages.theme.MediaMetrics
+import dev.rosty.messages.theme.MessagesColors
 import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.messages.ui.MessagesAvatar
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** Test tags of a conversation page. */
 object ConversationTags {
@@ -90,8 +106,23 @@ object ConversationTags {
     const val Find = "conversation-find"
     const val FindLabel = "conversation-find-label"
     const val JumpLatest = "conversation-jump-latest"
+    const val Lifted = "bubble-lifted"
+    const val BubblePanel = "bubble-panel"
+    const val Pills = "bubble-pills"
+    const val SelectBar = "conversation-select-bar"
+    const val SelectText = "conversation-select-text"
+    const val Info = "conversation-info"
 
     fun bubble(key: String) = "bubble-$key"
+
+    fun sender(key: String) = "sender-$key"
+
+    fun star(key: String) = "star-$key"
+}
+
+/** Test hook (E6.14): told the key of every bubble row that composes or recomposes. Null in the app. */
+internal object ConversationProbe {
+    @Volatile var onBubbleComposed: ((String) -> Unit)? = null
 }
 
 /** What a conversation page does with taps; the view model behind it (SMS or WhatsApp) answers. */
@@ -110,6 +141,30 @@ class ConversationActions(
     val onFindNewer: () -> Unit = {},
     val onFindClose: () -> Unit = {},
     val onScrolled: () -> Unit = {},
+    /** E6.5: the reaction row of a bubble's menu (empty: no row) and what a tap on one does. */
+    val reactionsFor: (BubbleUi) -> List<String> = { emptyList() },
+    val onReact: (BubbleUi, String) -> Unit = { _, _ -> },
+    /** E6.5: the detection pills of a bubble (null: none) and what a tap on one does. */
+    val pillsFor: (suspend (BubbleUi) -> List<PillUi>)? = null,
+    val onPill: (PillUi) -> Unit = {},
+    /** M20 select mode: a tap on a bubble adds or removes it; the bar's buttons. */
+    val onToggleSelect: (String) -> Unit = {},
+    val onSelectAction: (SelectAction) -> Unit = {},
+    /** M31: a swipe to the right on a bubble that [BubbleUi.canReply]; null: bubbles do not swipe. */
+    val onSwipeReply: ((BubbleUi) -> Unit)? = null,
+    val onCancelReply: () -> Unit = {},
+    val onRemoveAttachment: () -> Unit = {},
+    /** What the + beside the composer offers; empty: no button. */
+    val attachMenu: ImmutableList<MenuItem> = kotlinx.collections.immutable.persistentListOf(),
+    /** Save or Share on a file row. */
+    val onMediaAction: (BubbleUi, MediaAction) -> Unit = { _, _ -> },
+    val onVoiceToggle: (BubbleUi) -> Unit = {},
+    val onVoiceSeek: (BubbleUi, Float) -> Unit = { _, _ -> },
+    val onVoiceSpeed: () -> Unit = {},
+    /** M50: the card a tap on a group sender's name opens; null: names are plain text. */
+    val senderCard: (@Composable (BubbleUi) -> Unit)? = null,
+    /** E6.13: the menu of a bubble opened at this rect (the "Remind me" popover grows out of the same place). */
+    val onMenuOpened: (BubbleUi, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
 )
 
 /** The labels of the tools on a conversation page. */
@@ -140,8 +195,28 @@ fun ConversationScreen(
     olderLabel: String,
     tools: ToolsUi = ToolsUi(),
     labels: ToolLabels? = null,
+    selectLabels: SelectLabels? = null,
+    /** The voice note in the player (M17). */
+    voice: VoiceUi? = null,
+    /** Added to the composer's text field (a content receiver for pasted pictures, M46). */
+    composerModifier: Modifier = Modifier,
+    /** A long press on Send with the composer's text (E6.10 "Send later"); null: Send has no long press. */
+    onSendLongPress: ((String) -> Unit)? = null,
+    /** What a screen reader calls the long press ("Send later"). */
+    sendLaterLabel: String? = null,
+    /** Drawn between the list and the composer (the Scheduled strip). */
+    aboveComposer: (@Composable () -> Unit)? = null,
+    /** M34: the factor of the bubble text size (Settings, Text size); 1 keeps the body style. */
+    textScale: Float = 1f,
+    /** M11: the quick replies offered above the empty composer (Settings, Quick replies), and what a tap does. */
+    quickReplies: ImmutableList<ReplyChip> = kotlinx.collections.immutable.persistentListOf(),
+    onQuickReply: (ReplyChip) -> Unit = {},
 ) {
     val overlays = LocalOverlayOrNull.current
+    BackHandler(enabled = tools.selected != null) { actions.onSelectAction(SelectAction.Cancel) }
+    val sendLater by rememberUpdatedState(onSendLongPress)
+    val haptics = LocalRostyHaptics.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     // Find, jump to date: scroll the target into view once, then let the tools know.
     LaunchedEffect(tools.scrollTo) {
         val target = tools.scrollTo ?: return@LaunchedEffect
@@ -212,6 +287,10 @@ fun ConversationScreen(
                                     actions,
                                     glow =
                                         item.key == tools.highlight,
+                                    selected = tools.selected,
+                                    voice = voice?.takeIf { it.key == item.key },
+                                    speedLabel = state.voiceSpeed,
+                                    textScale = textScale,
                                 )
                             }
                         }
@@ -260,57 +339,119 @@ fun ConversationScreen(
                     )
                 }
             }
-            when (val mode = state.composer) {
-                is ComposerMode.Ready -> {
-                    if (mode.simLabel != null || mode.counter != null) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-                        ) {
-                            mode.simLabel?.let {
-                                CapsuleButton(
-                                    it,
-                                    onClick = actions.onSim,
-                                    modifier = Modifier.testTag(ConversationTags.Sim),
-                                    icon = RostyIcons.Sim,
-                                )
+            val chosen = tools.selected
+            if (chosen != null && selectLabels != null) {
+                SelectBar(chosen.size, selectLabels, actions.onSelectAction)
+            } else {
+                when (val mode = state.composer) {
+                    is ComposerMode.Ready -> {
+                        aboveComposer?.invoke()
+                        if (quickReplies.isNotEmpty()) {
+                            val empty by remember(composer) { derivedStateOf { composer.text.isEmpty() } }
+                            if (empty && state.attachment == null) QuickReplyRow(quickReplies, onQuickReply)
+                        }
+                        if (mode.simLabel != null || mode.counter != null) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                            ) {
+                                mode.simLabel?.let {
+                                    CapsuleButton(
+                                        it,
+                                        onClick = actions.onSim,
+                                        modifier = Modifier.testTag(ConversationTags.Sim),
+                                        icon = RostyIcons.Sim,
+                                    )
+                                }
+                                Box(Modifier.weight(1f))
+                                mode.counter?.let {
+                                    RostyText(
+                                        it,
+                                        modifier = Modifier.testTag(ConversationTags.Counter),
+                                        style = RostyTheme.type.caption1,
+                                        color = RostyTheme.colors.labelSecondary,
+                                    )
+                                }
                             }
-                            Box(Modifier.weight(1f))
-                            mode.counter?.let {
-                                RostyText(
-                                    it,
-                                    modifier = Modifier.testTag(ConversationTags.Counter),
-                                    style = RostyTheme.type.caption1,
-                                    color = RostyTheme.colors.labelSecondary,
+                        }
+                        state.reply?.let { ReplyBar(it, actions.onCancelReply) }
+                        state.attachment?.let {
+                            AttachmentBar(
+                                it,
+                                sendLabel,
+                                onRemove = actions.onRemoveAttachment,
+                                onSend = { actions.onSend(composer.text.toString()) },
+                            )
+                        }
+                        val attach = actions.attachMenu.isNotEmpty()
+                        Box {
+                            ComposerField(
+                                state = composer,
+                                onSend = actions.onSend,
+                                modifier =
+                                    if (attach) {
+                                        Modifier.padding(start = MediaMetrics.AttachButton + Spacing.xs)
+                                    } else {
+                                        Modifier
+                                    },
+                                fieldModifier =
+                                    Modifier
+                                        .testTag(ConversationTags.Composer)
+                                        .then(composerModifier)
+                                        .then(
+                                            if (onSendLongPress == null) {
+                                                Modifier
+                                            } else {
+                                                Modifier
+                                                    .sendLongPress(rtl, armed = { composer.text.isNotBlank() }) {
+                                                        haptics.longPress()
+                                                        sendLater?.invoke(composer.text.toString())
+                                                    }.semantics {
+                                                        if (sendLaterLabel != null) {
+                                                            customActions =
+                                                                listOf(
+                                                                    CustomAccessibilityAction(sendLaterLabel) {
+                                                                        sendLater?.invoke(composer.text.toString())
+                                                                        true
+                                                                    },
+                                                                )
+                                                        }
+                                                    }
+                                            },
+                                        ),
+                                placeholder = mode.placeholder,
+                                sendLabel = sendLabel,
+                            )
+                            if (attach) {
+                                AttachButton(
+                                    actions.attachMenu,
+                                    Modifier
+                                        .align(Alignment.BottomStart)
+                                        .navigationBarsPadding()
+                                        .imeOverlapPadding(excludeNavigationBar = false)
+                                        .padding(start = Spacing.gutter, bottom = Spacing.s + MediaMetrics.AttachLift),
                                 )
                             }
                         }
                     }
-                    ComposerField(
-                        state = composer,
-                        onSend = actions.onSend,
-                        fieldModifier = Modifier.testTag(ConversationTags.Composer),
-                        placeholder = mode.placeholder,
-                        sendLabel = sendLabel,
-                    )
-                }
 
-                ComposerMode.NeedsRole -> {
-                    DefaultSmsCard(
-                        onResult = actions.onRoleResult,
-                        Modifier.navigationBarsPadding().padding(bottom = Spacing.s),
-                    )
-                }
+                    ComposerMode.NeedsRole -> {
+                        DefaultSmsCard(
+                            onResult = actions.onRoleResult,
+                            Modifier.navigationBarsPadding().padding(bottom = Spacing.s),
+                        )
+                    }
 
-                is ComposerMode.ReadOnly -> {
-                    RostyText(
-                        mode.reason,
-                        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(Spacing.l),
-                        style = RostyTheme.type.footnote,
-                        color = RostyTheme.colors.labelSecondary,
-                        textAlign = TextAlign.Center,
-                    )
+                    is ComposerMode.ReadOnly -> {
+                        RostyText(
+                            mode.reason,
+                            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(Spacing.l),
+                            style = RostyTheme.type.footnote,
+                            color = RostyTheme.colors.labelSecondary,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         }
@@ -339,7 +480,12 @@ private fun CenteredLabel(
 @Composable
 private fun bubbleColors(outgoing: Boolean): Pair<Color, Color> {
     val colors = RostyTheme.colors
-    return if (outgoing) colors.accent to colors.onAccent else colors.fillSecondary to colors.labelPrimary
+    return if (outgoing) {
+        MessagesColors.OutgoingBubble to MessagesColors.OutgoingInk
+    } else {
+        colors.fillSecondary to
+            colors.labelPrimary
+    }
 }
 
 /**
@@ -424,57 +570,99 @@ private fun BubbleRow(
     bubble: BubbleUi,
     actions: ConversationActions,
     glow: Boolean = false,
+    selected: ImmutableList<String>? = null,
+    voice: VoiceUi? = null,
+    speedLabel: String = "",
+    textScale: Float = 1f,
 ) {
+    ConversationProbe.onBubbleComposed?.invoke(bubble.key)
     val overlays = LocalOverlayOrNull.current
     val maxWidth = (LocalConfiguration.current.screenWidthDp * MessagesMetrics.BubbleMaxFraction).dp
     val (fill, ink) = bubbleColors(bubble.outgoing)
     val menu = remember(bubble, actions) { actions.menuFor(bubble) }
     val tap = remember(bubble, actions) { { actions.onBubbleTap(bubble) } }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(
-                start = Spacing.gutter,
-                end = Spacing.gutter,
-                top = if (bubble.firstOfRun) MessagesMetrics.BubbleGroupGap else MessagesMetrics.BubbleGap,
-            ).testTag(ConversationTags.bubble(bubble.key)),
-        horizontalAlignment = if (bubble.outgoing) Alignment.End else Alignment.Start,
-    ) {
-        if (bubble.sender != null && bubble.firstOfRun) {
-            RostyText(
-                bubble.sender.rtlSafe(),
-                modifier = Modifier.padding(start = MessagesMetrics.BubblePadH, bottom = Spacing.textGap),
-                style = RostyTheme.type.caption1,
-                color = RostyTheme.colors.accent,
-                maxLines = 1,
-            )
+    val swipe = remember { ReplySwipeState() }
+    val onSwipe = actions.onSwipeReply
+    val swipes = bubble.canReply && onSwipe != null && selected == null
+    Box(Modifier.fillMaxWidth().swipeToReply(swipe, swipes) { onSwipe?.invoke(bubble) }) {
+        if (swipes) {
+            ReplyGlyph(swipe.offset, Modifier.align(Alignment.CenterStart).padding(start = Spacing.gutter))
         }
-        val press =
-            if (overlays != null && menu.isNotEmpty()) {
-                Modifier.longPressMenu(
-                    overlays,
-                    menu,
-                    ContextMenuStyle.Lifted(preview = {
-                        BubbleBody(bubble, fill, ink, maxWidth)
-                    }),
-                    onTap = tap,
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(swipe.offset.value.roundToInt(), 0) }
+                .padding(
+                    start = Spacing.gutter,
+                    end = Spacing.gutter,
+                    top = if (bubble.firstOfRun) MessagesMetrics.BubbleGroupGap else MessagesMetrics.BubbleGap,
+                ).testTag(ConversationTags.bubble(bubble.key)),
+            horizontalAlignment = if (bubble.outgoing) Alignment.End else Alignment.Start,
+        ) {
+            if (bubble.sender != null && bubble.firstOfRun) {
+                val card = actions.senderCard
+                val opensCard =
+                    if (card != null && bubble.senderId != null && overlays != null) {
+                        Modifier.popoverTrigger(overlays, stringResource(R.string.wa_sender_card, bubble.sender)) {
+                            card(bubble)
+                        }
+                    } else {
+                        Modifier
+                    }
+                RostyText(
+                    bubble.sender.rtlSafe(),
+                    modifier =
+                        opensCard
+                            .padding(start = MessagesMetrics.BubblePadH, bottom = Spacing.textGap)
+                            .testTag(ConversationTags.sender(bubble.key)),
+                    style = RostyTheme.type.caption1,
+                    color = RostyTheme.colors.accent,
+                    maxLines = 1,
                 )
-            } else {
-                Modifier.clickable(onClick = tap)
             }
-        val glowAlpha by animateFloatAsState(if (glow) GLOW_ALPHA else 0f, label = "glow")
-        Box(
-            press
-                .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
-                .drawBehind { drawRect(GlowColor.copy(alpha = glowAlpha)) }
-                .padding(MessagesMetrics.GlowPad),
-        ) { BubbleBody(bubble, fill, ink, maxWidth) }
-        bubble.reactions?.let {
-            RostyText(
-                it,
-                modifier = Modifier.padding(horizontal = MessagesMetrics.BubblePadH),
-                style = RostyTheme.type.footnote,
-            )
+            val reactions = remember(bubble, actions) { actions.reactionsFor(bubble) }
+            val press =
+                when {
+                    selected != null -> {
+                        Modifier.clickable { actions.onToggleSelect(bubble.key) }
+                    }
+
+                    overlays != null && menu.isNotEmpty() -> {
+                        Modifier.bubbleMenu(
+                            overlays,
+                            menu,
+                            reactions,
+                            onReact = { actions.onReact(bubble, it) },
+                            onTap = tap,
+                            onOpened = { actions.onMenuOpened(bubble, it) },
+                        ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel, textScale) }
+                    }
+
+                    else -> {
+                        Modifier.clickable(onClick = tap)
+                    }
+                }
+            val glowAlpha by animateFloatAsState(if (glow) GLOW_ALPHA else 0f, label = "glow")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (selected != null) SelectCircle(bubble.key in selected)
+                Box(
+                    press
+                        .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
+                        .drawBehind { drawRect(GlowColor.copy(alpha = glowAlpha)) }
+                        .padding(MessagesMetrics.GlowPad),
+                ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel, textScale) }
+            }
+            actions.pillsFor?.let { detect ->
+                val pills by produceState(emptyList<PillUi>(), bubble.key, bubble.text) { value = detect(bubble) }
+                if (selected == null) PillsRow(pills, bubble.outgoing, actions.onPill)
+            }
+            bubble.reactions?.let {
+                RostyText(
+                    it,
+                    modifier = Modifier.padding(horizontal = MessagesMetrics.BubblePadH),
+                    style = RostyTheme.type.footnote,
+                )
+            }
         }
     }
 }
@@ -485,6 +673,10 @@ private fun BubbleBody(
     fill: Color,
     ink: Color,
     maxWidth: androidx.compose.ui.unit.Dp,
+    actions: ConversationActions,
+    voice: VoiceUi? = null,
+    speedLabel: String = "",
+    textScale: Float = 1f,
 ) {
     val corner = MessagesMetrics.BubbleCorner
     val tail = MessagesMetrics.BubbleTail
@@ -535,7 +727,9 @@ private fun BubbleBody(
             }
         }
         for (media in bubble.media) {
-            if (media.isImage && media.model != null) {
+            if (media.kind != null) {
+                BubbleMediaView(media, MediaHost(bubble, ink, secondary, maxWidth, actions, voice, speedLabel))
+            } else if (media.isImage && media.model != null) {
                 val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
                 SizedImage(
                     model = media.model,
@@ -568,11 +762,11 @@ private fun BubbleBody(
                 bubble.text.rtlSafe(),
                 style =
                     if (bubble.deleted) {
-                        RostyTheme.type.body.copy(
+                        RostyTheme.type.body.scaledBy(textScale).copy(
                             fontStyle = FontStyle.Italic,
                         )
                     } else {
-                        RostyTheme.type.body
+                        RostyTheme.type.body.scaledBy(textScale)
                     },
                 color = if (bubble.deleted) RostyTheme.colors.labelSecondary else ink,
             )
@@ -582,6 +776,7 @@ private fun BubbleBody(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
+            MarkGlyphs(bubble, secondary)
             RostyText(
                 bubble.meta,
                 style = RostyTheme.type.caption2,
@@ -591,6 +786,32 @@ private fun BubbleBody(
             )
             if (bubble.outgoing) StateGlyph(bubble.state, secondary, read = ink)
         }
+    }
+}
+
+/** E6.13: the bell and clock of an armed reminder (M33) and the star (M10, M23), before the time. */
+@Composable
+private fun MarkGlyphs(
+    bubble: BubbleUi,
+    tint: Color,
+) {
+    bubble.reminder?.let { clock ->
+        RostyIcon(
+            RostyIcons.Bell,
+            stringResource(R.string.remind_badge_a11y),
+            tint = tint,
+            size = MessagesMetrics.TickGlyph,
+        )
+        RostyText(clock, style = RostyTheme.type.caption2, color = tint, maxLines = 1)
+    }
+    if (bubble.starred) {
+        RostyIcon(
+            RostyIcons.StarFilled,
+            stringResource(R.string.starred_mark_a11y),
+            tint = tint,
+            size = MessagesMetrics.TickGlyph,
+            modifier = Modifier.testTag(ConversationTags.star(bubble.key)),
+        )
     }
 }
 

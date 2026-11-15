@@ -26,6 +26,8 @@ import dev.rosty.messages.R
 import dev.rosty.messages.data.Book
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.RowAvatar
+import dev.rosty.platform.Headless
+import dev.rosty.platform.sms.SendHandle
 import dev.rosty.platform.sms.SmsRepository
 import dev.rosty.platform.sms.SmsResult
 import dev.rosty.platform.sms.SmsSims
@@ -48,6 +50,9 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 /** The words of the SMS page, from `strings.xml`. */
@@ -105,6 +110,8 @@ class SmsThreadSources(
     val book: StateFlow<Book>,
     val roleHeld: StateFlow<Boolean>,
     val now: () -> Long,
+    /** The core's `mms_send_req`: a base64 `m-send-req` for a picture and text (blocking; called off the main thread). */
+    val mmsPdu: (String) -> String? = { json -> Headless.call("mms_send_req", json) },
 )
 
 /**
@@ -140,6 +147,10 @@ class SmsThreadViewModel(
     private var subId: Int? = null
     private var nextLocal = sources.now()
     private val holds = HashMap<Long, Job>()
+
+    /** The picture staged for the next send (MMS) and the ones of my sends still on their way, by local id. */
+    private var staged: File? = null
+    private val sentPictures = HashMap<Long, File>()
 
     /** Unread incoming messages when the thread opened (before it was marked read); the divider sits above them. */
     private var unreadAtOpen: Int? = null
@@ -320,10 +331,14 @@ class SmsThreadViewModel(
             state = if (item.outgoing) state else BubbleState.None,
             atMs = item.atMs,
             media =
-                item.parts
-                    .filter(::isAttachment)
-                    .map(::mediaOf)
-                    .toImmutableList(),
+                (
+                    item.parts.filter(::isAttachment).map(::mediaOf) +
+                        listOfNotNull(
+                            item.key.let { (it as? SmsKey.Local)?.id }?.let(sentPictures::get)?.let {
+                                BubbleMedia(it, words.part("image/*"), isImage = true)
+                            },
+                        )
+                ).toImmutableList(),
         )
     }
 
@@ -333,6 +348,7 @@ class SmsThreadViewModel(
             model = part.path?.let(::File),
             label = words.part(part.contentType),
             isImage = image && part.path != null,
+            mime = part.contentType,
         )
     }
 
@@ -359,15 +375,37 @@ class SmsThreadViewModel(
             .orEmpty()
     }
 
+    /** Stages [file] (a picture copied into the app) for the next send; too big ones are refused with a pill. */
+    fun attach(file: File) {
+        if (file.length() > MAX_ATTACHMENT_BYTES) {
+            file.delete()
+            effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.sms_attachment_too_big)))
+            return
+        }
+        staged = file
+        ui.value =
+            ui.value.copy(attachment = AttachmentUi(words.part("image/*"), sizeLabel(file.length()), model = file))
+    }
+
+    fun clearAttachment() {
+        staged = null
+        ui.value = ui.value.copy(attachment = null)
+    }
+
     /** Puts the message on the page at once, then hands it to the radio after the undo window (M45). */
     fun send(text: String) {
         val body = text.trim()
-        if (body.isEmpty()) return
+        val picture = staged
+        if (body.isEmpty() && picture == null) return
         if (!sources.roleHeld.value) {
             effectChannel.trySend(ConversationEffect.NeedsRole)
             return
         }
         val local = ++nextLocal
+        if (picture != null) {
+            sentPictures[local] = picture
+            clearAttachment()
+        }
         viewModelScope.launch {
             sources.store.putDraft(tag, "")
             lock.withLock { events += TimelineEvent.pending(local, body, sources.now(), subId) }
@@ -376,7 +414,9 @@ class SmsThreadViewModel(
                 viewModelScope.launch {
                     delay(undoSendMs)
                     holds.remove(local)
-                    radio(SmsSend(local, to, body, subId))
+                    val request = SmsSend(local, to, body, subId)
+                    val pic = sentPictures[local]
+                    if (pic != null) mms(request, pic) else radio(request)
                 }
             effectChannel.trySend(
                 ConversationEffect.Undo(UiText.Res(R.string.sms_sending_undo), { undoSend(local) }, undoSendMs),
@@ -406,10 +446,40 @@ class SmsThreadViewModel(
     private suspend fun replay(): TimelineAnswer? =
         (sources.ops.timeline(TimelineRequest(thread.coerceAtLeast(0), to, events.toList())) as? Outcome.Ok)?.value
 
-    private suspend fun radio(request: SmsSend) {
-        val handle = sources.sms.send(request)
-        if (!handle.accepted) {
+    /** An MMS: the core builds the PDU from the picture's path, the platform sends it. */
+    private suspend fun mms(
+        request: SmsSend,
+        picture: File,
+    ) {
+        val json =
+            JSONObject()
+                .put("local_id", request.localId)
+                .put("to", JSONArray(request.to))
+                .put("text", request.body)
+                .put("image_path", picture.absolutePath)
+                .apply { request.subId?.let { put("sub_id", it) } }
+                .toString()
+        val pdu =
+            withContext(Dispatchers.IO) { sources.mmsPdu(json) }
+                ?.let { runCatching { JSONObject(it).optString("pdu_b64") }.getOrNull() }
+                .orEmpty()
+        if (pdu.isEmpty()) {
             status(SmsStatus(request.localId, state = DeliveryState.Failed))
+            return
+        }
+        follow(request.localId, sources.sms.sendMms(request.localId, pdu, request.subId))
+    }
+
+    private suspend fun radio(request: SmsSend) {
+        follow(request.localId, sources.sms.send(request))
+    }
+
+    private suspend fun follow(
+        localId: Long,
+        handle: SendHandle,
+    ) {
+        if (!handle.accepted) {
+            status(SmsStatus(localId, state = DeliveryState.Failed))
             return
         }
         viewModelScope.launch {
@@ -469,6 +539,33 @@ class SmsThreadViewModel(
                 ConversationEffect.Undo(
                     UiText.Res(R.string.sms_message_deleted),
                     { undoDelete(provider) },
+                    UNDO_DELETE_MS,
+                ),
+            )
+            tickDeletes()
+        }
+    }
+
+    /** Deletes the messages of [keys] (select mode, M20) behind one Undo; needs the role. */
+    fun deleteAll(keys: List<String>) {
+        val providers = keys.mapNotNull { k -> items.firstOrNull { keyOf(it.key) == k }?.let(::providerKey) }
+        if (providers.isEmpty()) return
+        if (!sources.roleHeld.value) {
+            effectChannel.trySend(ConversationEffect.NeedsRole)
+            return
+        }
+        viewModelScope.launch {
+            for (p in providers) pending("add", p)?.let { pendingDeletes = it.pending }
+            rebuild()
+            effectChannel.trySend(
+                ConversationEffect.Undo(
+                    UiText.Res(R.string.sms_messages_deleted),
+                    {
+                        viewModelScope.launch {
+                            for (p in providers) pending("undo", p)?.let { pendingDeletes = it.pending }
+                            rebuild()
+                        }
+                    },
                     UNDO_DELETE_MS,
                 ),
             )
@@ -554,6 +651,9 @@ class SmsThreadViewModel(
     companion object {
         const val UNDO_SEND_MS = 4_000L
         const val UNDO_DELETE_MS = 5_000L
+
+        /** The core reads no bigger attachment (`headless::MAX_ATTACHMENT_BYTES`). */
+        const val MAX_ATTACHMENT_BYTES = 4L * 1024 * 1024
         private const val TICK_MS = 1_000L
 
         /** `Telephony.Sms.MESSAGE_TYPE_INBOX`: a received SMS. */
@@ -592,3 +692,16 @@ private fun SmsStatus.isFinal(): Boolean = state == DeliveryState.Delivered || s
 /** An MMS part shown as an attachment (not the text body or the SMIL layout). */
 private fun isAttachment(part: MmsPart): Boolean =
     part.contentType != "text/plain" && part.contentType != "application/smil"
+
+/** "340 KB", "1.2 MB": the size under a staged picture. */
+internal fun sizeLabel(bytes: Long): String =
+    if (bytes <
+        MIB
+    ) {
+        "${(bytes + KIB - 1) / KIB} KB"
+    } else {
+        String.format(java.util.Locale.ROOT, "%.1f MB", bytes / MIB.toDouble())
+    }
+
+private const val KIB = 1024L
+private const val MIB = 1024L * 1024L

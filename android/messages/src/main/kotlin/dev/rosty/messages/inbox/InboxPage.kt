@@ -30,6 +30,7 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
+import dev.rosty.messages.schedule.scheduledCount
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
 import kotlinx.collections.immutable.toImmutableList
@@ -65,6 +66,9 @@ fun rememberInboxViewModel(container: MessagesContainer): InboxViewModel {
                             ops = container.ops,
                             chat = container.chat,
                             now = System::currentTimeMillis,
+                            spam = container.spamActions,
+                            blocked = container.blocklist.numbers(),
+                            cleanup = container.codeCleanup,
                         ),
                         InboxBuilder(words, time),
                         words,
@@ -94,6 +98,7 @@ fun ChatsPage(
         navigator.scrollToTop.collect { if (it.tab == ChatsTab) listState.animateScrollToItem(0) }
     }
     InboxEffects(viewModel, navigator, overlays, strings)
+    val starred by container.stars.items.collectAsState()
     val actions =
         remember(viewModel, overlays, strings) {
             RowMenuActions(
@@ -104,10 +109,13 @@ fun ChatsPage(
                 onAvatar = { row -> viewModel.onAction(InboxAction.Open(row.key)) },
                 onCopyCode = { code ->
                     container.clipboard.copy(code, sensitive = true)
-                    overlays.showToast(res.getString(R.string.inbox_code_copied, code))
+                    // The pill comes from the view model: it also says when M47 will delete the message.
+                    viewModel.codeCopied(code)
                 },
             )
         }
+    val schedule by container.schedule.state.collectAsState()
+    val scheduled = remember(schedule) { scheduledCount(schedule) }
     CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
         InboxScreen(
             state = state,
@@ -116,13 +124,21 @@ fun ChatsPage(
             searchState = searchState,
             actions = actions,
             onNewMessage = { navigator.push(MessagesRoute.NewConversation()) },
+            starredCount = starred.size,
+            onStarred = { navigator.push(MessagesRoute.Starred) },
             banner =
-                if (!state.roleHeld) {
+                if (!state.roleHeld || scheduled > 0) {
                     {
-                        DefaultSmsCard(
-                            onResult = { container.refreshSmsRole() },
-                            Modifier.padding(vertical = Spacing.s),
-                        )
+                        if (!state.roleHeld) {
+                            DefaultSmsCard(
+                                onResult = { container.refreshSmsRole() },
+                                Modifier.padding(vertical = Spacing.s),
+                            )
+                        }
+                        if (scheduled > 0) {
+                            // E6.10: what waits to be sent, across conversations.
+                            ScheduledRow(scheduled, strings) { navigator.push(MessagesRoute.Scheduled) }
+                        }
                     }
                 } else {
                     null

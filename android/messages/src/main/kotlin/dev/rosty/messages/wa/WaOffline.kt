@@ -298,6 +298,11 @@ class WaOffline(
         }
     }
 
+    /** Rows of [chats] changed outside the sync (a thumbnail or a download was stored): the readers read again. */
+    fun noteChanged(chats: Set<String>) {
+        changeBus.tryEmit(chats)
+    }
+
     /** The page before the oldest stored message of [chat] (the thread reached the end of what is stored). */
     suspend fun older(chat: String): OlderResult = sessionState.value?.runner?.older(chat) ?: OlderResult.Offline
 

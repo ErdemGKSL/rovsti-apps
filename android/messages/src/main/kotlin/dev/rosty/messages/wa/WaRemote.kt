@@ -16,6 +16,7 @@ import dev.rosty.core.model.wa.RichMessage
 import dev.rosty.core.model.wa.SendMediaWithBody
 import dev.rosty.core.model.wa.SendReaction
 import dev.rosty.core.model.wa.SendText
+import dev.rosty.core.model.wa.StarMessage
 import dev.rosty.core.model.wa.StatusList
 import dev.rosty.core.model.wa.TypingState
 import dev.rosty.core.model.wa.WaStreamEvent
@@ -93,6 +94,13 @@ interface WaRemote {
     suspend fun statusThumbnail(statusId: String): Outcome<BytesAnswer>
 
     suspend fun markStatusViewed(ids: List<String>): Outcome<Unit>
+
+    /** E6.13: stars or unstars a message on the account (M10). The store follows from the gateway's event. */
+    suspend fun star(
+        chat: String,
+        messageId: String,
+        starred: Boolean,
+    ): Outcome<Unit> = Outcome.Err(RustError.Unsupported("star"))
 }
 
 /**
@@ -232,6 +240,12 @@ class GatewayWaRemote(
     override suspend fun statusThumbnail(statusId: String): Outcome<BytesAnswer> = call { it.statusThumbnail(statusId) }
 
     override suspend fun markStatusViewed(ids: List<String>): Outcome<Unit> = call { it.markStatusViewed(ids).map { } }
+
+    override suspend fun star(
+        chat: String,
+        messageId: String,
+        starred: Boolean,
+    ): Outcome<Unit> = call { it.starMessage(StarMessage(chat, messageId, starred)).map { } }
 
     companion object {
         /** The `instance` label of the sync's own event socket (echoed in each `wa.event`). */

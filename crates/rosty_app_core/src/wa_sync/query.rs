@@ -117,12 +117,17 @@ impl Store {
     /// A page of a thread, newest first: at most `limit` stored messages older than `before` (`None`: from the
     /// newest). The first page starts with the sends still in the outbox (they are not counted in `limit`).
     /// Deleted and edited messages are rows like any other, with their state and their kept content.
+    ///
+    /// `chat` may be any id of the chat: one a merge has since moved (a LID whose number is known now) reads the
+    /// merged thread, and the rows name the key ([`Store::stored_key`]).
     pub fn thread(
         &self,
         chat: &str,
         limit: u32,
         before: Option<&ThreadCursor>,
     ) -> Result<ThreadPage> {
+        let chat = self.stored_key(chat);
+        let chat = chat.as_str();
         let limit = limit.clamp(1, MAX_THREAD_PAGE);
         let cleared_ts: Option<i64> = self
             .conn
@@ -232,8 +237,9 @@ impl Store {
         Ok(StarredPage { items, next })
     }
 
-    /// One stored message.
+    /// One stored message. `chat` may be any id of the chat ([`Store::stored_key`]).
     pub fn message(&self, chat: &str, id: &str) -> Result<Option<MessageRow>> {
+        let chat = self.stored_key(chat);
         let sql = format!(
             "SELECT {} FROM messages WHERE chat = ?1 AND id = ?2",
             row_columns()

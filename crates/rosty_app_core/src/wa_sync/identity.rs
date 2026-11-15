@@ -11,6 +11,7 @@ use rosty_core::wa_identity::{
     AliasKind, AliasRow, AliasState, Changes, IdentityKey, IdentityMap, PersonId, PersonRow,
     Rejected, Source, WaIdKind, parse,
 };
+use rosty_wa_proto::{GroupInfo, IdentityMappings, InstanceStatus, WaProfile};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
@@ -51,6 +52,78 @@ pub struct IdentityApplied {
     pub account_changed: bool,
 }
 
+/// What the gateway answered outside the event stream that names a person by both ids: the instance (the
+/// account's own number and LID), groups (their members) and profiles.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Observed<'a> {
+    pub status: Option<&'a InstanceStatus>,
+    pub groups: &'a [GroupInfo],
+    pub profiles: &'a [WaProfile],
+}
+
+/// What [`Store::identity_catch_up`] did with one page of the gateway's pairs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct IdentityCaughtUp {
+    /// Pairs in the page.
+    pub pairs: u32,
+    /// The cursor the store now holds: `since=` of the next call, now or at the next catch-up.
+    pub since: Option<String>,
+    /// The gateway has more: ask again with `since`.
+    pub more: bool,
+    /// The key changes applied to the stored rows, oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rekeyed: Vec<ChatRekeyed>,
+    /// Pairs that changed nothing, for the log.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected: Vec<Rejected>,
+    /// The chat list must be refreshed ([`Store::store_chats`]): a merge moved rows.
+    pub resync: bool,
+}
+
+/// What the calls of one transaction taught the map, beyond the rows they wrote.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct Learned {
+    /// The key changes the stored rows followed, oldest first.
+    pub rekeyed: Vec<ChatRekeyed>,
+    /// Pairs that changed nothing, each once.
+    pub rejected: Vec<Rejected>,
+    /// A key change moved a chat, a message, a cursor or an outbox row.
+    pub moved: bool,
+}
+
+/// The LID and the number among two ids that are the two forms of one person, in that order. `None` unless one
+/// is a LID and the other a phone number.
+pub(super) fn pair<'a>(a: &'a str, b: &'a str) -> Option<(&'a str, &'a str)> {
+    let kind = |text: &str| parse(text).map(|parsed| parsed.id.kind());
+    match (kind(a)?, kind(b)?) {
+        (WaIdKind::Lid, WaIdKind::Pn) => Some((a, b)),
+        (WaIdKind::Pn, WaIdKind::Lid) => Some((b, a)),
+        _ => None,
+    }
+}
+
+/// Whether the map already holds `lid` and `pn` as the current ids of one person, each from a source at least as
+/// trusted as `source`: learning the pair again would at most move a timestamp.
+fn settled(map: &IdentityMap, lid: &str, pn: &str, source: Source) -> bool {
+    let (Some(lid), Some(pn)) = (map.lookup(lid), map.lookup(pn)) else {
+        return false;
+    };
+    let Some(person) = lid.person_id.filter(|id| pn.person_id == Some(*id)) else {
+        return false;
+    };
+    let rows = map.aliases(person);
+    [(AliasKind::Lid, &lid.wire), (AliasKind::Pn, &pn.wire)]
+        .into_iter()
+        .all(|(kind, wire)| {
+            rows.iter().any(|row| {
+                row.kind == kind
+                    && row.user == wire.user()
+                    && row.state == AliasState::Current
+                    && row.source.rank() >= source.rank()
+            })
+        })
+}
+
 /// An id as the store keys it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Canon {
@@ -64,9 +137,84 @@ pub(super) struct Canon {
 pub(super) struct Ids<'a> {
     pub conn: &'a Connection,
     pub map: &'a mut IdentityMap,
+    /// What the pairs learned in this transaction did.
+    pub learned: Learned,
 }
 
-impl Ids<'_> {
+impl<'a> Ids<'a> {
+    pub fn new(conn: &'a Connection, map: &'a mut IdentityMap) -> Self {
+        Self {
+            conn,
+            map,
+            learned: Learned::default(),
+        }
+    }
+
+    /// Learns that `lid` and `pn` are one person and lets the stored rows follow at once, so what is matched
+    /// next finds them under their key. A pair the map already holds from a source as trusted writes nothing.
+    pub fn learn(&mut self, lid: &str, pn: &str, source: Source, at_ms: i64) -> Result<()> {
+        if settled(self.map, lid, pn, source) {
+            return Ok(());
+        }
+        let changes = self.map.learn(lid, pn, source, at_ms);
+        self.changed(changes, at_ms)
+    }
+
+    /// Learns from an id and its other form, whichever of the two is the LID. Anything else than a LID next to
+    /// a phone number teaches nothing.
+    pub fn learn_alt(
+        &mut self,
+        id: Option<&str>,
+        alt: Option<&str>,
+        source: Source,
+        at_ms: i64,
+    ) -> Result<()> {
+        if let (Some(id), Some(alt)) = (id, alt)
+            && let Some((lid, pn)) = pair(id, alt)
+        {
+            self.learn(lid, pn, source, at_ms)?;
+        }
+        Ok(())
+    }
+
+    /// A contact moved to another number ([`IdentityMap::number_changed`]).
+    pub fn number_changed(
+        &mut self,
+        old_pn: &str,
+        new_pn: &str,
+        old_lid: Option<&str>,
+        new_lid: Option<&str>,
+        at_ms: i64,
+    ) -> Result<()> {
+        let changes = self
+            .map
+            .number_changed(old_pn, new_pn, old_lid, new_lid, at_ms);
+        self.changed(changes, at_ms)
+    }
+
+    /// Writes what a call changed and applies the key changes it logged.
+    fn changed(&mut self, changes: Changes, at_ms: i64) -> Result<()> {
+        persist(self.conn, &changes, at_ms)?;
+        if !changes.merges.is_empty() {
+            self.follow()?;
+        }
+        for rejected in changes.rejected {
+            if !self.learned.rejected.contains(&rejected) {
+                self.learned.rejected.push(rejected);
+            }
+        }
+        Ok(())
+    }
+
+    /// Applies the key changes the stored rows have not followed yet.
+    pub fn follow(&mut self) -> Result<()> {
+        while let Some((step, moved)) = merge::apply_next(self.conn)? {
+            self.learned.moved |= moved;
+            self.learned.rekeyed.push(step);
+        }
+        Ok(())
+    }
+
     /// Resolves an id as it arrives. A number or LID seen for the first time becomes a person of its own, so a
     /// pair learned later finds it. Text that is not an id is its own key.
     pub fn canon(&mut self, text: &str) -> Result<Canon> {
@@ -229,13 +377,14 @@ fn bare_of(text: Option<&str>, kind: WaIdKind) -> Option<String> {
 }
 
 /// Forgets every person, alias and key change: the store now belongs to another WhatsApp account. The merge
-/// cursor moves past the dropped log, so sequence numbers never repeat and nothing of the old account replays.
+/// cursor moves past the dropped log, so sequence numbers never repeat and nothing of the old account replays;
+/// the gateway's pairs are asked for from the start again.
 fn reset_identity_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DELETE FROM person;
          DELETE FROM alias;
          DELETE FROM merge_log;
-         UPDATE sync_state SET identity_backfill = NULL, own_pn = NULL, own_lid = NULL,
+         UPDATE sync_state SET identity_backfill = NULL, identity_cursor = NULL, own_pn = NULL, own_lid = NULL,
             merge_cursor = COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'merge_log'), 0);",
     )?;
     Ok(())
@@ -362,6 +511,105 @@ impl Store {
         }))
     }
 
+    /// The key the rows of `text` are stored under now, without teaching the map anything: a reader that still
+    /// holds an id of before a merge (a LID whose number is known since) reads the merged rows. Text that is
+    /// not an id, and an id the map has not seen, is its own key.
+    pub fn stored_key(&self, text: &str) -> String {
+        self.identity.lookup(text).map_or_else(
+            || text.to_owned(),
+            |resolved| resolved.key.as_str().to_owned(),
+        )
+    }
+
+    /// The cursor of the last page of the gateway's pairs the store took in: `since=` of the next
+    /// `GET /v1/identity/mappings`. `None` before the first one (ask for every pair).
+    pub fn identity_since(&self) -> Result<Option<String>> {
+        Ok(self.conn.query_row(
+            "SELECT identity_cursor FROM sync_state WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Takes in one page of `GET /v1/identity/mappings?since=<cursor>`: learns every pair and keeps the page's
+    /// cursor, in one transaction. Ask with [`Self::identity_since`] when the store opens, when the event socket
+    /// reconnects and after a `resync` event, and go on with the answer's `since` while it says `more`. The
+    /// cursor only moves forward here, so a catch-up that was cut short goes on where it stopped.
+    pub fn identity_catch_up(&mut self, page: &IdentityMappings) -> Result<IdentityCaughtUp> {
+        let taken = in_tx(&mut self.conn, &mut self.identity, |ids| {
+            for item in &page.items {
+                ids.learn(
+                    &item.lid,
+                    &item.pn,
+                    Source::from_wire(&item.source),
+                    item.learned_ms,
+                )?;
+            }
+            if let Some(next) = &page.next {
+                ids.conn.execute(
+                    "UPDATE sync_state SET identity_cursor = ?1 WHERE id = 1",
+                    [next],
+                )?;
+            }
+            Ok(())
+        });
+        let ((), learned) = self.healed(taken)?;
+        // Steps logged before this call (a kill between a pair and its merge) are followed too.
+        let (mut rekeyed, resync) = (learned.rekeyed, learned.moved);
+        let (later, later_moved) = self.follow_merges()?;
+        rekeyed.extend(later);
+        Ok(IdentityCaughtUp {
+            pairs: page.items.len() as u32,
+            since: self.identity_since()?,
+            more: page.next.is_some(),
+            rekeyed,
+            rejected: learned.rejected,
+            resync: resync || later_moved,
+        })
+    }
+
+    /// Learns from what the gateway answered outside the event stream: the instance names the account's own
+    /// number and LID ([`Self::identity_set_own`]), a group names its members by both ids, a profile names the
+    /// LID of a number. Hand the answers in as they came; what names no pair teaches nothing.
+    pub fn identity_observe(
+        &mut self,
+        seen: &Observed<'_>,
+        now_ms: i64,
+    ) -> Result<IdentityApplied> {
+        let mut applied = match seen.status.filter(|status| status.own_jid.is_some()) {
+            Some(status) => {
+                self.identity_set_own(status.own_jid.as_deref(), status.own_lid.as_deref(), now_ms)?
+            }
+            None => IdentityApplied::default(),
+        };
+        let taken = in_tx(&mut self.conn, &mut self.identity, |ids| {
+            for member in seen.groups.iter().flat_map(|group| &group.participants) {
+                let (jid, lid, pn) = (
+                    Some(member.jid.as_str()),
+                    member.lid.as_deref(),
+                    member.pn.as_deref(),
+                );
+                for (id, alt) in [(lid, pn), (jid, lid), (jid, pn)] {
+                    ids.learn_alt(id, alt, Source::GroupMetadata, now_ms)?;
+                }
+            }
+            for profile in seen.profiles {
+                ids.learn_alt(
+                    Some(&profile.jid),
+                    profile.lid.as_deref(),
+                    Source::Usync,
+                    now_ms,
+                )?;
+            }
+            Ok(())
+        });
+        let ((), learned) = self.healed(taken)?;
+        applied.rekeyed.extend(learned.rekeyed);
+        applied.rejected.extend(learned.rejected);
+        applied.resync |= learned.moved;
+        Ok(applied)
+    }
+
     /// Applies the key changes of `merge_log` the stored rows have not followed yet, in order, one transaction
     /// per step. A store that was closed, or killed between steps, catches up here; opening the store calls it.
     pub fn apply_pending_merges(&mut self) -> Result<Vec<ChatRekeyed>> {
@@ -388,6 +636,20 @@ impl Store {
     pub fn rekeyed_since(&self, seq: u64) -> Result<Vec<ChatRekeyed>> {
         merge::logged_since(&self.conn, seq)
     }
+}
+
+/// Runs `f` in one transaction with the identity map; what it taught the map comes back next to its answer.
+pub(super) fn in_tx<T>(
+    conn: &mut Connection,
+    map: &mut IdentityMap,
+    f: impl FnOnce(&mut Ids<'_>) -> Result<T>,
+) -> Result<(T, Learned)> {
+    let tx = conn.transaction()?;
+    let mut ids = Ids::new(&tx, map);
+    let out = f(&mut ids)?;
+    let learned = ids.learned;
+    tx.commit()?;
+    Ok((out, learned))
 }
 
 fn write_change(

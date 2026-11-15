@@ -115,7 +115,8 @@ CREATE INDEX messages_starred ON messages (ts DESC, chat DESC, id DESC) WHERE st
 
 /// v4: identity. One person behind a phone-number id and a LID (`person`, `alias`), the key changes stored rows
 /// must follow (`merge_log`, applied up to `sync_state.merge_cursor`), the account's own ids, and the id a chat or
-/// a message arrived under when it is not the key it is stored under. Additive: no stored row changes here; the
+/// a message arrived under when it is not the key it is stored under, and how far the gateway's list of pairs was
+/// read (`identity_cursor`). Additive: no stored row changes here; the
 /// backfill (`identity_backfill`: NULL before it began, a cursor while it runs, `done`) and the merges run as
 /// normal steps after the migration.
 const V4: &str = "
@@ -149,6 +150,9 @@ ALTER TABLE sync_state ADD COLUMN own_lid TEXT;
 -- The last `merge_log.seq` applied to the stored rows.
 ALTER TABLE sync_state ADD COLUMN merge_cursor INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sync_state ADD COLUMN identity_backfill TEXT;
+-- The cursor of the last page of the gateway's pairs taken in (`GET /v1/identity/mappings?since=`); NULL before
+-- the first one.
+ALTER TABLE sync_state ADD COLUMN identity_cursor TEXT;
 -- The last id the gateway used for the chat, when it is not `jid`.
 ALTER TABLE chats ADD COLUMN wire_jid TEXT;
 -- The id the author arrived under, when it is not `sender`.

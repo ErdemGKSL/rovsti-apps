@@ -13,7 +13,7 @@ use rosty_core::wa_identity::{Source, WaIdKind, parse};
 
 use super::identity::{self, Canon, Ids};
 use super::model::{AppliedEvents, Content, Kind};
-use super::{Result, authors, merge, outbox};
+use super::{Result, authors, outbox};
 
 /// Location, contact card and mentions of a message, one JSON column.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -335,16 +335,59 @@ pub(super) struct Arrived {
     wire_sender: Option<String>,
 }
 
-/// Resolves what a message names before anything is matched against the store. An id seen for the first time
-/// becomes a person of its own, so a pair learned later finds its rows.
+/// Learns the pairs a list of reactions names: a reactor next to its other form.
+fn learn_reactions(ids: &mut Ids<'_>, reactions: &[Reaction], at_ms: i64) -> Result<()> {
+    for reaction in reactions {
+        ids.learn_alt(
+            reaction.sender.as_deref(),
+            reaction.sender_alt.as_deref(),
+            Source::PeerMessage,
+            at_ms,
+        )?;
+    }
+    Ok(())
+}
+
+/// The other form of a reactor is learned, not stored: a stored list names each person by their key only.
+fn drop_alts(reactions: &mut [Reaction]) {
+    for reaction in reactions {
+        reaction.sender_alt = None;
+    }
+}
+
+/// Learns the pairs a message names: the other form of a one-to-one chat, of its sender and of who reacted. A
+/// group next to an id, or two ids of one kind, teach nothing.
+pub(super) fn learn_message(ids: &mut Ids<'_>, message: &WaMessage) -> Result<()> {
+    let at_ms = message.timestamp_ms;
+    ids.learn_alt(
+        Some(&message.chat),
+        message.chat_alt.as_deref(),
+        Source::PeerMessage,
+        at_ms,
+    )?;
+    ids.learn_alt(
+        message.sender.as_deref(),
+        message.sender_alt.as_deref(),
+        Source::PeerMessage,
+        at_ms,
+    )?;
+    learn_reactions(ids, &message.reactions, at_ms)
+}
+
+/// Resolves what a message names before anything is matched against the store. The pairs it carries are learned
+/// first, so its ids resolve to the merged person. An id seen for the first time becomes a person of its own, so
+/// a pair learned later finds its rows.
 pub(super) fn arrive(
     ids: &mut Ids<'_>,
     message: &WaMessage,
     meta: Option<&MessageMeta>,
 ) -> Result<Arrived> {
+    learn_message(ids, message)?;
     let chat = ids.canon(&message.chat)?;
     let mut message = message.clone();
     message.chat = chat.key;
+    (message.chat_alt, message.sender_alt) = (None, None);
+    drop_alts(&mut message.reactions);
     let mut meta = meta.cloned();
     let mut resolve = |text: &str| ids.moved(text);
     let wire_sender = authors::id(&mut message.sender, &mut resolve)?
@@ -546,8 +589,7 @@ fn chat_merged(
 ) -> Result<()> {
     let kind_of = |text: &str| parse(text).map(|parsed| parsed.id.kind());
     if kind_of(from) == Some(WaIdKind::Lid) && kind_of(into) == Some(WaIdKind::Pn) {
-        let changes = ids.map.learn(from, into, Source::Other, at_ms);
-        identity::persist(ids.conn, &changes, at_ms)?;
+        ids.learn(from, into, Source::Other, at_ms)?;
     } else {
         let from_key = ids.canon(from)?.key;
         let into_key = ids.canon(into)?.key;
@@ -561,7 +603,7 @@ fn chat_merged(
             )?;
         }
     }
-    out.rekeyed.extend(merge::apply_pending(ids.conn)?);
+    ids.follow()?;
     ids.conn
         .execute("UPDATE sync_state SET needs_resync = 1", [])?;
     out.resync = true;
@@ -615,8 +657,10 @@ pub(super) fn apply_event(
             reactions,
             ..
         } => {
+            learn_reactions(ids, reactions, at_ms)?;
             let chat = chat_key(ids, chat)?;
             let mut reactions = reactions.clone();
+            drop_alts(&mut reactions);
             authors::reactions(&mut reactions, &mut |text| ids.moved(text))?;
             let changed = conn.execute(
                 "UPDATE messages SET reactions = ?3 WHERE chat = ?1 AND id = ?2 AND reactions != ?3",
@@ -706,6 +750,12 @@ pub(super) fn apply_event(
         }
         GatewayEvent::ChatMerged { from, into } => chat_merged(ids, from, into, at_ms, out)?,
         GatewayEvent::Profile(profile) => {
+            ids.learn_alt(
+                Some(&profile.jid),
+                profile.lid.as_deref(),
+                Source::Usync,
+                at_ms,
+            )?;
             let jid = chat_key(ids, &profile.jid)?;
             let changed = conn.execute(
                 "UPDATE chats SET push_name = COALESCE(?2, push_name), picture_id = COALESCE(?3, picture_id)
@@ -728,19 +778,44 @@ pub(super) fn apply_event(
             conn.execute("UPDATE sync_state SET needs_resync = 1", [])?;
             out.resync = true;
         }
-        // Typing and presence are not stored; whoever shows them resolves their ids
-        // (`Store::identity_resolve`) so they land on the chat as it is keyed now.
+        GatewayEvent::IdentityMapped {
+            lid,
+            pn,
+            source,
+            learned_ms,
+        } => ids.learn(lid, pn, Source::from_wire(source), *learned_ms)?,
+        GatewayEvent::IdentityNumberChanged {
+            old_pn,
+            new_pn,
+            old_lid,
+            new_lid,
+        } => ids.number_changed(
+            old_pn,
+            new_pn,
+            old_lid.as_deref(),
+            new_lid.as_deref(),
+            at_ms,
+        )?,
+        // Typing and presence are not stored, only the pair they name is learned; whoever shows them resolves
+        // their ids (`Store::identity_resolve`) so they land on the chat as it is keyed now.
+        GatewayEvent::Presence { jid, jid_alt, .. } | GatewayEvent::Typing { jid, jid_alt, .. } => {
+            ids.learn_alt(Some(jid), jid_alt.as_deref(), Source::Other, at_ms)?;
+        }
+        GatewayEvent::Call(call) => {
+            ids.learn_alt(
+                Some(&call.peer),
+                call.peer_alt.as_deref(),
+                Source::Call,
+                at_ms,
+            )?;
+        }
+        // `State` names the account's own ids: `Store::apply_events` sets them before this event is applied.
         GatewayEvent::Qr { .. }
         | GatewayEvent::PairCode { .. }
         | GatewayEvent::State(_)
-        | GatewayEvent::Presence { .. }
-        | GatewayEvent::Typing { .. }
         | GatewayEvent::GroupChanged { .. }
-        | GatewayEvent::Call(_)
         | GatewayEvent::Scheduled(_)
         | GatewayEvent::StatusChanged { .. }
-        | GatewayEvent::IdentityMapped { .. }
-        | GatewayEvent::IdentityNumberChanged { .. }
         | GatewayEvent::KeyRevoked => {}
     }
     Ok(())

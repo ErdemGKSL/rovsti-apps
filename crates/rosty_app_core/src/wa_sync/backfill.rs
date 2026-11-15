@@ -35,7 +35,7 @@ pub(super) fn step(conn: &mut Connection, map: &mut IdentityMap, batch: usize) -
         [],
         |row| row.get(0),
     )?;
-    let mut ids = Ids { conn: &tx, map };
+    let mut ids = Ids::new(&tx, map);
     let next = match state.as_deref() {
         Some(DONE) => return Ok(true),
         None => {

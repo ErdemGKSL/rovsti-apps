@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
 import dev.rosty.core.model.messages.DeliveryState
+import dev.rosty.core.model.messages.MmsRow
 import dev.rosty.core.model.messages.SmsKey
 import dev.rosty.core.model.messages.SmsMessagesPayload
 import dev.rosty.core.model.messages.SmsRow
@@ -20,6 +21,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
@@ -64,6 +67,18 @@ interface SmsRepository {
         limit: Int = DEFAULT_PAGE,
     ): SmsMessagesPayload
 
+    /**
+     * Every SMS on the phone for a backup, newest first, in pages of at most [pageSize] rows (cold: each collection
+     * reads the provider again, one page at a time). Nothing without `READ_SMS`.
+     */
+    fun backupSms(pageSize: Int = BACKUP_PAGE): Flow<List<SmsRow>>
+
+    /**
+     * Every MMS on the phone for a backup, newest first, in pages of at most [pageSize]: addresses and text parts only.
+     * Unlike [messages] no attachment is copied to the cache. Nothing without `READ_SMS`.
+     */
+    fun backupMms(pageSize: Int = BACKUP_PAGE): Flow<List<MmsRow>>
+
     /** The active SIMs, empty without `READ_PHONE_STATE`. */
     suspend fun sims(): SmsSims
 
@@ -96,6 +111,7 @@ interface SmsRepository {
     companion object {
         const val DEFAULT_THREADS = 500
         const val DEFAULT_PAGE = 50
+        const val BACKUP_PAGE = 500
     }
 }
 
@@ -175,6 +191,36 @@ class AndroidSmsRepository(
                 SmsMessagesPayload(emptyList(), emptyList(), false)
             }
         }
+
+    override fun backupSms(pageSize: Int): Flow<List<SmsRow>> =
+        backupPages(pageSize, { SmsQuery.backupSms(context, it, pageSize) }) { SmsQuery.PageKey(it.dateMs, it.id) }
+
+    override fun backupMms(pageSize: Int): Flow<List<MmsRow>> =
+        backupPages(pageSize, { SmsQuery.backupMms(context, it, pageSize) }) {
+            SmsQuery.PageKey(it.dateMs / 1000, it.id)
+        }
+
+    /** Reads [page] after the key of each last row until a short page; a denied read ends the flow. */
+    private fun <T> backupPages(
+        pageSize: Int,
+        page: (SmsQuery.PageKey?) -> List<T>,
+        keyOf: (T) -> SmsQuery.PageKey,
+    ): Flow<List<T>> =
+        flow {
+            val n = pageSize.coerceAtLeast(1)
+            var after: SmsQuery.PageKey? = null
+            while (true) {
+                val rows =
+                    try {
+                        page(after)
+                    } catch (_: SecurityException) {
+                        emptyList()
+                    }
+                if (rows.isNotEmpty()) emit(rows)
+                if (rows.size < n) break
+                after = keyOf(rows.last())
+            }
+        }.flowOn(io)
 
     override suspend fun sims(): SmsSims =
         withContext(io) {

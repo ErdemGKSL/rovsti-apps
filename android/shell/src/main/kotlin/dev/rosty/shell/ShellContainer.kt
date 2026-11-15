@@ -93,10 +93,17 @@ abstract class ShellContainer(
     val devLog: DevLog by lazy { createDevLog() }
 
     init {
-        scope.launch { devLog.start() }
+        if (startsDevLogAtCreate()) scope.launch { devLog.start() }
     }
 
     protected open fun createDevLog(): DevLog = DevLog.create(context, { rust }, scope)
+
+    /**
+     * Whether [devLog] starts on a pool thread as soon as the container is built (true for the apps). A JVM test's
+     * container returns false: that start could run after the test has torn the application down. Called from the
+     * constructor, so an override must not read the subclass's own fields.
+     */
+    protected open fun startsDevLogAtCreate(): Boolean = true
 
     protected open fun createRust(): RustCore {
         Rust.init(

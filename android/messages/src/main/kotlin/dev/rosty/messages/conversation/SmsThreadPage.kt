@@ -1,6 +1,11 @@
 package dev.rosty.messages.conversation
 
+import android.content.Context
 import android.content.res.Resources
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
@@ -14,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
@@ -21,13 +27,17 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.getOrNull
+import dev.rosty.core.model.chat.ChatUnread
+import dev.rosty.core.model.chat.NextUnreadRequest
 import dev.rosty.core.model.chat.SearchJumpRequest
 import dev.rosty.core.model.chat.SearchJumpStep
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.design.icons.RostyIcons
+import dev.rosty.design.media.showPhotoViewer
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.OverlayController
+import dev.rosty.design.overlay.confirmDestructive
 import dev.rosty.design.overlay.showToast
 import dev.rosty.design.overlay.showUndo
 import dev.rosty.design.text.resolve
@@ -35,16 +45,31 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.compose.presentForward
+import dev.rosty.messages.inbox.InboxAction
+import dev.rosty.messages.inbox.presentMute
 import dev.rosty.messages.inbox.rememberInboxViewModel
+import dev.rosty.messages.notify.TrackOpenConversation
+import dev.rosty.messages.schedule.ScheduledStrip
+import dev.rosty.messages.schedule.rememberSmsScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
+import dev.rosty.messages.settings.replies.rememberComposerExtras
+import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
+import dev.rosty.messages.viewer.openAttachment
 import dev.rosty.messages.viewer.picturesOf
 import dev.rosty.messages.viewer.showConversationPictures
+import dev.rosty.platform.sms.SmsResult
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.ZoneId
+import java.util.UUID
 
 /** [SmsWords] from the app's resources. */
 class ResourceSmsWords(
@@ -95,12 +120,25 @@ fun rememberDayLabels(): DayLabels {
     }
 }
 
-/** The bubble menu of an SMS (E6.3; the full menu with reactions is E6.5): failed ones retry, copy or delete. */
+/** What the SMS bubble menu does besides the view model's own actions (E6.5). */
+class SmsMenuHooks(
+    val onForward: (BubbleUi) -> Unit = {},
+    val onSelectText: (BubbleUi) -> Unit = {},
+    val onSelect: (BubbleUi) -> Unit = {},
+    val onInfo: (BubbleUi) -> Unit = {},
+    /** E6.13: "Star" or "Unstar" and "Remind me" for a message that can be marked. */
+    val marks: (BubbleUi) -> List<MenuItem> = { emptyList() },
+)
+
+/**
+ * The bubble menu of an SMS (E6.3, E6.5): Retry for a failed one, Copy, Select Text (M16), Forward (M9), Select (M20),
+ * Info (M14), then Delete.
+ */
 fun smsBubbleMenu(
     bubble: BubbleUi,
     res: Resources,
     model: SmsThreadViewModel,
-    onForward: (BubbleUi) -> Unit = {},
+    hooks: SmsMenuHooks = SmsMenuHooks(),
 ): ImmutableList<MenuItem> {
     val items = ArrayList<MenuItem>()
     if (bubble.state == BubbleState.Failed) {
@@ -108,8 +146,17 @@ fun smsBubbleMenu(
     }
     items += MenuItem.Action(res.getString(R.string.conversation_copy), RostyIcons.Copy) { model.copy(bubble.key) }
     if (bubble.text.isNotBlank()) {
-        items += MenuItem.Action(res.getString(R.string.conversation_forward), RostyIcons.Forward) { onForward(bubble) }
+        items +=
+            MenuItem.Action(res.getString(R.string.menu_select_text), RostyIcons.Pencil) { hooks.onSelectText(bubble) }
+        items +=
+            MenuItem.Action(
+                res.getString(R.string.conversation_forward),
+                RostyIcons.Forward,
+            ) { hooks.onForward(bubble) }
     }
+    items += hooks.marks(bubble)
+    items += MenuItem.Action(res.getString(R.string.menu_select), RostyIcons.CircleCheck) { hooks.onSelect(bubble) }
+    items += MenuItem.Action(res.getString(R.string.menu_info), RostyIcons.Info) { hooks.onInfo(bubble) }
     items += MenuItem.Separator
     items +=
         MenuItem.Action(res.getString(R.string.inbox_delete), RostyIcons.Trash, destructive = true) {
@@ -179,11 +226,36 @@ fun SmsThreadPage(
     val forward: (BubbleUi) -> Unit = { bubble ->
         overlays.presentForward(context, inbox.state.value.rows, model.tag, bubble.text, onOpen)
     }
+    val marks = rememberMarkHost(container, overlays, model.tag, days) { model.state.value.title }
+    val hooks =
+        remember(model, host, marks) {
+            SmsMenuHooks(
+                marks = marks::menu,
+                onForward = forward,
+                onSelectText = { overlays.presentSelectText(context, it.text) },
+                onSelect = { host.tools.enterSelect(it.key) },
+                onInfo = { b ->
+                    val mms = b.key.startsWith("mms:")
+                    overlays.presentInfo(
+                        context,
+                        infoRows(res, b, res.getString(if (mms) R.string.info_mms else R.string.inbox_chip_sms)),
+                    )
+                },
+            )
+        }
+    val stage: (Uri) -> Unit = { uri -> container.scope.launch { copyPicture(context, uri)?.let(model::attach) } }
+    val pick =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(stage) }
+    val detector = rememberDetector(container)
+    val selectLabels = rememberSelectLabels()
     val labels = rememberToolLabels()
+    TrackOpenConversation(model.tag)
+    val schedule = rememberSmsScheduleHost(container, overlays, route, composer)
     val actions =
-        remember(model, res, onBack, overlays, host, state.title) {
+        remember(model, res, onBack, overlays, host, state.title, hooks) {
             ConversationActions(
                 onBack = onBack,
+                onMenuOpened = marks::menuOpened,
                 onSend = { text ->
                     model.send(text)
                     composer.setTextAndPlaceCursorAtEnd("")
@@ -193,6 +265,18 @@ fun SmsThreadPage(
                     when {
                         bubble.state == BubbleState.Failed -> {
                             model.retry(bubble.key)
+                        }
+
+                        bubble.media.any { !it.isImage } && bubble.media.none { it.isImage } -> {
+                            container.scope.launch {
+                                overlays.openAttachment(
+                                    context,
+                                    bubble.media.first(),
+                                    container.chat,
+                                    container.files,
+                                    container.scope,
+                                )
+                            }
                         }
 
                         bubble.media.any { it.isImage } -> {
@@ -207,7 +291,81 @@ fun SmsThreadPage(
                         }
                     }
                 },
-                menuFor = { smsBubbleMenu(it, res, model, forward) },
+                menuFor = { smsBubbleMenu(it, res, model, hooks) },
+                // M4: the header photo opens full screen.
+                onAvatar = {
+                    model.state.value.avatar.photoUri?.let { uri ->
+                        overlays.showPhotoViewer(persistentListOf(Uri.parse(uri)), 0, persistentListOf())
+                    }
+                },
+                pillsFor = detector::pills,
+                attachMenu =
+                    persistentListOf(
+                        MenuItem.Action(res.getString(R.string.composer_attach), RostyIcons.Photo) {
+                            pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                    ),
+                onRemoveAttachment = model::clearAttachment,
+                onPill = { pill ->
+                    handlePill(
+                        context,
+                        pill,
+                        overlays,
+                    ) { text, sensitive -> container.clipboard.copy(text, sensitive = sensitive) }
+                    // M47: a copied code books its message for deletion when the user turned that on.
+                    if (pill.kind == PillKind.CopyCode) {
+                        container.scope.launch { container.codeCleanup.copied(route.threadId, pill.value) }
+                    }
+                },
+                onToggleSelect = host.tools::toggleSelect,
+                onSelectAction = { action ->
+                    val chosen =
+                        host.tools.state.value.selected
+                            .orEmpty()
+                    when (action) {
+                        SelectAction.Copy -> {
+                            container.scope.launch {
+                                host.tools
+                                    .selectionText(
+                                        model.state.value.title,
+                                        res.getString(R.string.tools_me),
+                                    )?.let(host.copy)
+                                host.tools.exitSelect()
+                            }
+                        }
+
+                        SelectAction.Forward -> {
+                            container.scope.launch {
+                                val text =
+                                    host.tools.selectionText(
+                                        model.state.value.title,
+                                        res.getString(R.string.tools_me),
+                                    )
+                                host.tools.exitSelect()
+                                if (text !=
+                                    null
+                                ) {
+                                    overlays.presentForward(
+                                        context,
+                                        inbox.state.value.rows,
+                                        model.tag,
+                                        text,
+                                        onOpen,
+                                    )
+                                }
+                            }
+                        }
+
+                        SelectAction.Delete -> {
+                            model.deleteAll(chosen)
+                            host.tools.exitSelect()
+                        }
+
+                        SelectAction.Cancel -> {
+                            host.tools.exitSelect()
+                        }
+                    }
+                },
                 onSim = model::nextSim,
                 headerMenu =
                     headerMenu(
@@ -218,6 +376,92 @@ fun SmsThreadPage(
                                     res.getString(R.string.tools_copy_name) to it
                                 },
                                 route.addresses.singleOrNull()?.let { res.getString(R.string.tools_copy_number) to it },
+                            ),
+                        extra =
+                            listOfNotNull(
+                                inbox.state.value.rows.firstOrNull { it.smsThread == route.threadId }?.let { row ->
+                                    // M29: mute this conversation from inside it.
+                                    MenuItem.Action(res.getString(R.string.inbox_mute_menu), RostyIcons.BellSlash) {
+                                        presentMute(overlays, res) { inbox.onAction(InboxAction.Mute(row.key, it)) }
+                                    }
+                                },
+                                // E6.11 on the thread page: out of Spam, or into it (strangers only).
+                                inbox.state.value.rows.firstOrNull { it.smsThread == route.threadId }?.let { row ->
+                                    when {
+                                        row.inSpam -> {
+                                            MenuItem.Action(
+                                                res.getString(R.string.thread_not_spam),
+                                                RostyIcons.ShieldCheck,
+                                            ) {
+                                                inbox.onAction(InboxAction.NotSpam(row.key))
+                                            }
+                                        }
+
+                                        row.canMoveToSpam -> {
+                                            MenuItem.Action(
+                                                res.getString(R.string.thread_move_to_spam),
+                                                RostyIcons.Shield,
+                                            ) {
+                                                inbox.onAction(InboxAction.MoveToSpam(row.key))
+                                            }
+                                        }
+
+                                        else -> {
+                                            null
+                                        }
+                                    }
+                                },
+                                // M27: clear the chat (every message of the thread, after a confirm; needs the role).
+                                MenuItem.Action(
+                                    res.getString(R.string.thread_clear),
+                                    RostyIcons.Trash,
+                                    destructive = true,
+                                ) {
+                                    overlays.confirmDestructive(
+                                        destructiveLabel = res.getString(R.string.thread_clear),
+                                        onConfirm = {
+                                            container.scope.launch {
+                                                if (!container.smsRole.value) {
+                                                    overlays.showToast(res.getString(R.string.inbox_needs_role))
+                                                } else if (container.sms.deleteThread(route.threadId) is SmsResult.Ok) {
+                                                    onBack()
+                                                }
+                                            }
+                                        },
+                                        message = res.getString(R.string.thread_clear_confirm),
+                                        cancelLabel = res.getString(R.string.inbox_cancel),
+                                    )
+                                },
+                                // M43: the next chat with unread messages, in the inbox's order.
+                                MenuItem.Action(res.getString(R.string.tools_next_unread), RostyIcons.ArrowDown) {
+                                    container.scope.launch {
+                                        val rows = inbox.state.value.rows
+                                        val current = rows.firstOrNull { it.smsThread == route.threadId }?.key
+                                        val next =
+                                            container.chat
+                                                .nextUnread(
+                                                    NextUnreadRequest(
+                                                        rows.map { ChatUnread(it.key, it.isUnread) },
+                                                        current,
+                                                    ),
+                                                ).getOrNull()
+                                                ?.index
+                                                ?.let(rows::getOrNull)
+                                        val target =
+                                            next?.smsThread?.let {
+                                                MessagesRoute.SmsThread(
+                                                    it,
+                                                    listOfNotNull(next.smsSender),
+                                                )
+                                            }
+                                                ?: next?.waChat?.let { MessagesRoute.WaThread(it) }
+                                        if (target == null) {
+                                            overlays.showToast(res.getString(R.string.inbox_none_unread))
+                                        } else {
+                                            onOpen(target)
+                                        }
+                                    }
+                                },
                             ),
                     ),
                 onFindQuery = host.tools::setQuery,
@@ -231,9 +475,10 @@ fun SmsThreadPage(
                 },
             )
         }
+    val extras = rememberComposerExtras(container, composer)
     CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
         ConversationScreen(
-            state = state,
+            state = marks.marked(state),
             composer = composer,
             listState = listState,
             actions = actions,
@@ -244,6 +489,14 @@ fun SmsThreadPage(
                 ),
             tools = toolsState,
             labels = labels,
+            selectLabels = selectLabels,
+            composerModifier = Modifier.pasteImages(stage),
+            onSendLongPress = schedule::ask,
+            sendLaterLabel = schedule.words.title,
+            aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
+            textScale = extras.textScale,
+            quickReplies = extras.chips,
+            onQuickReply = extras.insert,
         )
     }
 }
@@ -344,3 +597,25 @@ internal fun RevealHit(
         }
     }
 }
+
+/** Copies a picked or pasted picture into the app's cache, where the core can read it for the MMS. */
+internal suspend fun copyPicture(
+    c: Context,
+    uri: Uri,
+): File? =
+    withContext(Dispatchers.IO) {
+        val mime = c.contentResolver.getType(uri) ?: "image/jpeg"
+        val ext =
+            when (mime) {
+                "image/png" -> "png"
+                "image/gif" -> "gif"
+                "image/webp" -> "webp"
+                else -> "jpg"
+            }
+        val dir = File(c.cacheDir, "mms-out").apply { mkdirs() }
+        val file = File(dir, "${UUID.randomUUID()}.$ext")
+        runCatching {
+            c.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } }
+        }.getOrNull() ?: return@withContext null
+        file
+    }

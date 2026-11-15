@@ -8,9 +8,9 @@ import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SmsMessage
 import dev.rosty.core.log.RostyLog
+import dev.rosty.messages.notify.MessagesNotifier
 import dev.rosty.platform.Headless
 import dev.rosty.platform.PlatformEvents
-import dev.rosty.platform.notify.MessageNotifications
 import dev.rosty.platform.sms.IncomingNotice
 import dev.rosty.platform.sms.SmsClock
 import dev.rosty.platform.sms.Verdict
@@ -81,7 +81,7 @@ class SmsDeliverReceiver : BroadcastReceiver() {
             )
         if (!verdict.spam && threadId != 0L) {
             val lines = IncomingNotice.lastLines(unreadBodies(context, threadId), sms.body)
-            MessageNotifications.show(context, IncomingNotice.spec(threadId, name ?: sms.sender, lines, verdict.otp))
+            MessagesNotifier.show(context, IncomingNotice.spec(threadId, name ?: sms.sender, lines, verdict.otp))
         }
         PlatformEvents.emit(
             "sms_received",

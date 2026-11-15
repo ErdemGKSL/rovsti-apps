@@ -10,7 +10,11 @@ import dev.rosty.core.model.chat.FindCursorRequest
 import dev.rosty.core.model.chat.GalleryItem
 import dev.rosty.core.model.chat.GalleryKind
 import dev.rosty.core.model.chat.GalleryRequest
+import dev.rosty.core.model.chat.MultiSelectRequest
 import dev.rosty.core.ops.ChatOps
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -37,6 +41,8 @@ data class ToolsUi(
     val highlight: String? = null,
     /** A bubble the list should scroll to once (find, jump to date); the page clears it after scrolling. */
     val scrollTo: String? = null,
+    /** Select mode (M20): the chosen bubbles, oldest first; null when not selecting. */
+    val selected: ImmutableList<String>? = null,
 )
 
 /** A file the export made: its name and text (Save as, or the share sheet). */
@@ -161,6 +167,51 @@ class ConversationTools(
                 ),
             ) as? Outcome.Ok
         )?.value
+
+    /** Select mode (M20) with [key] chosen. */
+    fun enterSelect(key: String) {
+        ui.value = ui.value.copy(selected = persistentListOf(key), find = null)
+    }
+
+    /** Adds or removes [key]; the last one removed ends select mode. */
+    fun toggleSelect(key: String) {
+        val now = ui.value.selected ?: return
+        val next = if (key in now) now - key else now + key
+        ui.value = ui.value.copy(selected = next.takeIf { it.isNotEmpty() }?.toImmutableList())
+    }
+
+    fun exitSelect() {
+        ui.value = ui.value.copy(selected = null)
+    }
+
+    /** The selected bubbles as one clipboard text (`multi_select.plan`: a lone message is its text, more a block). */
+    suspend fun selectionText(
+        title: String,
+        me: String,
+    ): String? {
+        val chosen = ui.value.selected ?: return null
+        val lines =
+            ordered().filter { it.key in chosen && !it.deleted }.map { b ->
+                ExportLine(
+                    b.atMs,
+                    if (b.outgoing) me else b.sender ?: title,
+                    b.text.ifBlank {
+                        b.media
+                            .firstOrNull()
+                            ?.label
+                            .orEmpty()
+                    },
+                )
+            }
+        if (lines.isEmpty()) return null
+        return (chat.multiSelect(MultiSelectRequest(lines.size, lines, tzOffsetS = tzOffsetS())) as? Outcome.Ok)
+            ?.value
+            ?.copyText
+    }
+
+    /** The files of the loaded messages that are on the phone (M48 zip), oldest first. */
+    fun mediaFiles(): List<java.io.File> =
+        ordered().flatMap { b -> b.media.mapNotNull { it.model as? java.io.File } }.distinct()
 
     /** The picture of each loaded media message by bubble key, for the gallery grid. */
     fun mediaModels(): Map<String, Any?> =

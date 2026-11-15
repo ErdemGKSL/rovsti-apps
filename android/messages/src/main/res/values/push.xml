@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Whether a push service posts the WhatsApp digest while no UI is attached (AD-MSG5): only the firebase flavor
+         has one; the plain flavor notifies from its own event stream instead. -->
+    <bool name="push_wake">false</bool>
+</resources>

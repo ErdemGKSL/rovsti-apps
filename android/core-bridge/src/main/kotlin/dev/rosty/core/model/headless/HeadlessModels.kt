@@ -198,6 +198,8 @@ data class TripFixAnswer(
     @SerialName("notice_failed") val noticeFailed: Boolean = false,
     val side: Side? = null,
     val inside: Boolean = false,
+    /** Whole minutes to the line (the number in "about 14 min" of [text]); null without a speed. For `stops.arrival_clock`. */
+    @SerialName("eta_min") val etaMin: Int? = null,
     @SerialName("circle_m") val circleM: Double? = null,
     val at: FixPos? = null,
 )

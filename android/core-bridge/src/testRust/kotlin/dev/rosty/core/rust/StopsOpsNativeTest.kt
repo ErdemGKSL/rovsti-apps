@@ -6,6 +6,7 @@ import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.CoordFormatRequest
 import dev.rosty.core.model.stops.CrossingValidateRequest
 import dev.rosty.core.model.stops.DestParseRequest
+import dev.rosty.core.model.stops.DestShareRequest
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Endpoint
 import dev.rosty.core.model.stops.FixIn
@@ -16,7 +17,12 @@ import dev.rosty.core.model.stops.GtfsSummaryRequest
 import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.PickEvent
 import dev.rosty.core.model.stops.PickReplayRequest
+import dev.rosty.core.model.stops.PlacesExportRequest
+import dev.rosty.core.model.stops.PlacesImportRequest
 import dev.rosty.core.model.stops.ProjectRequest
+import dev.rosty.core.model.stops.SavedEdit
+import dev.rosty.core.model.stops.SavedEditRequest
+import dev.rosty.core.model.stops.SavedStops
 import dev.rosty.core.model.stops.Side
 import dev.rosty.core.model.stops.Slot
 import dev.rosty.core.model.stops.TripState
@@ -333,6 +339,107 @@ class StopsOpsNativeTest {
             // Another year, a calendar west of UTC (still 31 Dec there), and rows the import dropped.
             val later = GtfsSummaryRequest(nowMs = 400 * day, tzOffsetS = -5 * 3_600, skippedRows = 1_200, dir = dir)
             assertEquals("Imported 31 Dec 1969, 1 200 unusable rows skipped", ops.gtfsSummary(later).getOrOk().imported)
+        }
+
+    @Test
+    fun aRefusedStartIsClearedWithoutAHistoryRecord() =
+        runBlocking {
+            val dir =
+                kotlin.io.path
+                    .createTempDirectory("rosty-clear")
+                    .toFile()
+            val request =
+                dev.rosty.core.model.phone
+                    .DirRequest(dir.path)
+            try {
+                // Nothing to clear yet: not an error.
+                assertFalse(ops.storeTripClear(request).getOrOk().removed)
+                open(dir.path).use {
+                    assertNotNull(ops.storeTripLoad(request).getOrOk().trip)
+                    assertTrue(ops.storeTripClear(request).getOrOk().removed)
+                    assertNull(ops.storeTripLoad(request).getOrOk().trip)
+                    assertFalse(ops.storeTripClear(request).getOrOk().removed)
+                    // Nothing was recorded: ending now finds no trip either.
+                    val ended =
+                        ops.storeTripEnd(
+                            dev.rosty.core.model.stops
+                                .StoreTripEndRequest("cancelled", 99_000, dir.path),
+                        )
+                    assertNull(ended.getOrOk().record)
+                }
+            } finally {
+                dir.deleteRecursively()
+            }
+        }
+
+    @Test
+    fun theStatusOfAMovingTripCarriesItsEtaMinutes() =
+        runBlocking {
+            open().use { trip ->
+                // 8 m/s towards the line, 330 m away: under a minute, said as one.
+                val answer = trip.fix(fix(41.003, 28.999, 10_000)).getOrOk()
+                assertEquals(1, answer.out.etaMin)
+                assertEquals(answer.etaMin, answer.out.etaMin)
+                assertTrue(answer.out.text, answer.out.text.endsWith("about 1 min"))
+                val clock =
+                    ops
+                        .arrivalClock(
+                            dev.rosty.core.model.stops
+                                .ArrivalClockRequest(nowMs = 0, etaMin = answer.out.etaMin!!, tzOffsetS = 0),
+                        ).getOrOk()
+                assertEquals("00:01", clock.clock)
+            }
+        }
+
+    @Test
+    fun aSavedStopKeepsItsNoteThroughEditShareExportAndImport() =
+        runBlocking {
+            var saved = SavedStops(version = 2, nextId = 1, stops = emptyList())
+            val add = SavedEdit.Add("Pier", home, work)
+            saved = ops.savedEdit(SavedEditRequest(saved, add, nowMs = 5)).getOrOk().saved
+            val id = saved.stops.single().id
+            assertEquals("", saved.stops.single().note)
+
+            val noted = SavedEdit.SetNote(id, "  Back door,\n platform 2 ")
+            saved = ops.savedEdit(SavedEditRequest(saved, noted)).getOrOk().saved
+            assertEquals("Back door, platform 2", saved.stops.single().note)
+
+            val tooLong = ops.savedEdit(SavedEditRequest(saved, SavedEdit.SetNote(id, "x".repeat(201))))
+            assertEquals("note_too_long", (tooLong as Outcome.Err).error.reason)
+            val missing = ops.savedEdit(SavedEditRequest(saved, SavedEdit.SetNote(99, "x")))
+            assertEquals("not_found", (missing as Outcome.Err).error.reason)
+
+            // The note is the last line of the stop's share text.
+            val share =
+                ops
+                    .destShare(
+                        DestShareRequest(
+                            at = home.coord,
+                            b = work.coord,
+                            name = "Pier",
+                            note = saved.stops.single().note,
+                        ),
+                    ).getOrOk()
+            assertTrue(share.stopText!!.endsWith("\nBack door, platform 2"))
+            // It survives the JSON export and a fresh import.
+            val exported = ops.placesExport(PlacesExportRequest(saved, "json", "2026-11-15")).getOrOk()
+            val empty = SavedStops(version = 2, nextId = 1, stops = emptyList())
+            val imported =
+                ops
+                    .placesImport(
+                        PlacesImportRequest(empty, exported.text, nowMs = 9, apply = true),
+                    ).getOrOk()
+            assertEquals(
+                "Back door, platform 2",
+                imported.saved!!
+                    .stops
+                    .single()
+                    .note,
+            )
+
+            // A blank note clears it.
+            saved = ops.savedEdit(SavedEditRequest(saved, SavedEdit.SetNote(id, "  "))).getOrOk().saved
+            assertEquals("", saved.stops.single().note)
         }
 
     private fun <T> Outcome<T>.getOrOk(): T = (this as? Outcome.Ok)?.value ?: error("failed: $this")

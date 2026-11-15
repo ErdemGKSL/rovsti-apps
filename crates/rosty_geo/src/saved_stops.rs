@@ -16,6 +16,8 @@ pub const FORMAT_VERSION: u32 = 2;
 pub const MAX_STOPS: usize = 200;
 /// Longest stop name, in characters.
 pub const MAX_NAME_CHARS: usize = 60;
+/// Longest note of a stop (S44), in characters.
+pub const MAX_NOTE_CHARS: usize = 200;
 /// A new stop whose points are both this close to a saved stop's points is the same stop.
 pub const DUPLICATE_GATE_M: f64 = 25.0;
 /// How far from the gate midpoint a GTFS stop may be to suggest its name.
@@ -95,6 +97,11 @@ pub struct SavedStop {
     /// Map colour. Absent from the file when orange.
     #[serde(default, skip_serializing_if = "StopColour::is_default")]
     pub colour: StopColour,
+    /// A free line of the user's own (S44), shown in the row and in the share text. One line, trimmed, at most
+    /// [`MAX_NOTE_CHARS`]. Absent from the file when empty, so files written before notes existed and files read by
+    /// a build without them stay version 2.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
 }
 
 impl SavedStop {
@@ -140,6 +147,8 @@ pub enum SavedStopError {
     /// [`MAX_STOPS`] reached.
     Full,
     NotFound,
+    /// The note is longer than [`MAX_NOTE_CHARS`].
+    NoteTooLong,
 }
 
 impl SavedStopError {
@@ -150,6 +159,7 @@ impl SavedStopError {
             Self::Duplicate(_) => "You already saved this stop.",
             Self::Full => "You have saved 200 stops. Remove one first.",
             Self::NotFound => "That stop no longer exists.",
+            Self::NoteTooLong => "Notes can be up to 200 characters.",
         }
     }
 }
@@ -179,6 +189,12 @@ impl Default for SavedStops {
             stops: Vec::new(),
         }
     }
+}
+
+/// `note` as one trimmed line, or `None` when it is longer than [`MAX_NOTE_CHARS`].
+pub fn clean_note(note: &str) -> Option<String> {
+    let note = note.split_whitespace().collect::<Vec<_>>().join(" ");
+    (note.chars().count() <= MAX_NOTE_CHARS).then_some(note)
 }
 
 fn valid_name(name: &str) -> Option<String> {
@@ -216,6 +232,7 @@ impl SavedStops {
             created_ms: now_ms,
             favourite: false,
             colour: StopColour::default(),
+            note: String::new(),
         });
         Ok(id)
     }
@@ -256,6 +273,19 @@ impl SavedStops {
     }
 
     /// Sets the colour; false when the id is missing.
+    /// Sets the note of a stop, or clears it with an empty (or blank) text. The text is made one line (runs of
+    /// white space, line breaks included, become one space) and trimmed. Returns the note as stored.
+    pub fn set_note(&mut self, id: u64, note: &str) -> Result<String, SavedStopError> {
+        let note = clean_note(note).ok_or(SavedStopError::NoteTooLong)?;
+        let stop = self
+            .stops
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or(SavedStopError::NotFound)?;
+        stop.note.clone_from(&note);
+        Ok(note)
+    }
+
     pub fn set_colour(&mut self, id: u64, colour: StopColour) -> bool {
         match self.stops.iter_mut().find(|s| s.id == id) {
             Some(stop) => {
@@ -372,7 +402,7 @@ pub fn sorted(mut hits: Vec<&SavedStop>, sort: SavedSort, here: Option<Coord>) -
 }
 
 /// The list as plain text for sharing: a header, then per stop its name, centre,
-/// distance from `here` when known, and a map link. Empty for no stops.
+/// distance from `here` when known, its note when it has one, and a map link. Empty for no stops.
 pub fn list_text(stops: &[&SavedStop], here: Option<Coord>) -> String {
     if stops.is_empty() {
         return String::new();
@@ -388,6 +418,9 @@ pub fn list_text(stops: &[&SavedStop], here: Option<Coord>) -> String {
         ));
         if let Some(h) = here {
             out.push_str(&format!(" ({} away)", format_distance(h.distance_m(c))));
+        }
+        if !s.note.is_empty() {
+            out.push_str(&format!("\n  {}", s.note));
         }
         out.push_str(&format!("\n  {}", format(c, CoordFormat::OsmLink, None)));
     }
@@ -519,6 +552,7 @@ mod tests {
             created_ms: 0,
             favourite: false,
             colour: StopColour::default(),
+            note: String::new(),
         };
         let sp = shortcut_spec(&stop);
         assert_eq!(sp.id, "stop-7");
@@ -961,11 +995,116 @@ mod tests {
             created_ms: 0,
             favourite: true,
             colour: StopColour::default(),
+            note: String::new(),
         });
         assert!(s.nearest(Coord::new(41.0, 29.0), NEAREST_CHIP_M).is_none());
         let (a, b) = gate(0.01);
         let ok = s.add("Ok", a, b, 1).unwrap();
         let (stop, _) = s.nearest(Coord::new(41.0, 29.0), NEAREST_CHIP_M).unwrap();
         assert_eq!(stop.id, ok);
+    }
+
+    // ---- notes (S44) ----
+
+    #[test]
+    fn a_note_is_set_trimmed_made_one_line_and_cleared() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.01);
+        let id = s.add("Pier", a, b, 1).unwrap();
+        assert_eq!(s.get(id).unwrap().note, "");
+        assert_eq!(
+            s.set_note(id, "  Back door,\n\tplatform   2 \r\n").unwrap(),
+            "Back door, platform 2"
+        );
+        assert_eq!(s.get(id).unwrap().note, "Back door, platform 2");
+        // Blank text clears it.
+        assert_eq!(s.set_note(id, " \n ").unwrap(), "");
+        assert_eq!(s.get(id).unwrap().note, "");
+        assert_eq!(s.set_note(id, "").unwrap(), "");
+        assert_eq!(s.set_note(99, "x"), Err(SavedStopError::NotFound));
+    }
+
+    #[test]
+    fn a_note_is_capped_in_characters_not_bytes() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.01);
+        let id = s.add("Pier", a, b, 1).unwrap();
+        // 200 two-byte letters fit; one more does not, and the old note stays.
+        let full = "ş".repeat(MAX_NOTE_CHARS);
+        assert_eq!(
+            s.set_note(id, &full).unwrap().chars().count(),
+            MAX_NOTE_CHARS
+        );
+        assert_eq!(
+            s.set_note(id, &"ş".repeat(MAX_NOTE_CHARS + 1)),
+            Err(SavedStopError::NoteTooLong)
+        );
+        assert_eq!(s.get(id).unwrap().note, full);
+        // White space around a note of exactly the cap does not count against it.
+        let padded = format!("  {}  ", "a".repeat(MAX_NOTE_CHARS));
+        assert_eq!(s.set_note(id, &padded).unwrap().len(), MAX_NOTE_CHARS);
+        assert!(!SavedStopError::NoteTooLong.message().is_empty());
+        assert_eq!(clean_note(" a  b "), Some("a b".to_owned()));
+        assert_eq!(clean_note(&"x".repeat(201)), None);
+    }
+
+    #[test]
+    fn the_file_stays_version_two_with_and_without_notes() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.01);
+        let plain = s.add("Plain", a.clone(), b.clone(), 1).unwrap();
+        let (a2, b2) = gate(0.02);
+        let noted = s.add("Noted", a2, b2, 2).unwrap();
+        s.set_note(noted, "Platform 2").unwrap();
+        let json = serde_json::to_string(&s).unwrap();
+        // A stop without a note is written exactly as before notes existed.
+        assert_eq!(json.matches("\"note\"").count(), 1);
+        assert!(json.contains("\"version\":2"));
+        let back: SavedStops = serde_json::from_str(&json).unwrap();
+        // (Not `back == s`: serde_json may read a coordinate back one bit off.)
+        assert_eq!(back.get(noted).unwrap().note, "Platform 2");
+        assert_eq!(
+            (back.version, back.next_id, back.stops.len()),
+            (2, s.next_id, 2)
+        );
+        assert_eq!(back.get(plain).unwrap().note, "");
+        // A file written before notes existed loads, and loads as the current format.
+        let old = r#"{"version":2,"next_id":2,"stops":[{"id":1,"name":"Old","a":{"label":"","coord":{"lat":41.0,"lon":29.0}},
+            "b":{"label":"","coord":{"lat":41.01,"lon":29.0}},"created_ms":5}]}"#;
+        let loaded = load_saved_stops(Some(old));
+        assert!(!loaded.discarded);
+        assert_eq!(loaded.stops.stops[0].note, "");
+        // A build without notes reads a noted file too: an unknown field is not an error for this format.
+        #[derive(serde::Deserialize)]
+        struct OldStop {
+            id: u64,
+            name: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct OldFile {
+            version: u32,
+            stops: Vec<OldStop>,
+        }
+        let old_build: OldFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(old_build.version, FORMAT_VERSION);
+        assert_eq!(
+            (old_build.stops[1].id, old_build.stops[1].name.as_str()),
+            (noted, "Noted")
+        );
+    }
+
+    #[test]
+    fn the_shared_list_shows_a_note_under_its_stop() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.01);
+        let id = s.add("Pier", a, b, 1).unwrap();
+        let without = list_text(&s.stops.iter().collect::<Vec<_>>(), None);
+        s.set_note(id, "Back door").unwrap();
+        let with = list_text(&s.stops.iter().collect::<Vec<_>>(), None);
+        assert_eq!(with.lines().count(), without.lines().count() + 1);
+        let lines: Vec<&str> = with.lines().collect();
+        assert!(lines[1].starts_with("Pier: "));
+        assert_eq!(lines[2], "  Back door");
+        assert!(lines[3].trim_start().starts_with("https://"));
     }
 }

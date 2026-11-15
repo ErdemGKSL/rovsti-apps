@@ -22,6 +22,8 @@ pub struct Incoming {
     pub favourite: bool,
     /// Kept from our JSON; GPX has no colour, so it is orange.
     pub colour: StopColour,
+    /// The stop's note, kept from our JSON (cut to the cap); GPX has none.
+    pub note: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,8 +152,19 @@ fn parse_json(text: &str) -> Result<Vec<Incoming>, ImportError> {
             b: s.b.coord,
             favourite: s.favourite,
             colour: s.colour,
+            note: incoming_note(&s.note),
         })
         .collect())
+}
+
+/// A note from a file as one line, cut to the cap rather than refused: a long note must not lose the stop.
+fn incoming_note(note: &str) -> String {
+    let line = note.split_whitespace().collect::<Vec<_>>().join(" ");
+    line.chars()
+        .take(crate::saved_stops::MAX_NOTE_CHARS)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 fn ok(c: Coord) -> bool {
@@ -316,6 +329,7 @@ fn parse_gpx(text: &str) -> Result<Vec<Incoming>, ImportError> {
                                 b,
                                 favourite: false,
                                 colour: StopColour::default(),
+                                note: String::new(),
                             });
                         }
                     }
@@ -357,6 +371,7 @@ fn parse_gpx(text: &str) -> Result<Vec<Incoming>, ImportError> {
             b,
             favourite: false,
             colour: StopColour::default(),
+            note: String::new(),
         });
     }
     Ok(out)
@@ -402,6 +417,8 @@ pub fn apply_plan(stops: &mut SavedStops, plan: &MergePlan, now_ms: i64) -> usiz
                 stops.toggle_favourite(id);
             }
             stops.set_colour(id, item.colour);
+            // Already cleaned when it was read; a note that still does not fit is dropped, not the stop.
+            let _ = stops.set_note(id, &item.note);
             added += 1;
         }
     }
@@ -597,6 +614,7 @@ mod tests {
             b: Coord::new(b.0, b.1),
             favourite: false,
             colour: StopColour::default(),
+            note: String::new(),
         }
     }
 
@@ -684,6 +702,36 @@ mod tests {
             parse_import(&text).unwrap()[0].name.chars().count(),
             MAX_NAME_CHARS
         );
+    }
+
+    #[test]
+    fn json_keeps_the_note_gpx_has_none_and_a_long_one_is_cut_not_refused() {
+        let mut s = sample();
+        let first = s.stops[0].id;
+        s.set_note(first, "Back door").unwrap();
+        let json = to_json(&s);
+        assert_eq!(json.matches("\"note\"").count(), 1);
+        let got = parse_import(&json).unwrap();
+        assert_eq!(got[0].note, "Back door");
+        assert!(got[1..].iter().all(|g| g.note.is_empty()));
+        let mut target = SavedStops::default();
+        let plan = merge_plan(&target, got);
+        apply_plan(&mut target, &plan, 5);
+        assert_eq!(target.stops[0].note, "Back door");
+        assert!(
+            parse_import(&to_gpx(&s))
+                .unwrap()
+                .iter()
+                .all(|g| g.note.is_empty())
+        );
+        // A hand-edited file with a note over the cap and line breaks: the stop comes in, the note is one line, cut.
+        let long = json.replace(
+            "Back door",
+            &format!("line one\\nline two {}", "x".repeat(400)),
+        );
+        let cut = &parse_import(&long).unwrap()[0].note;
+        assert!(cut.starts_with("line one line two x"));
+        assert_eq!(cut.chars().count(), crate::saved_stops::MAX_NOTE_CHARS);
     }
 
     #[test]

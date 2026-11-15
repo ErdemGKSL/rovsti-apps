@@ -142,6 +142,67 @@ pub struct InstanceStatus {
     /// gateways omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_lid: Option<String>,
+    /// The id of this gateway process: a new one after every restart. Event
+    /// sequences start over with it, so a device that stored another epoch
+    /// has a gap whatever its last `seq` says. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<String>,
+    /// Raised each time the linked account (own number) changes; the stored
+    /// rows of the account before were cleared. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_epoch: Option<u32>,
+    /// How far WhatsApp's history sync got. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryStatus>,
+}
+
+/// Where the history sync of an instance stands.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryState {
+    /// No history sync arrived since the account was linked.
+    #[default]
+    Idle,
+    /// Chunks are arriving; more are expected.
+    Syncing,
+    /// The last expected chunk arrived, or none came for a long while.
+    Done,
+    /// A state from a newer gateway.
+    #[serde(other)]
+    Unknown,
+}
+
+/// `InstanceStatus.history`: the history sync and what the gateway holds.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HistoryStatus {
+    pub state: HistoryState,
+    /// 0 to 100 over the whole sync, never going back while it runs; `None`
+    /// when WhatsApp gave no progress or nothing is running.
+    pub progress: Option<u32>,
+    /// Chats the gateway holds for the account.
+    pub chats: u32,
+    /// Messages the gateway holds for the account.
+    pub messages: u64,
+    /// Time of the oldest held message (unix ms).
+    pub oldest_ms: Option<i64>,
+}
+
+/// What kind of history chunk a `history_synced` event announces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistorySyncType {
+    /// The first chunk after linking: the chat list and the newest messages.
+    Initial,
+    /// The recent messages, in several chunks.
+    Recent,
+    /// The older messages of a full history sync.
+    Full,
+    /// The answer to a request for older messages of one chat.
+    OnDemand,
+    /// Push names, status updates and other data, or a kind this build does
+    /// not know.
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -821,6 +882,9 @@ mod tests {
                 own_jid: Some("905550000009@s.whatsapp.net".into()),
                 push_name: Some("Ada".into()),
                 own_lid: None,
+                epoch: None,
+                account_epoch: None,
+                history: None,
             },
             r#"{"instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net","push_name":"Ada"}"#,
         )]);
@@ -863,6 +927,81 @@ mod tests {
         )]);
     }
 
+    /// The status of a gateway that knows its epoch, the account epoch and
+    /// the history sync; one from before parses with all three unset.
+    #[test]
+    fn status_with_epoch_account_and_history_is_pinned() {
+        pinned(&[
+            (
+                InstanceStatus {
+                    instance_id: "i".into(),
+                    state: InstanceState::Connected,
+                    own_jid: Some("100000000001@s.whatsapp.net".into()),
+                    push_name: Some("Ada".into()),
+                    own_lid: Some("9@lid".into()),
+                    epoch: Some("9f2c41d07ab35e68".into()),
+                    account_epoch: Some(0),
+                    history: Some(HistoryStatus {
+                        state: HistoryState::Idle,
+                        progress: None,
+                        chats: 0,
+                        messages: 0,
+                        oldest_ms: None,
+                    }),
+                },
+                r#"{"instance_id":"i","state":"connected","own_jid":"100000000001@s.whatsapp.net","push_name":"Ada","own_lid":"9@lid","epoch":"9f2c41d07ab35e68","account_epoch":0,"history":{"state":"idle","progress":null,"chats":0,"messages":0,"oldest_ms":null}}"#,
+            ),
+            (
+                InstanceStatus {
+                    instance_id: "i".into(),
+                    state: InstanceState::Connected,
+                    own_jid: None,
+                    push_name: None,
+                    own_lid: None,
+                    epoch: None,
+                    account_epoch: Some(3),
+                    history: Some(HistoryStatus {
+                        state: HistoryState::Done,
+                        progress: Some(100),
+                        chats: 412,
+                        messages: 5_000_000_000,
+                        oldest_ms: Some(1_400_000_000_000),
+                    }),
+                },
+                r#"{"instance_id":"i","state":"connected","own_jid":null,"push_name":null,"account_epoch":3,"history":{"state":"done","progress":100,"chats":412,"messages":5000000000,"oldest_ms":1400000000000}}"#,
+            ),
+        ]);
+        pinned(&[
+            (HistoryState::Idle, r#""idle""#),
+            (HistoryState::Syncing, r#""syncing""#),
+            (HistoryState::Done, r#""done""#),
+        ]);
+        pinned(&[
+            (HistorySyncType::Initial, r#""initial""#),
+            (HistorySyncType::Recent, r#""recent""#),
+            (HistorySyncType::Full, r#""full""#),
+            (HistorySyncType::OnDemand, r#""on_demand""#),
+            (HistorySyncType::Other, r#""other""#),
+        ]);
+        let old: InstanceStatus = serde_json::from_str(
+            r#"{"instance_id":"i","state":"connected","own_jid":null,"push_name":null}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            (old.epoch, old.account_epoch, old.history),
+            (None, None, None)
+        );
+        let newer: HistoryStatus = serde_json::from_str(
+            r#"{"state":"paused","progress":null,"chats":1,"messages":2,"oldest_ms":null,"later":1}"#,
+        )
+        .unwrap();
+        assert_eq!(newer.state, HistoryState::Unknown);
+        assert_eq!(
+            serde_json::from_str::<HistorySyncType>(r#""later_kind""#).unwrap(),
+            HistorySyncType::Other
+        );
+    }
+
     #[test]
     fn payloads_with_identity_fields_are_pinned() {
         pinned(&[(
@@ -872,6 +1011,9 @@ mod tests {
                 own_jid: Some("905550000009@s.whatsapp.net".into()),
                 push_name: None,
                 own_lid: Some("9@lid".into()),
+                epoch: None,
+                account_epoch: None,
+                history: None,
             },
             r#"{"instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net","push_name":null,"own_lid":"9@lid"}"#,
         )]);

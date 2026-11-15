@@ -937,6 +937,33 @@ mod tests {
         )))
         .unwrap();
         assert_eq!(status.own_lid.as_deref(), Some("9@lid"));
+        // A gateway that knows its epoch, the account epoch and the history.
+        let status: InstanceStatus = decode(Response::new(Body::builder().data(
+            r#"{"instance_id":"i","state":"connected","own_jid":"100000000001@s.whatsapp.net",
+            "push_name":null,"epoch":"9f2c41d07ab35e68","account_epoch":2,
+            "history":{"state":"syncing","progress":40,"chats":12,"messages":3400,
+            "oldest_ms":1500000000000}}"#,
+        )))
+        .unwrap();
+        assert_eq!(status.epoch.as_deref(), Some("9f2c41d07ab35e68"));
+        assert_eq!(status.account_epoch, Some(2));
+        let history = status.history.unwrap();
+        assert_eq!(history.state, rosty_wa_proto::HistoryState::Syncing);
+        assert_eq!((history.progress, history.chats), (Some(40), 12));
+        assert_eq!(
+            (history.messages, history.oldest_ms),
+            (3400, Some(1_500_000_000_000))
+        );
+        // One from before: all three are unset.
+        let status: InstanceStatus = decode(Response::new(
+            Body::builder()
+                .data(r#"{"instance_id":"i","state":"connected","own_jid":null,"push_name":null}"#),
+        ))
+        .unwrap();
+        assert_eq!(
+            (status.epoch, status.account_epoch, status.history),
+            (None, None, None)
+        );
         let group: GroupInfo = decode(Response::new(Body::builder().data(
             r#"{"jid":"1-2@g.us","subject":"s","addressing_mode":"lid","participants":[
             {"jid":"905550000001@s.whatsapp.net","admin":false,"lid":"1234@lid",

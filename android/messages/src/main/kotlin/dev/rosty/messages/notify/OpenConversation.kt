@@ -28,6 +28,14 @@ object OpenConversation {
         if (open == tag) open = null
     }
 
+    /** The open conversation [from] is [into] from now on (its chat merged into another one). */
+    fun rekey(
+        from: String,
+        into: String,
+    ) {
+        if (open == from) open = into
+    }
+
     /** True while the user is looking at [tag]: the UI is attached and that conversation is open. */
     fun isShowing(tag: String): Boolean = PlatformEvents.uiAttached && open == tag
 }

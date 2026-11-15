@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -117,6 +118,28 @@ class RemindCenter(
             if (!repo.arm(payload)) return@withContext null
             old.forEach { repo.disarm(it.id) }
             ArmedReminder(made.reminder.id, made.reminder.atMs, slot)
+        }
+    }
+
+    /**
+     * The conversation [from] is [into] now (two WhatsApp chats of one person became one): the reminders set on its
+     * messages are armed again under [into], so their badges and their tap follow the merged chat.
+     */
+    suspend fun rekey(
+        from: String,
+        into: String,
+    ) {
+        if (from == into) return
+        withContext(io) {
+            for (item in repo.armed().first().filter { it.tag == from }) {
+                val moved =
+                    try {
+                        JSONObject(item.raw.toString()).put("tag", into).toString()
+                    } catch (_: JSONException) {
+                        continue
+                    }
+                repo.arm(moved)
+            }
         }
     }
 

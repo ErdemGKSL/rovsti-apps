@@ -29,6 +29,7 @@ import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncNumbersAnswer
 import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
 import dev.rosty.core.model.wa.WaSyncOlderRequest
@@ -122,6 +123,9 @@ interface WaSyncOps {
     /** The key an id's chat is stored under, its kind and its wire form; null when the text is not a JID. */
     suspend fun identityResolve(req: WaSyncResolveRequest): Outcome<WaSyncResolved?>
 
+    /** The phone numbers of the person behind an id, the current one first, then the former ones. */
+    suspend fun identityNumbers(req: WaSyncResolveRequest): Outcome<WaSyncNumbersAnswer>
+
     /** The key changes logged after a `seq`, oldest first. */
     suspend fun rekeyedSince(req: WaSyncRekeyedRequest): Outcome<WaSyncRekeyedAnswer>
 
@@ -161,6 +165,7 @@ interface WaSyncOps {
                 "wa_sync.media_evict",
                 "wa_sync.identity_resolve",
                 "wa_sync.rekeyed_since",
+                "wa_sync.identity_numbers",
                 "wa_sync.identity_catch_up",
                 "wa_sync.identity_observe",
                 "wa_identity.parse",
@@ -241,6 +246,14 @@ class NativeWaSyncOps(
             req,
             WaSyncResolveRequest.serializer(),
             WaSyncResolved.serializer().nullable,
+        )
+
+    override suspend fun identityNumbers(req: WaSyncResolveRequest) =
+        core.call(
+            "wa_sync.identity_numbers",
+            req,
+            WaSyncResolveRequest.serializer(),
+            WaSyncNumbersAnswer.serializer(),
         )
 
     override suspend fun rekeyedSince(req: WaSyncRekeyedRequest) =

@@ -1,6 +1,8 @@
 package dev.rosty.people
 
 import dev.rosty.core.model.people.PersonRow
+import dev.rosty.core.model.wa.WaIdKind
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.platform.identity.PhoneNumbers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -84,13 +86,21 @@ class PeopleIndex(
         return map[key(raw)]
     }
 
-    /** The person with this phone JID, LID JID (`123@lid`) or bare LID. */
+    /**
+     * The person with this phone JID, LID JID (`123@lid`, any device) or bare LID. A LID is looked up as a LID only:
+     * its digits are never read as a phone number, whatever they are.
+     */
     fun byJid(jid: String): IndexedPerson? {
         val current = data.get()
-        val bare = jid.substringBefore(':').substringBefore('@')
-        return current.byJid[jid]
-            ?: current.byLid[bare]
-            ?: current.byNumber[digitsKey(bare)]
+        current.byJid[jid]?.let { return it }
+        // Text without a server is a bare LID.
+        val id = WaIds.parse(jid) ?: return current.byLid[jid.trim()]
+        return current.byJid[id.bare]
+            ?: when (id.kind) {
+                WaIdKind.Lid -> current.byLid[id.user]
+                WaIdKind.Pn -> id.number?.let { current.byNumber[key(it)] }
+                else -> null
+            }
     }
 
     /**

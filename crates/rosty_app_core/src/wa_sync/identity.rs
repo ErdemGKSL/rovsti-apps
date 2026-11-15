@@ -521,6 +521,21 @@ impl Store {
         )
     }
 
+    /// The phone numbers of the person behind `text` as `+<digits>`: the current one first, then the former
+    /// ones, newest first. A device contact is looked up by each in turn, so a contact that only holds a former
+    /// number still names the person. A number the map has not seen is its own only number; a LID without a
+    /// number, a group and text that is not an id have none. Reads only: the map learns nothing.
+    #[must_use]
+    pub fn identity_numbers(&self, text: &str) -> Vec<String> {
+        let Some(resolved) = self.identity.lookup(text) else {
+            return Vec::new();
+        };
+        match resolved.person_id {
+            Some(person) => self.identity.numbers(person),
+            None => resolved.wire.number().into_iter().collect(),
+        }
+    }
+
     /// The cursor of the last page of the gateway's pairs the store took in: `since=` of the next
     /// `GET /v1/identity/mappings`. `None` before the first one (ask for every pair).
     pub fn identity_since(&self) -> Result<Option<String>> {

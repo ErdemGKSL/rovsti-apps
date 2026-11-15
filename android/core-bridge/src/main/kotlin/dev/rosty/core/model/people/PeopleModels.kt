@@ -34,6 +34,8 @@ data class PeopleUpsertRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
     @SerialName("now_ms") val nowMs: Long,
     val people: List<PersonUpdate>,
+    /** The home calling code (`"90"`), for a number written the national way; without it such a number is skipped. */
+    @SerialName("home_cc") @EncodeDefault(NEVER) val homeCc: String? = null,
 )
 
 @Serializable
@@ -58,11 +60,15 @@ data class PersonRow(
     @SerialName("picture_stale") val pictureStale: Boolean = false,
 )
 
-/** `people.lookup`: [key] is an E.164 number in any spelling, a phone JID, a LID JID or a bare LID. */
+/**
+ * `people.lookup`: [key] is a number in any spelling, a phone JID, a LID JID or a bare LID. A number written the
+ * national way (`0532…`) is found only with the home calling code [homeCc] (`"90"`).
+ */
 @Serializable
 data class PeopleLookupRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
     val key: String,
+    @SerialName("home_cc") @EncodeDefault(NEVER) val homeCc: String? = null,
 )
 
 @Serializable

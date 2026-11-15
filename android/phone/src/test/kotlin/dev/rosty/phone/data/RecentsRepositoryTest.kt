@@ -184,7 +184,22 @@ class RecentsRepositoryTest {
         assertTrue(extras[0].outgoing)
         assertTrue(!extras[0].missed)
         assertTrue("an unanswered incoming call is missed", extras[1].missed)
-        assertNull(RecentsRepository.dialNumber("abc@s.whatsapp.net"))
+
+        fun peer(
+            peer: String,
+            alt: String? = null,
+        ) = CallSummary("c", peer, null, CallDirection.In, CallPhase.Ringing, false, 0, peerAlt = alt)
+        assertNull(RecentsRepository.dialNumber(peer("abc@s.whatsapp.net")))
+        assertEquals("+905551112233", RecentsRepository.dialNumber(peer("905551112233:4@s.whatsapp.net")))
+        // A peer the gateway names by a LID is dialled by the number it sent next to it; alone it has none.
+        assertEquals(
+            "+905551112233",
+            RecentsRepository.dialNumber(peer("777000000000001@lid", "905551112233@s.whatsapp.net")),
+        )
+        assertNull(RecentsRepository.dialNumber(peer("777000000000001@lid")))
+        // The digits of a LID are never a number, also when they look like one.
+        assertNull(RecentsRepository.dialNumber(peer("905551112233@lid")))
+        assertNull(RecentsRepository.dialNumber(peer("120000000000000001@g.us")))
     }
 
     @Test fun aFailedBuildKeepsTheRowsAndSaysWhy() =

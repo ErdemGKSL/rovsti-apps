@@ -1,10 +1,12 @@
 package dev.rosty.messages.notify
 
 import android.content.Context
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.names.PersonName
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.names.WaNames
+import dev.rosty.messages.wa.WaRekeys
 import dev.rosty.shell.HasContainer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -28,7 +30,6 @@ object NotificationNames {
     private const val LOOKUP_MS = 1_500L
     private const val MIN_DIGITS = 7
     private const val NUMBER_PUNCTUATION = "+ -()."
-    private const val GROUP_SUFFIX = "@g.us"
     private const val LINE_SEPARATOR = ": "
 
     /**
@@ -97,11 +98,35 @@ object NotificationNames {
         chat: String,
         specJson: String,
     ): Boolean {
-        val digest = Digest.parse(specJson) ?: return false
+        val pushed = Digest.parse(specJson) ?: return false
         val container = (context.applicationContext as? HasContainer<*>)?.container as? MessagesContainer
-        if (container == null) return MessagesNotifier.show(context, digest)
+        if (container == null) return MessagesNotifier.show(context, pushed)
+        // The push names the chat as the gateway does; the notification goes under the key the store keeps it by.
+        val key = runBlocking { withTimeoutOrNull(LOOKUP_MS) { container.waKeyOf(chat) } } ?: chat
+        return showWaPush(context, container, key, rekeyed(pushed, chat, key), specJson)
+    }
+
+    /** Pure: [digest] of the chat [from] under the tag of [into] (the chat it merged into). */
+    fun rekeyed(
+        digest: Digest,
+        from: String,
+        into: String,
+    ): Digest =
+        if (from == into || digest.spec.tag != WaRekeys.tagOf(from)) {
+            digest
+        } else {
+            digest.copy(spec = digest.spec.copy(tag = WaRekeys.tagOf(into)))
+        }
+
+    private fun showWaPush(
+        context: Context,
+        container: MessagesContainer,
+        chat: String,
+        digest: Digest,
+        specJson: String,
+    ): Boolean {
         val names = container.names
-        if (chat.endsWith(GROUP_SUFFIX)) {
+        if (WaIds.isGroup(chat)) {
             // A group keeps its subject; the people inside its lines are named by the rule.
             val senders = pushSenders(specJson)
             val lines =
@@ -145,8 +170,9 @@ object NotificationNames {
     ): List<String> =
         lines.mapIndexed { i, line ->
             val jid = senders.getOrNull(i).orEmpty()
-            val prefix = jid.substringBefore('@') + LINE_SEPARATOR
-            if (jid.isEmpty() || !line.startsWith(prefix)) {
+            // The core writes the user part of the writer's id; a LID's digits are replaced like a number's.
+            val prefix = WaIds.user(jid).orEmpty() + LINE_SEPARATOR
+            if (prefix == LINE_SEPARATOR || !line.startsWith(prefix)) {
                 line
             } else {
                 nameOf(jid).takeIf { it.isNotBlank() }?.let { it + LINE_SEPARATOR + line.removePrefix(prefix) } ?: line

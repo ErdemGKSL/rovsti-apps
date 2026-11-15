@@ -427,11 +427,47 @@ class WaSyncStoreNativeTest {
                 assertEquals(WaIdKind.Group, store.resolve(group).getOrOk()?.kind)
                 assertNull(store.resolve("merhaba").getOrOk())
 
+                // A device contact is looked up by the person's number, whichever id a screen holds.
+                assertEquals(listOf("+100000000001"), store.numbers("777000000000001:4@lid").getOrOk())
+                assertEquals(listOf("+100000000001"), store.numbers(ali).getOrOk())
+                assertTrue(store.numbers("777000000000005@lid").getOrOk().isEmpty())
+                assertTrue(store.numbers(group).getOrOk().isEmpty())
+
                 // A later message under the LID lands in the one chat.
                 store.applyEvents(listOf(WaSyncEvent(4, 4_000, text(lid, "L2", 4_000, "yine lid")))).getOrOk()
                 assertEquals(listOf("L2", "A1", "L1"), store.ids(ali))
             }
 
+            open(dir).use { store ->
+                // The person moves to another number: the new one first, then the one a contact may still hold.
+                val moved = "100000000002@s.whatsapp.net"
+                val changed = GatewayEvent.IdentityNumberChanged(oldPn = ali, newPn = moved, newLid = lid)
+                store.applyEvents(listOf(WaSyncEvent(5, 5_000, changed))).getOrOk()
+                for (id in listOf(lid, ali, moved)) {
+                    assertEquals(id, listOf("+100000000002", "+100000000001"), store.numbers(id).getOrOk())
+                }
+            }
+            open(dir).use { store ->
+                assertEquals(listOf("+100000000002", "+100000000001"), store.numbers(lid).getOrOk())
+            }
+        }
+
+    @Test
+    fun aStepLoggedBeforeACloseIsFoundFromTheCursorAfterIt() =
+        runBlocking {
+            val lid = "777000000000001@lid"
+            val dir = dir()
+            open(dir).use { store ->
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(1, 1_000, text(lid, "L1", 1_000, "lid'den")),
+                            WaSyncEvent(2, 2_000, text(ali, "A1", 2_000, "numaradan")),
+                            WaSyncEvent(3, 3_000, GatewayEvent.IdentityMapped(lid, ali, "peer_message", 2_500)),
+                            WaSyncEvent(4, 4_000, text(lid, "L2", 4_000, "yine lid")),
+                        ),
+                    ).getOrOk()
+            }
             // A layer that was not running finds the step from its own cursor.
             open(dir).use { store ->
                 assertEquals(listOf(WaSyncRekeyed(1, lid, ali)), store.rekeyedSince().getOrOk())

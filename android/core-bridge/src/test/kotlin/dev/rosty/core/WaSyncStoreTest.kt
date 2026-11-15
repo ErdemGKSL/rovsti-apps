@@ -1,5 +1,6 @@
 package dev.rosty.core
 
+import dev.rosty.core.Outcome
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.IdentityMapping
 import dev.rosty.core.model.wa.IdentityMappingsAnswer
@@ -110,6 +111,29 @@ class WaSyncStoreTest {
             assertEquals(WaSyncResolved(key = chat, kind = WaIdKind.Lid, wire = lid), resolved)
             assertNull(store.resolve("merhaba").getOrThrow())
             assertEquals("+100000000001", store.parseId("100000000001:2@s.whatsapp.net").getOrThrow()?.number)
+        }
+
+    @Test
+    fun theNumbersOfAPersonAreTheCurrentOneThenTheFormerOnes() =
+        runTest {
+            val fake = FakeWaSyncOps()
+            val store = store(fake)
+            val moved = "100000000002@s.whatsapp.net"
+            // A LID nobody mapped has no number, whatever its digits; a number is its own.
+            assertTrue(store.numbers(lid).getOrThrow().isEmpty())
+            assertTrue(store.numbers("100000000001@lid").getOrThrow().isEmpty())
+            assertEquals(listOf("+100000000001"), store.numbers("100000000001:3@s.whatsapp.net").getOrThrow())
+            assertTrue(store.numbers("merhaba").getOrThrow().isEmpty())
+
+            fake.merge(lid, chat)
+            assertEquals(listOf("+100000000001"), store.numbers(lid).getOrThrow())
+            // The person changed number: the new one first, then the one a contact may still hold.
+            fake.merge(chat, moved)
+            for (id in listOf(lid, chat, moved)) {
+                assertEquals(id, listOf("+100000000002", "+100000000001"), store.numbers(id).getOrThrow())
+            }
+            store.close()
+            assertTrue(store.numbers(lid) is Outcome.Err)
         }
 
     @Test

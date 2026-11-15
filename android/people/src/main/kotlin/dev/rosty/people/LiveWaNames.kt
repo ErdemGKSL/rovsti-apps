@@ -2,6 +2,8 @@ package dev.rosty.people
 
 import dev.rosty.core.Outcome
 import dev.rosty.core.log.RostyLog
+import dev.rosty.core.model.wa.WaIds
+import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.ops.WaGateway
 import dev.rosty.platform.identity.CallerIdentity
 import dev.rosty.platform.identity.IdentitySource
@@ -38,6 +40,8 @@ class LiveWaNames(
     /** Where the answers are kept between runs; null keeps them in memory only. */
     private val store: LiveNameStore? = null,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Hears every profile answer of the gateway (it may name a number's LID): an app with a chat store learns it. */
+    private val onProfiles: suspend (List<WaProfile>) -> Unit = {},
 ) : IdentitySource {
     private val known = ConcurrentHashMap<String, LiveName>()
     private val restoring = Mutex()
@@ -106,7 +110,7 @@ class LiveWaNames(
                 RostyLog.w(TAG, "live name: no gateway", e)
                 null
             } ?: return
-        val jid = key + JID_SUFFIX
+        val jid = WaIds.pnJid(key) ?: return
         val user =
             when (val answer = gw.lookupUsers(listOf(jid))) {
                 is Outcome.Ok -> {
@@ -126,6 +130,7 @@ class LiveWaNames(
         val profileName =
             when (val answer = gw.profiles(listOf(jid))) {
                 is Outcome.Ok -> {
+                    onProfiles(answer.value)
                     answer.value.firstOrNull { it.jid == jid }?.let { p ->
                         nameOf(p.verifiedName, p.pushName)
                     }
@@ -161,7 +166,6 @@ class LiveWaNames(
 
     companion object {
         private const val TAG = "people"
-        private const val JID_SUFFIX = "@s.whatsapp.net"
         private const val MIN_DIGITS = 7
 
         /** How long an answer (also "not on WhatsApp") is trusted before a new call asks again. */

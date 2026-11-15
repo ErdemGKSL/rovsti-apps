@@ -27,6 +27,7 @@ import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncNumbersAnswer
 import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
 import dev.rosty.core.model.wa.WaSyncOlderRequest
@@ -81,6 +82,10 @@ object WaSyncContracts : ContractModels {
                 ok = listOf("number", "unknown_lid", "group", "not_an_id"),
             )
             op<WaSyncRekeyedRequest, WaSyncRekeyedAnswer>("wa_sync.rekeyed_since", ok = listOf("followed", "none"))
+            op<WaSyncResolveRequest, WaSyncNumbersAnswer>(
+                "wa_sync.identity_numbers",
+                ok = listOf("former", "unknown_lid", "unknown_number", "group"),
+            )
             op<WaSyncCatchUpRequest, WaSyncCaughtUp>("wa_sync.identity_catch_up", ok = listOf("done", "rejected"))
             op<WaSyncObserveRequest, WaSyncIdentityApplied>("wa_sync.identity_observe", ok = listOf("nothing"))
             op<WaIdParseRequest, WaIdParsed?>(

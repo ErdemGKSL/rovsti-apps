@@ -372,6 +372,8 @@ class WaCalls(
                 isVideo = event.isVideo,
                 startedMs = old?.startedMs ?: now,
                 endedMs = if (ended) old?.endedMs ?: now else null,
+                // The number of a peer the gateway names by a LID: kept once it was sent.
+                peerAlt = event.peerAlt ?: old?.peerAlt,
             )
         list.value =
             if (old == null) listOf(next) + current else current.map { if (it.callId == next.callId) next else it }

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.PowerManager
 import android.telephony.PhoneNumberUtils
 import dev.rosty.core.log.RostyLog
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.platform.PlatformComponents
 import dev.rosty.platform.R
 import dev.rosty.platform.identity.PhoneNumbers
@@ -23,13 +24,7 @@ import org.json.JSONObject
  * (`905551234567:4@s.whatsapp.net`); null for a `@lid` the gateway could not map, a group or nothing. Gateways before
  * the rename sent `from`, which FCM reserves (it refused those pushes); it is still read.
  */
-internal fun waCallerNumber(data: Map<String, String>): String? {
-    val peer = (data["sender"] ?: data["from"]).orEmpty().trim()
-    val user = peer.substringBefore('@').substringBefore(':')
-    val server = peer.substringAfter('@', "")
-    val phone = server == "s.whatsapp.net" && user.isNotEmpty() && user.all { it in '0'..'9' }
-    return if (phone) "+$user" else null
-}
+internal fun waCallerNumber(data: Map<String, String>): String? = WaIds.number(data["sender"] ?: data["from"])
 
 /**
  * Pure: the caller title for an FCM data message (F28), as the app names a WhatsApp caller: the device contact that

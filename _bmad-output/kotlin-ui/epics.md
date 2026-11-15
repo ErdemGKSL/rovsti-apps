@@ -1597,17 +1597,17 @@ AD-MSG9, AD-WA11), then polish.
 |---|---|---|---|
 | E6.1 | App module, SMS role, manifest parity, tabs, permissions, migration test | R1 | done (R1 evidence) |
 | E6.2 | Unified inbox | R1 | done (R1 evidence) |
-| E6.3 | SMS and MMS conversation | R1, R2 | in-progress (R2: MMS attachment send, M46 paste image, unblock row) |
+| E6.3 | SMS and MMS conversation | R1, R2 | done (R2 evidence; unblock row with the blocklist page of E6.11) |
 | E6.4s | WhatsApp offline store and per-device sync engine (owner request 2026-11-10; before E6.2 and E6.4a) | R1 | done (R1 evidence; media cache wiring goes with E6.4b) |
 | E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | done (R1 evidence) |
-| E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | in-progress |
-| E6.5 | Message context menu, select mode, detection pills | R2 | in-progress |
-| E6.6 | Conversation tools | R1, R2 | in-progress (R2: M50 sender mini card, M43 next unread, M48 zip, M27 clear chat, M29, M22) |
-| E6.7 | Viewers: images, status, contact card, attachments | R1, R2 | in-progress (R2: M26 contact card sheet, M28 attachments, M4 header photo, attachment menu) |
+| E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | done (R2 evidence; played receipts, in-app video and voice recording not built) |
+| E6.5 | Message context menu, select mode, detection pills | R2 | done (R2 evidence; star and remind me come with E6.13) |
+| E6.6 | Conversation tools | R1, R2, R3 | in-progress (R3: M48 export .zip, M27 clear chat) |
+| E6.7 | Viewers: images, status, contact card, attachments | R1, R2, R3 | in-progress (R3: M4 header photo) |
 | E6.8 | New conversation, forward, share-in, intents | R1 | done (R1 evidence) |
-| E6.9 | Notifications and inline reply | R2 | in-progress |
-| E6.10 | Scheduled send | R2 | in-progress |
-| E6.11 | Spam | R2 | in-progress |
+| E6.9 | Notifications and inline reply | R2 | done (R2 evidence) |
+| E6.10 | Scheduled send | R2 | done (R2 evidence; inbox Scheduled overview in R3) |
+| E6.11 | Spam | R2 | done (R2 evidence) |
 | E6.12 | Settings and encrypted backup | R3 | todo |
 | E6.13 | Starred and reminders | R3 | todo |
 | E6.14 | Polish | R3 | todo |

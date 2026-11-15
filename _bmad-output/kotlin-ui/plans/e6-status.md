@@ -2,6 +2,44 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## R2 closed (2026-11-15) at `8d1b7e72`
+
+Merged with `origin/ui-overhaul` (nothing new since R1's merge `7120032`). Gate: `SKIP_RUST=1 scripts/kotlin-ui-check.sh`
+ALL GREEN (no Rust crate changed in R2). The gate now also runs `:messages` tests, lint and screenshot verify
+(`8d1b7e72`); before, the flavored module was skipped by `testReleaseUnitTest`/`verifyRoborazziRelease`.
+
+**What landed**
+- E6.4b WhatsApp media (received through the store's media cache, send with optimistic bubble, retry, 16 MiB rule,
+  paste), voice notes with speed and scrubbing, double-tap and menu reactions with recent emoji, swipe to reply with the
+  quoted composer, group sender mini card.
+- E6.5 message menu (lifted bubble, panel below or above, reaction row for WhatsApp), Copy, Select Text, Forward,
+  Select (block copy/forward/delete), Info, detection pills (call, message, e-mail, calendar, maps, link, Copy code).
+- E6.9 notifications from the core's digest spec, inline reply (attached: repository/outbox; cold: headless), Copy code,
+  Mark as read, Remind me in 1 hour, no notification for the open conversation, FCM wake (firebase).
+- E6.10 long-press Send → Send later sheet, Scheduled strip, SMS alarms, WhatsApp gateway scheduled items.
+- E6.11 spam filter page (rules, allow list, system blocklist, M47), Spam folder with Not spam / Move to Spam / Block.
+- E6.3 MMS pictures (picker, paste) through the shared attachment bar; E6.7 contact card sheet and Share for files;
+  E6.6 mute and next unread chat in the SMS header menu.
+- R1 review notes: my bubbles deep blue with white text in both themes, rounded run-end corner.
+
+**Shared code touched (own commit)**: `scripts/kotlin-ui-check.sh` (the `:messages` tasks next to `:phone`'s).
+
+**What to test on a device**
+1. Long-press a bubble: menu below/above, WhatsApp reaction row; Select several and Copy; tap a number pill (dialer).
+2. WhatsApp: send a photo offline (clock), reconnect; play a voice note at 1.5×; swipe a bubble to reply.
+3. Notifications: receive an SMS and a WhatsApp message with the app closed, reply from the notification; open the
+   conversation and check no new notification appears for it.
+4. Long-press Send → schedule for in 1 hour; cancel one from the strip.
+5. Settings → Spam filter: add a rule `PROMO*`, block a number, Move a chat to Spam and back.
+
+**Needs the main thread**: nothing to deploy, no gateway change. Played receipts and offline chat actions need a
+`wa_sync` outbox action; recent emoji and M47 have no field in `messages-prefs.json` (own files for now); the shared
+context menu has no room at font scale 2 and overlaps the lifted bubble.
+
+**Carried to R3**: E6.12 settings and backup, E6.13 starred and reminders, E6.14 polish; M48 zip export, M27 clear
+chat, M4 header photo, inbox Scheduled overview, Not spam / Move to Spam on the thread header, unformatted number in
+the WhatsApp header subtitle.
+
 ## R1 closed (2026-11-14) at `3f313b6`
 
 Merged with `origin/ui-overhaul` (nothing new since `9e3432e`). Gate: `scripts/kotlin-ui-check.sh` ALL GREEN (Rust steps

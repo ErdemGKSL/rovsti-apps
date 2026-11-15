@@ -112,6 +112,8 @@ data class FixOut(
     @SerialName("notice_failed") val noticeFailed: Boolean,
     val side: Side?,
     val inside: Boolean,
+    /** Whole minutes to the line, as in [text]; null without a speed. Absent from statuses written by older builds. */
+    @SerialName("eta_min") val etaMin: Int? = null,
     @SerialName("circle_m") val circleM: Double?,
     val at: FixPos?,
 )

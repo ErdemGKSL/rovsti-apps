@@ -76,6 +76,14 @@ sealed interface SavedEdit {
         val delta: Int,
     ) : SavedEdit
 
+    /** S44: sets the stop's note; a blank [note] clears it, one over 200 characters is refused (`note_too_long`). */
+    @Serializable
+    @SerialName("set_note")
+    data class SetNote(
+        val id: Long,
+        val note: String,
+    ) : SavedEdit
+
     /** Puts a removed stop back at [index] (undo of a delete). */
     @Serializable
     @SerialName("restore")
@@ -209,6 +217,8 @@ data class IncomingStop(
     val b: Coord,
     val favourite: Boolean,
     val colour: StopColour,
+    /** The stop's note from our JSON; empty for GPX and for answers of older builds. */
+    val note: String = "",
 )
 
 @Serializable
@@ -256,6 +266,8 @@ data class DestShareRequest(
     /** The second point of a stop; with it [DestShareAnswer.stopText] is written under [name]. */
     @EncodeDefault(NEVER) val b: Coord? = null,
     @EncodeDefault(NEVER) val name: String? = null,
+    /** The stop's note (S44): the last line of [DestShareAnswer.stopText]. */
+    @EncodeDefault(NEVER) val note: String? = null,
 )
 
 @Serializable

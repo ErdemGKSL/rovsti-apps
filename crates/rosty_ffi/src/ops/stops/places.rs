@@ -61,6 +61,7 @@ fn saved_error(error: SavedStopError) -> FfiError {
         SavedStopError::Duplicate(id) => ("duplicate", Some(id)),
         SavedStopError::Full => ("full", None),
         SavedStopError::NotFound => ("not_found", None),
+        SavedStopError::NoteTooLong => ("note_too_long", None),
     };
     FfiError::new(ErrorKind::Invalid, error.message())
         .with_detail(json!({"reason": reason, "id": id}))
@@ -123,6 +124,11 @@ enum Edit {
     Restore {
         stop: SavedStop,
         index: usize,
+    },
+    /// S44: the stop's note; an empty or blank text clears it.
+    SetNote {
+        id: u64,
+        note: String,
     },
 }
 
@@ -192,6 +198,10 @@ fn saved_edit(req: EditReq) -> Result<Value, FfiError> {
             id = Some(stop.id);
             saved.restore(stop, at);
         }
+        Edit::SetNote { id: i, note } => {
+            saved.set_note(i, &note).map_err(saved_error)?;
+            id = Some(i);
+        }
     }
     Ok(
         json!({"saved": saved, "id": id, "removed": removed, "index": index, "flag": flag, "colour": colour}),
@@ -244,6 +254,25 @@ fn edit_cases() -> Vec<Case> {
         Case::named(
             "move",
             json!({"saved": s, "edit": {"kind": "move_by", "id": 2, "delta": -1}}),
+        ),
+        Case::named(
+            "set_note",
+            json!({"saved": s, "edit": {"kind": "set_note", "id": 2, "note": "  Back door,\n platform 2  "}}),
+        ),
+        Case::named(
+            "clear_note",
+            json!({"saved": {"version": 2, "next_id": 2, "stops": [
+                       {"id": 1, "name": "Pier", "a": end(41.0, 28.994), "b": end(41.0, 29.006), "created_ms": 0,
+                        "note": "Back door"}]},
+                   "edit": {"kind": "set_note", "id": 1, "note": "   "}}),
+        ),
+        Case::named(
+            "note_too_long",
+            json!({"saved": s, "edit": {"kind": "set_note", "id": 2, "note": "x".repeat(201)}}),
+        ),
+        Case::named(
+            "note_missing_stop",
+            json!({"saved": s, "edit": {"kind": "set_note", "id": 99, "note": "x"}}),
         ),
         Case::named(
             "restore",
@@ -439,7 +468,7 @@ fn places_import(req: ImportReq) -> Result<Value, FfiError> {
     let add: Vec<Value> = plan
         .add
         .iter()
-        .map(|i| json!({"name": i.name, "a": i.a, "b": i.b, "favourite": i.favourite, "colour": i.colour}))
+        .map(|i| json!({"name": i.name, "a": i.a, "b": i.b, "favourite": i.favourite, "colour": i.colour, "note": i.note}))
         .collect();
     Ok(json!({
         "plan": {"add": add, "duplicates": plan.duplicates, "invalid": plan.invalid, "over_cap": plan.over_cap},

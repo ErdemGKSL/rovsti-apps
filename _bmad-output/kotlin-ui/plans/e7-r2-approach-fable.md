@@ -97,3 +97,58 @@ p90 <= 8.3 ms target, an awk line for the exact percentiles (the summary rounds 
 at this budget), the table to fill in and the four fixes to try before a record is opened.
 `docs/kotlin-ui/decisions/stops-map-renderer.md` is the record's skeleton (status: not opened) with the R1 host
 numbers, what the host cannot show, the fixes with their costs and the options table. ARCH 8.4 links both.
+
+## 4. The arriving-soon message (E7.10 WhatsApp part, AD-ST7)
+
+Package `dev.rosty.stops.notice`; the Settings hook `settings/ArrivingSoonSettings.kt` is filled from it.
+
+**Who sends.** Nothing new: the trip service asks Rust for every fix (`trip_fix`), and Rust sends the message
+itself through the stored gateway link (`rosty_app_core::stops::headless`, `wa_link::send`), at most once, with
+its own retry rule. Kotlin only decides whether a trip *carries* a message: `stops.trip_start {notice}` writes it
+into `trip.json`. So there is no `:platform` or `:wa` send code to add.
+
+**Settings.**
+- The group after Trip (`ArrivingSoonSettingsGroup`): "Arriving-Soon Message" (to whom, Off, or "Connect WhatsApp
+  first") and "WhatsApp" (the link in a word). Routes `StopsRoute.ArrivingSoon`, `ArrivingSoonChat`, `WhatsApp`.
+- `ArrivingSoonPage` (while connected): the chat row, Turn Off (with Undo: chat, text and time come back), the
+  message field with "Reads: ..." under it (`stops.notice_render` with a sample stop and 8 minutes), the refusal
+  from `stops.notice_validate` worded from `detail.reason` (our strings), Save Message, Use the Default Message,
+  and When (the choices and their labels are `stops.prefs_choices`, in the phone's language). Not connected: one
+  row to Settings > WhatsApp; the saved message is kept.
+- Every change is one `StopsStore.edit` (`set_notice`, `set_template`, `set_notice_when`, `clear_notice`).
+  Looking at the page writes nothing. The message is saved with its own row, not on every keystroke: a half-typed
+  message never goes out with a trip.
+- A message that was never rewritten (a default of any language; `prefs_choices.default_templates`, new) is shown
+  as the default of the phone's language, which is also how a trip sends it.
+- `StopsWhatsAppEntry` is the shared `:wa` `WhatsAppSettingsRoute` with `AppId.Stops`, wired as Contacts does.
+
+**The chat picker** is a pushed page (`NoticeChatPage`: search field, the chats in the gateway's order, a tick on
+the chosen one), not a sheet: it has a keyboard and a long list, and Back is the way out.
+
+**Names (owner rule: saved contact, then WhatsApp's name, the number last).** `namedChats` asks the same core rule
+Phone and Messages use, `wa.names {contact, wa_name, jid}`, per chat. Stops holds no contacts permission, so the
+"saved contact" is the contact name WhatsApp itself reports for the person (`WaProfile.contactName`); the
+WhatsApp name is the verified business name, then the push name, then the chat's own name. The profiles are asked
+for when the picker opens (`WaAvatars.wantProfile`) and the list is named again when they arrive
+(`WaAvatars.revision`). A person shows the number under the name; a bare number shows once; a group is its
+subject with "Group" under it. The name is stored with the chat (`chat_name`) as the picker showed it.
+
+**The per-trip switch** (R1's `ArrivingSoonHook` stub). `TripNotice` (container `arrivingSoon`) implements the
+hook: `noticeFor` answers the settings' message when a chat is chosen, WhatsApp is linked (or the stored link is
+still being read: a chat can only have been chosen while connected) and the switch is on. `PlanRow` draws "Text
+<chat> when arriving" with its switch under Start, only when a message can go out. Off lasts until the user
+turns it on again (as GPUI kept `notice_on`). The live card says what became of it (`noticeLine`: "Will text
+when arriving", "Arrival message sent", "Arrival message could not be sent"), from `RunningTrip.notice` (the
+trip file has a notice) and the service's `notice_sent` / `notice_failed`.
+
+**Edits outside the package:** `trip/TripViewModel.kt` (the hook's `PlanRow`, `RunningTrip.notice`,
+`LiveTrip.noticeSent/noticeFailed`), `trip/TripSheet.kt` (the row and the line), `home/HomeEntry.kt` (passes the
+hook), `StopsContainer.kt` (`arrivingSoon`), `StopsRoute.kt`, `StopsApp.kt`, `settings/ArrivingSoonSettings.kt`,
+strings (`strings_notice.xml`, en + tr; the unused `trip_arriving_soon` removed).
+
+**Tests.** `NoticeLogicTest` (naming on the real `wa.names`, search, availability, the card line),
+`NoticeViewModelTest` (real `prefs_edit` / `prefs_choices` / `notice_*`, English and Turkish),
+`TripNoticeTest`, `NoticeAppTest` (Settings to the picker and back; a started trip's `trip.json` carries the chat
+and the message, or none when switched off or not linked; the card line follows the service),
+`E710NoticeShotTest` (`e7.10-arriving-soon`, `e7.10-template-field-selection`, the picker, not connected,
+Turkish, font scale 2, the per-trip switch; light and dark).

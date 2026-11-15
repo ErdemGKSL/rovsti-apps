@@ -306,6 +306,20 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
     - Add a render test with a long Turkish name that checks the text box stays inside the panel.
   - The date line is "October 3" under the Turkish locale. Format it in the card's locale ("3 Ekim").
   - Re-record the x2 goldens, open them, and confirm nothing touches or crosses the panel edge.
+- **Owner device report (release APK from `597d10d`, real arm64 phone, Turkish, dark):** on a contact with only a number
+  and no birthday, Card Studio opens on the **Birthday** tab and the preview stays an empty grey box. The toast
+  "Kart hazırlanamadı" (`card_studio_failed`) shows, so the render op returned `Outcome.Err`. The screenshot is at
+  `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/x2-device-failed.jpg`.
+  - Find the cause; the host tests pass, so suspect what differs on device.
+    - Bundled fonts in the release `.so`.
+    - R8 or the JNI keep rules for the new ops.
+    - The aarch64 Takumi build.
+    - The animated path. Hareketli was off.
+    - A contact with no name and no birthday.
+  - Log `CardError`'s text (masked) through RostyLog so the next device report has it.
+  - A number-only contact without a birthday must open on Contact or Number, not Birthday. The Birthday tab must not
+    fail when there is no birthday or name.
+  - Prove it with a release-APK run on the emulator or a host test that goes through the same JNI op.
 - **Also in this step:** `:shell` `PermissionRationale` became a data class in the main tree (the rationale sheet closed and
   reopened on each recomposition of the contact card). Keep that change. Its test is in `PermissionGateTest`.
 

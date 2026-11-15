@@ -305,6 +305,74 @@ class MapCameraTest {
         assertEquals(200f, c.screenX(29.0), 0.5f)
     }
 
+    @Test fun fitInLandscapeUnderASheetIgnoresPaddingThatLeavesNoRoom() {
+        // 891 x 411 dp landscape at 3x with a sheet at its medium detent: 60 dp of map are left above it.
+        val c = camera(width = 2673, height = 1233, density = 3f)
+        assertTrue(c.setPadding(0f, 84f, 0f, 969f))
+        assertFalse(c.paddingCountsY)
+        assertTrue(c.paddingCountsX)
+        // A gate of about 1 km.
+        assertTrue(c.fitPoints(doubleArrayOf(41.0, 28.994, 41.0, 29.006), marginPx = 144f))
+        // Before the fallback the 1 px of room left zoomed out to the limit (2000 m per dp).
+        assertTrue("metres per dp: ${c.metresPerDp}", c.metresPerDp < 3.0)
+        // The gate is on screen, centred on the whole height since the strip is unusable.
+        assertEquals(1233 / 2f, c.screenY(41.0), 1f)
+        assertEquals(1233 / 2f, c.focusY, 0f)
+        val left = c.screenX(28.994)
+        val right = c.screenX(29.006)
+        assertTrue("$left..$right", left >= 144f - 1f && right <= 2673f - 144f + 1f)
+        // The wide axis binds and uses its margins.
+        assertEquals(144f, left, 2f)
+    }
+
+    @Test fun paddingThatLeavesEnoughRoomStillCounts() {
+        val c = camera(width = 2673, height = 1233, density = 3f)
+        // The sheet at peek: 120 dp of it, 263 dp of map left.
+        assertTrue(c.setPadding(0f, 84f, 0f, 360f))
+        assertTrue(c.paddingCountsY)
+        assertTrue(c.fit(40.999, 28.9995, 41.001, 29.0005, marginPx = 30f))
+        val top = c.screenY(41.001)
+        val bottom = c.screenY(40.999)
+        assertTrue("$top..$bottom", top >= 84f + 30f - 1f && bottom <= 1233f - 360f - 30f + 1f)
+        assertEquals((84f + 1233f - 360f) / 2f, c.focusY, 0f)
+        assertEquals(c.focusY, (top + bottom) / 2f, 1f)
+        // Exactly the minimum is still enough; a pixel less is not.
+        val min = MapCamera.MIN_FREE_DP * 3f
+        assertTrue(c.setPadding(0f, 0f, 0f, 1233f - min))
+        assertTrue(c.paddingCountsY)
+        assertTrue(c.setPadding(0f, 0f, 0f, 1233f - min + 1f))
+        assertFalse(c.paddingCountsY)
+    }
+
+    @Test fun aMarginLargerThanTheRoomIsShrunkNotObeyed() {
+        val c = camera(width = 400, height = 800)
+        // 190 px of margin on each side of 400 would leave 20 px: the fit keeps the 120 dp minimum instead.
+        assertTrue(c.fit(41.00, 28.90, 41.05, 29.10, marginPx = 190f))
+        val width = c.screenX(29.10) - c.screenX(28.90)
+        assertEquals(120f, width, 1f)
+        // A margin beyond the viewport, a negative one and padding beyond the viewport are harmless too.
+        assertTrue(c.fit(41.00, 28.90, 41.05, 29.10, marginPx = 5_000f))
+        assertEquals(120f, c.screenX(29.10) - c.screenX(28.90), 1f)
+        assertTrue(c.fit(41.00, 28.90, 41.05, 29.10, marginPx = -50f))
+        assertEquals(400f, c.screenX(29.10) - c.screenX(28.90), 1f)
+        assertTrue(c.setPadding(900f, 900f, 900f, 900f))
+        assertTrue(c.fit(41.00, 28.90, 41.05, 29.10))
+        assertEquals(200f, c.focusX, 0f)
+        assertEquals(400f, c.focusY, 0f)
+        assertEquals(400f, c.screenX(29.10) - c.screenX(28.90), 1f)
+    }
+
+    @Test fun aViewportSmallerThanTheMinimumUsesAllOfIt() {
+        val tiny = camera(width = 60, height = 40)
+        assertTrue(tiny.setPadding(10f, 0f, 10f, 0f))
+        assertTrue(tiny.fit(41.00, 28.90, 41.05, 29.10, marginPx = 20f))
+        assertEquals(60f, tiny.screenX(29.10) - tiny.screenX(28.90), 1f)
+        assertEquals(30f, tiny.focusX, 0f)
+        // Centre-on and travel aim at the same sensible point.
+        assertTrue(tiny.centreOn(41.02, 29.0))
+        assertEquals(30f, tiny.screenX(29.0), 0.5f)
+    }
+
     @Test fun fitOfOnePointUsesTheClosestAllowedScale() {
         val c = camera()
         assertTrue(c.fitPoints(doubleArrayOf(IST_LAT, IST_LON)))

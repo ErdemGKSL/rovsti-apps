@@ -134,9 +134,30 @@ class MapCamera(
     /** True while a pinch or a zoom animation changes the zoom; tiles are re-rasterised when it ends. */
     val zooming: Boolean get() = pinching || zoomAnim || (travel && travelFromZoom != travelToZoom)
 
-    /** The centre of the area the padding leaves free, where "centre on" puts a point. */
-    val focusX: Float get() = (paddingLeft + (widthPx - paddingRight)) / 2f
-    val focusY: Float get() = (paddingTop + (heightPx - paddingBottom)) / 2f
+    /**
+     * The centre of the area the padding leaves free, where "centre on" puts a point. On an axis where the padding
+     * leaves less than [MIN_FREE_DP] (a sheet in landscape covers nearly the whole height) the padding of that axis
+     * is ignored and the focus is the middle of the viewport: aiming at a sliver would push the content off screen.
+     */
+    val focusX: Float get() = if (paddingCountsX) (paddingLeft + (widthPx - paddingRight)) / 2f else widthPx / 2f
+    val focusY: Float get() = if (paddingCountsY) (paddingTop + (heightPx - paddingBottom)) / 2f else heightPx / 2f
+
+    /** Whether the padding leaves a usable strip on each axis; see [focusX]. */
+    val paddingCountsX: Boolean get() = widthPx - paddingLeft - paddingRight >= MIN_FREE_DP * density
+    val paddingCountsY: Boolean get() = heightPx - paddingTop - paddingBottom >= MIN_FREE_DP * density
+
+    /** The length [fit] may use on an axis: the free strip (or the whole axis, see [focusX]) less the margins. */
+    private fun fitRoom(
+        size: Int,
+        padding: Float,
+        counts: Boolean,
+        marginPx: Float,
+    ): Double {
+        val free = if (counts) size - padding else size.toFloat()
+        // A margin that would leave less than the minimum is shrunk rather than obeyed.
+        val least = minOf(free, MIN_FREE_DP * density)
+        return max(1.0, max(least, free - 2 * max(0f, marginPx)).toDouble())
+    }
 
     /** Screen x of a longitude: the copy of the world nearest to the centre. */
     fun screenX(lon: Double): Float =
@@ -299,6 +320,10 @@ class MapCamera(
      * Shows the box south-west ([south], [west]) to north-east ([north], [east]) in the free area with [marginPx]
      * around it (`Viewport::fit`, on Mercator). A single point gets [minMetresPerDp]. Like the Rust fit it does not
      * handle a box across the antimeridian.
+     *
+     * The fit never works with less than [MIN_FREE_DP] on an axis: padding that leaves less is ignored on that axis
+     * (the box is fitted to the whole viewport there, partly under the chrome, instead of zooming out to the limit),
+     * and a margin that would leave less is shrunk.
      */
     fun fit(
         south: Double,
@@ -315,8 +340,8 @@ class MapCamera(
         val x1 = MapMath.worldX(max(west, east))
         val y0 = MapMath.worldY(max(south, north))
         val y1 = MapMath.worldY(min(south, north))
-        val availX = max(1.0, (widthPx - paddingLeft - paddingRight - 2 * marginPx).toDouble())
-        val availY = max(1.0, (heightPx - paddingTop - paddingBottom - 2 * marginPx).toDouble())
+        val availX = fitRoom(widthPx, paddingLeft + paddingRight, paddingCountsX, marginPx)
+        val availY = fitRoom(heightPx, paddingTop + paddingBottom, paddingCountsY, marginPx)
         // World px needed so the spans fit; a zero span asks for infinity and the clamp below answers.
         val world = min(availX / (x1 - x0), availY / (y1 - y0))
         centreX = MapMath.wrap01((x0 + x1) / 2.0)
@@ -591,6 +616,9 @@ class MapCamera(
 
         /** A double tap zooms in by this (GPUI: `zoom_about(2.0, at)`). */
         const val DOUBLE_TAP_FACTOR = 2.0
+
+        /** The least free length per axis that padding and margins may leave for [fit] and the focus point. */
+        const val MIN_FREE_DP = 120f
 
         const val ZOOM_ANIMATION_S = 0.25
         const val TRAVEL_ANIMATION_S = 0.45

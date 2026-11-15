@@ -278,3 +278,30 @@ dates before 1970 and at `i64::MIN`/`MAX`, and offsets from -12 to +14 including
   built from the other worktree looks "fresh" here. `rosty_ffi` was compiled against the other worktree's
   `rosty_geo` (without the new module) until the sources were touched. Touch the crate sources before building, or
   give each worktree its own `CARGO_TARGET_DIR`.
+
+### R1 gap fixes
+
+- **Arrival clock (S41).** The status the service writes (`TripFixAnswer`, read by the card through `:platform`
+  `TripRepository`) and the interactive `FixOut` now carry `eta_min`: the same ETA the status text is built from,
+  rounded up and never 0 (`rosty_geo::session::eta_minutes`). It is absent when there is no ETA (standing still,
+  no speed yet), and optional on both sides, so a status written by an older build still parses. Kotlin:
+  `TripFixAnswer.etaMin: Int? = null`, `FixOut.etaMin: Int? = null`.
+- **`stops.store_trip_clear {dir}`** deletes `trip.json` under the trip lock and answers `{removed}`; a missing file
+  is `removed: false`, not an error. No history record is written, which is the point: a start Android refused
+  never was a trip. Kotlin: `StopsOps.storeTripClear(DirRequest): Outcome<StoreTripClearAnswer>`. **Fakes of
+  `StopsOps` must add `storeTripClear`.**
+- **Note on a saved stop (S44).** The only spec text is `_bmad-output/plans/util-stops-r6.md` ("free text shown in
+  the row and share text"); GPUI never built it. `SavedStop.note` is a string, absent from `saved.json` when empty
+  (so the file stays v2 and reads both ways), collapsed to one trimmed line, at most 200 characters
+  (`note_too_long` otherwise, nothing is cut silently on edit). `saved_edit` gets `set_note {id, note}` (an empty
+  note clears it). The note appears in the list share text (an indented line under the stop), in the stop share
+  text when `dest_share` is given `note` (last line; parsing a shared text still yields name and points only), in
+  the JSON export/import (an imported note longer than the cap is cut) and in the backup. GPX has no note.
+  Kotlin: `SavedStop.note = ""`, `SavedEdit.SetNote`, `IncomingStop.note = ""`, `DestShareRequest.note`.
+- **Fit in a tiny free area.** `MapCamera` never works with less than `MIN_FREE_DP` (120 dp) on an axis. Padding
+  that leaves less on an axis is ignored on that axis, for `fit`/`fitPoints` and for the focus point alike
+  (`centreOn`, travel), so content lands in the middle of the viewport, partly under the sheet, instead of the fit
+  zooming out to 2000 m/dp around a 1 px strip. A margin that would leave less than the minimum is shrunk. The
+  rule is per axis: in landscape under a sheet the height falls back while the width keeps its padding. Tested with
+  an 891 x 411 dp window and a medium sheet (60 dp left), the exact threshold, oversized margins and padding, and
+  a viewport smaller than the minimum.

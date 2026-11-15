@@ -93,7 +93,13 @@ fun rememberHomeMap(
                 }
             HomeMap(
                 camera = camera,
-                tiles = MapTileStore(container.createTileSource(), scope, MapTileStore.bitmapBudget(context)),
+                tiles =
+                    MapTileStore(
+                        container.createTileSource(),
+                        scope,
+                        MapTileStore.bitmapBudget(context),
+                        rasterDispatcher = container.tileRasterDispatcher,
+                    ),
                 pick = PickController(StopsPickOps(container.ops), scope, camera, forward),
                 motion = MotionGate(scope),
             )

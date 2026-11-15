@@ -27,9 +27,12 @@ import dev.rosty.stops.data.StopsTiles
 import dev.rosty.stops.home.CoreHomeData
 import dev.rosty.stops.home.HomeData
 import dev.rosty.stops.home.HomeSheet
+import dev.rosty.stops.map.MapTileStore
 import dev.rosty.stops.map.TileSource
 import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AndroidAlarmControl
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 
@@ -60,6 +63,11 @@ open class StopsContainer(
             cacheRoot = File(context.noBackupFilesDir, TILES_DIR).absolutePath,
             open = { request -> openTiles(request) },
         )
+    }
+
+    /** The threads the map paints its tiles on (never the main thread); a screen test paints them where it stands. */
+    open val tileRasterDispatcher: CoroutineDispatcher by lazy {
+        Dispatchers.Default.limitedParallelism(MapTileStore.RASTER_THREADS)
     }
 
     /**
@@ -104,7 +112,17 @@ open class StopsContainer(
     /** A sheet a page asked the map to open on the way back (the bar's Saved on Settings); the home clears it. */
     val pendingSheet: MutableStateFlow<HomeSheet?> = MutableStateFlow(null)
 
-    protected open fun createOps(): StopsOps = NativeStopsOps(rust)
+    private val appContext: Context = context.applicationContext
+
+    /**
+     * The language the user reads Stops in, as a tag (`tr-TR`): read at every call, so a language change needs no
+     * restart. The Rust core writes its sentences (labels, hints, distances, the trip's status) in it.
+     */
+    fun localeTag(): String =
+        appContext.resources.configuration.locales[0]
+            .toLanguageTag()
+
+    protected open fun createOps(): StopsOps = NativeStopsOps(rust) { localeTag() }
 
     protected open fun createTilesOps(): TilesOps = NativeTilesOps(rust)
 

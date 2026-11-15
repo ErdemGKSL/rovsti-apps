@@ -216,7 +216,10 @@ open class TestStopsContainer(
 
     override fun createShortcuts(): ShortcutsRepository = fakeShortcuts
 
-    override fun createWa(): WaRepository = FakeWaRepository()
+    /** WhatsApp without a gateway: not linked until a test says otherwise ([FakeWaRepository.setState]). */
+    val fakeWa = FakeWaRepository()
+
+    override fun createWa(): WaRepository = fakeWa
 
     override fun createSpecialAccess(): SpecialAccess = fakeSpecial
 

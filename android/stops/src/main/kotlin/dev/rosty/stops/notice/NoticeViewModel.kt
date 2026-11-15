@@ -3,7 +3,6 @@ package dev.rosty.stops.notice
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.rosty.core.Outcome
@@ -16,6 +15,7 @@ import dev.rosty.core.model.stops.NoticeWhen
 import dev.rosty.core.model.stops.NoticeWhenChoice
 import dev.rosty.core.model.stops.PrefsEdit
 import dev.rosty.core.model.stops.StopsPrefs
+import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.ops.StopsOps
 import dev.rosty.design.text.UiText
 import dev.rosty.stops.R
@@ -28,14 +28,13 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -71,6 +70,8 @@ data class NoticeUiState(
     /** The message as it is saved (the default of the phone's language while none was written). */
     val saved: String = "",
     val defaultTemplate: String = "",
+    /** The default message of every language (`stops.prefs_choices`). */
+    val defaults: ImmutableList<String> = persistentListOf(),
     /** The message in the field as it would read ("Arriving at Kadıköy Pier in about 8 min."). */
     val preview: String = "",
     val problem: NoticeProblem? = null,
@@ -113,14 +114,16 @@ sealed interface NoticeEffect {
  * `set_template`, `set_notice_when`, `clear_notice`), the preview is `stops.notice_render` and the check
  * `stops.notice_validate`; the labels of "when" and the default message come from `stops.prefs_choices` in the
  * phone's language. [sampleStop] stands for `{stop}` in the preview. The chats come from the gateway ([wa]) and are
- * named by [names] (see [namedChats]).
+ * named by [names] (see [namedChats]), again whenever [namesChanged] emits.
  */
 class NoticeViewModel(
     private val store: StopsStore,
     private val ops: StopsOps,
     private val wa: WaRepository,
-    private val names: suspend (List<dev.rosty.core.model.wa.RichChat>) -> List<NoticeChat>,
+    private val names: suspend (List<RichChat>) -> List<NoticeChat>,
     private val sampleStop: String,
+    /** Emits when more became known about the people (their profiles arrived): the chats are named again. */
+    private val namesChanged: Flow<*> = flowOf(Unit),
     scope: CoroutineScope? = null,
 ) : ViewModel() {
     private val work: CoroutineScope = scope ?: viewModelScope
@@ -145,6 +148,7 @@ class NoticeViewModel(
             mutable.update {
                 it.copy(
                     defaultTemplate = choices?.defaultTemplate.orEmpty(),
+                    defaults = choices?.defaultTemplates.orEmpty().toImmutableList(),
                     whenChoices = choices?.noticeWhen.orEmpty().toImmutableList(),
                 )
             }
@@ -155,19 +159,24 @@ class NoticeViewModel(
                 mutable.update { it.copy(link = link, linkSettled = settled) }
             }
         }
-        work.launch {
-            snapshotFlow { templateField.text.toString() }.collectLatest { text ->
-                delay(PREVIEW_DEBOUNCE_MS)
-                check(text)
-            }
-        }
-        work.launch {
-            snapshotFlow { searchField.text.toString() }.collect { query ->
-                mutable.update { state ->
-                    val chats = state.chats as? NoticeChats.Loaded ?: return@update state
-                    state.copy(chats = chats.copy(shown = filterChats(chats.all, query).toImmutableList()))
-                }
-            }
+    }
+
+    private var checkJob: Job? = null
+
+    /**
+     * The field's text changed (the page reports it; the view model after it set the text itself): the preview
+     * and the problem follow. A newer text cancels the check of an older one.
+     */
+    fun templateChanged(text: String = templateField.text.toString()) {
+        checkJob?.cancel()
+        checkJob = work.launch { check(text) }
+    }
+
+    /** The picker's search text changed. */
+    fun searchChanged(query: String = searchField.text.toString()) {
+        mutable.update { state ->
+            val chats = state.chats as? NoticeChats.Loaded ?: return@update state
+            state.copy(chats = chats.copy(shown = filterChats(chats.all, query).toImmutableList()))
         }
     }
 
@@ -175,7 +184,9 @@ class NoticeViewModel(
     private fun onPrefs(prefs: StopsPrefs) {
         val before = mutable.value
         val notice = prefs.notice
-        val saved = notice?.template ?: before.defaultTemplate
+        // A message that was never rewritten (a default of any language) reads as the default of this language:
+        // that is how a trip sends it.
+        val saved = notice?.template?.takeIf { it.trim() !in before.defaults } ?: before.defaultTemplate
         val untouched = before.loading || templateField.text.toString() == before.saved
         mutable.value =
             before.copy(
@@ -187,6 +198,7 @@ class NoticeViewModel(
                 dirty = !untouched && templateField.text.toString() != saved,
             )
         if (untouched && templateField.text.toString() != saved) templateField.setTextAndPlaceCursorAtEnd(saved)
+        if (untouched) templateChanged(saved)
     }
 
     /** The preview and the problem of [text], and whether it differs from the saved message. */
@@ -222,6 +234,7 @@ class NoticeViewModel(
                             ?.template ?: text.trim()
                     templateField.setTextAndPlaceCursorAtEnd(kept)
                     mutable.update { it.copy(saved = kept, dirty = false, problem = null) }
+                    templateChanged(kept)
                 }
 
                 is Outcome.Err -> {
@@ -285,7 +298,7 @@ class NoticeViewModel(
         mutable.update { it.copy(chats = NoticeChats.Loading) }
         chatsJob =
             work.launch {
-                wa.chats().collect { chats ->
+                combine(wa.chats(), namesChanged) { chats, _ -> chats }.collect { chats ->
                     val named = names(chats).toImmutableList()
                     val shown = filterChats(named, searchField.text.toString()).toImmutableList()
                     mutable.update { it.copy(chats = NoticeChats.Loaded(named, shown)) }
@@ -302,8 +315,6 @@ class NoticeViewModel(
     suspend fun awaitLoaded(): NoticeUiState = state.first { !it.loading }
 
     private companion object {
-        const val PREVIEW_DEBOUNCE_MS = 150L
-
         /** The preview's ETA: 8 minutes. */
         const val PREVIEW_ETA_S = 480L
     }

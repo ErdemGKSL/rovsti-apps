@@ -11,6 +11,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -102,8 +103,14 @@ fun rememberNoticeViewModel(container: StopsContainer): NoticeViewModel {
                         store = container.store,
                         ops = container.ops,
                         wa = container.wa,
-                        names = { chats -> namedChats(chats, container.avatars::profile, container.waOps::names) },
+                        names = { chats ->
+                            // What WhatsApp knows about each person (the saved contact name, the business name)
+                            // is asked for once; the names follow when it arrives.
+                            chats.forEach { if (!it.isGroup) container.avatars.wantProfile(it.jid) }
+                            namedChats(chats, container.avatars::profile, container.waOps::names)
+                        },
                         sampleStop = sample,
+                        namesChanged = container.avatars.revision,
                     )
                 }
             }
@@ -141,6 +148,7 @@ fun ArrivingSoonEntry(
     val vm = rememberNoticeViewModel(container)
     val state by vm.state.collectAsState()
     NoticeEffects(vm)
+    LaunchedEffect(vm) { snapshotFlow { vm.templateField.text.toString() }.collect(vm::templateChanged) }
     ArrivingSoonPage(
         state = state,
         template = vm.templateField,
@@ -168,6 +176,7 @@ fun ArrivingSoonChatEntry(
     val vm = rememberNoticeViewModel(container)
     val state by vm.state.collectAsState()
     NoticeEffects(vm, onChatChosen = onBack)
+    LaunchedEffect(vm) { snapshotFlow { vm.searchField.text.toString() }.collect(vm::searchChanged) }
     DisposableEffect(vm) {
         vm.openChats()
         onDispose { vm.closeChats() }

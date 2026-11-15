@@ -67,11 +67,13 @@ import dev.rosty.stops.map.rememberRadarOverlay
 import dev.rosty.stops.map.showThirdTapHint
 import dev.rosty.stops.pick.Picker
 import dev.rosty.stops.pick.rememberPicker
+import dev.rosty.stops.saved.PlacesTransfer
 import dev.rosty.stops.saved.SavedAction
 import dev.rosty.stops.saved.SavedEffect
 import dev.rosty.stops.saved.SavedViewModel
 import dev.rosty.stops.saved.presentSavedSheet
 import dev.rosty.stops.saved.presentSavedStopSheet
+import dev.rosty.stops.saved.rememberSavedFiles
 import dev.rosty.stops.saved.toDestination
 import dev.rosty.stops.tools.MapTools
 import dev.rosty.stops.tools.MeasureCard
@@ -207,6 +209,12 @@ fun HomeEntry(
     val trip = rememberTripViewModel(container)
     val alarm = rememberAlarmViewModel(container)
     val preflight = rememberPreflight()
+    // S5: the saved stops to and from a file (E7.12).
+    val savedFiles =
+        rememberSavedFiles(
+            container.files,
+            remember(container) { PlacesTransfer(container.ops, container.saved, TripClock::nowMillis, ::localToday) },
+        ) { viewModel.refresh() }
     // The History sheet (E7.11); what it hands back goes through these, defined once the map exists.
     var historyStart: (Destination, Destination) -> Unit = { _, _ -> }
     var historyShow: (Destination, Destination) -> Unit = { _, _ -> }
@@ -275,7 +283,7 @@ fun HomeEntry(
         val gone = { if (open?.second === entry) open = null }
         entry =
             when (which) {
-                HomeSheet.Saved -> overlays.presentSavedSheet(title, saved) { gone() }
+                HomeSheet.Saved -> overlays.presentSavedSheet(title, saved, savedFiles) { gone() }
                 HomeSheet.History -> overlays.presentHistorySheet(title, history.first, history.second) { gone() }
                 HomeSheet.Pick -> overlays.presentHomeSheet(which, title, shared) { gone() }
             }

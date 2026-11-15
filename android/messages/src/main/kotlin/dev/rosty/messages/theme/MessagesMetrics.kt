@@ -15,7 +15,7 @@ object MessagesMetrics {
     val FolderGlyph = 18.dp
     val BubbleMaxFraction = 0.78f
     val BubbleCorner = 18.dp
-    val BubbleTail = 6.dp
+    val BubbleTail = 12.dp
     val BubblePadH = 12.dp
     val BubblePadV = 7.dp
     val BubbleGap = 2.dp

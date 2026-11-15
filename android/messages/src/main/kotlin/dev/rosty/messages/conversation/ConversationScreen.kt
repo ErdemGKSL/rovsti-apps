@@ -72,6 +72,7 @@ import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
+import dev.rosty.messages.theme.MessagesColors
 import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.messages.ui.MessagesAvatar
 import kotlinx.collections.immutable.ImmutableList
@@ -388,7 +389,12 @@ private fun CenteredLabel(
 @Composable
 private fun bubbleColors(outgoing: Boolean): Pair<Color, Color> {
     val colors = RostyTheme.colors
-    return if (outgoing) colors.accent to colors.onAccent else colors.fillSecondary to colors.labelPrimary
+    return if (outgoing) {
+        MessagesColors.OutgoingBubble to MessagesColors.OutgoingInk
+    } else {
+        colors.fillSecondary to
+            colors.labelPrimary
+    }
 }
 
 /**

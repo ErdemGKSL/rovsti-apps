@@ -47,6 +47,26 @@ class CountingContainer(
     }
 }
 
+/** A container that keeps the dev log for its first use, as the apps' test containers do. */
+class QuietContainer(
+    context: Context,
+) : ShellContainer(context, AppPermissions.contacts) {
+    val devLogs =
+        java.util.concurrent.atomic
+            .AtomicInteger()
+
+    override fun createRust(): RustCore = FakeRustCore()
+
+    override fun createSpecialAccess(): SpecialAccess = FakeSpecialAccess()
+
+    override fun startsDevLogAtCreate(): Boolean = false
+
+    override fun createDevLog(): dev.rosty.core.log.DevLog {
+        devLogs.incrementAndGet()
+        return super.createDevLog()
+    }
+}
+
 class TestApp :
     Application(),
     HasContainer<CountingContainer> {
@@ -63,6 +83,18 @@ class ShellContainerTest {
         assertEquals(0, container.rustInits)
         assertEquals(0, container.waInits)
         assertEquals(0, container.loaderInits)
+    }
+
+    @Test fun aContainerThatOptsOutStartsNoDevLogOnAPoolThread() {
+        val container = QuietContainer(app)
+        // Nothing was launched: whatever runs later on the pool cannot build the log behind the test's back.
+        container.scope.coroutineContext[kotlinx.coroutines.Job]!!
+            .children
+            .toList()
+            .let { assertEquals(emptyList<kotlinx.coroutines.Job>(), it) }
+        assertEquals(0, container.devLogs.get())
+        container.devLog
+        assertEquals(1, container.devLogs.get())
     }
 
     @Test fun rustStartsOnFirstUseAndOnlyOnce() {

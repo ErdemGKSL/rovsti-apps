@@ -25,6 +25,7 @@ class AlarmPreviewTest {
 
     @Test fun thePickerOpensOnTheCurrentSoundOrTheDefault() {
         val default = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+
         @Suppress("DEPRECATION")
         val existing = { i: Intent -> i.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI) }
         assertEquals(default, existing(AlarmPreview.pickerIntent(null)))

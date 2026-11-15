@@ -6,3 +6,9 @@
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
 
+
+# Reached by name (E7.10, S10): WorkManager creates the offline download worker by reflection from its class name (a
+# request stored in its database survives an app update).
+-keep class dev.rosty.stops.offline.OfflineAreaWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}

@@ -34,9 +34,13 @@ import dev.rosty.stops.map.PickListener
 import dev.rosty.stops.map.RadarPosition
 import dev.rosty.stops.map.RadarSaved
 import dev.rosty.stops.map.StopsPickOps
+import dev.rosty.stops.offline.visibleArea
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -310,3 +314,23 @@ fun Context.openInMaps(geoUri: String): Boolean =
     } catch (_: SecurityException) {
         false
     }
+
+/**
+ * The two hooks Settings (E7.10) needs from the map: the view at rest becomes `container.mapView` (the offline area to
+ * download, S10), and a transit feed imported or removed in Settings makes the pick controller ask for its stops again.
+ */
+@Composable
+fun SettingsHooks(
+    map: HomeMap,
+    container: StopsContainer,
+) {
+    LaunchedEffect(map) {
+        snapshotFlow {
+            map.camera.observe()
+            if (map.camera.moving.value) null else visibleArea(map.camera)
+        }.filterNotNull()
+            .distinctUntilChanged()
+            .collect { container.mapView.value = it }
+    }
+    LaunchedEffect(map) { container.transitVersion.drop(1).collect { map.pick.refreshTransit() } }
+}

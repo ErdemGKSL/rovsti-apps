@@ -86,11 +86,14 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.collections.immutable)
     implementation(libs.navigation3.runtime)
+    // The offline map area download runs as a foreground worker (E7.10, S10).
+    implementation(libs.work.runtime.ktx)
 
     testImplementation(project(":testing"))
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.coroutines.test)
+    testImplementation(libs.work.testing)
     testImplementation(libs.compose.ui.test.junit4)
     testImplementation(testFixtures(project(":core-bridge")))
     testImplementation(testFixtures(project(":platform")))

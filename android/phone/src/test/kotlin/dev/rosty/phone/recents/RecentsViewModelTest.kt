@@ -353,6 +353,9 @@ class RecentsViewModelTest {
             assertEquals(1, ui.counts.whatsapp)
             model.onAction(RecentsAction.WhatsAppCall(row.key))
             assertEquals(listOf("+905550001122"), rig.whatsAppPlaced)
+            // WA-R2: the same row opens the person's chat in Rosty Messages, by its number.
+            model.onAction(RecentsAction.WhatsAppMessage(row.key))
+            assertEquals(listOf("+905550001122"), rig.whatsAppMessaged.map { it.first })
             assertTrue("the model says WhatsApp can be placed", model.whatsAppAvailable.value)
         }
 

@@ -27,6 +27,15 @@
     <permission
         android:name="dev.rosty.permission.READ_PEOPLE"
         android:protectionLevel="signature" />
+
+    <!-- WA-R2: the WhatsApp link (gateway address, instance id, connect key) is handed between Rosty apps signed with
+         the same key, so linking once links them all (pasting the key stays possible). Signature level, declared by
+         every app so whichever installs first defines it. :wa's WaLinkProvider (below) is reachable only with it and
+         checks the caller's signing certificate itself. -->
+    <permission
+        android:name="dev.rosty.permission.WA_LINK"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="dev.rosty.permission.WA_LINK" />
     <uses-permission android:name="dev.rosty.permission.READ_PEOPLE" tools:node="remove" />
 
     <!-- :platform mirrors the permissions of all four apps so lint can check its calls; this app does not use
@@ -43,6 +52,9 @@
         <intent>
             <action android:name="dev.rosty.action.WA_CHAT" />
         </intent>
+        <!-- WA-R2: the link providers of the sibling Rosty apps (package visibility). -->
+        <provider android:authorities="dev.rosty.messages.walink" />
+        <provider android:authorities="dev.rosty.phone.walink" />
     </queries>
 
     <application
@@ -103,6 +115,14 @@
             android:exported="false" />
 
         <!-- Images and files handed to the share sheet (cache/share only, read-only). -->
+        <!-- WA-R2: this app's WhatsApp link for the sibling Rosty apps. Exported, read and write both behind the
+             signature permission (nothing writes); it does no work until the first query. -->
+        <provider
+            android:name="dev.rosty.wa.share.WaLinkProvider"
+            android:authorities="${applicationId}.walink"
+            android:exported="true"
+            android:readPermission="dev.rosty.permission.WA_LINK"
+            android:writePermission="dev.rosty.permission.WA_LINK" />
         <provider
             android:name="dev.rosty.bridge.RostyShareProvider"
             android:authorities="${applicationId}.rostyshare"

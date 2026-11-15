@@ -224,6 +224,8 @@ private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewMode
                         placeWhatsApp = container.waLauncher::place,
                         forgetWhatsApp = container.waCalls::forget,
                         whatsAppAvailable = container.waLauncher.available,
+                        messageWhatsApp = container.waChat::open,
+                        whatsAppMessageAvailable = container.waChat.also { it.refresh() }.available,
                     )
                 }
             }

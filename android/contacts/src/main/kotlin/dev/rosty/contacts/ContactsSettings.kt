@@ -63,6 +63,8 @@ fun WhatsAppSettingsEntry(container: ContactsContainer) {
                             stagingDir = container.context.cacheDir,
                             clock = System::currentTimeMillis,
                             saved = SavedStateHandle(),
+                            // A sibling Rosty app's link is taken when this app has none (WA-R2).
+                            handover = container.waLinkHandover,
                         )
                     }
                 }

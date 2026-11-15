@@ -29,6 +29,7 @@ class DetailsStrings(
     val callHint: String = res.getString(R.string.details_call_hint)
     val menuReply: String = res.getString(R.string.details_menu_reply)
     val menuWhatsApp: String = res.getString(R.string.details_menu_whatsapp)
+    val menuWhatsAppMessage: String = res.getString(R.string.details_menu_whatsapp_message)
     val menuCopyNumber: String = res.getString(R.string.details_menu_copy_number)
     val menuCopyAll: String = res.getString(R.string.details_menu_copy_all)
     val menuShareDetails: String = res.getString(R.string.details_menu_share_details)

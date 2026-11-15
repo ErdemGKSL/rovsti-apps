@@ -12,6 +12,7 @@ import dev.rosty.platform.contacts.ContactPhotos
 import dev.rosty.platform.identity.CallerLookup
 import dev.rosty.platform.notify.PlatformChannels
 import dev.rosty.platform.telephony.CallRegistry
+import dev.rosty.platform.wa.WaPush
 import dev.rosty.shell.HasContainer
 
 /**
@@ -50,6 +51,8 @@ class RostyPhoneApp :
             // Calls and their notifications are named by the same caller-ID as Recents (F39); the container is
             // built on the first lookup, off the main thread.
             CallerLookup.install { number -> container.identifyBlocking(number) }
+            // A WhatsApp push whose caller is a LID gets its number from Phone's identity table (WA-R2).
+            WaPush.lidNumber = { jid -> container.waNumberBlocking(jid) }
         }
         // The people cache (names and WhatsApp pictures) follows its source from the start, so the incoming screen
         // and the notifications find a known caller's picture in memory (X.1d). Off the main thread.

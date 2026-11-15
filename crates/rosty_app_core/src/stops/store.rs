@@ -105,6 +105,16 @@ pub fn clear_trip(dir: &Path) -> io::Result<bool> {
     }
 }
 
+/// Deletes the imported transit feed (`gtfs.json`): Settings > Transit data > Remove. Returns whether a feed was
+/// there; removing twice is fine. Nothing else points into the file on disk (picked points keep their own copy).
+pub fn remove_gtfs(dir: &Path) -> io::Result<bool> {
+    match std::fs::remove_file(dir.join(GTFS_FILE)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// Helpers for the tests of this crate and of the apps that re-export it.
 #[allow(clippy::unwrap_used)]
 #[doc(hidden)]
@@ -187,6 +197,19 @@ mod tests {
         // The id is free for a real trip later, which is then recorded as usual.
         save_trip(&dir, &trip(4)).unwrap();
         assert!(end_trip(&dir, Outcome::Arrived, 9).unwrap().is_some());
+    }
+
+    #[test]
+    fn removing_the_feed_deletes_only_gtfs_json() {
+        let dir = tmp("store-gtfs-remove");
+        assert!(!remove_gtfs(&dir).unwrap());
+        assert!(!remove_gtfs(&dir.join("never-made")).unwrap());
+        std::fs::write(dir.join(GTFS_FILE), "{}").unwrap();
+        save_trip(&dir, &trip(5)).unwrap();
+        assert!(remove_gtfs(&dir).unwrap());
+        assert!(!dir.join(GTFS_FILE).exists());
+        assert!(load_trip(&dir).is_some(), "the trip stays");
+        assert!(!remove_gtfs(&dir).unwrap());
     }
 
     #[test]

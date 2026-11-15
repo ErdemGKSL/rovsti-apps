@@ -36,7 +36,6 @@
     </plurals>
     <!-- Settings (E7.10 adds the alarm, tiles, GTFS and message pages). -->
     <string name="settings_group_map">Map</string>
-    <string name="settings_tile_server">Tile Server</string>
     <!-- Map actions. -->
     <string name="home_copied">Copied</string>
     <string name="home_no_maps_app">No app can open this place.</string>
@@ -213,4 +212,149 @@
         <item quantity="other">%d lines</item>
     </plurals>
     <string name="pick_no_lines">No lines</string>
+
+    <!-- E7.10 Settings: alarm, map tiles, offline area, transit data. -->
+    <string name="settings_group_trip">Trip</string>
+    <string name="settings_alarm">Alarm</string>
+    <string name="settings_map_tiles">Map Tiles</string>
+    <string name="settings_alarm_both">Sound and vibration</string>
+    <string name="settings_alarm_sound_only">Sound only</string>
+    <string name="settings_alarm_vibration_only">Vibration only</string>
+    <string name="settings_undo">Undo</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="settings_save_failed">Could not save. Try again.</string>
+    <string name="settings_group_transit">Transit Data</string>
+    <string name="settings_transit_reading">Reading the feed…</string>
+    <string name="settings_transit_reading_desc">Large feeds take a minute.</string>
+    <string name="settings_transit_replace">Replace with Another Feed</string>
+    <string name="settings_transit_remove">Remove Transit Data</string>
+    <string name="settings_transit_import">Import a GTFS Feed</string>
+    <string name="settings_transit_import_desc">Stop names and lines from your transit agency. Stays on this phone.</string>
+    <string name="settings_transit_footer">With a feed, stops and their lines show on the map and in search, and any stop can be A or B.</string>
+    <string name="settings_transit_too_large">That file is too large. Feeds up to 64 MiB work.</string>
+    <string name="settings_transit_unreadable">That file could not be read. Choose a GTFS .zip file.</string>
+    <string name="settings_transit_failed">This feed could not be read: %1$s</string>
+    <string name="settings_transit_imported">Transit data imported</string>
+    <string name="settings_transit_removed">Transit data removed</string>
+    <string name="settings_transit_remove_title">Remove transit data?</string>
+    <string name="settings_transit_remove_message">Stops and lines from the feed leave the map and the search. You can import it again.</string>
+    <string name="settings_transit_remove_action">Remove</string>
+    <string name="settings_keep_one_on">Keep sound or vibration on, or the alarm is silent.</string>
+    <string name="settings_no_vibrator">This phone cannot vibrate.</string>
+    <string name="settings_sound_default">Default alarm</string>
+    <string name="settings_sound_unnamed">Alarm</string>
+    <string name="settings_sound_set">Alarm sound: %1$s</string>
+    <string name="settings_picker_missing">No app on this phone picks alarm sounds.</string>
+    <string name="settings_test_volume_playing">Playing for 3 seconds</string>
+    <string name="settings_alarm_busy">Not while the alarm is ringing</string>
+    <string name="settings_alarm_reset_done">Alarm settings reset</string>
+    <string name="settings_alarm_sound">Sound</string>
+    <string name="settings_alarm_vibration">Vibration</string>
+    <string name="settings_alarm_tone">Alarm Sound</string>
+    <string name="settings_alarm_snooze">Snooze</string>
+    <string name="settings_alarm_footer">The alarm rings when you cross the circle on A and B. One of sound and vibration always stays on.</string>
+    <string name="settings_alarm_volume">Volume</string>
+    <string name="settings_percent">%1$d %%</string>
+    <string name="settings_test_volume">Test Volume</string>
+    <string name="settings_test_volume_desc">Plays your alarm sound for 3 seconds.</string>
+    <string name="settings_alarm_volume_footer">The alarm is never quieter than this, even when the phone is turned down.</string>
+    <string name="settings_alarm_pattern">Vibration Pattern</string>
+    <string name="settings_alarm_pattern_footer">Choosing a pattern buzzes it once.</string>
+    <string name="settings_test_alarm">Test Alarm</string>
+    <string name="settings_test_alarm_desc">Rings once with your sound and vibration.</string>
+    <string name="settings_alarm_reset">Reset Alarm Settings</string>
+    <string name="settings_alarm_reset_title">Reset alarm settings?</string>
+    <string name="settings_alarm_reset_message">Sound, vibration, pattern, volume and snooze go back to their defaults. Your other settings stay.</string>
+    <string name="settings_alarm_reset_action">Reset</string>
+    <string name="settings_pattern_standard">Standard</string>
+    <string name="settings_pattern_pulse">Pulse</string>
+    <string name="settings_pattern_long">Long</string>
+    <string name="settings_pattern_heartbeat">Heartbeat</string>
+    <string name="tiles_server">Map server</string>
+    <string name="tiles_url_footer">Use {z}, {x} and {y} for the tile position. Any VersaTiles-compatible Shortbread vector tile server works.</string>
+    <string name="tiles_test_save">Test and Save</string>
+    <string name="tiles_test_save_desc">Downloads one tile first. A server that fails is not saved.</string>
+    <string name="tiles_testing">Testing…</string>
+    <string name="tiles_reset">Reset to Default</string>
+    <string name="tiles_downloaded">Downloaded Maps</string>
+    <string name="tiles_measuring">Checking…</string>
+    <string name="tiles_other_servers">Other Servers</string>
+    <string name="tiles_clear">Clear</string>
+    <string name="tiles_clear_all">Clear Downloaded Maps</string>
+    <string name="tiles_cache_size">Cache Size</string>
+    <string name="tiles_megabytes">%1$d MB</string>
+    <string name="tiles_cache_footer">Kept for offline use, up to the cache size per map server. Offline areas stay while they fit.</string>
+    <string name="tiles_size_none">None</string>
+    <string name="tiles_freed">Freed %1$s</string>
+    <string name="tiles_shrink_title">Shrink to %1$d MB?</string>
+    <string name="tiles_shrink_message">The cache holds more than that: the oldest tiles are deleted now.</string>
+    <string name="tiles_shrink_action">Shrink</string>
+    <string name="tiles_clear_others_title">Clear other servers?</string>
+    <string name="tiles_clear_others_message">Maps kept from servers you no longer use are deleted.</string>
+    <string name="tiles_clear_all_title">Clear downloaded maps?</string>
+    <string name="tiles_clear_all_message">Every map tile on this phone is deleted, offline areas too. The map downloads what it needs again.</string>
+    <string name="tiles_clear_action">Clear</string>
+    <string name="tiles_server_reset">Map server reset to default</string>
+    <string name="tiles_cache_limit">Cache limit %1$d MB</string>
+    <string name="tiles_not_during_trip">Not while a trip is running</string>
+    <string name="tiles_cleared">Downloaded maps cleared</string>
+    <string name="tiles_clear_failed">Could not clear. Try again.</string>
+    <string name="tiles_error_empty">Enter a tile URL.</string>
+    <string name="tiles_error_scheme">The URL must start with http:// or https://.</string>
+    <string name="tiles_error_placeholder">The URL needs {z}, {x} and {y} exactly once each.</string>
+    <string name="tiles_error_whitespace">The URL must not contain spaces.</string>
+    <string name="tiles_error_too_long">The URL is too long.</string>
+    <string name="tiles_error_unreachable">Map server not saved: it could not be reached. Check the URL and the connection.</string>
+    <string name="tiles_error_refused">Map server not saved: it refused access. Check the URL.</string>
+    <string name="tiles_error_no_tile">Map server not saved: it has no tile there (404). Check the URL.</string>
+    <string name="tiles_error_status">Map server not saved: it answered with error %1$d.</string>
+    <string name="tiles_error_too_large">Map server not saved: its tile is too large.</string>
+    <string name="tiles_error_not_vector">Map server not saved: it does not send vector tiles.</string>
+    <string name="tiles_error_storage">Map server not saved: the tile could not be stored on the phone.</string>
+    <string name="tiles_error_other">Map server not saved. Try again.</string>
+    <string name="offline_title">Offline Area</string>
+    <string name="offline_footer">The area the map showed last, from the whole region down to street detail. The download goes on when you close the app.</string>
+    <string name="offline_download">Download This Area</string>
+    <string name="offline_no_view">Open the map first, then come back here.</string>
+    <string name="offline_estimate_capped">%1$s. Zoom in for street detail.</string>
+    <string name="offline_confirm_action">Download</string>
+    <string name="offline_ok">OK</string>
+    <string name="offline_cancel">Cancel</string>
+    <string name="offline_starting">Getting ready to download…</string>
+    <string name="offline_could_not_start">The download could not start. Try again.</string>
+    <string name="offline_already_running">A map area is already downloading</string>
+    <string name="offline_notice_title">Downloading map area</string>
+    <string name="offline_notice_done_title">Map area</string>
+    <plurals name="settings_minutes">
+        <item quantity="one">%1$d min</item>
+        <item quantity="other">%1$d min</item>
+    </plurals>
+    <plurals name="tiles_server_works">
+        <item quantity="one">Map server works (%1$d layer)</item>
+        <item quantity="other">Map server works (%1$d layers)</item>
+    </plurals>
+    <plurals name="offline_estimate">
+        <item quantity="one">%1$,d tile, about %2$s, up to zoom %3$d</item>
+        <item quantity="other">%1$,d tiles, about %2$s, up to zoom %3$d</item>
+    </plurals>
+    <plurals name="offline_confirm_title">
+        <item quantity="one">Download %1$,d tile?</item>
+        <item quantity="other">Download %1$,d tiles?</item>
+    </plurals>
+    <plurals name="offline_progress">
+        <item quantity="one">Downloading %1$,d of %2$,d tile</item>
+        <item quantity="other">Downloading %1$,d of %2$,d tiles</item>
+    </plurals>
+    <plurals name="offline_cancelled">
+        <item quantity="one">Download stopped: %1$,d of %2$,d tile kept</item>
+        <item quantity="other">Download stopped: %1$,d of %2$,d tiles kept</item>
+    </plurals>
+    <plurals name="offline_failed">
+        <item quantity="one">Done, but %1$,d of %2$,d tiles failed</item>
+        <item quantity="other">Done, but %1$,d of %2$,d tiles failed</item>
+    </plurals>
+    <plurals name="offline_done">
+        <item quantity="one">Map area downloaded (%1$,d tile)</item>
+        <item quantity="other">Map area downloaded (%1$,d tiles)</item>
+    </plurals>
 </resources>

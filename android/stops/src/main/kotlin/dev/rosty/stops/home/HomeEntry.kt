@@ -431,6 +431,7 @@ fun HomeEntry(
     FeedRadar(map, savedOnMap?.let { state.copy(savedOnMap = it) } ?: state)
     LivePosition(map, container)
     MapMotionEffect(map.camera, map.motion)
+    SettingsHooks(map, container)
     // The picked ends survive a restart, as the GPUI app kept them in `draft.json`.
     LaunchedEffect(map) {
         map.pick.state

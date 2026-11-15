@@ -31,6 +31,8 @@
     <string name="channel_trip_desc">Shown while Stops follows your trip</string>
     <string name="channel_people_sync">WhatsApp sync</string>
     <string name="channel_people_sync_desc">Shown while WhatsApp names and photos are synced</string>
+    <string name="channel_map_download">Map downloads</string>
+    <string name="channel_map_download_desc">Shown while Stops downloads a map area for offline use</string>
     <string name="channel_trip_alarm">Destination alarm</string>
     <string name="channel_trip_alarm_desc">Rings when you are about to arrive</string>
     <string name="channel_ongoing">Ongoing call</string>

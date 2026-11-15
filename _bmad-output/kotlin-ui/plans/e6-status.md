@@ -2,6 +2,71 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## E6-WA R2 closing (2026-11-15): media limits, full history, account and link
+
+Merged with `origin/ui-overhaul`. Gate: **running** (this line is replaced when it ends).
+Plan and evidence: `plans/e6wa-r2.md`.
+
+**Gateway commits (deploy these; nothing was deployed from here)**: `91b74e14` (epoch, account change wipe, full
+history, store migration v8). Proto and client: `748a7973`. Never run against WhatsApp.
+
+**Database backup before the gateway's v8 migration: yes.** The migration only adds six columns to `instances` and
+rewrites no rows, but an older gateway refuses a v8 file, so a rollback needs the v7 copy
+(`sqlite3 gateway.db ".backup gateway-v7.db"`, or copy the file with the gateway stopped).
+
+**The owner must know**
+- The full history arrives only for a link made after the deploy: unlink WhatsApp on the phone and link again with
+  the same number (nothing stored is lost). Device props are sent only when a device registers.
+- A new link shows on the phone as a **Windows** device, and "full" is the 365-day limit that client claims. How much
+  the phone really sends cannot be read from source. `WA_GATEWAY_FULL_HISTORY=false` keeps the old behaviour.
+- Linking **another number** on the same instance now deletes the old account's data on the gateway and on the device.
+
+**What landed**
+- Gateway: one epoch per process (first socket frame `hello`, `resync`, the status), `account_epoch` and
+  `account_changed`, history status with progress, bounded history import.
+- Device store (`wa_sync` schema v5): media table, download rules by network, queue with back-off, size cap (default
+  512 MiB; starred, saved, unsent and recently opened files stay), epoch gap, account wipe, history progress, wipe.
+- Messages: downloads through the queue (Wi-Fi: photos, voice notes, stickers; mobile data: photos, voice notes;
+  video and documents on tap; nothing on roaming, with Data Saver or under 500 MiB free); "Storage and data" and
+  "Automatic download" in WhatsApp settings; a history progress card on the WhatsApp tab and in settings; unlink and
+  another account remove the store, its media and the per-chat state.
+- The WhatsApp link is handed to a same-signed Rosty app (Messages, Phone, Contacts) with no key pasted: provider
+  `<applicationId>.walink` behind the signature permission `dev.rosty.permission.WA_LINK`. Paste stays. Unlink is per
+  app. Stops is not part of it.
+- Phone: its own small identity table (`wa-identity.json`) names a caller that arrives under a LID; "WhatsApp message"
+  in the Recents row menu and the person sheet opens the chat in Rosty Messages. Phone now holds `HANDOFF`.
+
+**Shared code touched (own commits)**: `:platform` `DeviceData`; `:wa` hand-over, settings slot, sequence reset;
+`:shell` container wiring; `:people` `LiveWaNames.forget`; `:testing` manifest helper; `rosty_app_core`
+`phone::wa_idbook`; `:core-bridge` models and facades. Phone and Contacts: manifests, wiring, two menus.
+
+**What to try on the real gateway, in order**
+1. After the deploy `GET /v1/instance` shows `epoch`, `account_epoch: 0` and `history.state: "idle"` with the chat and
+   message counts. Time the call: it counts messages on every call and every `state` event.
+2. The first frame on `/v1/events` is `hello`; after a gateway restart its epoch differs.
+3. Unlink on the phone and link again with the same number (QR and pairing code both, the pairing code is the riskier
+   path): nothing is lost, the phone lists Windows, `history_synced` arrives as `initial`, `recent`, then `full`. Note
+   `history.progress`, the oldest date reached and whether `state` ends as `done`.
+4. Link a different number on a test instance: `account_changed`, `account_epoch` 1, `/v1/chats` empty, the instance's
+   media directory gone. Do not try this on the owner's instance.
+
+**What to test on a device**
+1. WhatsApp settings: "Storage and data" shows the used size; lower "Keep at most" and old files go, their previews stay.
+2. On Wi-Fi a photo and a voice note download by themselves, a video on tap; on mobile data a sticker waits for a tap.
+3. After the relink: the history card shows progress on the WhatsApp tab, survives an app restart and disappears at the end.
+4. Messages linked, Phone and Contacts not: open Phone, it is linked with no key; its settings say where the link came from.
+5. Unlink in Phone: Messages stays linked; Phone offers "Use the link from Rosty Messages" and does not relink itself.
+6. Phone Recents: "WhatsApp message" on a WhatsApp call row opens that chat in Messages.
+
+**For the main thread**
+- Not verified without a device or keystore: the signature check of the link provider, package visibility between the
+  apps, a real LID call, auto-download against the real store when a picture arrives on the stream.
+- Media in pages older than 7 days is not auto-downloaded during a history sync (so a full history does not download
+  and evict gigabytes); it downloads on tap.
+- An app with no link asks its siblings at every start (this starts their processes; no back-off).
+- A call from a LID nobody maps is still left out of Recents (no number to list or dial).
+- The device store is schema v5: older builds refuse it.
+
 ## E6-WA R1 closed (2026-11-15) at `7d24b484` plus this note: identity (LID, phone JID, one person)
 
 Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 2 982 tests with `wa_gateway`, the Android checks);

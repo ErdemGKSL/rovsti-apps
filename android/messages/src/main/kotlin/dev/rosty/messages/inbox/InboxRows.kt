@@ -13,6 +13,7 @@ import dev.rosty.core.model.wa.DeliveryStatus
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.MessageMeta
 import dev.rosty.core.model.wa.RichChat
+import dev.rosty.core.model.wa.WaIds
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -159,7 +160,7 @@ class InboxBuilder(
         val smsRow = sms?.let(inputs.sms::get)
         val wa = threads.filterIsInstance<ThreadId.WhatsApp>().firstOrNull()?.jid
         val chat = wa?.let(inputs.wa::get)
-        val group = (wa?.endsWith("@g.us") == true) || (smsRow != null && smsRow.addresses.size > 1)
+        val group = WaIds.isGroup(wa) || (smsRow != null && smsRow.addresses.size > 1)
         val sender = smsRow?.addresses?.singleOrNull()
         val contactId = (row.key as? PersonKey.Contact)?.id
         val contact = contactId?.let(inputs.contacts::get)
@@ -185,7 +186,7 @@ class InboxBuilder(
         val muted =
             tags.any { isMuted(it, inputs) } || chat?.meta?.mutedUntilMs?.let { it == -1L || it > inputs.nowMs } == true
         val numbers =
-            (contact?.numbers?.map { it.raw }.orEmpty() + listOfNotNull(sender) + listOfNotNull(wa?.let(::numberOfJid)))
+            (contact?.numbers?.map { it.raw }.orEmpty() + listOfNotNull(sender) + listOfNotNull(WaIds.number(wa)))
                 .distinct()
         return InboxRowUi(
             key = key,
@@ -248,7 +249,7 @@ class InboxBuilder(
         val withEdit = if (meta.editedMs != null) words.edited(preview) else preview
         return when {
             last.fromMe -> words.you(withEdit)
-            group -> words.sender(meta.senderName ?: last.sender?.let(::numberOfJid) ?: "", withEdit)
+            group -> words.sender(meta.senderName ?: WaIds.number(last.sender) ?: "", withEdit)
             else -> withEdit
         }
     }
@@ -314,13 +315,6 @@ fun waPreview(
             words.unsupported()
         }
     }
-}
-
-/** `+<user>` of a user JID (`905550000001@s.whatsapp.net`), null for groups, LIDs and broadcasts. */
-fun numberOfJid(jid: String): String? {
-    if (!jid.endsWith("@s.whatsapp.net")) return null
-    val user = jid.substringBefore('@').substringBefore(':')
-    return user.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.let { "+$it" }
 }
 
 private fun tickOf(meta: MessageMeta?): RowTick? =

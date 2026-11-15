@@ -311,6 +311,7 @@
     <string name="wa_attach_paste">Paste picture</string>
     <string name="wa_paste_nothing">No picture on the clipboard</string>
     <string name="wa_sender_card">About %1$s</string>
+    <string name="wa_user_unknown">WhatsApp user</string>
     <string name="wa_sender_message">Message privately</string>
     <string name="wa_sender_call">Call</string>
     <string name="wa_sender_open_contact">Open contact</string>

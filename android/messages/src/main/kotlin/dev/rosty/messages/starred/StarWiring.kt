@@ -1,6 +1,7 @@
 package dev.rosty.messages.starred
 
 import dev.rosty.core.getOrNull
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncStarredCursor
@@ -90,7 +91,7 @@ internal suspend fun storedStars(
                     me
                 }
 
-                chat?.isGroup ?: row.chat.endsWith(GROUP_SERVER) -> {
+                chat?.isGroup ?: WaIds.isGroup(row.chat) -> {
                     names.sender(row.sender, row.senderName)
                 }
 
@@ -104,6 +105,5 @@ internal suspend fun storedStars(
 }
 
 private const val LEGACY_FILE = "wa-stars.json"
-private const val GROUP_SERVER = "@g.us"
 private const val PAGE = 200
 private const val MAX_STARS = 1_000

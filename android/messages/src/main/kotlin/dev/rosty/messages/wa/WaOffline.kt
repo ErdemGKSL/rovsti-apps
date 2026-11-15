@@ -1,8 +1,12 @@
 package dev.rosty.messages.wa
 
 import dev.rosty.core.Outcome
+import dev.rosty.core.getOrNull
 import dev.rosty.core.log.RostyLog
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.GroupInfo
+import dev.rosty.core.model.wa.WaIds
+import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncEvent
 import dev.rosty.core.ops.WaSyncStore
@@ -60,6 +64,12 @@ class WaSession(
  *   and when the [wake] job fires.
  *
  * [changes] tells the readers which chats to read again (null: all); [online] is whether the gateway is reachable.
+ *
+ * One person is one chat, whichever id the gateway names them by: when the store learns that two chats are one it
+ * moves its rows and reports the step, and [rekeys] moves what the app keeps per chat outside the store (the steps
+ * logged while the app was not running are followed when the store opens). Ids that reach the app outside the store
+ * are resolved here before anyone compares them with a chat: the events of [live], and [keyOf] for a route, a
+ * notification tag or a hand-off from another app.
  */
 class WaOffline(
     private val scope: CoroutineScope,
@@ -72,6 +82,8 @@ class WaOffline(
     private val wake: WaWake,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val replayGraceMs: Long = REPLAY_GRACE_MS,
+    /** Moves what is kept per chat outside the store when two chats become one. */
+    val rekeys: WaRekeys = WaRekeys(),
 ) {
     private val sessionState = MutableStateFlow<WaSession?>(null)
 
@@ -102,7 +114,11 @@ class WaOffline(
             onBufferOverflow = BufferOverflow.DROP_OLDEST,
         )
 
-    /** The stream events as they come (typing, presence, status changes): for what is not stored. */
+    /**
+     * The stream events as they come (typing, presence, status changes): for what is not stored. The chat and the
+     * people of a message, a typing line and a presence are named by the keys the store keeps them under, so a
+     * listener compares them with its chat as they are.
+     */
     val live: SharedFlow<GatewayEvent> = liveBus.asSharedFlow()
 
     private val started = AtomicBoolean(false)
@@ -146,8 +162,10 @@ class WaOffline(
                     }
                 }
             val changed: (Set<String>?) -> Unit = { changeBus.tryEmit(it) }
-            val session =
-                WaSession(next, store, WaSyncRunner(store, remote, now, changed), WaOutbox(store, remote, now, changed))
+            // Merges logged while nothing followed them (at the store's open, in another run): before anyone reads.
+            rekeys.replay(store)
+            val runner = WaSyncRunner(store, remote, now, changed, onRekeyed = { rekeys.follow(store, it) })
+            val session = WaSession(next, store, runner, WaOutbox(store, remote, now, changed))
             sessionState.value = session
             changeBus.tryEmit(null)
             socket = scope.launch { run(session) }
@@ -203,7 +221,7 @@ class WaOffline(
                             batch += more.event
                         }
                         val applied = session.runner.apply(batch)
-                        batch.forEach { liveBus.tryEmit(it.event) }
+                        batch.forEach { liveBus.tryEmit(keyed(session.store, it.event)) }
                         if (applied?.resync == true) launchRefresh(session, this, null)
                     }
                 }
@@ -296,6 +314,69 @@ class WaOffline(
         } else {
             wake.at(0)
         }
+    }
+
+    /**
+     * [event] with its ids as the store keys them (the batch that carried it was applied, so the pair an alt id
+     * taught is known). Only what listeners match against a chat is touched.
+     */
+    private suspend fun keyed(
+        store: WaSyncStore,
+        event: GatewayEvent,
+    ): GatewayEvent =
+        when (event) {
+            is GatewayEvent.Message -> {
+                event.copy(chat = keyOf(store, event.chat), sender = event.sender?.let { keyOf(store, it) })
+            }
+
+            is GatewayEvent.Typing -> {
+                event.copy(chat = keyOf(store, event.chat), jid = keyOf(store, event.jid))
+            }
+
+            is GatewayEvent.Presence -> {
+                event.copy(jid = keyOf(store, event.jid))
+            }
+
+            else -> {
+                event
+            }
+        }
+
+    private suspend fun keyOf(
+        store: WaSyncStore,
+        jid: String,
+    ): String = store.resolve(jid).getOrNull()?.key ?: WaIds.bare(jid) ?: jid
+
+    /**
+     * The key the chat of [jid] is stored under: resolve an id that comes from outside the store (a route argument,
+     * a notification tag, a hand-off from Phone or Contacts, a push) before opening or comparing. Without an open
+     * store the id itself, without its device.
+     */
+    suspend fun keyOf(jid: String): String {
+        val store = sessionState.value?.store ?: return WaIds.bare(jid) ?: jid
+        return keyOf(store, jid)
+    }
+
+    /**
+     * The phone numbers of the person behind [jid], the current one first, then the former ones; without an open
+     * store the number [jid] itself carries, if any.
+     */
+    suspend fun numbersOf(jid: String): List<String> =
+        sessionState.value
+            ?.store
+            ?.numbers(jid)
+            ?.getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOfNotNull(WaIds.number(jid))
+
+    /**
+     * Group and profile answers fetched outside the sync: they name people by both ids, the store learns from them.
+     */
+    suspend fun observe(
+        groups: List<GroupInfo> = emptyList(),
+        profiles: List<WaProfile> = emptyList(),
+    ) {
+        sessionState.value?.runner?.observe(groups, profiles)
     }
 
     /** Rows of [chats] changed outside the sync (a thumbnail or a download was stored): the readers read again. */

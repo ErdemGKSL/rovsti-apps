@@ -21,6 +21,7 @@ import dev.rosty.core.model.messages.ThreadId
 import dev.rosty.core.model.phone.BlockedNumber
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.RichChat
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.core.ops.MessagesOps
 import dev.rosty.design.text.UiText
@@ -205,12 +206,12 @@ class InboxViewModel(
 
     /**
      * The titles of the rows the merge found no contact for: the WhatsApp name (stored with the chat, else asked from
-     * WhatsApp in the background), else the number as people read it. Groups keep their subject.
+     * WhatsApp in the background), else the number as people read it. Groups keep their subject; a person WhatsApp
+     * shows without a number is named by the same rule.
      */
     private suspend fun titles(rows: List<InboxRow>): Map<String, String> {
         val out = HashMap<String, String>()
         for (row in rows) {
-            val key = row.key as? PersonKey.Number ?: continue
             val jid =
                 row.threads
                     .map { it.id }
@@ -218,7 +219,21 @@ class InboxViewModel(
                     .firstOrNull()
                     ?.jid
             val wa = WaNames.of(jid?.let(waByJid.value::get))
-            out[InboxBuilder.keyOf(key)] = sources.names.unsaved(key.number.canonical, wa).text
+            when (val key = row.key) {
+                is PersonKey.Number -> {
+                    out[InboxBuilder.keyOf(key)] = sources.names.unsaved(key.number.canonical, wa).text
+                }
+
+                // A person WhatsApp shows without a number (a LID): their WhatsApp name, else "WhatsApp user" in the
+                // phone's language, never the digits of the id.
+                is PersonKey.Group -> {
+                    if (WaIds.isLid(jid)) out[InboxBuilder.keyOf(key)] = sources.names.ofJid(jid, wa).text
+                }
+
+                is PersonKey.Contact -> {
+                    Unit
+                }
+            }
         }
         return out
     }

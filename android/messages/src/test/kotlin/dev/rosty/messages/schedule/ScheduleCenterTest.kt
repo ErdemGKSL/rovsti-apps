@@ -5,6 +5,7 @@ import dev.rosty.core.model.messages.FiredSms
 import dev.rosty.core.model.messages.ScheduleTarget
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.ScheduledState
+import dev.rosty.core.model.wa.ScheduledText
 import dev.rosty.core.ops.NativeMessagesOps
 import dev.rosty.platform.sms.ArmMode
 import dev.rosty.platform.sms.FakeScheduledSmsRepository
@@ -269,6 +270,43 @@ class ScheduleCenterTest {
             assertEquals(listOf(StripKey.Gateway(two.id)), strip.map { it.key })
             assertTrue(strip.single().failed)
             assertEquals(listOf<ScheduleNotice>(ScheduleNotice.WhatsAppFailed(wa.chat)), notices)
+        }
+
+    @Test fun aScheduledTextOfAChatTheGatewayNamesByAnotherIdShowsInTheChatOfThePerson() =
+        runTest(UnconfinedTestDispatcher()) {
+            val lid = "777000000000002@lid"
+            val other = "777000000000003@lid"
+            val dispatcher = UnconfinedTestDispatcher(testScheduler)
+            // The store knows that the LID is the person of `wa`.
+            val center =
+                ScheduleCenter(
+                    backgroundScope,
+                    NativeMessagesOps(rust),
+                    alarms,
+                    remote,
+                    live,
+                    queue,
+                    { now },
+                    dispatcher,
+                    keyOf = { if (it == lid) wa.chat else it },
+                ).also { it.start() }
+            remote.items += ScheduledText("s9", lid, "from the list", now + hour, 0, ScheduledState.Pending)
+            remote.items += ScheduledText("s8", other, "someone else", now + hour, 0, ScheduledState.Pending)
+
+            center.refreshRemote()
+            live.emit(GatewayEvent.Scheduled("s7", lid, "from an event", now + 2 * hour, 0, ScheduledState.Pending))
+
+            val strip = ScheduleRules.stripItems(wa, center.state.value.local, center.state.value.remote)
+            assertEquals(setOf(StripKey.Gateway("s9"), StripKey.Gateway("s7")), strip.map { it.key }.toSet())
+
+            // The other chat merges into the person's later: its item follows, once.
+            center.rekey(other, wa.chat)
+            center.rekey(other, wa.chat)
+            assertEquals(
+                listOf(wa.chat, wa.chat, wa.chat),
+                center.state.value.remote
+                    .map { it.chat },
+            )
         }
 
     @Test fun theQueueFileIsReplacedWhole() {

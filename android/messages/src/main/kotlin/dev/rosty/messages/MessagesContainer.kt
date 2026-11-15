@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import dev.rosty.core.Rust
 import dev.rosty.core.model.wa.MessageMeta
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.core.ops.MessagesOps
@@ -43,9 +44,11 @@ import dev.rosty.messages.wa.WaChats
 import dev.rosty.messages.wa.WaMedia
 import dev.rosty.messages.wa.WaOffline
 import dev.rosty.messages.wa.WaRecentEmoji
+import dev.rosty.messages.wa.WaRekeys
 import dev.rosty.messages.wa.WaRemote
 import dev.rosty.messages.wa.WaVoiceNotes
 import dev.rosty.messages.wa.realWaOffline
+import dev.rosty.messages.wa.realWaRekeys
 import dev.rosty.messages.wa.realWaVoice
 import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.AvatarResolver
@@ -157,7 +160,24 @@ open class MessagesContainer(
     /** The offline store of the linked WhatsApp instance with its sync and outbox (E6.4s), following the link. */
     val waOffline: WaOffline get() = waOfflineOnce.value
 
-    private val waOfflineOnce = lazy { createWaOffline().also { it.start() } }
+    private val waOfflineOnce =
+        lazy {
+            createWaOffline().also { offline ->
+                // A profile answer may name the LID of a number: the store learns the pair.
+                avatars.onProfiles = { profiles -> scope.launch { offline.observe(profiles = profiles) } }
+                offline.start()
+            }
+        }
+
+    /** What is kept per WhatsApp chat outside the store follows a merge of two chats here, and nowhere else. */
+    val waRekeys: WaRekeys by lazy { createWaRekeys() }
+
+    /**
+     * The key the chat of [jid] is stored under, for an id that comes from outside the store (a push, a hand-off). A
+     * process that has not opened the store (a receiver) answers the id without its device and starts nothing.
+     */
+    suspend fun waKeyOf(jid: String): String =
+        if (waOfflineOnce.isInitialized()) waOffline.keyOf(jid) else WaIds.bare(jid) ?: jid
 
     /** The WhatsApp Status updates, for the Status row and the viewer. */
     val statusFeed: StatusFeed by lazy {
@@ -191,10 +211,20 @@ open class MessagesContainer(
     val replies: ReplyRouter by lazy { createReplies() }
 
     /** The notifications the app makes while its process runs: WhatsApp from the event stream, the switches (E6.9). */
-    val announcer: MessageAnnouncer by lazy { createAnnouncer() }
+    val announcer: MessageAnnouncer get() = announcerOnce.value
+
+    private val announcerOnce = lazy { createAnnouncer() }
+
+    /** [announcer] when something already made it; a merge of two chats has nothing to move in one nobody uses. */
+    val announcerIfMade: MessageAnnouncer? get() = if (announcerOnce.isInitialized()) announcer else null
 
     /** Scheduled send (E6.10, AD-MSG6): the local SMS queue with its alarms and the gateway's WhatsApp items. */
-    val schedule: ScheduleCenter by lazy { createSchedule() }
+    val schedule: ScheduleCenter get() = scheduleOnce.value
+
+    private val scheduleOnce = lazy { createSchedule() }
+
+    /** [schedule] when something already made it. */
+    val scheduleIfMade: ScheduleCenter? get() = if (scheduleOnce.isInitialized()) schedule else null
 
     /** Stars (E6.13): SMS/MMS in the prefs (M23), WhatsApp through the store's outbox (M10), and the Starred list. */
     val stars: StarCenter by lazy { createStars().also { it.start() } }
@@ -250,6 +280,7 @@ open class MessagesContainer(
             live = waOffline.live,
             queue = FileQueueStore(context.noBackupFilesDir),
             now = System::currentTimeMillis,
+            keyOf = { jid -> waOffline.keyOf(jid) },
         )
 
     protected open fun createLiveWaNames(): LiveWaNames =
@@ -259,6 +290,7 @@ open class MessagesContainer(
             scope = scope,
             // Kept between runs, so a restart does not ask WhatsApp for the same numbers again.
             store = FileLiveNameStore(File(context.noBackupFilesDir, "wa-live-names.json")),
+            onProfiles = { profiles -> if (waOfflineOnce.isInitialized()) waOffline.observe(profiles = profiles) },
         )
 
     protected open fun createNames(): PersonNames {
@@ -276,6 +308,9 @@ open class MessagesContainer(
             live = LiveNames.of(liveWaNames, PacedAsks(scope, liveWaNames::ask)),
             stored = stored::of,
             readable = { number -> withContext(Dispatchers.Default) { PhoneNumbers.forReading(number, homeRegion) } },
+            // A receiver in a cold process names a sender by the number its id carries, without opening the store.
+            numbers = { jid -> if (waOfflineOnce.isInitialized()) waOffline.numbersOf(jid) else emptyList() },
+            unknown = { context.getString(R.string.wa_user_unknown) },
         )
     }
 
@@ -284,6 +319,8 @@ open class MessagesContainer(
     protected open fun createWaOffline(): WaOffline = realWaOffline(this, waRemote)
 
     protected open fun createWaChats(): WaChats = StoreWaChats(waOffline, waRemote, names)
+
+    protected open fun createWaRekeys(): WaRekeys = realWaRekeys(this)
 
     @Volatile private var peopleStarted = false
 

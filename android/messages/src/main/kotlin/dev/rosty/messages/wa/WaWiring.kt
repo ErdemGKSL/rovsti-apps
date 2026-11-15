@@ -40,6 +40,7 @@ fun realWaOffline(
         remote = remote,
         now = System::currentTimeMillis,
         wake = WaOutboxWork(container.context),
+        rekeys = container.waRekeys,
     )
 }
 

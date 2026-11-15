@@ -10,6 +10,7 @@ import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.phone.DirRequest
 import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.Endpoint
+import dev.rosty.core.model.stops.Ends
 import dev.rosty.core.model.stops.GtfsSearchAnswer
 import dev.rosty.core.model.stops.GtfsSearchRequest
 import dev.rosty.core.model.stops.History
@@ -100,6 +101,8 @@ class FakeStopsCore(
     var saved: SavedStops? = SampleStops.saved,
     var history: History? = SampleStops.history,
     var transitImportedMs: Long? = 1_790_000_000_000L,
+    /** `draft.json`: the ends of the last session, put back on the map. */
+    var draft: Ends? = null,
     /** The real core behind the scripted ops ([HostCore.real]); null keeps the fake alone. */
     private val real: RustCore? = null,
 ) {
@@ -107,6 +110,7 @@ class FakeStopsCore(
 
     /** What the container calls: the fake, or the fake in front of the real core. */
     val rust: RustCore get() = real?.let { HybridCore(core, it) } ?: core
+    val usesRealCore: Boolean get() = real != null
     val savedPrefs = mutableListOf<StopsPrefs>()
     val writes = mutableListOf<StoreWriteRequest>()
 
@@ -119,21 +123,26 @@ class FakeStopsCore(
             prefs = it.prefs
             Outcome.Ok(Empty)
         }
-        core.onTyped("stops.store_trip_load", DirRequest.serializer(), StoreTripLoadAnswer.serializer()) {
-            val now = trip
-            Outcome.Ok(
-                StoreTripLoadAnswer(
-                    trip = now?.let { (a, b) -> tripJson(a, b) },
-                    file = "trip.json",
-                    label = now?.let { (a, b) -> "${a.label} – ${b.label}" },
-                ),
-            )
+        // With the real core and no scripted trip, the real trip file answers (the trip tests start real trips).
+        if (real != null) HostCore.reset()
+        if (real == null || trip != null) {
+            core.onTyped("stops.store_trip_load", DirRequest.serializer(), StoreTripLoadAnswer.serializer()) {
+                val now = trip
+                Outcome.Ok(
+                    StoreTripLoadAnswer(
+                        trip = now?.let { (a, b) -> tripJson(a, b) },
+                        file = "trip.json",
+                        label = now?.let { (a, b) -> "${a.label} – ${b.label}" },
+                    ),
+                )
+            }
         }
         core.onTyped("stops.store_read", StoreReadRequest.serializer(), StoreReadAnswer.serializer()) { req ->
             val value: JsonElement? =
                 when (req.file) {
                     "saved" -> saved?.let { Json.encodeToJsonElement(SavedStops.serializer(), it) }
                     "history" -> history?.let { Json.encodeToJsonElement(History.serializer(), it) }
+                    "draft" -> draft?.let { Json.encodeToJsonElement(Ends.serializer(), it) }
                     else -> null
                 }
             Outcome.Ok(StoreReadAnswer(req.file, value, discarded = false))
@@ -171,13 +180,18 @@ open class TestStopsContainer(
 
     override fun createRust(): RustCore = fake.rust
 
+    /** The real core's own directory when it answers (its trip file is the one the trip service would read). */
+    override val dataDir: String get() = if (fake.usesRealCore) HostCore.dataDir.absolutePath else super.dataDir
+
+    val fakeSpecial = FakeSpecialAccess()
+
     val fakeShortcuts = FakeShortcuts()
 
     override fun createShortcuts(): ShortcutsRepository = fakeShortcuts
 
     override fun createWa(): WaRepository = FakeWaRepository()
 
-    override fun createSpecialAccess(): SpecialAccess = FakeSpecialAccess()
+    override fun createSpecialAccess(): SpecialAccess = fakeSpecial
 
     override fun createLocation(): LocationRepository = fakeLocation
 

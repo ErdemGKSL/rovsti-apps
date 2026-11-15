@@ -18,12 +18,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import dev.rosty.core.Outcome
 import dev.rosty.core.model.stops.Coord
+import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Ends
 import dev.rosty.core.model.stops.Slot
+import dev.rosty.core.model.stops.StopsPrefs
 import dev.rosty.core.model.stops.StoreWriteRequest
 import dev.rosty.design.chrome.TabItem
 import dev.rosty.design.haptics.LocalRostyHaptics
@@ -60,6 +66,13 @@ import dev.rosty.stops.saved.SavedViewModel
 import dev.rosty.stops.saved.presentSavedSheet
 import dev.rosty.stops.saved.presentSavedStopSheet
 import dev.rosty.stops.saved.toDestination
+import dev.rosty.stops.trip.TripAction
+import dev.rosty.stops.trip.TripEffect
+import dev.rosty.stops.trip.TripProblem
+import dev.rosty.stops.trip.TripSection
+import dev.rosty.stops.trip.TripViewModel
+import dev.rosty.stops.trip.presentPreflightSheet
+import dev.rosty.stops.trip.rememberPreflight
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -104,6 +117,31 @@ fun rememberSavedViewModel(container: StopsContainer): SavedViewModel {
 
 private const val MS_PER_S = 1000
 
+/** The trip's view model, owned by the activity like the home's. */
+@Composable
+fun rememberTripViewModel(container: StopsContainer): TripViewModel {
+    val context = LocalContext.current
+    val owner = remember(context) { context.findComponentActivity() }
+    val waiting = stringResource(R.string.trip_waiting_fix)
+    return remember(owner, container) {
+        val factory =
+            viewModelFactory {
+                initializer {
+                    TripViewModel(
+                        ops = container.ops,
+                        trips = container.trips,
+                        prefs = { (container.store.load() as? Outcome.Ok)?.value ?: StopsPrefs() },
+                        dir = container.dataDir,
+                        here = { container.location.lastKnown()?.let { Coord(it.lat, it.lon) } },
+                        nowMs = TripClock::nowMillis,
+                        waitingText = waiting,
+                    )
+                }
+            }
+        ViewModelProvider(owner, factory)[TripViewModel::class.java]
+    }
+}
+
 /** The items of the home's folded bar (the GPUI tabs and icons: navigation, bookmark, gear). */
 @Composable
 fun homeTabItems() =
@@ -125,6 +163,8 @@ fun HomeEntry(
 ) {
     val viewModel = rememberHomeViewModel(container)
     val saved = rememberSavedViewModel(container)
+    val trip = rememberTripViewModel(container)
+    val preflight = rememberPreflight()
     val loaded by viewModel.state.collectAsState()
     val savedFile by container.saved.saved.collectAsState()
     // The saved stops follow every edit (the map markers, "Save as stop" offers) without reading the files again.
@@ -168,6 +208,20 @@ fun HomeEntry(
     fun closeSheet() {
         open?.second?.let(overlays::dismiss)
         open = null
+    }
+
+    // Start: the preflight sheet first while something blocks (ARCH 7.5), else straight away.
+    fun startTrip(
+        a: Destination,
+        b: Destination,
+    ) {
+        if (preflight.nextStep == null) {
+            trip.onAction(TripAction.Start(a, b))
+        } else {
+            overlays.presentPreflightSheet(resources.getString(R.string.trip_preflight_title)) {
+                trip.onAction(TripAction.Start(a, b))
+            }
+        }
     }
 
     val askedSheet by container.pendingSheet.collectAsState()
@@ -284,7 +338,10 @@ fun HomeEntry(
                 // The trip story (E7.5) starts the trip; until then the stop goes on the map.
                 is SavedEffect.Start -> {
                     closeSheet()
-                    map.showPair(effect.stop.a.toDestination(), effect.stop.b.toDestination())
+                    val a = effect.stop.a.toDestination()
+                    val b = effect.stop.b.toDestination()
+                    map.showPair(a, b)
+                    startTrip(a, b)
                 }
 
                 else -> {
@@ -293,6 +350,57 @@ fun HomeEntry(
             }
         }
     }
+    LaunchedEffect(trip, map) {
+        trip.effects.collect { effect ->
+            when (effect) {
+                is TripEffect.Started -> {
+                    map.pick.clear()
+                    map.showGate(effect.trip)
+                    viewModel.refresh()
+                }
+
+                is TripEffect.Stopped -> {
+                    map.showPair(effect.a, effect.b)
+                    overlays.showToast(resources.getString(R.string.trip_stopped))
+                    viewModel.refresh()
+                    saved.refresh()
+                }
+
+                is TripEffect.Over -> {
+                    viewModel.refresh()
+                    saved.refresh()
+                }
+
+                is TripEffect.Ring -> {
+                    Unit
+                }
+
+                is TripEffect.Toast -> {
+                    overlays.showToast(effect.text.resolve(context))
+                }
+
+                is TripEffect.Copy -> {
+                    if (container.clipboard.copy(effect.text)) {
+                        overlays.showToast(resources.getString(R.string.trip_status_copied))
+                    }
+                }
+
+                is TripEffect.Share -> {
+                    context.share(effect.text)
+                }
+            }
+        }
+    }
+    // AD-SA8: a trip whose restart Android refused resumes when Stops comes to the front; the trip file is read again
+    // on every resume (the alarm screen or the notification may have ended it).
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(trip, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            trip.onAction(TripAction.Refresh)
+            if (trip.state.value.problem == TripProblem.Restart) trip.onAction(TripAction.Resume)
+        }
+    }
+    val tripState by trip.state.collectAsState()
     val dark = RostyTheme.colors.isDark
     val overlay = rememberRadarOverlay(map.pick.radar, dark)
 
@@ -317,6 +425,30 @@ fun HomeEntry(
             MapAttribution()
         },
         motionFrozen = { map.motion.frozen },
+        sheetContent = {
+            val live = tripState.live
+            MapSheetContent(
+                state = state,
+                onOpenSaved = { openSheet(HomeSheet.Saved) },
+                onOpenHistory = { openSheet(HomeSheet.History) },
+                title = tripState.trip?.let { stringResource(R.string.home_sheet_trip) },
+                subtitle =
+                    tripState.trip?.let { running ->
+                        live?.let { stringResource(R.string.home_trip_live, it.distance, running.label) }
+                    } ?: pickState.pairLabel,
+                trip = {
+                    TripSection(
+                        viewModel = trip,
+                        a = pickState.ends.a,
+                        b = pickState.ends.b,
+                        onStart = ::startTrip,
+                        onClear = { map.pick.clear() },
+                        onLine = { slot, dest -> map.pick.place(slot, dest) },
+                        overlays = overlays,
+                    )
+                },
+            )
+        },
         actions =
             HomeActions(
                 onTab = { tab ->

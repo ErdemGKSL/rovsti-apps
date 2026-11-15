@@ -19,16 +19,33 @@ import java.nio.file.Files
  * data directory; a test using it is skipped when the library is absent.
  */
 object HostCore {
+    private val root: File by lazy { Files.createTempDirectory("stops-host").toFile().apply { deleteOnExit() } }
+
+    /** The data directory the real core was started with (its `dir: null`). */
+    val dataDir: File get() = File(root, "data")
+
+    /** Empties the files a test may have left in [dataDir] (the core is shared by the tests of one JVM). */
+    fun reset() {
+        for (name in listOf(
+            "trip.json",
+            "history.json",
+            "saved.json",
+            "draft.json",
+            "gtfs.json",
+        )) {
+            File(dataDir, name).delete()
+        }
+    }
+
     private val started: Boolean by lazy {
         val lib = File(System.getProperty("rosty.hostLib").orEmpty())
         val present = lib.isDirectory && lib.listFiles().orEmpty().any { it.name.contains("rosty_ffi") }
         if (!present) return@lazy false
-        val root = Files.createTempDirectory("stops-host").toFile().apply { deleteOnExit() }
         val outcome =
             runBlocking {
                 Rust
                     .init(
-                        File(root, "data"),
+                        dataDir,
                         File(root, "cache"),
                         "dev.rosty.stops",
                         SDK,

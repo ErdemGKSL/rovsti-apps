@@ -87,6 +87,9 @@ open class StopsContainer(
     /** The saved stops (E7.7): one `saved.json` for the list, the map markers and "Save as stop". */
     val saved: SavedStore by lazy { SavedStore(ops, nowMs = TripClock::nowMillis) }
 
+    /** The data directory Rust was started with: the trip service reads `trip.json` there. */
+    open val dataDir: String get() = context.noBackupFilesDir.absolutePath
+
     /** S18: stop shortcuts on the Home screen. */
     val shortcuts: ShortcutsRepository by lazy { createShortcuts() }
 

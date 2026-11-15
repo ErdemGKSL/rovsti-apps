@@ -168,6 +168,16 @@ private const val FIT_MARGIN_DP = 48f
 /** The scale of a view on one place (GPUI `map::STREET_MPP`). */
 private const val STREET_METRES_PER_DP = 1.5
 
+/** The view fits the gate of a trip that just started (GPUI follows the trip). */
+fun HomeMap.showGate(trip: dev.rosty.stops.trip.RunningTrip) {
+    if (camera.widthPx > 0 && camera.heightPx > 0) {
+        camera.fitPoints(
+            doubleArrayOf(trip.a.coord.lat, trip.a.coord.lon, trip.b.coord.lat, trip.b.coord.lon),
+            marginPx = FIT_MARGIN_DP * camera.density,
+        )
+    }
+}
+
 /** Both ends of a saved stop (or a recent trip) go on the map and the view fits them (GPUI `choose_pair`). */
 fun HomeMap.showPair(
     a: Destination,

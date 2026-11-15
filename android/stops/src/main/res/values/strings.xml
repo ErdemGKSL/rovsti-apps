@@ -98,4 +98,55 @@
         <item quantity="one">Copied %d stop</item>
         <item quantity="other">Copied %d stops</item>
     </plurals>
+    <string name="trip_start">Start</string>
+    <string name="trip_starting">Starting…</string>
+    <string name="trip_clear">Clear</string>
+    <string name="trip_stop">Stop</string>
+    <string name="trip_stopping">Stopping…</string>
+    <string name="trip_stopped">Trip stopped</string>
+    <string name="trip_line">Line</string>
+    <string name="trip_line_any">Any line</string>
+    <string name="trip_locating">Locating</string>
+    <string name="trip_near_line">near the line %1$s</string>
+    <string name="trip_crossed">Crossed</string>
+    <string name="trip_to_line">to the line</string>
+    <string name="trip_rule">Crossing the line %1$s wakes you, either way.</string>
+    <string name="trip_side_left">Left side</string>
+    <string name="trip_side_right">Right side</string>
+    <string name="trip_on_line">On the line</string>
+    <string name="trip_inside">Inside the circle</string>
+    <string name="trip_to_circle">%1$s to the circle</string>
+    <string name="trip_next_check">Next check in %1$s</string>
+    <string name="trip_arriving_soon">Text when arriving</string>
+    <string name="trip_copy_status">Copy status</string>
+    <string name="trip_share_status">Share status</string>
+    <string name="trip_status_copied">Status copied</string>
+    <string name="trip_status_failed">The status could not be written.</string>
+    <string name="trip_already_running">A trip is already running.</string>
+    <string name="trip_could_not_start">Tracking did not start</string>
+    <string name="trip_could_not_start_text">Android did not start the tracking service. Try again.</string>
+    <string name="trip_error_gate">Points A and B can\'t make a stop: move them apart or closer.</string>
+    <string name="trip_restart_title">Tracking paused</string>
+    <string name="trip_restart_text">Android closed Stops while the trip was running. Resume to keep tracking.</string>
+    <string name="trip_foreground_text">Android would not keep the tracking service running. Resume to try again.</string>
+    <string name="trip_resume">Resume</string>
+    <string name="trip_recommended_footer">Recommended: tracking keeps going when Android closes Stops, and the alarm shows over the lock screen.</string>
+    <string name="trip_preflight_title">Before the trip</string>
+    <string name="trip_preflight_location">Stops needs your location to know when you cross the line.</string>
+    <string name="trip_preflight_notifications">Allow notifications so the alarm can ring.</string>
+    <string name="trip_preflight_ready">Everything the alarm needs is allowed.</string>
+    <string name="trip_preflight_needed">Needed</string>
+    <string name="trip_preflight_recommended">Recommended</string>
+    <string name="trip_started_next">Set for your next trip</string>
+    <plurals name="trip_wait_seconds">
+        <item quantity="one">%d s</item>
+        <item quantity="other">%d s</item>
+    </plurals>
+    <plurals name="trip_wait_minutes">
+        <item quantity="one">%d min</item>
+        <item quantity="other">%d min</item>
+    </plurals>
+    <string name="trip_waiting_fix">Waiting for a location fix</string>
+    <string name="home_trip_live">%1$s to the line · %2$s</string>
+    <string name="home_sheet_trip">Your trip</string>
 </resources>

@@ -92,4 +92,55 @@
         <item quantity="one">%d durak kopyalandı</item>
         <item quantity="other">%d durak kopyalandı</item>
     </plurals>
+    <string name="trip_start">Başlat</string>
+    <string name="trip_starting">Başlatılıyor…</string>
+    <string name="trip_clear">Temizle</string>
+    <string name="trip_stop">Durdur</string>
+    <string name="trip_stopping">Durduruluyor…</string>
+    <string name="trip_stopped">Yolculuk durduruldu</string>
+    <string name="trip_line">Hat</string>
+    <string name="trip_line_any">Herhangi bir hat</string>
+    <string name="trip_locating">Konum aranıyor</string>
+    <string name="trip_near_line">%1$s çizgisinin yakınında</string>
+    <string name="trip_crossed">Geçildi</string>
+    <string name="trip_to_line">çizgiye</string>
+    <string name="trip_rule">%1$s çizgisini geçmek sizi uyandırır, hangi yönden olursa olsun.</string>
+    <string name="trip_side_left">Sol taraf</string>
+    <string name="trip_side_right">Sağ taraf</string>
+    <string name="trip_on_line">Çizginin üzerinde</string>
+    <string name="trip_inside">Dairenin içinde</string>
+    <string name="trip_to_circle">Daireye %1$s</string>
+    <string name="trip_next_check">Sonraki kontrol %1$s sonra</string>
+    <string name="trip_arriving_soon">Varırken mesaj at</string>
+    <string name="trip_copy_status">Durumu kopyala</string>
+    <string name="trip_share_status">Durumu paylaş</string>
+    <string name="trip_status_copied">Durum kopyalandı</string>
+    <string name="trip_status_failed">Durum yazılamadı.</string>
+    <string name="trip_already_running">Zaten bir yolculuk sürüyor.</string>
+    <string name="trip_could_not_start">Takip başlamadı</string>
+    <string name="trip_could_not_start_text">Android takip hizmetini başlatmadı. Yeniden deneyin.</string>
+    <string name="trip_error_gate">A ve B noktaları durak olamıyor: birbirinden uzaklaştırın ya da yaklaştırın.</string>
+    <string name="trip_restart_title">Takip duraklatıldı</string>
+    <string name="trip_restart_text">Yolculuk sürerken Android Duraklar\'ı kapattı. Takibe devam etmek için Sürdür\'e dokunun.</string>
+    <string name="trip_foreground_text">Android takip hizmetini açık tutmadı. Yeniden denemek için Sürdür\'e dokunun.</string>
+    <string name="trip_resume">Sürdür</string>
+    <string name="trip_recommended_footer">Önerilir: Android Duraklar\'ı kapatsa da takip sürer ve alarm kilit ekranında görünür.</string>
+    <string name="trip_preflight_title">Yolculuktan önce</string>
+    <string name="trip_preflight_location">Çizgiyi ne zaman geçtiğinizi bilmek için Duraklar konumunuza ihtiyaç duyar.</string>
+    <string name="trip_preflight_notifications">Alarmın çalabilmesi için bildirimlere izin verin.</string>
+    <string name="trip_preflight_ready">Alarmın ihtiyaç duyduğu her şeye izin verildi.</string>
+    <string name="trip_preflight_needed">Gerekli</string>
+    <string name="trip_preflight_recommended">Önerilen</string>
+    <string name="trip_started_next">Sonraki yolculuğunuz için ayarlandı</string>
+    <plurals name="trip_wait_seconds">
+        <item quantity="one">%d sn</item>
+        <item quantity="other">%d sn</item>
+    </plurals>
+    <plurals name="trip_wait_minutes">
+        <item quantity="one">%d dk</item>
+        <item quantity="other">%d dk</item>
+    </plurals>
+    <string name="trip_waiting_fix">Konum bekleniyor</string>
+    <string name="home_trip_live">Çizgiye %1$s · %2$s</string>
+    <string name="home_sheet_trip">Yolculuğunuz</string>
 </resources>

@@ -131,13 +131,16 @@ into `trip.json`. So there is no `:platform` or `:wa` send code to add.
 **The chat picker** is a pushed page (`NoticeChatPage`: search field, the chats in the gateway's order, a tick on
 the chosen one), not a sheet: it has a keyboard and a long list, and Back is the way out.
 
-**Names (owner rule: saved contact, then WhatsApp's name, the number last).** `namedChats` asks the same core rule
-Phone and Messages use, `wa.names {contact, wa_name, jid}`, per chat. Stops holds no contacts permission, so the
-"saved contact" is the contact name WhatsApp itself reports for the person (`WaProfile.contactName`); the
-WhatsApp name is the verified business name, then the push name, then the chat's own name. The profiles are asked
-for when the picker opens (`WaAvatars.wantProfile`) and the list is named again when they arrive
-(`WaAvatars.revision`). A person shows the number under the name; a bare number shows once; a group is its
-subject with "Group" under it. The name is stored with the chat (`chat_name`) as the picker showed it.
+**Names (owner rule: saved contact, then WhatsApp's name, the number last).** The rule is not Kotlin's: the new
+op `stops.notice_chats` names the whole chat list in one call with the shared rule of
+`rosty_core::wa_identity::display_name` (contact, verified business name, push name, the chat's own name, the
+number, else "WhatsApp user" / "WhatsApp kullanıcısı"; a group is its subject, else "Group"). `namedChats` only
+hands it what is known. Stops holds no contacts permission, so the "saved contact" is the contact name WhatsApp
+itself reports for the person (`WaProfile.contactName`). The profiles are asked for when the picker opens
+(`WaAvatars.wantProfile`) and the list is named again when they arrive (`WaAvatars.revision`). A person shows the
+number under the name; a bare number shows once; a LID never shows digits. The name is stored with the chat
+(`chat_name`) as the picker showed it. **New `StopsOps` method: `noticeChats`** (fakes of `StopsOps` must add it;
+none exist in the tree, the tests fake the core below it).
 
 **The per-trip switch** (R1's `ArrivingSoonHook` stub). `TripNotice` (container `arrivingSoon`) implements the
 hook: `noticeFor` answers the settings' message when a chat is chosen, WhatsApp is linked (or the stored link is
@@ -152,7 +155,7 @@ trip file has a notice) and the service's `notice_sent` / `notice_failed`.
 hook), `StopsContainer.kt` (`arrivingSoon`), `StopsRoute.kt`, `StopsApp.kt`, `settings/ArrivingSoonSettings.kt`,
 strings (`strings_notice.xml`, en + tr; the unused `trip_arriving_soon` removed).
 
-**Tests.** `NoticeLogicTest` (naming on the real `wa.names`, search, availability, the card line),
+**Tests.** `NoticeLogicTest` (naming on the real `stops.notice_chats`, search, availability, the card line),
 `NoticeViewModelTest` (real `prefs_edit` / `prefs_choices` / `notice_*`, English and Turkish),
 `TripNoticeTest`, `NoticeAppTest` (Settings to the picker and back; a started trip's `trip.json` carries the chat
 and the message, or none when switched off or not linked; the card line follows the service),

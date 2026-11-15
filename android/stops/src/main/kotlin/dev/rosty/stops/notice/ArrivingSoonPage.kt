@@ -107,7 +107,7 @@ fun rememberNoticeViewModel(container: StopsContainer): NoticeViewModel {
                             // What WhatsApp knows about each person (the saved contact name, the business name)
                             // is asked for once; the names follow when it arrives.
                             chats.forEach { if (!it.isGroup) container.avatars.wantProfile(it.jid) }
-                            namedChats(chats, container.avatars::profile, container.waOps::names)
+                            namedChats(chats, container.avatars::profile, container.ops::noticeChats)
                         },
                         sampleStop = sample,
                         namesChanged = container.avatars.revision,

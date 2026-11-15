@@ -2,7 +2,7 @@ package dev.rosty.stops.notice
 
 import dev.rosty.core.model.stops.NoticePrefs
 import dev.rosty.core.model.stops.NoticeWhen
-import dev.rosty.core.ops.NativeWaOps
+import dev.rosty.core.ops.NativeStopsOps
 import dev.rosty.stops.HostCore
 import dev.rosty.stops.R
 import dev.rosty.wa.WaLinkError
@@ -17,13 +17,14 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** The pure rules of the arriving-soon message; the naming runs on the real core (`wa.names`). */
+/** The pure rules of the arriving-soon message; the naming runs on the real core (`stops.notice_chats`). */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class NoticeLogicTest {
-    private val waOps = NativeWaOps(HostCore.real())
+    private val ops = NativeStopsOps(HostCore.real())
 
-    private fun named() = runBlocking { namedChats(NoticeFixtures.chats, NoticeFixtures.profiles::get, waOps::names) }
+    private fun named() =
+        runBlocking { namedChats(NoticeFixtures.chats, NoticeFixtures.profiles::get, ops::noticeChats) }
 
     @Test fun peopleAreNamedBySavedContactThenWhatsAppThenNumber() {
         val byJid = named().associateBy { it.jid }
@@ -53,11 +54,11 @@ class NoticeLogicTest {
                 namedChats(
                     listOf(NoticeFixtures.chats[0].copy(name = "  ")),
                     { NoticeFixtures.profiles.getValue(it).copy(contactName = " ", pushName = "") },
-                    waOps::names,
+                    ops::noticeChats,
                 )
             }
         assertEquals("+905550001122", blank.single().name)
-        assertEquals(emptyList<NoticeChat>(), runBlocking { namedChats(emptyList(), { null }, waOps::names) })
+        assertEquals(emptyList<NoticeChat>(), runBlocking { namedChats(emptyList(), { null }, ops::noticeChats) })
     }
 
     @Test fun theSearchMatchesNameAndNumberInAnyCase() {

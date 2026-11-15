@@ -2,9 +2,10 @@ package dev.rosty.stops.notice
 
 import androidx.compose.runtime.Immutable
 import dev.rosty.core.Outcome
+import dev.rosty.core.model.stops.NoticeChatInput
+import dev.rosty.core.model.stops.NoticeChatsAnswer
+import dev.rosty.core.model.stops.NoticeChatsRequest
 import dev.rosty.core.model.wa.RichChat
-import dev.rosty.core.model.wa.WaNamesAnswer
-import dev.rosty.core.model.wa.WaNamesRequest
 import dev.rosty.core.model.wa.WaProfile
 
 /** A chat the arriving-soon message can go to, as the picker lists it. */
@@ -19,37 +20,38 @@ data class NoticeChat(
 )
 
 /**
- * The chats as the picker shows them, in the gateway's order (newest first). People are named by the owner rule,
- * through the same core rule Phone and Messages use (`wa.names`): the saved contact name first, then the name
- * WhatsApp has (verified business name, push name, the chat's own name), the number last. Stops reads no phone
+ * The chats as the picker shows them, in the gateway's order (newest first), named by the owner rule: the saved
+ * contact name first, then the name WhatsApp has (the verified business name, the push name, the chat's own name),
+ * the number last. The rule is not written here: `stops.notice_chats` applies the one every app names a WhatsApp
+ * person with (`rosty_core::wa_identity::display_name`); this only hands it what is known. Stops reads no phone
  * contacts (it has no contacts permission), so "saved contact" is the contact name WhatsApp itself reports for the
- * person ([WaProfile.contactName]). A group is its subject; without one, what the core makes of its id.
+ * person ([WaProfile.contactName]). A group is its subject. If the core cannot be asked, a chat keeps the gateway's
+ * name for it, else its id.
  */
 suspend fun namedChats(
     chats: List<RichChat>,
     profile: (String) -> WaProfile?,
-    names: suspend (WaNamesRequest) -> Outcome<WaNamesAnswer>,
-): List<NoticeChat> =
-    chats.map { chat ->
-        val known = profile(chat.jid)
-        val waName = listOf(known?.verifiedName, known?.pushName, chat.name).firstNotNullOfOrNull(::words)
-        val request =
-            if (chat.isGroup) {
-                WaNamesRequest(waName = words(chat.name), jid = chat.jid)
-            } else {
-                WaNamesRequest(contact = words(known?.contactName), waName = waName, jid = chat.jid)
-            }
-        val answer = (names(request) as? Outcome.Ok)?.value
-        val name = answer?.name ?: request.contact ?: request.waName ?: chat.jid
-        NoticeChat(
-            jid = chat.jid,
-            name = name,
-            number = answer?.number?.takeIf { !chat.isGroup && it != name },
-            group = chat.isGroup,
+    names: suspend (NoticeChatsRequest) -> Outcome<NoticeChatsAnswer>,
+): List<NoticeChat> {
+    if (chats.isEmpty()) return emptyList()
+    val request =
+        NoticeChatsRequest(
+            chats.map { chat ->
+                val known = profile(chat.jid).takeUnless { chat.isGroup }
+                NoticeChatInput(
+                    jid = chat.jid,
+                    group = chat.isGroup,
+                    contact = known?.contactName,
+                    verified = known?.verifiedName,
+                    push = known?.pushName,
+                    chatName = chat.name,
+                )
+            },
         )
-    }
-
-private fun words(text: String?): String? = text?.trim()?.takeIf { it.isNotEmpty() }
+    val named = (names(request) as? Outcome.Ok)?.value?.chats
+    return named?.map { NoticeChat(it.jid, it.name, it.number, it.group) }
+        ?: chats.map { NoticeChat(it.jid, it.name?.trim()?.takeIf(String::isNotEmpty) ?: it.jid, null, it.isGroup) }
+}
 
 /** The chats whose name or number holds every word of [query] (any case); all of them for a blank query. */
 fun filterChats(

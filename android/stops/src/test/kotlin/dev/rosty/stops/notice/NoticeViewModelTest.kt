@@ -3,7 +3,6 @@ package dev.rosty.stops.notice
 import dev.rosty.core.model.stops.NoticeWhen
 import dev.rosty.core.model.stops.StopsPrefs
 import dev.rosty.core.ops.NativeStopsOps
-import dev.rosty.core.ops.NativeWaOps
 import dev.rosty.stops.FakeStopsCore
 import dev.rosty.stops.HostCore
 import dev.rosty.stops.data.StopsStore
@@ -40,13 +39,12 @@ class NoticeViewModelTest {
     ): Pair<NoticeViewModel, FakeStopsCore> {
         val fake = FakeStopsCore(prefs = prefs, real = HostCore.real())
         val ops = NativeStopsOps(fake.rust) { locale }
-        val waOps = NativeWaOps(HostCore.real())
         val model =
             NoticeViewModel(
                 store = StopsStore(ops),
                 ops = ops,
                 wa = wa,
-                names = { chats -> namedChats(chats, NoticeFixtures.profiles::get, waOps::names) },
+                names = { chats -> namedChats(chats, NoticeFixtures.profiles::get, ops::noticeChats) },
                 sampleStop = "Kadıköy Pier",
                 scope = scope,
             )

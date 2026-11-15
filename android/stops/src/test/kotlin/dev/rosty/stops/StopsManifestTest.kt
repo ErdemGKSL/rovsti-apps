@@ -93,6 +93,16 @@ class StopsManifestTest {
         }
     }
 
+    /** E7.10 (S10): the offline area download runs in WorkManager's foreground service as dataSync. */
+    @Test fun theOfflineDownloadRunsAsADataSyncForegroundService() {
+        val service = manifest.component("androidx.work.impl.foreground.SystemForegroundService")
+        assertEquals("dataSync", service.attributes["foregroundServiceType"])
+        assertTrue("android.permission.FOREGROUND_SERVICE_DATA_SYNC" in manifest.usesPermissions)
+        val cancel = manifest.component("dev.rosty.stops.offline.OfflineCancelReceiver")
+        assertEquals("receiver", cancel.kind)
+        assertEquals(false, cancel.exported)
+    }
+
     @Test fun theAlarmShowsOverTheLockScreen() {
         val alarm = manifest.component("dev.rosty.bridge.AlarmActivity")
         assertEquals("activity", alarm.kind)
@@ -139,6 +149,8 @@ class StopsManifestTest {
                 "dev.rosty.bridge.AlarmActivity",
                 "dev.rosty.bridge.TripAlarmReceiver",
                 "dev.rosty.bridge.RostyShareProvider",
+                // E7.10 (S10): the offline download notification's Cancel.
+                "dev.rosty.stops.offline.OfflineCancelReceiver",
             ),
             ours,
         )

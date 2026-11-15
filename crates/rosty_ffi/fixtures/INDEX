@@ -832,6 +832,8 @@ stops.snap.no_candidate
 stops.snap.slow
 stops.stats
 stops.stats.empty
+stops.store_gtfs_remove
+stops.store_gtfs_remove.no_feed
 stops.store_read
 stops.store_read.draft
 stops.store_read.history
@@ -896,6 +898,11 @@ tiles.encode_mvt.garbage
 tiles.encode_mvt.outside
 tiles.offline_cancel
 tiles.offline_cancel.unknown
+tiles.offline_plan
+tiles.offline_plan.bad_bbox
+tiles.offline_plan.capped
+tiles.offline_plan.circle
+tiles.offline_plan.no_area
 tiles.offline_start
 tiles.offline_start.bad_bbox
 tiles.offline_start.bad_zooms

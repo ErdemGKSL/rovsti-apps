@@ -46,6 +46,12 @@ data class StoreTripClearAnswer(
     val removed: Boolean,
 )
 
+/** [removed] says whether an imported feed (`gtfs.json`) was there to delete. */
+@Serializable
+data class StoreGtfsRemoveAnswer(
+    val removed: Boolean,
+)
+
 /** [file] is `saved`, `history` or `draft`. */
 @Serializable
 data class StoreReadRequest(

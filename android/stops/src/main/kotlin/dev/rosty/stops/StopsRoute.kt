@@ -22,6 +22,14 @@ sealed interface StopsRoute {
     @Serializable
     data object Settings : StopsRoute
 
+    /** Settings > Alarm: sound, vibration, pattern, volume, snooze, tests and reset (S12-S14, S39). */
+    @Serializable
+    data object AlarmSettings : StopsRoute
+
+    /** Settings > Map tiles: the server, the cache and the offline area (S10, S22). */
+    @Serializable
+    data object MapTiles : StopsRoute
+
     // The common settings pages (shell CommonSettingsPage + the licence detail).
     @Serializable
     data object Appearance : StopsRoute
@@ -73,6 +81,8 @@ fun chromeFor(route: StopsRoute): ChromeSpec =
         }
 
         StopsRoute.Settings,
+        StopsRoute.AlarmSettings,
+        StopsRoute.MapTiles,
         StopsRoute.Appearance,
         StopsRoute.About,
         StopsRoute.Licences,

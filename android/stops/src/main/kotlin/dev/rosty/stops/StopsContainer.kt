@@ -28,6 +28,11 @@ import dev.rosty.stops.home.CoreHomeData
 import dev.rosty.stops.home.HomeData
 import dev.rosty.stops.home.HomeSheet
 import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.offline.MapArea
+import dev.rosty.stops.offline.OfflineAreaWorker
+import dev.rosty.stops.offline.OfflineDownloads
+import dev.rosty.stops.settings.AlarmDevice
+import dev.rosty.stops.settings.AndroidAlarmDevice
 import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AndroidAlarmControl
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -104,7 +109,27 @@ open class StopsContainer(
     /** A sheet a page asked the map to open on the way back (the bar's Saved on Settings); the home clears it. */
     val pendingSheet: MutableStateFlow<HomeSheet?> = MutableStateFlow(null)
 
+    /** S10: the offline area download, run by a foreground worker; Settings and its notification follow it. */
+    val offline: OfflineDownloads by lazy {
+        OfflineDownloads(tiles, scope, schedule = ::scheduleOffline, unschedule = ::unscheduleOffline)
+    }
+
+    /** The area the map showed when it last came to rest (the home writes it); Settings downloads it (S10). */
+    val mapView: MutableStateFlow<MapArea?> = MutableStateFlow(null)
+
+    /** Bumped when the transit feed was imported or removed; the home's pick controller asks for its stops again. */
+    val transitVersion: MutableStateFlow<Int> = MutableStateFlow(0)
+
+    /** The sound picker's previews, the volume test and the test ring (S12-S14). */
+    val alarmDevice: AlarmDevice by lazy { createAlarmDevice() }
+
     protected open fun createOps(): StopsOps = NativeStopsOps(rust)
+
+    protected open fun scheduleOffline(area: MapArea) = OfflineAreaWorker.enqueue(context, area)
+
+    protected open fun unscheduleOffline() = OfflineAreaWorker.cancelQueued(context)
+
+    protected open fun createAlarmDevice(): AlarmDevice = AndroidAlarmDevice(context)
 
     protected open fun createTilesOps(): TilesOps = NativeTilesOps(rust)
 

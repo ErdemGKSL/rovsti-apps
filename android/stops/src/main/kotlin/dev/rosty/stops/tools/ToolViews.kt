@@ -2,6 +2,7 @@ package dev.rosty.stops.tools
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -104,36 +106,47 @@ fun MeasureCard(
                 Modifier.testTag(ToolTags.MeasureDone),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        // Equal thirds; with large text each keeps its own width and the row wraps instead of cutting labels.
+        val large = LocalDensity.current.fontScale >= LARGE_FONT_SCALE
+        val more = {
+            result?.let {
+                overlays.present(
+                    ButtonMenuEntry(moreAnchor[0], tools.moreItems(summary, it).toImmutableList()),
+                )
+            }
+        }
+        val buttons: @Composable (Modifier) -> Unit = { share ->
             CapsuleButton(
                 stringResource(R.string.measure_undo_last),
                 tools.measure::undo,
-                Modifier.weight(1f).testTag(ToolTags.MeasureUndo),
+                share.testTag(ToolTags.MeasureUndo),
                 enabled = state.points.isNotEmpty(),
-                fillWidth = true,
+                fillWidth = !large,
             )
             CapsuleButton(
                 stringResource(R.string.measure_clear),
                 tools::clearMeasure,
-                Modifier.weight(1f).testTag(ToolTags.MeasureClear),
+                share.testTag(ToolTags.MeasureClear),
                 enabled = state.points.isNotEmpty(),
-                fillWidth = true,
+                fillWidth = !large,
             )
             CapsuleButton(
                 stringResource(R.string.measure_more),
-                {
-                    result?.let {
-                        val items = tools.moreItems(summary, it).toImmutableList()
-                        overlays.present(ButtonMenuEntry(moreAnchor[0], items))
-                    }
-                },
-                Modifier
-                    .weight(1f)
+                { more() },
+                share
                     .onGloballyPositioned { moreAnchor[0] = it.boundsInWindow() }
                     .testTag(ToolTags.MeasureMore),
                 enabled = result != null,
-                fillWidth = true,
+                fillWidth = !large,
             )
+        }
+        if (large) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                verticalArrangement = Arrangement.spacedBy(Spacing.s),
+            ) { buttons(Modifier) }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) { buttons(Modifier.weight(1f)) }
         }
     }
 }
@@ -221,3 +234,6 @@ fun OverlayController.presentMyLocationSheet(
             }
         }
     }.also { present(it) }
+
+/** From this font scale the measure card's buttons keep their own widths and wrap. */
+private const val LARGE_FONT_SCALE = 1.5f

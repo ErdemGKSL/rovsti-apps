@@ -336,7 +336,9 @@ private fun TripRow(
             title = row.title,
             modifier = Modifier.testTag(HistoryTags.row(row.index)),
             secondary = stringResource(R.string.history_row_detail, ended, row.summaryLine),
-            secondaryMaxLines = 2,
+            // Large text: the pair and its line wrap rather than lose their ends to the outcome.
+            titleMaxLines = 2,
+            secondaryMaxLines = 3,
             meta =
                 stringResource(
                     if (row.record.outcome == Outcome.Arrived) {

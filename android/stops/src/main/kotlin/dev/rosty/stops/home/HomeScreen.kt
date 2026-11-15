@@ -5,6 +5,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -311,14 +312,15 @@ fun StopsHome(
                     ) {
                         // A wide window keeps the footer above the buttons, clear of the centred sheet.
                         if (wide) {
-                            Row(
+                            // A flow row: at large text the attribution goes under the scale bar instead of off the edge.
+                            FlowRow(
                                 Modifier
                                     .fillMaxWidth()
                                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                                     .padding(horizontal = Spacing.gutter, vertical = Spacing.xs)
                                     .testTag(HomeTags.MapFooter),
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Bottom,
+                                itemVerticalAlignment = Alignment.Bottom,
                                 content = mapFooter,
                             )
                         }
@@ -331,14 +333,15 @@ fun StopsHome(
                                 .onSizeChanged { buttonsWidthPx = it.width.toFloat() + gapPx },
                         )
                         if (!wide) {
-                            Row(
+                            // A flow row: at large text the attribution goes under the scale bar instead of off the edge.
+                            FlowRow(
                                 Modifier
                                     .fillMaxWidth()
                                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                                     .padding(horizontal = Spacing.gutter, vertical = Spacing.xs)
                                     .testTag(HomeTags.MapFooter),
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Bottom,
+                                itemVerticalAlignment = Alignment.Bottom,
                                 content = mapFooter,
                             )
                         }

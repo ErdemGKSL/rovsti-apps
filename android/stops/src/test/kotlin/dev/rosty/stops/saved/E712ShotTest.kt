@@ -26,11 +26,14 @@ class E712ShotTest : ShotTest() {
     private val options =
         RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = ShotTest.CHANGE_THRESHOLD))
 
-    private fun importShot(name: String) {
+    private fun importShot(
+        name: String,
+        fontScale: Float = 1f,
+    ) {
         for (dark in listOf(false, true)) {
             compose.runOnUiThread { compose.activity.viewModelStore.clear() }
             val fixture = AppFixture(FakeStopsCore(scriptTransit = false, real = HostCore.real()))
-            composeFrame(dark = dark) { fixture.Content() }
+            composeFrame(dark = dark, fontScale = fontScale) { fixture.Content() }
             settleRust()
             present(fixture.overlays, fixture)
             settleRust()
@@ -60,6 +63,8 @@ class E712ShotTest : ShotTest() {
         importShot("e7.12-import-summary")
         compose.onNodeWithText("Add 2 stops. 1 already saved.", useUnmergedTree = true).assertExists()
     }
+
+    @Test fun importSummaryLargeText() = importShot("e7.12-import-summary-fs2", fontScale = 2f)
 
     @Test fun importSummaryTurkish() {
         RuntimeEnvironment.setQualifiers("+tr")

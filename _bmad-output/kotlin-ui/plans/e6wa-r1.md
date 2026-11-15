@@ -82,4 +82,29 @@ gateway commit.
   (`person`, `alias`, `merge_log`, `wire_jid`, `wire_sender`, own ids, merge cursor, backfill cursor; no `person_id`
   columns: rows stay keyed by the canonical key), resolve before match on ingest, the logged and replayable merge,
   backfill. 41 new `wa_sync` tests.
-- Merged tree: fmt and clippy clean, the gate's Rust packages plus `wa_gateway`: 2 916 tests, 0 failed.
+- **Rest of step 5 and step 6** (`d29f12f8` store, `7ea29482` FFI, `1073af50` bridge, merge `35452cda`): alt ids,
+  the two events, `ChatMerged` and the mappings endpoint (resumable cursor) feed `learn`; a known pair writes nothing;
+  a read under an old key follows the merge. Ops `wa_sync.identity_resolve`, `rekeyed_since`, `identity_catch_up`,
+  `identity_observe`, `wa.identity_mappings` (`supported: false` on an old gateway), `wa_identity.parse`; answers
+  carry `rekeyed` steps.
+- **Step 8** (`15d22770`): `people::e164` goes through `caller_id::e164_of` with the home calling code;
+  `wa_sync.identity_numbers` lists the current then the former numbers of a person; `PersonNames` looks a contact up
+  by each. 12 new Rust tests (five spellings with and without a home region, wrong country same tail, former number
+  only, hidden member).
+- **Step 7** (`32e9f992` bridge, `293b3950` shared modules, `261f7b8f` Messages, `56114148` Phone and Contacts, merge
+  `cfe141e5`):
+  - `WaIds` (`:core-bridge`) is the one Kotlin JID helper. It is a Kotlin port, not a native call (its callers are
+    synchronous); `WaIdsTest` checks it against the Rust fixtures and `WaIdsNativeTest` against the real library.
+    Every other copy is gone except the log mask's domain list.
+  - `WaRekeys` (Messages) follows the store's merge log from its own cursor (`wa-rekeys.json`) and runs the movers in
+    order: draft and mute, announcer lines, the conversation on screen, the notification, message reminders,
+    scheduled texts. The open thread swaps its key and keeps its rows, reply bar and draft.
+  - The sync runner catches up on pairs and own ids before the chat list; ids from notifications and deep links are
+    resolved before the first read; React, Revoke and MarkRead send the wire sender.
+  - A LID nobody names reads "WhatsApp user" (en, tr) on every Messages surface.
+  - Phone: a call whose peer is a LID dials the number of `peer_alt`.
+  - No golden changed.
+- Not done in this round (WA-R2): Phone's identity table (a LID caller with no `peer_alt` has no number); the rekey
+  cursor reset on an account change; Rust `wa_digest` titles; outbox sends still name the chat by the canonical key;
+  group info is fetched nowhere in Messages, so only profile answers reach `store.observe`.
+- Close: see the WA-R1 note in `e6-status.md`.

@@ -1722,6 +1722,19 @@ the thread (E6.4a): both read WhatsApp **only from the local store**; the networ
 
 ---
 
+## E6-WA. Full WhatsApp in Rosty (after E6, same parallel session)
+
+Asked by the owner on 2026-11-15. Built on `messages-kotlin` like E6; planners on `ui-overhaul` skip it. Epic plan with
+the owner's answers and the rounds WA-R1 to WA-R7: `_bmad-output/kotlin-ui/plans/e6wa-plan.md`. Research:
+`_bmad-output/kotlin-ui/research/e6wa-inventory.md`, `e6wa-identity.md`, `e6wa-cache.md`. Round notes for the main
+thread: `_bmad-output/kotlin-ui/plans/e6-status.md`.
+
+| Round | Theme | Plan | Status |
+|---|---|---|---|
+| WA-R1 | Identity (LID, phone JID, one person) | `plans/e6wa-r1.md` | done (2026-11-15) |
+| WA-R2 | Media limits, full history, account change, connect key sharing, Phone identity | not planned yet | |
+| WA-R3 to WA-R7 | Media, message actions, rich content and presence, groups, account and history | not planned yet | |
+
 ## E7. Stops (`:stops`)
 
 > **Runs in a parallel session (owner decision, 2026-11-14).** E7 is built on branch `stops-kotlin` by a separate

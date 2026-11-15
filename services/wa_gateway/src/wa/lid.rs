@@ -217,6 +217,9 @@ pub fn source_jids(source: &MessageSource) -> Vec<&Jid> {
     jids
 }
 
+/// A sweep that found nothing is still logged when it took this long.
+const SLOW_SWEEP_MS: u128 = 250;
+
 /// Moves everything stored under a LID whose phone number is known to that
 /// number: LID chats, and rows of any chat that name a LID as an author, a
 /// reactor, a receipt, a quoted author, a mention or a profile. Idempotent,
@@ -231,6 +234,7 @@ where
     F: Fn(Jid) -> Fut,
     Fut: std::future::Future<Output = Option<String>>,
 {
+    let started = std::time::Instant::now();
     let lids = match sink.lids_seen().await {
         Ok(lids) => lids,
         Err(e) => {
@@ -258,9 +262,11 @@ where
             merged += 1;
         }
     }
-    if total > 0 {
+    // The listing reads the whole message table: the time says when that needs an index or a rarer sweep.
+    let took_ms = started.elapsed().as_millis();
+    if total > 0 || took_ms >= SLOW_SWEEP_MS {
         log::info!(
-            "{}: lid-merge: sweep moved {merged} of {total} stored LIDs",
+            "{}: lid-merge: sweep moved {merged} of {total} stored LIDs in {took_ms} ms",
             sink.instance()
         );
     }

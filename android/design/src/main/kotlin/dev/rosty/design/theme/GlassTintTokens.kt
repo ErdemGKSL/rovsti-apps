@@ -3,7 +3,7 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/theme/GlassTintTokens.kt
- * Changes for Rosty: package dev.rosty.design.theme; isHueless() moved here from HeroTheme.kt.
+ * Changes for Rosty: package dev.rosty.design.theme; isHueless() moved here from HeroTheme.kt; glassNeutralWash and a 0.55 light base so colour behind glass stays muted.
  */
 package dev.rosty.design.theme
 
@@ -74,7 +74,7 @@ object GlassTintTokens {
     const val DefaultHighlightOpacityLight = 0.60f
 
     // Nav-bar glass physics (Q16) vs all other glass (Q17).
-    const val NavVibrancy = 2.0f
+    const val NavVibrancy = 1.0f // Rosty: Convx 2.0 smeared colourful content at the bar ends
     const val NavBlurDp = 3f
     const val NavLensHeight = 0.60f
     const val NavLensAmount = 0.69f
@@ -91,7 +91,10 @@ object GlassTintTokens {
     // 0.15, not the measured 0.13: blur and saturation spread the lift, and on device the
     // surface read 0.09-0.11 at 0.13 (measured on SM-M346B screenshots, 2026-09-14).
     const val BaseSurfaceOpacityDark = 0.15f
-    const val BaseSurfaceOpacityLight = 0.40f // spec default
+
+    // Rosty: 0.55, not Convx's 0.40 (glisse light glass is white 0.6): at 0.40 a saturated avatar under the tab bar
+    // showed through as a coloured glow behind the labels.
+    const val BaseSurfaceOpacityLight = 0.55f
 
     const val NavPillFillOpacityDark = 0.55f
     const val NavPillFillOpacityLight = 0.68f
@@ -124,6 +127,16 @@ object GlassTintTokens {
     fun baseSurfaceColor(isDark: Boolean): Color = if (isDark) SurfaceBaseDark else SurfaceBaseLight
 
     fun neutralTintColor(isDark: Boolean): Color = if (isDark) TintNeutralDark else TintNeutralLight
+
+    /**
+     * Rosty: the wash a live glass surface paints over its base when nothing tints it. Light is [TintNeutralLight].
+     * Dark adds [GlassWashDark] (Convx painted none): a mid-grey that keeps a slight lift on black and grey pages
+     * (black 0 -> ~42, grey 104 -> ~111 with the base) but takes ~22 % of the colour out of what shows through, so a
+     * saturated avatar under the tab bar reads as a muted shape behind the labels, not a glow.
+     */
+    fun glassNeutralWash(isDark: Boolean): Color = if (isDark) GlassWashDark else TintNeutralLight
+
+    val GlassWashDark = Color(0xFF3A3A3C).copy(alpha = 0.22f)
 
     fun heroTintOpacity(isDark: Boolean): Float = if (isDark) HeroTintOpacityDark else HeroTintOpacityLight
 

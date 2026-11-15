@@ -3,7 +3,7 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/component/GlassEffect.kt
- * Changes for Rosty: package dev.rosty.design.glass ; music-only locals (ambient background, player blur, artwork hero tint, loop bucket, Apple Music UI) dropped; appearance comes from LocalSampledChromeDark or the Rosty theme.
+ * Changes for Rosty: package dev.rosty.design.glass ; music-only locals (ambient background, player blur, artwork hero tint, loop bucket, Apple Music UI) dropped; appearance comes from LocalSampledChromeDark or the Rosty theme; vibrancy 1 and the lens band capped by size (glassLensBand) so colourful content does not smear at the bar ends.
  */
 package dev.rosty.design.glass
 
@@ -20,6 +20,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
@@ -56,7 +58,11 @@ import dev.rosty.design.theme.isHueless
 @Stable
 data class GlassEffectConfig(
     val globalEnabled: Boolean = true,
-    val vibrancy: Float = 2.0f,
+    /**
+     * Rosty: 1 (saturation x1.5, the skill's Bar preset and glisse's `saturate(1.5)`). Convx's nav value 2.0
+     * (x2.0) pushed colourful rows behind the bar into saturated smears at its ends.
+     */
+    val vibrancy: Float = 1.0f,
     /** Blur in dp applied to glass pills. Nav spec = 3dp (Q16). */
     val blurRadius: Float = 3f,
     /** 0..1, mapped to 0..[LENS_MAX_DP] dp of lens refraction height. Nav spec .60 (Q16). */
@@ -199,6 +205,39 @@ fun isLowRamDevice(): Boolean {
 /** Combines the API-level check with the low-RAM device check; use this to gate glass. */
 @Composable
 fun isGlassAllowed(): Boolean = isGlassSupported() && !isLowRamDevice()
+
+/** Rosty: the refraction band of a glass surface, in the same px as its effect scope. */
+data class GlassLensBand(
+    val height: Float,
+    val amount: Float,
+)
+
+/** Deepest refraction band, as a share of the surface's shorter side (glisse `LensOptions.Glass` depth 0.25). */
+internal const val LENS_BAND_SHARE = 0.25f
+
+/** Largest inward pull at the very edge, as a share of the surface's shorter side. */
+internal const val LENS_REACH_SHARE = 0.16f
+
+/**
+ * Rosty: confines the lens to a narrow edge band with a modest pull. Convx's nav values (28.8 dp band, 33 dp pull)
+ * bent the whole end cap of a 68 dp capsule: every cap pixel sampled from ~33 dp further in, so a colourful avatar
+ * under the bar's end filled the cap as one magnified blob. Capped at [LENS_BAND_SHARE] / [LENS_REACH_SHARE] of the
+ * shorter side (17 / 11 dp on the tab bar), the bar still refracts what is behind it, as iOS 26 glass does, without
+ * the smear. [size] is the effect scope's size (already at the capture scale); unspecified leaves the values as they
+ * are.
+ */
+fun glassLensBand(
+    heightPx: Float,
+    amountPx: Float,
+    size: Size,
+): GlassLensBand {
+    if (!size.isSpecified || size.minDimension <= 0f) return GlassLensBand(heightPx, amountPx)
+    val side = size.minDimension
+    return GlassLensBand(
+        height = minOf(heightPx, side * LENS_BAND_SHARE),
+        amount = minOf(amountPx, side * LENS_REACH_SHARE),
+    )
+}
 
 /** Maps the 0..2 vibrancy preference to a saturation multiplier. */
 fun glassSaturation(vibrancy: Float): Float = 1f + 0.5f * vibrancy.coerceIn(0f, 2f)
@@ -391,7 +430,7 @@ fun Modifier.liquidGlass(
 
             else -> {
                 dev.rosty.design.theme.GlassTintTokens
-                    .neutralTintColor(isDark)
+                    .glassNeutralWash(isDark)
             }
         }
     val tintOpacity =
@@ -473,24 +512,26 @@ fun Modifier.liquidGlass(
                 if (!usePool && blurPx > 0f) {
                     blur(blurPx)
                 }
+                // Rosty: the band and the pull scale with the surface's shorter side (see [glassLensBand]).
+                val band = glassLensBand(lensHeightPx, lensAmountPx, size)
                 if (!plainBlur &&
                     applyEdgeEffects &&
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    (lensHeightPx > 0f || lensAmountPx > 0f)
+                    (band.height > 0f || band.amount > 0f)
                 ) {
                     if (usePool) {
                         // Refracted by the pool in its single pass for every bar surface: this
                         // layer then carries no effect, so it needs no offscreen buffer and no
                         // lens pass of its own. Same shader math, same region.
                         poolLens(
-                            refractionHeight = lensHeightPx,
-                            refractionAmount = lensAmountPx,
+                            refractionHeight = band.height,
+                            refractionAmount = band.amount,
                             depthEffect = config.depthEffect,
                         )
                     } else {
                         lens(
-                            refractionHeight = lensHeightPx,
-                            refractionAmount = lensAmountPx,
+                            refractionHeight = band.height,
+                            refractionAmount = band.amount,
                             depthEffect = config.depthEffect,
                             chromaticAberration = config.chromaticAberration,
                         )

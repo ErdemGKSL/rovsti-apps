@@ -3,10 +3,11 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/test/kotlin/com/convx/music/ui/component/GlassEffectTest.kt
- * Changes for Rosty: package only; assertions unchanged.
+ * Changes for Rosty: package only; assertions unchanged. GlassLensBandTest is Rosty's own.
  */
 package dev.rosty.design.glass
 
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -180,5 +181,46 @@ class GlassEffectConfigTest {
     fun `full glass used when supported and style is not Transparent`() {
         assertFalse(shouldUseTranslucentGlassFallback(GlassStyle.LIQUID, renderEffectSupported = true))
         assertFalse(shouldUseTranslucentGlassFallback(GlassStyle.BLUR, renderEffectSupported = true))
+    }
+}
+
+/** Rosty: the lens stays in a narrow edge band with a modest pull, whatever the configured values. */
+class GlassLensBandTest {
+    private val bar = Size(1100f, 204f) // a 68 dp tab bar at xxhdpi
+
+    @Test
+    fun `default config on the tab bar is capped to a quarter band and a modest pull`() {
+        val config = GlassEffectConfig()
+        val band = glassLensBand(config.lensHeight * LENS_MAX_DP * 3f, config.lensAmount * LENS_MAX_DP * 3f, bar)
+        assertEquals(204f * LENS_BAND_SHARE, band.height, 0.001f)
+        assertEquals(204f * LENS_REACH_SHARE, band.amount, 0.001f)
+        // The pull at the very edge stays inside the band: no sampling from deep inside (or outside) the bar.
+        assertTrue(band.amount < band.height)
+    }
+
+    @Test
+    fun `small values are kept`() {
+        val band = glassLensBand(10f, 8f, bar)
+        assertEquals(10f, band.height, 0.001f)
+        assertEquals(8f, band.amount, 0.001f)
+    }
+
+    @Test
+    fun `the band scales with the shorter side`() {
+        val tall = glassLensBand(1000f, 1000f, Size(132f, 600f))
+        assertEquals(132f * LENS_BAND_SHARE, tall.height, 0.001f)
+        assertEquals(132f * LENS_REACH_SHARE, tall.amount, 0.001f)
+    }
+
+    @Test
+    fun `an unmeasured surface keeps the configured values`() {
+        val band = glassLensBand(30f, 40f, Size.Unspecified)
+        assertEquals(30f, band.height, 0.001f)
+        assertEquals(40f, band.amount, 0.001f)
+    }
+
+    @Test
+    fun `default saturation is a moderate boost`() {
+        assertEquals(1.5f, glassSaturation(GlassEffectConfig().vibrancy), 0.001f)
     }
 }

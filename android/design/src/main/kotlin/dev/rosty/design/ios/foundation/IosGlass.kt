@@ -3,7 +3,7 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/foundation/IosGlass.kt
- * Changes for Rosty: package dev.rosty.design.ios.foundation; imports.
+ * Changes for Rosty: package dev.rosty.design.ios.foundation; imports; the neutral wash is GlassTintTokens.glassNeutralWash.
  */
 package dev.rosty.design.ios.foundation
 
@@ -116,7 +116,7 @@ fun Modifier.iosGlass(
             tint
         } else {
             dev.rosty.design.theme.GlassTintTokens
-                .neutralTintColor(isDark)
+                .glassNeutralWash(isDark)
         }
     val tintOpacity =
         if (isHeroContext) {

@@ -507,5 +507,6 @@
     <string name="card_studio_preview">Kart önizlemesi</string>
     <string name="card_studio_rendering">Kart hazırlanıyor</string>
     <string name="card_studio_failed">Kart hazırlanamadı</string>
+    <string name="card_studio_share_still">Sabit görsel olarak paylaş</string>
     <string name="card_studio_cant_share">Kart paylaşılamadı</string>
 </resources>

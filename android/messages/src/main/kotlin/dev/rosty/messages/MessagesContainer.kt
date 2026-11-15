@@ -49,6 +49,7 @@ import dev.rosty.messages.wa.realWaOffline
 import dev.rosty.messages.wa.realWaVoice
 import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.AvatarResolver
+import dev.rosty.people.FileLiveNameStore
 import dev.rosty.people.LiveWaNames
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.PeopleSources
@@ -77,6 +78,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 
 /**
  * What Rosty Messages adds to the shared [ShellContainer] (ARCH 5.3). Every member is lazy and built by a `create*`
@@ -255,6 +257,8 @@ open class MessagesContainer(
             gateway = { wa.gateway() },
             e164 = { PhoneNumbers.e164(it, homeRegion) },
             scope = scope,
+            // Kept between runs, so a restart does not ask WhatsApp for the same numbers again.
+            store = FileLiveNameStore(File(context.noBackupFilesDir, "wa-live-names.json")),
         )
 
     protected open fun createNames(): PersonNames {

@@ -68,3 +68,37 @@ with the hook left for it.
 Screenshots in `android/stops/screenshots/` (`e7.8-*`, `e7.9-*`, `e7.11-*`, `e7.12-*`, light and dark, Turkish and fs2
 where text matters); tests `PickSheetViewModelTest`, `PickAppTest`, `MeasureToolTest`, `MapToolsAppTest`,
 `HistoryViewModelTest`, `HistoryAppTest`, `BackupTest`, `PlacesTransferTest`.
+
+## E7.14 checks (app part)
+
+**Layout sweep at font scale 2 and in Turkish.** Every `fs2` and `-tr` Stops golden was opened. Fixes made:
+
+- At fs2 the pick field showed only "Search, or". From font scale 1.5 the field takes the whole width and Paste goes under it.
+- The map footer clipped "© OpenStreetMap contributors" at the edge. It is now a flow row: the attribution goes under the scale bar.
+- The measure card cut "Undo last". With large text the three buttons keep their own widths and wrap.
+- History trip rows truncated the pair and its details. The title now takes up to 2 lines and the details up to 3.
+
+New fs2 goldens: `e7.9-measure-two-legs-fs2`, `e7.9-my-location-sheet-fs2`, `e7.11-history-fs2` and
+`e7.12-import-summary-fs2`. The Turkish goldens (pick, measure, history, import) fit.
+
+Known leftovers:
+
+- Month names in Robolectric are always English, because `DateUtils` follows the JVM locale. On a device they follow
+  the phone's locale.
+- The sheet subtitle at peek is cut by the peek height. This is by design: peek shows one row.
+
+**Motion and overlays** (`convx-motion-compose` `references/checklist.md`, sections C and D). Checked on the pick, Confirm, stop,
+Copy as, My location, History, backup and import sheets, the layers / map options / measure More / history row menus,
+and the measure card:
+
+- Every sheet and menu is an overlay entry. Sheets are `SheetEntry`; menus are `ButtonMenuEntry`, anchored to a rect
+  captured when the menu opens, placed and morphed by `:design`. Exit animations play for programmatic dismiss too,
+  through `sheet.dismiss()` and `overlays.dismiss`.
+- Pressing a control never shifts the layout. Capsules, glass circles and rows animate transform and alpha only.
+- Long press on the Me button has a TalkBack equivalent: `onLongClick` semantics, exercised by the tests.
+- Fixed: the measure card appeared abruptly. It now fades in and grows slightly from the search pill on the
+  `RostyMotion.appear` spring. That spring is critically damped with no overshoot, so there is nothing to gate for
+  reduce motion. The value is read in the layer, not in composition.
+- Not changed, and deliberate: the Layers and Map options popovers open on tap from the glass buttons, so there is no
+  press-slide-release from the trigger. Using `menuTrigger` there would take the glass button's own press, and the Me
+  button next to them keeps its long press.

@@ -181,6 +181,37 @@ class SavedViewModelTest {
         assertFalse(model.state.value.editing)
     }
 
+    /** S44: a note is kept, shared with the stop, cleared by an empty one; a long one is refused inline. */
+    @Test fun aNoteIsKeptSharedClearedAndCapped() {
+        settled { it.rows.size == 2 }
+        model.onAction(SavedAction.Note(2, "  Gate by the bakery  "))
+        assertEquals(
+            "Gate by the bakery",
+            settled { s -> s.stops.any { it.note.isNotEmpty() } }
+                .stops
+                .first {
+                    it.id ==
+                        2L
+                }.note,
+        )
+        model.onAction(SavedAction.Share(2))
+        val share = nextEffect() as SavedEffect.Share
+        assertTrue(share.text, share.text.contains("Gate by the bakery"))
+        model.onAction(SavedAction.Note(2, "x".repeat(SavedUiState.NOTE_MAX_CHARS + 1)))
+        val refused = settled { it.noteError != null }.noteError!!
+        assertEquals(2L, refused.id)
+        assertEquals(UiText.Res(R.string.saved_error_note), refused.text)
+        assertEquals(
+            "Gate by the bakery",
+            fake.saved!!
+                .stops
+                .first { it.id == 2L }
+                .note,
+        )
+        model.onAction(SavedAction.Note(2, ""))
+        assertTrue(settled { s -> s.noteError == null && s.stops.all { it.note.isEmpty() } }.stops.isNotEmpty())
+    }
+
     private companion object {
         const val NOW = 1_790_100_000_000L
         const val TIMEOUT = 10_000L

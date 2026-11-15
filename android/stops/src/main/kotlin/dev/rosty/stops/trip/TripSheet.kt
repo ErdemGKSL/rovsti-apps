@@ -255,6 +255,12 @@ private fun LiveCard(
                 }
             }
             Detail(live.text)
+            // S41: the arrival clock, when the service has an estimate.
+            if (live.etaMin != null &&
+                live.arrive != null
+            ) {
+                Detail(stringResource(R.string.trip_eta, live.etaMin, live.arrive))
+            }
         }
         state.fromYou?.let { Detail(it) }
         live?.nextFixMs?.takeIf { it > 0 }?.let { Detail(stringResource(R.string.trip_next_check, waitText(it))) }

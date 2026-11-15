@@ -10,6 +10,7 @@ import dev.rosty.core.model.headless.TripState
 import dev.rosty.core.model.phone.DirRequest
 import dev.rosty.core.model.stops.AlarmPlan
 import dev.rosty.core.model.stops.AlarmPlanRequest
+import dev.rosty.core.model.stops.ArrivalClockRequest
 import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.CoordFormatRequest
 import dev.rosty.core.model.stops.Destination
@@ -18,14 +19,9 @@ import dev.rosty.core.model.stops.Ends
 import dev.rosty.core.model.stops.FormatDistanceRequest
 import dev.rosty.core.model.stops.GtfsLineChoice
 import dev.rosty.core.model.stops.GtfsLinesRequest
-import dev.rosty.core.model.stops.History
-import dev.rosty.core.model.stops.HistoryEdit
-import dev.rosty.core.model.stops.HistoryEditRequest
 import dev.rosty.core.model.stops.NoticePrefs
 import dev.rosty.core.model.stops.StopsPrefs
-import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripEndRequest
-import dev.rosty.core.model.stops.StoreWriteRequest
 import dev.rosty.core.model.stops.TripRecord
 import dev.rosty.core.ops.ActiveTripHandle
 import dev.rosty.core.ops.StopsOps
@@ -44,7 +40,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
@@ -77,6 +72,10 @@ data class LiveTrip(
     /** The service's notification text ("420 m to Kadıköy, about 3 min"). */
     val text: String,
     val nextFixMs: Long,
+    /** S41: minutes to the line, when the service has an estimate. */
+    val etaMin: Int? = null,
+    /** S41: the local clock time of [etaMin] from now ("18:42"). */
+    val arrive: String? = null,
 )
 
 /** Why the trip is not tracking as it should; each is a row with the next action (ARCH 7.5). */
@@ -197,6 +196,11 @@ class TripViewModel(
     private val here: suspend () -> Coord?,
     private val nowMs: () -> Long,
     private val waitingText: String,
+    private val tzOffsetS: () -> Int = {
+        java.util.TimeZone
+            .getDefault()
+            .getOffset(nowMs()) / MS_PER_S
+    },
     private val arrivingSoon: ArrivingSoonHook = ArrivingSoonHook.None,
     scope: CoroutineScope? = null,
 ) : ViewModel() {
@@ -333,7 +337,7 @@ class TripViewModel(
                 refreshBearing(trip)
             } else {
                 // A refused start leaves nothing behind (GPUI `start_trip` removes the new trip file).
-                forget(view.id)
+                forget()
                 mutable.value = mutable.value.copy(problem = TripProblem.CouldNotStart)
                 emit(TripEffect.Toast(UiText.Res(R.string.trip_could_not_start)))
             }
@@ -346,26 +350,9 @@ class TripViewModel(
         tripJson = (ops.storeTripLoad(DirRequest(dir)) as? Outcome.Ok)?.value?.trip
     }
 
-    /**
-     * Removes the trip file of a start Android refused. The bridge has no "delete the trip file" op, so the trip is
-     * ended (which moves it into the history) and its record is taken out of the history again.
-     */
-    private suspend fun forget(id: Long) {
-        ops.storeTripEnd(StoreTripEndRequest("cancelled", nowMs(), dir))
-        val value = (ops.storeRead(StoreReadRequest(HISTORY, dir)) as? Outcome.Ok)?.value?.value ?: return
-        val history =
-            try {
-                Lenient.decodeFromJsonElement(History.serializer(), value)
-            } catch (_: SerializationException) {
-                return
-            } catch (_: IllegalArgumentException) {
-                return
-            }
-        val index = history.records.indexOfFirst { it.id == id }
-        if (index < 0) return
-        val edited =
-            (ops.historyEdit(HistoryEditRequest(history, HistoryEdit.Take(index))) as? Outcome.Ok)?.value ?: return
-        ops.storeWrite(StoreWriteRequest(HISTORY, Json.encodeToJsonElement(History.serializer(), edited.history), dir))
+    /** A refused start leaves no trip behind: `stops.store_trip_clear` removes the new trip file, no history record. */
+    private suspend fun forget() {
+        ops.storeTripClear(DirRequest(dir))
     }
 
     private suspend fun stop() {
@@ -410,6 +397,8 @@ class TripViewModel(
                         circle = out.circleM?.takeIf { !out.inside }?.let { distance(it) },
                         text = out.text,
                         nextFixMs = out.nextFixMs,
+                        etaMin = out.etaMin,
+                        arrive = out.etaMin?.let { clock(it) },
                     )
                 val problem =
                     mutable.value.problem.takeUnless {
@@ -441,6 +430,10 @@ class TripViewModel(
         }
     }
 
+    /** S41: `stops.arrival_clock` for [etaMin] minutes from now. */
+    private suspend fun clock(etaMin: Int): String? =
+        (ops.arrivalClock(ArrivalClockRequest(nowMs(), etaMin, tzOffsetS())) as? Outcome.Ok)?.value?.clock
+
     private suspend fun distance(metres: Double): String =
         (ops.formatDistance(FormatDistanceRequest(metres)) as? Outcome.Ok)?.value?.text ?: "${metres.toInt()} m"
 
@@ -456,8 +449,10 @@ class TripViewModel(
         val text =
             handle.statusShare(
                 lineM = null,
+                etaMin = live?.etaMin,
                 here = here(),
                 crossed = live != null && live.state != TripState.Tracking,
+                arrive = live?.arrive,
             )
         handle.close()
         return (text as? Outcome.Ok)?.value?.text
@@ -467,9 +462,7 @@ class TripViewModel(
         /** The first fix comes quickly so the card fills (GPUI `start_spec`). */
         const val FIRST_FIX_MS = 5_000L
 
-        private const val HISTORY = "history"
-
-        private val Lenient = Json { ignoreUnknownKeys = true }
+        private const val MS_PER_S = 1000
 
         /**
          * The row of a `trip_status` error code (pure); `full_screen` has none of its own, the card's full-screen row

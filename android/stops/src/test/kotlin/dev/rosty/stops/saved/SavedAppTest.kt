@@ -174,4 +174,35 @@ class SavedAppTest : ShotTest() {
         assertEquals(SampleStops.pierW.coord, draft?.a?.coord)
         assertTrue(fixture.container.pendingLink.value == null)
     }
+
+    /** S44: the note field of the stop sheet; the note shows in the sheet; a long one is refused under the field. */
+    @Test fun aNoteIsEditedFromTheStopSheet() {
+        val fixture = start()
+        openSaved(fixture)
+        compose.onNodeWithTag(SavedTags.row(2), useUnmergedTree = true).performClick()
+        settleRust()
+        compose
+            .onNodeWithTag(
+                SavedTags.stopRow("note"),
+                useUnmergedTree = true,
+            ).performSemanticsAction(SemanticsActions.OnClick)
+        settleRust()
+        compose.onNodeWithTag(SavedTags.NoteField).performTextInput("x".repeat(SavedUiState.NOTE_MAX_CHARS + 1))
+        compose.onNodeWithTag(SavedTags.NoteSave, useUnmergedTree = true).performClick()
+        settleRust()
+        compose.onNodeWithTag(SavedTags.NoteError, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SavedTags.NoteField).performTextClearance()
+        compose.onNodeWithTag(SavedTags.NoteField).performTextInput("Side gate, by the bakery")
+        compose.onNodeWithTag(SavedTags.NoteSave, useUnmergedTree = true).performClick()
+        settleRust()
+        compose.onNodeWithTag(SavedTags.NoteSheet, useUnmergedTree = true).assertDoesNotExist()
+        assertEquals(
+            "Side gate, by the bakery",
+            fixture.container.fake.saved!!
+                .stops
+                .first { it.id == 2L }
+                .note,
+        )
+        compose.onNodeWithTag(SavedTags.Note, useUnmergedTree = true).assertExists()
+    }
 }

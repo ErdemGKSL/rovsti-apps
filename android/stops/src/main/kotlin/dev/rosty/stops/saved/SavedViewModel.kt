@@ -77,14 +77,26 @@ data class SavedUiState(
     /** Drag handles are showing (Edit). */
     val editing: Boolean = false,
     val maxNameChars: Int = DEFAULT_NAME_CHARS,
+    /** S44: a refused note of stop [NoteError.id], shown under the note field (the field keeps the text). */
+    val noteError: NoteError? = null,
 ) {
     /** The user's own order, unfiltered: what Move and the drag change is what is shown (GPUI `reorderable`). */
     val canReorder: Boolean get() = sort == SavedSort.Saved && (!showSearch(stops.size) || query.isBlank())
 
     companion object {
         const val DEFAULT_NAME_CHARS = 40
+
+        /** The longest note the core keeps (`saved_edit` `set_note`). */
+        const val NOTE_MAX_CHARS = 200
     }
 }
+
+/** A note the core refused, for the field of stop [id]. */
+@Immutable
+data class NoteError(
+    val id: Long,
+    val text: UiText,
+)
 
 /** What the screen does once (toasts, sheets, the share sheet, the launcher). */
 sealed interface SavedEffect {
@@ -172,6 +184,12 @@ sealed interface SavedAction {
     data class Rename(
         val id: Long,
         val name: String,
+    ) : SavedAction
+
+    /** S44: the stop's note; blank clears it. */
+    data class Note(
+        val id: Long,
+        val note: String,
     ) : SavedAction
 
     data class Delete(
@@ -295,6 +313,10 @@ class SavedViewModel(
 
             is SavedAction.Rename -> {
                 edit(SavedEdit.Rename(action.id, action.name.trim()))
+            }
+
+            is SavedAction.Note -> {
+                note(action.id, action.note)
             }
 
             is SavedAction.Delete -> {
@@ -426,6 +448,19 @@ class SavedViewModel(
         }
     }
 
+    /** A refused note stays on its field (inline), a saved one clears the error. */
+    private fun note(
+        id: Long,
+        note: String,
+    ) {
+        work.launch {
+            when (val answer = store.edit(SavedEdit.SetNote(id, note.trim()))) {
+                is Outcome.Err -> mutable.value = mutable.value.copy(noteError = NoteError(id, refusal(answer.error)))
+                is Outcome.Ok -> mutable.value = mutable.value.copy(noteError = null)
+            }
+        }
+    }
+
     private fun favourite(id: Long) =
         edit(SavedEdit.ToggleFavourite(id)) { answer ->
             answer.flag?.let { on ->
@@ -462,7 +497,14 @@ class SavedViewModel(
         id: Long,
         qr: Boolean,
     ) = withStop(id) { stop ->
-        val request = DestShareRequest(at = stop.a.coord, label = stop.a.label, b = stop.b.coord, name = stop.name)
+        val request =
+            DestShareRequest(
+                at = stop.a.coord,
+                label = stop.a.label,
+                b = stop.b.coord,
+                name = stop.name,
+                note = stop.note.ifBlank { null },
+            )
         val answer = (ops.destShare(request) as? Outcome.Ok)?.value ?: return@withStop
         emit(if (qr) SavedEffect.Qr(stop.name, answer.qrPayload) else SavedEffect.Share(answer.stopText ?: answer.text))
     }
@@ -502,6 +544,7 @@ class SavedViewModel(
                     "full" -> R.string.saved_error_full
                     "invalid_gate" -> R.string.saved_error_gate
                     "not_found" -> R.string.saved_error_gone
+                    "note_too_long" -> R.string.saved_error_note
                     else -> R.string.saved_error_other
                 },
             )

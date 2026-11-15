@@ -172,4 +172,10 @@
     <string name="trip_full_screen">Full-screen alarm</string>
     <string name="trip_full_screen_on">The alarm can take over the screen</string>
     <string name="trip_full_screen_off">The alarm shows as a banner only</string>
+    <string name="trip_eta">About %1$d min to the line, around %2$s</string>
+    <string name="saved_add_note">Add note</string>
+    <string name="saved_edit_note">Edit note</string>
+    <string name="saved_note_title">Note</string>
+    <string name="saved_note_placeholder">A note for this stop</string>
+    <string name="saved_error_note">A note can have at most 200 characters.</string>
 </resources>

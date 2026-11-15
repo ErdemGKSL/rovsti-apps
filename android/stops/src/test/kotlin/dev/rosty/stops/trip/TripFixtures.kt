@@ -84,5 +84,6 @@ internal object TripFixtures {
         side = Side.Left,
         inside = false,
         circleM = 1200.0,
+        etaMin = 3,
     )
 }

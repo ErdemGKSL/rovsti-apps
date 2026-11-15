@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
@@ -51,6 +52,7 @@ import dev.rosty.messages.viewer.openAttachment
 import dev.rosty.messages.viewer.picturesOf
 import dev.rosty.messages.viewer.showConversationPictures
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
@@ -275,9 +277,13 @@ fun SmsThreadPage(
                 },
                 menuFor = { smsBubbleMenu(it, res, model, hooks) },
                 pillsFor = detector::pills,
-                onAttach = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                onPaste = stage,
-                onClearAttachment = model::clearAttachment,
+                attachMenu =
+                    persistentListOf(
+                        MenuItem.Action(res.getString(R.string.composer_attach), RostyIcons.Photo) {
+                            pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                    ),
+                onRemoveAttachment = model::clearAttachment,
                 onPill = { pill ->
                     handlePill(
                         context,
@@ -410,6 +416,7 @@ fun SmsThreadPage(
             tools = toolsState,
             labels = labels,
             selectLabels = selectLabels,
+            composerModifier = Modifier.pasteImages(stage),
         )
     }
 }

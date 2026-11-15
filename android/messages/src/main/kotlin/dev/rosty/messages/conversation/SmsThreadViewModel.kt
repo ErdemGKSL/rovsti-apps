@@ -383,12 +383,13 @@ class SmsThreadViewModel(
             return
         }
         staged = file
-        ui.value = ui.value.copy(staged = BubbleMedia(file, words.part("image/*"), isImage = true))
+        ui.value =
+            ui.value.copy(attachment = AttachmentUi(words.part("image/*"), sizeLabel(file.length()), model = file))
     }
 
     fun clearAttachment() {
         staged = null
-        ui.value = ui.value.copy(staged = null)
+        ui.value = ui.value.copy(attachment = null)
     }
 
     /** Puts the message on the page at once, then hands it to the radio after the undo window (M45). */
@@ -691,3 +692,16 @@ private fun SmsStatus.isFinal(): Boolean = state == DeliveryState.Delivered || s
 /** An MMS part shown as an attachment (not the text body or the SMIL layout). */
 private fun isAttachment(part: MmsPart): Boolean =
     part.contentType != "text/plain" && part.contentType != "application/smil"
+
+/** "340 KB", "1.2 MB": the size under a staged picture. */
+internal fun sizeLabel(bytes: Long): String =
+    if (bytes <
+        MIB
+    ) {
+        "${(bytes + KIB - 1) / KIB} KB"
+    } else {
+        String.format(java.util.Locale.ROOT, "%.1f MB", bytes / MIB.toDouble())
+    }
+
+private const val KIB = 1024L
+private const val MIB = 1024L * 1024L

@@ -6,6 +6,8 @@ import dev.rosty.core.getOrNull
 import dev.rosty.core.model.chat.SearchJumpRequest
 import dev.rosty.core.model.chat.SearchJumpStep
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.MediaKind
+import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.TypingState
 import dev.rosty.core.model.wa.WaSyncAction
@@ -16,7 +18,9 @@ import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncRowState
 import dev.rosty.design.text.UiText
 import dev.rosty.messages.R
+import dev.rosty.messages.conversation.AttachmentUi
 import dev.rosty.messages.conversation.BubbleMedia
+import dev.rosty.messages.conversation.BubbleMediaKind
 import dev.rosty.messages.conversation.BubbleQuote
 import dev.rosty.messages.conversation.BubbleState
 import dev.rosty.messages.conversation.BubbleUi
@@ -24,9 +28,13 @@ import dev.rosty.messages.conversation.ComposerMode
 import dev.rosty.messages.conversation.ConversationEffect
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.conversation.DayLabels
+import dev.rosty.messages.conversation.MediaAction
+import dev.rosty.messages.conversation.ReplyUi
+import dev.rosty.messages.conversation.VoiceUi
 import dev.rosty.messages.conversation.withDays
 import dev.rosty.messages.inbox.InboxWords
 import dev.rosty.messages.inbox.RowAvatar
+import dev.rosty.messages.inbox.duration
 import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.waPreview
 import kotlinx.collections.immutable.persistentListOf
@@ -48,6 +56,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 /** The words of a WhatsApp thread, from `strings.xml` (English and Turkish). */
 interface WaWords {
@@ -76,7 +85,52 @@ interface WaWords {
     fun edited(clock: String): String
 
     fun unread(count: Int): String
+
+    /** "1.2 MB": the size of a file as people read it. */
+    fun size(bytes: Long): String
 }
+
+/** What a tap on a bubble's media asks the page to do (the page owns the viewer, the pickers and the intents). */
+sealed interface WaMediaEffect {
+    /** Open the picture viewer on the bubble [key]. */
+    data class ShowPictures(
+        val key: String,
+    ) : WaMediaEffect
+
+    /** Hand a downloaded video or document to an app that shows it. */
+    data class Open(
+        val file: File,
+        val mime: String,
+        val name: String,
+    ) : WaMediaEffect
+
+    /** "Save as" for a received file (a picture goes to Photos). */
+    data class Save(
+        val file: File,
+        val mime: String,
+        val name: String,
+        val picture: Boolean,
+    ) : WaMediaEffect
+
+    data class Share(
+        val file: File,
+        val mime: String,
+        val name: String,
+    ) : WaMediaEffect
+}
+
+/** Who wrote a group message, for the mini card (M50). */
+data class SenderCardUi(
+    val jid: String,
+    val name: String,
+    /** E.164, when the JID carries a phone number. */
+    val number: String?,
+    /** [number] as people read it. */
+    val numberLabel: String?,
+    val avatar: RowAvatar,
+    /** In the address book: "Open contact"; else "Add contact". */
+    val saved: Boolean,
+)
 
 /** The drafts of the threads (`drafts.json` under `wa:<jid>`). */
 interface WaDrafts {
@@ -102,6 +156,16 @@ class WaThreadSources(
     /** Rust's `global_search.jump`: the next step towards a search hit that is not loaded; null: it cannot say. */
     val searchJump: suspend (SearchJumpRequest) -> SearchJumpStep? = { null },
     val now: () -> Long,
+    /** Thumbnails, downloads and the files to send (E6.4b); null: media rows show what they are, nothing loads. */
+    val media: WaMedia? = null,
+    /** The voice note player (M17). */
+    val voice: WaVoiceNotes? = null,
+    /** The emoji used last for reactions (M49). */
+    val emoji: WaRecentEmoji = WaRecentEmoji(null),
+    /** Copies a picked or pasted document (a content URI) into app storage. */
+    val stage: suspend (uri: String) -> WaStageResult = { WaStageResult.Failed },
+    /** A number as people read it (`+90 555 000 00 01`). */
+    val readable: suspend (number: String) -> String = { it },
 )
 
 /**
@@ -122,6 +186,19 @@ class WaThreadViewModel(
 
     private val effectChannel = Channel<ConversationEffect>(Channel.BUFFERED)
     val effects: Flow<ConversationEffect> = effectChannel.receiveAsFlow()
+
+    private val mediaChannel = Channel<WaMediaEffect>(Channel.BUFFERED)
+
+    /** What the page does for a tapped picture or file. */
+    val mediaEffects: Flow<WaMediaEffect> = mediaChannel.receiveAsFlow()
+
+    /** The emoji of the reaction bar, most recently used first (M49); the message menu reads it. */
+    val recentEmoji: StateFlow<List<String>> get() = sources.emoji.recent
+
+    private val noVoice = MutableStateFlow<VoiceUi?>(null)
+
+    /** The voice note in the player. */
+    val voice: StateFlow<VoiceUi?> get() = sources.voice?.state ?: noVoice
 
     private val revealChannel = Channel<String>(Channel.BUFFERED)
 
@@ -146,6 +223,15 @@ class WaThreadViewModel(
     private var lastTypingSentMs = 0L
     private var visible = false
 
+    /** The message the composer answers (its id), and the file that goes out with the next Send. */
+    private var replyTo: String? = null
+    private var attachment: WaStagedFile? = null
+    private var mediaJob: Job? = null
+    private val thumbsTried = HashSet<String>()
+    private val filesTried = HashSet<String>()
+    private var lastTapKey: String? = null
+    private var lastTapMs = 0L
+
     /** The tag of drafts and notifications. */
     val tag: String get() = "wa:$jid"
 
@@ -168,7 +254,27 @@ class WaThreadViewModel(
                     .collect { reload(session) }
             }
         }
-        viewModelScope.launch { sources.offline.online.collect { publish() } }
+        viewModelScope.launch {
+            sources.offline.online.collect { online ->
+                publish()
+                if (online) {
+                    // What could not be loaded without a connection is tried again.
+                    thumbsTried.clear()
+                    filesTried.clear()
+                    prefetch()
+                }
+            }
+        }
+        sources.media?.let { media ->
+            viewModelScope.launch { media.busy.collect { publish() } }
+        }
+        sources.voice?.let { voice ->
+            viewModelScope.launch {
+                voice.prepare()
+                voice.speedLabel.collect { publish() }
+            }
+        }
+        viewModelScope.launch { sources.emoji.load() }
         viewModelScope.launch {
             sources.bookChanges.collect {
                 names.clear()
@@ -202,6 +308,43 @@ class WaThreadViewModel(
         if (unreadAtOpen == null) unreadAtOpen = chat?.unread ?: 0
         publish()
         markRead()
+        prefetch()
+    }
+
+    /**
+     * Loads what the loaded messages still miss, one after the other: the thumbnails of pictures and videos, then
+     * (connected) the pictures themselves. Each message is tried once per connection.
+     */
+    private fun prefetch() {
+        val media = sources.media ?: return
+        if (mediaJob?.isActive == true) return
+        val stored = rows.filter { !it.deleted && it.state !in OUTBOX_STATES }
+        val thumbs =
+            stored.filter {
+                it.kind in VISUAL_KINDS && media.thumb(it) == null && it.mediaPath == null &&
+                    (it.hasThumbnail || it.media?.thumbnail == true) && it.id !in thumbsTried
+            }
+        val files =
+            if (sources.offline.online.value) {
+                stored.filter { it.kind in PICTURE_KINDS && it.mediaPath == null && it.id !in filesTried }
+            } else {
+                emptyList()
+            }
+        if (thumbs.isEmpty() && files.isEmpty()) return
+        mediaJob =
+            viewModelScope.launch {
+                var fresh = false
+                for (row in thumbs) {
+                    thumbsTried += row.id
+                    if (media.ensureThumb(row)) fresh = true
+                }
+                if (fresh) publish()
+                for (row in files) {
+                    filesTried += row.id
+                    // A finished download tells the store, and the store's change reads the page again.
+                    media.fetch(row)
+                }
+            }
     }
 
     // ---- state
@@ -230,6 +373,16 @@ class WaThreadViewModel(
                 loaded = true,
                 hasOlder = hasStoredOlder || (!reachedStart && rows.isNotEmpty()),
                 composer = ComposerMode.Ready(words.placeholder),
+                reply = replyOf(),
+                attachment =
+                    attachment?.let {
+                        AttachmentUi(it.name, words.size(it.size), it.file.takeIf { _ -> it.mime.startsWith("image/") })
+                    },
+                voiceSpeed =
+                    sources.voice
+                        ?.speedLabel
+                        ?.value
+                        .orEmpty(),
                 notice =
                     when {
                         !online -> words.offline
@@ -311,28 +464,121 @@ class WaThreadViewModel(
             meta = meta,
             state = if (row.fromMe) state else BubbleState.None,
             atMs = row.timestampMs,
-            media =
-                if (isMedia && !row.deleted) {
-                    // E6.4a shows what the attachment is; the pictures and the player are E6.4b.
-                    persistentListOf(BubbleMedia(null, mediaLabel(row), isImage = false))
-                } else {
-                    persistentListOf()
-                },
+            media = if (isMedia && !row.deleted) persistentListOf(mediaOf(row, state)) else persistentListOf(),
             sender = if (group && !row.fromMe) senderOf(row.sender, row.senderName) else null,
-            quote =
-                row.quoted?.takeIf { !row.deleted }?.let { quoted ->
-                    val mine = quoted.sender == null
-                    BubbleQuote(
-                        author = if (mine) words.you else senderOf(quoted.sender, null),
-                        text = quoted.preview.orEmpty(),
-                        targetKey = quoted.id,
-                    )
-                },
+            quote = if (row.deleted) null else quoteOf(row),
             forwarded = row.forwarded && !row.deleted,
             edited = row.editedMs != null,
             deleted = row.deleted,
             reactions = reactionsOf(row),
+            senderId = if (group && !row.fromMe) row.sender else null,
+            canReply = !row.deleted && row.state !in OUTBOX_STATES,
         )
+    }
+
+    /**
+     * The quote above a reply. A reply still in the outbox carries only the id of what it answers, so author and
+     * preview come from the loaded message.
+     */
+    private suspend fun quoteOf(row: WaSyncMessage): BubbleQuote? {
+        val quoted = row.quoted ?: return null
+        val target = rows.firstOrNull { it.id == quoted.id }
+        val queued = row.state in OUTBOX_STATES && target != null
+        val mine = if (queued) target?.fromMe == true else quoted.sender == null
+        val author =
+            when {
+                mine -> words.you
+                queued -> senderOf(target?.sender, target?.senderName)
+                else -> senderOf(quoted.sender, null)
+            }
+        return BubbleQuote(
+            author = author,
+            text = quoted.preview ?: target?.let(::snippetOf).orEmpty(),
+            targetKey = quoted.id,
+        )
+    }
+
+    /** One line of a message for a quote: its text, else what its attachment is. */
+    private fun snippetOf(row: WaSyncMessage): String = row.text?.takeIf { it.isNotBlank() } ?: mediaLabel(row)
+
+    private suspend fun replyOf(): ReplyUi? {
+        val row = replyTo?.let { id -> rows.firstOrNull { it.id == id } } ?: return null
+        val author = if (row.fromMe) words.you else senderOf(row.sender, row.senderName)
+        return ReplyUi(keyOf(row), author, snippetOf(row))
+    }
+
+    /** How the attachment of [row] is drawn: the picture, the player, the file row. */
+    private fun mediaOf(
+        row: WaSyncMessage,
+        state: BubbleState,
+    ): BubbleMedia {
+        val media = sources.media
+        val queued = row.state in OUTBOX_STATES
+        val local = row.mediaPath?.let(::File)?.takeIf { it.isFile }
+        val busy = state == BubbleState.Sending || media?.busy?.value?.contains(row.id) == true
+        val meta = row.media
+        val label = mediaLabel(row)
+        val length = meta?.seconds?.let(::duration)
+        val size = row.size?.takeIf { it > 0 }?.let(words::size)
+        return when (row.kind) {
+            WaSyncKind.Image, WaSyncKind.Sticker -> {
+                BubbleMedia(
+                    model = local ?: media?.thumb(row),
+                    label = label,
+                    isImage = true,
+                    aspect = aspectOf(meta),
+                    kind = BubbleMediaKind.Picture,
+                    busy = busy,
+                    local = local != null,
+                )
+            }
+
+            WaSyncKind.Video -> {
+                BubbleMedia(
+                    model = media?.thumb(row),
+                    label = label,
+                    isImage = false,
+                    aspect = aspectOf(meta),
+                    kind = BubbleMediaKind.Video,
+                    detail = listOfNotNull(length, size).joinToString(" · ").ifEmpty { null },
+                    busy = busy,
+                    local = local != null,
+                )
+            }
+
+            WaSyncKind.Audio -> {
+                BubbleMedia(
+                    model = null,
+                    label = label,
+                    isImage = false,
+                    kind = BubbleMediaKind.Voice,
+                    detail = length ?: size,
+                    busy = busy,
+                    local = local != null,
+                )
+            }
+
+            else -> {
+                // An outbox row carries no file name: the staged file is kept under the name it was picked with.
+                val name = meta?.fileName?.takeIf { it.isNotBlank() } ?: local?.takeIf { queued }?.name
+                val type = (name ?: local?.name)?.substringAfterLast('.', "")?.takeIf { it.length in 1..MAX_TYPE }
+                BubbleMedia(
+                    model = null,
+                    label = name ?: label,
+                    isImage = false,
+                    kind = BubbleMediaKind.File,
+                    detail = listOfNotNull(type?.uppercase(), size).joinToString(" · ").ifEmpty { null },
+                    busy = busy,
+                    local = local != null,
+                )
+            }
+        }
+    }
+
+    private fun aspectOf(meta: MediaMeta?): Float? {
+        val width = meta?.width?.takeIf { it > 0 } ?: return null
+        val height = meta.height?.takeIf { it > 0 } ?: return null
+        return (width.toFloat() / height).coerceIn(MIN_ASPECT, MAX_ASPECT)
     }
 
     /** "Photo", "Voice message (0:12)": what the attachment is, without its caption. */
@@ -466,18 +712,217 @@ class WaThreadViewModel(
         }
     }
 
-    /** Queues the message: it is on the page at once, with a clock until the gateway has it. */
+    /**
+     * Queues the message: it is on the page at once, with a clock until the gateway has it. With a file above the
+     * composer the file goes out and [text] is its caption; with a quoted bar it is a reply.
+     */
     fun send(text: String) {
         val body = text.trim()
-        if (body.isEmpty()) return
+        val file = attachment
+        if (body.isEmpty() && file == null) return
+        val quoted = replyTo
+        attachment = null
+        replyTo = null
         viewModelScope.launch {
             sources.drafts.put(tag, "")
             lastTypingSentMs = 0
-            if (!sources.offline.enqueue(jid, WaSyncAction.SendText(body))) {
+            val action =
+                if (file != null) {
+                    WaSyncAction.SendMedia(
+                        file = file.file.absolutePath,
+                        media = mediaKindOf(file.mime),
+                        mime = file.mime,
+                        size = file.size,
+                        caption = body.ifEmpty { null },
+                        quotedId = quoted,
+                        fileName = file.name,
+                    )
+                } else {
+                    WaSyncAction.SendText(body, quoted)
+                }
+            if (!sources.offline.enqueue(jid, action)) {
+                attachment = file
+                replyTo = quoted
                 effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
                 effectChannel.trySend(ConversationEffect.Restore(body))
             }
+            publish()
         }
+    }
+
+    // ---- replies (M31)
+
+    /** The composer answers the message [key] from now on (a swipe to the right, "Reply" in the message menu). */
+    fun startReply(key: String) {
+        val row = rowOf(key)?.takeIf { !it.deleted && it.state !in OUTBOX_STATES } ?: return
+        replyTo = row.id
+        viewModelScope.launch { publish() }
+    }
+
+    /** The × of the quoted bar. */
+    fun cancelReply() {
+        if (replyTo == null) return
+        replyTo = null
+        viewModelScope.launch { publish() }
+    }
+
+    // ---- attachments
+
+    /**
+     * A picked or pasted document ([uri], a content URI): copied into app storage and kept above the composer until
+     * Send. A file over WhatsApp's 16 MiB is refused with a pill.
+     */
+    fun attach(uri: String) {
+        viewModelScope.launch {
+            when (val result = sources.stage(uri)) {
+                is WaStageResult.Staged -> {
+                    if (result.file.size > WaMedia.MAX_SEND_BYTES) {
+                        sources.media?.discard(result.file.file.absolutePath)
+                        tooLarge()
+                    } else {
+                        attachment?.let { sources.media?.discard(it.file.absolutePath) }
+                        attachment = result.file
+                        publish()
+                    }
+                }
+
+                WaStageResult.TooLarge -> {
+                    tooLarge()
+                }
+
+                WaStageResult.Failed -> {
+                    effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_media_cant_attach)))
+                }
+            }
+        }
+    }
+
+    private fun tooLarge() {
+        val megabytes = (WaMedia.MAX_SEND_BYTES / BYTES_PER_MB).toInt()
+        effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_media_too_large, listOf(megabytes))))
+    }
+
+    /** The × of the file above the composer. */
+    fun removeAttachment() {
+        val file = attachment ?: return
+        attachment = null
+        viewModelScope.launch {
+            sources.media?.discard(file.file.absolutePath)
+            publish()
+        }
+    }
+
+    // ---- media of a bubble
+
+    /** The file of [row] on the phone: the one being sent, the cached one, else downloaded now. */
+    private suspend fun fileOf(row: WaSyncMessage): File? {
+        val local = row.mediaPath?.let(::File)?.takeIf { it.isFile }
+        if (row.state in OUTBOX_STATES) return local
+        val file = sources.media?.fetch(row) ?: local
+        if (file == null) {
+            effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_media_cant_download)))
+        }
+        return file
+    }
+
+    private fun fileName(
+        row: WaSyncMessage,
+        file: File,
+    ): String = row.media?.fileName?.takeIf { it.isNotBlank() } ?: file.name
+
+    /**
+     * A tap on a bubble with an attachment: a picture opens in the viewer, a voice note plays or pauses, a video or
+     * document is downloaded and handed to an app that shows it. False: the bubble has nothing to open.
+     */
+    fun openMedia(key: String): Boolean {
+        val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS } ?: return false
+        if (row.kind == WaSyncKind.Audio) {
+            toggleVoice(key)
+            return true
+        }
+        viewModelScope.launch {
+            val file = fileOf(row) ?: return@launch
+            if (row.kind in PICTURE_KINDS) {
+                // The viewer pages over the pictures of the state: it must know this one is there now.
+                sources.offline.session.value
+                    ?.let { reload(it) }
+                mediaChannel.trySend(WaMediaEffect.ShowPictures(key))
+            } else {
+                mediaChannel.trySend(WaMediaEffect.Open(file, row.mime.orEmpty(), fileName(row, file)))
+            }
+        }
+        return true
+    }
+
+    /** Save or Share of a received file (downloaded first when it is not on the phone). */
+    fun mediaAction(
+        key: String,
+        action: MediaAction,
+    ) {
+        val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS } ?: return
+        viewModelScope.launch {
+            val file = fileOf(row) ?: return@launch
+            val name = fileName(row, file)
+            val mime = row.mime.orEmpty()
+            mediaChannel.trySend(
+                when (action) {
+                    MediaAction.Save -> WaMediaEffect.Save(file, mime, name, row.kind in PICTURE_KINDS)
+                    MediaAction.Share -> WaMediaEffect.Share(file, mime, name)
+                },
+            )
+        }
+    }
+
+    // ---- voice notes (M17)
+
+    /** Play or pause of the voice note [key]; another note that was playing stops. */
+    fun toggleVoice(key: String) {
+        val voice = sources.voice ?: return
+        val row = rowOf(key)?.takeIf { !it.deleted && it.kind == WaSyncKind.Audio } ?: return
+        viewModelScope.launch {
+            val file = fileOf(row) ?: return@launch
+            if (!voice.toggle(key, file.absolutePath)) {
+                effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_voice_cant_play)))
+            }
+        }
+    }
+
+    /** Scrubbing the bar of the note in the player to [fraction] (0..1). */
+    fun seekVoice(
+        key: String,
+        fraction: Float,
+    ) {
+        viewModelScope.launch { sources.voice?.seek(key, fraction) }
+    }
+
+    /** The speed pill: 1×, 1.5×, 2×, remembered. */
+    fun nextVoiceSpeed() {
+        viewModelScope.launch { sources.voice?.nextSpeed() }
+    }
+
+    /** The page is left: nothing keeps playing. */
+    fun stopVoice() {
+        sources.voice?.stop()
+    }
+
+    // ---- the sender card (M50)
+
+    /** Who [senderJid] is, for the card a tap on a sender name of a group opens. */
+    suspend fun senderCard(senderJid: String): SenderCardUi {
+        val number = numberOfJid(senderJid)
+        return SenderCardUi(
+            jid = senderJid,
+            name = senderOf(senderJid, null),
+            number = number,
+            numberLabel = number?.let { sources.readable(it) },
+            avatar =
+                RowAvatar(
+                    numbers = listOfNotNull(number).toImmutableList(),
+                    waJid = senderJid,
+                    colorKey = number ?: senderJid,
+                ),
+            saved = number?.let { nameOf(it) } != null,
+        )
     }
 
     // ---- bubble actions
@@ -497,8 +942,18 @@ class WaThreadViewModel(
     ) {
         val row = rowOf(key)?.takeIf { it.state in OUTBOX_STATES } ?: return
         viewModelScope.launch {
-            if (sources.offline.cancel(jid, row.clientId ?: row.id) && restore) {
+            if (!sources.offline.cancel(jid, row.clientId ?: row.id)) return@launch
+            val file = row.mediaPath?.let(::File)?.takeIf { row.kind in MEDIA_KINDS }
+            if (restore) {
                 effectChannel.trySend(ConversationEffect.Restore(row.text.orEmpty()))
+                // A queued file goes back above the composer with its caption.
+                if (file != null && file.isFile) {
+                    attachment?.let { sources.media?.discard(it.file.absolutePath) }
+                    attachment = WaStagedFile(file, file.name, row.mime.orEmpty(), row.size ?: file.length())
+                    publish()
+                }
+            } else if (file != null) {
+                sources.media?.discard(file.absolutePath)
             }
         }
     }
@@ -532,8 +987,30 @@ class WaThreadViewModel(
     ) {
         val row = rowOf(key)?.takeIf { it.state !in OUTBOX_STATES && !it.deleted } ?: return
         viewModelScope.launch {
-            sources.offline.enqueue(jid, WaSyncAction.React(row.id, row.fromMe, row.sender, emoji))
+            if (sources.offline.enqueue(jid, WaSyncAction.React(row.id, row.fromMe, row.sender, emoji))) {
+                sources.emoji.note(emoji)
+            } else {
+                effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
+            }
         }
+    }
+
+    /**
+     * A tap on the bubble [key]. The second tap within [DOUBLE_TAP_MS] on a text message reacts with the default
+     * emoji, or takes that reaction back (M32). True when the tap was that double tap.
+     */
+    fun tap(key: String): Boolean {
+        val now = sources.now()
+        val double = lastTapKey == key && now - lastTapMs in 0..DOUBLE_TAP_MS
+        lastTapKey = if (double) null else key
+        lastTapMs = now
+        if (!double) return false
+        val row =
+            rowOf(key)?.takeIf { it.kind == WaSyncKind.Text && it.state !in OUTBOX_STATES && !it.deleted }
+                ?: return false
+        val mine = row.reactions.firstOrNull { it.fromMe }?.emoji
+        react(key, if (mine == WaRecentEmoji.DEFAULT) "" else WaRecentEmoji.DEFAULT)
+        return true
     }
 
     // ---- typing
@@ -587,6 +1064,24 @@ class WaThreadViewModel(
         private val OUTBOX_STATES = setOf(WaSyncRowState.Waiting, WaSyncRowState.Sending, WaSyncRowState.Failed)
         private val MEDIA_KINDS =
             setOf(WaSyncKind.Image, WaSyncKind.Video, WaSyncKind.Audio, WaSyncKind.Document, WaSyncKind.Sticker)
+        private val PICTURE_KINDS = setOf(WaSyncKind.Image, WaSyncKind.Sticker)
+        private val VISUAL_KINDS = setOf(WaSyncKind.Image, WaSyncKind.Sticker, WaSyncKind.Video)
+        private const val MIN_ASPECT = 0.6f
+        private const val MAX_ASPECT = 1.9f
+        private const val MAX_TYPE = 5
+        private const val BYTES_PER_MB = 1024L * 1024L
+
+        /** Two taps this close together are a double tap (Android's own timeout). */
+        const val DOUBLE_TAP_MS = 300L
+
+        /** What a picked file is sent as. */
+        fun mediaKindOf(mime: String): MediaKind =
+            when {
+                mime.startsWith("image/") -> MediaKind.Image
+                mime.startsWith("video/") -> MediaKind.Video
+                mime.startsWith("audio/") -> MediaKind.Audio
+                else -> MediaKind.Document
+            }
 
         /** Stable from the moment a message is written: the outbox client id it keeps after it went out. */
         fun keyOf(row: WaSyncMessage): String = row.clientId ?: row.id

@@ -19,9 +19,13 @@ import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.wa.GatewayWaRemote
 import dev.rosty.messages.wa.StoreWaChats
 import dev.rosty.messages.wa.WaChats
+import dev.rosty.messages.wa.WaMedia
 import dev.rosty.messages.wa.WaOffline
+import dev.rosty.messages.wa.WaRecentEmoji
 import dev.rosty.messages.wa.WaRemote
+import dev.rosty.messages.wa.WaVoiceNotes
 import dev.rosty.messages.wa.realWaOffline
+import dev.rosty.messages.wa.realWaVoice
 import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.AvatarResolver
 import dev.rosty.people.PeopleIndex
@@ -122,6 +126,17 @@ open class MessagesContainer(
 
     /** The WhatsApp chats of the inbox and their actions, read from the offline store. */
     val waChats: WaChats by lazy { createWaChats() }
+
+    /** Thumbnails, downloads and the files to send of WhatsApp messages (E6.4b), kept through the store's LRU. */
+    val waMedia: WaMedia by lazy {
+        WaMedia(waOffline, waRemote, java.io.File(context.filesDir, "wa-media"), System::currentTimeMillis)
+    }
+
+    /** The voice note player (M17): one note at a time. */
+    val waVoice: WaVoiceNotes by lazy { realWaVoice(this) }
+
+    /** The emoji used last for reactions (M49). */
+    val waEmoji: WaRecentEmoji by lazy { WaRecentEmoji(java.io.File(context.filesDir, "recent-reactions.json")) }
 
     protected open fun createWaRemote(): WaRemote = GatewayWaRemote(wa)
 

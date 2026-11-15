@@ -69,6 +69,8 @@ object EnglishWaWords : WaWords {
     override fun edited(clock: String) = "Edited $clock"
 
     override fun unread(count: Int) = if (count == 1) "1 unread message" else "$count unread messages"
+
+    override fun size(bytes: Long) = plainSize(bytes)
 }
 
 /** Drafts in memory. */

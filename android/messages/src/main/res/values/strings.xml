@@ -289,4 +289,31 @@
     <string name="card_unnamed">Contact</string>
     <string name="card_add">Add to Contacts</string>
     <string name="tools_next_unread">Next Unread Chat</string>
+    <!-- E6.4b -->
+    <string name="wa_media_too_large">That file is over %1$d MB</string>
+    <string name="wa_media_cant_attach">Couldn\'t attach the file</string>
+    <string name="wa_media_cant_download">Couldn\'t download the file</string>
+    <string name="wa_media_cant_open">No app can open this file</string>
+    <string name="wa_media_saved">Saved</string>
+    <string name="wa_media_not_saved">Couldn\'t save the file</string>
+    <string name="wa_media_cant_share">Couldn\'t share the file</string>
+    <string name="wa_voice_cant_play">Couldn\'t play the voice message</string>
+    <string name="wa_voice_play">Play</string>
+    <string name="wa_voice_pause">Pause</string>
+    <string name="wa_voice_speed">Playback speed %1$s</string>
+    <string name="wa_reply">Reply</string>
+    <string name="wa_reply_cancel">Cancel reply</string>
+    <string name="wa_attachment_remove">Remove attachment</string>
+    <string name="wa_attach">Attach</string>
+    <string name="wa_attach_photo">Photo</string>
+    <string name="wa_attach_video">Video</string>
+    <string name="wa_attach_document">Document</string>
+    <string name="wa_attach_paste">Paste picture</string>
+    <string name="wa_paste_nothing">No picture on the clipboard</string>
+    <string name="wa_sender_card">About %1$s</string>
+    <string name="wa_sender_message">Message privately</string>
+    <string name="wa_sender_call">Call</string>
+    <string name="wa_sender_open_contact">Open contact</string>
+    <string name="wa_sender_add_contact">Add to contacts</string>
+    <string name="wa_no_app">No app found for this</string>
 </resources>

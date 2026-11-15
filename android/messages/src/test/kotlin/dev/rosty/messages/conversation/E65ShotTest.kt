@@ -89,7 +89,14 @@ class E65ShotTest : ShotTest() {
                             menuFor = { menu },
                             reactionsFor = { reactions },
                             pillsFor = { b -> pills[b.key].orEmpty() },
-                            onAttach = if (attach) ({}) else null,
+                            attachMenu =
+                                if (attach) {
+                                    persistentListOf(
+                                        MenuItem.Action("Add Photo", RostyIcons.Photo) {},
+                                    )
+                                } else {
+                                    persistentListOf()
+                                },
                         )
                     },
                 sendLabel = "Send",
@@ -169,7 +176,7 @@ class E65ShotTest : ShotTest() {
             val base = ConversationSample.state(picture)
             Thread(
                 it,
-                state = base.copy(staged = BubbleMedia(picture, "Photo", isImage = true)),
+                state = base.copy(attachment = AttachmentUi("Photo", "312 KB", model = picture)),
                 pills = emptyMap(),
                 attach = true,
             )

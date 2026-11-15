@@ -276,49 +276,6 @@ fun OverlayController.presentInfo(
     )
 }
 
-/** The picture waiting in the composer, with × to drop it. */
-@Composable
-internal fun StagedPicture(
-    media: BubbleMedia,
-    onClear: () -> Unit,
-) {
-    Box(
-        Modifier
-            .padding(start = Spacing.gutter, top = Spacing.s)
-            .size(MessagesMetrics.StagedPicture)
-            .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
-            .testTag(ConversationTags.Staged),
-    ) {
-        SizedImage(
-            model = media.model,
-            widthPx = with(LocalDensity.current) { MessagesMetrics.StagedPicture.roundToPx() },
-            heightPx = with(LocalDensity.current) { MessagesMetrics.StagedPicture.roundToPx() },
-            modifier = Modifier.matchParentSize(),
-            contentScale = ContentScale.Crop,
-            contentDescription = media.label,
-        )
-        Box(
-            Modifier
-                .align(Alignment.TopEnd)
-                .padding(Spacing.xs)
-                .size(MessagesMetrics.SelectCircle)
-                .clip(CircleShape)
-                .background(RostyTheme.colors.labelPrimary.copy(alpha = STAGED_CLOSE_ALPHA))
-                .clickable(onClick = onClear),
-            contentAlignment = Alignment.Center,
-        ) {
-            RostyIcon(
-                RostyIcons.Xmark,
-                stringResource(R.string.composer_remove_attachment),
-                tint = RostyTheme.colors.page,
-                size = MessagesMetrics.TickGlyph,
-            )
-        }
-    }
-}
-
-private const val STAGED_CLOSE_ALPHA = 0.6f
-
 /** M46: a picture pasted or dropped into the composer goes to [onPaste]; text still pastes as text. */
 @OptIn(ExperimentalFoundationApi::class)
 internal fun Modifier.pasteImages(onPaste: ((android.net.Uri) -> Unit)?): Modifier =

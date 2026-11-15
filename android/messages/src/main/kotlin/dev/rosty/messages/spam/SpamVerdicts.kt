@@ -61,7 +61,14 @@ class SpamVerdicts(
             val (thread, sender) = singleSender(row, sms) ?: continue
             if (blocked.isNotEmpty() && isBlocked(sender, blocked)) blockedThreads += thread
             if (!candidate(row)) continue
-            val question = Question(sender, row.threads.first().last.body, row.key is PersonKey.Contact)
+            val question =
+                Question(
+                    sender,
+                    row.threads
+                        .first()
+                        .last.body,
+                    row.key is PersonKey.Contact,
+                )
             val verdict =
                 spamAnswers.getOrPut(question) {
                     val request = ClassifyRequest(rules, question.sender, question.body, question.known, blocked)

@@ -141,7 +141,15 @@ fun ColumnScope.RuleEditorContent(
             GlassTextField(
                 state = field,
                 placeholder =
-                    stringResource(if (kind == RuleKind.Sender) R.string.spam_field_sender else R.string.spam_field_keyword),
+                    stringResource(
+                        if (kind ==
+                            RuleKind.Sender
+                        ) {
+                            R.string.spam_field_sender
+                        } else {
+                            R.string.spam_field_keyword
+                        },
+                    ),
                 modifier = Modifier.fillMaxWidth().testTag(RuleEditorTags.Field),
                 focusRequester = focus,
                 onSubmit = { if (valid) onSave(kind, typed) { problem = it } },
@@ -183,7 +191,14 @@ fun ColumnScope.SenderEditorContent(
             state = field,
             placeholder = placeholder,
             modifier = Modifier.fillMaxWidth().testTag(RuleEditorTags.Field),
-            keyboardOptions = if (phone) KeyboardOptions(keyboardType = KeyboardType.Phone) else KeyboardOptions.Default,
+            keyboardOptions =
+                if (phone) {
+                    KeyboardOptions(
+                        keyboardType = KeyboardType.Phone,
+                    )
+                } else {
+                    KeyboardOptions.Default
+                },
             focusRequester = focus,
             onSubmit = { if (valid) onSave(typed) { problem = it } },
         )

@@ -268,7 +268,7 @@
     <string name="spam_kind_keyword">Metin içerir</string>
     <string name="spam_field_sender">Ad veya numara, * kullanılabilir</string>
     <string name="spam_field_keyword">Aranacak kelimeler</string>
-    <string name="spam_hint_sender">PROMO* ile PROMO ile başlayan her gönderici eşleşir.</string>
+    <string name="spam_hint_sender">PROMO*, PROMO ile başlayan her göndericiyle eşleşir.</string>
     <string name="spam_hint_keyword">Büyük harf ve Türkçe karakter fark etmez: kazandiniz, KAZANDINIZ yazanı da bulur.</string>
     <string name="spam_hint_links">Kişilerinizde olmayan birinden gelen bağlantılı mesaj.</string>
     <string name="spam_hint_short">3 ile 6 haneli numaralardan gelen mesajlar. Doğrulama kodları yine gelen kutusuna düşer.</string>

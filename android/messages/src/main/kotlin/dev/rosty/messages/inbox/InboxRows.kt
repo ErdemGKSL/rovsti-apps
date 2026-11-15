@@ -79,11 +79,12 @@ data class InboxRowUi(
 
     /** Block and Unblock need a sender that is a phone number (not an id like `GARANTI`). */
     val senderIsNumber: Boolean
-        get() = smsSender?.let { s -> s.any(Char::isDigit) && s.all { it.isDigit() || it in NUMBER_PUNCTUATION } } == true
+        get() =
+            smsSender?.let { s -> s.any(Char::isDigit) && s.all { it.isDigit() || it in NUMBER_PUNCTUATION } } ==
+                true
 }
 
 private const val NUMBER_PUNCTUATION = "+ -()."
-
 
 /** The inbox split as the GPUI app showed it: the normal rows (pins first), the archived ones and the spam. */
 @Immutable

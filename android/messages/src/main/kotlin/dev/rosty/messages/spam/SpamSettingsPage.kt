@@ -58,10 +58,23 @@ class SpamPageLinks(
 @Composable
 fun ruleLabel(rule: RuleRow): String =
     when (rule.kind) {
-        RuleKind.Sender -> stringResource(R.string.spam_rule_sender, rule.text)
-        RuleKind.Keyword -> stringResource(R.string.spam_rule_keyword, rule.text)
-        RuleKind.UnknownLinks -> stringResource(R.string.spam_rule_links)
-        RuleKind.ShortCodes -> stringResource(if (rule.on) R.string.spam_rule_short_codes else R.string.spam_rule_short_codes_off)
+        RuleKind.Sender -> {
+            stringResource(R.string.spam_rule_sender, rule.text)
+        }
+
+        RuleKind.Keyword -> {
+            stringResource(R.string.spam_rule_keyword, rule.text)
+        }
+
+        RuleKind.UnknownLinks -> {
+            stringResource(R.string.spam_rule_links)
+        }
+
+        RuleKind.ShortCodes -> {
+            stringResource(
+                if (rule.on) R.string.spam_rule_short_codes else R.string.spam_rule_short_codes_off,
+            )
+        }
     }
 
 /**
@@ -125,7 +138,13 @@ fun SpamSettingsPage(
                     valueItem(sender, stringResource(R.string.spam_remove), SpamTags.allowed(index), danger) {
                         links.onAction(SpamSettingsAction.RemoveAllowed(index))
                     }
-                } + addItem(stringResource(R.string.spam_add_allow), SpamTags.AddAllow, tint, onClick = links.addAllowed),
+                } +
+                    addItem(
+                        stringResource(R.string.spam_add_allow),
+                        SpamTags.AddAllow,
+                        tint,
+                        onClick = links.addAllowed,
+                    ),
         )
         Footnote(stringResource(R.string.spam_allow_footer))
 
@@ -133,7 +152,13 @@ fun SpamSettingsPage(
             title = stringResource(R.string.spam_group_blocked),
             items =
                 ui.blocked.mapIndexed { index, number ->
-                    valueItem(number, stringResource(R.string.spam_unblock), SpamTags.blocked(index), tint, ui.canBlock) {
+                    valueItem(
+                        number,
+                        stringResource(R.string.spam_unblock),
+                        SpamTags.blocked(index),
+                        tint,
+                        ui.canBlock,
+                    ) {
                         links.onAction(SpamSettingsAction.Unblock(number))
                     }
                 } +

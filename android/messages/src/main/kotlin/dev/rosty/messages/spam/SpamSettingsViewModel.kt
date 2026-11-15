@@ -148,7 +148,12 @@ class SpamSettingsViewModel(
         return copy(
             loaded = prefs != null,
             enabled = spam?.enabled ?: true,
-            rules = spam?.rules.orEmpty().mapIndexed(::rowOf).toImmutableList(),
+            rules =
+                spam
+                    ?.rules
+                    .orEmpty()
+                    .mapIndexed(::rowOf)
+                    .toImmutableList(),
             allow = spam?.allow.orEmpty().toImmutableList(),
             blocked = blocked.map { it.numberRaw.ifBlank { it.normalized } }.toImmutableList(),
             deleteCodes = codes,
@@ -234,6 +239,11 @@ class SpamSettingsViewModel(
         fun rowOf(
             index: Int,
             rule: SpamRule,
-        ) = RuleRow(index, RuleKind.of(rule), RuleKind.textOf(rule), (rule as? SpamRule.ShortCodeOnly)?.enabled != false)
+        ) = RuleRow(
+            index,
+            RuleKind.of(rule),
+            RuleKind.textOf(rule),
+            (rule as? SpamRule.ShortCodeOnly)?.enabled != false,
+        )
     }
 }

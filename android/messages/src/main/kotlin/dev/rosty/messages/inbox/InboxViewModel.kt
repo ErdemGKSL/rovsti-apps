@@ -681,7 +681,11 @@ class InboxViewModel(
         val outcome = if (blocked) spam.block(sender) else spam.unblock(sender)
         when (outcome) {
             BlockOutcome.Done -> {
-                val text = UiText.Res(if (blocked) R.string.spam_blocked_done else R.string.spam_unblocked_done, listOf(sender))
+                val text =
+                    UiText.Res(
+                        if (blocked) R.string.spam_blocked_done else R.string.spam_unblocked_done,
+                        listOf(sender),
+                    )
                 effectChannel.trySend(
                     InboxEffect.Undo(text) {
                         launch { if (blocked) spam.unblock(sender) else spam.block(sender) }

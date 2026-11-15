@@ -77,6 +77,9 @@ interface MapToolsHost {
         dest: Destination,
     )
 
+    /** Asks for the location permission (the system dialog); [onResult] hears whether it is granted now. */
+    fun requestLocation(onResult: (Boolean) -> Unit)
+
     /** "Export as GPX": the system's Save as for [fileName], then [text] written to it. */
     fun exportGpx(
         fileName: String,
@@ -189,9 +192,16 @@ class MapTools internal constructor(
             return
         }
         if (container.permissions.state(PermissionGroup.LOCATION).first() != PermissionState.Granted) {
-            toast(R.string.tools_allow_location)
+            // GPUI `locate_me`: ask first; only a refusal says why nothing happens.
+            host().requestLocation { granted ->
+                if (granted) scope.launch { waitForFix() } else toast(R.string.tools_allow_location)
+            }
             return
         }
+        waitForFix()
+    }
+
+    private suspend fun waitForFix() {
         toast(R.string.tools_looking)
         val first =
             withTimeoutOrNull(LOCATE_WAIT_MS) {

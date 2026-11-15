@@ -1,11 +1,15 @@
 package dev.rosty.stops.home
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Slot
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.overlay.showToast
+import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.stops.R
 import dev.rosty.stops.StopsContainer
 import dev.rosty.stops.files.rememberTextExport
@@ -32,6 +36,18 @@ internal fun mapToolsHost(
 ): MapToolsHost {
     val overlays = LocalOverlay.current
     val resources = LocalResources.current
+    val context = LocalContext.current
+    val permissions = container.permissions
+    val pending = remember { arrayOfNulls<(Boolean) -> Unit>(1) }
+    val askLocation =
+        rememberLauncherForActivityResult(
+            remember(permissions) { permissions.contract(PermissionGroup.LOCATION) },
+        ) { result ->
+            val done = pending[0] ?: return@rememberLauncherForActivityResult
+            pending[0] = null
+            permissions.refresh(context.findComponentActivity())
+            done(result.isNotEmpty() && result.values.all { it })
+        }
     val saveGpx =
         rememberTextExport(container.files, GPX_MIME) { ok ->
             overlays.showToast(
@@ -48,6 +64,11 @@ internal fun mapToolsHost(
         override fun setSavedOnMap(on: Boolean) {
             showSavedOnMap(on)
             container.scope.launch { container.store.update { it.copy(showSavedOnMap = on) } }
+        }
+
+        override fun requestLocation(onResult: (Boolean) -> Unit) {
+            pending[0] = onResult
+            askLocation.launch(Unit)
         }
 
         override fun saveGate(

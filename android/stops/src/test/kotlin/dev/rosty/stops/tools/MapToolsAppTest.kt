@@ -1,6 +1,7 @@
 package dev.rosty.stops.tools
 
 import android.Manifest
+import android.content.pm.PackageManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
@@ -30,10 +31,18 @@ import org.robolectric.annotation.Config
 /** The map tools (E7.9) in the real app root, on the real core. */
 @Config(sdk = [35])
 class MapToolsAppTest : ShotTest() {
-    private fun start(): AppFixture {
+    private val permissions =
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+
+    private fun start(granted: Boolean = true): AppFixture {
         val fixture = PickFixtures.app()
-        val permissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        shadowOf(fixture.app).grantPermissions(*permissions)
+        if (granted) {
+            shadowOf(
+                fixture.app,
+            ).grantPermissions(*permissions)
+        } else {
+            shadowOf(fixture.app).denyPermissions(*permissions)
+        }
         fixture.container.permissions.refreshNow { false }
         composeFrame { fixture.Content() }
         settleRust()
@@ -141,5 +150,34 @@ class MapToolsAppTest : ShotTest() {
                 .primaryText()
                 .orEmpty()
         assertTrue(copied, copied.startsWith("https://www.openstreetmap.org/#map="))
+    }
+
+    /** Me without the permission asks for it; only a refusal shows the toast. */
+    private fun askAndAnswer(grant: Boolean) {
+        val fixture = start(granted = false)
+        press(HomeTags.Locate)
+        val asked = shadowOf(compose.activity).lastRequestedPermission
+        assertTrue(asked.requestedPermissions.contains(Manifest.permission.ACCESS_FINE_LOCATION))
+        if (grant) shadowOf(fixture.app).grantPermissions(*permissions)
+        val answer = if (grant) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED
+        compose.runOnUiThread {
+            compose.activity.onRequestPermissionsResult(
+                asked.requestCode,
+                asked.requestedPermissions,
+                IntArray(asked.requestedPermissions.size) { answer },
+            )
+        }
+        settleRust(800)
+    }
+
+    @Test fun meWithoutThePermissionAsksAndARefusalSaysWhy() {
+        askAndAnswer(grant = false)
+        compose.onNodeWithText("Allow location to see where you are.").assertExists()
+    }
+
+    @Test fun meWithoutThePermissionAsksAndAGrantLooksForTheFix() {
+        askAndAnswer(grant = true)
+        compose.onNodeWithText("Allow location to see where you are.").assertDoesNotExist()
+        compose.onNodeWithText("Looking for your location…").assertExists()
     }
 }

@@ -29,7 +29,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
-import java.io.File
 
 /**
  * A fake core for the star and reminder ops with a small Kotlin model of `rosty_core::starred` (set, unset, rows
@@ -149,21 +148,35 @@ class MarkCore(
     }
 }
 
-/** The WhatsApp side of [StarCenter] as a script: the gateway takes a star only while [online]. */
+/**
+ * The WhatsApp side of [StarCenter] as a script of what the store does: a queued star sets the flag of a message it
+ * [knows] at once, and [starred] answers the flagged ones newest first. Not [linked]: nothing is queued or answered.
+ */
 class FakeWaStars {
-    val online = MutableStateFlow(false)
     val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
-    var stored: List<WaStarRow>? = emptyList()
+    var linked = true
 
-    /** Every star call the gateway took: chat, message id, starred. */
-    val sent = mutableListOf<Triple<String, String, Boolean>>()
+    /** The stored messages, by id. */
+    val knows = mutableMapOf<String, WaStarRow>()
+
+    /** The ids the store has as starred. */
+    val flagged = mutableSetOf<String>()
+
+    /** Every star queued in the outbox: chat, message id, starred. */
+    val queued = mutableListOf<Triple<String, String, Boolean>>()
 
     val seams =
         WaStarSeams(
-            online = online,
             changes = changes,
-            scan = { stored },
-            star = { chat, id, starred -> online.value.also { if (it) sent += Triple(chat, id, starred) } },
+            starred = { if (linked) knows.values.filter { it.id in flagged }.sortedByDescending { it.atMs } else null },
+            star = { chat, id, starred ->
+                linked.also {
+                    if (it) {
+                        queued += Triple(chat, id, starred)
+                        if (starred) flagged += id else flagged -= id
+                    }
+                }
+            },
         )
 }
 
@@ -199,14 +212,12 @@ class MarkKit(
     scope: CoroutineScope,
     io: CoroutineDispatcher,
     val now: () -> Long,
-    val file: File? = null,
     prefs: MessagesPrefs = prefsWith(),
-    graceMs: Long = StarCenter.GRACE_MS,
 ) {
     val core = MarkCore(prefs)
     val store = core.store(scope, io)
     val wa = FakeWaStars()
     val repo = FakeReminders()
-    val stars = StarCenter(core.chat, store, wa.seams, file, scope, now, io, graceMs).also { it.start() }
+    val stars = StarCenter(core.chat, store, wa.seams, scope).also { it.start() }
     val reminders = RemindCenter(core.chat, repo, scope, now, tzOffsetS = { 0 }, io = io).also { it.start() }
 }

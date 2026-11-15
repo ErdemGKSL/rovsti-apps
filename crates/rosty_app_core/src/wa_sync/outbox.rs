@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::model::{Content, Kind, MessageRow, RowState};
 use super::store::Store;
-use super::{Error, Result, apply};
+use super::{Error, Result, apply, media};
 
 /// The first retry waits this long; every further one twice as long.
 pub const BACKOFF_BASE_MS: i64 = 2_000;
@@ -336,6 +336,22 @@ fn items_where(conn: &Connection, clause: &str, chat: Option<&str>) -> Result<Ve
 }
 
 /// True while a read mark of `chat` waits: the gateway's unread count is stale until it went out.
+/// The files unsent media rows send, with their sizes, in the order written. A payload that does not read (a row
+/// of a newer build) names no file.
+pub(super) fn media_files(conn: &Connection) -> Result<Vec<(String, u64)>> {
+    let payloads: Vec<String> = conn
+        .prepare("SELECT payload FROM outbox WHERE kind = 'send_media' ORDER BY seq")?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(payloads
+        .iter()
+        .filter_map(|payload| match serde_json::from_str(payload) {
+            Ok(Action::SendMedia { file, size, .. }) => Some((file, size)),
+            _ => None,
+        })
+        .collect())
+}
+
 pub(super) fn has_pending_read(conn: &Connection, chat: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM outbox WHERE chat = ?1 AND kind = 'mark_read')",
@@ -420,6 +436,7 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         mentions: Vec::new(),
         has_thumbnail: false,
         media_path,
+        media_state: None,
         client_id: Some(item.client_id),
         wire_sender: None,
         error: item.last_error,
@@ -955,11 +972,7 @@ fn confirm_send(
     )?;
     // The file that was sent is the cached full media of the message.
     if let Action::SendMedia { file, size, .. } = &row.action {
-        conn.execute(
-            "UPDATE messages SET media_path = ?3, media_bytes = ?4, media_used_ms = ?5
-             WHERE chat = ?1 AND id = ?2 AND media_path IS NULL",
-            params![row.chat, message_id, file, size, timestamp_ms],
-        )?;
+        media::adopt_sent_file(conn, &row.chat, message_id, file, *size, timestamp_ms)?;
     }
     Ok(())
 }

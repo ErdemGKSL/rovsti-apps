@@ -1,6 +1,6 @@
 //! Opening the store, the instance row and the sync writes (events, the chat list, pages).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rosty_core::wa_identity::{IdentityMap, Source};
 use rosty_wa_proto::{EventEnvelope, GatewayEvent, RichChat, RichMessage};
@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use super::apply::{self, Upsert};
 use super::identity::{self, Canon, Ids};
+use super::link_state::Told;
 use super::model::{AppliedEvents, StoredChats, StoredPage};
 use super::plan::{self, ChatCursor, FetchPage, Gap, SyncPlan, SyncState};
 use super::{Error, Result, backfill, merge, outbox, schema};
@@ -20,6 +21,8 @@ pub struct Store {
     /// Who every id is. Loaded from the `person` and `alias` tables and written back in the transaction of each
     /// call that changes it.
     pub(super) identity: IdentityMap,
+    /// The database file; `None` for a store in memory.
+    pub(super) path: Option<PathBuf>,
 }
 
 /// What [`Store::opened`] reports.
@@ -60,7 +63,9 @@ impl Store {
         // WAL: the UI reads while the sync writes, and a kill mid-write loses at most the last transaction.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        Self::prepare(conn, instance_id)
+        let mut store = Self::prepare(conn, instance_id)?;
+        store.path = Some(path.to_owned());
+        Ok(store)
     }
 
     /// A store that lives in memory (tests, previews).
@@ -96,6 +101,7 @@ impl Store {
             conn,
             instance_id: instance_id.to_owned(),
             identity,
+            path: None,
         };
         // Key changes logged before the store was closed or killed.
         store.apply_pending_merges()?;
@@ -155,8 +161,8 @@ impl Store {
     /// unless a `state` event names the account.
     ///
     /// A `state` event that names the account (its own number, and its LID when the gateway knows it) sets the
-    /// store's own ids first ([`Self::identity_set_own`]): another account resets the identity tables, which is
-    /// not a step of the events' transaction. The events before such an event are then a transaction of their
+    /// store's own ids first ([`Self::identity_set_own`]): another account empties the store
+    /// (`account_changed`), which is a transaction of its own, not a step of the events' transaction. The events before such an event are then a transaction of their
     /// own, with their `seq` stored, so a failure later in the batch leaves them applied and the rest is applied
     /// when the batch is handed in again.
     pub fn apply_events(&mut self, events: &[EventEnvelope]) -> Result<AppliedEvents> {
@@ -173,10 +179,12 @@ impl Store {
                 && let Some((pn, lid)) = own_ids(first)
                 && plan::accepts(self.sync_state()?.last_seq, first)
             {
-                let own = self.identity_set_own(Some(pn), lid, first.at_ms)?;
+                let own = self.set_own(Some(pn), lid, first.at_ms, Told::Event)?;
                 out.rekeyed.extend(own.rekeyed);
                 out.rejected.extend(own.rejected);
                 out.resync |= own.resync;
+                out.account_changed |= own.account_changed;
+                out.delete_files.extend(own.delete_files);
             }
             let applied = apply_events(&mut self.conn, &mut self.identity, chunk, &mut out);
             self.healed(applied)?;

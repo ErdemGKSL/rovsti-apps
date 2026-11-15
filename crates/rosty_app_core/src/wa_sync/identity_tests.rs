@@ -273,14 +273,14 @@ pub(super) fn old_file(dir: &std::path::Path, version: u32) -> PathBuf {
 #[test]
 fn a_new_file_has_the_identity_tables_and_columns() {
     let store = store();
-    assert_eq!(SCHEMA_VERSION, 4);
-    assert_eq!(store.opened().unwrap().schema_version, 4);
+    assert_eq!(store.opened().unwrap().schema_version, SCHEMA_VERSION);
     assert_eq!(
         tables(&store.conn),
         [
             "alias",
             "chat_sync",
             "chats",
+            "media",
             "merge_log",
             "messages",
             "outbox",
@@ -336,7 +336,7 @@ fn files_of_every_older_version_upgrade_and_keep_their_data() {
         let opened = store.opened().unwrap();
         assert_eq!(
             (opened.schema_version, opened.last_seq, opened.needs_resync),
-            (4, Some(41), false),
+            (SCHEMA_VERSION, Some(41), false),
             "v{version}"
         );
         // The migration moved nothing: both chats of the person are still there, as they were.
@@ -355,7 +355,7 @@ fn files_of_every_older_version_upgrade_and_keep_their_data() {
         // Opening again migrates and backfills nothing.
         let before = dump(&Connection::open(dir.join(file_name("inst1"))).unwrap());
         let again = Store::open(&dir, "inst1").unwrap();
-        assert_eq!(again.opened().unwrap().schema_version, 4);
+        assert_eq!(again.opened().unwrap().schema_version, SCHEMA_VERSION);
         assert_eq!(dump(&again.conn), before, "v{version}");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -788,7 +788,7 @@ fn a_message_stored_under_both_keys_is_kept_once_with_what_either_row_knew() {
     assert_eq!(row.reactions, [reaction(LID2, "kept"), reaction(PN, "new")]);
     let media = store.media(PN, "SAME", None).unwrap().unwrap();
     assert_eq!(
-        (media.thumbnail.as_deref(), media.bytes),
+        (media.thumbnail.as_deref(), media.media.bytes),
         (Some(&b"thumb"[..]), Some(512))
     );
     assert_eq!(store.media_bytes().unwrap(), 512);
@@ -1767,7 +1767,7 @@ fn the_same_account_linked_again_keeps_the_identity_tables() {
 }
 
 #[test]
-fn another_account_on_the_same_instance_resets_the_identity_tables() {
+fn another_account_on_the_same_instance_starts_the_identity_tables_over() {
     let mut store = two_chats();
     store
         .identity_set_own(Some(OWN_PN), Some(OWN_LID), 1)
@@ -1778,7 +1778,6 @@ fn another_account_on_the_same_instance_resets_the_identity_tables() {
     store.identity_learn(LID2, PN2, Source::Usync, 3).unwrap();
     assert_eq!(count(&store.conn, "SELECT COUNT(*) FROM merge_log"), 1);
     assert_eq!(count(&store.conn, "SELECT merge_cursor FROM sync_state"), 1);
-    let messages = count(&store.conn, "SELECT COUNT(*) FROM messages");
 
     let other = "905550000008@s.whatsapp.net";
     let applied = store.identity_set_own(Some(other), None, 10).unwrap();
@@ -1800,12 +1799,9 @@ fn another_account_on_the_same_instance_resets_the_identity_tables() {
             .unwrap(),
         format!("{other} -")
     );
-    // Until the full wipe exists the stored rows stay, and the new map knows the ids they name.
-    assert_eq!(
-        count(&store.conn, "SELECT COUNT(*) FROM messages"),
-        messages
-    );
-    assert!(store.identity().lookup(PN).unwrap().person_id.is_some());
+    // The rows of the old account are gone with its map (`link_state_tests` covers the whole wipe).
+    assert_eq!(count(&store.conn, "SELECT COUNT(*) FROM messages"), 0);
+    assert!(store.identity().lookup(PN).unwrap().person_id.is_none());
     assert_eq!(
         count(
             &store.conn,

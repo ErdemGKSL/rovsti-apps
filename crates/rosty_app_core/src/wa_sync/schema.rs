@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use super::{Error, Result};
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// v1: the instance row, chats, the per-chat cursor and messages.
 const V1: &str = "
@@ -159,7 +159,63 @@ ALTER TABLE chats ADD COLUMN wire_jid TEXT;
 ALTER TABLE messages ADD COLUMN wire_sender TEXT;
 ";
 
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4];
+/// v5: media rows and what the store knows about the gateway process and the linked account.
+///
+/// `media` holds the full file of a message: where it is in its download (`state`), the cached file and the
+/// bookkeeping of the cap. It is filled from the three `media_*` columns of `messages`, which are cleared and no
+/// longer written or read: `media` is the only place a cached file is recorded. The thumbnail stays in
+/// `messages.thumb`.
+///
+/// `sync_state` gains the gateway's `epoch` (one id per gateway process: another one is a gap), the
+/// `account_epoch` the gateway raises when another account is linked, `account_sweep` (the store was emptied for
+/// another account on the word of a status answer and the event that announces the change has not been seen:
+/// events of the old account may still arrive before it), the history progress the gateway last reported
+/// (`history_json`) and the media cap in bytes (`-1`: no limit).
+const V5: &str = "
+CREATE TABLE media (
+    chat TEXT NOT NULL,
+    id TEXT NOT NULL,
+    -- The kind of the message, for the sizes by kind.
+    kind TEXT NOT NULL DEFAULT 'unsupported',
+    mime TEXT,
+    size_expected INTEGER,
+    -- none | queued | downloading | ready | evicted | failed | gone
+    state TEXT NOT NULL DEFAULT 'none',
+    -- The cached file and its size; set while `ready` only.
+    path TEXT,
+    bytes INTEGER,
+    -- Hex, when the caller checked the file.
+    sha256 TEXT,
+    used_ms INTEGER,
+    -- Never evicted.
+    pinned INTEGER NOT NULL DEFAULT 0,
+    -- Where the user saved a copy (the gallery); a saved file is never evicted.
+    saved_uri TEXT,
+    -- Asked for by a tap, not by the auto-download rules.
+    by_tap INTEGER NOT NULL DEFAULT 0,
+    queued_ms INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+    -- When the download was handed out.
+    attempted_ms INTEGER,
+    last_error TEXT,
+    PRIMARY KEY (chat, id)
+) WITHOUT ROWID;
+CREATE INDEX media_lru ON media (used_ms) WHERE state = 'ready';
+CREATE INDEX media_queue ON media (state, next_attempt_ms) WHERE state IN ('queued', 'downloading');
+INSERT INTO media (chat, id, kind, mime, size_expected, state, path, bytes, used_ms)
+    SELECT chat, id, kind, mime, size, 'ready', media_path, COALESCE(media_bytes, 0), media_used_ms
+    FROM messages WHERE media_path IS NOT NULL;
+DROP INDEX messages_cached_media;
+UPDATE messages SET media_path = NULL, media_bytes = NULL, media_used_ms = NULL WHERE media_path IS NOT NULL;
+ALTER TABLE sync_state ADD COLUMN epoch TEXT;
+ALTER TABLE sync_state ADD COLUMN account_epoch INTEGER;
+ALTER TABLE sync_state ADD COLUMN account_sweep INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sync_state ADD COLUMN history_json TEXT;
+ALTER TABLE sync_state ADD COLUMN media_cap_bytes INTEGER NOT NULL DEFAULT 536870912;
+";
+
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5];
 
 /// The version of the file.
 pub(super) fn version(conn: &Connection) -> Result<u32> {

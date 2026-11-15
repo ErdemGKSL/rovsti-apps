@@ -6,8 +6,10 @@
 //!
 //! What one step does:
 //! * Messages of chat `from` move to chat `into`. A message stored in both is kept once: the row of `into`, with
-//!   the star, the cached media, the thumbnail, the client id, the higher tick, the longer edit history and the
-//!   reactions of both; the sender the other row had stays as its wire sender.
+//!   the star, the thumbnail, the client id, the higher tick, the longer edit history and the reactions of both;
+//!   the sender the other row had stays as its wire sender.
+//! * Media rows move with their messages. A message stored in both keeps one media row: the one that holds the
+//!   cached file, else the one nearer to it ([`media::follow_merge`]).
 //! * Every row of every chat that names `from` as an author names `into`: the sender (its old id stays in
 //!   `wire_sender`), who deleted it, who reacted (one reaction per person, the one listed last), the author of the
 //!   quoted message, the mentions.
@@ -25,10 +27,10 @@ use rosty_wa_proto::{DeliveryStatus, MUTED_FOREVER};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
-use super::Result;
 use super::apply::{self, Stored};
 use super::authors::{self, JsonRefs, Moved};
 use super::outbox::Action;
+use super::{Result, media};
 
 /// Rows stored under `from_key` now live under `into_key`: move what is kept per chat outside the store (the
 /// draft, the prefs, the notification tag, the open thread).
@@ -94,6 +96,7 @@ pub(super) fn apply_step(conn: &Connection, from: &str, into: &str) -> Result<bo
         return Ok(false);
     }
     let mut moved = move_messages(conn, from, into)?;
+    moved |= media::follow_merge(conn, from, into)?;
     rewrite_authors(conn, from, into)?;
     moved |= merge_chat_rows(conn, from, into)?;
     moved |= merge_cursors(conn, from, into)?;
@@ -167,11 +170,6 @@ fn move_messages(conn: &Connection, from: &str, into: &str) -> Result<bool> {
         conn.execute(
             "UPDATE messages SET
                 thumb = COALESCE(messages.thumb, f.thumb),
-                media_bytes = CASE WHEN messages.media_path IS NULL THEN f.media_bytes
-                    ELSE messages.media_bytes END,
-                media_used_ms = CASE WHEN messages.media_path IS NULL THEN f.media_used_ms
-                    ELSE messages.media_used_ms END,
-                media_path = COALESCE(messages.media_path, f.media_path),
                 client_id = COALESCE(messages.client_id, f.client_id),
                 wire_sender = COALESCE(messages.wire_sender, f.wire_sender,
                     CASE WHEN f.sender IS NOT messages.sender THEN f.sender END)

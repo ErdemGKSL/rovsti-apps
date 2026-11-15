@@ -27,12 +27,22 @@ class MainActivity : RostyShellActivity<MessagesRoute>() {
     override val navSpec: NavSpec<MessagesRoute> = NavSpec(MessagesTabs, MessagesRoots, MessagesRoute.serializer())
 
     override fun routeFor(extras: Bundle?): Pair<Tab, List<MessagesRoute>>? =
-        messagesRouteFor(IntentFacts(threadTag = extras?.getString(EXTRA_THREAD_TAG)))
+        messagesRouteFor(
+            IntentFacts(
+                threadTag = extras?.getString(EXTRA_THREAD_TAG),
+                messageId = extras?.getString(EXTRA_MESSAGE_ID),
+                messageAtMs = extras?.getLong(EXTRA_MESSAGE_AT, 0L)?.takeIf { it > 0 },
+            ),
+        )
 
     override fun routeFor(intent: Intent): Pair<Tab, List<MessagesRoute>>? {
         val route = messagesRouteFor(IntentFacts.of(intent))
         // A link is used once: a rotation or a restart must not open the same conversation again.
-        if (route != null) intent.removeExtra(EXTRA_THREAD_TAG)
+        if (route != null) {
+            intent.removeExtra(EXTRA_THREAD_TAG)
+            intent.removeExtra(EXTRA_MESSAGE_ID)
+            intent.removeExtra(EXTRA_MESSAGE_AT)
+        }
         return route
     }
 

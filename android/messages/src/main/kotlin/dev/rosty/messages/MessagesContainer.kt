@@ -24,12 +24,15 @@ import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.notify.AnnouncerSources
 import dev.rosty.messages.notify.MessageAnnouncer
 import dev.rosty.messages.notify.ReplyRouter
+import dev.rosty.messages.remind.RemindCenter
 import dev.rosty.messages.schedule.FileQueueStore
 import dev.rosty.messages.schedule.GatewayWaScheduleRemote
 import dev.rosty.messages.schedule.ScheduleCenter
 import dev.rosty.messages.spam.CodeCleanup
 import dev.rosty.messages.spam.CodeCleanupWorker
 import dev.rosty.messages.spam.SpamActions
+import dev.rosty.messages.starred.StarCenter
+import dev.rosty.messages.starred.realStarCenter
 import dev.rosty.messages.wa.GatewayWaRemote
 import dev.rosty.messages.wa.StoreWaChats
 import dev.rosty.messages.wa.WaChats
@@ -50,6 +53,7 @@ import dev.rosty.platform.calllog.BlocklistRepository
 import dev.rosty.platform.contacts.AndroidContactsRepository
 import dev.rosty.platform.contacts.ContactsRepository
 import dev.rosty.platform.identity.PhoneNumbers
+import dev.rosty.platform.notify.ReminderRepositories
 import dev.rosty.platform.sms.AndroidScheduledSmsRepository
 import dev.rosty.platform.sms.AndroidSmsRepository
 import dev.rosty.platform.sms.ScheduledSmsRepository
@@ -174,6 +178,17 @@ open class MessagesContainer(
 
     /** Scheduled send (E6.10, AD-MSG6): the local SMS queue with its alarms and the gateway's WhatsApp items. */
     val schedule: ScheduleCenter by lazy { createSchedule() }
+
+    /** Stars (E6.13): SMS/MMS in the prefs (M23), WhatsApp through the gateway (M10), and the Starred list. */
+    val stars: StarCenter by lazy { createStars().also { it.start() } }
+
+    /** "Remind me" on a message (M33): Rust's slots and payload, `:platform`'s alarms. */
+    val reminders: RemindCenter by lazy { createReminders().also { it.start() } }
+
+    protected open fun createStars(): StarCenter = realStarCenter(this)
+
+    protected open fun createReminders(): RemindCenter =
+        RemindCenter(chat, ReminderRepositories.messages(context), scope, System::currentTimeMillis)
 
     protected open fun createReplies(): ReplyRouter =
         ReplyRouter(

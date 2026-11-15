@@ -444,4 +444,32 @@
     </plurals>
     <string name="thread_clear">Clear Chat</string>
     <string name="thread_clear_confirm">Delete every message in this conversation? This can\'t be undone.</string>
+    <!-- E6.13 -->
+    <string name="starred_title">Starred Messages</string>
+    <string name="starred_star">Star</string>
+    <string name="starred_unstar">Unstar</string>
+    <string name="starred_done">Starred</string>
+    <string name="starred_undone">Unstarred</string>
+    <string name="starred_failed">Couldn\'t star the message</string>
+    <string name="starred_mark_a11y">Starred</string>
+    <string name="starred_empty_title">No Starred Messages</string>
+    <string name="starred_empty_detail">Touch and hold a message and choose Star to keep it here.</string>
+    <string name="starred_line">%1$s: %2$s</string>
+    <string name="starred_unstar_a11y">Unstar, %1$s</string>
+    <plurals name="starred_count">
+        <item quantity="one">%d message</item>
+        <item quantity="other">%d messages</item>
+    </plurals>
+    <string name="remind_me">Remind Me</string>
+    <string name="remind_in_15_min">In 15 minutes</string>
+    <string name="remind_in_1_hour">In 1 hour</string>
+    <string name="remind_tonight">Tonight</string>
+    <string name="remind_tomorrow">Tomorrow</string>
+    <string name="remind_cancel">Cancel reminder (%1$s)</string>
+    <string name="remind_set">Reminder set for %1$s</string>
+    <string name="remind_set_tomorrow">Reminder set for tomorrow at %1$s</string>
+    <string name="remind_failed">Couldn\'t set the reminder</string>
+    <string name="remind_cancelled">Reminder cancelled</string>
+    <string name="remind_badge_a11y">Reminder</string>
+    <string name="remind_notification_title">Reminder: %1$s</string>
 </resources>

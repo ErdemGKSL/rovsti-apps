@@ -73,6 +73,8 @@ fun Modifier.bubbleMenu(
     reactions: List<String>,
     onReact: (String) -> Unit,
     onTap: () -> Unit,
+    /** E6.13: where the menu opened (the bubble's rect in the overlay host). */
+    onOpened: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     preview: @Composable () -> Unit,
 ): Modifier {
     val target = remember { ContextMenuTarget() }
@@ -80,11 +82,13 @@ fun Modifier.bubbleMenu(
     val live = remember { arrayOfNulls<OverlayEntry>(1) }
     val latest = rememberUpdatedState(Triple(items, reactions, preview))
     val react = rememberUpdatedState(onReact)
+    val opened = rememberUpdatedState(onOpened)
     return contextMenu(
         anchor = target.anchor,
         press = press,
         onTap = onTap,
         onOpen = { rect ->
+            opened.value(rect)
             val current = live[0]
             if (current == null || !current.state.targetState) {
                 val (menu, emoji, lifted) = latest.value

@@ -428,4 +428,32 @@
     </plurals>
     <string name="thread_clear">Sohbeti Temizle</string>
     <string name="thread_clear_confirm">Bu sohbetteki tüm mesajlar silinsin mi? Bu geri alınamaz.</string>
+    <!-- E6.13 -->
+    <string name="starred_title">Yıldızlı Mesajlar</string>
+    <string name="starred_star">Yıldızla</string>
+    <string name="starred_unstar">Yıldızı Kaldır</string>
+    <string name="starred_done">Yıldızlandı</string>
+    <string name="starred_undone">Yıldız kaldırıldı</string>
+    <string name="starred_failed">Mesaj yıldızlanamadı</string>
+    <string name="starred_mark_a11y">Yıldızlı</string>
+    <string name="starred_empty_title">Yıldızlı Mesaj Yok</string>
+    <string name="starred_empty_detail">Bir mesajı burada saklamak için basılı tutup Yıldızla\'yı seçin.</string>
+    <string name="starred_line">%1$s: %2$s</string>
+    <string name="starred_unstar_a11y">Yıldızı kaldır, %1$s</string>
+    <plurals name="starred_count">
+        <item quantity="one">%d mesaj</item>
+        <item quantity="other">%d mesaj</item>
+    </plurals>
+    <string name="remind_me">Bana Hatırlat</string>
+    <string name="remind_in_15_min">15 dakika sonra</string>
+    <string name="remind_in_1_hour">1 saat sonra</string>
+    <string name="remind_tonight">Bu akşam</string>
+    <string name="remind_tomorrow">Yarın</string>
+    <string name="remind_cancel">Hatırlatmayı iptal et (%1$s)</string>
+    <string name="remind_set">Hatırlatma %1$s için kuruldu</string>
+    <string name="remind_set_tomorrow">Hatırlatma yarın %1$s için kuruldu</string>
+    <string name="remind_failed">Hatırlatma kurulamadı</string>
+    <string name="remind_cancelled">Hatırlatma iptal edildi</string>
+    <string name="remind_badge_a11y">Hatırlatma</string>
+    <string name="remind_notification_title">Hatırlatma: %1$s</string>
 </resources>

@@ -113,6 +113,8 @@ object ConversationTags {
     fun bubble(key: String) = "bubble-$key"
 
     fun sender(key: String) = "sender-$key"
+
+    fun star(key: String) = "star-$key"
 }
 
 /** Test hook (E6.14): told the key of every bubble row that composes or recomposes. Null in the app. */
@@ -158,6 +160,8 @@ class ConversationActions(
     val onVoiceSpeed: () -> Unit = {},
     /** M50: the card a tap on a group sender's name opens; null: names are plain text. */
     val senderCard: (@Composable (BubbleUi) -> Unit)? = null,
+    /** E6.13: the menu of a bubble opened at this rect (the "Remind me" popover grows out of the same place). */
+    val onMenuOpened: (BubbleUi, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
 )
 
 /** The labels of the tools on a conversation page. */
@@ -616,6 +620,7 @@ private fun BubbleRow(
                             reactions,
                             onReact = { actions.onReact(bubble, it) },
                             onTap = tap,
+                            onOpened = { actions.onMenuOpened(bubble, it) },
                         ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel) }
                     }
 
@@ -756,6 +761,7 @@ private fun BubbleBody(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
+            MarkGlyphs(bubble, secondary)
             RostyText(
                 bubble.meta,
                 style = RostyTheme.type.caption2,
@@ -765,6 +771,32 @@ private fun BubbleBody(
             )
             if (bubble.outgoing) StateGlyph(bubble.state, secondary, read = ink)
         }
+    }
+}
+
+/** E6.13: the bell and clock of an armed reminder (M33) and the star (M10, M23), before the time. */
+@Composable
+private fun MarkGlyphs(
+    bubble: BubbleUi,
+    tint: Color,
+) {
+    bubble.reminder?.let { clock ->
+        RostyIcon(
+            RostyIcons.Bell,
+            stringResource(R.string.remind_badge_a11y),
+            tint = tint,
+            size = MessagesMetrics.TickGlyph,
+        )
+        RostyText(clock, style = RostyTheme.type.caption2, color = tint, maxLines = 1)
+    }
+    if (bubble.starred) {
+        RostyIcon(
+            RostyIcons.StarFilled,
+            stringResource(R.string.starred_mark_a11y),
+            tint = tint,
+            size = MessagesMetrics.TickGlyph,
+            modifier = Modifier.testTag(ConversationTags.star(bubble.key)),
+        )
     }
 }
 

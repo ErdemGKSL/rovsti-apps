@@ -1568,6 +1568,8 @@ checklist, full gate, close X.2. Next planner after X.2: F40. E6 and E7 run in p
 
 **R1** -> `_bmad-output/kotlin-ui/plans/e6-r1.md` (planned 2026-11-14 at base `9e3432e`, the Rosty rename): E6.1, E6.4s, E6.2,
 E6.3, E6.4a, E6.6, E6.7, E6.8. Progress notes for the main thread: `_bmad-output/kotlin-ui/plans/e6-status.md`.
+**R2** -> `_bmad-output/kotlin-ui/plans/e6-r2.md` (planned 2026-11-15 at `3ec785a`): E6.4b, E6.5, E6.9, E6.10, E6.11 and
+the R1 carry-overs of E6.3, E6.6, E6.7. **R3**: E6.12, E6.13, E6.14.
 
 Goal: parity with `apps/messages` (roadmap "Rosty Messages", `util-messages*.md` M1-M50, `messages.md`, AD-MSG1 to
 AD-MSG9, AD-WA11), then polish.
@@ -1598,17 +1600,17 @@ AD-MSG9, AD-WA11), then polish.
 | E6.3 | SMS and MMS conversation | R1, R2 | in-progress (R2: MMS attachment send, M46 paste image, unblock row) |
 | E6.4s | WhatsApp offline store and per-device sync engine (owner request 2026-11-10; before E6.2 and E6.4a) | R1 | done (R1 evidence; media cache wiring goes with E6.4b) |
 | E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | done (R1 evidence) |
-| E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | todo |
-| E6.5 | Message context menu, select mode, detection pills | R2 | todo |
+| E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | in-progress |
+| E6.5 | Message context menu, select mode, detection pills | R2 | in-progress |
 | E6.6 | Conversation tools | R1, R2 | in-progress (R2: M50 sender mini card, M43 next unread, M48 zip, M27 clear chat, M29, M22) |
 | E6.7 | Viewers: images, status, contact card, attachments | R1, R2 | in-progress (R2: M26 contact card sheet, M28 attachments, M4 header photo, attachment menu) |
 | E6.8 | New conversation, forward, share-in, intents | R1 | done (R1 evidence) |
-| E6.9 | Notifications and inline reply | R2 | todo |
-| E6.10 | Scheduled send | R2 | todo |
-| E6.11 | Spam | R2 | todo |
-| E6.12 | Settings and encrypted backup | R2 | todo |
-| E6.13 | Starred and reminders | R2 | todo |
-| E6.14 | Polish | R2 | todo |
+| E6.9 | Notifications and inline reply | R2 | in-progress |
+| E6.10 | Scheduled send | R2 | in-progress |
+| E6.11 | Spam | R2 | in-progress |
+| E6.12 | Settings and encrypted backup | R3 | todo |
+| E6.13 | Starred and reminders | R3 | todo |
+| E6.14 | Polish | R3 | todo |
 
 ### E6.1 App module
 - AC1 Every component FQCN of the GPUI Messages manifest (main and firebase); default-SMS role request; manifest test.

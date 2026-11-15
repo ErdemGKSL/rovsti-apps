@@ -168,6 +168,22 @@ object MessagesNotifier {
         return show(context, old.copy(spec = old.spec.copy(tag = into, silent = true)))
     }
 
+    /** Takes away the notification of every conversation whose tag starts with [prefix], silently. */
+    fun dismissAll(
+        context: Context,
+        prefix: String,
+    ) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        try {
+            for (shown in manager.activeNotifications) {
+                val tag = shown.tag ?: continue
+                if (tag.startsWith(prefix)) manager.cancel(tag, 0)
+            }
+            sweepSummary(manager, gone = null)
+        } catch (_: RuntimeException) {
+        }
+    }
+
     /** Cancels the summary once no conversation is left under it. */
     fun sweepSummary(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return

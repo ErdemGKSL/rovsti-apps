@@ -8,14 +8,19 @@ import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.model.wa.WaSyncAction
-import dev.rosty.core.model.wa.WaSyncEvent
+import dev.rosty.core.model.wa.WaSyncHistory
+import dev.rosty.core.model.wa.WaSyncMediaStats
+import dev.rosty.core.model.wa.WaSyncWiped
 import dev.rosty.core.ops.WaSyncStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +34,9 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,6 +51,15 @@ data class WaStoreLink(
 /** Asks for an outbox drain [delayMs] from now, once the phone has a network (a WorkManager job; no polling). */
 fun interface WaWake {
     fun at(delayMs: Long)
+}
+
+/**
+ * Drops what the app keeps for a WhatsApp link outside the offline store and the media directory: drafts and mutes of
+ * its chats, notifications, reminders, scheduled texts in memory, names asked through it. Called only when the store
+ * said another account was linked, and on an explicit unlink.
+ */
+fun interface WaLinkCleanup {
+    suspend fun forget(instanceId: String)
 }
 
 /** One open store with what fills and drains it. */
@@ -61,7 +78,13 @@ class WaSession(
  * - it runs the sync: `plan`, the event socket after the plan's `seq`, the chat list and the gap pages the plan owes,
  *   every stream event applied in batches, the chat list again after a `resync`;
  * - it queues what the user does ([enqueue]) and drains the outbox while the socket is connected, when it reconnects
- *   and when the [wake] job fires.
+ *   and when the [wake] job fires;
+ * - it keeps the media files in step with the store through [downloads]: reconciled when the store opens, fetched by
+ *   the store's queue and rules, under the store's cap;
+ * - when the store says another account was linked, and on [unlink], everything kept for the link goes: the media
+ *   directory, and through [cleanup] what is kept per chat outside the store. Nothing else ever deletes it.
+ *
+ * [history] is the progress of the history sync as the store keeps it (so it survives a restart).
  *
  * [changes] tells the readers which chats to read again (null: all); [online] is whether the gateway is reachable.
  *
@@ -84,6 +107,13 @@ class WaOffline(
     private val replayGraceMs: Long = REPLAY_GRACE_MS,
     /** Moves what is kept per chat outside the store when two chats become one. */
     val rekeys: WaRekeys = WaRekeys(),
+    /** The media files of the store; null: nothing is downloaded (tests of other things). */
+    private val downloads: WaDownloads? = null,
+    private val cleanup: WaLinkCleanup = WaLinkCleanup { },
+    /** Deletes the store files of an instance, open or not (`WaSyncStore.wipe`); the answer names its media files. */
+    private val wipe: suspend (instanceId: String) -> Outcome<WaSyncWiped> = {
+        Outcome.Ok(WaSyncWiped(emptyList(), emptyList()))
+    },
 ) {
     private val sessionState = MutableStateFlow<WaSession?>(null)
 
@@ -121,10 +151,22 @@ class WaOffline(
      */
     val live: SharedFlow<GatewayEvent> = liveBus.asSharedFlow()
 
+    private val historyState = MutableStateFlow<WaSyncHistory?>(null)
+
+    /**
+     * How far the phone's history has arrived at the gateway, as the store last heard; null before the first report
+     * and while WhatsApp is not linked. Read from the store when it opens, after every status and after the events
+     * that move it.
+     */
+    val history: StateFlow<WaSyncHistory?> = historyState.asStateFlow()
+
     private val started = AtomicBoolean(false)
     private val refreshQueued = AtomicBoolean(false)
     private val drainQueued = AtomicBoolean(false)
     private var socket: Job? = null
+
+    /** One link change at a time: opening, closing and wiping a store never interleave. */
+    private val linking = Mutex()
 
     /** Follows the link from now on. Idempotent. */
     fun start() {
@@ -137,18 +179,27 @@ class WaOffline(
         }
     }
 
-    private suspend fun follow(next: WaStoreLink?) {
+    /** Not cancelled half way: a store that was opened is published or closed, never lost. */
+    private suspend fun follow(next: WaStoreLink?) =
+        linking.withLock { withContext(NonCancellable) { followLocked(next) } }
+
+    private suspend fun closeLocked() {
+        // Joined: what the old socket still held is dropped, not applied after the next one started.
+        socket?.cancelAndJoin()
+        socket = null
+        onlineState.value = false
+        val current = sessionState.value ?: return
+        sessionState.value = null
+        historyState.value = null
+        current.store.close()
+        changeBus.tryEmit(null)
+    }
+
+    private suspend fun followLocked(next: WaStoreLink?) {
         val current = sessionState.value
         if (current != null && current.link == next) return
         if (current == null || next == null || current.link.instanceId != next.instanceId) {
-            socket?.cancel()
-            socket = null
-            onlineState.value = false
-            if (current != null) {
-                sessionState.value = null
-                current.store.close()
-                changeBus.tryEmit(null)
-            }
+            closeLocked()
             if (next == null) return
             val store =
                 when (val opened = open(next.instanceId)) {
@@ -164,20 +215,123 @@ class WaOffline(
             val changed: (Set<String>?) -> Unit = { changeBus.tryEmit(it) }
             // Merges logged while nothing followed them (at the store's open, in another run): before anyone reads.
             rekeys.replay(store)
-            val runner = WaSyncRunner(store, remote, now, changed, onRekeyed = { rekeys.follow(store, it) })
+            // Rows and files agree again, and the cache is under its cap, before anyone reads a path.
+            downloads?.opened(store)
+            val runner =
+                WaSyncRunner(
+                    store,
+                    remote,
+                    now,
+                    changed,
+                    onRekeyed = { rekeys.follow(store, it) },
+                    onAccountChanged = { files -> accountChanged(store, files) },
+                    onHistory = { readHistory(store) },
+                    onMedia = { refs -> wantMedia(store, refs) },
+                )
             val session = WaSession(next, store, runner, WaOutbox(store, remote, now, changed))
+            readHistory(store)
             sessionState.value = session
             changeBus.tryEmit(null)
             socket = scope.launch { run(session) }
+            kickMedia(session)
         } else {
             // Same instance, another gateway handle (a new key, another URL): only the socket is reopened.
             val session = WaSession(next, current.store, current.runner, current.outbox)
-            socket?.cancel()
+            socket?.cancelAndJoin()
             onlineState.value = false
             sessionState.value = session
             socket = scope.launch { run(session) }
         }
     }
+
+    private suspend fun readHistory(store: WaSyncStore) {
+        historyState.value = store.history().getOrNull()
+    }
+
+    /**
+     * The store emptied itself: another account is linked to the instance. Its media files and what the app keeps
+     * for the link outside the store belonged to the old account and go with it. The caller refreshes the chat list.
+     */
+    private suspend fun accountChanged(
+        store: WaSyncStore,
+        files: List<String>,
+    ) {
+        RostyLog.i(TAG, "another account is linked: the cache of the old one is dropped")
+        forgetLink(store.instanceId, files)
+    }
+
+    private suspend fun forgetLink(
+        instanceId: String,
+        files: List<String>,
+    ) {
+        downloads?.wipe(instanceId, files)
+        rekeys.forget(instanceId)
+        cleanup.forget(instanceId)
+        changeBus.tryEmit(null)
+    }
+
+    /**
+     * Forgets the link: [forget] removes it (the repository's own unlink), then the store of the instance is deleted
+     * with its media directory and what is kept per chat outside the store. Nothing is deleted when [forget] fails.
+     */
+    suspend fun unlink(forget: suspend () -> Outcome<Unit>): Outcome<Unit> {
+        val instance = sessionState.value?.link?.instanceId ?: link()?.instanceId
+        val removed = forget()
+        if (removed is Outcome.Err || instance == null) return removed
+        linking.withLock {
+            withContext(NonCancellable) {
+                closeLocked()
+                val files =
+                    when (val wiped = wipe(instance)) {
+                        is Outcome.Ok -> {
+                            wiped.value.mediaFiles
+                        }
+
+                        is Outcome.Err -> {
+                            RostyLog.w(TAG, "wiping the store failed: ${wiped.error.message}")
+                            emptyList()
+                        }
+                    }
+                forgetLink(instance, files)
+            }
+        }
+        return removed
+    }
+
+    /** Offers media rows that arrived or came into view to the auto-download rules and fetches what they queue. */
+    suspend fun wantMedia(refs: List<WaMediaRef>) {
+        sessionState.value?.let { wantMedia(it.store, refs) }
+    }
+
+    private suspend fun wantMedia(
+        store: WaSyncStore,
+        refs: List<WaMediaRef>,
+    ) {
+        val files = downloads ?: return
+        if (files.auto(store, refs)) files.kick(store, ::noteChanged)
+    }
+
+    /** The media cache in numbers (the settings); null while WhatsApp is not linked. */
+    suspend fun mediaStats(): WaSyncMediaStats? =
+        sessionState.value
+            ?.store
+            ?.mediaStats(now())
+            ?.getOrNull()
+
+    /**
+     * Stores the cap of the media cache ([capBytes] null: no limit) and brings the cache under it at once: the
+     * files the store lets go of are deleted, their messages keep the thumbnail. False when it was not stored.
+     */
+    suspend fun setMediaCap(capBytes: Long?): Boolean {
+        val store = sessionState.value?.store ?: return false
+        if (store.setMediaCap(capBytes) is Outcome.Err) return false
+        val gone = downloads?.evict(store).orEmpty()
+        changeBus.tryEmit(gone)
+        return true
+    }
+
+    /** Starts the download worker on what is due; join the answer to wait for a tapped file. Null: no downloads. */
+    fun kickMedia(session: WaSession): Job? = downloads?.kick(session.store, ::noteChanged)
 
     /** The sync of one session: the socket after the store's `seq`, events in batches, the owed fetches. */
     private suspend fun run(session: WaSession) =
@@ -199,6 +353,7 @@ class WaOffline(
                         onlineState.value = true
                         launchCatchUp(session, this)
                         launchDrain(session, this, networkBack = true)
+                        kickMedia(session)
                     }
 
                     WaRemoteEvent.Disconnected -> {
@@ -220,9 +375,13 @@ class WaOffline(
                             }
                             batch += more.event
                         }
+                        // A socket that was closed meanwhile: its events are dropped, the next one replays them.
+                        ensureActive()
                         val applied = session.runner.apply(batch)
                         batch.forEach { liveBus.tryEmit(keyed(session.store, it.event)) }
-                        if (applied?.resync == true) launchRefresh(session, this, null)
+                        if (applied?.resync == true || applied?.accountChanged == true) {
+                            launchRefresh(session, this, null)
+                        }
                     }
                 }
             }
@@ -399,6 +558,8 @@ class WaOffline(
         delay(replayGraceMs)
         session.runner.catchUp()
         drainNow(session, networkBack = true)
+        // Downloads that waited for a network or for their next attempt; the job keeps the process until they end.
+        kickMedia(session)?.let { pass -> withTimeoutOrNull(MEDIA_WORK_MS) { pass.join() } }
     }
 
     companion object {
@@ -407,6 +568,7 @@ class WaOffline(
         private const val MAX_BATCH = 200
         private const val OPEN_TIMEOUT_MS = 20_000L
         private const val CONNECT_TIMEOUT_MS = 15_000L
+        private const val MEDIA_WORK_MS = 8 * 60_000L
 
         /** How long after a reconnect the outbox waits for the replayed events (the echoes of what did go out). */
         const val REPLAY_GRACE_MS = 1_500L

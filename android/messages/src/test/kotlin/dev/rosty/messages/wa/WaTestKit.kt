@@ -30,9 +30,13 @@ import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncRowState
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.model.wa.WaSyncWipeRequest
 import dev.rosty.core.ops.WaSyncOps
 import dev.rosty.core.ops.WaSyncStore
+import dev.rosty.platform.system.FakeDeviceData
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +45,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
+import java.io.File
 
 /** A scripted gateway for the sync, outbox and view-model tests: no network, every call logged. */
 class FakeWaRemote : WaRemote {
@@ -71,7 +76,7 @@ class FakeWaRemote : WaRemote {
     /** The `since` of every pairs call. */
     val mappingCalls = mutableListOf<String?>()
 
-    /** What `status` answers: the account's own ids; null: the gateway does not say. */
+    /** What `status` answers: the account's own ids, the gateway's epoch, the history; null: it does not say. */
     var ownStatus: InstanceStatus? = null
 
     /** Every call that fills the store, in the order made: `identity`, `status`, `chats`, `page`. */
@@ -159,8 +164,12 @@ class FakeWaRemote : WaRemote {
         return thumbnails[messageId]?.takeIf { !down }?.let { Outcome.Ok(it) } ?: Outcome.Err(LOST)
     }
 
+    /** What a download of a message answers instead of its file (`NotFound`: the gateway no longer has it). */
+    val mediaErrors = mutableMapOf<String, RustError>()
+
     override suspend fun media(messageId: String): Outcome<BytesAnswer> {
         mediaCalls += messageId
+        mediaErrors[messageId]?.let { return Outcome.Err(it) }
         return files[messageId]?.takeIf { !down }?.let { Outcome.Ok(it) } ?: Outcome.Err(LOST)
     }
 
@@ -255,14 +264,30 @@ class WaTestKit(
     graceMs: Long = GRACE_MS,
     /** What follows a merge of two chats; the default moves nothing and only tells the open screens. */
     val rekeys: WaRekeys = WaRekeys(),
+    /** Where media files go; null: the kit downloads nothing. */
+    mediaDir: File? = null,
+    io: CoroutineDispatcher = Dispatchers.Unconfined,
 ) {
     val remote = FakeWaRemote()
+
+    /** The network the phone is on and the room it has left, as the download rules hear them. */
+    val device = FakeDeviceData()
+
+    /** The instances whose kept state was dropped (another account, an unlink). */
+    val forgotten = mutableListOf<String>()
+
+    /** The instances whose store files were deleted. */
+    val wiped = mutableListOf<String>()
     val link = MutableStateFlow(if (linked) WaStoreLink(INSTANCE) else null)
     val opened = mutableListOf<String>()
     val closed = mutableListOf<Long>()
     val wakes = mutableListOf<Long>()
     var now = NOW
     private var ids = 0
+
+    /** The download worker of the kit, when it was given a directory. */
+    val downloads: WaDownloads? =
+        mediaDir?.let { dir -> WaDownloads(scope, remote, dir, { now }, device, wake = { wakes += it }, io = io) }
 
     val offline =
         WaOffline(
@@ -279,6 +304,12 @@ class WaTestKit(
             newId = { "c${++ids}" },
             replayGraceMs = graceMs,
             rekeys = rekeys,
+            downloads = downloads,
+            cleanup = { forgotten += it },
+            wipe = { instance ->
+                wiped += instance
+                storeOps.wipe(WaSyncWipeRequest(instanceId = instance))
+            },
         )
 
     fun connect() = remote.emit(WaRemoteEvent.Connected)
@@ -345,10 +376,12 @@ class WaTestKit(
         fun withMedia(
             scope: CoroutineScope,
             graceMs: Long = GRACE_MS,
+            mediaDir: File? = null,
+            io: CoroutineDispatcher = Dispatchers.Unconfined,
         ): Pair<WaTestKit, MediaStoreOps> {
             val ops = FakeWaSyncOps(INSTANCE)
             val media = MediaStoreOps(ops)
-            return WaTestKit(scope, ops, storeOps = media, graceMs = graceMs) to media
+            return WaTestKit(scope, ops, storeOps = media, graceMs = graceMs, mediaDir = mediaDir, io = io) to media
         }
 
         /** A received (or sent) attachment as the store returns it. */

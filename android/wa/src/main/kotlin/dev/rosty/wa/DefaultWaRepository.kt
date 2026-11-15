@@ -87,6 +87,9 @@ class DefaultWaRepository(
     private val lock = Mutex()
     private var session: Session? = null
     private var lastSeq: Long? = null
+
+    /** The gateway process [lastSeq] counts in (`hello`); null until one said. */
+    private var epoch: String? = null
     private val started = AtomicBoolean(false)
 
     private val state = MutableStateFlow<WaLinkState>(WaLinkState.None)
@@ -138,6 +141,7 @@ class DefaultWaRepository(
                 is Outcome.Ok -> {
                     closeSession()
                     lastSeq = null
+                    epoch = null
                     connect()
                     Outcome.Ok(Unit)
                 }
@@ -148,6 +152,7 @@ class DefaultWaRepository(
         lock.withLock {
             closeSession()
             lastSeq = null
+            epoch = null
             val removed = store.forget()
             if (removed is Outcome.Ok) state.value = WaLinkState.None
             removed
@@ -216,10 +221,11 @@ class DefaultWaRepository(
     }
 
     private fun onEvent(event: WaStreamEvent.Event) {
+        val body = event.event
+        if (body is GatewayEvent.Hello && restarted(body, event.seq)) return
         val previous = lastSeq
         val gap = previous != null && event.seq > previous + 1
         if (previous == null || event.seq > previous) lastSeq = event.seq
-        val body = event.event
         when (body) {
             is GatewayEvent.State -> state.value = body.status().toLinkState()
             is GatewayEvent.Qr -> state.value = WaLinkState.Linking(qr = body.payload)
@@ -233,6 +239,26 @@ class DefaultWaRepository(
             else -> body.chatKey()?.let { reloads.tryEmit(it) }
         }
         bus.tryEmit(body)
+    }
+
+    /**
+     * The first frame of a socket. [lastSeq] only goes up, which is right inside one gateway process; another
+     * process (another epoch, or a start point below what was seen) counts from its own start, so the `seq` is taken
+     * from the frame and everything is loaded again. True when that happened.
+     */
+    private fun restarted(
+        hello: GatewayEvent.Hello,
+        seq: Long,
+    ): Boolean {
+        val known = epoch
+        val previous = lastSeq
+        epoch = hello.epoch
+        val other = (known != null && known != hello.epoch) || (known == null && previous != null && seq < previous)
+        if (!other) return false
+        lastSeq = seq
+        reloads.tryEmit(null)
+        bus.tryEmit(hello)
+        return true
     }
 
     /** A flow that fetches once on collect and again for each reload that concerns [jid] (all reloads for chats). */

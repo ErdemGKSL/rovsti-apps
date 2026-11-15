@@ -102,11 +102,15 @@ private const val LARGE_FONT = 1.3f
 private val StatusDot = 10.dp
 private val GatewayValueMax = 200.dp
 
-/** The route: collects the view model and shows what its events ask for (a "Copied" toast, a share sheet). */
+/**
+ * The route: collects the view model and shows what its events ask for (a "Copied" toast, a share sheet). [linked]
+ * are blocks the app adds to the page of a linked account (Messages: history progress, storage and data).
+ */
 @Composable
 fun WhatsAppSettingsRoute(
     viewModel: WhatsAppSettingsViewModel,
     modifier: Modifier = Modifier,
+    linked: (LazyListScope.() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsState()
     val overlay = LocalOverlayOrNull.current
@@ -135,7 +139,7 @@ fun WhatsAppSettingsRoute(
             }
         }
     }
-    WhatsAppSettingsScreen(state = state, onAction = viewModel::onAction, modifier = modifier)
+    WhatsAppSettingsScreen(state = state, onAction = viewModel::onAction, modifier = modifier, linked = linked)
 }
 
 /** The screen. [state] is all it knows; every tap goes out through [onAction]. */
@@ -145,6 +149,7 @@ fun WhatsAppSettingsScreen(
     onAction: (WaSettingsAction) -> Unit,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
+    linked: (LazyListScope.() -> Unit)? = null,
 ) {
     val page = state.page
     val back = page.back
@@ -172,6 +177,7 @@ fun WhatsAppSettingsScreen(
         modifier = modifier.testTag("wa-settings"),
     ) {
         pageItems(state, fields, onAction)
+        if (page.kind == CONNECTED) linked?.invoke(this)
     }
 }
 
@@ -679,6 +685,7 @@ private fun ConfirmAlert(
 }
 
 private const val FAILED = "failed"
+private const val CONNECTED = "connected"
 private const val BACK = "back"
 private const val PRIMARY = "primary"
 private const val OPTION = "option"

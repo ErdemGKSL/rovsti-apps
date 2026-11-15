@@ -1,19 +1,12 @@
 package dev.rosty.messages.wa
 
-import dev.rosty.core.Outcome
 import dev.rosty.core.getOrNull
-import dev.rosty.core.log.RostyLog
 import dev.rosty.core.model.wa.BytesAnswer
-import dev.rosty.core.model.wa.WaSyncKind
+import dev.rosty.core.model.wa.WaSyncMediaState
 import dev.rosty.core.model.wa.WaSyncMessage
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -42,55 +35,55 @@ sealed interface WaStageResult {
 }
 
 /**
- * The media of WhatsApp messages on the phone (E6.4b), kept through the offline store's media table:
+ * The media of WhatsApp messages as the screens use it (E6.4b, E6-WA R2), kept through the offline store:
  *
  * - **thumbnails** are stored with the message for good (`wa_sync.media_set` base64) and written once to a file under
- *   [dir] so the image loader has a stable model; a message whose thumbnail the store does not have asks the gateway;
- * - **full files** are downloaded into [dir] on a tap (pictures on their own), named to the store with their size, and
- *   kept in its LRU: [fetch] marks the file used, and after every download the store is brought under [capBytes] and
- *   the files it names are deleted. A message whose file was evicted stays readable and downloads again on a tap;
- * - **files to send** are copied into [dir] first ([outgoing]); once sent the store counts them as the cached media of
- *   the message, so the same LRU clears them.
+ *   the instance's directory so the image loader has a stable model; a message whose thumbnail the store does not
+ *   have asks the gateway;
+ * - **full files** go through the store's download queue ([WaDownloads]): [want] offers the rows a thread shows to
+ *   the auto-download rules, [fetch] is a tap. A message whose file was evicted, or was never downloaded, keeps its
+ *   thumbnail and downloads on a tap; one the gateway no longer has says so;
+ * - **files to send** are copied into the instance's directory first ([outgoing]); once sent the store counts them
+ *   as the cached media of the message, so the same LRU clears them.
  *
- * Nothing here polls; every call is one tap or one page load. Downloads run one at a time.
+ * Nothing here polls; every call is one tap or one page load.
  */
 class WaMedia(
     private val offline: WaOffline,
     private val remote: WaRemote,
-    private val dir: File,
+    private val downloads: WaDownloads,
     private val now: () -> Long,
-    private val capBytes: () -> Long = { DEFAULT_CAP_BYTES },
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
+    private val dir: File get() = downloads.dir
     private val thumbs = ConcurrentHashMap<String, File>()
-    private val busyState = MutableStateFlow<Set<String>>(emptySet())
-    private val failedState = MutableStateFlow<Set<String>>(emptySet())
-    private val downloads = Mutex()
 
-    /** The messages whose file is being downloaded right now. */
-    val busy: StateFlow<Set<String>> = busyState.asStateFlow()
+    /** The store the thumbnails in memory belong to: another link starts over. */
+    @Volatile private var thumbsOf: Any? = null
 
-    /** The messages whose last download failed (cleared by the next try). */
-    val failed: StateFlow<Set<String>> = failedState.asStateFlow()
-
-    private fun root(instance: String): File = File(dir, safe(instance))
-
-    private fun thumbFile(
-        instance: String,
-        id: String,
-    ): File = File(File(root(instance), "thumbs"), "${safe(id)}.jpg")
+    /** The messages whose file is being downloaded right now, or was tapped and is on its way. */
+    val busy: StateFlow<Set<String>> get() = downloads.busy
 
     /** The thumbnail file of [row] when it is already known; [ensureThumb] finds the others. */
     fun thumb(row: WaSyncMessage): File? = thumbs[row.id]
+
+    /** Forgets the thumbnails in memory: their files went with the account they belonged to. */
+    fun forgetThumbs() {
+        thumbs.clear()
+    }
 
     /**
      * Makes the thumbnail of [row] a file: from disk, from the store, else from the gateway (stored then). True when a
      * new one appeared, so the page should be read again.
      */
     suspend fun ensureThumb(row: WaSyncMessage): Boolean {
-        if (thumbs.containsKey(row.id)) return false
         val session = offline.session.value ?: return false
-        val target = thumbFile(session.link.instanceId, row.id)
+        if (thumbsOf !== session.store) {
+            thumbs.clear()
+            thumbsOf = session.store
+        }
+        if (thumbs.containsKey(row.id)) return false
+        val target = downloads.thumbFile(session.link.instanceId, row.id)
         if (withContext(io) { target.isFile }) {
             thumbs[row.id] = target
             return true
@@ -133,106 +126,53 @@ class WaMedia(
     fun local(row: WaSyncMessage): File? = row.mediaPath?.let(::File)?.takeIf { it.isFile }
 
     /**
-     * The full file of [row], opened now: the cached one (marked used in the LRU), else downloaded, stored and the
-     * cache brought under its cap. Null when it could not be downloaded (offline, gone from the gateway).
+     * The rows a thread shows are offered to the auto-download rules (the store decides by kind and network). A file
+     * the cap took, one that failed and one the gateway no longer has are not asked for again by themselves: they
+     * wait for a tap.
+     */
+    suspend fun want(rows: List<WaSyncMessage>) {
+        val fresh =
+            rows
+                .filter { it.mediaPath == null && (it.mediaState == null || it.mediaState == WaSyncMediaState.None) }
+                .map { WaMediaRef(it.chat, it.id) }
+        offline.wantMedia(fresh)
+    }
+
+    /**
+     * The full file of [row], asked for by a tap: the cached one (marked used in the LRU), else queued in the store
+     * and waited for. Null when it could not be downloaded now (offline, gone from the gateway); a file that only
+     * failed stays queued and arrives with a later attempt.
      */
     suspend fun fetch(row: WaSyncMessage): File? {
         val session = offline.session.value ?: return null
-        val stored = session.store.media(row.chat, row.id, usedMs = now()).getOrNull()
-        val cached = stored?.path?.let(::File)
-        if (cached != null && withContext(io) { cached.isFile }) return cached
-        busyState.update { it + row.id }
-        failedState.update { it - row.id }
+        cached(session, row)?.let { return it }
+        downloads.tapping(row.id)
         try {
-            val file =
-                downloads.withLock {
-                    val answer =
-                        when (val got = remote.media(row.id)) {
-                            is Outcome.Ok -> {
-                                got.value
-                            }
-
-                            is Outcome.Err -> {
-                                RostyLog.w(TAG, "download failed: ${got.error.message}")
-                                null
-                            }
-                        }
-                    answer?.let { withContext(io) { place(it, target(session.link.instanceId, row)) } }
-                }
-            if (file == null) {
-                failedState.update { it + row.id }
-                return null
-            }
-            session.store.setMedia(row.chat, row.id, now(), path = file.absolutePath, bytes = file.length())
-            evict(session)
-            return file
+            if (!downloads.tap(session.store, WaMediaRef(row.chat, row.id))) return null
+            offline.kickMedia(session)?.join()
+            return cached(session, row)
         } finally {
-            busyState.update { it - row.id }
+            downloads.untap(row.id)
             offline.noteChanged(setOf(row.chat))
         }
     }
 
-    /** Brings the cache under its cap and deletes what the store let go of. */
-    private suspend fun evict(session: WaSession) {
-        val gone =
-            session.store
-                .evictMedia(capBytes())
-                .getOrNull()
-                ?.evicted
-                .orEmpty()
-        if (gone.isEmpty()) return
-        withContext(io) {
-            // Only files this class wrote: the store never names anything else, but a path is still a path.
-            gone.map { File(it.path) }.filter { it.startsWith(dir) }.forEach { it.delete() }
-        }
-        offline.noteChanged(gone.mapTo(HashSet()) { it.chat })
-    }
-
-    private fun target(
-        instance: String,
+    private suspend fun cached(
+        session: WaSession,
         row: WaSyncMessage,
-    ): File {
-        val name =
-            row.media
-                ?.fileName
-                ?.let(::safeName)
-                ?.takeIf { it.isNotEmpty() }
-                ?: "${row.kind.name.lowercase()}.${extensionOf(row.mime, row.kind)}"
-        return File(File(File(root(instance), "files"), safe(row.id)), name)
+    ): File? {
+        val stored = session.store.media(row.chat, row.id, usedMs = now()).getOrNull()
+        return stored?.path?.let(::File)?.takeIf { file -> withContext(io) { file.isFile } }
     }
 
-    /** The answer's bytes at [target]: decoded, or the temp file the core downloaded moved there. */
-    private fun place(
-        answer: BytesAnswer,
-        target: File,
-    ): File? =
-        try {
-            target.parentFile?.mkdirs()
-            val temp = answer.path?.let(::File)
-            val data = answer.dataB64
-            when {
-                data != null -> {
-                    target.writeBytes(Base64.getDecoder().decode(data))
-                    target
-                }
-
-                temp != null && temp.isFile -> {
-                    if (!temp.renameTo(target)) {
-                        temp.copyTo(target, overwrite = true)
-                        temp.delete()
-                    }
-                    target
-                }
-
-                else -> {
-                    null
-                }
-            }
-        } catch (_: IOException) {
-            null
-        } catch (_: IllegalArgumentException) {
-            null
-        }
+    /** True when the gateway no longer has the file of [row] (asked after a tap that brought none). */
+    suspend fun gone(row: WaSyncMessage): Boolean {
+        val session = offline.session.value ?: return false
+        return session.store
+            .media(row.chat, row.id)
+            .getOrNull()
+            ?.state == WaSyncMediaState.Gone
+    }
 
     private fun bytesOf(answer: BytesAnswer): ByteArray? =
         try {
@@ -247,17 +187,18 @@ class WaMedia(
         }
 
     /**
-     * Where a file to send is copied to before it is queued: its own folder under [dir], kept under [name] (an outbox
-     * row carries no file name, so the bubble reads it from the path). Null when WhatsApp is not linked.
+     * Where a file to send is copied to before it is queued: its own folder under the instance's directory, kept
+     * under [name] (an outbox row carries no file name, so the bubble reads it from the path). Null when WhatsApp is
+     * not linked.
      */
     fun outgoing(
         id: String,
         name: String,
     ): File? {
         val session = offline.session.value ?: return null
-        val folder = File(File(root(session.link.instanceId), "out"), safe(id))
+        val folder = downloads.outgoingDir(session.link.instanceId, id)
         folder.mkdirs()
-        return File(folder, safeName(name).ifEmpty { "file" })
+        return File(folder, WaDownloads.safeName(name).ifEmpty { "file" })
     }
 
     /** Deletes a staged file that will not be sent after all (removed from the composer, a cancelled send). */
@@ -272,85 +213,7 @@ class WaMedia(
     }
 
     companion object {
-        private const val TAG = "wa-media"
-
         /** WhatsApp's limit for one attachment (`rosty_wa_proto::MAX_SEND_BYTES`). */
         const val MAX_SEND_BYTES = 16L * 1024 * 1024
-
-        /** The cache cap until Settings has one (E6.12). */
-        const val DEFAULT_CAP_BYTES = 512L * 1024 * 1024
-
-        private const val MAX_NAME = 80
-
-        private fun safe(text: String): String {
-            val kept = text.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(MAX_NAME)
-            // Ids that differ only in dropped characters still get their own file.
-            return if (kept == text) kept else "$kept-${Integer.toHexString(text.hashCode())}"
-        }
-
-        /** A display name as a file name: no path parts, no control characters. */
-        fun safeName(name: String): String =
-            name
-                .substringAfterLast('/')
-                .substringAfterLast('\\')
-                .filter { !it.isISOControl() && it !in FORBIDDEN }
-                .trim()
-                .trim('.')
-                .takeLast(MAX_NAME)
-
-        private const val FORBIDDEN = ":*?\"|<>"
-
-        /** The extension a downloaded file gets when the message names none. */
-        fun extensionOf(
-            mime: String?,
-            kind: WaSyncKind,
-        ): String =
-            when (mime?.substringBefore(';')?.trim()?.lowercase()) {
-                "image/jpeg" -> {
-                    "jpg"
-                }
-
-                "image/png" -> {
-                    "png"
-                }
-
-                "image/webp" -> {
-                    "webp"
-                }
-
-                "image/gif" -> {
-                    "gif"
-                }
-
-                "video/mp4" -> {
-                    "mp4"
-                }
-
-                "audio/ogg" -> {
-                    "ogg"
-                }
-
-                "audio/mpeg" -> {
-                    "mp3"
-                }
-
-                "audio/mp4", "audio/aac" -> {
-                    "m4a"
-                }
-
-                "application/pdf" -> {
-                    "pdf"
-                }
-
-                else -> {
-                    when (kind) {
-                        WaSyncKind.Image -> "jpg"
-                        WaSyncKind.Sticker -> "webp"
-                        WaSyncKind.Video -> "mp4"
-                        WaSyncKind.Audio -> "ogg"
-                        else -> "bin"
-                    }
-                }
-            }
     }
 }

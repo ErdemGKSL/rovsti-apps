@@ -7,9 +7,13 @@ import dev.rosty.core.model.wa.Reaction
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEvicted
+import dev.rosty.core.model.wa.WaSyncFetched
 import dev.rosty.core.model.wa.WaSyncKind
+import dev.rosty.core.model.wa.WaSyncMediaEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
+import dev.rosty.core.model.wa.WaSyncMediaSettleRequest
+import dev.rosty.core.model.wa.WaSyncNetwork
 import dev.rosty.design.text.UiText
 import dev.rosty.messages.R
 import dev.rosty.messages.conversation.BubbleMediaKind
@@ -69,8 +73,10 @@ class WaThreadMediaTest {
 
     @After fun reset() = Dispatchers.resetMain()
 
+    private val mediaDir get() = File(folder.root, "wa-media")
+
     private fun mediaOf(kit: WaTestKit) =
-        WaMedia(kit.offline, kit.remote, File(folder.root, "wa-media"), { kit.now }, io = dispatcher)
+        WaMedia(kit.offline, kit.remote, checkNotNull(kit.downloads), { kit.now }, io = dispatcher)
 
     private fun model(
         kit: WaTestKit,
@@ -138,7 +144,7 @@ class WaThreadMediaTest {
 
     @Test fun theHeaderShowsTheNumberAsPeopleReadIt() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(WaTestKit.text(ADA, "m1", NOW - 10 * minute, "Hi"))
             val model = model(kit)
@@ -149,7 +155,7 @@ class WaThreadMediaTest {
 
     @Test fun aSwipeQuotesTheMessageAndTheReplyCarriesIt() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(WaTestKit.text(ADA, "m1", NOW - 10 * minute, "Shall we take the 9:40 ferry?"))
             kit.message(WaTestKit.text(ADA, "m2", NOW - 9 * minute, "I can", fromMe = true))
@@ -180,7 +186,7 @@ class WaThreadMediaTest {
 
     @Test fun theQuotedBarCanBeClosedAndMyOwnMessageIsQuotedAsYou() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(WaTestKit.text(ADA, "m1", NOW - 10 * minute, "On my way", fromMe = true))
             val model = model(kit)
@@ -206,7 +212,7 @@ class WaThreadMediaTest {
 
     @Test fun aDoubleTapReactsWithTheDefaultEmojiAndASecondOneTakesItBack() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(WaTestKit.text(ADA, "m1", NOW - 10 * minute, "Done!"))
             kit.message(
@@ -240,7 +246,7 @@ class WaThreadMediaTest {
 
     @Test fun theEmojiUsedLastLeadTheReactionBar() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(WaTestKit.text(ADA, "m1", NOW - 10 * minute, "We won"))
             val model = model(kit)
@@ -262,7 +268,7 @@ class WaThreadMediaTest {
 
     @Test fun aPickedPictureWaitsAboveTheComposerAndGoesOutWithItsCaption() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(WaTestKit.text(ADA, "m1", NOW - 10 * minute, "Send me the view"))
             val model = model(kit)
@@ -305,7 +311,7 @@ class WaThreadMediaTest {
 
     @Test fun aFileGoesOutWithoutAnyText() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             val model = model(kit)
             settle()
@@ -328,7 +334,7 @@ class WaThreadMediaTest {
 
     @Test fun aFileOverSixteenMegabytesIsRefusedWithAPill() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             val model = model(kit)
             settle()
@@ -366,7 +372,7 @@ class WaThreadMediaTest {
 
     @Test fun aRefusedFileSaysNotSentAndGoesOutAgainOnATap() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             val model = model(kit)
             settle()
@@ -405,7 +411,7 @@ class WaThreadMediaTest {
 
     @Test fun editingAQueuedFilePutsItBackAboveTheComposer() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             val model = model(kit)
             settle()
@@ -436,7 +442,7 @@ class WaThreadMediaTest {
 
     @Test fun aReceivedPictureShowsItsThumbnailThenThePictureThroughTheStore() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(
                 WaTestKit.media(
@@ -467,16 +473,26 @@ class WaThreadMediaTest {
 
             kit.connect()
             settle()
-            // The thumbnail went into the store as base64 and the download was named to it with its size.
+            // The thumbnail went into the store as base64. The picture was asked for under the rules (Wi-Fi), went
+            // through the store's queue and was settled with its file and size.
             val sets = kit.ops.writes.filterIsInstance<WaSyncMediaSetRequest>()
-            assertEquals("VEhN", sets.first { it.thumbnailB64 != null }.thumbnailB64)
-            val stored = sets.first { it.path != null }
+            assertEquals("VEhN", sets.single().thumbnailB64)
+            val asked =
+                kit.ops.writes
+                    .filterIsInstance<WaSyncMediaEnqueueRequest>()
+                    .single()
+            assertEquals(WaSyncNetwork.Wifi to false, asked.network to asked.tap)
+            val stored =
+                kit.ops.writes
+                    .filterIsInstance<WaSyncMediaSettleRequest>()
+                    .single()
+                    .outcome as WaSyncFetched.Ready
             assertEquals(3L, stored.bytes)
-            assertEquals("IMG", File(stored.path!!).readText())
-            assertTrue(File(stored.path!!).startsWith(File(folder.root, "wa-media")))
+            assertEquals("IMG", File(stored.path).readText())
+            assertTrue(File(stored.path).startsWith(File(folder.root, "wa-media")))
             media = bubble(model, "p1").media.single()
             assertTrue(media.local)
-            assertEquals(File(stored.path!!), media.model)
+            assertEquals(File(stored.path), media.model)
             assertFalse(media.busy)
             // Once each, however often the page is read again.
             kit.offline.noteChanged(setOf(ADA))
@@ -487,7 +503,7 @@ class WaThreadMediaTest {
 
     @Test fun aTapOnAPictureOpensTheViewerAndMarksItUsed() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(
                 WaTestKit.media(ADA, "p1", NOW - 5 * minute, WaSyncKind.Image, "image/jpeg", 2_048, pictureMeta),
@@ -508,11 +524,16 @@ class WaThreadMediaTest {
             kit.remote.down = false
             kit.connect()
             settle()
-            val downloads = kit.remote.mediaCalls.size
+            // The failed download waits for its next attempt; a tap does not wait.
             kit.now += minute
             assertTrue(model.openMedia("p1"))
             settle()
             assertEquals(listOf<WaMediaEffect>(WaMediaEffect.ShowPictures("p1")), opened)
+            val downloads = kit.remote.mediaCalls.size
+            kit.now += minute
+            assertTrue(model.openMedia("p1"))
+            settle()
+            assertEquals(2, opened.size)
             // The cached file was used, not downloaded again, and the viewer pages over it.
             assertEquals(downloads, kit.remote.mediaCalls.size)
             assertEquals(listOf("p1"), waPicturesOf(model.state.value.items).map { it.first })
@@ -522,7 +543,7 @@ class WaThreadMediaTest {
 
     @Test fun aReceivedFileIsDownloadedForSaveAndShareAndTheCacheIsBroughtUnderItsCap() =
         scope.runTest {
-            val (kit, store) = WaTestKit.withMedia(backgroundScope)
+            val (kit, store) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(
                 WaTestKit.media(
@@ -574,11 +595,83 @@ class WaThreadMediaTest {
             )
         }
 
+    @Test fun anEvictedPictureKeepsItsThumbnailAndComesBackOnlyOnATap() =
+        scope.runTest {
+            val kit = WaTestKit(backgroundScope, mediaDir = mediaDir, io = dispatcher)
+            kit.chat(ADA, name = "Ada")
+            kit.message(
+                WaTestKit.media(ADA, "p1", NOW - 5 * minute, WaSyncKind.Image, "image/jpeg", 2_048, pictureMeta),
+            )
+            kit.remote.thumbnails["p1"] = BytesAnswer(3, dataB64 = "VEhN")
+            kit.remote.files["p1"] = BytesAnswer(3, dataB64 = "SU1H")
+            val model = model(kit)
+            settle()
+            kit.connect()
+            settle()
+            val file = bubble(model, "p1").media.single().model as File
+            assertTrue(file.isFile)
+
+            // A day later (a file used in the last 24 hours is spared) a lower cap takes the file.
+            kit.now += 25 * 60 * minute
+            assertTrue(kit.offline.setMediaCap(1))
+            settle()
+            assertFalse(file.exists())
+            var media = bubble(model, "p1").media.single()
+            // The thumbnail with the download mark; reading the page again does not fetch it.
+            assertFalse(media.local)
+            assertTrue(media.model != null)
+            kit.offline.noteChanged(setOf(ADA))
+            settle()
+            assertEquals(1, kit.remote.mediaCalls.size)
+
+            val opened = mediaEffectsOf(model)
+            assertTrue(model.openMedia("p1"))
+            settle()
+            assertEquals(2, kit.remote.mediaCalls.size)
+            assertEquals(listOf<WaMediaEffect>(WaMediaEffect.ShowPictures("p1")), opened)
+            media = bubble(model, "p1").media.single()
+            assertTrue(media.local)
+        }
+
+    @Test fun aFileTheGatewayNoLongerHasSaysSo() =
+        scope.runTest {
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
+            kit.chat(ADA, name = "Ada")
+            kit.message(
+                WaTestKit.media(
+                    ADA,
+                    "d1",
+                    NOW - 5 * minute,
+                    WaSyncKind.Document,
+                    "application/pdf",
+                    1_258_291,
+                    MediaMeta(fileName = "Ferry timetable.pdf"),
+                ),
+            )
+            kit.remote.mediaErrors["d1"] =
+                dev.rosty.core.RustError
+                    .NotFound("no such media")
+            val model = model(kit)
+            settle()
+            kit.connect()
+            settle()
+            val effects = effectsOf(model)
+
+            model.mediaAction("d1", MediaAction.Save)
+            settle()
+
+            assertEquals(ConversationEffect.Toast(UiText.Res(R.string.wa_media_gone)), effects.last())
+            val row = bubble(model, "d1").media.single()
+            assertEquals(EnglishWaWords.gone, row.detail)
+            assertFalse(row.local)
+            assertFalse(row.busy)
+        }
+
     // ---- the sender card (M50)
 
     @Test fun aGroupBubbleNamesItsSenderForTheCard() =
         scope.runTest {
-            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(GROUP, name = "Weekend hike", group = true)
             kit.message(WaTestKit.text(GROUP, "g1", NOW - 3 * minute, "Who brings water?", sender = ADA))
             kit.message(

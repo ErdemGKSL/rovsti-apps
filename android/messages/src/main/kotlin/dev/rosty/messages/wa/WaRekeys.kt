@@ -167,6 +167,14 @@ class WaRekeys(
             done
         }
 
+    /**
+     * The store of [instanceId] was emptied or deleted (another account, an unlink): its merge log starts again at
+     * 0, so the cursor does too. Otherwise the first merges of the new account would be skipped.
+     */
+    suspend fun forget(instanceId: String) {
+        running.withLock { cursor.write(instanceId, 0L) }
+    }
+
     private suspend fun moved(step: Rekey): Boolean {
         for (mover in movers) {
             try {

@@ -8,6 +8,7 @@ import dev.rosty.core.ops.NativeWaSyncOps
 import dev.rosty.core.ops.WaSyncStore
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.platform.files.FileResult
+import dev.rosty.platform.system.AndroidDeviceData
 import dev.rosty.wa.WaLinkStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,8 +42,25 @@ fun realWaOffline(
         now = System::currentTimeMillis,
         wake = WaOutboxWork(container.context),
         rekeys = container.waRekeys,
+        downloads = container.waDownloads,
+        cleanup = messagesLinkCleanup(container),
+        wipe = { instance -> WaSyncStore.wipe(instance, ops = NativeWaSyncOps(container.rust)) },
     )
 }
+
+/**
+ * The real [WaDownloads]: files under `files/wa-media`, the network kind and the free space from `:platform`, woken
+ * by the same WorkManager job as the outbox.
+ */
+fun realWaDownloads(container: MessagesContainer): WaDownloads =
+    WaDownloads(
+        scope = container.scope,
+        remote = container.waRemote,
+        dir = File(container.context.filesDir, "wa-media"),
+        now = System::currentTimeMillis,
+        device = AndroidDeviceData(container.context),
+        wake = WaOutboxWork(container.context),
+    )
 
 /**
  * The real voice note player: Rust's `voice_player.*` rules, Android's media player (on the main thread) and the speed

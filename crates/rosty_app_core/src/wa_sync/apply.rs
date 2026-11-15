@@ -2,9 +2,9 @@
 
 use rosty_wa_proto::event::ReceiptKind;
 use rosty_wa_proto::{
-    ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, EventEnvelope, GatewayEvent, Location,
-    MediaMeta, MessageBody, MessageMeta, Quoted, Reaction, RichChat, SharedContact, WaMessage,
-    is_status_chat,
+    ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, EventEnvelope, GatewayEvent,
+    HistorySyncType, Location, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction, RichChat,
+    SharedContact, WaMessage, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -767,20 +767,28 @@ pub(super) fn apply_event(
                 touched(out, &jid);
             }
         }
-        GatewayEvent::HistorySynced { progress, .. } => {
+        GatewayEvent::HistorySynced {
+            chats: _,
+            progress,
+            sync_type,
+            messages,
+            oldest_ms,
+        } => {
             // The phone delivered history without one event per message: chats may have older and newer
             // messages than the cursors say.
             conn.execute("UPDATE chat_sync SET reached_start = 0", [])?;
             conn.execute("UPDATE sync_state SET needs_resync = 1", [])?;
-            // The kind of the batch and its oldest message go here once the event carries them.
             let batch = link_state::HistoryBatch {
+                sync_type: sync_type.map(sync_type_name),
+                oldest_ms: *oldest_ms,
                 progress: *progress,
-                ..Default::default()
+                messages: *messages,
             };
             link_state::history_synced(conn, &batch, at_ms)?;
             out.resync = true;
         }
-        GatewayEvent::Resync => {
+        // The epoch a `resync` names is taken in by `Store::apply_events`, which holds the `seq`.
+        GatewayEvent::Resync { .. } => {
             conn.execute("UPDATE sync_state SET needs_resync = 1", [])?;
             link_state::resynced(conn)?;
             out.resync = true;
@@ -816,14 +824,28 @@ pub(super) fn apply_event(
                 at_ms,
             )?;
         }
-        // `State` names the account's own ids: `Store::apply_events` sets them before this event is applied.
+        // `State` names the gateway process, the account and its history, `AccountChanged` another account and
+        // `Hello` the gateway process: `Store::apply_events` takes them in before this event is applied.
         GatewayEvent::Qr { .. }
         | GatewayEvent::PairCode { .. }
         | GatewayEvent::State(_)
+        | GatewayEvent::AccountChanged { .. }
+        | GatewayEvent::Hello { .. }
         | GatewayEvent::GroupChanged { .. }
         | GatewayEvent::Scheduled(_)
         | GatewayEvent::StatusChanged { .. }
         | GatewayEvent::KeyRevoked => {}
     }
     Ok(())
+}
+
+/// The wire name of a history batch's kind, as [`link_state::HistoryProgress`] keeps it.
+fn sync_type_name(sync_type: HistorySyncType) -> &'static str {
+    match sync_type {
+        HistorySyncType::Initial => "initial",
+        HistorySyncType::Recent => "recent",
+        HistorySyncType::Full => "full",
+        HistorySyncType::OnDemand => "on_demand",
+        HistorySyncType::Other => "other",
+    }
 }

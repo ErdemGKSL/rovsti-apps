@@ -258,12 +258,45 @@ mod tests {
                     own_jid: None,
                     push_name: None,
                     own_lid: None,
+                    epoch: None,
+                    account_epoch: None,
+                    history: None,
                 }),
             }),
         );
         assert_eq!(event["event"]["kind"], "event");
         assert_eq!(event["event"]["seq"], 7);
         assert_eq!(event["event"]["event"]["type"], "state");
+        // A status of an old gateway carries none of the newer fields.
+        assert_eq!(event["event"]["event"].get("epoch"), None);
+    }
+
+    /// The frames of the epoch, account and history round reach Kotlin as the gateway wrote them.
+    #[test]
+    fn the_gateway_s_newer_frames_pass_through_unchanged() {
+        let frames = [
+            json!({"type": "hello", "epoch": "9f2c41d07ab35e68"}),
+            json!({"type": "resync", "epoch": "9f2c41d07ab35e68"}),
+            json!({"type": "resync"}),
+            json!({"type": "account_changed", "old_pn": "100000000001@s.whatsapp.net",
+                "new_pn": "100000000002@s.whatsapp.net"}),
+            json!({"type": "account_changed", "new_pn": "100000000002@s.whatsapp.net"}),
+            json!({"type": "history_synced", "chats": 12, "progress": 40, "sync_type": "full",
+                "messages": 3500, "oldest_ms": 1_500_000_000_000_i64}),
+            json!({"type": "state", "instance_id": "i", "state": "connected",
+                "own_jid": "100000000001@s.whatsapp.net", "push_name": null, "epoch": "9f2c41d07ab35e68",
+                "account_epoch": 2, "history": {"state": "syncing", "progress": 55, "chats": 120,
+                "messages": 48_000, "oldest_ms": 1_500_000_000_000_i64}}),
+        ];
+        for (seq, frame) in frames.into_iter().enumerate() {
+            let envelope: EventEnvelope =
+                serde_json::from_value(json!({"seq": seq, "at_ms": 5, "event": frame.clone()}))
+                    .expect("envelope");
+            let sent = payload("inst1", ClientEvent::Event(envelope));
+            assert_eq!(sent["event"]["kind"], "event");
+            assert_eq!(sent["event"]["seq"], seq);
+            assert_eq!(sent["event"]["event"], frame);
+        }
     }
 
     #[test]

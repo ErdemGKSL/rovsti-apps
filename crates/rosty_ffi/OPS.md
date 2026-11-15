@@ -152,7 +152,7 @@ WhatsApp (E2.14): `wa.open {url, key?, cache_dir?}` answers `{handle}`, a `rosty
 `detail.source` = `whatsapp` | `gateway`) and `parse`. Bytes (`wa.media`, `wa.thumbnail`, `wa.status_media`, `wa.status_thumbnail`, `wa.picture`)
 answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the handle's cache directory (Kotlin deletes it). `wa.send_media(_with)` takes `data_b64` or a `path`.
 `wa.events_start {handle, instance, after?}` answers a stream handle and emits every socket message as event `wa.event` `{instance, event}` with `event.kind` one of `connected`,
-`event` (`seq`, `at_ms`, `event` = the gateway event, tagged `type`), `disconnected {reason}`, `unauthorized`; `wa.events_reconnect_now`, `RustNative.release` stops it. `wa.call_audio_open
+`event` (`seq`, `at_ms`, `event` = the gateway event, tagged `type`; since E6-WA R2 also `hello {epoch}` as the first frame of every socket, `account_changed {old_pn?, new_pn}`, `resync {epoch?}`, `history_synced {chats, progress, sync_type?, messages, oldest_ms?}`, and `state` and `wa.status` carry `epoch?`, `account_epoch?`, `history?: {state, progress, chats, messages, oldest_ms}`), `disconnected {reason}`, `unauthorized`; `wa.events_reconnect_now`, `RustNative.release` stops it. `wa.call_audio_open
 {handle, call_id}` answers an audio handle for `RustNative.audioPush` / `audioPull` (push takes microphone frames of exactly 1 920 bytes and drops any other size; the socket asks for 20 ms speaker frames (`?spk_ms=20`), and pull waits up to 20 ms and answers the frame's bytes: 640 from a gateway that sends 20 ms frames, 1 920 from an older one; 0 when nothing came, -1 when the call ended). Fixtures run against a loopback stub that answers `crates/rosty_ffi/tests/data/wa/<stem>.json` (`tests/support/mod.rs`); each file also states the request
 the client must have sent. Pure: `wa.push_parse` (FCM wake), `wa.link_read` / `wa.link_write` (`whatsapp-link.json`), `wa.avatars_plan` (picture file names and the disk prune plan; the
 `AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up), `wa.settings_apply {model?, link?, app, now_ms, input?}` (the stateless WhatsApp settings state machine: answers `{model, effects, view}`, a render-ready page; the caller keeps `model` as JSON; the gateway URL and `rwk_` key checks run inside it).
@@ -242,14 +242,23 @@ emptied in one transaction (chats, cursors, messages with their reactions, ticks
 and merge log, own ids, the pairs cursor, the history progress; the event `seq`, the epoch and the media cap stay) and the answer
 says `account_changed` and lists the media files to delete; what is kept per chat outside the store (drafts, mutes, the rekey
 cursor) belongs to the old account too. A value that is unknown on either side wipes nothing, nor does the same account linked
-again. `wa_sync.apply_events` does the same when a `state` event names another own number (`account_changed?`, `delete_files?` in
-its answer), and so does `wa_sync.identity_observe` (`delete_files?`). `wa_sync.account_changed {handle, now_ms, old_pn?, new_pn}`
-takes the gateway's `account_changed` event at its place in the stream and answers `{rekeyed, rejected, resync, account_changed,
+again. `wa_sync.identity_observe` does all of this with the whole `wa.status` answer in `status` (epoch, account epoch, own ids,
+history report; a gap reads as `resync`), so the fields need not be copied into `wa_sync.note_status`. `wa_sync.apply_events`
+takes the same from the stream, so every `wa.event` is handed in as it came: a `hello` or a `resync` that names another epoch than
+the stored one is the gap (`resync` in the answer; `last_seq` is `null` after a `hello` gap until the next event; a `hello` of the
+stored epoch changes nothing and never moves the `seq`; no epoch changes nothing); a `state` event is taken in like a status
+answer (epoch, account epoch, own ids, history report; one of an account before the stored one, by its lower `account_epoch`,
+is not believed); an `account_changed` event is applied at its place in the batch as `wa_sync.account_changed` does
+(`account_changed?`, `delete_files?` in the answer: what came before it in the batch is dropped, what follows is kept); a
+`history_synced` event keeps its `sync_type` and the oldest `oldest_ms` and adds its `messages` to the stored count until the next
+status report sets it. `wa_sync.account_changed {handle, now_ms, old_pn?, new_pn}`
+takes the gateway's `account_changed` event at its place in the stream (for a caller that does not hand the event to
+`wa_sync.apply_events`; never both) and answers `{rekeyed, rejected, resync, account_changed,
 delete_files?}`: a store of another number is emptied; a store already emptied for `new_pn` by a status answer is swept once more
 (events of the old account may have arrived in between; the outbox stays); the same account does nothing. `history` is
 `{state: idle|syncing|done, progress?, chats?, messages?, oldest_ms?}` as the gateway reports it; it is stored (`progress` capped at
 100) and `wa_sync.history {handle}` answers `{history: {state, progress?, chats, messages, oldest_ms?, sync_type?, updated_ms} |
-null}` after a restart; a `history_synced` event updates `progress`. `wa_sync.wipe {handle}` or `{instance_id, dir?}` is the
+null}` after a restart; a `history_synced` event updates `progress`, `sync_type`, `oldest_ms` and `messages`. `wa_sync.wipe {handle}` or `{instance_id, dir?}` is the
 unlink: it closes the store (every handle of it then answers `not_found`), deletes the database with its `-wal` and `-shm`, and
 answers `{deleted, media_files}`: the store files removed and the media files the store named (cached files and files of unsent
 outbox rows); Kotlin deletes those and the instance's media directory. An instance without a store answers two empty lists.
@@ -265,7 +274,8 @@ takes one page of `wa.identity_mappings` and answers `{pairs, since, more, rekey
 `wa_sync.plan`'s `identity_since?` (left out before the first page) when the store opens, when the socket reconnects and after a
 `resync`, and go on with `since` while `more`. `wa.identity_mappings {handle, since?}` answers `{supported, items: [{lid, pn,
 source, learned_ms}], next}`; `supported: false` is a gateway from before the route (404), not an error. `wa_sync.identity_observe
-{handle, now_ms, status?, groups?, profiles?}` learns from the answers of `wa.status` (the account's own ids; another own number
+{handle, now_ms, status?, groups?, profiles?}` learns from the answers of `wa.status` (the whole answer: the account's own ids, and its `epoch`, `account_epoch` and
+`history` as `wa_sync.note_status` takes them; another epoch is a gap: `resync`; another account
 empties the store: `account_changed`, `delete_files?`), `wa.group(s)` (members' `lid` / `pn`) and `wa.profiles` (`lid`) and answers
 `{rekeyed, rejected, resync, account_changed, delete_files?}`. `wa_sync.identity_resolve {handle, id}` answers `{key, kind, wire, person_id?}`
 (the key the chat of `id` is stored under, the kind of `id` as written, `id` without device for the wire, the person of a number or

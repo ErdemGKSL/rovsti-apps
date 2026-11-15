@@ -82,7 +82,7 @@ pub enum Step {
 /// True when `envelope` is news for a store at `last_seq`. A `resync` is always news: it also resets the sequence
 /// (after a gateway restart the numbers start over).
 pub fn accepts(last_seq: Option<u64>, envelope: &EventEnvelope) -> bool {
-    matches!(envelope.event, GatewayEvent::Resync)
+    matches!(envelope.event, GatewayEvent::Resync { .. })
         || last_seq.is_none_or(|last| envelope.seq > last)
 }
 

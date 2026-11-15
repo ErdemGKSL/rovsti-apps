@@ -289,6 +289,9 @@ impl LinkModel {
                     own_jid: None,
                     push_name: None,
                     own_lid: None,
+                    epoch: None,
+                    account_epoch: None,
+                    history: None,
                 },
             },
             (None, _) => Screen::Choose,
@@ -687,6 +690,9 @@ mod tests {
             own_jid: Some("905321234567@s.whatsapp.net".into()),
             push_name: Some("Ada".into()),
             own_lid: None,
+            epoch: None,
+            account_epoch: None,
+            history: None,
         }
     }
 
@@ -1016,7 +1022,10 @@ mod tests {
         assert!(m.link.is_none());
         // Chatter that is not about linking changes nothing.
         let mut m = linked();
-        assert!(m.apply(Input::Event(GatewayEvent::Resync)).is_empty());
+        assert!(
+            m.apply(Input::Event(GatewayEvent::Resync { epoch: None }))
+                .is_empty()
+        );
     }
 
     fn key(id: &str, current: bool) -> KeyInfo {

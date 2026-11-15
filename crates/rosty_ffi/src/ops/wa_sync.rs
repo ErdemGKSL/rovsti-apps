@@ -18,7 +18,9 @@
 //!
 //! The gateway and the account: `wa_sync.note_status` takes the gateway's epoch, account epoch, own ids and
 //! history progress (another epoch is a gap, another account empties the store), `wa_sync.account_changed` takes
-//! the gateway's announcement of an account change, `wa_sync.history` reads the progress back, and
+//! the gateway's announcement of an account change, `wa_sync.history` reads the progress back;
+//! `wa_sync.identity_observe` (a whole `wa.status` answer) and `wa_sync.apply_events` (`hello`, `resync`, `state`,
+//! `account_changed`, `history_synced`) take the same from the wire types, so a caller copies no field by hand;
 //! `wa_sync.wipe` closes a store and deletes its files (unlink).
 
 use crate::envelope::{ErrorKind, FfiError};
@@ -658,6 +660,31 @@ fn apply_events_cases() -> Vec<Case> {
             json!({"handle": H, "events": [event(1, json!({"instance_id": "inst1", "state": "connected",
                 "own_jid": "100000000009@s.whatsapp.net", "push_name": null, "own_lid": "777000000000009@lid"}),
                 "state")]}),
+        )),
+        // A socket of a restarted gateway: `hello` names another epoch than the stored one (a gap: `resync`,
+        // the low numbers of the new process are applied), a history batch says its kind, and the `state`
+        // names the gateway, the account and how far its history got (`wa_sync.history` then answers it).
+        on_linked(Case::named(
+            "gateway",
+            json!({"handle": H, "events": [
+                event(1, json!({"epoch": "e2"}), "hello"),
+                event(2, json!({"chats": 12, "progress": 40, "sync_type": "full", "messages": 3500,
+                    "oldest_ms": NOW - 86_400_000}), "history_synced"),
+                event(3, json!({"instance_id": "inst1", "state": "connected", "own_jid": OWN, "push_name": null,
+                    "epoch": "e2", "account_epoch": 1, "history": {"state": "syncing", "progress": 55,
+                    "chats": 120, "messages": 48_000, "oldest_ms": NOW - 86_400_000}}), "state"),
+                event(4, json!({"epoch": "e2"}), "resync"),
+            ]}),
+        )),
+        // The gateway announces another account at its place in the stream: what came before is dropped
+        // (`account_changed`, `delete_files`), what follows is kept.
+        on_linked(Case::named(
+            "account_changed",
+            json!({"handle": H, "events": [
+                event(9, text_msg(ALI, "A9", NOW + 2_500, false, "eski hesaptan"), "message"),
+                event(10, json!({"old_pn": OWN, "new_pn": OTHER_OWN}), "account_changed"),
+                event(11, text_msg(ALI, "B1", NOW + 2_600, false, "yeni hesaptan"), "message"),
+            ]}),
         )),
     ]
 }
@@ -2107,7 +2134,8 @@ fn identity_catch_up_cases() -> Vec<Case> {
 struct ObserveReq {
     handle: i64,
     now_ms: i64,
-    /// `wa.status`: the account's own number and LID.
+    /// `wa.status`, the whole answer: the account's own number and LID, the gateway's `epoch`, the
+    /// `account_epoch` and the `history` report (what `wa_sync.note_status` takes field by field).
     #[serde(default)]
     status: Option<InstanceStatus>,
     /// `wa.group` / `wa.groups`: members named by LID and number.
@@ -2144,6 +2172,22 @@ fn identity_observe_cases() -> Vec<Case> {
                 "lid": "777000000000002@lid"}],
         }))),
         on_sample(Case::named("nothing", json!({"handle": H, "now_ms": NOW}))),
+        // The whole `wa.status` answer of a gateway that restarted: another epoch is a gap (`resync`), and the
+        // history report is stored.
+        on_linked(Case::named(
+            "gateway",
+            json!({"handle": H, "now_ms": NOW + 3_000,
+                "status": {"instance_id": "inst1", "state": "connected", "own_jid": OWN, "push_name": "Ben",
+                    "epoch": "e2", "account_epoch": 1, "history": {"state": "done", "progress": 100,
+                    "chats": 412, "messages": 120_000, "oldest_ms": NOW - 86_400_000}}}),
+        )),
+        // The status names a raised account epoch: the store is emptied, as `wa_sync.note_status` does.
+        on_linked(Case::named(
+            "account_changed",
+            json!({"handle": H, "now_ms": NOW + 3_000,
+                "status": {"instance_id": "inst1", "state": "connected", "own_jid": OTHER_OWN,
+                    "push_name": null, "epoch": "e1", "account_epoch": 2}}),
+        )),
     ]
 }
 

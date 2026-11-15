@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use super::apply::{self, Upsert};
 use super::identity::{self, Canon, Ids};
-use super::link_state::Told;
+use super::link_state::{self, Told};
 use super::model::{AppliedEvents, StoredChats, StoredPage};
 use super::plan::{self, ChatCursor, FetchPage, Gap, SyncPlan, SyncState};
 use super::{Error, Result, backfill, merge, outbox, schema};
@@ -158,13 +158,19 @@ impl Store {
 
     /// Applies gateway events in the order given. An event at or before the stored `seq` was applied already and
     /// is skipped; a `resync` resets the `seq` and asks for a chat list refresh. One transaction, all or nothing,
-    /// unless a `state` event names the account.
+    /// unless an event tells about the account.
     ///
-    /// A `state` event that names the account (its own number, and its LID when the gateway knows it) sets the
-    /// store's own ids first ([`Self::identity_set_own`]): another account empties the store
-    /// (`account_changed`), which is a transaction of its own, not a step of the events' transaction. The events before such an event are then a transaction of their
-    /// own, with their `seq` stored, so a failure later in the batch leaves them applied and the rest is applied
-    /// when the batch is handed in again.
+    /// The gateway process: a `hello` (the first frame of a socket) or a `resync` that names another epoch than
+    /// the stored one is a gap, as in [`Self::note_status`]: the stored `seq` is forgotten and the chat list
+    /// must be refreshed (`resync`). A `hello` of the stored epoch changes nothing, and it never moves the
+    /// `seq`.
+    ///
+    /// A `state` event is taken in the way a status answer is ([`Self::note_status`]): its epoch, the account
+    /// (the account epoch, the own number and LID) and the history report. An `account_changed` event is
+    /// [`Self::note_account_event`]. Another account empties the store (`account_changed`), which is a
+    /// transaction of its own, not a step of the events' transaction. The events before such an event are then a
+    /// transaction of their own, with their `seq` stored, so a failure later in the batch leaves them applied
+    /// and the rest is applied when the batch is handed in again.
     pub fn apply_events(&mut self, events: &[EventEnvelope]) -> Result<AppliedEvents> {
         let mut out = AppliedEvents::default();
         let mut start = 0;
@@ -172,19 +178,21 @@ impl Store {
             let end = events[start..]
                 .iter()
                 .skip(1)
-                .position(|envelope| own_ids(envelope).is_some())
+                .position(tells_account)
                 .map_or(events.len(), |at| start + 1 + at);
             let chunk = &events[start..end];
             if let Some(first) = chunk.first()
-                && let Some((pn, lid)) = own_ids(first)
-                && plan::accepts(self.sync_state()?.last_seq, first)
+                && tells_account(first)
             {
-                let own = self.set_own(Some(pn), lid, first.at_ms, Told::Event)?;
-                out.rekeyed.extend(own.rekeyed);
-                out.rejected.extend(own.rejected);
-                out.resync |= own.resync;
-                out.account_changed |= own.account_changed;
-                out.delete_files.extend(own.delete_files);
+                // The epoch comes before the `seq`, as for a `hello`: after a gap the event is news.
+                if let GatewayEvent::State(status) = &first.event
+                    && link_state::note_epoch(&self.conn, status.epoch.as_deref())?
+                {
+                    out.resync = true;
+                }
+                if plan::accepts(self.sync_state()?.last_seq, first) {
+                    self.note_account(first, &mut out)?;
+                }
             }
             let applied = apply_events(&mut self.conn, &mut self.identity, chunk, &mut out);
             self.healed(applied)?;
@@ -193,6 +201,31 @@ impl Store {
             }
             start = end;
         }
+    }
+
+    /// Takes in what a `state` or `account_changed` event tells about the gateway and the account, before the
+    /// event's place in the batch is applied.
+    fn note_account(&mut self, envelope: &EventEnvelope, out: &mut AppliedEvents) -> Result<()> {
+        match &envelope.event {
+            GatewayEvent::State(status) => {
+                let noted = self.note_status_told(status, envelope.at_ms, Told::Event)?;
+                out.rekeyed.extend(noted.rekeyed);
+                out.rejected.extend(noted.rejected);
+                out.resync |= noted.resync;
+                out.account_changed |= noted.account_changed;
+                out.delete_files.extend(noted.delete_files);
+            }
+            GatewayEvent::AccountChanged { old_pn, new_pn } => {
+                let noted = self.note_account_event(old_pn.as_deref(), new_pn, envelope.at_ms)?;
+                out.rekeyed.extend(noted.rekeyed);
+                out.rejected.extend(noted.rejected);
+                out.resync |= noted.resync;
+                out.account_changed |= noted.account_changed;
+                out.delete_files.extend(noted.delete_files);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Stores a refreshed chat list (`GET /v1/chats`) and decides, per chat, whether messages were missed: those
@@ -252,12 +285,26 @@ impl Store {
     }
 }
 
-/// The account's own number and LID, when `envelope` is a `state` event that names the account.
-fn own_ids(envelope: &EventEnvelope) -> Option<(&str, Option<&str>)> {
+/// True for an event that tells about the gateway and the account outside the events' transaction: a `state`
+/// event that says anything of it, and `account_changed`.
+fn tells_account(envelope: &EventEnvelope) -> bool {
     match &envelope.event {
         GatewayEvent::State(status) => {
-            Some((status.own_jid.as_deref()?, status.own_lid.as_deref()))
+            status.own_jid.is_some()
+                || status.epoch.is_some()
+                || status.account_epoch.is_some()
+                || status.history.is_some()
         }
+        GatewayEvent::AccountChanged { .. } => true,
+        _ => false,
+    }
+}
+
+/// The epoch a `hello` or a `resync` names.
+fn named_epoch(event: &GatewayEvent) -> Option<&str> {
+    match event {
+        GatewayEvent::Hello { epoch } => Some(epoch),
+        GatewayEvent::Resync { epoch } => epoch.as_deref(),
         _ => None,
     }
 }
@@ -281,6 +328,18 @@ fn apply_events(
     };
     let mut ids = Ids::new(&tx, map);
     for envelope in events {
+        // The epoch comes before the `seq`: the numbers of another gateway process say nothing about this one.
+        let gap = link_state::note_epoch(&tx, named_epoch(&envelope.event))?;
+        if gap {
+            last_seq = None;
+            done.resync = true;
+        }
+        if matches!(envelope.event, GatewayEvent::Hello { .. }) {
+            // The first frame of a socket is no event of the log: its `seq` is where the socket starts, which
+            // after a gap is not a point this store has reached.
+            done.applied += u32::from(gap);
+            continue;
+        }
         if !plan::accepts(last_seq, envelope) {
             continue;
         }

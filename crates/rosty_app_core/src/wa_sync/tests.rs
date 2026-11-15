@@ -446,7 +446,9 @@ fn a_resync_pages_down_to_the_stored_history_and_drops_nothing() {
     );
 
     // The gateway restarted: its sequence starts over and five messages were missed in one chat.
-    let applied = store.apply_events(&[env(2, GatewayEvent::Resync)]).unwrap();
+    let applied = store
+        .apply_events(&[env(2, GatewayEvent::Resync { epoch: None })])
+        .unwrap();
     assert!(applied.resync);
     assert_eq!(
         applied.last_seq,
@@ -512,7 +514,9 @@ fn an_interrupted_resync_resumes_and_live_events_do_not_hide_the_hole() {
     store
         .apply_events(&[env(1, GatewayEvent::Message(text(ALI, "A1", 1_000, "old")))])
         .unwrap();
-    store.apply_events(&[env(9, GatewayEvent::Resync)]).unwrap();
+    store
+        .apply_events(&[env(9, GatewayEvent::Resync { epoch: None })])
+        .unwrap();
     let gateway: Vec<WaMessage> = (1..=6)
         .map(|n| text(ALI, &format!("A{n}"), n * 1_000, "m"))
         .collect();
@@ -1190,7 +1194,9 @@ fn a_send_that_may_have_gone_out_waits_for_the_sync_before_it_is_retried() {
         .unwrap();
 
     // Back online after a gap: the echo of "hello" may be among what was missed.
-    store.apply_events(&[env(1, GatewayEvent::Resync)]).unwrap();
+    store
+        .apply_events(&[env(1, GatewayEvent::Resync { epoch: None })])
+        .unwrap();
     let due = store.outbox_due(900_000, true).unwrap();
     let ready: Vec<_> = due
         .items

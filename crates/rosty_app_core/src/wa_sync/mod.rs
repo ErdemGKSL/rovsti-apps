@@ -35,6 +35,8 @@ mod authors;
 mod backfill;
 #[cfg(test)]
 mod contact_match_tests;
+#[cfg(test)]
+mod gateway_wire_tests;
 mod identity;
 #[cfg(test)]
 mod identity_tests;

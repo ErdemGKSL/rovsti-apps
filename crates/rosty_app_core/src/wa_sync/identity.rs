@@ -593,16 +593,29 @@ impl Store {
     }
 
     /// Learns from what the gateway answered outside the event stream: the instance names the account's own
-    /// number and LID ([`Self::identity_set_own`]), a group names its members by both ids, a profile names the
-    /// LID of a number. Hand the answers in as they came; what names no pair teaches nothing.
+    /// number and LID, a group names its members by both ids, a profile names the LID of a number. Hand the
+    /// answers in as they came; what names no pair teaches nothing.
+    ///
+    /// The instance status is taken in whole ([`Self::note_instance_status`]): its epoch (another one than the
+    /// stored is a gap, answered as `resync`), the account epoch and own ids (another account empties the store:
+    /// `account_changed`, `delete_files`) and the history report ([`Self::history`]).
     pub fn identity_observe(
         &mut self,
         seen: &Observed<'_>,
         now_ms: i64,
     ) -> Result<IdentityApplied> {
-        let mut applied = match seen.status.filter(|status| status.own_jid.is_some()) {
+        // The whole status: the gateway's epoch (another one is a gap, `resync`), the account (another one
+        // empties the store) and the history report, next to the own ids.
+        let mut applied = match seen.status {
             Some(status) => {
-                self.identity_set_own(status.own_jid.as_deref(), status.own_lid.as_deref(), now_ms)?
+                let noted = self.note_instance_status(status, now_ms)?;
+                IdentityApplied {
+                    rekeyed: noted.rekeyed,
+                    rejected: noted.rejected,
+                    resync: noted.resync,
+                    account_changed: noted.account_changed,
+                    delete_files: noted.delete_files,
+                }
             }
             None => IdentityApplied::default(),
         };

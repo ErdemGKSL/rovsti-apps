@@ -1135,8 +1135,10 @@ wa_sync.account_changed
 wa_sync.account_changed.same
 wa_sync.account_changed.swept
 wa_sync.apply_events
+wa_sync.apply_events.account_changed
 wa_sync.apply_events.alt_ids
 wa_sync.apply_events.echo
+wa_sync.apply_events.gateway
 wa_sync.apply_events.identity
 wa_sync.apply_events.other_forms
 wa_sync.apply_events.own_ids
@@ -1160,6 +1162,8 @@ wa_sync.identity_numbers.group
 wa_sync.identity_numbers.unknown_lid
 wa_sync.identity_numbers.unknown_number
 wa_sync.identity_observe
+wa_sync.identity_observe.account_changed
+wa_sync.identity_observe.gateway
 wa_sync.identity_observe.nothing
 wa_sync.identity_resolve
 wa_sync.identity_resolve.group

@@ -24,7 +24,7 @@ use std::path::Path;
 use crate::headless::{self, Handler};
 use crate::storage;
 use crate::wa_link::send::{SendFailure, send_text_in};
-use rosty_geo::{FixIn, NoticeDelivery, Outcome, StopsPrefs};
+use rosty_geo::{FixIn, Lang, NoticeDelivery, Outcome, StopsPrefs};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -35,6 +35,9 @@ const ENDED: &str = "{\"state\":\"ended\"}";
 #[derive(Deserialize)]
 struct FixRequest {
     dir: String,
+    /// The phone's locale now; absent keeps the language the trip started in.
+    #[serde(default)]
+    locale: Option<Lang>,
     #[serde(flatten)]
     fix: FixIn,
 }
@@ -71,16 +74,24 @@ fn trip_fix(_: &str, json: &str) -> String {
     let Ok(request) = serde_json::from_str::<FixRequest>(json) else {
         return String::new();
     };
-    fix_in(Path::new(&request.dir), request.fix, &send_text_in)
+    fix_in(
+        Path::new(&request.dir),
+        request.fix,
+        request.locale,
+        &send_text_in,
+    )
 }
 
 /// One fix: advance the trip, persist it, maybe send the notice (outside the
 /// lock, it blocks on the network), record how that went, and answer.
-fn fix_in(dir: &Path, fix: FixIn, send: SendNotice<'_>) -> String {
+fn fix_in(dir: &Path, fix: FixIn, locale: Option<Lang>, send: SendNotice<'_>) -> String {
     let guard = store::lock();
     let Some(mut trip) = store::load_trip(dir) else {
         return ENDED.to_owned();
     };
+    if let Some(lang) = locale {
+        trip.lang = lang;
+    }
     let outcome = trip.on_fix(fix.fix(), fix.at_ms);
     save(dir, &trip);
     drop(guard);
@@ -226,7 +237,7 @@ mod tests {
     }
 
     fn run(dir: &Path, f: FixIn) -> FixOut {
-        serde_json::from_str(&fix_in(dir, f, &never)).unwrap()
+        serde_json::from_str(&fix_in(dir, f, None, &never)).unwrap()
     }
 
     fn history(dir: &Path) -> History {
@@ -298,9 +309,9 @@ mod tests {
             sent.borrow_mut().push((chat.to_owned(), text.to_owned()));
             Ok(())
         };
-        let before: FixOut = serde_json::from_str(&fix_in(&dir, fix(300.0, 1), &ok)).unwrap();
+        let before: FixOut = serde_json::from_str(&fix_in(&dir, fix(300.0, 1), None, &ok)).unwrap();
         assert!(!before.ring && sent.borrow().is_empty());
-        let ring: FixOut = serde_json::from_str(&fix_in(&dir, fix(-300.0, 2), &ok)).unwrap();
+        let ring: FixOut = serde_json::from_str(&fix_in(&dir, fix(-300.0, 2), None, &ok)).unwrap();
         assert!(ring.ring && ring.notice_sent);
         assert_eq!(sent.borrow().len(), 1);
         assert!(sent.borrow()[0].1.contains("Work"));
@@ -309,7 +320,7 @@ mod tests {
     #[test]
     fn no_trip_answers_ended() {
         let dir = tmp("hl-none");
-        assert_eq!(fix_in(&dir, fix(100.0, 1), &never), ENDED);
+        assert_eq!(fix_in(&dir, fix(100.0, 1), None, &never), ENDED);
         assert_eq!(alarm_in(&dir, "dismiss", 5), ENDED);
         let json = format!(
             "{{\"dir\":{:?},\"reason\":\"cancelled\"}}",
@@ -489,7 +500,7 @@ mod tests {
 
         // The real sender: no whatsapp-link.json in the directory.
         let first: FixOut =
-            serde_json::from_str(&fix_in(&dir, fix(900.0, 1), &send_text_in)).unwrap();
+            serde_json::from_str(&fix_in(&dir, fix(900.0, 1), None, &send_text_in)).unwrap();
         assert!(!first.notice_sent);
         let notice = store::load_trip(&dir).unwrap().notice.unwrap();
         assert!(!notice.sent);
@@ -501,7 +512,7 @@ mod tests {
             calls.set(calls.get() + 1);
             Ok(())
         };
-        fix_in(&dir, fix(800.0, 2), &counting);
+        fix_in(&dir, fix(800.0, 2), None, &counting);
         assert_eq!(calls.get(), 0);
     }
 
@@ -515,7 +526,7 @@ mod tests {
             Err(SendFailure::Retryable("offline".into()))
         };
         for at in 1..=5 {
-            fix_in(&dir, fix(900.0, at), &flaky);
+            fix_in(&dir, fix(900.0, at), None, &flaky);
         }
         assert_eq!(calls.get(), 3);
     }
@@ -529,8 +540,8 @@ mod tests {
             sent.borrow_mut().push((chat.to_owned(), text.to_owned()));
             Ok(())
         };
-        let first: FixOut = serde_json::from_str(&fix_in(&dir, fix(900.0, 1), &ok)).unwrap();
-        fix_in(&dir, fix(800.0, 2), &ok);
+        let first: FixOut = serde_json::from_str(&fix_in(&dir, fix(900.0, 1), None, &ok)).unwrap();
+        fix_in(&dir, fix(800.0, 2), None, &ok);
         assert!(first.notice_sent);
         let sent = sent.into_inner();
         assert_eq!(sent.len(), 1);

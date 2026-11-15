@@ -1,8 +1,8 @@
 //! Trip history as files: CSV for spreadsheets, GPX routes for other apps.
 
-use crate::Coord;
 use crate::history::{Outcome, TripRecord};
 use crate::places_io::escape;
+use crate::{Coord, Lang};
 
 const HEADER: &str = "started,ended,duration_min,outcome,label,a_lat,a_lon,b_lat,b_lon,travelled_m,snoozes,notice_sent";
 const DAY_S: i64 = 86_400;
@@ -19,14 +19,6 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let y = yoe + era * 400 + i64::from(m <= 2);
     (y, m, d)
-}
-
-/// Short English month name for 1..=12 (clamped).
-pub(crate) fn month_name(m: u8) -> &'static str {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    MONTHS[usize::from(m.clamp(1, 12) - 1)]
 }
 
 /// `YYYY-MM-DD` of an instant shifted by `tz_offset_s`.
@@ -130,22 +122,27 @@ pub fn to_gpx(records: &[TripRecord]) -> String {
 /// Shareable summary of a finished trip; a second line with a geo link to B
 /// follows when B is known. Times are local (`tz_offset_s` east of UTC).
 pub fn share_text(record: &TripRecord, tz_offset_s: i32) -> String {
+    share_text_in(Lang::En, record, tz_offset_s)
+}
+
+/// [`share_text`] in `lang`.
+pub fn share_text_in(lang: Lang, record: &TripRecord, tz_offset_s: i32) -> String {
     let (y, m, d) = rosty_core::contact_dates::local_ymd(record.ended_ms, tz_offset_s);
     let secs = (record.ended_ms.div_euclid(1000) + i64::from(tz_offset_s)).rem_euclid(DAY_S);
     let when = format!(
         "{d} {} {y}, {:02}:{:02}",
-        month_name(m),
+        lang.month(m),
         secs / 3600,
         secs % 3600 / 60
     );
-    let title = record.title();
-    let mut out = match record.outcome {
-        Outcome::Arrived => format!("Arrived at {title} on {when}. {}.", record.summary_line()),
-        Outcome::Cancelled => {
-            format!(
-                "Trip to {title} stopped on {when}. {}.",
-                record.summary_line()
-            )
+    let title = record.title_in(lang);
+    let summary = record.summary_line_in(lang);
+    let mut out = match (lang, record.outcome) {
+        (Lang::En, Outcome::Arrived) => format!("Arrived at {title} on {when}. {summary}."),
+        (Lang::En, Outcome::Cancelled) => format!("Trip to {title} stopped on {when}. {summary}."),
+        (Lang::Tr, Outcome::Arrived) => format!("Varış: {title}, {when}. {summary}."),
+        (Lang::Tr, Outcome::Cancelled) => {
+            format!("Durdurulan yolculuk: {title}, {when}. {summary}.")
         }
     };
     if let Some(b) = &record.b {

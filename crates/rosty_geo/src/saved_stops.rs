@@ -7,8 +7,8 @@ use rosty_core::search::fold;
 use serde::{Deserialize, Serialize};
 
 use crate::coord_format::{CoordFormat, format};
-use crate::session::format_distance;
-use crate::{Coord, Diameter, DiameterError, Endpoint, Feed};
+use crate::session::format_distance_in;
+use crate::{Coord, Diameter, DiameterError, Endpoint, Feed, Lang};
 
 /// Version written to and required from `saved.json`.
 pub const FORMAT_VERSION: u32 = 2;
@@ -38,8 +38,17 @@ pub struct StopShortcut {
 
 /// Shortcut description for `stop`; labels are cut on character boundaries.
 pub fn shortcut_spec(stop: &SavedStop) -> StopShortcut {
+    shortcut_spec_in(Lang::En, stop)
+}
+
+/// [`shortcut_spec`]; a stop without a name is "Stop" / "Durak".
+pub fn shortcut_spec_in(lang: Lang, stop: &SavedStop) -> StopShortcut {
     let name = stop.name.trim();
-    let name = if name.is_empty() { "Stop" } else { name };
+    let name = if name.is_empty() {
+        lang.pick("Stop", "Durak")
+    } else {
+        name
+    };
     StopShortcut {
         id: format!("stop-{}", stop.id),
         short_label: name.chars().take(SHORTCUT_SHORT_CHARS).collect(),
@@ -68,6 +77,17 @@ impl StopColour {
             Self::Red => "Red",
             Self::Green => "Green",
             Self::Blue => "Blue",
+        }
+    }
+
+    /// [`Self::label`] in `lang`.
+    pub fn label_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.label(),
+            (Lang::Tr, Self::Orange) => "Turuncu",
+            (Lang::Tr, Self::Red) => "Kırmızı",
+            (Lang::Tr, Self::Green) => "Yeşil",
+            (Lang::Tr, Self::Blue) => "Mavi",
         }
     }
 
@@ -160,6 +180,19 @@ impl SavedStopError {
             Self::Full => "You have saved 200 stops. Remove one first.",
             Self::NotFound => "That stop no longer exists.",
             Self::NoteTooLong => "Notes can be up to 200 characters.",
+        }
+    }
+
+    /// [`Self::message`] in `lang`.
+    pub fn message_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.message(),
+            (Lang::Tr, Self::InvalidName) => "Durak adı 1 ile 60 karakter arasında olmalı.",
+            (Lang::Tr, Self::InvalidGate(e)) => e.message_in(lang),
+            (Lang::Tr, Self::Duplicate(_)) => "Bu durağı zaten kaydettiniz.",
+            (Lang::Tr, Self::Full) => "200 durak kaydettiniz. Önce birini silin.",
+            (Lang::Tr, Self::NotFound) => "Bu durak artık yok.",
+            (Lang::Tr, Self::NoteTooLong) => "Notlar en fazla 200 karakter olabilir.",
         }
     }
 }
@@ -404,10 +437,16 @@ pub fn sorted(mut hits: Vec<&SavedStop>, sort: SavedSort, here: Option<Coord>) -
 /// The list as plain text for sharing: a header, then per stop its name, centre,
 /// distance from `here` when known, its note when it has one, and a map link. Empty for no stops.
 pub fn list_text(stops: &[&SavedStop], here: Option<Coord>) -> String {
+    list_text_in(Lang::En, stops, here)
+}
+
+/// [`list_text`] in `lang`.
+pub fn list_text_in(lang: Lang, stops: &[&SavedStop], here: Option<Coord>) -> String {
     if stops.is_empty() {
         return String::new();
     }
-    let mut out = format!("Saved stops ({})", stops.len());
+    let heading = lang.pick("Saved stops", "Kayıtlı duraklar");
+    let mut out = format!("{heading} ({})", stops.len());
     for s in stops {
         let c = s.center();
         let star = if s.favourite { "\u{2605} " } else { "" };
@@ -417,7 +456,11 @@ pub fn list_text(stops: &[&SavedStop], here: Option<Coord>) -> String {
             format(c, CoordFormat::Decimal, None)
         ));
         if let Some(h) = here {
-            out.push_str(&format!(" ({} away)", format_distance(h.distance_m(c))));
+            let away = format_distance_in(lang, h.distance_m(c));
+            out.push_str(&match lang {
+                Lang::En => format!(" ({away} away)"),
+                Lang::Tr => format!(" ({away} uzakta)"),
+            });
         }
         if !s.note.is_empty() {
             out.push_str(&format!("\n  {}", s.note));
@@ -458,7 +501,7 @@ pub fn load_saved_stops(text: Option<&str>) -> LoadedStops {
 }
 
 fn is_generic(label: &str) -> bool {
-    matches!(label.trim(), "" | "Point" | "Point A" | "Point B")
+    crate::history::is_generic_label(label)
 }
 
 /// A name to prefill when saving the stop AB: the nearest GTFS stop to the gate

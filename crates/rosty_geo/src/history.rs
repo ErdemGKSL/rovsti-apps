@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rosty_core::search::fold;
 use serde::{Deserialize, Serialize};
 
-use crate::{ActiveTrip, Coord, Endpoint};
+use crate::{ActiveTrip, Coord, Endpoint, Lang};
 
 /// Records kept; older ones are dropped.
 pub const MAX_RECORDS: usize = 500;
@@ -41,6 +41,16 @@ impl OutcomeFilter {
             Self::All => "All",
             Self::Arrived => "Arrived",
             Self::Cancelled => "Cancelled",
+        }
+    }
+
+    /// [`Self::label`] in `lang`.
+    pub fn label_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.label(),
+            (Lang::Tr, Self::All) => "Tümü",
+            (Lang::Tr, Self::Arrived) => "Varıldı",
+            (Lang::Tr, Self::Cancelled) => "İptal edildi",
         }
     }
 
@@ -131,44 +141,70 @@ impl TripRecord {
 
 /// "under 1 min", "18 min", "1 h 05 min".
 pub fn format_duration(ms: u64) -> String {
+    format_duration_in(Lang::En, ms)
+}
+
+/// [`format_duration`] in `lang`: "1 dk'dan kısa", "18 dk", "1 sa 05 dk".
+pub fn format_duration_in(lang: Lang, ms: u64) -> String {
     let minutes = ms / 60_000;
-    match minutes {
-        0 => "under 1 min".to_owned(),
-        1..=59 => format!("{minutes} min"),
-        _ => format!("{} h {:02} min", minutes / 60, minutes % 60),
+    match (lang, minutes) {
+        (Lang::En, 0) => "under 1 min".to_owned(),
+        (Lang::En, 1..=59) => format!("{minutes} min"),
+        (Lang::En, _) => format!("{} h {:02} min", minutes / 60, minutes % 60),
+        (Lang::Tr, 0) => "1 dk'dan kısa".to_owned(),
+        (Lang::Tr, 1..=59) => format!("{minutes} dk"),
+        (Lang::Tr, _) => format!("{} sa {:02} dk", minutes / 60, minutes % 60),
     }
 }
 
 /// "1 snooze", "3 snoozes"; `None` without snoozes.
 pub fn snoozes_text(n: u8) -> Option<String> {
-    match n {
-        0 => None,
-        1 => Some("1 snooze".to_owned()),
-        n => Some(format!("{n} snoozes")),
+    snoozes_text_in(Lang::En, n)
+}
+
+/// [`snoozes_text`] in `lang`: "1 erteleme", "3 erteleme".
+pub fn snoozes_text_in(lang: Lang, n: u8) -> Option<String> {
+    (n > 0).then(|| lang.count(usize::from(n), "snooze", "snoozes", "erteleme"))
+}
+
+/// What an end without a name is called: "Point A" / "A noktası".
+pub fn point_name(lang: Lang, letter: &str) -> String {
+    match lang {
+        Lang::En => format!("Point {letter}"),
+        Lang::Tr => format!("{letter} noktası"),
     }
+}
+
+/// Whether `label` is no name at all: empty, or a generic point name in any language.
+pub fn is_generic_label(label: &str) -> bool {
+    matches!(
+        label.trim(),
+        "" | "Point" | "Point A" | "Point B" | "Nokta" | "A noktası" | "B noktası"
+    )
 }
 
 impl TripRecord {
     /// "A – B" from the end labels (empty ones read Point A / Point B), the
     /// label of a legacy record, or "Trip".
     pub fn title(&self) -> String {
+        self.title_in(Lang::En)
+    }
+
+    /// [`Self::title`] in `lang`. An end stored under a generic name of either language ("Point A",
+    /// "A noktası") reads in `lang`.
+    pub fn title_in(&self, lang: Lang) -> String {
         if self.a.is_some() || self.b.is_some() {
-            let name = |e: &Option<Endpoint>, fallback: &str| {
+            let name = |e: &Option<Endpoint>, letter: &str| {
                 e.as_ref()
                     .map(|e| e.label.trim())
-                    .filter(|l| !l.is_empty())
-                    .unwrap_or(fallback)
-                    .to_owned()
+                    .filter(|l| !is_generic_label(l))
+                    .map_or_else(|| point_name(lang, letter), str::to_owned)
             };
-            return format!(
-                "{} \u{2013} {}",
-                name(&self.a, "Point A"),
-                name(&self.b, "Point B")
-            );
+            return format!("{} \u{2013} {}", name(&self.a, "A"), name(&self.b, "B"));
         }
         let label = self.label.trim();
         if label.is_empty() {
-            "Trip".to_owned()
+            lang.pick("Trip", "Yolculuk").to_owned()
         } else {
             label.to_owned()
         }
@@ -176,11 +212,16 @@ impl TripRecord {
 
     /// "18 min \u{b7} 3.4 km \u{b7} 1 snooze" (no snooze part at 0).
     pub fn summary_line(&self) -> String {
+        self.summary_line_in(Lang::En)
+    }
+
+    /// [`Self::summary_line`] in `lang`: "18 dk \u{b7} 3,4 km \u{b7} 1 erteleme".
+    pub fn summary_line_in(&self, lang: Lang) -> String {
         let mut parts = vec![
-            format_duration(self.duration_ms()),
-            crate::session::format_distance(self.travelled_m.max(0.0)),
+            format_duration_in(lang, self.duration_ms()),
+            crate::session::format_distance_in(lang, self.travelled_m),
         ];
-        parts.extend(snoozes_text(self.snoozes));
+        parts.extend(snoozes_text_in(lang, self.snoozes));
         parts.join(" \u{b7} ")
     }
 }
@@ -228,19 +269,19 @@ pub struct Usage {
 /// "Used once, today", "Used 4 times, last 5 Nov" (year added when it is not
 /// the current one). Local time is `tz_offset_s` east of UTC.
 pub fn usage_text(u: Usage, now_ms: i64, tz_offset_s: i32) -> String {
+    usage_text_in(Lang::En, u, now_ms, tz_offset_s)
+}
+
+/// [`usage_text`] in `lang`: "1 kez kullanıldı, bugün", "4 kez kullanıldı, en son 5 Kas".
+pub fn usage_text_in(lang: Lang, u: Usage, now_ms: i64, tz_offset_s: i32) -> String {
     use rosty_core::contact_dates::{local_day, local_ymd};
-    let times = if u.count == 1 {
-        "once".to_owned()
-    } else {
-        format!("{} times", u.count)
-    };
     let age = local_day(now_ms, tz_offset_s) - local_day(u.last_ms, tz_offset_s);
     let last = match age {
-        0 => "today".to_owned(),
-        1 => "yesterday".to_owned(),
+        0 => lang.pick("today", "bugün").to_owned(),
+        1 => lang.pick("yesterday", "dün").to_owned(),
         _ => {
             let (y, m, d) = local_ymd(u.last_ms, tz_offset_s);
-            let month = crate::history_io::month_name(m);
+            let month = lang.month(m);
             if y == local_ymd(now_ms, tz_offset_s).0 {
                 format!("{d} {month}")
             } else {
@@ -248,17 +289,28 @@ pub fn usage_text(u: Usage, now_ms: i64, tz_offset_s: i32) -> String {
             }
         }
     };
-    if u.count == 1 {
-        format!("Used {times}, {last}")
-    } else {
-        format!("Used {times}, last {last}")
+    match (lang, u.count) {
+        (Lang::En, 1) => format!("Used once, {last}"),
+        (Lang::En, n) => format!("Used {n} times, last {last}"),
+        (Lang::Tr, 1) => format!("1 kez kullanıldı, {last}"),
+        (Lang::Tr, n) => format!("{n} kez kullanıldı, en son {last}"),
     }
 }
 
 /// "Delete 12 trips older than 30 days", "Delete 1 trip older than 90 days".
 pub fn prune_label(n: usize, days: u32) -> String {
-    let noun = if n == 1 { "trip" } else { "trips" };
-    format!("Delete {n} {noun} older than {days} days")
+    prune_label_in(Lang::En, n, days)
+}
+
+/// [`prune_label`] in `lang`: "30 günden eski 12 yolculuğu sil".
+pub fn prune_label_in(lang: Lang, n: usize, days: u32) -> String {
+    match lang {
+        Lang::En => {
+            let noun = if n == 1 { "trip" } else { "trips" };
+            format!("Delete {n} {noun} older than {days} days")
+        }
+        Lang::Tr => format!("{days} günden eski {n} yolculuğu sil"),
+    }
 }
 
 impl History {

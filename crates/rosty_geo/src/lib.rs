@@ -15,6 +15,7 @@ pub mod dest;
 pub mod gtfs;
 pub mod history;
 pub mod history_io;
+pub mod lang;
 pub mod measure;
 pub mod notice;
 pub mod places_io;
@@ -42,6 +43,7 @@ pub use history::{
     DAY_MS, History, Outcome, OutcomeFilter, PRUNE_CHOICES_DAYS, Stats, TripRecord, Usage,
     prune_label, usage_text,
 };
+pub use lang::Lang;
 pub use measure::Measure;
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use prefs::{
@@ -52,7 +54,7 @@ pub use saved_stops::{
 };
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,
-    arrival_clock, format_distance, status_share_text,
+    arrival_clock, format_distance, format_distance_in, status_share_text, status_share_text_in,
 };
 pub use trip::{Fix, TripState};
 pub use view::{FollowMode, Viewport};

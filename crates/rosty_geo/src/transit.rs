@@ -7,6 +7,7 @@
 //! the map and remembered on the picked point as `Destination::pattern`. The
 //! alarm is the crossing of the circle on AB.
 
+use crate::Lang;
 use crate::gtfs::{Feed, Route};
 
 /// Most lines listed for one stop.
@@ -92,32 +93,26 @@ pub fn lines_through(feed: &Feed, stop: u32, limit: usize) -> Vec<LineChoice> {
 
 /// `1234567` as "1 234 567".
 pub fn grouped(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(' ');
-        }
-        out.push(c);
-    }
-    out
+    Lang::En.grouped(n)
 }
 
 /// "1 234 stops, 87 lines".
 pub fn feed_summary(feed: &Feed) -> String {
-    let plural = |n: usize, one: &str, many: &str| {
-        format!("{} {}", grouped(n), if n == 1 { one } else { many })
+    feed_summary_in(Lang::En, feed)
+}
+
+/// [`feed_summary`] in `lang`: "1.234 durak, 87 hat".
+pub fn feed_summary_in(lang: Lang, feed: &Feed) -> String {
+    let counted = |n: usize, one: &str, many: &str, tr: &str| match lang {
+        Lang::En => format!("{} {}", lang.grouped(n), if n == 1 { one } else { many }),
+        Lang::Tr => format!("{} {tr}", lang.grouped(n)),
     };
     format!(
         "{}, {}",
-        plural(feed.stops.len(), "stop", "stops"),
-        plural(feed.routes.len(), "line", "lines")
+        counted(feed.stops.len(), "stop", "stops", "durak"),
+        counted(feed.routes.len(), "line", "lines", "hat")
     )
 }
-
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
 
 /// (year, month 1..=12, day) of a Unix day number, proleptic Gregorian.
 pub fn civil_from_days(days: i64) -> (i64, usize, i64) {
@@ -136,50 +131,80 @@ pub fn civil_from_days(days: i64) -> (i64, usize, i64) {
 /// "5 Nov" for a moment in the current year, "5 Nov 2025" otherwise, on the
 /// phone's calendar (`tz_offset_s` east of UTC, e.g. 10 800 in Turkey).
 pub fn date_text(ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
+    date_text_in(Lang::En, ms, now_ms, tz_offset_s)
+}
+
+/// [`date_text`] in `lang`: "5 Kas", "5 Kas 2025".
+pub fn date_text_in(lang: Lang, ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
     let local_day = |ms: i64| {
         ms.saturating_add(i64::from(tz_offset_s) * 1_000)
             .div_euclid(86_400_000)
     };
     let (year, month, day) = civil_from_days(local_day(ms));
     let (this_year, _, _) = civil_from_days(local_day(now_ms));
+    let month = lang.month(u8::try_from(month).unwrap_or(1));
     if year == this_year {
-        format!("{day} {}", MONTHS[month - 1])
+        format!("{day} {month}")
     } else {
-        format!("{day} {} {year}", MONTHS[month - 1])
+        format!("{day} {month} {year}")
     }
 }
 
 /// "Imported 5 Nov", with a note when the import dropped rows.
 pub fn imported_text(feed: &Feed, skipped_rows: u64, now_ms: i64, tz_offset_s: i32) -> String {
-    let mut text = format!(
-        "Imported {}",
-        date_text(feed.imported_ms, now_ms, tz_offset_s)
-    );
+    imported_text_in(Lang::En, feed, skipped_rows, now_ms, tz_offset_s)
+}
+
+/// [`imported_text`] in `lang`: "5 Kas tarihinde içe aktarıldı, kullanılamayan 12 satır atlandı".
+pub fn imported_text_in(
+    lang: Lang,
+    feed: &Feed,
+    skipped_rows: u64,
+    now_ms: i64,
+    tz_offset_s: i32,
+) -> String {
+    let date = date_text_in(lang, feed.imported_ms, now_ms, tz_offset_s);
+    let mut text = match lang {
+        Lang::En => format!("Imported {date}"),
+        Lang::Tr => format!("{date} tarihinde içe aktarıldı"),
+    };
     if skipped_rows > 0 {
-        text.push_str(&format!(
-            ", {} unusable rows skipped",
-            grouped(usize::try_from(skipped_rows).unwrap_or(usize::MAX))
-        ));
+        let rows = lang.grouped(usize::try_from(skipped_rows).unwrap_or(usize::MAX));
+        text.push_str(&match lang {
+            Lang::En => format!(", {rows} unusable rows skipped"),
+            Lang::Tr => format!(", kullanılamayan {rows} satır atlandı"),
+        });
     }
     text
 }
 
 /// "Line 34 to Kadıköy", or "Line 34" for a pattern without a headsign.
 pub fn line_title(name: &str, headsign: &str) -> String {
-    if headsign.is_empty() {
-        format!("Line {name}")
-    } else {
-        format!("Line {name} to {headsign}")
+    line_title_in(Lang::En, name, headsign)
+}
+
+/// [`line_title`] in `lang`: "Hat 34, Kadıköy yönü", "Hat 34".
+pub fn line_title_in(lang: Lang, name: &str, headsign: &str) -> String {
+    match (lang, headsign.is_empty()) {
+        (Lang::En, true) => format!("Line {name}"),
+        (Lang::En, false) => format!("Line {name} to {headsign}"),
+        (Lang::Tr, true) => format!("Hat {name}"),
+        (Lang::Tr, false) => format!("Hat {name}, {headsign} yönü"),
     }
 }
 
 /// "1 stop earlier on this line" / "3 stops earlier on this line": how many
 /// stops the line calls at before this one.
 pub fn earlier_text(before: usize) -> String {
-    if before == 1 {
-        "1 stop earlier on this line".to_owned()
-    } else {
-        format!("{} stops earlier on this line", grouped(before))
+    earlier_text_in(Lang::En, before)
+}
+
+/// [`earlier_text`] in `lang`: "Bu hatta 3 durak önce".
+pub fn earlier_text_in(lang: Lang, before: usize) -> String {
+    match lang {
+        Lang::En if before == 1 => "1 stop earlier on this line".to_owned(),
+        Lang::En => format!("{} stops earlier on this line", lang.grouped(before)),
+        Lang::Tr => format!("Bu hatta {} durak önce", lang.grouped(before)),
     }
 }
 

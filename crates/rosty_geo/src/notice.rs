@@ -3,8 +3,25 @@
 use std::fmt;
 use std::time::Duration;
 
+use crate::Lang;
+
 /// Template used when the user has not written their own.
 pub const DEFAULT_TEMPLATE: &str = "Arriving at {stop} in about {min} min.";
+
+/// [`DEFAULT_TEMPLATE`] in `lang`. The Turkish one puts no suffix on the stop's name.
+pub fn default_template(lang: Lang) -> &'static str {
+    lang.pick(
+        DEFAULT_TEMPLATE,
+        "Yaklaşık {min} dk sonra varıyorum: {stop}.",
+    )
+}
+
+/// Whether `template` is the default of any language (so it may follow the phone's language).
+pub fn is_default_template(template: &str) -> bool {
+    Lang::ALL
+        .iter()
+        .any(|l| default_template(*l) == template.trim())
+}
 
 /// Rendered messages and templates are capped at this many characters.
 pub const MAX_CHARS: usize = 500;
@@ -26,6 +43,20 @@ impl fmt::Display for TemplateError {
 
 impl std::error::Error for TemplateError {}
 
+impl TemplateError {
+    /// A sentence for the user.
+    pub fn message_in(self, lang: Lang) -> String {
+        match (lang, self) {
+            (Lang::En, Self::Empty) => "The message is empty.".to_owned(),
+            (Lang::En, Self::TooLong) => {
+                format!("The message is longer than {MAX_CHARS} characters.")
+            }
+            (Lang::Tr, Self::Empty) => "Mesaj boş.".to_owned(),
+            (Lang::Tr, Self::TooLong) => format!("Mesaj {MAX_CHARS} karakterden uzun."),
+        }
+    }
+}
+
 /// Checks a user-written template. Placeholders are optional.
 pub fn validate(template: &str) -> Result<(), TemplateError> {
     let template = template.trim();
@@ -41,9 +72,14 @@ pub fn validate(template: &str) -> Result<(), TemplateError> {
 /// Fills `{stop}` and `{min}`. Without an ETA `{min}` becomes "a few". The
 /// result is trimmed and capped at [`MAX_CHARS`] characters.
 pub fn render(template: &str, stop: &str, eta: Option<Duration>) -> String {
+    render_in(Lang::En, template, stop, eta)
+}
+
+/// [`render`] in `lang`: without an ETA `{min}` is "a few" / "birkaç".
+pub fn render_in(lang: Lang, template: &str, stop: &str, eta: Option<Duration>) -> String {
     let min = match eta {
-        Some(eta) => (eta.as_secs_f64() / 60.0).ceil().max(1.0).to_string(),
-        None => "a few".to_owned(),
+        Some(eta) => crate::session::eta_minutes(eta).to_string(),
+        None => lang.pick("a few", "birkaç").to_owned(),
     };
     let text = template.replace("{stop}", stop).replace("{min}", &min);
     let text = text.trim();

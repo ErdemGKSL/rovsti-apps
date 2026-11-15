@@ -11,8 +11,8 @@ use crate::notice;
 use crate::poll::retry_after;
 use crate::trip::MAX_ACCURACY_M;
 use crate::{
-    Coord, CrossingTrip, CrossingUpdate, Diameter, DiameterError, Endpoint, Fix, NoticeRule, Side,
-    TripState,
+    Coord, CrossingTrip, CrossingUpdate, Diameter, DiameterError, Endpoint, Fix, Lang, NoticeRule,
+    Side, TripState,
 };
 
 /// Notice delivery attempts before giving up.
@@ -108,6 +108,10 @@ pub struct ActiveTrip {
     /// Ring timeouts so far (each re-rings; capped at [`MAX_TIMEOUT_RERINGS`]).
     #[serde(default)]
     pub timeouts: u8,
+    /// The language of the texts this trip writes on its own (the notification, the arriving-soon
+    /// message's "a few"): the phone's when the trip started, or of the last fix that named one.
+    #[serde(default, skip_serializing_if = "Lang::is_default")]
+    pub lang: Lang,
 }
 
 /// A location fix as delivered by the Android side.
@@ -189,6 +193,7 @@ impl ActiveTrip {
             track: Track::default(),
             notice: None,
             timeouts: 0,
+            lang: Lang::default(),
         })
     }
 
@@ -210,7 +215,12 @@ impl ActiveTrip {
                     && self.trip.state() != TripState::Dismissed
                     && n.rule.is_met(&update, &fix) =>
             {
-                Some(notice::render(&n.text_template, &self.b.label, update.eta))
+                Some(notice::render_in(
+                    self.lang,
+                    &n.text_template,
+                    &self.b.label,
+                    update.eta,
+                ))
             }
             _ => None,
         };
@@ -270,25 +280,18 @@ impl ActiveTrip {
     }
 
     pub fn fix_out(&self, outcome: &FixOutcome) -> FixOut {
+        self.fix_out_in(self.lang, outcome)
+    }
+
+    /// The status of a fix with its notification title and text in `lang`.
+    pub fn fix_out_in(&self, lang: Lang, outcome: &FixOutcome) -> FixOut {
         let u = &outcome.update;
         let ringing = u.state == TripState::Arrived;
         let label = self.label();
-        let mut text = if !u.inside {
-            format!("Outside the circle, {} away", format_distance(u.circle_m))
-        } else {
-            match u.side {
-                Some(side) => format!(
-                    "{} side, {} to the line {label}",
-                    side.label(),
-                    format_distance(u.line_m)
-                ),
-                None => "On the line".to_owned(),
-            }
-        };
         let eta_min = u.eta.map(eta_minutes);
-        if let Some(min) = eta_min {
-            text.push_str(&format!(", about {min} min"));
-        }
+        let text = status_text(
+            lang, &label, u.inside, u.side, u.line_m, u.circle_m, eta_min,
+        );
         FixOut {
             state: u.state,
             distance_m: u.line_m,
@@ -300,7 +303,7 @@ impl ActiveTrip {
             high_accuracy: u.next_fix_in <= HIGH_ACCURACY_BELOW,
             ring: u.ring,
             title: if ringing {
-                format!("Crossed {label}")
+                crossed_title(lang, &label)
             } else {
                 label
             },
@@ -330,12 +333,70 @@ pub fn eta_minutes(eta: std::time::Duration) -> u32 {
     }
 }
 
+/// The notification text of a running trip: where the user is against the circle and the line,
+/// and the ETA when there is one.
+pub fn status_text(
+    lang: Lang,
+    label: &str,
+    inside: bool,
+    side: Option<Side>,
+    line_m: f64,
+    circle_m: f64,
+    eta_min: Option<u32>,
+) -> String {
+    let mut text = if !inside {
+        let away = format_distance_in(lang, circle_m);
+        match lang {
+            Lang::En => format!("Outside the circle, {away} away"),
+            Lang::Tr => format!("Çemberin dışında, {away} uzakta"),
+        }
+    } else {
+        match side {
+            Some(side) => {
+                let line = format_distance_in(lang, line_m);
+                match lang {
+                    Lang::En => format!("{} side, {line} to the line {label}", side.label()),
+                    Lang::Tr => format!("{} taraf, {label} çizgisine {line}", side.label_in(lang)),
+                }
+            }
+            None => lang.pick("On the line", "Çizginin üzerinde").to_owned(),
+        }
+    };
+    if let Some(min) = eta_min {
+        text.push_str(&match lang {
+            Lang::En => format!(", about {min} min"),
+            Lang::Tr => format!(", yaklaşık {min} dk"),
+        });
+    }
+    text
+}
+
+/// The notification title once the line was crossed.
+pub fn crossed_title(lang: Lang, label: &str) -> String {
+    match lang {
+        Lang::En => format!("Crossed {label}"),
+        Lang::Tr => format!("Çizgi geçildi: {label}"),
+    }
+}
+
 /// Short distance text: 10 m steps below a kilometre, then one decimal of km.
 pub fn format_distance(metres: f64) -> String {
-    if metres < 1_000.0 {
-        format!("{} m", (metres / 10.0).round() as i64 * 10)
+    format_distance_in(Lang::En, metres)
+}
+
+/// [`format_distance`] in `lang`: "850 m", "1.2 km" / "1,2 km". Rounded before the unit is chosen, so
+/// 995 m reads "1.0 km" and never "1000 m"; a negative or broken length reads "0 m".
+pub fn format_distance_in(lang: Lang, metres: f64) -> String {
+    let metres = if metres.is_finite() {
+        metres.max(0.0)
     } else {
-        format!("{:.1} km", metres / 1_000.0)
+        0.0
+    };
+    let tens = (metres / 10.0).round() as i64 * 10;
+    if tens < 1_000 {
+        format!("{tens} m")
+    } else {
+        format!("{} km", lang.one_decimal(metres / 1_000.0))
     }
 }
 
@@ -358,30 +419,66 @@ pub fn status_share_text(
     crossed: bool,
     arrive: Option<&str>,
 ) -> String {
+    status_share_text_in(
+        Lang::En,
+        label,
+        line_m,
+        eta_min,
+        here,
+        target,
+        crossed,
+        arrive,
+    )
+}
+
+/// [`status_share_text`] in `lang`.
+#[allow(clippy::too_many_arguments)]
+pub fn status_share_text_in(
+    lang: Lang,
+    label: &str,
+    line_m: Option<f64>,
+    eta_min: Option<u32>,
+    here: Option<Coord>,
+    target: Coord,
+    crossed: bool,
+    arrive: Option<&str>,
+) -> String {
     let link = crate::point_qr_payload(target, Some(label));
     if crossed {
-        return format!("Arrived at {label}.\n{link}");
+        return match lang {
+            Lang::En => format!("Arrived at {label}.\n{link}"),
+            Lang::Tr => format!("Vardım: {label}.\n{link}"),
+        };
     }
     let mut parts = Vec::new();
     if let Some(m) = line_m.filter(|m| m.is_finite()) {
-        parts.push(format!("{} to the line", format_distance(m)));
+        let line = format_distance_in(lang, m);
+        parts.push(match lang {
+            Lang::En => format!("{line} to the line"),
+            Lang::Tr => format!("çizgiye {line}"),
+        });
     }
     if let Some(min) = eta_min {
-        parts.push(match arrive {
-            Some(at) => format!("about {} min (around {at})", min.max(1)),
-            None => format!("about {} min", min.max(1)),
+        let min = min.max(1);
+        parts.push(match (lang, arrive) {
+            (Lang::En, Some(at)) => format!("about {min} min (around {at})"),
+            (Lang::En, None) => format!("about {min} min"),
+            (Lang::Tr, Some(at)) => format!("yaklaşık {min} dk (saat {at} gibi)"),
+            (Lang::Tr, None) => format!("yaklaşık {min} dk"),
         });
     }
     if let Some(h) = here {
-        parts.push(format!(
-            "heading {}",
-            crate::coord_format::cardinal(h.bearing_deg(target))
-        ));
+        let point = crate::coord_format::cardinal_in(lang, h.bearing_deg(target));
+        parts.push(match lang {
+            Lang::En => format!("heading {point}"),
+            Lang::Tr => format!("yön {point}"),
+        });
     }
-    let head = if parts.is_empty() {
-        format!("On my way to {label}.")
-    } else {
-        format!("On my way to {label}: {}.", parts.join(", "))
+    let head = match (lang, parts.is_empty()) {
+        (Lang::En, true) => format!("On my way to {label}."),
+        (Lang::En, false) => format!("On my way to {label}: {}.", parts.join(", ")),
+        (Lang::Tr, true) => format!("Yoldayım, hedef {label}."),
+        (Lang::Tr, false) => format!("Yoldayım, hedef {label}: {}.", parts.join(", ")),
     };
     format!("{head}\n{link}")
 }

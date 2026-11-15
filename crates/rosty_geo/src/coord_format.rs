@@ -3,7 +3,7 @@
 
 use rosty_core::location_link::{coords_text, geo_url, osm_url};
 
-use crate::Coord;
+use crate::{Coord, Lang};
 
 /// A way to write a coordinate as text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +42,19 @@ impl CoordFormat {
             CoordFormat::PlusCode => "Plus Code",
             CoordFormat::GeoUri => "geo: link",
             CoordFormat::OsmLink => "OpenStreetMap link",
+        }
+    }
+
+    /// [`Self::label`] in `lang`.
+    pub fn label_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.label(),
+            (Lang::Tr, CoordFormat::Decimal) => "Ondalık",
+            (Lang::Tr, CoordFormat::Dms) => "DMS",
+            (Lang::Tr, CoordFormat::Ddm) => "DDM",
+            (Lang::Tr, CoordFormat::PlusCode) => "Plus Code",
+            (Lang::Tr, CoordFormat::GeoUri) => "geo: bağlantısı",
+            (Lang::Tr, CoordFormat::OsmLink) => "OpenStreetMap bağlantısı",
         }
     }
 }
@@ -396,27 +409,43 @@ pub fn parse_coord(text: &str) -> Option<Coord> {
 
 /// Compass point (N, NE, E, SE, S, SW, W, NW) for a bearing in degrees.
 pub fn cardinal(deg: f64) -> &'static str {
-    const POINTS: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    cardinal_in(Lang::En, deg)
+}
+
+/// [`cardinal`] in `lang`: Turkish K, KD, D, GD, G, GB, B, KB.
+pub fn cardinal_in(lang: Lang, deg: f64) -> &'static str {
+    const EN: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    const TR: [&str; 8] = ["K", "KD", "D", "GD", "G", "GB", "B", "KB"];
     let d = if deg.is_finite() {
         deg.rem_euclid(360.0)
     } else {
         0.0
     };
-    POINTS[(((d + 22.5) / 45.0) as usize) % 8]
+    let index = (((d + 22.5) / 45.0) as usize) % 8;
+    match lang {
+        Lang::En => EN[index],
+        Lang::Tr => TR[index],
+    }
 }
 
 /// "1.2 km from you, NE": distance and compass point of `to` seen from `here`.
 /// Under 10 m it is "You are here".
 pub fn from_you_text(here: Coord, to: Coord) -> String {
+    from_you_text_in(Lang::En, here, to)
+}
+
+/// [`from_you_text`] in `lang`: "1,2 km uzağınızda, KD", "Buradasınız".
+pub fn from_you_text_in(lang: Lang, here: Coord, to: Coord) -> String {
     let d = here.distance_m(to);
-    if d < 10.0 {
-        return "You are here".to_string();
+    if !d.is_finite() || d < 10.0 {
+        return lang.pick("You are here", "Buradasınız").to_owned();
     }
-    format!(
-        "{} from you, {}",
-        crate::session::format_distance(d),
-        cardinal(here.bearing_deg(to))
-    )
+    let distance = crate::session::format_distance_in(lang, d);
+    let point = cardinal_in(lang, here.bearing_deg(to));
+    match lang {
+        Lang::En => format!("{distance} from you, {point}"),
+        Lang::Tr => format!("{distance} uzağınızda, {point}"),
+    }
 }
 
 /// OpenStreetMap link to a map view (`#map=z/lat/lon`), zoom rounded to 0..=19.
@@ -436,8 +465,14 @@ pub fn geo_view_url(center: Coord, zoom: f64) -> String {
 
 /// Share text for the current map view: a title line, then both links.
 pub fn map_view_share_text(center: Coord, zoom: f64) -> String {
+    map_view_share_text_in(Lang::En, center, zoom)
+}
+
+/// [`map_view_share_text`] in `lang`.
+pub fn map_view_share_text_in(lang: Lang, center: Coord, zoom: f64) -> String {
     format!(
-        "Map view\n{}\n{}",
+        "{}\n{}\n{}",
+        lang.pick("Map view", "Harita görünümü"),
         osm_view_url(center, zoom),
         geo_view_url(center, zoom)
     )

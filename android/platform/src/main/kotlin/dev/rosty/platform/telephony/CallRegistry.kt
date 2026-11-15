@@ -238,6 +238,15 @@ object CallRegistry : CallsApi {
     /** Every live call as the last rebuild saw it, in registry order. Emits after the notification work of that rebuild. */
     val state: StateFlow<List<WireCall>> = callsFlow.asStateFlow()
 
+    private val seqFlow = MutableStateFlow(0L)
+
+    /**
+     * The `seq` of the last published snapshot: it moves on every rebuild, also when only the audio route, mute or the
+     * keyguard changed and [state] (the call list, which then compares equal) does not emit. Readers of [snapshot]
+     * re-read on this.
+     */
+    val snapshotSeq: StateFlow<Long> = seqFlow.asStateFlow()
+
     private val opDeadline = Runnable { onOpDeadline() }
     private val dtmfSafetyStop = Runnable { stopDtmfNow() }
     private var dtmfCall: Call? = null
@@ -1369,6 +1378,7 @@ object CallRegistry : CallsApi {
             callsFlow.value =
                 Envelope.json.decodeFromString(CallSnapshot.serializer(), text).calls
         }
+        seqFlow.value = seq
         PlatformEvents.emit("calls", text)
     }
 

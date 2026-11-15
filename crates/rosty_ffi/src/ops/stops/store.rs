@@ -40,6 +40,13 @@ pub(super) const OPS: &[OpSpec] = &[
         trip_end,
         trip_end_cases
     ),
+    op!(
+        "stops.store_trip_clear",
+        DirReq,
+        Value,
+        trip_clear,
+        trip_clear_cases
+    ),
     op!("stops.store_read", ReadReq, Value, read, read_cases),
     op!("stops.store_write", WriteReq, Empty, write, write_cases),
     op!(
@@ -122,6 +129,21 @@ fn trip_end(req: TripEndReq) -> Result<Value, FfiError> {
     let _guard = store::lock();
     let record = store::end_trip(&dir, outcome, req.now_ms)?;
     Ok(json!({"record": record}))
+}
+
+/// Deletes `trip.json` under the trip lock without touching the history: for a start Android refused, where the trip
+/// never ran. `removed` says whether a file was there; clearing twice is fine.
+fn trip_clear(req: DirReq) -> Result<Value, FfiError> {
+    let dir = data_dir(&req.dir)?;
+    let _guard = store::lock();
+    Ok(json!({"removed": store::clear_trip(&dir)?}))
+}
+
+fn trip_clear_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"dir": "$DIR"})).seeded("stops"),
+        Case::named("no_trip", json!({"dir": "$DIR/nothing-here"})).seeded("stops"),
+    ]
 }
 
 fn trip_end_cases() -> Vec<Case> {

@@ -983,12 +983,15 @@ struct DestShareReq {
     b: Option<Coord>,
     #[serde(default)]
     name: String,
+    /// The stop's note (S44), added to `stop_text` as its last line.
+    #[serde(default)]
+    note: String,
 }
 
 fn dest_share(req: DestShareReq) -> Result<Value, FfiError> {
     Ok(json!({
         "text": rosty_geo::share_text(&req.label, req.at),
-        "stop_text": req.b.map(|b| rosty_geo::stop_share_text(&req.name, req.at, b)),
+        "stop_text": req.b.map(|b| rosty_geo::stop_share_text_noted(&req.name, &req.note, req.at, b)),
         "qr_payload": rosty_geo::point_qr_payload(req.at, if req.label.trim().is_empty() { None } else { Some(&req.label) }),
     }))
 }
@@ -998,5 +1001,10 @@ fn dest_share_cases() -> Vec<Case> {
         Case::new(json!({"label": "Work", "at": {"lat": 41.0, "lon": 29.006},
                          "b": {"lat": 41.0, "lon": 28.994}, "name": "Pier"})),
         Case::named("unnamed", json!({"at": {"lat": 41.0, "lon": 29.006}})),
+        Case::named(
+            "noted",
+            json!({"at": {"lat": 41.0, "lon": 29.006}, "b": {"lat": 41.0, "lon": 28.994}, "name": "Pier",
+                   "note": "Back door, platform 2"}),
+        ),
     ]
 }

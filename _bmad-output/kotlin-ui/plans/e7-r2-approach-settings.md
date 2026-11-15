@@ -50,8 +50,8 @@ the full Trip / Saved / Settings bar (F16):
 - Manifest: `FOREGROUND_SERVICE_DATA_SYNC`, `SystemForegroundService` with `foregroundServiceType="dataSync"`
   (`tools:node="merge"`), the receiver. dataSync because it moves user-chosen data (map tiles) from the network to the
   phone. `stops.permissions.txt` and `StopsManifestTest` updated.
-- The area is the map's view at rest: the home writes `container.mapView` (`SettingsHooks` in `home/HomeMap.kt`,
-  `visibleArea(camera)`); before the map was shown in this run the row says "Open the map first".
+- The area is the map's view as the map leaves the screen: the home writes `container.mapView` on dispose (`SettingsHooks` in `home/HomeMap.kt`,
+  `visibleArea(camera)`; a collector following the camera shifted the E7.5 golden timing, so it is read once); before the map was shown in this run the row says "Open the map first".
 
 ## Hooks for others
 - **WhatsApp (Fable):** `settings/ArrivingSoonSettings.kt` `ColumnScope.ArrivingSoonSettingsGroup(container, onOpen)`

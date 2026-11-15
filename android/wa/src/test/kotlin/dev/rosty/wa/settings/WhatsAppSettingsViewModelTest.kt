@@ -136,7 +136,7 @@ class WhatsAppSettingsViewModelTest {
             // CreateInstance ran on a gateway opened with no key, then it was closed; Save and Subscribe followed.
             assertEquals(listOf(DEFAULT_URL to null), gw.opened.toList())
             assertEquals(LinkRequest.Qr, gw.createRequests.single().link)
-            assertEquals(StoredLink("https://rovsti.erdemdev.tr", "inst1", FakeWaGateway.NEW_KEY), repo.linked)
+            assertEquals(StoredLink("https://rosty.erdemdev.tr", "inst1", FakeWaGateway.NEW_KEY), repo.linked)
             assertTrue("subscribed", "start" in repo.log)
             assertTrue("the creating gateway was closed", FakeWaGateway.GATEWAY in gw.released)
             assertEquals("connecting", vm.view.kind)
@@ -449,6 +449,6 @@ class WhatsAppSettingsViewModelTest {
 
     private companion object {
         const val NOW = 1_760_000_000_000L
-        const val DEFAULT_URL = "https://rovsti.erdemdev.tr"
+        const val DEFAULT_URL = "https://rosty.erdemdev.tr"
     }
 }

@@ -172,8 +172,9 @@ class SettingsViewModelTest {
         assertNotNull(imported.summary)
         assertNotNull(imported.imported)
         assertFalse("the cache copy is gone", copy.exists())
-        assertEquals(1, transitChanges)
+        // The toast follows the map's hook, so once it is here the hook has run.
         assertEquals(SettingsEffect.Toast(UiText.Res(R.string.settings_transit_imported)), nextEffect())
+        assertEquals(1, transitChanges)
         model.removeFeed()
         assertEquals(SettingsEffect.Toast(UiText.Res(R.string.settings_transit_removed)), nextEffect())
         assertFalse(settled { !it.transit.hasFeed }.transit.hasFeed)

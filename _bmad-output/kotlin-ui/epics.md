@@ -1603,15 +1603,15 @@ AD-MSG9, AD-WA11), then polish.
 | E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | done (R1 evidence) |
 | E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | done (R2 evidence; played receipts, in-app video and voice recording not built) |
 | E6.5 | Message context menu, select mode, detection pills | R2 | done (R2 evidence; star and remind me come with E6.13) |
-| E6.6 | Conversation tools | R1, R2, R3 | in-progress (R3: M48 export .zip, M27 clear chat) |
-| E6.7 | Viewers: images, status, contact card, attachments | R1, R2, R3 | in-progress (R3: M4 header photo) |
+| E6.6 | Conversation tools | R1, R2, R3 | done (R3 evidence) |
+| E6.7 | Viewers: images, status, contact card, attachments | R1, R2, R3 | done (R3 evidence; in-app video not built) |
 | E6.8 | New conversation, forward, share-in, intents | R1 | done (R1 evidence) |
 | E6.9 | Notifications and inline reply | R2 | done (R2 evidence) |
-| E6.10 | Scheduled send | R2 | done (R2 evidence; inbox Scheduled overview in R3) |
+| E6.10 | Scheduled send | R2, R3 | done (R2 and R3 evidence) |
 | E6.11 | Spam | R2 | done (R2 evidence) |
-| E6.12 | Settings and encrypted backup | R3 | in-progress |
-| E6.13 | Starred and reminders | R3 | in-progress |
-| E6.14 | Polish | R3 | in-progress |
+| E6.12 | Settings and encrypted backup | R3 | done (R3 evidence; backup not yet tried on a device) |
+| E6.13 | Starred and reminders | R3 | done (R3 evidence; offline WhatsApp stars need a `wa_sync` action) |
+| E6.14 | Polish | R3 | done (R3 evidence, `docs/kotlin-ui/checklist-e6.md`) |
 
 ### E6.1 App module
 - AC1 Every component FQCN of the GPUI Messages manifest (main and firebase); default-SMS role request; manifest test.

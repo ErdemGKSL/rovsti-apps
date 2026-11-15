@@ -12,10 +12,13 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
+import dev.rosty.core.model.chat.CardField
+import dev.rosty.core.model.chat.SharedCard
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.OverlayHost
+import dev.rosty.messages.viewer.presentContactCard
 import dev.rosty.testing.ShotTest
 import dev.rosty.testing.gradientImage
 import kotlinx.collections.immutable.persistentListOf
@@ -70,6 +73,7 @@ class E65ShotTest : ShotTest() {
         tools: ToolsUi = ToolsUi(),
         reactions: List<String> = emptyList(),
         pills: Map<String, List<PillUi>> = this.pills,
+        attach: Boolean = false,
     ) {
         OverlayHost(overlays) {
             ConversationScreen(
@@ -85,6 +89,7 @@ class E65ShotTest : ShotTest() {
                             menuFor = { menu },
                             reactionsFor = { reactions },
                             pillsFor = { b -> pills[b.key].orEmpty() },
+                            onAttach = if (attach) ({}) else null,
                         )
                     },
                 sendLabel = "Send",
@@ -158,6 +163,37 @@ class E65ShotTest : ShotTest() {
             )
         })
     }
+
+    @Test fun mmsStaged() =
+        snap("e6.3-mms-staged", content = {
+            val base = ConversationSample.state(picture)
+            Thread(
+                it,
+                state = base.copy(staged = BubbleMedia(picture, "Photo", isImage = true)),
+                pills = emptyMap(),
+                attach = true,
+            )
+        })
+
+    @Test fun contactCardSheet() =
+        snap("e6.7-contact-card-sheet", content = { Thread(it) }, after = {
+            compose.runOnUiThread {
+                it.presentContactCard(
+                    RuntimeEnvironment.getApplication(),
+                    SharedCard(
+                        name = "Deniz Aydın",
+                        org = "Kadıköy Library",
+                        numbers =
+                            listOf(
+                                CardField("+90 555 000 00 03", "Mobile"),
+                                CardField("+90 555 000 00 04", "Work"),
+                            ),
+                        emails = listOf(CardField("deniz@example.org", "Home")),
+                        note = "",
+                    ),
+                ) {}
+            }
+        })
 
     @Test fun selectModeBlock() =
         snap("e6.5-select-mode-block", content = {

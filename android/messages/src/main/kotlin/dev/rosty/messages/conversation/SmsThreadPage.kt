@@ -1,6 +1,11 @@
 package dev.rosty.messages.conversation
 
+import android.content.Context
 import android.content.res.Resources
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
@@ -38,14 +43,19 @@ import dev.rosty.messages.compose.presentForward
 import dev.rosty.messages.inbox.rememberInboxViewModel
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
+import dev.rosty.messages.viewer.openAttachment
 import dev.rosty.messages.viewer.picturesOf
 import dev.rosty.messages.viewer.showConversationPictures
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.ZoneId
+import java.util.UUID
 
 /** [SmsWords] from the app's resources. */
 class ResourceSmsWords(
@@ -214,6 +224,9 @@ fun SmsThreadPage(
                 },
             )
         }
+    val stage: (Uri) -> Unit = { uri -> container.scope.launch { copyPicture(context, uri)?.let(model::attach) } }
+    val pick =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(stage) }
     val detector = rememberDetector(container)
     val selectLabels = rememberSelectLabels()
     val labels = rememberToolLabels()
@@ -232,6 +245,18 @@ fun SmsThreadPage(
                             model.retry(bubble.key)
                         }
 
+                        bubble.media.any { !it.isImage } && bubble.media.none { it.isImage } -> {
+                            container.scope.launch {
+                                overlays.openAttachment(
+                                    context,
+                                    bubble.media.first(),
+                                    container.chat,
+                                    container.files,
+                                    container.scope,
+                                )
+                            }
+                        }
+
                         bubble.media.any { it.isImage } -> {
                             overlays.showConversationPictures(
                                 context,
@@ -246,6 +271,9 @@ fun SmsThreadPage(
                 },
                 menuFor = { smsBubbleMenu(it, res, model, hooks) },
                 pillsFor = detector::pills,
+                onAttach = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPaste = stage,
+                onClearAttachment = model::clearAttachment,
                 onPill = { pill ->
                     handlePill(
                         context,
@@ -439,3 +467,25 @@ internal fun RevealHit(
         }
     }
 }
+
+/** Copies a picked or pasted picture into the app's cache, where the core can read it for the MMS. */
+internal suspend fun copyPicture(
+    c: Context,
+    uri: Uri,
+): File? =
+    withContext(Dispatchers.IO) {
+        val mime = c.contentResolver.getType(uri) ?: "image/jpeg"
+        val ext =
+            when (mime) {
+                "image/png" -> "png"
+                "image/gif" -> "gif"
+                "image/webp" -> "webp"
+                else -> "jpg"
+            }
+        val dir = File(c.cacheDir, "mms-out").apply { mkdirs() }
+        val file = File(dir, "${UUID.randomUUID()}.$ext")
+        runCatching {
+            c.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } }
+        }.getOrNull() ?: return@withContext null
+        file
+    }

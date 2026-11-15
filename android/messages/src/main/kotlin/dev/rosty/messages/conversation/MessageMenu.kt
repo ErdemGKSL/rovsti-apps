@@ -1,8 +1,13 @@
 package dev.rosty.messages.conversation
 
 import android.content.Context
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +29,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -35,6 +43,7 @@ import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.ios.component.IosContextMenuEntry
 import dev.rosty.design.ios.component.IosMenuItem
 import dev.rosty.design.list.ListRow
+import dev.rosty.design.media.SizedImage
 import dev.rosty.design.overlay.ContextMenuTarget
 import dev.rosty.design.overlay.Detent
 import dev.rosty.design.overlay.MenuItem
@@ -266,3 +275,62 @@ fun OverlayController.presentInfo(
         },
     )
 }
+
+/** The picture waiting in the composer, with × to drop it. */
+@Composable
+internal fun StagedPicture(
+    media: BubbleMedia,
+    onClear: () -> Unit,
+) {
+    Box(
+        Modifier
+            .padding(start = Spacing.gutter, top = Spacing.s)
+            .size(MessagesMetrics.StagedPicture)
+            .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
+            .testTag(ConversationTags.Staged),
+    ) {
+        SizedImage(
+            model = media.model,
+            widthPx = with(LocalDensity.current) { MessagesMetrics.StagedPicture.roundToPx() },
+            heightPx = with(LocalDensity.current) { MessagesMetrics.StagedPicture.roundToPx() },
+            modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop,
+            contentDescription = media.label,
+        )
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(Spacing.xs)
+                .size(MessagesMetrics.SelectCircle)
+                .clip(CircleShape)
+                .background(RostyTheme.colors.labelPrimary.copy(alpha = STAGED_CLOSE_ALPHA))
+                .clickable(onClick = onClear),
+            contentAlignment = Alignment.Center,
+        ) {
+            RostyIcon(
+                RostyIcons.Xmark,
+                stringResource(R.string.composer_remove_attachment),
+                tint = RostyTheme.colors.page,
+                size = MessagesMetrics.TickGlyph,
+            )
+        }
+    }
+}
+
+private const val STAGED_CLOSE_ALPHA = 0.6f
+
+/** M46: a picture pasted or dropped into the composer goes to [onPaste]; text still pastes as text. */
+@OptIn(ExperimentalFoundationApi::class)
+internal fun Modifier.pasteImages(onPaste: ((android.net.Uri) -> Unit)?): Modifier =
+    if (onPaste == null) {
+        this
+    } else {
+        contentReceiver { content ->
+            if (!content.hasMediaType(MediaType.Image)) return@contentReceiver content
+            content.consume { item ->
+                val uri = item.uri
+                if (uri != null) onPaste(uri)
+                uri != null
+            }
+        }
+    }

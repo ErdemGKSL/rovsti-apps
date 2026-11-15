@@ -96,6 +96,8 @@ object ConversationTags {
     const val SelectBar = "conversation-select-bar"
     const val SelectText = "conversation-select-text"
     const val Info = "conversation-info"
+    const val Attach = "conversation-attach"
+    const val Staged = "conversation-staged"
 
     fun bubble(key: String) = "bubble-$key"
 }
@@ -125,6 +127,10 @@ class ConversationActions(
     /** M20 select mode: a tap on a bubble adds or removes it; the bar's buttons. */
     val onToggleSelect: (String) -> Unit = {},
     val onSelectAction: (SelectAction) -> Unit = {},
+    /** E6.3/E6.7: the "+" of the composer (null: no button), a picture pasted into it (M46), the staged one's ×. */
+    val onAttach: (() -> Unit)? = null,
+    val onPaste: ((android.net.Uri) -> Unit)? = null,
+    val onClearAttachment: () -> Unit = {},
 )
 
 /** The labels of the tools on a conversation page. */
@@ -309,13 +315,33 @@ fun ConversationScreen(
                                 }
                             }
                         }
-                        ComposerField(
-                            state = composer,
-                            onSend = actions.onSend,
-                            fieldModifier = Modifier.testTag(ConversationTags.Composer),
-                            placeholder = mode.placeholder,
-                            sendLabel = sendLabel,
-                        )
+                        state.staged?.let { StagedPicture(it, actions.onClearAttachment) }
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            actions.onAttach?.let { attach ->
+                                GlassIconButton(
+                                    RostyIcons.Plus,
+                                    stringResource(R.string.composer_attach),
+                                    onClick = attach,
+                                    modifier =
+                                        Modifier
+                                            .navigationBarsPadding()
+                                            .padding(start = Spacing.gutter, bottom = Spacing.s)
+                                            .testTag(ConversationTags.Attach),
+                                )
+                            }
+                            ComposerField(
+                                state = composer,
+                                onSend = actions.onSend,
+                                modifier = Modifier.weight(1f),
+                                fieldModifier =
+                                    Modifier
+                                        .testTag(
+                                            ConversationTags.Composer,
+                                        ).pasteImages(actions.onPaste),
+                                placeholder = mode.placeholder,
+                                sendLabel = sendLabel,
+                            )
+                        }
                     }
 
                     ComposerMode.NeedsRole -> {

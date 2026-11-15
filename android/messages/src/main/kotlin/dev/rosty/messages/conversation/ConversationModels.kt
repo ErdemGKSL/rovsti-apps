@@ -16,6 +16,8 @@ data class BubbleMedia(
     val isImage: Boolean,
     /** Width over height when known, so the bubble keeps its size before the picture loads. */
     val aspect: Float? = null,
+    /** The part's content type, when known (a vCard opens the contact card sheet, M26). */
+    val mime: String? = null,
 )
 
 /** The quoted message a reply shows above its text. */
@@ -111,4 +113,6 @@ data class ConversationUi(
     /** A line under the header: "Waiting for connection", "This conversation is in Spam." */
     val notice: String? = null,
     val error: String? = null,
+    /** A picture waiting in the composer (MMS, M46 paste); it goes out with the next send. */
+    val staged: BubbleMedia? = null,
 )

@@ -32,4 +32,10 @@ object MessagesMetrics {
 
     /** The check circle of a bubble in select mode (M20). */
     val SelectCircle = 22.dp
+
+    /** The picture waiting in the composer. */
+    val StagedPicture = 72.dp
+
+    /** The avatar on a shared contact card (M26). */
+    val CardAvatar = 72.dp
 }

@@ -281,4 +281,11 @@
         <item quantity="one">%d selected</item>
         <item quantity="other">%d selected</item>
     </plurals>
+    <!-- E6.3 MMS attachment -->
+    <string name="composer_attach">Add Photo</string>
+    <string name="composer_remove_attachment">Remove Photo</string>
+    <string name="sms_attachment_too_big">This picture is too big for an MMS</string>
+    <!-- E6.7 attachments -->
+    <string name="card_unnamed">Contact</string>
+    <string name="card_add">Add to Contacts</string>
 </resources>

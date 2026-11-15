@@ -265,4 +265,11 @@
         <item quantity="one">%d seçildi</item>
         <item quantity="other">%d seçildi</item>
     </plurals>
+    <!-- E6.3 MMS attachment -->
+    <string name="composer_attach">Fotoğraf Ekle</string>
+    <string name="composer_remove_attachment">Fotoğrafı Kaldır</string>
+    <string name="sms_attachment_too_big">Bu fotoğraf MMS için çok büyük</string>
+    <!-- E6.7 attachments -->
+    <string name="card_unnamed">Kişi</string>
+    <string name="card_add">Kişilere Ekle</string>
 </resources>

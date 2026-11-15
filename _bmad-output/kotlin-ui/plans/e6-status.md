@@ -2,6 +2,39 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## R3 closed (2026-11-15) at `c2ea78f9`, last E6 round
+
+Merged with `origin/ui-overhaul`: nothing new since R2 (the `:design` tab-bar glass fix is not there yet; when it lands,
+merge it here and re-record the Messages goldens it changes; the inbox and settings shots carry the tab bar). Gate:
+`SKIP_RUST=1 scripts/kotlin-ui-check.sh` ALL GREEN (no Rust crate or gateway changed in R3). E6.1-E6.14 are all done
+in `epics.md`. Checklist: `docs/kotlin-ui/checklist-e6.md`; contact sheet: `docs/kotlin-ui/screenshots/messages.png`.
+
+**What landed**
+- E6.12 settings in GPUI's order: Notifications (switches, muted conversations), Quick replies (M11, chips above an
+  empty composer), Text size (M34), encrypted Backup export/restore with preview (AD-MSG7, restore needs the SMS role).
+- E6.13 Star/Unstar (SMS local, WhatsApp via gateway), Starred page (inbox folder row), Remind me (four Rust slots,
+  bubble badge, notification tap glows the message, re-armed at boot).
+- E6.6 M48 export with media (.zip), M27 Clear Chat; E6.7 M4 header photo; E6.10 inbox Scheduled overview; E6.11 Not
+  spam / Move to Spam on the SMS header; E6.14 recomposition tests, readable WhatsApp header number.
+
+**Shared code touched**: none (all changes are in `android/messages` and the plan docs).
+
+**Needs a Rust, `:platform`, `:design` or `:shell` change (not done here)**
+- Rust `wa_sync`: an outbox Star action (offline WhatsApp stars now wait in the app's file) and a `starred` query
+  (the Starred list reads recent chats only); `quick_replies.edit` in place.
+- `:platform`: a bulk text-only SMS/MMS read for backups.
+- `:design`: secure mode for `GlassTextField`, an activity spinner, a bolt icon; context menu overlap at font scale 2.
+- `:shell`: `ShellContainer`'s init coroutine can touch SharedPreferences after Robolectric teardown
+  (`MessageAnnouncerTest` flake on the firebase flavor, passes on rerun).
+
+**What to test on a device**
+1. Settings > Backup: export with a passphrase, restore it on the same phone (preview counts, nothing doubled).
+2. Settings > Quick replies: add, reorder, use a chip in a chat; Text size Larger changes the bubbles.
+3. Star an SMS and a WhatsApp message; open Starred from the inbox and tap a row (the message glows).
+4. Remind me in 15 minutes on a message; tap the notification (the chat opens on it); reboot with one armed.
+5. Chat menu: Export with Media (zip), Clear Chat; tap the header photo; inbox Scheduled row with two scheduled SMS.
+6. WhatsApp chat with an unsaved number: the header reads `+90 5xx xxx xx xx`.
+
 ## R2 closed (2026-11-15) at `8d1b7e72`
 
 Merged with `origin/ui-overhaul` (nothing new since R1's merge `7120032`). Gate: `SKIP_RUST=1 scripts/kotlin-ui-check.sh`

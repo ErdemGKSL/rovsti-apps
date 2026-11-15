@@ -118,6 +118,8 @@ object CardTags {
     fun chip(key: String) = "card-wa-chip-$key"
 
     fun wish(key: String) = "card-wish-$key"
+
+    fun cardChip(key: String) = "card-chip-$key"
 }
 
 /**
@@ -728,30 +730,43 @@ private fun FieldBody(
                 SourceGlyph(MessageSource.WhatsApp, contentDescription = null)
             }
         }
+        if (row.birthday != null) {
+            DateChip(stringResource(R.string.card_studio_chip), CardTags.cardChip(row.key)) {
+                onAction(ContactCardAction.MakeCard)
+            }
+        }
         if (row.wish != null && row.wishNumber != null) {
             val text = row.wish
             val number = row.wishNumber
-            Box(
-                Modifier
-                    .testTag(CardTags.wish(row.key))
-                    .heightIn(min = Sizes.touch)
-                    .clickable(role = Role.Button) { onAction(ContactCardAction.Wish(number, text)) }
-                    .padding(horizontal = Spacing.xs),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    Modifier
-                        .background(colors.accent.copy(alpha = 0.14f), CircleShape)
-                        .padding(horizontal = Spacing.m, vertical = Spacing.xs),
-                ) {
-                    RostyText(
-                        stringResource(R.string.card_wish),
-                        style = type.footnote,
-                        color = colors.accent,
-                        maxLines = 1,
-                    )
-                }
+            DateChip(stringResource(R.string.card_wish), CardTags.wish(row.key)) {
+                onAction(ContactCardAction.Wish(number, text))
             }
+        }
+    }
+}
+
+/** A small accent pill on the date row (Card, Wish): one line, never a wrapping chip row, a 48 dp touch target. */
+@Composable
+private fun DateChip(
+    text: String,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    val colors = RostyTheme.colors
+    Box(
+        Modifier
+            .testTag(tag)
+            .heightIn(min = Sizes.touch)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = Spacing.xs),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .background(colors.accent.copy(alpha = 0.14f), CircleShape)
+                .padding(horizontal = Spacing.m, vertical = Spacing.xs),
+        ) {
+            RostyText(text, style = RostyTheme.type.footnote, color = colors.accent, maxLines = 1)
         }
     }
 }
@@ -805,6 +820,9 @@ private fun overflowMenu(
     return persistentListOf(
         MenuItem.Action(context.getString(R.string.contacts_share), RostyIcons.Share) { submenu(share)() },
         MenuItem.Action(context.getString(R.string.contacts_copy), RostyIcons.Copy) { submenu(copy)() },
+        MenuItem.Action(context.getString(R.string.card_studio_menu), RostyIcons.Document) {
+            onAction(ContactCardAction.MakeCard)
+        },
         MenuItem.Action(context.getString(R.string.contacts_export_vcf), RostyIcons.Download) {
             onAction(ContactCardAction.ExportVcf)
         },

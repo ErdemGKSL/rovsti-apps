@@ -97,6 +97,10 @@ fun PermissionRow(
     )
 }
 
+/** The leading tile of [PermissionRow], for an app's own access rows (Messages' default-SMS ask). */
+@Composable
+fun PermissionIconTile(icon: ImageVector) = IconTile(icon)
+
 /** The 32 dp rounded accent tile with a white glyph that leads settings rows. */
 @Composable
 internal fun IconTile(icon: ImageVector) {

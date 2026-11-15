@@ -39,6 +39,13 @@ object Sizes {
     val tabBarMaxWidth = 500.dp
     val contentMaxWidth = 640.dp
     val sheetMaxWidth = 560.dp
+
+    /** Colour swatch (chosen size) and its progress ring in pickers. */
+    val swatch = 44.dp
+    val ring = 28.dp
+    val ringStroke = 3.dp
+    val selectionBorder = 2.dp
+    val hairline = 1.dp
 }
 
 object RostyShapes {

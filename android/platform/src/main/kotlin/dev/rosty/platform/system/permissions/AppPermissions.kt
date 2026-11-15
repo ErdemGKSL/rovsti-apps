@@ -121,8 +121,14 @@ class AppPermissions(
                         Manifest.permission.RECEIVE_BOOT_COMPLETED,
                         Manifest.permission.ACCESS_NETWORK_STATE,
                         Manifest.permission.INTERNET,
+                        // :design's haptics (E6.1).
+                        Manifest.permission.VIBRATE,
                     ),
                 specialPermissions = setOf("android.permission.SCHEDULE_EXACT_ALARM"),
+                // Names and WhatsApp pictures from Contacts' people provider (X.1).
+                peopleUses = true,
+                // work-runtime (the WhatsApp outbox and sync jobs, E6.4s) merges these two.
+                libraryPermissions = setOf(Manifest.permission.WAKE_LOCK, Manifest.permission.FOREGROUND_SERVICE),
             )
 
         /** Camera capture goes through the system camera app, so there is no `CAMERA` permission. */

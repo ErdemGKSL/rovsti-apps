@@ -1,0 +1,67 @@
+//! The WhatsApp offline store and the per-device sync engine (E6.4s).
+//!
+//! The inbox and the thread read WhatsApp **only** from this SQLite store; the network only fills it. Platform-free:
+//! no clock, no randomness, no network. The caller (Kotlin, through the `wa_sync.*` ops) performs the gateway calls
+//! and hands the answers in, with the time.
+//!
+//! * [`Store`] is one SQLite file per linked instance (`wa-sync-<instance>.db`), so re-linking another instance
+//!   never mixes data; the file also remembers its instance and refuses another.
+//! * Gateway events are applied in order ([`Store::apply_events`]); every write is an idempotent upsert by gateway
+//!   message id. The install keeps its own last event `seq` and, per chat, the newest and oldest stored message.
+//! * A gap (the gateway restarted or its ring was trimmed: a `resync` event) starts a resync: refresh the chat list
+//!   ([`Store::store_chats`]), then per chat fetch pages newer than the newest stored message, paging with `before=`
+//!   until they overlap what is stored ([`Store::store_page`]). Stored history is never dropped. The planning itself
+//!   is pure ([`plan`]).
+//! * Deleted messages are never erased: a delete marks `deleted_at` / `deleted_by` and keeps text, quote and media.
+//!   An edit keeps the previous text as edit history.
+//! * The outbox ([`Store::outbox_enqueue`] and friends) keeps what was written offline, in the same database, and
+//!   reconciles each send with its echo so nothing doubles.
+//! * Full media is a cached file path with LRU bookkeeping; evicting clears the path and keeps the message and its
+//!   thumbnail.
+
+mod apply;
+mod media;
+mod model;
+mod outbox;
+pub mod plan;
+mod query;
+mod schema;
+mod store;
+#[cfg(test)]
+mod tests;
+
+pub use media::{Evicted, Eviction, MediaInfo};
+pub use model::{
+    AppliedEvents, ChatRow, Kind, MessageRow, PendingOp, RowState, StoredChats, StoredPage,
+    ThreadCursor, ThreadPage,
+};
+pub use outbox::{
+    Action, BACKOFF_BASE_MS, BACKOFF_MAX_MS, Due, ErrorKind, OutboxItem, OutboxState, Outcome,
+    SENDING_LEASE_MS, Settled, backoff_ms,
+};
+pub use plan::{ChatCursor, FetchPage, Gap, SyncPlan, SyncState};
+pub use schema::SCHEMA_VERSION;
+pub use store::{Opened, Store, file_name};
+
+/// Why a store call failed.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("database: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("file: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("stored JSON: {0}")]
+    Json(#[from] serde_json::Error),
+    /// The file belongs to another linked instance.
+    #[error("the store belongs to instance {found:?}, not {wanted:?}")]
+    InstanceMismatch { wanted: String, found: String },
+    /// The file was written by a newer build.
+    #[error("the store has schema version {found}, this build knows up to {supported}")]
+    NewerSchema { found: u32, supported: u32 },
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    Invalid(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;

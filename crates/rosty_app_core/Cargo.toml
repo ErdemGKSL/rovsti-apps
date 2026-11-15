@@ -13,6 +13,8 @@ rosty_core.workspace = true
 rosty_geo.workspace = true
 rosty_wa_client.workspace = true
 rosty_wa_proto.workspace = true
+# fallible_uint: u64 columns (event seq, sizes) convert with a checked cast.
+rusqlite = { workspace = true, features = ["fallible_uint"] }
 serde.workspace = true
 # preserve_order: handlers answer with keys in insertion order, as the GPUI apps always did
 # (feature unification turned it on there); the golden answers are byte-identical.

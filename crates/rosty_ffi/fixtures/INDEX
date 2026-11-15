@@ -767,6 +767,9 @@ stops.measure
 stops.measure.empty
 stops.measure.one_point
 stops.measure.tr
+stops.notice_chats
+stops.notice_chats.empty
+stops.notice_chats.tr
 stops.notice_render
 stops.notice_render.no_eta
 stops.notice_render.tr

@@ -53,6 +53,13 @@ pub(super) const OPS: &[OpSpec] = &[
         notice_validate,
         validate_cases
     ),
+    op!(
+        "stops.notice_chats",
+        NoticeChatsReq,
+        Value,
+        notice_chats,
+        notice_chats_cases
+    ),
     op!("stops.alarm_plan", PlanReq, Value, alarm_plan, plan_cases),
     op!("stops.poll", PollReq, Value, poll_op, poll_cases),
     op!(
@@ -388,6 +395,102 @@ fn validate_cases() -> Vec<Case> {
         Case::named("empty", json!({"template": "   "})),
         Case::named("too_long", json!({"template": "x".repeat(501)})),
         super::tr_named("tr_empty", json!({"template": "   "})),
+    ]
+}
+
+/// One chat the arriving-soon message can go to, with what is known about the person behind it.
+#[derive(Deserialize)]
+struct NoticeChatIn {
+    jid: String,
+    #[serde(default)]
+    group: bool,
+    /// The saved contact name.
+    #[serde(default)]
+    contact: Option<String>,
+    /// The verified business name.
+    #[serde(default)]
+    verified: Option<String>,
+    /// The name the person set on WhatsApp.
+    #[serde(default)]
+    push: Option<String>,
+    /// The name stored with the chat (a group's subject).
+    #[serde(default)]
+    chat_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct NoticeChatsReq {
+    chats: Vec<NoticeChatIn>,
+    #[serde(default)]
+    locale: Lang,
+}
+
+/// Names the chats of the arriving-soon picker, in the order given, by the one rule every app shows a WhatsApp
+/// person with (`rosty_core::wa_identity::display_name`): the saved contact name, then the verified business
+/// name, the push name and the chat's own name, the number last, and "WhatsApp user" when not even a number is
+/// known (a LID); a group is its subject, else "Group". `number` is the second line of a row: the number of a person shown by a name, null for a group
+/// and for a row that already is the number.
+fn notice_chats(req: NoticeChatsReq) -> Result<Value, FfiError> {
+    use rosty_app_core::wa_link::names::number_label;
+    use rosty_core::wa_identity::{NameInputs, NameTier, display_name};
+    let unknown = req.locale.pick("WhatsApp user", "WhatsApp kullanıcısı");
+    let unknown_group = req.locale.pick("Group", "Grup");
+    let chats: Vec<Value> = req
+        .chats
+        .iter()
+        .map(|chat| {
+            // Only a phone-number id has a number to show; a group's id and a LID are not for reading.
+            let number = (!chat.group && rosty_wa_proto::is_pn_jid(&chat.jid))
+                .then(|| number_label(&chat.jid));
+            let shown = display_name(
+                &NameInputs {
+                    contact: if chat.group {
+                        None
+                    } else {
+                        chat.contact.as_deref()
+                    },
+                    verified: if chat.group {
+                        None
+                    } else {
+                        chat.verified.as_deref()
+                    },
+                    push: if chat.group {
+                        None
+                    } else {
+                        chat.push.as_deref()
+                    },
+                    stored_chat: chat.chat_name.as_deref(),
+                    number: number.as_deref(),
+                },
+                if chat.group { unknown_group } else { unknown },
+            );
+            let named = !matches!(shown.tier, NameTier::Number | NameTier::Unknown);
+            json!({
+                "jid": chat.jid,
+                "name": shown.text,
+                "tier": shown.tier,
+                "number": number.filter(|_| named),
+                "group": chat.group,
+            })
+        })
+        .collect();
+    Ok(json!({"chats": chats}))
+}
+
+fn notice_chats_cases() -> Vec<Case> {
+    let chats = json!([
+        {"jid": "905550001122@s.whatsapp.net", "contact": "Ayşe Demir", "push": "ayse", "chat_name": "ayse"},
+        {"jid": "905550003344@s.whatsapp.net", "verified": "Corner Bakery", "push": "shop"},
+        {"jid": "905550007788@s.whatsapp.net", "push": " deniz ", "contact": "  "},
+        {"jid": "905550005566@s.whatsapp.net"},
+        {"jid": "120363000000000001@g.us", "group": true, "chat_name": "Family", "push": "not a person"},
+        {"jid": "120363000000000002@g.us", "group": true},
+        {"jid": "98765432101234@lid"},
+    ]);
+    vec![
+        Case::new(json!({"chats": chats})),
+        Case::named("empty", json!({"chats": []})),
+        super::tr_case(json!({"chats": chats})),
     ]
 }
 

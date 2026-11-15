@@ -98,6 +98,9 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   settings page shows such a message in the phone's language too). `stops.trip_{restore, fix, status_share, end}` and the headless `trip_fix` take an
   optional `locale` that replaces the stored one (the phone's language changed during the trip); without it the stored one holds.
   A point without a name is stored as "Point A" / "A noktası"; both read as "no name" in either language.
+- `stops.notice_chats {chats: [{jid, group?, contact?, verified?, push?, chat_name?}], locale?}` names the chats the arriving-soon
+  message can go to with the shared rule of `rosty_core::wa_identity` (contact, verified, push, the chat's own name, the number,
+  else "WhatsApp user"), in the order given; `number` is the row's second line (null for a group and for a bare number).
 - `stops.gtfs_import {zip, now_ms, save?, dir?}` reads the zip at a path (a tiny feed lives in `tests/data/gtfs-tiny.zip`; fixture requests
   write it as `$DATA/gtfs-tiny.zip`) and answers the `FeedReport`; `save` writes `gtfs.json`, which `stops.gtfs_search` and
   `stops.saved_suggest_name` read. `stops.measure` takes the point list (Kotlin keeps it; undo drops the last point).
@@ -809,6 +812,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::notice::DEFAULT_TEMPLATE` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
 | `rosty_geo::notice::render` | stops | stops | op | stops.notice_render, stops.notice_validate |
 | `rosty_geo::notice::validate` | stops | stops | op | stops.notice_render, stops.notice_validate |
+| `rosty_core::wa_identity::display_name` (the arriving-soon picker's chats) | stops | stops | op | stops.notice_chats |
 | `rosty_geo::places_io::MergePlan` | stops | stops | op | stops.places_export, stops.places_import |
 | `rosty_geo::poll::MAX_POLL` | stops | stops | op | stops.poll |
 | `rosty_geo::poll::MIN_POLL` | stops | stops | op | stops.poll |

@@ -254,6 +254,7 @@ class TripService : Service() {
                 if (location.hasAccuracy()) location.accuracy.toDouble() else 1_000.0,
                 speed,
                 location.time,
+                resources.configuration.locales[0]?.toLanguageTag(),
             )
         val raw = Headless.call("trip_fix", request)
         val answer = TripAnswer.parse(raw)

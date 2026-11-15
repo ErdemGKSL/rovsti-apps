@@ -99,6 +99,7 @@ import dev.rosty.core.model.stops.StatsRequest
 import dev.rosty.core.model.stops.StatusShareRequest
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
+import dev.rosty.core.model.stops.StoreTripClearAnswer
 import dev.rosty.core.model.stops.StoreTripEndAnswer
 import dev.rosty.core.model.stops.StoreTripEndRequest
 import dev.rosty.core.model.stops.StoreTripLoadAnswer
@@ -243,6 +244,9 @@ interface StopsOps {
     /** Moves the trip in progress into the history (under the trip lock). */
     suspend fun storeTripEnd(req: StoreTripEndRequest): Outcome<StoreTripEndAnswer>
 
+    /** Deletes `trip.json` without a history record (a start Android refused). Clearing twice is fine. */
+    suspend fun storeTripClear(req: DirRequest): Outcome<StoreTripClearAnswer>
+
     /** Reads `saved.json`, `history.json` or `draft.json`. */
     suspend fun storeRead(req: StoreReadRequest): Outcome<StoreReadAnswer>
 
@@ -362,6 +366,7 @@ interface StopsOps {
                 "stops.store_trip_load",
                 "stops.store_trip_save",
                 "stops.store_trip_end",
+                "stops.store_trip_clear",
                 "stops.store_read",
                 "stops.store_write",
                 "stops.prefs_load",
@@ -511,6 +516,9 @@ class NativeStopsOps(
 
     override suspend fun storeTripEnd(req: StoreTripEndRequest) =
         core.call("stops.store_trip_end", req, StoreTripEndRequest.serializer(), StoreTripEndAnswer.serializer())
+
+    override suspend fun storeTripClear(req: DirRequest) =
+        core.call("stops.store_trip_clear", req, DirRequest.serializer(), StoreTripClearAnswer.serializer())
 
     override suspend fun storeRead(req: StoreReadRequest) =
         core.call("stops.store_read", req, StoreReadRequest.serializer(), StoreReadAnswer.serializer())

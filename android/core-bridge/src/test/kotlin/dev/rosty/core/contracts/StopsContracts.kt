@@ -97,6 +97,7 @@ import dev.rosty.core.model.stops.StatsRequest
 import dev.rosty.core.model.stops.StatusShareRequest
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
+import dev.rosty.core.model.stops.StoreTripClearAnswer
 import dev.rosty.core.model.stops.StoreTripEndAnswer
 import dev.rosty.core.model.stops.StoreTripEndRequest
 import dev.rosty.core.model.stops.StoreTripLoadAnswer
@@ -187,7 +188,7 @@ object StopsContracts : ContractModels {
             )
             op<DestShareRequest, DestShareAnswer>(
                 "stops.dest_share",
-                ok = listOf("unnamed"),
+                ok = listOf("noted", "unnamed"),
             )
             op<PickReplayRequest, PickReplayAnswer>(
                 "stops.pick_replay",
@@ -211,8 +212,27 @@ object StopsContracts : ContractModels {
             )
             op<SavedEditRequest, SavedEditAnswer>(
                 "stops.saved_edit",
-                ok = listOf("cycle_colour", "favourite", "move", "remove", "rename", "restore", "set_colour"),
-                err = listOf("bad_name", "duplicate", "remove_missing", "short_gate"),
+                ok =
+                    listOf(
+                        "clear_note",
+                        "cycle_colour",
+                        "favourite",
+                        "move",
+                        "remove",
+                        "rename",
+                        "restore",
+                        "set_colour",
+                        "set_note",
+                    ),
+                err =
+                    listOf(
+                        "bad_name",
+                        "duplicate",
+                        "note_missing_stop",
+                        "note_too_long",
+                        "remove_missing",
+                        "short_gate",
+                    ),
             )
             op<SavedListRequest, SavedListAnswer>(
                 "stops.saved_list",
@@ -280,6 +300,10 @@ object StopsContracts : ContractModels {
                 "stops.store_trip_end",
                 ok = listOf("no_trip"),
                 err = listOf("bad_outcome"),
+            )
+            op<DirRequest, StoreTripClearAnswer>(
+                "stops.store_trip_clear",
+                ok = listOf("no_trip"),
             )
             op<StoreReadRequest, StoreReadAnswer>(
                 "stops.store_read",

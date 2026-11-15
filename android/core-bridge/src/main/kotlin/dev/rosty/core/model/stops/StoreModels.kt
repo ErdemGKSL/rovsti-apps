@@ -40,6 +40,12 @@ data class StoreTripEndAnswer(
     val record: TripRecord?,
 )
 
+/** [removed] says whether a `trip.json` was there to delete. */
+@Serializable
+data class StoreTripClearAnswer(
+    val removed: Boolean,
+)
+
 /** [file] is `saved`, `history` or `draft`. */
 @Serializable
 data class StoreReadRequest(

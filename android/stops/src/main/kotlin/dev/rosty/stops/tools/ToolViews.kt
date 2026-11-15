@@ -3,7 +3,6 @@ package dev.rosty.stops.tools
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -121,7 +120,7 @@ fun MeasureCard(
                 Modifier.testTag(ToolTags.MeasureDone),
             )
         }
-        // Equal thirds; with large text each keeps its own width and the row wraps instead of cutting labels.
+        // Equal thirds; with large text each keeps its own width, one under the other, instead of cutting labels.
         val large = LocalDensity.current.fontScale >= LARGE_FONT_SCALE
         val more = {
             result?.let {
@@ -156,10 +155,7 @@ fun MeasureCard(
             )
         }
         if (large) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-                verticalArrangement = Arrangement.spacedBy(Spacing.s),
-            ) { buttons(Modifier) }
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) { buttons(Modifier) }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) { buttons(Modifier.weight(1f)) }
         }
@@ -250,7 +246,7 @@ fun OverlayController.presentMyLocationSheet(
         }
     }.also { present(it) }
 
-/** From this font scale the measure card's buttons keep their own widths and wrap. */
+/** From this font scale the measure card's buttons keep their own widths, one under the other. */
 private const val LARGE_FONT_SCALE = 1.5f
 
 /** The card grows from this scale as it appears. */

@@ -5,7 +5,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -139,7 +138,8 @@ fun StopsHome(
     topCard: (@Composable () -> Unit)? = null,
     /** The locate button is tinted while the view follows the position (S17). */
     following: Boolean = false,
-    mapFooter: @Composable RowScope.() -> Unit = {},
+    /** The scale bar and the attribution; [stacked] (large text) puts them one under the other. */
+    mapFooter: @Composable (stacked: Boolean) -> Unit = {},
     motionFrozen: () -> Boolean = { false },
     sheetContent: @Composable () -> Unit = { MapSheetContent(state, actions.onOpenSaved, actions.onOpenHistory) },
 ) {
@@ -147,6 +147,8 @@ fun StopsHome(
     val entry =
         rememberMapSheet(detentFromTallest) { _ -> sheetContent() }
     val density = LocalDensity.current
+    // Large text: the attribution goes under the scale bar instead of off the edge.
+    val stackedFooter = density.fontScale >= STACKED_FOOTER_SCALE
     val bottomInsetPx = WindowInsets.safeDrawing.getBottom(density).toFloat()
     val gapPx = with(density) { Spacing.s.toPx() }
     val fadePx = with(density) { StopsSizes.rideFade.toPx() }
@@ -312,17 +314,13 @@ fun StopsHome(
                     ) {
                         // A wide window keeps the footer above the buttons, clear of the centred sheet.
                         if (wide) {
-                            // A flow row: at large text the attribution goes under the scale bar instead of off the edge.
-                            FlowRow(
+                            Box(
                                 Modifier
                                     .fillMaxWidth()
                                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                                     .padding(horizontal = Spacing.gutter, vertical = Spacing.xs)
                                     .testTag(HomeTags.MapFooter),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                itemVerticalAlignment = Alignment.Bottom,
-                                content = mapFooter,
-                            )
+                            ) { mapFooter(stackedFooter) }
                         }
                         MapButtons(
                             actions,
@@ -333,17 +331,13 @@ fun StopsHome(
                                 .onSizeChanged { buttonsWidthPx = it.width.toFloat() + gapPx },
                         )
                         if (!wide) {
-                            // A flow row: at large text the attribution goes under the scale bar instead of off the edge.
-                            FlowRow(
+                            Box(
                                 Modifier
                                     .fillMaxWidth()
                                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                                     .padding(horizontal = Spacing.gutter, vertical = Spacing.xs)
                                     .testTag(HomeTags.MapFooter),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                itemVerticalAlignment = Alignment.Bottom,
-                                content = mapFooter,
-                            )
+                            ) { mapFooter(stackedFooter) }
                         }
                         RostyTabBar(
                             tabs = tabs,
@@ -516,3 +510,6 @@ private fun MapButtons(
         )
     }
 }
+
+/** From this font scale the map footer stacks. */
+private const val STACKED_FOOTER_SCALE = 1.5f

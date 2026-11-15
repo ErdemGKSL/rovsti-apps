@@ -95,8 +95,9 @@ class E71ShotTest : ShotTest() {
                     waitForIdle()
                     simulateBars(activity!!)
                 }
-                // The core answers on its own threads, through the main looper.
-                repeat(30) {
+                // The core answers on its own threads, through the main looper (and the tiles load on theirs: a busy
+                // full run needed longer than three seconds).
+                repeat(60) {
                     mainClock.advanceTimeBy(100)
                     Thread.sleep(15)
                 }

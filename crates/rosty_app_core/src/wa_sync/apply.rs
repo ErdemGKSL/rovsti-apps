@@ -3,14 +3,17 @@
 use rosty_wa_proto::event::ReceiptKind;
 use rosty_wa_proto::{
     ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, EventEnvelope, GatewayEvent, Location,
-    MediaMeta, MessageBody, MessageMeta, Quoted, Reaction, RichChat, RichMessage, SharedContact,
-    WaMessage, is_status_chat,
+    MediaMeta, MessageBody, MessageMeta, Quoted, Reaction, RichChat, SharedContact, WaMessage,
+    is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+use rosty_core::wa_identity::{Source, WaIdKind, parse};
+
+use super::identity::{self, Canon, Ids};
 use super::model::{AppliedEvents, Content, Kind};
-use super::{Result, outbox};
+use super::{Result, authors, merge, outbox};
 
 /// Location, contact card and mentions of a message, one JSON column.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -114,7 +117,7 @@ pub(super) fn read(row: &Row<'_>, at: usize) -> rusqlite::Result<Stored> {
     })
 }
 
-fn load(conn: &Connection, chat: &str, id: &str) -> Result<Option<Stored>> {
+pub(super) fn load(conn: &Connection, chat: &str, id: &str) -> Result<Option<Stored>> {
     Ok(conn
         .query_row(
             &format!("SELECT {COLUMNS} FROM messages WHERE chat = ?1 AND id = ?2"),
@@ -124,7 +127,7 @@ fn load(conn: &Connection, chat: &str, id: &str) -> Result<Option<Stored>> {
         .optional()?)
 }
 
-fn write(conn: &Connection, chat: &str, id: &str, row: &Stored) -> Result<()> {
+pub(super) fn write(conn: &Connection, chat: &str, id: &str, row: &Stored) -> Result<()> {
     conn.execute(
         "INSERT INTO messages (chat, id, sender, sender_name, from_me, ts, kind, text, mime, size, quoted_id,
             quoted_json, reactions, status, edited_ms, edit_history, deleted, deleted_at, deleted_by, forwarded,
@@ -323,20 +326,81 @@ pub(super) fn upsert(
     })
 }
 
-/// A message with its meta (a page row).
-pub(super) fn upsert_rich(conn: &Connection, rich: &RichMessage, now_ms: i64) -> Result<Upsert> {
-    upsert(
+/// A message as the store keeps it: its chat and every author it names under their canonical keys, and the ids
+/// they arrived under where those differ.
+pub(super) struct Arrived {
+    pub message: WaMessage,
+    pub meta: Option<MessageMeta>,
+    wire_chat: Option<String>,
+    wire_sender: Option<String>,
+}
+
+/// Resolves what a message names before anything is matched against the store. An id seen for the first time
+/// becomes a person of its own, so a pair learned later finds its rows.
+pub(super) fn arrive(
+    ids: &mut Ids<'_>,
+    message: &WaMessage,
+    meta: Option<&MessageMeta>,
+) -> Result<Arrived> {
+    let chat = ids.canon(&message.chat)?;
+    let mut message = message.clone();
+    message.chat = chat.key;
+    let mut meta = meta.cloned();
+    let mut resolve = |text: &str| ids.moved(text);
+    let wire_sender = authors::id(&mut message.sender, &mut resolve)?
+        .filter(|moved| moved.wire != moved.to)
+        .map(|moved| moved.wire);
+    authors::reactions(&mut message.reactions, &mut resolve)?;
+    if let Some(meta) = &mut meta {
+        authors::meta(meta, &mut resolve)?;
+    }
+    Ok(Arrived {
+        message,
+        meta,
+        wire_chat: chat.wire,
+        wire_sender,
+    })
+}
+
+/// Remembers the id the gateway last used for a chat, when it is not the key the chat is stored under.
+fn note_wire_jid(conn: &Connection, key: &str, wire: Option<&str>) -> Result<()> {
+    if let Some(wire) = wire {
+        conn.execute(
+            "UPDATE chats SET wire_jid = ?2 WHERE jid = ?1 AND wire_jid IS NOT ?2",
+            params![key, wire],
+        )?;
+    }
+    Ok(())
+}
+
+/// Upserts a resolved message and keeps the ids it arrived under. The first wire sender of a message stays.
+pub(super) fn upsert_arrived(
+    conn: &Connection,
+    arrived: &Arrived,
+    event_ms: Option<i64>,
+    now_ms: i64,
+) -> Result<Upsert> {
+    let message = &arrived.message;
+    let done = upsert(
         conn,
-        &rich.message.chat,
-        &rich.message.id,
+        &message.chat,
+        &message.id,
         &Incoming {
-            base: Some(&rich.message),
+            base: Some(message),
             body: None,
-            meta: Some(&rich.meta),
-            event_ms: None,
+            meta: arrived.meta.as_ref(),
+            event_ms,
             now_ms,
         },
-    )
+    )?;
+    note_wire_jid(conn, &message.chat, arrived.wire_chat.as_deref())?;
+    if let Some(wire) = &arrived.wire_sender {
+        conn.execute(
+            "UPDATE messages SET wire_sender = ?3 WHERE chat = ?1 AND id = ?2 AND wire_sender IS NULL",
+            params![message.chat, message.id, wire],
+        )?;
+    }
+    Ok(done)
 }
 
 pub(super) fn ensure_chat(conn: &Connection, jid: &str) -> Result<()> {
@@ -363,32 +427,6 @@ fn bump_cursor(conn: &Connection, chat: &str, ts: i64, id: &str) -> Result<()> {
                 WHEN oldest_ts IS NULL OR excluded.oldest_ts < oldest_ts
                 THEN excluded.oldest_ts ELSE oldest_ts END",
         params![chat, ts, id],
-    )?;
-    Ok(())
-}
-
-/// Sets the cursor of a chat from its stored messages (after a merge moved them).
-fn recompute_cursor(conn: &Connection, chat: &str) -> Result<()> {
-    let newest: Option<(i64, String)> = conn
-        .query_row(
-            "SELECT ts, id FROM messages WHERE chat = ?1 ORDER BY ts DESC, id DESC LIMIT 1",
-            [chat],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    let Some((newest_ts, newest_id)) = newest else {
-        return Ok(());
-    };
-    let oldest_ts: i64 = conn.query_row(
-        "SELECT MIN(ts) FROM messages WHERE chat = ?1",
-        [chat],
-        |row| row.get(0),
-    )?;
-    conn.execute(
-        "INSERT INTO chat_sync (jid, newest_ts, newest_id, oldest_ts) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT (jid) DO UPDATE SET newest_ts = excluded.newest_ts, newest_id = excluded.newest_id,
-            oldest_ts = excluded.oldest_ts, reached_start = 0",
-        params![chat, newest_ts, newest_id, oldest_ts],
     )?;
     Ok(())
 }
@@ -429,35 +467,34 @@ fn set_chat_meta(conn: &Connection, jid: &str, meta: &ChatMeta) -> Result<()> {
     Ok(())
 }
 
-/// A chat of the refreshed list: its row and its newest message. The unread count is the gateway's, except while a
-/// read mark of this chat still waits in the outbox.
-pub(super) fn upsert_chat(conn: &Connection, chat: &RichChat, now_ms: i64) -> Result<()> {
+/// A chat of the refreshed list: its row and its newest message, under `key`. The unread count is the gateway's,
+/// except while a read mark of this chat still waits in the outbox.
+pub(super) fn upsert_chat(
+    ids: &mut Ids<'_>,
+    key: &Canon,
+    chat: &RichChat,
+    now_ms: i64,
+) -> Result<()> {
+    let conn = ids.conn;
     let summary = &chat.chat;
-    ensure_chat(conn, &summary.jid)?;
-    let read_pending = outbox::has_pending_read(conn, &summary.jid)?;
+    let jid = key.key.as_str();
+    ensure_chat(conn, jid)?;
+    let read_pending = outbox::has_pending_read(conn, jid)?;
     conn.execute(
         "UPDATE chats SET name = ?2, is_group = ?3, unread = ?4, hidden = 0 WHERE jid = ?1",
         params![
-            summary.jid,
+            jid,
             summary.name,
             summary.is_group,
             if read_pending { 0 } else { summary.unread },
         ],
     )?;
-    set_chat_meta(conn, &summary.jid, &chat.meta)?;
+    set_chat_meta(conn, jid, &chat.meta)?;
+    note_wire_jid(conn, jid, key.wire.as_deref())?;
     if let Some(last) = &summary.last {
-        upsert(
-            conn,
-            &summary.jid,
-            &last.id,
-            &Incoming {
-                base: Some(last),
-                body: None,
-                meta: chat.last_meta.as_ref(),
-                event_ms: None,
-                now_ms,
-            },
-        )?;
+        let mut arrived = arrive(ids, last, chat.last_meta.as_ref())?;
+        arrived.message.chat = jid.to_owned();
+        upsert_arrived(conn, &arrived, None, now_ms)?;
     }
     Ok(())
 }
@@ -491,44 +528,66 @@ fn upgrade_status(conn: &Connection, chat: &str, id: &str, to: DeliveryStatus) -
     Ok(true)
 }
 
-/// Moves everything of chat `from` into chat `into` (a LID chat merged into the phone-number chat).
-fn merge_chats(conn: &Connection, from: &str, into: &str) -> Result<()> {
-    ensure_chat(conn, into)?;
-    conn.execute(
-        "UPDATE OR IGNORE messages SET chat = ?2 WHERE chat = ?1",
-        params![from, into],
-    )?;
-    // What is left has the same id in `into`: the same message, already there.
-    conn.execute("DELETE FROM messages WHERE chat = ?1", [from])?;
-    conn.execute(
-        "UPDATE outbox SET chat = ?2 WHERE chat = ?1",
-        params![from, into],
-    )?;
-    conn.execute("DELETE FROM chats WHERE jid = ?1", [from])?;
-    conn.execute("DELETE FROM chat_sync WHERE jid = ?1", [from])?;
-    recompute_cursor(conn, into)
+/// The key of a chat an event names, with the id it arrived under remembered on the chat row.
+fn chat_key(ids: &mut Ids<'_>, jid: &str) -> Result<String> {
+    let chat = ids.canon(jid)?;
+    note_wire_jid(ids.conn, &chat.key, chat.wire.as_deref())?;
+    Ok(chat.key)
 }
 
-/// Applies one event. The caller checked that it is news and advances the sequence.
+/// A gateway that does not send identity pairs announces a merge it did: a LID chat joined its number's chat.
+/// That is a pair to learn, and the stored rows follow the map. Any other pair of chats is moved as it is.
+fn chat_merged(
+    ids: &mut Ids<'_>,
+    from: &str,
+    into: &str,
+    at_ms: i64,
+    out: &mut AppliedEvents,
+) -> Result<()> {
+    let kind_of = |text: &str| parse(text).map(|parsed| parsed.id.kind());
+    if kind_of(from) == Some(WaIdKind::Lid) && kind_of(into) == Some(WaIdKind::Pn) {
+        let changes = ids.map.learn(from, into, Source::Other, at_ms);
+        identity::persist(ids.conn, &changes, at_ms)?;
+    } else {
+        let from_key = ids.canon(from)?.key;
+        let into_key = ids.canon(into)?.key;
+        if from_key != into_key {
+            identity::log_merge(
+                ids.conn,
+                at_ms,
+                &from_key,
+                &into_key,
+                identity::REASON_GATEWAY,
+            )?;
+        }
+    }
+    out.rekeyed.extend(merge::apply_pending(ids.conn)?);
+    ids.conn
+        .execute("UPDATE sync_state SET needs_resync = 1", [])?;
+    out.resync = true;
+    touched(out, from);
+    let into_key = ids.canon(into)?.key;
+    touched(out, &into_key);
+    Ok(())
+}
+
+/// Applies one event. The caller checked that it is news and advances the sequence. Every chat and author the
+/// event names is resolved through the identity map before it is matched against stored rows.
 pub(super) fn apply_event(
-    conn: &Connection,
+    ids: &mut Ids<'_>,
     envelope: &EventEnvelope,
     out: &mut AppliedEvents,
 ) -> Result<()> {
+    let conn = ids.conn;
     let at_ms = envelope.at_ms;
     match &envelope.event {
         GatewayEvent::Message(message) => {
             if is_status_chat(&message.chat) {
                 return Ok(());
             }
-            let incoming = Incoming {
-                base: Some(message),
-                body: None,
-                meta: None,
-                event_ms: Some(at_ms),
-                now_ms: at_ms,
-            };
-            match upsert(conn, &message.chat, &message.id, &incoming)? {
+            let arrived = arrive(ids, message, None)?;
+            let message = &arrived.message;
+            match upsert_arrived(conn, &arrived, Some(at_ms), at_ms)? {
                 Upsert::New if message.from_me => {
                     conn.execute(
                         "UPDATE chats SET unread = 0 WHERE jid = ?1",
@@ -556,22 +615,30 @@ pub(super) fn apply_event(
             reactions,
             ..
         } => {
+            let chat = chat_key(ids, chat)?;
+            let mut reactions = reactions.clone();
+            authors::reactions(&mut reactions, &mut |text| ids.moved(text))?;
             let changed = conn.execute(
                 "UPDATE messages SET reactions = ?3 WHERE chat = ?1 AND id = ?2 AND reactions != ?3",
-                params![chat, id, to_json(reactions)?],
+                params![chat, id, to_json(&reactions)?],
             )?;
             if changed > 0 {
-                touched(out, chat);
+                touched(out, &chat);
             }
         }
-        GatewayEvent::Receipt { chat, ids, kind } => {
+        GatewayEvent::Receipt {
+            chat,
+            ids: acked,
+            kind,
+        } => {
+            let chat = chat_key(ids, chat)?;
             let to = match kind {
                 ReceiptKind::Delivered => DeliveryStatus::Delivered,
                 ReceiptKind::Read => DeliveryStatus::Read,
             };
-            for id in ids {
-                if upgrade_status(conn, chat, id, to)? {
-                    touched(out, chat);
+            for id in acked {
+                if upgrade_status(conn, &chat, id, to)? {
+                    touched(out, &chat);
                 }
             }
         }
@@ -581,18 +648,21 @@ pub(super) fn apply_event(
             body,
             meta,
         } => {
+            let chat = chat_key(ids, chat)?;
+            let mut meta = (**meta).clone();
+            authors::meta(&mut meta, &mut |text| ids.moved(text))?;
             let incoming = Incoming {
                 base: None,
                 body: body.as_ref(),
-                meta: Some(meta),
+                meta: Some(&meta),
                 event_ms: Some(at_ms),
                 now_ms: at_ms,
             };
             if matches!(
-                upsert(conn, chat, id, &incoming)?,
+                upsert(conn, &chat, id, &incoming)?,
                 Upsert::New | Upsert::Changed
             ) {
-                touched(out, chat);
+                touched(out, &chat);
             }
         }
         GatewayEvent::MessageDeleted {
@@ -601,48 +671,50 @@ pub(super) fn apply_event(
             deleted_at,
             deleted_by,
         } => {
-            let by = deleted_by.as_deref().unwrap_or(DELETED_BY_ME);
-            if mark_deleted(conn, chat, id, deleted_at.or(Some(at_ms)), by)? {
-                touched(out, chat);
+            let chat = chat_key(ids, chat)?;
+            let by = ids
+                .canon(deleted_by.as_deref().unwrap_or(DELETED_BY_ME))?
+                .key;
+            if mark_deleted(conn, &chat, id, deleted_at.or(Some(at_ms)), &by)? {
+                touched(out, &chat);
             }
         }
         GatewayEvent::ChatMeta { jid, meta } => {
-            set_chat_meta(conn, jid, meta)?;
-            touched(out, jid);
+            let chat = ids.canon(jid)?;
+            set_chat_meta(conn, &chat.key, meta)?;
+            note_wire_jid(conn, &chat.key, chat.wire.as_deref())?;
+            touched(out, &chat.key);
         }
         GatewayEvent::ChatDeleted { jid } => {
+            let jid = chat_key(ids, jid)?;
             // Never erased: the chat leaves the list, its messages stay.
             conn.execute(
                 "UPDATE chats SET hidden = 1, unread = 0 WHERE jid = ?1",
-                [jid],
+                [&jid],
             )?;
-            touched(out, jid);
+            touched(out, &jid);
         }
         GatewayEvent::ChatCleared { jid } => {
+            let jid = chat_key(ids, jid)?;
             conn.execute(
                 "UPDATE chats SET unread = 0,
                     cleared_ts = (SELECT newest_ts FROM chat_sync WHERE chat_sync.jid = chats.jid)
                  WHERE jid = ?1",
-                [jid],
+                [&jid],
             )?;
-            touched(out, jid);
+            touched(out, &jid);
         }
-        GatewayEvent::ChatMerged { from, into } => {
-            merge_chats(conn, from, into)?;
-            conn.execute("UPDATE sync_state SET needs_resync = 1", [])?;
-            out.resync = true;
-            touched(out, from);
-            touched(out, into);
-        }
+        GatewayEvent::ChatMerged { from, into } => chat_merged(ids, from, into, at_ms, out)?,
         GatewayEvent::Profile(profile) => {
+            let jid = chat_key(ids, &profile.jid)?;
             let changed = conn.execute(
                 "UPDATE chats SET push_name = COALESCE(?2, push_name), picture_id = COALESCE(?3, picture_id)
                  WHERE jid = ?1 AND (push_name IS NOT COALESCE(?2, push_name)
                     OR picture_id IS NOT COALESCE(?3, picture_id))",
-                params![profile.jid, profile.push_name, profile.picture_id],
+                params![jid, profile.push_name, profile.picture_id],
             )?;
             if changed > 0 {
-                touched(out, &profile.jid);
+                touched(out, &jid);
             }
         }
         GatewayEvent::HistorySynced { .. } => {
@@ -656,6 +728,8 @@ pub(super) fn apply_event(
             conn.execute("UPDATE sync_state SET needs_resync = 1", [])?;
             out.resync = true;
         }
+        // Typing and presence are not stored; whoever shows them resolves their ids
+        // (`Store::identity_resolve`) so they land on the chat as it is keyed now.
         GatewayEvent::Qr { .. }
         | GatewayEvent::PairCode { .. }
         | GatewayEvent::State(_)

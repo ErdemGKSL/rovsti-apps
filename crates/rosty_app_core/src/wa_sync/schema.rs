@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use super::{Error, Result};
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// v1: the instance row, chats, the per-chat cursor and messages.
 const V1: &str = "
@@ -113,7 +113,49 @@ const V3: &str = "
 CREATE INDEX messages_starred ON messages (ts DESC, chat DESC, id DESC) WHERE starred = 1;
 ";
 
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3];
+/// v4: identity. One person behind a phone-number id and a LID (`person`, `alias`), the key changes stored rows
+/// must follow (`merge_log`, applied up to `sync_state.merge_cursor`), the account's own ids, and the id a chat or
+/// a message arrived under when it is not the key it is stored under. Additive: no stored row changes here; the
+/// backfill (`identity_backfill`: NULL before it began, a cursor while it runs, `done`) and the merges run as
+/// normal steps after the migration.
+const V4: &str = "
+CREATE TABLE person (
+    person_id INTEGER PRIMARY KEY,
+    -- The canonical key: `<digits>@s.whatsapp.net`, or `<user>@lid` while no number is known.
+    key TEXT NOT NULL UNIQUE
+);
+CREATE TABLE alias (
+    -- `pn` or `lid`.
+    kind TEXT NOT NULL,
+    -- The digits of the number, or the LID user.
+    user TEXT NOT NULL,
+    person_id INTEGER NOT NULL,
+    -- `current` or `former`.
+    state TEXT NOT NULL,
+    source TEXT NOT NULL,
+    learned_ms INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (kind, user)
+) WITHOUT ROWID;
+CREATE INDEX alias_by_person ON alias (person_id);
+CREATE TABLE merge_log (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    at_ms INTEGER NOT NULL,
+    from_key TEXT NOT NULL,
+    into_key TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
+ALTER TABLE sync_state ADD COLUMN own_pn TEXT;
+ALTER TABLE sync_state ADD COLUMN own_lid TEXT;
+-- The last `merge_log.seq` applied to the stored rows.
+ALTER TABLE sync_state ADD COLUMN merge_cursor INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sync_state ADD COLUMN identity_backfill TEXT;
+-- The last id the gateway used for the chat, when it is not `jid`.
+ALTER TABLE chats ADD COLUMN wire_jid TEXT;
+-- The id the author arrived under, when it is not `sender`.
+ALTER TABLE messages ADD COLUMN wire_sender TEXT;
+";
+
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4];
 
 /// The version of the file.
 pub(super) fn version(conn: &Connection) -> Result<u32> {

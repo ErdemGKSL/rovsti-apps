@@ -6,6 +6,7 @@ use rosty_wa_proto::{
 };
 use serde::{Deserialize, Serialize};
 
+use super::merge::ChatRekeyed;
 use super::outbox::OutboxState;
 use super::plan::FetchPage;
 
@@ -228,6 +229,10 @@ pub struct MessageRow {
     /// The outbox client id this message was sent with, or still waits under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    /// The id the sender arrived under, when it is not `sender` (a LID whose number is known): what an outbound
+    /// message key names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_sender: Option<String>,
     /// Why the last attempt of an outbox row failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -240,6 +245,9 @@ pub struct MessageRow {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ChatRow {
     pub jid: String,
+    /// The id the gateway last used for this chat, when it is not `jid`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_jid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,6 +320,10 @@ pub struct AppliedEvents {
     pub chats: Vec<String>,
     /// Outbox sends an echo confirmed.
     pub reconciled: Vec<String>,
+    /// Key changes the stored rows followed while these events were applied (a merge the gateway announced, or
+    /// one left over from before), oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rekeyed: Vec<ChatRekeyed>,
 }
 
 /// What [`super::Store::store_chats`] did.

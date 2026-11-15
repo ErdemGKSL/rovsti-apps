@@ -59,3 +59,30 @@ of `e6-status.md` (gateway commits, backup need, what to try), message to the ma
 ## Evidence
 
 (filled as steps land)
+
+- **Step 8** (not committed by the subagent; the lead commits):
+  - Link hand-over: `:wa` `dev.rosty.wa.share` (`WaLinkShare` contract, `WaLinkProvider`, `WaLinkHandover`,
+    `ResolverSiblingLinks`, `PrefsWaLinkMarks`). Each of Messages, Phone and Contacts declares the provider under
+    `<applicationId>.walink`, exported behind the signature permission `dev.rosty.permission.WA_LINK` (read and
+    write), holds the permission and queries the two sibling authorities. `content://<pkg>.walink/link` answers no
+    row or one row (`gateway_url`, `instance_id`, `key`). The provider checks the caller's signing certificate itself;
+    the asking side only asks a package whose provider it owns and whose signature matches. An app without a link
+    asks when its WhatsApp repository starts (`ShellContainer.createWa`) and when the link screen opens; the first
+    usable answer goes through `WaRepository.relinkTo`, as a pasted key does.
+  - Unlink is per app: the siblings keep their link. The app remembers a one-way mark of the link it removed
+    (SHA-256 of instance id and key, never the key) and does not take that same link back by itself; the start page
+    then shows "Use the link from <app>". A sibling with another link (new key, other instance) is adopted as usual.
+  - The linked page says where the link came from in the footer of the status group (en, tr). Stops is not part of
+    the hand-over (its manifest is unchanged): it still links by QR or pasted key.
+  - Phone identity: `rosty_app_core::phone::wa_idbook` (`wa-identity.json`, the `IdentityMap` rows, the mappings
+    cursor, own ids and account epoch; one instance per file), ops `wa_idbook.snapshot`, `catch_up`, `learn`,
+    `account`, `wipe`, `:core-bridge` `WaIdentityBook` with `FakeWaIdBookOps`. `WaIdentitySync` (Phone) opens it for
+    the link's instance, notes the account, pages `wa.identity_mappings` from the stored cursor when connected, on
+    `hello` and on `resync`, takes `identity_mapped`, `identity_number_changed`, `account_changed` and state events,
+    and learns `peer` / `peer_alt` of calls. `resolvedWaCalls` fills `peerAlt` of a LID peer before Recents, caller id
+    and the call screens read the call; a LID nobody maps reads "WhatsApp user". The FCM path asks the table through
+    `WaPush.lidNumber`.
+  - "WhatsApp message" in the Recents row menu and the person sheet's menu opens the chat in Rosty Messages
+    (`dev.rosty.action.WA_CHAT`); hidden while Messages is not installed. Phone now holds `HANDOFF`.
+  - Not proven here: the signature check on a device (no keystore), the hand-over between two installed apps, a real
+    LID call. A call from a LID nobody maps is still left out of Recents (it has no number to list or dial).

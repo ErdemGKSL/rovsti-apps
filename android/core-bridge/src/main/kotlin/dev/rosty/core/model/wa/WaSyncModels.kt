@@ -238,7 +238,10 @@ data class WaSyncCaughtUp(
 data class WaSyncObserveRequest(
     val handle: Long,
     @SerialName("now_ms") val nowMs: Long,
-    /** `wa.status`: the account's own number and LID. */
+    /**
+     * `wa.status`, the whole answer: the account's own number and LID, the gateway's epoch, the account epoch and
+     * the history report, taken in as `wa_sync.note_status` takes them.
+     */
     @EncodeDefault(NEVER) val status: InstanceStatus? = null,
     /** `wa.group` / `wa.groups`: members named by LID and number. */
     @EncodeDefault(NEVER) val groups: List<GroupInfo> = emptyList(),
@@ -251,10 +254,13 @@ data class WaSyncIdentityApplied(
     val handle: Long,
     val rekeyed: List<WaSyncRekeyed>,
     val rejected: List<WaSyncRejected>,
-    /** A merge moved rows: refresh the chat list. */
+    /**
+     * Refresh the chat list: a merge moved rows, the status named another gateway epoch than the stored one (the
+     * stored `seq` is forgotten too) or another account.
+     */
     val resync: Boolean,
     /**
-     * The own number is another one than before: another account was linked and the store was emptied
+     * Another account was linked (another own number, or a raised account epoch) and the store was emptied
      * ([WaSyncStatusNoted.accountChanged]).
      */
     @SerialName("account_changed") val accountChanged: Boolean,
@@ -306,7 +312,10 @@ data class WaSyncApplied(
     @SerialName("last_seq") val lastSeq: Long?,
     /** Events applied; ones at or before the stored `seq` are skipped. */
     val applied: Int,
-    /** A `resync` came: refresh the chat list. */
+    /**
+     * Refresh the chat list: a `resync` came, a `hello`, `resync` or `state` named another gateway epoch than the
+     * stored one (a gap: the stored `seq` was forgotten), history arrived, or the account changed.
+     */
     val resync: Boolean,
     /** Chats whose rows changed. */
     val chats: List<String>,
@@ -317,8 +326,8 @@ data class WaSyncApplied(
     /** Pairs the events named that changed nothing, for the log. */
     @EncodeDefault(NEVER) val rejected: List<WaSyncRejected> = emptyList(),
     /**
-     * A `state` event named another own number: another account was linked and the store was emptied
-     * ([WaSyncStatusNoted.accountChanged]).
+     * An `account_changed` event, or a `state` event that named another own number or a raised account epoch:
+     * another account was linked and the store was emptied ([WaSyncStatusNoted.accountChanged]).
      */
     @SerialName("account_changed") @EncodeDefault(NEVER) val accountChanged: Boolean = false,
     /** Media files of the old account to delete. */

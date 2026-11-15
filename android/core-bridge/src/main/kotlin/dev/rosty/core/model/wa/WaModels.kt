@@ -90,7 +90,41 @@ data class InstanceStatus(
     @SerialName("push_name") val pushName: String? = null,
     /** The account's LID, the other form of [ownJid]; older gateways leave it out. */
     @SerialName("own_lid") @EncodeDefault(NEVER) val ownLid: String? = null,
+    /**
+     * The id of the gateway process: a new one after every restart. Event sequences start over with it, so a stored
+     * `seq` of another epoch says nothing. Older gateways leave it out.
+     */
+    @EncodeDefault(NEVER) val epoch: String? = null,
+    /** Raised each time another account (own number) is linked to the instance; older gateways leave it out. */
+    @SerialName("account_epoch") @EncodeDefault(NEVER) val accountEpoch: Int? = null,
+    /** How far WhatsApp's history sync got; older gateways leave it out. */
+    @EncodeDefault(NEVER) val history: HistoryStatus? = null,
 )
+
+/** `InstanceStatus.history`: the history sync of the account and what the gateway holds of it. */
+@Serializable
+data class HistoryStatus(
+    /** [IDLE], [SYNCING] or [DONE]; a newer gateway may name another state. */
+    val state: String,
+    /** 0 to 100 over the whole sync; null when WhatsApp gave none or nothing is running. */
+    val progress: Int? = null,
+    /** Chats and messages the gateway holds for the account. */
+    @EncodeDefault val chats: Int = 0,
+    @EncodeDefault val messages: Long = 0,
+    /** Time of the oldest held message (unix ms). */
+    @SerialName("oldest_ms") val oldestMs: Long? = null,
+) {
+    companion object {
+        /** No history sync arrived since the account was linked. */
+        const val IDLE = "idle"
+
+        /** Chunks are arriving; more are expected. */
+        const val SYNCING = "syncing"
+
+        /** The last expected chunk arrived, or none came for a long while. */
+        const val DONE = "done"
+    }
+}
 
 /** A key minted for another app; the plain key is only in this answer. */
 @Serializable

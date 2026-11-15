@@ -6,6 +6,7 @@ import dev.rosty.core.model.wa.ChatMeta
 import dev.rosty.core.model.wa.DELETED_BY_ME
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.GroupInfo
+import dev.rosty.core.model.wa.HistoryStatus
 import dev.rosty.core.model.wa.IdentityMapping
 import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.InstanceState
@@ -23,6 +24,7 @@ import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncErrorKind
 import dev.rosty.core.model.wa.WaSyncEvent
 import dev.rosty.core.model.wa.WaSyncFetch
+import dev.rosty.core.model.wa.WaSyncHistoryState
 import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncRekeyed
 import dev.rosty.core.model.wa.WaSyncRowState
@@ -198,7 +200,7 @@ class WaSyncStoreNativeTest {
             open(dir()).use { store ->
                 store.applyEvents(listOf(WaSyncEvent(7, 1_000, text(ali, "A1", 1_000, "eski")))).getOrOk()
                 store.storeChats(emptyList(), nowMs = 1_500).getOrOk()
-                assertTrue(store.applyEvents(listOf(WaSyncEvent(2, 9_000, GatewayEvent.Resync))).getOrOk().resync)
+                assertTrue(store.applyEvents(listOf(WaSyncEvent(2, 9_000, GatewayEvent.Resync()))).getOrOk().resync)
                 val plan = store.plan(limit = 2).getOrOk()
                 assertEquals(2L, plan.afterSeq)
                 assertTrue(plan.refreshChats)
@@ -542,6 +544,91 @@ class WaSyncStoreNativeTest {
                 assertEquals(listOf("L1"), store.ids(ali))
                 // My LID is me: its chat is the chat of my number.
                 assertEquals("100000000009@s.whatsapp.net", store.resolve("777000000000009@lid").getOrOk()?.key)
+            }
+        }
+
+    /** The epoch, account and history frames go through the real library as Kotlin encodes them. */
+    @Test
+    fun theGatewaysEpochAccountAndHistoryReachTheStore() =
+        runBlocking {
+            val own = "100000000009@s.whatsapp.net"
+            val other = "100000000008@s.whatsapp.net"
+            open(dir()).use { store ->
+                // A whole status answer: the epoch, the account and a history report with zero counts.
+                val status =
+                    InstanceStatus(
+                        "inst1",
+                        InstanceState.Connected,
+                        own,
+                        "Ben",
+                        epoch = "e1",
+                        accountEpoch = 1,
+                        history = HistoryStatus(HistoryStatus.IDLE),
+                    )
+                val first = store.observe(nowMs = 1_000, status = status).getOrOk()
+                assertFalse(first.resync || first.accountChanged)
+                assertEquals(WaSyncHistoryState.Idle, store.history().getOrOk()?.state)
+
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(1, 2_000, GatewayEvent.Hello("e1")),
+                            WaSyncEvent(2, 2_000, text(ali, "A1", 1_000, "eski")),
+                        ),
+                    ).getOrOk()
+                store.storeChats(emptyList(), nowMs = 2_500).getOrOk()
+                assertEquals(2L, store.plan().getOrOk().afterSeq)
+
+                // A socket of a restarted gateway: the hello is the gap, the low numbers after it are applied.
+                val restarted =
+                    store
+                        .applyEvents(
+                            listOf(
+                                WaSyncEvent(0, 3_000, GatewayEvent.Hello("e2")),
+                                WaSyncEvent(
+                                    1,
+                                    3_000,
+                                    GatewayEvent.State(
+                                        "inst1",
+                                        InstanceState.Connected,
+                                        own,
+                                        epoch = "e2",
+                                        accountEpoch = 1,
+                                        history = HistoryStatus(HistoryStatus.SYNCING, 55, 120, 48_000, 500),
+                                    ),
+                                ),
+                                WaSyncEvent(2, 3_100, GatewayEvent.HistorySynced(2, 60, "full", 500, 400)),
+                                WaSyncEvent(3, 3_200, GatewayEvent.Resync("e2")),
+                            ),
+                        ).getOrOk()
+                assertTrue(restarted.resync && !restarted.accountChanged)
+                assertEquals(3L, restarted.lastSeq)
+                val history = store.history().getOrOk()
+                assertEquals(listOf(60, 120), listOf(history?.progress, history?.chats))
+                assertEquals(48_500L, history?.messages)
+                assertEquals(400L, history?.oldestMs)
+                assertEquals("full", history?.syncType)
+                assertEquals(listOf("A1"), store.ids(ali))
+
+                // The announcement of another account, in the batch.
+                val changed =
+                    store
+                        .applyEvents(
+                            listOf(
+                                WaSyncEvent(4, 4_000, GatewayEvent.AccountChanged(own, other)),
+                                WaSyncEvent(5, 4_100, text(ali, "B1", 4_100, "yeni")),
+                            ),
+                        ).getOrOk()
+                assertTrue(changed.accountChanged && changed.resync)
+                assertEquals(listOf("B1"), store.ids(ali))
+                assertNull(store.history().getOrOk())
+                // The status of the new account, with its raised epoch, wipes nothing more.
+                val after =
+                    store
+                        .observe(nowMs = 5_000, status = status.copy(ownJid = other, epoch = "e2", accountEpoch = 2))
+                        .getOrOk()
+                assertFalse(after.accountChanged)
+                assertEquals(listOf("B1"), store.ids(ali))
             }
         }
 

@@ -287,6 +287,20 @@ before a merge reads the merged chat, and the rows name the key. Chat rows carry
 chat, when it is not `jid`) and message rows `wire_sender?` (the id the author arrived under, when it is not `sender`: what an
 outbound message key names). `wa_identity.parse {id}` (pure, no handle) answers `{kind: pn|lid|group|broadcast|status|newsletter|
 bot|other, user, bare, number?, device?}` or `null`; a LID has no `number`, whatever its digits.
+Phone's identity table (WA-R2, `rosty_app_core::phone::wa_idbook`): Phone shows no WhatsApp messages and never opens the `wa_sync`
+store, so it keeps its own small table of LID and number pairs, the same `rosty_core::wa_identity::IdentityMap`, in `wa-identity.json`
+under the data dir (or `dir`), one instance per file (read for another `instance_id` it is empty; a damaged or newer file too). No op
+touches the network. `wa_idbook.snapshot {dir?, instance_id}` answers `{since?, own_pn?, own_lid?, pairs: [{lid, pn}]}`: every LID the
+table can name with the current number of its person (bare ids), and `since` for the next `wa.identity_mappings` (left out before the
+first page). `wa_idbook.catch_up {dir?, instance_id, items, next?}` takes one page of `wa.identity_mappings` and answers `{pairs,
+since?, more, changed}`: ask at start and after a reconnect or a `resync`, and go on with `since` while `more`; the cursor only moves
+with a page that names one, so a catch-up cut short resumes. `wa_idbook.learn {dir?, instance_id, now_ms, pairs?: [{id, alt, source?,
+learned_ms?}], number_changes?: [{old_pn, new_pn, old_lid?, new_lid?}]}` answers `{changed}`: `pairs` are two ids of one person in
+either order (an `identity_mapped` event, a call's `peer` and `peer_alt`; `source` defaults to `call`; two ids that are not a LID and
+a number teach nothing), `number_changes` are `identity_number_changed` events. `wa_idbook.account {dir?, instance_id, own_pn?,
+own_lid?, account_epoch?, changed?}` answers `{reset}`: another own number or another `account_epoch` than the stored one empties the
+table and its cursor (a value left out never does), `changed: true` is the `account_changed` event and always empties it.
+`wa_idbook.wipe {dir?}` removes the file (unlink). After `changed` or `reset`, read `wa_idbook.snapshot` again.
 Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
 
 | Item | Used by | Domain | Class | Target |
@@ -366,6 +380,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
 | `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
+| `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

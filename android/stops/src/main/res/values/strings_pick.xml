@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picking A and B on the map and the pin menu (E7.4). -->
+<resources>
+    <string name="pick_menu_copy_as">Copy as…</string>
+    <string name="pick_menu_qr">QR code</string>
+    <string name="pick_menu_open_in_maps">Open in maps</string>
+    <string name="pick_menu_measure">Measure from here</string>
+    <string name="pick_menu_save">Save as stop</string>
+    <string name="pick_menu_move">Move</string>
+    <string name="pick_menu_swap">Swap A and B</string>
+    <string name="pick_menu_remove">Remove</string>
+    <string name="pick_menu_lines">Lines</string>
+    <string name="pick_hint_full">Drag a pin to adjust it, or tap Clear.</string>
+    <string name="pick_format_decimal">Decimal degrees</string>
+    <string name="pick_format_dms">Degrees, minutes, seconds</string>
+    <string name="pick_format_ddm">Degrees, decimal minutes</string>
+    <string name="pick_format_plus_code">Plus Code</string>
+    <string name="pick_format_geo">geo: link</string>
+    <string name="pick_format_osm">OpenStreetMap link</string>
+</resources>

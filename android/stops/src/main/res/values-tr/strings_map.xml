@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="map_attribution">© OpenStreetMap katkıda bulunanları</string>
+    <string name="map_content_description">Harita</string>
+    <string name="map_scale_metres">%1$d m</string>
+    <string name="map_scale_kilometres">%1$d km</string>
+    <string name="map_scale_feet">%1$d ft</string>
+    <string name="map_scale_miles">%1$d mil</string>
+</resources>

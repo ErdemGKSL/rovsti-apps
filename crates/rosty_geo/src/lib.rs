@@ -23,6 +23,7 @@ pub mod prefs;
 pub mod saved_stops;
 mod session;
 pub mod tiles;
+pub mod transit;
 mod trip;
 pub mod view;
 
@@ -34,9 +35,9 @@ pub use crossing::{
 };
 pub use dest::{
     DestError, SharedPlace, parse_location, parse_stop_share, point_qr_payload, share_text,
-    stop_share_text,
+    stop_share_text, stop_share_text_noted,
 };
-pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, read_zip};
+pub use gtfs::{BBox, Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, read_zip};
 pub use history::{
     DAY_MS, History, Outcome, OutcomeFilter, PRUNE_CHOICES_DAYS, Stats, TripRecord, Usage,
     prune_label, usage_text,

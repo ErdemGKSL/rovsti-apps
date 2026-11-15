@@ -41,6 +41,17 @@ class SheetMathTest {
         assertEquals(3, detentOffsets(all, 480f * density, status, density).size)
     }
 
+    /** The Stops map sheet keeps peek and medium in landscape (E7.1). */
+    @Test
+    fun aCompactWindowKeepsEveryDetentWhenAsked() {
+        val h = 411f * density
+        val o = detentOffsets(all, h, 24f * density, density, compactLargeOnly = false)
+        assertEquals(3, o.size)
+        assertEquals(48f * density, o[0], 0.01f)
+        assertEquals(h * 0.5f, o[1], 0.01f)
+        assertEquals(h - 120f * density, o[2], 0.01f)
+    }
+
     @Test
     fun aSlowReleaseSettlesOnTheNearestDetent() {
         val o = offsets()

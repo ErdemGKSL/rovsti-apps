@@ -127,6 +127,8 @@ data class SavedStop(
     @SerialName("created_ms") val createdMs: Long,
     @EncodeDefault(NEVER) val favourite: Boolean = false,
     @EncodeDefault(NEVER) val colour: StopColour = StopColour.Orange,
+    /** S44: one line of the user's own, at most 200 characters; empty when there is none. */
+    @EncodeDefault(NEVER) val note: String = "",
 )
 
 /** The content of `saved.json`. */

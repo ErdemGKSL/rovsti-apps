@@ -9,12 +9,14 @@ import dev.rosty.design.transition.ChromeSpec
 import dev.rosty.design.transition.RostyEntries
 import dev.rosty.design.transition.RostyNavHost
 import dev.rosty.design.transition.TabNavigator
+import dev.rosty.design.transition.TabSelection
 import kotlinx.collections.immutable.ImmutableList
 
 /**
  * The root of every app: [RostyNavHost] over the app's [navigator], with the tab bar drawn from [chromeFor] and
  * [overlays] above everything (lifted from the catalog's `CatalogApp`, so the apps and the catalog run the same shell).
- * [entries] is the route table: `entry<Home> { ... }` per route class.
+ * [entries] is the route table: `entry<Home> { ... }` per route class. [tabSelection] is for an app whose bar items are
+ * not all navigator tabs (Stops); null keeps the navigator's tabs.
  *
  * Back goes to the overlays first, then to the current tab's stack, then to the activity (see `RostyNavHost`).
  */
@@ -28,6 +30,7 @@ fun <R : Any> RostyShell(
     isMorphRoute: (R) -> Boolean = { false },
     chrome: @Composable BoxScope.() -> Unit = {},
     accessory: (@Composable (modifier: Modifier, isInline: Boolean) -> Unit)? = null,
+    tabSelection: TabSelection<R>? = null,
     entries: RostyEntries<R>.() -> Unit,
 ) {
     RostyNavHost(
@@ -39,6 +42,7 @@ fun <R : Any> RostyShell(
         isMorphRoute = isMorphRoute,
         chrome = chrome,
         accessory = accessory,
+        tabSelection = tabSelection,
         entries = entries,
     )
 }

@@ -99,16 +99,18 @@ sealed interface Detent {
 /**
  * Where each detent sits as a distance from the top of the window, ascending: index 0 is the tallest sheet, the last
  * index the shortest. [density] is pixels per dp. Heights above Large are clamped to Large and detents that land on
- * the same pixel are merged. A window shorter than 480 dp gets the Large detent alone, however many were asked for.
+ * the same pixel are merged. A window shorter than 480 dp gets the Large detent alone, however many were asked for,
+ * unless [compactLargeOnly] is false (a non-modal sheet over a map keeps its short detents in landscape).
  */
 fun detentOffsets(
     detents: List<Detent>,
     containerHeight: Float,
     topInset: Float,
     density: Float,
+    compactLargeOnly: Boolean = true,
 ): FloatArray {
     val largeTop = (topInset + SheetMetrics.LargeGap.value * density).coerceIn(0f, containerHeight)
-    if (containerHeight / density < SheetMetrics.CompactHeightDp) return floatArrayOf(largeTop)
+    if (compactLargeOnly && containerHeight / density < SheetMetrics.CompactHeightDp) return floatArrayOf(largeTop)
     val largeHeight = containerHeight - largeTop
     val offsets = ArrayList<Float>(detents.size)
     for (detent in detents) {

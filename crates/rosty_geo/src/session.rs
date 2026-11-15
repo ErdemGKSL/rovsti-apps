@@ -154,6 +154,10 @@ pub struct FixOut {
     /// Inside the circle.
     #[serde(default)]
     pub inside: bool,
+    /// Whole minutes to the line at the current speed (at least one), when the speed is known: the number in
+    /// "about 14 min" of `text`, for the arrival clock (`arrival_clock`).
+    #[serde(default)]
+    pub eta_min: Option<u32>,
     /// Metres from the fix to the circle (0 inside). Absent in older answers.
     #[serde(default)]
     pub circle_m: Option<f64>,
@@ -281,11 +285,9 @@ impl ActiveTrip {
                 None => "On the line".to_owned(),
             }
         };
-        if let Some(eta) = u.eta {
-            text.push_str(&format!(
-                ", about {} min",
-                (eta.as_secs_f64() / 60.0).ceil().max(1.0)
-            ));
+        let eta_min = u.eta.map(eta_minutes);
+        if let Some(min) = eta_min {
+            text.push_str(&format!(", about {min} min"));
         }
         FixOut {
             state: u.state,
@@ -307,6 +309,7 @@ impl ActiveTrip {
             notice_failed: self.notice.as_ref().is_some_and(NoticeState::gave_up),
             side: u.side,
             inside: u.inside,
+            eta_min,
             circle_m: Some(u.circle_m),
             at: Some(FixPos {
                 lat: outcome.fix.at.lat,
@@ -314,6 +317,16 @@ impl ActiveTrip {
                 accuracy_m: outcome.fix.accuracy_m,
             }),
         }
+    }
+}
+
+/// An ETA in whole minutes, rounded up and never less than one ("about 1 min" is the soonest).
+pub fn eta_minutes(eta: std::time::Duration) -> u32 {
+    let minutes = (eta.as_secs_f64() / 60.0).ceil().max(1.0);
+    if minutes >= f64::from(u32::MAX) {
+        u32::MAX
+    } else {
+        minutes as u32
     }
 }
 
@@ -826,5 +839,25 @@ mod tests {
         let back: ActiveTrip = serde_json::from_value(json).unwrap();
         assert_eq!(back.timeouts, 0);
         assert_eq!(back.trip, t.trip);
+    }
+
+    #[test]
+    fn eta_minutes_round_up_and_are_never_zero() {
+        use std::time::Duration;
+        assert_eq!(eta_minutes(Duration::ZERO), 1);
+        assert_eq!(eta_minutes(Duration::from_millis(1)), 1);
+        assert_eq!(eta_minutes(Duration::from_secs(60)), 1);
+        assert_eq!(eta_minutes(Duration::from_secs(61)), 2);
+        assert_eq!(eta_minutes(Duration::from_secs(14 * 60)), 14);
+        assert_eq!(eta_minutes(Duration::from_secs(14 * 60 + 1)), 15);
+        assert_eq!(eta_minutes(Duration::MAX), u32::MAX);
+    }
+
+    #[test]
+    fn a_status_written_before_eta_min_existed_still_parses() {
+        let old = r#"{"state":"Tracking","distance_m":10.0,"next_fix_ms":1000,"high_accuracy":false,"ring":false,
+            "title":"t","text":"x","notice_sent":false}"#;
+        let out: FixOut = serde_json::from_str(old).unwrap();
+        assert_eq!(out.eta_min, None);
     }
 }

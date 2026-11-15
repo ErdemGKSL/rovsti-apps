@@ -277,6 +277,105 @@ data class GtfsSearchAnswer(
     val rows: List<GtfsHit>,
 )
 
+/** A latitude and longitude box in degrees; [west] greater than [east] crosses the antimeridian. */
+@Serializable
+data class GtfsBbox(
+    val south: Double,
+    val west: Double,
+    val north: Double,
+    val east: Double,
+)
+
+/** What the map shows of the imported feed: the stops in [bbox] and, with [pattern], the line of that pattern. */
+@Serializable
+data class GtfsViewRequest(
+    val bbox: GtfsBbox,
+    /** The most stops to answer; those nearest the middle of the box win. */
+    val cap: Int,
+    @EncodeDefault(NEVER) val pattern: Int? = null,
+    @EncodeDefault(NEVER) val dir: String? = null,
+)
+
+@Serializable
+data class GtfsViewStop(
+    /** Index in the feed, as in [GtfsHit.index]. */
+    val index: Int,
+    val id: String,
+    val name: String,
+    val coord: Coord,
+)
+
+@Serializable
+data class GtfsViewAnswer(
+    @SerialName("has_feed") val hasFeed: Boolean,
+    /** Stops inside the box before the cap. */
+    val total: Int,
+    val capped: Boolean,
+    /** In feed order. */
+    val stops: List<GtfsViewStop>,
+    /** The stops of the pattern in travel order; null without a pattern and for one the feed does not have. */
+    val line: List<Coord>?,
+)
+
+/** The lines at a stop, named by its feed index ([stop]) or its GTFS id ([stopId]); the index wins. */
+@Serializable
+data class GtfsLinesRequest(
+    @EncodeDefault(NEVER) val stop: Int? = null,
+    @SerialName("stop_id") @EncodeDefault(NEVER) val stopId: String? = null,
+    /** The most lines to list; [GtfsLinesAnswer.maxLines] when absent. */
+    @EncodeDefault(NEVER) val limit: Int? = null,
+    @EncodeDefault(NEVER) val dir: String? = null,
+)
+
+/** One line that calls at a stop and has a stop before it, as the stop sheet lists it. */
+@Serializable
+data class GtfsLineChoice(
+    /** Goes on the picked point as [Destination.pattern]; `stops.gtfs_view` then answers its line. */
+    val pattern: Int,
+    /** "34", or the long name when the route has no short one. */
+    val name: String,
+    val headsign: String,
+    /** Stops the line calls at before this one. */
+    val before: Int,
+    /** "Line 34 to Kadıköy". */
+    val title: String,
+    /** "3 stops earlier on this line". */
+    val earlier: String,
+)
+
+@Serializable
+data class GtfsLinesAnswer(
+    @SerialName("has_feed") val hasFeed: Boolean,
+    /** Null when the feed does not have the stop. */
+    val stop: GtfsViewStop?,
+    /** One per line and headsign, numbers before names. */
+    val lines: List<GtfsLineChoice>,
+    @SerialName("max_lines") val maxLines: Int,
+)
+
+/** The Settings row of the imported feed. [skippedRows] is [FeedReport.skippedRows] of the import just done. */
+@Serializable
+data class GtfsSummaryRequest(
+    @SerialName("now_ms") val nowMs: Long,
+    /** Seconds east of UTC of the phone's calendar. */
+    @SerialName("tz_offset_s") @EncodeDefault(NEVER) val tzOffsetS: Int? = null,
+    @SerialName("skipped_rows") @EncodeDefault(NEVER) val skippedRows: Long? = null,
+    @EncodeDefault(NEVER) val dir: String? = null,
+)
+
+@Serializable
+data class GtfsSummaryAnswer(
+    @SerialName("has_feed") val hasFeed: Boolean,
+    /** "1 234 stops, 87 lines". */
+    val summary: String?,
+    /** "Imported 5 Nov", with the year when it is not this year and the skipped rows when there were any. */
+    val imported: String?,
+    @SerialName("imported_ms") val importedMs: Long?,
+    val stops: Int,
+    val routes: Int,
+    val patterns: Int,
+)
+
 @Serializable
 data class CoordFormatRequest(
     val at: Coord,

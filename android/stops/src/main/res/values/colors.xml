@@ -1,0 +1,4 @@
+<resources>
+    <!-- The window before Compose draws: the map's radar background, so the first frame does not flash. -->
+    <color name="page">#FFEDEAE3</color>
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The map engine (E7.2): attribution, scale bar and accessibility labels. -->
+<resources>
+    <string name="map_attribution">© OpenStreetMap contributors</string>
+    <string name="map_content_description">Map</string>
+    <string name="map_scale_metres">%1$d m</string>
+    <string name="map_scale_kilometres">%1$d km</string>
+    <string name="map_scale_feet">%1$d ft</string>
+    <string name="map_scale_miles">%1$d mi</string>
+</resources>

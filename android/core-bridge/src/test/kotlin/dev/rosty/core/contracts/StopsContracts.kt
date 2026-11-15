@@ -34,8 +34,14 @@ import dev.rosty.core.model.stops.FracToCoordAnswer
 import dev.rosty.core.model.stops.FracToCoordRequest
 import dev.rosty.core.model.stops.GtfsImportAnswer
 import dev.rosty.core.model.stops.GtfsImportRequest
+import dev.rosty.core.model.stops.GtfsLinesAnswer
+import dev.rosty.core.model.stops.GtfsLinesRequest
 import dev.rosty.core.model.stops.GtfsSearchAnswer
 import dev.rosty.core.model.stops.GtfsSearchRequest
+import dev.rosty.core.model.stops.GtfsSummaryAnswer
+import dev.rosty.core.model.stops.GtfsSummaryRequest
+import dev.rosty.core.model.stops.GtfsViewAnswer
+import dev.rosty.core.model.stops.GtfsViewRequest
 import dev.rosty.core.model.stops.HistoryEditAnswer
 import dev.rosty.core.model.stops.HistoryEditRequest
 import dev.rosty.core.model.stops.HistoryExportAnswer
@@ -91,6 +97,7 @@ import dev.rosty.core.model.stops.StatsRequest
 import dev.rosty.core.model.stops.StatusShareRequest
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
+import dev.rosty.core.model.stops.StoreTripClearAnswer
 import dev.rosty.core.model.stops.StoreTripEndAnswer
 import dev.rosty.core.model.stops.StoreTripEndRequest
 import dev.rosty.core.model.stops.StoreTripLoadAnswer
@@ -181,7 +188,7 @@ object StopsContracts : ContractModels {
             )
             op<DestShareRequest, DestShareAnswer>(
                 "stops.dest_share",
-                ok = listOf("unnamed"),
+                ok = listOf("noted", "unnamed"),
             )
             op<PickReplayRequest, PickReplayAnswer>(
                 "stops.pick_replay",
@@ -205,8 +212,27 @@ object StopsContracts : ContractModels {
             )
             op<SavedEditRequest, SavedEditAnswer>(
                 "stops.saved_edit",
-                ok = listOf("cycle_colour", "favourite", "move", "remove", "rename", "restore", "set_colour"),
-                err = listOf("bad_name", "duplicate", "remove_missing", "short_gate"),
+                ok =
+                    listOf(
+                        "clear_note",
+                        "cycle_colour",
+                        "favourite",
+                        "move",
+                        "remove",
+                        "rename",
+                        "restore",
+                        "set_colour",
+                        "set_note",
+                    ),
+                err =
+                    listOf(
+                        "bad_name",
+                        "duplicate",
+                        "note_missing_stop",
+                        "note_too_long",
+                        "remove_missing",
+                        "short_gate",
+                    ),
             )
             op<SavedListRequest, SavedListAnswer>(
                 "stops.saved_list",
@@ -275,6 +301,10 @@ object StopsContracts : ContractModels {
                 ok = listOf("no_trip"),
                 err = listOf("bad_outcome"),
             )
+            op<DirRequest, StoreTripClearAnswer>(
+                "stops.store_trip_clear",
+                ok = listOf("no_trip"),
+            )
             op<StoreReadRequest, StoreReadAnswer>(
                 "stops.store_read",
                 ok = listOf("draft", "history", "missing"),
@@ -339,6 +369,18 @@ object StopsContracts : ContractModels {
             op<GtfsSearchRequest, GtfsSearchAnswer>(
                 "stops.gtfs_search",
                 ok = listOf("no_feed"),
+            )
+            op<GtfsLinesRequest, GtfsLinesAnswer>(
+                "stops.gtfs_lines",
+                ok = listOf("by_id", "first_stop", "no_feed", "out_of_range", "unknown_stop"),
+            )
+            op<GtfsSummaryRequest, GtfsSummaryAnswer>(
+                "stops.gtfs_summary",
+                ok = listOf("another_year", "no_feed", "skipped_rows"),
+            )
+            op<GtfsViewRequest, GtfsViewAnswer>(
+                "stops.gtfs_view",
+                ok = listOf("antimeridian", "capped", "empty_box", "no_feed", "unknown_pattern"),
             )
             op<CoordFormatRequest, CoordFormatAnswer>(
                 "stops.coord_format",

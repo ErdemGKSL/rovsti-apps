@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,6 +54,7 @@ import dev.rosty.shell.permissions.SpecialAccessRow
 import dev.rosty.shell.permissions.SpecialRowTexts
 import dev.rosty.stops.R
 import dev.rosty.stops.home.OnSheet
+import dev.rosty.stops.home.StopsIcons
 import dev.rosty.stops.notice.noticeLine
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -61,6 +63,9 @@ import kotlinx.collections.immutable.toImmutableList
 object TripTags {
     const val Start = "trip-start"
     const val Clear = "trip-clear"
+    const val Save = "trip-save-stop"
+    const val Saved = "trip-saved-as"
+    const val PlanRule = "trip-plan-rule"
     const val Line = "trip-line"
     const val Card = "trip-card"
     const val Distance = "trip-distance"
@@ -115,6 +120,7 @@ fun TripSection(
     onLine: (Slot, Destination) -> Unit,
     overlays: OverlayController,
     arrivingSoon: ArrivingSoonHook = ArrivingSoonHook.None,
+    save: PlanSave = PlanSave.Hidden,
     lastTrip: @Composable () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
@@ -127,6 +133,14 @@ fun TripSection(
             RecommendedRows(preflight)
         } else if (a != null && b != null) {
             StartRow(state.busy, { onStart(a, b) }, onClear)
+            SaveRow(save)
+            // What Start does, for someone who has never seen a "gate": one line, before the trip.
+            RostyText(
+                stringResource(R.string.trip_plan_rule),
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(TripTags.PlanRule),
+                style = RostyTheme.type.footnote,
+                color = RostyTheme.colors.labelSecondary,
+            )
             arrivingSoon.PlanRow()
             val slot = if (b.gtfsStop != null) Slot.B else Slot.A
             val stop = if (slot == Slot.B) b else a
@@ -157,6 +171,54 @@ private fun StartRow(
             fillWidth = true,
         )
         CapsuleButton(stringResource(R.string.trip_clear), onClear, Modifier.testTag(TripTags.Clear))
+    }
+}
+
+/** What the plan says about keeping the pair on the map as a stop. */
+@Immutable
+sealed interface PlanSave {
+    /** Nothing to save (the two points cannot make a stop). */
+    data object Hidden : PlanSave
+
+    /** "Save as stop": [onSave] asks for the name. */
+    data class Offer(
+        val onSave: () -> Unit,
+    ) : PlanSave
+
+    /** The pair is the saved stop [name] already. */
+    data class Saved(
+        val name: String,
+    ) : PlanSave
+}
+
+/** Under Start and Clear: "Save as stop" for a pair that is no stop yet, or which stop it already is. */
+@Composable
+private fun SaveRow(save: PlanSave) {
+    when (save) {
+        PlanSave.Hidden -> {
+            Unit
+        }
+
+        is PlanSave.Offer -> {
+            CapsuleButton(
+                stringResource(R.string.trip_save_stop),
+                save.onSave,
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(TripTags.Save),
+                icon = StopsIcons.Bookmark,
+                fillWidth = true,
+            )
+        }
+
+        is PlanSave.Saved -> {
+            RostyText(
+                stringResource(R.string.trip_saved_as, save.name),
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(TripTags.Saved),
+                style = RostyTheme.type.footnote,
+                color = RostyTheme.colors.labelSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -25,6 +26,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -32,6 +36,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.Outcome
+import dev.rosty.core.RustError
 import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Ends
@@ -62,6 +67,7 @@ import dev.rosty.stops.map.MapAttribution
 import dev.rosty.stops.map.MapFollowMode
 import dev.rosty.stops.map.MapMotionEffect
 import dev.rosty.stops.map.MapScaleBar
+import dev.rosty.stops.map.PickController
 import dev.rosty.stops.map.PickListener
 import dev.rosty.stops.map.PinMenuActions
 import dev.rosty.stops.map.StopsMap
@@ -76,6 +82,7 @@ import dev.rosty.stops.saved.PlacesTransfer
 import dev.rosty.stops.saved.SavedAction
 import dev.rosty.stops.saved.SavedEffect
 import dev.rosty.stops.saved.SavedViewModel
+import dev.rosty.stops.saved.presentRenameSheet
 import dev.rosty.stops.saved.presentSavedSheet
 import dev.rosty.stops.saved.presentSavedStopSheet
 import dev.rosty.stops.saved.rememberSavedFiles
@@ -88,6 +95,7 @@ import dev.rosty.stops.trip.AlarmEffect
 import dev.rosty.stops.trip.AlarmEntry
 import dev.rosty.stops.trip.AlarmViewModel
 import dev.rosty.stops.trip.LastTripCard
+import dev.rosty.stops.trip.PlanSave
 import dev.rosty.stops.trip.TripAction
 import dev.rosty.stops.trip.TripEffect
 import dev.rosty.stops.trip.TripProblem
@@ -269,12 +277,9 @@ fun HomeEntry(
     var picker: Picker? = null
     var tools: MapTools? = null
 
-    fun openSheet(
-        which: HomeSheet,
-        shared: String? = null,
-    ) {
+    fun openSheet(which: HomeSheet) {
         open?.let { (kind, entry) ->
-            if (kind == which && shared == null) return
+            if (kind == which) return
             overlays.dismiss(entry)
         }
         val title =
@@ -282,7 +287,6 @@ fun HomeEntry(
                 when (which) {
                     HomeSheet.Saved -> R.string.sheet_saved_title
                     HomeSheet.History -> R.string.sheet_history_title
-                    HomeSheet.Pick -> R.string.sheet_pick_title
                 },
             )
         lateinit var entry: SheetEntry
@@ -291,7 +295,6 @@ fun HomeEntry(
             when (which) {
                 HomeSheet.Saved -> overlays.presentSavedSheet(title, saved, savedFiles) { gone() }
                 HomeSheet.History -> overlays.presentHistorySheet(title, history.first, history.second) { gone() }
-                HomeSheet.Pick -> overlays.presentHomeSheet(which, title, shared) { gone() }
             }
         open = which to entry
     }
@@ -372,8 +375,10 @@ fun HomeEntry(
                 saved.onAction(SavedAction.SaveGate(a, b))
             }
 
-            // The lines of a transit stop belong to the pick sheets (E7.8).
-            override fun showLines(stopId: String) = Unit
+            override fun showLines(stopId: String) {
+                val ends = map.pick.state.value.ends
+                listOfNotNull(ends.a, ends.b).firstOrNull { it.gtfsStop == stopId }?.let { picker?.openStopOf(it) }
+            }
 
             override fun move(slot: Slot) = map.pick.beginMove(slot)
 
@@ -381,17 +386,19 @@ fun HomeEntry(
 
             override fun remove(slot: Slot) = map.pick.remove(slot)
         }
+
+    fun openPinMenu(slot: Slot) {
+        val anchor = map.pick.pinAnchor(slot) ?: return
+        scope.launch {
+            val model = map.pick.pinMenuModel(slot) ?: return@launch
+            overlays.presentPinMenu(anchor, model, menuStrings, pinActions)
+        }
+    }
     map =
         rememberHomeMap(
             container,
             object : PickListener {
-                override fun onPinTap(slot: Slot) {
-                    val anchor = map.pick.pinAnchor(slot) ?: return
-                    scope.launch {
-                        val model = map.pick.pinMenuModel(slot) ?: return@launch
-                        overlays.presentPinMenu(anchor, model, menuStrings, pinActions)
-                    }
-                }
+                override fun onPinTap(slot: Slot) = openPinMenu(slot)
 
                 override fun onSavedStopTap(id: Long) {
                     overlays.presentSavedStopSheet(saved, id)
@@ -406,6 +413,13 @@ fun HomeEntry(
                 }
 
                 override fun onSnapped() = haptics.selection()
+
+                // A refused edit leaves the pick as it was: say so instead of doing nothing.
+                override fun onError(error: RustError) {
+                    // A core without the pick ops (a preview's fake) has nothing to refuse.
+                    if (error is RustError.Unsupported) return
+                    overlays.showToast(resources.getString(R.string.pick_failed))
+                }
             },
         )
     picker = rememberPicker(container, map, overlays) { trip.state.value.trip != null }
@@ -609,6 +623,30 @@ fun HomeEntry(
     }
     val dark = RostyTheme.colors.isDark
     val overlay = rememberRadarOverlay(map.pick.radar, dark)
+    // The plan's "Save as stop": the core says whether this pair can be a stop and whether it is one already.
+    val planSave by produceState<PlanSave>(PlanSave.Hidden, pickState.ends, state.savedFile) {
+        val a = pickState.ends.a
+        val b = pickState.ends.b
+        val offer = if (a == null || b == null) null else map.pick.saveOffer()
+        value =
+            when {
+                a == null || b == null || offer == null -> PlanSave.Hidden
+                offer.kind == PickController.OFFER_SAVED -> PlanSave.Saved(offer.name.orEmpty())
+                offer.kind == PickController.OFFER_SAVE -> PlanSave.Offer { saved.onAction(SavedAction.SaveGate(a, b)) }
+                else -> PlanSave.Hidden
+            }
+    }
+    // The pins are drawn, not nodes: a screen reader opens their menus through the map's actions.
+    val pinOptions =
+        listOfNotNull(
+            pickState.ends.a?.let { Slot.A to pickState.labelA },
+            pickState.ends.b?.let { Slot.B to pickState.labelB },
+        ).map { (slot, label) ->
+            CustomAccessibilityAction(resources.getString(R.string.pick_pin_options, label)) {
+                openPinMenu(slot)
+                true
+            }
+        }
 
     StopsHome(
         state = state,
@@ -617,7 +655,10 @@ fun HomeEntry(
                 map.camera,
                 map.tiles,
                 dark,
-                modifier.pickAnchorOrigin(map.pick).testTag(HomeMapTag),
+                modifier
+                    .pickAnchorOrigin(map.pick)
+                    .semantics { if (pinOptions.isNotEmpty()) customActions = pinOptions }
+                    .testTag(HomeMapTag),
                 gesturePolicy = mapTools.gestures,
                 overlay = overlay,
             )
@@ -674,6 +715,7 @@ fun HomeEntry(
                         onLine = { slot, dest -> map.pick.place(slot, dest) },
                         overlays = overlays,
                         arrivingSoon = container.arrivingSoon,
+                        save = planSave,
                         lastTrip = { LastTripCard(alarm) },
                     )
                 },
@@ -732,6 +774,22 @@ private suspend fun savedEffect(
                 { onAction(SavedAction.Restore(effect.stop, effect.index)) },
                 undo,
             )
+        }
+
+        is SavedEffect.AskName -> {
+            val pair =
+                listOf(effect.a.label, effect.b.label)
+                    .filter { it.isNotBlank() }
+                    .takeIf { it.size == 2 }
+                    ?.joinToString(" – ")
+            overlays.presentRenameSheet(
+                context,
+                resources.getString(R.string.saved_save_title),
+                effect.name,
+                effect.maxChars,
+                detail = pair,
+                cancel = true,
+            ) { name -> onAction(SavedAction.Add(name, effect.a, effect.b)) }
         }
 
         is SavedEffect.Saved -> {

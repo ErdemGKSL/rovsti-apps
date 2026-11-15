@@ -92,6 +92,17 @@ class PickSheetViewModelTest {
         java.io.File(HostCore.dataDir, "gtfs.json").delete()
     }
 
+    @Test fun aLinkWithoutCoordinatesSaysWhyAndANameDoesNot() {
+        model.open(Ends())
+        query("https://maps.example/no-place-here")
+        val refusal =
+            rows { it.rows.any { r -> r is PickRow.Refusal } }.rows.filterIsInstance<PickRow.Refusal>().single()
+        assertEquals(UiText.Res(R.string.pick_error_not_a_location), refusal.text)
+        query("zzqx")
+        val named = rows { it.query == "zzqx" && it.rows.any { r -> r is PickRow.NoMatch } }
+        assertTrue(named.rows.none { it is PickRow.Refusal })
+    }
+
     @Test fun nothingFoundSaysSo() {
         model.open(Ends())
         query("zzqx")

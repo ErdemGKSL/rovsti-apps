@@ -9,6 +9,7 @@
     <string name="pick_menu_swap">A ile B\'yi değiştir</string>
     <string name="pick_menu_remove">Kaldır</string>
     <string name="pick_menu_lines">Hatlar</string>
+    <string name="pick_pin_options">%1$s seçenekleri</string>
     <string name="pick_hint_full">Ayarlamak için bir iğneyi sürükleyin veya Temizle\'ye dokunun.</string>
     <string name="pick_format_decimal">Ondalık derece</string>
     <string name="pick_format_dms">Derece, dakika, saniye</string>

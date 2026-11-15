@@ -418,4 +418,6 @@
     <string name="schedule_wa_failed">%1$s kişisine zamanlanan WhatsApp mesajı gönderilemedi</string>
     <string name="schedule_reopen">Aç</string>
     <string name="tools_export_zip">Medyayla Dışa Aktar</string>
+    <string name="thread_not_spam">İstenmeyen Değil</string>
+    <string name="thread_move_to_spam">İstenmeyene Taşı</string>
 </resources>

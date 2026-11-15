@@ -434,4 +434,6 @@
     <string name="schedule_wa_failed">Scheduled WhatsApp message to %1$s couldn\'t be sent</string>
     <string name="schedule_reopen">Open</string>
     <string name="tools_export_zip">Export with Media</string>
+    <string name="thread_not_spam">Not Spam</string>
+    <string name="thread_move_to_spam">Move to Spam</string>
 </resources>

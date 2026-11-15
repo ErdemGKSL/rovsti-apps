@@ -33,6 +33,7 @@ import dev.rosty.core.model.chat.SearchJumpRequest
 import dev.rosty.core.model.chat.SearchJumpStep
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.design.icons.RostyIcons
+import dev.rosty.design.media.showPhotoViewer
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.OverlayController
@@ -281,6 +282,12 @@ fun SmsThreadPage(
                     }
                 },
                 menuFor = { smsBubbleMenu(it, res, model, hooks) },
+                // M4: the header photo opens full screen.
+                onAvatar = {
+                    model.state.value.avatar.photoUri?.let { uri ->
+                        overlays.showPhotoViewer(persistentListOf(Uri.parse(uri)), 0, persistentListOf())
+                    }
+                },
                 pillsFor = detector::pills,
                 attachMenu =
                     persistentListOf(
@@ -366,6 +373,32 @@ fun SmsThreadPage(
                                     // M29: mute this conversation from inside it.
                                     MenuItem.Action(res.getString(R.string.inbox_mute_menu), RostyIcons.BellSlash) {
                                         presentMute(overlays, res) { inbox.onAction(InboxAction.Mute(row.key, it)) }
+                                    }
+                                },
+                                // E6.11 on the thread page: out of Spam, or into it (strangers only).
+                                inbox.state.value.rows.firstOrNull { it.smsThread == route.threadId }?.let { row ->
+                                    when {
+                                        row.inSpam -> {
+                                            MenuItem.Action(
+                                                res.getString(R.string.thread_not_spam),
+                                                RostyIcons.ShieldCheck,
+                                            ) {
+                                                inbox.onAction(InboxAction.NotSpam(row.key))
+                                            }
+                                        }
+
+                                        row.canMoveToSpam -> {
+                                            MenuItem.Action(
+                                                res.getString(R.string.thread_move_to_spam),
+                                                RostyIcons.Shield,
+                                            ) {
+                                                inbox.onAction(InboxAction.MoveToSpam(row.key))
+                                            }
+                                        }
+
+                                        else -> {
+                                            null
+                                        }
                                     }
                                 },
                                 // M43: the next chat with unread messages, in the inbox's order.

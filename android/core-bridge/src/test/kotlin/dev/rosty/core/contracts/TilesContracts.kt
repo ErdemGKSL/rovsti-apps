@@ -13,6 +13,8 @@ import dev.rosty.core.model.stops.TilesOfflineAnswer
 import dev.rosty.core.model.stops.TilesOfflineRequest
 import dev.rosty.core.model.stops.TilesOpenAnswer
 import dev.rosty.core.model.stops.TilesOpenRequest
+import dev.rosty.core.model.stops.TilesPlanAnswer
+import dev.rosty.core.model.stops.TilesPlanRequest
 import dev.rosty.core.model.stops.TilesSetCapRequest
 import dev.rosty.core.model.stops.TilesSourcesAnswer
 import dev.rosty.core.model.stops.TilesStandInAnswer
@@ -51,6 +53,11 @@ object TilesContracts : ContractModels {
                 "tiles.encode_mvt",
                 ok = listOf("dark", "empty"),
                 err = listOf("garbage", "outside"),
+            )
+            op<TilesPlanRequest, TilesPlanAnswer>(
+                "tiles.offline_plan",
+                ok = listOf("capped", "circle"),
+                err = listOf("no_area", "bad_bbox"),
             )
             op<TilesOfflineRequest, TilesOfflineAnswer>(
                 "tiles.offline_start",

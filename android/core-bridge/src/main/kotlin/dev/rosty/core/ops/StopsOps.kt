@@ -97,6 +97,7 @@ import dev.rosty.core.model.stops.SnoozeRequest
 import dev.rosty.core.model.stops.StatsAnswer
 import dev.rosty.core.model.stops.StatsRequest
 import dev.rosty.core.model.stops.StatusShareRequest
+import dev.rosty.core.model.stops.StoreGtfsRemoveAnswer
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripClearAnswer
@@ -247,6 +248,9 @@ interface StopsOps {
     /** Deletes `trip.json` without a history record (a start Android refused). Clearing twice is fine. */
     suspend fun storeTripClear(req: DirRequest): Outcome<StoreTripClearAnswer>
 
+    /** Deletes the imported transit feed (`gtfs.json`); removing twice is fine. */
+    suspend fun storeGtfsRemove(req: DirRequest): Outcome<StoreGtfsRemoveAnswer>
+
     /** Reads `saved.json`, `history.json` or `draft.json`. */
     suspend fun storeRead(req: StoreReadRequest): Outcome<StoreReadAnswer>
 
@@ -367,6 +371,7 @@ interface StopsOps {
                 "stops.store_trip_save",
                 "stops.store_trip_end",
                 "stops.store_trip_clear",
+                "stops.store_gtfs_remove",
                 "stops.store_read",
                 "stops.store_write",
                 "stops.prefs_load",
@@ -519,6 +524,9 @@ class NativeStopsOps(
 
     override suspend fun storeTripClear(req: DirRequest) =
         core.call("stops.store_trip_clear", req, DirRequest.serializer(), StoreTripClearAnswer.serializer())
+
+    override suspend fun storeGtfsRemove(req: DirRequest) =
+        core.call("stops.store_gtfs_remove", req, DirRequest.serializer(), StoreGtfsRemoveAnswer.serializer())
 
     override suspend fun storeRead(req: StoreReadRequest) =
         core.call("stops.store_read", req, StoreReadRequest.serializer(), StoreReadAnswer.serializer())

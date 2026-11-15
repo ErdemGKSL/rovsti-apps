@@ -12,6 +12,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -71,6 +72,7 @@ fun TilesSettingsEntry(
     val state by vm.state.collectAsState()
     val context = LocalContext.current
     val overlays = LocalOverlayOrNull.current
+    val res = LocalResources.current
     val undo = stringResource(R.string.settings_undo)
     LaunchedEffect(vm) { vm.measure() }
     LaunchedEffect(vm, overlays) {
@@ -87,7 +89,7 @@ fun TilesSettingsEntry(
 
                 is TilesEffect.Freed -> {
                     shown.showToast(
-                        context.getString(R.string.tiles_freed, bytesText(context, effect.bytes)),
+                        res.getString(R.string.tiles_freed, bytesText(context, effect.bytes)),
                     )
                 }
             }
@@ -103,10 +105,10 @@ fun TilesSettingsEntry(
                 setCache = { mb ->
                     if (vm.shrinks(mb)) {
                         overlays?.confirm(
-                            context,
-                            heading = context.getString(R.string.tiles_shrink_title, mb),
-                            message = context.getString(R.string.tiles_shrink_message),
-                            action = context.getString(R.string.tiles_shrink_action),
+                            res,
+                            heading = res.getString(R.string.tiles_shrink_title, mb),
+                            message = res.getString(R.string.tiles_shrink_message),
+                            action = res.getString(R.string.tiles_shrink_action),
                         ) { vm.setCache(mb) }
                     } else {
                         vm.setCache(mb)
@@ -114,34 +116,34 @@ fun TilesSettingsEntry(
                 },
                 clearOthers = {
                     overlays?.confirm(
-                        context,
-                        heading = context.getString(R.string.tiles_clear_others_title),
-                        message = context.getString(R.string.tiles_clear_others_message),
-                        action = context.getString(R.string.tiles_clear_action),
+                        res,
+                        heading = res.getString(R.string.tiles_clear_others_title),
+                        message = res.getString(R.string.tiles_clear_others_message),
+                        action = res.getString(R.string.tiles_clear_action),
                         onConfirm = vm::clearOthers,
                     )
                 },
                 clearAll = {
                     overlays?.confirm(
-                        context,
-                        heading = context.getString(R.string.tiles_clear_all_title),
-                        message = context.getString(R.string.tiles_clear_all_message),
-                        action = context.getString(R.string.tiles_clear_action),
+                        res,
+                        heading = res.getString(R.string.tiles_clear_all_title),
+                        message = res.getString(R.string.tiles_clear_all_message),
+                        action = res.getString(R.string.tiles_clear_action),
                         onConfirm = vm::clearAll,
                     )
                 },
                 download = {
                     val area = state.area ?: return@TilesPageActions
                     overlays?.confirm(
-                        context,
+                        res,
                         heading =
-                            context.resources.getQuantityString(
+                            res.getQuantityString(
                                 R.plurals.offline_confirm_title,
                                 area.tiles,
                                 area.tiles,
                             ),
                         message = areaText(context, area),
-                        action = context.getString(R.string.offline_confirm_action),
+                        action = res.getString(R.string.offline_confirm_action),
                         destructive = false,
                         onConfirm = vm::download,
                     )
@@ -159,15 +161,16 @@ internal fun areaText(
     context: Context,
     area: AreaUi,
 ): String {
+    val res = context.resources
     val text =
-        context.resources.getQuantityString(
+        res.getQuantityString(
             R.plurals.offline_estimate,
             area.tiles,
             area.tiles,
             bytesText(context, area.bytes),
             area.topZoom,
         )
-    return if (area.capped) context.getString(R.string.offline_estimate_capped, text) else text
+    return if (area.capped) res.getString(R.string.offline_estimate_capped, text) else text
 }
 
 @Composable

@@ -1,6 +1,7 @@
 package dev.rosty.stops.settings
 
 import android.content.Context
+import android.content.res.Resources
 import android.text.format.Formatter
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -179,7 +180,7 @@ internal fun ProgressBar(
 
 /** A confirmation alert: Cancel, and [action] (red when [destructive]) which runs [onConfirm]. */
 internal fun OverlayController.confirm(
-    context: Context,
+    resources: Resources,
     heading: String,
     message: String?,
     action: String,
@@ -192,7 +193,7 @@ internal fun OverlayController.confirm(
             message = message,
             actions =
                 persistentListOf(
-                    AlertAction(context.getString(R.string.settings_cancel), AlertRole.Cancel),
+                    AlertAction(resources.getString(R.string.settings_cancel), AlertRole.Cancel),
                     AlertAction(action, if (destructive) AlertRole.Destructive else AlertRole.Default, onConfirm),
                 ),
         ),

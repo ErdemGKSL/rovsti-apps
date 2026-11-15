@@ -87,4 +87,20 @@ class SettingsScreenTest : ShotTest() {
                 .container.offline.state.value.active,
         )
     }
+
+    /** S10: leaving the map for Settings hands its view over as the area to download. */
+    @Test fun theMapsViewBecomesTheOfflineAreaWhenSettingsOpens() {
+        composeFrame {
+            val made = remember { AppFixture(FakeStopsCore()) }
+            fixture = made
+            made.Content()
+        }
+        settleRust()
+        val container = fixture!!.container
+        assertEquals(null, container.mapView.value)
+        compose.runOnUiThread { fixture!!.navigator.push(StopsRoute.Settings) }
+        settleRust()
+        val area = container.mapView.value
+        assertTrue("$area", area != null && area.south < area.north && area.west < area.east)
+    }
 }

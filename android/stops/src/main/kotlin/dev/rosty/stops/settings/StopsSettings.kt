@@ -176,6 +176,7 @@ fun StopsSettingsEntry(
             }
         }
     val overlays = LocalOverlayOrNull.current
+    val res = LocalResources.current
     StopsSettingsPage(
         state = state,
         offline = offline,
@@ -186,10 +187,10 @@ fun StopsSettingsEntry(
                 importFeed = { pickFeed.launch(Unit) },
                 removeFeed = {
                     overlays?.confirm(
-                        context,
-                        heading = context.getString(R.string.settings_transit_remove_title),
-                        message = context.getString(R.string.settings_transit_remove_message),
-                        action = context.getString(R.string.settings_transit_remove_action),
+                        res,
+                        heading = res.getString(R.string.settings_transit_remove_title),
+                        message = res.getString(R.string.settings_transit_remove_message),
+                        action = res.getString(R.string.settings_transit_remove_action),
                         onConfirm = vm::removeFeed,
                     )
                 },

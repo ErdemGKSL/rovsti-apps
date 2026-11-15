@@ -10,6 +10,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -67,6 +68,7 @@ fun AlarmSettingsEntry(
     SettingsEffects(vm.effects)
     val context = LocalContext.current
     val overlays = LocalOverlayOrNull.current
+    val res = LocalResources.current
     val picker =
         rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             vm.onSoundPicked(AlarmPreview.picked(context, result.resultCode, result.data))
@@ -92,10 +94,10 @@ fun AlarmSettingsEntry(
                 testAlarm = vm::testAlarm,
                 reset = {
                     overlays?.confirm(
-                        context,
-                        heading = context.getString(R.string.settings_alarm_reset_title),
-                        message = context.getString(R.string.settings_alarm_reset_message),
-                        action = context.getString(R.string.settings_alarm_reset_action),
+                        res,
+                        heading = res.getString(R.string.settings_alarm_reset_title),
+                        message = res.getString(R.string.settings_alarm_reset_message),
+                        action = res.getString(R.string.settings_alarm_reset_action),
                         onConfirm = vm::resetAlarm,
                     )
                 },

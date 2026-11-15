@@ -50,6 +50,7 @@ import dev.rosty.messages.notify.TrackOpenConversation
 import dev.rosty.messages.schedule.ScheduledStrip
 import dev.rosty.messages.schedule.rememberSmsScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
+import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.messages.viewer.openAttachment
 import dev.rosty.messages.viewer.picturesOf
@@ -121,6 +122,8 @@ class SmsMenuHooks(
     val onSelectText: (BubbleUi) -> Unit = {},
     val onSelect: (BubbleUi) -> Unit = {},
     val onInfo: (BubbleUi) -> Unit = {},
+    /** E6.13: "Star" or "Unstar" and "Remind me" for a message that can be marked. */
+    val marks: (BubbleUi) -> List<MenuItem> = { emptyList() },
 )
 
 /**
@@ -147,6 +150,7 @@ fun smsBubbleMenu(
                 RostyIcons.Forward,
             ) { hooks.onForward(bubble) }
     }
+    items += hooks.marks(bubble)
     items += MenuItem.Action(res.getString(R.string.menu_select), RostyIcons.CircleCheck) { hooks.onSelect(bubble) }
     items += MenuItem.Action(res.getString(R.string.menu_info), RostyIcons.Info) { hooks.onInfo(bubble) }
     items += MenuItem.Separator
@@ -218,9 +222,11 @@ fun SmsThreadPage(
     val forward: (BubbleUi) -> Unit = { bubble ->
         overlays.presentForward(context, inbox.state.value.rows, model.tag, bubble.text, onOpen)
     }
+    val marks = rememberMarkHost(container, overlays, model.tag, days) { model.state.value.title }
     val hooks =
-        remember(model, host) {
+        remember(model, host, marks) {
             SmsMenuHooks(
+                marks = marks::menu,
                 onForward = forward,
                 onSelectText = { overlays.presentSelectText(context, it.text) },
                 onSelect = { host.tools.enterSelect(it.key) },
@@ -242,9 +248,10 @@ fun SmsThreadPage(
     TrackOpenConversation(model.tag)
     val schedule = rememberSmsScheduleHost(container, overlays, route, composer)
     val actions =
-        remember(model, res, onBack, overlays, host, state.title) {
+        remember(model, res, onBack, overlays, host, state.title, hooks) {
             ConversationActions(
                 onBack = onBack,
+                onMenuOpened = marks::menuOpened,
                 onSend = { text ->
                     model.send(text)
                     composer.setTextAndPlaceCursorAtEnd("")
@@ -413,7 +420,7 @@ fun SmsThreadPage(
         }
     CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
         ConversationScreen(
-            state = state,
+            state = marks.marked(state),
             composer = composer,
             listState = listState,
             actions = actions,

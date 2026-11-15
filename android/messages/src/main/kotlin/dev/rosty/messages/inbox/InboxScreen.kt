@@ -93,6 +93,7 @@ object InboxTags {
     const val Empty = "inbox-empty"
     const val Archived = "inbox-archived"
     const val Spam = "inbox-spam"
+    const val Starred = "inbox-starred"
     const val Back = "inbox-folder-back"
     const val Role = "inbox-role"
     const val SelectAll = "inbox-select-all"
@@ -158,6 +159,9 @@ data class InboxStrings(
     val moveToSpam: String = "",
     val block: String = "",
     val unblock: String = "",
+    /** The Starred row (E6.13). */
+    val starredRow: String = "",
+    val starredCount: (Int) -> String = { it.toString() },
 )
 
 @Composable
@@ -255,6 +259,8 @@ fun rememberInboxStrings(): InboxStrings {
         moveToSpam = stringResource(R.string.inbox_move_to_spam),
         block = stringResource(R.string.inbox_block),
         unblock = stringResource(R.string.inbox_unblock),
+        starredRow = stringResource(R.string.starred_title),
+        starredCount = { n -> res.getQuantityString(R.plurals.starred_count, n, n) },
     )
 }
 
@@ -350,6 +356,9 @@ fun InboxScreen(
     onNewMessage: () -> Unit,
     modifier: Modifier = Modifier,
     banner: (@Composable () -> Unit)? = null,
+    /** E6.13: how many messages are starred (0: no row) and what a tap on the Starred row opens. */
+    starredCount: Int = 0,
+    onStarred: () -> Unit = {},
 ) {
     val onAction = rememberUpdatedState(actions.onAction)
     LaunchedEffect(searchState) {
@@ -452,6 +461,17 @@ fun InboxScreen(
                     }
                 }
                 if (state.folder == InboxFolder.Inbox && select == null && state.query.isBlank()) {
+                    if (starredCount > 0) {
+                        item(key = "starred", contentType = "folder") {
+                            FolderRow(
+                                icon = RostyIcons.Star,
+                                title = strings.starredRow,
+                                detail = strings.starredCount(starredCount),
+                                modifier = Modifier.testTag(InboxTags.Starred),
+                                onClick = onStarred,
+                            )
+                        }
+                    }
                     if (state.archivedCount > 0) {
                         item(key = "archived", contentType = "folder") {
                             FolderRow(

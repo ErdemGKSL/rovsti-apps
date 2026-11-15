@@ -39,7 +39,11 @@ internal class InboxHarness(
 }
 
 @Composable
-internal fun HostedInbox(harness: InboxHarness) {
+internal fun HostedInbox(
+    harness: InboxHarness,
+    /** E6.13: the count on the Starred row (0: no row). */
+    starred: Int = 0,
+) {
     val navigator = remember { TabNavigator(MessagesTabs, MessagesRoots).also { it.select(ChatsTab) } }
     val strings = rememberInboxStrings()
     harness.listState = rememberLazyListState()
@@ -82,6 +86,7 @@ internal fun HostedInbox(harness: InboxHarness) {
                 searchState = harness.searchState,
                 actions = actions,
                 onNewMessage = {},
+                starredCount = starred,
             )
         }
         entry<MessagesRoute.WhatsApp> {}

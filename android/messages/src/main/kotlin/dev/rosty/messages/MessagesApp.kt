@@ -28,6 +28,7 @@ import dev.rosty.messages.settings.MessagesSettingsPage
 import dev.rosty.messages.settings.SettingsLinks
 import dev.rosty.messages.settings.WhatsAppSettingsEntry
 import dev.rosty.messages.spam.SpamSettingsEntry
+import dev.rosty.messages.starred.StarredEntry
 import dev.rosty.messages.wa.WaThreadPage
 import dev.rosty.messages.wa.WhatsAppPage
 import dev.rosty.messages.wa.rememberWaInboxViewModel
@@ -102,6 +103,7 @@ fun MessagesApp(
         entry<MessagesRoute.SmsThread> { route -> SmsThreadPage(container, route, pop) { navigator.push(it) } }
         entry<MessagesRoute.WaThread> { route -> WaThreadPage(container, route, navigator, pop) }
         entry<MessagesRoute.NewConversation> { route -> NewConversationPage(container, route, navigator, pop) }
+        entry<MessagesRoute.Starred> { StarredEntry(container, navigator) }
         entry<MessagesRoute.WhatsAppSettings> { WhatsAppSettingsEntry(container) }
         entry<MessagesRoute.SpamSettings> { SpamSettingsEntry(container, pop, popToRoot) }
         entry<MessagesRoute.Appearance> { AppearanceEntry(container.commonSettings, pop, popToRoot) }

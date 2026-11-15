@@ -97,6 +97,7 @@ fun ChatsPage(
         navigator.scrollToTop.collect { if (it.tab == ChatsTab) listState.animateScrollToItem(0) }
     }
     InboxEffects(viewModel, navigator, overlays, strings)
+    val starred by container.stars.items.collectAsState()
     val actions =
         remember(viewModel, overlays, strings) {
             RowMenuActions(
@@ -120,6 +121,8 @@ fun ChatsPage(
             searchState = searchState,
             actions = actions,
             onNewMessage = { navigator.push(MessagesRoute.NewConversation()) },
+            starredCount = starred.size,
+            onStarred = { navigator.push(MessagesRoute.Starred) },
             banner =
                 if (!state.roleHeld) {
                     {

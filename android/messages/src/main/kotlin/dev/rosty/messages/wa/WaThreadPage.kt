@@ -52,6 +52,7 @@ import dev.rosty.messages.notify.TrackOpenConversation
 import dev.rosty.messages.schedule.ScheduledStrip
 import dev.rosty.messages.schedule.rememberWaScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
+import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.platform.identity.PhoneNumbers
 import kotlinx.collections.immutable.ImmutableList
@@ -131,6 +132,8 @@ fun waBubbleMenu(
     bubble: BubbleUi,
     res: Resources,
     model: WaThreadViewModel,
+    /** E6.13: "Star" or "Unstar" and "Remind me" for a message that can be marked. */
+    marks: (BubbleUi) -> List<MenuItem> = { emptyList() },
 ): ImmutableList<MenuItem> {
     val items = ArrayList<MenuItem>()
     val queued =
@@ -144,6 +147,7 @@ fun waBubbleMenu(
     if (!bubble.deleted && bubble.text.isNotEmpty()) {
         items += MenuItem.Action(res.getString(R.string.conversation_copy), RostyIcons.Copy) { model.copy(bubble.key) }
     }
+    items += marks(bubble)
     if (queued && bubble.state != BubbleState.Sending) {
         items +=
             MenuItem.Action(res.getString(R.string.wa_thread_edit), RostyIcons.Pencil) {
@@ -264,10 +268,12 @@ fun WaThreadPage(
     val number = remember(route.jid) { numberOfJid(route.jid) }
     TrackOpenConversation(model.tag)
     val schedule = rememberWaScheduleHost(container, overlays, route.jid, composer)
+    val marks = rememberMarkHost(container, overlays, model.tag, rememberDayLabels()) { model.state.value.title }
     val actions =
-        remember(model, res, onBack, host, state.title, attachMenu, navigator) {
+        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks) {
             ConversationActions(
                 onBack = onBack,
+                onMenuOpened = marks::menuOpened,
                 onSend = { text ->
                     model.send(text)
                     composer.setTextAndPlaceCursorAtEnd("")
@@ -283,7 +289,7 @@ fun WaThreadPage(
                         else -> model.tap(bubble.key)
                     }
                 },
-                menuFor = { waBubbleMenu(it, res, model) },
+                menuFor = { waBubbleMenu(it, res, model, marks::menu) },
                 // E6.5: the reaction row of the menu (recent emoji first, M49) and the detection pills.
                 reactionsFor = { b ->
                     if (b.deleted) {
@@ -332,7 +338,7 @@ fun WaThreadPage(
         }
     CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
         ConversationScreen(
-            state = state,
+            state = marks.marked(state),
             composer = composer,
             listState = listState,
             actions = actions,

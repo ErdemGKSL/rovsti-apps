@@ -473,6 +473,8 @@ class WaThreadViewModel(
             reactions = reactionsOf(row),
             senderId = if (group && !row.fromMe) row.sender else null,
             canReply = !row.deleted && row.state !in OUTBOX_STATES,
+            starred = row.starred && !row.deleted,
+            markId = row.id.takeIf { it != keyOf(row) },
         )
     }
 

@@ -55,6 +55,10 @@ sealed interface MessagesRoute {
     @Serializable
     data object WhatsAppSettings : MessagesRoute
 
+    /** The Starred list (E6.13): WhatsApp stars (M10) and the local SMS/MMS stars (M23). */
+    @Serializable
+    data object Starred : MessagesRoute
+
     /** Settings, Spam filter: rules, allow list, blocked numbers, M47 (E6.11). */
     @Serializable
     data object SpamSettings : MessagesRoute
@@ -145,6 +149,10 @@ fun chromeFor(
             ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
         }
 
+        MessagesRoute.Starred -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.starred_title)))
+        }
+
         MessagesRoute.SpamSettings -> {
             ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.settings_spam_row)))
         }
@@ -184,6 +192,10 @@ const val EXTRA_WA_NUMBER = "dev.rosty.extra.NUMBER"
 /** The extra of a message notification's tap (`sms:<thread>` or `wa:<jid>`), `MessageNotifications.EXTRA_TAG`. */
 const val EXTRA_THREAD_TAG = "open_thread_tag"
 
+/** The extras of a message reminder's tap (M33): the message to open the conversation on, and when it was sent. */
+const val EXTRA_MESSAGE_ID = "open_message_id"
+const val EXTRA_MESSAGE_AT = "open_message_at"
+
 /**
  * The parts of an intent [messagesRouteFor] reads; built from a real intent in `MainActivity`, by hand in tests.
  * [compose] is what [ComposeRequest] made of a SENDTO, VIEW or SEND.
@@ -194,6 +206,9 @@ data class IntentFacts(
     val waJid: String? = null,
     val waNumber: String? = null,
     val compose: ComposeRequest? = null,
+    /** E6.13: with [threadTag], the message the conversation opens on and lights up (a reminder's tap). */
+    val messageId: String? = null,
+    val messageAtMs: Long? = null,
 ) {
     companion object
 }
@@ -206,8 +221,14 @@ data class IntentFacts(
  */
 fun messagesRouteFor(facts: IntentFacts): Pair<Tab, List<MessagesRoute>>? {
     facts.threadTag?.let { tag ->
-        smsThreadOf(tag)?.let { return ChatsTab to listOf(MessagesRoute.SmsThread(it)) }
-        waChatOf(tag)?.let { return ChatsTab to listOf(MessagesRoute.WaThread(it)) }
+        val reveal = facts.messageId?.takeIf { it.isNotBlank() }
+        val revealAt = facts.messageAtMs?.takeIf { reveal != null && it > 0 }
+        smsThreadOf(tag)?.let {
+            return ChatsTab to listOf(MessagesRoute.SmsThread(it, reveal = reveal, revealAtMs = revealAt))
+        }
+        waChatOf(tag)?.let {
+            return ChatsTab to listOf(MessagesRoute.WaThread(it, reveal = reveal, revealAtMs = revealAt))
+        }
     }
     if (facts.action == ACTION_WA_CHAT) {
         val jid = facts.waJid?.takeIf { it.contains('@') } ?: facts.waNumber?.let(::jidOfNumber)
@@ -234,6 +255,8 @@ fun IntentFacts.Companion.of(intent: Intent): IntentFacts =
     IntentFacts(
         action = intent.action,
         threadTag = intent.getStringExtra(EXTRA_THREAD_TAG),
+        messageId = intent.getStringExtra(EXTRA_MESSAGE_ID),
+        messageAtMs = intent.getLongExtra(EXTRA_MESSAGE_AT, 0L).takeIf { it > 0 },
         waJid = intent.getStringExtra(EXTRA_WA_JID),
         waNumber = intent.getStringExtra(EXTRA_WA_NUMBER),
         compose = ComposeRequest.fromIntent(intent),

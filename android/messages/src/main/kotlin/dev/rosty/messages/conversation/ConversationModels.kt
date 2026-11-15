@@ -112,6 +112,12 @@ data class BubbleUi(
     val senderId: String? = null,
     /** A swipe to the right answers this bubble (M31). */
     val canReply: Boolean = false,
+    /** E6.13: starred (M10 WhatsApp, M23 SMS): a small star beside the time. */
+    val starred: Boolean = false,
+    /** E6.13: the clock of the reminder armed on it ("18:05", M33): a bell and the clock beside the time. */
+    val reminder: String? = null,
+    /** E6.13: the id stars and reminders know the message by when it is not [key] (a WhatsApp message I sent). */
+    val markId: String? = null,
 )
 
 /** A row of the conversation list: a day separator, the unread divider or a bubble. Newest first (reverse layout). */

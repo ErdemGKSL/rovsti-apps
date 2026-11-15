@@ -72,7 +72,11 @@ class GlobalSearch(
         if (smsReadable) candidates += smsCandidates(sms.search(prepared.like), bySms)
         val waRecent = prepared.recent.filter { it.startsWith("wa:") }.map { it.removePrefix("wa:") }
         val waFound = wa.searchCandidates(waRecent)
-        if (waFound != null) candidates += waFound
+        // A chat is called what its inbox row is called (the name-order rule, applied once).
+        if (waFound != null) {
+            candidates +=
+                waFound.map { c -> byWa[c.chatKey.removePrefix("wa:")]?.let { c.copy(chatTitle = it.title) } ?: c }
+        }
         val partial = waFound != null && chats.size > waRecent.size
         val answer = chat.globalSearch(GlobalSearchRequest(q, partial, candidates)).getOrNull() ?: return null
         val at = now()

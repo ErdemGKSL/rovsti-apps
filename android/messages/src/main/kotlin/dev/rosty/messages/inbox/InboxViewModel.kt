@@ -12,10 +12,12 @@ import dev.rosty.core.model.messages.MergeRequest
 import dev.rosty.core.model.messages.MessageDirection
 import dev.rosty.core.model.messages.MessagesPrefs
 import dev.rosty.core.model.messages.OtpRequest
+import dev.rosty.core.model.messages.PersonKey
 import dev.rosty.core.model.messages.PrefsEditRequest
 import dev.rosty.core.model.messages.RowFacts
 import dev.rosty.core.model.messages.SmsMarks
 import dev.rosty.core.model.messages.SmsThreadRow
+import dev.rosty.core.model.messages.ThreadId
 import dev.rosty.core.model.phone.BlockedNumber
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.RichChat
@@ -26,6 +28,8 @@ import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.data.Book
 import dev.rosty.messages.data.MessagesStore
+import dev.rosty.messages.names.PersonNames
+import dev.rosty.messages.names.WaNames
 import dev.rosty.messages.spam.BlockOutcome
 import dev.rosty.messages.spam.CodeCleanup
 import dev.rosty.messages.spam.MarkOutcome
@@ -50,6 +54,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -78,6 +83,8 @@ class InboxSources(
     val blocked: Flow<List<BlockedNumber>> = flowOf(emptyList()),
     /** M47, told when a passcode is copied. */
     val cleanup: CodeCleanup? = null,
+    /** The name-order rule for the rows no contact owns (WhatsApp name, else the number). */
+    val names: PersonNames = PersonNames({ null }, emptyFlow<Unit>()),
 )
 
 /**
@@ -142,7 +149,8 @@ class InboxViewModel(
             combine(
                 smsRows,
                 waRows,
-                sources.book,
+                // A WhatsApp name that was asked for arrived: the rows are named again.
+                combine(sources.book, sources.names.changes) { book, _ -> book },
                 prefsAndBlocked,
                 sources.store.drafts,
             ) { sms, wa, book, (prefs, blocked), drafts ->
@@ -187,11 +195,32 @@ class InboxViewModel(
                 muteUntil = prefs?.muteUntil.orEmpty(),
                 drafts = s.drafts,
                 otps = otps(merged, prefs?.otpCopy != false),
+                titles = titles(merged),
                 spamThreads = facts.spam,
                 blockedThreads = facts.blocked,
                 nowMs = sources.now(),
             )
         return builder.build(merged, inputs) to access
+    }
+
+    /**
+     * The titles of the rows the merge found no contact for: the WhatsApp name (stored with the chat, else asked from
+     * WhatsApp in the background), else the number as people read it. Groups keep their subject.
+     */
+    private suspend fun titles(rows: List<InboxRow>): Map<String, String> {
+        val out = HashMap<String, String>()
+        for (row in rows) {
+            val key = row.key as? PersonKey.Number ?: continue
+            val jid =
+                row.threads
+                    .map { it.id }
+                    .filterIsInstance<ThreadId.WhatsApp>()
+                    .firstOrNull()
+                    ?.jid
+            val wa = WaNames.of(jid?.let(waByJid.value::get))
+            out[InboxBuilder.keyOf(key)] = sources.names.unsaved(key.number.canonical, wa).text
+        }
+        return out
     }
 
     /** Passcodes of rows whose newest message is an unread incoming SMS (GPUI shows the chip only while unread). */

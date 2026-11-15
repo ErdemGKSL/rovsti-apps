@@ -17,7 +17,7 @@ import dev.rosty.core.model.wa.WaSyncCursor
 import dev.rosty.core.model.wa.WaSyncKind
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncRowState
-import dev.rosty.messages.inbox.numberOfJid
+import dev.rosty.messages.names.PersonNames
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.onStart
 class StoreWaChats(
     private val offline: WaOffline,
     private val remote: WaRemote,
+    /** Names the chats and the group senders of the search candidates. */
+    private val names: PersonNames,
 ) : WaChats {
     override val chats: Flow<List<RichChat>> =
         offline.session.flatMapLatest { session ->
@@ -65,11 +67,9 @@ class StoreWaChats(
         val out = ArrayList<SearchCandidate>()
         for (jid in jids) {
             val chat = chats[jid]
-            val title =
-                chat?.name?.takeIf { it.isNotBlank() }
-                    ?: chat?.pushName?.takeIf { it.isNotBlank() }
-                    ?: numberOfJid(jid)
-                    ?: jid.substringBefore('@')
+            val title = names.chatTitle(jid, chat)
+            val group = chat?.isGroup ?: jid.endsWith(GROUP_SUFFIX)
+            val authors = HashMap<String?, String>()
             var cursor: WaSyncCursor? = null
             for (page in 0 until SEARCH_PAGES) {
                 val read = session.store.thread(jid, SEARCH_PAGE, cursor).getOrNull() ?: break
@@ -81,7 +81,12 @@ class StoreWaChats(
                             chatKey = "wa:$jid",
                             chatTitle = title,
                             messageId = row.id,
-                            author = if (row.fromMe) null else row.senderName?.takeIf { it.isNotBlank() },
+                            author =
+                                when {
+                                    row.fromMe -> null
+                                    group -> authors.getOrPut(row.sender) { names.sender(row.sender, row.senderName) }
+                                    else -> row.senderName?.takeIf { it.isNotBlank() }
+                                },
                             text = text,
                             atMs = row.timestampMs,
                         )
@@ -107,6 +112,7 @@ class StoreWaChats(
 /** Stored messages read per chat for the global search: a few pages at most. */
 private const val SEARCH_PAGES = 3
 private const val SEARCH_PAGE = 200
+private const val GROUP_SUFFIX = "@g.us"
 
 /** A stored chat in the shape the inbox merges (`RichChat`, as the gateway lists it). */
 fun WaSyncChat.toRichChat(): RichChat =

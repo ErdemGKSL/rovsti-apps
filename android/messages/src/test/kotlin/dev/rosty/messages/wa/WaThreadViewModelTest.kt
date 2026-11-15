@@ -19,6 +19,8 @@ import dev.rosty.messages.conversation.ConversationItem
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.conversation.DayLabels
 import dev.rosty.messages.inbox.EnglishInboxWords
+import dev.rosty.messages.names.FakeLiveNames
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaTestKit.Companion.ADA
 import dev.rosty.messages.wa.WaTestKit.Companion.GROUP
 import dev.rosty.messages.wa.WaTestKit.Companion.MERT
@@ -95,6 +97,7 @@ class WaThreadViewModelTest {
     private val days = DayLabels(ZoneId.of("UTC"), Locale.US, true, "Today", "Yesterday")
     private val drafts = MemoryDrafts()
     private val book = MutableStateFlow(mapOf("+905550000001" to "Ada Lovelace"))
+    private val live = FakeLiveNames()
 
     @Before fun main() = Dispatchers.setMain(dispatcher)
 
@@ -110,8 +113,7 @@ class WaThreadViewModelTest {
                 offline = kit.offline,
                 remote = kit.remote,
                 drafts = drafts,
-                nameOf = { book.value[it] },
-                bookChanges = book,
+                names = PersonNames({ book.value[it] }, book, live),
                 divider = { incoming, unread -> incoming.size - unread },
                 now = { kit.now },
             ),
@@ -179,6 +181,50 @@ class WaThreadViewModelTest {
             assertEquals("👍 2", byKey.getValue("m5").reactions)
             assertEquals(BubbleState.None, byKey.getValue("m1").state)
             assertNull(byKey.getValue("m1").sender)
+        }
+
+    @Test fun withoutAContactThePushNameComesBeforeTheStoredChatNameAndAContactSavedLaterWins() =
+        scope.runTest {
+            book.value = emptyMap()
+            val kit = WaTestKit(backgroundScope)
+            kit.chat(ADA, name = "ada.l", pushName = "Ada")
+            kit.message(WaTestKit.text(ADA, "m1", NOW - minute, "Hi"))
+            val model = model(kit)
+            settle()
+
+            assertEquals("Ada", model.state.value.title)
+            assertEquals("+905550000001", model.state.value.subtitle)
+            assertTrue("a stored WhatsApp name is a name: nothing is asked", live.asked.isEmpty())
+
+            book.value = mapOf("+905550000001" to "Ada Lovelace")
+            settle()
+            assertEquals("Ada Lovelace", model.state.value.title)
+        }
+
+    @Test fun anUnknownNumberShowsItsNumberAndTakesTheWhatsAppNameWhenItArrives() =
+        scope.runTest {
+            val kit = WaTestKit(backgroundScope)
+            kit.chat(MERT)
+            kit.chat(GROUP, name = "Weekend hike", group = true)
+            kit.message(WaTestKit.text(MERT, "m1", NOW - minute, "Hi"))
+            kit.message(WaTestKit.text(GROUP, "g1", NOW - minute, "Who brings water?", sender = MERT))
+            val model = model(kit, MERT)
+            val hike = model(kit, GROUP)
+            settle()
+
+            // Nobody names the number: it is the title (nothing repeats it below) and WhatsApp is asked.
+            assertEquals("+905550000002", model.state.value.title)
+            assertNull(model.state.value.subtitle)
+            assertEquals("+905550000002", bubbles(hike.state.value).single().sender)
+            assertEquals(setOf("+905550000002"), live.asked.toSet())
+
+            live.land("+905550000002", "Mert K.")
+            settle()
+            assertEquals("Mert K.", model.state.value.title)
+            assertEquals("+905550000002", model.state.value.subtitle)
+            // The group keeps its subject; the person inside it is named.
+            assertEquals("Weekend hike", hike.state.value.title)
+            assertEquals("Mert K.", bubbles(hike.state.value).single().sender)
         }
 
     @Test fun aGroupShowsWhoWroteEachMessage() =
@@ -454,8 +500,7 @@ class WaThreadViewModelTest {
                         offline = kit.offline,
                         remote = kit.remote,
                         drafts = drafts,
-                        nameOf = { null },
-                        bookChanges = book,
+                        names = PersonNames({ null }, book),
                         searchJump = { request ->
                             asked += request
                             if (request.pagesLoaded < 10) SearchJumpStep.LoadOlder else SearchJumpStep.FurtherBack

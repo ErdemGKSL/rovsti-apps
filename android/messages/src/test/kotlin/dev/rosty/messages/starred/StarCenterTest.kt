@@ -9,12 +9,14 @@ import dev.rosty.messages.conversation.BubbleUi
 import dev.rosty.messages.conversation.ConversationItem
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.inbox.EnglishInboxWords
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaStoreLink
 import dev.rosty.messages.wa.WaTestKit
 import dev.rosty.messages.wa.settle
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -49,6 +51,9 @@ class StarCenterTest {
         MarkTarget("wa:905550000002@s.whatsapp.net", "3EB0AA", 1_789_999_500_000L, "Me", "Biletler bende", "Elif")
     private val jid = "905550000002@s.whatsapp.net"
     private val waRow = WaStarRow(jid, "3EB0AA", wa.atMs, "Me", "Biletler bende", "Elif")
+
+    /** No address book and nothing asked: names come from the store alone. */
+    private val noNames = PersonNames({ null }, MutableStateFlow(Unit))
 
     @Test fun anSmsStarGoesThroughRustIntoThePrefs() =
         runTest {
@@ -214,7 +219,7 @@ class StarCenterTest {
             kit.ops.put(jid, "3EB0AA", wa.atMs, "Biletler bende", fromMe = true)
             kit.offline.start()
             settle()
-            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me")
+            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me", noNames)
 
             // Offline: queued in the store, starred there at once, and a wake asked for the outbox job.
             assertTrue(seams.star(jid, "3EB0AA", true))
@@ -240,7 +245,7 @@ class StarCenterTest {
             settle()
             kit.connect()
             settle()
-            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me")
+            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me", noNames)
             val heard = mutableListOf<Set<String>?>()
             backgroundScope.launch { kit.offline.changes.collect { heard += it } }
             settle()
@@ -259,7 +264,7 @@ class StarCenterTest {
             val kit = WaTestKit(backgroundScope, linked = false)
             kit.offline.start()
             settle()
-            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me")
+            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me", noNames)
             // Not linked: no store to ask or to queue in.
             assertNull(seams.starred())
             assertFalse(seams.star(jid, "3EB0AA", true))

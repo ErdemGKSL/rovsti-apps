@@ -55,6 +55,7 @@ import dev.rosty.messages.inbox.RowMenuActions
 import dev.rosty.messages.inbox.SmsAccess
 import dev.rosty.messages.inbox.rememberInboxStrings
 import dev.rosty.messages.messagesTabItems
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaTestKit.Companion.ADA
 import dev.rosty.messages.wa.WaTestKit.Companion.GROUP
 import dev.rosty.messages.wa.WaTestKit.Companion.MERT
@@ -121,8 +122,7 @@ class WaShotTest : ShotTest() {
                     offline = kit.offline,
                     remote = kit.remote,
                     drafts = MemoryDrafts(),
-                    nameOf = { book[it] },
-                    bookChanges = MutableStateFlow(Unit),
+                    names = PersonNames({ book[it] }, MutableStateFlow(Unit)),
                     now = { kit.now },
                 ),
                 jid,

@@ -8,8 +8,8 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
 import dev.rosty.messages.inbox.InboxWords
 import dev.rosty.messages.inbox.ResourceInboxWords
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.waPreview
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaOffline
 import dev.rosty.messages.wa.toBody
 import dev.rosty.messages.wa.toMeta
@@ -25,7 +25,13 @@ fun realStarCenter(container: MessagesContainer): StarCenter {
     return StarCenter(
         chat = container.chat,
         store = container.store,
-        wa = waStarSeams(container.waOffline, ResourceInboxWords(res), res.getString(R.string.tools_me)),
+        wa =
+            waStarSeams(
+                container.waOffline,
+                ResourceInboxWords(res),
+                res.getString(R.string.tools_me),
+                container.names,
+            ),
         scope = container.scope,
     )
 }
@@ -38,10 +44,11 @@ internal fun waStarSeams(
     offline: WaOffline,
     words: InboxWords,
     me: String,
+    names: PersonNames,
 ): WaStarSeams =
     WaStarSeams(
         changes = offline.changes,
-        starred = { storedStars(offline, words, me) },
+        starred = { storedStars(offline, words, me, names) },
         star = { chat, id, starred -> offline.enqueue(chat, WaSyncAction.Star(id, starred)) },
     )
 
@@ -53,6 +60,7 @@ internal suspend fun storedStars(
     offline: WaOffline,
     words: InboxWords,
     me: String,
+    names: PersonNames,
 ): List<WaStarRow>? {
     val store = offline.session.value?.store ?: return null
     val rows = ArrayList<WaSyncMessage>()
@@ -71,11 +79,7 @@ internal suspend fun storedStars(
             .associateBy { it.jid }
     return rows.map { row ->
         val chat = chats[row.chat]
-        val title =
-            chat?.name?.takeIf { it.isNotBlank() }
-                ?: chat?.pushName?.takeIf { it.isNotBlank() }
-                ?: numberOfJid(row.chat)
-                ?: row.chat
+        val title = names.chatTitle(row.chat, chat)
         val author =
             when {
                 row.fromMe -> {
@@ -83,7 +87,7 @@ internal suspend fun storedStars(
                 }
 
                 chat?.isGroup ?: row.chat.endsWith(GROUP_SERVER) -> {
-                    row.senderName?.takeIf { it.isNotBlank() } ?: row.sender?.let(::numberOfJid) ?: title
+                    names.sender(row.sender, row.senderName)
                 }
 
                 else -> {

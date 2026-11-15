@@ -41,6 +41,7 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.time.ZoneId
 
@@ -380,11 +381,10 @@ fun ScheduleNotices(
                 }
 
                 is ScheduleNotice.WhatsAppFailed -> {
-                    val number = numberOfJid(notice.chat)
-                    val name =
-                        number?.let { container.book.owner(it)?.displayName }?.takeIf { it.isNotBlank() }
-                            ?: number
-                            ?: notice.chat.substringBefore('@')
+                    val chat =
+                        withTimeoutOrNull(CHAT_LOOKUP_MS) { container.waChats.chats.first() }
+                            ?.firstOrNull { it.jid == notice.chat }
+                    val name = container.names.chatTitle(notice.chat, chat)
                     overlays.showToast(res.getString(R.string.schedule_wa_failed, name))
                 }
             }
@@ -393,3 +393,4 @@ fun ScheduleNotices(
 }
 
 private const val LARGE_TEXT_SCALE = 1.3f
+private const val CHAT_LOOKUP_MS = 2_000L

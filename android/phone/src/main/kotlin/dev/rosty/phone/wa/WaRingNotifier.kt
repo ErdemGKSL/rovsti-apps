@@ -56,7 +56,7 @@ class WaRingNotifier(
         /** Pure: the contact or push name, else the `+` number, else the generic title. */
         fun titleOf(call: CallSummary): String =
             call.peerName?.trim()?.takeIf { it.isNotEmpty() }
-                ?: dialNumber(call.peer)
+                ?: dialNumber(call)
                 ?: WaIncomingNotice.FALLBACK_TITLE
     }
 }

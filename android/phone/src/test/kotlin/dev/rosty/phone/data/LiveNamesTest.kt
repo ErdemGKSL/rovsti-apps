@@ -13,6 +13,7 @@ import dev.rosty.core.model.wa.CallSummary
 import dev.rosty.core.ops.NativePhoneOps
 import dev.rosty.core.ops.NativeSearchOps
 import dev.rosty.phone.HostRust
+import dev.rosty.phone.wa.dialPeer
 import dev.rosty.platform.calllog.FakeCallLogRepository
 import dev.rosty.platform.contacts.FakeContactsRepository
 import dev.rosty.platform.identity.CallerIds
@@ -154,6 +155,19 @@ class LiveNamesTest {
                     ),
                 )
             assertEquals(listOf("Ayşe", "Can", "Lid kişi"), calls.map { it.peerName })
+            // A caller the gateway names by a LID, with the number next to it: the contact that owns the number.
+            val byLid =
+                ids.liveCalls(
+                    listOf(
+                        call("4242@lid", "Ayse WA").copy(peerAlt = "905321234567@s.whatsapp.net"),
+                        // The digits of a LID are not a number: Ayşe's digits under `@lid` name nobody.
+                        call("905321234567@lid", "Lid kişi"),
+                    ),
+                )
+            assertEquals(listOf("Ayşe", "Lid kişi"), byLid.map { it.peerName })
+            assertEquals("905321234567@s.whatsapp.net", byLid[0].dialPeer())
+            assertEquals("905321234567@lid", byLid[1].dialPeer())
+            assertEquals("+905321234567", RecentsRepository.dialNumber(byLid[0]))
             val extras =
                 ids.liveExtras(
                     listOf(

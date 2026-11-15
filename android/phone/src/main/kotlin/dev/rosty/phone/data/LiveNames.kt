@@ -37,15 +37,16 @@ suspend fun CallerIds.liveExtras(extras: List<ExtraCall>): List<ExtraCall> {
 /**
  * The gateway's WhatsApp calls with [CallSummary.peerName] set to the contact that owns the caller's number (F28):
  * the phone JID's number, then the contact, else the WhatsApp push name the gateway sent, else nothing (the screens
- * show the formatted number). A `@lid` peer the gateway could not map to a phone JID has no number and keeps its name.
+ * show the formatted number). A `@lid` peer is looked up by the number the gateway sent next to it (`peer_alt`); one it
+ * could not map to a number has none and keeps its name.
  */
 suspend fun CallerIds.liveCalls(calls: List<CallSummary>): List<CallSummary> {
     if (calls.isEmpty()) return calls
-    val numbers = calls.mapNotNull { RecentsRepository.dialNumber(it.peer) }
+    val numbers = calls.mapNotNull { RecentsRepository.dialNumber(it) }
     if (numbers.isEmpty()) return calls
     val found = resolve(numbers)
     return calls.map { call ->
-        val name = RecentsRepository.dialNumber(call.peer)?.let { found[it]?.name }
+        val name = RecentsRepository.dialNumber(call)?.let { found[it]?.name }
         if (name != null && name != call.peerName) call.copy(peerName = name) else call
     }
 }

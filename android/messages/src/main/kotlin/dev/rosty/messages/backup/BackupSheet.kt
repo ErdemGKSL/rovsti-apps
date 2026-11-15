@@ -7,13 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicSecureTextField
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.input.TextFieldDecorator
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -21,27 +16,28 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import dev.rosty.core.model.messages.Strength
+import dev.rosty.design.controls.ActivityIndicator
 import dev.rosty.design.controls.CapsuleButton
 import dev.rosty.design.controls.CapsuleStyle
 import dev.rosty.design.ios.foundation.LocalIosBackdrop
 import dev.rosty.design.list.InsetGroupedSection
 import dev.rosty.design.list.ListRow
+import dev.rosty.design.text.GlassSecureTextField
 import dev.rosty.design.text.imeOverlapPadding
+import dev.rosty.design.theme.RostyShapes
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
-import dev.rosty.messages.backup.theme.BackupMetrics
 import dev.rosty.messages.theme.MessagesColors
 
 /** Test tags of the backup sheet. */
@@ -261,9 +257,16 @@ private fun Count(
 
 @Composable
 private fun BusyLine(what: BackupBusy) {
-    Box(Modifier.fillMaxWidth().padding(vertical = Spacing.xl), contentAlignment = Alignment.Center) {
+    val text = stringResource(busyText(what))
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = Spacing.xl),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Spacing.m),
+    ) {
+        // The text names the work; the spinner says it is still going.
+        ActivityIndicator(text, Modifier.clearAndSetSemantics { })
         RostyText(
-            stringResource(busyText(what)),
+            text,
             Modifier.testTag(BackupSheetTags.Busy),
             style = RostyTheme.type.body,
             color = RostyTheme.colors.labelSecondary,
@@ -303,7 +306,10 @@ private fun Buttons(
     }
 }
 
-/** A passphrase field: the platform's secure field (dots, no suggestions, no copy), in the shape of the glass fields. */
+/**
+ * A passphrase field: the design system's secure glass field, on an opaque base so the page behind the glass sheet
+ * never shows through it.
+ */
 @Composable
 private fun PassphraseField(
     state: TextFieldState,
@@ -313,44 +319,22 @@ private fun PassphraseField(
     onSubmit: () -> Unit = {},
     onEdited: (String) -> Unit,
 ) {
-    val colors = RostyTheme.colors
     androidx.compose.runtime.LaunchedEffect(state) {
         androidx.compose.runtime
             .snapshotFlow { state.text.toString() }
             .collect { onEdited(it) }
     }
-    BasicSecureTextField(
+    GlassSecureTextField(
         state = state,
+        placeholder = placeholder,
         modifier =
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = BackupMetrics.FieldMinHeight)
-                .clip(RoundedCornerShape(BackupMetrics.FieldCorner))
-                // Opaque under the tint: the page behind the glass sheet must not show through the field.
-                .background(colors.groupedSurface)
-                .background(colors.fillTertiary)
+                .clip(RostyShapes.capsule)
+                .background(RostyTheme.colors.groupedSurface)
                 .testTag(tag),
-        textStyle = RostyTheme.type.body.copy(color = colors.labelPrimary),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ime),
-        onKeyboardAction = { onSubmit() },
-        cursorBrush = SolidColor(colors.accent),
-        decorator =
-            TextFieldDecorator { inner ->
-                Box(
-                    Modifier.padding(horizontal = BackupMetrics.FieldPadH, vertical = Spacing.s),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    if (state.text.isEmpty()) {
-                        RostyText(
-                            placeholder,
-                            style = RostyTheme.type.body,
-                            color = colors.labelSecondary,
-                            maxLines = 1,
-                        )
-                    }
-                    inner()
-                }
-            },
+        imeAction = ime,
+        onSubmit = onSubmit,
     )
 }
 

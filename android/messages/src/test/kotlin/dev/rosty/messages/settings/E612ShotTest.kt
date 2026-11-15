@@ -27,6 +27,7 @@ import dev.rosty.messages.MessagesTabs
 import dev.rosty.messages.R
 import dev.rosty.messages.SettingsTab
 import dev.rosty.messages.TestMessagesApp
+import dev.rosty.messages.backup.BackupBusy
 import dev.rosty.messages.backup.BackupFields
 import dev.rosty.messages.backup.BackupPhase
 import dev.rosty.messages.backup.BackupSheetContent
@@ -239,6 +240,8 @@ class E612ShotTest : ShotTest() {
     @Config(qualifiers = "+tr-rTR")
     @Test
     fun backupPassphraseTurkish() = sheet("e6.12-backup-passphrase-tr", passphraseUi, ::typed)
+
+    @Test fun backupBusy() = sheet("e6.12-backup-busy", BackupUi(phase = BackupPhase.Busy(BackupBusy.Restoring)))
 
     private val previewUi =
         BackupUi(

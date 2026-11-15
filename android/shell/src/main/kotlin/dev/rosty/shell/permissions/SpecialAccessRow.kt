@@ -1,8 +1,8 @@
 package dev.rosty.shell.permissions
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -52,11 +52,6 @@ internal fun SpecialKind.icon(): ImageVector =
     }
 
 /**
- * A row for access that only Settings grants (exact alarms, full-screen calls, battery, Xiaomi autostart). It re-reads
- * [special] each time the screen resumes, so coming back from Settings updates it. Off shows "Open Settings", which
- * starts the first page of the chain that some activity accepts (the app's own page is the last one).
- */
-/**
  * An app's own words for a special-access row (Stops' full-screen access is for its alarm, not for calls): the title
  * and the line under it when the access is on and when it is off.
  */
@@ -67,6 +62,11 @@ data class SpecialRowTexts(
     val off: String,
 )
 
+/**
+ * A row for access that only Settings grants (exact alarms, full-screen calls, battery, Xiaomi autostart). It re-reads
+ * [special] each time the screen resumes, so coming back from Settings updates it. Off shows "Open Settings", which
+ * starts the first page of the chain that some activity accepts (the app's own page is the last one).
+ */
 @Composable
 fun SpecialAccessRow(
     kind: SpecialKind,

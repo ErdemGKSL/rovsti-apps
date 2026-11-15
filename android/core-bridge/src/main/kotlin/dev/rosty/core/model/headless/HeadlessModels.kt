@@ -182,6 +182,8 @@ data class TripFixRequest(
     @SerialName("accuracy_m") val accuracyM: Double,
     @SerialName("speed_mps") val speedMps: Double? = null,
     @SerialName("at_ms") val atMs: Long,
+    /** The phone's locale now (a tag); absent keeps the language the trip was started in. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val locale: String? = null,
 )
 
 @Serializable

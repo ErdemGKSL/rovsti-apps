@@ -102,6 +102,8 @@ sealed interface PrefsEdit {
 data class PrefsEditRequest(
     val prefs: StopsPrefs,
     val edit: PrefsEdit,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -135,6 +137,12 @@ data class NoticeWhenChoice(
     val label: String,
 )
 
+/** Request of `stops.prefs_choices`: only the language of the labels (absent for English). */
+@Serializable
+data class PrefsChoicesRequest(
+    @EncodeDefault(NEVER) val locale: String? = null,
+)
+
 /** The fixed choices the settings page lists, with their labels. */
 @Serializable
 data class PrefsChoicesAnswer(
@@ -157,12 +165,16 @@ data class NoticeRenderRequest(
     val template: String,
     val stop: String,
     @SerialName("eta_s") @EncodeDefault(NEVER) val etaS: Long? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** A template that cannot be saved answers `RustError.Invalid` with the reason as its message. */
 @Serializable
 data class NoticeValidateRequest(
     val template: String,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -174,6 +186,8 @@ data class NoticeValidateAnswer(
 @Serializable
 data class AlarmPlanRequest(
     val prefs: StopsPrefs,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** The plan plus the two flags the service reads when it rings. */
@@ -325,6 +339,8 @@ data class GtfsLinesRequest(
     /** The most lines to list; [GtfsLinesAnswer.maxLines] when absent. */
     @EncodeDefault(NEVER) val limit: Int? = null,
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** One line that calls at a stop and has a stop before it, as the stop sheet lists it. */
@@ -361,6 +377,8 @@ data class GtfsSummaryRequest(
     @SerialName("tz_offset_s") @EncodeDefault(NEVER) val tzOffsetS: Int? = null,
     @SerialName("skipped_rows") @EncodeDefault(NEVER) val skippedRows: Long? = null,
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -383,6 +401,8 @@ data class CoordFormatRequest(
     /** Where the user is, for the "1.2 km from you, NE" line. */
     @EncodeDefault(NEVER) val here: Coord? = null,
     @EncodeDefault(NEVER) val zoom: Double? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -423,6 +443,8 @@ data class MeasureRequest(
     val points: List<Coord>,
     @EncodeDefault(NEVER) val name: String? = null,
     @EncodeDefault(NEVER) val today: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -453,6 +475,8 @@ data class BackupExportRequest(
     @SerialName("now_ms") val nowMs: Long,
     @SerialName("tz_offset_s") val tzOffsetS: Int,
     val today: String,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -467,6 +491,8 @@ data class BackupExportAnswer(
 data class BackupParseRequest(
     val text: String,
     @SerialName("tz_offset_s") val tzOffsetS: Int,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -481,4 +507,6 @@ data class BackupParseAnswer(
 @Serializable
 data class FormatDistanceRequest(
     val metres: Double,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )

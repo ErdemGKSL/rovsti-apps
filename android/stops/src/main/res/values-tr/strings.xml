@@ -172,7 +172,7 @@
     <string name="saved_note_title">Not</string>
     <string name="saved_note_placeholder">Bu durak için bir not</string>
     <string name="saved_error_note">Not en çok 200 karakter olabilir.</string>
-    <string name="pick_field">Durak ara ya da bağlantı, koordinat veya Plus Code yapıştır</string>
+    <string name="pick_field">Ara ya da bir yer yapıştır</string>
     <string name="pick_paste">Yapıştır</string>
     <string name="pick_nothing_to_paste">Yapıştırılacak bir şey yok</string>
     <string name="pick_filled_pair">A ve B dolduruldu</string>

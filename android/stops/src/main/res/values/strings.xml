@@ -178,7 +178,7 @@
     <string name="saved_note_title">Note</string>
     <string name="saved_note_placeholder">A note for this stop</string>
     <string name="saved_error_note">A note can have at most 200 characters.</string>
-    <string name="pick_field">Search stops, or paste a link, coordinates or Plus Code</string>
+    <string name="pick_field">Search, or paste a place</string>
     <string name="pick_paste">Paste</string>
     <string name="pick_nothing_to_paste">Nothing to paste</string>
     <string name="pick_filled_pair">Filled A and B</string>

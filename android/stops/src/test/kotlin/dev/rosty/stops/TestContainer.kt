@@ -108,6 +108,8 @@ class FakeStopsCore(
     var transitImportedMs: Long? = 1_790_000_000_000L,
     /** `draft.json`: the ends of the last session, put back on the map. */
     var draft: Ends? = null,
+    /** False lets the real core answer `stops.gtfs_search` (the pick sheet's stop search over a test feed). */
+    private val scriptTransit: Boolean = true,
     /** The real core behind the scripted ops ([HostCore.real]); null keeps the fake alone. */
     private val real: RustCore? = null,
 ) {
@@ -157,8 +159,10 @@ class FakeStopsCore(
             if (it.file == "saved") saved = Json.decodeFromJsonElement(SavedStops.serializer(), it.value)
             Outcome.Ok(Empty)
         }
-        core.onTyped("stops.gtfs_search", GtfsSearchRequest.serializer(), GtfsSearchAnswer.serializer()) {
-            Outcome.Ok(GtfsSearchAnswer(transitImportedMs != null, transitImportedMs, emptyList()))
+        if (scriptTransit) {
+            core.onTyped("stops.gtfs_search", GtfsSearchRequest.serializer(), GtfsSearchAnswer.serializer()) {
+                Outcome.Ok(GtfsSearchAnswer(transitImportedMs != null, transitImportedMs, emptyList()))
+            }
         }
     }
 

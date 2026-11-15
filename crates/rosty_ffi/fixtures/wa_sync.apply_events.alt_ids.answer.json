@@ -1,0 +1,1 @@
+{"ok":{"handle":7777777777,"last_seq":11,"applied":2,"resync":true,"chats":["100000000001@s.whatsapp.net","100000000002@s.whatsapp.net"],"reconciled":[],"rekeyed":[{"seq":1,"from_key":"777000000000001@lid","into_key":"100000000001@s.whatsapp.net"},{"seq":2,"from_key":"100000000001@s.whatsapp.net","into_key":"100000000002@s.whatsapp.net"}]}}

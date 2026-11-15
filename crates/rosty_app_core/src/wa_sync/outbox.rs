@@ -421,6 +421,7 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         has_thumbnail: false,
         media_path,
         client_id: Some(item.client_id),
+        wire_sender: None,
         error: item.last_error,
         pending: Vec::new(),
     })
@@ -533,6 +534,7 @@ fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()
                         sender: None,
                         from_me: true,
                         emoji: emoji.clone(),
+                        sender_alt: None,
                     });
                 }
                 conn.execute(
@@ -584,6 +586,11 @@ impl Store {
                 "client id and chat must not be empty".into(),
             ));
         }
+        // The row is queued under the chat's key, whichever id of the chat the caller still holds.
+        let chat = self
+            .identity_resolve(chat)?
+            .map_or_else(|| chat.to_owned(), |resolved| resolved.key);
+        let chat = chat.as_str();
         let tx = self.conn.transaction()?;
         if let Some(existing) = item(&tx, client_id)? {
             return Ok(existing);
@@ -918,6 +925,8 @@ fn confirm_send(
         timestamp_ms,
         body,
         reactions: Vec::new(),
+        chat_alt: None,
+        sender_alt: None,
     };
     let meta = rosty_wa_proto::MessageMeta {
         quoted: row.action.quoted_id().map(|id| rosty_wa_proto::Quoted {

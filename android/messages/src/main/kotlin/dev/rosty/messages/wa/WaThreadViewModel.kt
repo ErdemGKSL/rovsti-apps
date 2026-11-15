@@ -10,6 +10,7 @@ import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.TypingState
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncChat
 import dev.rosty.core.model.wa.WaSyncCursor
@@ -35,7 +36,6 @@ import dev.rosty.messages.conversation.withDays
 import dev.rosty.messages.inbox.InboxWords
 import dev.rosty.messages.inbox.RowAvatar
 import dev.rosty.messages.inbox.duration
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.names.PersonNames
 import kotlinx.collections.immutable.persistentListOf
@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
@@ -165,6 +166,8 @@ class WaThreadSources(
     val stage: suspend (uri: String) -> WaStageResult = { WaStageResult.Failed },
     /** A number as people read it (`+90 555 000 00 01`). */
     val readable: suspend (number: String) -> String = { it },
+    /** The key changes of the store, after what is kept per chat was moved ([WaRekeys.rekeys]). */
+    val rekeys: Flow<Rekey> = emptyFlow(),
 )
 
 /**
@@ -172,10 +175,16 @@ class WaThreadSources(
  * the sync or the outbox changed the chat. Sending, retrying, editing, deleting, reacting and read marks go into the
  * outbox, so they show at once and work without a connection. Scrolling past the oldest stored message asks the
  * gateway for the page before it; without a connection what is stored stays readable.
+ *
+ * The thread follows its person, not an id. The JID it was opened with ([routeJid]: a route argument, a
+ * notification tag, a hand-off) is resolved to the key the store keeps the chat under before anything is read, and
+ * when the store later learns that this chat is another one's (`rekeys`: a LID that turned out to be a number, a
+ * number that changed) the thread swaps its key and goes on: the page stays, what it shows stays until the merged
+ * rows are read, and the draft, the reply bar and the attachment are kept.
  */
 class WaThreadViewModel(
     private val sources: WaThreadSources,
-    val jid: String,
+    routeJid: String,
     private val words: WaWords,
     private val preview: InboxWords,
     private val days: DayLabels,
@@ -232,8 +241,19 @@ class WaThreadViewModel(
     private var lastTapKey: String? = null
     private var lastTapMs = 0L
 
+    private val key = MutableStateFlow(WaIds.bare(routeJid) ?: routeJid)
+
+    /** The key the chat is stored under: the id the thread was opened with until it is resolved, then the store's. */
+    val chatJid: StateFlow<String> = key.asStateFlow()
+
+    /** [chatJid] now. */
+    val jid: String get() = key.value
+
     /** The tag of drafts and notifications. */
-    val tag: String get() = "wa:$jid"
+    val tag: String get() = WaRekeys.tagOf(jid)
+
+    /** The numbers of the person of a one-to-one chat, the current one first; read with the stored rows. */
+    private var numbers: List<String> = listOfNotNull(WaIds.number(jid))
 
     init {
         viewModelScope.launch {
@@ -244,6 +264,7 @@ class WaThreadViewModel(
                     publish()
                     return@collectLatest
                 }
+                adopt(session)
                 merge(
                     sources.offline.changes
                         .filter { it == null || jid in it }
@@ -283,6 +304,32 @@ class WaThreadViewModel(
             }
         }
         viewModelScope.launch { sources.offline.live.collect(::onLive) }
+        viewModelScope.launch {
+            sources.rekeys.collect { step ->
+                // Two ids became one person: whoever was named by one of them is named again.
+                senders.clear()
+                // This chat is another one's now: the same page under the new key, read again.
+                if (step.from == jid) swap(step.into) else reloads.tryEmit(Unit)
+            }
+        }
+    }
+
+    /** Resolves the id the thread holds to the key its chat is stored under. */
+    private suspend fun adopt(session: WaSession) {
+        val found =
+            session.store
+                .resolve(jid)
+                .getOrNull()
+                ?.key ?: return
+        if (found != jid) swap(found)
+    }
+
+    /** The thread goes on under [into]: nothing on the page is cleared, the rows of the merged chat are read. */
+    private fun swap(into: String) {
+        if (into == jid) return
+        key.value = into
+        senders.clear()
+        reloads.tryEmit(Unit)
     }
 
     private suspend fun reload(session: WaSession) {
@@ -300,12 +347,19 @@ class WaThreadViewModel(
             syncing = page.syncing
             if (cursor == null || stored >= wanted) break
         }
+        // The store answers the rows of a merged chat under the key they live in now: the thread takes that key.
+        loaded
+            .firstOrNull()
+            ?.chat
+            ?.takeIf { it != jid && it.isNotEmpty() }
+            ?.let { key.value = it }
         rows = loaded
         chat =
             session.store
                 .chats(includeArchived = true)
                 .getOrNull()
                 ?.firstOrNull { it.jid == jid }
+        numbers = sources.names.numbersOf(jid)
         chatRead = true
         if (unreadAtOpen == null) unreadAtOpen = chat?.unread ?: 0
         publish()
@@ -353,12 +407,13 @@ class WaThreadViewModel(
 
     private suspend fun publish() {
         val now = sources.now()
-        val group = chat?.isGroup ?: jid.endsWith(GROUP_SUFFIX)
+        val group = chat?.isGroup ?: WaIds.isGroup(jid)
         // Oldest first, the order `withDays` and the divider want.
         val bubbles = rows.asReversed().map { bubbleOf(it, group, now) }
         // Until the stored chat was read its names are unknown: the number shows, WhatsApp is not asked yet.
         val title = sources.names.chatTitle(jid, chat, ask = chatRead)
-        val number = numberOfJid(jid)
+        // A LID whose number the store knows shows that number; a hidden one shows none.
+        val number = numbers.firstOrNull()?.takeIf { !group }
         val online = sources.offline.online.value
         ui.value =
             ui.value.copy(
@@ -367,7 +422,7 @@ class WaThreadViewModel(
                 subtitle = typing ?: number?.let { sources.readable(it) }?.takeIf { !group && it != title },
                 avatar =
                     RowAvatar(
-                        numbers = listOfNotNull(number).toImmutableList(),
+                        numbers = (if (group) emptyList() else numbers).toImmutableList(),
                         waJid = jid,
                         pictureId = chat?.pictureId,
                         group = group,
@@ -613,7 +668,8 @@ class WaThreadViewModel(
                 .toList()
         if (fresh.isEmpty()) return
         val group = chat?.isGroup == true
-        for ((sender, list) in fresh.groupBy { if (group) it.sender else null }) {
+        // A receipt names the author by the id the message arrived under (a LID in a LID-addressed group).
+        for ((sender, list) in fresh.groupBy { if (group) it.wireSender ?: it.sender else null }) {
             sources.offline.enqueue(jid, WaSyncAction.MarkRead(sender, list.map { it.id }))
         }
     }
@@ -687,7 +743,13 @@ class WaThreadViewModel(
 
     // ---- composer
 
-    suspend fun initialDraft(fromLink: String?): String = fromLink ?: sources.drafts.load(tag)
+    suspend fun initialDraft(fromLink: String?): String {
+        if (fromLink != null) return fromLink
+        // The draft is kept under the chat's key: an id from before a merge is resolved first.
+        sources.offline.session.value
+            ?.let { adopt(it) }
+        return sources.drafts.load(tag)
+    }
 
     fun onDraft(text: String) {
         viewModelScope.launch {
@@ -898,7 +960,8 @@ class WaThreadViewModel(
 
     /** Who [senderJid] is, for the card a tap on a sender name of a group opens. */
     suspend fun senderCard(senderJid: String): SenderCardUi {
-        val number = numberOfJid(senderJid)
+        val all = sources.names.numbersOf(senderJid)
+        val number = all.firstOrNull()
         return SenderCardUi(
             jid = senderJid,
             name = senderOf(senderJid, null),
@@ -906,11 +969,12 @@ class WaThreadViewModel(
             numberLabel = number?.let { sources.readable(it) },
             avatar =
                 RowAvatar(
-                    numbers = listOfNotNull(number).toImmutableList(),
+                    numbers = all.toImmutableList(),
                     waJid = senderJid,
                     colorKey = number ?: senderJid,
                 ),
-            saved = number?.let { sources.names.of(it).saved } == true,
+            // A contact that holds the current number or a former one.
+            saved = number != null && sources.names.ofJid(senderJid, ask = false).saved,
         )
     }
 
@@ -956,7 +1020,12 @@ class WaThreadViewModel(
     /** Deletes a sent message of mine for everyone (queued; the store keeps its content, marked deleted). */
     fun revoke(key: String) {
         val row = rowOf(key)?.takeIf { it.fromMe && it.state !in OUTBOX_STATES && !it.deleted } ?: return
-        viewModelScope.launch { sources.offline.enqueue(jid, WaSyncAction.Revoke(row.id, row.sender)) }
+        viewModelScope.launch {
+            sources.offline.enqueue(
+                jid,
+                WaSyncAction.Revoke(row.id, row.wireSender ?: row.sender),
+            )
+        }
     }
 
     /** Changes the text of a sent message of mine (queued). */
@@ -976,7 +1045,9 @@ class WaThreadViewModel(
     ) {
         val row = rowOf(key)?.takeIf { it.state !in OUTBOX_STATES && !it.deleted } ?: return
         viewModelScope.launch {
-            if (sources.offline.enqueue(jid, WaSyncAction.React(row.id, row.fromMe, row.sender, emoji))) {
+            // The message key names its author by the id the message arrived under.
+            val author = row.wireSender ?: row.sender
+            if (sources.offline.enqueue(jid, WaSyncAction.React(row.id, row.fromMe, author, emoji))) {
                 sources.emoji.note(emoji)
             } else {
                 effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
@@ -1004,6 +1075,7 @@ class WaThreadViewModel(
 
     // ---- typing
 
+    /** The events of [WaOffline.live] name their chat and people by the store's keys, as [jid] is. */
     private suspend fun onLive(event: GatewayEvent) {
         when (event) {
             is GatewayEvent.Typing -> {
@@ -1012,7 +1084,7 @@ class WaThreadViewModel(
                 if (event.state == TypingState.Paused) {
                     typing = null
                 } else {
-                    val group = chat?.isGroup ?: jid.endsWith(GROUP_SUFFIX)
+                    val group = chat?.isGroup ?: WaIds.isGroup(jid)
                     val who = if (group) senderOf(event.jid, null) else null
                     typing = words.typing(who, event.state == TypingState.Recording)
                     // WhatsApp sends no "paused" when the other side just stops: the line clears on its own.
@@ -1049,7 +1121,6 @@ class WaThreadViewModel(
         private const val NOW_MS = 60_000L
         private const val TYPING_EVERY_MS = 5_000L
         const val TYPING_SHOWN_MS = 12_000L
-        private const val GROUP_SUFFIX = "@g.us"
         private val OUTBOX_STATES = setOf(WaSyncRowState.Waiting, WaSyncRowState.Sending, WaSyncRowState.Failed)
         private val MEDIA_KINDS =
             setOf(WaSyncKind.Image, WaSyncKind.Video, WaSyncKind.Audio, WaSyncKind.Document, WaSyncKind.Sticker)

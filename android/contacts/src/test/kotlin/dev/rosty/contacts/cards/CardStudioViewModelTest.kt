@@ -1,8 +1,10 @@
 package dev.rosty.contacts.cards
 
 import android.net.Uri
+import dev.rosty.contacts.R
 import dev.rosty.core.ops.CardPalette
 import dev.rosty.core.ops.CardTemplate
+import dev.rosty.design.text.UiText
 import dev.rosty.platform.files.FakeFilesRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -204,6 +206,67 @@ class CardStudioViewModelTest {
             runCurrent()
             assertEquals(1, files.gallery.size)
             assertEquals("image/png", files.gallery.single().third)
+        }
+
+    @Test fun anAnimatedCardIsSharedAsGifAndAsAStillOnRequest() =
+        runTest {
+            val m = model()
+            runCurrent()
+            m.onAction(CardStudioAction.SetAnimated(true))
+            settle()
+
+            m.onAction(CardStudioAction.Share)
+            runCurrent()
+            val gif = m.effects.first() as CardStudioEffect.Share
+            assertEquals("image/gif", gif.mime)
+            assertEquals("Ayşe-Yılmaz-card.gif", gif.name)
+            assertEquals(false, files.stagedCards.last().second)
+
+            m.onAction(CardStudioAction.ShareAsStill)
+            runCurrent()
+            val still = m.effects.first() as CardStudioEffect.Share
+            assertEquals("image/jpeg", still.mime)
+            assertEquals("Ayşe-Yılmaz-card.jpg", still.name)
+            assertEquals(true, files.stagedCards.last().second)
+        }
+
+    @Test fun aFailedSaveToastsAndRejects() =
+        runTest {
+            files.galleryOk = false
+            val m = model()
+            runCurrent()
+            m.onAction(CardStudioAction.Save)
+            runCurrent()
+            val first = m.effects.first()
+            assertEquals(UiText.Res(R.string.contacts_cant_save_image), (first as CardStudioEffect.Toast).text)
+            assertEquals(CardStudioEffect.Reject, m.effects.first())
+        }
+
+    @Test fun aSavedCardToastsWithoutTheRejectHaptic() =
+        runTest {
+            val m = model()
+            runCurrent()
+            m.onAction(CardStudioAction.Save)
+            runCurrent()
+            assertEquals(
+                UiText.Res(R.string.contacts_saved_to_photos),
+                (m.effects.first() as CardStudioEffect.Toast).text,
+            )
+            assertEquals(1, files.gallery.size)
+        }
+
+    @Test fun aCardThatCannotBeStagedToastsAndRejects() =
+        runTest {
+            files.staged = null
+            val m = model()
+            runCurrent()
+            m.onAction(CardStudioAction.Share)
+            runCurrent()
+            assertEquals(
+                UiText.Res(R.string.card_studio_cant_share),
+                (m.effects.first() as CardStudioEffect.Toast).text,
+            )
+            assertEquals(CardStudioEffect.Reject, m.effects.first())
         }
 
     @Test fun aFailedRenderKeepsThePreviewAndSaysSo() =

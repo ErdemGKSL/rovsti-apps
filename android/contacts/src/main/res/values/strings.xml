@@ -507,5 +507,6 @@
     <string name="card_studio_preview">Card preview</string>
     <string name="card_studio_rendering">Making the card</string>
     <string name="card_studio_failed">Couldn\'t make the card</string>
+    <string name="card_studio_share_still">Share as still image</string>
     <string name="card_studio_cant_share">Couldn\'t share the card</string>
 </resources>

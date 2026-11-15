@@ -8,7 +8,7 @@ use std::thread;
 
 use rosty_wa_client::{ClientError, Gateway, Picture};
 use rosty_wa_proto::{
-    ChatAction, ChatActionKind, ConnectKey, ErrorCode, GatewayUrl, InstanceState,
+    ChatAction, ChatActionKind, ConnectKey, ErrorCode, GatewayUrl, IdentitySource, InstanceState,
 };
 
 /// Answers one request with `status` and `body`, returning the raw request
@@ -184,6 +184,85 @@ fn profiles_and_chat_actions_use_their_routes() {
         .unwrap();
     let raw = request.join().unwrap().to_ascii_lowercase();
     assert!(raw.starts_with("post /v1/chats/action http/1.1"), "{raw}");
+}
+
+#[test]
+fn identity_mappings_page_with_the_cursor() {
+    let body = r#"{"items":[{"lid":"1234@lid","pn":"905550000001@s.whatsapp.net","source":"peer_message","learned_ms":1700000000000},{"lid":"77@lid","pn":"905550000002@s.whatsapp.net","source":"from_a_newer_gateway","learned_ms":5}],"next":"12"}"#;
+    let (url, request) = stub("200 OK", body);
+    let page = Gateway::new(url, Some(key()))
+        .identity_mappings(Some("10"))
+        .unwrap();
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(page.items[0].lid, "1234@lid");
+    assert_eq!(page.items[0].source(), IdentitySource::PeerMessage);
+    // A source this build does not know is kept as text and reads as other.
+    assert_eq!(page.items[1].source, "from_a_newer_gateway");
+    assert_eq!(page.items[1].source(), IdentitySource::Other);
+    assert_eq!(page.next.as_deref(), Some("12"));
+    let raw = request.join().unwrap().to_ascii_lowercase();
+    assert!(
+        raw.starts_with("get /v1/identity/mappings?since=10 http/1.1"),
+        "{raw}"
+    );
+    assert!(raw.contains("authorization: bearer "), "{raw}");
+
+    // The first page asks without a cursor; an empty page ends the paging.
+    let (url, request) = stub("200 OK", r#"{"items":[],"next":null}"#);
+    let page = Gateway::new(url, Some(key()))
+        .identity_mappings(None)
+        .unwrap();
+    assert!(page.items.is_empty());
+    assert_eq!(page.next, None);
+    let raw = request.join().unwrap().to_ascii_lowercase();
+    assert!(
+        raw.starts_with("get /v1/identity/mappings http/1.1"),
+        "{raw}"
+    );
+}
+
+#[test]
+fn an_older_gateway_has_no_identity_mappings() {
+    // A gateway from before the route: the router's 404, no API body.
+    let (url, request) = stub_with("404 Not Found", "", "");
+    let err = Gateway::new(url, Some(key()))
+        .identity_mappings(None)
+        .unwrap_err();
+    assert!(err.is_not_found(), "{err:?}");
+    match err {
+        ClientError::Api(api) => {
+            assert_eq!(api.code, ErrorCode::NotFound);
+            assert_eq!(api.message, "this gateway does not list identity mappings");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    request.join().unwrap();
+
+    // Other answers keep their meaning.
+    let (url, request) = stub(
+        "400 Bad Request",
+        r#"{"code":"bad_request","message":"since is not a cursor"}"#,
+    );
+    let err = Gateway::new(url, Some(key()))
+        .identity_mappings(Some("x"))
+        .unwrap_err();
+    assert!(matches!(&err, ClientError::Api(e) if e.code == ErrorCode::BadRequest));
+    assert!(!err.is_not_found());
+    request.join().unwrap();
+
+    let (url, request) = stub("401 Unauthorized", "");
+    let err = Gateway::new(url, Some(key()))
+        .identity_mappings(None)
+        .unwrap_err();
+    assert_eq!(err, ClientError::Unauthorized);
+    request.join().unwrap();
+
+    let (url, request) = stub_with("502 Bad Gateway", "", "down");
+    let err = Gateway::new(url, Some(key()))
+        .identity_mappings(None)
+        .unwrap_err();
+    assert!(matches!(err, ClientError::Http(_)), "{err:?}");
+    request.join().unwrap();
 }
 
 /// An `https` gateway builds the rustls config (WebPKI roots) on the first

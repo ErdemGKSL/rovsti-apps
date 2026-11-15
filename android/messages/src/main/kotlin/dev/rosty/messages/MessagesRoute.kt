@@ -1,6 +1,7 @@
 package dev.rosty.messages
 
 import android.content.Intent
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.design.chrome.TabItem
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.text.UiText
@@ -271,7 +272,7 @@ fun messagesRouteFor(facts: IntentFacts): Pair<Tab, List<MessagesRoute>>? {
         }
     }
     if (facts.action == ACTION_WA_CHAT) {
-        val jid = facts.waJid?.takeIf { it.contains('@') } ?: facts.waNumber?.let(::jidOfNumber)
+        val jid = WaIds.bare(facts.waJid) ?: facts.waNumber?.let(WaIds::pnJid)
         return jid?.let { ChatsTab to listOf(MessagesRoute.WaThread(it)) }
     }
     return when (val compose = facts.compose) {
@@ -310,14 +311,10 @@ internal fun smsThreadOf(tag: String): Long? =
         ?.toLongOrNull()
         ?.takeIf { it > 0 }
 
-/** `wa:<jid>` with a JID. */
+/**
+ * `wa:<jid>` with a JID, without its device. The id is what the tag or the hand-off named: the thread resolves it to
+ * the key its chat is stored under before it reads anything (`WaThreadViewModel`), so a tag from before a merge, or
+ * a LID handed over by Phone, opens the one chat of the person.
+ */
 internal fun waChatOf(tag: String): String? =
-    tag.removePrefix("wa:").takeIf { tag.startsWith("wa:") && it.contains('@') }
-
-/** A WhatsApp user JID from a dialable number: its digits at `s.whatsapp.net`; null when it has too few digits. */
-internal fun jidOfNumber(number: String): String? {
-    val digits = number.filter { it.isDigit() }
-    return digits.takeIf { it.length >= MIN_JID_DIGITS }?.let { "$it@s.whatsapp.net" }
-}
-
-private const val MIN_JID_DIGITS = 6
+    tag.takeIf { it.startsWith("wa:") }?.let { WaIds.bare(it.removePrefix("wa:")) }

@@ -96,6 +96,7 @@ impl Tracker {
                 direction: CallDirection::Out,
                 phase: CallPhase::Ringing,
                 is_video: false,
+                peer_alt: None,
             },
             now_ms,
         )
@@ -331,6 +332,7 @@ mod tests {
             direction,
             phase,
             is_video: false,
+            peer_alt: None,
         }
     }
 

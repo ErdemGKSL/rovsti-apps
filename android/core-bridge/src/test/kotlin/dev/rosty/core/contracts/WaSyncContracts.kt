@@ -3,8 +3,12 @@ package dev.rosty.core.contracts
 import dev.rosty.core.model.core.ErrEnvelope
 import dev.rosty.core.model.core.OkEnvelope
 import dev.rosty.core.model.wa.HandleAnswer
+import dev.rosty.core.model.wa.WaIdParseRequest
+import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
+import dev.rosty.core.model.wa.WaSyncCatchUpRequest
+import dev.rosty.core.model.wa.WaSyncCaughtUp
 import dev.rosty.core.model.wa.WaSyncChatsAnswer
 import dev.rosty.core.model.wa.WaSyncChatsRequest
 import dev.rosty.core.model.wa.WaSyncClientIdRequest
@@ -16,12 +20,15 @@ import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncHandleRequest
+import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncMedia
 import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncNumbersAnswer
+import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
 import dev.rosty.core.model.wa.WaSyncOlderRequest
 import dev.rosty.core.model.wa.WaSyncOpenRequest
@@ -30,6 +37,10 @@ import dev.rosty.core.model.wa.WaSyncOutboxAnswer
 import dev.rosty.core.model.wa.WaSyncOutboxEditRequest
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncRekeyedAnswer
+import dev.rosty.core.model.wa.WaSyncRekeyedRequest
+import dev.rosty.core.model.wa.WaSyncResolveRequest
+import dev.rosty.core.model.wa.WaSyncResolved
 import dev.rosty.core.model.wa.WaSyncRetried
 import dev.rosty.core.model.wa.WaSyncSettleRequest
 import dev.rosty.core.model.wa.WaSyncSettled
@@ -44,21 +55,42 @@ import dev.rosty.core.model.wa.WaSyncThreadRequest
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.serializer
 
-/** Fixture stem to model for `wa_sync.*` (the WhatsApp offline store, E6.4s). */
+/**
+ * Fixture stem to model for `wa_sync.*` (the WhatsApp offline store, E6.4s) and `wa_identity.*` (reading a JID, which
+ * the same facade offers).
+ */
 object WaSyncContracts : ContractModels {
     override val models: Map<String, KSerializer<*>> =
         buildMap {
             op<WaSyncOpenRequest, WaSyncOpened>("wa_sync.open", err = listOf("no_instance"))
             op<WaSyncHandleRequest, WaSyncClosed>("wa_sync.close", err = listOf("not_open"))
             op<WaSyncPlanRequest, WaSyncPlan>("wa_sync.plan", ok = listOf("gap"))
-            op<WaSyncEventsRequest, WaSyncApplied>("wa_sync.apply_events", ok = listOf("resync", "stale", "echo"))
-            op<WaSyncStoreChatsRequest, WaSyncStoredChats>("wa_sync.store_chats", ok = listOf("missed"))
-            op<WaSyncStorePageRequest, WaSyncStoredPage>("wa_sync.store_page", ok = listOf("overlap", "older"))
+            op<WaSyncEventsRequest, WaSyncApplied>(
+                "wa_sync.apply_events",
+                ok = listOf("resync", "stale", "echo", "identity", "alt_ids", "other_forms", "rejected", "own_ids"),
+            )
+            op<WaSyncStoreChatsRequest, WaSyncStoredChats>("wa_sync.store_chats", ok = listOf("missed", "alt"))
+            op<WaSyncStorePageRequest, WaSyncStoredPage>("wa_sync.store_page", ok = listOf("overlap", "alt", "older"))
             op<WaSyncOlderRequest, WaSyncOlderAnswer>("wa_sync.older", ok = listOf("start"))
-            op<WaSyncChatsRequest, WaSyncChatsAnswer>("wa_sync.chats", ok = listOf("empty"))
+            op<WaSyncChatsRequest, WaSyncChatsAnswer>("wa_sync.chats", ok = listOf("empty", "merged"))
             op<WaSyncThreadRequest, WaSyncThreadPage>(
                 "wa_sync.thread",
-                ok = listOf("older", "media", "pending", "unknown_chat"),
+                ok = listOf("older", "media", "pending", "unknown_chat", "old_key"),
+            )
+            op<WaSyncResolveRequest, WaSyncResolved?>(
+                "wa_sync.identity_resolve",
+                ok = listOf("number", "unknown_lid", "group", "not_an_id"),
+            )
+            op<WaSyncRekeyedRequest, WaSyncRekeyedAnswer>("wa_sync.rekeyed_since", ok = listOf("followed", "none"))
+            op<WaSyncResolveRequest, WaSyncNumbersAnswer>(
+                "wa_sync.identity_numbers",
+                ok = listOf("former", "unknown_lid", "unknown_number", "group"),
+            )
+            op<WaSyncCatchUpRequest, WaSyncCaughtUp>("wa_sync.identity_catch_up", ok = listOf("done", "rejected"))
+            op<WaSyncObserveRequest, WaSyncIdentityApplied>("wa_sync.identity_observe", ok = listOf("nothing"))
+            op<WaIdParseRequest, WaIdParsed?>(
+                "wa_identity.parse",
+                ok = listOf("lid", "c_us", "group", "status", "newsletter", "service", "not_an_id"),
             )
             op<WaSyncMessageRequest, WaSyncMessageAnswer>("wa_sync.message", ok = listOf("unknown"))
             op<WaSyncStarredRequest, WaSyncStarredPage>("wa_sync.starred", ok = listOf("older", "unstarred", "empty"))

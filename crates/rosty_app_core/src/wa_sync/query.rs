@@ -14,9 +14,10 @@ use super::{Result, outbox};
 /// The largest thread page.
 pub const MAX_THREAD_PAGE: u32 = 500;
 
-/// `id`, `chat`, the gateway columns, then whether a thumbnail is stored, the cached file and the client id.
+/// `id`, `chat`, the gateway columns, then whether a thumbnail is stored, the cached file, the client id and the
+/// wire sender.
 fn row_columns() -> String {
-    format!("id, chat, {COLUMNS}, thumb IS NOT NULL, media_path, client_id")
+    format!("id, chat, {COLUMNS}, thumb IS NOT NULL, media_path, client_id, wire_sender")
 }
 
 fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
@@ -50,6 +51,7 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         has_thumbnail: row.get(tail)?,
         media_path: row.get(tail + 1)?,
         client_id: row.get(tail + 2)?,
+        wire_sender: row.get(tail + 3)?,
         error: None,
         pending: Vec::new(),
     })
@@ -72,7 +74,7 @@ impl Store {
     pub fn chats(&self, include_archived: bool) -> Result<Vec<ChatRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT jid, name, push_name, is_group, unread, pinned, archived, muted_until_ms, marked_unread,
-                picture_id, cleared_ts
+                picture_id, cleared_ts, wire_jid
              FROM chats WHERE hidden = 0 AND (archived = 0 OR ?1)",
         )?;
         let found: Vec<(ChatRow, Option<i64>)> = stmt
@@ -80,6 +82,7 @@ impl Store {
                 Ok((
                     ChatRow {
                         jid: row.get(0)?,
+                        wire_jid: row.get(11)?,
                         name: row.get(1)?,
                         push_name: row.get(2)?,
                         is_group: row.get(3)?,
@@ -114,12 +117,17 @@ impl Store {
     /// A page of a thread, newest first: at most `limit` stored messages older than `before` (`None`: from the
     /// newest). The first page starts with the sends still in the outbox (they are not counted in `limit`).
     /// Deleted and edited messages are rows like any other, with their state and their kept content.
+    ///
+    /// `chat` may be any id of the chat: one a merge has since moved (a LID whose number is known now) reads the
+    /// merged thread, and the rows name the key ([`Store::stored_key`]).
     pub fn thread(
         &self,
         chat: &str,
         limit: u32,
         before: Option<&ThreadCursor>,
     ) -> Result<ThreadPage> {
+        let chat = self.stored_key(chat);
+        let chat = chat.as_str();
         let limit = limit.clamp(1, MAX_THREAD_PAGE);
         let cleared_ts: Option<i64> = self
             .conn
@@ -229,8 +237,9 @@ impl Store {
         Ok(StarredPage { items, next })
     }
 
-    /// One stored message.
+    /// One stored message. `chat` may be any id of the chat ([`Store::stored_key`]).
     pub fn message(&self, chat: &str, id: &str) -> Result<Option<MessageRow>> {
+        let chat = self.stored_key(chat);
         let sql = format!(
             "SELECT {} FROM messages WHERE chat = ?1 AND id = ?2",
             row_columns()

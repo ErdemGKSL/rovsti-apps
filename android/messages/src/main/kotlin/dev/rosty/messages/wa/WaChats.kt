@@ -11,8 +11,8 @@ import dev.rosty.core.model.wa.ChatAction
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.MessageMeta
 import dev.rosty.core.model.wa.RichChat
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.messages.inbox.InboxWords
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.wa.WaRepository
@@ -56,10 +56,7 @@ class GatewayWaChats(
 }
 
 /** The status broadcast and newsletter "chats" are not conversations. */
-fun RichChat.isConversation(): Boolean =
-    jid != STATUS_JID && !jid.endsWith("@newsletter") && !jid.endsWith("@broadcast")
-
-private const val STATUS_JID = "status@broadcast"
+fun RichChat.isConversation(): Boolean = WaIds.isConversation(jid)
 
 /** A chat as `inbox.merge` takes it (GPUI `inbox::chat_threads`): the newest message in the unified model. */
 fun RichChat.toInboxThread(words: InboxWords): InboxThread? {
@@ -73,7 +70,7 @@ fun RichChat.toInboxThread(words: InboxWords): InboxThread? {
             Message(
                 thread = id,
                 direction = if (last.fromMe) MessageDirection.Outgoing else MessageDirection.Incoming,
-                sender = if (last.fromMe) null else (last.sender ?: jid).let(::numberOfJid)?.let(::PhoneNumber),
+                sender = if (last.fromMe) null else WaIds.number(last.sender ?: jid)?.let(::PhoneNumber),
                 body = body,
                 timestampMs = last.timestampMs,
                 read = unread == 0,

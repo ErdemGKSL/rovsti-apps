@@ -2,6 +2,7 @@ package dev.rosty.phone.wa
 
 import dev.rosty.core.Outcome
 import dev.rosty.core.model.phone.CanPlaceRequest
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.PhoneOps
 import dev.rosty.platform.telephony.CallsApi
 import dev.rosty.platform.telephony.RejectPolicy
@@ -236,7 +237,12 @@ class WaCallLauncher(
             notices.say(WaNotice.Refused(WaRefusal.NeedsCountryCode))
             return
         }
-        when (val result = waCalls.place(jidOf(full))) {
+        val jid = jidOf(full)
+        if (jid == null) {
+            notices.say(WaNotice.Refused(WaRefusal.NeedsCountryCode))
+            return
+        }
+        when (val result = waCalls.place(jid)) {
             is CallResult.Started -> {
                 waiting = null
                 onStarted()
@@ -258,9 +264,7 @@ class WaCallLauncher(
         (link.value as? WaLinkState.Connected)
             ?.status
             ?.ownJid
-            ?.substringBefore('@')
-            ?.substringBefore(':')
-            ?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+            ?.let(WaIds::pnUser)
 
     companion object {
         private const val MAX_CC = 3
@@ -270,7 +274,7 @@ class WaCallLauncher(
          * The JID of an international number: its digits only (no `+`, spaces or brackets) at the WhatsApp server. The
          * gateway refuses `+90…@s.whatsapp.net` with a 400, so the `+` must never reach it.
          */
-        fun jidOf(number: String): String = number.filter { it in '0'..'9' } + "@s.whatsapp.net"
+        fun jidOf(number: String): String? = WaIds.pnJid(number)
 
         /**
          * [number] in `+` form when [e164] could not say (the home country was not inferred from the contacts), using

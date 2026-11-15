@@ -9,9 +9,11 @@ import dev.rosty.core.model.messages.OtpRequest
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichChat
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.MessagesOps
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.names.WaNames
+import dev.rosty.messages.wa.WaRekeys
 import dev.rosty.messages.wa.isConversation
 import dev.rosty.platform.PlatformEvents
 import dev.rosty.platform.notify.NotificationSpec
@@ -36,6 +38,30 @@ class Digests(
         while (lines.size > maxLines) lines.removeAt(0)
         return lines.toList()
     }
+
+    /**
+     * The conversation [from] is [into] now: its lines join those of [into], in the order they came, under the tag
+     * [into]. Nothing happens when [from] has none.
+     */
+    @Synchronized
+    fun rekey(
+        from: String,
+        into: String,
+    ) {
+        val moved = byTag.remove(from) ?: return
+        if (from == into) {
+            byTag[from] = moved
+            return
+        }
+        val lines = byTag.getOrPut(into) { ArrayList() }
+        lines += moved.map { it.copy(thread = into) }
+        lines.sortBy { it.atMs }
+        while (lines.size > maxLines) lines.removeAt(0)
+    }
+
+    /** The lines kept for [tag], oldest first. */
+    @Synchronized
+    fun lines(tag: String): List<Incoming> = byTag[tag].orEmpty().toList()
 
     /** Forgets a conversation (its notification was taken away). */
     @Synchronized
@@ -103,10 +129,20 @@ class MessageAnnouncer(
         }
     }
 
+    /**
+     * The chat [from] merged into [into] (`wa:` tags): the lines collected for [from] go on under [into], so the
+     * next message of the person continues one notification.
+     */
+    fun rekey(
+        from: String,
+        into: String,
+    ) = digests.rekey(from, into)
+
     /** One live WhatsApp message: notify unless it is mine, old, muted, or its chat is on screen. */
     internal suspend fun onWhatsApp(message: GatewayEvent.Message): Boolean {
+        // The stream names the chat by the store's key ([WaOffline.live]).
         val jid = message.chat
-        val tag = "wa:$jid"
+        val tag = WaRekeys.tagOf(jid)
         if (message.fromMe || !isChat(jid)) return false
         if (!PlatformEvents.uiAttached && sources.pushWake) return false
         // A reconnect replays what was missed: history is not news, and nothing is announced twice.
@@ -117,7 +153,7 @@ class MessageAnnouncer(
         // Muted in WhatsApp (here or on another device): stay quiet.
         val mutedUntil = chat?.meta?.mutedUntilMs
         if (mutedUntil != null && (mutedUntil < 0 || mutedUntil > sources.now())) return false
-        val group = chat?.isGroup ?: jid.endsWith(GROUP_SUFFIX)
+        val group = chat?.isGroup ?: WaIds.isGroup(jid)
         val body = sources.preview(message.body)
         val incoming =
             Incoming(
@@ -175,8 +211,7 @@ class MessageAnnouncer(
         }
     }
 
-    private fun isChat(jid: String): Boolean =
-        jid != STATUS_JID && !jid.endsWith("@newsletter") && !jid.endsWith("@broadcast")
+    private fun isChat(jid: String): Boolean = WaIds.isConversation(jid)
 
     private fun firstTime(id: String): Boolean =
         synchronized(seen) {
@@ -193,7 +228,5 @@ class MessageAnnouncer(
         /** A message older than this when it arrives was missed, not new. */
         const val RECENT_MS = 10 * 60_000L
         private const val SEEN_MAX = 500
-        private const val GROUP_SUFFIX = "@g.us"
-        private const val STATUS_JID = "status@broadcast"
     }
 }

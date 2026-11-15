@@ -2,6 +2,75 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## E6-WA R1 closed (2026-11-15) at `7d24b484` plus this note: identity (LID, phone JID, one person)
+
+Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 2 982 tests with `wa_gateway`, the Android checks);
+the Gradle steps green **without the Stops tests** (`-x :stops:testReleaseUnitTest -x :stops:verifyRoborazziRelease`, as
+in R5), APK check and compose stability included. The orphan-golden check lists only Stops goldens, because its shots
+were not run here.
+Plan and evidence: `plans/e6wa-r1.md`. Epic: `plans/e6wa-plan.md`.
+
+**Gateway commits (deploy these; nothing was deployed from here)**: `9dab1c9f` (identity pairs, route, events, alt ids,
+store migration v7, the fixes) and `7dc63514` (the sweep logs its duration). Proto and client: `fb215b14`.
+The gateway code was never run against WhatsApp.
+
+**What landed**
+- Rust `rosty_core::wa_identity`: one parser and one identity map (canonical key: the number when known, else the LID),
+  sources ranked, number changes, the merge steps.
+- Gateway: learned pairs in `identity_pairs`, `GET /v1/identity/mappings`, events `identity_mapped` and
+  `identity_number_changed`, `own_lid`, the other id of a chat, sender, reactor, participant, typing, presence, call
+  and profile; LIDs seen only as authors, reactors, receipts, mentions and quotes are swept too.
+- Device store (`wa_sync` schema v4): person, alias and merge log; every incoming id is resolved before it is
+  matched; a pair learned later merges the two chats in one logged, replayable step (messages, stars, pin, archive,
+  mute, unread, outbox); a read under the old key follows.
+- Messages: drafts, mutes, notifications, reminders, scheduled texts and the open thread follow a merge (`WaRekeys`);
+  a LID nobody names reads "WhatsApp user"; a contact is matched by every number of a person, current then former,
+  national spellings in the home region.
+- One Kotlin JID helper (`WaIds`, `:core-bridge`), checked against the Rust parser; the other copies are gone in
+  Messages, Phone, Contacts, `:people`, `:wa`, `:platform`.
+- Phone: a call from a LID dials the number of its alt id. No WhatsApp messages or media in Phone (owner).
+
+**Shared code touched (own commits)**: `rosty_core` `7e8759d8`; proto and client `fb215b14`; `wa_sync` `55e44d01`,
+`d29f12f8`, `15d22770`; `rosty_ffi` `7ea29482`; `:core-bridge` `1073af50`, `32e9f992`; `:people`, `:wa`, `:platform`
+`293b3950`; Phone and Contacts `56114148`.
+
+**Database backup before the gateway's v7 migration: yes, take one.**
+- The migration is additive and runs in one transaction, so a failed migration leaves v6.
+- There is no way back without a copy: an older gateway refuses a v7 database, and the first connect after the deploy
+  rewrites rows (the LID sweep renames authors, reactions, receipts, quotes, mentions and profiles to the number).
+- Copy `gateway.db` in the gateway's data directory (`WA_GATEWAY_DATA`) with the gateway stopped, or run
+  `sqlite3 gateway.db ".backup gateway-v6.db"` while it runs. `instances/<id>/wa.db` is not migrated by this change.
+
+**What to try on the real gateway, in order**
+1. Read the log of the first connect: `lid-merge: sweep moved M of T stored LIDs in N ms`. `T` is how many LIDs the
+   store held, `M` how many now have a number, `N` the time of one sweep. The line is written when the sweep found
+   LIDs or took 250 ms or more; a sweep runs at every connect and on a device-list or number-change event. If `N` is
+   regularly above about a second, tell this thread: the listing scans `messages` and needs an index or a rarer sweep.
+2. `GET /v1/identity/mappings` with the connect key lists the pairs known at connect; `next` pages.
+3. `GET /v1/instance`: `own_lid` is filled.
+4. Open a group whose members show as LIDs (a community group): authors are numbers or names where a pair is known,
+   and each participant carries `lid` and `pn` in the group info answer.
+5. Send a reaction and a reply in a LID-addressed group from Rosty and look at the phone: the reaction sits on the
+   right message and the reply quotes it (outbound keys now use the wire id; not verified on the wire).
+6. Read a group message in Rosty: on the sender's phone the ticks turn blue once, not early.
+7. Send a message from the phone to a contact whose chat is LID-addressed: it lands in the number chat, not a new one.
+
+**What to test on a device (after the gateway deploy)**
+1. A chat that showed twice (a number and a LID) is one row; its draft, mute and pin are on it.
+2. Write a draft in a LID chat, let the pair arrive (open the group the person writes in): the draft is still there.
+3. A group member with no saved contact and no WhatsApp name reads "WhatsApp user", never a long digit string.
+4. A contact saved the national way (0532…) names its WhatsApp chat.
+
+**For the main thread**
+- A dev device that already opened an earlier build of this round holds an intermediate v4 store: clear the app's
+  data once. v4 was never shipped, so users are not affected. Older app builds refuse a v4 store.
+- `apps/*` no longer compiles with the new proto fields (not touched, by instruction).
+- `:phone:lintPlainRelease` fails on `PhoneApp.kt:708` (`LocalContextGetResourceValueCall`); the line is not from
+  this branch and the gate does not run that task.
+- Left for WA-R2: Phone's own identity table (a LID caller without an alt id has no number), the rekey cursor reset on
+  an account change, Rust `wa_digest` titles for a LID, the wire id on outbox sends.
+- Own-device receipts: the chat cannot be recovered at whatsapp-rust 0.7.0.
+
 ## R5 closed (2026-11-15) at `50e05ebe`: name order follow-ups
 
 Gate: Rust steps of `scripts/kotlin-ui-check.sh` green; the Gradle steps green **without the Stops tests**

@@ -24,6 +24,9 @@ class PersonNamesTest {
     private val live = FakeLiveNames()
     private val stored = HashMap<String, WaNames>()
 
+    /** What the offline store knows: the numbers of the person behind an id, the current one first. */
+    private val numbers = HashMap<String, List<String>>()
+
     private fun names() =
         PersonNames(
             contactName = { book.value[it] },
@@ -31,6 +34,8 @@ class PersonNamesTest {
             live = live,
             stored = { stored[it] },
             readable = { "read:$it" },
+            numbers = { numbers[it].orEmpty() },
+            unknown = { "WhatsApp kullanıcısı" },
         )
 
     @Test fun eachTierWinsInOrder() {
@@ -134,8 +139,78 @@ class PersonNamesTest {
                 PersonName("Mert K.", NameTier.Push),
                 names.ofJid("77700000000001@lid", WaNames(push = "Mert K.")),
             )
-            assertEquals(PersonName("77700000000001", NameTier.Number), names.ofJid("77700000000001@lid"))
             assertTrue(live.asked.isEmpty())
+        }
+
+    @Test fun aLidNobodyNamesShowsTheWhatsAppUserLabelAndNeverItsDigits() =
+        runTest {
+            val names = names()
+            // The digits of the LID are a contact's number: a LID is not a number, whatever its digits.
+            book.value = mapOf("+905550000001" to "Ada Lovelace")
+            for (lid in listOf("77700000000001@lid", "77700000000001:4@lid", "905550000001@lid")) {
+                val who = names.ofJid(lid)
+                assertEquals(lid, PersonName("WhatsApp kullanıcısı", NameTier.Unknown), who)
+                assertFalse(lid, who.named || who.saved)
+                assertEquals(lid, "WhatsApp kullanıcısı", names.sender(lid, null))
+                assertEquals(lid, "WhatsApp kullanıcısı", names.chatTitle(lid, null as RichChat?))
+            }
+            // The push name a message carried still names them.
+            assertEquals("Mert K.", names.sender("77700000000001@lid", " Mert K. "))
+            // A blank id (a line without a sender) gets the label too, never an empty name.
+            assertEquals("WhatsApp kullanıcısı", names.sender(null, null))
+            // What is neither a person nor a group has nothing but its id.
+            assertEquals(PersonName("1700", NameTier.Number), names.ofJid("1700@broadcast"))
+            assertTrue(live.asked.isEmpty())
+        }
+
+    @Test fun aLidWhoseNumberTheStoreKnowsIsNamedByThatNumber() =
+        runTest {
+            val names = names()
+            val lid = "77700000000001@lid"
+            numbers[lid] = listOf(number)
+            // Nobody names the number: the number as people read it, and WhatsApp is asked for its name.
+            assertEquals(PersonName("read:$number", NameTier.Number), names.ofJid(lid))
+            assertEquals(listOf(number), live.asked)
+            stored[number] = WaNames(push = "ada")
+            assertEquals(PersonName("ada", NameTier.Push), names.ofJid(lid))
+            book.value = mapOf(number to "Ada Lovelace")
+            assertEquals(PersonName("Ada Lovelace", NameTier.Contact), names.ofJid(lid))
+            assertEquals(listOf(number), names.numbersOf(lid))
+        }
+
+    @Test fun aContactThatOnlyHoldsTheFormerNumberStillNamesThePerson() =
+        runTest {
+            val names = names()
+            val former = "+905550000009"
+            val lid = "77700000000001@lid"
+            // The person moved from `former` to `number`; the store lists the current number first.
+            numbers[jid] = listOf(number, former)
+            numbers[lid] = listOf(number, former)
+            numbers["905550000009@s.whatsapp.net"] = listOf(number, former)
+            book.value = mapOf(former to "Ada (old number)")
+            for (id in listOf(jid, lid, "905550000009@s.whatsapp.net")) {
+                val who = names.ofJid(id, WaNames(push = "ada"))
+                assertEquals(id, PersonName("Ada (old number)", NameTier.Contact), who)
+                assertTrue(id, who.saved)
+            }
+            // A contact that holds the current number comes first.
+            book.value = mapOf(former to "Ada (old number)", number to "Ada Lovelace")
+            assertEquals("Ada Lovelace", names.ofJid(lid).text)
+            assertEquals("Ada Lovelace", names.chatTitle(jid, null as RichChat?))
+            // Without a contact the rule goes on over the current number, never the former one.
+            book.value = emptyMap()
+            assertEquals(PersonName("read:$number", NameTier.Number), names.ofJid(jid))
+            assertEquals(listOf(number), live.asked)
+        }
+
+    @Test fun withoutAStoreAPhoneIdIsLookedUpByTheNumberItCarries() =
+        runTest {
+            val names = names()
+            assertEquals(listOf(number), names.numbersOf("905550000001:7@s.whatsapp.net"))
+            assertEquals(emptyList<String>(), names.numbersOf("77700000000001@lid"))
+            assertEquals(emptyList<String>(), names.numbersOf(null))
+            book.value = mapOf(number to "Ada Lovelace")
+            assertEquals("Ada Lovelace", names.ofJid("905550000001:7@s.whatsapp.net").text)
         }
 
     @Test fun aGroupKeepsItsSubjectAndAPersonIsNamedByTheRule() =

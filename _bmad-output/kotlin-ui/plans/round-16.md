@@ -295,6 +295,20 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 
 ### Step 8. F40, close X.2, full gate, APKs
 
+- **Owner-visible layout bugs found in the `7e08ce8` goldens (main thread review; fix before closing X.2):**
+  - The card's headline is wider than the card. In `x2-share-animated-fs2-light.png`, "Happy birthday, Ayşe Yılmaz!"
+    runs past the inner glass panel and touches the card's edges. In `x2-share-still-menu-tr-*.png`, "Doğum günün kutlu
+    olsun, Ayşe Yılmaz!" is cut off at both sides ("m günün kutlu olsun, Ayşe Yı").
+    - The headline must wrap inside the inner panel, with padding, on at most 2–3 lines. If it still does not fit, shrink
+      it to a floor size, then ellipsize.
+    - This applies to every template (Birthday, Contact, Number), to static and animated renders, and to long names and
+      the Turkish locale.
+    - Add a render test with a long Turkish name that checks the text box stays inside the panel.
+  - The date line is "October 3" under the Turkish locale. Format it in the card's locale ("3 Ekim").
+  - Re-record the x2 goldens, open them, and confirm nothing touches or crosses the panel edge.
+- **Also in this step:** `:shell` `PermissionRationale` became a data class in the main tree (the rationale sheet closed and
+  reopened on each recomposition of the contact card). Keep that change. Its test is in `PermissionGateTest`.
+
 - **F40:**
   - Replace the fake WhatsApp picture loaders in `X1PhoneAvatarShotTest` and Contacts `AvatarRig` with recognisable test
     portraits: a drawn head-and-shoulders silhouette on a patterned background, one per person, produced in code with

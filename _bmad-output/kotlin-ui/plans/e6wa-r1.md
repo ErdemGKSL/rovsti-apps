@@ -42,6 +42,69 @@ Close: merge `origin/ui-overhaul`, the gate with Rust (`scripts/kotlin-ui-check.
 `cargo test -p wa_gateway --profile checks`, note at the top of `e6-status.md`, message to the main thread naming the
 gateway commit.
 
+## For the close note (asked by the main thread)
+
+**Database backup before the gateway's v7 migration: yes.**
+- The migration itself is additive and runs in one transaction (`store.rs::migrate`), so a failed migration leaves v6.
+- But there is no way back without a copy: a gateway older than this one refuses a v7 database ("database schema v7
+  is newer than this gateway"), so rolling the binary back needs the pre-v7 file.
+- The first connect after the deploy rewrites rows (the LID sweep renames authors, reactions, receipts, quotes,
+  mentions and profiles to the number, and joins receipt rows); that is not reversible either.
+- What to copy: `gateway.db` in the gateway's data directory (`WA_GATEWAY_DATA`), with the gateway stopped, or with
+  `sqlite3 gateway.db ".backup gateway-v6.db"` while it runs (the store is WAL). `instances/<id>/wa.db` (the Signal
+  keys) is not migrated by this change; `config.example.toml` already says to back the directory up.
+
+**What to try on the real gateway, in order**
+1. After the deploy, read the log of the first connect: `lid-merge: sweep moved M of T stored LIDs in N ms`
+   (`wa/lid.rs::sweep_with`, commit `7dc63514`). `N` is the time of one sweep; the line is written when the sweep found
+   LIDs or took 250 ms or more. A sweep runs at every connect and on a device-list or number-change event. If `N` is
+   regularly above about a second, the listing (`store/identity.rs::lids_seen`, `LIKE '%@lid'` over `messages`) needs
+   an index or a rarer sweep: tell this thread.
+2. `GET /v1/identity/mappings` with the connect key: the pairs the library knew at connect are listed; `next` pages.
+3. `GET /v1/instance`: `own_lid` is filled.
+4. A group whose members show as LIDs in WhatsApp (a community group): open it, the authors are numbers or names where
+   a pair is known, and each participant carries `lid` and `pn` in the group info answer.
+5. Send a reaction and a reply in a LID-addressed group from Rosty and look at the phone: the reaction sits on the
+   right message and the reply quotes it (the outbound keys now use the wire id; not verified on the wire).
+6. Read a group message in Rosty: on the sender's phone the ticks turn blue once, not early (receipts by person).
+7. Send a message from the phone to a contact whose chat is LID-addressed: it lands in the number chat, not a new
+   LID chat (`peer_recipient_pn`).
+
 ## Evidence
 
-(per step, filled in as each lands)
+- **Step 1** (`7e8759d8`, merge `9986fc23`): `rosty_core::wa_identity` (`id`, `source`, `rows`, `map`, `name`), 63 tests
+  including the conflict matrix over every source pair and a random-operations invariant test.
+- **Steps 2 and 3** (`fb215b14` proto and client, `9dab1c9f` gateway, `9e70600f`, merge `4e7c9f03`): wire additions as
+  agreed; gateway table `identity_pairs`, route and events, store migration v7, the fixes of ID 2.4 (item 7 partly: the
+  chat of an own-device receipt cannot be recovered at 0.7.0). Never run against WhatsApp. `apps/*` struct literals no
+  longer compile with the new fields (not touched, by instruction).
+- **Step 4 and the store half of 5** (`55e44d01`, merge `1e292692`, fixture `bf874965`, `afbdd7e1`): schema v4
+  (`person`, `alias`, `merge_log`, `wire_jid`, `wire_sender`, own ids, merge cursor, backfill cursor; no `person_id`
+  columns: rows stay keyed by the canonical key), resolve before match on ingest, the logged and replayable merge,
+  backfill. 41 new `wa_sync` tests.
+- **Rest of step 5 and step 6** (`d29f12f8` store, `7ea29482` FFI, `1073af50` bridge, merge `35452cda`): alt ids,
+  the two events, `ChatMerged` and the mappings endpoint (resumable cursor) feed `learn`; a known pair writes nothing;
+  a read under an old key follows the merge. Ops `wa_sync.identity_resolve`, `rekeyed_since`, `identity_catch_up`,
+  `identity_observe`, `wa.identity_mappings` (`supported: false` on an old gateway), `wa_identity.parse`; answers
+  carry `rekeyed` steps.
+- **Step 8** (`15d22770`): `people::e164` goes through `caller_id::e164_of` with the home calling code;
+  `wa_sync.identity_numbers` lists the current then the former numbers of a person; `PersonNames` looks a contact up
+  by each. 12 new Rust tests (five spellings with and without a home region, wrong country same tail, former number
+  only, hidden member).
+- **Step 7** (`32e9f992` bridge, `293b3950` shared modules, `261f7b8f` Messages, `56114148` Phone and Contacts, merge
+  `cfe141e5`):
+  - `WaIds` (`:core-bridge`) is the one Kotlin JID helper. It is a Kotlin port, not a native call (its callers are
+    synchronous); `WaIdsTest` checks it against the Rust fixtures and `WaIdsNativeTest` against the real library.
+    Every other copy is gone except the log mask's domain list.
+  - `WaRekeys` (Messages) follows the store's merge log from its own cursor (`wa-rekeys.json`) and runs the movers in
+    order: draft and mute, announcer lines, the conversation on screen, the notification, message reminders,
+    scheduled texts. The open thread swaps its key and keeps its rows, reply bar and draft.
+  - The sync runner catches up on pairs and own ids before the chat list; ids from notifications and deep links are
+    resolved before the first read; React, Revoke and MarkRead send the wire sender.
+  - A LID nobody names reads "WhatsApp user" (en, tr) on every Messages surface.
+  - Phone: a call whose peer is a LID dials the number of `peer_alt`.
+  - No golden changed.
+- Not done in this round (WA-R2): Phone's identity table (a LID caller with no `peer_alt` has no number); the rekey
+  cursor reset on an account change; Rust `wa_digest` titles; outbox sends still name the chat by the canonical key;
+  group info is fetched nowhere in Messages, so only profile answers reach `store.observe`.
+- Close: see the WA-R1 note in `e6-status.md`.

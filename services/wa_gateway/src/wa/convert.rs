@@ -8,11 +8,12 @@ use rosty_wa_proto::{
     SharedContact, WaMessage, WaUser,
 };
 use whatsapp_rust::prelude::*;
-use whatsapp_rust::wacore::types::message::MessageSource;
+use whatsapp_rust::wacore::types::message::{MessageInfo, MessageSource};
+use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::waproto::whatsapp::message::protocol_message::Type as ProtocolType;
 
-use super::lid::{self, LidMap};
+use super::lid::{self, LidMap, Pair};
 use crate::driver::DriverError;
 use crate::store::{MAX_THUMBNAIL_BYTES, MessageExtras};
 
@@ -70,6 +71,32 @@ pub struct Origin<'a> {
     pub timestamp_ms: i64,
     /// The author's push name, as the envelope carried it.
     pub sender_name: Option<&'a str>,
+    /// The other form of `chat` (one-to-one chats), when it is known.
+    pub chat_alt: Option<&'a str>,
+    /// The other form of `sender`, when it is known.
+    pub sender_alt: Option<&'a str>,
+}
+
+impl<'a> Origin<'a> {
+    /// An origin without a push name or alt ids.
+    pub fn new(
+        id: &'a str,
+        chat: &'a str,
+        sender: Option<&'a str>,
+        from_me: bool,
+        timestamp_ms: i64,
+    ) -> Self {
+        Self {
+            id,
+            chat,
+            sender,
+            from_me,
+            timestamp_ms,
+            sender_name: None,
+            chat_alt: None,
+            sender_alt: None,
+        }
+    }
 }
 
 /// What a WhatsApp message turned into.
@@ -412,6 +439,8 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
         raw_proto: None,
         secret,
         thumbnail,
+        wire_chat: None,
+        wire_sender: None,
     }
 }
 
@@ -448,6 +477,8 @@ pub fn convert(origin: Origin<'_>, message: &wa::Message) -> Converted {
                     timestamp_ms: origin.timestamp_ms,
                     body,
                     reactions: Vec::new(),
+                    chat_alt: origin.chat_alt.map(str::to_owned),
+                    sender_alt: origin.sender_alt.map(str::to_owned),
                 },
                 Box::new(extras),
             )
@@ -475,6 +506,7 @@ pub fn convert(origin: Origin<'_>, message: &wa::Message) -> Converted {
                 sender: origin.sender.map(str::to_owned),
                 from_me: origin.from_me,
                 emoji,
+                sender_alt: origin.sender_alt.map(str::to_owned),
             },
         },
         Content::Ignore => Converted::Ignore,
@@ -487,47 +519,166 @@ pub fn group_sender(chat: &str, sender: &Jid) -> Option<String> {
     is_group(chat).then(|| sender.to_non_ad().to_string())
 }
 
-/// The chat and author JIDs of a live message, by phone number when `map`
-/// knows the LID or WhatsApp told the number too (the `*_alt` fields).
-pub fn chat_and_sender(source: &MessageSource, map: &LidMap) -> (String, Option<String>) {
-    let chat = if source.is_group {
-        source.chat.to_non_ad()
-    } else if source.is_from_me {
-        lid::resolve(&source.chat, source.recipient_alt.as_ref(), map)
+/// Who a live message is from and for: the ids the apps get, their other
+/// form where one is known, and the ids it arrived under.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Addressed {
+    /// The chat by phone number when known, else as it arrived.
+    pub chat: String,
+    /// The author, for groups; resolved like `chat`.
+    pub sender: Option<String>,
+    /// The other form of `chat` (one-to-one chats).
+    pub chat_alt: Option<String>,
+    /// The other form of `sender`.
+    pub sender_alt: Option<String>,
+    /// The chat id on the wire, bare.
+    pub wire_chat: String,
+    /// The author id on the wire, bare (groups).
+    pub wire_sender: Option<String>,
+}
+
+/// The phone number WhatsApp sent next to the chat of a one-to-one message,
+/// if any. A message of theirs names it as the sender's other id. One of
+/// mine, echoed from another of my devices, names it in `peer_recipient_pn`
+/// (`peer_pn`): there the sender's other id is my own, never the chat's.
+fn chat_hint<'a>(source: &'a MessageSource, peer_pn: Option<&'a Jid>) -> Option<&'a Jid> {
+    if source.is_from_me {
+        peer_pn.or(source.recipient_alt.as_ref())
     } else {
-        lid::resolve(&source.chat, source.sender_alt.as_ref(), map)
+        source.sender_alt.as_ref()
     }
-    .to_string();
-    let author = lid::resolve(&source.sender, source.sender_alt.as_ref(), map);
-    let sender = group_sender(&chat, &author);
-    (chat, sender)
+}
+
+/// Resolves the chat and author of a live message: by phone number when
+/// `map` knows the LID or WhatsApp told the number too. `peer_pn` is the
+/// envelope's `peer_recipient_pn` ([`MessageInfo::peer_recipient_pn`]).
+pub fn addressed(source: &MessageSource, peer_pn: Option<&Jid>, map: &LidMap) -> Addressed {
+    let wire_chat = source.chat.to_non_ad();
+    if source.is_group || wire_chat.is_group() {
+        let author = lid::resolve(&source.sender, source.sender_alt.as_ref(), map);
+        return Addressed {
+            chat: wire_chat.to_string(),
+            sender: Some(author.to_string()),
+            chat_alt: None,
+            sender_alt: lid::alt_of(&author, &source.sender, source.sender_alt.as_ref(), map),
+            wire_chat: wire_chat.to_string(),
+            wire_sender: Some(source.sender.to_non_ad().to_string()),
+        };
+    }
+    let hint = chat_hint(source, peer_pn);
+    let chat = lid::resolve(&source.chat, hint, map);
+    Addressed {
+        chat_alt: lid::alt_of(&chat, &source.chat, hint, map),
+        chat: chat.to_string(),
+        sender: None,
+        sender_alt: None,
+        wire_chat: wire_chat.to_string(),
+        wire_sender: None,
+    }
+}
+
+/// The chat and author JIDs of a live message ([`addressed`]).
+pub fn chat_and_sender(
+    source: &MessageSource,
+    peer_pn: Option<&Jid>,
+    map: &LidMap,
+) -> (String, Option<String>) {
+    let to = addressed(source, peer_pn, map);
+    (to.chat, to.sender)
+}
+
+/// The LID and phone-number pairs a message envelope names: the author's
+/// two ids, and for a one-to-one message of mine the other person's. My own
+/// two ids, which my messages carry, are not a discovery.
+pub fn envelope_pairs(info: &MessageInfo) -> Vec<Pair> {
+    let source = &info.source;
+    let mut pairs = Vec::new();
+    if source.is_from_me {
+        if !source.is_group
+            && let Some(pair) = chat_hint(source, info.peer_recipient_pn.as_ref())
+                .and_then(|pn| Pair::of(&source.chat, pn))
+        {
+            pairs.push(pair);
+        }
+    } else if let Some(pair) = source
+        .sender_alt
+        .as_ref()
+        .and_then(|alt| Pair::of(&source.sender, alt))
+    {
+        pairs.push(pair);
+    }
+    pairs
+}
+
+/// The business name the envelope of someone else's message carried.
+pub fn verified_name(info: &MessageInfo) -> Option<&str> {
+    if info.source.is_from_me {
+        return None;
+    }
+    info.verified_name
+        .as_deref()
+        .and_then(|v| v.name.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+/// The people a message names besides its author: who it mentions and whose
+/// message it quotes. For [`Resolver::prefetch`](super::lid::Resolver::prefetch).
+pub fn context_jids(message: &wa::Message) -> Vec<Jid> {
+    let Some(context) = context_of(message.get_base_message()) else {
+        return Vec::new();
+    };
+    context
+        .mentioned_jid
+        .iter()
+        .map(String::as_str)
+        .chain(context.participant.as_deref())
+        .filter_map(|id| id.parse::<Jid>().ok())
+        .collect()
+}
+
+/// Names the people in `meta` (the quoted author, the mentions) the way
+/// chats and authors are named: no device, and by phone number when `map`
+/// knows their LID. Each person is mentioned once.
+pub fn resolve_meta(meta: &mut MessageMeta, map: &LidMap) {
+    if let Some(sender) = meta.quoted.as_mut().and_then(|q| q.sender.as_mut()) {
+        *sender = lid::resolve_str(sender, map);
+    }
+    let mut mentions: Vec<String> = Vec::with_capacity(meta.mentions.len());
+    for mention in &meta.mentions {
+        let resolved = lid::resolve_str(mention, map);
+        if !mentions.contains(&resolved) {
+            mentions.push(resolved);
+        }
+    }
+    meta.mentions = mentions;
 }
 
 /// Converts a live message. The raw protobuf is kept for media, so the file
 /// can be downloaded later.
 pub fn message(ctx: &MessageContext, map: &LidMap) -> Converted {
     let source: &MessageSource = &ctx.info.source;
-    let (chat, sender) = chat_and_sender(source, map);
+    let to = addressed(source, ctx.info.peer_recipient_pn.as_ref(), map);
     let mut converted = convert(
         Origin {
             id: &ctx.info.id,
-            chat: &chat,
-            sender: sender.as_deref(),
+            chat: &to.chat,
+            sender: to.sender.as_deref(),
             from_me: source.is_from_me,
             timestamp_ms: ctx.info.timestamp.timestamp_millis(),
             sender_name: Some(ctx.info.push_name.as_str()),
+            chat_alt: to.chat_alt.as_deref(),
+            sender_alt: to.sender_alt.as_deref(),
         },
         &ctx.message,
     );
-    if let Converted::Message(
-        WaMessage {
-            body: MessageBody::Media { .. },
-            ..
-        },
-        extras,
-    ) = &mut converted
-    {
-        extras.raw_proto = Some(ctx.message.encode_to_vec());
+    if let Converted::Message(message, extras) = &mut converted {
+        if matches!(message.body, MessageBody::Media { .. }) {
+            extras.raw_proto = Some(ctx.message.encode_to_vec());
+        }
+        resolve_meta(&mut extras.meta, map);
+        extras.wire_chat = Some(to.wire_chat);
+        extras.wire_sender = to.wire_sender;
     }
     converted
 }
@@ -541,12 +692,8 @@ mod tests {
 
     fn origin<'a>(from_me: bool, sender: Option<&'a str>, chat: &'a str) -> Origin<'a> {
         Origin {
-            id: "ABC",
-            chat,
-            sender,
-            from_me,
-            timestamp_ms: 1_700_000_000_000,
             sender_name: Some(" Ada "),
+            ..Origin::new("ABC", chat, sender, from_me, 1_700_000_000_000)
         }
     }
 
@@ -790,12 +937,12 @@ mod tests {
             ..Default::default()
         };
         // No alt, no mapping: the LID stays.
-        assert_eq!(chat_and_sender(&source, &none).0, "1234@lid");
+        assert_eq!(chat_and_sender(&source, None, &none).0, "1234@lid");
         // No alt, but the map knows it: the PN chat.
-        assert_eq!(chat_and_sender(&source, &known).0, pn.to_string());
+        assert_eq!(chat_and_sender(&source, None, &known).0, pn.to_string());
         // The alt supplies the number.
         source.sender_alt = Some(pn.clone());
-        assert_eq!(chat_and_sender(&source, &none).0, pn.to_string());
+        assert_eq!(chat_and_sender(&source, None, &none).0, pn.to_string());
 
         // My own message from another device: only the recipient alt counts.
         let mine = MessageSource {
@@ -804,8 +951,8 @@ mod tests {
             is_from_me: true,
             ..Default::default()
         };
-        assert_eq!(chat_and_sender(&mine, &none).0, "1234@lid");
-        assert_eq!(chat_and_sender(&mine, &known).0, pn.to_string());
+        assert_eq!(chat_and_sender(&mine, None, &none).0, "1234@lid");
+        assert_eq!(chat_and_sender(&mine, None, &known).0, pn.to_string());
 
         // Groups: the chat stays, the author resolves.
         let group = MessageSource {
@@ -814,7 +961,7 @@ mod tests {
             is_group: true,
             ..Default::default()
         };
-        let (chat, sender) = chat_and_sender(&group, &known);
+        let (chat, sender) = chat_and_sender(&group, None, &known);
         assert_eq!(chat, "1-2@g.us");
         assert_eq!(sender.as_deref(), Some("905321234567@s.whatsapp.net"));
     }
@@ -932,6 +1079,7 @@ mod tests {
                     sender: Some("g@s.whatsapp.net".into()),
                     from_me: false,
                     emoji: "\u{1F44D}".into(),
+                    sender_alt: None,
                 },
             }
         );
@@ -1029,5 +1177,338 @@ mod tests {
         assert!(!users[0].on_whatsapp);
         assert!(users[1].on_whatsapp && users[1].business);
         assert_eq!(users[1].verified_name.as_deref(), Some("Shop"));
+    }
+
+    const PEER_PN: &str = "905550000001@s.whatsapp.net";
+    const PEER_LID: &str = "1234@lid";
+    const MY_PN: &str = "905550000009@s.whatsapp.net";
+    const MY_LID: &str = "777@lid";
+
+    fn jid(s: &str) -> Jid {
+        s.parse().unwrap()
+    }
+
+    /// My own message to a LID-addressed one-to-one chat, echoed from another
+    /// of my devices: the chat is the recipient's LID, the sender's other id
+    /// is my own, and the other person's number is `peer_recipient_pn`.
+    fn my_echo() -> MessageSource {
+        MessageSource {
+            chat: jid(PEER_LID),
+            sender: jid("777:3@lid"),
+            is_from_me: true,
+            sender_alt: Some(jid(MY_PN)),
+            recipient: Some(jid(PEER_LID)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn my_echoed_message_lands_in_the_peers_number_chat() {
+        let none = LidMap::default();
+        let peer = jid("905550000001:2@s.whatsapp.net");
+        // Without the peer's number and without a mapping it stays a LID
+        // chat. It must never become a chat with my own number, which is
+        // what the sender's other id names.
+        let alone = addressed(&my_echo(), None, &none);
+        assert_eq!(alone.chat, PEER_LID);
+        assert_eq!(alone.chat_alt, None);
+        // `peer_recipient_pn` names the chat.
+        let to = addressed(&my_echo(), Some(&peer), &none);
+        assert_eq!(
+            to,
+            Addressed {
+                chat: PEER_PN.into(),
+                sender: None,
+                chat_alt: Some(PEER_LID.into()),
+                sender_alt: None,
+                wire_chat: PEER_LID.into(),
+                wire_sender: None,
+            }
+        );
+        assert_eq!(
+            chat_and_sender(&my_echo(), Some(&peer), &none),
+            (PEER_PN.to_owned(), None)
+        );
+        // The mapping store still wins over what the stanza says.
+        let other = LidMap::from_entries([("1234", "905550000002")]);
+        assert_eq!(
+            addressed(&my_echo(), Some(&peer), &other).chat,
+            "905550000002@s.whatsapp.net"
+        );
+    }
+
+    #[test]
+    fn live_messages_carry_wire_and_alt_ids() {
+        let none = LidMap::default();
+        let known = LidMap::from_entries([("1234", "905550000001")]);
+        // Theirs, addressed by LID with the number next to it.
+        let theirs = MessageSource {
+            chat: jid(PEER_LID),
+            sender: jid("1234:5@lid"),
+            sender_alt: Some(jid(PEER_PN)),
+            ..Default::default()
+        };
+        let to = addressed(&theirs, None, &none);
+        assert_eq!(
+            (to.chat.as_str(), to.chat_alt.as_deref()),
+            (PEER_PN, Some(PEER_LID))
+        );
+        assert_eq!(to.wire_chat, PEER_LID);
+        // Theirs, addressed by number with the LID next to it.
+        let by_number = MessageSource {
+            chat: jid(PEER_PN),
+            sender: jid("905550000001:5@s.whatsapp.net"),
+            sender_alt: Some(jid(PEER_LID)),
+            ..Default::default()
+        };
+        let to = addressed(&by_number, None, &none);
+        assert_eq!(
+            (to.chat.as_str(), to.chat_alt.as_deref()),
+            (PEER_PN, Some(PEER_LID))
+        );
+        assert_eq!(to.wire_chat, PEER_PN);
+        // By number with nothing next to it: the mappings know the LID.
+        let bare = MessageSource {
+            sender_alt: None,
+            ..by_number.clone()
+        };
+        assert_eq!(
+            addressed(&bare, None, &known).chat_alt.as_deref(),
+            Some(PEER_LID)
+        );
+        assert_eq!(addressed(&bare, None, &none).chat_alt, None);
+        // A LID nobody knows the number of: no other form.
+        let hidden = MessageSource {
+            chat: jid("9999@lid"),
+            sender: jid("9999@lid"),
+            ..Default::default()
+        };
+        let to = addressed(&hidden, None, &known);
+        assert_eq!((to.chat.as_str(), to.chat_alt), ("9999@lid", None));
+
+        // A group that addresses its members by LID.
+        let group = MessageSource {
+            chat: jid("1-2@g.us"),
+            sender: jid("1234:5@lid"),
+            is_group: true,
+            sender_alt: Some(jid(PEER_PN)),
+            ..Default::default()
+        };
+        assert_eq!(
+            addressed(&group, None, &none),
+            Addressed {
+                chat: "1-2@g.us".into(),
+                sender: Some(PEER_PN.into()),
+                chat_alt: None,
+                sender_alt: Some(PEER_LID.into()),
+                wire_chat: "1-2@g.us".into(),
+                wire_sender: Some(PEER_LID.into()),
+            }
+        );
+        // My own group message from another device, under my LID.
+        let mine = MessageSource {
+            chat: jid("1-2@g.us"),
+            sender: jid("777:3@lid"),
+            is_group: true,
+            is_from_me: true,
+            sender_alt: Some(jid(MY_PN)),
+            ..Default::default()
+        };
+        let to = addressed(&mine, None, &none);
+        assert_eq!(to.sender.as_deref(), Some(MY_PN));
+        assert_eq!(to.sender_alt.as_deref(), Some(MY_LID));
+        assert_eq!(to.wire_sender.as_deref(), Some(MY_LID));
+    }
+
+    #[test]
+    fn converted_messages_and_reactions_carry_the_alt_ids() {
+        let origin = Origin {
+            chat_alt: Some(PEER_LID),
+            ..Origin::new("ABC", PEER_PN, None, false, 1)
+        };
+        let Converted::Message(m, _) = convert(origin, &text("x")) else {
+            panic!("expected a message");
+        };
+        assert_eq!(m.chat_alt.as_deref(), Some(PEER_LID));
+        assert_eq!(m.sender_alt, None);
+
+        let reaction = wa::Message {
+            reaction_message: MessageField::some(wa::message::ReactionMessage {
+                key: MessageField::some(wa::MessageKey {
+                    id: Some("T".into()),
+                    ..Default::default()
+                }),
+                text: Some("x".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let origin = Origin {
+            sender_alt: Some(PEER_LID),
+            ..Origin::new("R", "1-2@g.us", Some(PEER_PN), false, 1)
+        };
+        let Converted::Reaction { reaction, .. } = convert(origin, &reaction) else {
+            panic!("expected a reaction");
+        };
+        assert_eq!(reaction.sender.as_deref(), Some(PEER_PN));
+        assert_eq!(reaction.sender_alt.as_deref(), Some(PEER_LID));
+    }
+
+    #[test]
+    fn envelopes_state_pairs() {
+        let pair = Pair::of(&jid(PEER_LID), &jid(PEER_PN));
+        assert!(pair.is_some());
+        let info = |source: MessageSource, peer: Option<&str>| MessageInfo {
+            source,
+            peer_recipient_pn: peer.map(jid),
+            ..Default::default()
+        };
+        // Theirs: the sender's two ids, whichever is the alt.
+        let theirs = MessageSource {
+            chat: jid(PEER_LID),
+            sender: jid("1234:5@lid"),
+            sender_alt: Some(jid("905550000001:1@s.whatsapp.net")),
+            ..Default::default()
+        };
+        assert_eq!(
+            envelope_pairs(&info(theirs.clone(), None)),
+            pair.clone().into_iter().collect::<Vec<_>>()
+        );
+        let reversed = MessageSource {
+            chat: jid(PEER_PN),
+            sender: jid(PEER_PN),
+            sender_alt: Some(jid(PEER_LID)),
+            ..Default::default()
+        };
+        assert_eq!(envelope_pairs(&info(reversed, None)).first(), pair.as_ref());
+        // In a group: the author's.
+        let group = MessageSource {
+            chat: jid("1-2@g.us"),
+            is_group: true,
+            ..theirs
+        };
+        assert_eq!(envelope_pairs(&info(group, None)).first(), pair.as_ref());
+        // Mine, echoed: the other person's, from `peer_recipient_pn`. My own
+        // two ids are not a discovery.
+        assert_eq!(
+            envelope_pairs(&info(my_echo(), Some(PEER_PN))).first(),
+            pair.as_ref()
+        );
+        assert!(envelope_pairs(&info(my_echo(), None)).is_empty());
+        let my_group = MessageSource {
+            chat: jid("1-2@g.us"),
+            is_group: true,
+            ..my_echo()
+        };
+        assert!(envelope_pairs(&info(my_group, Some(PEER_PN))).is_empty());
+        // Nothing next to the sender: nothing learned.
+        let bare = MessageSource {
+            chat: jid(PEER_LID),
+            sender: jid(PEER_LID),
+            ..Default::default()
+        };
+        assert!(envelope_pairs(&info(bare, None)).is_empty());
+    }
+
+    fn mentioning(mentions: &[&str], quoted: Option<&str>) -> wa::Message {
+        wa::Message {
+            extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
+                text: Some("hi".into()),
+                context_info: MessageField::some(wa::ContextInfo {
+                    stanza_id: Some("Q1".into()),
+                    participant: quoted.map(str::to_owned),
+                    mentioned_jid: mentions.iter().map(|m| (*m).to_owned()).collect(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn mentions_and_quoted_authors_are_named_like_everybody_else() {
+        let message = mentioning(
+            &[
+                "1234:7@lid",
+                "905550000002:3@s.whatsapp.net",
+                PEER_PN,
+                "9999@lid",
+            ],
+            Some("1234:2@lid"),
+        );
+        let named: Vec<String> = context_jids(&message)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            named,
+            [
+                "1234:7@lid",
+                "905550000002:3@s.whatsapp.net",
+                PEER_PN,
+                "9999@lid",
+                "1234:2@lid"
+            ]
+        );
+        assert!(context_jids(&text("plain")).is_empty());
+
+        let known = LidMap::from_entries([("1234", "905550000001")]);
+        let mut meta = extras(&message).meta;
+        resolve_meta(&mut meta, &known);
+        // No devices, the known LID by its number, each person once; a LID
+        // nobody knows the number of stays a LID.
+        assert_eq!(
+            meta.mentions,
+            [PEER_PN, "905550000002@s.whatsapp.net", "9999@lid"]
+        );
+        assert_eq!(
+            meta.quoted.as_ref().unwrap().sender.as_deref(),
+            Some(PEER_PN)
+        );
+
+        // Without a mapping only the devices go.
+        let mut meta = extras(&message).meta;
+        resolve_meta(&mut meta, &LidMap::default());
+        assert_eq!(
+            meta.mentions,
+            [PEER_LID, "905550000002@s.whatsapp.net", PEER_PN, "9999@lid"]
+        );
+        assert_eq!(
+            meta.quoted.as_ref().unwrap().sender.as_deref(),
+            Some(PEER_LID)
+        );
+
+        // Text that is no id is kept as it is.
+        let mut odd = MessageMeta {
+            mentions: vec!["not a jid@@".into()],
+            ..Default::default()
+        };
+        resolve_meta(&mut odd, &known);
+        assert_eq!(odd.mentions, ["not a jid@@"]);
+    }
+
+    #[test]
+    fn the_envelope_names_a_business() {
+        use whatsapp_rust::wacore::stanza::business::VerifiedName;
+        let named = |name: Option<&str>, from_me: bool| MessageInfo {
+            source: MessageSource {
+                is_from_me: from_me,
+                ..Default::default()
+            },
+            verified_name: Some(Box::new(VerifiedName {
+                name: name.map(str::to_owned),
+                serial: None,
+                issuer: None,
+                certificate: None,
+            })),
+            ..Default::default()
+        };
+        assert_eq!(verified_name(&named(Some(" Shop "), false)), Some("Shop"));
+        assert_eq!(verified_name(&named(Some("  "), false)), None);
+        assert_eq!(verified_name(&named(None, false)), None);
+        // My own messages say nothing about the chat.
+        assert_eq!(verified_name(&named(Some("Shop"), true)), None);
+        assert_eq!(verified_name(&MessageInfo::default()), None);
     }
 }

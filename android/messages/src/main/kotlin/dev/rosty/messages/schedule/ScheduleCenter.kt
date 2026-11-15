@@ -174,7 +174,9 @@ sealed interface ScheduleNotice {
  *   there and armed as one `AlarmManager` alarm through [alarms]. The alarm sends cold; what fired is settled here
  *   (`schedule.reconcile`): a sent item leaves the queue, a failed one is announced on [notices].
  * - **WhatsApp**: the gateway keeps the item and sends it ([remote]); its `scheduled` events ([live]) keep the list
- *   in step, and a text that newly failed is announced.
+ *   in step, and a text that newly failed is announced. The gateway names the chat of an item by the id it holds;
+ *   [keyOf] turns it into the key the offline store keeps the chat under, so an item of a person the gateway still
+ *   knows by a LID shows in the thread of their number, and [rekey] moves the items of a chat that merged.
  */
 class ScheduleCenter(
     private val scope: CoroutineScope,
@@ -185,6 +187,8 @@ class ScheduleCenter(
     private val queue: QueueStore,
     private val now: () -> Long,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** The key the offline store keeps the chat of a WhatsApp id under. */
+    private val keyOf: suspend (jid: String) -> String = { it },
 ) {
     private val lock = Mutex()
     private var queueJson = ""
@@ -294,7 +298,8 @@ class ScheduleCenter(
     ): ScheduleOutcome =
         when (val answer = remote.schedule(dest.chat, body, atMs)) {
             is Outcome.Ok -> {
-                stateFlow.update { it.copy(remote = ScheduleRules.upsert(it.remote, answer.value)) }
+                val item = keyed(answer.value)
+                stateFlow.update { it.copy(remote = ScheduleRules.upsert(it.remote, item)) }
                 ScheduleOutcome.Scheduled(atMs)
             }
 
@@ -341,7 +346,7 @@ class ScheduleCenter(
 
     /** Reads the gateway's list again (a conversation opened, the link changed). Nothing changes when it fails. */
     suspend fun refreshRemote() {
-        val list = (remote.list() as? Outcome.Ok)?.value ?: return
+        val list = (remote.list() as? Outcome.Ok)?.value?.map { keyed(it) } ?: return
         stateFlow.update { it.copy(remote = list) }
     }
 
@@ -377,8 +382,29 @@ class ScheduleCenter(
         )
     }
 
-    private fun onRemote(event: GatewayEvent.Scheduled) {
-        val item = ScheduledText(event.id, event.chat, event.text, event.sendAtMs, event.createdMs, event.state)
+    private suspend fun keyed(item: ScheduledText): ScheduledText {
+        val key = keyOf(item.chat)
+        return if (key == item.chat) item else item.copy(chat = key)
+    }
+
+    /** The WhatsApp chat [from] is [into] now (two chats of one person became one): its scheduled texts follow. */
+    fun rekey(
+        from: String,
+        into: String,
+    ) {
+        if (from == into) return
+        stateFlow.update { s ->
+            if (s.remote.none { it.chat == from }) {
+                s
+            } else {
+                s.copy(remote = s.remote.map { if (it.chat == from) it.copy(chat = into) else it })
+            }
+        }
+    }
+
+    private suspend fun onRemote(event: GatewayEvent.Scheduled) {
+        val item =
+            keyed(ScheduledText(event.id, event.chat, event.text, event.sendAtMs, event.createdMs, event.state))
         val before = stateFlow.value.remote.firstOrNull { it.id == item.id }
         stateFlow.update { it.copy(remote = ScheduleRules.upsert(it.remote, item)) }
         if (ScheduleRules.newlyFailed(before, item)) noticeBus.tryEmit(ScheduleNotice.WhatsAppFailed(item.chat))

@@ -93,6 +93,44 @@ class RemindCenterTest {
             assertEquals(MarkCore.due(ReminderSlot.TomorrowMorning, now), item.atMs)
         }
 
+    @Test fun theRemindersOfAMergedWhatsAppChatFollowIt() =
+        runTest {
+            val kit = kit()
+            val lid = "wa:777000000000001@lid"
+            val number = "wa:905550000001@s.whatsapp.net"
+            val onLid = MarkTarget(lid, "L1", 1_789_999_000_000L, "ada", "Altıda garda", "ada")
+            kit.reminders.arm(onLid, ReminderSlot.In1Hour) { "Hatırlatma: $it" }
+            now += 1_000
+            kit.reminders.arm(target, ReminderSlot.Tonight) { it }
+            advanceUntilIdle()
+            val before = kit.repo.now.single { it.messageId == "L1" }
+
+            kit.reminders.rekey(lid, number)
+            advanceUntilIdle()
+
+            // The same reminder (id, time, words), now of the chat that stays: its badge and its tap follow.
+            val after = kit.repo.now.single { it.messageId == "L1" }
+            assertEquals(number, after.tag)
+            assertEquals(listOf(before.id, before.atMs, before.title), listOf(after.id, after.atMs, after.title))
+            assertEquals(mapOf("L1" to after.atMs), kit.reminders.badges(number).first())
+            assertTrue(
+                kit.reminders
+                    .badges(lid)
+                    .first()
+                    .isEmpty(),
+            )
+            // The SMS reminder is untouched, and following the step again changes nothing.
+            assertEquals(
+                "sms:7",
+                kit.repo.now
+                    .single { it.messageId == "sms:12" }
+                    .tag,
+            )
+            kit.reminders.rekey(lid, number)
+            advanceUntilIdle()
+            assertEquals(2, kit.repo.now.size)
+        }
+
     @Test fun cancelTakesItBack() =
         runTest {
             val kit = kit()

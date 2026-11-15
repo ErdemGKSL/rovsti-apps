@@ -62,6 +62,10 @@ pub struct SyncPlan {
     pub after_seq: Option<u64>,
     pub refresh_chats: bool,
     pub fetch: Vec<FetchPage>,
+    /// `since=` of the catch-up on the gateway's LID and number pairs (`GET /v1/identity/mappings`); `None`
+    /// before the first page was taken in: ask for every pair.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_since: Option<String>,
 }
 
 /// One step of answering a `since(seq)` result.

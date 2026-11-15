@@ -8,6 +8,8 @@ import dev.rosty.core.model.wa.ChatAction
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.ChatState
 import dev.rosty.core.model.wa.EditMessage
+import dev.rosty.core.model.wa.IdentityMappingsAnswer
+import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MarkRead
 import dev.rosty.core.model.wa.MediaOptions
 import dev.rosty.core.model.wa.RevokeMessage
@@ -62,6 +64,16 @@ interface WaRemote {
     ): Flow<WaRemoteEvent>
 
     suspend fun chats(): Outcome<List<RichChat>>
+
+    /**
+     * A page of the LID and number pairs the gateway learned, after the cursor [since] (null: every pair). The
+     * default is a gateway that does not list them: the store then learns from the events and the alt ids only.
+     */
+    suspend fun identityMappings(since: String?): Outcome<IdentityMappingsAnswer> =
+        Outcome.Ok(IdentityMappingsAnswer(supported = false))
+
+    /** The linked account as the gateway sees it: its own number and LID. */
+    suspend fun status(): Outcome<InstanceStatus> = Outcome.Err(RustError.Unsupported("status"))
 
     /** The page a [WaSyncFetch] names, newest first. */
     suspend fun page(fetch: WaSyncFetch): Outcome<List<RichMessage>>
@@ -159,6 +171,11 @@ class GatewayWaRemote(
         }
 
     override suspend fun chats(): Outcome<List<RichChat>> = call { it.chatsWithMeta() }
+
+    override suspend fun identityMappings(since: String?): Outcome<IdentityMappingsAnswer> =
+        call { it.identityMappings(since) }
+
+    override suspend fun status(): Outcome<InstanceStatus> = call { it.status() }
 
     override suspend fun page(fetch: WaSyncFetch): Outcome<List<RichMessage>> =
         call { it.messagesWithMeta(fetch.chat, fetch.before, fetch.limit) }

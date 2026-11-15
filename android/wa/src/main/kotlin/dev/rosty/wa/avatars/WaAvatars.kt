@@ -57,6 +57,9 @@ class WaAvatars(
     private val invalidate: (String) -> Unit = {},
 ) {
     private val lock = Any()
+
+    /** Hears every profile answer of the gateway (it may name a number's LID): an app with a chat store learns it. */
+    @Volatile var onProfiles: ((List<WaProfile>) -> Unit)? = null
     private val book = AvatarBook()
     private val profiles = HashMap<String, WaProfile>()
     private val profileQueue = LinkedHashSet<String>()
@@ -177,6 +180,7 @@ class WaAvatars(
             }
             val gateway = repo.gateway()
             val result = withContext(io) { gateway?.profiles(batch) }
+            (result as? Outcome.Ok)?.value?.takeIf { it.isNotEmpty() }?.let { onProfiles?.invoke(it) }
             synchronized(lock) {
                 when (result) {
                     is Outcome.Ok -> {
@@ -215,7 +219,12 @@ class WaAvatars(
                 bump()
             }
 
-            GatewayEvent.Resync, is GatewayEvent.ChatMerged -> {
+            // Two ids became one person: a picture missed under one of them is asked for again.
+            GatewayEvent.Resync,
+            is GatewayEvent.ChatMerged,
+            is GatewayEvent.IdentityMapped,
+            is GatewayEvent.IdentityNumberChanged,
+            -> {
                 synchronized(lock) { book.forgetMisses() }
                 bump()
             }

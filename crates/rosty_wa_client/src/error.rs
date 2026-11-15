@@ -26,6 +26,15 @@ pub enum ClientError {
     Closed,
 }
 
+impl ClientError {
+    /// The gateway answered "not found". For a route an older gateway does
+    /// not have (identity mappings) this means "not supported".
+    #[must_use]
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::Api(api) if api.code == ErrorCode::NotFound)
+    }
+}
+
 impl From<ureq::Error> for ClientError {
     fn from(e: ureq::Error) -> Self {
         Self::Http(e.to_string())
@@ -43,6 +52,18 @@ pub(crate) fn from_status(status: u16, body: &[u8]) -> ClientError {
         Ok(api) if api.code == ErrorCode::Unauthorized => ClientError::Unauthorized,
         Ok(api) => ClientError::Api(api),
         Err(_) => ClientError::Http(format!("unexpected response (status {status})")),
+    }
+}
+
+/// [`from_status`] for a route an older gateway may not have. Such a gateway
+/// answers 404 without an API body, which would read as a transport problem
+/// worth retrying: here it is a `not_found` API error saying `missing`.
+pub(crate) fn from_status_optional(status: u16, body: &[u8], missing: &str) -> ClientError {
+    match from_status(status, body) {
+        ClientError::Http(_) if status == 404 => {
+            ClientError::Api(ApiError::new(ErrorCode::NotFound, missing))
+        }
+        other => other,
     }
 }
 
@@ -113,6 +134,40 @@ mod tests {
             from_status(502, b"<html>bad gateway</html>"),
             ClientError::Http("unexpected response (status 502)".into())
         );
+    }
+
+    #[test]
+    fn a_missing_optional_route_is_not_found() {
+        // An older gateway: the router's bare 404.
+        let missing = from_status_optional(404, b"", "no such route here");
+        assert_eq!(
+            missing,
+            ClientError::Api(ApiError::new(ErrorCode::NotFound, "no such route here"))
+        );
+        assert!(missing.is_not_found());
+        // A proxy's HTML 404 reads the same.
+        assert!(from_status_optional(404, b"<html>404</html>", "x").is_not_found());
+        // The gateway's own errors come through as they are.
+        let body = br#"{"code":"bad_request","message":"since is not a cursor"}"#;
+        assert_eq!(
+            from_status_optional(400, body, "x"),
+            ClientError::Api(ApiError::new(
+                ErrorCode::BadRequest,
+                "since is not a cursor"
+            ))
+        );
+        assert_eq!(
+            from_status_optional(401, b"", "x"),
+            ClientError::Unauthorized
+        );
+        // Other failures without a body stay transport errors.
+        let down = from_status_optional(502, b"", "x");
+        assert_eq!(
+            down,
+            ClientError::Http("unexpected response (status 502)".into())
+        );
+        assert!(!down.is_not_found());
+        assert!(!ClientError::Unauthorized.is_not_found());
     }
 
     #[test]

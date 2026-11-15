@@ -90,6 +90,9 @@ struct UpsertReq {
     #[serde(default)]
     dir: Option<String>,
     now_ms: i64,
+    /// The home calling code (`"90"`), for a `number` written the national way.
+    #[serde(default)]
+    home_cc: Option<String>,
     people: Vec<Update>,
 }
 
@@ -97,7 +100,7 @@ fn upsert(req: UpsertReq) -> Result<Upserted, FfiError> {
     let dir = data_dir(&req.dir)?;
     let _writing = book_lock();
     let mut book = people::load(&dir);
-    let out = book.upsert(&req.people, req.now_ms);
+    let out = book.upsert_in(&req.people, req.now_ms, req.home_cc.as_deref());
     if out.changed > 0 || !out.drop_files.is_empty() {
         people::save(&dir, &book)?;
     }
@@ -135,8 +138,11 @@ fn upsert_cases() -> Vec<Case> {
 struct LookupReq {
     #[serde(default)]
     dir: Option<String>,
-    /// An E.164 number in any spelling, a phone JID, a LID JID or a bare LID.
+    /// A number in any spelling, a phone JID, a LID JID or a bare LID.
     key: String,
+    /// The home calling code (`"90"`): without it only an international number is found.
+    #[serde(default)]
+    home_cc: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -146,13 +152,26 @@ struct LookupAns {
 
 fn lookup(req: LookupReq) -> Result<LookupAns, FfiError> {
     let book = people::load(&data_dir(&req.dir)?);
-    let person = book.lookup(&req.key).map(people::Person::row);
+    let person = book
+        .lookup_in(&req.key, req.home_cc.as_deref())
+        .map(people::Person::row);
     Ok(LookupAns { person })
 }
 
 fn lookup_cases() -> Vec<Case> {
     vec![
         Case::new(json!({"dir": "$DIR", "key": "+90 532 123 45 67"})).seeded("people"),
+        // The national spelling is the same person in its home region, and nobody without one.
+        Case::named(
+            "national",
+            json!({"dir": "$DIR", "key": "0532 123 45 67", "home_cc": "90"}),
+        )
+        .seeded("people"),
+        Case::named(
+            "national_without_home",
+            json!({"dir": "$DIR", "key": "0532 123 45 67"}),
+        )
+        .seeded("people"),
         Case::named("by_lid", json!({"dir": "$DIR", "key": "4477@lid"})).seeded("people"),
         Case::named("unknown", json!({"dir": "$DIR", "key": "+1 202 555 0100"})).seeded("people"),
     ]

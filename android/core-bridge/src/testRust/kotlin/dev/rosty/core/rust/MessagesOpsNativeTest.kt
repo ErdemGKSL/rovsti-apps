@@ -13,6 +13,7 @@ import dev.rosty.core.model.messages.ClassifyRequest
 import dev.rosty.core.model.messages.DeliveryState
 import dev.rosty.core.model.messages.DirRequest
 import dev.rosty.core.model.messages.DraftsPutRequest
+import dev.rosty.core.model.messages.DraftsRekeyRequest
 import dev.rosty.core.model.messages.DraftsSaveRequest
 import dev.rosty.core.model.messages.FiredSms
 import dev.rosty.core.model.messages.InboxThread
@@ -278,6 +279,46 @@ class MessagesOpsNativeTest {
                     .drafts
                     .isEmpty(),
             )
+        }
+
+    /** What Kotlin calls when two WhatsApp chats become one (`MessagesStore.rekeyThread`): Rust's rules. */
+    @Test
+    fun theDraftAndTheMuteOfAMergedChatMoveToTheChatThatStays() =
+        runBlocking {
+            val from = "wa:777000000000001@lid"
+            val into = "wa:100000000001@s.whatsapp.net"
+
+            // Only the merged chat has a draft: it moves.
+            val one = ops.draftsRekey(DraftsRekeyRequest(mapOf(from to "half a thought", "sms:7" to "ok"), from, into))
+            assertEquals(mapOf(into to "half a thought", "sms:7" to "ok"), one.getOrOk().drafts)
+            // Both have one: the draft of the chat that stays is kept.
+            val both =
+                ops.draftsRekey(
+                    DraftsRekeyRequest(mapOf(from to "under the lid", into to "under the number"), from, into),
+                )
+            assertEquals(mapOf(into to "under the number"), both.getOrOk().drafts)
+            // Neither, and the same step again: nothing changes.
+            val none = ops.draftsRekey(DraftsRekeyRequest(mapOf("sms:7" to "ok"), from, into))
+            assertEquals(mapOf("sms:7" to "ok"), none.getOrOk().drafts)
+            val again = ops.draftsRekey(DraftsRekeyRequest(one.getOrOk().drafts, from, into))
+            assertEquals(one.getOrOk().drafts, again.getOrOk().drafts)
+
+            val dir =
+                Files
+                    .createTempDirectory("rosty-rekey")
+                    .toFile()
+                    .apply { deleteOnExit() }
+                    .path
+            val prefs = ops.prefsLoad(DirRequest(dir)).getOrOk().prefs
+            val muted =
+                ops.prefsEdit(PrefsEditRequest(prefs, "mute", tag = from, untilMs = 1_900_000_000_000)).getOrOk().prefs
+            val moved = ops.prefsEdit(PrefsEditRequest(muted, "rekey", from = from, into = into)).getOrOk()
+            assertTrue(moved.changed)
+            assertEquals(listOf(into), moved.prefs.muted)
+            assertEquals(mapOf(into to 1_900_000_000_000), moved.prefs.muteUntil)
+            val twice = ops.prefsEdit(PrefsEditRequest(moved.prefs, "rekey", from = from, into = into)).getOrOk()
+            assertFalse(twice.changed)
+            assertEquals(moved.prefs, twice.prefs)
         }
 
     @Test

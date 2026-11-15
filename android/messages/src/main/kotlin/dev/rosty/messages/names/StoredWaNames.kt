@@ -1,7 +1,7 @@
 package dev.rosty.messages.names
 
 import dev.rosty.core.getOrNull
-import dev.rosty.messages.inbox.numberOfJid
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.messages.wa.WaOffline
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.map
@@ -42,7 +42,7 @@ class StoredWaNames(
         val names = HashMap<String, WaNames>()
         for (chat in chats) {
             if (chat.isGroup) continue
-            val digits = numberOfJid(chat.jid)?.removePrefix("+") ?: continue
+            val digits = WaIds.number(chat.jid)?.removePrefix("+") ?: continue
             val wa = WaNames.of(chat)
             if (PersonNames.pick(null, wa, null) != null) names[digits] = wa
         }

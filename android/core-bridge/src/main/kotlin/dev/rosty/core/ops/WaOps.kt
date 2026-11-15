@@ -22,6 +22,8 @@ import dev.rosty.core.model.wa.EditMessage
 import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.IdBody
+import dev.rosty.core.model.wa.IdentityMappingsAnswer
+import dev.rosty.core.model.wa.IdentityMappingsBody
 import dev.rosty.core.model.wa.IdsBody
 import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.IssuedKey
@@ -254,6 +256,15 @@ interface WaOps {
         body: PictureBody,
     ): Outcome<PictureAnswer>
 
+    /**
+     * One page of the LID and number pairs the gateway learned, after the cursor [since] (null: every pair). An
+     * old gateway answers `supported = false`. The pages go to `WaSyncStore.identityCatchUp`.
+     */
+    suspend fun identityMappings(
+        handle: Long,
+        since: String?,
+    ): Outcome<IdentityMappingsAnswer>
+
     /** The status updates (stories), mine and everyone else's. */
     suspend fun statuses(handle: Long): Outcome<StatusList>
 
@@ -411,6 +422,7 @@ interface WaOps {
                 "wa.profiles",
                 "wa.refresh_profiles",
                 "wa.picture",
+                "wa.identity_mappings",
                 "wa.statuses",
                 "wa.status_media",
                 "wa.status_thumbnail",
@@ -619,6 +631,17 @@ class NativeWaOps(
         handle: Long,
         body: PictureBody,
     ) = gateway("wa.picture", handle, body, PictureBody.serializer(), PictureAnswer.serializer())
+
+    override suspend fun identityMappings(
+        handle: Long,
+        since: String?,
+    ) = gateway(
+        "wa.identity_mappings",
+        handle,
+        IdentityMappingsBody(since),
+        IdentityMappingsBody.serializer(),
+        IdentityMappingsAnswer.serializer(),
+    )
 
     override suspend fun statuses(handle: Long) =
         gateway("wa.statuses", handle, Empty, Empty.serializer(), StatusList.serializer())

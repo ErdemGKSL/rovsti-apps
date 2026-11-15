@@ -5,16 +5,26 @@ import dev.rosty.core.RustError
 import dev.rosty.core.model.wa.ChatMeta
 import dev.rosty.core.model.wa.DELETED_BY_ME
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.GroupInfo
+import dev.rosty.core.model.wa.IdentityMapping
+import dev.rosty.core.model.wa.IdentityMappingsAnswer
+import dev.rosty.core.model.wa.InstanceState
+import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.MessageMeta
+import dev.rosty.core.model.wa.Participant
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
+import dev.rosty.core.model.wa.WaIdKind
+import dev.rosty.core.model.wa.WaIdParseRequest
+import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaMessage
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncErrorKind
 import dev.rosty.core.model.wa.WaSyncEvent
 import dev.rosty.core.model.wa.WaSyncFetch
 import dev.rosty.core.model.wa.WaSyncOutcome
+import dev.rosty.core.model.wa.WaSyncRekeyed
 import dev.rosty.core.model.wa.WaSyncRowState
 import dev.rosty.core.model.wa.WaSyncSettled
 import dev.rosty.core.ops.NativeWaSyncOps
@@ -30,7 +40,8 @@ import java.nio.file.Files
 
 /**
  * The WhatsApp offline store against the real host library (E6.4s): what was synced is read back with no gateway at
- * all, deleted and edited messages keep their content, the outbox survives a close and never doubles a send.
+ * all, deleted and edited messages keep their content, the outbox survives a close and never doubles a send, and a
+ * person named by a LID and by a number is one chat once the pair is learned.
  */
 class WaSyncStoreNativeTest {
     private val ops = NativeWaSyncOps(TestRust.core)
@@ -40,7 +51,12 @@ class WaSyncStoreNativeTest {
     @Before
     fun load() = TestRust.ensure()
 
-    private fun <T> Outcome<T>.getOrOk(): T = (this as? Outcome.Ok)?.value ?: error("failed: $this")
+    /** The value of an answer, which may itself be null ("not a JID"). */
+    private fun <T> Outcome<T>.getOrOk(): T =
+        when (this) {
+            is Outcome.Ok -> value
+            is Outcome.Err -> error("failed: $this")
+        }
 
     private fun dir(): String =
         Files
@@ -365,6 +381,180 @@ class WaSyncStoreNativeTest {
                 assertEquals("foto", row?.text)
                 assertTrue(row?.hasThumbnail == true)
             }
+        }
+
+    @Test
+    fun aLidChatAndANumberChatBecomeOneWhenThePairIsLearned() =
+        runBlocking {
+            val lid = "777000000000001@lid"
+            val dir = dir()
+            open(dir).use { store ->
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(1, 1_000, text(lid, "L1", 1_000, "lid'den")),
+                            WaSyncEvent(2, 2_000, text(ali, "A1", 2_000, "numaradan")),
+                        ),
+                    ).getOrOk()
+                // Two chats until the gateway says whose LID it is.
+                assertEquals(listOf(ali, lid), store.chats().getOrOk().map { it.jid })
+                assertEquals(lid, store.resolve(lid).getOrOk()?.key)
+
+                val mapped = GatewayEvent.IdentityMapped(lid, ali, "peer_message", learnedMs = 2_500)
+                val applied = store.applyEvents(listOf(WaSyncEvent(3, 3_000, mapped))).getOrOk()
+                assertEquals(listOf(WaSyncRekeyed(1, fromKey = lid, intoKey = ali)), applied.rekeyed)
+                assertTrue(applied.resync)
+                assertEquals(listOf(ali), applied.chats)
+                assertTrue(applied.rejected.isEmpty())
+
+                // One chat, and a screen that still holds the LID reads it.
+                val chats = store.chats().getOrOk()
+                assertEquals(listOf(ali), chats.map { it.jid })
+                assertEquals(lid, chats[0].wireJid)
+                assertEquals(2, chats[0].unread)
+                val rows = store.thread(lid, 50).getOrOk().items
+                assertEquals(listOf("A1", "L1"), rows.map { it.id })
+                assertTrue(rows.all { it.chat == ali && it.sender == ali })
+                assertEquals(listOf(null, lid), rows.map { it.wireSender })
+                assertEquals("lid'den", store.message(lid, "L1").getOrOk()?.text)
+                assertEquals(ali, store.older(lid).getOrOk()?.chat)
+
+                // An id that arrives outside the store (typing, a notification) is resolved to the same chat.
+                val resolved = store.resolve("777000000000001:4@lid").getOrOk()
+                assertEquals(ali, resolved?.key)
+                assertEquals(WaIdKind.Lid, resolved?.kind)
+                assertEquals(lid, resolved?.wire)
+                assertEquals(WaIdKind.Group, store.resolve(group).getOrOk()?.kind)
+                assertNull(store.resolve("merhaba").getOrOk())
+
+                // A device contact is looked up by the person's number, whichever id a screen holds.
+                assertEquals(listOf("+100000000001"), store.numbers("777000000000001:4@lid").getOrOk())
+                assertEquals(listOf("+100000000001"), store.numbers(ali).getOrOk())
+                assertTrue(store.numbers("777000000000005@lid").getOrOk().isEmpty())
+                assertTrue(store.numbers(group).getOrOk().isEmpty())
+
+                // A later message under the LID lands in the one chat.
+                store.applyEvents(listOf(WaSyncEvent(4, 4_000, text(lid, "L2", 4_000, "yine lid")))).getOrOk()
+                assertEquals(listOf("L2", "A1", "L1"), store.ids(ali))
+            }
+
+            open(dir).use { store ->
+                // The person moves to another number: the new one first, then the one a contact may still hold.
+                val moved = "100000000002@s.whatsapp.net"
+                val changed = GatewayEvent.IdentityNumberChanged(oldPn = ali, newPn = moved, newLid = lid)
+                store.applyEvents(listOf(WaSyncEvent(5, 5_000, changed))).getOrOk()
+                for (id in listOf(lid, ali, moved)) {
+                    assertEquals(id, listOf("+100000000002", "+100000000001"), store.numbers(id).getOrOk())
+                }
+            }
+            open(dir).use { store ->
+                assertEquals(listOf("+100000000002", "+100000000001"), store.numbers(lid).getOrOk())
+            }
+        }
+
+    @Test
+    fun aStepLoggedBeforeACloseIsFoundFromTheCursorAfterIt() =
+        runBlocking {
+            val lid = "777000000000001@lid"
+            val dir = dir()
+            open(dir).use { store ->
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(1, 1_000, text(lid, "L1", 1_000, "lid'den")),
+                            WaSyncEvent(2, 2_000, text(ali, "A1", 2_000, "numaradan")),
+                            WaSyncEvent(3, 3_000, GatewayEvent.IdentityMapped(lid, ali, "peer_message", 2_500)),
+                            WaSyncEvent(4, 4_000, text(lid, "L2", 4_000, "yine lid")),
+                        ),
+                    ).getOrOk()
+            }
+            // A layer that was not running finds the step from its own cursor.
+            open(dir).use { store ->
+                assertEquals(listOf(WaSyncRekeyed(1, lid, ali)), store.rekeyedSince().getOrOk())
+                assertTrue(store.rekeyedSince(seq = 1).getOrOk().isEmpty())
+                assertEquals(listOf("L2", "A1", "L1"), store.ids(lid))
+            }
+        }
+
+    @Test
+    fun theGatewaysPairsAreCaughtUpPageByPageFromTheStoredCursor() =
+        runBlocking {
+            val lid = "777000000000001@lid"
+            val dir = dir()
+            val asked = mutableListOf<String?>()
+            val pages =
+                mapOf(
+                    null to IdentityMappingsAnswer(true, listOf(IdentityMapping(lid, ali, "usync", 500)), "41"),
+                    "41" to IdentityMappingsAnswer(true, emptyList(), null),
+                )
+            val fetch: suspend (String?) -> Outcome<IdentityMappingsAnswer> = { since ->
+                asked += since
+                Outcome.Ok(pages.getValue(since))
+            }
+            open(dir).use { store ->
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(1, 1_000, text(lid, "L1", 1_000, "lid'den")),
+                            WaSyncEvent(2, 2_000, text(ali, "A1", 2_000, "numaradan")),
+                        ),
+                    ).getOrOk()
+                val caught = store.identityCatchUp(fetch).getOrOk()
+                assertTrue(caught.supported && caught.complete && caught.resync)
+                assertEquals(1, caught.pairs)
+                assertEquals(listOf(WaSyncRekeyed(1, lid, ali)), caught.rekeyed)
+                assertEquals(listOf(null, "41"), asked)
+                assertEquals(listOf("A1", "L1"), store.ids(ali))
+            }
+            // After a restart the catch-up asks only for what is newer.
+            open(dir).use { store ->
+                assertEquals("41", store.plan().getOrOk().identitySince)
+                asked.clear()
+                val again = store.identityCatchUp(fetch).getOrOk()
+                assertTrue(again.complete && again.rekeyed.isEmpty())
+                assertEquals(listOf<String?>("41"), asked)
+            }
+        }
+
+    @Test
+    fun whatTheGatewayAnswersElsewhereTeachesTheStoreToo() =
+        runBlocking {
+            val lid = "777000000000001@lid"
+            open(dir()).use { store ->
+                store.applyEvents(listOf(WaSyncEvent(1, 1_000, text(lid, "L1", 1_000, "lid'den")))).getOrOk()
+                val team =
+                    GroupInfo(
+                        group,
+                        "Aile",
+                        listOf(Participant(lid, admin = false, lid = lid, pn = ali)),
+                        addressingMode = "lid",
+                    )
+                val own = InstanceStatus("inst1", InstanceState.Connected, "100000000009@s.whatsapp.net", "Ben")
+                val applied =
+                    store
+                        .observe(
+                            nowMs = 2_000,
+                            status = own.copy(ownLid = "777000000000009@lid"),
+                            groups = listOf(team),
+                        ).getOrOk()
+                assertEquals(listOf(WaSyncRekeyed(1, lid, ali)), applied.rekeyed)
+                assertFalse(applied.accountChanged)
+                assertEquals(listOf("L1"), store.ids(ali))
+                // My LID is me: its chat is the chat of my number.
+                assertEquals("100000000009@s.whatsapp.net", store.resolve("777000000000009@lid").getOrOk()?.key)
+            }
+        }
+
+    @Test
+    fun aJidIsTakenApartWithoutAStore() =
+        runBlocking {
+            val pn = ops.parseId(WaIdParseRequest("100000000001:12@s.whatsapp.net")).getOrOk()
+            assertEquals(WaIdParsed(WaIdKind.Pn, "100000000001", ali, "+100000000001", 12), pn)
+            val lid = ops.parseId(WaIdParseRequest("100000000001@lid")).getOrOk()
+            // The digits of a LID are not a phone number.
+            assertEquals(WaIdParsed(WaIdKind.Lid, "100000000001", "100000000001@lid"), lid)
+            assertEquals(WaIdKind.Group, ops.parseId(WaIdParseRequest(group)).getOrOk()?.kind)
+            assertNull(ops.parseId(WaIdParseRequest("+90 555 000 00 01")).getOrOk())
         }
 
     @Test

@@ -188,6 +188,8 @@ async fn statuses_are_listed_apart_from_the_chats() {
                 timestamp_ms: now,
                 body: MessageBody::Text("story".into()),
                 reactions: vec![],
+                chat_alt: None,
+                sender_alt: None,
             },
             MessageExtras::default(),
         )

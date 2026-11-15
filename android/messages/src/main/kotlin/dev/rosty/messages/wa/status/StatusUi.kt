@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rosty.core.model.wa.StatusItem
 import dev.rosty.core.model.wa.StatusList
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.ios.foundation.IosTheme
@@ -29,7 +30,6 @@ import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.inbox.RowAvatar
 import dev.rosty.messages.inbox.UnreadBadge
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.theme.StatusMetrics
 import dev.rosty.messages.ui.MessagesAvatar
 import kotlinx.collections.immutable.ImmutableList
@@ -129,7 +129,7 @@ fun statusRowOf(
     }
     for (author in list.authors) {
         if (author.items.isEmpty()) continue
-        val number = numberOfJid(author.author)
+        val number = WaIds.number(author.author)
         people +=
             StatusPerson(
                 author = author.author,

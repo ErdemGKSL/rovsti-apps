@@ -2,6 +2,7 @@ package dev.rosty.messages.wa.status
 
 import dev.rosty.core.model.wa.StatusAuthor
 import dev.rosty.core.model.wa.StatusList
+import dev.rosty.core.model.wa.WaIds
 
 // The viewer rules of `rosty_wa_proto::status` (`StatusPlayer`, `StatusList::mark_viewed`, `sort_authors`), which have
 // no bridge op: the same pure decisions, kept in step with the Rust tests by `StatusPlayerTest`.
@@ -150,8 +151,6 @@ fun statusMessageTarget(
     author: String,
     fromMe: Boolean,
 ): String? {
-    val jid = author.trim()
-    return jid.takeIf { !fromMe && it.endsWith(USER_SUFFIX) && it != USER_SUFFIX }
+    if (fromMe) return null
+    return WaIds.bare(author).takeIf { WaIds.isPn(author) }
 }
-
-private const val USER_SUFFIX = "@s.whatsapp.net"

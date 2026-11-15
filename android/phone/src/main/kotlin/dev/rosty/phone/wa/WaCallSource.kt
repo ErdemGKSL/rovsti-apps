@@ -10,6 +10,7 @@ import dev.rosty.core.model.phone.WaArbitrateRequest
 import dev.rosty.core.model.phone.WireCall
 import dev.rosty.core.model.phone.WireCallState
 import dev.rosty.core.model.wa.CallSummary
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.PhoneOps
 import dev.rosty.phone.incoming.CallSource
 import dev.rosty.phone.incoming.WaCallMeta
@@ -155,7 +156,7 @@ class WaMergedCallSource(
         val id = ids.idOf(wa.callId)
         val call = wireOf(id, wa)
         val locked = input.locked ?: snap.keyguardLocked
-        val info = WaCallMeta(wa.callId, wa.peer, wa.toUpdate(), input.speaker, wa.callId in input.muted)
+        val info = WaCallMeta(wa.callId, wa.dialPeer(), wa.toUpdate(), input.speaker, wa.callId in input.muted)
         meta.value = mapOf(id to info)
         val calls = snap.calls + call
         return if (decision == WaDecision.WaWaiting) {
@@ -199,7 +200,7 @@ class WaMergedCallSource(
             }
         val connected = call.phase == CallPhase.Active
         val since = if (connected) activeAt.getOrPut(call.callId, clock) else 0L
-        val number = dialNumber(call.peer)
+        val number = dialNumber(call)
         return WireCall(
             id = id,
             state = state,
@@ -213,14 +214,22 @@ class WaMergedCallSource(
         )
     }
 
-    private fun CallSummary.toUpdate() = CallUpdate(callId, peer, peerName, direction, phase, isVideo)
+    /** The call as the phone's call view takes it, its peer the number's JID when the gateway sent one. */
+    private fun CallSummary.toUpdate() = CallUpdate(callId, dialPeer(), peerName, direction, phase, isVideo)
 
     private companion object {
         val LIVE = setOf(WireCallState.Dialing, WireCallState.Active, WireCallState.Holding)
     }
 }
 
-/** `+<digits>` for a `<digits>[:device]@s.whatsapp.net` JID, null for anything else (`@lid`, groups). */
-internal fun dialNumber(peer: String): String? =
+/**
+ * The peer of a WhatsApp call as Phone shows it: the phone JID. A peer the gateway names by a LID is the number it
+ * sent next to it (`peer_alt`), when it sent one; else the id as it came.
+ */
+internal fun CallSummary.dialPeer(): String =
+    if (WaIds.isLid(peer) && WaIds.isPn(peerAlt)) WaIds.bare(peerAlt) ?: peer else peer
+
+/** The number of a WhatsApp call's peer ([dev.rosty.phone.data.RecentsRepository.dialNumber]). */
+internal fun dialNumber(call: CallSummary): String? =
     dev.rosty.phone.data.RecentsRepository
-        .dialNumber(peer)
+        .dialNumber(call)

@@ -41,6 +41,24 @@ class FakeFilesRepository(
         return galleryOk
     }
 
+    val stagedCards = mutableListOf<Pair<String, Boolean>>()
+
+    override suspend fun stageCard(
+        path: String,
+        asStill: Boolean,
+    ): StagedCard? {
+        stagedCards += path to asStill
+        val uri = staged ?: return null
+        val format =
+            when {
+                asStill -> CardFormat.Jpeg
+                path.endsWith(".gif") -> CardFormat.Gif
+                path.endsWith(".webp") -> CardFormat.WebP
+                else -> CardFormat.Png
+            }
+        return StagedCard(uri, format.mime, java.io.File(path), format)
+    }
+
     override suspend fun stageForShare(
         path: String,
         name: String?,

@@ -57,7 +57,7 @@ use crate::wa::call_audio::{
     InboundDecoder, MIC_QUEUE, MIC_TARGET, SPK_QUEUE, SPK_TARGET, bump, mask_peer,
 };
 use crate::wa::convert::parse_jid;
-use crate::wa::lid::{self, LidMap};
+use crate::wa::lid::{self, LidMap, Pair};
 
 /// A ringing call that nobody answers ends as missed after this long.
 pub const RING_TIMEOUT: Duration = Duration::from_secs(60);
@@ -299,6 +299,15 @@ pub fn clean_report(text: &str) -> String {
         .collect()
 }
 
+/// The pair a call offer states: a caller addressed by LID whose phone
+/// number the offer carries too (`caller_pn`).
+pub fn offer_pair(call: &IncomingCall) -> Option<Pair> {
+    match &call.action {
+        CallAction::Offer { caller_pn, .. } => Pair::of(&call.from, caller_pn.as_ref()?),
+        _ => None,
+    }
+}
+
 /// One call. See the module docs.
 struct CallEntry {
     incoming: Option<IncomingCall>,
@@ -308,6 +317,9 @@ struct CallEntry {
     peer: String,
     /// The other side as WhatsApp addresses it (signaling).
     wire_peer: String,
+    /// The other form of `peer` (its LID next to a phone-number JID), when
+    /// it is known.
+    peer_alt: Option<String>,
     creator: String,
     peer_name: Option<String>,
     is_video: bool,
@@ -338,6 +350,7 @@ impl CallEntry {
             handle: None,
             wire_peer: peer.clone(),
             peer,
+            peer_alt: None,
             creator: String::new(),
             peer_name: None,
             is_video: false,
@@ -361,6 +374,7 @@ impl CallEntry {
             direction: self.machine.direction(),
             phase: self.machine.phase().clone(),
             is_video: self.is_video,
+            peer_alt: self.peer_alt.clone(),
         }
     }
 
@@ -712,6 +726,7 @@ impl CallTable {
     }
 
     /// An `IncomingCall` event: a new offer, or the peer's answer to ours.
+    /// `map` should know the caller both ways (LID to number, number to LID).
     pub fn on_incoming(self: &Arc<Self>, call: &IncomingCall, map: &LidMap) {
         match &call.action {
             CallAction::Offer {
@@ -728,8 +743,10 @@ impl CallTable {
                 }
                 // A LID caller: the mapping store, else the phone JID the offer
                 // carries (`caller_pn`), so the phone can match a contact.
-                let from = lid::resolve(&call.from, caller_pn.as_ref(), map).to_string();
+                let caller = lid::resolve(&call.from, caller_pn.as_ref(), map);
+                let from = caller.to_string();
                 let mut entry = CallEntry::new(CallDirection::In, from.clone());
+                entry.peer_alt = lid::alt_of(&caller, &call.from, caller_pn.as_ref(), map);
                 entry.wire_peer = call.from.to_string();
                 entry.creator = call_creator.to_string();
                 entry.peer_name = call.notify.clone().filter(|n| !n.is_empty());
@@ -886,7 +903,19 @@ impl CallTable {
         backend: &dyn CallBackend,
         to: &str,
     ) -> Result<CallStarted, CallError> {
+        self.place_with_alt(backend, to, None).await
+    }
+
+    /// Rings `to`, whose other id (its LID next to a phone-number JID, or
+    /// the reverse) is `peer_alt` when the gateway knows it.
+    pub async fn place_with_alt(
+        self: &Arc<Self>,
+        backend: &dyn CallBackend,
+        to: &str,
+        peer_alt: Option<String>,
+    ) -> Result<CallStarted, CallError> {
         let mut entry = CallEntry::new(CallDirection::Out, to.to_owned());
+        entry.peer_alt = peer_alt;
         let handle = backend.place(to.to_owned(), entry.io()).await?;
         let call_id = handle.call_id();
         // Visible with its handle, so `end` always has one to terminate.
@@ -1123,9 +1152,29 @@ async fn place(
     Json(req): Json<PlaceCall>,
 ) -> ApiResult<Json<CallStarted>> {
     let to = req.to.trim();
-    parse_jid(to)?;
+    let peer = parse_jid(to)?.to_non_ad();
     let backend = state.driver().call_backend(&auth.instance)?;
-    let started = state.calls(&auth.instance).place(&*backend, to).await?;
+    // The other id of who is called, from the pairs the gateway learned.
+    let store = state.store();
+    let known = if peer.is_pn() {
+        store
+            .lid_of_pn(auth.instance.clone(), peer.to_string())
+            .await
+    } else if peer.is_lid() {
+        store
+            .pn_of_lid(auth.instance.clone(), peer.to_string())
+            .await
+    } else {
+        Ok(None)
+    };
+    let peer_alt = known.unwrap_or_else(|e| {
+        log::warn!("{}: reading an identity pair failed: {e}", auth.instance);
+        None
+    });
+    let started = state
+        .calls(&auth.instance)
+        .place_with_alt(&*backend, to, peer_alt)
+        .await?;
     Ok(Json(started))
 }
 
@@ -1889,9 +1938,17 @@ mod tests {
     #[tokio::test]
     async fn a_lid_caller_is_named_by_the_phone_jid_of_the_offer() {
         let rig = rig();
-        rig.table
-            .on_incoming(&lid_offer("C1", Some(FROM)), &LidMap::default());
+        let call = lid_offer("C1", Some(FROM));
+        rig.table.on_incoming(&call, &LidMap::default());
         assert_eq!(rig.table.list()[0].update.peer, FROM);
+        // The LID it came from is the other form, and the two are a pair.
+        assert_eq!(
+            rig.table.list()[0].update.peer_alt.as_deref(),
+            Some("4242@lid")
+        );
+        let pair = offer_pair(&call).unwrap();
+        assert_eq!(pair.lid.to_string(), "4242@lid");
+        assert_eq!(pair.pn.to_string(), FROM);
         assert_eq!(
             *rig.pushes.0.lock().unwrap(),
             [PushKind::Call {
@@ -1916,6 +1973,18 @@ mod tests {
         let listed = rig.table.list();
         let c2 = listed.iter().find(|c| c.update.call_id == "C2").unwrap();
         assert_eq!(c2.update.peer, "4242@lid");
+        // A LID whose number nobody knows has no other form and is no pair.
+        assert_eq!(c2.update.peer_alt, None);
+        assert_eq!(offer_pair(&lid_offer("C2", None)), None);
+        let c1 = listed.iter().find(|c| c.update.call_id == "C1").unwrap();
+        assert_eq!(c1.update.peer_alt.as_deref(), Some("4242@lid"));
+        // A caller addressed by number: the mappings name the LID.
+        let by_number = offer("C3", "905551112233@s.whatsapp.net", None);
+        rig.table.on_incoming(&by_number, &map);
+        let listed = rig.table.list();
+        let c3 = listed.iter().find(|c| c.update.call_id == "C3").unwrap();
+        assert_eq!(c3.update.peer_alt.as_deref(), Some("4242@lid"));
+        assert_eq!(offer_pair(&by_number), None);
     }
 
     #[tokio::test]
@@ -2085,6 +2154,7 @@ mod tests {
         let id = started.call_id;
         assert_eq!(rig.table.phase(&id), Some(CallPhase::Ringing));
         assert_eq!(rig.calls.ops(), [format!("place {FROM}")]);
+        assert_eq!(rig.table.list()[0].update.peer_alt, None);
 
         let live = rig.calls.lives().pop().unwrap();
         rig.table

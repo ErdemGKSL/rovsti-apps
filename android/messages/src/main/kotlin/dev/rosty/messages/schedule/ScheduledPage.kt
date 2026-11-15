@@ -14,6 +14,7 @@ import dev.rosty.core.model.messages.ScheduledSms
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.ScheduledState
 import dev.rosty.core.model.wa.ScheduledText
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.design.chrome.ScreenLazyPage
 import dev.rosty.design.controls.EmptyState
 import dev.rosty.design.icons.RostyIcons
@@ -99,7 +100,7 @@ fun ScheduledPage(
                 names[group.dest]
                     ?: when (val d = group.dest) {
                         is ScheduleDest.Sms -> d.to
-                        is ScheduleDest.WhatsApp -> d.chat.substringBefore('@')
+                        is ScheduleDest.WhatsApp -> WaIds.number(d.chat).orEmpty()
                     }
             item(key = "head-${group.dest}") { SectionHeader(name) }
             item(key = "strip-${group.dest}") {

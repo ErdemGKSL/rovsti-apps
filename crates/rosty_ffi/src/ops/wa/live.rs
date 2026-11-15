@@ -255,6 +255,7 @@ mod tests {
                     state: InstanceState::Connected,
                     own_jid: None,
                     push_name: None,
+                    own_lid: None,
                 }),
             }),
         );

@@ -405,6 +405,7 @@ mod tests {
             last: None,
             unread: 0,
             is_group: false,
+            alt: None,
         };
         let users = rosty_wa_proto::chat_users(&[chat("96413459456093@lid")]);
         let c = contact(1, &["+96413459456093"]);

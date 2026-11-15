@@ -665,6 +665,8 @@ pub(super) fn apply_event(
         | GatewayEvent::Call(_)
         | GatewayEvent::Scheduled(_)
         | GatewayEvent::StatusChanged { .. }
+        | GatewayEvent::IdentityMapped { .. }
+        | GatewayEvent::IdentityNumberChanged { .. }
         | GatewayEvent::KeyRevoked => {}
     }
     Ok(())

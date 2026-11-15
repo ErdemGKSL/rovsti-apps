@@ -35,6 +35,8 @@ fn text(chat: &str, id: &str, ts: i64, body: &str) -> WaMessage {
         timestamp_ms: ts,
         body: MessageBody::Text(body.into()),
         reactions: Vec::new(),
+        chat_alt: None,
+        sender_alt: None,
     }
 }
 
@@ -66,6 +68,7 @@ fn chat(jid: &str, last: Option<WaMessage>, unread: u32) -> RichChat {
             last,
             unread,
             is_group: jid.ends_with("@g.us"),
+            alt: None,
         },
         meta: ChatMeta::default(),
         last_meta: None,
@@ -1366,7 +1369,8 @@ fn edits_deletes_reactions_and_read_marks_queue_too() {
         [Reaction {
             sender: None,
             from_me: true,
-            emoji: "+".into()
+            emoji: "+".into(),
+            sender_alt: None,
         }]
     );
     let pending: Vec<_> = thread.items[1]

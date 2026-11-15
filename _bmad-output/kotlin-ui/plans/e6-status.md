@@ -2,9 +2,12 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
-## E6-WA R1 closing (2026-11-15): identity (LID, phone JID, one person)
+## E6-WA R1 closed (2026-11-15) at `7d24b484` plus this note: identity (LID, phone JID, one person)
 
-Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 2 982 tests with `wa_gateway`, the Android checks); **Gradle steps still running**.
+Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 2 982 tests with `wa_gateway`, the Android checks);
+the Gradle steps green **without the Stops tests** (`-x :stops:testReleaseUnitTest -x :stops:verifyRoborazziRelease`, as
+in R5), APK check and compose stability included. The orphan-golden check lists only Stops goldens, because its shots
+were not run here.
 Plan and evidence: `plans/e6wa-r1.md`. Epic: `plans/e6wa-plan.md`.
 
 **Gateway commits (deploy these; nothing was deployed from here)**: `9dab1c9f` (identity pairs, route, events, alt ids,

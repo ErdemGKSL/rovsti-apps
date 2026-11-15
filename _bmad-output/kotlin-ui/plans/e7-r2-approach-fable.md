@@ -87,7 +87,13 @@ late tile is a late tile.
 
 **Evidence.** The three real-core shot classes recorded twice in a row are byte-identical; three whole-module
 verifications in a row are green (the run before the last hole was closed had one failure in two). The light
-goldens of the real-core tests were re-recorded once: they now show the same map position as their dark twins.
+goldens of the real-core tests were re-recorded once (checked on the line-choice pair: the light picture now has
+the map where its dark twin has it). After the merge of the app work (which narrows the top padding to the search
+pill and re-recorded every golden) the same held true for its new shot classes: only the light pictures of
+E7.8, E7.9, E7.11 and E7.12 moved (the first view placed after the insets instead of before), the dark ones did
+not; they were re-recorded, together with the four E7.10 Settings pictures that gained the WhatsApp group.
+A shot test stops at its first failing picture, so a red light picture hides its dark twin: the dark ones were
+checked in a second verification after the light ones were recorded.
 
 ## 3. E7.13
 

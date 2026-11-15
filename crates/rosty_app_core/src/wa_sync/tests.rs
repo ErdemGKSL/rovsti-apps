@@ -1860,7 +1860,16 @@ fn a_new_file_gets_the_whole_schema() {
     assert_eq!(store.opened().unwrap().schema_version, SCHEMA_VERSION);
     assert_eq!(
         tables(&store.conn),
-        ["chat_sync", "chats", "messages", "outbox", "sync_state"]
+        [
+            "alias",
+            "chat_sync",
+            "chats",
+            "merge_log",
+            "messages",
+            "outbox",
+            "person",
+            "sync_state"
+        ]
     );
     assert_eq!(
         store.opened().unwrap(),

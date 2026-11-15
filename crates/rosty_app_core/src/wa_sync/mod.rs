@@ -16,11 +16,21 @@
 //!   An edit keeps the previous text as edit history.
 //! * The outbox ([`Store::outbox_enqueue`] and friends) keeps what was written offline, in the same database, and
 //!   reconciles each send with its echo so nothing doubles.
+//! * One person is one chat, whichever id the gateway names them by: a phone-number JID or a LID. Every id is
+//!   resolved through the identity map before it is matched ([`Store::identity_resolve`]), a pair learned later
+//!   ([`Store::identity_learn`]) merges what was stored under both, and each merge is a logged step the rows
+//!   follow ([`Store::apply_pending_merges`], [`ChatRekeyed`]).
 //! * Full media is a cached file path with LRU bookkeeping; evicting clears the path and keeps the message and its
 //!   thumbnail.
 
 mod apply;
+mod authors;
+mod backfill;
+mod identity;
+#[cfg(test)]
+mod identity_tests;
 mod media;
+mod merge;
 mod model;
 mod outbox;
 pub mod plan;
@@ -30,7 +40,9 @@ mod store;
 #[cfg(test)]
 mod tests;
 
+pub use identity::{IdentityApplied, ResolvedId};
 pub use media::{Evicted, Eviction, MediaInfo};
+pub use merge::ChatRekeyed;
 pub use model::{
     AppliedEvents, ChatRow, Kind, MessageRow, PendingOp, RowState, StarredCursor, StarredPage,
     StoredChats, StoredPage, ThreadCursor, ThreadPage,

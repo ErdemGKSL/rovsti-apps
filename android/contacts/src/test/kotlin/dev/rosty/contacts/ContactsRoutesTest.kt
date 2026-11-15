@@ -27,6 +27,20 @@ class ContactsRoutesTest {
         assertEquals(ContactsTab to listOf<ContactsRoute>(ContactsRoute.ContactCard(42L)), route)
     }
 
+    @Test fun theMakeACardActionOpensTheCardWithTheSheet() {
+        val route =
+            contactsRouteFor(
+                null,
+                null,
+                null,
+                extras {
+                    putLong(BirthdayReminders.EXTRA_CONTACT_ID, 42L)
+                    putBoolean(BirthdayReminders.EXTRA_MAKE_CARD, true)
+                },
+            )
+        assertEquals(ContactsTab to listOf<ContactsRoute>(ContactsRoute.ContactCard(42L, makeCard = true)), route)
+    }
+
     @Test fun theShortcutExtraOpensTheCard() {
         val route = contactsRouteFor(null, null, null, extras { putLong(Shortcuts.EXTRA_CONTACT_ID, 7L) })
         assertEquals(ContactsTab to listOf<ContactsRoute>(ContactsRoute.ContactCard(7L)), route)

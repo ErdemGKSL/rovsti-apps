@@ -2,6 +2,7 @@ package dev.rosty.contacts.cards
 
 import dev.rosty.contacts.R
 import dev.rosty.core.Outcome
+import dev.rosty.core.log.RostyLog
 import dev.rosty.core.ops.CardPalette
 import dev.rosty.core.ops.CardRenderRequest
 import dev.rosty.core.ops.CardSpec
@@ -86,7 +87,11 @@ class CardStudioViewModel(
             }
 
             CardStudioAction.Share -> {
-                scope.launch { share() }
+                scope.launch { share(asStill = false) }
+            }
+
+            CardStudioAction.ShareAsStill -> {
+                scope.launch { share(asStill = true) }
             }
 
             CardStudioAction.Save -> {
@@ -140,6 +145,8 @@ class CardStudioViewModel(
                     }
 
                     is Outcome.Err -> {
+                        // The reason reaches the developer-mode Logs page (masked), so a device report carries it.
+                        RostyLog.w("cards", "render failed: template=${spec.template} (${answer.error})")
                         mutable.update { it.copy(rendering = false, failed = true) }
                         outbox.trySend(CardStudioEffect.Toast(UiText.Res(R.string.card_studio_failed)))
                     }
@@ -153,30 +160,31 @@ class CardStudioViewModel(
         scope.launch(NonCancellable + renderContext) { ops.cancel(out) }
     }
 
-    private suspend fun share() {
+    /** Stages the card (a still goes out as JPEG, or PNG when transparent) and asks the host to open the chooser. */
+    private suspend fun share(asStill: Boolean) {
         val shown = mutable.value.preview ?: return
-        val name = shareName(shown)
-        val uri = files.stageForShare(shown.path, name)
-        outbox.trySend(
-            if (uri != null) {
-                CardStudioEffect.Share(uri, mimeOf(shown), name)
-            } else {
-                CardStudioEffect.Toast(UiText.Res(R.string.card_studio_cant_share))
-            },
-        )
+        val card = files.stageCard(shown.path, asStill = asStill && shown.animated)
+        if (card == null) {
+            outbox.trySend(CardStudioEffect.Toast(UiText.Res(R.string.card_studio_cant_share)))
+            outbox.trySend(CardStudioEffect.Reject)
+            return
+        }
+        outbox.trySend(CardStudioEffect.Share(card.uri, card.mime, shareName(card.format.extension)))
     }
 
+    /** Saves the card to Pictures/Rosty as it was rendered; a failure answers with a toast and the reject haptic. */
     private suspend fun save() {
         val shown = mutable.value.preview ?: return
-        val saved = files.saveToGallery(shown.path, shareName(shown), mimeOf(shown))
+        val saved = files.saveToGallery(shown.path, shareName(extension(shown)), mimeOf(shown))
         outbox.trySend(
             CardStudioEffect.Toast(
                 UiText.Res(if (saved) R.string.contacts_saved_to_photos else R.string.contacts_cant_save_image),
             ),
         )
+        if (!saved) outbox.trySend(CardStudioEffect.Reject)
     }
 
-    private fun shareName(shown: CardPreview): String {
+    private fun shareName(extension: String): String {
         val base =
             mutable.value.subject.name
                 .trim()
@@ -185,7 +193,7 @@ class CardStudioViewModel(
                     "-",
                 ).trim('-')
                 .ifEmpty { "card" }
-        return "$base-card.${extension(shown)}"
+        return "$base-card.$extension"
     }
 
     private fun mimeOf(shown: CardPreview) = if (shown.animated) "image/gif" else "image/png"

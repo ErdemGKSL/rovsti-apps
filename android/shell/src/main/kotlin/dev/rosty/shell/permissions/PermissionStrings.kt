@@ -11,9 +11,12 @@ import dev.rosty.platform.system.permissions.PermissionState
 import dev.rosty.platform.system.permissions.SpecialKind
 import dev.rosty.shell.R
 
-/** What the rationale sheet of one group says. */
+/**
+ * What the rationale sheet of one group says. A data class: [PermissionGate] keys its sheet on it, and [rationaleFor]
+ * builds a new one on every recomposition, so equal texts must compare equal or the sheet closes and opens again.
+ */
 @Immutable
-class PermissionRationale(
+data class PermissionRationale(
     val icon: ImageVector,
     val title: String,
     val body: String,

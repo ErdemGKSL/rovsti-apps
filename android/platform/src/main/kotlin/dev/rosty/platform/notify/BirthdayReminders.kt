@@ -5,8 +5,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import dev.rosty.bridge.BirthdayReminderReceiver
 import dev.rosty.platform.PlatformPrefs
+import dev.rosty.platform.R
 import dev.rosty.platform.contacts.Shortcuts
 import org.json.JSONArray
 import org.json.JSONObject
@@ -58,6 +60,9 @@ object BirthdayReminders {
     const val ACTION_FIRE = "dev.rosty.bridge.BIRTHDAY_REMINDER_FIRE"
     const val EXTRA_ID = "birthday_reminder_id"
     const val EXTRA_CONTACT_ID = Shortcuts.EXTRA_CONTACT_ID
+
+    /** Boolean extra of the "Make a Card" action: open the contact with the Card Studio sheet already up. */
+    const val EXTRA_MAKE_CARD = "open_card_studio"
     const val EVENT_FIRED = "birthday_reminder_fired"
     const val EVENT_CHANGED = "birthday_reminders_changed"
     private const val NOTIFICATION_TAG = "birthday-reminder"
@@ -118,18 +123,33 @@ object BirthdayReminders {
     private fun open(
         context: Context,
         item: BirthdayItem,
+        makeCard: Boolean = false,
     ): PendingIntent {
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
         launch
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_CONTACT_ID, item.contactId)
+        if (makeCard) launch.putExtra(EXTRA_MAKE_CARD, true)
         return PendingIntent.getActivity(
             context,
-            reminderCode(item.id),
+            // A second code for the action: the two PendingIntents differ only in an extra, which does not count.
+            reminderCode(item.id) * 31 + (if (makeCard) 1 else 0),
             launch,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
+
+    /** The "Make a Card" action: it opens the contact with the Card Studio sheet open, with the birthday icon. */
+    private fun makeCardAction(
+        context: Context,
+        item: BirthdayItem,
+    ): Notification.Action =
+        Notification.Action
+            .Builder(
+                Icon.createWithResource(context, R.drawable.ic_notif_birthday),
+                context.getString(R.string.notif_make_card),
+                open(context, item, makeCard = true),
+            ).build()
 
     /** Posts the notification and forgets the item. Runs on the receiver's async thread. */
     fun fire(
@@ -148,6 +168,7 @@ object BirthdayReminders {
                     .setContentText(item.body)
                     .setCategory(Notification.CATEGORY_REMINDER)
                     .setContentIntent(open(context, item))
+                    .addAction(makeCardAction(context, item))
                     .setAutoCancel(true)
                     .build()
             try {

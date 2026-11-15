@@ -295,6 +295,52 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
 
 ### Step 8. F40, close X.2, full gate, APKs
 
+- **Owner-visible layout bugs found in the `7e08ce8` goldens (main thread review; fix before closing X.2):**
+  - The card's headline is wider than the card. In `x2-share-animated-fs2-light.png`, "Happy birthday, Ayşe Yılmaz!"
+    runs past the inner glass panel and touches the card's edges. In `x2-share-still-menu-tr-*.png`, "Doğum günün kutlu
+    olsun, Ayşe Yılmaz!" is cut off at both sides ("m günün kutlu olsun, Ayşe Yı").
+    - The headline must wrap inside the inner panel, with padding, on at most 2–3 lines. If it still does not fit, shrink
+      it to a floor size, then ellipsize.
+    - This applies to every template (Birthday, Contact, Number), to static and animated renders, and to long names and
+      the Turkish locale.
+    - Add a render test with a long Turkish name that checks the text box stays inside the panel.
+  - The date line is "October 3" under the Turkish locale. Format it in the card's locale ("3 Ekim").
+  - Re-record the x2 goldens, open them, and confirm nothing touches or crosses the panel edge.
+- **ROOT CAUSE FOUND (owner's device Logs, `50b2b2a`): Step 3 never landed. Do it in this step; X.2 is not done
+  without it.**
+  - Every render answers `e04: cards.render is not available in this build`. That is `UnavailableCardsOps`
+    (`:core-bridge` `CardsOps.kt:71`), and `ContactsContainer.createCards()` still returns it (`ContactsContainer.kt:261`).
+  - There is no `crates/rosty_ffi/src/ops/cards.rs`, no `cards.*` op, no fixtures and no OPS.md entry. The goldens and
+    tests pass only because they inject fakes.
+  - Build Step 3 as planned:
+    - `cards.templates` and `cards.render` in `rosty_ffi` over `rosty_app_core::cards`, with fixtures, `INDEX` and
+      `OPS.md` entries;
+    - a native `CardsOps` on the `Rust.init`-gated entry, wired in `ContactsContainer`, plus cancel;
+    - keep rules and a `dexdump` check;
+    - a contract test over the fixtures.
+  - Prove it end to end without fakes: a Robolectric or host test that goes through the real JNI op and the real `.so`,
+    and the release APK on the emulator rendering a card.
+  - Add a guard test that fails if any production container returns `UnavailableCardsOps`.
+- **Owner device report (release APK from `597d10d`, real arm64 phone, Turkish, dark):** on a saved contact whose name the owner typed as the
+  number itself ("+90 5xx xxx xx xx", digits, spaces and a plus) and that has no birthday, Card Studio opens on the **Birthday** tab and the preview stays an empty grey box. The toast
+  "Kart hazırlanamadı" (`card_studio_failed`) shows, so the render op returned `Outcome.Err`. The screenshot is at
+  `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/x2-device-failed.jpg`.
+  - **Update from the owner:** a contact with a short, ordinary name fails the same way. The render fails on the device
+    for every contact, so the cause is not the contact data. Look first at the release/arm64 path (fonts in the `.so`,
+    R8/JNI, the aarch64 Takumi build).
+  - Find the cause; the host tests pass, so suspect what differs on device.
+    - Bundled fonts in the release `.so`.
+    - R8 or the JNI keep rules for the new ops.
+    - The aarch64 Takumi build.
+    - The animated path. Hareketli was off.
+    - A contact with no name and no birthday.
+  - Log `CardError`'s text (masked) through RostyLog so the next device report has it.
+  - A contact without a birthday must open on Contact, not Birthday. No tab may fail when the birthday is missing or
+    the name is a number. Add that exact contact to the render tests.
+  - Prove it with a release-APK run on the emulator or a host test that goes through the same JNI op.
+- **Also in this step:** `:shell` `PermissionRationale` became a data class in the main tree (the rationale sheet closed and
+  reopened on each recomposition of the contact card). Keep that change. Its test is in `PermissionGateTest`.
+
 - **F40:**
   - Replace the fake WhatsApp picture loaders in `X1PhoneAvatarShotTest` and Contacts `AvatarRig` with recognisable test
     portraits: a drawn head-and-shoulders silhouette on a patterned background, one per person, produced in code with

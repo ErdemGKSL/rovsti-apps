@@ -159,6 +159,30 @@ class CardStudioSheetTest : ShotTest() {
         assertEquals(before.height, during.height)
         assertEquals(CardStudioMetrics.Aspect, during.width.value / during.height.value, 0.01f)
     }
+
+    @Test fun theMoreButtonOnlyExistsForAnAnimatedCardAndSharesAStill() {
+        val r = rig()
+        r.files.staged = android.net.Uri.parse("content://x/card.gif")
+        compose.onNodeWithTag(CardStudioTags.ShareMore).assertDoesNotExist()
+        compose
+            .onNodeWithTag(CardStudioTags.Animated)
+            .performTouchInput { click(centerRight.copy(x = right - 40f)) }
+        r.settle(3)
+        compose.onNodeWithTag(CardStudioTags.ShareMore).assertIsDisplayed().assertIsEnabled()
+
+        compose.onNodeWithTag(CardStudioTags.ShareMore).performClick()
+        advance(1200)
+        compose.onNodeWithText("Share as still image").assertIsDisplayed().performClick()
+        advance(800)
+        r.settle(2)
+
+        assertEquals(
+            true,
+            r.files.stagedCards
+                .last()
+                .second,
+        )
+    }
 }
 
 private fun androidx.compose.ui.test.junit4.AndroidComposeTestRule<*, *>.onAllNodesWithTagCount(tag: String): Int =

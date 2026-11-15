@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -100,9 +101,18 @@ fun ContactCardPage(
     id: Long,
     navigator: TabNavigator<ContactsRoute>,
     onBack: () -> Unit,
+    openStudio: Boolean = false,
 ) {
     PermissionGate(PermissionGroup.CALL_LOG)
     val model = rememberContactCardModel(container, id)
+    // The birthday notification's "Make a Card": the sheet opens once, not again after a rotation.
+    var studioAsked by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(model, openStudio) {
+        if (openStudio && !studioAsked) {
+            studioAsked = true
+            model.onAction(ContactCardAction.MakeCard)
+        }
+    }
     val state by model.state.collectAsState()
     val overlays = LocalOverlay.current
     val context = LocalContext.current

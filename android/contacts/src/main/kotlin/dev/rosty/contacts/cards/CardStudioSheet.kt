@@ -30,12 +30,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -44,6 +47,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -56,12 +61,16 @@ import dev.rosty.contacts.R
 import dev.rosty.core.ops.CardPalette
 import dev.rosty.core.ops.CardTemplate
 import dev.rosty.design.controls.SegmentedControl
+import dev.rosty.design.haptics.LocalRostyHaptics
 import dev.rosty.design.ios.component.IosButton
 import dev.rosty.design.ios.component.IosButtonSizing
 import dev.rosty.design.ios.component.IosButtonStyle
 import dev.rosty.design.ios.component.IosToggle
 import dev.rosty.design.motion.RostyMotion
+import dev.rosty.design.overlay.ButtonMenuEntry
 import dev.rosty.design.overlay.Detent
+import dev.rosty.design.overlay.LocalOverlayOrNull
+import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.SheetEntry
 import dev.rosty.design.overlay.showToast
@@ -102,11 +111,13 @@ fun OverlayController.presentCardStudio(
             onDismissed = model::close,
         ) { _ ->
             val state by model.state.collectAsState()
+            val haptics = LocalRostyHaptics.current
             LaunchedEffect(model) {
                 model.effects.collect { effect ->
                     when (effect) {
                         is CardStudioEffect.Share -> onShare(effect)
                         is CardStudioEffect.Toast -> controller.showToast(effect.text.resolve(context))
+                        CardStudioEffect.Reject -> haptics.reject()
                     }
                 }
             }
@@ -165,8 +176,37 @@ internal fun ColumnScope.CardStudioContent(
                 sizing = IosButtonSizing.Flexible,
                 enabled = state.ready,
             )
+            if (state.preview?.animated == true) ShareMore(state.ready, onAction)
         }
     }
+}
+
+/** The "..." button beside Share of an animated card: its menu offers "Share as still image". */
+@Composable
+private fun ShareMore(
+    enabled: Boolean,
+    onAction: (CardStudioAction) -> Unit,
+) {
+    val overlays = LocalOverlayOrNull.current
+    var anchor by remember { mutableStateOf(Rect.Zero) }
+    val label = stringResource(R.string.card_studio_share_still)
+    val items =
+        remember(label) {
+            persistentListOf<MenuItem>(
+                MenuItem.Action(label = label, onClick = { onAction(CardStudioAction.ShareAsStill) }),
+            )
+        }
+    IosButton(
+        title = "•••",
+        onClick = { overlays?.present(ButtonMenuEntry(anchor, items)) },
+        modifier =
+            Modifier
+                .onGloballyPositioned { anchor = it.boundsInWindow() }
+                .semantics { contentDescription = label }
+                .testTag(CardStudioTags.ShareMore),
+        style = IosButtonStyle.Bordered,
+        enabled = enabled,
+    )
 }
 
 @Composable

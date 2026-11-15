@@ -22,6 +22,43 @@ object MediaShare {
 
     fun dir(context: Context): File = File(context.cacheDir, "share").apply { mkdirs() }
 
+    /** The sub-folder of [dir] that holds finished share cards (X.2). */
+    const val CARDS = "cards"
+
+    /** `cache/share/cards`, created when missing. */
+    fun cardsDir(context: Context): File = File(dir(context), CARDS).apply { mkdirs() }
+
+    /** The provider URI of the card file [name] in [cardsDir]. */
+    fun cardUriFor(
+        context: Context,
+        name: String,
+    ): Uri =
+        Uri
+            .Builder()
+            .scheme("content")
+            .authority(authority(context))
+            .appendPath(CARDS)
+            .appendPath(name)
+            .build()
+
+    /**
+     * The file a provider [uri] names: `<name>` in [dir], or `cards/<name>` in [cardsDir]. Null for anything else
+     * (other depth, unsafe name).
+     */
+    fun resolve(
+        context: Context,
+        uri: Uri,
+    ): File? {
+        val segments = uri.pathSegments
+        val name = segments.lastOrNull() ?: return null
+        if (!isSafeName(name)) return null
+        return when {
+            segments.size == 1 -> File(dir(context), name)
+            segments.size == 2 && segments[0] == CARDS -> File(cardsDir(context), name)
+            else -> null
+        }
+    }
+
     /** The provider URI of the file [name] in [dir]. */
     fun uriFor(
         context: Context,
@@ -133,6 +170,7 @@ object MediaShare {
             val folder = dir(context)
             folder
                 .listFiles()
+                ?.filter { it.isFile }
                 ?.sortedBy { it.lastModified() }
                 ?.dropLast(MAX_STAGED - 1)
                 ?.forEach { it.delete() }

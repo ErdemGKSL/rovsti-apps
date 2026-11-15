@@ -8,7 +8,7 @@ import dev.rosty.contacts.R
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.SheetEntry
 import dev.rosty.design.overlay.showToast
-import dev.rosty.platform.files.ShareIntents
+import dev.rosty.platform.files.CardShare
 import java.io.File
 
 /** Where finished cards are written; the share provider serves `cache/share`. */
@@ -34,7 +34,7 @@ fun OverlayController.openCardStudio(
         )
     val controller = this
     return presentCardStudio(context, model) { share ->
-        val chooser = ShareIntents.image(share.uri, share.mime, share.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val chooser = CardShare.shareIntent(share.uri, share.mime, share.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(chooser)
         } catch (_: ActivityNotFoundException) {

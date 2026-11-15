@@ -84,7 +84,7 @@ class BirthdayRemindersTest : RemindersTestBase() {
         assertNotNull(posted)
         assertEquals(PlatformChannels.BIRTHDAYS, posted.channelId)
         assertEquals("Ayse turns 30", posted.extras.getCharSequence("android.title").toString())
-        assertTrue(posted.actions == null || posted.actions.isEmpty())
+        assertEquals(listOf("Make a Card"), posted.actions.map { it.title.toString() })
         assertTrue(BirthdayReminders.armed(context).isEmpty())
     }
 
@@ -99,6 +99,29 @@ class BirthdayRemindersTest : RemindersTestBase() {
         val launch = shadowOf(posted.contentIntent).savedIntent
         assertEquals(42L, launch.getLongExtra("open_contact_id", 0))
         assertEquals(BirthdayReminders.EXTRA_CONTACT_ID, "open_contact_id")
+    }
+
+    @Test fun theMakeACardActionOpensTheContactWithTheSheet() {
+        repository().arm(json)
+        BirthdayReminderReceiver().onReceive(
+            context,
+            Intent(shadowOf(alarms.peekNextScheduledAlarm()!!.operation!!).savedIntent),
+        )
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val posted = shadowOf(nm).getNotification("birthday-reminder", (id xor (id ushr 32)).toInt())
+
+        val action = posted.actions.single()
+        val launch = shadowOf(action.actionIntent).savedIntent
+        assertEquals(42L, launch.getLongExtra("open_contact_id", 0))
+        assertTrue(launch.getBooleanExtra(BirthdayReminders.EXTRA_MAKE_CARD, false))
+        assertEquals("open_card_studio", BirthdayReminders.EXTRA_MAKE_CARD)
+        assertTrue(shadowOf(action.actionIntent).isActivityIntent)
+        // The plain tap stays a plain open: no sheet.
+        val tap = shadowOf(posted.contentIntent).savedIntent
+        assertFalse(tap.hasExtra(BirthdayReminders.EXTRA_MAKE_CARD))
+        assertTrue(shadowOf(action.actionIntent).requestCode != shadowOf(posted.contentIntent).requestCode)
+        // It uses the birthday notification's own icon.
+        assertEquals(dev.rosty.platform.R.drawable.ic_notif_birthday, action.getIcon().resId)
     }
 
     @Test fun aWrongActionOrAnUnknownIdDoesNothing() {

@@ -36,6 +36,15 @@ interface FilesRepository {
         mime: String,
     ): Boolean
 
+    /**
+     * Copies the finished card at [path] into `cache/share/cards` (JPEG or PNG for a still, GIF or WebP for an animated
+     * card; the first frame of those when [asStill]) and returns the staged card; null on failure.
+     */
+    suspend fun stageCard(
+        path: String,
+        asStill: Boolean = false,
+    ): StagedCard?
+
     /** Copies [path] into the share cache and returns its provider URI; null on failure. */
     suspend fun stageForShare(
         path: String,
@@ -131,6 +140,11 @@ class AndroidFilesRepository(
         name: String,
         mime: String,
     ): Boolean = withContext(io) { MediaShare.saveToGallery(context, path, name, mime, now) }
+
+    override suspend fun stageCard(
+        path: String,
+        asStill: Boolean,
+    ): StagedCard? = withContext(io) { CardShare.stage(context, path, asStill) }
 
     override suspend fun stageForShare(
         path: String,

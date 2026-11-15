@@ -162,11 +162,15 @@ stored message (`{fetch}` or `null` at the start). Reads: `wa_sync.chats {handle
 limit, before?: {timestamp_ms, id}}` (newest first; the first page starts with the sends still in the outbox; `state` is `received`,
 `sent`, `delivered`, `read`, `played`, `waiting`, `sending` or `failed`; a deleted row has `deleted`, `deleted_at`, `deleted_by` and
 still its text, quote and media; `edit_history` holds earlier texts; `pending` the queued edits, deletes and reactions of the row),
-`wa_sync.message {handle, chat, id}`. Outbox: `wa_sync.outbox_enqueue {handle, now_ms, client_id, chat, action}` (`action.kind`:
-`send_text`, `send_media`, `edit`, `revoke`, `react`, `mark_read`; the same `client_id` twice is one row), `wa_sync.outbox_due {handle,
+`wa_sync.message {handle, chat, id}`, `wa_sync.starred {handle, limit, before?: {timestamp_ms, chat, id}}` (the starred messages of
+every chat, newest first, as thread rows: `{items, next?}`; a star still in the outbox counts; deleted messages, cleared messages and
+chats deleted on another device are left out). Outbox: `wa_sync.outbox_enqueue {handle, now_ms, client_id, chat, action}` (`action.kind`:
+`send_text`, `send_media`, `edit`, `revoke`, `react`, `mark_read`, `star {message_id, starred}`; the same `client_id` twice is one
+row; a star sets the stored flag at once, holds it against gateway pages until it went out, and replaces the stars of the same message
+that have not gone out), `wa_sync.outbox_due {handle,
 now_ms, network_back?}` (at most one row per chat, the oldest; marks them `sending`; `held` counts sends kept back until the sync is
 done; `next_wake_ms`), `wa_sync.outbox_settle {handle, now_ms, client_id, outcome}` (`outcome.kind`: `sent {message_id?,
-timestamp_ms?}` or `error {error: network|gateway|rejected, message, retry_after_ms?}`; answers `state`: `done`, `waiting` or `failed`),
+timestamp_ms?}` or `error {error: network|gateway|rejected, message, retry_after_ms?}`; answers `state`: `done`, `waiting` or `failed`; a rejected `star` is undone and dropped, it leaves no failed row),
 `wa_sync.outbox_cancel`, `wa_sync.outbox_edit {handle, client_id, text}`, `wa_sync.outbox_retry`, `wa_sync.outbox`. Media:
 `wa_sync.media_set {handle, now_ms, chat, id, thumbnail_b64?, path?, bytes?}`, `wa_sync.media {handle, chat, id, used_ms?}`,
 `wa_sync.media_evict {handle, max_bytes}` (answers the files to delete, least recently used first; the messages and thumbnails stay).
@@ -246,7 +250,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
-| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

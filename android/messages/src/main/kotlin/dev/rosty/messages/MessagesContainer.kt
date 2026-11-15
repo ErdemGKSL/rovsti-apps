@@ -21,6 +21,10 @@ import dev.rosty.messages.data.ContactBook
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.ResourceInboxWords
 import dev.rosty.messages.inbox.waPreview
+import dev.rosty.messages.names.LiveNames
+import dev.rosty.messages.names.PacedAsks
+import dev.rosty.messages.names.PersonNames
+import dev.rosty.messages.names.StoredWaNames
 import dev.rosty.messages.notify.AnnouncerSources
 import dev.rosty.messages.notify.MessageAnnouncer
 import dev.rosty.messages.notify.ReplyRouter
@@ -45,6 +49,7 @@ import dev.rosty.messages.wa.realWaOffline
 import dev.rosty.messages.wa.realWaVoice
 import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.AvatarResolver
+import dev.rosty.people.LiveWaNames
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.PeopleSources
 import dev.rosty.people.ProviderSource
@@ -66,7 +71,9 @@ import dev.rosty.platform.telephony.SimRepository
 import dev.rosty.shell.ShellContainer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -136,11 +143,19 @@ open class MessagesContainer(
         ContactBook(contacts, permissions.state(PermissionGroup.CONTACTS), search, scope)
     }
 
+    /** WhatsApp names asked on demand for numbers no contact and no stored chat names (shared with Phone's rule). */
+    val liveWaNames: LiveWaNames by lazy { createLiveWaNames() }
+
+    /** The one name-order rule of every surface: contact, WhatsApp name (verified, push), number. */
+    val names: PersonNames by lazy { createNames() }
+
     /** Every gateway call of the WhatsApp sync, outbox and Status (E6.4s); tests swap in a fake. */
     val waRemote: WaRemote by lazy { createWaRemote() }
 
     /** The offline store of the linked WhatsApp instance with its sync and outbox (E6.4s), following the link. */
-    val waOffline: WaOffline by lazy { createWaOffline().also { it.start() } }
+    val waOffline: WaOffline get() = waOfflineOnce.value
+
+    private val waOfflineOnce = lazy { createWaOffline().also { it.start() } }
 
     /** The WhatsApp Status updates, for the Status row and the viewer. */
     val statusFeed: StatusFeed by lazy {
@@ -179,7 +194,7 @@ open class MessagesContainer(
     /** Scheduled send (E6.10, AD-MSG6): the local SMS queue with its alarms and the gateway's WhatsApp items. */
     val schedule: ScheduleCenter by lazy { createSchedule() }
 
-    /** Stars (E6.13): SMS/MMS in the prefs (M23), WhatsApp through the gateway (M10), and the Starred list. */
+    /** Stars (E6.13): SMS/MMS in the prefs (M23), WhatsApp through the store's outbox (M10), and the Starred list. */
     val stars: StarCenter by lazy { createStars().also { it.start() } }
 
     /** "Remind me" on a message (M33): Rust's slots and payload, `:platform`'s alarms. */
@@ -216,7 +231,7 @@ open class MessagesContainer(
                 chatOf = { jid ->
                     withTimeoutOrNull(CHAT_LOOKUP_MS) { waChats.chats.first() }?.firstOrNull { it.jid == jid }
                 },
-                nameOf = { number -> book.owner(number)?.displayName },
+                names = names,
                 preview = { body -> waPreview(body, MessageMeta(), words) },
                 pushWake = context.resources.getBoolean(R.bool.push_wake),
                 now = System::currentTimeMillis,
@@ -235,11 +250,36 @@ open class MessagesContainer(
             now = System::currentTimeMillis,
         )
 
+    protected open fun createLiveWaNames(): LiveWaNames =
+        LiveWaNames(
+            gateway = { wa.gateway() },
+            e164 = { PhoneNumbers.e164(it, homeRegion) },
+            scope = scope,
+        )
+
+    protected open fun createNames(): PersonNames {
+        val stored =
+            StoredWaNames(
+                // A receiver in a cold process names a sender without starting the WhatsApp sync.
+                offline = { if (waOfflineOnce.isInitialized()) waOffline else null },
+                key = { number -> PhoneNumbers.e164(number, homeRegion)?.filter(Char::isDigit) },
+                scope = scope,
+            )
+        return PersonNames(
+            contactName = { number -> book.owner(number)?.displayName },
+            // The book (and the Rust index behind it) opens with the first lookup, not with the resolver.
+            contactChanges = flow { emitAll(book.book) },
+            live = LiveNames.of(liveWaNames, PacedAsks(scope, liveWaNames::ask)),
+            stored = stored::of,
+            readable = { number -> withContext(Dispatchers.Default) { PhoneNumbers.forReading(number, homeRegion) } },
+        )
+    }
+
     protected open fun createWaRemote(): WaRemote = GatewayWaRemote(wa)
 
     protected open fun createWaOffline(): WaOffline = realWaOffline(this, waRemote)
 
-    protected open fun createWaChats(): WaChats = StoreWaChats(waOffline, waRemote)
+    protected open fun createWaChats(): WaChats = StoreWaChats(waOffline, waRemote, names)
 
     @Volatile private var peopleStarted = false
 

@@ -1,43 +1,48 @@
 package dev.rosty.messages.starred
 
+import dev.rosty.core.Outcome
+import dev.rosty.core.RustError
+import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.conversation.BubbleState
 import dev.rosty.messages.conversation.BubbleUi
 import dev.rosty.messages.conversation.ConversationItem
 import dev.rosty.messages.conversation.ConversationUi
+import dev.rosty.messages.inbox.EnglishInboxWords
+import dev.rosty.messages.names.PersonNames
+import dev.rosty.messages.wa.WaStoreLink
+import dev.rosty.messages.wa.WaTestKit
+import dev.rosty.messages.wa.settle
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
-import java.io.File
 
-/** E6.13: local SMS stars through Rust into the prefs (M23), WhatsApp stars shown at once and sent when online (M10). */
+/**
+ * E6.13: local SMS stars through Rust into the prefs (M23); WhatsApp stars queued in the store's outbox, shown at once
+ * and listed by the store's own query (M10).
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class StarCenterTest {
-    @get:Rule val tmp = TemporaryFolder()
+    private val now = 1_790_000_000_000L
 
-    private var now = 1_790_000_000_000L
-
-    private fun TestScope.kit(
-        file: File? = null,
-        graceMs: Long = 10_000,
-    ): MarkKit {
+    private fun TestScope.kit(): MarkKit {
         val dispatcher = UnconfinedTestDispatcher(testScheduler)
-        return MarkKit(CoroutineScope(backgroundScope.coroutineContext + dispatcher), dispatcher, {
-            now
-        }, file, graceMs = graceMs)
+        return MarkKit(CoroutineScope(backgroundScope.coroutineContext + dispatcher), dispatcher, { now })
             .also { advanceUntilIdle() }
     }
 
@@ -45,6 +50,10 @@ class StarCenterTest {
     private val wa =
         MarkTarget("wa:905550000002@s.whatsapp.net", "3EB0AA", 1_789_999_500_000L, "Me", "Biletler bende", "Elif")
     private val jid = "905550000002@s.whatsapp.net"
+    private val waRow = WaStarRow(jid, "3EB0AA", wa.atMs, "Me", "Biletler bende", "Elif")
+
+    /** No address book and nothing asked: names come from the store alone. */
+    private val noNames = PersonNames({ null }, MutableStateFlow(Unit))
 
     @Test fun anSmsStarGoesThroughRustIntoThePrefs() =
         runTest {
@@ -100,41 +109,28 @@ class StarCenterTest {
             )
         }
 
-    @Test fun aWhatsAppStarShowsAtOnceAndGoesOutWhenTheConnectionIsBack() =
+    @Test fun aWhatsAppStarIsQueuedInTheOutboxAndListedAtOnce() =
         runTest {
             val kit = kit()
+            kit.wa.knows["3EB0AA"] = waRow
             assertTrue(kit.stars.set(wa, true))
-            advanceUntilIdle()
-            // Offline: nothing was sent, the bubble and the list show it already.
-            assertTrue(kit.wa.sent.isEmpty())
-            assertEquals(
-                setOf("3EB0AA"),
-                kit.stars
-                    .marks(wa.tag)
-                    .first()
-                    .on,
-            )
+            // Queued once, with nothing else asked of the gateway; the list has it before any debounce ran.
+            assertEquals(listOf(Triple(jid, "3EB0AA", true)), kit.wa.queued)
             val item =
                 kit.stars.items.value
                     .single()
             assertEquals("Elif", item.title)
+            assertEquals("Me", item.author)
             assertEquals(MessagesRoute.WaThread(jid, reveal = "3EB0AA", revealAtMs = wa.atMs), starredRoute(item))
-
-            kit.wa.online.value = true
-            advanceUntilIdle()
-            assertEquals(listOf(Triple(jid, "3EB0AA", true)), kit.wa.sent)
-            // Sent once: another reconnect does not send it again.
-            kit.wa.online.value = false
-            kit.wa.online.value = true
-            advanceUntilIdle()
-            assertEquals(1, kit.wa.sent.size)
+            // The bubble shows the store's own flag: nothing is laid over a WhatsApp thread.
+            assertEquals(StarMarks(), kit.stars.marks(wa.tag).first())
         }
 
-    @Test fun anUnstarHidesAStoredStarUntilTheStoreFollows() =
+    @Test fun anUnstarLeavesTheListAtOnceAndUndoBringsItBack() =
         runTest {
             val kit = kit()
-            kit.wa.stored = listOf(WaStarRow(jid, "3EB0AA", wa.atMs, "Me", "Biletler bende", "Elif"))
-            kit.wa.online.value = true
+            kit.wa.knows["3EB0AA"] = waRow
+            kit.wa.flagged += "3EB0AA"
             kit.stars.rescan()
             advanceUntilIdle()
             assertEquals(
@@ -143,70 +139,161 @@ class StarCenterTest {
                     .map { it.id },
             )
 
-            kit.stars.set(wa, false)
-            advanceUntilIdle()
-            assertEquals(listOf(Triple(jid, "3EB0AA", false)), kit.wa.sent)
+            assertTrue(kit.stars.set(wa, false))
             assertTrue(
                 kit.stars.items.value
                     .isEmpty(),
             )
+            // Undo is the star again, queued behind (the store replaces an unstar that has not gone out).
+            assertTrue(kit.stars.set(wa, true))
             assertEquals(
-                setOf("3EB0AA"),
-                kit.stars
-                    .marks(wa.tag)
-                    .first()
-                    .off,
-            )
-
-            // The gateway's event reached the store; after the grace time the store alone decides.
-            kit.wa.stored = emptyList()
-            now += 11_000
-            kit.stars.seen(jid, mapOf("3EB0AA" to false))
-            kit.stars.rescan()
-            advanceUntilIdle()
-            assertEquals(StarMarks(), kit.stars.marks(wa.tag).first())
-            assertTrue(
+                listOf("3EB0AA"),
                 kit.stars.items.value
-                    .isEmpty(),
+                    .map { it.id },
             )
+            assertEquals(listOf(Triple(jid, "3EB0AA", false), Triple(jid, "3EB0AA", true)), kit.wa.queued)
         }
 
-    @Test fun aStarUnstarredOnAnotherPhoneLeavesTheList() =
+    @Test fun whatTheStoreChangesReachesTheList() =
         runTest {
             val kit = kit()
-            kit.wa.online.value = true
+            kit.wa.knows["3EB0AA"] = waRow
+            // Starred on another phone: the gateway's event set the flag in the store.
+            kit.wa.flagged += "3EB0AA"
+            kit.wa.changes.tryEmit(Unit)
+            // The rows are read again once the changes settle (the debounce).
+            advanceTimeBy(2_000)
+            runCurrent()
+            assertEquals(
+                listOf("3EB0AA"),
+                kit.stars.items.value
+                    .map { it.id },
+            )
+            // Unstarred there, or a star of this phone the gateway refused: the store took the flag back.
+            kit.wa.flagged -= "3EB0AA"
+            kit.wa.changes.tryEmit(Unit)
+            // The rows are read again once the changes settle (the debounce).
+            advanceTimeBy(2_000)
+            runCurrent()
+            assertTrue(
+                kit.stars.items.value
+                    .isEmpty(),
+            )
+            assertTrue(kit.wa.queued.isEmpty())
+        }
+
+    @Test fun smsAndWhatsAppStarsAreOneListNewestFirst() =
+        runTest {
+            val kit = kit()
+            kit.wa.knows["3EB0AA"] = waRow
+            kit.stars.set(sms, true)
             kit.stars.set(wa, true)
             advanceUntilIdle()
-            now += 11_000
-            // Still starred in the store: the own copy stays (the message may be older than what the scan reads).
-            kit.stars.seen(jid, mapOf("3EB0AA" to true))
-            advanceUntilIdle()
-            assertEquals(1, kit.stars.items.value.size)
-            kit.stars.seen(jid, mapOf("3EB0AA" to false))
-            advanceUntilIdle()
+            assertEquals(
+                listOf("3EB0AA", "sms:12"),
+                kit.stars.items.value
+                    .map { it.id },
+            )
+            // An SMS star never touches the WhatsApp outbox.
+            assertEquals(1, kit.wa.queued.size)
+        }
+
+    @Test fun withoutALinkAWhatsAppStarIsNotKept() =
+        runTest {
+            val kit = kit()
+            kit.wa.linked = false
+            assertFalse(kit.stars.set(wa, true))
+            assertTrue(kit.wa.queued.isEmpty())
             assertTrue(
                 kit.stars.items.value
                     .isEmpty(),
             )
         }
 
-    @Test fun pendingStarsSurviveARestart() =
-        runTest {
-            val file = File(tmp.root, StarCenter.FILE)
-            val first = kit(file)
-            first.stars.set(wa, true)
-            advanceUntilIdle()
-            assertTrue(file.readText().contains("3EB0AA"))
+    // ---- the real seams: the offline store's outbox and its starred query
 
-            val second = kit(file)
-            assertEquals(
-                listOf("3EB0AA"),
-                second.stars.items.value
-                    .map { it.id },
+    @Test fun theStarIsAnOutboxActionThatGoesOutWhenTheConnectionIsBack() =
+        runTest {
+            val kit = WaTestKit(backgroundScope)
+            kit.chat(jid, name = "Elif")
+            kit.ops.put(jid, "3EB0AA", wa.atMs, "Biletler bende", fromMe = true)
+            kit.offline.start()
+            settle()
+            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me", noNames)
+
+            // Offline: queued in the store, starred there at once, and a wake asked for the outbox job.
+            assertTrue(seams.star(jid, "3EB0AA", true))
+            assertEquals(listOf(WaSyncAction.Star("3EB0AA", true)), kit.ops.queue.map { it.action })
+            assertTrue(kit.remote.performed.isEmpty())
+            assertEquals(listOf(0L), kit.wakes)
+            assertEquals(listOf(waRow), seams.starred())
+
+            kit.connect()
+            settle()
+            assertEquals(listOf(jid to WaSyncAction.Star("3EB0AA", true)), kit.remote.performed)
+            assertTrue(kit.ops.queue.isEmpty())
+            assertEquals(listOf(waRow), seams.starred())
+        }
+
+    @Test fun aStarTheGatewayRefusesIsTakenBack() =
+        runTest {
+            val kit = WaTestKit(backgroundScope)
+            kit.chat(jid, name = "Elif")
+            kit.ops.put(jid, "3EB0AA", wa.atMs, "Biletler bende", fromMe = true)
+            kit.remote.answer = { _, _ -> Outcome.Err(RustError.Invalid("no such message")) }
+            kit.offline.start()
+            settle()
+            kit.connect()
+            settle()
+            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me", noNames)
+            val heard = mutableListOf<Set<String>?>()
+            backgroundScope.launch { kit.offline.changes.collect { heard += it } }
+            settle()
+
+            assertTrue(seams.star(jid, "3EB0AA", true))
+            settle()
+            assertEquals(1, kit.remote.performed.size)
+            assertTrue(kit.ops.queue.isEmpty())
+            assertEquals(emptyList<WaStarRow>(), seams.starred())
+            // The readers were told: once for the star, once for the answer.
+            assertEquals(listOf<Set<String>?>(setOf(jid), setOf(jid)), heard)
+        }
+
+    @Test fun theStarredQueryNamesTheChatAndWhoWrote() =
+        runTest {
+            val kit = WaTestKit(backgroundScope, linked = false)
+            kit.offline.start()
+            settle()
+            val seams = waStarSeams(kit.offline, EnglishInboxWords, "Me", noNames)
+            // Not linked: no store to ask or to queue in.
+            assertNull(seams.starred())
+            assertFalse(seams.star(jid, "3EB0AA", true))
+
+            kit.chat(WaTestKit.ADA, pushName = "Ada")
+            kit.chat(WaTestKit.GROUP, name = "Flatmates", group = true)
+            kit.message(WaTestKit.text(WaTestKit.ADA, "a1", 1_000, "Door code 4821").copy(starred = true))
+            kit.message(WaTestKit.text(WaTestKit.ADA, "a2", 2_000, "not starred"))
+            kit.message(
+                WaTestKit
+                    .text(WaTestKit.GROUP, "g1", 3_000, "Rent is due", sender = WaTestKit.MERT, senderName = "Deniz")
+                    .copy(starred = true),
             )
-            second.wa.online.value = true
-            advanceUntilIdle()
-            assertEquals(listOf(Triple(jid, "3EB0AA", true)), second.wa.sent)
+            kit.message(
+                WaTestKit.text(WaTestKit.GROUP, "g2", 4_000, "", sender = WaTestKit.MERT).copy(starred = true),
+            )
+            kit.message(WaTestKit.text(WaTestKit.GROUP, "g3", 5_000, "gone").copy(starred = true, deleted = true))
+            kit.message(
+                WaTestKit.text(WaTestKit.MERT, "c1", 6_000, "I have the tickets", fromMe = true).copy(starred = true),
+            )
+            kit.link.value = WaStoreLink(WaTestKit.INSTANCE)
+            settle()
+
+            val rows = seams.starred()!!
+            assertEquals(listOf("c1", "g2", "g1", "a1"), rows.map { it.id })
+            // A chat the list does not name yet falls back to its number; a group names the sender.
+            assertEquals(listOf("+905550000002", "Flatmates", "Flatmates", "Ada"), rows.map { it.title })
+            assertEquals(listOf("Me", "+905550000002", "Deniz", "Ada"), rows.map { it.author })
+            assertEquals("Rent is due", rows[2].preview)
         }
 
     @Test fun onlyMessagesWithAnIdOfTheirOwnCanBeMarked() {

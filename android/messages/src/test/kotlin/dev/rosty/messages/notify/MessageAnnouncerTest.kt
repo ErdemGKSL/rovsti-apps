@@ -14,6 +14,8 @@ import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.ops.NativeMessagesOps
+import dev.rosty.messages.names.FakeLiveNames
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.platform.PlatformEvents
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -43,6 +45,8 @@ class MessageAnnouncerTest {
     private val posted = ArrayList<Digest>()
     private val chats = HashMap<String, RichChat>()
     private val names = HashMap<String, String>()
+    private val bookChanges = MutableStateFlow(0)
+    private val live = FakeLiveNames()
     private val now = 1_800_000_000_000L
     private val ada = "905550000002@s.whatsapp.net"
     private val club = "120363000000000001@g.us"
@@ -94,12 +98,13 @@ class MessageAnnouncerTest {
             loadPrefs = {},
             live = emptyFlow(),
             chatOf = { chats[it] },
-            nameOf = { names[it] },
+            names = PersonNames({ names[it] }, bookChanges, live),
             preview = { (it as? MessageBody.Text)?.text ?: "Photo" },
             pushWake = pushWake,
             now = { now },
         ),
         post = { _, digest -> posted.add(digest) },
+        shown = { _, tag -> posted.lastOrNull { it.spec.tag == tag } },
     )
 
     private fun message(
@@ -124,6 +129,46 @@ class MessageAnnouncerTest {
             assertEquals("Ada Lovelace", spec.title)
             assertEquals(listOf("Are you coming?", "We start at six"), spec.lines)
             assertTrue(spec.reply)
+        }
+
+    @Test fun theTitleFollowsTheNameOrder() =
+        runTest(UnconfinedTestDispatcher()) {
+            scriptRust()
+            val announcer = announcer(this)
+            names.remove("+905550000002")
+            chats[ada] = RichChat(ada, "ada.l", null, 0, false, ChatMeta(pushName = "Ada"))
+
+            // No contact: WhatsApp's push name comes before the stored chat name.
+            announcer.onWhatsApp(message("m1"))
+            assertEquals("Ada", posted.last().spec.title)
+
+            // A saved contact beats both.
+            names["+905550000002"] = "Ada Lovelace"
+            announcer.onWhatsApp(message("m2"))
+            assertEquals("Ada Lovelace", posted.last().spec.title)
+            assertTrue(live.asked.isEmpty())
+        }
+
+    @Test fun anUnknownNumberIsNotifiedAtOnceAndRenamedInPlaceWhenWhatsAppNamesIt() =
+        runTest(UnconfinedTestDispatcher()) {
+            scriptRust()
+            names.clear()
+            val announcer = announcer(this)
+
+            assertTrue(announcer.onWhatsApp(message("m1")))
+            assertEquals("+905550000002", posted.single().spec.title)
+            assertEquals(listOf("+905550000002"), live.asked.distinct())
+
+            live.land("+905550000002", "Ada")
+            // The same notification, renamed without a second sound.
+            assertEquals(2, posted.size)
+            assertEquals("Ada", posted.last().spec.title)
+            assertTrue(posted.last().spec.silent)
+            assertEquals(posted.first().spec.lines, posted.last().spec.lines)
+
+            // A group sender nobody names is named by WhatsApp's answer too.
+            announcer.onWhatsApp(message("g1", chat = club, text = "Hi all", sender = ada))
+            assertEquals(listOf("Ada: Hi all"), posted.last().spec.lines)
         }
 
     @Test fun aGroupMessageNamesItsSender() =

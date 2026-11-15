@@ -189,7 +189,7 @@ fun SmsThreadPage(
                                 ops = container.ops,
                                 chat = container.chat,
                                 store = container.store,
-                                book = container.book.book,
+                                names = container.names,
                                 roleHeld = container.smsRole,
                                 now = System::currentTimeMillis,
                             ),

@@ -143,6 +143,7 @@ fun NotificationSettingsEntry(
                             ops = container.ops,
                             nameOf = { tag -> container.nameOfTag(tag) },
                             now = SystemRostyClock::nowMillis,
+                            nameChanges = container.names.changes,
                         )
                     }
                 }
@@ -152,22 +153,19 @@ fun NotificationSettingsEntry(
     NotificationSettingsPage(ui, model::onAction, onBack = onBack, onBackLongClick = onBackLongClick)
 }
 
-/** The name behind a notification tag: the chat's name, or the contact (else the number) of an SMS thread. */
+/** The name behind a notification tag by the name-order rule: a group's subject, else the people of the thread. */
 internal suspend fun MessagesContainer.nameOfTag(tag: String): String? =
     when {
         tag.startsWith("wa:") -> {
             val jid = tag.removePrefix("wa:")
-            withTimeoutOrNull(LOOKUP_MS) { waChats.chats.first() }
-                ?.firstOrNull { it.jid == jid }
-                ?.name
-                ?: jid.substringBefore('@').takeIf { jid.endsWith("@s.whatsapp.net") }?.let { "+$it" }
+            names.chatTitle(jid, withTimeoutOrNull(LOOKUP_MS) { waChats.chats.first() }?.firstOrNull { it.jid == jid })
         }
 
         tag.startsWith("sms:") -> {
             val id = tag.removePrefix("sms:").toLongOrNull()
             val thread =
                 withTimeoutOrNull(LOOKUP_MS) { sms.threads().first() }?.firstOrNull { it.threadId == id }
-            thread?.addresses?.map { address -> book.owner(address)?.displayName ?: address }?.joinToString()
+            thread?.addresses?.map { address -> names.of(address).text }?.joinToString()
         }
 
         else -> {

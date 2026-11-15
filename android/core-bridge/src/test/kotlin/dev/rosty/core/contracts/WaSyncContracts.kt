@@ -33,6 +33,8 @@ import dev.rosty.core.model.wa.WaSyncPlanRequest
 import dev.rosty.core.model.wa.WaSyncRetried
 import dev.rosty.core.model.wa.WaSyncSettleRequest
 import dev.rosty.core.model.wa.WaSyncSettled
+import dev.rosty.core.model.wa.WaSyncStarredPage
+import dev.rosty.core.model.wa.WaSyncStarredRequest
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.model.wa.WaSyncStorePageRequest
 import dev.rosty.core.model.wa.WaSyncStoredChats
@@ -59,15 +61,16 @@ object WaSyncContracts : ContractModels {
                 ok = listOf("older", "media", "pending", "unknown_chat"),
             )
             op<WaSyncMessageRequest, WaSyncMessageAnswer>("wa_sync.message", ok = listOf("unknown"))
+            op<WaSyncStarredRequest, WaSyncStarredPage>("wa_sync.starred", ok = listOf("older", "unstarred", "empty"))
             op<WaSyncEnqueueRequest, WaSyncItemAnswer>(
                 "wa_sync.outbox_enqueue",
-                ok = listOf("media", "edit", "revoke", "react", "mark_read"),
+                ok = listOf("media", "edit", "revoke", "react", "mark_read", "star"),
                 err = listOf("no_chat"),
             )
             op<WaSyncDueRequest, WaSyncDue>("wa_sync.outbox_due", ok = listOf("sending", "empty"))
             op<WaSyncSettleRequest, WaSyncSettled>(
                 "wa_sync.outbox_settle",
-                ok = listOf("network", "rate_limited", "rejected", "gone"),
+                ok = listOf("network", "rate_limited", "rejected", "gone", "star_rejected"),
             )
             op<WaSyncClientIdRequest, WaSyncCancelled>("wa_sync.outbox_cancel", ok = listOf("in_flight"))
             op<WaSyncOutboxEditRequest, WaSyncItemAnswer>("wa_sync.outbox_edit", err = listOf("in_flight", "gone"))

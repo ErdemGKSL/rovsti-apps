@@ -3,6 +3,7 @@ package dev.rosty.messages.schedule
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -10,6 +11,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import dev.rosty.core.model.messages.ScheduleTarget
 import dev.rosty.core.model.messages.ScheduledSms
+import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.ScheduledState
 import dev.rosty.core.model.wa.ScheduledText
 import dev.rosty.design.chrome.ScreenLazyPage
@@ -19,6 +21,7 @@ import dev.rosty.design.list.SectionHeader
 import dev.rosty.design.time.LocalRostyClock
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
+import dev.rosty.messages.names.PersonNames
 import kotlinx.coroutines.launch
 
 object ScheduledPageTags {
@@ -69,13 +72,19 @@ fun ScheduledPage(
 ) {
     val res = LocalResources.current
     val state by container.schedule.state.collectAsState()
-    val book by container.book.book.collectAsState()
-    val chats by container.waChats.chats.collectAsState(emptyList())
+    // Null until the stored chats were read: nobody is named (or asked from WhatsApp) before that.
+    val chats by container.waChats.chats.collectAsState(null)
+    // Moves when a contact is saved or a WhatsApp name that was asked for arrives: the headers are named again.
+    val revision by container.names.changes.collectAsState(0L)
     val words = remember(res) { scheduleWords(res) }
     val labels = rememberScheduleLabels()
     val clock = LocalRostyClock.current
     val scope = rememberCoroutineScope()
     val groups = remember(state) { scheduledGroups(state.local, state.remote) }
+    val names by produceState(emptyMap<ScheduleDest, String>(), groups, chats, revision) {
+        val known = chats ?: return@produceState
+        value = groups.associate { it.dest to scheduledName(container.names, it.dest, known) }
+    }
     ScreenLazyPage(
         title = res.getString(R.string.scheduled_title),
         modifier = Modifier.testTag(ScheduledPageTags.Page),
@@ -85,20 +94,13 @@ fun ScheduledPage(
             item(key = "empty") { EmptyState(RostyIcons.Clock, res.getString(R.string.scheduled_none), "") }
         }
         groups.forEach { group ->
+            // The destination itself for the one frame before the names are looked up.
             val name =
-                when (val d = group.dest) {
-                    is ScheduleDest.Sms -> {
-                        val digits = d.to.filter(Char::isDigit).takeLast(MATCH_DIGITS)
-                        book.contacts.values
-                            .firstOrNull { c -> c.numbers.any { it.raw.filter(Char::isDigit).endsWith(digits) } }
-                            ?.displayName ?: d.to
+                names[group.dest]
+                    ?: when (val d = group.dest) {
+                        is ScheduleDest.Sms -> d.to
+                        is ScheduleDest.WhatsApp -> d.chat.substringBefore('@')
                     }
-
-                    is ScheduleDest.WhatsApp -> {
-                        chats.firstOrNull { it.jid == d.chat }?.name?.takeIf { it.isNotBlank() }
-                            ?: d.chat.substringBefore('@')
-                    }
-                }
             item(key = "head-${group.dest}") { SectionHeader(name) }
             item(key = "strip-${group.dest}") {
                 ScheduledStrip(
@@ -118,4 +120,13 @@ fun ScheduledPage(
     }
 }
 
-private const val MATCH_DIGITS = 9
+/** Whom a scheduled message goes to, by the name-order rule; a WhatsApp group keeps its subject. */
+internal suspend fun scheduledName(
+    names: PersonNames,
+    dest: ScheduleDest,
+    chats: List<RichChat>,
+): String =
+    when (dest) {
+        is ScheduleDest.Sms -> names.of(dest.to).text
+        is ScheduleDest.WhatsApp -> names.chatTitle(dest.chat, chats.firstOrNull { it.jid == dest.chat })
+    }

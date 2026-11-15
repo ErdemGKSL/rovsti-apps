@@ -5,10 +5,15 @@ import dev.rosty.core.log.RostyLog
 import dev.rosty.core.ops.WaGateway
 import dev.rosty.platform.identity.CallerIdentity
 import dev.rosty.platform.identity.IdentitySource
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -20,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Order stays: the device contact first, then the people cache, then this; a source only adds what the earlier ones lack.
  * One query per number at a time; an answer (also "not on WhatsApp") is kept for [ttlMs], so a redial asks nothing.
+ * With a [store] the answers outlive the process: they are read once, before the first lookup or ask, and written
+ * after each new answer, with the same lifetime.
  * Two gateway calls per new number (lookup, then profile), well inside the gateway's allowance. Never throws.
  */
 class LiveWaNames(
@@ -28,13 +35,14 @@ class LiveWaNames(
     private val scope: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
     private val ttlMs: Long = TTL_MS,
+    /** Where the answers are kept between runs; null keeps them in memory only. */
+    private val store: LiveNameStore? = null,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : IdentitySource {
-    private class Known(
-        val name: String?,
-        val atMs: Long,
-    )
+    private val known = ConcurrentHashMap<String, LiveName>()
+    private val restoring = Mutex()
 
-    private val known = ConcurrentHashMap<String, Known>()
+    @Volatile private var restored = store == null
     private val asking = ConcurrentHashMap.newKeySet<String>()
     private val changes = MutableStateFlow(0L)
 
@@ -44,6 +52,7 @@ class LiveWaNames(
     override val ready: Boolean = true
 
     override suspend fun lookup(numbers: List<String>): Map<String, CallerIdentity> {
+        restore()
         val out = HashMap<String, CallerIdentity>()
         for (number in numbers) {
             val key = keyOf(number) ?: continue
@@ -56,15 +65,36 @@ class LiveWaNames(
     /** Starts a background WhatsApp query for [number] unless one runs or a fresh answer is known. */
     fun ask(number: String) {
         val key = keyOf(number) ?: return
-        val prior = known[key]
-        if (prior != null && clock() - prior.atMs < ttlMs) return
+        if (fresh(key)) return
         if (!asking.add(key)) return
         scope.launch {
             try {
-                query(key)
+                restore()
+                // A stored answer may cover it now that the file is read.
+                if (!fresh(key)) query(key)
             } finally {
                 asking.remove(key)
             }
+        }
+    }
+
+    private fun fresh(key: String): Boolean = known[key]?.let { clock() - it.atMs < ttlMs } == true
+
+    /** Reads the stored answers once; the ones past their lifetime are left out. A name found moves [revision]. */
+    private suspend fun restore() {
+        if (restored) return
+        restoring.withLock {
+            if (restored) return
+            val saved = withContext(io) { store?.load().orEmpty() }
+            val now = clock()
+            var named = false
+            for ((key, answer) in saved) {
+                if (now - answer.atMs >= ttlMs) continue
+                // An answer of this run is newer than the file's.
+                if (known.putIfAbsent(key, answer) == null && answer.name != null) named = true
+            }
+            restored = true
+            if (named) changes.value += 1
         }
     }
 
@@ -111,12 +141,16 @@ class LiveWaNames(
         RostyLog.i(TAG, if (name != null) "live name: found on WhatsApp" else "live name: on WhatsApp, no name")
     }
 
-    private fun remember(
+    private suspend fun remember(
         key: String,
         name: String?,
     ) {
-        known[key] = Known(name, clock())
+        known[key] = LiveName(name, clock())
         if (name != null) changes.value += 1
+        val keep = store ?: return
+        val now = clock()
+        val live = known.filterValues { now - it.atMs < ttlMs }
+        withContext(io) { keep.save(live) }
     }
 
     /** The number's digits in international form, the key and the JID's user part; null for a withheld or short number. */

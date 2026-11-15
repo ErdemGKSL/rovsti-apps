@@ -8,6 +8,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import dev.rosty.design.transition.Tab
 import dev.rosty.people.ui.LocalAvatarResolver
 import dev.rosty.platform.contacts.Shortcuts
+import dev.rosty.platform.notify.BirthdayReminders
 import dev.rosty.shell.NavSpec
 import dev.rosty.shell.RostyShellActivity
 import dev.rosty.shell.shellContainer
@@ -34,7 +35,10 @@ class MainActivity : RostyShellActivity<ContactsRoute>() {
             }
         val route = contactsRouteFor(intent.action, intent.data?.toString(), stream, intent.extras)
         // A link is used once: a rotation or a restart must not open the same card again (AD-CT8).
-        if (route != null) intent.removeExtra(Shortcuts.EXTRA_CONTACT_ID)
+        if (route != null) {
+            intent.removeExtra(Shortcuts.EXTRA_CONTACT_ID)
+            intent.removeExtra(BirthdayReminders.EXTRA_MAKE_CARD)
+        }
         return route
     }
 

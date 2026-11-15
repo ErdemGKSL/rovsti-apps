@@ -10,6 +10,7 @@ import dev.rosty.design.transition.ChromeSpec
 import dev.rosty.design.transition.Tab
 import dev.rosty.design.transition.TabBarMode
 import dev.rosty.platform.contacts.Shortcuts
+import dev.rosty.platform.notify.BirthdayReminders
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.serialization.Serializable
 
@@ -39,6 +40,8 @@ sealed interface ContactsRoute {
     @Serializable
     data class ContactCard(
         val id: Long,
+        /** Open Card Studio on arrival (the birthday notification's "Make a Card" action). */
+        val makeCard: Boolean = false,
     ) : ContactsRoute
 
     /** [id] null creates a contact; [seed] pre-fills a new one. */
@@ -297,7 +300,8 @@ fun contactsRouteFor(
     if (action == OPEN_PEOPLE_SYNC) return SettingsTab to emptyList()
     val contact = contactIdOf(extras)
     if (contact != null) {
-        return ContactsTab to listOf(ContactsRoute.ContactCard(contact))
+        val makeCard = extras?.getBoolean(BirthdayReminders.EXTRA_MAKE_CARD, false) == true
+        return ContactsTab to listOf(ContactsRoute.ContactCard(contact, makeCard))
     }
     val vcard =
         when (action) {

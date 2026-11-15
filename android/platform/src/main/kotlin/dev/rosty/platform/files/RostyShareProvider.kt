@@ -9,10 +9,9 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import dev.rosty.platform.files.MediaShare
-import java.io.File
 
 /**
- * Serves the files in `cache/share` read-only to the share target. Only `camera-<digits>.jpg` may be opened for
+ * Serves the files in `cache/share` (and `cache/share/cards`, X.2) read-only to the share target. Only `camera-<digits>.jpg` may be opened for
  * writing (the camera app writes the photo there). Names with a separator or `..` are refused.
  */
 class RostyShareProvider : ContentProvider() {
@@ -25,10 +24,9 @@ class RostyShareProvider : ContentProvider() {
         val write = mode == "w" || mode == "wt"
         if (mode != "r" && !write) return null
         val ctx = context ?: return null
-        val name = uri.lastPathSegment ?: return null
-        if (!MediaShare.isSafeName(name)) return null
-        if (write && !MediaShare.writable(name)) return null
-        val file = File(MediaShare.dir(ctx), name)
+        val file = MediaShare.resolve(ctx, uri) ?: return null
+        val name = file.name
+        if (write && (!MediaShare.writable(name) || file.parentFile?.name == MediaShare.CARDS)) return null
         if (!file.isFile) return null
         val flags =
             if (write) {

@@ -18,6 +18,7 @@ object CardStudioTags {
     const val Animated = "card-studio-animated"
     const val Share = "card-studio-share"
     const val Save = "card-studio-save"
+    const val ShareMore = "card-studio-share-more"
 
     fun swatch(palette: CardPalette) = "card-studio-swatch-${palette.name.lowercase()}"
 }
@@ -104,6 +105,9 @@ sealed interface CardStudioAction {
 
     data object Share : CardStudioAction
 
+    /** Share the first frame of an animated card as a still image. */
+    data object ShareAsStill : CardStudioAction
+
     data object Save : CardStudioAction
 
     /** The sheet left the screen: cancels the running render. */
@@ -120,6 +124,9 @@ sealed interface CardStudioEffect {
     data class Toast(
         val text: UiText,
     ) : CardStudioEffect
+
+    /** Something failed: the sheet plays the reject haptic. */
+    data object Reject : CardStudioEffect
 }
 
 /** The words printed on the card, resolved from string resources so Turkish needs no second table in Rust. */

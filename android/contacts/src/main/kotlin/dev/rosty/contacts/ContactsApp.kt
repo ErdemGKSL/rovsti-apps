@@ -163,7 +163,9 @@ fun ContactsApp(
         entry<ContactsRoute.Intake> { route -> IntakePage(container, route, navigator) }
         // The pages below arrive with E4.2-E4.9; until then a route that a link or a later screen can reach still shows
         // an honest placeholder instead of nothing.
-        entry<ContactsRoute.ContactCard> { route -> ContactCardPage(container, route.id, navigator, pop) }
+        entry<ContactsRoute.ContactCard> { route ->
+            ContactCardPage(container, route.id, navigator, pop, openStudio = route.makeCard)
+        }
         entry<ContactsRoute.ContactEditor> { route ->
             ContactEditorPage(container, route, outcome = { _, _ -> }, onClosed = pop)
         }

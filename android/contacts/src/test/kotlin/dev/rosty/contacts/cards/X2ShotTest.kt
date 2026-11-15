@@ -84,6 +84,31 @@ class X2ShotTest : ShotTest() {
             r.settle(2)
         }
 
+    private fun animatedReady(r: CardStudioRig) {
+        compose
+            .onNodeWithTag(CardStudioTags.Animated)
+            .performTouchInput { click(centerRight.copy(x = right - 40f)) }
+        r.settle(3)
+    }
+
+    private fun openMore(r: CardStudioRig) {
+        animatedReady(r)
+        compose.onNodeWithTag(CardStudioTags.ShareMore).performClick()
+        advance(1200)
+        r.settle(2)
+    }
+
+    /** The finished animated card: Save, Share and the "..." button that holds "Share as still image". */
+    @Test fun animatedReady() = studio("x2-share-animated") { animatedReady(it) }
+
+    @Test fun shareStillMenu() = studio("x2-share-still-menu") { openMore(it) }
+
+    @Config(qualifiers = "+tr")
+    @Test
+    fun shareStillMenuTurkish() = studio("x2-share-still-menu-tr") { openMore(it) }
+
+    @Test fun animatedReadyFs2() = studio("x2-share-animated-fs2", fontScale = 2f) { animatedReady(it) }
+
     @Config(qualifiers = "+tr")
     @Test
     fun birthdayTurkish() = studio("x2-card-preview-birthday-tr")

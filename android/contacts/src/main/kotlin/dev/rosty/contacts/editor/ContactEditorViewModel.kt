@@ -217,6 +217,11 @@ class ContactEditorViewModel(
         }.getOrNull()
     }
 
+    /**
+     * Synchronized so the load coroutine's persist and an early edit's persist cannot interleave: each one reads the
+     * newest [edit] inside the lock, so the last write to [saved] always carries the newest draft.
+     */
+    @Synchronized
     private fun persist() {
         val e = edit.value
         saved[KEY_DRAFT] = JSON.encodeToString(ContactDraft.serializer(), e.draft)

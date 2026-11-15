@@ -356,6 +356,29 @@ data class WaSyncThreadPage(
     val syncing: Boolean,
 )
 
+/** Where a page of starred messages ended; pass it back as `before` for the next (older) page. */
+@Serializable
+data class WaSyncStarredCursor(
+    @SerialName("timestamp_ms") val timestampMs: Long,
+    val chat: String,
+    val id: String,
+)
+
+@Serializable
+data class WaSyncStarredRequest(
+    val handle: Long,
+    val limit: Int,
+    @EncodeDefault(NEVER) val before: WaSyncStarredCursor? = null,
+)
+
+/** A page of the starred messages of every chat, newest first. A star still in the outbox counts. */
+@Serializable
+data class WaSyncStarredPage(
+    val items: List<WaSyncMessage>,
+    /** The cursor of the next page; null: nothing older is starred. */
+    val next: WaSyncStarredCursor?,
+)
+
 @Serializable
 data class WaSyncMessageRequest(
     val handle: Long,
@@ -426,6 +449,17 @@ sealed interface WaSyncAction {
     data class MarkRead(
         @EncodeDefault(NEVER) val sender: String? = null,
         val ids: List<String>,
+    ) : WaSyncAction
+
+    /**
+     * Stars or unstars a stored message on the account. The stored flag changes at once; a later star of the same
+     * message replaces one that has not gone out, and a refused one is undone.
+     */
+    @Serializable
+    @SerialName("star")
+    data class Star(
+        @SerialName("message_id") val messageId: String,
+        val starred: Boolean,
     ) : WaSyncAction
 }
 

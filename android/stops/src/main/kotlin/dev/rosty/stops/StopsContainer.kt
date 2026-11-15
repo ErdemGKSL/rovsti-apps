@@ -29,6 +29,7 @@ import dev.rosty.stops.home.HomeData
 import dev.rosty.stops.home.HomeSheet
 import dev.rosty.stops.map.MapTileStore
 import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.notice.TripNotice
 import dev.rosty.stops.offline.MapArea
 import dev.rosty.stops.offline.OfflineAreaWorker
 import dev.rosty.stops.offline.OfflineDownloads
@@ -51,6 +52,16 @@ open class StopsContainer(
 ) : ShellContainer(context, AppPermissions.stops) {
     /** Every Stops decision the Rust core makes (E2.12): trip, pick, saved stops, history, prefs, GTFS, `view.*`. */
     val ops: StopsOps by lazy { createOps() }
+
+    /** AD-ST7: whether a trip carries the arriving-soon message, and the per-trip switch under Start. */
+    val arrivingSoon: TripNotice by lazy {
+        TripNotice(
+            prefs = store.prefs,
+            load = { (store.load() as? Outcome.Ok)?.value ?: store.prefs.value },
+            link = wa.linkState,
+            settled = wa.settled,
+        )
+    }
 
     /** The tile cache and source management (E2.13). */
     val tilesOps: TilesOps by lazy { createTilesOps() }

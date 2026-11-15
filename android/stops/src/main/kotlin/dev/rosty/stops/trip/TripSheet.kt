@@ -53,6 +53,7 @@ import dev.rosty.shell.permissions.SpecialAccessRow
 import dev.rosty.shell.permissions.SpecialRowTexts
 import dev.rosty.stops.R
 import dev.rosty.stops.home.OnSheet
+import dev.rosty.stops.notice.noticeLine
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 
@@ -121,11 +122,12 @@ fun TripSection(
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
         val trip = state.trip
         if (trip != null) {
-            LiveCard(state, trip, viewModel::onAction, arrivingSoon)
+            LiveCard(state, trip, viewModel::onAction)
             ProblemRows(state.problem, preflight, viewModel::onAction)
             RecommendedRows(preflight)
         } else if (a != null && b != null) {
             StartRow(state.busy, { onStart(a, b) }, onClear)
+            arrivingSoon.PlanRow()
             val slot = if (b.gtfsStop != null) Slot.B else Slot.A
             val stop = if (slot == Slot.B) b else a
             if (stop.gtfsStop != null) LineRow(viewModel, slot, stop, overlays, onLine)
@@ -208,7 +210,6 @@ private fun LiveCard(
     state: TripUiState,
     trip: RunningTrip,
     onAction: (TripAction) -> Unit,
-    arrivingSoon: ArrivingSoonHook,
 ) {
     val colors = RostyTheme.colors
     val type = RostyTheme.type
@@ -264,9 +265,9 @@ private fun LiveCard(
         }
         state.fromYou?.let { Detail(it) }
         live?.nextFixMs?.takeIf { it > 0 }?.let { Detail(stringResource(R.string.trip_next_check, waitText(it))) }
-        if (arrivingSoon.showsRow) {
-            // The per-trip arriving-soon toggle is the `:wa` story's (ArrivingSoonHook); the stub shows no row.
-            Detail(stringResource(R.string.trip_arriving_soon), Modifier.testTag(TripTags.ArrivingSoon))
+        // AD-ST7: what became of the arriving-soon message of this trip.
+        noticeLine(trip.notice, live?.noticeSent == true, live?.noticeFailed == true)?.let {
+            Detail(stringResource(it), Modifier.testTag(TripTags.ArrivingSoon))
         }
         Row(
             Modifier.padding(top = Spacing.s),

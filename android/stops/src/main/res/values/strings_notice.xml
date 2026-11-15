@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The arriving-soon WhatsApp message (AD-ST7): Settings group, its page, the chat picker, the trip sheet. -->
+    <string name="notice_group">WhatsApp</string>
+    <string name="notice_group_footer">Stops can text one WhatsApp chat shortly before you arrive. It is the only thing Stops sends from your phone.</string>
+    <string name="notice_title">Arriving-Soon Message</string>
+    <string name="notice_row_to">To %1$s</string>
+    <string name="notice_row_off">Off</string>
+    <string name="notice_row_needs_whatsapp">Connect WhatsApp first</string>
+    <string name="notice_whatsapp">WhatsApp</string>
+    <string name="notice_wa_connected">Connected</string>
+    <string name="notice_wa_not_connected">Not connected</string>
+    <string name="notice_wa_linking">Linking</string>
+    <string name="notice_wa_logged_out">Logged out</string>
+    <string name="notice_wa_banned">Number banned</string>
+    <string name="notice_send_to">Send To</string>
+    <string name="notice_chat">Chat</string>
+    <string name="notice_none">None</string>
+    <string name="notice_turn_off">Turn Off</string>
+    <string name="notice_on_footer">The message goes to this chat on every trip. You can switch it off for one trip before you start.</string>
+    <string name="notice_off_footer">Choose a chat to send the message on your trips.</string>
+    <string name="notice_message">Message</string>
+    <string name="notice_preview">Reads: %1$s</string>
+    <string name="notice_problem_empty">Write a message first.</string>
+    <string name="notice_problem_long">The message is too long (%1$d characters at most).</string>
+    <string name="notice_message_footer">{stop} is where you are going, {min} the minutes left. Sent at most once per trip.</string>
+    <string name="notice_save">Save Message</string>
+    <string name="notice_use_default">Use the Default Message</string>
+    <string name="notice_save_failed">Could not save</string>
+    <string name="notice_turned_off">Arriving-soon message turned off</string>
+    <string name="notice_when">When</string>
+    <string name="notice_when_footer">Before the circle: when you are that many minutes away from the circle around your stop.</string>
+    <string name="notice_not_connected_footer">Link WhatsApp to choose who gets the message. Your message is kept.</string>
+    <string name="notice_sample_stop">Kadıköy Pier</string>
+    <string name="notice_pick_title">Choose a Chat</string>
+    <string name="notice_pick_search">Search</string>
+    <string name="notice_pick_loading">Loading chats…</string>
+    <string name="notice_pick_empty">No chats yet</string>
+    <string name="notice_pick_no_match">No chat matches</string>
+    <string name="notice_pick_group">Group</string>
+    <string name="notice_toggle">Text %1$s when arriving</string>
+    <string name="notice_line_planned">Will text when arriving</string>
+    <string name="notice_line_sent">Arrival message sent</string>
+    <string name="notice_line_failed">Arrival message could not be sent</string>
+</resources>

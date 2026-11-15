@@ -168,6 +168,7 @@ fun rememberTripViewModel(container: StopsContainer): TripViewModel {
                         here = { container.location.lastKnown()?.let { Coord(it.lat, it.lon) } },
                         nowMs = TripClock::nowMillis,
                         waitingText = waiting,
+                        arrivingSoon = container.arrivingSoon,
                     )
                 }
             }
@@ -566,6 +567,7 @@ fun HomeEntry(
                         onClear = { map.pick.clear() },
                         onLine = { slot, dest -> map.pick.place(slot, dest) },
                         overlays = overlays,
+                        arrivingSoon = container.arrivingSoon,
                         lastTrip = { LastTripCard(alarm) },
                     )
                 },

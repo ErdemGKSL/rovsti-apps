@@ -346,13 +346,13 @@ class MapCameraTest {
 
     @Test fun aMarginLargerThanTheRoomIsShrunkNotObeyed() {
         val c = camera(width = 400, height = 800)
-        // 190 px of margin on each side of 400 would leave 20 px: the fit keeps the 120 dp minimum instead.
+        // 190 px of margin on each side of 400 would leave 20 px: the fit keeps the 60 dp minimum instead.
         assertTrue(c.fit(41.00, 28.90, 41.05, 29.10, marginPx = 190f))
         val width = c.screenX(29.10) - c.screenX(28.90)
-        assertEquals(120f, width, 1f)
+        assertEquals(60f, width, 1f)
         // A margin beyond the viewport, a negative one and padding beyond the viewport are harmless too.
         assertTrue(c.fit(41.00, 28.90, 41.05, 29.10, marginPx = 5_000f))
-        assertEquals(120f, c.screenX(29.10) - c.screenX(28.90), 1f)
+        assertEquals(60f, c.screenX(29.10) - c.screenX(28.90), 1f)
         assertTrue(c.fit(41.00, 28.90, 41.05, 29.10, marginPx = -50f))
         assertEquals(400f, c.screenX(29.10) - c.screenX(28.90), 1f)
         assertTrue(c.setPadding(900f, 900f, 900f, 900f))
@@ -371,6 +371,48 @@ class MapCameraTest {
         // Centre-on and travel aim at the same sensible point.
         assertTrue(tiny.centreOn(41.02, 29.0))
         assertEquals(30f, tiny.screenX(29.0), 0.5f)
+    }
+
+    @Test fun fitGateKeepsTheWholeCircleInTheFreeArea() {
+        // 891 x 411 dp landscape at 3x, a trip in progress: top chrome 84 dp, the sheet at peek 120 dp, buttons 68 dp.
+        val c = camera(width = 2673, height = 1233, density = 3f)
+        assertTrue(c.setPadding(0f, 252f, 204f, 360f))
+        val margin = 144f
+        // A west-east gate of about 670 m.
+        val lat = 41.002
+        val west = 28.994
+        val east = 29.002
+        // Fitting the two ends alone fills the width: most of the circle is under the chrome (the bug).
+        assertTrue(c.fitPoints(doubleArrayOf(lat, west, lat, east), marginPx = margin))
+        val wrongRadius = (c.screenX(east) - c.screenX(west)) / 2f
+        assertTrue(c.screenY(lat) - wrongRadius < 252f)
+        // The gate fit holds the whole circle.
+        assertTrue(c.fitGate(lat, west, lat, east, marginPx = margin))
+        val radius = (c.screenX(east) - c.screenX(west)) / 2f
+        val cx = (c.screenX(east) + c.screenX(west)) / 2f
+        val cy = c.screenY(lat)
+        assertEquals(c.focusX, cx, 1f)
+        assertEquals(c.focusY, cy, 1f)
+        assertTrue("top ${cy - radius}", cy - radius >= 252f + margin - 1f)
+        assertTrue("bottom ${cy + radius}", cy + radius <= 1233f - 360f - margin + 1f)
+        assertTrue(cx - radius >= margin && cx + radius <= 2673f - 204f - margin)
+        // The short axis binds: the circle touches the margins above and below.
+        assertEquals(252f + margin, cy - radius, 2f)
+        // The same for a north-south and a diagonal gate, and whichever end is A.
+        for (gate in listOf(doubleArrayOf(41.0, 29.0, 41.006, 29.0), doubleArrayOf(41.004, 29.003, 41.0, 28.997))) {
+            assertTrue(c.fitGate(gate[0], gate[1], gate[2], gate[3], marginPx = margin))
+            val ax = c.screenX(gate[1])
+            val ay = c.screenY(gate[0])
+            val bx = c.screenX(gate[3])
+            val by = c.screenY(gate[2])
+            val r = kotlin.math.hypot(bx - ax, by - ay) / 2f
+            assertEquals(c.focusY, (ay + by) / 2f, 1f)
+            assertEquals((1233f - 360f - 252f) / 2f - margin, r, 2f)
+        }
+        // Both ends on one point is a point fit; a broken coordinate changes nothing.
+        assertTrue(c.fitGate(41.0, 29.0, 41.0, 29.0))
+        assertEquals(MapMath.MIN_METRES_PER_DP, c.metresPerDp, 1e-6)
+        assertFalse(c.fitGate(41.0, Double.NaN, 41.0, 29.0))
     }
 
     @Test fun fitOfOnePointUsesTheClosestAllowedScale() {

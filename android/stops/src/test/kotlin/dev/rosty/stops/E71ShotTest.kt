@@ -85,13 +85,19 @@ class E71ShotTest : ShotTest() {
         for (dark in listOf(false, true)) {
             runAndroidComposeUiTest<ComponentActivity> {
                 mainClock.autoAdvance = false
-                setContent { RostyTheme(darkTheme = dark) { remember { AppFixture(withTrip) }.Content() } }
+                // The real core behind the scripted trip: the pick controller draws the trip's pins and circle with it.
+                val core = FakeStopsCore(trip = SampleStops.pierW to SampleStops.pierE, real = HostCore.real())
+                setContent { RostyTheme(darkTheme = dark) { remember { AppFixture(core) }.Content() } }
                 repeat(3) {
                     mainClock.advanceTimeByFrame()
                     waitForIdle()
                     simulateBars(activity!!)
                 }
-                repeat(20) { mainClock.advanceTimeBy(100) }
+                // The core answers on its own threads, through the main looper.
+                repeat(30) {
+                    mainClock.advanceTimeBy(100)
+                    Thread.sleep(15)
+                }
                 waitForIdle()
                 onRoot().captureRoboImage(
                     "screenshots/e7.1-home-landscape-${if (dark) "dark" else "light"}.png",

@@ -155,7 +155,7 @@ class MapCamera(
     ): Double {
         val free = if (counts) size - padding else size.toFloat()
         // A margin that would leave less than the minimum is shrunk rather than obeyed.
-        val least = minOf(free, MIN_FREE_DP * density)
+        val least = minOf(free, MIN_FIT_DP * density)
         return max(1.0, max(least, free - 2 * max(0f, marginPx)).toDouble())
     }
 
@@ -323,7 +323,7 @@ class MapCamera(
      *
      * The fit never works with less than [MIN_FREE_DP] on an axis: padding that leaves less is ignored on that axis
      * (the box is fitted to the whole viewport there, partly under the chrome, instead of zooming out to the limit),
-     * and a margin that would leave less is shrunk.
+     * and a margin that would leave less than [MIN_FIT_DP] is shrunk.
      */
     fun fit(
         south: Double,
@@ -387,6 +387,37 @@ class MapCamera(
             east = max(east, latLon[2 * i + 1])
         }
         return fit(south, west, north, east, marginPx, minMetresPerDp)
+    }
+
+    /**
+     * [fit] for a gate: the whole circle whose diameter is AB, not only its two ends. A west-east gate in a wide
+     * window would otherwise fill the width and leave most of its circle above and below the free area.
+     */
+    fun fitGate(
+        aLat: Double,
+        aLon: Double,
+        bLat: Double,
+        bLon: Double,
+        marginPx: Float = 0f,
+        minMetresPerDp: Double = MapMath.MIN_METRES_PER_DP,
+    ): Boolean {
+        if (!aLat.isFinite() || !aLon.isFinite() || !bLat.isFinite() || !bLon.isFinite()) return false
+        // On the Mercator plane, where the circle is drawn: its centre is the middle of AB, its radius half of AB.
+        val ax = MapMath.worldX(aLon)
+        val ay = MapMath.worldY(aLat)
+        val dx = MapMath.wrapDelta(MapMath.worldX(bLon), ax)
+        val dy = MapMath.worldY(bLat) - ay
+        val cx = ax + dx / 2.0
+        val cy = ay + dy / 2.0
+        val r = Math.hypot(dx, dy) / 2.0
+        return fit(
+            south = MapMath.latOf(min(1.0, cy + r)),
+            west = MapMath.lonOfUnwrapped(cx - r),
+            north = MapMath.latOf(max(0.0, cy - r)),
+            east = MapMath.lonOfUnwrapped(cx + r),
+            marginPx = marginPx,
+            minMetresPerDp = minMetresPerDp,
+        )
     }
 
     // ---- gestures and animation ----
@@ -617,8 +648,11 @@ class MapCamera(
         /** A double tap zooms in by this (GPUI: `zoom_about(2.0, at)`). */
         const val DOUBLE_TAP_FACTOR = 2.0
 
-        /** The least free length per axis that padding and margins may leave for [fit] and the focus point. */
+        /** The least free length per axis that padding may leave for [fit] and the focus point. */
         const val MIN_FREE_DP = 120f
+
+        /** The least length per axis the margins of [fit] may leave (a short strip keeps most of its margins). */
+        const val MIN_FIT_DP = 60f
 
         const val ZOOM_ANIMATION_S = 0.25
         const val TRAVEL_ANIMATION_S = 0.45

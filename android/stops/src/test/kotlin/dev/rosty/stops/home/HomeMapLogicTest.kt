@@ -12,9 +12,8 @@ class HomeMapLogicTest {
 
     @Test fun aTripInProgressWinsTheFirstView() {
         val state = HomeState(trip = TripSummary("A – B", SampleStops.pierW, SampleStops.pierE))
-        val view = firstView(state, fix) as FirstView.Fit
-        assertEquals(4, view.latLon.size)
-        assertEquals(SampleStops.pierE.coord.lon, view.latLon[3], 0.0)
+        // The gate, so the view fits its whole circle and not only the two ends.
+        assertEquals(FirstView.Gate(SampleStops.pierW.coord, SampleStops.pierE.coord), firstView(state, fix))
     }
 
     @Test fun thenMyPositionThenTheSavedStopsThenTheDefault() {

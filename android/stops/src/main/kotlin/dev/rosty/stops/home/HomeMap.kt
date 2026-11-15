@@ -19,6 +19,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.design.motion.MotionGate
 import dev.rosty.platform.location.Fix
@@ -159,6 +160,10 @@ fun PlaceFirstView(
                 map.camera.fitPoints(view.latLon, marginPx = FIT_MARGIN_DP * map.camera.density)
             }
 
+            is FirstView.Gate -> {
+                map.fitGate(view.a, view.b)
+            }
+
             is FirstView.Centre -> {
                 // GPUI `Viewport::new(at, STREET_MPP)`: the position opens at street scale, then clears the chrome.
                 map.camera.setView(view.lat, view.lon, STREET_METRES_PER_DP)
@@ -181,11 +186,16 @@ private const val STREET_METRES_PER_DP = 1.5
 
 /** The view fits the gate of a trip that just started (GPUI follows the trip). */
 fun HomeMap.showGate(trip: dev.rosty.stops.trip.RunningTrip) {
+    fitGate(trip.a.coord, trip.b.coord)
+}
+
+/** The view fits the whole circle on AB (the pins, their captions and the circle clear the chrome by the margin). */
+private fun HomeMap.fitGate(
+    a: Coord,
+    b: Coord,
+) {
     if (camera.widthPx > 0 && camera.heightPx > 0) {
-        camera.fitPoints(
-            doubleArrayOf(trip.a.coord.lat, trip.a.coord.lon, trip.b.coord.lat, trip.b.coord.lon),
-            marginPx = FIT_MARGIN_DP * camera.density,
-        )
+        camera.fitGate(a.lat, a.lon, b.lat, b.lon, marginPx = FIT_MARGIN_DP * camera.density)
     }
 }
 
@@ -195,18 +205,19 @@ fun HomeMap.showPair(
     b: Destination,
 ) {
     pick.setPair(a, b)
-    if (camera.widthPx > 0 && camera.heightPx > 0) {
-        camera.fitPoints(
-            doubleArrayOf(a.coord.lat, a.coord.lon, b.coord.lat, b.coord.lon),
-            marginPx = FIT_MARGIN_DP * camera.density,
-        )
-    }
+    fitGate(a.coord, b.coord)
 }
 
 /** Where the first view goes. */
 sealed interface FirstView {
     class Fit(
         val latLon: DoubleArray,
+    ) : FirstView
+
+    /** A trip's gate: the circle on AB. */
+    data class Gate(
+        val a: Coord,
+        val b: Coord,
     ) : FirstView
 
     data class Centre(
@@ -224,7 +235,7 @@ fun firstView(
 ): FirstView {
     val trip = state.trip
     if (trip?.a != null && trip.b != null) {
-        return FirstView.Fit(doubleArrayOf(trip.a.coord.lat, trip.a.coord.lon, trip.b.coord.lat, trip.b.coord.lon))
+        return FirstView.Gate(trip.a.coord, trip.b.coord)
     }
     if (fix != null && fix.lat.isFinite() && fix.lon.isFinite()) return FirstView.Centre(fix.lat, fix.lon)
     if (state.saved.isNotEmpty()) {

@@ -59,10 +59,13 @@ class E79ShotTest : ShotTest() {
         settleRust(800)
     }
 
-    private fun measureThreePoints(item: String = "Measure distance") {
+    private fun measureThreePoints(
+        item: String = "Measure distance",
+        points: List<Pair<Float, Float>> = listOf(0.25f to 0.32f, 0.6f to 0.28f, 0.7f to 0.5f),
+    ) {
         press(HomeTags.Layers)
         menu(item)
-        for ((fx, fy) in listOf(0.25f to 0.32f, 0.6f to 0.28f, 0.7f to 0.5f)) {
+        for ((fx, fy) in points) {
             compose.onNodeWithTag(HomeMapTag).performTouchInput { click(Offset(width * fx, height * fy)) }
             settleRust(800)
         }
@@ -77,7 +80,11 @@ class E79ShotTest : ShotTest() {
         toolShot("e7.9-measure-two-legs-tr") { measureThreePoints("Mesafe ölç") }
     }
 
-    @Test fun measureLargeText() = toolShot("e7.9-measure-two-legs-fs2", fontScale = 2f) { measureThreePoints() }
+    @Test fun measureLargeText() =
+        toolShot("e7.9-measure-two-legs-fs2", fontScale = 2f) {
+            // The fs2 card is taller: the taps go below it.
+            measureThreePoints(points = listOf(0.25f to 0.5f, 0.6f to 0.45f, 0.7f to 0.62f))
+        }
 
     @Test fun myLocationLargeText() =
         toolShot("e7.9-my-location-sheet-fs2", fontScale = 2f) {

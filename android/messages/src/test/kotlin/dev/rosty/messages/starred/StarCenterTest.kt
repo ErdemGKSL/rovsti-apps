@@ -9,6 +9,7 @@ import dev.rosty.messages.conversation.BubbleUi
 import dev.rosty.messages.conversation.ConversationItem
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.inbox.EnglishInboxWords
+import dev.rosty.messages.names.FakeLiveNames
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaStoreLink
 import dev.rosty.messages.wa.WaTestKit
@@ -257,6 +258,29 @@ class StarCenterTest {
             assertEquals(emptyList<WaStarRow>(), seams.starred())
             // The readers were told: once for the star, once for the answer.
             assertEquals(listOf<Set<String>?>(setOf(jid), setOf(jid)), heard)
+        }
+
+    @Test fun aNameThatArrivesLaterIsReadIntoTheSeamsChanges() =
+        runTest {
+            val kit = WaTestKit(backgroundScope)
+            kit.offline.start()
+            kit.chat(WaTestKit.MERT)
+            kit.message(WaTestKit.text(WaTestKit.MERT, "c1", 6_000, "See you at six").copy(starred = true))
+            settle()
+            val live = FakeLiveNames()
+            val seams =
+                waStarSeams(kit.offline, EnglishInboxWords, "Me", PersonNames({ null }, MutableStateFlow(Unit), live))
+            var reads = 0
+            backgroundScope.launch { seams.changes.collect { reads++ } }
+            settle()
+            val before = reads
+            assertEquals("+905550000002", seams.starred()!!.single().title)
+
+            // WhatsApp answered for the number: the list is told to read again and the row carries the name.
+            live.land("+905550000002", "Mert")
+            settle()
+            assertEquals(before + 1, reads)
+            assertEquals("Mert", seams.starred()!!.single().title)
         }
 
     @Test fun theStarredQueryNamesTheChatAndWhoWrote() =

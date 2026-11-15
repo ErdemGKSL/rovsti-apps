@@ -14,6 +14,8 @@ import dev.rosty.messages.wa.WaOffline
 import dev.rosty.messages.wa.toBody
 import dev.rosty.messages.wa.toMeta
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -47,7 +49,9 @@ internal fun waStarSeams(
     names: PersonNames,
 ): WaStarSeams =
     WaStarSeams(
-        changes = offline.changes,
+        // The list names chats and writers: it is read again when a name may read differently (a contact saved,
+        // a WhatsApp name answered), not only when the store changed. The first value is the state now.
+        changes = merge(offline.changes, names.changes.drop(1)),
         starred = { storedStars(offline, words, me, names) },
         star = { chat, id, starred -> offline.enqueue(chat, WaSyncAction.Star(id, starred)) },
     )

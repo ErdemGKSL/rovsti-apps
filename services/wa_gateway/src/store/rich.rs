@@ -9,6 +9,7 @@ use rosty_wa_proto::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+use super::identity::Alts;
 use super::{InstanceId, Store, StoreError, last_message_row, reactions_of, upsert_chat};
 
 /// Largest thumbnail kept per message (they are a few KiB in practice).
@@ -24,6 +25,20 @@ pub struct MessageExtras {
     pub secret: Option<Vec<u8>>,
     /// A small preview image (JPEG or PNG) that came inside the message.
     pub thumbnail: Option<Vec<u8>>,
+    /// The chat id the message arrived under, bare (a LID while the row is
+    /// stored under the phone number). `None` when it was not recorded.
+    pub wire_chat: Option<String>,
+    /// The author id the message arrived under, bare. `None` for one-to-one
+    /// chats and when it was not recorded.
+    pub wire_sender: Option<String>,
+}
+
+/// The ids a stored message arrived under: what WhatsApp expects back in a
+/// message key, a quote and a read receipt.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WireIds {
+    pub chat: Option<String>,
+    pub sender: Option<String>,
 }
 
 /// A change to a stored message.
@@ -85,6 +100,8 @@ pub enum ProfileChange {
     /// Something changed on WhatsApp's side; ask again next time.
     Stale,
     Fetched(FetchedProfile),
+    /// The business name a message of theirs carried.
+    VerifiedName(String),
 }
 
 /// The body an edit leaves: a caption edit of media keeps the media.
@@ -194,6 +211,59 @@ pub fn group_status(members: Option<usize>, counts: ReceiptCounts) -> Option<Del
         Some(_) => None,
         None => (counts.delivered > 0).then_some(DeliveryStatus::Delivered),
     }
+}
+
+/// One group member's receipt for messages of mine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupReceipt {
+    /// Who acked: their phone-number JID when known, else their LID. Bare.
+    pub participant: String,
+    /// The messages the receipt covers.
+    pub ids: Vec<String>,
+    /// How far they got.
+    pub status: DeliveryStatus,
+    /// How many other members the group has now; `None` when unknown.
+    pub members: Option<usize>,
+    /// This account's own ids, bare: its devices are not members.
+    pub own: Vec<String>,
+}
+
+/// Counts receipt rows by person. `rows` are `(person, furthest state)`
+/// with a LID already replaced by its number where the gateway knows it;
+/// `own` are this account's ids, whose devices never count.
+fn count_receipts(rows: impl IntoIterator<Item = (String, i64)>, own: &[String]) -> ReceiptCounts {
+    let mut counts = ReceiptCounts::default();
+    for (person, status) in rows {
+        if own.contains(&person) {
+            continue;
+        }
+        counts.delivered += 1;
+        counts.read += usize::from(status >= receipt_rank(DeliveryStatus::Read));
+        counts.played += usize::from(status >= receipt_rank(DeliveryStatus::Played));
+    }
+    counts
+}
+
+/// How far each person got with message `id`: one row per person, whether
+/// the receipts named them by LID, by number or both.
+fn receipts_by_person(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+    id: &str,
+) -> Result<Vec<(String, i64)>, StoreError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT COALESCE(p.pn, r.participant) AS person, MAX(r.status)
+         FROM receipts r
+         LEFT JOIN identity_pairs p
+           ON p.instance_id = r.instance_id AND p.lid = r.participant
+         WHERE r.instance_id = ?1 AND r.chat = ?2 AND r.id = ?3
+         GROUP BY person",
+    )?;
+    let rows = stmt.query_map(params![instance.as_str(), chat, id], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 /// The `receipts.status` value of a state (`Sent` is never stored).
@@ -306,8 +376,7 @@ pub(super) fn edits_of(
 }
 
 /// The columns [`StoredRow::read`] reads, in order.
-pub(super) const ROW_COLUMNS: &str =
-    "id, sender, from_me, ts_ms, body_json, meta_json, deleted_at, deleted_by";
+pub(super) const ROW_COLUMNS: &str = "id, sender, from_me, ts_ms, body_json, meta_json, deleted_at, deleted_by, wire_chat, wire_sender";
 
 /// A message row as stored, before [`present`].
 pub(super) struct StoredRow {
@@ -319,6 +388,8 @@ pub(super) struct StoredRow {
     meta: Option<String>,
     deleted_at: Option<i64>,
     deleted_by: Option<String>,
+    wire_chat: Option<String>,
+    wire_sender: Option<String>,
 }
 
 impl StoredRow {
@@ -332,16 +403,20 @@ impl StoredRow {
             meta: r.get(5)?,
             deleted_at: r.get(6)?,
             deleted_by: r.get(7)?,
+            wire_chat: r.get(8)?,
+            wire_sender: r.get(9)?,
         })
     }
 
     /// The message of `chat` as apps see it, taking its reactions and edits
-    /// out of the chat's maps. A deleted message shows no reactions.
+    /// out of the chat's maps. A deleted message shows no reactions. The
+    /// other form of its chat and author comes from `alts`.
     pub(super) fn into_rich(
         self,
         chat: &str,
         reactions: &mut HashMap<String, Vec<Reaction>>,
         edits: &mut HashMap<String, Vec<EditRecord>>,
+        alts: &mut Alts<'_>,
     ) -> Result<RichMessage, StoreError> {
         let mut reactions = reactions.remove(&self.id).unwrap_or_default();
         let (body, meta) = present(
@@ -354,6 +429,10 @@ impl StoredRow {
         if meta.deleted {
             reactions.clear();
         }
+        let sender_alt = match self.sender.as_deref() {
+            Some(sender) => alts.of(sender, self.wire_sender.as_deref())?,
+            None => None,
+        };
         Ok(RichMessage {
             message: WaMessage {
                 id: self.id,
@@ -363,6 +442,8 @@ impl StoredRow {
                 timestamp_ms: self.timestamp_ms,
                 body,
                 reactions,
+                chat_alt: alts.of(chat, self.wire_chat.as_deref())?,
+                sender_alt,
             },
             meta,
         })
@@ -403,8 +484,9 @@ pub(super) fn insert_row(
         .filter(|t| !t.is_empty() && t.len() <= MAX_THUMBNAIL_BYTES);
     let n = tx.execute(
         "INSERT OR IGNORE INTO messages
-         (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto, meta_json, secret, thumb)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto, meta_json, secret,
+          thumb, wire_chat, wire_sender)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             instance.as_str(),
             chat,
@@ -416,7 +498,9 @@ pub(super) fn insert_row(
             extras.raw_proto,
             meta_json(&extras.meta)?,
             extras.secret,
-            thumb
+            thumb,
+            extras.wire_chat,
+            extras.wire_sender
         ],
     )?;
     if n > 0 && !message.from_me {
@@ -530,6 +614,7 @@ fn profile_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<WaProfile> {
         business: r.get(5)?,
         verified_name: r.get(6)?,
         fetched_ms: r.get(7)?,
+        lid: None,
     })
 }
 
@@ -538,13 +623,21 @@ fn profile_of(
     instance: &InstanceId,
     jid: &str,
 ) -> Result<Option<WaProfile>, StoreError> {
-    Ok(conn
+    let profile = conn
         .query_row(
             &format!("SELECT {PROFILE_COLUMNS} FROM profiles WHERE instance_id = ?1 AND jid = ?2"),
             params![instance.as_str(), jid],
             profile_row,
         )
-        .optional()?)
+        .optional()?;
+    let Some(mut profile) = profile else {
+        return Ok(None);
+    };
+    // Only a phone-number profile names its LID; a LID profile has no number.
+    if rosty_wa_proto::is_pn_jid(jid) {
+        profile.lid = Alts::new(conn, instance).of(jid, None)?;
+    }
+    Ok(Some(profile))
 }
 
 /// The parts of a message row a change needs: from me, body and meta JSON,
@@ -587,9 +680,11 @@ pub(super) fn message_row(
     let Some(row) = row else {
         return Ok(None);
     };
-    let mut reactions = reactions_of(conn, instance, chat)?;
+    let mut alts = Alts::new(conn, instance);
+    let mut reactions = reactions_of(conn, instance, chat, &mut alts)?;
     let mut edits = edits_of(conn, instance, chat, Some(id))?;
-    row.into_rich(chat, &mut reactions, &mut edits).map(Some)
+    row.into_rich(chat, &mut reactions, &mut edits, &mut alts)
+        .map(Some)
 }
 
 impl Store {
@@ -651,10 +746,11 @@ impl Store {
                     StoredRow::read,
                 )?
                 .collect::<Result<Vec<_>, _>>()?;
-            let mut reactions = reactions_of(conn, &instance, &chat)?;
+            let mut alts = Alts::new(conn, &instance);
+            let mut reactions = reactions_of(conn, &instance, &chat, &mut alts)?;
             let mut edits = edits_of(conn, &instance, &chat, None)?;
             rows.into_iter()
-                .map(|row| row.into_rich(&chat, &mut reactions, &mut edits))
+                .map(|row| row.into_rich(&chat, &mut reactions, &mut edits, &mut alts))
                 .collect()
         })
         .await
@@ -690,6 +786,7 @@ impl Store {
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
+            let mut alts = Alts::new(conn, &instance);
             let mut out = Vec::with_capacity(rows.len());
             for (jid, name, is_group, unread) in rows {
                 let (last, last_meta) = match last_message_row(conn, &instance, &jid)? {
@@ -699,6 +796,7 @@ impl Store {
                 out.push(RichChat {
                     meta: chat_meta(conn, &instance, &jid)?,
                     chat: rosty_wa_proto::ChatSummary {
+                        alt: alts.of(&jid, None)?,
                         jid,
                         name,
                         last,
@@ -818,22 +916,30 @@ impl Store {
         Ok(changed)
     }
 
-    /// Records that group member `participant` reached `status` with my
-    /// messages `ids` in group `chat`, then moves each message's ticks to
-    /// what the whole group reached ([`group_status`] with `members` other
-    /// members). Returns the messages whose ticks moved, with their new meta.
-    /// Receipts for messages that are not mine are ignored.
+    /// Records that a group member reached a state with my messages in
+    /// group `chat` ([`GroupReceipt`]), then moves each message's ticks to
+    /// what the whole group reached ([`group_status`]). Returns the messages
+    /// whose ticks moved, with their new meta. Receipts for messages that are
+    /// not mine are ignored.
+    ///
+    /// Members are counted by person: a member who acked under a LID and
+    /// under the number the gateway knows for it counts once, and a receipt
+    /// from this account's own ids never counts.
     pub async fn record_group_receipt(
         &self,
         instance: InstanceId,
         chat: String,
-        participant: String,
-        ids: Vec<String>,
-        status: DeliveryStatus,
-        members: Option<usize>,
+        receipt: GroupReceipt,
     ) -> Result<Vec<(String, MessageMeta)>, StoreError> {
+        let GroupReceipt {
+            participant,
+            ids,
+            status,
+            members,
+            own,
+        } = receipt;
         let rank = receipt_rank(status);
-        if rank == 0 {
+        if rank == 0 || own.contains(&participant) {
             return Ok(Vec::new());
         }
         self.run(move |conn| {
@@ -852,21 +958,7 @@ impl Store {
                      DO UPDATE SET status = MAX(status, excluded.status)",
                     params![instance.as_str(), chat, id, participant, rank],
                 )?;
-                let counts = tx.query_row(
-                    "SELECT COUNT(*),
-                            COALESCE(SUM(status >= 2), 0),
-                            COALESCE(SUM(status >= 3), 0)
-                     FROM receipts WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
-                    params![instance.as_str(), chat, id],
-                    |r| {
-                        let n = |i| r.get::<_, i64>(i).map(|v| usize::try_from(v).unwrap_or(0));
-                        Ok(ReceiptCounts {
-                            delivered: n(0)?,
-                            read: n(1)?,
-                            played: n(2)?,
-                        })
-                    },
-                )?;
+                let counts = count_receipts(receipts_by_person(&tx, &instance, &chat, &id)?, &own);
                 let Some(group) = group_status(members, counts) else {
                     continue;
                 };
@@ -887,6 +979,33 @@ impl Store {
             }
             tx.commit()?;
             Ok(changed)
+        })
+        .await
+    }
+
+    /// The ids message `id` of `chat` arrived under. Empty for an unknown
+    /// message and for one stored before the gateway kept them.
+    pub async fn wire_ids(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        id: String,
+    ) -> Result<WireIds, StoreError> {
+        self.run(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT wire_chat, wire_sender FROM messages
+                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                    params![instance.as_str(), chat, id],
+                    |r| {
+                        Ok(WireIds {
+                            chat: r.get(0)?,
+                            sender: r.get(1)?,
+                        })
+                    },
+                )
+                .optional()?
+                .unwrap_or_default())
         })
         .await
     }
@@ -1151,11 +1270,27 @@ impl Store {
                         ],
                     )?;
                 }
+                ProfileChange::VerifiedName(name) => {
+                    if let Some(name) = clean_name(Some(name)) {
+                        tx.execute(
+                            "UPDATE profiles SET business = 1, verified_name = ?3
+                             WHERE instance_id = ?1 AND jid = ?2",
+                            params![instance.as_str(), jid, name],
+                        )?;
+                    }
+                }
             }
             let after = profile_of(&tx, &instance, &jid)?;
             tx.commit()?;
-            let visible =
-                |p: &Option<WaProfile>| p.clone().map(|p| WaProfile { fetched_ms: 0, ..p });
+            // When it was fetched and which LID the number has are not
+            // changes of the profile itself.
+            let visible = |p: &Option<WaProfile>| {
+                p.clone().map(|p| WaProfile {
+                    fetched_ms: 0,
+                    lid: None,
+                    ..p
+                })
+            };
             let changed = visible(&before).unwrap_or_else(|| WaProfile {
                 jid: jid.clone(),
                 ..Default::default()
@@ -1385,5 +1520,40 @@ mod tests {
         assert_eq!(text_of(&photo(Some("c"))), "c");
         assert_eq!(text_of(&photo(None)), "");
         assert_eq!(text_of(&MessageBody::Unsupported), "");
+    }
+
+    #[test]
+    fn receipts_are_counted_by_person_without_my_own_devices() {
+        let rows = |rows: &[(&str, i64)]| -> Vec<(String, i64)> {
+            rows.iter()
+                .map(|(who, s)| ((*who).to_owned(), *s))
+                .collect()
+        };
+        let own = ["me@s.whatsapp.net".to_owned(), "777@lid".to_owned()];
+        assert_eq!(count_receipts(Vec::new(), &own), ReceiptCounts::default());
+        assert_eq!(
+            count_receipts(rows(&[("a", 1), ("b", 2), ("c", 3)]), &own),
+            ReceiptCounts {
+                delivered: 3,
+                read: 2,
+                played: 1,
+            }
+        );
+        // My devices ack what I send; that says nothing about the members.
+        assert_eq!(
+            count_receipts(
+                rows(&[("me@s.whatsapp.net", 3), ("777@lid", 2), ("a", 1)]),
+                &own
+            ),
+            ReceiptCounts {
+                delivered: 1,
+                read: 0,
+                played: 0,
+            }
+        );
+        assert_eq!(
+            count_receipts(rows(&[("me@s.whatsapp.net", 3)]), &[]).delivered,
+            1
+        );
     }
 }

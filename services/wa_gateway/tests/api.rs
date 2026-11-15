@@ -15,9 +15,9 @@ use rosty_wa_client::{
 use rosty_wa_proto::audio::SpeakerFrames;
 use rosty_wa_proto::{
     AppId, CallPhase, ChatState, ConnectKey, CreateInstance, CreatedInstance, EndReason, ErrorCode,
-    EventEnvelope, GatewayEvent, GatewayUrl, GroupInfo, InstanceState, LinkRequest, MarkRead,
-    MediaKind, MessageBody, Participant, ScheduleText, ScheduledState, ScheduledText, SendReaction,
-    SendText, TypingState,
+    EventEnvelope, GatewayEvent, GatewayUrl, GroupInfo, IdentitySource, InstanceState, LinkRequest,
+    MarkRead, MediaKind, MessageBody, Participant, ScheduleText, ScheduledState, ScheduledText,
+    SendReaction, SendText, TypingState,
 };
 use rosty_wa_proto::{
     ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
@@ -686,9 +686,12 @@ async fn groups_are_listed() {
             jid: "905321234567@s.whatsapp.net".into(),
             admin: true,
             name: None,
+            lid: None,
+            pn: None,
         }],
         description: Some("family".into()),
         announce: false,
+        addressing_mode: None,
     };
     server.driver.set_groups(vec![group.clone()]);
     let g = gateway.clone();
@@ -1468,6 +1471,8 @@ fn incoming(id: &str, chat: &str, sender: Option<&str>) -> WaMessage {
         timestamp_ms: 1_700_000_000_000,
         body: MessageBody::Text("hi".into()),
         reactions: vec![],
+        chat_alt: None,
+        sender_alt: None,
     }
 }
 
@@ -2335,4 +2340,381 @@ async fn gateway_bucket_429_has_source_gateway() {
         }
         other => panic!("expected a 429, got {other:?}"),
     }
+}
+
+// --- identity: LID and phone-number pairs -----------------------------------
+
+const PEER_LID: &str = "1234@lid";
+const PEER_PN: &str = "905550000001@s.whatsapp.net";
+const OTHER_LID: &str = "5678@lid";
+const OTHER_PN: &str = "905550000002@s.whatsapp.net";
+
+async fn mappings(gateway: &Gateway, since: Option<&str>) -> rosty_wa_proto::IdentityMappings {
+    let gateway = gateway.clone();
+    let since = since.map(str::to_owned);
+    blocking(move || gateway.identity_mappings(since.as_deref()))
+        .await
+        .unwrap()
+}
+
+/// The next event that is about identity.
+async fn next_identity(events: &mut Events) -> GatewayEvent {
+    loop {
+        if let event @ (GatewayEvent::IdentityMapped { .. }
+        | GatewayEvent::IdentityNumberChanged { .. }
+        | GatewayEvent::ChatMerged { .. }) = events.next_event().await.event
+        {
+            return event;
+        }
+    }
+}
+
+#[tokio::test]
+async fn learned_pairs_are_announced_and_paged() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let id = instance(&created);
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    let sink = server.driver.sink_of(&id).unwrap();
+
+    // Nothing learned yet: an empty page without a cursor.
+    let empty = mappings(&gateway, None).await;
+    assert!(empty.items.is_empty());
+    assert_eq!(empty.next, None);
+
+    sink.learn_pair(PEER_LID, PEER_PN, IdentitySource::PeerMessage)
+        .await;
+    match next_identity(&mut events).await {
+        GatewayEvent::IdentityMapped {
+            lid, pn, source, ..
+        } => {
+            assert_eq!((lid.as_str(), pn.as_str()), (PEER_LID, PEER_PN));
+            assert_eq!(source, "peer_message");
+        }
+        other => panic!("expected identity_mapped, got {other:?}"),
+    }
+    // The same pair again, from anywhere, is no news.
+    sink.learn_pair(PEER_LID, PEER_PN, IdentitySource::History)
+        .await;
+    sink.learn_pair(OTHER_LID, OTHER_PN, IdentitySource::Usync)
+        .await;
+    match next_identity(&mut events).await {
+        GatewayEvent::IdentityMapped { lid, source, .. } => {
+            assert_eq!(lid, OTHER_LID, "the repeated pair was not announced");
+            assert_eq!(source, "usync");
+        }
+        other => panic!("expected identity_mapped, got {other:?}"),
+    }
+
+    // An app that was not listening pages them, oldest first.
+    let all = mappings(&gateway, None).await;
+    assert_eq!(
+        all.items
+            .iter()
+            .map(|m| (m.lid.as_str(), m.pn.as_str(), m.source()))
+            .collect::<Vec<_>>(),
+        [
+            (PEER_LID, PEER_PN, IdentitySource::PeerMessage),
+            (OTHER_LID, OTHER_PN, IdentitySource::Usync),
+        ]
+    );
+    assert!(all.items.iter().all(|m| m.learned_ms > 0));
+    let cursor = all.next.clone().expect("a page with items has a cursor");
+    // From its cursor there is nothing new, which ends the paging.
+    let rest = mappings(&gateway, Some(&cursor)).await;
+    assert!(rest.items.is_empty());
+    assert_eq!(rest.next, None);
+
+    // A pair that changes (the LID now belongs to another number) comes
+    // after every cursor handed out so far.
+    sink.learn_pair(PEER_LID, OTHER_PN, IdentitySource::NumberChange)
+        .await;
+    let newer = mappings(&gateway, Some(&cursor)).await;
+    assert_eq!(newer.items.len(), 1);
+    assert_eq!(
+        (newer.items[0].lid.as_str(), newer.items[0].pn.as_str()),
+        (PEER_LID, OTHER_PN)
+    );
+    assert_ne!(newer.next, Some(cursor));
+    assert_eq!(mappings(&gateway, None).await.items.len(), 2);
+
+    // The wire shape, and paging with a limit.
+    let (status, _, body) = raw(
+        &server,
+        &created.key,
+        "GET",
+        "/v1/identity/mappings?limit=1",
+        "",
+    )
+    .await;
+    assert_eq!(status, 200);
+    let page: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["items"][0]["lid"], OTHER_LID);
+    assert_eq!(page["items"][0]["pn"], OTHER_PN);
+    assert_eq!(page["items"][0]["source"], "usync");
+    assert!(page["items"][0]["learned_ms"].is_i64());
+    assert!(page["next"].is_string());
+}
+
+#[tokio::test]
+async fn the_mappings_route_checks_its_cursor_and_needs_a_key() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    for bad in ["x", "-1", "1.5"] {
+        let g = gateway.clone();
+        let err = blocking(move || g.identity_mappings(Some(bad)))
+            .await
+            .unwrap_err();
+        assert!(is_code(&err, ErrorCode::BadRequest), "{bad}: {err:?}");
+        assert!(!err.is_not_found());
+    }
+    let anonymous = Gateway::new(server.url.clone(), None);
+    assert_eq!(
+        blocking(move || anonymous.identity_mappings(None))
+            .await
+            .unwrap_err(),
+        ClientError::Unauthorized
+    );
+    let (status, _, _) = raw(&server, "wrong-key", "GET", "/v1/identity/mappings", "").await;
+    assert_eq!(status, 401);
+    // Another instance's pairs are not this one's.
+    let (other, other_created) = create(&server).await;
+    let sink = server.driver.sink_of(&instance(&other_created)).unwrap();
+    sink.learn_pair(PEER_LID, PEER_PN, IdentitySource::Usync)
+        .await;
+    assert_eq!(mappings(&other, None).await.items.len(), 1);
+    assert!(mappings(&gateway, None).await.items.is_empty());
+    let _ = created;
+}
+
+/// A route this gateway does not have answers like a gateway from before
+/// the mappings route did: the client reports "not found", which callers
+/// read as "not supported".
+#[tokio::test]
+async fn a_route_the_gateway_lacks_is_a_bare_404() {
+    let server = start(4).await;
+    let (_, created) = create(&server).await;
+    let (status, _, body) = raw(&server, &created.key, "GET", "/v1/identity/nothing", "").await;
+    assert_eq!(status, 404);
+    assert!(serde_json::from_str::<rosty_wa_proto::ApiError>(&body).is_err());
+}
+
+#[tokio::test]
+async fn a_pair_learned_late_moves_what_was_stored_under_the_lid() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let id = instance(&created);
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    let sink = server.driver.sink_of(&id).unwrap();
+    let group = "120363-1@g.us";
+
+    // Before the pair is known: a chat under the LID, and the LID as a
+    // group author.
+    server
+        .driver
+        .deliver(
+            &id,
+            incoming("D1", PEER_LID, None),
+            MessageExtras::default(),
+        )
+        .await;
+    server
+        .driver
+        .deliver(
+            &id,
+            incoming("G1", group, Some(PEER_LID)),
+            MessageExtras::default(),
+        )
+        .await;
+    // Somebody else's LID, only ever a group author.
+    server
+        .driver
+        .deliver(
+            &id,
+            incoming("G2", group, Some(OTHER_LID)),
+            MessageExtras::default(),
+        )
+        .await;
+
+    sink.learn_pair(PEER_LID, PEER_PN, IdentitySource::PeerMessage)
+        .await;
+    // New apps get the pair; old apps still get `chat_merged`.
+    assert!(matches!(
+        next_identity(&mut events).await,
+        GatewayEvent::IdentityMapped { .. }
+    ));
+    match next_identity(&mut events).await {
+        GatewayEvent::ChatMerged { from, into } => {
+            assert_eq!((from.as_str(), into.as_str()), (PEER_LID, PEER_PN));
+        }
+        other => panic!("expected chat_merged, got {other:?}"),
+    }
+
+    let g = gateway.clone();
+    let chats = blocking(move || g.chats()).await.unwrap();
+    let direct = chats.iter().find(|c| !c.is_group).unwrap();
+    assert_eq!(direct.jid, PEER_PN);
+    assert_eq!(direct.alt.as_deref(), Some(PEER_LID));
+    assert_eq!(chats.iter().find(|c| c.is_group).unwrap().alt, None);
+
+    let g = gateway.clone();
+    let moved = blocking(move || g.messages(PEER_PN, None, 10))
+        .await
+        .unwrap();
+    assert_eq!(moved.len(), 1);
+    assert_eq!(moved[0].chat_alt.as_deref(), Some(PEER_LID));
+    let g = gateway.clone();
+    let in_group = blocking(move || g.messages(group, None, 10)).await.unwrap();
+    let by_id = |mid: &str| in_group.iter().find(|m| m.id == mid).unwrap();
+    assert_eq!(by_id("G1").sender.as_deref(), Some(PEER_PN));
+    assert_eq!(by_id("G1").sender_alt.as_deref(), Some(PEER_LID));
+    assert_eq!(by_id("G1").chat_alt, None);
+    // The other author is still a LID: nobody told the gateway their number.
+    assert_eq!(by_id("G2").sender.as_deref(), Some(OTHER_LID));
+    assert_eq!(by_id("G2").sender_alt, None);
+
+    // A LID that is nobody's chat: the pair renames the author, and old
+    // apps hear no `chat_merged` since no chat moved.
+    sink.learn_pair(OTHER_LID, OTHER_PN, IdentitySource::GroupMetadata)
+        .await;
+    assert!(matches!(
+        next_identity(&mut events).await,
+        GatewayEvent::IdentityMapped { .. }
+    ));
+    let g = gateway.clone();
+    let in_group = blocking(move || g.messages(group, None, 10)).await.unwrap();
+    let renamed = in_group.iter().find(|m| m.id == "G2").unwrap();
+    assert_eq!(renamed.sender.as_deref(), Some(OTHER_PN));
+    assert_eq!(renamed.sender_alt.as_deref(), Some(OTHER_LID));
+    // Nothing else about identity is waiting: the next identity event is
+    // the one sent now.
+    sink.number_changed(OTHER_PN, "905550000003@s.whatsapp.net", None, None)
+        .await;
+    assert!(matches!(
+        next_identity(&mut events).await,
+        GatewayEvent::IdentityNumberChanged { .. }
+    ));
+}
+
+#[tokio::test]
+async fn a_number_change_is_announced_with_its_pairs() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let id = instance(&created);
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    let sink = server.driver.sink_of(&id).unwrap();
+    sink.learn_pair(PEER_LID, PEER_PN, IdentitySource::PeerMessage)
+        .await;
+    assert!(matches!(
+        next_identity(&mut events).await,
+        GatewayEvent::IdentityMapped { .. }
+    ));
+
+    // The usual case: the LID stays, the number changes.
+    sink.number_changed(PEER_PN, OTHER_PN, Some(PEER_LID), Some(PEER_LID))
+        .await;
+    assert_eq!(
+        next_identity(&mut events).await,
+        GatewayEvent::IdentityNumberChanged {
+            old_pn: PEER_PN.into(),
+            new_pn: OTHER_PN.into(),
+            old_lid: Some(PEER_LID.into()),
+            new_lid: Some(PEER_LID.into()),
+        }
+    );
+    match next_identity(&mut events).await {
+        GatewayEvent::IdentityMapped {
+            lid, pn, source, ..
+        } => {
+            assert_eq!((lid.as_str(), pn.as_str()), (PEER_LID, OTHER_PN));
+            assert_eq!(source, "number_change");
+        }
+        other => panic!("expected identity_mapped, got {other:?}"),
+    }
+    let page = mappings(&gateway, None).await;
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].pn, OTHER_PN);
+
+    // WhatsApp named no LIDs: the apps still hear of the change.
+    sink.number_changed(OTHER_PN, "905550000003@s.whatsapp.net", None, None)
+        .await;
+    assert_eq!(
+        next_identity(&mut events).await,
+        GatewayEvent::IdentityNumberChanged {
+            old_pn: OTHER_PN.into(),
+            new_pn: "905550000003@s.whatsapp.net".into(),
+            old_lid: None,
+            new_lid: None,
+        }
+    );
+    assert_eq!(mappings(&gateway, None).await.items.len(), 1);
+}
+
+#[tokio::test]
+async fn the_instance_status_names_the_own_lid() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let id = instance(&created);
+    let g = gateway.clone();
+    let before = blocking(move || g.status()).await.unwrap();
+    assert_eq!(before.own_lid, None);
+
+    let sink = server.driver.sink_of(&id).unwrap();
+    sink.emit(GatewayEvent::State(rosty_wa_proto::InstanceStatus {
+        instance_id: created.instance_id.clone(),
+        state: InstanceState::Connected,
+        own_jid: Some("905550000009@s.whatsapp.net".into()),
+        push_name: None,
+        own_lid: Some("777@lid".into()),
+    }))
+    .await;
+    let after = blocking(move || gateway.status()).await.unwrap();
+    assert_eq!(
+        after.own_jid.as_deref(),
+        Some("905550000009@s.whatsapp.net")
+    );
+    assert_eq!(after.own_lid.as_deref(), Some("777@lid"));
+    assert_eq!(after.push_name.as_deref(), Some("Fake"), "kept from before");
+
+    // An app from before the field reads the same answer.
+    let (status, _, body) = raw(&server, &created.key, "GET", "/v1/instance", "").await;
+    assert_eq!(status, 200);
+    #[derive(serde::Deserialize)]
+    struct OldStatus {
+        own_jid: Option<String>,
+    }
+    let old: OldStatus = serde_json::from_str(&body).unwrap();
+    assert_eq!(old.own_jid.as_deref(), Some("905550000009@s.whatsapp.net"));
+}
+
+#[tokio::test]
+async fn an_outgoing_call_names_the_other_id_of_the_peer() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let sink = server.driver.sink_of(&instance(&created)).unwrap();
+    sink.learn_pair(PEER_LID, PEER_PN, IdentitySource::Usync)
+        .await;
+
+    // By number: the LID the gateway learned comes along. By a number
+    // nobody told the gateway about: nothing.
+    for to in [PEER_PN, OTHER_PN] {
+        let g = gateway.clone();
+        blocking(move || g.place_call(to)).await.unwrap();
+    }
+    let calls = blocking(move || gateway.calls()).await.unwrap();
+    let alt_of = |peer: &str| {
+        calls
+            .iter()
+            .find(|c| c.update.peer == peer)
+            .unwrap()
+            .update
+            .peer_alt
+            .clone()
+    };
+    assert_eq!(alt_of(PEER_PN).as_deref(), Some(PEER_LID));
+    assert_eq!(alt_of(OTHER_PN), None);
 }

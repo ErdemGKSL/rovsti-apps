@@ -8,7 +8,7 @@ use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::waproto::whatsapp::web_message_info::Status as WebStatus;
 
 use super::convert::{self, Converted, Origin};
-use super::lid::{self, LidMap};
+use super::lid::{self, LidMap, Pair};
 use super::status;
 use crate::store::{ChatSettings, HistoryChat, HistoryMessage, StoredStatus};
 
@@ -34,15 +34,30 @@ fn delivery(status: Option<WebStatus>) -> Option<DeliveryStatus> {
     }
 }
 
-/// The author of `key` in `chat`, for groups.
-fn author(chat: &str, participant: Option<&str>, map: &LidMap) -> Option<String> {
-    participant
-        .filter(|p| !p.is_empty())
-        .and_then(|p| p.parse::<Jid>().ok())
-        .and_then(|jid| convert::group_sender(chat, &lid::resolve(&jid, None, map)))
+/// The author of a group message as the apps get it and as the sync named
+/// it (bare).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Author {
+    sender: Option<String>,
+    wire: Option<String>,
 }
 
-/// The reactions a history entry carries.
+/// The author of `key` in `chat`, for groups.
+fn author(chat: &str, participant: Option<&str>, map: &LidMap) -> Author {
+    let Some(jid) = participant
+        .filter(|p| !p.is_empty() && convert::is_group(chat))
+        .and_then(|p| p.parse::<Jid>().ok())
+    else {
+        return Author::default();
+    };
+    Author {
+        sender: Some(lid::resolve(&jid, None, map).to_string()),
+        wire: Some(jid.to_non_ad().to_string()),
+    }
+}
+
+/// The reactions a history entry carries. Their other id is left to the
+/// store, which fills it from the learned pairs when the message is read.
 fn reactions(chat: &str, info: &wa::WebMessageInfo, map: &LidMap) -> Vec<Reaction> {
     info.reactions
         .iter()
@@ -50,32 +65,41 @@ fn reactions(chat: &str, info: &wa::WebMessageInfo, map: &LidMap) -> Vec<Reactio
             let emoji = r.text.clone().filter(|t| !t.is_empty())?;
             let key = r.key.as_option();
             Some(Reaction {
-                sender: author(chat, key.and_then(|k| k.participant.as_deref()), map),
+                sender: author(chat, key.and_then(|k| k.participant.as_deref()), map).sender,
                 from_me: key.and_then(|k| k.from_me).unwrap_or(false),
                 emoji,
+                sender_alt: None,
             })
         })
         .collect()
 }
 
-/// One history message. `None` when it has no id or content the apps show.
-fn history_message(chat: &str, info: &wa::WebMessageInfo, map: &LidMap) -> Option<HistoryMessage> {
+/// One history message of the conversation stored as `chat`, which the sync
+/// names `wire_chat`. `None` when it has no id or content the apps show.
+fn history_message(
+    chat: &str,
+    wire_chat: &str,
+    info: &wa::WebMessageInfo,
+    map: &LidMap,
+) -> Option<HistoryMessage> {
     let key = info.key.as_option()?;
     let id = key.id.as_deref().filter(|id| !id.is_empty())?;
     let content = info.message.as_option()?;
     let from_me = key.from_me.unwrap_or(false);
-    let sender = author(
+    let author = author(
         chat,
         info.participant.as_deref().or(key.participant.as_deref()),
         map,
     );
     let origin = Origin {
-        id,
-        chat,
-        sender: sender.as_deref(),
-        from_me,
-        timestamp_ms: seconds_to_ms(info.message_timestamp.unwrap_or(0)),
         sender_name: info.push_name.as_deref(),
+        ..Origin::new(
+            id,
+            chat,
+            author.sender.as_deref(),
+            from_me,
+            seconds_to_ms(info.message_timestamp.unwrap_or(0)),
+        )
     };
     match convert::convert(origin, content) {
         Converted::Message(message, extras) => {
@@ -83,6 +107,9 @@ fn history_message(chat: &str, info: &wa::WebMessageInfo, map: &LidMap) -> Optio
             if matches!(message.body, MessageBody::Media { .. }) {
                 extras.raw_proto = Some(content.encode_to_vec());
             }
+            convert::resolve_meta(&mut extras.meta, map);
+            extras.wire_chat = Some(wire_chat.to_owned());
+            extras.wire_sender = author.wire;
             if from_me {
                 extras.meta.status = delivery(info.status).or(extras.meta.status);
             }
@@ -133,8 +160,9 @@ fn conversation_jid(conv: &wa::Conversation, map: &LidMap) -> String {
     }
 }
 
-/// The LIDs a conversation names (its id and its message authors), to look
-/// up before [`conversation`] runs.
+/// The LIDs a conversation names (its id, its message authors, who
+/// reacted, who is mentioned and whose message is quoted), to look up before
+/// [`conversation`] runs.
 pub fn conversation_lids(conv: &wa::Conversation) -> Vec<Jid> {
     let participants = conv
         .messages
@@ -142,6 +170,11 @@ pub fn conversation_lids(conv: &wa::Conversation) -> Vec<Jid> {
         .filter_map(|m| m.message.as_option())
         .flat_map(|info| {
             let key = info.key.as_option();
+            let named = info
+                .message
+                .as_option()
+                .map(convert::context_jids)
+                .unwrap_or_default();
             [
                 info.participant.as_deref(),
                 key.and_then(|k| k.participant.as_deref()),
@@ -154,6 +187,7 @@ pub fn conversation_lids(conv: &wa::Conversation) -> Vec<Jid> {
                     .filter_map(|r| r.key.as_option().and_then(|k| k.participant.as_deref())),
             )
             .map(str::to_owned)
+            .chain(named.iter().map(ToString::to_string))
             .collect::<Vec<_>>()
         });
     std::iter::once(conv.id.clone())
@@ -164,6 +198,31 @@ pub fn conversation_lids(conv: &wa::Conversation) -> Vec<Jid> {
         .collect()
 }
 
+/// The pair a conversation names: it is keyed by one id of the other person
+/// and carries the other one (`pnJid` next to a LID id, `lidJid` next to a
+/// phone-number id).
+pub fn conversation_pair(conv: &wa::Conversation) -> Option<Pair> {
+    let id = Some(conv.id.as_str());
+    lid::pair_of_strs(id, conv.pn_jid.as_deref())
+        .or_else(|| lid::pair_of_strs(id, conv.lid_jid.as_deref()))
+}
+
+/// The pairs of a sync's own table (`phoneNumberToLidMappings`).
+pub fn mapping_pairs(sync: &wa::HistorySync) -> Vec<Pair> {
+    sync.phone_number_to_lid_mappings
+        .iter()
+        .filter_map(|m| lid::pair_of_strs(m.lid_jid.as_deref(), m.pn_jid.as_deref()))
+        .collect()
+}
+
+/// The id a conversation is keyed by in the sync, bare.
+fn wire_chat(conv: &wa::Conversation) -> String {
+    match conv.id.parse::<Jid>() {
+        Ok(jid) => jid.to_non_ad().to_string(),
+        Err(_) => conv.id.clone(),
+    }
+}
+
 /// One conversation. `None` for chats the apps do not show.
 pub fn conversation(conv: &wa::Conversation, now_ms: i64, map: &LidMap) -> Option<HistoryChat> {
     let jid = conversation_jid(conv, map);
@@ -171,11 +230,12 @@ pub fn conversation(conv: &wa::Conversation, now_ms: i64, map: &LidMap) -> Optio
     if jid.is_empty() || is_skipped(jid) {
         return None;
     }
+    let wire_chat = wire_chat(conv);
     let messages: Vec<HistoryMessage> = conv
         .messages
         .iter()
         .filter_map(|m| m.message.as_option())
-        .filter_map(|info| history_message(jid, info, map))
+        .filter_map(|info| history_message(jid, &wire_chat, info, map))
         .collect();
     let newest = messages
         .iter()
@@ -217,17 +277,27 @@ pub fn sync_to_chats(sync: &wa::HistorySync, now_ms: i64, map: &LidMap) -> Vec<H
         .collect()
 }
 
-/// `(jid, push name)` pairs a sync carries.
-pub fn push_names(sync: &wa::HistorySync) -> Vec<(String, String)> {
+/// `(jid, push name)` pairs a sync carries, each under the id the person's
+/// chat and messages are stored under: the phone number when `map` knows
+/// the LID.
+pub fn push_names(sync: &wa::HistorySync, map: &LidMap) -> Vec<(String, String)> {
     sync.pushnames
         .iter()
         .filter_map(|p| {
             let jid = p.id.as_deref()?.parse::<Jid>().ok()?;
             let name = p.pushname.as_deref()?.trim();
             (!name.is_empty() && name != "-")
-                .then(|| (jid.to_non_ad().to_string(), name.to_owned()))
+                .then(|| (lid::resolve(&jid, None, map).to_string(), name.to_owned()))
         })
         .collect()
+}
+
+/// The LIDs among a sync's push names.
+fn push_name_lids(sync: &wa::HistorySync) -> impl Iterator<Item = Jid> {
+    sync.pushnames
+        .iter()
+        .filter_map(|p| p.id.as_deref()?.parse::<Jid>().ok())
+        .filter(Jid::is_lid)
 }
 
 /// What one history sync holds for the store.
@@ -239,17 +309,71 @@ pub struct Drained {
     pub statuses: Vec<StoredStatus>,
 }
 
-/// Every LID the sync's conversations name, for [`Resolver::prefetch`]. Blocking
-/// like [`drain`].
-pub fn lids(lazy: &LazyHistorySync) -> Result<Vec<Jid>, HistorySyncError> {
-    let mut stream = lazy.stream();
-    let mut found: Vec<Jid> = Vec::new();
-    while let Some(conv) = stream.next_conversation()? {
-        for jid in conversation_lids(&conv) {
-            if !found.iter().any(|f| f.user == jid.user) {
-                found.push(jid);
-            }
+/// What a first pass over a sync finds about identities, before [`drain`]
+/// stores anything.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scan {
+    /// Every LID the sync names, to look up
+    /// ([`Resolver::prefetch`](super::lid::Resolver::prefetch)).
+    pub lids: Vec<Jid>,
+    /// The pairs the sync itself states: its mapping table and the two ids
+    /// of each one-to-one conversation.
+    pub pairs: Vec<Pair>,
+}
+
+impl Scan {
+    fn add_lid(&mut self, jid: Jid) {
+        if !self.lids.iter().any(|f| f.user == jid.user) {
+            self.lids.push(jid);
         }
+    }
+
+    fn add_pair(&mut self, pair: Pair) {
+        if !self.pairs.contains(&pair) {
+            self.pairs.push(pair);
+        }
+    }
+
+    fn add_conversation(&mut self, conv: &wa::Conversation) {
+        for jid in conversation_lids(conv) {
+            self.add_lid(jid);
+        }
+        if let Some(pair) = conversation_pair(conv) {
+            self.add_pair(pair);
+        }
+    }
+
+    /// The non-conversation part of a sync: push names and the mapping table.
+    fn add_rest(&mut self, rest: &wa::HistorySync) {
+        for jid in push_name_lids(rest) {
+            self.add_lid(jid);
+        }
+        for pair in mapping_pairs(rest) {
+            self.add_pair(pair);
+        }
+    }
+
+    /// `map` plus the sync's own pairs, for LIDs `map` does not know.
+    pub fn complete(&self, mut map: LidMap) -> LidMap {
+        for pair in &self.pairs {
+            map.insert_new(pair);
+        }
+        map
+    }
+}
+
+/// Every LID and pair a sync names. Blocking like [`drain`].
+pub fn scan(lazy: &LazyHistorySync) -> Result<Scan, HistorySyncError> {
+    let mut stream = lazy.stream();
+    let mut found = Scan::default();
+    while let Some(conv) = stream.next_conversation()? {
+        found.add_conversation(&conv);
+    }
+    // Like the push names in `drain`: a tail that does not decode costs the
+    // sync's own table, not its conversations.
+    match stream.remainder() {
+        Ok(rest) => found.add_rest(&rest),
+        Err(e) => log::debug!("history sync remainder unreadable: {e}"),
     }
     Ok(found)
 }
@@ -278,7 +402,7 @@ pub fn drain(
     // Push names are optional: a sync whose tail does not decode still
     // delivers its chats.
     let push_names = match stream.remainder() {
-        Ok(rest) => push_names(&rest),
+        Ok(rest) => push_names(&rest, map),
         Err(e) => {
             log::debug!("history sync remainder unreadable: {e}");
             Vec::new()
@@ -526,7 +650,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            push_names(&sync),
+            push_names(&sync, &LidMap::default()),
             [("905321234567@s.whatsapp.net".to_owned(), "Ayse".to_owned())]
         );
     }
@@ -581,5 +705,167 @@ mod tests {
         );
         assert_eq!(mute_end(Some(1_600_000_000), now), None, "already over");
         assert_eq!(mute_end(Some(u64::MAX), now), Some(MUTED_FOREVER));
+    }
+
+    const PEER_PN: &str = "905550000001@s.whatsapp.net";
+
+    #[test]
+    fn a_sync_states_pairs() {
+        let pair = |lid: &str, pn: &str| lid::pair_of_strs(Some(lid), Some(pn)).unwrap();
+        // A conversation keyed by the LID that names the number, and one
+        // keyed by the number that names the LID.
+        let by_lid = wa::Conversation {
+            id: "1234@lid".into(),
+            pn_jid: Some(PEER_PN.into()),
+            ..Default::default()
+        };
+        assert_eq!(conversation_pair(&by_lid), Some(pair("1234@lid", PEER_PN)));
+        let by_pn = wa::Conversation {
+            id: "905550000002@s.whatsapp.net".into(),
+            lid_jid: Some("55:3@lid".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            conversation_pair(&by_pn),
+            Some(pair("55@lid", "905550000002@s.whatsapp.net"))
+        );
+        let group = wa::Conversation {
+            id: "1-2@g.us".into(),
+            pn_jid: Some(PEER_PN.into()),
+            ..Default::default()
+        };
+        assert_eq!(conversation_pair(&group), None);
+        assert_eq!(conversation_pair(&wa::Conversation::default()), None);
+
+        // The sync's own table; rows that are not a pair are skipped.
+        let mapping = |pn: Option<&str>, lid: Option<&str>| wa::PhoneNumberToLIDMapping {
+            pn_jid: pn.map(str::to_owned),
+            lid_jid: lid.map(str::to_owned),
+        };
+        let rest = wa::HistorySync {
+            phone_number_to_lid_mappings: vec![
+                mapping(Some("905550000003@s.whatsapp.net"), Some("66@lid")),
+                mapping(Some("905550000004@s.whatsapp.net"), None),
+                mapping(Some("nonsense"), Some("67@lid")),
+                mapping(Some("68@lid"), Some("905550000005@s.whatsapp.net")),
+            ],
+            pushnames: vec![
+                wa::Pushname {
+                    id: Some("70@lid".into()),
+                    pushname: Some("Ada".into()),
+                },
+                wa::Pushname {
+                    id: Some(PEER_PN.into()),
+                    pushname: Some("Bob".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            mapping_pairs(&rest),
+            [
+                pair("66@lid", "905550000003@s.whatsapp.net"),
+                pair("68@lid", "905550000005@s.whatsapp.net"),
+            ]
+        );
+
+        let mut scan = Scan::default();
+        scan.add_conversation(&by_lid);
+        scan.add_conversation(&by_lid);
+        scan.add_conversation(&by_pn);
+        scan.add_rest(&rest);
+        assert_eq!(scan.pairs.len(), 4, "each pair once");
+        let lids: Vec<String> = scan.lids.iter().map(|j| j.user.to_string()).collect();
+        assert_eq!(lids, ["1234", "70"]);
+
+        // The lookups win; the sync fills what they do not know.
+        let looked_up = LidMap::from_entries([("1234", "905550000009")]);
+        let map = scan.complete(looked_up);
+        assert_eq!(map.get("1234"), Some("905550000009"));
+        assert_eq!(map.get("55"), Some("905550000002"));
+        assert_eq!(map.get("66"), Some("905550000003"));
+    }
+
+    #[test]
+    fn push_names_sit_under_the_id_the_chat_is_stored_under() {
+        let sync = wa::HistorySync {
+            pushnames: vec![
+                wa::Pushname {
+                    id: Some("1234:2@lid".into()),
+                    pushname: Some("Ada".into()),
+                },
+                wa::Pushname {
+                    id: Some("9999@lid".into()),
+                    pushname: Some("Hidden".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        let known = LidMap::from_entries([("1234", "905550000001")]);
+        assert_eq!(
+            push_names(&sync, &known),
+            [
+                (PEER_PN.to_owned(), "Ada".to_owned()),
+                ("9999@lid".to_owned(), "Hidden".to_owned()),
+            ]
+        );
+        assert_eq!(push_names(&sync, &LidMap::default())[0].0, "1234@lid");
+    }
+
+    #[test]
+    fn history_rows_keep_their_wire_ids_and_name_people_by_number() {
+        let known = LidMap::from_entries([("1234", "905550000001"), ("555", "905550000002")]);
+        // A one-to-one conversation keyed by the LID.
+        let direct = wa::Conversation {
+            id: "1234@lid".into(),
+            messages: vec![web_message("M", false, 10, "x", None)],
+            ..Default::default()
+        };
+        let chat = conversation(&direct, 0, &known).unwrap();
+        assert_eq!(chat.jid, PEER_PN);
+        let row = &chat.messages[0];
+        assert_eq!(row.extras.wire_chat.as_deref(), Some("1234@lid"));
+        assert_eq!(row.extras.wire_sender, None);
+
+        // A group message from a LID that quotes and mentions LIDs.
+        let mut quoting = web_message("G", false, 11, "y", Some("555:3@lid"));
+        quoting.message.as_option_mut().unwrap().message = MessageField::some(wa::Message {
+            extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
+                text: Some("re".into()),
+                context_info: MessageField::some(wa::ContextInfo {
+                    stanza_id: Some("Q".into()),
+                    participant: Some("1234:1@lid".into()),
+                    mentioned_jid: vec!["1234@lid".into(), "8888@lid".into()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let group = wa::Conversation {
+            id: "1-2@g.us".into(),
+            messages: vec![quoting],
+            ..Default::default()
+        };
+        // The quoted author and the mentions are looked up too.
+        let users: Vec<String> = conversation_lids(&group)
+            .iter()
+            .map(|j| j.user.to_string())
+            .collect();
+        assert_eq!(users, ["555", "1234", "8888", "1234"]);
+
+        let chat = conversation(&group, 0, &known).unwrap();
+        let row = &chat.messages[0];
+        assert_eq!(
+            row.message.sender.as_deref(),
+            Some("905550000002@s.whatsapp.net")
+        );
+        assert_eq!(row.extras.wire_chat.as_deref(), Some("1-2@g.us"));
+        assert_eq!(row.extras.wire_sender.as_deref(), Some("555@lid"));
+        assert_eq!(
+            row.extras.meta.quoted.as_ref().unwrap().sender.as_deref(),
+            Some(PEER_PN)
+        );
+        assert_eq!(row.extras.meta.mentions, [PEER_PN, "8888@lid"]);
     }
 }

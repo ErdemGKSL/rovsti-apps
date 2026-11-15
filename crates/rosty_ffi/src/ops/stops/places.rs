@@ -368,13 +368,30 @@ fn list_cases() -> Vec<Case> {
 struct SuggestReq {
     a: Endpoint,
     b: Endpoint,
-    /// The imported feed (the content of `gtfs.json`); absent for none.
+    /// The imported feed (the content of `gtfs.json`); absent reads it from `dir`.
     #[serde(default)]
     feed: Option<Feed>,
+    /// Where `gtfs.json` is when `feed` is absent; absent for the directory given to `init`.
+    #[serde(default)]
+    dir: Option<String>,
+    /// The names saved already: the suggestion is none of them.
+    #[serde(default)]
+    names: Vec<String>,
+    #[serde(default)]
+    locale: Lang,
 }
 
+/// A name to prefill when saving the stop AB: never empty, at most `MAX_NAME_CHARS`, none of `names`.
 fn suggest_name(req: SuggestReq) -> Result<Value, FfiError> {
-    Ok(json!({"name": saved_stops::suggest_name(req.feed.as_ref(), &req.a, &req.b)}))
+    // No feed in the request: the imported one, when the app's directory is known.
+    let feed = req.feed.or_else(|| {
+        let dir = super::data_dir(&req.dir).ok()?;
+        rosty_app_core::storage::load_json(&dir, rosty_app_core::stops::store::GTFS_FILE)
+    });
+    let names: Vec<&str> = req.names.iter().map(String::as_str).collect();
+    Ok(json!({
+        "name": saved_stops::suggest_name_in(req.locale, feed.as_ref(), &req.a, &req.b, &names),
+    }))
 }
 
 pub(super) fn feed_sample() -> Value {
@@ -391,9 +408,22 @@ pub(super) fn feed_sample() -> Value {
 
 fn suggest_cases() -> Vec<Case> {
     let g = super::gate();
+    let unnamed = json!({
+        "a": {"label": "Point A", "coord": g["a"]["coord"]},
+        "b": {"label": "", "coord": g["b"]["coord"]},
+    });
     vec![
         Case::new(json!({"a": g["a"], "b": g["b"], "feed": feed_sample()})),
         Case::named("no_feed", json!({"a": g["a"], "b": g["b"]})),
+        Case::named(
+            "unnamed",
+            json!({"a": unnamed["a"], "b": unnamed["b"], "names": ["Home", "Stop 3"]}),
+        ),
+        Case::named(
+            "taken",
+            json!({"a": g["a"], "b": g["b"], "feed": feed_sample(), "names": ["Moda İskele"]}),
+        ),
+        super::tr_case(json!({"a": unnamed["a"], "b": unnamed["b"], "names": ["Ev"]})),
     ]
 }
 

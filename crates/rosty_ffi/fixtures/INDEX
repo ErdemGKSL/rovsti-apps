@@ -853,6 +853,9 @@ stops.saved_shortcut
 stops.saved_shortcut.long_name
 stops.saved_suggest_name
 stops.saved_suggest_name.no_feed
+stops.saved_suggest_name.taken
+stops.saved_suggest_name.tr
+stops.saved_suggest_name.unnamed
 stops.snap
 stops.snap.held
 stops.snap.no_candidate

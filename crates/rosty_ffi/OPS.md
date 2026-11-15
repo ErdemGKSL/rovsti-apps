@@ -103,7 +103,7 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   else "WhatsApp user"), in the order given; `number` is the row's second line (null for a group and for a bare number).
 - `stops.gtfs_import {zip, now_ms, save?, dir?}` reads the zip at a path (a tiny feed lives in `tests/data/gtfs-tiny.zip`; fixture requests
   write it as `$DATA/gtfs-tiny.zip`) and answers the `FeedReport`; `save` writes `gtfs.json`, which `stops.gtfs_search` and
-  `stops.saved_suggest_name` read. `stops.measure` takes the point list (Kotlin keeps it; undo drops the last point).
+  `stops.saved_suggest_name` read. `stops.saved_suggest_name {a, b, feed?, dir?, names?, locale?}` answers a name that is never empty, fits the name limit and is none of `names` (a GTFS stop near the midpoint, an end's own name, else "Stop 3" / "Durak 3"; a taken name gets the next number). `stops.measure` takes the point list (Kotlin keeps it; undo drops the last point).
 - `stops.gtfs_view {bbox: {south, west, north, east}, cap, pattern?, dir?}` answers what the map draws and snaps to from the saved
   feed: `{has_feed, total, capped, stops: [{index, id, name, coord}], line}`. The stops are those inside the box (`west > east` crosses
   the antimeridian), at most `cap`, the ones nearest the middle of the box when there are more (`total` counts all of them), in feed

@@ -51,7 +51,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.dp
 import dev.rosty.core.model.stops.StopColour
 import dev.rosty.design.controls.CapsuleButton
 import dev.rosty.design.controls.CapsuleStyle
@@ -741,10 +740,6 @@ private fun Modifier.consumeTaps(): Modifier =
         }
     }
 
-private val MORE_GLYPH = 22.dp
 private const val NOTE_LINES = 4
 private const val NOTE_MIN_LINES = 3
-private val BADGE = 30.dp
-private val BADGE_GLYPH = 16.dp
-private val LIFT_SHADOW = 12.dp
 private const val LIFT_SCALE = 1.03f

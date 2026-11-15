@@ -28,7 +28,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import dev.rosty.design.controls.CapsuleButton
 import dev.rosty.design.controls.CapsuleStyle
 import dev.rosty.design.motion.RostyMotion
@@ -204,6 +203,5 @@ fun LastTripCard(viewModel: AlarmViewModel) {
     }
 }
 
-private val BUTTON_HEIGHT = 64.dp
 private const val WASH_TOP = 0.45f
 private const val WASH_BOTTOM = 0.12f

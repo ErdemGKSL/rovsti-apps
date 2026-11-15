@@ -23,7 +23,7 @@ import org.robolectric.annotation.Config
 
 /**
  * E7.7 screenshots: the Saved sheet over the map on the real core (list texts, distances, usage), its search and
- * sort, the row menu, the reorder mode, the rename field (in place of the note field, which `SavedStop` does not have)
+ * sort, the row menu, the reorder mode, the note field (S44)
  * and the end of a long list above the bottom edge. Light and dark.
  */
 @Config(sdk = [35])
@@ -84,13 +84,20 @@ class E77ShotTest : ShotTest() {
             settleRust(800)
         }
 
-    /** The GPUI note field never shipped (`SavedStop` has no note, backlog R7): the editable field is the name. */
-    @Test fun editNameField() =
-        savedShot("e7.7-saved-edit-name-field") {
+    /** S44: the note field of a stop, a note being typed. */
+    @Test fun editNoteField() =
+        savedShot("e7.7-saved-edit-note-field") {
             compose.onNodeWithTag(SavedTags.row(2), useUnmergedTree = true).performClick()
             settleRust()
-            compose.onNodeWithTag(SavedTags.stopRow("rename"), useUnmergedTree = true).performClick()
+            compose
+                .onNodeWithTag(SavedTags.stopRow("note"), useUnmergedTree = true)
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
             settleRust()
+            compose
+                .onNodeWithTag(
+                    SavedTags.NoteField,
+                ).performTextInput("Side gate, by the bakery. Wait under the awning.")
+            settleRust(600)
         }
 
     @Test fun endAboveBar() =

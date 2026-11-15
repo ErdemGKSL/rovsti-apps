@@ -13,8 +13,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -80,12 +82,15 @@ import dev.rosty.stops.trip.presentPreflightSheet
 import dev.rosty.stops.trip.rememberPreflight
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.util.TimeZone
+import kotlin.math.abs
 
 /** The home's view model, owned by the activity so a pushed page and the way back keep one state. */
 @Composable
@@ -383,7 +388,6 @@ fun HomeEntry(
         trip.effects.collect { effect ->
             when (effect) {
                 is TripEffect.Started -> {
-                    map.pick.clear()
                     map.showGate(effect.trip)
                     viewModel.refresh()
                 }
@@ -396,6 +400,7 @@ fun HomeEntry(
                 }
 
                 is TripEffect.Over -> {
+                    map.pick.clear()
                     viewModel.refresh()
                     saved.refresh()
                     alarm.onAction(AlarmAction.Refresh)
@@ -432,6 +437,28 @@ fun HomeEntry(
         }
     }
     val tripState by trip.state.collectAsState()
+    // The trip in progress is on the map: its pins, its circle and its line (the pick controller draws them through
+    // Rust as for a pick); picking is off until it ends (GPUI `pins_grabbable`).
+    val runningTrip = tripState.trip
+    LaunchedEffect(map, runningTrip) {
+        map.pick.enabled = runningTrip == null
+        if (runningTrip != null) map.pick.restore(runningTrip.ends())
+    }
+    // While it runs the view follows the gate (GPUI `map.follow`): re-fitted when the sheet settles on another detent,
+    // so the gate stays in the free area above it.
+    val density = LocalDensity.current
+    LaunchedEffect(map, runningTrip, padding, density) {
+        val trip = runningTrip ?: return@LaunchedEffect
+        snapshotFlow { padding.insets }.collectLatest { insets ->
+            // The camera takes the new padding in its own effect first.
+            val bottom = with(density) { insets.calculateBottomPadding().toPx() }
+            snapshotFlow {
+                map.camera.observe()
+                map.camera.paddingBottom
+            }.first { abs(it - bottom) < 1f }
+            map.showGate(trip)
+        }
+    }
     // The in-app alarm: presented while the alarm rings, gone with the answer.
     val alarmState by alarm.state.collectAsState()
     val alarmTitle = stringResource(R.string.alarm_title)
@@ -510,7 +537,7 @@ fun HomeEntry(
         tabs = homeTabItems(),
         selectedTab = if (open?.first == HomeSheet.Saved) HomeTab.Saved else HomeTab.Trip,
         camera = padding,
-        hint = pickState.pairLabel ?: pickState.hintText,
+        hint = if (runningTrip != null) null else pickState.pairLabel ?: pickState.hintText,
         mapFooter = {
             MapScaleBar(map.camera, Modifier.testTag(HomeTags.ScaleBar))
             MapAttribution()
@@ -524,9 +551,11 @@ fun HomeEntry(
                 onOpenHistory = { openSheet(HomeSheet.History) },
                 title = tripState.trip?.let { stringResource(R.string.home_sheet_trip) },
                 subtitle =
-                    tripState.trip?.let { running ->
-                        live?.let { stringResource(R.string.home_trip_live, it.distance, running.label) }
-                    } ?: pickState.pairLabel,
+                    if (runningTrip != null) {
+                        live?.let { stringResource(R.string.home_trip_live, it.distance, runningTrip.label) }
+                    } else {
+                        pickState.pairLabel
+                    },
                 trip = {
                     TripSection(
                         viewModel = trip,

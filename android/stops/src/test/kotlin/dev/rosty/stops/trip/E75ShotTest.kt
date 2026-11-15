@@ -2,6 +2,8 @@ package dev.rosty.stops.trip
 
 import androidx.compose.runtime.remember
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -31,6 +33,7 @@ class E75ShotTest : ShotTest() {
         name: String,
         end: Destination = TripFixtures.b,
         feed: Boolean = false,
+        settle: Int = LARGE,
         before: (AppFixture) -> Unit = {},
         then: (AppFixture) -> Unit = {},
     ) {
@@ -46,6 +49,17 @@ class E75ShotTest : ShotTest() {
                 settleRust(800)
             }
             then(fixture)
+            // From large the grabber's action goes to peek, then up again to medium.
+            val steps =
+                when (settle) {
+                    PEEK -> 1
+                    MEDIUM -> 2
+                    else -> 0
+                }
+            repeat(steps) {
+                compose.onNodeWithTag("sheet-grabber").performSemanticsAction(SemanticsActions.OnClick)
+                settleRust(800)
+            }
             compose.onRoot().captureRoboImage("screenshots/$name-${if (dark) "dark" else "light"}.png", options)
         }
     }
@@ -65,12 +79,32 @@ class E75ShotTest : ShotTest() {
         }
 
     @Test fun liveCard() =
-        tripShot("e7.5-trip-live-card", before = { fixture ->
+        tripShot("e7.5-trip-live-card", settle = MEDIUM, before = { fixture ->
             // Everything recommended is allowed too: the card alone.
             startRunning(fixture)
             fixture.container.fakeSpecial.ignoresBattery = true
             TripFixtures.grant(fixture, *TripFixtures.background)
         }) { fixture ->
+            tap(TripTags.Start)
+            fixture.container.fakeTrips.push(TripStatus.Fixed(TripFixtures.fix()))
+            settleRust()
+        }
+
+    /** At peek the map shows the trip: both pins, the circle and the chosen line (Line 7 at Pier East). */
+    @Test fun tripOnMap() =
+        tripShot(
+            "e7.5-trip-on-map",
+            end = TripFixtures.bStop,
+            feed = true,
+            settle = PEEK,
+            before = ::startRunning,
+        ) { fixture ->
+            tap(TripTags.Line)
+            compose
+                .onNode(
+                    hasText("7", substring = true) and hasText("Harbour", substring = true) and hasClickAction(),
+                ).performClick()
+            settleRust()
             tap(TripTags.Start)
             fixture.container.fakeTrips.push(TripStatus.Fixed(TripFixtures.fix()))
             settleRust()
@@ -95,4 +129,11 @@ class E75ShotTest : ShotTest() {
         tripShot("e7.5-line-choice-in-stop-ui", end = TripFixtures.bStop, feed = true) {
             tap(TripTags.Line)
         }
+
+    private companion object {
+        /** The detent a shot settles on. */
+        const val PEEK = 0
+        const val MEDIUM = 1
+        const val LARGE = 2
+    }
 }

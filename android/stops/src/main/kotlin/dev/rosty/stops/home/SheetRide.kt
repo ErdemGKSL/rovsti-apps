@@ -50,3 +50,19 @@ fun rideMaxVisiblePx(
     val room = windowHeightPx - topChromeBottomPx - gapPx - blockHeightPx + bottomInsetPx
     return minOf(mediumVisiblePx, room).coerceAtLeast(bottomInsetPx)
 }
+
+/**
+ * The top chrome's alpha (pure): 1 while the sheet's top edge ([sheetTopPx], from the window top) stays [fadePx] below
+ * the chrome's bottom ([chromeBottomPx]), 0 once the edge reaches it, so the search pill never peeks above a large
+ * sheet. A modal sheet's push-back ([pushBack], 0..1) hides it the same way.
+ */
+fun topChromeAlpha(
+    sheetTopPx: Float,
+    chromeBottomPx: Float,
+    fadePx: Float,
+    pushBack: Float = 0f,
+): Float {
+    val gap = sheetTopPx - chromeBottomPx
+    val bySheet = if (fadePx <= 0f) (if (gap > 0f) 1f else 0f) else (gap / fadePx).coerceIn(0f, 1f)
+    return minOf(bySheet, 1f - pushBack.coerceIn(0f, 1f))
+}

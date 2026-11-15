@@ -119,6 +119,9 @@ class TripViewModelTest {
         assertEquals(Side.Left, live.side)
         assertEquals("1.2 km", live.circle)
         assertEquals("420 m to Pier, about 3 min", live.text)
+        // S41: the arrival clock of the estimate.
+        assertEquals(3, live.etaMin)
+        assertTrue(live.arrive.orEmpty(), live.arrive.orEmpty().matches(Regex("\\d{1,2}:\\d{2}.*")))
     }
 
     @Test fun aRingIsHandedToTheAlarm() {
@@ -200,6 +203,7 @@ class TripViewModelTest {
         side = Side.Left,
         inside = false,
         circleM = 1200.0,
+        etaMin = 3,
     )
 
     private companion object {

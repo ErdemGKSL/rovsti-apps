@@ -82,7 +82,7 @@ internal fun rememberMapSheet(
                 modal = false,
                 dismissible = false,
                 compactLargeOnly = false,
-            ) { sheet -> latest(this, sheet) }
+            ) { sheet -> OnSheet { latest(this, sheet) } }
         }
     DisposableEffect(overlays, entry) {
         overlays.present(entry)

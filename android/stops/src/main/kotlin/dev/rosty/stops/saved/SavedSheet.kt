@@ -33,7 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,11 +75,13 @@ import dev.rosty.design.overlay.menuTrigger
 import dev.rosty.design.overlay.sheetScrollConnection
 import dev.rosty.design.text.GlassTextField
 import dev.rosty.design.text.SearchField
+import dev.rosty.design.text.text
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.stops.R
+import dev.rosty.stops.home.OnSheet
 import dev.rosty.stops.map.RadarPalette
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -100,6 +104,11 @@ object SavedTags {
     const val Rename = "saved-rename"
     const val RenameField = "saved-rename-field"
     const val RenameSave = "saved-rename-save"
+    const val Note = "saved-note"
+    const val NoteSheet = "saved-note-sheet"
+    const val NoteField = "saved-note-field"
+    const val NoteError = "saved-note-error"
+    const val NoteSave = "saved-note-save"
 
     fun row(id: Long) = "saved-row-$id"
 
@@ -124,7 +133,7 @@ fun OverlayController.presentSavedSheet(
         detents = persistentListOf(Detent.Medium, Detent.Large),
         onDismissed = onDismissed,
     ) { sheet ->
-        SavedList(viewModel, this@presentSavedSheet, sheet)
+        OnSheet { SavedList(viewModel, this@presentSavedSheet, sheet) }
     }.also { present(it) }
 
 @Composable
@@ -378,7 +387,12 @@ private fun ReorderableCollectionItemScope.SavedRow(
         ListRow(
             title = rowTitle(row.stop),
             modifier = Modifier.testTag(SavedTags.row(id)),
-            secondary = detailLine(row),
+            // S44: the note under the detail, on a second line.
+            secondary =
+                row.stop.note
+                    .takeIf { it.isNotBlank() }
+                    ?.let { "${detailLine(row)}\n$it" } ?: detailLine(row),
+            secondaryMaxLines = 2,
             leading = { StopBadge(row.stop.colour) },
             trailing = {
                 if (state.editing) {
@@ -490,7 +504,7 @@ fun OverlayController.presentSavedStopSheet(
             ?.name
             .orEmpty()
     return SheetEntry(title = name, detents = persistentListOf(Detent.Medium, Detent.Large)) { sheet ->
-        SavedStopBody(viewModel, id, this@presentSavedStopSheet, sheet)
+        OnSheet { SavedStopBody(viewModel, id, this@presentSavedStopSheet, sheet) }
     }.also { present(it) }
 }
 
@@ -532,6 +546,15 @@ private fun SavedStopBody(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (stop.note.isNotBlank()) {
+                RostyText(
+                    stop.note,
+                    Modifier.padding(top = Spacing.xs).testTag(SavedTags.Note),
+                    style = RostyTheme.type.subheadline,
+                    maxLines = NOTE_LINES,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         val start = stringResource(R.string.saved_start)
         val show = stringResource(R.string.saved_show_on_map)
@@ -542,6 +565,7 @@ private fun SavedStopBody(
         val qr = stringResource(R.string.saved_qr)
         val home = stringResource(R.string.saved_home_screen)
         val renameTitle = stringResource(R.string.saved_rename_title)
+        val noteLabel = stringResource(if (stop.note.isBlank()) R.string.saved_add_note else R.string.saved_edit_note)
         val context = androidx.compose.ui.platform.LocalContext.current
         InsetGroupedSection {
             row { SheetRow(start, "start") { leave(SavedAction.Start(id)) } }
@@ -557,6 +581,9 @@ private fun SavedStopBody(
                         onAction(SavedAction.Rename(id, name))
                     }
                 }
+            }
+            row {
+                SheetRow(noteLabel, "note") { overlays.presentNoteSheet(context, viewModel, id, stop.note) }
             }
             row { SheetRow(colourText, "colour") { onAction(SavedAction.CycleColour(id)) } }
         }
@@ -577,8 +604,87 @@ private fun SheetRow(
 }
 
 /**
- * Rename (and the place of the GPUI note field, which never shipped: `SavedStop` has no note). One field holding the
- * name, at most [maxChars] characters, and Save; Rust checks the name and a refusal comes back as a toast.
+ * S44: the note of stop [id] in a field of a few lines, at most [SavedUiState.NOTE_MAX_CHARS] characters; an empty note
+ * clears it. A note the core refuses stays in the field with the reason under it; a saved one closes the sheet.
+ */
+fun OverlayController.presentNoteSheet(
+    context: Context,
+    viewModel: SavedViewModel,
+    id: Long,
+    note: String,
+): SheetEntry =
+    SheetEntry(
+        title = context.getString(R.string.saved_note_title),
+        detents = persistentListOf(Detent.Medium),
+    ) { sheet ->
+        OnSheet { NoteBody(context, viewModel, id, note, sheet) }
+    }.also { present(it) }
+
+@Composable
+private fun NoteBody(
+    context: Context,
+    viewModel: SavedViewModel,
+    id: Long,
+    note: String,
+    sheet: SheetState,
+) {
+    val state by viewModel.state.collectAsState()
+    val field = rememberTextFieldState(note)
+    var sent by remember { mutableStateOf<String?>(null) }
+    val stored = state.stops.firstOrNull { it.id == id }?.note
+    val error = state.noteError?.takeIf { it.id == id && sent != null }
+    // Saved: the stored note is what was sent and nothing was refused.
+    LaunchedEffect(stored, sent, error) {
+        val wanted = sent ?: return@LaunchedEffect
+        if (error == null && stored == wanted.trim()) sheet.dismiss()
+    }
+    val save = {
+        sent = field.text.toString()
+        viewModel.onAction(SavedAction.Note(id, field.text.toString()))
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(SavedTags.NoteSheet),
+        verticalArrangement = Arrangement.spacedBy(Spacing.m),
+    ) {
+        RostyText(context.getString(R.string.saved_note_title), style = RostyTheme.type.title3)
+        GlassTextField(
+            field,
+            placeholder = context.getString(R.string.saved_note_placeholder),
+            modifier = Modifier.fillMaxWidth().testTag(SavedTags.NoteField),
+            maxLines = NOTE_LINES,
+            minLines = NOTE_MIN_LINES,
+        )
+        if (error != null) {
+            RostyText(
+                error.text.text(),
+                Modifier.testTag(SavedTags.NoteError),
+                style = RostyTheme.type.footnote,
+                color = RostyTheme.colors.destructive,
+            )
+        } else {
+            RostyText(
+                context.resources.getQuantityString(
+                    R.plurals.saved_name_limit,
+                    SavedUiState.NOTE_MAX_CHARS,
+                    SavedUiState.NOTE_MAX_CHARS,
+                ),
+                style = RostyTheme.type.footnote,
+                color = RostyTheme.colors.labelSecondary,
+            )
+        }
+        CapsuleButton(
+            context.getString(R.string.saved_save),
+            onClick = save,
+            modifier = Modifier.fillMaxWidth().testTag(SavedTags.NoteSave),
+            style = CapsuleStyle.Filled,
+            fillWidth = true,
+        )
+    }
+}
+
+/**
+ * Rename: one field holding the name, at most [maxChars] characters, and Save; Rust checks the name and a refusal
+ * comes back as a toast.
  */
 fun OverlayController.presentRenameSheet(
     context: Context,
@@ -589,35 +695,37 @@ fun OverlayController.presentRenameSheet(
 ): SheetEntry =
     SheetEntry(title = title, detents = persistentListOf(Detent.Medium)) { sheet ->
         val field = rememberTextFieldState(name)
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(SavedTags.Rename),
-            verticalArrangement = Arrangement.spacedBy(Spacing.m),
-        ) {
-            RostyText(title, style = RostyTheme.type.title3)
-            GlassTextField(
-                field,
-                placeholder = context.getString(R.string.saved_name),
-                modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameField),
-                onSubmit = {
-                    sheet.dismiss()
-                    onSave(field.text.toString())
-                },
-            )
-            RostyText(
-                context.resources.getQuantityString(R.plurals.saved_name_limit, maxChars, maxChars),
-                style = RostyTheme.type.footnote,
-                color = RostyTheme.colors.labelSecondary,
-            )
-            CapsuleButton(
-                context.getString(R.string.saved_save),
-                onClick = {
-                    sheet.dismiss()
-                    onSave(field.text.toString())
-                },
-                modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameSave),
-                style = CapsuleStyle.Filled,
-                fillWidth = true,
-            )
+        OnSheet {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(SavedTags.Rename),
+                verticalArrangement = Arrangement.spacedBy(Spacing.m),
+            ) {
+                RostyText(title, style = RostyTheme.type.title3)
+                GlassTextField(
+                    field,
+                    placeholder = context.getString(R.string.saved_name),
+                    modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameField),
+                    onSubmit = {
+                        sheet.dismiss()
+                        onSave(field.text.toString())
+                    },
+                )
+                RostyText(
+                    context.resources.getQuantityString(R.plurals.saved_name_limit, maxChars, maxChars),
+                    style = RostyTheme.type.footnote,
+                    color = RostyTheme.colors.labelSecondary,
+                )
+                CapsuleButton(
+                    context.getString(R.string.saved_save),
+                    onClick = {
+                        sheet.dismiss()
+                        onSave(field.text.toString())
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameSave),
+                    style = CapsuleStyle.Filled,
+                    fillWidth = true,
+                )
+            }
         }
     }.also { present(it) }
 
@@ -634,6 +742,8 @@ private fun Modifier.consumeTaps(): Modifier =
     }
 
 private val MORE_GLYPH = 22.dp
+private const val NOTE_LINES = 4
+private const val NOTE_MIN_LINES = 3
 private val BADGE = 30.dp
 private val BADGE_GLYPH = 16.dp
 private val LIFT_SHADOW = 12.dp

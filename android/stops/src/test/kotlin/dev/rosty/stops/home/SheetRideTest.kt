@@ -59,4 +59,15 @@ class SheetRideTest {
         assertEquals(165.5f, sideRoomDp(891.dp, 560.dp).value, 0.01f)
         assertEquals(0f, sideRoomDp(411.dp, 560.dp).value, 0f)
     }
+
+    @Test fun theTopChromeFadesAsALargeSheetReachesIt() {
+        // Sheet top well below the chrome: shown; at the chrome's bottom or above: hidden; in between: fading.
+        assertEquals(1f, topChromeAlpha(sheetTopPx = 900f, chromeBottomPx = 300f, fadePx = 96f), 0f)
+        assertEquals(0f, topChromeAlpha(sheetTopPx = 300f, chromeBottomPx = 300f, fadePx = 96f), 0f)
+        assertEquals(0f, topChromeAlpha(sheetTopPx = 120f, chromeBottomPx = 300f, fadePx = 96f), 0f)
+        assertEquals(0.5f, topChromeAlpha(sheetTopPx = 348f, chromeBottomPx = 300f, fadePx = 96f), 1e-6f)
+        // A modal sheet's push-back hides it the same way.
+        assertEquals(0.25f, topChromeAlpha(900f, 300f, 96f, pushBack = 0.75f), 1e-6f)
+        assertEquals(0f, topChromeAlpha(900f, 300f, 96f, pushBack = 1f), 0f)
+    }
 }

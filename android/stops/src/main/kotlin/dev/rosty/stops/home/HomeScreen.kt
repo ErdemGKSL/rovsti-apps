@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -37,6 +38,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -44,6 +46,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +62,7 @@ import dev.rosty.design.glass.LocalAppBackdropFrozen
 import dev.rosty.design.glass.rostyGlass
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
+import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.press.scalePress
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
@@ -74,6 +78,7 @@ import kotlinx.collections.immutable.persistentListOf
 /** Test tags of the home's floating chrome. */
 object HomeTags {
     const val Root = "home"
+    const val Top = "home-top"
     const val Search = "home-search"
     const val Chips = "home-chips"
     const val Buttons = "home-buttons"
@@ -138,6 +143,15 @@ fun StopsHome(
     var blockPx by remember { mutableFloatStateOf(0f) }
     var buttonsWidthPx by remember { mutableFloatStateOf(0f) }
     var unfolded by remember { mutableStateOf(false) }
+    val overlays = LocalOverlay.current
+    // A hidden top chrome takes no touch and says nothing (it reads in layout, not per frame of the sheet's drag).
+    val topHidden by remember(entry) {
+        derivedStateOf {
+            val sheet = entry.sheet
+            val top = if (sheet == null) windowPx else sheet.offset.value
+            topChromeAlpha(top, topChromeBottomPx, fadePx, overlays.pushBackProgress()) < HIDDEN_ALPHA
+        }
+    }
     // Toasts (the third-tap hint, "Copied") rise above the riding block and the settled sheet, not over the scale bar:
     // the bar hands these metrics to the overlay host, and the settle below writes the clearance into them (the bar's
     // own height write on a fold is read back and replaced).
@@ -221,7 +235,14 @@ fun StopsHome(
                             ).padding(top = Spacing.s)
                             .widthIn(max = Sizes.contentMaxWidth)
                             .fillMaxWidth()
-                            .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom },
+                            .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom }
+                            .graphicsLayer {
+                                // Hidden under a large map sheet and under a modal sheet's push-back (read in draw).
+                                val sheet = entry.sheet
+                                val top = if (sheet == null) windowPx else sheet.offset.value
+                                alpha = topChromeAlpha(top, topChromeBottomPx, fadePx, overlays.pushBackProgress())
+                            }.then(if (topHidden) Modifier.clearAndSetSemantics {}.blockTouches() else Modifier)
+                            .testTag(HomeTags.Top),
                     ) {
                         SearchPill(actions.onSearch, Modifier.padding(horizontal = Spacing.gutter))
                         if (!hint.isNullOrBlank()) {
@@ -321,6 +342,17 @@ fun StopsHome(
         map(Modifier.fillMaxSize())
     }
 }
+
+/** Below this the top chrome counts as hidden (no touch, no semantics). */
+private const val HIDDEN_ALPHA = 0.05f
+
+/** Swallows every touch of a hidden element so the map under it does not take a tap the user did not aim at it. */
+private fun Modifier.blockTouches(): Modifier =
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) awaitPointerEvent().changes.forEach { it.consume() }
+        }
+    }
 
 /** The medium detent's share of the window (`Detent.Medium`). */
 private const val MEDIUM_SHARE = 0.5f

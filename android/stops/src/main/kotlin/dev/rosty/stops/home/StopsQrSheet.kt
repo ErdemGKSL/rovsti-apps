@@ -56,7 +56,7 @@ suspend fun OverlayController.presentStopsQrSheet(
     val modules = QrModules(matrix.side) { x, y -> matrix[x, y] }
     present(
         SheetEntry(title = context.getString(R.string.qr_title), detents = persistentListOf(Detent.Medium)) { _ ->
-            QrContent(modules, title, payload, onShare)
+            OnSheet { QrContent(modules, title, payload, onShare) }
         },
     )
     return true

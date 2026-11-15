@@ -73,6 +73,8 @@ class E76ShotTest : ShotTest() {
     @Test fun ringAgain() =
         alarmShot("e7.6-ring-again-menu") { fixture ->
             ring(fixture)
+            // The view has followed the gate to its last settle before the answer.
+            settleRust(1500)
             tap(AlarmTags.Dismiss)
             // What the platform does on Dismiss: the trip ends into the history, then the event.
             kotlinx.coroutines.runBlocking {
@@ -85,6 +87,6 @@ class E76ShotTest : ShotTest() {
                 )
             }
             fixture.container.fakeAlarm.push(AlarmEvent.Dismissed)
-            settleRust(600)
+            settleRust(1500)
         }
 }

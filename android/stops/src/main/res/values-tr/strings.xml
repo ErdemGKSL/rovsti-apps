@@ -163,4 +163,13 @@
         <item quantity="one">En çok %d karakter.</item>
         <item quantity="other">En çok %d karakter.</item>
     </plurals>
+    <string name="trip_full_screen">Tam ekran alarm</string>
+    <string name="trip_full_screen_on">Alarm ekranı kaplayabilir</string>
+    <string name="trip_full_screen_off">Alarm yalnızca bildirim olarak görünür</string>
+    <string name="trip_eta">Çizgiye yaklaşık %1$d dk, %2$s civarı</string>
+    <string name="saved_add_note">Not ekle</string>
+    <string name="saved_edit_note">Notu düzenle</string>
+    <string name="saved_note_title">Not</string>
+    <string name="saved_note_placeholder">Bu durak için bir not</string>
+    <string name="saved_error_note">Not en çok 200 karakter olabilir.</string>
 </resources>

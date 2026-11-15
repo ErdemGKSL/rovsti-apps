@@ -1,0 +1,1 @@
+{"ok":{"handle":7777777777,"last_seq":12,"applied":2,"resync":false,"chats":[],"reconciled":[],"rejected":[{"lid":"100000000001@s.whatsapp.net","pn":"777000000000001@lid","source":"usync","reason":"invalid"},{"lid":"777000000000001@lid","pn":"100000000002@s.whatsapp.net","source":"history","reason":"outranked"}]}}

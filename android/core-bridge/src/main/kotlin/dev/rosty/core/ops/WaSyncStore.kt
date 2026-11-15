@@ -209,6 +209,15 @@ class WaSyncStore internal constructor(
         live { ops.identityResolve(WaSyncResolveRequest(id, jid)) }
 
     /**
+     * The phone numbers of the person behind [jid] as `+<digits>`: the current one first, then the former ones (a
+     * contact that changed number). Look a device contact up by each in turn, so a contact that only holds the
+     * former number still names the chat. Empty for a LID whose number is not known, a group and text that is not
+     * a JID. Nothing is learned by asking.
+     */
+    suspend fun numbers(jid: String): Outcome<List<String>> =
+        live { ops.identityNumbers(WaSyncResolveRequest(id, jid)).map { it.numbers } }
+
+    /**
      * The key changes after [seq] (0: all of them), oldest first. What is kept per chat outside the store (drafts,
      * prefs, notification tags, the open thread) keeps the `seq` of the last step it followed and replays the rest:
      * a merge that happened while that layer was not running is not lost.

@@ -4,9 +4,9 @@ import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichMessage
-import dev.rosty.core.model.wa.WaIdKind
 import dev.rosty.core.model.wa.WaIdParseRequest
 import dev.rosty.core.model.wa.WaIdParsed
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
@@ -34,6 +34,7 @@ import dev.rosty.core.model.wa.WaSyncMediaSetRequest
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncNumbersAnswer
 import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
 import dev.rosty.core.model.wa.WaSyncOlderRequest
@@ -130,7 +131,18 @@ class FakeWaSyncOps(
             if (old == key) return@synchronized null
             aliases[old] = key
             messages.remove(old)?.forEach { store(it.copy(chat = key)) }
-            messages[key]?.replaceAll { if (it.sender == old) it.copy(sender = key, wireSender = old) else it }
+            // The author is rewritten in every chat (a group message of theirs too); the id it arrived under stays.
+            for (rows in messages.values) {
+                rows.replaceAll {
+                    if (it.sender ==
+                        old
+                    ) {
+                        it.copy(sender = key, wireSender = it.wireSender ?: old)
+                    } else {
+                        it
+                    }
+                }
+            }
             val moved = chats.firstOrNull { it.jid == old }
             chats.removeAll { it.jid == old }
             if (moved != null && chats.none { it.jid == key }) chats += moved.copy(jid = key, wireJid = old)
@@ -146,38 +158,10 @@ class FakeWaSyncOps(
 
     private val unreported = mutableListOf<WaSyncRekeyed>()
 
-    private fun bare(id: String): String {
-        val at = id.lastIndexOf('@')
-        if (at <= 0) return id
-        return id.substring(0, at).substringBefore(':') + id.substring(at)
-    }
+    /** The id without device; text that is not a JID stays as it is. */
+    private fun bare(id: String): String = WaIds.bare(id) ?: id
 
-    private fun kindOf(server: String): WaIdKind =
-        when (server) {
-            "s.whatsapp.net", "c.us" -> WaIdKind.Pn
-            "lid" -> WaIdKind.Lid
-            "g.us" -> WaIdKind.Group
-            "newsletter" -> WaIdKind.Newsletter
-            "broadcast" -> WaIdKind.Broadcast
-            else -> WaIdKind.Other
-        }
-
-    private fun parsed(id: String): WaIdParsed? {
-        val at = id.lastIndexOf('@')
-        if (at <= 0 || at == id.lastIndex) return null
-        val local = id.substring(0, at)
-        val kind = kindOf(id.substring(at + 1))
-        val user = local.substringBefore(':')
-        if (kind == WaIdKind.Pn && !user.all(Char::isDigit)) return null
-        val server = if (kind == WaIdKind.Pn) "s.whatsapp.net" else id.substring(at + 1)
-        return WaIdParsed(
-            kind = kind,
-            user = user,
-            bare = "$user@$server",
-            number = if (kind == WaIdKind.Pn) "+$user" else null,
-            device = local.substringAfter(':', "").toIntOrNull(),
-        )
-    }
+    private fun parsed(id: String): WaIdParsed? = WaIds.parse(id)
 
     /** Seeds one stored text message. */
     fun put(
@@ -557,6 +541,15 @@ class FakeWaSyncOps(
         synchronized(lock) {
             val id = parsed(req.id) ?: return@synchronized ok(null)
             ok(WaSyncResolved(key = keyOf(id.bare), kind = id.kind, wire = id.bare))
+        }
+
+    /** The number of the key first, then the numbers that were merged into it (a number change), newest first. */
+    override suspend fun identityNumbers(req: WaSyncResolveRequest): Outcome<WaSyncNumbersAnswer> =
+        synchronized(lock) {
+            val id = parsed(req.id) ?: return@synchronized ok(WaSyncNumbersAnswer(emptyList()))
+            val key = keyOf(id.bare)
+            val former = rekeyed.filter { it.intoKey == key }.reversed().mapNotNull { WaIds.number(it.fromKey) }
+            ok(WaSyncNumbersAnswer((listOfNotNull(WaIds.number(key)) + former).distinct()))
         }
 
     override suspend fun rekeyedSince(req: WaSyncRekeyedRequest): Outcome<WaSyncRekeyedAnswer> =

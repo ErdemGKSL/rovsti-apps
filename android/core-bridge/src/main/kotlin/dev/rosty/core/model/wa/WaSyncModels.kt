@@ -187,6 +187,13 @@ data class WaSyncResolved(
     @SerialName("person_id") @EncodeDefault(NEVER) val personId: Long? = null,
 )
 
+/** `wa_sync.identity_numbers`: the phone numbers of the person behind an id. */
+@Serializable
+data class WaSyncNumbersAnswer(
+    /** `+<digits>`: the current number first, then the former ones, newest first. */
+    val numbers: List<String>,
+)
+
 @Serializable
 data class WaSyncRekeyedRequest(
     val handle: Long,

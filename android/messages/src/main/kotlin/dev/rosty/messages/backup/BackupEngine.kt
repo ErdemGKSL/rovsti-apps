@@ -18,7 +18,6 @@ import dev.rosty.core.model.messages.StrengthRequest
 import dev.rosty.core.ops.MessagesOps
 import dev.rosty.platform.sms.SmsRepository
 import dev.rosty.platform.sms.SmsResult
-import kotlinx.coroutines.flow.first
 import java.util.Base64
 
 /** The parts of the app a backup reads and a restore writes, besides the SMS provider. */
@@ -82,23 +81,17 @@ class BackupEngine(
     suspend fun strength(passphrase: String): Strength? =
         (ops.passphraseStrength(StrengthRequest(passphrase)) as? Outcome.Ok)?.value?.strength
 
-    /** Every SMS and MMS on the phone, oldest page last; empty without `READ_SMS`. */
-    suspend fun snapshot(): Pair<List<SmsRow>, List<MmsRow>> {
-        val smsRows = ArrayList<SmsRow>()
-        val mmsRows = ArrayList<MmsRow>()
-        for (thread in sms.threads(MAX_THREADS).first()) {
-            var before: Long? = null
-            while (true) {
-                val page = sms.messages(thread.threadId, before, PAGE)
-                smsRows += page.sms
-                mmsRows += page.mms
-                val oldest = (page.sms.map { it.dateMs } + page.mms.map { it.dateMs }).minOrNull()
-                if (!page.hasOlder || oldest == null) break
-                before = oldest
-            }
-        }
-        return smsRows to mmsRows
-    }
+    /**
+     * Every SMS and MMS on the phone, newest first; empty without `READ_SMS`. The provider is read in pages by date,
+     * MMS as text parts and addresses only (no attachment is copied to the cache).
+     */
+    suspend fun snapshot(): Pair<List<SmsRow>, List<MmsRow>> = smsRows() to mmsRows()
+
+    private suspend fun smsRows(): List<SmsRow> =
+        ArrayList<SmsRow>().also { all -> sms.backupSms().collect { all += it } }
+
+    private suspend fun mmsRows(): List<MmsRow> =
+        ArrayList<MmsRow>().also { all -> sms.backupMms().collect { all += it } }
 
     /** The encrypted backup file of everything now; null when it could not be made. */
     suspend fun seal(passphrase: String): ByteArray? {
@@ -134,7 +127,8 @@ class BackupEngine(
                 is Outcome.Ok -> parsed.value.body
                 is Outcome.Err -> return failureOf(parsed.error)
             }
-        val existing = snapshot().first
+        // The plan compares SMS only: the MMS are not read.
+        val existing = smsRows()
         val plan =
             (ops.backupPlan(RestorePlanRequest(body, existing)) as? Outcome.Ok)?.value
                 ?: return OpenResult.Unusable(BackupFailure.Failed)
@@ -235,7 +229,5 @@ class BackupEngine(
         const val MIME = "application/octet-stream"
         private const val SALT_BYTES = 16
         private const val NONCE_BYTES = 12
-        private const val MAX_THREADS = 100_000
-        private const val PAGE = 500
     }
 }

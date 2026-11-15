@@ -44,4 +44,14 @@ gateway commit.
 
 ## Evidence
 
-(per step, filled in as each lands)
+- **Step 1** (`7e8759d8`, merge `9986fc23`): `rosty_core::wa_identity` (`id`, `source`, `rows`, `map`, `name`), 63 tests
+  including the conflict matrix over every source pair and a random-operations invariant test.
+- **Steps 2 and 3** (`fb215b14` proto and client, `9dab1c9f` gateway, `9e70600f`, merge `4e7c9f03`): wire additions as
+  agreed; gateway table `identity_pairs`, route and events, store migration v7, the fixes of ID 2.4 (item 7 partly: the
+  chat of an own-device receipt cannot be recovered at 0.7.0). Never run against WhatsApp. `apps/*` struct literals no
+  longer compile with the new fields (not touched, by instruction).
+- **Step 4 and the store half of 5** (`55e44d01`, merge `1e292692`, fixture `bf874965`, `afbdd7e1`): schema v4
+  (`person`, `alias`, `merge_log`, `wire_jid`, `wire_sender`, own ids, merge cursor, backfill cursor; no `person_id`
+  columns: rows stay keyed by the canonical key), resolve before match on ingest, the logged and replayable merge,
+  backfill. 41 new `wa_sync` tests.
+- Merged tree: fmt and clippy clean, the gate's Rust packages plus `wa_gateway`: 2 916 tests, 0 failed.

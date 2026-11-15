@@ -549,6 +549,7 @@ mod tests {
             state,
             own_jid: Some("905321234567@s.whatsapp.net".into()),
             push_name: None,
+            own_lid: None,
         }
     }
 

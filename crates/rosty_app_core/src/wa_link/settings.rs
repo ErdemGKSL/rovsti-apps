@@ -288,6 +288,7 @@ impl LinkModel {
                     state: InstanceState::Disconnected,
                     own_jid: None,
                     push_name: None,
+                    own_lid: None,
                 },
             },
             (None, _) => Screen::Choose,
@@ -685,6 +686,7 @@ mod tests {
             state,
             own_jid: Some("905321234567@s.whatsapp.net".into()),
             push_name: Some("Ada".into()),
+            own_lid: None,
         }
     }
 

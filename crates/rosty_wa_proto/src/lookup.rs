@@ -166,6 +166,7 @@ mod tests {
             last: None,
             unread: 0,
             is_group,
+            alt: None,
         }
     }
 

@@ -2,12 +2,14 @@
 //! deletes, and the app-state and profile events that other devices and
 //! WhatsApp send (archive, pin, mute, star, push names, pictures, about).
 
-use rosty_wa_proto::{MUTED_FOREVER, MediaKind, MessageBody};
+use rosty_wa_proto::{GatewayEvent, IdentitySource, MUTED_FOREVER, MediaKind, MessageBody};
 use whatsapp_rust::features::message_edit;
 use whatsapp_rust::prelude::*;
+use whatsapp_rust::wacore::types::events::ContactNumberChanged;
+use whatsapp_rust::wacore::types::lid_pn::LearningSource;
 
 use super::convert::{self, Converted, Origin};
-use super::lid::{LidMap, Resolver};
+use super::lid::{LidMap, Pair, Resolver};
 use crate::driver::EventSink;
 use crate::store::{ChatChange, MessageChange, ProfileChange};
 
@@ -69,7 +71,7 @@ pub fn encrypted_edit(ctx: &MessageContext, map: &LidMap) -> Option<PendingEdit>
         device.pn.clone()
     }?;
     let author = envelope.original_sender_for_dispatch(source.is_from_me, &source.sender, &own);
-    let (chat, sender) = convert::chat_and_sender(source, map);
+    let (chat, sender) = convert::chat_and_sender(source, ctx.info.peer_recipient_pn.as_ref(), map);
     Some(PendingEdit {
         id: ctx.info.id.to_string(),
         chat,
@@ -119,14 +121,13 @@ impl PendingEdit {
             return Converted::Ignore;
         };
         convert::convert(
-            Origin {
-                id: &self.id,
-                chat: &self.chat,
-                sender: self.sender.as_deref(),
-                from_me: self.from_me,
-                timestamp_ms: self.timestamp_ms,
-                sender_name: None,
-            },
+            Origin::new(
+                &self.id,
+                &self.chat,
+                self.sender.as_deref(),
+                self.from_me,
+                self.timestamp_ms,
+            ),
             &legacy,
         )
     }
@@ -170,6 +171,50 @@ pub fn mute_change(muted: Option<bool>, end_ms: Option<i64>) -> ChatChange {
         Some(end) if end > 0 => ChatChange::Muted(Some(end)),
         _ => ChatChange::Muted(Some(MUTED_FOREVER)),
     }
+}
+
+/// The pair a synced address-book entry states: the contact's LID and
+/// phone-number JID, of which the entry is keyed by one (`jid`) and names
+/// the other (`lidJid` / `pnJid`).
+pub fn contact_pair(jid: &Jid, action: &wa::sync_action_value::ContactAction) -> Option<Pair> {
+    let named = |id: &Option<String>| {
+        id.as_deref()
+            .filter(|id| !id.is_empty())?
+            .parse::<Jid>()
+            .ok()
+    };
+    let (lid, pn) = (named(&action.lid_jid), named(&action.pn_jid));
+    match (lid, pn) {
+        (Some(lid), Some(pn)) => Pair::of(&lid, &pn),
+        (Some(other), None) | (None, Some(other)) => Pair::of(jid, &other),
+        (None, None) => None,
+    }
+}
+
+/// What the apps hear when WhatsApp says a contact changed number.
+pub fn number_changed(change: &ContactNumberChanged) -> GatewayEvent {
+    let bare = |jid: &Jid| jid.to_non_ad().to_string();
+    GatewayEvent::IdentityNumberChanged {
+        old_pn: bare(&change.old_jid),
+        new_pn: bare(&change.new_jid),
+        old_lid: change.old_lid.as_ref().map(bare),
+        new_lid: change.new_lid.as_ref().map(bare),
+    }
+}
+
+/// Tells the apps about a number change and records its pairs.
+pub async fn on_number_changed(sink: &EventSink, change: &ContactNumberChanged) {
+    let GatewayEvent::IdentityNumberChanged {
+        old_pn,
+        new_pn,
+        old_lid,
+        new_lid,
+    } = number_changed(change)
+    else {
+        return;
+    };
+    sink.number_changed(&old_pn, &new_pn, old_lid.as_deref(), new_lid.as_deref())
+        .await;
 }
 
 /// The chat JID an app-state event names, as the store keys it.
@@ -237,6 +282,19 @@ pub async fn handle(sink: &EventSink, resolver: &Resolver, event: &Event) {
             .await;
         }
         Event::ContactUpdate(u) => {
+            // whatsapp-rust does not read the ids of a synced contact; they
+            // are how a saved contact's LID meets its number.
+            if let Some(pair) = contact_pair(&u.jid, &u.action) {
+                let fed = resolver
+                    .client()
+                    .add_lid_pn_mapping(&pair.lid.user, &pair.pn.user, LearningSource::Other)
+                    .await;
+                if let Err(e) = fed {
+                    log::debug!("feeding a contact's LID to the client failed: {e:?}");
+                }
+                sink.learn_pairs(vec![pair.learned(IdentitySource::ContactAction)])
+                    .await;
+            }
             let name = u
                 .action
                 .full_name
@@ -298,6 +356,79 @@ mod tests {
         assert_eq!(
             mute_change(Some(true), Some(1_800_000_000_000)),
             ChatChange::Muted(Some(1_800_000_000_000))
+        );
+    }
+
+    fn jid(s: &str) -> Jid {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn synced_contacts_state_pairs() {
+        use wa::sync_action_value::ContactAction;
+        let lid = jid("1234@lid");
+        let pn = jid("905550000001@s.whatsapp.net");
+        let pair = Pair::of(&lid, &pn);
+        assert!(pair.is_some());
+        let action = |lid_jid: Option<&str>, pn_jid: Option<&str>| ContactAction {
+            full_name: Some("Ayse".into()),
+            lid_jid: lid_jid.map(str::to_owned),
+            pn_jid: pn_jid.map(str::to_owned),
+            ..Default::default()
+        };
+        // Keyed by the number, naming the LID; and the reverse.
+        assert_eq!(contact_pair(&pn, &action(Some("1234@lid"), None)), pair);
+        assert_eq!(
+            contact_pair(&lid, &action(None, Some("905550000001@s.whatsapp.net"))),
+            pair
+        );
+        // Both named: they are the pair, whatever the key says.
+        assert_eq!(
+            contact_pair(
+                &jid("905550000009@s.whatsapp.net"),
+                &action(Some("1234:3@lid"), Some("905550000001:1@s.whatsapp.net"))
+            ),
+            pair
+        );
+        // Nothing named, the same kind twice, or text that is no id.
+        assert_eq!(contact_pair(&pn, &action(None, None)), None);
+        assert_eq!(contact_pair(&lid, &action(Some("5@lid"), None)), None);
+        assert_eq!(contact_pair(&pn, &action(Some(""), Some(""))), None);
+        assert_eq!(contact_pair(&pn, &action(Some("@@"), None)), None);
+    }
+
+    #[test]
+    fn a_number_change_names_bare_ids() {
+        let at = whatsapp_rust::wacore::chrono::DateTime::from_timestamp(1, 0).unwrap();
+        let change = ContactNumberChanged::builder()
+            .old_jid(jid("905550000001:2@s.whatsapp.net"))
+            .new_jid(jid("905550000002@s.whatsapp.net"))
+            .old_lid(jid("1234:7@lid"))
+            .new_lid(jid("1234@lid"))
+            .timestamp(at)
+            .build();
+        assert_eq!(
+            number_changed(&change),
+            GatewayEvent::IdentityNumberChanged {
+                old_pn: "905550000001@s.whatsapp.net".into(),
+                new_pn: "905550000002@s.whatsapp.net".into(),
+                old_lid: Some("1234@lid".into()),
+                new_lid: Some("1234@lid".into()),
+            }
+        );
+        let bare = ContactNumberChanged::builder()
+            .old_jid(jid("905550000001@s.whatsapp.net"))
+            .new_jid(jid("905550000002@s.whatsapp.net"))
+            .timestamp(at)
+            .build();
+        assert_eq!(
+            number_changed(&bare),
+            GatewayEvent::IdentityNumberChanged {
+                old_pn: "905550000001@s.whatsapp.net".into(),
+                new_pn: "905550000002@s.whatsapp.net".into(),
+                old_lid: None,
+                new_lid: None,
+            }
         );
     }
 

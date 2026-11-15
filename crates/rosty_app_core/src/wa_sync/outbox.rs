@@ -534,6 +534,7 @@ fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()
                         sender: None,
                         from_me: true,
                         emoji: emoji.clone(),
+                        sender_alt: None,
                     });
                 }
                 conn.execute(
@@ -924,6 +925,8 @@ fn confirm_send(
         timestamp_ms,
         body,
         reactions: Vec::new(),
+        chat_alt: None,
+        sender_alt: None,
     };
     let meta = rosty_wa_proto::MessageMeta {
         quoted: row.action.quoted_id().map(|id| rosty_wa_proto::Quoted {

@@ -288,6 +288,10 @@ pub struct WaProfile {
     /// and only knows what arrived with messages.
     #[serde(default)]
     pub fetched_ms: i64,
+    /// The person's LID (`<user>@lid`) when `jid` is their phone-number JID
+    /// and the gateway knows it. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lid: Option<String>,
 }
 
 impl WaProfile {
@@ -448,6 +452,8 @@ mod tests {
             timestamp_ms: 1,
             body: MessageBody::Text(t.into()),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 
@@ -554,6 +560,7 @@ mod tests {
                 last: Some(text("x")),
                 unread: 2,
                 is_group: true,
+                alt: None,
             },
             meta: ChatMeta {
                 picture_id: Some("123".into()),

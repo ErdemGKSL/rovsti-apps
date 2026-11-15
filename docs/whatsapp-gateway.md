@@ -300,23 +300,74 @@ number, even when it is all digits. Every chat, sender, author and participant i
 gateway produces goes through `wa/lid.rs`: a LID with a known mapping becomes
 `<number>@s.whatsapp.net`, the device suffix (`:5`) is dropped, groups, broadcasts and
 phone-number JIDs are untouched, and a LID without a mapping stays a LID. The mapping
-comes from whatsapp-rust's `Client::get_lid_pn_entry` (cache, then its store), with the
-message's `sender_alt`/`recipient_alt` as a fallback. The mapping wins over the alt.
+comes from whatsapp-rust's `Client::get_lid_pn_entry` (cache, then its store), then
+from the gateway's own table of learned pairs, with the number WhatsApp sent next to
+the id as a fallback: `sender_alt` for someone else's message, `peer_recipient_pn` for
+my own message echoed from another of my devices. The mapping wins over that number.
+Mentions and quoted authors go through the same resolution.
 
-whatsapp-rust has no "mapping learned" event, so mappings are looked up lazily and the
-stored LID chats are swept on every connect (this is also the one-time startup
-migration, and it is idempotent), after each history sync, on `DeviceListUpdate` and
-`ContactNumberChanged`, and when a message arrives for a LID the resolver had not seen.
-The sweep logs `lid-merge: startup sweep merged N of M LID chats`.
+whatsapp-rust has no "mapping learned" event, so the gateway records every pair it
+sees (below), takes over the library's whole table on every connect, and sweeps what
+is stored under a LID on every connect (idempotent), after each history sync, on
+`DeviceListUpdate` and on `ContactNumberChanged`. The sweep covers every stored LID,
+not only LID chats: group authors, reaction senders, receipt participants, who
+deleted a message, quoted authors, mentions and profiles. It logs
+`lid-merge: sweep moved N of M stored LIDs`.
 
 Merging (`Store::merge_chat(from, into)`, one transaction) moves the LID chat's messages,
 reactions and receipts to the phone-number chat (deduplicated by message id, the existing
-row wins), rewrites sender and participant ids, sums the unread counters, keeps the newer
-`last_ms` and the name, carries settings (pin, archive, mute), profile names and scheduled
-texts over, and deletes the LID chat. A second call is a no-op. Sends keep working with
-either id: the store key is the resolved id, the wire target is what the app sent.
+row wins), sums the unread counters, keeps the newer `last_ms` and the name, carries
+settings (pin, archive, mute) and scheduled texts over, and deletes the LID chat. It
+also renames the person in every chat, whether or not they had a chat of their own:
+authors, `deleted_by`, reaction senders (one reaction per person), receipt participants
+(one row per person, at the furthest state), quoted authors, mentions and the profile.
+A second call is a no-op. Sends keep working with either id: the store key is the
+resolved id, the wire target is what the app sent.
 
-Event `chat_merged {from, into}` (see below) tells clients to move local state.
+Event `chat_merged {from, into}` (see above) tells clients to move local state. It is
+sent only when a chat moved, as before.
+
+### Identity: both ids, and the pairs the gateway learned
+
+The gateway resolves ids but no longer hides what it resolved. Everything here is
+additive: an older app skips the fields and events, and a newer app treats a missing
+field as "not known". Ids are bare (`user@server`, no device).
+
+- The other form of an id sits next to it when the gateway knows it (the LID next
+  to a phone-number JID, or the reverse): `chat_alt` and `sender_alt` on a message,
+  `sender_alt` on a reaction, `alt` on a chat, `lid` on a profile, `lid` and `pn` on a
+  group participant, `jid_alt` on `presence` and `typing`, `peer_alt` on a call.
+  `GET /v1/instance` and the `state` event carry `own_lid` next to `own_jid`. A group
+  carries `addressing_mode` (`"pn"` or `"lid"`).
+- `GET /v1/identity/mappings?since=<cursor>&limit=<n>` lists the learned pairs,
+  oldest change first: `{ items: [{ lid, pn, source, learned_ms }], next }`. `next` is
+  the cursor for the page after this one; an empty page has `next: null`, which means
+  the app has everything. An app keeps the last cursor and asks from there on open,
+  on reconnect and on `resync`. A gateway from before this route answers a bare 404,
+  which `rosty_wa_client` reports as a `not_found` API error.
+- `identity_mapped { lid, pn, source, learned_ms }` is sent when a pair is new or its
+  LID moved to another number. Pairs learned in bulk (the library's table at connect,
+  a history sync) are announced one by one up to 200; above that the apps get one
+  `resync` and page the route.
+- `identity_number_changed { old_pn, new_pn, old_lid?, new_lid? }` is sent when
+  WhatsApp says a contact changed number. The two number chats are not merged here.
+
+`source` is where the pair comes from: `number_change`, `peer_message`, `receipt`,
+`call`, `usync`, `group_metadata`, `migration_sync`, `contact_action`, `history`,
+`device_notification` or `other`. Pairs live in table `identity_pairs`, one row per
+LID. A pair that disagrees with the stored one replaces it only from a source trusted
+as much or more (`IdentitySource::rank`), and then gets a new, larger cursor. Synced
+address-book contacts (`ContactAction`) are also fed to whatsapp-rust
+(`Client::add_lid_pn_mapping`), which does not read them itself.
+
+Each stored message keeps the chat and author id it arrived under (`wire_chat`,
+`wire_sender`). Those are what goes back to WhatsApp: the `participant` of the message
+key in a reaction and in an admin's delete for everyone, the quoted author of a reply,
+and the chat and author of read and played receipts. Messages stored before schema v7
+have none and fall back to the stored ids.
+
+Group ticks count people: a member who acked under a LID and under the number the
+gateway knows for that LID counts once, and this account's own devices never count.
 
 `rosty_wa_proto::Timeline::apply_rich_page` and `Timeline::meta(id)` keep the meta
 next to the timeline and apply `message_meta`, `message_deleted` and `chat_cleared`.

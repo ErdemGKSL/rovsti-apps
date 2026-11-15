@@ -26,22 +26,27 @@ pub fn message_key(
 }
 
 /// The author of the target message in a group, from the most to the least
-/// trustworthy source: the stored message, the request, then me (when it is
-/// my own message). `None` in one-to-one chats and when nothing names the
-/// author.
+/// trustworthy source: the id the stored message arrived under
+/// (`wire_sender`: what WhatsApp itself called the author, a LID in a group
+/// that addresses its members by LID), the stored message, the request, then
+/// me (when it is my own message). `None` in one-to-one chats and when
+/// nothing names the author.
 pub fn target_author(
     req: &SendReaction,
     stored: Option<&WaMessage>,
+    wire_sender: Option<&str>,
     own_jid: Option<&str>,
 ) -> Option<String> {
     if !is_group(&req.chat) {
         return None;
     }
+    let wire = wire_sender
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_owned);
     if req.from_me {
-        return own_jid.map(str::to_owned);
+        return wire.or_else(|| own_jid.map(str::to_owned));
     }
-    stored
-        .and_then(|m| m.sender.clone())
+    wire.or_else(|| stored.and_then(|m| m.sender.clone()))
         .or_else(|| req.sender.clone())
         .filter(|s| !s.trim().is_empty())
 }
@@ -54,6 +59,7 @@ mod tests {
     const DM: &str = "905321234567@s.whatsapp.net";
     const GROUP: &str = "120363-1@g.us";
     const ALICE: &str = "4915123@s.whatsapp.net";
+    const ALICE_LID: &str = "1234@lid";
     const ME: &str = "90500@s.whatsapp.net";
 
     fn req(chat: &str, from_me: bool, sender: Option<&str>) -> SendReaction {
@@ -75,6 +81,8 @@ mod tests {
             timestamp_ms: 1,
             body: MessageBody::Text("x".into()),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 
@@ -86,7 +94,12 @@ mod tests {
         assert_eq!(key.from_me, Some(false));
         assert_eq!(key.participant, None);
         assert_eq!(
-            target_author(&req(DM, false, Some(ALICE)), None, Some(ME)),
+            target_author(
+                &req(DM, false, Some(ALICE)),
+                None,
+                Some(ALICE_LID),
+                Some(ME)
+            ),
             None
         );
     }
@@ -106,21 +119,43 @@ mod tests {
         let r = req(GROUP, false, Some("request@s.whatsapp.net"));
         // The stored message wins over what the client claims.
         assert_eq!(
-            target_author(&r, Some(&stored(ALICE)), Some(ME)).as_deref(),
+            target_author(&r, Some(&stored(ALICE)), None, Some(ME)).as_deref(),
             Some(ALICE)
         );
         assert_eq!(
-            target_author(&r, None, Some(ME)).as_deref(),
+            target_author(&r, None, None, Some(ME)).as_deref(),
             Some("request@s.whatsapp.net")
         );
         assert_eq!(
-            target_author(&req(GROUP, false, None), None, Some(ME)),
+            target_author(&req(GROUP, false, None), None, None, Some(ME)),
             None
         );
         // My own message in a group is authored by me.
         assert_eq!(
-            target_author(&req(GROUP, true, None), None, Some(ME)).as_deref(),
+            target_author(&req(GROUP, true, None), None, None, Some(ME)).as_deref(),
             Some(ME)
+        );
+    }
+
+    #[test]
+    fn the_key_names_the_author_as_whatsapp_did() {
+        let r = req(GROUP, false, Some(ALICE));
+        // Stored by phone number, arrived under a LID: the key says the LID.
+        assert_eq!(
+            target_author(&r, Some(&stored(ALICE)), Some(ALICE_LID), Some(ME)).as_deref(),
+            Some(ALICE_LID)
+        );
+        let key = message_key(GROUP, "ABC", false, Some(ALICE_LID));
+        assert_eq!(key.participant.as_deref(), Some(ALICE_LID));
+        // A blank wire id is no wire id.
+        assert_eq!(
+            target_author(&r, Some(&stored(ALICE)), Some(" "), Some(ME)).as_deref(),
+            Some(ALICE)
+        );
+        // My own message echoed from another device under my LID.
+        assert_eq!(
+            target_author(&req(GROUP, true, None), None, Some("777@lid"), Some(ME)).as_deref(),
+            Some("777@lid")
         );
     }
 }

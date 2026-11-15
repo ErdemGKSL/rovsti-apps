@@ -6,16 +6,16 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use rosty_wa_proto::{
     ChatAction, ChatState, DELETED_BY_ME, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
-    LinkRequest, MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage, SendReaction, SendText,
-    Sent, WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
+    IdentitySource, LinkRequest, MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage,
+    SendReaction, SendText, Sent, WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
 };
 
 use crate::hub::Hub;
 use crate::now_ms;
 use crate::push::{PushKind, Pusher, should_push};
 use crate::store::{
-    ChatChange, FetchedProfile, InstanceId, MessageChange, MessageExtras, ProfileChange, Store,
-    StoredStatus,
+    ChatChange, FetchedProfile, GroupReceipt, InstanceId, LearnedPair, MessageChange,
+    MessageExtras, NewPair, ProfileChange, Store, StoredStatus, WireIds,
 };
 use crate::wa::calls::{CallBackend, CallTable};
 
@@ -58,6 +58,29 @@ pub fn tick_events(chat: &str, moved: Vec<(String, MessageMeta)>) -> Vec<Gateway
             meta: Box::new(meta),
         });
     receipts.chain(metas).collect()
+}
+
+/// Pairs learned in one go (a history sync, the library's whole table) are
+/// announced one by one up to this many. Above it the apps get one `resync`
+/// instead and page `GET /v1/identity/mappings` from their cursor: thousands
+/// of events would only push everything else out of the event log.
+pub const MAX_PAIR_EVENTS: usize = 200;
+
+/// What the apps hear about `learned` pairs: an `identity_mapped` each, or
+/// one `resync` when there are more than [`MAX_PAIR_EVENTS`].
+pub fn pair_events(learned: &[LearnedPair]) -> Vec<GatewayEvent> {
+    if learned.len() > MAX_PAIR_EVENTS {
+        return vec![GatewayEvent::Resync];
+    }
+    learned
+        .iter()
+        .map(|pair| GatewayEvent::IdentityMapped {
+            lid: pair.mapping.lid.clone(),
+            pn: pair.mapping.pn.clone(),
+            source: pair.mapping.source.clone(),
+            learned_ms: pair.mapping.learned_ms,
+        })
+        .collect()
 }
 
 /// A file to send as a media message.
@@ -184,11 +207,12 @@ impl EventSink {
             GatewayEvent::State(status) => {
                 let saved = self
                     .store
-                    .set_state(
+                    .set_state_with_lid(
                         self.instance.clone(),
                         status.state,
                         status.own_jid.clone(),
                         status.push_name.clone(),
+                        status.own_lid.clone(),
                     )
                     .await;
                 if let Err(e) = saved {
@@ -357,26 +381,36 @@ impl EventSink {
         self.store.lid_chats(self.instance.clone()).await
     }
 
-    /// Merges the stored chat `from` (a LID) into `into` (its phone number)
-    /// and tells the apps. `None` when there was nothing to merge or the
-    /// store failed.
+    /// Every LID something is stored under: chats, authors, reactors,
+    /// receipts, quoted authors, mentions and profiles.
+    pub async fn lids_seen(&self) -> Result<Vec<String>, crate::store::StoreError> {
+        self.store.lids_seen(self.instance.clone()).await
+    }
+
+    /// Moves everything stored under `from` (a LID) to `into` (its phone
+    /// number): the chat, when there is one, and every row of any chat that
+    /// names the person. The apps hear `chat_merged` when a chat moved.
+    /// `None` when nothing was stored under `from` or the store failed.
     pub async fn merge_chat(&self, from: &str, into: &str) -> Option<crate::store::MergeReport> {
         match self
             .store
             .merge_chat(self.instance.clone(), from.to_owned(), into.to_owned())
             .await
         {
-            Ok(report) if report.merged => {
+            Ok(report) if report.merged || report.rewritten > 0 => {
                 log::info!(
-                    "{}: lid-merge: {from} -> {into}: {} moved, {} deduped",
+                    "{}: lid-merge: {from} -> {into}: {} moved, {} deduped, {} rows renamed",
                     self.instance,
                     report.moved,
-                    report.deduped
+                    report.deduped,
+                    report.rewritten
                 );
-                self.publish(GatewayEvent::ChatMerged {
-                    from: from.to_owned(),
-                    into: into.to_owned(),
-                });
+                if report.merged {
+                    self.publish(GatewayEvent::ChatMerged {
+                        from: from.to_owned(),
+                        into: into.to_owned(),
+                    });
+                }
                 Some(report)
             }
             Ok(_) => None,
@@ -385,6 +419,117 @@ impl EventSink {
                 None
             }
         }
+    }
+
+    /// Records that `lid` and `pn` (bare ids) are one person. See
+    /// [`Self::learn_pairs`].
+    pub async fn learn_pair(&self, lid: &str, pn: &str, source: IdentitySource) {
+        self.learn_pairs(vec![NewPair::new(lid, pn, source, now_ms())])
+            .await;
+    }
+
+    /// Records LID and phone-number pairs. For each one that is new, or
+    /// whose LID moved to another number, the apps hear `identity_mapped`
+    /// ([`pair_events`]) and whatever is stored under the LID moves to the
+    /// number ([`Self::merge_chat`]). Returns those pairs.
+    pub async fn learn_pairs(&self, pairs: Vec<NewPair>) -> Vec<LearnedPair> {
+        let learned = match self.store.learn_pairs(self.instance.clone(), pairs).await {
+            Ok(learned) => learned,
+            Err(e) => {
+                log::warn!("{}: saving identity pairs failed: {e}", self.instance);
+                return Vec::new();
+            }
+        };
+        if learned.is_empty() {
+            return learned;
+        }
+        for event in pair_events(&learned) {
+            self.publish(event);
+        }
+        // A batch names many people nothing is stored about: look once at
+        // what is stored instead of searching every table per pair.
+        let stored = if learned.len() > 1 {
+            self.lids_seen().await.ok()
+        } else {
+            None
+        };
+        for pair in &learned {
+            let mapping = &pair.mapping;
+            if stored
+                .as_ref()
+                .is_none_or(|lids| lids.contains(&mapping.lid))
+            {
+                self.merge_chat(&mapping.lid, &mapping.pn).await;
+            }
+        }
+        learned
+    }
+
+    /// A contact changed number: tells the apps and records the pairs
+    /// WhatsApp named. The ids are bare.
+    pub async fn number_changed(
+        &self,
+        old_pn: &str,
+        new_pn: &str,
+        old_lid: Option<&str>,
+        new_lid: Option<&str>,
+    ) {
+        self.publish(GatewayEvent::IdentityNumberChanged {
+            old_pn: old_pn.to_owned(),
+            new_pn: new_pn.to_owned(),
+            old_lid: old_lid.map(str::to_owned),
+            new_lid: new_lid.map(str::to_owned),
+        });
+        let now = now_ms();
+        let mut pairs = Vec::new();
+        // The old pair is history: only worth knowing when nothing better
+        // is, and only when the LID is not the one that moves to the new
+        // number.
+        if let Some(old_lid) = old_lid.filter(|lid| Some(*lid) != new_lid) {
+            pairs.push(NewPair::new(old_lid, old_pn, IdentitySource::Other, now));
+        }
+        if let Some(new_lid) = new_lid {
+            pairs.push(NewPair::new(
+                new_lid,
+                new_pn,
+                IdentitySource::NumberChange,
+                now,
+            ));
+        }
+        self.learn_pairs(pairs).await;
+    }
+
+    /// The phone-number JID the gateway learned for `lid` (bare).
+    pub async fn pn_of_lid(&self, lid: &str) -> Option<String> {
+        self.store
+            .pn_of_lid(self.instance.clone(), lid.to_owned())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading an identity pair failed: {e}", self.instance);
+                None
+            })
+    }
+
+    /// The LID the gateway learned for the phone-number JID `pn` (bare).
+    pub async fn lid_of_pn(&self, pn: &str) -> Option<String> {
+        self.store
+            .lid_of_pn(self.instance.clone(), pn.to_owned())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading an identity pair failed: {e}", self.instance);
+                None
+            })
+    }
+
+    /// The ids a stored message arrived under (empty when not recorded).
+    pub async fn wire_ids(&self, chat: &str, id: &str) -> WireIds {
+        self.store
+            .wire_ids(self.instance.clone(), chat.to_owned(), id.to_owned())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading wire ids failed: {e}", self.instance);
+                WireIds::default()
+            })
     }
 
     /// Publishes without persisting (receipts, presence, typing, ...).
@@ -479,24 +624,10 @@ impl EventSink {
     /// Stores one group member's receipt for my messages and tells the apps
     /// about the messages whose group-wide ticks moved (see
     /// [`crate::store::group_status`]).
-    pub async fn group_receipt(
-        &self,
-        chat: &str,
-        participant: String,
-        ids: Vec<String>,
-        status: DeliveryStatus,
-        members: Option<usize>,
-    ) {
+    pub async fn group_receipt(&self, chat: &str, receipt: GroupReceipt) {
         match self
             .store
-            .record_group_receipt(
-                self.instance.clone(),
-                chat.to_owned(),
-                participant,
-                ids,
-                status,
-                members,
-            )
+            .record_group_receipt(self.instance.clone(), chat.to_owned(), receipt)
             .await
         {
             Ok(moved) => self.publish_ticks(chat, moved),
@@ -1192,6 +1323,7 @@ mod fake {
                     state: InstanceState::Connected,
                     own_jid: Some(own_jid(&instance)),
                     push_name: Some("Fake".to_owned()),
+                    own_lid: None,
                 }))
                 .await;
                 Ok(())
@@ -1222,6 +1354,7 @@ mod fake {
                         state: InstanceState::LoggedOut,
                         own_jid: None,
                         push_name: None,
+                        own_lid: None,
                     }))
                     .await;
                 }
@@ -1261,6 +1394,8 @@ mod fake {
                         timestamp_ms,
                         body: MessageBody::Text(req.text),
                         reactions: vec![],
+                        chat_alt: None,
+                        sender_alt: None,
                     },
                     MessageExtras {
                         meta,
@@ -1350,6 +1485,8 @@ mod fake {
                             size,
                         },
                         reactions: vec![],
+                        chat_alt: None,
+                        sender_alt: None,
                     },
                     MessageExtras {
                         meta,
@@ -1384,6 +1521,7 @@ mod fake {
                         sender: None,
                         from_me: true,
                         emoji: req.emoji,
+                        sender_alt: None,
                     },
                 )
                 .await;
@@ -1646,6 +1784,51 @@ mod tests {
             ]
         );
         assert!(tick_events("c", Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn learned_pairs_are_announced_one_by_one_up_to_a_limit() {
+        use rosty_wa_proto::IdentityMapping;
+        let learned = |n: usize| -> Vec<LearnedPair> {
+            (0..n)
+                .map(|i| LearnedPair {
+                    mapping: IdentityMapping::new(
+                        format!("{i}@lid"),
+                        format!("9055500{i:05}@s.whatsapp.net"),
+                        IdentitySource::History,
+                        7,
+                    ),
+                    previous_pn: None,
+                })
+                .collect()
+        };
+        assert!(pair_events(&[]).is_empty());
+        assert_eq!(
+            pair_events(&learned(2)),
+            [
+                GatewayEvent::IdentityMapped {
+                    lid: "0@lid".into(),
+                    pn: "905550000000@s.whatsapp.net".into(),
+                    source: "history".into(),
+                    learned_ms: 7,
+                },
+                GatewayEvent::IdentityMapped {
+                    lid: "1@lid".into(),
+                    pn: "905550000001@s.whatsapp.net".into(),
+                    source: "history".into(),
+                    learned_ms: 7,
+                },
+            ]
+        );
+        assert_eq!(
+            pair_events(&learned(MAX_PAIR_EVENTS)).len(),
+            MAX_PAIR_EVENTS
+        );
+        // A whole table at once: the apps page the mappings instead.
+        assert_eq!(
+            pair_events(&learned(MAX_PAIR_EVENTS + 1)),
+            [GatewayEvent::Resync]
+        );
     }
 
     #[test]

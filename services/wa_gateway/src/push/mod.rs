@@ -294,6 +294,8 @@ mod tests {
             timestamp_ms: ts,
             body: MessageBody::Text("secret".into()),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 

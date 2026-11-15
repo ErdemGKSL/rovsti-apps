@@ -9,11 +9,11 @@ use std::time::Duration;
 use rosty_wa_proto::api::routes;
 use rosty_wa_proto::{
     CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey, CreateInstance,
-    CreatedInstance, DeleteForMe, EditMessage, GatewayUrl, GroupInfo, InstanceStatus, IssuedKey,
-    KeyInfo, LinkRequest, LookupUsers, MarkRead, MarkStatusViewed, MediaKind, MediaOptions,
-    MintKey, PlaceCall, ProfilesRequest, PushRegistration, RevokeMessage, RichChat, RichMessage,
-    ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage,
-    StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
+    CreatedInstance, DeleteForMe, EditMessage, GatewayUrl, GroupInfo, IdentityMappings,
+    InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead, MarkStatusViewed,
+    MediaKind, MediaOptions, MintKey, PlaceCall, ProfilesRequest, PushRegistration, RevokeMessage,
+    RichChat, RichMessage, ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted,
+    SetPresence, StarMessage, StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -22,7 +22,7 @@ use ureq::http::{self, HeaderValue, Method, Request, Response, header};
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::{Agent, AsSendBody, Body};
 
-use crate::error::{ClientError, from_status};
+use crate::error::{ClientError, from_status, from_status_optional};
 use crate::tls;
 
 /// Responses are small JSON documents, except media.
@@ -143,6 +143,15 @@ pub(crate) fn picture_path(jid: &str, full: bool) -> String {
     }
 }
 
+/// The path of one page of identity mappings: every pair, or those after
+/// the cursor `since`.
+pub(crate) fn mappings_path(since: Option<&str>) -> String {
+    match since.filter(|cursor| !cursor.is_empty()) {
+        Some(cursor) => format!("{}?since={}", routes::IDENTITY_MAPPINGS, enc(cursor)),
+        None => routes::IDENTITY_MAPPINGS.to_owned(),
+    }
+}
+
 /// The picture id an `ETag` header names (`"123"`, `W/"123"` or `123`).
 pub(crate) fn etag_id(value: &str) -> Option<String> {
     let value = value.trim();
@@ -161,6 +170,14 @@ pub enum Picture {
     Unchanged,
     /// The person or group has no picture, or hides it from this account.
     None,
+}
+
+/// What the gateway said to a request that reached it.
+enum Answer {
+    /// A 2xx response.
+    Ok(Response<Body>),
+    /// Any other status, with the start of its body.
+    Refused { status: u16, body: Vec<u8> },
 }
 
 enum Payload {
@@ -199,11 +216,12 @@ impl Gateway {
         &self.url
     }
 
-    fn run<B: AsSendBody>(&self, req: Request<B>) -> Result<Response<Body>, ClientError> {
+    /// Runs `req`; a non-2xx answer comes back as [`Answer::Refused`].
+    fn run_raw<B: AsSendBody>(&self, req: Request<B>) -> Result<Answer, ClientError> {
         let mut resp = self.agent.run(req)?;
         let status = resp.status();
         if status.is_success() {
-            return Ok(resp);
+            return Ok(Answer::Ok(resp));
         }
         let body = resp
             .body_mut()
@@ -211,7 +229,17 @@ impl Gateway {
             .limit(ERROR_BODY_LIMIT)
             .read_to_vec()
             .unwrap_or_default();
-        Err(from_status(status.as_u16(), &body))
+        Ok(Answer::Refused {
+            status: status.as_u16(),
+            body,
+        })
+    }
+
+    fn run<B: AsSendBody>(&self, req: Request<B>) -> Result<Response<Body>, ClientError> {
+        match self.run_raw(req)? {
+            Answer::Ok(resp) => Ok(resp),
+            Answer::Refused { status, body } => Err(from_status(status, &body)),
+        }
     }
 
     fn exec(
@@ -634,6 +662,28 @@ impl Gateway {
         Ok(Picture::Image { id, bytes })
     }
 
+    /// One page of the LID and phone-number pairs the gateway learned:
+    /// every pair when `since` is `None`, else those learned or changed after
+    /// that cursor. Page on with [`IdentityMappings::next`] until it is
+    /// `None`, and keep the last cursor for the next catch-up.
+    ///
+    /// A gateway from before this route answers 404: that comes back as an
+    /// API error with [`rosty_wa_proto::ErrorCode::NotFound`]
+    /// ([`ClientError::is_not_found`]), which here means "not supported",
+    /// not "try again".
+    pub fn identity_mappings(&self, since: Option<&str>) -> Result<IdentityMappings, ClientError> {
+        let key = self.key.as_ref().ok_or(ClientError::Unauthorized)?;
+        let req = request(Method::GET, &self.url, &mappings_path(since), Some(key), ())?;
+        match self.run_raw(req)? {
+            Answer::Ok(resp) => decode(resp),
+            Answer::Refused { status, body } => Err(from_status_optional(
+                status,
+                &body,
+                "this gateway does not list identity mappings",
+            )),
+        }
+    }
+
     fn call_action(&self, template: &str, call_id: &str) -> Result<(), ClientError> {
         let path = routes::fill(template, "call_id", call_id);
         self.exec(Method::POST, &path, true, Payload::None)
@@ -821,5 +871,79 @@ mod tests {
     fn calls_without_a_key_are_unauthorized() {
         let gw = Gateway::new(url(), None);
         assert_eq!(gw.status().unwrap_err(), ClientError::Unauthorized);
+        assert_eq!(
+            gw.identity_mappings(None).unwrap_err(),
+            ClientError::Unauthorized
+        );
+    }
+
+    #[test]
+    fn mappings_path_carries_the_cursor() {
+        assert_eq!(mappings_path(None), "/v1/identity/mappings");
+        assert_eq!(mappings_path(Some("")), "/v1/identity/mappings");
+        assert_eq!(mappings_path(Some("41")), "/v1/identity/mappings?since=41");
+        // A cursor is opaque: whatever it holds stays one query value.
+        assert_eq!(
+            mappings_path(Some("a b&c")),
+            "/v1/identity/mappings?since=a%20b%26c"
+        );
+        let host = GatewayUrl::parse("https://rosty.erdemdev.tr").unwrap();
+        let req = request(Method::GET, &host, &mappings_path(Some("41")), None, ()).unwrap();
+        assert_eq!(
+            req.uri().to_string(),
+            "https://rosty.erdemdev.tr/v1/identity/mappings?since=41"
+        );
+    }
+
+    #[test]
+    fn mapping_pages_decode() {
+        let body = r#"{"items":[{"lid":"1234@lid","pn":"905550000001@s.whatsapp.net",
+            "source":"usync","learned_ms":1700000000000}],"next":"7"}"#;
+        let page: IdentityMappings = decode(Response::new(Body::builder().data(body))).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].lid, "1234@lid");
+        assert_eq!(page.items[0].pn, "905550000001@s.whatsapp.net");
+        assert_eq!(
+            page.items[0].source(),
+            rosty_wa_proto::IdentitySource::Usync
+        );
+        assert_eq!(page.next.as_deref(), Some("7"));
+        let last: IdentityMappings = decode(Response::new(
+            Body::builder().data(r#"{"items":[],"next":null}"#),
+        ))
+        .unwrap();
+        assert_eq!(last, IdentityMappings::default());
+    }
+
+    #[test]
+    fn lists_decode_with_and_without_identity_fields() {
+        let old = r#"[{"jid":"905550000001@s.whatsapp.net","name":null,"last":null,"unread":0,
+            "is_group":false}]"#;
+        let chats: Vec<ChatSummary> = decode(Response::new(Body::builder().data(old))).unwrap();
+        assert_eq!(chats[0].alt, None);
+        let new = r#"[{"jid":"905550000001@s.whatsapp.net","name":null,"unread":0,
+            "is_group":false,"alt":"1234@lid","last":{"id":"m","chat":"905550000001@s.whatsapp.net",
+            "sender":null,"from_me":false,"timestamp_ms":1,"body":{"text":"hi"},"reactions":[],
+            "chat_alt":"1234@lid"}}]"#;
+        let chats: Vec<RichChat> = decode(Response::new(Body::builder().data(new))).unwrap();
+        assert_eq!(chats[0].chat.alt.as_deref(), Some("1234@lid"));
+        let last = chats[0].chat.last.as_ref().unwrap();
+        assert_eq!(last.chat_alt.as_deref(), Some("1234@lid"));
+        assert_eq!(last.sender_alt, None);
+
+        let status: InstanceStatus = decode(Response::new(Body::builder().data(
+            r#"{"instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net",
+            "push_name":null,"own_lid":"9@lid"}"#,
+        )))
+        .unwrap();
+        assert_eq!(status.own_lid.as_deref(), Some("9@lid"));
+        let group: GroupInfo = decode(Response::new(Body::builder().data(
+            r#"{"jid":"1-2@g.us","subject":"s","addressing_mode":"lid","participants":[
+            {"jid":"905550000001@s.whatsapp.net","admin":false,"lid":"1234@lid",
+            "pn":"905550000001@s.whatsapp.net"}]}"#,
+        )))
+        .unwrap();
+        assert_eq!(group.addressing_mode.as_deref(), Some("lid"));
+        assert_eq!(group.participants[0].lid.as_deref(), Some("1234@lid"));
     }
 }

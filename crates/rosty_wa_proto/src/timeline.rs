@@ -191,6 +191,8 @@ impl Timeline {
             timestamp_ms: now_ms,
             body: MessageBody::Text(text),
             reactions: Vec::new(),
+            chat_alt: None,
+            sender_alt: None,
         };
         self.insert_sorted(Item {
             message,
@@ -225,6 +227,8 @@ impl Timeline {
                 size,
             },
             reactions: Vec::new(),
+            chat_alt: None,
+            sender_alt: None,
         };
         self.insert_sorted(Item {
             message,
@@ -306,6 +310,7 @@ impl Timeline {
                 sender: None,
                 from_me: true,
                 emoji: emoji.to_owned(),
+                sender_alt: None,
             });
         }
         item.message.reactions != before
@@ -632,6 +637,8 @@ mod tests {
             timestamp_ms: ts,
             body: MessageBody::Text(id.into()),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 
@@ -797,6 +804,7 @@ mod tests {
             sender: None,
             from_me: true,
             emoji: "x".into(),
+            sender_alt: None,
         }];
         let ev = GatewayEvent::MessageUpdate {
             chat: CHAT.into(),
@@ -890,6 +898,7 @@ mod tests {
             sender: None,
             from_me,
             emoji: emoji.into(),
+            sender_alt: None,
         }
     }
 

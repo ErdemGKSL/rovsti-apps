@@ -5,8 +5,9 @@ Branch `messages-kotlin`. Epic plan: `e6wa-plan.md`. Research: `../research/e6wa
 whatever id it arrives under, a mapping learned later merges what was stored, and no surface shows LID digits.
 
 Decision for this round: the alias table and the merge log live **inside the `wa_sync` store** (schema v4), not in a
-file of their own, so a merge and the rows it moves are one transaction. Phone reads it through the cache provider
-that WA-R2 builds. Canonical key: phone number when known, else LID (owner question 7 can change it; one function).
+file of their own, so a merge and the rows it moves are one transaction. Phone shows no messages (owner), so it does
+not read this store: it gets its own small identity table for caller names in WA-R2, from the same Rust module and the
+gateway's mappings. Canonical key: phone number when known, else LID (owner; kept in one function).
 
 ## Wire additions (agreed up front so the gateway and the client can be written in parallel)
 

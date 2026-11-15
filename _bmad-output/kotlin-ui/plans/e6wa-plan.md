@@ -27,7 +27,7 @@ from memory and marked so in the reports):
   store or its media on unlink or account change. The gateway's event ring is in memory with no epoch, so a gateway
   restart can lose events silently; expired media cannot be fetched again; only recent history is synced.
 
-## Decisions (defaults; the owner questions below can change them)
+## Decisions (the owner answered the questions on 2026-11-15; see the end)
 
 1. **Identity lives in Rust, platform-free**: `rosty_core::wa_identity` (parse, canonical key, alias table logic, merge
    plan, all unit tested) with persistence in `rosty_app_core`. Canonical key: the phone number when known, else the
@@ -38,10 +38,11 @@ from memory and marked so in the reports):
    messages, reactions, participants, typing, presence, calls and profiles, `own_lid`, and its own fixes (the report's
    list 2.4). The device makes the final merge, from a replayable merge log, so a late or older gateway cannot split a
    person. Old gateway + new app falls back to today's `ChatMerged`.
-3. **One cache, owned by Messages, read by Phone**: the sync engine and media cache move out of Messages into `:wa`;
-   Messages exposes the cache through a signature-permission ContentProvider (rows by cursor, media by file
-   descriptor), the pattern Contacts already uses for `:people`. Phone reads it and never downloads the same file
-   twice; without Messages installed Phone runs the same engine locally. `sharedUserId` and per-app copies are ruled out.
+3. **One cache, owned by Messages; Phone shows no WhatsApp messages or media** (owner): Phone has only a "message"
+   shortcut that opens Messages, and keeps using the shared identity, name, photo and call code. So there is no
+   cross-app cache provider: the sync engine and the media cache stay in Messages. What both apps need is shared as
+   code (`rosty_core::wa_identity`, `rosty_wa_client`, `:wa`, `:people`); Phone keeps its own small identity table,
+   filled from the gateway's mappings, for caller names.
 4. **Schema**: v4 adds a `media` table (state, pin, hash, size, last use), `person_id` and wire ids on chats and
    messages, the merge cursor, `account_jid` and the gateway epoch in `sync_state`; v5 adds FTS5 for search inside
    chats. Migrations only add columns and tables; merges run as normal resumable steps.
@@ -50,10 +51,14 @@ from memory and marked so in the reports):
    data: images and voice notes; video and documents on tap); `.part` downloads; Save puts a copy in the gallery or
    Downloads through MediaStore; an evicted file downloads again, through media re-upload when the link expired.
 6. **Sync**: the global event sequence stays, with a gateway epoch so a restart forces a catch-up; per-chat gap paging
-   stays; older history on scroll and for search through on-demand history from the phone.
+   stays. **Full history** is asked from WhatsApp (owner; the gateway's device props change for it), with progress
+   shown and the sync resumable; older history on scroll and for search still uses on-demand history when a chat's
+   start has not arrived.
 7. **Relink and second app**: same account relinked keeps the cache, drafts and stars; a different account on the link
-   wipes the store and media of the old one on the device and the gateway; a key pasted in a second app reads the owner's
-   cache when Messages is installed, else syncs from the gateway; unlink deletes the store and its media.
+   wipes the store and media of the old one on the device and the gateway; the connect key is **shared
+   automatically between Rosty apps signed with the same key** (owner): linking once in any app links all of them
+   through a signature-permission provider in `:wa`; pasting the key stays as the fallback; unlink deletes the store
+   and its media.
 8. **Calls**: 1:1 voice calls stay as they are in Phone. Video and group calls are out of this epic (the library gives
    transport only; the gateway wires audio only).
 
@@ -62,7 +67,7 @@ from memory and marked so in the reports):
 | Round | Theme | Stories |
 |---|---|---|
 | WA-R1 | Identity | `rosty_core::wa_identity` with the test matrix; alias table and merge log (shared per link); gateway: alt ids, mappings endpoint and events, `own_lid`, the fixes; `wa_sync` v4 identity columns and the full merge (pin, archive, mute, unread, senders, reactions, quotes, mentions, outbox); drafts, prefs and notification tags follow a merge; Kotlin JID copies removed; contact matching by every number alias with the home region. |
-| WA-R2 | Shared cache | Engine and media cache moved into `:wa`; `media` table, limits, eviction, auto-download rules, `.part` files; the cache provider in Messages and its reader for Phone (local fallback); gateway epoch; account-change wipe and unlink cleanup on device and gateway; Phone shows the last messages and media of a person from the cache. |
+| WA-R2 | Cache, history and link | `media` table, limits, eviction, auto-download rules, `.part` files; full history sync with progress, resumable (gateway device props, history events); gateway epoch; account-change wipe and unlink cleanup on device and gateway; the connect key shared automatically between Rosty apps (paste as fallback); Phone's identity table for caller names and its "message" shortcut into Messages. |
 | WA-R3 | Media | Full-screen viewer: pinch, double-tap zoom, swipe between items, video playback; save to gallery, share, forward; stickers and GIFs; view-once; thumbnails, dimensions and waveform on sent media (gateway); several files with captions; voice-note recording (hold to record, slide to cancel, lock). |
 | WA-R4 | Message actions | Edit a sent message; forward with the forwarded mark (gateway route); delete for me; played receipts; message info per recipient in groups; mentions; link previews; disappearing messages (timer on send, expiry in the store, chat setting). |
 | WA-R5 | Rich content and presence | Polls (show, vote, create); locations (show on the Stops map tiles, send current place); contact cards (send); online, last seen and typing in the thread header (shared with Phone through `:wa`); presence subscription rules. |
@@ -84,17 +89,16 @@ drafts, notification tags, with no row lost and no duplicate); conflicting or st
 chats keyed by LID on the gateway and by number on the device; relink to another account; the owner app not installed
 or killed; a gateway restart between two events; a download cut off half way; a file evicted and its link expired.
 
-## Open questions for the owner (defaults above are used until answered)
+## Owner answers (2026-11-15, through the main thread)
 
-1. Cache owner: Messages (default) or Contacts? What should Phone show from it: last messages and media on a contact
-   card, or only a "message" shortcut?
-2. Connect key: shared automatically between Rosty apps signed with the same key, or paste only (today)?
-3. Media: is 512 MiB the right default cap; are the auto-download defaults right; should thumbnails be kept forever?
-4. History: recent only (today), or ask WhatsApp for the full history (this changes how the gateway device presents
-   itself)? Is "load older messages from the phone" wanted?
-5. Different account on the same link: wipe the old cache at once (default) or keep it for some days?
-6. Should the gateway keep every message forever (today)?
-7. Canonical key: phone number when known (default, matches today's stores) or LID first?
-8. Should the name WhatsApp's own address book synced for a person rank between the device contact and the WhatsApp
-   name, or stay unused (default)?
-9. Is un-merge needed for a wrong mapping? The design keeps wire ids so it stays possible, but does not build it.
+1. Messages owns the cache. Phone shows no WhatsApp messages or media, only a "message" shortcut that opens Messages;
+   it keeps the shared identity, names, photos and calls. The cache provider is dropped unless identity sharing needs it.
+2. The connect key is shared automatically between Rosty apps signed with the same key; paste stays as a fallback.
+3. Media as proposed: 512 MiB LRU, starred and saved items exempt; Wi-Fi: images, voice notes, stickers; mobile data:
+   images, voice notes; video and documents on tap; thumbnails kept.
+4. Full history from WhatsApp; changing the device props is accepted; show sync progress and keep it resumable.
+5. A different account wipes the old cache at once.
+6. The gateway keeps messages as today.
+7. The canonical key is the number, with the LID as fallback.
+8. WhatsApp's own address-book name is not used.
+9. No un-merge UI; the design stays open for it (wire ids are kept).

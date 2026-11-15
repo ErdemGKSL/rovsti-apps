@@ -1,0 +1,1 @@
+{"ok":{"total":{"files":1,"bytes":2048},"exempt":{"files":1,"bytes":2048},"by_kind":[{"kind":"image","files":1,"bytes":2048}],"outbox":{"files":1,"bytes":34567},"queued":0,"downloading":0,"failed":0,"cap_bytes":536870912,"exempt_over_cap":false}}

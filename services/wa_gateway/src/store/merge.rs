@@ -1,5 +1,6 @@
 //! Merging a chat stored under a WhatsApp LID into its phone-number chat.
 
+use rosty_wa_proto::MessageMeta;
 use rusqlite::{Transaction, params};
 
 use super::{InstanceId, Store, StoreError};
@@ -11,8 +12,13 @@ pub struct MergeReport {
     pub moved: usize,
     /// Messages dropped because the surviving chat had them already.
     pub deduped: usize,
-    /// False when there was nothing to merge.
+    /// A chat was stored under the old id (and now is not): the apps are
+    /// told with `chat_merged`. False when the id had no chat of its own.
     pub merged: bool,
+    /// Rows in any chat that named the old id as an author, a reactor, a
+    /// receipt, a quoted author, a mention or a profile, and now name the
+    /// new one.
+    pub rewritten: usize,
 }
 
 impl Store {
@@ -28,8 +34,9 @@ impl Store {
         .await
     }
 
-    /// Moves everything stored under chat `from` to chat `into`, in one
-    /// transaction. Rows `into` has already win; `from` is removed.
+    /// Moves everything stored under chat `from` to chat `into`, and renames
+    /// the person `from` to `into` wherever a row of any chat names them, in
+    /// one transaction. Rows `into` has already win; `from` is removed.
     /// A no-op when the ids are equal or nothing is stored under `from`.
     pub async fn merge_chat(
         &self,
@@ -68,21 +75,45 @@ fn merge(
         || has_rows("messages", "chat")?
         || has_rows("chat_settings", "jid")?
         || has_rows("scheduled", "chat")?;
-    if !stored {
-        return Ok(MergeReport::default());
+    let mut report = MergeReport::default();
+    if stored {
+        let (moved, deduped) = move_chat(tx, i, from, into)?;
+        report = MergeReport {
+            moved,
+            deduped,
+            merged: true,
+            rewritten: 0,
+        };
     }
+    // The same person may be an author, a reactor, a receipt, a quote, a
+    // mention or a profile in any chat, with no chat of their own.
+    report.rewritten = rewrite_person(tx, i, from, into)?;
+    Ok(report)
+}
 
+/// Moves the chat-level rows of `from` under `into`: messages with their
+/// reactions, receipts and edits, the chat row, its settings and its
+/// scheduled texts. Returns how many messages moved and how many `into` had
+/// already.
+fn move_chat(
+    tx: &Transaction<'_>,
+    i: &str,
+    from: &str,
+    into: &str,
+) -> Result<(usize, usize), StoreError> {
     let before: i64 = tx.query_row(
         "SELECT COUNT(*) FROM messages WHERE instance_id = ?1 AND chat = ?2",
         params![i, from],
         |r| r.get(0),
     )?;
+    // A moved row arrived under `from`: remember that as its wire chat.
     let moved = tx.execute(
         "INSERT OR IGNORE INTO messages
             (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto,
-             meta_json, secret, thumb, deleted_at, deleted_by)
+             meta_json, secret, thumb, deleted_at, deleted_by, wire_chat, wire_sender)
          SELECT instance_id, ?3, id, sender, from_me, ts_ms, body_json, raw_proto,
-                meta_json, secret, thumb, deleted_at, deleted_by
+                meta_json, secret, thumb, deleted_at, deleted_by,
+                COALESCE(wire_chat, ?2), wire_sender
          FROM messages WHERE instance_id = ?1 AND chat = ?2",
         params![i, from, into],
     )?;
@@ -119,33 +150,6 @@ fn merge(
     )?;
     tx.execute(
         "DELETE FROM message_edits WHERE instance_id = ?1 AND chat = ?2",
-        params![i, from],
-    )?;
-
-    // Group authors: the same person may appear as a LID in any chat.
-    tx.execute(
-        "UPDATE messages SET sender = ?3 WHERE instance_id = ?1 AND sender = ?2",
-        params![i, from, into],
-    )?;
-    tx.execute(
-        "UPDATE messages SET deleted_by = ?3 WHERE instance_id = ?1 AND deleted_by = ?2",
-        params![i, from, into],
-    )?;
-    tx.execute(
-        "UPDATE OR IGNORE reactions SET sender = ?3 WHERE instance_id = ?1 AND sender = ?2",
-        params![i, from, into],
-    )?;
-    tx.execute(
-        "DELETE FROM reactions WHERE instance_id = ?1 AND sender = ?2",
-        params![i, from],
-    )?;
-    tx.execute(
-        "UPDATE OR IGNORE receipts SET participant = ?3
-         WHERE instance_id = ?1 AND participant = ?2",
-        params![i, from, into],
-    )?;
-    tx.execute(
-        "DELETE FROM receipts WHERE instance_id = ?1 AND participant = ?2",
         params![i, from],
     )?;
 
@@ -188,7 +192,62 @@ fn merge(
         params![i, from],
     )?;
 
-    // Profile: fill what the phone-number profile lacks, then drop the LID one.
+    tx.execute(
+        "UPDATE scheduled SET chat = ?3 WHERE instance_id = ?1 AND chat = ?2",
+        params![i, from, into],
+    )?;
+
+    Ok((
+        moved,
+        usize::try_from(before).unwrap_or(0).saturating_sub(moved),
+    ))
+}
+
+/// Renames the person `from` to `into` wherever a row names them, in every
+/// chat: message authors (the id they arrived under is kept as the wire
+/// author), who deleted a message, reaction senders, receipt participants,
+/// quoted authors, mentions and the profile. Returns how many rows changed.
+fn rewrite_person(
+    tx: &Transaction<'_>,
+    i: &str,
+    from: &str,
+    into: &str,
+) -> Result<usize, StoreError> {
+    let mut rewritten = tx.execute(
+        "UPDATE messages SET wire_sender = COALESCE(wire_sender, sender), sender = ?3
+         WHERE instance_id = ?1 AND sender = ?2",
+        params![i, from, into],
+    )?;
+    rewritten += tx.execute(
+        "UPDATE messages SET deleted_by = ?3 WHERE instance_id = ?1 AND deleted_by = ?2",
+        params![i, from, into],
+    )?;
+    // One reaction per person and message: the one under `into` stays.
+    rewritten += tx.execute(
+        "UPDATE OR IGNORE reactions SET sender = ?3 WHERE instance_id = ?1 AND sender = ?2",
+        params![i, from, into],
+    )?;
+    rewritten += tx.execute(
+        "DELETE FROM reactions WHERE instance_id = ?1 AND sender = ?2",
+        params![i, from],
+    )?;
+    // One receipt row per person and message, at the furthest state either
+    // id reached.
+    rewritten += tx.execute(
+        "INSERT INTO receipts (instance_id, chat, id, participant, status)
+         SELECT instance_id, chat, id, ?3, status FROM receipts
+         WHERE instance_id = ?1 AND participant = ?2
+         ON CONFLICT (instance_id, chat, id, participant)
+         DO UPDATE SET status = MAX(status, excluded.status)",
+        params![i, from, into],
+    )?;
+    tx.execute(
+        "DELETE FROM receipts WHERE instance_id = ?1 AND participant = ?2",
+        params![i, from],
+    )?;
+    rewritten += rewrite_meta(tx, i, from, into)?;
+
+    // Profile: fill what the surviving profile lacks, then drop the other.
     tx.execute(
         "INSERT OR IGNORE INTO profiles (instance_id, jid) SELECT ?1, ?3
          WHERE EXISTS (SELECT 1 FROM profiles WHERE instance_id = ?1 AND jid = ?2)",
@@ -199,25 +258,79 @@ fn merge(
             push_name = COALESCE(push_name,
                 (SELECT push_name FROM profiles WHERE instance_id = ?1 AND jid = ?2)),
             contact_name = COALESCE(contact_name,
-                (SELECT contact_name FROM profiles WHERE instance_id = ?1 AND jid = ?2))
+                (SELECT contact_name FROM profiles WHERE instance_id = ?1 AND jid = ?2)),
+            verified_name = COALESCE(verified_name,
+                (SELECT verified_name FROM profiles WHERE instance_id = ?1 AND jid = ?2)),
+            business = MAX(business,
+                COALESCE((SELECT business FROM profiles WHERE instance_id = ?1 AND jid = ?2), 0))
          WHERE instance_id = ?1 AND jid = ?3",
         params![i, from, into],
     )?;
-    tx.execute(
+    rewritten += tx.execute(
         "DELETE FROM profiles WHERE instance_id = ?1 AND jid = ?2",
         params![i, from],
     )?;
+    Ok(rewritten)
+}
 
-    tx.execute(
-        "UPDATE scheduled SET chat = ?3 WHERE instance_id = ?1 AND chat = ?2",
-        params![i, from, into],
-    )?;
+/// Renames `from` to `into` in the quoted author and the mentions of every
+/// stored message meta. Returns how many messages changed.
+fn rewrite_meta(
+    tx: &Transaction<'_>,
+    i: &str,
+    from: &str,
+    into: &str,
+) -> Result<usize, StoreError> {
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt = tx.prepare(
+            "SELECT chat, id, meta_json FROM messages
+             WHERE instance_id = ?1 AND instr(meta_json, ?2) > 0",
+        )?;
+        stmt.query_map(params![i, from], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<Result<_, _>>()?
+    };
+    let mut changed = 0;
+    for (chat, id, json) in rows {
+        let mut meta: MessageMeta = serde_json::from_str(&json)?;
+        if !rename_in_meta(&mut meta, from, into) {
+            continue;
+        }
+        tx.execute(
+            "UPDATE messages SET meta_json = ?4
+             WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+            params![i, chat, id, serde_json::to_string(&meta)?],
+        )?;
+        changed += 1;
+    }
+    Ok(changed)
+}
 
-    Ok(MergeReport {
-        moved,
-        deduped: usize::try_from(before).unwrap_or(0).saturating_sub(moved),
-        merged: true,
-    })
+/// Renames `from` to `into` in the quoted author and the mentions of `meta`
+/// (each person is mentioned once). True when something changed.
+fn rename_in_meta(meta: &mut MessageMeta, from: &str, into: &str) -> bool {
+    let mut changed = false;
+    if let Some(quoted) = meta.quoted.as_mut()
+        && quoted.sender.as_deref() == Some(from)
+    {
+        quoted.sender = Some(into.to_owned());
+        changed = true;
+    }
+    if meta.mentions.iter().any(|m| m == from) {
+        let mut seen = Vec::with_capacity(meta.mentions.len());
+        for mention in std::mem::take(&mut meta.mentions) {
+            let mention = if mention == from {
+                into.to_owned()
+            } else {
+                mention
+            };
+            if !seen.contains(&mention) {
+                seen.push(mention);
+            }
+        }
+        meta.mentions = seen;
+        changed = true;
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -255,6 +368,8 @@ mod tests {
             timestamp_ms: ts,
             body: MessageBody::Text(format!("hi {mid}")),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 
@@ -313,7 +428,8 @@ mod tests {
             MergeReport {
                 moved: 2,
                 deduped: 0,
-                merged: true
+                merged: true,
+                rewritten: 0,
             }
         );
         let got = s.messages(id(), PN.into(), None, 10).await.unwrap();
@@ -414,5 +530,223 @@ mod tests {
         assert_eq!(chats.len(), 1);
         assert_eq!(chats[0].jid, PN);
         assert_eq!(chats[0].unread, 1);
+    }
+
+    const GROUP: &str = "1-2@g.us";
+    const OTHER: &str = "905550000002@s.whatsapp.net";
+
+    fn group_msg(mid: &str, sender: &str, from_me: bool) -> WaMessage {
+        WaMessage {
+            sender: Some(sender.into()),
+            from_me,
+            ..msg(GROUP, mid, 100)
+        }
+    }
+
+    /// A LID that is nobody's chat: only an author, a reactor, a receipt, a
+    /// quoted author, a mention, a deleter and a profile in a group.
+    #[tokio::test]
+    async fn a_lid_without_a_chat_is_renamed_wherever_it_appears() {
+        use crate::store::{GroupReceipt, MessageChange, MessageExtras};
+        use rosty_wa_proto::{DeliveryStatus, MessageMeta, Quoted, Reaction};
+        let s = store().await;
+        s.insert_message(id(), group_msg("theirs", LID, false), None)
+            .await
+            .unwrap();
+        s.insert_message(id(), group_msg("mine", OTHER, true), None)
+            .await
+            .unwrap();
+        let quoting = MessageExtras {
+            meta: MessageMeta {
+                quoted: Some(Quoted {
+                    id: "theirs".into(),
+                    sender: Some(LID.into()),
+                    preview: Some("hi".into()),
+                }),
+                mentions: vec![LID.into(), OTHER.into(), PN.into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        s.insert_message_full(id(), group_msg("reply", OTHER, false), quoting)
+            .await
+            .unwrap();
+        let reaction = |sender: &str, emoji: &str| Reaction {
+            sender: Some(sender.into()),
+            from_me: false,
+            emoji: emoji.into(),
+            sender_alt: None,
+        };
+        s.set_reaction(id(), GROUP.into(), "mine".into(), reaction(LID, "a"))
+            .await
+            .unwrap();
+        // They acked my message under the LID (delivered) and under the
+        // number (read): one person, who read it.
+        for (who, status) in [(LID, DeliveryStatus::Delivered), (PN, DeliveryStatus::Read)] {
+            s.record_group_receipt(
+                id(),
+                GROUP.into(),
+                GroupReceipt {
+                    participant: who.into(),
+                    ids: vec!["mine".into()],
+                    status,
+                    members: None,
+                    own: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let revoke = MessageChange::Revoke {
+            by: LID.into(),
+            at_ms: 9,
+        };
+        s.change_message(id(), GROUP.into(), "theirs".into(), revoke)
+            .await
+            .unwrap();
+        s.change_profile(id(), LID.into(), ProfileChange::PushName("Annem".into()), 5)
+            .await
+            .unwrap();
+        assert_eq!(s.lids_seen(id()).await.unwrap(), [LID]);
+        assert!(s.lid_chats(id()).await.unwrap().is_empty());
+
+        let r = s.merge_chat(id(), LID.into(), PN.into()).await.unwrap();
+        assert!(!r.merged, "no chat was stored under the LID");
+        assert_eq!((r.moved, r.deduped), (0, 0));
+        assert!(r.rewritten > 0);
+        assert!(s.lids_seen(id()).await.unwrap().is_empty());
+
+        let page = s.messages_rich(id(), GROUP.into(), None, 10).await.unwrap();
+        let by_id = |mid: &str| page.iter().find(|m| m.message.id == mid).unwrap();
+        let theirs = by_id("theirs");
+        assert_eq!(theirs.message.sender.as_deref(), Some(PN));
+        assert_eq!(theirs.meta.deleted_by.as_deref(), Some(PN));
+        // The id it arrived under is kept for keys sent back to WhatsApp,
+        // and shown as the other form.
+        assert_eq!(theirs.message.sender_alt.as_deref(), Some(LID));
+        assert_eq!(
+            s.wire_ids(id(), GROUP.into(), "theirs".into())
+                .await
+                .unwrap()
+                .sender
+                .as_deref(),
+            Some(LID)
+        );
+        let reply = by_id("reply");
+        assert_eq!(
+            reply.meta.quoted.as_ref().unwrap().sender.as_deref(),
+            Some(PN)
+        );
+        assert_eq!(
+            reply.meta.quoted.as_ref().unwrap().preview.as_deref(),
+            Some("hi")
+        );
+        assert_eq!(reply.meta.mentions, [PN, OTHER], "each person once");
+        assert_eq!(by_id("mine").message.reactions, [reaction(PN, "a")]);
+        let profiles = s.profiles(id(), vec![PN.into(), LID.into()]).await.unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].push_name.as_deref(), Some("Annem"));
+
+        // One receipt row, at the furthest state either id reached: with one
+        // other member the message is read.
+        let moved = s
+            .record_group_receipt(
+                id(),
+                GROUP.into(),
+                GroupReceipt {
+                    participant: PN.into(),
+                    ids: vec!["mine".into()],
+                    status: DeliveryStatus::Delivered,
+                    members: Some(1),
+                    own: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved[0].1.status, Some(DeliveryStatus::Read));
+
+        // Again: nothing left to do.
+        assert_eq!(
+            s.merge_chat(id(), LID.into(), PN.into()).await.unwrap(),
+            MergeReport::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_same_persons_two_reactions_become_one() {
+        use rosty_wa_proto::Reaction;
+        let s = store().await;
+        s.insert_message(id(), group_msg("m", OTHER, true), None)
+            .await
+            .unwrap();
+        for (sender, emoji) in [(LID, "old"), (PN, "new")] {
+            let reaction = Reaction {
+                sender: Some(sender.into()),
+                from_me: false,
+                emoji: emoji.into(),
+                sender_alt: None,
+            };
+            s.set_reaction(id(), GROUP.into(), "m".into(), reaction)
+                .await
+                .unwrap();
+        }
+        s.merge_chat(id(), LID.into(), PN.into()).await.unwrap();
+        let m = s
+            .message(id(), GROUP.into(), "m".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.reactions.len(), 1);
+        assert_eq!(m.reactions[0].sender.as_deref(), Some(PN));
+        assert_eq!(m.reactions[0].emoji, "new");
+    }
+
+    #[tokio::test]
+    async fn moved_messages_remember_the_chat_they_arrived_under() {
+        use crate::store::{MessageExtras, WireIds};
+        let s = store().await;
+        add(&s, LID, "old", 100).await;
+        // One that already knows its wire chat keeps it.
+        let kept = MessageExtras {
+            wire_chat: Some("77@lid".into()),
+            ..Default::default()
+        };
+        s.insert_message_full(id(), msg(LID, "kept", 110), kept)
+            .await
+            .unwrap();
+        add(&s, PN, "pn", 120).await;
+        s.merge_chat(id(), LID.into(), PN.into()).await.unwrap();
+        let wire = |mid: &'static str| {
+            let s = s.clone();
+            async move { s.wire_ids(id(), PN.into(), mid.into()).await.unwrap() }
+        };
+        assert_eq!(wire("old").await.chat.as_deref(), Some(LID));
+        assert_eq!(wire("kept").await.chat.as_deref(), Some("77@lid"));
+        assert_eq!(wire("pn").await, WireIds::default());
+        let page = s.messages(id(), PN.into(), None, 10).await.unwrap();
+        let alt = |mid: &str| page.iter().find(|m| m.id == mid).unwrap().chat_alt.clone();
+        assert_eq!(alt("old").as_deref(), Some(LID));
+        assert_eq!(alt("pn"), None, "nobody told the gateway the pair");
+    }
+
+    #[test]
+    fn mentions_and_quotes_are_renamed_exactly() {
+        use rosty_wa_proto::Quoted;
+        let mut meta = MessageMeta {
+            quoted: Some(Quoted {
+                id: "q".into(),
+                sender: Some("123@lid".into()),
+                preview: None,
+            }),
+            mentions: vec!["9123@lid".into(), "123@lid".into()],
+            ..Default::default()
+        };
+        // An id that merely contains the LID is another person.
+        assert!(!rename_in_meta(&mut meta, "23@lid", PN));
+        assert!(rename_in_meta(&mut meta, "123@lid", PN));
+        assert_eq!(meta.quoted.as_ref().unwrap().sender.as_deref(), Some(PN));
+        assert_eq!(meta.mentions, ["9123@lid", PN]);
+        assert!(!rename_in_meta(&mut meta, "123@lid", PN));
+        assert!(!rename_in_meta(&mut MessageMeta::default(), "123@lid", PN));
     }
 }

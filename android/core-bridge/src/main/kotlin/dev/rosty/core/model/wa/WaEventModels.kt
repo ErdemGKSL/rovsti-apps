@@ -23,6 +23,8 @@ data class CallUpdate(
     val direction: CallDirection,
     val phase: CallPhase,
     @SerialName("is_video") val isVideo: Boolean,
+    /** The other form of [peer] (its LID next to a number, or the reverse), when the gateway knows it. */
+    @SerialName("peer_alt") @EncodeDefault(NEVER) val peerAlt: String? = null,
 )
 
 /** One entry of `wa.calls` (`rosty_wa_proto::CallSummary`, whose update fields are flat). */
@@ -36,8 +38,9 @@ data class CallSummary(
     @SerialName("is_video") val isVideo: Boolean,
     @SerialName("started_ms") val startedMs: Long,
     @SerialName("ended_ms") val endedMs: Long? = null,
+    @SerialName("peer_alt") @EncodeDefault(NEVER) val peerAlt: String? = null,
 ) {
-    fun update() = CallUpdate(callId, peer, peerName, direction, phase, isVideo)
+    fun update() = CallUpdate(callId, peer, peerName, direction, phase, isVideo, peerAlt)
 }
 
 @Serializable
@@ -77,8 +80,9 @@ sealed interface GatewayEvent {
         val state: InstanceState,
         @SerialName("own_jid") val ownJid: String? = null,
         @SerialName("push_name") val pushName: String? = null,
+        @SerialName("own_lid") @EncodeDefault(NEVER) val ownLid: String? = null,
     ) : GatewayEvent {
-        fun status() = InstanceStatus(instanceId, state, ownJid, pushName)
+        fun status() = InstanceStatus(instanceId, state, ownJid, pushName, ownLid)
     }
 
     @Serializable
@@ -91,8 +95,10 @@ sealed interface GatewayEvent {
         @SerialName("timestamp_ms") val timestampMs: Long,
         val body: MessageBody,
         val reactions: List<Reaction>,
+        @SerialName("chat_alt") @EncodeDefault(NEVER) val chatAlt: String? = null,
+        @SerialName("sender_alt") @EncodeDefault(NEVER) val senderAlt: String? = null,
     ) : GatewayEvent {
-        fun message() = WaMessage(id, chat, sender, fromMe, timestampMs, body, reactions)
+        fun message() = WaMessage(id, chat, sender, fromMe, timestampMs, body, reactions, chatAlt, senderAlt)
     }
 
     @Serializable
@@ -118,6 +124,8 @@ sealed interface GatewayEvent {
         val jid: String,
         val available: Boolean,
         @SerialName("last_seen_ms") val lastSeenMs: Long? = null,
+        /** The other form of [jid], when the gateway knows it. */
+        @SerialName("jid_alt") @EncodeDefault(NEVER) val jidAlt: String? = null,
     ) : GatewayEvent
 
     @Serializable
@@ -126,6 +134,8 @@ sealed interface GatewayEvent {
         val chat: String,
         val jid: String,
         val state: TypingState,
+        /** The other form of [jid] (who is typing), when the gateway knows it. */
+        @SerialName("jid_alt") @EncodeDefault(NEVER) val jidAlt: String? = null,
     ) : GatewayEvent
 
     @Serializable
@@ -150,8 +160,9 @@ sealed interface GatewayEvent {
         val direction: CallDirection,
         val phase: CallPhase,
         @SerialName("is_video") val isVideo: Boolean,
+        @SerialName("peer_alt") @EncodeDefault(NEVER) val peerAlt: String? = null,
     ) : GatewayEvent {
-        fun update() = CallUpdate(callId, peer, peerName, direction, phase, isVideo)
+        fun update() = CallUpdate(callId, peer, peerName, direction, phase, isVideo, peerAlt)
     }
 
     @Serializable
@@ -215,8 +226,9 @@ sealed interface GatewayEvent {
         val business: Boolean = false,
         @SerialName("verified_name") val verifiedName: String? = null,
         @SerialName("fetched_ms") val fetchedMs: Long = 0,
+        @EncodeDefault(NEVER) val lid: String? = null,
     ) : GatewayEvent {
-        fun profile() = WaProfile(jid, pushName, contactName, about, pictureId, business, verifiedName, fetchedMs)
+        fun profile() = WaProfile(jid, pushName, contactName, about, pictureId, business, verifiedName, fetchedMs, lid)
     }
 
     @Serializable
@@ -230,6 +242,30 @@ sealed interface GatewayEvent {
     data class ChatMerged(
         val from: String,
         val into: String,
+    ) : GatewayEvent
+
+    /**
+     * The gateway learned that [lid] and [pn] are one person, or the pair changed. Nothing to act on here: hand the
+     * event to the offline store (`WaSyncStore.applyEvents`), which joins the chats and reports the key change.
+     */
+    @Serializable
+    @SerialName("identity_mapped")
+    data class IdentityMapped(
+        val lid: String,
+        val pn: String,
+        /** Where the pair comes from; a name a newer gateway adds still decodes. */
+        val source: String,
+        @SerialName("learned_ms") val learnedMs: Long,
+    ) : GatewayEvent
+
+    /** A contact moved from the number [oldPn] to [newPn]; for the offline store, like [IdentityMapped]. */
+    @Serializable
+    @SerialName("identity_number_changed")
+    data class IdentityNumberChanged(
+        @SerialName("old_pn") val oldPn: String,
+        @SerialName("new_pn") val newPn: String,
+        @SerialName("old_lid") @EncodeDefault(NEVER) val oldLid: String? = null,
+        @SerialName("new_lid") @EncodeDefault(NEVER) val newLid: String? = null,
     ) : GatewayEvent
 
     /** The gateway lost track of what it sent: reload. */

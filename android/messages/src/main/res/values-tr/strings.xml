@@ -295,6 +295,7 @@
     <string name="wa_attach_paste">Resmi yapıştır</string>
     <string name="wa_paste_nothing">Panoda resim yok</string>
     <string name="wa_sender_card">%1$s hakkında</string>
+    <string name="wa_user_unknown">WhatsApp kullanıcısı</string>
     <string name="wa_sender_message">Özel mesaj gönder</string>
     <string name="wa_sender_call">Ara</string>
     <string name="wa_sender_open_contact">Kişiyi aç</string>

@@ -12,6 +12,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.getOrNull
 import dev.rosty.core.model.chat.UnreadDividerRequest
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.overlay.MenuItem
@@ -47,7 +49,6 @@ import dev.rosty.messages.conversation.rememberToolHost
 import dev.rosty.messages.conversation.rememberToolLabels
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.ResourceInboxWords
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.notify.TrackOpenConversation
 import dev.rosty.messages.schedule.ScheduledStrip
 import dev.rosty.messages.schedule.rememberWaScheduleHost
@@ -212,6 +213,7 @@ fun rememberWaThreadViewModel(
                                     PhoneNumbers.forReading(number, container.homeRegion)
                                 }
                             },
+                            rekeys = container.waOffline.rekeys.rekeys,
                         ),
                         jid,
                         ResourceWaWords(res) { bytes -> Formatter.formatShortFileSize(context, bytes) },
@@ -265,12 +267,22 @@ fun WaThreadPage(
     val labels = rememberToolLabels()
     val detector = rememberDetector(container)
     val context = LocalContext.current
-    val number = remember(route.jid) { numberOfJid(route.jid) }
-    TrackOpenConversation(model.tag)
-    val schedule = rememberWaScheduleHost(container, overlays, route.jid, composer)
-    val marks = rememberMarkHost(container, overlays, model.tag, rememberDayLabels()) { model.state.value.title }
+    // The key the chat is stored under: the route's id until it is resolved, another one after a merge.
+    val jid by model.chatJid.collectAsState()
+    val tag = WaRekeys.tagOf(jid)
+    // The number the id carries at once; the one the store knows for the person (a LID with a number) once read.
+    val number by produceState(WaIds.number(jid), jid, state.loaded) {
+        value =
+            container.names
+                .numbersOf(jid)
+                .firstOrNull()
+                ?.takeIf { !WaIds.isGroup(jid) }
+    }
+    TrackOpenConversation(tag)
+    val schedule = rememberWaScheduleHost(container, overlays, jid, composer)
+    val marks = rememberMarkHost(container, overlays, tag, rememberDayLabels()) { model.state.value.title }
     val actions =
-        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks) {
+        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks, number) {
             ConversationActions(
                 onBack = onBack,
                 onMenuOpened = marks::menuOpened,

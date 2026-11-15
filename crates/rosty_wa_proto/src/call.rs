@@ -299,6 +299,7 @@ mod view_tests {
             direction: CallDirection::In,
             phase,
             is_video: false,
+            peer_alt: None,
         }
     }
 

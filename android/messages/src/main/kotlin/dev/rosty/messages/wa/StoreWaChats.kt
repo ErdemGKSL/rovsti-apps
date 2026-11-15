@@ -11,6 +11,7 @@ import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.MessageMeta
 import dev.rosty.core.model.wa.RichChat
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaMessage
 import dev.rosty.core.model.wa.WaSyncChat
 import dev.rosty.core.model.wa.WaSyncCursor
@@ -68,7 +69,7 @@ class StoreWaChats(
         for (jid in jids) {
             val chat = chats[jid]
             val title = names.chatTitle(jid, chat)
-            val group = chat?.isGroup ?: jid.endsWith(GROUP_SUFFIX)
+            val group = chat?.isGroup ?: WaIds.isGroup(jid)
             val authors = HashMap<String?, String>()
             var cursor: WaSyncCursor? = null
             for (page in 0 until SEARCH_PAGES) {
@@ -78,7 +79,7 @@ class StoreWaChats(
                     // A send still in the outbox has no WhatsApp id yet: its client id opens it all the same.
                     out +=
                         SearchCandidate(
-                            chatKey = "wa:$jid",
+                            chatKey = WaRekeys.tagOf(jid),
                             chatTitle = title,
                             messageId = row.id,
                             author =
@@ -112,7 +113,6 @@ class StoreWaChats(
 /** Stored messages read per chat for the global search: a few pages at most. */
 private const val SEARCH_PAGES = 3
 private const val SEARCH_PAGE = 200
-private const val GROUP_SUFFIX = "@g.us"
 
 /** A stored chat in the shape the inbox merges (`RichChat`, as the gateway lists it). */
 fun WaSyncChat.toRichChat(): RichChat =

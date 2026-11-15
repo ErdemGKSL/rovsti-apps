@@ -13,10 +13,10 @@ use axum::{Json, Router};
 use rosty_wa_proto::api::routes as r;
 use rosty_wa_proto::{
     ChatState, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope, GatewayEvent, GroupInfo,
-    InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest, LookupUsers, MAX_LOOKUP,
-    MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, RichChat, RichMessage,
-    ScheduleText, ScheduledState, ScheduledText, SendReaction, SendText, Sent, SetPresence,
-    SubscribePresence, WaUser,
+    IdentityMappings, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest,
+    LookupUsers, MAX_LOOKUP, MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, RichChat,
+    RichMessage, ScheduleText, ScheduledState, ScheduledText, SendReaction, SendText, Sent,
+    SetPresence, SubscribePresence, WaUser,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -27,7 +27,7 @@ use crate::error::HttpError;
 use crate::hub::Replay;
 use crate::media_cache::{DEFAULT_MAX_BYTES, MediaCache};
 use crate::now_ms;
-use crate::store::{InstanceId, NewKey, parse_key_id};
+use crate::store::{InstanceId, MAX_IDENTITY_PAGE, NewKey, parse_key_id};
 use crate::{AppState, store::StoreError};
 
 const MAX_LABEL_CHARS: usize = 64;
@@ -76,6 +76,7 @@ pub fn router(state: AppState) -> Router {
         .route(r::CONTACTS_LOOKUP, post(lookup_users))
         .route(r::GROUPS, get(groups))
         .route(r::GROUP, get(group))
+        .route(r::IDENTITY_MAPPINGS, get(identity_mappings))
         .merge(crate::wa::calls::routes())
         .merge(crate::rich_routes::routes())
         .merge(crate::status_routes::routes())
@@ -852,6 +853,44 @@ async fn name_participants(
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+struct MappingsQuery {
+    since: Option<String>,
+    limit: Option<u32>,
+}
+
+/// The cursor a `since` parameter names: none means "from the start".
+fn check_cursor(since: Option<&str>) -> ApiResult<i64> {
+    match since.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(0),
+        Some(text) => text
+            .parse::<i64>()
+            .ok()
+            .filter(|cursor| *cursor >= 0)
+            .ok_or_else(|| HttpError::bad_request("since is not a cursor")),
+    }
+}
+
+/// The LID and phone-number pairs learned or changed after `since`, oldest
+/// change first. `next` is the cursor for the page after this one; an empty
+/// page has none, which tells the app it has everything.
+async fn identity_mappings(
+    State(state): State<AppState>,
+    auth: Authed,
+    Query(page): Query<MappingsQuery>,
+) -> ApiResult<Json<IdentityMappings>> {
+    let since = check_cursor(page.since.as_deref())?;
+    let limit = page.limit.unwrap_or(MAX_IDENTITY_PAGE);
+    let page = state
+        .store()
+        .identity_page(auth.instance, since, limit)
+        .await?;
+    Ok(Json(IdentityMappings {
+        next: page.last.map(|cursor| cursor.to_string()),
+        items: page.items,
+    }))
+}
+
 async fn groups(State(state): State<AppState>, auth: Authed) -> ApiResult<Json<Vec<GroupInfo>>> {
     let mut groups = state.driver().groups(&auth.instance).await?;
     name_participants(&state, &auth.instance, &mut groups).await?;
@@ -961,6 +1000,17 @@ mod tests {
         assert!(check_send_at(now - 1, now).is_err());
         assert!(check_send_at(i64::MIN, now).is_err());
         assert!(check_send_at(i64::MAX, i64::MIN).is_err());
+    }
+
+    #[test]
+    fn cursors_are_checked() {
+        assert_eq!(check_cursor(None).unwrap(), 0);
+        assert_eq!(check_cursor(Some("")).unwrap(), 0);
+        assert_eq!(check_cursor(Some(" 41 ")).unwrap(), 41);
+        assert_eq!(check_cursor(Some("0")).unwrap(), 0);
+        for bad in ["x", "-1", "1.5", "4 1", "99999999999999999999"] {
+            assert!(check_cursor(Some(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]

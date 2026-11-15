@@ -72,6 +72,8 @@ class WaMarksTest {
                             chat("905321234567@s.whatsapp.net"),
                             chat("120363@g.us", group = true),
                             chat("status@broadcast"),
+                            // A chat WhatsApp names by a LID has no number to match, whatever its digits.
+                            chat("905339999999@lid"),
                         ),
                     )
                 }

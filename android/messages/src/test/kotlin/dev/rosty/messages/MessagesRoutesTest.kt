@@ -39,6 +39,29 @@ class MessagesRoutesTest {
         )
         assertNull(messagesRouteFor(IntentFacts(threadTag = "sms:0")))
         assertNull(messagesRouteFor(IntentFacts(threadTag = "wa:nojid")))
+        assertNull(messagesRouteFor(IntentFacts(threadTag = "wa:abc@s.whatsapp.net")))
+    }
+
+    @Test fun aTagOrAHandoffThatNamesALidOrADeviceOpensTheChatOfThatId() {
+        // The id goes into the route without its device; the thread resolves it to the chat of the person.
+        assertEquals(
+            ChatsTab to listOf(MessagesRoute.WaThread("777000000000001@lid")),
+            messagesRouteFor(IntentFacts(threadTag = "wa:777000000000001:4@lid")),
+        )
+        assertEquals(
+            ChatsTab to listOf(MessagesRoute.WaThread("777000000000001@lid")),
+            messagesRouteFor(IntentFacts(action = ACTION_WA_CHAT, waJid = "777000000000001@lid")),
+        )
+        assertEquals(
+            ChatsTab to listOf(MessagesRoute.WaThread("100000000001@s.whatsapp.net")),
+            messagesRouteFor(IntentFacts(action = ACTION_WA_CHAT, waJid = "100000000001:2@c.us")),
+        )
+        // Text that is no JID falls back to the number, and to nothing without one.
+        assertEquals(
+            ChatsTab to listOf(MessagesRoute.WaThread("905550000001@s.whatsapp.net")),
+            messagesRouteFor(IntentFacts(action = ACTION_WA_CHAT, waJid = "ada", waNumber = "+90 555 000 00 01")),
+        )
+        assertNull(messagesRouteFor(IntentFacts(action = ACTION_WA_CHAT, waJid = "ada")))
     }
 
     @Test fun theWhatsAppHandoffOpensTheChatByJidOrNumber() {

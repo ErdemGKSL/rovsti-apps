@@ -6,6 +6,7 @@ import dev.rosty.core.model.people.SyncStatus
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.InstanceState
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.ops.PeopleOps
 import dev.rosty.people.sync.PartNotifier
@@ -250,7 +251,7 @@ class PeopleSync(
     // ---- live events
 
     private suspend fun onProfile(profile: WaProfile) {
-        if (wa.linkState.value !is WaLinkState.Connected || profile.jid.endsWith(GROUP_SUFFIX)) return
+        if (wa.linkState.value !is WaLinkState.Connected || WaIds.isGroup(profile.jid)) return
         val answer = store.upsert(listOf(PeopleSyncRunner.profileUpdate(profile))) ?: return
         if (answer.changed > 0 || answer.dropFiles.isNotEmpty()) notifier.part()
     }
@@ -346,7 +347,6 @@ class PeopleSync(
         const val NOTIFY_MIN_MS = 3_000L
 
         private const val LIVE_DEBOUNCE_MS = 2_000L
-        private const val GROUP_SUFFIX = "@g.us"
 
         // The v1 prefs (`PeopleSyncLog`), read once.
         private const val LEGACY_LAST = "last_ms"

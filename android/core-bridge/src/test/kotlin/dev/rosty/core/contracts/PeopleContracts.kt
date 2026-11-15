@@ -27,7 +27,10 @@ object PeopleContracts : ContractModels {
     override val models: Map<String, KSerializer<*>> =
         buildMap {
             op<PeopleUpsertRequest, PeopleUpsertAnswer>("people.upsert", ok = listOf("lid_join", "picture_removed"))
-            op<PeopleLookupRequest, PeopleLookupAnswer>("people.lookup", ok = listOf("by_lid", "unknown"))
+            op<PeopleLookupRequest, PeopleLookupAnswer>(
+                "people.lookup",
+                ok = listOf("national", "national_without_home", "by_lid", "unknown"),
+            )
             op<PeoplePlanRequest, PeoplePlanAnswer>("people.plan", ok = listOf("nothing_to_do"))
             op<PeopleSnapshotRequest, PeopleSnapshotAnswer>("people.snapshot", ok = listOf("missing"))
             op<SyncStatusRequest, SyncStatus>("people.sync_status", ok = listOf("never"))

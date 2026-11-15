@@ -1,8 +1,9 @@
 package dev.rosty.messages.names
 
 import dev.rosty.core.model.wa.RichChat
+import dev.rosty.core.model.wa.WaIdKind
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncChat
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.people.LiveWaNames
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,9 @@ enum class NameTier {
 
     /** Nobody names the number: the number itself, formatted for reading. */
     Number,
+
+    /** A WhatsApp user whose number is hidden (a LID) and whom nobody names: the "WhatsApp user" label. */
+    Unknown,
 }
 
 /** The name a surface shows for a person and the tier that gave it. */
@@ -34,8 +38,8 @@ data class PersonName(
     val text: String,
     val tier: NameTier,
 ) {
-    /** False when the text is only the number (or the JID's user part). */
-    val named: Boolean get() = tier != NameTier.Number
+    /** False when the text is only the number, or the label of a WhatsApp user nobody names. */
+    val named: Boolean get() = tier != NameTier.Number && tier != NameTier.Unknown
 
     /** True when a device contact owns the number. */
     val saved: Boolean get() = tier == NameTier.Contact
@@ -120,7 +124,13 @@ interface LiveNames {
  * 1. the saved device contact's name;
  * 2. the WhatsApp name: verified business name, else push name (stored on the device, else asked from WhatsApp);
  * 3. the stored WhatsApp chat name, when that is all there is;
- * 4. the number, formatted for reading.
+ * 4. the number, formatted for reading;
+ * 5. for a WhatsApp user whose number is hidden (a LID nobody mapped to a number): "WhatsApp user" in the phone's
+ *    language. The digits of a LID are never shown: they are not a number and mean nothing to a reader.
+ *
+ * A WhatsApp user is looked up in the address book by every number the store knows for the person ([numbers]): the
+ * current one first, then the former ones, so a contact that only holds the number the person had before still names
+ * the chat. A LID whose number the store learned is named by that number.
  *
  * A number nobody names is shown at once and asked from WhatsApp in the background ([LiveNames.ask], deduplicated and
  * cached there); when the answer lands [changes] moves and the surface asks again, so the name swaps in without a
@@ -137,6 +147,14 @@ class PersonNames(
     private val stored: suspend (number: String) -> WaNames? = { null },
     /** A number as people read it (`+90 555 000 00 01`). */
     private val readable: suspend (number: String) -> String = { it },
+    /**
+     * The phone numbers of the person behind a WhatsApp id as the offline store knows them (`+<digits>`): the
+     * current one first, then the former ones. Empty when the store knows none (or is not open): the number the id
+     * itself carries is used then.
+     */
+    private val numbers: suspend (jid: String) -> List<String> = { emptyList() },
+    /** "WhatsApp user" in the phone's language: what a WhatsApp user nobody can name is called. */
+    private val unknown: () -> String = { UNKNOWN_USER },
 ) {
     /** Moves when a name may read differently: the address book changed or an asked WhatsApp name arrived. */
     val changes: Flow<Long> =
@@ -160,17 +178,35 @@ class PersonNames(
     ): PersonName = resolve(number, wa, null, ask = true)
 
     /**
-     * The name of the WhatsApp user [jid]. A JID that carries no phone number (a LID) can only be named by [wa]; with
-     * nothing at all its user part stands in, so a row is never blank.
+     * The name of the WhatsApp user [jid]: by the numbers of the person (the current one, then the former ones) a
+     * contact first, then the rule over the current number. A person with no number at all (a LID nobody mapped) can
+     * only be named by [wa]; with nothing the "WhatsApp user" label stands in, never the digits of the LID.
      */
     suspend fun ofJid(
         jid: String?,
         wa: WaNames = WaNames.None,
         ask: Boolean = true,
     ): PersonName {
-        val number = jid?.let(::numberOfJid)
-        if (number != null) return of(number, wa, ask)
-        return pick(null, wa, null) ?: PersonName(jid?.substringBefore('@').orEmpty(), NameTier.Number)
+        val all = numbersOf(jid)
+        val current = all.firstOrNull() ?: return pick(null, wa, null) ?: nameless(jid)
+        val contact = all.firstNotNullOfOrNull { number -> WaNames.clean(contactName(number)) }
+        return resolve(current, wa, contact, ask)
+    }
+
+    /**
+     * What stands in for an id nobody names and that carries no number. A person (a LID) and text that is no id get
+     * the "WhatsApp user" label; a broadcast list, a bot or a service account has nothing but its id.
+     */
+    private fun nameless(jid: String?): PersonName {
+        val kind = WaIds.kind(jid)
+        val id = if (kind == null || kind == WaIdKind.Lid || kind == WaIdKind.Pn) null else WaIds.user(jid)
+        return if (id == null) PersonName(unknown(), NameTier.Unknown) else PersonName(id, NameTier.Number)
+    }
+
+    /** The numbers [jid] is looked up by: what the store knows for the person, else the number the id carries. */
+    suspend fun numbersOf(jid: String?): List<String> {
+        if (jid == null) return emptyList()
+        return numbers(jid).ifEmpty { listOfNotNull(WaIds.number(jid)) }
     }
 
     /** Who wrote a group message, or whom a quote or a typing line names: [carried] is the push name it came with. */
@@ -207,7 +243,8 @@ class PersonNames(
     }
 
     companion object {
-        private const val GROUP_SUFFIX = "@g.us"
+        /** The label of [NameTier.Unknown] where no resources are at hand (plain JVM tests); the app passes its own. */
+        const val UNKNOWN_USER = "WhatsApp user"
 
         /**
          * Pure: the rule over what is known. [contact] first, then [wa]'s verified and push names, then the name
@@ -234,11 +271,12 @@ class PersonNames(
         private fun isGroup(
             jid: String,
             flag: Boolean?,
-        ): Boolean = flag ?: jid.endsWith(GROUP_SUFFIX)
+        ): Boolean = flag ?: WaIds.isGroup(jid)
 
+        /** A group is called by its subject; one without a subject by its id, as WhatsApp lists it. */
         private fun groupTitle(
             jid: String,
             subject: String?,
-        ): String = WaNames.clean(subject) ?: jid.substringBefore('@')
+        ): String = WaNames.clean(subject) ?: WaIds.user(jid) ?: jid
     }
 }

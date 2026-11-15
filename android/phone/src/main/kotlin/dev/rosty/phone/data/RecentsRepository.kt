@@ -17,6 +17,7 @@ import dev.rosty.core.model.phone.RefreshDeltaRequest
 import dev.rosty.core.model.phone.RowView
 import dev.rosty.core.model.phone.TimeFormat
 import dev.rosty.core.model.wa.CallSummary
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.PhoneOps
 import dev.rosty.platform.calllog.CallLogRepository
 import dev.rosty.platform.identity.CallerIds
@@ -236,7 +237,7 @@ class RecentsRepository(
          */
         fun extraCalls(calls: List<CallSummary>): List<ExtraCall> =
             calls.mapNotNull { call ->
-                val number = dialNumber(call.peer) ?: return@mapNotNull null
+                val number = dialNumber(call) ?: return@mapNotNull null
                 val ended = call.phase as? CallPhase.Ended
                 ExtraCall(
                     numberRaw = number,
@@ -256,18 +257,12 @@ class RecentsRepository(
                 )
             }
 
-        /** `+<digits>` for a `<digits>[:device]@s.whatsapp.net` JID, null for anything else. */
-        fun dialNumber(peer: String): String? {
-            val user = peer.substringBefore('@', "").substringBefore(':')
-            val server = peer.substringAfter('@', "")
-            return if (server == "s.whatsapp.net" && user.isNotEmpty() &&
-                user.all { it in '0'..'9' }
-            ) {
-                "+$user"
-            } else {
-                null
-            }
-        }
+        /**
+         * The number to dial and to look a contact up by for a WhatsApp call: `+<digits>` of its peer's phone JID,
+         * or, for a peer the gateway names by a LID, of the number it sent next to it (`peer_alt`). Null for a LID
+         * whose number the gateway does not know (Phone keeps no identity table of its own yet).
+         */
+        fun dialNumber(call: CallSummary): String? = WaIds.number(call.peer, call.peerAlt)
 
         private const val MS_PER_S = 1000L
     }

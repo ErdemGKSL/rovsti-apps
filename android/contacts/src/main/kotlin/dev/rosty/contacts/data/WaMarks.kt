@@ -4,6 +4,7 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.model.contacts.WaMarksRequest
 import dev.rosty.core.model.search.WireContact
 import dev.rosty.core.model.wa.RichChat
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.ContactsWaOps
 import dev.rosty.wa.WaLinkState
 import dev.rosty.wa.WaRepository
@@ -72,13 +73,10 @@ class WaMarks(
     }
 
     companion object {
-        private const val PERSON_SUFFIX = "@s.whatsapp.net"
-
         /** The user parts of the 1:1 chats (groups and statuses are never matched), as `chat_users` in Rust. */
         fun chatUsers(chats: List<RichChat>): List<String> =
             chats
-                .filter { !it.isGroup && it.jid.endsWith(PERSON_SUFFIX) }
-                .map { it.jid.substringBefore('@') }
-                .filter { it.isNotEmpty() }
+                .filter { !it.isGroup }
+                .mapNotNull { WaIds.pnUser(it.jid) }
     }
 }

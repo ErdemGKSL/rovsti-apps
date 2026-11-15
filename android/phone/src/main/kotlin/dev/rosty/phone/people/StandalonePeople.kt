@@ -3,6 +3,7 @@ package dev.rosty.phone.people
 import dev.rosty.core.log.RostyLog
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.PeopleOps
 import dev.rosty.people.GatewaySource
 import dev.rosty.people.sync.PartNotifier
@@ -126,7 +127,7 @@ class StandalonePeople(
                 .onEach { event ->
                     val profile = event.profile()
                     if (wa.linkState.value !is WaLinkState.Connected ||
-                        profile.jid.endsWith(GROUP_SUFFIX)
+                        WaIds.isGroup(profile.jid)
                     ) {
                         return@onEach
                     }
@@ -184,6 +185,5 @@ class StandalonePeople(
     companion object {
         const val NOTIFY_MIN_MS = 3_000L
         private const val LIVE_DEBOUNCE_MS = 2_000L
-        private const val GROUP_SUFFIX = "@g.us"
     }
 }

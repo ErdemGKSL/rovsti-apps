@@ -6,6 +6,8 @@ import dev.rosty.core.RustError
 import dev.rosty.core.model.wa.BytesAnswer
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.IdentityMappingsAnswer
+import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MessageBody
@@ -60,6 +62,21 @@ class FakeWaRemote : WaRemote {
     var statusList = StatusList()
     var statusCalls = 0
 
+    /**
+     * The LID and number pairs the gateway lists, by the cursor asked for (null: the first page); null: a gateway
+     * from before the list, which answers "not supported".
+     */
+    var mappings: Map<String?, IdentityMappingsAnswer>? = null
+
+    /** The `since` of every pairs call. */
+    val mappingCalls = mutableListOf<String?>()
+
+    /** What `status` answers: the account's own ids; null: the gateway does not say. */
+    var ownStatus: InstanceStatus? = null
+
+    /** Every call that fills the store, in the order made: `identity`, `status`, `chats`, `page`. */
+    val order = mutableListOf<String>()
+
     /** What a send, edit, delete, reaction or read mark answers; the default accepts everything. */
     var answer: (String, WaSyncAction) -> Outcome<WaSyncOutcome.Sent> =
         { _, _ -> Outcome.Ok(WaSyncOutcome.Sent("sent-${performed.size}", SENT_AT + performed.size)) }
@@ -87,14 +104,30 @@ class FakeWaRemote : WaRemote {
     override suspend fun chats(): Outcome<List<RichChat>> =
         gate {
             chatCalls++
+            order += "chats"
             chatList
         }
 
     override suspend fun page(fetch: WaSyncFetch): Outcome<List<RichMessage>> =
         gate {
             pageCalls += fetch
+            order += "page"
             pages[fetch.chat to fetch.before].orEmpty()
         }
+
+    override suspend fun identityMappings(since: String?): Outcome<IdentityMappingsAnswer> =
+        gate {
+            mappingCalls += since
+            order += "identity"
+            mappings?.let { it[since] ?: IdentityMappingsAnswer(supported = true) }
+                ?: IdentityMappingsAnswer(supported = false)
+        }
+
+    override suspend fun status(): Outcome<InstanceStatus> {
+        val status = ownStatus?.takeIf { !down } ?: return Outcome.Err(LOST)
+        order += "status"
+        return Outcome.Ok(status)
+    }
 
     override suspend fun perform(
         chat: String,
@@ -220,6 +253,8 @@ class WaTestKit(
     storeOps: WaSyncOps = ops,
     linked: Boolean = true,
     graceMs: Long = GRACE_MS,
+    /** What follows a merge of two chats; the default moves nothing and only tells the open screens. */
+    val rekeys: WaRekeys = WaRekeys(),
 ) {
     val remote = FakeWaRemote()
     val link = MutableStateFlow(if (linked) WaStoreLink(INSTANCE) else null)
@@ -243,6 +278,7 @@ class WaTestKit(
             wake = { wakes += it },
             newId = { "c${++ids}" },
             replayGraceMs = graceMs,
+            rekeys = rekeys,
         )
 
     fun connect() = remote.emit(WaRemoteEvent.Connected)
@@ -279,6 +315,9 @@ class WaTestKit(
         const val ADA = "905550000001@s.whatsapp.net"
         const val MERT = "905550000002@s.whatsapp.net"
         const val GROUP = "120363000000000001@g.us"
+
+        /** The LID of [ADA], as a gateway names her before it knows her number. */
+        const val ADA_LID = "777000000000001@lid"
 
         fun text(
             chat: String,

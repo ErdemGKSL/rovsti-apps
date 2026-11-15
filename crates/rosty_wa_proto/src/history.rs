@@ -313,6 +313,7 @@ mod tests {
                 direction,
                 phase,
                 is_video: false,
+                peer_alt: None,
             },
             started_ms: 1_000,
             ended_ms: Some(31_000),

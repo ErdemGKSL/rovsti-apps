@@ -4,6 +4,12 @@
 //! `wa_sync.close` (or `RustNative.release`) frees it. Opening the same file twice in one process shares one store.
 //! No op here touches the network: the caller performs the gateway calls (`wa.*`) and hands the answers in, with the
 //! time. The ops that write answer the `handle` again next to their result.
+//!
+//! One person is one chat here, whichever id the gateway names them by. The store learns the pairs from the events
+//! it applies and the ids its payloads carry; `wa_sync.identity_catch_up` takes the pages of `wa.identity_mappings`
+//! and `wa_sync.identity_observe` what `wa.status`, `wa.group(s)` and `wa.profiles` answered. A merge is reported
+//! as `rekeyed` (`{seq, from_key, into_key}`) by the op that caused it and listed by `wa_sync.rekeyed_since`; the
+//! reads take any id of a chat, so a screen that still holds the old one reads the merged chat.
 
 use crate::envelope::{ErrorKind, FfiError};
 use crate::handles;
@@ -12,11 +18,13 @@ use crate::ops::registry::{Case, OpSpec, PLACEHOLDER_HANDLE as H};
 use crate::state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
-    self, Action, AppliedEvents, ChatRow, Due, Eviction, FetchPage, MessageRow, Opened, OutboxItem,
-    Outcome, Settled, StarredCursor, StarredPage, Store, StoredChats, StoredPage, SyncPlan,
-    ThreadCursor, ThreadPage,
+    self, Action, AppliedEvents, ChatRekeyed, ChatRow, Due, Eviction, FetchPage, IdentityApplied,
+    IdentityCaughtUp, MessageRow, Observed, Opened, OutboxItem, Outcome, ResolvedId, Settled,
+    StarredCursor, StarredPage, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor, ThreadPage,
 };
-use rosty_wa_proto::{EventEnvelope, RichChat, RichMessage};
+use rosty_wa_proto::{
+    EventEnvelope, GroupInfo, IdentityMappings, InstanceStatus, RichChat, RichMessage, WaProfile,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -135,6 +143,41 @@ pub(super) const OPS: &[OpSpec] = &[
         media_evict,
         media_evict_cases
     ),
+    op!(
+        "wa_sync.identity_resolve",
+        ResolveReq,
+        Option<ResolvedId>,
+        identity_resolve,
+        identity_resolve_cases
+    ),
+    op!(
+        "wa_sync.rekeyed_since",
+        RekeyedReq,
+        RekeyedAns,
+        rekeyed_since,
+        rekeyed_since_cases
+    ),
+    op!(
+        "wa_sync.identity_numbers",
+        ResolveReq,
+        NumbersAns,
+        identity_numbers,
+        identity_numbers_cases
+    ),
+    op!(
+        "wa_sync.identity_catch_up",
+        CatchUpReq,
+        WithHandle<IdentityCaughtUp>,
+        identity_catch_up,
+        identity_catch_up_cases
+    ),
+    op!(
+        "wa_sync.identity_observe",
+        ObserveReq,
+        WithHandle<IdentityApplied>,
+        identity_observe,
+        identity_observe_cases
+    ),
 ];
 
 type Shared = Arc<Mutex<Store>>;
@@ -212,6 +255,8 @@ struct ItemAns {
 
 const NOW: i64 = 1_790_000_000_000;
 const ALI: &str = "100000000001@s.whatsapp.net";
+/// The LID of [`ALI`].
+const ALI_LID: &str = "777000000000001@lid";
 const GROUP: &str = "120000000000000001@g.us";
 
 fn open_req() -> Value {
@@ -260,6 +305,34 @@ fn on_sample(case: Case) -> Case {
 fn enqueue_req(client_id: &str, text: &str) -> Value {
     json!({"handle": H, "now_ms": NOW, "client_id": client_id, "chat": ALI,
         "action": {"kind": "send_text", "text": text}})
+}
+
+/// One message under Ali's LID, written before the store knew whose LID it is.
+fn lid_events() -> Value {
+    json!({"handle": H, "events": [
+        event(9, text_msg(ALI_LID, "L1", NOW - 500, false, "lid'den"), "message"),
+    ]})
+}
+
+fn mapped_event(seq: u64, lid: &str, pn: &str, source: &str) -> Value {
+    event(
+        seq,
+        json!({"lid": lid, "pn": pn, "source": source, "learned_ms": NOW}),
+        "identity_mapped",
+    )
+}
+
+/// A case on the sample store that also holds a chat under Ali's LID: one person in two chats.
+fn on_two_chats(case: Case) -> Case {
+    on_sample(case).after("wa_sync.apply_events", lid_events())
+}
+
+/// A case on a store where the LID chat and the number chat of Ali became one.
+fn on_merged(case: Case) -> Case {
+    on_two_chats(case).after(
+        "wa_sync.apply_events",
+        json!({"handle": H, "events": [mapped_event(10, ALI_LID, ALI, "peer_message")]}),
+    )
 }
 
 /// A case on the sample store with one text waiting in the outbox.
@@ -411,6 +484,60 @@ fn apply_events_cases() -> Vec<Case> {
             "echo",
             json!({"handle": H, "events": [event(9, text_msg(ALI, "S1", NOW + 20, true, "yoldayım"), "message")]}),
         )),
+        // The gateway learned whose LID it is: the two chats of the person become one (`rekeyed`).
+        on_two_chats(Case::named(
+            "identity",
+            json!({"handle": H, "events": [mapped_event(10, ALI_LID, ALI, "peer_message")]}),
+        )),
+        // A message that names both forms of its chat teaches the pair itself; a number change follows it.
+        on_two_chats(Case::named("alt_ids", {
+            let mut message = text_msg(ALI_LID, "L2", NOW - 400, false, "ikisi de");
+            message["chat_alt"] = json!(ALI);
+            json!({"handle": H, "events": [
+                event(10, message, "message"),
+                event(11, json!({"old_pn": ALI, "new_pn": "100000000002@s.whatsapp.net", "new_lid": ALI_LID}),
+                    "identity_number_changed"),
+            ]})
+        })),
+        // Every other place an event names a person by both ids: a group author, who reacted, who is typing,
+        // who is online, who calls, a profile.
+        on_two_chats(Case::named("other_forms", {
+            let veli = "100000000002@s.whatsapp.net";
+            let veli_lid = "777000000000002@lid";
+            let mut message = text_msg(GROUP, "G2", NOW - 300, false, "grupta");
+            message["sender"] = json!(veli_lid);
+            message["sender_alt"] = json!(veli);
+            message["reactions"] =
+                json!([{"sender": ALI, "from_me": false, "emoji": "👍", "sender_alt": ALI_LID}]);
+            json!({"handle": H, "events": [
+                event(10, message, "message"),
+                event(11, json!({"chat": GROUP, "id": "G2", "read": false, "reactions": [
+                    {"sender": veli_lid, "from_me": false, "emoji": "❤", "sender_alt": veli}]}), "message_update"),
+                event(12, json!({"chat": GROUP, "jid": veli_lid, "state": "typing", "jid_alt": veli}), "typing"),
+                event(13, json!({"jid": veli, "available": true, "last_seen_ms": null, "jid_alt": veli_lid}),
+                    "presence"),
+                event(14, json!({"call_id": "c1", "peer": veli, "peer_name": null, "direction": "in",
+                    "phase": "ringing", "is_video": false, "peer_alt": veli_lid}), "call"),
+                event(15, json!({"jid": veli, "push_name": "veli", "contact_name": null, "about": null,
+                    "picture_id": null, "business": false, "verified_name": null, "fetched_ms": NOW,
+                    "lid": veli_lid}), "profile"),
+            ]})
+        })),
+        // Pairs that change nothing are listed (`rejected`): ids of the wrong kind, a weaker source.
+        on_merged(Case::named(
+            "rejected",
+            json!({"handle": H, "events": [
+                mapped_event(11, ALI, ALI_LID, "usync"),
+                mapped_event(12, ALI_LID, "100000000002@s.whatsapp.net", "history"),
+            ]}),
+        )),
+        // The account's own number and LID arrive with the instance state.
+        on_store(Case::named(
+            "own_ids",
+            json!({"handle": H, "events": [event(1, json!({"instance_id": "inst1", "state": "connected",
+                "own_jid": "100000000009@s.whatsapp.net", "push_name": null, "own_lid": "777000000000009@lid"}),
+                "state")]}),
+        )),
     ]
 }
 
@@ -457,6 +584,13 @@ fn store_chats_cases() -> Vec<Case> {
     vec![
         on_sample(Case::new(chats_req(None))),
         on_sample(Case::named("missed", chats_req(Some("A9")))),
+        // The gateway lists the chat under the LID and names its number (`alt`): the stored chats become one.
+        on_two_chats(Case::named(
+            "alt",
+            json!({"handle": H, "now_ms": NOW + 61_000, "chats": [
+                {"jid": ALI_LID, "name": "Ali", "last": null, "unread": 1, "is_group": false, "alt": ALI},
+            ]}),
+        )),
     ]
 }
 
@@ -508,6 +642,15 @@ fn store_page_cases() -> Vec<Case> {
                 ]),
             ),
         )),
+        // A page asked under the LID whose message names the number: it is a page of the number's chat, and
+        // the two stored chats become one (`rekeyed`).
+        on_two_chats(Case::named("alt", {
+            let mut newest = text_msg(ALI_LID, "L3", NOW + 50_000, false, "yeni");
+            newest["chat_alt"] = json!(ALI);
+            newest["sender_alt"] = json!(ALI);
+            json!({"handle": H, "now_ms": NOW + 62_000, "chat": ALI_LID, "before": null, "limit": 50,
+                "messages": [newest]})
+        })),
         // Older history: a short page means there is nothing older.
         on_sample(Case::named(
             "older",
@@ -581,6 +724,8 @@ fn chats_cases() -> Vec<Case> {
             "empty",
             json!({"handle": H, "include_archived": true}),
         )),
+        // One chat for the person; `wire_jid` is the id the gateway last used for it.
+        on_merged(Case::named("merged", json!({"handle": H}))),
     ]
 }
 
@@ -624,6 +769,9 @@ fn thread_cases() -> Vec<Case> {
                     "action": {"kind": "react", "message_id": "A1", "from_me": false, "sender": ALI, "emoji": "❤"}}),
             ),
         on_store(Case::named("unknown_chat", json!({"handle": H, "chat": ALI, "limit": 50}))),
+        // A screen that still holds the LID of a chat that merged into its number reads the merged thread; the
+        // message that arrived under the LID keeps it as `wire_sender`.
+        on_merged(Case::named("old_key", json!({"handle": H, "chat": ALI_LID, "limit": 2}))),
     ]
 }
 
@@ -1060,6 +1208,188 @@ fn media_evict_cases() -> Vec<Case> {
     ]
 }
 
+// ---- wa_sync.identity_resolve, wa_sync.rekeyed_since
+
+#[derive(Deserialize)]
+struct ResolveReq {
+    handle: i64,
+    /// A JID as it arrived or as a screen holds it, device allowed.
+    id: String,
+}
+
+/// `null` when `id` is not a JID.
+fn identity_resolve(req: ResolveReq) -> Result<Option<ResolvedId>, FfiError> {
+    with(req.handle, |store| store.identity_resolve(&req.id))
+}
+
+fn identity_resolve_cases() -> Vec<Case> {
+    vec![
+        // A LID with a device whose number is known: the key is the number, `wire` goes back on the wire.
+        on_merged(Case::new(
+            json!({"handle": H, "id": "777000000000001:2@lid"}),
+        )),
+        on_merged(Case::named("number", json!({"handle": H, "id": ALI}))),
+        // Seen for the first time: a person of its own, keyed by the LID until a number is learned.
+        on_store(Case::named(
+            "unknown_lid",
+            json!({"handle": H, "id": "777000000000005@lid"}),
+        )),
+        on_store(Case::named("group", json!({"handle": H, "id": GROUP}))),
+        on_store(Case::named(
+            "not_an_id",
+            json!({"handle": H, "id": "merhaba"}),
+        )),
+    ]
+}
+
+#[derive(Deserialize)]
+struct RekeyedReq {
+    handle: i64,
+    /// The `seq` of the last key change the caller followed; 0 for all of them.
+    #[serde(default)]
+    seq: u64,
+}
+
+#[derive(Serialize)]
+struct RekeyedAns {
+    /// Oldest first.
+    rekeyed: Vec<ChatRekeyed>,
+}
+
+fn rekeyed_since(req: RekeyedReq) -> Result<RekeyedAns, FfiError> {
+    with(req.handle, |store| store.rekeyed_since(req.seq)).map(|rekeyed| RekeyedAns { rekeyed })
+}
+
+fn rekeyed_since_cases() -> Vec<Case> {
+    vec![
+        on_merged(Case::new(json!({"handle": H, "seq": 0}))),
+        on_merged(Case::named("followed", json!({"handle": H, "seq": 1}))),
+        on_sample(Case::named("none", json!({"handle": H}))),
+    ]
+}
+
+// ---- wa_sync.identity_numbers
+
+#[derive(Serialize)]
+struct NumbersAns {
+    /// `+<digits>`: the current number first, then the former ones, newest first.
+    numbers: Vec<String>,
+}
+
+fn identity_numbers(req: ResolveReq) -> Result<NumbersAns, FfiError> {
+    with(req.handle, |store| Ok(store.identity_numbers(&req.id)))
+        .map(|numbers| NumbersAns { numbers })
+}
+
+fn identity_numbers_cases() -> Vec<Case> {
+    let moved = json!({"handle": H, "events": [event(
+        11,
+        json!({"old_pn": ALI, "new_pn": "100000000002@s.whatsapp.net", "new_lid": ALI_LID}),
+        "identity_number_changed",
+    )]});
+    vec![
+        // Asked by the LID: the number the person is known by.
+        on_merged(Case::new(json!({"handle": H, "id": ALI_LID}))),
+        // After a number change: the new number first, then the one a contact may still hold.
+        on_merged(Case::named("former", json!({"handle": H, "id": ALI_LID})))
+            .after("wa_sync.apply_events", moved),
+        // A LID nobody mapped has no number, whatever its digits.
+        on_store(Case::named(
+            "unknown_lid",
+            json!({"handle": H, "id": "777000000000005@lid"}),
+        )),
+        // A number the store has not met is its own number.
+        on_store(Case::named(
+            "unknown_number",
+            json!({"handle": H, "id": "100000000009:3@s.whatsapp.net"}),
+        )),
+        on_store(Case::named("group", json!({"handle": H, "id": GROUP}))),
+    ]
+}
+
+// ---- wa_sync.identity_catch_up, wa_sync.identity_observe
+
+#[derive(Deserialize)]
+struct CatchUpReq {
+    handle: i64,
+    /// One page of `GET /v1/identity/mappings` (`wa.identity_mappings`): `items` and `next`.
+    #[serde(flatten)]
+    page: IdentityMappings,
+}
+
+fn identity_catch_up(req: CatchUpReq) -> Result<WithHandle<IdentityCaughtUp>, FfiError> {
+    with(req.handle, |store| store.identity_catch_up(&req.page)).map(|out| handled(req.handle, out))
+}
+
+fn mapping(lid: &str, pn: &str, source: &str) -> Value {
+    json!({"lid": lid, "pn": pn, "source": source, "learned_ms": NOW - 1_000})
+}
+
+fn identity_catch_up_cases() -> Vec<Case> {
+    let first = json!({"handle": H, "items": [mapping(ALI_LID, ALI, "usync")], "next": "41"});
+    vec![
+        // The first page joins the two chats of Ali and leaves a cursor; `more` asks for the next page.
+        on_two_chats(Case::new(first.clone())),
+        // An empty page: the store has every pair and keeps the cursor of the page before.
+        on_two_chats(Case::named(
+            "done",
+            json!({"handle": H, "items": [], "next": null}),
+        ))
+        .after("wa_sync.identity_catch_up", first),
+        on_merged(Case::named(
+            "rejected",
+            json!({"handle": H, "items": [
+                mapping(ALI_LID, "100000000002@s.whatsapp.net", "history"),
+                mapping("777000000000003@lid", "100000000003@s.whatsapp.net", "from_the_future"),
+            ], "next": "43"}),
+        )),
+    ]
+}
+
+#[derive(Deserialize)]
+struct ObserveReq {
+    handle: i64,
+    now_ms: i64,
+    /// `wa.status`: the account's own number and LID.
+    #[serde(default)]
+    status: Option<InstanceStatus>,
+    /// `wa.group` / `wa.groups`: members named by LID and number.
+    #[serde(default)]
+    groups: Vec<GroupInfo>,
+    /// `wa.profiles` / `wa.refresh_profiles`: the LID of a number.
+    #[serde(default)]
+    profiles: Vec<WaProfile>,
+}
+
+fn identity_observe(req: ObserveReq) -> Result<WithHandle<IdentityApplied>, FfiError> {
+    let seen = Observed {
+        status: req.status.as_ref(),
+        groups: &req.groups,
+        profiles: &req.profiles,
+    };
+    with(req.handle, |store| {
+        store.identity_observe(&seen, req.now_ms)
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+fn identity_observe_cases() -> Vec<Case> {
+    vec![
+        on_two_chats(Case::new(json!({"handle": H, "now_ms": NOW,
+            "status": {"instance_id": "inst1", "state": "connected", "own_jid": "100000000009@s.whatsapp.net",
+                "push_name": "Ben", "own_lid": "777000000000009@lid"},
+            "groups": [{"jid": GROUP, "subject": "Aile", "addressing_mode": "lid", "participants": [
+                {"jid": ALI_LID, "admin": true, "name": "Ali", "lid": ALI_LID, "pn": ALI},
+                {"jid": "777000000000003@lid", "admin": false, "lid": "777000000000003@lid"},
+            ]}],
+            "profiles": [{"jid": "100000000002@s.whatsapp.net", "push_name": "veli", "contact_name": null,
+                "about": null, "picture_id": null, "business": false, "verified_name": null, "fetched_ms": NOW,
+                "lid": "777000000000002@lid"}],
+        }))),
+        on_sample(Case::named("nothing", json!({"handle": H, "now_ms": NOW}))),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1145,6 +1475,65 @@ mod tests {
     }
 
     #[test]
+    fn a_catch_up_joins_two_chats_and_its_cursor_and_the_merge_survive_close() {
+        let dir = temp_dir("identity");
+        let open = || {
+            ok("wa_sync.open", json!({"dir": dir, "instance_id": "inst1"}))["handle"]
+                .as_i64()
+                .expect("handle")
+        };
+        let on = |handle: i64, mut request: Value| {
+            request["handle"] = json!(handle);
+            request
+        };
+        let handle = open();
+        ok("wa_sync.apply_events", on(handle, sample_events()));
+        ok("wa_sync.apply_events", on(handle, lid_events()));
+        assert_eq!(
+            ok("wa_sync.plan", json!({"handle": handle})).get("identity_since"),
+            None
+        );
+        let caught = ok(
+            "wa_sync.identity_catch_up",
+            json!({"handle": handle, "items": [mapping(ALI_LID, ALI, "usync")], "next": "41"}),
+        );
+        assert_eq!(caught["since"], "41");
+        assert_eq!(caught["more"], true);
+        assert_eq!(
+            caught["rekeyed"],
+            json!([{"seq": 1, "from_key": ALI_LID, "into_key": ALI}])
+        );
+        ok("wa_sync.close", json!({"handle": handle}));
+
+        let handle = open();
+        // The next catch-up goes on from the cursor, and a consumer that was not running finds the step.
+        assert_eq!(
+            ok("wa_sync.plan", json!({"handle": handle}))["identity_since"],
+            "41"
+        );
+        assert_eq!(
+            ok("wa_sync.rekeyed_since", json!({"handle": handle}))["rekeyed"],
+            caught["rekeyed"]
+        );
+        // A reader that still holds the LID reads the one chat, under its key.
+        let thread = ok(
+            "wa_sync.thread",
+            json!({"handle": handle, "chat": ALI_LID, "limit": 10}),
+        );
+        let rows = thread["items"].as_array().expect("items");
+        assert_eq!(rows.len(), 4);
+        assert!(rows.iter().all(|row| row["chat"] == ALI));
+        assert_eq!(rows[0]["wire_sender"], ALI_LID);
+        let resolved = ok(
+            "wa_sync.identity_resolve",
+            json!({"handle": handle, "id": ALI_LID}),
+        );
+        assert_eq!(resolved["key"], ALI);
+        handles::global().release(handle);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn two_handles_of_one_file_share_the_store() {
         let dir = temp_dir("shared");
         let open = || {
@@ -1172,6 +1561,7 @@ mod tests {
             for handle in [0, foreign] {
                 let request = json!({"handle": handle, "now_ms": 0, "client_id": "c", "chat": "c", "id": "i",
                     "limit": 1, "events": [], "chats": [], "messages": [], "text": "", "max_bytes": 0,
+                    "seq": 0, "items": [],
                     "action": {"kind": "send_text", "text": "x"}, "outcome": {"kind": "sent"}});
                 let error = err(spec.name, request);
                 assert_eq!(error.kind, ErrorKind::NotFound, "{}", spec.name);

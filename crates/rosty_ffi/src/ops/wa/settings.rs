@@ -80,6 +80,7 @@ fn status(state: InstanceState) -> InstanceStatus {
         state,
         own_jid: Some("905321234567@s.whatsapp.net".into()),
         push_name: Some("Ada".into()),
+        own_lid: None,
     }
 }
 

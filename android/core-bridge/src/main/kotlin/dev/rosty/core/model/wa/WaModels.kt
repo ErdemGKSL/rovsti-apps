@@ -88,6 +88,8 @@ data class InstanceStatus(
     val state: InstanceState,
     @SerialName("own_jid") val ownJid: String? = null,
     @SerialName("push_name") val pushName: String? = null,
+    /** The account's LID, the other form of [ownJid]; older gateways leave it out. */
+    @SerialName("own_lid") @EncodeDefault(NEVER) val ownLid: String? = null,
 )
 
 /** A key minted for another app; the plain key is only in this answer. */
@@ -223,6 +225,8 @@ data class Reaction(
     val sender: String? = null,
     @SerialName("from_me") val fromMe: Boolean,
     val emoji: String,
+    /** The other form of [sender] (its LID next to a number, or the reverse), when the gateway knows it. */
+    @SerialName("sender_alt") @EncodeDefault(NEVER) val senderAlt: String? = null,
 )
 
 /** The body of a message: `{"text": ...}`, `{"media": {...}}` or `"unsupported"`. */
@@ -311,6 +315,10 @@ data class WaMessage(
     @SerialName("timestamp_ms") val timestampMs: Long,
     val body: MessageBody,
     val reactions: List<Reaction>,
+    /** The other form of [chat] in a one-to-one chat, when the gateway knows it. The store learns the pair. */
+    @SerialName("chat_alt") @EncodeDefault(NEVER) val chatAlt: String? = null,
+    /** The other form of [sender], when the gateway knows it. */
+    @SerialName("sender_alt") @EncodeDefault(NEVER) val senderAlt: String? = null,
 )
 
 @Serializable
@@ -320,6 +328,8 @@ data class ChatSummary(
     val last: WaMessage? = null,
     val unread: Int,
     @SerialName("is_group") val isGroup: Boolean,
+    /** The other form of [jid] in a one-to-one chat, when the gateway knows it. */
+    @EncodeDefault(NEVER) val alt: String? = null,
 )
 
 // ---- message and chat meta
@@ -428,8 +438,10 @@ data class RichMessage(
     val body: MessageBody,
     val reactions: List<Reaction>,
     @EncodeDefault(NEVER) val meta: MessageMeta = MessageMeta(),
+    @SerialName("chat_alt") @EncodeDefault(NEVER) val chatAlt: String? = null,
+    @SerialName("sender_alt") @EncodeDefault(NEVER) val senderAlt: String? = null,
 ) {
-    fun message() = WaMessage(id, chat, sender, fromMe, timestampMs, body, reactions)
+    fun message() = WaMessage(id, chat, sender, fromMe, timestampMs, body, reactions, chatAlt, senderAlt)
 }
 
 @Serializable
@@ -453,8 +465,10 @@ data class RichChat(
     @SerialName("is_group") val isGroup: Boolean,
     @EncodeDefault(NEVER) val meta: ChatMeta = ChatMeta(),
     @SerialName("last_meta") @EncodeDefault(NEVER) val lastMeta: MessageMeta? = null,
+    /** The other form of [jid] in a one-to-one chat, when the gateway knows it. */
+    @EncodeDefault(NEVER) val alt: String? = null,
 ) {
-    fun summary() = ChatSummary(jid, name, last, unread, isGroup)
+    fun summary() = ChatSummary(jid, name, last, unread, isGroup, alt)
 }
 
 @Serializable
@@ -467,6 +481,8 @@ data class WaProfile(
     val business: Boolean = false,
     @SerialName("verified_name") val verifiedName: String? = null,
     @SerialName("fetched_ms") val fetchedMs: Long = 0,
+    /** The person's LID when [jid] is their number and the gateway knows it; older gateways leave it out. */
+    @EncodeDefault(NEVER) val lid: String? = null,
 ) {
     /** The name to show: saved name, verified business name, push name. */
     fun displayName(): String? =
@@ -555,6 +571,10 @@ data class Participant(
     val jid: String,
     val admin: Boolean,
     @EncodeDefault(NEVER) val name: String? = null,
+    /** Their LID, when the gateway knows it. */
+    @EncodeDefault(NEVER) val lid: String? = null,
+    /** Their phone-number JID, when the gateway knows it; a member who hides their number has none. */
+    @EncodeDefault(NEVER) val pn: String? = null,
 )
 
 @Serializable
@@ -564,6 +584,39 @@ data class GroupInfo(
     val participants: List<Participant>,
     @EncodeDefault(NEVER) val description: String? = null,
     @EncodeDefault(NEVER) val announce: Boolean = false,
+    /** How WhatsApp names the members on the wire: `pn` or `lid`; older gateways leave it out. */
+    @SerialName("addressing_mode") @EncodeDefault(NEVER) val addressingMode: String? = null,
+)
+
+// ---- identity: LID and phone-number pairs
+
+/** One pair the gateway learned: [lid] and [pn] are the same person (`rosty_wa_proto::IdentityMapping`). */
+@Serializable
+data class IdentityMapping(
+    val lid: String,
+    val pn: String,
+    /** Where the pair comes from (`peer_message`, `usync`, ...); a name a newer gateway adds still decodes. */
+    val source: String,
+    @SerialName("learned_ms") val learnedMs: Long,
+)
+
+/**
+ * `wa.identity_mappings`: one page of the gateway's pairs, to hand to the offline store
+ * (`WaSyncStore.identityCatchUp`). [supported] false is a gateway from before the list: not an error, and nothing
+ * to hand in.
+ */
+@Serializable
+data class IdentityMappingsAnswer(
+    val supported: Boolean,
+    val items: List<IdentityMapping> = emptyList(),
+    /** The cursor of the page after this one; null when this page is empty. */
+    val next: String? = null,
+)
+
+/** The body of `wa.identity_mappings`: the cursor of the page before; left out for every pair. */
+@Serializable
+data class IdentityMappingsBody(
+    @EncodeDefault(NEVER) val since: String? = null,
 )
 
 @Serializable

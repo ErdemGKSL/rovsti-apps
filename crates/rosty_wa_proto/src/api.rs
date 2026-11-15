@@ -47,6 +47,10 @@ pub mod routes {
     pub const STATUS_VIEWED: &str = "/v1/statuses/viewed";
     pub const STATUS_MEDIA: &str = "/v1/statuses/{id}/media";
     pub const STATUS_THUMBNAIL: &str = "/v1/statuses/{id}/thumbnail";
+    /// The LID and phone-number pairs the gateway learned, paged by
+    /// `?since=<cursor>` ([`crate::IdentityMappings`]). Older gateways do not
+    /// have it and answer 404.
+    pub const IDENTITY_MAPPINGS: &str = "/v1/identity/mappings";
 
     /// Replaces `{name}` in `template` with `value`, percent-encoding every
     /// byte that is not unreserved (so a JID's `@` is safe in a path).
@@ -134,6 +138,10 @@ pub struct InstanceStatus {
     pub state: InstanceState,
     pub own_jid: Option<String>,
     pub push_name: Option<String>,
+    /// This account's LID (`<user>@lid`), the other form of `own_jid`. Older
+    /// gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_lid: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -261,6 +269,11 @@ pub struct Reaction {
     pub sender: Option<String>,
     pub from_me: bool,
     pub emoji: String,
+    /// The other form of `sender` (its LID when `sender` is a phone-number
+    /// JID, its phone-number JID when `sender` is a LID), when the gateway
+    /// knows it. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_alt: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -285,6 +298,14 @@ pub struct WaMessage {
     pub timestamp_ms: i64,
     pub body: MessageBody,
     pub reactions: Vec<Reaction>,
+    /// The other form of `chat` in a one-to-one chat (the LID next to a
+    /// phone-number JID, or the reverse), when the gateway knows it. Bare:
+    /// no device, no agent. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_alt: Option<String>,
+    /// The other form of `sender`, when the gateway knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_alt: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -294,6 +315,10 @@ pub struct ChatSummary {
     pub last: Option<WaMessage>,
     pub unread: u32,
     pub is_group: bool,
+    /// The other form of `jid` in a one-to-one chat, when the gateway knows
+    /// it. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -304,7 +329,22 @@ pub struct Participant {
     /// gateways omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Their LID (`<user>@lid`), when the gateway knows it. Older gateways
+    /// omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lid: Option<String>,
+    /// Their phone-number JID, when the gateway knows it. A member who hides
+    /// their number has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pn: Option<String>,
 }
+
+/// [`GroupInfo::addressing_mode`] of a group whose members WhatsApp names by
+/// phone number.
+pub const ADDRESSING_PN: &str = "pn";
+/// [`GroupInfo::addressing_mode`] of a group whose members WhatsApp names by
+/// LID.
+pub const ADDRESSING_LID: &str = "lid";
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupInfo {
@@ -317,6 +357,10 @@ pub struct GroupInfo {
     /// Only admins may send (announcement group).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub announce: bool,
+    /// How WhatsApp names the members on the wire: [`ADDRESSING_PN`] or
+    /// [`ADDRESSING_LID`]. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub addressing_mode: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -677,6 +721,8 @@ mod tests {
             timestamp_ms: 1_700_000_000_000,
             body,
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 
@@ -762,5 +808,160 @@ mod tests {
         let mut w = wa(false, Some("lid-abc@lid"), MessageBody::Text("x".into()));
         w.chat = "g@g.us".into();
         assert!(to_rosty(&w).sender.is_none());
+    }
+
+    /// What a gateway from before the identity fields sends still parses,
+    /// and goes back out byte for byte.
+    #[test]
+    fn payloads_without_identity_fields_are_pinned() {
+        pinned(&[(
+            InstanceStatus {
+                instance_id: "i".into(),
+                state: InstanceState::Connected,
+                own_jid: Some("905550000009@s.whatsapp.net".into()),
+                push_name: Some("Ada".into()),
+                own_lid: None,
+            },
+            r#"{"instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net","push_name":"Ada"}"#,
+        )]);
+        pinned(&[(
+            ChatSummary {
+                jid: "905550000001@s.whatsapp.net".into(),
+                name: None,
+                last: None,
+                unread: 2,
+                is_group: false,
+                alt: None,
+            },
+            r#"{"jid":"905550000001@s.whatsapp.net","name":null,"last":null,"unread":2,"is_group":false}"#,
+        )]);
+        pinned(&[(
+            GroupInfo {
+                jid: "1-2@g.us".into(),
+                subject: "Aile".into(),
+                participants: vec![Participant {
+                    jid: "905550000001@s.whatsapp.net".into(),
+                    admin: true,
+                    name: None,
+                    lid: None,
+                    pn: None,
+                }],
+                description: None,
+                announce: false,
+                addressing_mode: None,
+            },
+            r#"{"jid":"1-2@g.us","subject":"Aile","participants":[{"jid":"905550000001@s.whatsapp.net","admin":true}]}"#,
+        )]);
+        pinned(&[(
+            Reaction {
+                sender: None,
+                from_me: true,
+                emoji: "x".into(),
+                sender_alt: None,
+            },
+            r#"{"sender":null,"from_me":true,"emoji":"x"}"#,
+        )]);
+    }
+
+    #[test]
+    fn payloads_with_identity_fields_are_pinned() {
+        pinned(&[(
+            InstanceStatus {
+                instance_id: "i".into(),
+                state: InstanceState::Connected,
+                own_jid: Some("905550000009@s.whatsapp.net".into()),
+                push_name: None,
+                own_lid: Some("9@lid".into()),
+            },
+            r#"{"instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net","push_name":null,"own_lid":"9@lid"}"#,
+        )]);
+        pinned(&[(
+            ChatSummary {
+                jid: "905550000001@s.whatsapp.net".into(),
+                name: None,
+                last: None,
+                unread: 0,
+                is_group: false,
+                alt: Some("1@lid".into()),
+            },
+            r#"{"jid":"905550000001@s.whatsapp.net","name":null,"last":null,"unread":0,"is_group":false,"alt":"1@lid"}"#,
+        )]);
+        pinned(&[(
+            GroupInfo {
+                jid: "1-2@g.us".into(),
+                subject: "Aile".into(),
+                participants: vec![
+                    Participant {
+                        jid: "905550000001@s.whatsapp.net".into(),
+                        admin: false,
+                        name: Some("Ada".into()),
+                        lid: Some("1@lid".into()),
+                        pn: Some("905550000001@s.whatsapp.net".into()),
+                    },
+                    // A member who hides their number: a LID and nothing else.
+                    Participant {
+                        jid: "2@lid".into(),
+                        admin: false,
+                        name: None,
+                        lid: Some("2@lid".into()),
+                        pn: None,
+                    },
+                ],
+                description: None,
+                announce: false,
+                addressing_mode: Some(ADDRESSING_LID.into()),
+            },
+            r#"{"jid":"1-2@g.us","subject":"Aile","participants":[{"jid":"905550000001@s.whatsapp.net","admin":false,"name":"Ada","lid":"1@lid","pn":"905550000001@s.whatsapp.net"},{"jid":"2@lid","admin":false,"lid":"2@lid"}],"addressing_mode":"lid"}"#,
+        )]);
+        pinned(&[(
+            WaMessage {
+                id: "m".into(),
+                chat: "1-2@g.us".into(),
+                sender: Some("905550000001@s.whatsapp.net".into()),
+                from_me: false,
+                timestamp_ms: 3,
+                body: MessageBody::Unsupported,
+                reactions: vec![],
+                chat_alt: None,
+                sender_alt: Some("1@lid".into()),
+            },
+            r#"{"id":"m","chat":"1-2@g.us","sender":"905550000001@s.whatsapp.net","from_me":false,"timestamp_ms":3,"body":"unsupported","reactions":[],"sender_alt":"1@lid"}"#,
+        )]);
+        assert_eq!((ADDRESSING_PN, ADDRESSING_LID), ("pn", "lid"));
+    }
+
+    /// A client from before the identity fields reads the new payloads: it
+    /// knows none of the added keys and skips them.
+    #[test]
+    fn old_clients_skip_the_identity_fields() {
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        struct OldStatus {
+            instance_id: String,
+            state: InstanceState,
+            own_jid: Option<String>,
+            push_name: Option<String>,
+        }
+        let old: OldStatus = serde_json::from_str(
+            r#"{"instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net","push_name":null,"own_lid":"9@lid"}"#,
+        )
+        .unwrap();
+        assert_eq!(old.own_jid.as_deref(), Some("905550000009@s.whatsapp.net"));
+
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        struct OldParticipant {
+            jid: String,
+            admin: bool,
+        }
+        let old: OldParticipant = serde_json::from_str(
+            r#"{"jid":"2@lid","admin":false,"lid":"2@lid","pn":"905550000002@s.whatsapp.net"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old,
+            OldParticipant {
+                jid: "2@lid".into(),
+                admin: false,
+            }
+        );
     }
 }

@@ -13,13 +13,16 @@ use rosty_wa_proto::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+mod identity;
 mod merge;
 mod rich;
 mod status;
+pub use identity::{IdentityPage, LearnedPair, MAX_IDENTITY_PAGE, NewPair};
 pub use merge::MergeReport;
 pub use rich::{
-    ChatChange, ChatSettings, FetchedProfile, MAX_THUMBNAIL_BYTES, MessageChange, MessageExtras,
-    ProfileChange, ReceiptCounts, apply_change, group_status, merge_edit, present,
+    ChatChange, ChatSettings, FetchedProfile, GroupReceipt, MAX_THUMBNAIL_BYTES, MessageChange,
+    MessageExtras, ProfileChange, ReceiptCounts, WireIds, apply_change, group_status, merge_edit,
+    present,
 };
 pub use status::{StatusTarget, StoredStatus};
 
@@ -289,6 +292,28 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (instance_id, chat, id, edited_at)
     );
     ",
+    // v7: identity. The LID and phone-number pairs the gateway learned, one
+    // row per LID; a new or changed pair gets a fresh, larger `cursor`
+    // (AUTOINCREMENT never reuses one), which pages
+    // `GET /v1/identity/mappings`. Each message keeps the chat and author ids
+    // it arrived under, for the keys and receipts sent back to WhatsApp; rows
+    // from before this version have none. The account's own LID sits next to
+    // its phone-number JID.
+    "
+    CREATE TABLE identity_pairs (
+        cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        lid TEXT NOT NULL,
+        pn TEXT NOT NULL,
+        source TEXT NOT NULL,
+        learned_ms INTEGER NOT NULL,
+        UNIQUE (instance_id, lid)
+    );
+    CREATE INDEX identity_pairs_by_pn ON identity_pairs(instance_id, pn);
+    ALTER TABLE messages ADD COLUMN wire_chat TEXT;
+    ALTER TABLE messages ADD COLUMN wire_sender TEXT;
+    ALTER TABLE instances ADD COLUMN own_lid TEXT;
+    ",
 ];
 
 /// Brings `conn` to the latest schema using `PRAGMA user_version`.
@@ -557,23 +582,25 @@ impl Store {
         self.run(move |conn| {
             let row = conn
                 .query_row(
-                    "SELECT state, own_jid, push_name FROM instances WHERE id = ?1",
+                    "SELECT state, own_jid, push_name, own_lid FROM instances WHERE id = ?1",
                     [id.as_str()],
                     |r| {
                         Ok((
                             r.get::<_, String>(0)?,
                             r.get::<_, Option<String>>(1)?,
                             r.get::<_, Option<String>>(2)?,
+                            r.get::<_, Option<String>>(3)?,
                         ))
                     },
                 )
                 .optional()?;
-            row.map(|(state, own_jid, push_name)| {
+            row.map(|(state, own_jid, push_name, own_lid)| {
                 Ok(InstanceStatus {
                     instance_id: id.to_string(),
                     state: from_tag(&state)?,
                     own_jid,
                     push_name,
+                    own_lid,
                 })
             })
             .transpose()
@@ -588,12 +615,26 @@ impl Store {
         own_jid: Option<String>,
         push_name: Option<String>,
     ) -> Result<(), StoreError> {
+        self.set_state_with_lid(id, state, own_jid, push_name, None)
+            .await
+    }
+
+    /// [`Self::set_state`] with the account's own LID.
+    pub async fn set_state_with_lid(
+        &self,
+        id: InstanceId,
+        state: InstanceState,
+        own_jid: Option<String>,
+        push_name: Option<String>,
+        own_lid: Option<String>,
+    ) -> Result<(), StoreError> {
         self.run(move |conn| {
             // Keep what we know when a later event does not repeat it.
             conn.execute(
                 "UPDATE instances SET state = ?2, own_jid = COALESCE(?3, own_jid),
-                 push_name = COALESCE(?4, push_name) WHERE id = ?1",
-                params![id.as_str(), to_tag(&state), own_jid, push_name],
+                 push_name = COALESCE(?4, push_name), own_lid = COALESCE(?5, own_lid)
+                 WHERE id = ?1",
+                params![id.as_str(), to_tag(&state), own_jid, push_name, own_lid],
             )?;
             Ok(())
         })
@@ -897,6 +938,8 @@ impl Store {
                     timestamp_ms,
                     body: serde_json::from_str(&body)?,
                     reactions: Vec::new(),
+                    chat_alt: None,
+                    sender_alt: None,
                 },
                 raw,
             )))
@@ -1020,11 +1063,13 @@ impl Store {
                     r.get::<_, u32>(3)?,
                 ))
             })?;
+            let mut alts = identity::Alts::new(conn, &instance);
             let mut out = Vec::new();
             for row in rows {
                 let (jid, name, is_group, unread) = row?;
                 let last = last_message(conn, &instance, &jid)?;
                 out.push(ChatSummary {
+                    alt: alts.of(&jid, None)?,
                     jid,
                     name,
                     last,
@@ -1136,6 +1181,7 @@ fn reactions_of(
     conn: &Connection,
     instance: &InstanceId,
     chat: &str,
+    alts: &mut identity::Alts<'_>,
 ) -> Result<HashMap<String, Vec<Reaction>>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, sender, from_me, emoji FROM reactions
@@ -1152,8 +1198,13 @@ fn reactions_of(
     let mut map: HashMap<String, Vec<Reaction>> = HashMap::new();
     for row in rows {
         let (id, sender, from_me, emoji) = row?;
+        let sender = (!sender.is_empty() && sender != OWN_REACTION_KEY).then_some(sender);
         map.entry(id).or_default().push(Reaction {
-            sender: (!sender.is_empty() && sender != OWN_REACTION_KEY).then_some(sender),
+            sender_alt: match sender.as_deref() {
+                Some(sender) => alts.of(sender, None)?,
+                None => None,
+            },
+            sender,
             from_me,
             emoji,
         });
@@ -1190,9 +1241,11 @@ fn last_message_row(
     let Some(row) = row else {
         return Ok(None);
     };
-    let mut reactions = reactions_of(conn, instance, chat)?;
+    let mut alts = identity::Alts::new(conn, instance);
+    let mut reactions = reactions_of(conn, instance, chat, &mut alts)?;
     let mut edits = HashMap::new();
-    row.into_rich(chat, &mut reactions, &mut edits).map(Some)
+    row.into_rich(chat, &mut reactions, &mut edits, &mut alts)
+        .map(Some)
 }
 
 #[cfg(test)]
@@ -1223,6 +1276,8 @@ mod tests {
             timestamp_ms: ts,
             body: MessageBody::Text(format!("hello {id}")),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 
@@ -1766,6 +1821,7 @@ mod tests {
                     sender: Some("x@s.whatsapp.net".into()),
                     from_me: false,
                     emoji: "👍".into(),
+                    sender_alt: None,
                 },
             )
             .await
@@ -1779,6 +1835,7 @@ mod tests {
                     sender: None,
                     from_me: true,
                     emoji: "❤".into(),
+                    sender_alt: None,
                 },
             )
             .await
@@ -1801,6 +1858,7 @@ mod tests {
                     sender: None,
                     from_me: true,
                     emoji: String::new(),
+                    sender_alt: None,
                 },
             )
             .await
@@ -1854,6 +1912,7 @@ mod tests {
                         sender: None,
                         from_me,
                         emoji: emoji.into(),
+                        sender_alt: None,
                     },
                 )
                 .await
@@ -1979,6 +2038,8 @@ mod tests {
             raw_proto: None,
             secret: Some(vec![7; 32]),
             thumbnail: Some(vec![0xFF, 0xD8, 1]),
+            wire_chat: None,
+            wire_sender: None,
         };
         assert!(
             store
@@ -2069,10 +2130,13 @@ mod tests {
             store.record_group_receipt(
                 id(1),
                 group.into(),
-                who.into(),
-                vec!["m".into(), "t".into(), "unknown".into()],
-                status,
-                Some(2),
+                GroupReceipt {
+                    participant: who.into(),
+                    ids: vec!["m".into(), "t".into(), "unknown".into()],
+                    status,
+                    members: Some(2),
+                    own: Vec::new(),
+                },
             )
         };
         let status_of = |page: &[rosty_wa_proto::RichMessage], msg: &str| {
@@ -2140,6 +2204,7 @@ mod tests {
                     sender: None,
                     from_me: false,
                     emoji: "x".into(),
+                    sender_alt: None,
                 },
             )
             .await

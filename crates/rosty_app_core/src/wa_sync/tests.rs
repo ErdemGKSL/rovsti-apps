@@ -35,6 +35,8 @@ fn text(chat: &str, id: &str, ts: i64, body: &str) -> WaMessage {
         timestamp_ms: ts,
         body: MessageBody::Text(body.into()),
         reactions: Vec::new(),
+        chat_alt: None,
+        sender_alt: None,
     }
 }
 
@@ -66,6 +68,7 @@ fn chat(jid: &str, last: Option<WaMessage>, unread: u32) -> RichChat {
             last,
             unread,
             is_group: jid.ends_with("@g.us"),
+            alt: None,
         },
         meta: ChatMeta::default(),
         last_meta: None,
@@ -437,7 +440,8 @@ fn a_resync_pages_down_to_the_stored_history_and_drops_nothing() {
         SyncPlan {
             after_seq: Some(3),
             refresh_chats: false,
-            fetch: Vec::new()
+            fetch: Vec::new(),
+            identity_since: None,
         }
     );
 
@@ -911,7 +915,20 @@ fn a_merged_chat_moves_its_messages_and_asks_for_a_refresh() {
         ids(&store.thread(ALI, 10, None).unwrap()),
         ["c1", "SAME", "L1"]
     );
-    assert!(store.thread(lid, 10, None).unwrap().items.is_empty());
+    // Nothing is left under the LID; a reader that still holds it reads the merged chat.
+    let left: i64 = store
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE chat = ?1",
+            [lid],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(
+        ids(&store.thread(lid, 10, None).unwrap()),
+        ["c1", "SAME", "L1"]
+    );
     assert_eq!(store.cursor(ALI).unwrap().oldest_ts, Some(1_000));
 }
 
@@ -1366,7 +1383,8 @@ fn edits_deletes_reactions_and_read_marks_queue_too() {
         [Reaction {
             sender: None,
             from_me: true,
-            emoji: "+".into()
+            emoji: "+".into(),
+            sender_alt: None,
         }]
     );
     let pending: Vec<_> = thread.items[1]
@@ -1860,7 +1878,16 @@ fn a_new_file_gets_the_whole_schema() {
     assert_eq!(store.opened().unwrap().schema_version, SCHEMA_VERSION);
     assert_eq!(
         tables(&store.conn),
-        ["chat_sync", "chats", "messages", "outbox", "sync_state"]
+        [
+            "alias",
+            "chat_sync",
+            "chats",
+            "merge_log",
+            "messages",
+            "outbox",
+            "person",
+            "sync_state"
+        ]
     );
     assert_eq!(
         store.opened().unwrap(),

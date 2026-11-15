@@ -1,5 +1,6 @@
 //! Media of a message: the thumbnail is stored inline and stays with the message; the full file is a cached path
-//! with LRU bookkeeping. Evicting clears the path only.
+//! with LRU bookkeeping. Evicting clears the path only. The chat of a message may be named by any of its ids
+//! ([`Store::stored_key`]): media that was being fetched while a merge moved the chat still lands on its message.
 
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
@@ -37,6 +38,7 @@ pub struct Eviction {
 impl Store {
     /// Stores the thumbnail of a message (kept for good, also after the full file is evicted).
     pub fn set_thumbnail(&mut self, chat: &str, id: &str, thumbnail: &[u8]) -> Result<()> {
+        let chat = &self.stored_key(chat);
         let changed = self.conn.execute(
             "UPDATE messages SET thumb = ?3 WHERE chat = ?1 AND id = ?2",
             params![chat, id, thumbnail],
@@ -53,6 +55,7 @@ impl Store {
         bytes: u64,
         now_ms: i64,
     ) -> Result<()> {
+        let chat = &self.stored_key(chat);
         let changed = self.conn.execute(
             "UPDATE messages SET media_path = ?3, media_bytes = ?4, media_used_ms = ?5 WHERE chat = ?1 AND id = ?2",
             params![chat, id, path, bytes, now_ms],
@@ -68,6 +71,7 @@ impl Store {
         id: &str,
         used_ms: Option<i64>,
     ) -> Result<Option<MediaInfo>> {
+        let chat = &self.stored_key(chat);
         if let Some(now_ms) = used_ms {
             self.conn.execute(
                 "UPDATE messages SET media_used_ms = ?3 WHERE chat = ?1 AND id = ?2 AND media_path IS NOT NULL",

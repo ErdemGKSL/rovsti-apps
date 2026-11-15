@@ -4,8 +4,10 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.RustError
 import dev.rosty.core.model.messages.DirRequest
 import dev.rosty.core.model.messages.DraftsPutRequest
+import dev.rosty.core.model.messages.DraftsRekeyRequest
 import dev.rosty.core.model.messages.DraftsSaveRequest
 import dev.rosty.core.model.messages.MessagesPrefs
+import dev.rosty.core.model.messages.PrefsEditRequest
 import dev.rosty.core.model.messages.PrefsSaveRequest
 import dev.rosty.core.ops.MessagesOps
 import kotlinx.coroutines.CoroutineDispatcher
@@ -87,6 +89,38 @@ class MessagesStore(
             draftsDirty = true
             schedule()
         }
+    }
+
+    /**
+     * A chat merged into another one (`wa:<lid>` into `wa:<number>`): its draft and its mute move to the tag
+     * [into], by Rust's rules (`drafts_rekey`: the draft of [into] is kept when both have one; the prefs' `rekey`:
+     * the mute and its end follow). Running it again changes nothing.
+     */
+    suspend fun rekeyThread(
+        from: String,
+        into: String,
+    ) {
+        if (from == into) return
+        load()
+        val drafts = (ops.draftsRekey(DraftsRekeyRequest(draftsState.value, from, into)) as? Outcome.Ok)?.value?.drafts
+        if (drafts != null && drafts != draftsState.value) {
+            draftsState.value = drafts
+            draftsDirty = true
+        }
+        val prefs = prefsState.value
+        if (prefs != null && !readOnly) {
+            val edited =
+                (
+                    ops.prefsEdit(
+                        PrefsEditRequest(prefs, "rekey", from = from, into = into),
+                    ) as? Outcome.Ok
+                )?.value
+            if (edited != null && edited.changed) {
+                prefsState.value = edited.prefs
+                prefsDirty = true
+            }
+        }
+        if (draftsDirty || prefsDirty) schedule()
     }
 
     /** Writes what is pending now; false when a write failed. */

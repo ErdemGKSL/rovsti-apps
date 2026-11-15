@@ -8,10 +8,10 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_wa_client::Picture;
 use rosty_wa_proto::{
     CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, CreateInstance, CreatedInstance,
-    DeleteForMe, EditMessage, GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, MarkRead,
-    MediaKind, MediaOptions, PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText,
-    ScheduledText, SendReaction, SendText, Sent, StarMessage, StatusList, WaMessage, WaProfile,
-    WaUser,
+    DeleteForMe, EditMessage, GroupInfo, IdentityMappings, InstanceStatus, IssuedKey, KeyInfo,
+    LinkRequest, MarkRead, MediaKind, MediaOptions, PushRegistration, RevokeMessage, RichChat,
+    RichMessage, ScheduleText, ScheduledText, SendReaction, SendText, Sent, StarMessage,
+    StatusList, WaMessage, WaProfile, WaUser,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -194,6 +194,18 @@ pub(super) const OPS: &[OpSpec] = &[
         Vec<WaProfile>,
         refresh_profiles,
         || vec![case(json!({"jids": [CHAT]}))]
+    ),
+    wa_op!(
+        "wa.identity_mappings",
+        Call<Since>,
+        MappingsAns,
+        identity_mappings,
+        || vec![
+            case(json!({})),
+            named("since", json!({"since": "41"})),
+            named("old_gateway", json!({})),
+            named("unauthorized", json!({"since": "41"})),
+        ]
     ),
     wa_op!("wa.statuses", Call<Nothing>, StatusList, statuses, || vec![
         case(json!({}))
@@ -410,6 +422,23 @@ pub(super) struct Jids {
     jids: Vec<String>,
 }
 
+/// Where a page of identity mappings starts: the cursor of the page before, or nothing for the first page.
+#[derive(Deserialize)]
+pub(super) struct Since {
+    #[serde(default)]
+    since: Option<String>,
+}
+
+/// One page of the gateway's LID and number pairs, to hand to `wa_sync.identity_catch_up`.
+#[derive(Serialize)]
+pub(super) struct MappingsAns {
+    /// `false`: the gateway is from before this route and lists no pairs. Not an error and not worth a retry
+    /// before the gateway changes: the store then learns from events and from the ids payloads carry.
+    supported: bool,
+    #[serde(flatten)]
+    page: IdentityMappings,
+}
+
 #[derive(Deserialize)]
 pub(super) struct Presence {
     available: bool,
@@ -582,6 +611,21 @@ gateway_fn!(lookup_users, Jids => Vec<WaUser>, |g, b| g.lookup_users(&b.jids));
 gateway_fn!(profiles, Jids => Vec<WaProfile>, |g, b| g.profiles(&b.jids));
 gateway_fn!(refresh_profiles, Jids => Vec<WaProfile>, |g, b| g.refresh_profiles(&b.jids));
 gateway_fn!(statuses, Nothing => StatusList, |g, _b| g.statuses());
+
+fn identity_mappings(req: Call<Since>) -> Result<MappingsAns, FfiError> {
+    let gateway = super::ctx(req.handle)?;
+    match gateway.identity_mappings(req.body.since.as_deref()) {
+        Ok(page) => Ok(MappingsAns {
+            supported: true,
+            page,
+        }),
+        Err(error) if error.is_not_found() => Ok(MappingsAns {
+            supported: false,
+            page: IdentityMappings::default(),
+        }),
+        Err(error) => Err(super::map_error(error)),
+    }
+}
 gateway_fn!(mark_status_viewed, Ids => Empty, |g, b| done(g.mark_status_viewed(&b.ids)));
 gateway_fn!(edit_message, EditMessage => Empty, |g, b| done(g.edit_message(&b)));
 gateway_fn!(revoke_message, RevokeMessage => Empty, |g, b| done(g.revoke_message(&b)));

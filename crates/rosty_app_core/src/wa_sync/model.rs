@@ -1,11 +1,13 @@
 //! What the store answers: chat rows, message rows and the results of its writes.
 
+use rosty_core::wa_identity::Rejected;
 use rosty_wa_proto::{
     DeliveryStatus, EditRecord, Location, MediaKind, MediaMeta, MessageBody, Quoted, Reaction,
     SharedContact,
 };
 use serde::{Deserialize, Serialize};
 
+use super::merge::ChatRekeyed;
 use super::outbox::OutboxState;
 use super::plan::FetchPage;
 
@@ -228,6 +230,10 @@ pub struct MessageRow {
     /// The outbox client id this message was sent with, or still waits under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    /// The id the sender arrived under, when it is not `sender` (a LID whose number is known): what an outbound
+    /// message key names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_sender: Option<String>,
     /// Why the last attempt of an outbox row failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -240,6 +246,9 @@ pub struct MessageRow {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ChatRow {
     pub jid: String,
+    /// The id the gateway last used for this chat, when it is not `jid`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_jid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,6 +321,14 @@ pub struct AppliedEvents {
     pub chats: Vec<String>,
     /// Outbox sends an echo confirmed.
     pub reconciled: Vec<String>,
+    /// Key changes the stored rows followed while these events were applied (a merge the gateway announced, or
+    /// one left over from before), oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rekeyed: Vec<ChatRekeyed>,
+    /// Pairs the events named that changed nothing (an id that does not read, a weaker source than the one the
+    /// LID is held by, a pair that would join the account's own id to someone else), each once: for the log.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected: Vec<Rejected>,
 }
 
 /// What [`super::Store::store_chats`] did.
@@ -320,6 +337,11 @@ pub struct StoredChats {
     pub chats: u32,
     /// The first page of every chat that missed messages.
     pub fetch: Vec<FetchPage>,
+    /// Key changes the stored rows followed: the list named a pair the store did not know.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rekeyed: Vec<ChatRekeyed>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected: Vec<Rejected>,
 }
 
 /// What [`super::Store::store_page`] did.
@@ -333,4 +355,9 @@ pub struct StoredPage {
     pub reached_start: bool,
     /// Outbox sends this page confirmed.
     pub reconciled: Vec<String>,
+    /// Key changes the stored rows followed: the page named a pair the store did not know.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rekeyed: Vec<ChatRekeyed>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected: Vec<Rejected>,
 }

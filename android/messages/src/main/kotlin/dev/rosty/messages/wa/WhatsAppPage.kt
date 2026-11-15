@@ -54,7 +54,6 @@ import dev.rosty.messages.inbox.InboxViewModel
 import dev.rosty.messages.inbox.ResourceInboxWords
 import dev.rosty.messages.inbox.RowMenuActions
 import dev.rosty.messages.inbox.RowTime
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.presentMute
 import dev.rosty.messages.inbox.rememberInboxStrings
 import dev.rosty.messages.settings.findComponentActivity
@@ -340,7 +339,7 @@ private fun statusRowState(
     return produceState(StatusRowUi(subtitle = words.none), list, words, revision) {
         val names = HashMap<String, String>()
         for (author in list.authors) names[author.author] = container.names.sender(author.author, author.name)
-        value = statusRowOf(list, words, clock.nowMillis()) { jid, _ -> names[jid] ?: jid.substringBefore('@') }
+        value = statusRowOf(list, words, clock.nowMillis()) { jid, _ -> names[jid].orEmpty() }
     }
 }
 

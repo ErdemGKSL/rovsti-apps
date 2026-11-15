@@ -156,7 +156,7 @@ answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the hand
 {handle, call_id}` answers an audio handle for `RustNative.audioPush` / `audioPull` (push takes microphone frames of exactly 1 920 bytes and drops any other size; the socket asks for 20 ms speaker frames (`?spk_ms=20`), and pull waits up to 20 ms and answers the frame's bytes: 640 from a gateway that sends 20 ms frames, 1 920 from an older one; 0 when nothing came, -1 when the call ended). Fixtures run against a loopback stub that answers `crates/rosty_ffi/tests/data/wa/<stem>.json` (`tests/support/mod.rs`); each file also states the request
 the client must have sent. Pure: `wa.push_parse` (FCM wake), `wa.link_read` / `wa.link_write` (`whatsapp-link.json`), `wa.avatars_plan` (picture file names and the disk prune plan; the
 `AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up), `wa.settings_apply {model?, link?, app, now_ms, input?}` (the stateless WhatsApp settings state machine: answers `{model, effects, view}`, a render-ready page; the caller keeps `model` as JSON; the gateway URL and `rwk_` key checks run inside it).
-People cache (X.1): `people.upsert {dir?, now_ms, people:[{jid, number?, lid?, push_name?, verified_name?, on_whatsapp?, picture_id?, picture_removed?, picture_file?}]}` writes `people.json` (a changed `picture_id` marks the picture stale and keeps the old file showing; `picture_removed` drops the file; a LID and its number join into one person under the phone JID) and answers `{changed, stale, drop_files}`; `people.lookup {dir?, key}` (E.164 in any spelling, phone JID, LID JID or bare LID; offline, a missing or damaged file reads as empty) answers `{person: row|null}`; `people.plan {dir?, now_ms, files, max_bytes}` answers `{refresh:[{jid, picture_id}], remove:[path]}` (orphans of a changed picture, then the oldest over the cap, by the `wa.avatars_plan` rules); `people.snapshot {dir?}` answers `{people: rows}` sorted by name for the Contacts provider.
+People cache (X.1): `people.upsert {dir?, now_ms, people:[{jid, number?, lid?, push_name?, verified_name?, on_whatsapp?, picture_id?, picture_removed?, picture_file?}]}` writes `people.json` (a changed `picture_id` marks the picture stale and keeps the old file showing; `picture_removed` drops the file; a LID and its number join into one person under the phone JID) and answers `{changed, stale, drop_files}`; `people.lookup {dir?, key, home_cc?}` (a number in any spelling, phone JID, LID JID or bare LID; a number is read by the one number rule, `caller_id::e164_of`, so a national spelling needs the home calling code `home_cc` and `people.upsert` takes `home_cc?` for its `number`s too; offline, a missing or damaged file reads as empty) answers `{person: row|null}`; `people.plan {dir?, now_ms, files, max_bytes}` answers `{refresh:[{jid, picture_id}], remove:[path]}` (orphans of a changed picture, then the oldest over the cap, by the `wa.avatars_plan` rules); `people.snapshot {dir?}` answers `{people: rows}` sorted by name for the Contacts provider.
 
 People sync v2 (`rosty_app_core::people_sync`, plan `_bmad-output/plans/people-sync-v2.md`): `people.sync_begin
 {dir?, now_ms, instance_id, gateway_url, numbers, start: resume|restart|auto|live_pictures, slice_ms?}` opens a slice and
@@ -196,6 +196,30 @@ timestamp_ms?}` or `error {error: network|gateway|rejected, message, retry_after
 `wa_sync.outbox_cancel`, `wa_sync.outbox_edit {handle, client_id, text}`, `wa_sync.outbox_retry`, `wa_sync.outbox`. Media:
 `wa_sync.media_set {handle, now_ms, chat, id, thumbnail_b64?, path?, bytes?}`, `wa_sync.media {handle, chat, id, used_ms?}`,
 `wa_sync.media_evict {handle, max_bytes}` (answers the files to delete, least recently used first; the messages and thumbnails stay).
+Identity (E6-WA R1): one person is one chat, whichever id the gateway names them by (a phone-number JID or a LID). A chat is keyed by
+the number when it is known, else by the LID; when a pair is learned the rows stored under the LID move to the number, and that move
+is a `rekeyed` step `{seq, from_key, into_key}` that everything kept per chat outside the store (drafts, prefs, notification tags,
+the open thread) must follow. The store learns pairs from `wa_sync.apply_events` (`identity_mapped`, `identity_number_changed`,
+`chat_merged`, the `own_jid` / `own_lid` of `state`, and the other form an event carries: `chat_alt`, `sender_alt`, `jid_alt`,
+`peer_alt`, a profile's `lid`), from `wa_sync.store_chats` (`alt`) and `wa_sync.store_page`; their answers add `rekeyed?` and
+`rejected?: [{lid, pn, source, reason: invalid|outranked|own_id}]` (pairs that changed nothing, for the log), both left out when
+empty, and `apply_events` names the merged chat in `chats` and sets `resync`. `wa_sync.identity_catch_up {handle, items, next?}`
+takes one page of `wa.identity_mappings` and answers `{pairs, since, more, rekeyed?, rejected?, resync}`: ask with
+`wa_sync.plan`'s `identity_since?` (left out before the first page) when the store opens, when the socket reconnects and after a
+`resync`, and go on with `since` while `more`. `wa.identity_mappings {handle, since?}` answers `{supported, items: [{lid, pn,
+source, learned_ms}], next}`; `supported: false` is a gateway from before the route (404), not an error. `wa_sync.identity_observe
+{handle, now_ms, status?, groups?, profiles?}` learns from the answers of `wa.status` (the account's own ids; another own number
+resets the identity tables: `account_changed`), `wa.group(s)` (members' `lid` / `pn`) and `wa.profiles` (`lid`) and answers
+`{rekeyed, rejected, resync, account_changed}`. `wa_sync.identity_resolve {handle, id}` answers `{key, kind, wire, person_id?}`
+(the key the chat of `id` is stored under, the kind of `id` as written, `id` without device for the wire, the person of a number or
+LID) or `null` when `id` is not a JID; `wa_sync.rekeyed_since {handle, seq?}` answers `{rekeyed}`, the steps after `seq`, oldest
+first, for a consumer's own cursor; `wa_sync.identity_numbers {handle, id}` answers `{numbers}`, the phone numbers of the
+person behind `id` as `+<digits>`, the current one first and then the former ones (a device contact is looked up by each in turn; a
+LID without a number, a group and text that is no JID have none; nothing is learned). `wa_sync.thread`, `message`, `older`, `media` and `media_set` take any id of a chat: an id of
+before a merge reads the merged chat, and the rows name the key. Chat rows carry `wire_jid?` (the id the gateway last used for the
+chat, when it is not `jid`) and message rows `wire_sender?` (the id the author arrived under, when it is not `sender`: what an
+outbound message key names). `wa_identity.parse {id}` (pure, no handle) answers `{kind: pn|lid|group|broadcast|status|newsletter|
+bot|other, user, bare, number?, device?}` or `null`; a LID has no `number`, whatever its digits.
 Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
 
 | Item | Used by | Domain | Class | Target |
@@ -234,6 +258,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(wa) wa.end_call` | - | wa | op | wa.end_call |
 | `(wa) wa.group` | - | wa | op | wa.group |
 | `(wa) wa.groups` | - | wa | op | wa.groups |
+| `(wa) wa.identity_mappings` | - | wa | op | wa.identity_mappings |
 | `(wa) wa.keys` | - | wa | op | wa.keys |
 | `(wa) wa.lookup_users` | - | wa | op | wa.lookup_users |
 | `(wa) wa.mark_played` | - | wa | op | wa.mark_played |
@@ -272,7 +297,8 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
-| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
+| `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

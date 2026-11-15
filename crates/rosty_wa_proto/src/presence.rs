@@ -83,6 +83,7 @@ impl PresenceBook {
             jid,
             available,
             last_seen_ms,
+            ..
         } = event
         else {
             return;
@@ -126,6 +127,7 @@ mod tests {
             jid: jid.to_owned(),
             available,
             last_seen_ms: seen,
+            jid_alt: None,
         }
     }
 
@@ -162,6 +164,7 @@ mod tests {
                 chat: "a".into(),
                 jid: "a".into(),
                 state: crate::api::TypingState::Typing,
+                jid_alt: None,
             },
             T,
         );

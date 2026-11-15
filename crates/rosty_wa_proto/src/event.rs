@@ -26,6 +26,10 @@ pub struct CallUpdate {
     pub direction: CallDirection,
     pub phase: CallPhase,
     pub is_video: bool,
+    /// The other form of `peer` (its LID next to a phone-number JID, or the
+    /// reverse), when the gateway knows it. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_alt: Option<String>,
 }
 
 /// One call as `GET /v1/calls` reports it: the latest [`CallUpdate`] plus the
@@ -69,11 +73,19 @@ pub enum GatewayEvent {
         jid: String,
         available: bool,
         last_seen_ms: Option<i64>,
+        /// The other form of `jid`, when the gateway knows it. Older
+        /// gateways omit it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jid_alt: Option<String>,
     },
     Typing {
         chat: String,
         jid: String,
         state: TypingState,
+        /// The other form of `jid` (who is typing), when the gateway knows
+        /// it. Older gateways omit it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jid_alt: Option<String>,
     },
     HistorySynced {
         chats: u32,
@@ -141,6 +153,28 @@ pub enum GatewayEvent {
         from: String,
         into: String,
     },
+    /// The gateway learned that `lid` and `pn` are one person, or the pair
+    /// changed (the LID now belongs to another number). The fields are those
+    /// of [`crate::IdentityMapping`]; `GET /v1/identity/mappings` lists every
+    /// pair for an app that was not listening. Older clients skip it.
+    IdentityMapped {
+        lid: String,
+        pn: String,
+        /// A [`crate::IdentitySource`] name.
+        source: String,
+        learned_ms: i64,
+    },
+    /// A contact moved from the number `old_pn` to `new_pn` (bare
+    /// phone-number JIDs). The LIDs are there when WhatsApp sent them; they
+    /// are usually the same one. Older clients skip it.
+    IdentityNumberChanged {
+        old_pn: String,
+        new_pn: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        old_lid: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        new_lid: Option<String>,
+    },
     /// The client missed events; refetch chats.
     Resync,
     /// The key used for this socket was revoked.
@@ -166,6 +200,7 @@ mod tests {
                 direction: CallDirection::In,
                 phase: CallPhase::Ringing,
                 is_video: false,
+                peer_alt: None,
             },
             started_ms: 5,
             ended_ms: None,
@@ -204,6 +239,7 @@ mod tests {
                     state: InstanceState::LoggedOut,
                     own_jid: None,
                     push_name: None,
+                    own_lid: None,
                 }),
                 r#"{"type":"state","instance_id":"i","state":"logged_out","own_jid":null,"push_name":null}"#,
             ),
@@ -229,6 +265,7 @@ mod tests {
                     jid: "j".into(),
                     available: true,
                     last_seen_ms: Some(5),
+                    jid_alt: None,
                 },
                 r#"{"type":"presence","jid":"j","available":true,"last_seen_ms":5}"#,
             ),
@@ -237,6 +274,7 @@ mod tests {
                     chat: "c".into(),
                     jid: "j".into(),
                     state: TypingState::Recording,
+                    jid_alt: None,
                 },
                 r#"{"type":"typing","chat":"c","jid":"j","state":"recording"}"#,
             ),
@@ -259,6 +297,7 @@ mod tests {
                     direction: CallDirection::In,
                     phase: CallPhase::Ringing,
                     is_video: false,
+                    peer_alt: None,
                 }),
                 r#"{"type":"call","call_id":"k","peer":"p","peer_name":null,"direction":"in","phase":"ringing","is_video":false}"#,
             ),
@@ -358,6 +397,81 @@ mod tests {
                 },
                 r#"{"type":"chat_merged","from":"1@lid","into":"2@s.whatsapp.net"}"#,
             ),
+            (
+                GatewayEvent::IdentityMapped {
+                    lid: "1@lid".into(),
+                    pn: "905550000001@s.whatsapp.net".into(),
+                    source: "peer_message".into(),
+                    learned_ms: 7,
+                },
+                r#"{"type":"identity_mapped","lid":"1@lid","pn":"905550000001@s.whatsapp.net","source":"peer_message","learned_ms":7}"#,
+            ),
+            (
+                GatewayEvent::IdentityNumberChanged {
+                    old_pn: "905550000001@s.whatsapp.net".into(),
+                    new_pn: "905550000002@s.whatsapp.net".into(),
+                    old_lid: None,
+                    new_lid: None,
+                },
+                r#"{"type":"identity_number_changed","old_pn":"905550000001@s.whatsapp.net","new_pn":"905550000002@s.whatsapp.net"}"#,
+            ),
+            (
+                GatewayEvent::IdentityNumberChanged {
+                    old_pn: "905550000001@s.whatsapp.net".into(),
+                    new_pn: "905550000002@s.whatsapp.net".into(),
+                    old_lid: Some("1@lid".into()),
+                    new_lid: Some("1@lid".into()),
+                },
+                r#"{"type":"identity_number_changed","old_pn":"905550000001@s.whatsapp.net","new_pn":"905550000002@s.whatsapp.net","old_lid":"1@lid","new_lid":"1@lid"}"#,
+            ),
+            (
+                GatewayEvent::Presence {
+                    jid: "905550000001@s.whatsapp.net".into(),
+                    available: false,
+                    last_seen_ms: None,
+                    jid_alt: Some("1@lid".into()),
+                },
+                r#"{"type":"presence","jid":"905550000001@s.whatsapp.net","available":false,"last_seen_ms":null,"jid_alt":"1@lid"}"#,
+            ),
+            (
+                GatewayEvent::Typing {
+                    chat: "g@g.us".into(),
+                    jid: "1@lid".into(),
+                    state: TypingState::Typing,
+                    jid_alt: Some("905550000001@s.whatsapp.net".into()),
+                },
+                r#"{"type":"typing","chat":"g@g.us","jid":"1@lid","state":"typing","jid_alt":"905550000001@s.whatsapp.net"}"#,
+            ),
+            (
+                GatewayEvent::Call(CallUpdate {
+                    call_id: "k".into(),
+                    peer: "905550000001@s.whatsapp.net".into(),
+                    peer_name: None,
+                    direction: CallDirection::In,
+                    phase: CallPhase::Ringing,
+                    is_video: false,
+                    peer_alt: Some("1@lid".into()),
+                }),
+                r#"{"type":"call","call_id":"k","peer":"905550000001@s.whatsapp.net","peer_name":null,"direction":"in","phase":"ringing","is_video":false,"peer_alt":"1@lid"}"#,
+            ),
+            (
+                GatewayEvent::State(InstanceStatus {
+                    instance_id: "i".into(),
+                    state: InstanceState::Connected,
+                    own_jid: Some("905550000009@s.whatsapp.net".into()),
+                    push_name: None,
+                    own_lid: Some("9@lid".into()),
+                }),
+                r#"{"type":"state","instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net","push_name":null,"own_lid":"9@lid"}"#,
+            ),
+            (
+                GatewayEvent::Profile(WaProfile {
+                    jid: "905550000001@s.whatsapp.net".into(),
+                    lid: Some("1@lid".into()),
+                    ..Default::default()
+                }),
+                r#"{"type":"profile","jid":"905550000001@s.whatsapp.net","push_name":null,"contact_name":null,"about":null,"picture_id":null,"business":false,"verified_name":null,"fetched_ms":0,"lid":"1@lid"}"#,
+            ),
             (GatewayEvent::Resync, r#"{"type":"resync"}"#),
             (GatewayEvent::KeyRevoked, r#"{"type":"key_revoked"}"#),
         ];
@@ -377,6 +491,8 @@ mod tests {
             timestamp_ms: 9,
             body: crate::api::MessageBody::Text("hi".into()),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         };
         let env = EventEnvelope {
             seq: 4,
@@ -471,6 +587,190 @@ mod tests {
                     edited_ms: None,
                 },
             }
+        );
+    }
+
+    /// A payload from a gateway built before the identity fields: nothing
+    /// is missing for the parser, the new fields read as `None`.
+    #[test]
+    fn old_gateway_payloads_still_parse() {
+        let cases = [
+            (
+                r#"{"type":"presence","jid":"j","available":true,"last_seen_ms":5}"#,
+                GatewayEvent::Presence {
+                    jid: "j".into(),
+                    available: true,
+                    last_seen_ms: Some(5),
+                    jid_alt: None,
+                },
+            ),
+            (
+                r#"{"type":"typing","chat":"c","jid":"j","state":"paused"}"#,
+                GatewayEvent::Typing {
+                    chat: "c".into(),
+                    jid: "j".into(),
+                    state: TypingState::Paused,
+                    jid_alt: None,
+                },
+            ),
+            (
+                r#"{"type":"state","instance_id":"i","state":"connected","own_jid":"1@s.whatsapp.net","push_name":"Ada"}"#,
+                GatewayEvent::State(InstanceStatus {
+                    instance_id: "i".into(),
+                    state: InstanceState::Connected,
+                    own_jid: Some("1@s.whatsapp.net".into()),
+                    push_name: Some("Ada".into()),
+                    own_lid: None,
+                }),
+            ),
+            (
+                r#"{"type":"call","call_id":"k","peer":"p","peer_name":null,"direction":"out","phase":"ringing","is_video":true}"#,
+                GatewayEvent::Call(CallUpdate {
+                    call_id: "k".into(),
+                    peer: "p".into(),
+                    peer_name: None,
+                    direction: CallDirection::Out,
+                    phase: CallPhase::Ringing,
+                    is_video: true,
+                    peer_alt: None,
+                }),
+            ),
+            (
+                r#"{"type":"message","id":"m","chat":"c","sender":"s","from_me":false,"timestamp_ms":1,"body":"unsupported","reactions":[{"sender":"r","from_me":false,"emoji":"x"}]}"#,
+                GatewayEvent::Message(WaMessage {
+                    id: "m".into(),
+                    chat: "c".into(),
+                    sender: Some("s".into()),
+                    from_me: false,
+                    timestamp_ms: 1,
+                    body: MessageBody::Unsupported,
+                    reactions: vec![Reaction {
+                        sender: Some("r".into()),
+                        from_me: false,
+                        emoji: "x".into(),
+                        sender_alt: None,
+                    }],
+                    chat_alt: None,
+                    sender_alt: None,
+                }),
+            ),
+        ];
+        for (text, event) in cases {
+            assert_eq!(serde_json::from_str::<GatewayEvent>(text).unwrap(), event);
+            // And it goes back out exactly as the old gateway wrote it.
+            assert_eq!(json(&event), text);
+        }
+    }
+
+    #[test]
+    fn a_message_with_alt_ids_round_trips() {
+        let message = WaMessage {
+            id: "m".into(),
+            chat: "905550000001@s.whatsapp.net".into(),
+            sender: None,
+            from_me: false,
+            timestamp_ms: 1,
+            body: MessageBody::Text("hi".into()),
+            reactions: vec![Reaction {
+                sender: Some("905550000001@s.whatsapp.net".into()),
+                from_me: false,
+                emoji: "x".into(),
+                sender_alt: Some("1@lid".into()),
+            }],
+            chat_alt: Some("1@lid".into()),
+            sender_alt: None,
+        };
+        let text = r#"{"type":"message","id":"m","chat":"905550000001@s.whatsapp.net","sender":null,"from_me":false,"timestamp_ms":1,"body":{"text":"hi"},"reactions":[{"sender":"905550000001@s.whatsapp.net","from_me":false,"emoji":"x","sender_alt":"1@lid"}],"chat_alt":"1@lid"}"#;
+        let event = GatewayEvent::Message(message);
+        assert_eq!(json(&event), text);
+        assert_eq!(serde_json::from_str::<GatewayEvent>(text).unwrap(), event);
+    }
+
+    /// The events as a client built before the identity round knew them.
+    #[derive(Debug, PartialEq, serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum PreIdentityEvent {
+        Presence {
+            jid: String,
+            available: bool,
+            last_seen_ms: Option<i64>,
+        },
+        Typing {
+            chat: String,
+            jid: String,
+            state: TypingState,
+        },
+        ChatMerged {
+            from: String,
+            into: String,
+        },
+    }
+
+    #[test]
+    fn old_clients_skip_the_alt_ids_and_the_identity_events() {
+        let presence = GatewayEvent::Presence {
+            jid: "j".into(),
+            available: true,
+            last_seen_ms: None,
+            jid_alt: Some("1@lid".into()),
+        };
+        assert_eq!(
+            serde_json::from_str::<PreIdentityEvent>(&json(&presence)).unwrap(),
+            PreIdentityEvent::Presence {
+                jid: "j".into(),
+                available: true,
+                last_seen_ms: None,
+            }
+        );
+        let typing = GatewayEvent::Typing {
+            chat: "c".into(),
+            jid: "j".into(),
+            state: TypingState::Typing,
+            jid_alt: Some("1@lid".into()),
+        };
+        assert_eq!(
+            serde_json::from_str::<PreIdentityEvent>(&json(&typing)).unwrap(),
+            PreIdentityEvent::Typing {
+                chat: "c".into(),
+                jid: "j".into(),
+                state: TypingState::Typing,
+            }
+        );
+        // `chat_merged` is unchanged for them.
+        let merged = GatewayEvent::ChatMerged {
+            from: "1@lid".into(),
+            into: "2@s.whatsapp.net".into(),
+        };
+        assert_eq!(
+            serde_json::from_str::<PreIdentityEvent>(&json(&merged)).unwrap(),
+            PreIdentityEvent::ChatMerged {
+                from: "1@lid".into(),
+                into: "2@s.whatsapp.net".into(),
+            }
+        );
+        // An event kind they never heard of does not decode; the event
+        // stream logs it and goes on with the next one.
+        let mapped = GatewayEvent::IdentityMapped {
+            lid: "1@lid".into(),
+            pn: "2@s.whatsapp.net".into(),
+            source: "usync".into(),
+            learned_ms: 1,
+        };
+        assert!(serde_json::from_str::<PreIdentityEvent>(&json(&mapped)).is_err());
+    }
+
+    /// The same rule for this build: a kind from a newer gateway is an
+    /// error to skip, in an event and in its envelope.
+    #[test]
+    fn unknown_event_kinds_do_not_decode() {
+        assert!(
+            serde_json::from_str::<GatewayEvent>(r#"{"type":"from_the_future","x":1}"#).is_err()
+        );
+        assert!(
+            serde_json::from_str::<EventEnvelope>(
+                r#"{"seq":4,"at_ms":10,"event":{"type":"from_the_future"}}"#
+            )
+            .is_err()
         );
     }
 

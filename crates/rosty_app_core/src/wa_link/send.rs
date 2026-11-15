@@ -195,6 +195,8 @@ mod tests {
             timestamp_ms: at,
             body: MessageBody::Text(body.into()),
             reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
         }
     }
 

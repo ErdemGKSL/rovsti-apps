@@ -4,6 +4,7 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.getOrNull
 import dev.rosty.core.model.wa.BytesAnswer
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.StatusAuthor
 import dev.rosty.core.model.wa.StatusItem
 import dev.rosty.core.model.wa.StatusList
 import dev.rosty.messages.wa.WaOffline
@@ -78,10 +79,33 @@ class StatusFeed(
 
     /** Fetches the list again; what was seen here stays seen. */
     suspend fun reload() {
-        val fetched = remote.statuses().getOrNull() ?: return
+        val fetched = keyed(remote.statuses().getOrNull() ?: return)
         val known = synchronized(seen) { seen.toSet() }
         state.value = fetched.markViewed(known)
         flush()
+    }
+
+    /**
+     * The list with every author under the key the store knows the person by: an author the gateway names by a LID
+     * is the person of the number's chat, and one person named by both ids is one entry.
+     */
+    private suspend fun keyed(list: StatusList): StatusList {
+        val byKey = LinkedHashMap<String, StatusAuthor>()
+        for (author in list.authors) {
+            val key = offline.keyOf(author.author)
+            val items = author.items.map { if (it.author == key) it else it.copy(author = key) }
+            val known = byKey[key]
+            byKey[key] =
+                if (known == null) {
+                    author.copy(author = key, items = items)
+                } else {
+                    known.copy(
+                        name = known.name ?: author.name,
+                        items = (known.items + items).sortedBy { it.timestampMs },
+                    )
+                }
+        }
+        return list.copy(authors = byKey.values.toList())
     }
 
     /** The user saw [id]: seen at once, and a read receipt goes to its author. */

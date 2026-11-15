@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Bundle
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.messages.R
 import dev.rosty.platform.notify.MessageNotifications
 import dev.rosty.platform.notify.NotificationIcon
@@ -144,6 +145,29 @@ object MessagesNotifier {
         onDismissed?.invoke(tag)
     }
 
+    /**
+     * The chat of the tag [from] merged into the chat of [into]: the notification of [from] is taken away and, when it
+     * was showing and [into] shows none of its own, posted again under [into], silently (the same lines, no second
+     * sound). A notification [into] already shows stays as it is. True when one was posted under [into].
+     */
+    fun retag(
+        context: Context,
+        from: String,
+        into: String,
+    ): Boolean {
+        if (from == into) return false
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        val old = shown(context, from)
+        val kept = shown(context, into)
+        try {
+            manager.cancel(from, 0)
+            sweepSummary(manager, gone = from)
+        } catch (_: RuntimeException) {
+        }
+        if (old == null || kept != null) return false
+        return show(context, old.copy(spec = old.spec.copy(tag = into, silent = true)))
+    }
+
     /** Cancels the summary once no conversation is left under it. */
     fun sweepSummary(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -168,7 +192,7 @@ object MessagesNotifier {
         if (NotificationSpec.waChat(tag) != null) NotificationKind.WA_MESSAGE else NotificationKind.MESSAGE
 
     /** A WhatsApp group chat: its lines read "Sender: text" (`rosty_core::notify::build`). */
-    internal fun isGroup(tag: String): Boolean = NotificationSpec.waChat(tag)?.endsWith("@g.us") == true
+    internal fun isGroup(tag: String): Boolean = WaIds.isGroup(NotificationSpec.waChat(tag))
 
     /** The title to show: the spec's, else the number of the chat, else the app's name. */
     private fun titleOf(
@@ -176,7 +200,7 @@ object MessagesNotifier {
         spec: NotificationSpec,
     ): String =
         spec.title.takeIf { it.isNotBlank() }
-            ?: NotificationSpec.waChat(spec.tag)?.substringBefore('@')?.takeIf { it.isNotBlank() }
+            ?: WaIds.number(NotificationSpec.waChat(spec.tag))
             ?: context.getString(R.string.launcher_name)
 
     internal fun build(

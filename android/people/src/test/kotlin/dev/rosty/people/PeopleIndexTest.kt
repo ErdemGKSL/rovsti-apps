@@ -69,6 +69,22 @@ class PeopleIndexTest {
         assertEquals("Cem", index.byJid("4477@lid")?.row?.name)
         assertEquals("Cem", index.byJid("4477")?.row?.name)
         assertNull(index.byJid("999@lid"))
+        assertEquals("Cem", index.byJid("4477:3@lid")?.row?.name)
+        assertEquals("Cem", index.byJid("4477@hosted.lid")?.row?.name)
+        assertEquals("Ayse", index.byJid("905321234567@c.us")?.row?.name)
+    }
+
+    @Test fun theDigitsOfALidAreNeverReadAsAPhoneNumber() {
+        val index = PeopleIndex.forRegion("TR")
+        index.replace(listOf(ayse, cem), ::uri)
+        // A LID nobody knows whose digits happen to be Ayse's number: it is not Ayse.
+        assertNull(index.byJid("905321234567@lid"))
+        assertNull(index.byJid("905321234567:2@lid"))
+        // Nor is a group or a channel that carries those digits.
+        assertNull(index.byJid("905321234567@g.us"))
+        assertNull(index.byJid("905321234567@newsletter"))
+        // The number itself still is.
+        assertEquals("Ayse", index.byJid("905321234567:2@s.whatsapp.net")?.row?.name)
     }
 
     @Test fun aPersonWithoutPictureHasNoUri() {

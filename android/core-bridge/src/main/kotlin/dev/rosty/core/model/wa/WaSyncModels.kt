@@ -2,6 +2,7 @@
 
 package dev.rosty.core.model.wa
 
+import dev.rosty.core.RustError
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.EncodeDefault.Mode.NEVER
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -72,6 +73,205 @@ data class WaSyncPlan(
     @SerialName("refresh_chats") val refreshChats: Boolean,
     /** The next page of every chat whose resync is not finished. */
     val fetch: List<WaSyncFetch>,
+    /** `since` of the next `wa.identity_mappings` call; null before the first page: ask for every pair. */
+    @SerialName("identity_since") @EncodeDefault(NEVER) val identitySince: String? = null,
+)
+
+// ---- identity: one person, one chat
+
+/**
+ * Rows stored under [fromKey] now live under [intoKey] (a LID chat merged into its number's chat, or a contact
+ * changed number): move what is kept per chat outside the store (the draft, the prefs, the notification tag, the
+ * open thread). [seq] is the step's place in the store's log, for a consumer's own cursor
+ * (`WaSyncStore.rekeyedSince`).
+ */
+@Serializable
+data class WaSyncRekeyed(
+    val seq: Long,
+    @SerialName("from_key") val fromKey: String,
+    @SerialName("into_key") val intoKey: String,
+)
+
+/** A LID and number pair that changed nothing, for the log (developer mode). */
+@Serializable
+data class WaSyncRejected(
+    /** The LID as given; empty when a number change named none. */
+    val lid: String,
+    val pn: String,
+    /** Where the pair came from (`peer_message`, `usync`, ...). */
+    val source: String,
+    /** One of [INVALID], [OUTRANKED], [OWN_ID]. */
+    val reason: String,
+) {
+    companion object {
+        /** An id did not parse, or was not a LID next to a number. */
+        const val INVALID = "invalid"
+
+        /** The LID already belongs to another number by a stronger or newer source. */
+        const val OUTRANKED = "outranked"
+
+        /** The pair would join the account's own number or LID to someone else. */
+        const val OWN_ID = "own_id"
+    }
+}
+
+/** What a WhatsApp id names (`rosty_core::wa_identity::WaIdKind`). */
+@Serializable
+enum class WaIdKind {
+    /** A phone number. */
+    @SerialName("pn")
+    Pn,
+
+    @SerialName("lid")
+    Lid,
+
+    @SerialName("group")
+    Group,
+
+    @SerialName("broadcast")
+    Broadcast,
+
+    /** The status feed. */
+    @SerialName("status")
+    Status,
+
+    /** A channel. */
+    @SerialName("newsletter")
+    Newsletter,
+
+    @SerialName("bot")
+    Bot,
+
+    /** Any other server, and the announcements account. */
+    @SerialName("other")
+    Other,
+}
+
+/** `wa_identity.parse`: a JID as the gateway writes it, device allowed. */
+@Serializable
+data class WaIdParseRequest(
+    val id: String,
+)
+
+/** A JID taken apart. Who it is (the chat it belongs to) is `WaSyncStore.resolve`. */
+@Serializable
+data class WaIdParsed(
+    val kind: WaIdKind,
+    /** The digits of a phone number, the LID user, the group id. */
+    val user: String,
+    /** `user@server` without device: the id to compare and to store. */
+    val bare: String,
+    /** `+<digits>` of a phone number; a LID has none, whatever its digits. */
+    @EncodeDefault(NEVER) val number: String? = null,
+    /** The device the id was written with. */
+    @EncodeDefault(NEVER) val device: Int? = null,
+)
+
+@Serializable
+data class WaSyncResolveRequest(
+    val handle: Long,
+    /** A JID as it arrived or as a screen holds it, device allowed. */
+    val id: String,
+)
+
+/** An id resolved against what the store learned. */
+@Serializable
+data class WaSyncResolved(
+    /** The key the chat and the messages of this id are stored under: the number when known, else the LID. */
+    val key: String,
+    /** What the id names, as it was written. */
+    val kind: WaIdKind,
+    /** The id as it was written, without device: what goes back on the wire. */
+    val wire: String,
+    /** The person behind a number or LID; null for a group and every other kind. */
+    @SerialName("person_id") @EncodeDefault(NEVER) val personId: Long? = null,
+)
+
+/** `wa_sync.identity_numbers`: the phone numbers of the person behind an id. */
+@Serializable
+data class WaSyncNumbersAnswer(
+    /** `+<digits>`: the current number first, then the former ones, newest first. */
+    val numbers: List<String>,
+)
+
+@Serializable
+data class WaSyncRekeyedRequest(
+    val handle: Long,
+    /** The `seq` of the last step the caller followed; left out for all of them. */
+    @EncodeDefault(NEVER) val seq: Long? = null,
+)
+
+@Serializable
+data class WaSyncRekeyedAnswer(
+    /** Oldest first. */
+    val rekeyed: List<WaSyncRekeyed>,
+)
+
+/** `wa_sync.identity_catch_up`: one page of `wa.identity_mappings`. */
+@Serializable
+data class WaSyncCatchUpRequest(
+    val handle: Long,
+    val items: List<IdentityMapping>,
+    val next: String?,
+)
+
+@Serializable
+data class WaSyncCaughtUp(
+    val handle: Long,
+    /** Pairs in the page. */
+    val pairs: Int,
+    /** The cursor the store now holds: `since` of the next call. */
+    val since: String?,
+    /** The gateway has more: ask again with [since]. */
+    val more: Boolean,
+    @EncodeDefault(NEVER) val rekeyed: List<WaSyncRekeyed> = emptyList(),
+    @EncodeDefault(NEVER) val rejected: List<WaSyncRejected> = emptyList(),
+    /** A merge moved rows: refresh the chat list. */
+    val resync: Boolean,
+)
+
+/**
+ * `wa_sync.identity_observe`: what the gateway answered outside the event stream that names a person by both ids.
+ * Hand the answers in as they came.
+ */
+@Serializable
+data class WaSyncObserveRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    /** `wa.status`: the account's own number and LID. */
+    @EncodeDefault(NEVER) val status: InstanceStatus? = null,
+    /** `wa.group` / `wa.groups`: members named by LID and number. */
+    @EncodeDefault(NEVER) val groups: List<GroupInfo> = emptyList(),
+    /** `wa.profiles` / `wa.refresh_profiles`: the LID of a number. */
+    @EncodeDefault(NEVER) val profiles: List<WaProfile> = emptyList(),
+)
+
+@Serializable
+data class WaSyncIdentityApplied(
+    val handle: Long,
+    val rekeyed: List<WaSyncRekeyed>,
+    val rejected: List<WaSyncRejected>,
+    /** A merge moved rows: refresh the chat list. */
+    val resync: Boolean,
+    /** The own number is another one than before: another account was linked, the identity tables started over. */
+    @SerialName("account_changed") val accountChanged: Boolean,
+)
+
+/** What a whole catch-up on the gateway's pairs came to (`WaSyncStore.identityCatchUp`). */
+data class WaSyncIdentityCatchUp(
+    /** False: the gateway does not list pairs (an old one); nothing was asked again in this session. */
+    val supported: Boolean,
+    /** False: a page could not be fetched or stored ([error]); the next catch-up goes on from the stored cursor. */
+    val complete: Boolean,
+    /** Pairs taken in. */
+    val pairs: Int = 0,
+    /** Chats whose key changed, oldest first: follow them. */
+    val rekeyed: List<WaSyncRekeyed> = emptyList(),
+    val rejected: List<WaSyncRejected> = emptyList(),
+    /** A merge moved rows: refresh the chat list. */
+    val resync: Boolean = false,
+    /** Why the run stopped early. */
+    val error: RustError? = null,
 )
 
 // ---- sync writes
@@ -107,6 +307,10 @@ data class WaSyncApplied(
     val chats: List<String>,
     /** Client ids of outbox sends an echo confirmed. */
     val reconciled: List<String>,
+    /** Chats whose key changed while these events were applied, oldest first: follow them. */
+    @EncodeDefault(NEVER) val rekeyed: List<WaSyncRekeyed> = emptyList(),
+    /** Pairs the events named that changed nothing, for the log. */
+    @EncodeDefault(NEVER) val rejected: List<WaSyncRejected> = emptyList(),
 )
 
 @Serializable
@@ -125,6 +329,9 @@ data class WaSyncStoredChats(
     val chats: Int,
     /** The first page of every chat that missed messages. */
     val fetch: List<WaSyncFetch>,
+    /** Chats whose key changed: the list named a pair the store did not know. */
+    @EncodeDefault(NEVER) val rekeyed: List<WaSyncRekeyed> = emptyList(),
+    @EncodeDefault(NEVER) val rejected: List<WaSyncRejected> = emptyList(),
 )
 
 @Serializable
@@ -151,6 +358,9 @@ data class WaSyncStoredPage(
     /** The gateway has nothing older than what is stored. */
     @SerialName("reached_start") val reachedStart: Boolean,
     val reconciled: List<String>,
+    /** Chats whose key changed: the page named a pair the store did not know. */
+    @EncodeDefault(NEVER) val rekeyed: List<WaSyncRekeyed> = emptyList(),
+    @EncodeDefault(NEVER) val rejected: List<WaSyncRejected> = emptyList(),
 )
 
 @Serializable
@@ -295,6 +505,11 @@ data class WaSyncMessage(
     /** Why the last attempt of an outbox row failed. */
     @EncodeDefault(NEVER) val error: String? = null,
     @EncodeDefault(NEVER) val pending: List<WaSyncPendingOp> = emptyList(),
+    /**
+     * The id the sender arrived under, when it is not [sender] (a LID whose number is known): what an outbound
+     * message key names (a reaction, a delete, a read mark of this message).
+     */
+    @SerialName("wire_sender") @EncodeDefault(NEVER) val wireSender: String? = null,
 )
 
 @Serializable
@@ -316,6 +531,8 @@ data class WaSyncChat(
     @EncodeDefault(NEVER) val last: WaSyncMessage? = null,
     /** Sends of this chat waiting in the outbox. */
     val waiting: Int,
+    /** The id the gateway last used for this chat, when it is not [jid] (the key): the LID of a number chat. */
+    @SerialName("wire_jid") @EncodeDefault(NEVER) val wireJid: String? = null,
 )
 
 @Serializable

@@ -10,8 +10,8 @@ import android.graphics.Paint
 import android.graphics.Shader
 import android.net.Uri
 import android.provider.ContactsContract
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.messages.MessagesContainer
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.people.PersonAvatar
 import dev.rosty.platform.notify.NotificationSpec
 import dev.rosty.platform.sms.SmsQuery
@@ -49,7 +49,7 @@ object ContactNotificationAvatars : NotificationAvatars {
         tag: String,
     ): List<String> {
         NotificationSpec.smsThreadId(tag)?.let { return SmsQuery.addressesFor(context, it) }
-        return listOfNotNull(NotificationSpec.waChat(tag)?.let(::numberOfJid))
+        return listOfNotNull(WaIds.number(NotificationSpec.waChat(tag)))
     }
 
     private fun contactPhoto(

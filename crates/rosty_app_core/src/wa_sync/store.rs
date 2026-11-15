@@ -2,19 +2,24 @@
 
 use std::path::Path;
 
-use rosty_wa_proto::{EventEnvelope, RichChat, RichMessage};
+use rosty_core::wa_identity::{IdentityMap, Source};
+use rosty_wa_proto::{EventEnvelope, GatewayEvent, RichChat, RichMessage};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use super::apply::{self, Upsert};
+use super::identity::{self, Canon, Ids};
 use super::model::{AppliedEvents, StoredChats, StoredPage};
 use super::plan::{self, ChatCursor, FetchPage, Gap, SyncPlan, SyncState};
-use super::{Error, Result, outbox, schema};
+use super::{Error, Result, backfill, merge, outbox, schema};
 
 /// The offline store of one linked WhatsApp instance.
 pub struct Store {
     pub(super) conn: Connection,
     instance_id: String,
+    /// Who every id is. Loaded from the `person` and `alias` tables and written back in the transaction of each
+    /// call that changes it.
+    pub(super) identity: IdentityMap,
 }
 
 /// What [`Store::opened`] reports.
@@ -84,10 +89,17 @@ impl Store {
                 found,
             });
         }
-        Ok(Store {
+        let mut identity = identity::load(&conn)?;
+        // Before the first pair is learned the map must know every stored id.
+        backfill::run(&mut conn, &mut identity)?;
+        let mut store = Store {
             conn,
             instance_id: instance_id.to_owned(),
-        })
+            identity,
+        };
+        // Key changes logged before the store was closed or killed.
+        store.apply_pending_merges()?;
+        Ok(store)
     }
 
     pub fn instance_id(&self) -> &str {
@@ -120,9 +132,10 @@ impl Store {
         )?)
     }
 
-    /// What one chat's history looks like in the store.
+    /// What one chat's history looks like in the store. `chat` may be any id of the chat
+    /// ([`Self::stored_key`]).
     pub fn cursor(&self, chat: &str) -> Result<ChatCursor> {
-        cursor(&self.conn, chat)
+        cursor(&self.conn, &self.stored_key(chat))
     }
 
     /// The work the store still owes: the `seq` to subscribe after, whether to refresh the chat list, and the next
@@ -133,33 +146,45 @@ impl Store {
             after_seq: state.last_seq,
             refresh_chats: state.needs_resync,
             fetch: open_gaps(&self.conn, plan::clamp_limit(limit))?,
+            identity_since: self.identity_since()?,
         })
     }
 
     /// Applies gateway events in the order given. An event at or before the stored `seq` was applied already and
-    /// is skipped; a `resync` resets the `seq` and asks for a chat list refresh. One transaction: all or nothing.
+    /// is skipped; a `resync` resets the `seq` and asks for a chat list refresh. One transaction, all or nothing,
+    /// unless a `state` event names the account.
+    ///
+    /// A `state` event that names the account (its own number, and its LID when the gateway knows it) sets the
+    /// store's own ids first ([`Self::identity_set_own`]): another account resets the identity tables, which is
+    /// not a step of the events' transaction. The events before such an event are then a transaction of their
+    /// own, with their `seq` stored, so a failure later in the batch leaves them applied and the rest is applied
+    /// when the batch is handed in again.
     pub fn apply_events(&mut self, events: &[EventEnvelope]) -> Result<AppliedEvents> {
-        let tx = self.conn.transaction()?;
-        let mut last_seq: Option<u64> =
-            tx.query_row("SELECT last_seq FROM sync_state WHERE id = 1", [], |row| {
-                row.get(0)
-            })?;
         let mut out = AppliedEvents::default();
-        for envelope in events {
-            if !plan::accepts(last_seq, envelope) {
-                continue;
+        let mut start = 0;
+        loop {
+            let end = events[start..]
+                .iter()
+                .skip(1)
+                .position(|envelope| own_ids(envelope).is_some())
+                .map_or(events.len(), |at| start + 1 + at);
+            let chunk = &events[start..end];
+            if let Some(first) = chunk.first()
+                && let Some((pn, lid)) = own_ids(first)
+                && plan::accepts(self.sync_state()?.last_seq, first)
+            {
+                let own = self.identity_set_own(Some(pn), lid, first.at_ms)?;
+                out.rekeyed.extend(own.rekeyed);
+                out.rejected.extend(own.rejected);
+                out.resync |= own.resync;
             }
-            apply::apply_event(&tx, envelope, &mut out)?;
-            last_seq = Some(envelope.seq);
-            out.applied += 1;
+            let applied = apply_events(&mut self.conn, &mut self.identity, chunk, &mut out);
+            self.healed(applied)?;
+            if end == events.len() {
+                return Ok(out);
+            }
+            start = end;
         }
-        tx.execute(
-            "UPDATE sync_state SET last_seq = ?1 WHERE id = 1",
-            [last_seq],
-        )?;
-        tx.commit()?;
-        out.last_seq = last_seq;
-        Ok(out)
     }
 
     /// Stores a refreshed chat list (`GET /v1/chats`) and decides, per chat, whether messages were missed: those
@@ -173,32 +198,15 @@ impl Store {
         limit: Option<u32>,
         refresh_recent_ms: Option<i64>,
     ) -> Result<StoredChats> {
-        let limit = plan::clamp_limit(limit);
-        let tx = self.conn.transaction()?;
-        for chat in chats {
-            let jid = &chat.chat.jid;
-            if rosty_wa_proto::is_status_chat(jid) {
-                continue;
-            }
-            let before = cursor(&tx, jid)?;
-            let last = chat.chat.last.as_ref();
-            let recent = refresh_recent_ms
-                .zip(last)
-                .is_some_and(|(window, last)| last.timestamp_ms >= now_ms.saturating_sub(window));
-            let gap = plan::chat_gap(&before, last, recent);
-            apply::upsert_chat(&tx, chat, now_ms)?;
-            set_gap(&tx, jid, gap)?;
-        }
-        tx.execute(
-            "UPDATE sync_state SET needs_resync = 0, chats_synced_ms = ?1 WHERE id = 1",
-            [now_ms],
-        )?;
-        let fetch = open_gaps(&tx, limit)?;
-        tx.commit()?;
-        Ok(StoredChats {
-            chats: chats.len() as u32,
-            fetch,
-        })
+        let stored = store_chats(
+            &mut self.conn,
+            &mut self.identity,
+            chats,
+            now_ms,
+            plan::clamp_limit(limit),
+            refresh_recent_ms,
+        );
+        self.healed(stored)
     }
 
     /// Stores one page of `GET /v1/chats/{chat}/messages?before=&limit=` (newest first). `before` and `limit` are
@@ -212,66 +220,264 @@ impl Store {
         messages: &[RichMessage],
         now_ms: i64,
     ) -> Result<StoredPage> {
-        let tx = self.conn.transaction()?;
-        let was = cursor(&tx, chat)?;
-        let mut new = 0;
-        let mut stored = 0;
-        let mut reconciled = Vec::new();
-        let mut span: Option<(i64, i64)> = None;
-        for rich in messages.iter().filter(|rich| rich.message.chat == chat) {
-            let ts = rich.message.timestamp_ms;
-            span = Some(span.map_or((ts, ts), |(oldest, newest)| {
-                (oldest.min(ts), newest.max(ts))
-            }));
-            stored += 1;
-            if apply::upsert_rich(&tx, rich, now_ms)? == Upsert::New {
-                new += 1;
-                if let Some(client_id) = outbox::reconcile_echo(&tx, &rich.message)? {
-                    reconciled.push(client_id);
-                }
-            }
-        }
-        let short = messages.len() < limit as usize;
-        if short {
-            apply::ensure_chat(&tx, chat)?;
-            tx.execute(
-                "INSERT INTO chat_sync (jid, reached_start) VALUES (?1, 1)
-                 ON CONFLICT (jid) DO UPDATE SET reached_start = 1",
-                [chat],
-            )?;
-        }
-        let mut next = None;
-        if let Some(gap) = was.gap.filter(|gap| gap.before == before) {
-            let after = plan::after_page(gap, span, messages.len(), limit);
-            set_gap(&tx, chat, after)?;
-            if after.is_none() {
-                tx.execute("UPDATE chat_sync SET gap_open = 0 WHERE jid = ?1", [chat])?;
-            }
-            next = after.map(|gap| FetchPage {
-                chat: chat.to_owned(),
-                before: gap.before,
-                limit,
-            });
-        }
-        tx.commit()?;
-        Ok(StoredPage {
-            stored,
-            new,
-            next,
-            reached_start: short || was.reached_start,
-            reconciled,
-        })
+        let page = Page {
+            chat,
+            before,
+            limit,
+            messages,
+            now_ms,
+        };
+        let stored = store_page(&mut self.conn, &mut self.identity, &page);
+        self.healed(stored)
     }
 
     /// The page to fetch when the thread is scrolled past the oldest stored message; `None` when the gateway has
-    /// nothing older. Store the answer with [`Self::store_page`].
+    /// nothing older. Store the answer with [`Self::store_page`]. `chat` may be any id of the chat; the page
+    /// names its key.
     pub fn older(&self, chat: &str, limit: Option<u32>) -> Result<Option<FetchPage>> {
+        let chat = self.stored_key(chat);
         Ok(plan::older(
-            chat,
-            &self.cursor(chat)?,
+            &chat,
+            &cursor(&self.conn, &chat)?,
             plan::clamp_limit(limit),
         ))
     }
+}
+
+/// The account's own number and LID, when `envelope` is a `state` event that names the account.
+fn own_ids(envelope: &EventEnvelope) -> Option<(&str, Option<&str>)> {
+    match &envelope.event {
+        GatewayEvent::State(status) => {
+            Some((status.own_jid.as_deref()?, status.own_lid.as_deref()))
+        }
+        _ => None,
+    }
+}
+
+/// Applies `events` in one transaction and adds what they did to `out`. A failure leaves `out` as it was.
+fn apply_events(
+    conn: &mut Connection,
+    map: &mut IdentityMap,
+    events: &[EventEnvelope],
+    out: &mut AppliedEvents,
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    let mut last_seq: Option<u64> =
+        tx.query_row("SELECT last_seq FROM sync_state WHERE id = 1", [], |row| {
+            row.get(0)
+        })?;
+    let mut done = AppliedEvents {
+        // Nothing is matched against rows that still wait for a key change.
+        rekeyed: merge::apply_pending(&tx)?,
+        ..AppliedEvents::default()
+    };
+    let mut ids = Ids::new(&tx, map);
+    for envelope in events {
+        if !plan::accepts(last_seq, envelope) {
+            continue;
+        }
+        apply::apply_event(&mut ids, envelope, &mut done)?;
+        last_seq = Some(envelope.seq);
+        done.applied += 1;
+    }
+    let learned = ids.learned;
+    tx.execute(
+        "UPDATE sync_state SET last_seq = ?1 WHERE id = 1",
+        [last_seq],
+    )?;
+    tx.commit()?;
+    out.last_seq = last_seq;
+    out.applied += done.applied;
+    out.resync |= done.resync || learned.moved;
+    out.reconciled.extend(done.reconciled);
+    // The chats a key change joined read differently, whatever the events themselves touched.
+    let merged = learned.rekeyed.iter().map(|step| &step.into_key);
+    for chat in done.chats.iter().chain(merged) {
+        if !out.chats.contains(chat) {
+            out.chats.push(chat.clone());
+        }
+    }
+    out.rekeyed.extend(done.rekeyed);
+    out.rekeyed.extend(learned.rekeyed);
+    out.rejected.extend(learned.rejected);
+    Ok(())
+}
+
+/// The newer of two newest messages, with its meta.
+fn newer_last(kept: &mut RichChat, other: RichChat) {
+    let stamp = |chat: &RichChat| {
+        chat.chat
+            .last
+            .as_ref()
+            .map(|last| (last.timestamp_ms, last.id.clone()))
+    };
+    if stamp(&other) > stamp(kept) {
+        kept.chat.last = other.chat.last;
+        kept.last_meta = other.last_meta;
+    }
+}
+
+/// The listed chats under their keys. Two entries that are one chat here (the gateway still lists a LID chat next
+/// to the number chat of a person the map knows) are joined the way a merge joins two chat rows.
+///
+/// The pairs the list names (a chat next to its other form, and what its newest message carries) are learned
+/// before any entry is keyed, so two entries of one person are seen as one whichever comes first.
+fn listed(ids: &mut Ids<'_>, chats: &[RichChat], now_ms: i64) -> Result<Vec<(Canon, RichChat)>> {
+    for chat in chats {
+        let summary = &chat.chat;
+        // The gateway's own resolution of the chat, not something WhatsApp said about it.
+        ids.learn_alt(
+            Some(&summary.jid),
+            summary.alt.as_deref(),
+            Source::Other,
+            now_ms,
+        )?;
+        if let Some(last) = &summary.last {
+            apply::learn_message(ids, last)?;
+        }
+    }
+    let mut out: Vec<(Canon, RichChat)> = Vec::with_capacity(chats.len());
+    for chat in chats {
+        if rosty_wa_proto::is_status_chat(&chat.chat.jid) {
+            continue;
+        }
+        let key = ids.canon(&chat.chat.jid)?;
+        let Some((first, kept)) = out.iter_mut().find(|(seen, _)| seen.key == key.key) else {
+            out.push((key, chat.clone()));
+            continue;
+        };
+        let other = chat.clone();
+        first.wire = first.wire.take().or(key.wire);
+        kept.chat.name = kept.chat.name.take().or(other.chat.name.clone());
+        kept.chat.unread = kept.chat.unread.saturating_add(other.chat.unread);
+        kept.meta.picture_id = kept
+            .meta
+            .picture_id
+            .take()
+            .or(other.meta.picture_id.clone());
+        kept.meta.push_name = kept.meta.push_name.take().or(other.meta.push_name.clone());
+        kept.meta.archived |= other.meta.archived;
+        kept.meta.pinned |= other.meta.pinned;
+        kept.meta.marked_unread |= other.meta.marked_unread;
+        kept.meta.muted_until_ms =
+            merge::later_mute(kept.meta.muted_until_ms, other.meta.muted_until_ms);
+        newer_last(kept, other);
+    }
+    Ok(out)
+}
+
+fn store_chats(
+    conn: &mut Connection,
+    map: &mut IdentityMap,
+    chats: &[RichChat],
+    now_ms: i64,
+    limit: u32,
+    refresh_recent_ms: Option<i64>,
+) -> Result<StoredChats> {
+    let tx = conn.transaction()?;
+    let mut ids = Ids::new(&tx, map);
+    for (key, chat) in listed(&mut ids, chats, now_ms)? {
+        let jid = key.key.as_str();
+        let before = cursor(&tx, jid)?;
+        let last = chat.chat.last.as_ref();
+        let recent = refresh_recent_ms
+            .zip(last)
+            .is_some_and(|(window, last)| last.timestamp_ms >= now_ms.saturating_sub(window));
+        let gap = plan::chat_gap(&before, last, recent);
+        apply::upsert_chat(&mut ids, &key, &chat, now_ms)?;
+        set_gap(&tx, jid, gap)?;
+    }
+    tx.execute(
+        "UPDATE sync_state SET needs_resync = 0, chats_synced_ms = ?1 WHERE id = 1",
+        [now_ms],
+    )?;
+    let fetch = open_gaps(&tx, limit)?;
+    let learned = ids.learned;
+    tx.commit()?;
+    Ok(StoredChats {
+        chats: chats.len() as u32,
+        fetch,
+        rekeyed: learned.rekeyed,
+        rejected: learned.rejected,
+    })
+}
+
+/// One answered page of a chat's messages.
+struct Page<'a> {
+    chat: &'a str,
+    before: Option<i64>,
+    limit: u32,
+    messages: &'a [RichMessage],
+    now_ms: i64,
+}
+
+fn store_page(conn: &mut Connection, map: &mut IdentityMap, page: &Page<'_>) -> Result<StoredPage> {
+    let tx = conn.transaction()?;
+    let mut ids = Ids::new(&tx, map);
+    // The pairs the page names are learned before its chat is keyed: a page asked under a LID whose messages
+    // name the number is a page of the number's chat.
+    for rich in page.messages {
+        apply::learn_message(&mut ids, &rich.message)?;
+    }
+    // The page was asked under the key or under an id of the same chat; its messages are matched by key.
+    let chat = ids.canon(page.chat)?.key;
+    let chat = chat.as_str();
+    let (limit, messages) = (page.limit, page.messages);
+    let was = cursor(&tx, chat)?;
+    let mut new = 0;
+    let mut stored = 0;
+    let mut reconciled = Vec::new();
+    let mut span: Option<(i64, i64)> = None;
+    for rich in messages {
+        let arrived = apply::arrive(&mut ids, &rich.message, Some(&rich.meta))?;
+        if arrived.message.chat != chat {
+            continue;
+        }
+        let ts = arrived.message.timestamp_ms;
+        span = Some(span.map_or((ts, ts), |(oldest, newest)| {
+            (oldest.min(ts), newest.max(ts))
+        }));
+        stored += 1;
+        if apply::upsert_arrived(&tx, &arrived, None, page.now_ms)? == Upsert::New {
+            new += 1;
+            if let Some(client_id) = outbox::reconcile_echo(&tx, &arrived.message)? {
+                reconciled.push(client_id);
+            }
+        }
+    }
+    let short = messages.len() < limit as usize;
+    if short {
+        apply::ensure_chat(&tx, chat)?;
+        tx.execute(
+            "INSERT INTO chat_sync (jid, reached_start) VALUES (?1, 1)
+             ON CONFLICT (jid) DO UPDATE SET reached_start = 1",
+            [chat],
+        )?;
+    }
+    let mut next = None;
+    if let Some(gap) = was.gap.filter(|gap| gap.before == page.before) {
+        let after = plan::after_page(gap, span, messages.len(), limit);
+        set_gap(&tx, chat, after)?;
+        if after.is_none() {
+            tx.execute("UPDATE chat_sync SET gap_open = 0 WHERE jid = ?1", [chat])?;
+        }
+        next = after.map(|gap| FetchPage {
+            chat: chat.to_owned(),
+            before: gap.before,
+            limit,
+        });
+    }
+    let learned = ids.learned;
+    tx.commit()?;
+    Ok(StoredPage {
+        stored,
+        new,
+        next,
+        reached_start: short || was.reached_start,
+        reconciled,
+        rekeyed: learned.rekeyed,
+        rejected: learned.rejected,
+    })
 }
 
 fn cursor(conn: &Connection, chat: &str) -> Result<ChatCursor> {

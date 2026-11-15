@@ -20,6 +20,7 @@ import dev.rosty.core.model.wa.CreatedInstance
 import dev.rosty.core.model.wa.DeleteForMe
 import dev.rosty.core.model.wa.EditMessage
 import dev.rosty.core.model.wa.GroupInfo
+import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.IssuedKey
 import dev.rosty.core.model.wa.KeyInfo
@@ -165,6 +166,13 @@ class WaGateway internal constructor(
 
     /** A profile picture, unchanged, or none. */
     suspend fun picture(body: PictureBody): Outcome<PictureAnswer> = guarded { ops.picture(id, body) }
+
+    /**
+     * One page of the LID and number pairs the gateway learned, after the cursor [since] (null: every pair); an old
+     * gateway answers `supported = false`. Pass it as the fetch of `WaSyncStore.identityCatchUp`.
+     */
+    suspend fun identityMappings(since: String?): Outcome<IdentityMappingsAnswer> =
+        guarded { ops.identityMappings(id, since) }
 
     /** The status updates (stories), mine and everyone else's. */
     suspend fun statuses(): Outcome<StatusList> = guarded { ops.statuses(id) }

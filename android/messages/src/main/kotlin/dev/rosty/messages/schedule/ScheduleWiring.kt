@@ -33,7 +33,6 @@ import dev.rosty.design.time.RostyClock
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.schedule.theme.ScheduleMetrics
 import dev.rosty.platform.system.permissions.SettingsKind
 import dev.rosty.platform.system.permissions.startFirst

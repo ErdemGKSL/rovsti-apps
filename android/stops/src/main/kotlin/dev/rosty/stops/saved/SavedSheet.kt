@@ -125,6 +125,7 @@ object SavedTags {
 fun OverlayController.presentSavedSheet(
     title: String,
     viewModel: SavedViewModel,
+    files: SavedFileActions? = null,
     onDismissed: () -> Unit = {},
 ): SheetEntry =
     SheetEntry(
@@ -132,7 +133,7 @@ fun OverlayController.presentSavedSheet(
         detents = persistentListOf(Detent.Medium, Detent.Large),
         onDismissed = onDismissed,
     ) { sheet ->
-        OnSheet { SavedList(viewModel, this@presentSavedSheet, sheet) }
+        OnSheet { SavedList(viewModel, this@presentSavedSheet, sheet, files) }
     }.also { present(it) }
 
 @Composable
@@ -140,11 +141,12 @@ private fun ColumnScope.SavedList(
     viewModel: SavedViewModel,
     overlays: OverlayController,
     sheet: SheetState,
+    files: SavedFileActions?,
 ) {
     val state by viewModel.state.collectAsState()
     val onAction = viewModel::onAction
     Column(Modifier.fillMaxWidth().weight(1f).testTag(SavedTags.Sheet)) {
-        SavedHeader(state, overlays, onAction)
+        SavedHeader(state, overlays, onAction, files)
         if (state.loading) return@Column
         if (state.stops.isEmpty()) {
             Box(Modifier.fillMaxSize().testTag(SavedTags.Empty), contentAlignment = Alignment.TopCenter) {
@@ -176,6 +178,7 @@ private fun SavedHeader(
     state: SavedUiState,
     overlays: OverlayController,
     onAction: (SavedAction) -> Unit,
+    files: SavedFileActions?,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(start = Spacing.gutter, end = Spacing.s),
@@ -210,13 +213,30 @@ private fun SavedHeader(
         if (!state.editing) {
             val copy = stringResource(R.string.saved_copy_list)
             val share = stringResource(R.string.saved_share_list)
+            val gpx = stringResource(R.string.places_export_gpx)
+            val json = stringResource(R.string.places_export_json)
+            val import = stringResource(R.string.places_import)
             val listed = state.rows.isNotEmpty()
+            val any = state.stops.isNotEmpty()
             val items =
-                remember(copy, share, listed, onAction) {
-                    persistentListOf<MenuItem>(
-                        MenuItem.Action(copy, RostyIcons.Copy, enabled = listed) { onAction(SavedAction.CopyAll) },
-                        MenuItem.Action(share, RostyIcons.Share, enabled = listed) { onAction(SavedAction.ShareAll) },
-                    )
+                remember(copy, share, listed, any, onAction, files) {
+                    val list =
+                        mutableListOf<MenuItem>(
+                            MenuItem.Action(copy, RostyIcons.Copy, enabled = listed) { onAction(SavedAction.CopyAll) },
+                            MenuItem.Action(
+                                share,
+                                RostyIcons.Share,
+                                enabled = listed,
+                            ) { onAction(SavedAction.ShareAll) },
+                        )
+                    // S5: the whole list to a file and back.
+                    if (files != null) {
+                        list += MenuItem.Separator
+                        list += MenuItem.Action(gpx, enabled = any) { files.export(PlacesTransfer.FORMAT_GPX) }
+                        list += MenuItem.Action(json, enabled = any) { files.export(PlacesTransfer.FORMAT_JSON) }
+                        list += MenuItem.Action(import) { files.import() }
+                    }
+                    list.toImmutableList()
                 }
             MoreButton(overlays, items, SavedTags.More)
         }

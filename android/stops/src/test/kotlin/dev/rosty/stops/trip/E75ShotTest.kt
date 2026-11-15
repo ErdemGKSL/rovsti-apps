@@ -11,12 +11,18 @@ import androidx.compose.ui.test.performSemanticsAction
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rosty.core.model.stops.Destination
+import dev.rosty.design.time.RostyClock
+import dev.rosty.design.time.SystemRostyClock
+import dev.rosty.platform.location.TripClock
 import dev.rosty.platform.location.TripStatus
 import dev.rosty.stops.AppFixture
 import dev.rosty.stops.saved.settleRust
 import dev.rosty.testing.ShotTest
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import org.robolectric.annotation.Config
+import java.util.TimeZone
 
 /**
  * E7.5 screenshots on the real core: the preflight sheet, the live card (light and dark), the recommended background
@@ -28,6 +34,19 @@ import org.robolectric.annotation.Config
 class E75ShotTest : ShotTest() {
     private val options =
         RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = ShotTest.CHANGE_THRESHOLD))
+
+    // S41's "arrives around 10:50" reads the wall clock and the zone: both fixed, so the goldens do not move.
+    private val zone = TimeZone.getDefault()
+
+    @Before fun fixClock() {
+        TripClock.clock = RostyClock { FIXED_NOW }
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+    }
+
+    @After fun resetClock() {
+        TripClock.clock = SystemRostyClock
+        TimeZone.setDefault(zone)
+    }
 
     private fun tripShot(
         name: String,
@@ -135,5 +154,8 @@ class E75ShotTest : ShotTest() {
         const val PEEK = 0
         const val MEDIUM = 1
         const val LARGE = 2
+
+        /** 2026-09-21 08:40 UTC. */
+        const val FIXED_NOW = 1_790_066_400_000L
     }
 }

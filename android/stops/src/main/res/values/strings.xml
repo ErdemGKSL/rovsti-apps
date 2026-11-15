@@ -176,6 +176,41 @@
     <string name="saved_note_title">Note</string>
     <string name="saved_note_placeholder">A note for this stop</string>
     <string name="saved_error_note">A note can have at most 200 characters.</string>
+    <string name="pick_field">Search, or paste a place</string>
+    <string name="pick_paste">Paste</string>
+    <string name="pick_nothing_to_paste">Nothing to paste</string>
+    <string name="pick_filled_pair">Filled A and B</string>
+    <string name="pick_filled_pair_from">Filled A and B from %1$s</string>
+    <string name="pick_stops">Stops</string>
+    <string name="pick_saved">Saved stops</string>
+    <string name="pick_recent_trips">Recent trips</string>
+    <string name="pick_recent">Recent</string>
+    <string name="pick_hint">Share a location from any maps app to Rosty Stops, or paste a link, coordinates or Plus Code here.</string>
+    <string name="pick_stop_detail">%1$s, %2$s</string>
+    <string name="pick_error_no_coordinates">This link has no coordinates. Open it in a maps app and share the place from there.</string>
+    <string name="pick_error_out_of_range">These coordinates are outside the map.</string>
+    <string name="pick_error_not_a_location">This is not a location.</string>
+    <string name="pick_confirm_title">Use this point</string>
+    <string name="pick_use_a">Use as A</string>
+    <string name="pick_use_b">Use as B</string>
+    <string name="pick_cancel">Cancel</string>
+    <string name="pick_show_line">Show a line on the map</string>
+    <string name="pick_this_stop">This stop</string>
+    <string name="pick_copy_name">Copy name</string>
+    <string name="pick_copy_code">Copy stop code</string>
+    <string name="pick_share">Share</string>
+    <string name="pick_copy_as">Copy as</string>
+    <string name="pick_copy_as_title">Copy coordinates as</string>
+    <string name="pick_copied_name">Copied the stop name</string>
+    <string name="pick_copied_code">Copied the stop code</string>
+    <string name="pick_copied_format">Copied %1$s</string>
+    <string name="pick_after_trip">Stop the trip to choose new points.</string>
+    <string name="home_nearest">Nearest: %1$s</string>
+    <plurals name="pick_lines">
+        <item quantity="one">%d line</item>
+        <item quantity="other">%d lines</item>
+    </plurals>
+    <string name="pick_no_lines">No lines</string>
 
     <!-- E7.10 Settings: alarm, map tiles, offline area, transit data. -->
     <string name="settings_group_trip">Trip</string>

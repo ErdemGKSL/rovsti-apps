@@ -67,7 +67,8 @@ class E76ShotTest : ShotTest() {
 
     @Test fun arrivalSummary() {
         TripClock.clock = RostyClock { AlarmAppTest.LAST_TRIP_NOW }
-        alarmShot("e7.6-arrival-summary") {}
+        // The circle behind the sheet comes from the core a call or two later: wait for it, so the golden holds.
+        alarmShot("e7.6-arrival-summary") { settleRust(2500) }
     }
 
     @Test fun ringAgain() =

@@ -82,6 +82,13 @@ class PermissionGateTest : ShotTest() {
         assertFalse("the sheet closes", sheetShown())
     }
 
+    @Test fun equalRationaleTextsCompareEqualSoARecompositionKeepsTheSheet() {
+        // The gate keys its sheet on the rationale, which rationaleFor builds anew on every recomposition: unequal
+        // copies closed and reopened the sheet each time the page recomposed (the contact card did it 3-4 times).
+        val icon = dev.rosty.design.icons.RostyIcons.Phone
+        assertEquals(PermissionRationale(icon, "t", "b"), PermissionRationale(icon, "t", "b"))
+    }
+
     @Test fun notNowClosesTheSheetAndAsksNothing() {
         refresh()
         show()

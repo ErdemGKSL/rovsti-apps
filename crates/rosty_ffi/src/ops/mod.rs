@@ -13,6 +13,7 @@ mod shared;
 mod stops;
 mod tiles;
 mod wa;
+mod wa_idbook;
 mod wa_identity;
 mod wa_sync;
 

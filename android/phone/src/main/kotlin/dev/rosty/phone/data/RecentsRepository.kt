@@ -259,8 +259,9 @@ class RecentsRepository(
 
         /**
          * The number to dial and to look a contact up by for a WhatsApp call: `+<digits>` of its peer's phone JID,
-         * or, for a peer the gateway names by a LID, of the number it sent next to it (`peer_alt`). Null for a LID
-         * whose number the gateway does not know (Phone keeps no identity table of its own yet).
+         * or, for a peer the gateway names by a LID, of the number next to it (`peer_alt`): the one the gateway sent,
+         * or the one Phone's own identity table filled in before the call got here (`resolvedWaCalls`, WA-R2). Null
+         * for a LID nobody could map to a number.
          */
         fun dialNumber(call: CallSummary): String? = WaIds.number(call.peer, call.peerAlt)
 

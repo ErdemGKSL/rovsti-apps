@@ -98,8 +98,25 @@ class PhoneManifestTest {
         assertEquals(true, alias.exported)
         assertEquals(setOf("dev.rosty.action.WA_CALL"), alias.filters.single().actions)
         assertEquals("signature", manifest.declaredPermissions[handoff])
-        // Phone receives hand-offs, it does not send them: no uses-permission for it (the committed list says so).
-        assertFalse(handoff in manifest.usesPermissions)
+        // WA-R2: Phone also sends one ("Message" opens the chat in Rosty Messages), so it holds the permission.
+        assertTrue(handoff in manifest.usesPermissions)
+    }
+
+    /** WA-R2: the link hand-over. Exported, but unreachable without the signature permission, in both directions. */
+    @Test fun theWhatsAppLinkProviderIsExportedBehindTheSignaturePermission() {
+        val permission = "dev.rosty.permission.WA_LINK"
+        val provider = manifest.component("dev.rosty.wa.share.WaLinkProvider")
+        assertEquals("provider", provider.kind)
+        assertEquals(true, provider.exported)
+        assertEquals("dev.rosty.phone.walink", provider.attributes["authorities"])
+        assertEquals(permission, provider.attributes["readPermission"])
+        assertEquals(permission, provider.attributes["writePermission"])
+        assertEquals(null, provider.attributes["grantUriPermissions"])
+        assertEquals("signature", manifest.declaredPermissions[permission])
+        assertTrue("this app asks its siblings too", permission in manifest.usesPermissions)
+        assertTrue(
+            manifest.queriedProviders.containsAll(setOf("dev.rosty.messages.walink", "dev.rosty.contacts.walink")),
+        )
     }
 
     @Test fun theInCallServiceIsTheCallUiOfTheSystem() {
@@ -243,6 +260,8 @@ class PhoneManifestTest {
                 "$pkg.BootReceiver",
                 "dev.rosty.bridge.RostyShareProvider",
                 "dev.rosty.people.sync.PeopleSyncStopReceiver",
+                // WA-R2: the link hand-over between Rosty apps.
+                "dev.rosty.wa.share.WaLinkProvider",
             )
         assertEquals(if (flavor == "firebase") expected + "$pkg.RostyMessagingService" else expected, ours)
         assertTrue(manifest.component("$pkg.MainActivity").filters.isNotEmpty())

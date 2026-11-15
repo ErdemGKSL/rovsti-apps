@@ -7,7 +7,9 @@ import android.view.View
 import coil3.ImageLoader
 import dev.rosty.core.Rust
 import dev.rosty.core.RustCore
+import dev.rosty.core.getOrNull
 import dev.rosty.core.log.DevLog
+import dev.rosty.core.model.wa.StoredLink
 import dev.rosty.core.ops.NativeWaOps
 import dev.rosty.core.ops.WaOps
 import dev.rosty.design.haptics.HapticEvent
@@ -31,9 +33,14 @@ import dev.rosty.wa.WaRepository
 import dev.rosty.wa.avatars.WaAvatar
 import dev.rosty.wa.avatars.WaAvatars
 import dev.rosty.wa.avatars.waAvatars
+import dev.rosty.wa.share.PrefsWaLinkMarks
+import dev.rosty.wa.share.ResolverSiblingLinks
+import dev.rosty.wa.share.WaLinkHandover
+import dev.rosty.wa.share.WaLinkShare
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -64,6 +71,12 @@ abstract class ShellContainer(
 
     /** The one WhatsApp repository of the process, already started. */
     val wa: WaRepository by lazy { createWa() }
+
+    /**
+     * The link hand-over between Rosty apps signed with the same key (WA-R2): this app, when it has no WhatsApp
+     * link, takes the link of an installed sibling. Asked once when [wa] is created and again by the link screen.
+     */
+    val waLinkHandover: WaLinkHandover by lazy { createWaLinkHandover() }
 
     /** Profile pictures of WhatsApp contacts; started by the screens that show them. */
     val avatars: WaAvatars by lazy { createAvatars() }
@@ -118,7 +131,35 @@ abstract class ShellContainer(
     }
 
     protected open fun createWa(): WaRepository =
-        DefaultWaRepository(WaLinkStore(waOps), waOps, scope, context.cacheDir.absolutePath).also { it.start() }
+        DefaultWaRepository(WaLinkStore(waOps), waOps, scope, context.cacheDir.absolutePath).also { repo ->
+            repo.start()
+            // No link here: ask the sibling Rosty apps for theirs (a link of this app's own always wins). The one
+            // hand-over of the process, so this ask and the link screen's never run side by side; it reads [wa],
+            // which is this repository once the lazy has it.
+            scope.launch { waLinkHandover.adoptIfUnlinked() }
+        }
+
+    protected open fun createWaLinkHandover(): WaLinkHandover =
+        WaLinkHandover(
+            store = WaLinkStore(waOps),
+            siblings = WaLinkShare.siblingsOf(context.packageName),
+            source = ResolverSiblingLinks(context),
+            marks = PrefsWaLinkMarks(context),
+            adopt = { link -> wa.relinkTo(link) },
+        )
+
+    /**
+     * The link `WaLinkProvider` answers a sibling app with: what this app stored, or null. A cold process (the
+     * provider started it) builds the Rust core first; the provider bounds the wait.
+     */
+    open suspend fun sharedWaLink(): StoredLink? {
+        // An app that never linked answers without loading the native library: the link file is just not there
+        // (`whatsapp-link.json`, removed again when the link is).
+        if (!File(context.noBackupFilesDir, WA_LINK_FILE).exists()) return null
+        rust
+        Rust.ready.first { it }
+        return WaLinkStore(waOps).read().getOrNull()
+    }
 
     protected open fun createAvatars(): WaAvatars =
         WaAvatars(
@@ -161,6 +202,9 @@ abstract class ShellContainer(
         // ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW and TRIM_MEMORY_MODERATE (deprecated names, stable values).
         const val TRIM_RUNNING_LOW = 10
         const val TRIM_MODERATE = 60
+
+        /** `rosty_app_core::wa_link::LINK_FILE`, in the data directory given to `Rust.init`. */
+        const val WA_LINK_FILE = "whatsapp-link.json"
     }
 }
 

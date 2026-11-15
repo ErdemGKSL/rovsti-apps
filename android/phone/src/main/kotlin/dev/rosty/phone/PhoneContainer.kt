@@ -6,6 +6,7 @@ import android.telephony.TelephonyManager
 import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
 import dev.rosty.core.getOrNull
+import dev.rosty.core.map
 import dev.rosty.core.model.chat.CallReminderRequest
 import dev.rosty.core.model.chat.ReminderSlot
 import dev.rosty.core.model.phone.LocaleTime
@@ -15,6 +16,7 @@ import dev.rosty.core.model.shared.InferHomeCcRequest
 import dev.rosty.core.model.shared.NumberForm
 import dev.rosty.core.model.shared.RenderRequest
 import dev.rosty.core.model.wa.CallSummary
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.core.ops.ContactsOps
 import dev.rosty.core.ops.NativeChatOps
@@ -24,10 +26,12 @@ import dev.rosty.core.ops.NativePhoneOps
 import dev.rosty.core.ops.NativeQrOps
 import dev.rosty.core.ops.NativeSearchOps
 import dev.rosty.core.ops.NativeSharedOps
+import dev.rosty.core.ops.NativeWaIdBookOps
 import dev.rosty.core.ops.PhoneOps
 import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
+import dev.rosty.core.ops.WaIdentityBook
 import dev.rosty.people.AvatarResolver
 import dev.rosty.people.FileLiveNameStore
 import dev.rosty.people.LiveWaNames
@@ -79,11 +83,14 @@ import dev.rosty.phone.wa.CoreWaArbiter
 import dev.rosty.phone.wa.PrefsForgottenCalls
 import dev.rosty.phone.wa.WaCallLauncher
 import dev.rosty.phone.wa.WaCallsRouter
+import dev.rosty.phone.wa.WaChatOpener
 import dev.rosty.phone.wa.WaIdBook
+import dev.rosty.phone.wa.WaIdentitySync
 import dev.rosty.phone.wa.WaInCallEffects
 import dev.rosty.phone.wa.WaMergedCallSource
 import dev.rosty.phone.wa.WaNotices
 import dev.rosty.phone.wa.WaRingNotifier
+import dev.rosty.phone.wa.resolvedWaCalls
 import dev.rosty.platform.calllog.AndroidBlocklistRepository
 import dev.rosty.platform.calllog.AndroidCallLogRepository
 import dev.rosty.platform.calllog.BlocklistRepository
@@ -100,6 +107,7 @@ import dev.rosty.platform.identity.PhoneNumbers
 import dev.rosty.platform.notify.ReminderItem
 import dev.rosty.platform.notify.ReminderRepositories
 import dev.rosty.platform.notify.RemindersRepository
+import dev.rosty.platform.system.Handoff
 import dev.rosty.platform.system.SettingsMirror
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionGroup
@@ -137,6 +145,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /** A number the Keypad is asked to show: a `tel:` link decoded by `dial.fromTelUri`, or a WhatsApp hand-off. */
@@ -266,6 +275,53 @@ open class PhoneContainer(
 
     /** The WhatsApp calls of the linked instance; started with the container (the merged call source and Recents read it). */
     val waCalls: WaCalls by lazy { createWaCalls() }
+
+    /**
+     * Phone's own identity table (WA-R2, `wa-identity.json`): the number behind a LID, for a WhatsApp caller the
+     * gateway names by a LID alone. Phone shows no messages, so it never opens the offline store of Messages.
+     */
+    val waIdentity: WaIdentityBook by lazy { createWaIdentity() }
+
+    /** Keeps [waIdentity] current from the gateway's pairs, its events and the calls; started with [waCalls]. */
+    val waIdentitySync: WaIdentitySync by lazy {
+        WaIdentitySync(
+            wa = wa,
+            book = waIdentity,
+            instanceId = { WaLinkStore(waOps).read().map { it?.instanceId } },
+            fetch = { since -> wa.gateway()?.identityMappings(since) },
+            calls = waCalls.calls,
+            scope = scope,
+            ready = ::awaitRustReady,
+        )
+    }
+
+    /** "WhatsApp message" on a person: opens the chat in Rosty Messages when it is installed (WA-R2). */
+    val waChat: WaChatOpener by lazy {
+        WaChatOpener(
+            link = wa.linkState,
+            e164 = ::e164,
+            installed = { Handoff.canStart(context, Handoff.ACTION_WA_CHAT) },
+            start = { jid, name -> Handoff.start(context, Handoff.ACTION_WA_CHAT, jid, name) },
+            notices = waNotices,
+            scope = scope,
+        ).also { it.refresh() }
+    }
+
+    /**
+     * Blocking, off the main thread: the number behind the LID [jid] for a push that wakes a cold process (installed
+     * as `WaPush.lidNumber` by the app). The table in memory answers; a table not opened yet is opened first, for at
+     * most [WA_IDENTITY_WAIT_MS]. Null for a LID nobody mapped.
+     */
+    fun waNumberBlocking(jid: String): String? {
+        waIdentity.numberOf(jid)?.let { return it }
+        if (!WaIds.isLid(jid)) return null
+        return runBlocking {
+            withTimeoutOrNull(WA_IDENTITY_WAIT_MS) {
+                waIdentitySync.ensureOpen()
+                waIdentity.numberOf(jid)
+            }
+        }
+    }
 
     /** The preferences (`prefs.json`) and the call notes; loaded by the first screen that needs them. */
     val store: PhoneStore by lazy { createStore() }
@@ -436,6 +492,13 @@ open class PhoneContainer(
 
     private lateinit var namedWaCalls: StateFlow<List<CallSummary>>
 
+    /** [waCalls] with the numbers of LID peers filled in from [waIdentity]; set when [waCalls] is created. */
+    private lateinit var resolvedCalls: StateFlow<List<CallSummary>>
+
+    /** The WhatsApp calls as Recents lists them: a LID peer with the number the identity table knows. */
+    val waCallsResolved: StateFlow<List<CallSummary>>
+        get() = waCalls.let { if (::resolvedCalls.isInitialized) resolvedCalls else it.calls }
+
     /** The SIMs as chips and the "ask every time" state. */
     val simState: SimState by lazy { SimState(sims, ops, scope) }
 
@@ -592,6 +655,8 @@ open class PhoneContainer(
             locale = ::localeNow,
             placeWhatsApp = waLauncher::place,
             whatsAppAvailable = waLauncher.available,
+            messageWhatsApp = waChat::open,
+            whatsAppMessageAvailable = waChat.also { it.refresh() }.available,
             scope = scope,
             clock = clock,
             identify = { number -> callerIds.resolve(number) },
@@ -737,6 +802,8 @@ open class PhoneContainer(
         return (sharedOps.render(RenderRequest(typed, NumberForm.E164, home)) as? Outcome.Ok)?.value?.text
     }
 
+    protected open fun createWaIdentity(): WaIdentityBook = WaIdentityBook(NativeWaIdBookOps(rust), clock = clock)
+
     protected open fun createCallPump(): CallAudioPump = AndroidCallAudioPump(context)
 
     protected open fun createWaCalls(): WaCalls =
@@ -750,7 +817,11 @@ open class PhoneContainer(
             ringOver = { id -> WaIncoming.cancel(context, id) },
         ).also {
             it.start()
-            namedWaCalls = namedCalls(it.calls)
+            // A LID caller gets its number from Phone's identity table before anything names or lists the call.
+            val resolved = resolvedWaCalls(it.calls, waIdentity, { context.getString(R.string.wa_user_unknown) }, scope)
+            resolvedCalls = resolved
+            namedWaCalls = namedCalls(resolved)
+            scope.launch { waIdentitySync.start() }
             WaRingNotifier(namedWaCalls, scope, clock) { id, title -> WaIncoming.show(context, id, title) }.start()
             // The screen goes dark at the ear, and the ongoing notification names the call and leads back to it.
             WaInCallEffects(
@@ -802,7 +873,7 @@ open class PhoneContainer(
             ops = ops,
             scope = scope,
             clock = clock,
-            extras = waCalls.calls.map { RecentsRepository.extraCalls(it) },
+            extras = waCallsResolved.map { RecentsRepository.extraCalls(it) },
             ids = callerIds,
             idsChanged = callerIdsChanged,
             // Re-reads the log when READ_CALL_LOG is granted while the process runs (first launch after install).
@@ -832,6 +903,9 @@ open class PhoneContainer(
 
 /** How many contact numbers the home-country guess reads. */
 private const val HOME_CC_SAMPLE = 200
+
+/** How long a push waits for Phone's identity table of a cold process (`PhoneContainer.waNumberBlocking`). */
+private const val WA_IDENTITY_WAIT_MS = 1_500L
 
 /** How many recent calls the people sync reads numbers from. */
 private const val PEOPLE_RECENT_CALLS = 300

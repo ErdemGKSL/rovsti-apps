@@ -163,6 +163,7 @@
     <string name="recents_menu_call_back">Geri ara</string>
     <string name="recents_menu_message">Mesaj</string>
     <string name="recents_menu_whatsapp">WhatsApp araması</string>
+    <string name="recents_menu_whatsapp_message">WhatsApp mesajı</string>
     <string name="recents_menu_quick_reply">Hızlı yanıt</string>
     <string name="recents_menu_remind">Daha sonra hatırlat</string>
     <string name="recents_menu_copy_number">Numarayı kopyala</string>
@@ -394,6 +395,7 @@
     <string name="wa_refused_busy">Başka bir arama sürüyor</string>
     <string name="wa_refused_country_code">Bu numarayı WhatsApp\'ta aramak için ülke kodunu ekleyin</string>
     <string name="details_menu_whatsapp">WhatsApp araması</string>
+    <string name="details_menu_whatsapp_message">WhatsApp mesajı</string>
 
     <!-- E5.10 Arama istatistikleri -->
     <string name="settings_stats">Arama istatistikleri</string>
@@ -640,4 +642,6 @@
     <string name="notes_notice_delete_failed">Not silinemedi</string>
     <string name="notes_notice_undo_failed">Geri alınamadı</string>
     <string name="notes_notice_export_failed">Notlar dışa aktarılamadı</string>
+    <!-- A WhatsApp caller known only by a LID nobody mapped to a number (WA-R2): never its digits. -->
+    <string name="wa_user_unknown">WhatsApp kullanıcısı</string>
 </resources>

@@ -129,6 +129,8 @@ fun personMenu(
     strings: DetailsStrings,
     onAction: (PersonAction) -> Unit,
     whatsApp: Boolean = false,
+    /** Rosty Messages is installed: the menu offers the person's WhatsApp chat there (hidden without it). */
+    whatsAppMessage: Boolean = false,
 ): ImmutableList<MenuItem> {
     val callable = ui.numbers.isNotEmpty()
     val multiple = ui.numbers.size > 1
@@ -137,6 +139,12 @@ fun personMenu(
         MenuItem.Action(strings.menuWhatsApp, RostyIcons.WhatsApp, enabled = callable && whatsApp) {
             onAction(PersonAction.WhatsAppCall)
         }
+    if (whatsAppMessage) {
+        items +=
+            MenuItem.Action(strings.menuWhatsAppMessage, RostyIcons.WhatsApp, enabled = callable && whatsApp) {
+                onAction(PersonAction.WhatsAppMessage)
+            }
+    }
     items +=
         MenuItem.Action(strings.menuReply, RostyIcons.Forward, enabled = callable) {
             onAction(PersonAction.AskQuickReply)
@@ -493,7 +501,11 @@ fun ColumnScope.PersonSheet(
     DisposableEffect(model) { onDispose { model.close() } }
     PersonEffects(model, host, strings, onOpenCall, onShowQr)
     val whatsApp by model.whatsAppAvailable.collectAsState()
-    val menu = remember(ui, strings, model, whatsApp) { personMenu(ui, strings, model::onAction, whatsApp) }
+    val whatsAppMessage by model.whatsAppMessageAvailable.collectAsState()
+    val menu =
+        remember(ui, strings, model, whatsApp, whatsAppMessage) {
+            personMenu(ui, strings, model::onAction, whatsApp, whatsAppMessage)
+        }
     PersonSheetContent(ui, strings, menu, model::onAction, overlays)
 }
 

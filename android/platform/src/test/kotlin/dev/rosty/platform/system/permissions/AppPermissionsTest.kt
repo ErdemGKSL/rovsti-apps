@@ -73,7 +73,8 @@ class AppPermissionsTest {
                     .toSet()
             val handoff = if (app.handoffUses) setOf("dev.rosty.permission.HANDOFF") else emptySet()
             val people = if (app.peopleUses) setOf("dev.rosty.permission.READ_PEOPLE") else emptySet()
-            assertEquals(app.app, committed, app.manifestPermissions + handoff + people)
+            val link = if (app.waLinkUses) setOf("dev.rosty.permission.WA_LINK") else emptySet()
+            assertEquals(app.app, committed, app.manifestPermissions + handoff + people + link)
         }
     }
 

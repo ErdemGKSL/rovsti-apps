@@ -71,6 +71,7 @@ internal class RecentsRig(
     val waExtras = MutableStateFlow<List<dev.rosty.core.model.phone.ExtraCall>>(emptyList())
     val whatsAppPlaced = mutableListOf<String>()
     val whatsAppForgotten = mutableListOf<List<String>>()
+    val whatsAppMessaged = mutableListOf<Pair<String, String?>>()
     val whatsAppAvailable = MutableStateFlow(true)
     val store = PhoneStore(ops, scope, tempDir("rosty-recents"), Dispatchers.IO, debounceMs = 20)
     val simState = SimState(FakeSimRepository(accounts, defaultKey), ops, scope)
@@ -107,6 +108,7 @@ internal class RecentsRig(
             placeWhatsApp = { whatsAppPlaced += it },
             forgetWhatsApp = { whatsAppForgotten += it },
             whatsAppAvailable = whatsAppAvailable,
+            messageWhatsApp = { number, name -> whatsAppMessaged += number to name },
         )
 
     suspend fun ready() {

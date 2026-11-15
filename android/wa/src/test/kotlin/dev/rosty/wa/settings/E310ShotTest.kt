@@ -89,6 +89,22 @@ class E310ShotTest : ShotTest() {
     @Test
     fun connected() = snap("e3.10-wa-connected", page(fixtureView("connected")))
 
+    /** WA-R2: the link was taken from a sibling Rosty app; the status group says so in its footer. */
+    @Test
+    fun connectedWithASharedLink() =
+        snap(
+            "wa-r2-link-shared",
+            { Harness(stateOf(fixtureView("connected")).copy(sharedFrom = "dev.rosty.messages")) },
+        )
+
+    /** WA-R2: no link here, a sibling holds the one that was removed: the start page offers it under its options. */
+    @Test
+    fun notLinkedWithASiblingOffer() =
+        snap(
+            "wa-r2-link-offer",
+            { Harness(stateOf(fixtureView("")).copy(siblingOffer = "dev.rosty.messages")) },
+        )
+
     @Test
     fun keyListMenuOpen() =
         snap("e3.10-wa-key-list-menu-open", page(fixtureView("keys_loaded"))) {

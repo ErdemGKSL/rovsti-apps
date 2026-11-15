@@ -21,10 +21,17 @@ import org.json.JSONObject
 
 /**
  * Pure: the caller's number for an FCM data message, `+<digits>` from a phone JID in `sender`
- * (`905551234567:4@s.whatsapp.net`); null for a `@lid` the gateway could not map, a group or nothing. Gateways before
- * the rename sent `from`, which FCM reserves (it refused those pushes); it is still read.
+ * (`905551234567:4@s.whatsapp.net`); for a `@lid` sender the number [lidNumber] knows (the app's own identity table,
+ * WA-R2); null for a LID nobody mapped, a group or nothing. Gateways before the rename sent `from`, which FCM reserves
+ * (it refused those pushes); it is still read.
  */
-internal fun waCallerNumber(data: Map<String, String>): String? = WaIds.number(data["sender"] ?: data["from"])
+internal fun waCallerNumber(
+    data: Map<String, String>,
+    lidNumber: (String) -> String? = { null },
+): String? {
+    val sender = data["sender"] ?: data["from"]
+    return WaIds.number(sender) ?: sender?.takeIf { WaIds.isLid(it) }?.let(lidNumber)
+}
 
 /**
  * Pure: the caller title for an FCM data message (F28), as the app names a WhatsApp caller: the device contact that
@@ -34,8 +41,9 @@ internal fun waCallerNumber(data: Map<String, String>): String? = WaIds.number(d
 internal fun waCallerTitle(
     data: Map<String, String>,
     contactName: (String) -> String? = { null },
+    lidNumber: (String) -> String? = { null },
 ): String {
-    val number = waCallerNumber(data)
+    val number = waCallerNumber(data, lidNumber)
     number
         ?.let(contactName)
         ?.trim()
@@ -58,10 +66,11 @@ data class WaIncomingNotice(
         fun of(
             data: Map<String, String>,
             contactName: (String) -> String? = { null },
+            lidNumber: (String) -> String? = { null },
         ): WaIncomingNotice? {
             if (data["kind"] != "call") return null
             val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
-            return WaIncomingNotice(id, waCallerTitle(data, contactName))
+            return WaIncomingNotice(id, waCallerTitle(data, contactName, lidNumber))
         }
     }
 }
@@ -76,10 +85,11 @@ data class WaMissedNotice(
         fun of(
             data: Map<String, String>,
             contactName: (String) -> String? = { null },
+            lidNumber: (String) -> String? = { null },
         ): WaMissedNotice? {
             if (data["kind"] != "call_end" || data["missed"] != "1") return null
             val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
-            return WaMissedNotice(id, waCallerTitle(data, contactName))
+            return WaMissedNotice(id, waCallerTitle(data, contactName, lidNumber))
         }
     }
 }

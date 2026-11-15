@@ -54,6 +54,21 @@ class ContactsManifestTest {
         assertFalse("the owner of the provider needs no uses-permission", permission in manifest.usesPermissions)
     }
 
+    /** WA-R2: the link hand-over. Exported, but unreachable without the signature permission, in both directions. */
+    @Test fun theWhatsAppLinkProviderIsExportedBehindTheSignaturePermission() {
+        val permission = "dev.rosty.permission.WA_LINK"
+        val provider = manifest.component("dev.rosty.wa.share.WaLinkProvider")
+        assertEquals("provider", provider.kind)
+        assertEquals(true, provider.exported)
+        assertEquals("dev.rosty.contacts.walink", provider.attributes["authorities"])
+        assertEquals(permission, provider.attributes["readPermission"])
+        assertEquals(permission, provider.attributes["writePermission"])
+        assertEquals(null, provider.attributes["grantUriPermissions"])
+        assertEquals("signature", manifest.declaredPermissions[permission])
+        assertTrue("this app asks its siblings too", permission in manifest.usesPermissions)
+        assertTrue(manifest.queriedProviders.containsAll(setOf("dev.rosty.messages.walink", "dev.rosty.phone.walink")))
+    }
+
     @Test fun workManagerHasItsComponentsAndTheSyncWorkerNeedsNoneOfItsOwn() {
         // The worker is created by name from WorkManager's database, not declared; WorkManager's own services merge in.
         assertTrue(manifest.components.any { it.name == "androidx.work.impl.background.systemjob.SystemJobService" })
@@ -135,6 +150,8 @@ class ContactsManifestTest {
                 "dev.rosty.bridge.BirthdayReminderReceiver",
                 "dev.rosty.bridge.RostyShareProvider",
                 "dev.rosty.people.sync.PeopleSyncStopReceiver",
+                // WA-R2: the link hand-over between Rosty apps.
+                "dev.rosty.wa.share.WaLinkProvider",
             ),
             ours,
         )

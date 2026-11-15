@@ -48,6 +48,9 @@ import dev.rosty.messages.conversation.rememberToolLabels
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.ResourceInboxWords
 import dev.rosty.messages.inbox.numberOfJid
+import dev.rosty.messages.notify.TrackOpenConversation
+import dev.rosty.messages.schedule.ScheduledStrip
+import dev.rosty.messages.schedule.rememberWaScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.platform.identity.PhoneNumbers
@@ -259,6 +262,8 @@ fun WaThreadPage(
     val detector = rememberDetector(container)
     val context = LocalContext.current
     val number = remember(route.jid) { numberOfJid(route.jid) }
+    TrackOpenConversation(model.tag)
+    val schedule = rememberWaScheduleHost(container, overlays, route.jid, composer)
     val actions =
         remember(model, res, onBack, host, state.title, attachMenu, navigator) {
             ConversationActions(
@@ -340,6 +345,9 @@ fun WaThreadPage(
             labels = labels,
             voice = voice,
             composerModifier = Modifier.pastedPictures(model),
+            onSendLongPress = schedule::ask,
+            sendLaterLabel = schedule.words.title,
+            aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
         )
     }
 }

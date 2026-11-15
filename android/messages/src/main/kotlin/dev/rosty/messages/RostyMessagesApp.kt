@@ -3,8 +3,8 @@ package dev.rosty.messages
 import android.app.Application
 import androidx.work.Configuration
 import dev.rosty.core.log.RostyLog
+import dev.rosty.messages.notify.MessagesNotifier
 import dev.rosty.platform.PlatformComponents
-import dev.rosty.platform.notify.MessageNotifications
 import dev.rosty.platform.notify.PlatformChannels
 import dev.rosty.platform.sms.MmsCodec
 import dev.rosty.platform.sms.MmsInbox
@@ -33,7 +33,8 @@ class RostyMessagesApp :
         }
         step("mms") {
             MmsCodec.downloadedHandler = MmsCodec.DownloadedHandler(MmsInbox::onDownloaded)
-            MmsInbox.notifier = MessageNotifications.notifier
+            // The app's own renderer: avatars, the group summary, labels in the phone's language (E6.9).
+            MmsInbox.notifier = MessagesNotifier.notifier
         }
         // Channel names and descriptions in the phone's language, again after a language change (F32).
         step("channels") { PlatformChannels.followLocale(this) }

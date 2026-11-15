@@ -384,4 +384,53 @@
     <string name="inbox_back_in_inbox">Back in the inbox</string>
     <string name="inbox_spam_failed">That could not be moved to Spam</string>
     <string name="inbox_code_copied_delete">Copied %1$s. The message is deleted in 24 hours.</string>
+    <!-- E6.9 / E6.10 -->
+    <string name="notify_you">You</string>
+    <string name="notify_reply">Reply</string>
+    <string name="notify_copy_code">Copy code</string>
+    <string name="notify_mark_read">Mark as read</string>
+    <string name="notify_remind_hour">Remind me in 1 hour</string>
+    <string name="notify_reminder_set">Reminder set</string>
+    <string name="notify_reply_failed">The reply was not sent</string>
+    <string name="notify_summary_line">%1$s: %2$s</string>
+    <plurals name="notify_summary_chats">
+        <item quantity="one">%d conversation</item>
+        <item quantity="other">%d conversations</item>
+    </plurals>
+    <string name="schedule_title">Send later</string>
+    <string name="schedule_in_hour">In 1 hour</string>
+    <string name="schedule_this_evening">This evening</string>
+    <string name="schedule_tomorrow_evening">Tomorrow evening</string>
+    <string name="schedule_tomorrow_morning">Tomorrow morning</string>
+    <string name="schedule_tomorrow">Tomorrow</string>
+    <string name="schedule_day">Day</string>
+    <string name="schedule_time">Time</string>
+    <string name="schedule_day_earlier">A day earlier</string>
+    <string name="schedule_day_later">A day later</string>
+    <string name="schedule_time_earlier">15 minutes earlier</string>
+    <string name="schedule_time_later">15 minutes later</string>
+    <string name="schedule_confirm">Schedule for %1$s</string>
+    <string name="schedule_too_soon">Pick a time at least a minute from now</string>
+    <string name="schedule_late_note">Android may send it a few minutes late. Tap to allow exact alarms.</string>
+    <string name="schedule_type_first">Type the message first, then hold Send</string>
+    <string name="schedule_one_to_one">Scheduling works in one-to-one conversations</string>
+    <string name="schedule_done">Scheduled for %1$s</string>
+    <string name="schedule_failed">Couldn\'t schedule that message</string>
+    <string name="schedule_cancelled">Scheduled message cancelled</string>
+    <string name="schedule_cancel_failed">Couldn\'t cancel that message</string>
+    <string name="schedule_cancel_for">Cancel the message scheduled for %1$s</string>
+    <string name="schedule_strip_title">Scheduled</string>
+    <string name="schedule_strip_waiting">%1$s · %2$s</string>
+    <string name="schedule_strip_not_sent">Not sent · %1$s</string>
+    <plurals name="schedule_strip_more">
+        <item quantity="one">Show %d more</item>
+        <item quantity="other">Show %d more</item>
+    </plurals>
+    <string name="schedule_failed_to">Scheduled message to %1$s couldn\'t be sent</string>
+    <plurals name="schedule_failed_many">
+        <item quantity="one">%d scheduled message couldn\'t be sent</item>
+        <item quantity="other">%d scheduled messages couldn\'t be sent</item>
+    </plurals>
+    <string name="schedule_wa_failed">Scheduled WhatsApp message to %1$s couldn\'t be sent</string>
+    <string name="schedule_reopen">Open</string>
 </resources>

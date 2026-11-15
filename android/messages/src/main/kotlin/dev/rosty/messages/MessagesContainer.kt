@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import dev.rosty.core.Rust
+import dev.rosty.core.model.wa.MessageMeta
+import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.core.ops.MessagesOps
 import dev.rosty.core.ops.NativeChatOps
@@ -17,6 +19,14 @@ import dev.rosty.core.ops.SharedOps
 import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.messages.data.ContactBook
 import dev.rosty.messages.data.MessagesStore
+import dev.rosty.messages.inbox.ResourceInboxWords
+import dev.rosty.messages.inbox.waPreview
+import dev.rosty.messages.notify.AnnouncerSources
+import dev.rosty.messages.notify.MessageAnnouncer
+import dev.rosty.messages.notify.ReplyRouter
+import dev.rosty.messages.schedule.FileQueueStore
+import dev.rosty.messages.schedule.GatewayWaScheduleRemote
+import dev.rosty.messages.schedule.ScheduleCenter
 import dev.rosty.messages.spam.CodeCleanup
 import dev.rosty.messages.spam.CodeCleanupWorker
 import dev.rosty.messages.spam.SpamActions
@@ -43,6 +53,7 @@ import dev.rosty.platform.identity.PhoneNumbers
 import dev.rosty.platform.sms.AndroidScheduledSmsRepository
 import dev.rosty.platform.sms.AndroidSmsRepository
 import dev.rosty.platform.sms.ScheduledSmsRepository
+import dev.rosty.platform.sms.SmsQuery
 import dev.rosty.platform.sms.SmsRepository
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionGroup
@@ -53,6 +64,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * What Rosty Messages adds to the shared [ShellContainer] (ARCH 5.3). Every member is lazy and built by a `create*`
@@ -153,6 +166,60 @@ open class MessagesContainer(
     /** The emoji used last for reactions (M49). */
     val waEmoji: WaRecentEmoji by lazy { WaRecentEmoji(java.io.File(context.filesDir, "recent-reactions.json")) }
 
+    /** Where a reply typed into a notification goes while the UI is attached (E6.9). */
+    val replies: ReplyRouter by lazy { createReplies() }
+
+    /** The notifications the app makes while its process runs: WhatsApp from the event stream, the switches (E6.9). */
+    val announcer: MessageAnnouncer by lazy { createAnnouncer() }
+
+    /** Scheduled send (E6.10, AD-MSG6): the local SMS queue with its alarms and the gateway's WhatsApp items. */
+    val schedule: ScheduleCenter by lazy { createSchedule() }
+
+    protected open fun createReplies(): ReplyRouter =
+        ReplyRouter(
+            sms = sms,
+            wa = { jid, text -> waOffline.enqueue(jid, WaSyncAction.SendText(text)) },
+            recipients = { thread -> withContext(Dispatchers.IO) { SmsQuery.addressesFor(context, thread) } },
+            sim = { thread ->
+                store.prefs.value
+                    ?.simChoices
+                    ?.get(thread)
+            },
+            now = System::currentTimeMillis,
+        )
+
+    protected open fun createAnnouncer(): MessageAnnouncer {
+        val words = ResourceInboxWords(context.resources)
+        return MessageAnnouncer(
+            context,
+            scope,
+            AnnouncerSources(
+                ops = ops,
+                prefs = store.prefs,
+                loadPrefs = { store.load() },
+                live = waOffline.live,
+                chatOf = { jid ->
+                    withTimeoutOrNull(CHAT_LOOKUP_MS) { waChats.chats.first() }?.firstOrNull { it.jid == jid }
+                },
+                nameOf = { number -> book.owner(number)?.displayName },
+                preview = { body -> waPreview(body, MessageMeta(), words) },
+                pushWake = context.resources.getBoolean(R.bool.push_wake),
+                now = System::currentTimeMillis,
+            ),
+        )
+    }
+
+    protected open fun createSchedule(): ScheduleCenter =
+        ScheduleCenter(
+            scope = scope,
+            ops = ops,
+            alarms = scheduledSms,
+            remote = GatewayWaScheduleRemote(wa),
+            live = waOffline.live,
+            queue = FileQueueStore(context.noBackupFilesDir),
+            now = System::currentTimeMillis,
+        )
+
     protected open fun createWaRemote(): WaRemote = GatewayWaRemote(wa)
 
     protected open fun createWaOffline(): WaOffline = realWaOffline(this, waRemote)
@@ -211,4 +278,8 @@ open class MessagesContainer(
     protected open fun createSharedOps(): SharedOps = NativeSharedOps(rust)
 
     protected open fun createQr(): QrOps = NativeQrOps(rust)
+
+    private companion object {
+        const val CHAT_LOOKUP_MS = 2_000L
+    }
 }

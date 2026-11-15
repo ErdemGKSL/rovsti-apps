@@ -46,6 +46,9 @@ import dev.rosty.messages.compose.presentForward
 import dev.rosty.messages.inbox.InboxAction
 import dev.rosty.messages.inbox.presentMute
 import dev.rosty.messages.inbox.rememberInboxViewModel
+import dev.rosty.messages.notify.TrackOpenConversation
+import dev.rosty.messages.schedule.ScheduledStrip
+import dev.rosty.messages.schedule.rememberSmsScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.messages.viewer.openAttachment
@@ -236,6 +239,8 @@ fun SmsThreadPage(
     val detector = rememberDetector(container)
     val selectLabels = rememberSelectLabels()
     val labels = rememberToolLabels()
+    TrackOpenConversation(model.tag)
+    val schedule = rememberSmsScheduleHost(container, overlays, route, composer)
     val actions =
         remember(model, res, onBack, overlays, host, state.title) {
             ConversationActions(
@@ -290,6 +295,10 @@ fun SmsThreadPage(
                         pill,
                         overlays,
                     ) { text, sensitive -> container.clipboard.copy(text, sensitive = sensitive) }
+                    // M47: a copied code books its message for deletion when the user turned that on.
+                    if (pill.kind == PillKind.CopyCode) {
+                        container.scope.launch { container.codeCleanup.copied(route.threadId, pill.value) }
+                    }
                 },
                 onToggleSelect = host.tools::toggleSelect,
                 onSelectAction = { action ->
@@ -417,6 +426,9 @@ fun SmsThreadPage(
             labels = labels,
             selectLabels = selectLabels,
             composerModifier = Modifier.pasteImages(stage),
+            onSendLongPress = schedule::ask,
+            sendLaterLabel = schedule.words.title,
+            aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
         )
     }
 }

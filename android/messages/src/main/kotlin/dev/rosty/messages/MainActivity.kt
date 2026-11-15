@@ -4,7 +4,10 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.transition.Tab
+import dev.rosty.messages.schedule.ScheduleNotices
 import dev.rosty.people.ui.LocalAvatarResolver
 import dev.rosty.platform.PlatformEvents
 import dev.rosty.shell.NavSpec
@@ -24,12 +27,22 @@ class MainActivity : RostyShellActivity<MessagesRoute>() {
     override val navSpec: NavSpec<MessagesRoute> = NavSpec(MessagesTabs, MessagesRoots, MessagesRoute.serializer())
 
     override fun routeFor(extras: Bundle?): Pair<Tab, List<MessagesRoute>>? =
-        messagesRouteFor(IntentFacts(threadTag = extras?.getString(EXTRA_THREAD_TAG)))
+        messagesRouteFor(
+            IntentFacts(
+                threadTag = extras?.getString(EXTRA_THREAD_TAG),
+                messageId = extras?.getString(EXTRA_MESSAGE_ID),
+                messageAtMs = extras?.getLong(EXTRA_MESSAGE_AT, 0L)?.takeIf { it > 0 },
+            ),
+        )
 
     override fun routeFor(intent: Intent): Pair<Tab, List<MessagesRoute>>? {
         val route = messagesRouteFor(IntentFacts.of(intent))
         // A link is used once: a rotation or a restart must not open the same conversation again.
-        if (route != null) intent.removeExtra(EXTRA_THREAD_TAG)
+        if (route != null) {
+            intent.removeExtra(EXTRA_THREAD_TAG)
+            intent.removeExtra(EXTRA_MESSAGE_ID)
+            intent.removeExtra(EXTRA_MESSAGE_AT)
+        }
         return route
     }
 
@@ -42,6 +55,11 @@ class MainActivity : RostyShellActivity<MessagesRoute>() {
     override fun onStart() {
         super.onStart()
         PlatformEvents.uiAttached = true
+        // Off the main thread: both read files through the Rust core, which may still be starting.
+        container.scope.launch {
+            container.announcer.start()
+            container.schedule.start()
+        }
     }
 
     override fun onStop() {
@@ -53,8 +71,11 @@ class MainActivity : RostyShellActivity<MessagesRoute>() {
     @Composable
     override fun Content() {
         // Every avatar goes through the resolver (own photo, else the WhatsApp picture, else initials; X.1c).
+        val overlays = remember { OverlayController() }
         CompositionLocalProvider(LocalAvatarResolver provides container.avatarResolver) {
-            MessagesApp(container = container, navigator = navigator)
+            MessagesApp(container = container, navigator = navigator, overlays = overlays)
+            // A scheduled message that could not be sent says so on whatever page is up (E6.10).
+            ScheduleNotices(container, overlays) { navigator.push(it) }
         }
     }
 }

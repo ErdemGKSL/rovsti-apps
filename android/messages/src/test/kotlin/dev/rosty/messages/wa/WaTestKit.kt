@@ -6,7 +6,10 @@ import dev.rosty.core.RustError
 import dev.rosty.core.model.wa.BytesAnswer
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.MediaKind
+import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MessageBody
+import dev.rosty.core.model.wa.Quoted
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
 import dev.rosty.core.model.wa.StatusList
@@ -14,11 +17,17 @@ import dev.rosty.core.model.wa.TypingState
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncChat
 import dev.rosty.core.model.wa.WaSyncEvent
+import dev.rosty.core.model.wa.WaSyncEvictRequest
+import dev.rosty.core.model.wa.WaSyncEvicted
+import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncFetch
 import dev.rosty.core.model.wa.WaSyncKind
+import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncRowState
+import dev.rosty.core.model.wa.WaSyncThreadPage
+import dev.rosty.core.model.wa.WaSyncThreadRequest
 import dev.rosty.core.ops.WaSyncOps
 import dev.rosty.core.ops.WaSyncStore
 import kotlinx.coroutines.CoroutineScope
@@ -106,9 +115,21 @@ class FakeWaRemote : WaRemote {
         state: TypingState,
     ): Outcome<Unit> = gate { typed += chat to state }
 
-    override suspend fun thumbnail(messageId: String): Outcome<BytesAnswer> = Outcome.Err(LOST)
+    /** The thumbnails and files the gateway has, by message id; anything else is a lost connection. */
+    val thumbnails = mutableMapOf<String, BytesAnswer>()
+    val files = mutableMapOf<String, BytesAnswer>()
+    val thumbnailCalls = mutableListOf<String>()
+    val mediaCalls = mutableListOf<String>()
 
-    override suspend fun media(messageId: String): Outcome<BytesAnswer> = Outcome.Err(LOST)
+    override suspend fun thumbnail(messageId: String): Outcome<BytesAnswer> {
+        thumbnailCalls += messageId
+        return thumbnails[messageId]?.takeIf { !down }?.let { Outcome.Ok(it) } ?: Outcome.Err(LOST)
+    }
+
+    override suspend fun media(messageId: String): Outcome<BytesAnswer> {
+        mediaCalls += messageId
+        return files[messageId]?.takeIf { !down }?.let { Outcome.Ok(it) } ?: Outcome.Err(LOST)
+    }
 
     override suspend fun statuses(): Outcome<StatusList> =
         gate {
@@ -125,6 +146,69 @@ class FakeWaRemote : WaRemote {
     companion object {
         const val SENT_AT = 1_790_000_100_000L
         val LOST = RustError.Network("connection lost")
+    }
+}
+
+/**
+ * What the Rust store does with media and the fake does not model: a thread row says whether its thumbnail is stored and
+ * where its downloaded file is, a send of a file in the outbox is a row of that file (kind, type, size, path), a queued
+ * reply names what it answers, and [mediaEvict] lets go of the files in [evictNext].
+ */
+class MediaStoreOps(
+    private val inner: FakeWaSyncOps,
+) : WaSyncOps by inner {
+    /** What the next `media_evict` answers (and forgets the path of). */
+    val evictNext = mutableListOf<WaSyncEvicted>()
+    private val evicted = mutableSetOf<Pair<String, String>>()
+
+    override suspend fun thread(req: WaSyncThreadRequest): Outcome<WaSyncThreadPage> =
+        when (val page = inner.thread(req)) {
+            is Outcome.Err -> page
+            is Outcome.Ok -> Outcome.Ok(page.value.copy(items = page.value.items.map { decorate(it) }))
+        }
+
+    private suspend fun decorate(row: WaSyncMessage): WaSyncMessage {
+        val queued = inner.queue.firstOrNull { it.clientId == row.id }
+        return when (val action = queued?.action) {
+            is WaSyncAction.SendMedia -> {
+                row.copy(
+                    kind =
+                        when (action.media) {
+                            MediaKind.Image -> WaSyncKind.Image
+                            MediaKind.Video -> WaSyncKind.Video
+                            MediaKind.Audio -> WaSyncKind.Audio
+                            MediaKind.Document -> WaSyncKind.Document
+                            MediaKind.Sticker -> WaSyncKind.Sticker
+                        },
+                    mime = action.mime,
+                    size = action.size,
+                    mediaPath = action.file,
+                    quoted = action.quotedId?.let { Quoted(it, null, null) },
+                )
+            }
+
+            is WaSyncAction.SendText -> {
+                row.copy(quoted = action.quotedId?.let { Quoted(it, null, null) })
+            }
+
+            else -> {
+                val media =
+                    (inner.media(WaSyncMediaRequest(FakeWaSyncOps.HANDLE, row.chat, row.id)) as? Outcome.Ok)?.value
+                val path = media?.path?.takeIf { (row.chat to row.id) !in evicted }
+                row.copy(
+                    hasThumbnail = row.hasThumbnail || media?.thumbnailB64 != null,
+                    mediaPath =
+                        path ?: row.mediaPath,
+                )
+            }
+        }
+    }
+
+    override suspend fun mediaEvict(req: WaSyncEvictRequest): Outcome<WaSyncEviction> {
+        val gone = evictNext.toList()
+        evictNext.clear()
+        evicted += gone.map { it.chat to it.id }
+        return Outcome.Ok(WaSyncEviction(gone, 0))
     }
 }
 
@@ -216,6 +300,43 @@ class WaTestKit(
             text = text,
             reactions = emptyList(),
             state = state,
+        )
+
+        /** A kit whose store also does what Rust does with media ([MediaStoreOps]). */
+        fun withMedia(
+            scope: CoroutineScope,
+            graceMs: Long = GRACE_MS,
+        ): Pair<WaTestKit, MediaStoreOps> {
+            val ops = FakeWaSyncOps(INSTANCE)
+            val media = MediaStoreOps(ops)
+            return WaTestKit(scope, ops, storeOps = media, graceMs = graceMs) to media
+        }
+
+        /** A received (or sent) attachment as the store returns it. */
+        fun media(
+            chat: String,
+            id: String,
+            atMs: Long,
+            kind: WaSyncKind,
+            mime: String,
+            size: Long,
+            meta: MediaMeta = MediaMeta(),
+            caption: String? = null,
+            fromMe: Boolean = false,
+            sender: String? = if (fromMe) null else chat,
+        ) = WaSyncMessage(
+            id = id,
+            chat = chat,
+            sender = sender,
+            fromMe = fromMe,
+            timestampMs = atMs,
+            kind = kind,
+            text = caption,
+            mime = mime,
+            size = size,
+            reactions = emptyList(),
+            state = if (fromMe) WaSyncRowState.Read else WaSyncRowState.Received,
+            media = meta,
         )
 
         fun rich(

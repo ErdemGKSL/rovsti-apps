@@ -71,8 +71,8 @@ private val FieldTextPadding: Dp = 8.dp
 private val ClearSize: Dp = 36.dp
 private val ClearGlyph: Dp = 14.dp
 private val LeadingGlyph: Dp = 16.dp
-private const val FILL_MS = 200
-private const val DISABLED_ALPHA = 0.35f
+internal const val FIELD_FILL_MS = 200
+internal const val FIELD_DISABLED_ALPHA = 0.35f
 
 /**
  * A single-line text field in a capsule pill: the glisse `Input` over the platform text stack.
@@ -109,36 +109,14 @@ fun GlassTextField(
     val focused by interaction.collectIsFocusedAsState()
     val fill by animateColorAsState(
         if (focused) tokens.glassActive else Color.Transparent,
-        tween(FILL_MS),
+        tween(FIELD_FILL_MS),
         label = "fieldFill",
     )
     val focus = focusRequester ?: remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     BasicTextField(
         state = state,
-        modifier =
-            modifier
-                .heightIn(min = FieldMinHeight)
-                .alpha(if (enabled) 1f else DISABLED_ALPHA)
-                .rostyGlass(
-                    GlassPreset.Bar,
-                    if (multiline) RoundedCornerShape(FieldMinHeight / 2) else RostyShapes.capsule,
-                    "field",
-                    outerShadow = false,
-                ).drawBehind {
-                    drawPill(
-                        fill,
-                        tokens.edge,
-                        if (multiline) FieldMinHeight.toPx() / 2f else Float.MAX_VALUE,
-                    )
-                }.pointerInput(enabled) {
-                    detectTapGestures {
-                        if (enabled) {
-                            focus.requestFocus()
-                            keyboard?.show()
-                        }
-                    }
-                }.focusRequester(focus),
+        modifier = modifier.glassFieldPill(enabled, multiline, { fill }, tokens.edge, focus, keyboard),
         enabled = enabled,
         textStyle = RostyTheme.type.body.copy(color = tokens.foreground),
         lineLimits =
@@ -152,37 +130,81 @@ fun GlassTextField(
         interactionSource = interaction,
         cursorBrush = SolidColor(colors.accent),
         decorator =
-            TextFieldDecorator { inner ->
-                Row(
-                    Modifier.padding(horizontal = FieldPaddingStart),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(FieldGap),
-                ) {
-                    val glyph = leading ?: if (search) RostyIcons.Search else null
-                    if (glyph != null) {
-                        RostyIcon(glyph, contentDescription = null, tint = colors.labelSecondary, size = LeadingGlyph)
-                    }
-                    Box(
-                        Modifier.weight(1f).padding(vertical = FieldTextPadding),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        if (state.text.isEmpty()) {
-                            RostyText(
-                                placeholder,
-                                style = RostyTheme.type.body,
-                                color = colors.labelSecondary,
-                                maxLines = 1,
-                            )
-                        }
-                        inner()
-                    }
-                    if (search && enabled && state.text.isNotEmpty()) {
-                        ClearButton(onClear = { state.clearText() })
-                    }
+            glassFieldDecorator(state, placeholder, leading ?: if (search) RostyIcons.Search else null) {
+                if (search && enabled && state.text.isNotEmpty()) {
+                    ClearButton(onClear = { state.clearText() })
                 }
             },
     )
 }
+
+/** The pill every glass field draws: glass, the focus fill read in the draw phase, a hairline, tap-to-focus. */
+@Composable
+internal fun Modifier.glassFieldPill(
+    enabled: Boolean,
+    multiline: Boolean,
+    /** Read in the draw phase only, so an animated fill never recomposes the field. */
+    fill: () -> Color,
+    edge: Color,
+    focus: FocusRequester,
+    keyboard: androidx.compose.ui.platform.SoftwareKeyboardController?,
+): Modifier =
+    heightIn(min = FieldMinHeight)
+        .alpha(if (enabled) 1f else FIELD_DISABLED_ALPHA)
+        .rostyGlass(
+            GlassPreset.Bar,
+            if (multiline) RoundedCornerShape(FieldMinHeight / 2) else RostyShapes.capsule,
+            "field",
+            outerShadow = false,
+        ).drawBehind {
+            drawPill(
+                fill(),
+                edge,
+                if (multiline) FieldMinHeight.toPx() / 2f else Float.MAX_VALUE,
+            )
+        }.pointerInput(enabled) {
+            detectTapGestures {
+                if (enabled) {
+                    focus.requestFocus()
+                    keyboard?.show()
+                }
+            }
+        }.focusRequester(focus)
+
+/** The inside of a glass field: an optional leading glyph, the placeholder under the text, then [trailing]. */
+internal fun glassFieldDecorator(
+    state: TextFieldState,
+    placeholder: String,
+    glyph: ImageVector?,
+    trailing: @Composable () -> Unit = {},
+): TextFieldDecorator =
+    TextFieldDecorator { inner ->
+        val colors = RostyTheme.colors
+        Row(
+            Modifier.padding(horizontal = FieldPaddingStart),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(FieldGap),
+        ) {
+            if (glyph != null) {
+                RostyIcon(glyph, contentDescription = null, tint = colors.labelSecondary, size = LeadingGlyph)
+            }
+            Box(
+                Modifier.weight(1f).padding(vertical = FieldTextPadding),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (state.text.isEmpty()) {
+                    RostyText(
+                        placeholder,
+                        style = RostyTheme.type.body,
+                        color = colors.labelSecondary,
+                        maxLines = 1,
+                    )
+                }
+                inner()
+            }
+            trailing()
+        }
+    }
 
 /** Capsule fill with a hairline edge; both colours come from the glass tokens and are drawn, not composed. */
 private fun DrawScope.drawPill(

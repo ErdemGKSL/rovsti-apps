@@ -2,6 +2,7 @@ package dev.rosty.platform.sms
 
 import dev.rosty.core.model.messages.DeliveryState
 import dev.rosty.core.model.messages.FiredSms
+import dev.rosty.core.model.messages.MmsRow
 import dev.rosty.core.model.messages.SmsKey
 import dev.rosty.core.model.messages.SmsMessagesPayload
 import dev.rosty.core.model.messages.SmsRow
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import dev.rosty.core.model.messages.SmsSend as SmsSendModel
@@ -22,8 +24,24 @@ import dev.rosty.core.model.messages.SmsSend as SmsSendModel
 class FakeSmsRepository(
     rows: List<SmsRow> = emptyList(),
     private val simList: SmsSims = SmsSims(emptyList(), null),
+    /** The MMS [backupMms] answers (the other reads and writes are SMS only). */
+    private val mmsRows: List<MmsRow> = emptyList(),
 ) : SmsRepository {
     private val all = MutableStateFlow(rows)
+
+    override fun backupSms(pageSize: Int): Flow<List<SmsRow>> =
+        pagesOf(pageSize) { all.value.sortedWith(compareByDescending<SmsRow> { it.dateMs }.thenByDescending { it.id }) }
+
+    override fun backupMms(pageSize: Int): Flow<List<MmsRow>> =
+        pagesOf(pageSize) { mmsRows.sortedWith(compareByDescending<MmsRow> { it.dateMs }.thenByDescending { it.id }) }
+
+    private fun <T> pagesOf(
+        pageSize: Int,
+        rows: () -> List<T>,
+    ): Flow<List<T>> =
+        flow {
+            for (page in rows().chunked(pageSize.coerceAtLeast(1))) emit(page)
+        }
 
     val sent = ArrayList<SmsSendModel>()
 

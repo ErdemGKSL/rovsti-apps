@@ -42,6 +42,34 @@ Close: merge `origin/ui-overhaul`, the gate with Rust (`scripts/kotlin-ui-check.
 `cargo test -p wa_gateway --profile checks`, note at the top of `e6-status.md`, message to the main thread naming the
 gateway commit.
 
+## For the close note (asked by the main thread)
+
+**Database backup before the gateway's v7 migration: yes.**
+- The migration itself is additive and runs in one transaction (`store.rs::migrate`), so a failed migration leaves v6.
+- But there is no way back without a copy: a gateway older than this one refuses a v7 database ("database schema v7
+  is newer than this gateway"), so rolling the binary back needs the pre-v7 file.
+- The first connect after the deploy rewrites rows (the LID sweep renames authors, reactions, receipts, quotes,
+  mentions and profiles to the number, and joins receipt rows); that is not reversible either.
+- What to copy: `gateway.db` in the gateway's data directory (`WA_GATEWAY_DATA`), with the gateway stopped, or with
+  `sqlite3 gateway.db ".backup gateway-v6.db"` while it runs (the store is WAL). `instances/<id>/wa.db` (the Signal
+  keys) is not migrated by this change; `config.example.toml` already says to back the directory up.
+
+**What to try on the real gateway, in order**
+1. After the deploy, read the log of the first connect: `lid-merge: sweep moved M of T stored LIDs in N ms`
+   (`wa/lid.rs::sweep_with`, commit `7dc63514`). `N` is the time of one sweep; the line is written when the sweep found
+   LIDs or took 250 ms or more. A sweep runs at every connect and on a device-list or number-change event. If `N` is
+   regularly above about a second, the listing (`store/identity.rs::lids_seen`, `LIKE '%@lid'` over `messages`) needs
+   an index or a rarer sweep: tell this thread.
+2. `GET /v1/identity/mappings` with the connect key: the pairs the library knew at connect are listed; `next` pages.
+3. `GET /v1/instance`: `own_lid` is filled.
+4. A group whose members show as LIDs in WhatsApp (a community group): open it, the authors are numbers or names where
+   a pair is known, and each participant carries `lid` and `pn` in the group info answer.
+5. Send a reaction and a reply in a LID-addressed group from Rosty and look at the phone: the reaction sits on the
+   right message and the reply quotes it (the outbound keys now use the wire id; not verified on the wire).
+6. Read a group message in Rosty: on the sender's phone the ticks turn blue once, not early (receipts by person).
+7. Send a message from the phone to a contact whose chat is LID-addressed: it lands in the number chat, not a new
+   LID chat (`peer_recipient_pn`).
+
 ## Evidence
 
 - **Step 1** (`7e8759d8`, merge `9986fc23`): `rosty_core::wa_identity` (`id`, `source`, `rows`, `map`, `name`), 63 tests

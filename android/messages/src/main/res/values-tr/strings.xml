@@ -235,4 +235,31 @@
     <string name="inbox_results_no_sms">SMS aranmadı (erişim yok)</string>
     <string name="tools_message_gone">Bu mesaj artık burada değil</string>
     <string name="conversation_forwarded">İletildi</string>
+    <!-- E6.4b -->
+    <string name="wa_media_too_large">Bu dosya %1$d MB\'tan büyük</string>
+    <string name="wa_media_cant_attach">Dosya eklenemedi</string>
+    <string name="wa_media_cant_download">Dosya indirilemedi</string>
+    <string name="wa_media_cant_open">Bu dosyayı açabilecek uygulama yok</string>
+    <string name="wa_media_saved">Kaydedildi</string>
+    <string name="wa_media_not_saved">Dosya kaydedilemedi</string>
+    <string name="wa_media_cant_share">Dosya paylaşılamadı</string>
+    <string name="wa_voice_cant_play">Sesli mesaj oynatılamadı</string>
+    <string name="wa_voice_play">Oynat</string>
+    <string name="wa_voice_pause">Duraklat</string>
+    <string name="wa_voice_speed">Oynatma hızı %1$s</string>
+    <string name="wa_reply">Yanıtla</string>
+    <string name="wa_reply_cancel">Yanıtı iptal et</string>
+    <string name="wa_attachment_remove">Eki kaldır</string>
+    <string name="wa_attach">Ekle</string>
+    <string name="wa_attach_photo">Fotoğraf</string>
+    <string name="wa_attach_video">Video</string>
+    <string name="wa_attach_document">Belge</string>
+    <string name="wa_attach_paste">Resmi yapıştır</string>
+    <string name="wa_paste_nothing">Panoda resim yok</string>
+    <string name="wa_sender_card">%1$s hakkında</string>
+    <string name="wa_sender_message">Özel mesaj gönder</string>
+    <string name="wa_sender_call">Ara</string>
+    <string name="wa_sender_open_contact">Kişiyi aç</string>
+    <string name="wa_sender_add_contact">Kişilere ekle</string>
+    <string name="wa_no_app">Bunun için uygulama bulunamadı</string>
 </resources>

@@ -1,6 +1,7 @@
 package dev.rosty.messages.wa
 
 import android.content.res.Resources
+import android.text.format.Formatter
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -13,6 +14,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
@@ -46,15 +48,20 @@ import dev.rosty.messages.inbox.ResourceInboxWords
 import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
+import dev.rosty.platform.identity.PhoneNumbers
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.withContext
 
 /** [WaWords] from the app's resources. */
 class ResourceWaWords(
     private val res: Resources,
+    /** "1.2 MB" in the phone's language; the default is for tests without a context. */
+    private val sizeOf: (Long) -> String = ::plainSize,
 ) : WaWords {
     override val placeholder = res.getString(R.string.wa_thread_placeholder)
     override val sending = res.getString(R.string.wa_thread_sending)
@@ -80,7 +87,19 @@ class ResourceWaWords(
     override fun edited(clock: String) = res.getString(R.string.wa_thread_edited, clock)
 
     override fun unread(count: Int) = res.getQuantityString(R.plurals.conversation_unread, count, count)
+
+    override fun size(bytes: Long) = sizeOf(bytes)
 }
+
+/** "512 B", "340 KB", "1.2 MB": a file size without a context (1024-based, one decimal from a megabyte up). */
+fun plainSize(bytes: Long): String =
+    when {
+        bytes < KILO -> "$bytes B"
+        bytes < KILO * KILO -> "${bytes / KILO} KB"
+        else -> "%.1f MB".format(java.util.Locale.ROOT, bytes / (KILO * KILO).toDouble())
+    }
+
+private const val KILO = 1024L
 
 /** The thread drafts in `drafts.json`, next to the SMS ones. */
 class StoreWaDrafts(
@@ -113,6 +132,9 @@ fun waBubbleMenu(
         bubble.state == BubbleState.Waiting || bubble.state == BubbleState.Failed || bubble.state == BubbleState.Sending
     if (bubble.state == BubbleState.Failed) {
         items += MenuItem.Action(res.getString(R.string.sms_retry), RostyIcons.Rotate) { model.retry(bubble.key) }
+    }
+    if (bubble.canReply) {
+        items += MenuItem.Action(res.getString(R.string.wa_reply), RostyIcons.Message) { model.startReply(bubble.key) }
     }
     if (!bubble.deleted && bubble.text.isNotEmpty()) {
         items += MenuItem.Action(res.getString(R.string.conversation_copy), RostyIcons.Copy) { model.copy(bubble.key) }
@@ -172,9 +194,18 @@ fun rememberWaThreadViewModel(
                                     ?.step
                             },
                             now = System::currentTimeMillis,
+                            media = container.waMedia,
+                            voice = container.waVoice,
+                            emoji = container.waEmoji,
+                            stage = { uri -> stageForWhatsApp(container, uri) },
+                            readable = { number ->
+                                withContext(Dispatchers.Default) {
+                                    PhoneNumbers.forReading(number, container.homeRegion)
+                                }
+                            },
                         ),
                         jid,
-                        ResourceWaWords(res),
+                        ResourceWaWords(res) { bytes -> Formatter.formatShortFileSize(context, bytes) },
                         ResourceInboxWords(res),
                         days,
                     )
@@ -207,6 +238,10 @@ fun WaThreadPage(
     WhileResumed(model)
     OlderOnReachingTheEnd(listState, state.items.size, state.hasOlder && !state.loadingOlder, model::loadOlder)
     ConversationEffects(model.effects, overlays, composer) { container.clipboard.copy(it) }
+    WaMediaEffects(model, container, overlays)
+    val voice by model.voice.collectAsState()
+    DisposableEffect(model) { onDispose { model.stopVoice() } }
+    val attachMenu = rememberWaAttachMenu(model, overlays)
     val host =
         rememberToolHost(
             container,
@@ -221,7 +256,7 @@ fun WaThreadPage(
     val labels = rememberToolLabels()
     val number = remember(route.jid) { numberOfJid(route.jid) }
     val actions =
-        remember(model, res, onBack, host, state.title) {
+        remember(model, res, onBack, host, state.title, attachMenu, navigator) {
             ConversationActions(
                 onBack = onBack,
                 onSend = { text ->
@@ -229,7 +264,16 @@ fun WaThreadPage(
                     composer.setTextAndPlaceCursorAtEnd("")
                 },
                 onLoadOlder = model::loadOlder,
-                onBubbleTap = { bubble -> if (bubble.state == BubbleState.Failed) model.retry(bubble.key) },
+                onBubbleTap = { bubble ->
+                    when {
+                        bubble.state == BubbleState.Failed -> model.retry(bubble.key)
+
+                        // A picture opens, a file downloads and opens; a second tap on a text reacts (M32).
+                        bubble.media.isNotEmpty() && !bubble.deleted -> model.openMedia(bubble.key)
+
+                        else -> model.tap(bubble.key)
+                    }
+                },
                 menuFor = { waBubbleMenu(it, res, model) },
                 headerMenu =
                     headerMenu(
@@ -247,6 +291,15 @@ fun WaThreadPage(
                 onFindNewer = host.tools::newer,
                 onFindClose = host.tools::closeFind,
                 onScrolled = host.tools::scrolled,
+                onSwipeReply = { model.startReply(it.key) },
+                onCancelReply = model::cancelReply,
+                onRemoveAttachment = model::removeAttachment,
+                attachMenu = attachMenu,
+                onMediaAction = { bubble, action -> model.mediaAction(bubble.key, action) },
+                onVoiceToggle = { model.toggleVoice(it.key) },
+                onVoiceSeek = { bubble, fraction -> model.seekVoice(bubble.key, fraction) },
+                onVoiceSpeed = model::nextVoiceSpeed,
+                senderCard = { bubble -> WaSenderCard(bubble, model, container, navigator, overlays) },
             )
         }
     CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
@@ -262,6 +315,8 @@ fun WaThreadPage(
                 ),
             tools = toolsState,
             labels = labels,
+            voice = voice,
+            composerModifier = Modifier.pastedPictures(model),
         )
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -48,6 +49,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.rosty.design.chrome.ScreenScaffold
@@ -63,8 +65,10 @@ import dev.rosty.design.overlay.LocalOverlayOrNull
 import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.longPressMenu
 import dev.rosty.design.overlay.menuTrigger
+import dev.rosty.design.overlay.popoverTrigger
 import dev.rosty.design.text.ComposerField
 import dev.rosty.design.text.SearchField
+import dev.rosty.design.text.imeOverlapPadding
 import dev.rosty.design.text.rtlSafe
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
@@ -72,10 +76,12 @@ import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
+import dev.rosty.messages.theme.MediaMetrics
 import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.messages.ui.MessagesAvatar
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** Test tags of a conversation page. */
 object ConversationTags {
@@ -92,6 +98,8 @@ object ConversationTags {
     const val JumpLatest = "conversation-jump-latest"
 
     fun bubble(key: String) = "bubble-$key"
+
+    fun sender(key: String) = "sender-$key"
 }
 
 /** What a conversation page does with taps; the view model behind it (SMS or WhatsApp) answers. */
@@ -110,6 +118,19 @@ class ConversationActions(
     val onFindNewer: () -> Unit = {},
     val onFindClose: () -> Unit = {},
     val onScrolled: () -> Unit = {},
+    /** M31: a swipe to the right on a bubble that [BubbleUi.canReply]; null: bubbles do not swipe. */
+    val onSwipeReply: ((BubbleUi) -> Unit)? = null,
+    val onCancelReply: () -> Unit = {},
+    val onRemoveAttachment: () -> Unit = {},
+    /** What the + beside the composer offers; empty: no button. */
+    val attachMenu: ImmutableList<MenuItem> = kotlinx.collections.immutable.persistentListOf(),
+    /** Save or Share on a file row. */
+    val onMediaAction: (BubbleUi, MediaAction) -> Unit = { _, _ -> },
+    val onVoiceToggle: (BubbleUi) -> Unit = {},
+    val onVoiceSeek: (BubbleUi, Float) -> Unit = { _, _ -> },
+    val onVoiceSpeed: () -> Unit = {},
+    /** M50: the card a tap on a group sender's name opens; null: names are plain text. */
+    val senderCard: (@Composable (BubbleUi) -> Unit)? = null,
 )
 
 /** The labels of the tools on a conversation page. */
@@ -140,6 +161,10 @@ fun ConversationScreen(
     olderLabel: String,
     tools: ToolsUi = ToolsUi(),
     labels: ToolLabels? = null,
+    /** The voice note in the player (M17). */
+    voice: VoiceUi? = null,
+    /** Added to the composer's text field (a content receiver for pasted pictures, M46). */
+    composerModifier: Modifier = Modifier,
 ) {
     val overlays = LocalOverlayOrNull.current
     // Find, jump to date: scroll the target into view once, then let the tools know.
@@ -212,6 +237,8 @@ fun ConversationScreen(
                                     actions,
                                     glow =
                                         item.key == tools.highlight,
+                                    voice = voice?.takeIf { it.key == item.key },
+                                    speedLabel = state.voiceSpeed,
                                 )
                             }
                         }
@@ -287,13 +314,41 @@ fun ConversationScreen(
                             }
                         }
                     }
-                    ComposerField(
-                        state = composer,
-                        onSend = actions.onSend,
-                        fieldModifier = Modifier.testTag(ConversationTags.Composer),
-                        placeholder = mode.placeholder,
-                        sendLabel = sendLabel,
-                    )
+                    state.reply?.let { ReplyBar(it, actions.onCancelReply) }
+                    state.attachment?.let {
+                        AttachmentBar(
+                            it,
+                            sendLabel,
+                            onRemove = actions.onRemoveAttachment,
+                            onSend = { actions.onSend(composer.text.toString()) },
+                        )
+                    }
+                    val attach = actions.attachMenu.isNotEmpty()
+                    Box {
+                        ComposerField(
+                            state = composer,
+                            onSend = actions.onSend,
+                            modifier =
+                                if (attach) {
+                                    Modifier.padding(start = MediaMetrics.AttachButton + Spacing.xs)
+                                } else {
+                                    Modifier
+                                },
+                            fieldModifier = Modifier.testTag(ConversationTags.Composer).then(composerModifier),
+                            placeholder = mode.placeholder,
+                            sendLabel = sendLabel,
+                        )
+                        if (attach) {
+                            AttachButton(
+                                actions.attachMenu,
+                                Modifier
+                                    .align(Alignment.BottomStart)
+                                    .navigationBarsPadding()
+                                    .imeOverlapPadding(excludeNavigationBar = false)
+                                    .padding(start = Spacing.gutter, bottom = Spacing.s + MediaMetrics.AttachLift),
+                            )
+                        }
+                    }
                 }
 
                 ComposerMode.NeedsRole -> {
@@ -424,57 +479,80 @@ private fun BubbleRow(
     bubble: BubbleUi,
     actions: ConversationActions,
     glow: Boolean = false,
+    voice: VoiceUi? = null,
+    speedLabel: String = "",
 ) {
     val overlays = LocalOverlayOrNull.current
     val maxWidth = (LocalConfiguration.current.screenWidthDp * MessagesMetrics.BubbleMaxFraction).dp
     val (fill, ink) = bubbleColors(bubble.outgoing)
     val menu = remember(bubble, actions) { actions.menuFor(bubble) }
     val tap = remember(bubble, actions) { { actions.onBubbleTap(bubble) } }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(
-                start = Spacing.gutter,
-                end = Spacing.gutter,
-                top = if (bubble.firstOfRun) MessagesMetrics.BubbleGroupGap else MessagesMetrics.BubbleGap,
-            ).testTag(ConversationTags.bubble(bubble.key)),
-        horizontalAlignment = if (bubble.outgoing) Alignment.End else Alignment.Start,
-    ) {
-        if (bubble.sender != null && bubble.firstOfRun) {
-            RostyText(
-                bubble.sender.rtlSafe(),
-                modifier = Modifier.padding(start = MessagesMetrics.BubblePadH, bottom = Spacing.textGap),
-                style = RostyTheme.type.caption1,
-                color = RostyTheme.colors.accent,
-                maxLines = 1,
-            )
+    val swipe = remember { ReplySwipeState() }
+    val onSwipe = actions.onSwipeReply
+    val swipes = bubble.canReply && onSwipe != null
+    Box(Modifier.fillMaxWidth().swipeToReply(swipe, swipes) { onSwipe?.invoke(bubble) }) {
+        if (swipes) {
+            ReplyGlyph(swipe.offset, Modifier.align(Alignment.CenterStart).padding(start = Spacing.gutter))
         }
-        val press =
-            if (overlays != null && menu.isNotEmpty()) {
-                Modifier.longPressMenu(
-                    overlays,
-                    menu,
-                    ContextMenuStyle.Lifted(preview = {
-                        BubbleBody(bubble, fill, ink, maxWidth)
-                    }),
-                    onTap = tap,
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(swipe.offset.value.roundToInt(), 0) }
+                .padding(
+                    start = Spacing.gutter,
+                    end = Spacing.gutter,
+                    top = if (bubble.firstOfRun) MessagesMetrics.BubbleGroupGap else MessagesMetrics.BubbleGap,
+                ).testTag(ConversationTags.bubble(bubble.key)),
+            horizontalAlignment = if (bubble.outgoing) Alignment.End else Alignment.Start,
+        ) {
+            if (bubble.sender != null && bubble.firstOfRun) {
+                val card = actions.senderCard
+                val opensCard =
+                    if (card != null && bubble.senderId != null && overlays != null) {
+                        Modifier.popoverTrigger(overlays, stringResource(R.string.wa_sender_card, bubble.sender)) {
+                            card(bubble)
+                        }
+                    } else {
+                        Modifier
+                    }
+                RostyText(
+                    bubble.sender.rtlSafe(),
+                    modifier =
+                        opensCard
+                            .padding(start = MessagesMetrics.BubblePadH, bottom = Spacing.textGap)
+                            .testTag(ConversationTags.sender(bubble.key)),
+                    style = RostyTheme.type.caption1,
+                    color = RostyTheme.colors.accent,
+                    maxLines = 1,
                 )
-            } else {
-                Modifier.clickable(onClick = tap)
             }
-        val glowAlpha by animateFloatAsState(if (glow) GLOW_ALPHA else 0f, label = "glow")
-        Box(
-            press
-                .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
-                .drawBehind { drawRect(GlowColor.copy(alpha = glowAlpha)) }
-                .padding(MessagesMetrics.GlowPad),
-        ) { BubbleBody(bubble, fill, ink, maxWidth) }
-        bubble.reactions?.let {
-            RostyText(
-                it,
-                modifier = Modifier.padding(horizontal = MessagesMetrics.BubblePadH),
-                style = RostyTheme.type.footnote,
-            )
+            val press =
+                if (overlays != null && menu.isNotEmpty()) {
+                    Modifier.longPressMenu(
+                        overlays,
+                        menu,
+                        ContextMenuStyle.Lifted(preview = {
+                            BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel)
+                        }),
+                        onTap = tap,
+                    )
+                } else {
+                    Modifier.clickable(onClick = tap)
+                }
+            val glowAlpha by animateFloatAsState(if (glow) GLOW_ALPHA else 0f, label = "glow")
+            Box(
+                press
+                    .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
+                    .drawBehind { drawRect(GlowColor.copy(alpha = glowAlpha)) }
+                    .padding(MessagesMetrics.GlowPad),
+            ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel) }
+            bubble.reactions?.let {
+                RostyText(
+                    it,
+                    modifier = Modifier.padding(horizontal = MessagesMetrics.BubblePadH),
+                    style = RostyTheme.type.footnote,
+                )
+            }
         }
     }
 }
@@ -485,6 +563,9 @@ private fun BubbleBody(
     fill: Color,
     ink: Color,
     maxWidth: androidx.compose.ui.unit.Dp,
+    actions: ConversationActions,
+    voice: VoiceUi? = null,
+    speedLabel: String = "",
 ) {
     val corner = MessagesMetrics.BubbleCorner
     val tail = MessagesMetrics.BubbleTail
@@ -535,7 +616,9 @@ private fun BubbleBody(
             }
         }
         for (media in bubble.media) {
-            if (media.isImage && media.model != null) {
+            if (media.kind != null) {
+                BubbleMediaView(media, MediaHost(bubble, ink, secondary, maxWidth, actions, voice, speedLabel))
+            } else if (media.isImage && media.model != null) {
                 val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
                 SizedImage(
                     model = media.model,

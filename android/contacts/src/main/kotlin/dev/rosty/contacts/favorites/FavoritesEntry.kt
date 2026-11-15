@@ -24,6 +24,8 @@ import dev.rosty.contacts.ContactsContainer
 import dev.rosty.contacts.ContactsRoute
 import dev.rosty.contacts.FavoritesTab
 import dev.rosty.contacts.R
+import dev.rosty.contacts.cards.CardStudioSubject
+import dev.rosty.contacts.cards.openCardStudio
 import dev.rosty.contacts.findComponentActivity
 import dev.rosty.contacts.startSafely
 import dev.rosty.design.list.InsetGroupedSection
@@ -77,7 +79,11 @@ fun FavoritesPage(
     PermissionGate(PermissionGroup.CALL_LOG)
     val viewModel = rememberFavoritesViewModel(container)
     val state by viewModel.state.collectAsState()
-    FavoritesEffects(viewModel.effects, navigator, LocalOverlay.current, LocalContext.current)
+    val overlays = LocalOverlay.current
+    val context = LocalContext.current
+    FavoritesEffects(viewModel.effects, navigator, overlays, context) { subject ->
+        overlays.openCardStudio(context, container, subject)
+    }
     FavoritesScreen(
         state = state,
         onAction = viewModel::onAction,
@@ -144,6 +150,10 @@ fun UpcomingPage(
                 is FavoritesEffect.OpenCard -> {
                     navigator.push(ContactsRoute.ContactCard(effect.id))
                 }
+
+                is FavoritesEffect.OpenCardStudio -> {
+                    overlays.openCardStudio(context, container, effect.subject)
+                }
             }
         }
     }
@@ -151,7 +161,13 @@ fun UpcomingPage(
     UpcomingScreen(
         state = state,
         onAction = { action ->
-            viewModel.onAction(if (action is FavoritesAction.Wish) action.copy(onPage = true) else action)
+            viewModel.onAction(
+                when (action) {
+                    is FavoritesAction.Wish -> action.copy(onPage = true)
+                    is FavoritesAction.MakeCard -> action.copy(onPage = true)
+                    else -> action
+                },
+            )
         },
         onBack = onBack,
         listState = listState,
@@ -165,8 +181,10 @@ fun FavoritesEffects(
     navigator: TabNavigator<ContactsRoute>,
     overlays: OverlayController,
     context: Context,
+    onCardStudio: (CardStudioSubject) -> Unit = {},
 ) {
     val latestOverlays = rememberUpdatedState(overlays)
+    val latestStudio = rememberUpdatedState(onCardStudio)
     LaunchedEffect(effects, navigator) {
         effects.collect { effect ->
             val toast: (String) -> Unit = { text -> latestOverlays.value.showToast(text) }
@@ -189,6 +207,10 @@ fun FavoritesEffects(
 
                 is FavoritesEffect.SaveCalendar -> {
                     Unit
+                }
+
+                is FavoritesEffect.OpenCardStudio -> {
+                    latestStudio.value(effect.subject)
                 }
             }
         }

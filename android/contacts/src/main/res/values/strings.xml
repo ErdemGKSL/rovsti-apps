@@ -488,4 +488,24 @@
     <string name="card_birthday_title_nameless">Happy birthday!</string>
     <plurals name="card_birthday_age"><item quantity="one">Turning %1$d</item><item quantity="other">Turning %1$d</item></plurals>
     <string name="card_new_number_subtitle">My new number</string>
+    <string name="card_studio_title">Make a Card</string>
+    <string name="card_studio_menu">Make a Card…</string>
+    <string name="card_studio_chip">Card</string>
+    <string name="card_template_birthday">Birthday</string>
+    <string name="card_template_contact">Contact</string>
+    <string name="card_template_number">Number</string>
+    <string name="card_palette_dawn">Dawn</string>
+    <string name="card_palette_lagoon">Lagoon</string>
+    <string name="card_palette_meadow">Meadow</string>
+    <string name="card_palette_dusk">Dusk</string>
+    <string name="card_palette_ink">Ink</string>
+    <string name="card_studio_colors">Colour</string>
+    <string name="card_studio_still">Still</string>
+    <string name="card_studio_animated">Animated</string>
+    <string name="card_studio_share">Share</string>
+    <string name="card_studio_save">Save</string>
+    <string name="card_studio_preview">Card preview</string>
+    <string name="card_studio_rendering">Making the card</string>
+    <string name="card_studio_failed">Couldn\'t make the card</string>
+    <string name="card_studio_cant_share">Couldn\'t share the card</string>
 </resources>

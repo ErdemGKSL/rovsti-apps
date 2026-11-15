@@ -1,0 +1,388 @@
+package dev.rosty.core
+
+import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.HandleAnswer
+import dev.rosty.core.model.wa.MessageBody
+import dev.rosty.core.model.wa.RichMessage
+import dev.rosty.core.model.wa.WaSyncAction
+import dev.rosty.core.model.wa.WaSyncApplied
+import dev.rosty.core.model.wa.WaSyncCancelled
+import dev.rosty.core.model.wa.WaSyncChat
+import dev.rosty.core.model.wa.WaSyncChatsAnswer
+import dev.rosty.core.model.wa.WaSyncChatsRequest
+import dev.rosty.core.model.wa.WaSyncClientIdRequest
+import dev.rosty.core.model.wa.WaSyncClosed
+import dev.rosty.core.model.wa.WaSyncCursor
+import dev.rosty.core.model.wa.WaSyncDue
+import dev.rosty.core.model.wa.WaSyncDueRequest
+import dev.rosty.core.model.wa.WaSyncEnqueueRequest
+import dev.rosty.core.model.wa.WaSyncEventsRequest
+import dev.rosty.core.model.wa.WaSyncEvictRequest
+import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncHandleRequest
+import dev.rosty.core.model.wa.WaSyncItemAnswer
+import dev.rosty.core.model.wa.WaSyncKind
+import dev.rosty.core.model.wa.WaSyncMedia
+import dev.rosty.core.model.wa.WaSyncMediaRequest
+import dev.rosty.core.model.wa.WaSyncMediaSetRequest
+import dev.rosty.core.model.wa.WaSyncMessage
+import dev.rosty.core.model.wa.WaSyncMessageAnswer
+import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncOlderAnswer
+import dev.rosty.core.model.wa.WaSyncOlderRequest
+import dev.rosty.core.model.wa.WaSyncOpenRequest
+import dev.rosty.core.model.wa.WaSyncOpened
+import dev.rosty.core.model.wa.WaSyncOutboxAnswer
+import dev.rosty.core.model.wa.WaSyncOutboxEditRequest
+import dev.rosty.core.model.wa.WaSyncOutboxItem
+import dev.rosty.core.model.wa.WaSyncOutboxState
+import dev.rosty.core.model.wa.WaSyncOutcome
+import dev.rosty.core.model.wa.WaSyncPlan
+import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncRetried
+import dev.rosty.core.model.wa.WaSyncRowState
+import dev.rosty.core.model.wa.WaSyncSettleRequest
+import dev.rosty.core.model.wa.WaSyncSettled
+import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
+import dev.rosty.core.model.wa.WaSyncStorePageRequest
+import dev.rosty.core.model.wa.WaSyncStoredChats
+import dev.rosty.core.model.wa.WaSyncStoredPage
+import dev.rosty.core.model.wa.WaSyncThreadPage
+import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.ops.WaSyncOps
+
+/**
+ * An in-memory [WaSyncOps] for view-model and screen tests (no native library): seed [chats] and [messages], read
+ * them back through the facade, queue and settle sends. It keeps rows the way the real store shows them (newest
+ * first, waiting sends on top) but none of the sync rules (gaps, echo matching, edit history, backoff): those are
+ * tested in Rust and against the real library (`WaSyncStoreNativeTest`).
+ */
+class FakeWaSyncOps(
+    private val instanceId: String = "fake-instance",
+) : WaSyncOps {
+    private val lock = Any()
+
+    /** The chat list as seeded, in the order to answer it. */
+    val chats = mutableListOf<WaSyncChat>()
+
+    /** Stored messages by chat, in any order; a thread page sorts them newest first. */
+    val messages = mutableMapOf<String, MutableList<WaSyncMessage>>()
+
+    /** The outbox, in the order written. */
+    val queue = mutableListOf<WaSyncOutboxItem>()
+
+    /** What [plan] answers. */
+    var owed = WaSyncPlan(afterSeq = null, refreshChats = false, fetch = emptyList())
+
+    /** The requests of every write, for assertions. */
+    val writes = mutableListOf<Any>()
+
+    private val media = mutableMapOf<Pair<String, String>, WaSyncMedia>()
+    private var seq: Long? = null
+
+    /** Seeds one stored text message. */
+    fun put(
+        chat: String,
+        id: String,
+        timestampMs: Long,
+        text: String,
+        fromMe: Boolean = false,
+        deleted: Boolean = false,
+    ): WaSyncMessage {
+        val row =
+            WaSyncMessage(
+                id = id,
+                chat = chat,
+                sender = if (fromMe) null else chat,
+                fromMe = fromMe,
+                timestampMs = timestampMs,
+                kind = WaSyncKind.Text,
+                text = text,
+                reactions = emptyList(),
+                state = if (fromMe) WaSyncRowState.Sent else WaSyncRowState.Received,
+                deleted = deleted,
+                deletedAt = if (deleted) timestampMs else null,
+            )
+        synchronized(lock) { store(row) }
+        return row
+    }
+
+    private fun store(row: WaSyncMessage) {
+        val rows = messages.getOrPut(row.chat) { mutableListOf() }
+        rows.removeAll { it.id == row.id }
+        rows += row
+    }
+
+    private fun stored(message: RichMessage): WaSyncMessage {
+        val body = message.body
+        return WaSyncMessage(
+            id = message.id,
+            chat = message.chat,
+            sender = message.sender,
+            fromMe = message.fromMe,
+            timestampMs = message.timestampMs,
+            kind = if (body is MessageBody.Text) WaSyncKind.Text else WaSyncKind.Unsupported,
+            text = (body as? MessageBody.Text)?.text,
+            reactions = message.reactions,
+            state = if (message.fromMe) WaSyncRowState.Sent else WaSyncRowState.Received,
+            deleted = message.meta.deleted,
+            deletedAt = message.meta.deletedAt,
+            deletedBy = message.meta.deletedBy,
+        )
+    }
+
+    private fun waiting(item: WaSyncOutboxItem): WaSyncMessage? {
+        val text =
+            when (val action = item.action) {
+                is WaSyncAction.SendText -> action.text
+                is WaSyncAction.SendMedia -> action.caption
+                else -> return null
+            }
+        return WaSyncMessage(
+            id = item.clientId,
+            chat = item.chat,
+            fromMe = true,
+            timestampMs = item.createdMs,
+            kind = if (item.action is WaSyncAction.SendText) WaSyncKind.Text else WaSyncKind.Image,
+            text = text,
+            reactions = emptyList(),
+            state =
+                when (item.state) {
+                    WaSyncOutboxState.Waiting -> WaSyncRowState.Waiting
+                    WaSyncOutboxState.Sending -> WaSyncRowState.Sending
+                    WaSyncOutboxState.Failed -> WaSyncRowState.Failed
+                },
+            clientId = item.clientId,
+            error = item.lastError,
+        )
+    }
+
+    private fun <T> ok(value: T): Outcome<T> = Outcome.Ok(value)
+
+    override suspend fun open(req: WaSyncOpenRequest) = ok(WaSyncOpened(HANDLE, instanceId, 2, seq, owed.refreshChats))
+
+    override suspend fun close(req: WaSyncHandleRequest) = ok(WaSyncClosed(true))
+
+    override suspend fun plan(req: WaSyncPlanRequest) = ok(owed)
+
+    override suspend fun applyEvents(req: WaSyncEventsRequest): Outcome<WaSyncApplied> =
+        synchronized(lock) {
+            writes += req
+            val changed = linkedSetOf<String>()
+            for (envelope in req.events) {
+                seq = envelope.seq
+                val event = envelope.event as? GatewayEvent.Message ?: continue
+                store(
+                    stored(
+                        RichMessage(
+                            event.id,
+                            event.chat,
+                            event.sender,
+                            event.fromMe,
+                            event.timestampMs,
+                            event.body,
+                            event.reactions,
+                        ),
+                    ),
+                )
+                changed += event.chat
+            }
+            ok(WaSyncApplied(HANDLE, seq, req.events.size, false, changed.toList(), emptyList()))
+        }
+
+    override suspend fun storeChats(req: WaSyncStoreChatsRequest): Outcome<WaSyncStoredChats> =
+        synchronized(lock) {
+            writes += req
+            owed = owed.copy(refreshChats = false)
+            ok(WaSyncStoredChats(HANDLE, req.chats.size, emptyList()))
+        }
+
+    override suspend fun storePage(req: WaSyncStorePageRequest): Outcome<WaSyncStoredPage> =
+        synchronized(lock) {
+            writes += req
+            req.messages.forEach { store(stored(it)) }
+            ok(
+                WaSyncStoredPage(
+                    HANDLE,
+                    req.messages.size,
+                    req.messages.size,
+                    null,
+                    req.messages.size < req.limit,
+                    emptyList(),
+                ),
+            )
+        }
+
+    override suspend fun older(req: WaSyncOlderRequest) = ok(WaSyncOlderAnswer(null))
+
+    override suspend fun chats(req: WaSyncChatsRequest): Outcome<WaSyncChatsAnswer> =
+        synchronized(lock) { ok(WaSyncChatsAnswer(chats.filter { req.includeArchived || !it.archived })) }
+
+    override suspend fun thread(req: WaSyncThreadRequest): Outcome<WaSyncThreadPage> =
+        synchronized(lock) {
+            val before = req.before
+            val all =
+                messages[req.chat]
+                    .orEmpty()
+                    .sortedWith(compareByDescending<WaSyncMessage> { it.timestampMs }.thenByDescending { it.id })
+                    .filter {
+                        before == null || it.timestampMs < before.timestampMs ||
+                            (it.timestampMs == before.timestampMs && it.id < before.id)
+                    }
+            val page = all.take(req.limit)
+            val pending =
+                if (before ==
+                    null
+                ) {
+                    queue.filter { it.chat == req.chat }.mapNotNull(::waiting).reversed()
+                } else {
+                    emptyList()
+                }
+            val next = page.lastOrNull()?.takeIf { all.size > page.size }?.let { WaSyncCursor(it.timestampMs, it.id) }
+            ok(WaSyncThreadPage(pending + page, next, reachedStart = true, syncing = false))
+        }
+
+    override suspend fun message(req: WaSyncMessageRequest): Outcome<WaSyncMessageAnswer> =
+        synchronized(lock) { ok(WaSyncMessageAnswer(messages[req.chat].orEmpty().firstOrNull { it.id == req.id })) }
+
+    override suspend fun outboxEnqueue(req: WaSyncEnqueueRequest): Outcome<WaSyncItemAnswer> =
+        synchronized(lock) {
+            writes += req
+            val item =
+                queue.firstOrNull { it.clientId == req.clientId }
+                    ?: WaSyncOutboxItem(
+                        req.clientId,
+                        req.chat,
+                        req.action,
+                        req.nowMs,
+                        0,
+                        0,
+                        WaSyncOutboxState.Waiting,
+                    ).also {
+                        queue +=
+                            it
+                    }
+            ok(WaSyncItemAnswer(HANDLE, item))
+        }
+
+    override suspend fun outboxDue(req: WaSyncDueRequest): Outcome<WaSyncDue> =
+        synchronized(lock) {
+            val heads =
+                queue
+                    .filter { it.state != WaSyncOutboxState.Failed }
+                    .groupBy { it.chat }
+                    .values
+                    .map { it.first() }
+                    .filter { it.state == WaSyncOutboxState.Waiting }
+            val sending = heads.map { it.copy(state = WaSyncOutboxState.Sending, attempts = it.attempts + 1) }
+            sending.forEach { now -> queue.replaceAll { if (it.clientId == now.clientId) now else it } }
+            ok(WaSyncDue(HANDLE, sending, held = 0))
+        }
+
+    override suspend fun outboxSettle(req: WaSyncSettleRequest): Outcome<WaSyncSettled> =
+        synchronized(lock) {
+            writes += req
+            val item =
+                queue.firstOrNull { it.clientId == req.clientId }
+                    ?: return@synchronized ok(WaSyncSettled(HANDLE, WaSyncSettled.DONE))
+            when (val outcome = req.outcome) {
+                is WaSyncOutcome.Sent -> {
+                    queue.remove(item)
+                    val sent = waiting(item)
+                    val id = outcome.messageId
+                    if (sent != null && id != null) {
+                        store(
+                            sent.copy(
+                                id = id,
+                                timestampMs = outcome.timestampMs ?: req.nowMs,
+                                state = WaSyncRowState.Sent,
+                            ),
+                        )
+                    }
+                    ok(WaSyncSettled(HANDLE, WaSyncSettled.DONE, messageId = id))
+                }
+
+                is WaSyncOutcome.Error -> {
+                    val failed = outcome.error == dev.rosty.core.model.wa.WaSyncErrorKind.Rejected
+                    val state = if (failed) WaSyncOutboxState.Failed else WaSyncOutboxState.Waiting
+                    queue.replaceAll {
+                        if (it.clientId ==
+                            item.clientId
+                        ) {
+                            it.copy(state = state, lastError = outcome.message)
+                        } else {
+                            it
+                        }
+                    }
+                    if (failed) {
+                        ok(
+                            WaSyncSettled(HANDLE, WaSyncSettled.FAILED),
+                        )
+                    } else {
+                        ok(WaSyncSettled(HANDLE, WaSyncSettled.WAITING, nextAttemptMs = req.nowMs))
+                    }
+                }
+            }
+        }
+
+    override suspend fun outboxCancel(req: WaSyncClientIdRequest): Outcome<WaSyncCancelled> =
+        synchronized(lock) {
+            writes += req
+            ok(
+                WaSyncCancelled(
+                    queue.removeAll { it.clientId == req.clientId && it.state != WaSyncOutboxState.Sending },
+                ),
+            )
+        }
+
+    override suspend fun outboxEdit(req: WaSyncOutboxEditRequest): Outcome<WaSyncItemAnswer> =
+        synchronized(lock) {
+            writes += req
+            val item =
+                queue.firstOrNull { it.clientId == req.clientId }
+                    ?: return@synchronized Outcome.Err(RustError.NotFound("outbox row ${req.clientId}"))
+            val action =
+                when (val action = item.action) {
+                    is WaSyncAction.SendText -> action.copy(text = req.text)
+                    is WaSyncAction.SendMedia -> action.copy(caption = req.text.ifEmpty { null })
+                    else -> return@synchronized Outcome.Err(RustError.Invalid("only a message text can be edited"))
+                }
+            val edited = item.copy(action = action, state = WaSyncOutboxState.Waiting, lastError = null)
+            queue.replaceAll { if (it.clientId == edited.clientId) edited else it }
+            ok(WaSyncItemAnswer(HANDLE, edited))
+        }
+
+    override suspend fun outboxRetry(req: WaSyncClientIdRequest): Outcome<WaSyncRetried> =
+        synchronized(lock) {
+            writes += req
+            val found = queue.any { it.clientId == req.clientId }
+            queue.replaceAll { if (it.clientId == req.clientId) it.copy(state = WaSyncOutboxState.Waiting) else it }
+            ok(WaSyncRetried(found))
+        }
+
+    override suspend fun outbox(req: WaSyncHandleRequest): Outcome<WaSyncOutboxAnswer> =
+        synchronized(lock) {
+            ok(WaSyncOutboxAnswer(queue.toList()))
+        }
+
+    override suspend fun mediaSet(req: WaSyncMediaSetRequest): Outcome<HandleAnswer> =
+        synchronized(lock) {
+            writes += req
+            val key = req.chat to req.id
+            val had = media[key]
+            media[key] =
+                WaSyncMedia(req.thumbnailB64 ?: had?.thumbnailB64, req.path ?: had?.path, req.bytes ?: had?.bytes)
+            ok(HandleAnswer(HANDLE))
+        }
+
+    override suspend fun media(req: WaSyncMediaRequest): Outcome<WaSyncMedia> =
+        synchronized(lock) { ok(media[req.chat to req.id] ?: WaSyncMedia(null, null, null)) }
+
+    override suspend fun mediaEvict(req: WaSyncEvictRequest): Outcome<WaSyncEviction> =
+        synchronized(lock) { ok(WaSyncEviction(emptyList(), media.values.sumOf { it.bytes ?: 0 })) }
+
+    companion object {
+        /** The handle every answer carries. */
+        const val HANDLE = 1L
+    }
+}

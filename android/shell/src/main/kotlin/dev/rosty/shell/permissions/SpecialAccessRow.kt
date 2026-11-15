@@ -44,7 +44,7 @@ internal fun SpecialKind.settings(): SettingsKind =
         SpecialKind.XiaomiBackground -> SettingsKind.XiaomiAutostart
     }
 
-private fun SpecialKind.icon(): ImageVector =
+internal fun SpecialKind.icon(): ImageVector =
     when (this) {
         SpecialKind.ExactAlarms -> RostyIcons.Message
         SpecialKind.FullScreenIntent -> RostyIcons.Phone

@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's own name (About, logs, share sheets). -->
+    <string name="app_name" translatable="false">Rosty Messages</string>
+
+    <!-- Tabs (apps/messages/src/main.rs TABS). -->
+    <string name="tab_chats">Chats</string>
+    <string name="tab_whatsapp" translatable="false">WhatsApp</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- The default-SMS ask (E6.1). -->
+    <string name="access_default_sms_title">Not the default SMS app</string>
+    <string name="access_default_sms_detail">Set Rosty Messages as the default to send, receive and delete SMS and MMS.</string>
+    <string name="access_default_sms_action">Set as Default</string>
+
+    <!-- Settings (E6.1). -->
+    <string name="settings_group_access">Access</string>
+    <string name="settings_access_footer">Names and search by name need contacts. Scheduled messages go out on time with exact alarms.</string>
+    <string name="settings_whatsapp" translatable="false">WhatsApp</string>
+    <string name="settings_appearance_title">Appearance</string>
+    <string name="settings_haptics_title">Haptics</string>
+    <string name="settings_about_title">About</string>
+    <string name="settings_licences_title">Licences</string>
+    <string name="settings_logs_title">Logs</string>
+
+    <!-- Inbox (E6.2). -->
+    <string name="inbox_empty_title">No Messages</string>
+    <string name="inbox_empty_detail">Conversations you start or receive show up here.</string>
+
+    <!-- New conversation (E6.8). -->
+    <string name="new_conversation_title">New Message</string>
+    <!-- Inbox (E6.2). -->
+    <string name="inbox_loading">Reading your messages…</string>
+    <string name="inbox_access_off_title">SMS Access Is Off</string>
+    <string name="inbox_access_off_detail">Set Rosty Messages as the default SMS app to see your texts.</string>
+    <string name="inbox_search">Search chats</string>
+    <string name="inbox_yesterday">Yesterday</string>
+    <string name="inbox_chip_all">All</string>
+    <string name="inbox_chip_unread">Unread</string>
+    <string name="inbox_chip_sms">SMS</string>
+    <string name="inbox_chip_groups">Groups</string>
+    <string name="inbox_none_all">No conversations</string>
+    <string name="inbox_none_unread">No unread chats</string>
+    <string name="inbox_none_whatsapp">No WhatsApp chats</string>
+    <string name="inbox_none_sms">No SMS conversations</string>
+    <string name="inbox_none_groups">No group chats</string>
+    <string name="inbox_no_results">No Results</string>
+    <string name="inbox_archived_title">Archived</string>
+    <string name="inbox_spam_title">Spam</string>
+    <string name="inbox_spam_note">Spam is never deleted or announced.</string>
+    <plurals name="inbox_chats">
+        <item quantity="one">%d chat</item>
+        <item quantity="other">%d chats</item>
+    </plurals>
+    <string name="inbox_select">Select</string>
+    <string name="inbox_select_all">Select All</string>
+    <string name="inbox_deselect_all">Deselect All</string>
+    <string name="inbox_cancel">Cancel</string>
+    <string name="inbox_select_none">Select Chats</string>
+    <string name="inbox_selected">%d Selected</string>
+    <string name="inbox_pin">Pin</string>
+    <string name="inbox_unpin">Unpin</string>
+    <string name="inbox_mark_read">Mark as Read</string>
+    <string name="inbox_mark_unread">Mark as Unread</string>
+    <string name="inbox_mute">Mute</string>
+    <string name="inbox_mute_menu">Mute…</string>
+    <string name="inbox_unmute">Unmute</string>
+    <string name="inbox_archive">Archive</string>
+    <string name="inbox_unarchive">Unarchive</string>
+    <string name="inbox_delete">Delete</string>
+    <string name="inbox_delete_conversation">Delete Conversation</string>
+    <string name="inbox_delete_one">Delete the conversation with %1$s? Its messages are removed from this phone.</string>
+    <plurals name="inbox_delete_many">
+        <item quantity="one">Delete %d conversation? This can\'t be undone.</item>
+        <item quantity="other">Delete %d conversations? This can\'t be undone.</item>
+    </plurals>
+    <plurals name="inbox_deleted_n">
+        <item quantity="one">Conversation deleted</item>
+        <item quantity="other">Deleted %d conversations</item>
+    </plurals>
+    <string name="inbox_nothing_to_delete">Only SMS conversations can be deleted here</string>
+    <string name="inbox_needs_role">Make Rosty Messages your default SMS app to delete messages</string>
+    <string name="inbox_mute_for">Mute for</string>
+    <string name="inbox_mute_8h">8 Hours</string>
+    <string name="inbox_mute_week">1 Week</string>
+    <string name="inbox_mute_always">Always</string>
+    <string name="inbox_muted">Muted</string>
+    <string name="inbox_unmuted">Unmuted</string>
+    <string name="inbox_archived">Archived</string>
+    <string name="inbox_unarchived">Unarchived</string>
+    <plurals name="inbox_archived_n">
+        <item quantity="one">Archived %d chat</item>
+        <item quantity="other">Archived %d chats</item>
+    </plurals>
+    <string name="inbox_marked_unread">Marked as unread</string>
+    <plurals name="inbox_marked_read_n">
+        <item quantity="one">Marked %d chat as read</item>
+        <item quantity="other">Marked %d chats as read</item>
+    </plurals>
+    <string name="inbox_nothing_to_mark">Nothing to mark as read</string>
+    <string name="inbox_pin_cap_sms">You can pin up to 5 SMS conversations</string>
+    <string name="inbox_undo">Undo</string>
+    <string name="inbox_copy_code">Copy %1$s</string>
+    <string name="inbox_code_copied">Copied %1$s</string>
+    <string name="inbox_muted_a11y">Muted</string>
+    <string name="inbox_pinned_a11y">Pinned</string>
+    <string name="inbox_unread_count">%1$d unread</string>
+    <string name="inbox_you">You: %1$s</string>
+    <string name="inbox_sender">%1$s: %2$s</string>
+    <string name="inbox_draft">Draft: %1$s</string>
+
+    <!-- WhatsApp previews (rows, quotes, bubbles). -->
+    <string name="wa_you_deleted">You deleted this message</string>
+    <string name="wa_deleted">This message was deleted</string>
+    <string name="wa_live_location">Live location · %1$s</string>
+    <string name="wa_location">Location · %1$s</string>
+    <string name="wa_location_default">Location</string>
+    <string name="wa_contact">Contact · %1$s</string>
+    <string name="wa_voice">Voice message</string>
+    <string name="wa_voice_length">Voice message (%1$s)</string>
+    <string name="wa_photo">Photo</string>
+    <string name="wa_video">Video</string>
+    <string name="wa_audio">Audio</string>
+    <string name="wa_document">Document</string>
+    <string name="wa_sticker">Sticker</string>
+    <string name="wa_unsupported">Unsupported message</string>
+    <string name="wa_edited_snippet">%1$s · Edited</string>
+    <!-- Conversations (E6.3, E6.4a). -->
+    <string name="conversation_today">Today</string>
+    <string name="conversation_send">Send</string>
+    <string name="conversation_load_earlier">Load Earlier</string>
+    <string name="conversation_loading">Loading…</string>
+    <string name="conversation_copy">Copy</string>
+    <string name="conversation_copied">Copied</string>
+    <string name="sms_placeholder">Text message</string>
+    <string name="sms_sending">Sending…</string>
+    <string name="sms_sending_undo">Sending…</string>
+    <string name="sms_not_sent">Not sent · Tap to retry</string>
+    <string name="sms_now">Now</string>
+    <string name="sms_read_only">This sender can\'t receive replies</string>
+    <string name="sms_counter">%1$d left · %2$d SMS</string>
+    <string name="sms_counter_unicode">%1$d left · %2$d SMS · Unicode</string>
+    <plurals name="sms_people">
+        <item quantity="one">%d person</item>
+        <item quantity="other">%d people</item>
+    </plurals>
+    <string name="sms_retry">Retry</string>
+    <string name="sms_message_deleted">Message deleted</string>
+    <string name="sms_contact_card">Contact card</string>
+    <string name="sms_attachment">Attachment</string>
+    <!-- New conversation, share-in (E6.8). -->
+    <string name="new_share_title">Send To</string>
+    <string name="new_field">Name or number</string>
+    <string name="new_no_match">No matching contacts. Type a full number to message it.</string>
+    <string name="new_wa_not_on">%1$s is not on WhatsApp</string>
+    <string name="new_wa_cant_check">Can\'t check WhatsApp right now.</string>
+    <string name="new_wa_country_code">Add the country code to message on WhatsApp</string>
+    <!-- Viewers (E6.7). -->
+    <string name="viewer_save">Save</string>
+    <string name="viewer_share">Share</string>
+    <string name="viewer_saved">Saved to Photos</string>
+    <string name="viewer_not_saved">Couldn\'t save the picture</string>
+    <string name="viewer_cant_share">Couldn\'t share the picture</string>
+    <!-- Conversation tools (E6.6). -->
+    <string name="tools_menu">More</string>
+    <string name="tools_find">Search in Chat</string>
+    <string name="tools_older">Older</string>
+    <string name="tools_newer">Newer</string>
+    <string name="tools_done">Done</string>
+    <string name="tools_jump_latest">Jump to the latest message</string>
+    <string name="tools_position">%1$d of %2$d</string>
+    <string name="tools_no_matches">No matches</string>
+    <string name="tools_jump_date">Jump to Date</string>
+    <string name="tools_week_ago">1 week ago</string>
+    <string name="tools_month_ago">1 month ago</string>
+    <string name="tools_further_back">Those messages are further back. Load earlier messages first.</string>
+    <string name="tools_gallery">Media, Links and Docs</string>
+    <string name="tools_tab_media">Media</string>
+    <string name="tools_tab_links">Links</string>
+    <string name="tools_tab_docs">Docs</string>
+    <string name="tools_no_media">No photos or videos in the loaded part of this chat</string>
+    <string name="tools_no_links">No links in the loaded part of this chat</string>
+    <string name="tools_no_docs">No documents in the loaded part of this chat</string>
+    <string name="tools_export">Export Chat</string>
+    <string name="tools_share_text">Share as Text</string>
+    <string name="tools_me">Me</string>
+    <string name="tools_export_failed">Couldn\'t export</string>
+    <string name="tools_exported">Chat exported</string>
+    <string name="tools_copy_name">Copy Name</string>
+    <string name="tools_copy_number">Copy Number</string>
+    <plurals name="conversation_unread">
+        <item quantity="one">%d unread message</item>
+        <item quantity="other">%d unread messages</item>
+    </plurals>
+    <!-- WhatsApp thread, tab and Status (E6.4a, E6.4s, E6.2 status row, E6.7 status viewer) -->
+    <string name="wa_thread_placeholder">Message</string>
+    <string name="wa_thread_sending">Sending…</string>
+    <string name="wa_thread_waiting">Waiting for connection</string>
+    <string name="wa_thread_not_sent">Not sent · Tap to retry</string>
+    <string name="wa_thread_offline">Offline · showing saved messages</string>
+    <string name="wa_thread_syncing">Updating…</string>
+    <string name="wa_thread_typing">typing…</string>
+    <string name="wa_thread_recording">recording audio…</string>
+    <string name="wa_thread_typing_by">%1$s is typing…</string>
+    <string name="wa_thread_recording_by">%1$s is recording audio…</string>
+    <string name="wa_thread_edited">Edited %1$s</string>
+    <string name="wa_thread_you">You</string>
+    <string name="wa_thread_not_linked">WhatsApp is not linked</string>
+    <string name="wa_thread_older_offline">Earlier messages need a connection</string>
+    <string name="wa_thread_edit">Edit</string>
+    <string name="wa_thread_cancel_send">Cancel Sending</string>
+    <string name="wa_thread_delete_everyone">Delete for Everyone</string>
+    <string name="wa_tab_empty_title">No WhatsApp Chats</string>
+    <string name="wa_tab_empty_detail">Chats from your linked WhatsApp show up here.</string>
+    <string name="wa_tab_not_linked_title">WhatsApp Is Not Linked</string>
+    <string name="wa_tab_not_linked_detail">Link WhatsApp in Settings to see your chats here.</string>
+    <string name="wa_tab_link">Link WhatsApp</string>
+    <string name="wa_tab_offline">Offline · showing saved chats</string>
+    <string name="wa_status_title">Status</string>
+    <plurals name="wa_status_new">
+        <item quantity="one">%d new update</item>
+        <item quantity="other">%d new updates</item>
+    </plurals>
+    <string name="wa_status_none">No new updates</string>
+    <string name="wa_status_my">My status</string>
+    <string name="wa_status_recent">Recent updates</string>
+    <string name="wa_status_viewed">Viewed updates</string>
+    <string name="wa_status_just_now">Just now</string>
+    <string name="wa_status_min_ago">%1$d min ago</string>
+    <string name="wa_status_message">Message</string>
+    <string name="wa_status_close">Close</string>
+    <string name="wa_status_photo_failed">The photo could not be loaded</string>
+    <string name="wa_status_video">Video</string>
+    <string name="wa_status_video_length">Video · %1$s</string>
+    <string name="wa_status_video_note">Videos play in WhatsApp on your phone</string>
+    <string name="wa_status_unsupported">This update can\'t be shown here</string>
+    <string name="wa_status_empty">No status updates</string>
+    <string name="wa_status_position">Update %1$d of %2$d</string>
+    <string name="conversation_forward">Forward</string>
+    <string name="forward_title">Forward to</string>
+    <string name="forward_search">Search chats</string>
+    <string name="forward_none">No chats</string>
+    <string name="forward_via_sms">SMS</string>
+    <string name="forward_via_whatsapp">WhatsApp</string>
+    <string name="inbox_messages_header">Messages</string>
+    <plurals name="inbox_results">
+        <item quantity="one">%d result</item>
+        <item quantity="other">%d results</item>
+    </plurals>
+    <string name="inbox_results_partial">in recent WhatsApp chats</string>
+    <string name="inbox_results_no_sms">SMS not searched (no access)</string>
+    <string name="tools_message_gone">That message is no longer here</string>
+    <string name="conversation_forwarded">Forwarded</string>
+</resources>

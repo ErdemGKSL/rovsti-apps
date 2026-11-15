@@ -488,4 +488,24 @@
     <string name="card_birthday_title_nameless">Doğum günün kutlu olsun!</string>
     <plurals name="card_birthday_age"><item quantity="one">%1$d yaşına giriyorsun</item><item quantity="other">%1$d yaşına giriyorsun</item></plurals>
     <string name="card_new_number_subtitle">Yeni numaram</string>
+    <string name="card_studio_title">Kart Hazırla</string>
+    <string name="card_studio_menu">Kart Hazırla…</string>
+    <string name="card_studio_chip">Kart</string>
+    <string name="card_template_birthday">Doğum günü</string>
+    <string name="card_template_contact">Kişi</string>
+    <string name="card_template_number">Numara</string>
+    <string name="card_palette_dawn">Şafak</string>
+    <string name="card_palette_lagoon">Lagün</string>
+    <string name="card_palette_meadow">Çayır</string>
+    <string name="card_palette_dusk">Alacakaranlık</string>
+    <string name="card_palette_ink">Mürekkep</string>
+    <string name="card_studio_colors">Renk</string>
+    <string name="card_studio_still">Sabit</string>
+    <string name="card_studio_animated">Hareketli</string>
+    <string name="card_studio_share">Paylaş</string>
+    <string name="card_studio_save">Kaydet</string>
+    <string name="card_studio_preview">Kart önizlemesi</string>
+    <string name="card_studio_rendering">Kart hazırlanıyor</string>
+    <string name="card_studio_failed">Kart hazırlanamadı</string>
+    <string name="card_studio_cant_share">Kart paylaşılamadı</string>
 </resources>

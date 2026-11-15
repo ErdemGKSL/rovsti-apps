@@ -1,4 +1,5 @@
 uses-permission android.permission.ACCESS_NETWORK_STATE
+uses-permission android.permission.FOREGROUND_SERVICE
 uses-permission android.permission.INTERNET
 uses-permission android.permission.POST_NOTIFICATIONS
 uses-permission android.permission.READ_CONTACTS
@@ -10,5 +11,9 @@ uses-permission android.permission.RECEIVE_SMS
 uses-permission android.permission.RECEIVE_WAP_PUSH
 uses-permission android.permission.SCHEDULE_EXACT_ALARM
 uses-permission android.permission.SEND_SMS
+uses-permission android.permission.VIBRATE
+uses-permission android.permission.WAKE_LOCK
+uses-permission dev.rosty.permission.READ_PEOPLE
 declares dev.rosty.permission.HANDOFF signature
+declares dev.rosty.permission.READ_PEOPLE signature
 protects activity-alias .WaHandoff dev.rosty.permission.HANDOFF

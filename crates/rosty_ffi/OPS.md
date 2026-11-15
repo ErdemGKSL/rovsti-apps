@@ -138,6 +138,29 @@ drop_files, stage, progress}`; `people.sync_stop {handle?|dir?, now_ms, reason}`
 (without a handle it interrupts the stored run: unlink); `people.sync_status {dir?, now_ms}` answers `{run?, last?,
 not_before_ms?}` for the settings row. The first `people.sync_*` call for a directory in a process turns a stored
 `running` run into `interrupted(process_death)`.
+WhatsApp offline store (E6.4s, `rosty_app_core::wa_sync`): `wa_sync.open {instance_id, dir?, memory?}` opens the SQLite store of
+one linked instance (`wa-sync-<instance>.db` in the data directory; another instance is another file) and answers `{handle,
+instance_id, schema_version, last_seq, needs_resync}`; a second open of the same file in one process shares the store, and
+`wa_sync.close {handle}` or `RustNative.release` frees a handle. No op touches the network: Kotlin makes the `wa.*` calls and hands the
+answers in. The ops that write repeat `handle` in their answer. Sync: `wa_sync.plan {handle, limit?}` answers `{after_seq,
+refresh_chats, fetch: [{chat, before, limit}]}` (what to subscribe after, whether `GET /v1/chats` is owed, the next page of every open
+gap); `wa_sync.apply_events {handle, events: [{seq, at_ms, event}]}` applies gateway events in order (stale `seq` skipped, a `resync`
+resets it) and answers `{last_seq, applied, resync, chats, reconciled}`; `wa_sync.store_chats {handle, now_ms, chats, limit?,
+refresh_recent_ms?}` stores the chat list and opens a gap for each chat that missed messages (`{chats, fetch}`); `wa_sync.store_page
+{handle, now_ms, chat, before?, limit, messages}` stores one `GET .../messages` page (`{stored, new, next?, reached_start,
+reconciled}`; `next` is the following page of the gap); `wa_sync.older {handle, chat, limit?}` answers the page before the oldest
+stored message (`{fetch}` or `null` at the start). Reads: `wa_sync.chats {handle, include_archived?}`, `wa_sync.thread {handle, chat,
+limit, before?: {timestamp_ms, id}}` (newest first; the first page starts with the sends still in the outbox; `state` is `received`,
+`sent`, `delivered`, `read`, `played`, `waiting`, `sending` or `failed`; a deleted row has `deleted`, `deleted_at`, `deleted_by` and
+still its text, quote and media; `edit_history` holds earlier texts; `pending` the queued edits, deletes and reactions of the row),
+`wa_sync.message {handle, chat, id}`. Outbox: `wa_sync.outbox_enqueue {handle, now_ms, client_id, chat, action}` (`action.kind`:
+`send_text`, `send_media`, `edit`, `revoke`, `react`, `mark_read`; the same `client_id` twice is one row), `wa_sync.outbox_due {handle,
+now_ms, network_back?}` (at most one row per chat, the oldest; marks them `sending`; `held` counts sends kept back until the sync is
+done; `next_wake_ms`), `wa_sync.outbox_settle {handle, now_ms, client_id, outcome}` (`outcome.kind`: `sent {message_id?,
+timestamp_ms?}` or `error {error: network|gateway|rejected, message, retry_after_ms?}`; answers `state`: `done`, `waiting` or `failed`),
+`wa_sync.outbox_cancel`, `wa_sync.outbox_edit {handle, client_id, text}`, `wa_sync.outbox_retry`, `wa_sync.outbox`. Media:
+`wa_sync.media_set {handle, now_ms, chat, id, thumbnail_b64?, path?, bytes?}`, `wa_sync.media {handle, chat, id, used_ms?}`,
+`wa_sync.media_evict {handle, max_bytes}` (answers the files to delete, least recently used first; the messages and thumbnails stay).
 Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
 
 | Item | Used by | Domain | Class | Target |
@@ -214,6 +237,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

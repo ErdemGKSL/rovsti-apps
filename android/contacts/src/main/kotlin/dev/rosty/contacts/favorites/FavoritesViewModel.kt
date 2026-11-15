@@ -4,6 +4,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.rosty.contacts.R
+import dev.rosty.contacts.cards.CardStudioSubject
 import dev.rosty.contacts.data.Book
 import dev.rosty.contacts.data.BookRepository
 import dev.rosty.contacts.data.ContactsStore
@@ -13,6 +14,7 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.model.contacts.ContactDraft
 import dev.rosty.core.model.contacts.ContactsPrefs
 import dev.rosty.core.model.contacts.DatesRequest
+import dev.rosty.core.model.contacts.EventKind
 import dev.rosty.core.model.contacts.EventLineRequest
 import dev.rosty.core.model.contacts.FavoritesMoveRequest
 import dev.rosty.core.model.contacts.FrequentContactsRequest
@@ -163,6 +165,23 @@ class FavoritesViewModel(
 
             is FavoritesAction.Wish -> {
                 viewModelScope.launch { wish(action) }
+            }
+
+            is FavoritesAction.MakeCard -> {
+                val item = action.item
+                val birthday = item.kind == EventKind.Birthday
+                (if (action.onPage) pageOutbox else outbox).trySend(
+                    FavoritesEffect.OpenCardStudio(
+                        CardStudioSubject(
+                            contactId = item.contactId,
+                            name = item.name,
+                            birthday = birthday,
+                            dateLine = item.pageLine.takeIf { birthday },
+                            photo = item.photoUri,
+                            numbers = item.numbers,
+                        ),
+                    ),
+                )
             }
 
             FavoritesAction.SaveCalendar -> {

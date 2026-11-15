@@ -1,6 +1,7 @@
 package dev.rosty.contacts.card
 
 import dev.rosty.contacts.R
+import dev.rosty.contacts.cards.CardStudioSubject
 import dev.rosty.contacts.data.Book
 import dev.rosty.contacts.data.BookRepository
 import dev.rosty.contacts.data.ContactsStore
@@ -292,6 +293,10 @@ class ContactCardViewModel(
                 scope.launch { shareFile() }
             }
 
+            ContactCardAction.MakeCard -> {
+                scope.launch { makeCard() }
+            }
+
             ContactCardAction.ShowQr -> {
                 scope.launch { showQr() }
             }
@@ -454,6 +459,42 @@ class ContactCardViewModel(
         }
         val fileName = ok(shared.fileName(FileNameRequest(name)))?.qrFileName ?: "contact-qr.png"
         send(ContactCardEffect.ShowQr(QrSheetModel(name, matrix, fileName, files, stagingDir)))
+    }
+
+    /** Card Studio: the name, picture and numbers of the card page, the birthday row if there is one, and the vCard. */
+    private suspend fun makeCard() {
+        val ui = state.first { it.header != null }
+        val header = ui.header ?: return
+        val birthday = ui.sections.flatMap { it.rows }.firstNotNullOfOrNull { it.birthday }
+        val b = base()
+        val payload =
+            b?.let {
+                val numbers =
+                    it.draft.numbers
+                        .filter { n ->
+                            n.value.isNotBlank()
+                        }.map { n -> QrNumber(n.value, n.label) }
+                ok(shared.contactQr(ContactQrRequest(header.name, numbers, it.homeCc)))?.payload
+            }
+        send(
+            ContactCardEffect.OpenCardStudio(
+                CardStudioSubject(
+                    contactId = header.id,
+                    name = header.name,
+                    birthday = birthday != null,
+                    dateLine = birthday?.dateLine,
+                    ageYears = birthday?.ageYears,
+                    photo = header.photoUri,
+                    numbers =
+                        b
+                            ?.draft
+                            ?.numbers
+                            ?.map { it.value }
+                            ?.filter { it.isNotBlank() } ?: header.numbers,
+                    vcard = payload,
+                ),
+            ),
+        )
     }
 
     private suspend fun pinToHome() {
@@ -958,6 +999,12 @@ class ContactCardViewModel(
                 label = label,
                 wish = if (event.kind == EventKind.Birthday && primary != null) line.wish else null,
                 wishNumber = primary,
+                birthday =
+                    if (event.kind == EventKind.Birthday) {
+                        BirthdayInfo(value, years?.takeIf { it > 0 }?.toInt())
+                    } else {
+                        null
+                    },
                 menu =
                     persistentListOf(
                         FieldMenuItem(

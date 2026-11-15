@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher glyph: one flat white speech bubble, 48 dp inside the 66 dp safe zone of the 108 dp adaptive icon. Also the
+     monochrome layer for themed icons (Android 13+). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2"
+        android:scaleY="2"
+        android:translateX="30"
+        android:translateY="30">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M12,3C6.75,3 2.5,6.58 2.5,11C2.5,13.38 3.73,15.51 5.68,16.98C5.5,18.3 4.86,19.5 3.86,20.42C3.67,20.6 3.8,20.92 4.06,20.9C6.06,20.75 7.8,19.98 9.03,18.71C9.98,18.9 10.97,19 12,19C17.25,19 21.5,15.42 21.5,11C21.5,6.58 17.25,3 12,3z" />
+    </group>
+</vector>

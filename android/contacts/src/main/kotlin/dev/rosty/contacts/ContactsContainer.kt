@@ -21,6 +21,7 @@ import dev.rosty.contacts.trash.ContactTrash
 import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
 import dev.rosty.core.model.shared.InferHomeCcRequest
+import dev.rosty.core.ops.CardsOps
 import dev.rosty.core.ops.ContactsOps
 import dev.rosty.core.ops.ContactsWaOps
 import dev.rosty.core.ops.NativeContactsOps
@@ -35,6 +36,7 @@ import dev.rosty.core.ops.PhoneOps
 import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
+import dev.rosty.core.ops.UnavailableCardsOps
 import dev.rosty.people.AvatarResolver
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.WaFullPictures
@@ -184,6 +186,9 @@ open class ContactsContainer(
 
     val qr: QrOps by lazy { createQr() }
 
+    /** Share cards for Card Studio (X.2). */
+    val cards: CardsOps by lazy { createCards() }
+
     val shortcuts: ShortcutsRepository by lazy { createShortcuts() }
 
     /** Appearance and haptics live in `contacts-prefs.json` (E4.15); the activity follows them. */
@@ -252,6 +257,8 @@ open class ContactsContainer(
         }
 
     protected open fun createQr(): QrOps = NativeQrOps(rust)
+
+    protected open fun createCards(): CardsOps = UnavailableCardsOps
 
     protected open fun createShortcuts(): ShortcutsRepository = AndroidShortcutsRepository(context)
 }

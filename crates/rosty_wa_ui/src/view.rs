@@ -1237,7 +1237,7 @@ mod tests {
 
     fn link() -> StoredLink {
         StoredLink {
-            gateway_url: "https://rovsti.erdemdev.tr".into(),
+            gateway_url: "https://rosty.erdemdev.tr".into(),
             instance_id: "inst-1".into(),
             key: "rwk_test".into(),
         }

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 /// What a fresh install proposes: the owner's gateway behind the Cloudflare
 /// tunnel. Another address can be typed once and is remembered. (The Android
 /// emulator reaches a gateway on the host as `http://10.0.2.2:8787`.)
-pub const DEFAULT_GATEWAY_URL: &str = "https://rovsti.erdemdev.tr";
+pub const DEFAULT_GATEWAY_URL: &str = "https://rosty.erdemdev.tr";
 
 pub const OPTION_LINK_NEW: &str = "Link WhatsApp for the first time";
 pub const OPTION_CONNECT_EXISTING: &str = "Connect to an existing instance";

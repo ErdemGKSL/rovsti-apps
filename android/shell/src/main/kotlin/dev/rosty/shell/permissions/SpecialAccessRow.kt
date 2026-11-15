@@ -1,6 +1,7 @@
 package dev.rosty.shell.permissions
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,11 +56,24 @@ private fun SpecialKind.icon(): ImageVector =
  * [special] each time the screen resumes, so coming back from Settings updates it. Off shows "Open Settings", which
  * starts the first page of the chain that some activity accepts (the app's own page is the last one).
  */
+/**
+ * An app's own words for a special-access row (Stops' full-screen access is for its alarm, not for calls): the title
+ * and the line under it when the access is on and when it is off.
+ */
+@Immutable
+data class SpecialRowTexts(
+    val title: String,
+    val on: String,
+    val off: String,
+)
+
 @Composable
 fun SpecialAccessRow(
     kind: SpecialKind,
     modifier: Modifier = Modifier,
     special: SpecialAccess = LocalSpecialAccess.current,
+    /** The app's words for this row; null keeps the shared ones. */
+    texts: SpecialRowTexts? = null,
 ) {
     val context = LocalContext.current
     var resumes by remember { mutableIntStateOf(0) }
@@ -71,8 +85,8 @@ fun SpecialAccessRow(
     }
     val on = remember(resumes, special, kind) { special.isOn(kind) }
     ListRow(
-        title = stringResource(kind.titleRes()),
-        secondary = stringResource(kind.statusRes(on)),
+        title = texts?.title ?: stringResource(kind.titleRes()),
+        secondary = texts?.let { if (on == true) it.on else it.off } ?: stringResource(kind.statusRes(on)),
         secondaryMaxLines = 2,
         modifier = modifier,
         leading = { IconTile(kind.icon()) },

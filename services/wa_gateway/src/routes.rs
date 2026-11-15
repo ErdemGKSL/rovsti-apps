@@ -181,12 +181,13 @@ async fn get_instance(
     State(state): State<AppState>,
     auth: Authed,
 ) -> ApiResult<Json<InstanceStatus>> {
-    state
+    let mut status = state
         .store()
         .instance_status(auth.instance)
         .await?
-        .map(Json)
-        .ok_or_else(|| HttpError::not_found("instance not found"))
+        .ok_or_else(|| HttpError::not_found("instance not found"))?;
+    status.epoch = Some(state.hub().epoch().to_owned());
+    Ok(Json(status))
 }
 
 async fn relink(
@@ -329,10 +330,11 @@ async fn send_envelope(socket: &mut WebSocket, envelope: &EventEnvelope) -> bool
 }
 
 /// An event that belongs to this socket alone (it is not in the shared log),
-/// stamped with the current head so a client's resume point stays valid.
-fn private_event(head_seq: u64, event: GatewayEvent) -> EventEnvelope {
+/// stamped with a `seq` that keeps a client's resume point valid: the
+/// current head, or for `hello` the point the socket starts from.
+fn private_event(seq: u64, event: GatewayEvent) -> EventEnvelope {
     EventEnvelope {
-        seq: head_seq,
+        seq,
         at_ms: now_ms(),
         event,
     }
@@ -357,6 +359,14 @@ async fn event_socket(mut socket: WebSocket, state: AppState, auth: Authed, afte
         }
     }
 
+    // First the process this socket talks to: sequences start over with it,
+    // so a device that stored another epoch refetches whatever `after` says.
+    let hello = GatewayEvent::Hello {
+        epoch: hub.epoch().to_owned(),
+    };
+    if !send_envelope(&mut socket, &private_event(sub.start_seq, hello)).await {
+        return;
+    }
     match sub.replay {
         Replay::Events(events) => {
             for envelope in &events {
@@ -366,7 +376,7 @@ async fn event_socket(mut socket: WebSocket, state: AppState, auth: Authed, afte
             }
         }
         Replay::Gap { head_seq } => {
-            if !send_envelope(&mut socket, &private_event(head_seq, GatewayEvent::Resync)).await {
+            if !send_envelope(&mut socket, &private_event(head_seq, hub.resync())).await {
                 return;
             }
         }
@@ -384,7 +394,7 @@ async fn event_socket(mut socket: WebSocket, state: AppState, auth: Authed, afte
                 }
                 Err(RecvError::Lagged(missed)) => {
                     log::warn!("{}: socket lagged by {missed} events", auth.instance);
-                    let resync = private_event(hub.head_seq(&auth.instance), GatewayEvent::Resync);
+                    let resync = private_event(hub.head_seq(&auth.instance), hub.resync());
                     if !send_envelope(&mut socket, &resync).await {
                         return;
                     }
@@ -1015,7 +1025,7 @@ mod tests {
 
     #[test]
     fn private_events_keep_the_head_seq() {
-        let e = private_event(7, GatewayEvent::Resync);
+        let e = private_event(7, GatewayEvent::Resync { epoch: None });
         assert_eq!(e.seq, 7);
     }
 }

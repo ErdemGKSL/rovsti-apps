@@ -79,7 +79,10 @@ impl Events {
                 .await
                 .expect("timed out waiting for an event")
                 .expect("event stream ended");
-            if let ClientEvent::Event(e) = next {
+            // Every socket starts with `hello`; these tests are about what follows.
+            if let ClientEvent::Event(e) = next
+                && !matches!(e.event, GatewayEvent::Hello { .. })
+            {
                 return e.event;
             }
         }

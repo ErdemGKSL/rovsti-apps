@@ -38,7 +38,8 @@ use crate::driver::{
 };
 use crate::now_ms;
 use crate::store::{
-    FetchedProfile, GroupReceipt, InstanceId, MessageExtras, NewPair, ProfileChange, WireIds,
+    FetchedProfile, GroupReceipt, HISTORY_ROWS_PER_TX, HistoryImport, InstanceId, MessageExtras,
+    NewPair, ProfileChange, WireIds,
 };
 
 /// How long a bot gets to flush and stop before it is abandoned.
@@ -54,6 +55,9 @@ struct Running {
 
 struct Shared {
     data_dir: PathBuf,
+    /// Pair new devices asking for the full chat history
+    /// ([`history::device_props`]).
+    full_history: bool,
     running: Mutex<HashMap<InstanceId, Running>>,
     next_generation: AtomicU64,
 }
@@ -112,6 +116,9 @@ fn status(
         own_jid,
         push_name,
         own_lid: None,
+        epoch: None,
+        account_epoch: None,
+        history: None,
     })
 }
 
@@ -130,6 +137,9 @@ fn connected(
         own_jid: pn.map(bare),
         push_name: Some(push_name.to_owned()).filter(|n| !n.is_empty()),
         own_lid: lid.map(bare),
+        epoch: None,
+        account_epoch: None,
+        history: None,
     })
 }
 
@@ -357,10 +367,49 @@ pub fn quote_context(
     }
 }
 
+/// The directories under an instance's own that cache what its account
+/// downloaded: decrypted media and profile pictures
+/// (`Config::media_dir`, `Config::pictures_dir`).
+const ACCOUNT_CACHE_DIRS: [&str; 2] = ["media", "pictures"];
+
+/// What the handlers of one instance need to tell that another account was
+/// linked, and to clean up after it.
+#[derive(Clone)]
+struct Account {
+    /// The account's cache directories.
+    cache_dirs: Arc<[PathBuf]>,
+    full_history: bool,
+}
+
+impl Account {
+    /// Checks the account that just paired or connected against the one the
+    /// instance holds data for ([`EventSink::account_linked`]); the cached
+    /// files of another account are deleted before the apps hear of it.
+    async fn check(&self, sink: &EventSink, pn: Option<&Jid>, paired: bool) {
+        let pn = pn.map(|jid| jid.to_non_ad().to_string());
+        let paired = paired.then_some(self.full_history);
+        sink.account_linked(pn, paired, async || {
+            for dir in self.cache_dirs.iter() {
+                match tokio::fs::remove_dir_all(dir).await {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        log::warn!("{}: cannot delete {}: {e}", sink.instance(), dir.display())
+                    }
+                }
+            }
+        })
+        .await;
+    }
+}
+
 impl WaRuntime {
-    pub fn new(data_dir: PathBuf) -> Self {
+    /// `full_history`: pair new devices asking WhatsApp for the full chat
+    /// history instead of the recent messages only.
+    pub fn new(data_dir: PathBuf, full_history: bool) -> Self {
         Self(Arc::new(Shared {
             data_dir,
+            full_history,
             running: Mutex::new(HashMap::new()),
             next_generation: AtomicU64::new(1),
         }))
@@ -368,6 +417,15 @@ impl WaRuntime {
 
     fn instance_dir(&self, instance: &InstanceId) -> PathBuf {
         self.0.data_dir.join("instances").join(instance.as_str())
+    }
+
+    /// The account context of `instance`.
+    fn account(&self, instance: &InstanceId) -> Account {
+        let dir = self.instance_dir(instance);
+        Account {
+            cache_dirs: ACCOUNT_CACHE_DIRS.iter().map(|d| dir.join(d)).collect(),
+            full_history: self.0.full_history,
+        }
     }
 
     fn running(&self) -> std::sync::MutexGuard<'_, HashMap<InstanceId, Running>> {
@@ -445,8 +503,14 @@ impl WaRuntime {
 
         let generation = self.0.next_generation.fetch_add(1, Ordering::Relaxed);
         let was_connected = Arc::new(AtomicBool::new(false));
-        let mut builder = Bot::builder()
-            .with_backend(backend)
+        let account = self.account(&instance);
+        let mut builder = Bot::builder().with_backend(backend);
+        // Sent when a device registers, so this decides the history of the
+        // next pairing, not of an account that is already linked.
+        if let Some(props) = history::device_props(account.full_history) {
+            builder = builder.with_device_props(props);
+        }
+        let mut builder = builder
             .on_qr_code({
                 let sink = sink.clone();
                 move |payload, valid_for| {
@@ -477,9 +541,11 @@ impl WaRuntime {
                 let sink = sink.clone();
                 let instance = instance.clone();
                 let was_connected = Arc::clone(&was_connected);
+                let account = account.clone();
                 move |client| {
                     let sink = sink.clone();
                     let instance = instance.clone();
+                    let account = account.clone();
                     was_connected.store(true, Ordering::Relaxed);
                     let device = client.persistence_manager().get_device_snapshot();
                     let state = connected(
@@ -494,6 +560,9 @@ impl WaRuntime {
                         .zip(device.lid.as_ref())
                         .and_then(|(pn, lid)| Pair::of(lid, pn));
                     async move {
+                        // Before the state names the new number: the rows of
+                        // another account must be gone first.
+                        account.check(&sink, device.pn.as_ref(), false).await;
                         sink.emit(state).await;
                         tokio::spawn(async move {
                             // My own two ids are a pair like any other.
@@ -616,18 +685,26 @@ impl WaRuntime {
                     EventKind::DeleteChatUpdate,
                     EventKind::ClearChatUpdate,
                     EventKind::DeleteMessageForMeUpdate,
+                    EventKind::PairSuccess,
                 ],
                 {
                     let sink = sink.clone();
                     let instance = instance.clone();
                     let was_connected = Arc::clone(&was_connected);
+                    let account = account.clone();
                     move |event, client| {
                         let sink = sink.clone();
                         let instance = instance.clone();
                         let was_connected = Arc::clone(&was_connected);
+                        let account = account.clone();
                         async move {
                             let resolver = Resolver::recording(client, sink.clone());
-                            handle_event(&sink, &resolver, &instance, &was_connected, &event).await;
+                            let context = Handling {
+                                instance: &instance,
+                                was_connected: &was_connected,
+                                account: &account,
+                            };
+                            handle_event(&sink, &resolver, &context, &event).await;
                         }
                     }
                 },
@@ -975,13 +1052,24 @@ async fn on_receipt(sink: &EventSink, resolver: &Resolver, receipt: &Receipt) {
     }
 }
 
+/// What [`handle_event`] knows about the instance an event belongs to.
+struct Handling<'a> {
+    instance: &'a InstanceId,
+    was_connected: &'a AtomicBool,
+    account: &'a Account,
+}
+
 async fn handle_event(
     sink: &EventSink,
     resolver: &Resolver,
-    instance: &InstanceId,
-    was_connected: &AtomicBool,
+    context: &Handling<'_>,
     event: &Event,
 ) {
+    let Handling {
+        instance,
+        was_connected,
+        ..
+    } = *context;
     match event {
         Event::Receipt(receipt) => on_receipt(sink, resolver, receipt).await,
         // Presence and typing never carry the other id: the mappings are
@@ -1025,17 +1113,24 @@ async fn handle_event(
             }
             sink.publish(GatewayEvent::GroupChanged { jid });
         }
+        // A device was paired. The library reconnects next and the history
+        // sync follows: whatever is stored for another account goes now.
+        Event::PairSuccess(pair) => {
+            context.account.check(sink, Some(&pair.id), true).await;
+        }
         Event::HistorySync(lazy) => {
             let progress = lazy.progress();
+            let kind = history::sync_kind(lazy.sync_type());
             let lazy = (**lazy).clone();
             let now = now_ms();
-            let own_pn = resolver
+            let own = resolver
                 .client()
                 .persistence_manager()
-                .get_device_snapshot()
-                .pn
-                .as_ref()
-                .map(|jid| jid.to_non_ad().to_string());
+                .get_device_snapshot();
+            // Never store one account's history next to another's rows
+            // (the check is one read when nothing changed).
+            context.account.check(sink, own.pn.as_ref(), false).await;
+            let own_pn = own.pn.as_ref().map(|jid| jid.to_non_ad().to_string());
             // Look up every LID the sync names before the blocking walk,
             // and take the pairs the sync states itself.
             let scan = {
@@ -1053,15 +1148,30 @@ async fn handle_event(
                 }
                 _ => LidMap::default(),
             };
-            let drained = tokio::task::spawn_blocking(move || {
-                history::drain(&lazy, now, own_pn.as_deref(), &map)
-            })
-            .await;
-            match drained {
-                Ok(Ok(drained)) => {
-                    sink.set_push_names(drained.push_names).await;
-                    sink.import_statuses(drained.statuses).await;
-                    sink.import_history(drained.chats, progress).await;
+            // The walk hands the conversations over in batches and waits
+            // until each is stored: a large chunk is never decoded whole.
+            let (batches, mut stored) = tokio::sync::mpsc::channel(1);
+            let walk = tokio::task::spawn_blocking(move || {
+                history::drain_in_batches(
+                    &lazy,
+                    now,
+                    own_pn.as_deref(),
+                    &map,
+                    HISTORY_ROWS_PER_TX,
+                    |batch| batches.blocking_send(batch).is_ok(),
+                )
+            });
+            let mut report = HistoryImport::default();
+            while let Some(batch) = stored.recv().await {
+                if let Some(part) = sink.import_history(batch).await {
+                    report.absorb(part);
+                }
+            }
+            match walk.await {
+                Ok(Ok(rest)) => {
+                    sink.set_push_names(rest.push_names).await;
+                    sink.import_statuses(rest.statuses).await;
+                    sink.history_synced(kind, progress, report).await;
                     lid::sweep(resolver, sink).await;
                 }
                 Ok(Err(e)) => log::warn!("{instance}: history sync unreadable: {e}"),
@@ -1992,6 +2102,105 @@ mod tests {
     }
 
     #[test]
+    fn the_account_caches_are_the_configured_directories() {
+        let config = crate::config::Config::from_parts(None, &|_| None).unwrap();
+        let runtime = WaRuntime::new(config.data_dir.clone(), false);
+        let account = runtime.account(&InstanceId::new("abc"));
+        assert!(!account.full_history);
+        assert_eq!(
+            account.cache_dirs.to_vec(),
+            [config.media_dir("abc"), config.pictures_dir("abc")]
+        );
+    }
+
+    /// Another account on the instance: its cached files are gone before the
+    /// apps hear `account_changed`; the same account loses nothing.
+    #[tokio::test]
+    async fn another_account_loses_its_cached_files_first() {
+        use crate::store::{NewKey, Store};
+        use rosty_wa_proto::{ConnectKey, KeyId};
+
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = WaRuntime::new(dir.path().to_owned(), true);
+        let instance = InstanceId::new("abc");
+        let account = runtime.account(&instance);
+        let store = Store::open_in_memory().unwrap();
+        let key = ConnectKey::from_bytes(&[1; 32]);
+        let new = NewKey {
+            key_id: KeyId::from_bytes(&[1; 8]),
+            hash: key.hash(),
+            label: "k".into(),
+        };
+        store
+            .create_instance(instance.clone(), new, 1, 4)
+            .await
+            .unwrap();
+        let hub = Arc::new(crate::hub::Hub::new());
+        let pusher: Arc<dyn crate::push::Pusher> = Arc::new(crate::push::NoopPusher);
+        let calls = crate::wa::calls::CallTable::new(
+            instance.clone(),
+            Arc::clone(&hub),
+            Arc::clone(&pusher),
+            crate::wa::calls::RING_TIMEOUT,
+        );
+        let sink = EventSink::new(
+            instance.clone(),
+            Arc::clone(&hub),
+            store.clone(),
+            pusher,
+            calls,
+        );
+        let fill = || {
+            for cache in account.cache_dirs.iter() {
+                std::fs::create_dir_all(cache).unwrap();
+                std::fs::write(cache.join("file"), b"x").unwrap();
+            }
+        };
+        let filled = || account.cache_dirs.iter().all(|c| c.join("file").exists());
+        let old = jid("100000000001:3@s.whatsapp.net");
+        let new = jid("100000000002:1@s.whatsapp.net");
+        let mut events = hub.subscribe(&instance, None).events;
+
+        // The first account, its reconnect and its relink keep everything.
+        sink.emit(connected(&instance, Some(&old), None, "Old"))
+            .await;
+        fill();
+        account.check(&sink, Some(&old), false).await;
+        account.check(&sink, Some(&old), true).await;
+        account.check(&sink, None, true).await;
+        assert!(filled());
+        assert!(matches!(
+            events.try_recv().unwrap().event,
+            GatewayEvent::State(_)
+        ));
+        assert!(events.try_recv().is_err());
+
+        account.check(&sink, Some(&new), true).await;
+        assert!(account.cache_dirs.iter().all(|c| !c.exists()));
+        assert_eq!(
+            events.try_recv().unwrap().event,
+            GatewayEvent::AccountChanged {
+                old_pn: Some("100000000001@s.whatsapp.net".into()),
+                new_pn: "100000000002@s.whatsapp.net".into(),
+            }
+        );
+        // The `connected` state that follows names the new epoch.
+        sink.emit(connected(&instance, Some(&new), None, "New"))
+            .await;
+        match events.try_recv().unwrap().event {
+            GatewayEvent::State(status) => {
+                assert_eq!(status.account_epoch, Some(1));
+                assert_eq!(status.epoch.as_deref(), Some(hub.epoch()));
+                assert_eq!(
+                    status.own_jid.as_deref(),
+                    Some("100000000002@s.whatsapp.net")
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
     fn the_connected_state_names_both_own_ids() {
         let id = InstanceId::new("abc");
         let pn = jid("905550000009:4@s.whatsapp.net");
@@ -2004,6 +2213,9 @@ mod tests {
                 own_jid: Some("905550000009@s.whatsapp.net".into()),
                 push_name: Some("Ada".into()),
                 own_lid: Some("777@lid".into()),
+                epoch: None,
+                account_epoch: None,
+                history: None,
             })
         );
         // Before the LID is known, and without a push name.
@@ -2015,6 +2227,9 @@ mod tests {
                 own_jid: Some("905550000009@s.whatsapp.net".into()),
                 push_name: None,
                 own_lid: None,
+                epoch: None,
+                account_epoch: None,
+                history: None,
             })
         );
         assert_eq!(
@@ -2025,7 +2240,7 @@ mod tests {
 
     #[test]
     fn instance_files_live_under_the_data_dir() {
-        let runtime = WaRuntime::new(PathBuf::from("/data"));
+        let runtime = WaRuntime::new(PathBuf::from("/data"), true);
         let id = InstanceId::new("abc");
         assert_eq!(
             runtime.instance_dir(&id),

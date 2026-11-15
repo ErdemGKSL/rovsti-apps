@@ -89,11 +89,13 @@ scripts/deploy-wa-gateway.sh --dry-run  # connection and bundle check only
 | `fcm_project_id` | `WA_GATEWAY_FCM_PROJECT` | unset (push off) |
 | `fcm_service_account` | `WA_GATEWAY_FCM_SA` | unset (push off) |
 | `trust_proxy` | `WA_GATEWAY_TRUST_PROXY` | `false` |
+| `full_history` | `WA_GATEWAY_FULL_HISTORY` | `true` |
 
 Creating an instance needs no key, so anyone who can reach the gateway can create one
 up to `max_instances`. Keep the address private or behind the proxy's own access
 rules. Set `trust_proxy = true` only behind a proxy that sets `X-Forwarded-For`;
-failed-key rate limiting is per client IP.
+failed-key rate limiting is per client IP. `full_history` is explained under
+[History sync](#history-sync-recent-or-full).
 
 ## TLS reverse proxy
 
@@ -185,8 +187,9 @@ existing `wa.db` signs back in silently, so there is no QR the second time.
 3. Render the payload as a QR code (the apps use `rosty_wa_ui`) and scan it from
    WhatsApp on the phone: Settings, Linked devices, Link a device.
 4. When the phone approves, the stream sends `{"type":"state","state":"connected",...}`
-   with the account's JID and push name. A history sync follows, and one
-   `history_synced` event reports how many chats arrived.
+   with the account's JID and push name. A history sync follows in chunks, and one
+   `history_synced` event per chunk reports what arrived (see
+   [History sync](#history-sync-recent-or-full)).
 
 ## Link by pairing code
 
@@ -205,6 +208,97 @@ instead", and type the code.
   `POST /v1/instance/link`, or delete the instance with `DELETE /v1/instance`.
 - A temporary WhatsApp ban shows as `banned`. The gateway does not restart a banned
   instance at boot; relink once the ban is over.
+
+## Event socket: epoch and resume
+
+`GET /v1/events?after=<seq>` replays the events after `seq` from a ring of 1024 per
+instance, or sends `resync` when that point is gone. Sequences start at 1 again when
+the gateway restarts, so `seq` alone cannot tell two runs apart. The gateway therefore
+has an **epoch**: 16 hex digits, new for every process.
+
+- The first frame of every socket is
+  `{"seq":<start>,"at_ms":...,"event":{"type":"hello","epoch":"9f2c41d07ab35e68"}}`.
+  `seq` is the point the socket starts from: the `after` it resumes, or the newest
+  event for a socket without `after` or with one the gateway no longer has. It never
+  moves a resume point past an event that was not sent.
+- `resync` names it too: `{"type":"resync","epoch":"9f2c41d07ab35e68"}`.
+- `GET /v1/instance` and every `state` event carry it as `epoch`.
+
+A device stores the epoch next to its last `seq`. When a frame or the status names
+another epoch, everything since its last sync may be missing, whatever `seq` says:
+it refetches as for `resync`. A gateway from before this sends no `hello` and a bare
+`{"type":"resync"}`; a client from before this skips `hello` and ignores the field.
+
+## History sync: recent or full
+
+After a device is paired, the phone sends the chat history in chunks. Each chunk is
+stored (messages already there are kept as they are) and announced once:
+
+```
+{"type":"history_synced","chats":12,"progress":40,"sync_type":"recent","messages":3500,"oldest_ms":1500000000000}
+```
+
+- `chats`: chats the chunk wrote. `messages`: messages of the chunk that were not
+  stored before. `oldest_ms`: the oldest message in the chunk.
+- `sync_type`: `initial` (the chat list and newest messages), `recent`, `full` (the
+  older messages of a full history), `on_demand`, or `other` (push names, status
+  updates and the like, with `chats` 0).
+- `progress`: what WhatsApp said for the chunk, 0 to 100 within its `sync_type`, or
+  `null`.
+
+`GET /v1/instance` (and every `state` event) reports the whole picture as `history`:
+
+```
+"history": {"state":"syncing","progress":55,"chats":120,"messages":48000,"oldest_ms":1500000000000}
+```
+
+- `state`: `idle` (no chunk since the account was linked), `syncing`, `done`.
+- `progress`: 0 to 100 over the whole sync, never going back while it runs. With a
+  full history the recent messages are the first 25 and the older ones the rest;
+  that split is the gateway's guess, not a number from WhatsApp.
+- `chats`, `messages`, `oldest_ms`: what the gateway holds for the account now, live
+  messages included.
+- `done` is the last expected chunk at 100 (`recent`, or `full` when a full history
+  was asked for). WhatsApp does not say when a sync ends, so a sync that sent nothing
+  for 30 minutes also reads `done`; a chunk that arrives later (the phone was
+  offline) makes it `syncing` again. The state is kept in `gateway.db` and survives a
+  restart.
+
+A chunk is imported in pieces of at most 2000 messages per database transaction, read
+from the compressed blob one conversation at a time, so a large history neither holds
+the database nor sits in memory whole.
+
+**`full_history` (default `true`)** makes a newly paired device ask for the full
+history instead of the recent messages only. For that the device registers the way
+WhatsApp's Windows desktop client does (platform type `UWP`, `require_full_sync`, a
+365-day limit and the on-demand flags; the library documents these as one set), so
+the phone lists it as Windows under Linked devices. How much the phone then sends is
+its decision.
+
+These device properties are sent only when a device registers. **An account that is
+already linked keeps the sync it was paired with: to get the full history, unlink it
+(on the phone, or let it log out) and link it again** with `POST /v1/instance/link`.
+A relink of the same account keeps every stored chat and message; the new sync adds
+what is missing. Set `full_history = false` to pair as before (recent messages, an
+unnamed device).
+
+## Another account on the same instance
+
+An instance keeps its id, keys and push tokens when it is linked again. When the
+account that links has **another phone number** than the one the instance holds data
+for, the gateway first deletes everything it stored for the old account (chats,
+messages, reactions, receipts, edits, chat settings, profiles, status updates,
+scheduled texts, identity pairs, and the cached media and profile pictures), raises
+`account_epoch` in the instance status and then sends
+
+```
+{"type":"account_changed","old_pn":"100000000001@s.whatsapp.net","new_pn":"100000000002@s.whatsapp.net"}
+```
+
+An app drops its local copy on that event, or when the status shows another
+`account_epoch` than the one it stored. Nothing is deleted when either number is
+unknown, and a relink of the same number keeps everything. The check runs when a
+pairing completes, on every connect and before a history chunk is stored.
 
 ## Is this number on WhatsApp?
 

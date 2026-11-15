@@ -1750,21 +1750,28 @@ to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (A
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E7.1 | App module, manifest parity, full-screen map home skeleton, migration test | R1 | in-progress |
-| E7.2a | Camera, gestures, tile request/cancel, decode (`MapCamera`, `tile()` client) | R1 | in-progress |
-| E7.2b | Tile rasteriser, bitmap LRU, stand-ins, styles, scale bar, JVM render benchmark | R1 | in-progress |
-| E7.3 | Radar layers | R1 | in-progress |
-| E7.4 | Picking and the pin menu | R1 | in-progress |
-| E7.5 | Trip start, preflight, live card | R1 | in-progress |
-| E7.6 | Alarm and arrival | R1 | in-progress |
-| E7.7 | Saved stops | R1 | in-progress |
+| E7.1 | App module, manifest parity, full-screen map home skeleton, migration test | R1 | done (R1; evidence in `plans/e7-r1.md`) |
+| E7.2a | Camera, gestures, tile request/cancel, decode (`MapCamera`, `tile()` client) | R1 | done (R1; evidence in `plans/e7-r1.md`) |
+| E7.2b | Tile rasteriser, bitmap LRU, stand-ins, styles, scale bar, JVM render benchmark | R1 | done (R1; evidence in `plans/e7-r1.md`) |
+| E7.3 | Radar layers | R1 | done (R1; evidence in `plans/e7-r1.md`) |
+| E7.4 | Picking and the pin menu | R1 | done (R1; evidence in `plans/e7-r1.md`) |
+| E7.5 | Trip start, preflight, live card | R1 | done (R1; evidence in `plans/e7-r1.md`) |
+| E7.6 | Alarm and arrival | R1 | done (R1; evidence in `plans/e7-r1.md`) |
+| E7.7 | Saved stops | R1 | done (R1; evidence in `plans/e7-r1.md`) |
 | E7.8 | Pick sheets | R2 | todo |
 | E7.9 | Map options, measure, share location | R2 | todo |
 | E7.10 | Settings | R2 | todo |
 | E7.11 | History, stats, backup | R2 | todo |
 | E7.12 | Saved stops import and export | R2 | todo |
-| E7.13 | Tile renderer device check and MapLibre decision record | R2 | todo |
+| E7.13 | Tile renderer device check and MapLibre decision record | R2 | todo (AC1 done in R1 with E7.2b) |
 | E7.14 | Polish | R2 | todo |
+
+**E7 R1 closed (2026-11-15, `stops-kotlin`)**: plan and per-story Evidence in `_bmad-output/kotlin-ui/plans/e7-r1.md`,
+approach notes `e7-r1-approach-map.md` (Fable subagent: map engine, radar, picking, GTFS ops) and `e7-r1-approach-app.md`.
+Parity notes: the E7.5 "line-aware N stops before" alarm no longer exists (AD-ST6); its parity is the stop sheet's line list
+plus the drawn line (`stops.gtfs_lines`), screenshot `e7.5-line-choice-in-stop-ui`. S19 reverse/duplicate dropped upstream.
+New ops: `stops.gtfs_view`, `stops.gtfs_lines`, `stops.gtfs_summary`, `stops.store_trip_clear`; `eta_min` on the trip status;
+S44 saved-stop note. Carried to R2: see "Carried to R2" in `plans/e7-r1.md`.
 
 Shared AC for every E7 story: the map is the full window in every state; no screen shows a map inside a box; every
 control floats over the map as glass chrome; the sheet at peek and medium lets the map pan and take taps; floating

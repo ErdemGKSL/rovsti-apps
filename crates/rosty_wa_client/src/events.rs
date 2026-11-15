@@ -26,6 +26,9 @@ use crate::error::{ClientError, from_ws};
 use crate::{http, tls};
 
 /// What the stream tells its consumer.
+// Nearly every value is an `Event`, so boxing it would add an allocation per
+// event and save nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientEvent {
     /// The socket is open; events follow.
@@ -66,6 +69,19 @@ impl Drop for EventStream {
 
 const PING_EVERY: Duration = Duration::from_secs(25);
 const IDLE_LIMIT: Duration = Duration::from_secs(90);
+
+/// The envelope in one text frame. `None` for a frame this build cannot
+/// read, which is how an event kind from a newer gateway is skipped: the
+/// stream logs it and goes on with the next frame.
+pub(crate) fn decode_event(text: &str) -> Option<EventEnvelope> {
+    match serde_json::from_str::<EventEnvelope>(text) {
+        Ok(envelope) => Some(envelope),
+        Err(error) => {
+            log::warn!("wa events: undecodable event: {error}");
+            None
+        }
+    }
+}
 
 /// Builds a WebSocket upgrade request with the bearer header.
 pub(crate) fn ws_request(
@@ -251,8 +267,8 @@ async fn session(
             Ok(Some(Ok(message))) => message,
         };
         match message {
-            Message::Text(text) => match serde_json::from_str::<EventEnvelope>(&text) {
-                Ok(envelope) => {
+            Message::Text(text) => {
+                if let Some(envelope) = decode_event(&text) {
                     if last.is_none_or(|seq| envelope.seq > seq) {
                         *last = Some(envelope.seq);
                     }
@@ -260,8 +276,7 @@ async fn session(
                         return Ended::Stopped;
                     }
                 }
-                Err(error) => log::warn!("wa events: undecodable event: {error}"),
-            },
+            }
             Message::Close(_) => return Ended::Lost("closed by the gateway".into()),
             // Pings are answered by tungstenite; pongs and binary are ignored.
             _ => {}
@@ -297,6 +312,49 @@ mod tests {
         let url = GatewayUrl::parse("http://10.0.2.2:8787").unwrap();
         let req = ws_request(&url, &events_path(None), &key()).unwrap();
         assert_eq!(req.uri().to_string(), "ws://10.0.2.2:8787/v1/events");
+    }
+
+    #[test]
+    fn identity_events_decode_and_unknown_kinds_are_skipped() {
+        use rosty_wa_proto::GatewayEvent;
+
+        let mapped = decode_event(
+            r#"{"seq":7,"at_ms":9,"event":{"type":"identity_mapped","lid":"1234@lid","pn":"905550000001@s.whatsapp.net","source":"receipt","learned_ms":8}}"#,
+        )
+        .unwrap();
+        assert_eq!(mapped.seq, 7);
+        assert_eq!(
+            mapped.event,
+            GatewayEvent::IdentityMapped {
+                lid: "1234@lid".into(),
+                pn: "905550000001@s.whatsapp.net".into(),
+                source: "receipt".into(),
+                learned_ms: 8,
+            }
+        );
+        let changed = decode_event(
+            r#"{"seq":8,"at_ms":9,"event":{"type":"identity_number_changed","old_pn":"905550000001@s.whatsapp.net","new_pn":"905550000002@s.whatsapp.net","new_lid":"1234@lid"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            changed.event,
+            GatewayEvent::IdentityNumberChanged {
+                old_pn: "905550000001@s.whatsapp.net".into(),
+                new_pn: "905550000002@s.whatsapp.net".into(),
+                old_lid: None,
+                new_lid: Some("1234@lid".into()),
+            }
+        );
+        // An event with alt ids this build knows, and one from the future.
+        let typing = decode_event(
+            r#"{"seq":9,"at_ms":9,"event":{"type":"typing","chat":"c","jid":"905550000001@s.whatsapp.net","state":"typing","jid_alt":"1234@lid","later_field":1}}"#,
+        );
+        assert!(typing.is_some());
+        assert_eq!(
+            decode_event(r#"{"seq":10,"at_ms":9,"event":{"type":"from_the_future","x":1}}"#),
+            None
+        );
+        assert_eq!(decode_event("not json"), None);
     }
 
     #[test]

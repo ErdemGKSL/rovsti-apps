@@ -11,6 +11,7 @@ pub mod audio;
 pub mod call;
 pub mod event;
 pub mod history;
+pub mod identity;
 pub mod key;
 pub mod limit;
 pub mod log;
@@ -30,6 +31,7 @@ pub use call::{
 };
 pub use event::{CallSummary, CallUpdate, EventEnvelope, GatewayEvent};
 pub use history::{SnapshotPlan, WaCallHistory, WaCallRecord, plan_snapshot, tracked_end};
+pub use identity::{IdentityMapping, IdentityMappings, IdentitySource};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};
 pub use lookup::{LookupCache, LookupUsers, MAX_LOOKUP, WaTarget, WaUser, chat_users, wa_target};

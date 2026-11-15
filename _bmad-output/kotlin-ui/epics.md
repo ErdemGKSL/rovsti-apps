@@ -1396,7 +1396,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | Story | Title | Round | Status |
 |---|---|---|---|
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
-| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | done (plan `plans/round-16.md`; Evidence at the end of the X.2 section; known open item there) |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | in-progress (reopened in round 17: the `cards.*` op only arrived in the unreviewed `3a03c05` WIP, no glass optics in the GIF, x2 goldens show the old stand-in; plan `plans/round-17.md`) |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1507,7 +1507,7 @@ contact with vCard QR, new number) and the glass panel with glisse-ported refrac
 5 Contacts Card Studio sheet (menu, birthday row chip, Upcoming); 6 share and save (share provider, MediaStore, birthday
 notification action); 7 budgets and cancellation; 8 **F40** (X.1 goldens use featureless gradient "photos" that cannot
 prove the WhatsApp picture, e.g. `x1-wa-avatar-incoming-dark` looks like an aura: use recognisable test portraits),
-checklist, full gate, close X.2. Next planner after X.2: **E6 R1**. E6 and E7 run in parallel sessions (see E6, E7); after F40 the `ui-overhaul` workflow plans no E6/E7 rounds.
+checklist, full gate, close X.2. **Round 17** -> `_bmad-output/kotlin-ui/plans/round-17.md` (planned 2026-11-15 at `3a03c05`): land the carry-over, real native path, layout and goldens, glisse optics, sheet fixes R17-F1..F4, budgets, close. Next planner after X.2: **E8 R1**. E6 and E7 run in parallel sessions (see E6, E7); after F40 the `ui-overhaul` workflow plans no E6/E7 rounds.
 
 - Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least
   two weeks old, check its current API on docs.rs) inside the Rust core to render designed cards from node trees to
@@ -1559,7 +1559,12 @@ checklist, full gate, close X.2. Next planner after X.2: **E6 R1**. E6 and E7 ru
   budget (static card under ~300 ms, GIF under ~3 s on the phone), Kotlin flow tests; screenshots
   `x2-card-preview-birthday`, `x2-card-preview-contact`, `x2-card-preview-gif`.
 
-**X.2 status: done (round-16 step 8).**
+**X.2 status: in-progress (reopened by the round-17 planner, 2026-11-15).** The round-16 close in `be4bf61` was premature:
+the real `cards.*` FFI op, `NativeCardsOps` and the Rust templates exist only in `3a03c05 WIP: carry-over` (unreviewed),
+the animated cards have no glisse refraction/glint yet, and the committed `x2-*` goldens still show the Kotlin stand-in
+(cut headline, "October 3" in Turkish). Round 17 (`plans/round-17.md`) finishes it; then the next planner is **E8 R1**.
+
+**Round-16 Evidence (kept for history):**
 **Evidence (step 8, uncommitted at the time of writing):**
 - F40: `:testing` `portraitImage` (`android/testing/src/main/kotlin/dev/rosty/testing/PortraitImage.kt`) draws a
   head-and-shoulders portrait in code (wall pattern: boards, bokeh or window; shoulders, neck, ears, hair, eyes, brows,

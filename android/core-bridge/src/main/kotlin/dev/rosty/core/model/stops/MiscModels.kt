@@ -155,6 +155,8 @@ data class PrefsChoicesAnswer(
     val vibration: List<VibrationChoice>,
     @SerialName("notice_when") val noticeWhen: List<NoticeWhenChoice>,
     @SerialName("default_template") val defaultTemplate: String,
+    /** The default message of every language: a stored message that is one of them was never rewritten. */
+    @SerialName("default_templates") val defaultTemplates: List<String> = emptyList(),
     @SerialName("default_tile_url") val defaultTileUrl: String,
     val attribution: String,
 )

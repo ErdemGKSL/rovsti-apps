@@ -167,6 +167,9 @@ sealed interface PersonAction {
     /** The More menu's WhatsApp call item: calls the first number over WhatsApp. */
     data object WhatsAppCall : PersonAction
 
+    /** The More menu's WhatsApp message item: opens the chat of the first number in Rosty Messages. */
+    data object WhatsAppMessage : PersonAction
+
     data class CopyNumber(
         val number: String,
     ) : PersonAction
@@ -330,6 +333,10 @@ class PersonSheetViewModel(
     private val placeWhatsApp: (String) -> Unit = {},
     /** WhatsApp calls can be placed (the link is connected): enables the menu item. */
     val whatsAppAvailable: StateFlow<Boolean> = MutableStateFlow(false),
+    /** Opens the WhatsApp chat of a number in Rosty Messages, with the person's name. */
+    private val messageWhatsApp: (number: String, name: String?) -> Unit = { _, _ -> },
+    /** Rosty Messages is installed to take the chat: the menu shows its WhatsApp message item. */
+    val whatsAppMessageAvailable: StateFlow<Boolean> = MutableStateFlow(false),
     /**
      * The caller-ID (F39): a sheet opened for a bare number (Blocked, Statistics, a favorite number) names the contact
      * that owns it now, the same way Recents does. Asked on every build, so it follows contact edits.
@@ -455,26 +462,89 @@ class PersonSheetViewModel(
 
     fun onAction(action: PersonAction) {
         when (action) {
-            is PersonAction.Call -> scope.launch { place(action.number, null) }
-            is PersonAction.AskSim -> askSim(action.number)
-            is PersonAction.CallOn -> scope.launch { place(action.number, action.simKey) }
-            PersonAction.Message -> primary()?.let { say(PersonEffect.SendMessage(it, null)) }
-            PersonAction.WhatsAppCall -> primary()?.let(placeWhatsApp)
-            is PersonAction.CopyNumber -> copy(action.number)
-            PersonAction.CopyAll -> copyAll()
-            PersonAction.ShareDetails -> shareDetails()
-            PersonAction.ShareStats -> statsShare?.let { say(PersonEffect.ShareText(it)) }
-            PersonAction.ShowQr -> scope.launch { showQr() }
-            PersonAction.ExportCsv -> scope.launch { exportCsv() }
-            PersonAction.AskQuickReply -> scope.launch { askReply() }
-            is PersonAction.QuickReply -> primary()?.let { say(PersonEffect.SendMessage(it, action.text)) }
-            PersonAction.AskBlock -> askBlock()
-            PersonAction.ConfirmBlock -> scope.launch { blockAll() }
-            PersonAction.AddContact -> primary()?.let { say(PersonEffect.AddContact(it)) }
-            PersonAction.AskDeleteHistory -> askDeleteHistory()
-            PersonAction.ConfirmDeleteHistory -> scope.launch { deleteHistory() }
-            is PersonAction.OpenCall -> lines[action.key]?.let { say(PersonEffect.OpenCall(it.line, target.name)) }
-            is PersonAction.Undo -> scope.launch { undo(action.undo) }
+            is PersonAction.Call -> {
+                scope.launch { place(action.number, null) }
+            }
+
+            is PersonAction.AskSim -> {
+                askSim(action.number)
+            }
+
+            is PersonAction.CallOn -> {
+                scope.launch { place(action.number, action.simKey) }
+            }
+
+            PersonAction.Message -> {
+                primary()?.let { say(PersonEffect.SendMessage(it, null)) }
+            }
+
+            PersonAction.WhatsAppCall -> {
+                primary()?.let(placeWhatsApp)
+            }
+
+            PersonAction.WhatsAppMessage -> {
+                primary()?.let { number -> messageWhatsApp(number, state.value.takeIf { it.named }?.title) }
+            }
+
+            is PersonAction.CopyNumber -> {
+                copy(action.number)
+            }
+
+            PersonAction.CopyAll -> {
+                copyAll()
+            }
+
+            PersonAction.ShareDetails -> {
+                shareDetails()
+            }
+
+            PersonAction.ShareStats -> {
+                statsShare?.let { say(PersonEffect.ShareText(it)) }
+            }
+
+            PersonAction.ShowQr -> {
+                scope.launch { showQr() }
+            }
+
+            PersonAction.ExportCsv -> {
+                scope.launch { exportCsv() }
+            }
+
+            PersonAction.AskQuickReply -> {
+                scope.launch { askReply() }
+            }
+
+            is PersonAction.QuickReply -> {
+                primary()?.let { say(PersonEffect.SendMessage(it, action.text)) }
+            }
+
+            PersonAction.AskBlock -> {
+                askBlock()
+            }
+
+            PersonAction.ConfirmBlock -> {
+                scope.launch { blockAll() }
+            }
+
+            PersonAction.AddContact -> {
+                primary()?.let { say(PersonEffect.AddContact(it)) }
+            }
+
+            PersonAction.AskDeleteHistory -> {
+                askDeleteHistory()
+            }
+
+            PersonAction.ConfirmDeleteHistory -> {
+                scope.launch { deleteHistory() }
+            }
+
+            is PersonAction.OpenCall -> {
+                lines[action.key]?.let { say(PersonEffect.OpenCall(it.line, target.name)) }
+            }
+
+            is PersonAction.Undo -> {
+                scope.launch { undo(action.undo) }
+            }
         }
     }
 

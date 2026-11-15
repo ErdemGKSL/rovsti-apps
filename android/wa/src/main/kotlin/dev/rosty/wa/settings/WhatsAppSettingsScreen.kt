@@ -1,6 +1,7 @@
 package dev.rosty.wa.settings
 
 import android.content.ActivityNotFoundException
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -102,11 +103,15 @@ private const val LARGE_FONT = 1.3f
 private val StatusDot = 10.dp
 private val GatewayValueMax = 200.dp
 
-/** The route: collects the view model and shows what its events ask for (a "Copied" toast, a share sheet). */
+/**
+ * The route: collects the view model and shows what its events ask for (a "Copied" toast, a share sheet). [linked]
+ * are blocks the app adds to the page of a linked account (Messages: history progress, storage and data).
+ */
 @Composable
 fun WhatsAppSettingsRoute(
     viewModel: WhatsAppSettingsViewModel,
     modifier: Modifier = Modifier,
+    linked: (LazyListScope.() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsState()
     val overlay = LocalOverlayOrNull.current
@@ -135,7 +140,7 @@ fun WhatsAppSettingsRoute(
             }
         }
     }
-    WhatsAppSettingsScreen(state = state, onAction = viewModel::onAction, modifier = modifier)
+    WhatsAppSettingsScreen(state = state, onAction = viewModel::onAction, modifier = modifier, linked = linked)
 }
 
 /** The screen. [state] is all it knows; every tap goes out through [onAction]. */
@@ -145,6 +150,7 @@ fun WhatsAppSettingsScreen(
     onAction: (WaSettingsAction) -> Unit,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
+    linked: (LazyListScope.() -> Unit)? = null,
 ) {
     val page = state.page
     val back = page.back
@@ -172,6 +178,7 @@ fun WhatsAppSettingsScreen(
         modifier = modifier.testTag("wa-settings"),
     ) {
         pageItems(state, fields, onAction)
+        if (page.kind == CONNECTED) linked?.invoke(this)
     }
 }
 
@@ -186,7 +193,7 @@ private fun LazyListScope.pageItems(
         item(key = "failed") { FailurePage(page, onAction) }
     }
     if (intro) notes(page.notes)
-    if (page.rows.isNotEmpty()) item(key = "rows") { StatusRows(page.rows) }
+    if (page.rows.isNotEmpty()) item(key = "rows") { StatusRows(page.rows, state.sharedFrom) }
     if (page.qrPayload != null) item(key = "qr") { QrCard(state.qr) }
     page.code?.let { code -> item(key = "code") { PairingCode(code) } }
     if (page.keyLines.isNotEmpty()) item(key = "key-lines") { KeyBlock(page.keyLines, state.keyQr, onAction) }
@@ -197,6 +204,12 @@ private fun LazyListScope.pageItems(
     }
     if (page.keys.isNotEmpty()) item(key = "keys") { KeyList(page.keys, onAction) }
     if (page.kind != FAILED) buttons(page, fields, onAction)
+    // No link here, and a sibling Rosty app holds the one that was removed: one tap takes it back. The page's own
+    // options (link a new device, paste a key) stay above it.
+    val offer = state.siblingOffer
+    if (page.kind == CHOOSE && offer != null) {
+        item(key = "sibling-offer") { SiblingOffer(offer) { onAction(WaSettingsAction.UseSiblingLink) } }
+    }
     if (!intro && page.kind != FAILED) notes(page.notes)
 }
 
@@ -216,9 +229,62 @@ private fun LazyListScope.notes(notes: List<String>) {
 
 // ---- blocks
 
+/** The name the phone shows for the Rosty app [packageName]; null when it is not installed or not visible. */
 @Composable
-private fun StatusRows(rows: List<SettingsRow>) {
-    InsetGroupedSection(Modifier.padding(top = BlockGap).testTag("wa-status")) {
+private fun siblingName(packageName: String): String? {
+    val context = LocalContext.current
+    return remember(packageName, context) {
+        try {
+            val packages = context.packageManager
+            packages.getApplicationLabel(packages.getApplicationInfo(packageName, 0)).toString().ifBlank { null }
+        } catch (_: PackageManager.NameNotFoundException) {
+            null
+        }
+    }
+}
+
+/** "Use the link from Rosty Messages": the hand-over the user asks for, under the page's own options. */
+@Composable
+private fun SiblingOffer(
+    packageName: String,
+    onClick: () -> Unit,
+) {
+    val name = siblingName(packageName)
+    InsetGroupedSection(
+        Modifier.padding(top = BlockGap),
+        header = stringResource(R.string.wa_link_sibling_section),
+    ) {
+        row {
+            ListRow(
+                title =
+                    name?.let { stringResource(R.string.wa_link_use_sibling, it) }
+                        ?: stringResource(R.string.wa_link_use_sibling_other),
+                secondary = stringResource(R.string.wa_link_use_sibling_detail),
+                secondaryMaxLines = SECONDARY_LINES,
+                titleMaxLines = TITLE_LINES,
+                titleColor = RostyTheme.colors.accent,
+                modifier = Modifier.testTag("wa-use-sibling"),
+                onClick = onClick,
+            )
+        }
+    }
+}
+
+/**
+ * The status rows. [sharedFrom] is the package of the sibling Rosty app the link was taken from: the group then
+ * says so in its footer.
+ */
+@Composable
+private fun StatusRows(
+    rows: List<SettingsRow>,
+    sharedFrom: String? = null,
+) {
+    val footer =
+        sharedFrom?.let { from ->
+            siblingName(from)?.let { stringResource(R.string.wa_link_shared_from, it) }
+                ?: stringResource(R.string.wa_link_shared_from_other)
+        }
+    InsetGroupedSection(Modifier.padding(top = BlockGap).testTag("wa-status"), footer = footer) {
         for (r in rows) {
             row {
                 ListRow(
@@ -679,6 +745,8 @@ private fun ConfirmAlert(
 }
 
 private const val FAILED = "failed"
+private const val CONNECTED = "connected"
+private const val CHOOSE = "choose"
 private const val BACK = "back"
 private const val PRIMARY = "primary"
 private const val OPTION = "option"

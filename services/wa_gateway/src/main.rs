@@ -52,7 +52,10 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
 
     let pusher = wa_gateway::push::from_config(config.fcm.as_ref(), store.clone())
         .map_err(|e| e.to_string())?;
-    let driver = Arc::new(wa_gateway::wa::WaRuntime::new(config.data_dir.clone()));
+    let driver = Arc::new(wa_gateway::wa::WaRuntime::new(
+        config.data_dir.clone(),
+        config.full_history,
+    ));
     let listener = tokio::net::TcpListener::bind(config.bind)
         .await
         .map_err(|e| format!("cannot bind {}: {e}", config.bind))?;

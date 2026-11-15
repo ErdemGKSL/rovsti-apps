@@ -2,11 +2,14 @@ package dev.rosty.core
 
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.HandleAnswer
+import dev.rosty.core.model.wa.HistoryStatus
+import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichMessage
 import dev.rosty.core.model.wa.WaIdParseRequest
 import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaIds
+import dev.rosty.core.model.wa.WaSyncAccountChangedRequest
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
@@ -23,17 +26,44 @@ import dev.rosty.core.model.wa.WaSyncDueRequest
 import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
+import dev.rosty.core.model.wa.WaSyncEvicted
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncFetched
 import dev.rosty.core.model.wa.WaSyncHandleRequest
+import dev.rosty.core.model.wa.WaSyncHistory
+import dev.rosty.core.model.wa.WaSyncHistoryAnswer
+import dev.rosty.core.model.wa.WaSyncHistoryReport
+import dev.rosty.core.model.wa.WaSyncHistoryState
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncKind
+import dev.rosty.core.model.wa.WaSyncKindUsage
 import dev.rosty.core.model.wa.WaSyncMedia
+import dev.rosty.core.model.wa.WaSyncMediaCap
+import dev.rosty.core.model.wa.WaSyncMediaCapRequest
+import dev.rosty.core.model.wa.WaSyncMediaDecision
+import dev.rosty.core.model.wa.WaSyncMediaDue
+import dev.rosty.core.model.wa.WaSyncMediaDueRequest
+import dev.rosty.core.model.wa.WaSyncMediaEnqueueRequest
+import dev.rosty.core.model.wa.WaSyncMediaEntry
+import dev.rosty.core.model.wa.WaSyncMediaKeepRequest
+import dev.rosty.core.model.wa.WaSyncMediaKept
+import dev.rosty.core.model.wa.WaSyncMediaPolicy
+import dev.rosty.core.model.wa.WaSyncMediaPolicyRequest
+import dev.rosty.core.model.wa.WaSyncMediaQueued
 import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
+import dev.rosty.core.model.wa.WaSyncMediaSettleRequest
+import dev.rosty.core.model.wa.WaSyncMediaSettled
+import dev.rosty.core.model.wa.WaSyncMediaState
+import dev.rosty.core.model.wa.WaSyncMediaStats
+import dev.rosty.core.model.wa.WaSyncMediaStatsRequest
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncMissing
+import dev.rosty.core.model.wa.WaSyncNetwork
+import dev.rosty.core.model.wa.WaSyncNoteStatusRequest
 import dev.rosty.core.model.wa.WaSyncNumbersAnswer
 import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
@@ -47,6 +77,8 @@ import dev.rosty.core.model.wa.WaSyncOutboxState
 import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncReconcileRequest
+import dev.rosty.core.model.wa.WaSyncReconciled
 import dev.rosty.core.model.wa.WaSyncRekeyed
 import dev.rosty.core.model.wa.WaSyncRekeyedAnswer
 import dev.rosty.core.model.wa.WaSyncRekeyedRequest
@@ -59,12 +91,16 @@ import dev.rosty.core.model.wa.WaSyncSettled
 import dev.rosty.core.model.wa.WaSyncStarredCursor
 import dev.rosty.core.model.wa.WaSyncStarredPage
 import dev.rosty.core.model.wa.WaSyncStarredRequest
+import dev.rosty.core.model.wa.WaSyncStatusNoted
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.model.wa.WaSyncStorePageRequest
 import dev.rosty.core.model.wa.WaSyncStoredChats
 import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.model.wa.WaSyncUsage
+import dev.rosty.core.model.wa.WaSyncWipeRequest
+import dev.rosty.core.model.wa.WaSyncWiped
 import dev.rosty.core.ops.WaSyncOps
 
 /**
@@ -77,6 +113,13 @@ import dev.rosty.core.ops.WaSyncOps
  * Identity is a scripted alias map: [merge] (or an `identity_mapped` event, a catch-up page, an observed group member
  * or profile) makes two ids one chat, reads under the old id follow it, and the step is reported as `rekeyed`. None
  * of the real rules (source ranks, number changes, own ids) are modelled.
+ *
+ * Media follows the store's rules: the auto-download table ([mediaPolicy]), the queue with its back-off and five
+ * attempts, the cap with its exemptions (starred, pinned, saved, a file an unsent row sends, used in the last 24
+ * hours) and the reconcile. A thread row carries the cached file and the state of its download, as in Rust. The
+ * gateway epoch and the account wipe ([noteStatus], [accountChanged], a whole status handed to [identityObserve],
+ * and in [applyEvents] a `hello`, a `resync`, a `state` and an `account_changed` event) follow the same conditions;
+ * what is wiped is everything seeded here. A `history_synced` event and a status report keep [history].
  */
 class FakeWaSyncOps(
     private val instanceId: String = "fake-instance",
@@ -107,7 +150,28 @@ class FakeWaSyncOps(
     /** Every key change so far, oldest first (`rekeyedSince`). */
     val rekeyed = mutableListOf<WaSyncRekeyed>()
 
-    private val media = mutableMapOf<Pair<String, String>, WaSyncMedia>()
+    /** Stored thumbnails (base64) by chat and message id. */
+    private val thumbs = mutableMapOf<Pair<String, String>, String>()
+
+    /** Media rows by chat and message id; a message without one reads as [WaSyncMediaState.None]. */
+    private val files = mutableMapOf<Pair<String, String>, WaSyncMediaEntry>()
+
+    /** When each media row was queued, and when it was handed out. */
+    private val queuedMs = mutableMapOf<Pair<String, String>, Long>()
+    private val attemptedMs = mutableMapOf<Pair<String, String>, Long>()
+
+    /** The media cap in bytes; null: no limit. */
+    var capBytes: Long? = DEFAULT_CAP_BYTES
+
+    /** The gateway epoch, the account and the history progress as last noted. */
+    var epoch: String? = null
+    var accountEpoch: Int? = null
+    var ownPn: String? = null
+    var history: WaSyncHistory? = null
+
+    /** The store was emptied on the word of a status; the announcement may still sweep it. */
+    private var sweepPending = false
+    private var rekeySeq = 0L
     private var seq: Long? = null
 
     /** The key the rows of [id] live under: the id without device, followed through [aliases]. */
@@ -147,10 +211,19 @@ class FakeWaSyncOps(
             chats.removeAll { it.jid == old }
             if (moved != null && chats.none { it.jid == key }) chats += moved.copy(jid = key, wireJid = old)
             queue.replaceAll { if (it.chat == old) it.copy(chat = key) else it }
-            for (file in media.keys.filter { it.first == old }) {
-                media.remove(file)?.let { media[key to file.second] = it }
+            for (file in thumbs.keys.filter { it.first == old }) {
+                thumbs.remove(file)?.let { thumbs.putIfAbsent(key to file.second, it) }
             }
-            val step = WaSyncRekeyed(rekeyed.size + 1L, old, key)
+            // A message both chats hold keeps the row that has the file.
+            for (file in files.keys.filter { it.first == old }) {
+                val moved = files.remove(file)?.copy(chat = key) ?: continue
+                val kept = files[key to file.second]
+                if (kept == null || (kept.state != WaSyncMediaState.Ready && moved.state == WaSyncMediaState.Ready)) {
+                    files[key to file.second] = moved
+                }
+            }
+            rekeySeq += 1
+            val step = WaSyncRekeyed(rekeySeq, old, key)
             rekeyed += step
             unreported += step
             step
@@ -250,7 +323,88 @@ class FakeWaSyncOps(
 
     private fun <T> ok(value: T): Outcome<T> = Outcome.Ok(value)
 
-    override suspend fun open(req: WaSyncOpenRequest) = ok(WaSyncOpened(HANDLE, instanceId, 2, seq, owed.refreshChats))
+    /** A stored row with what the media rows say about it: the thumbnail, the cached file, the download state. */
+    private fun withMedia(row: WaSyncMessage): WaSyncMessage {
+        val key = row.chat to row.id
+        val entry = files[key]
+        if (entry == null && key !in thumbs) return row
+        return row.copy(
+            hasThumbnail = row.hasThumbnail || key in thumbs,
+            mediaPath = entry?.path ?: row.mediaPath,
+            mediaState = entry?.state?.takeIf { it != WaSyncMediaState.None } ?: row.mediaState,
+        )
+    }
+
+    private fun row(
+        chat: String,
+        id: String,
+    ): WaSyncMessage? = messages[chat].orEmpty().firstOrNull { it.id == id }
+
+    private fun missing(
+        chat: String,
+        id: String,
+    ) = Outcome.Err(RustError.NotFound("message $id of $chat"))
+
+    /** The media row of a message; one that was never asked for reads as `none`. */
+    private fun entryOf(row: WaSyncMessage): WaSyncMediaEntry =
+        files[row.chat to row.id]
+            ?: WaSyncMediaEntry(row.chat, row.id, row.kind, row.mime, row.size, WaSyncMediaState.None)
+
+    /** The owner's auto-download rules, as `rosty_app_core::wa_sync::media::policy` has them. */
+    private fun decide(
+        row: WaSyncMessage,
+        network: WaSyncNetwork,
+        freeBytes: Long?,
+    ): WaSyncMediaDecision {
+        val meta: MediaMeta? = row.media
+        val voice = row.kind == WaSyncKind.Audio && meta?.voiceNote == true
+        val auto =
+            when {
+                row.kind !in MEDIA_KINDS || meta?.viewOnce == true -> return WaSyncMediaDecision.Never
+                network == WaSyncNetwork.Wifi -> row.kind == WaSyncKind.Image || row.kind == WaSyncKind.Sticker || voice
+                network == WaSyncNetwork.Mobile -> row.kind == WaSyncKind.Image || voice
+                else -> false
+            }
+        val room = freeBytes == null || freeBytes - (row.size ?: 0) >= FREE_SPACE_FLOOR
+        return if (auto && room) WaSyncMediaDecision.Auto else WaSyncMediaDecision.OnTap
+    }
+
+    /** Files the cap never takes. */
+    private fun exempt(
+        entry: WaSyncMediaEntry,
+        nowMs: Long?,
+    ): Boolean =
+        entry.pinned || entry.savedUri != null || row(entry.chat, entry.id)?.starred == true ||
+            queue.any { (it.action as? WaSyncAction.SendMedia)?.file == entry.path } ||
+            (nowMs != null && (entry.usedMs ?: 0) > nowMs - RECENT_USE_MS)
+
+    private fun cached(): List<WaSyncMediaEntry> =
+        files.values
+            .filter { it.state == WaSyncMediaState.Ready && it.path != null }
+            .sortedWith(compareBy<WaSyncMediaEntry> { it.usedMs ?: 0 }.thenBy { it.chat }.thenBy { it.id })
+
+    /** Everything that belongs to the linked account goes; the answer names the media files. */
+    private fun wipeAccount(keepOutbox: Boolean): List<String> {
+        val sending = if (keepOutbox) emptyList() else queue.mapNotNull { (it.action as? WaSyncAction.SendMedia)?.file }
+        val gone = (files.values.mapNotNull { it.path } + sending).distinct()
+        chats.clear()
+        messages.clear()
+        if (!keepOutbox) queue.clear()
+        thumbs.clear()
+        files.clear()
+        queuedMs.clear()
+        attemptedMs.clear()
+        aliases.clear()
+        rekeyed.clear()
+        unreported.clear()
+        history = null
+        ownPn = null
+        owed = owed.copy(refreshChats = true, fetch = emptyList(), identitySince = null)
+        return gone
+    }
+
+    override suspend fun open(req: WaSyncOpenRequest) =
+        ok(WaSyncOpened(HANDLE, instanceId, SCHEMA_VERSION, seq, owed.refreshChats))
 
     override suspend fun close(req: WaSyncHandleRequest) = ok(WaSyncClosed(true))
 
@@ -260,22 +414,67 @@ class FakeWaSyncOps(
         synchronized(lock) {
             writes += req
             val changed = linkedSetOf<String>()
+            var accountChanged = false
+            var resync = false
+            val deleteFiles = mutableListOf<String>()
             for (envelope in req.events) {
+                val event = envelope.event
+                if (event is GatewayEvent.Hello) {
+                    // The first frame of a socket: another epoch is a gap, and its `seq` is never taken.
+                    resync = noteEpoch(event.epoch) || resync
+                    continue
+                }
+                if (event is GatewayEvent.Resync) {
+                    noteEpoch(event.epoch)
+                    sweepPending = false
+                    resync = true
+                }
+                val told =
+                    when (event) {
+                        is GatewayEvent.State -> {
+                            val status = event.status()
+                            noted(
+                                StatusTold(status.epoch, status.accountEpoch, status.ownJid, envelope.atMs),
+                                status.history?.let(::report),
+                                fromEvent = true,
+                            )
+                        }
+
+                        is GatewayEvent.AccountChanged -> {
+                            announced(event.oldPn, event.newPn)
+                        }
+
+                        else -> {
+                            null
+                        }
+                    }
+                if (told != null) {
+                    resync = resync || told.gap || told.changed
+                    if (told.changed) {
+                        accountChanged = true
+                        deleteFiles += told.deleteFiles
+                        changed.clear()
+                    }
+                }
                 seq = envelope.seq
-                val mapped = envelope.event as? GatewayEvent.IdentityMapped
+                if (event is GatewayEvent.HistorySynced) {
+                    historySynced(event, envelope.atMs)
+                    resync = true
+                }
+                val mapped = event as? GatewayEvent.IdentityMapped
                 if (mapped != null) merge(mapped.lid, mapped.pn)?.let { changed += it.intoKey }
-                val event = envelope.event as? GatewayEvent.Message ?: continue
-                val chat = keyOf(event.chat)
+                val message = event as? GatewayEvent.Message ?: continue
+                val chat = keyOf(message.chat)
                 store(
                     stored(
                         RichMessage(
-                            event.id,
+                            message.id,
                             chat,
-                            event.sender?.let(::keyOf),
-                            event.fromMe,
-                            event.timestampMs,
-                            event.body,
-                            event.reactions,
+                            message.sender?.let(::keyOf),
+                            message.fromMe,
+                            message.timestampMs,
+                            message.body,
+                            message.reactions,
                         ),
                     ),
                 )
@@ -288,10 +487,12 @@ class FakeWaSyncOps(
                     HANDLE,
                     seq,
                     req.events.size,
-                    resync = steps.isNotEmpty(),
+                    resync = steps.isNotEmpty() || resync,
                     chats = changed.toList(),
                     reconciled = emptyList(),
                     rekeyed = steps,
+                    accountChanged = accountChanged,
+                    deleteFiles = deleteFiles,
                 ),
             )
         }
@@ -347,12 +548,12 @@ class FakeWaSyncOps(
                     emptyList()
                 }
             val next = page.lastOrNull()?.takeIf { all.size > page.size }?.let { WaSyncCursor(it.timestampMs, it.id) }
-            ok(WaSyncThreadPage(pending + page, next, reachedStart = true, syncing = false))
+            ok(WaSyncThreadPage(pending + page.map(::withMedia), next, reachedStart = true, syncing = false))
         }
 
     override suspend fun message(req: WaSyncMessageRequest): Outcome<WaSyncMessageAnswer> =
         synchronized(lock) {
-            ok(WaSyncMessageAnswer(messages[keyOf(req.chat)].orEmpty().firstOrNull { it.id == req.id }))
+            ok(WaSyncMessageAnswer(row(keyOf(req.chat), req.id)?.let(::withMedia)))
         }
 
     override suspend fun starred(req: WaSyncStarredRequest): Outcome<WaSyncStarredPage> =
@@ -380,7 +581,7 @@ class FakeWaSyncOps(
                     .lastOrNull()
                     ?.takeIf { all.size > page.size }
                     ?.let { WaSyncStarredCursor(it.timestampMs, it.chat, it.id) }
-            ok(WaSyncStarredPage(page, next))
+            ok(WaSyncStarredPage(page.map(::withMedia), next))
         }
 
     override suspend fun outboxEnqueue(req: WaSyncEnqueueRequest): Outcome<WaSyncItemAnswer> =
@@ -524,18 +725,500 @@ class FakeWaSyncOps(
     override suspend fun mediaSet(req: WaSyncMediaSetRequest): Outcome<HandleAnswer> =
         synchronized(lock) {
             writes += req
-            val key = req.chat to req.id
-            val had = media[key]
-            media[key] =
-                WaSyncMedia(req.thumbnailB64 ?: had?.thumbnailB64, req.path ?: had?.path, req.bytes ?: had?.bytes)
+            val key = keyOf(req.chat) to req.id
+            req.thumbnailB64?.let { thumbs[key] = it }
+            val path = req.path
+            if (path != null) {
+                val row = row(key.first, key.second)
+                val had =
+                    files[key]
+                        ?: WaSyncMediaEntry(
+                            key.first,
+                            key.second,
+                            row?.kind ?: WaSyncKind.Unsupported,
+                            row?.mime,
+                            row?.size,
+                            WaSyncMediaState.None,
+                        )
+                files[key] =
+                    had.copy(
+                        state = WaSyncMediaState.Ready,
+                        path = path,
+                        bytes = req.bytes,
+                        usedMs = req.nowMs,
+                        attempts = 0,
+                        nextAttemptMs = null,
+                        lastError = null,
+                    )
+            }
             ok(HandleAnswer(HANDLE))
         }
 
+    /** Unlike the real store, a message that was never seeded answers an empty row instead of "not found". */
     override suspend fun media(req: WaSyncMediaRequest): Outcome<WaSyncMedia> =
-        synchronized(lock) { ok(media[req.chat to req.id] ?: WaSyncMedia(null, null, null)) }
+        synchronized(lock) {
+            val key = keyOf(req.chat) to req.id
+            val usedMs = req.usedMs
+            val entry = files[key]
+            if (usedMs != null && entry?.state == WaSyncMediaState.Ready) files[key] = entry.copy(usedMs = usedMs)
+            val now = files[key]
+            ok(
+                WaSyncMedia(
+                    thumbs[key],
+                    now?.path,
+                    now?.bytes,
+                    now?.state ?: WaSyncMediaState.None,
+                    now?.sizeExpected ?: row(key.first, key.second)?.size,
+                    now?.attempts ?: 0,
+                    now?.pinned ?: false,
+                    now?.savedUri,
+                    now?.lastError,
+                ),
+            )
+        }
 
     override suspend fun mediaEvict(req: WaSyncEvictRequest): Outcome<WaSyncEviction> =
-        synchronized(lock) { ok(WaSyncEviction(emptyList(), media.values.sumOf { it.bytes ?: 0 })) }
+        synchronized(lock) {
+            val limit = req.maxBytes ?: capBytes
+            val ready = cached()
+            var left = ready.sumOf { it.bytes ?: 0 }
+            val spared = ready.filter { exempt(it, req.nowMs) }
+            val evicted = mutableListOf<WaSyncEvicted>()
+            for (file in ready - spared.toSet()) {
+                if (limit == null || left <= limit) break
+                files[file.chat to file.id] =
+                    file.copy(state = WaSyncMediaState.Evicted, path = null, bytes = null, sha256 = null, usedMs = null)
+                left -= file.bytes ?: 0
+                evicted += WaSyncEvicted(file.chat, file.id, file.path.orEmpty(), file.bytes ?: 0)
+            }
+            ok(WaSyncEviction(evicted, left, spared.sumOf { it.bytes ?: 0 }))
+        }
+
+    override suspend fun mediaPolicy(req: WaSyncMediaPolicyRequest): Outcome<WaSyncMediaPolicy> =
+        synchronized(lock) {
+            val chat = keyOf(req.chat)
+            val row = row(chat, req.id) ?: return@synchronized missing(chat, req.id)
+            ok(WaSyncMediaPolicy(decide(row, req.network, req.freeBytes)))
+        }
+
+    override suspend fun mediaEnqueue(req: WaSyncMediaEnqueueRequest): Outcome<WaSyncMediaQueued> =
+        synchronized(lock) {
+            writes += req
+            val chat = keyOf(req.chat)
+            val row = row(chat, req.id) ?: return@synchronized missing(chat, req.id)
+            val network = req.network
+            if (!req.tap && network == null) {
+                return@synchronized Outcome.Err(RustError.Invalid("an automatic request names the network"))
+            }
+            val decision =
+                when {
+                    network != null && !req.tap -> decide(row, network, req.freeBytes)
+                    row.kind !in MEDIA_KINDS || row.media?.viewOnce == true -> WaSyncMediaDecision.Never
+                    else -> WaSyncMediaDecision.OnTap
+                }
+            val key = chat to req.id
+            val entry = entryOf(row)
+            val wanted =
+                when (decision) {
+                    WaSyncMediaDecision.Never -> false
+                    WaSyncMediaDecision.OnTap -> req.tap
+                    WaSyncMediaDecision.Auto -> !row.deleted
+                }
+            val fresh =
+                when (entry.state) {
+                    WaSyncMediaState.None, WaSyncMediaState.Evicted -> true
+                    WaSyncMediaState.Failed, WaSyncMediaState.Gone -> req.tap
+                    else -> false
+                }
+            if (wanted && fresh) {
+                files[key] =
+                    entry.copy(
+                        state = WaSyncMediaState.Queued,
+                        byTap = req.tap,
+                        attempts = 0,
+                        nextAttemptMs = null,
+                        lastError = null,
+                        path = null,
+                        bytes = null,
+                        sha256 = null,
+                    )
+                queuedMs[key] = req.nowMs
+            } else if (wanted && req.tap && entry.state == WaSyncMediaState.Queued) {
+                files[key] = entry.copy(byTap = true, nextAttemptMs = null)
+            }
+            val now = files[key] ?: entry
+            val queued = now.state == WaSyncMediaState.Queued || now.state == WaSyncMediaState.Downloading
+            ok(WaSyncMediaQueued(HANDLE, queued, decision, now))
+        }
+
+    override suspend fun mediaDue(req: WaSyncMediaDueRequest): Outcome<WaSyncMediaDue> =
+        synchronized(lock) {
+            val limit = (req.limit ?: DEFAULT_DUE).coerceIn(1, MAX_DUE)
+            val network = req.network
+            val waiting =
+                files
+                    .filter { (key, entry) ->
+                        (entry.state == WaSyncMediaState.Queued && (entry.nextAttemptMs ?: 0) <= req.nowMs) ||
+                            (
+                                entry.state == WaSyncMediaState.Downloading &&
+                                    (attemptedMs[key] ?: 0) <= req.nowMs - DOWNLOAD_LEASE_MS
+                            )
+                    }.entries
+                    .sortedWith(
+                        compareByDescending<Map.Entry<Pair<String, String>, WaSyncMediaEntry>> { it.value.byTap }
+                            .thenBy { queuedMs[it.key] ?: 0 }
+                            .thenBy { it.key.first }
+                            .thenBy { it.key.second },
+                    )
+            val items = mutableListOf<WaSyncMediaEntry>()
+            var held = 0
+            for ((key, entry) in waiting) {
+                val row = row(key.first, key.second)
+                val allowed =
+                    entry.byTap || network == null ||
+                        (row != null && decide(row, network, req.freeBytes) == WaSyncMediaDecision.Auto)
+                if (!allowed) {
+                    held += 1
+                    continue
+                }
+                if (items.size == limit) continue
+                val out = entry.copy(state = WaSyncMediaState.Downloading)
+                files[key] = out
+                attemptedMs[key] = req.nowMs
+                items += out
+            }
+            val wakes =
+                files.mapNotNull { (key, entry) ->
+                    when (entry.state) {
+                        WaSyncMediaState.Queued -> entry.nextAttemptMs?.takeIf { it > req.nowMs }
+                        WaSyncMediaState.Downloading -> (attemptedMs[key] ?: 0) + DOWNLOAD_LEASE_MS
+                        else -> null
+                    }
+                }
+            ok(WaSyncMediaDue(HANDLE, items, held, wakes.minOrNull()))
+        }
+
+    override suspend fun mediaSettle(req: WaSyncMediaSettleRequest): Outcome<WaSyncMediaSettled> =
+        synchronized(lock) {
+            writes += req
+            val chat = keyOf(req.chat)
+            val row = row(chat, req.id) ?: return@synchronized missing(chat, req.id)
+            val key = chat to req.id
+            val entry = entryOf(row)
+            val ready = entry.state == WaSyncMediaState.Ready
+            var replaced: String? = null
+            attemptedMs.remove(key)
+            when (val outcome = req.outcome) {
+                is WaSyncFetched.Ready -> {
+                    replaced = entry.path?.takeIf { it != outcome.path }
+                    files[key] =
+                        entry.copy(
+                            state = WaSyncMediaState.Ready,
+                            path = outcome.path,
+                            bytes = outcome.bytes,
+                            sha256 = outcome.sha256,
+                            usedMs = req.nowMs,
+                            attempts = 0,
+                            nextAttemptMs = null,
+                            lastError = null,
+                        )
+                }
+
+                is WaSyncFetched.Failed -> {
+                    if (!ready) {
+                        val attempts = entry.attempts + 1
+                        val failed = attempts >= MAX_ATTEMPTS
+                        files[key] =
+                            entry.copy(
+                                state = if (failed) WaSyncMediaState.Failed else WaSyncMediaState.Queued,
+                                attempts = attempts,
+                                nextAttemptMs = if (failed) null else req.nowMs + backoffMs(attempts),
+                                lastError = outcome.error,
+                            )
+                    }
+                }
+
+                is WaSyncFetched.Gone -> {
+                    if (!ready) {
+                        files[key] =
+                            entry.copy(state = WaSyncMediaState.Gone, nextAttemptMs = null, lastError = outcome.error)
+                    }
+                }
+
+                WaSyncFetched.Cancelled -> {
+                    if (entry.state in CANCELLABLE) {
+                        files[key] =
+                            entry.copy(
+                                state = WaSyncMediaState.None,
+                                byTap = false,
+                                attempts = 0,
+                                nextAttemptMs = null,
+                                lastError = null,
+                            )
+                    }
+                }
+            }
+            ok(WaSyncMediaSettled(HANDLE, files[key] ?: entry, replaced))
+        }
+
+    override suspend fun mediaKeep(req: WaSyncMediaKeepRequest): Outcome<WaSyncMediaKept> =
+        synchronized(lock) {
+            writes += req
+            val chat = keyOf(req.chat)
+            val row = row(chat, req.id) ?: return@synchronized missing(chat, req.id)
+            var entry = entryOf(row)
+            req.pinned?.let { entry = entry.copy(pinned = it) }
+            req.savedUri?.let { entry = entry.copy(savedUri = it.ifEmpty { null }) }
+            files[chat to req.id] = entry
+            ok(WaSyncMediaKept(HANDLE, entry))
+        }
+
+    override suspend fun mediaReconcile(req: WaSyncReconcileRequest): Outcome<WaSyncReconciled> =
+        synchronized(lock) {
+            writes += req
+            val cut = files.filterValues { it.state == WaSyncMediaState.Downloading }
+            for ((key, entry) in cut) files[key] = entry.copy(state = WaSyncMediaState.Queued)
+            attemptedMs.clear()
+            val listed =
+                req.files ?: return@synchronized ok(WaSyncReconciled(HANDLE, cut.size, emptyList(), emptyList()))
+            val named = queue.mapNotNull { (it.action as? WaSyncAction.SendMedia)?.file }.toMutableSet()
+            val missing = mutableListOf<WaSyncMissing>()
+            for (entry in cached().sortedWith(compareBy<WaSyncMediaEntry> { it.chat }.thenBy { it.id })) {
+                val path = entry.path ?: continue
+                if (path in listed) {
+                    named += path
+                } else {
+                    files[entry.chat to entry.id] =
+                        entry.copy(
+                            state = WaSyncMediaState.Evicted,
+                            path = null,
+                            bytes = null,
+                            sha256 = null,
+                            usedMs = null,
+                        )
+                    missing += WaSyncMissing(entry.chat, entry.id, path)
+                }
+            }
+            ok(WaSyncReconciled(HANDLE, cut.size, missing, listed.filter { it.endsWith(".part") || it !in named }))
+        }
+
+    override suspend fun mediaStats(req: WaSyncMediaStatsRequest): Outcome<WaSyncMediaStats> =
+        synchronized(lock) {
+            val ready = cached()
+
+            fun usage(of: List<WaSyncMediaEntry>) = WaSyncUsage(of.size, of.sumOf { it.bytes ?: 0 })
+            val spared = usage(ready.filter { exempt(it, req.nowMs) })
+            val paths = ready.mapNotNull { it.path }.toSet()
+            val sending = queue.mapNotNull { it.action as? WaSyncAction.SendMedia }.filter { it.file !in paths }
+            val byKind =
+                ready
+                    .groupBy { it.kind }
+                    .map { (kind, of) -> WaSyncKindUsage(kind, of.size, of.sumOf { it.bytes ?: 0 }) }
+                    .sortedWith(compareByDescending<WaSyncKindUsage> { it.bytes }.thenBy { it.kind.name.lowercase() })
+            val cap = capBytes
+            ok(
+                WaSyncMediaStats(
+                    total = usage(ready),
+                    exempt = spared,
+                    byKind = byKind,
+                    outbox = WaSyncUsage(sending.size, sending.sumOf { it.size }),
+                    queued = files.values.count { it.state == WaSyncMediaState.Queued },
+                    downloading = files.values.count { it.state == WaSyncMediaState.Downloading },
+                    failed = files.values.count { it.state == WaSyncMediaState.Failed },
+                    capBytes = cap,
+                    exemptOverCap = cap != null && spared.bytes > cap,
+                ),
+            )
+        }
+
+    override suspend fun mediaCap(req: WaSyncMediaCapRequest): Outcome<WaSyncMediaCap> =
+        synchronized(lock) {
+            if (req.noLimit && req.capBytes != null) {
+                return@synchronized Outcome.Err(RustError.Invalid("cap_bytes and no_limit exclude each other"))
+            }
+            if (req.noLimit) {
+                capBytes = null
+            } else if (req.capBytes != null) {
+                capBytes = req.capBytes
+            }
+            ok(WaSyncMediaCap(HANDLE, capBytes))
+        }
+
+    /** What a status or a `state` event says about the gateway and the account. */
+    private class StatusTold(
+        val epoch: String?,
+        val accountEpoch: Int?,
+        val ownPn: String?,
+        val nowMs: Long,
+    )
+
+    /** What taking in a status, a `state` event or an announcement did. */
+    private class Noted(
+        val gap: Boolean,
+        val changed: Boolean,
+        val deleteFiles: List<String>,
+    )
+
+    /** Another epoch than the stored one is a gap; so is the first epoch a store with a `seq` hears. */
+    private fun noteEpoch(told: String?): Boolean {
+        val named = told?.takeIf { it.isNotEmpty() } ?: return false
+        val gap = named != epoch && (epoch != null || seq != null)
+        epoch = named
+        if (gap) {
+            seq = null
+            sweepPending = false
+            owed = owed.copy(afterSeq = null, refreshChats = true)
+        }
+        return gap
+    }
+
+    /** The wire's report as the store's; a state of a newer gateway keeps the stored one. */
+    private fun report(status: HistoryStatus): WaSyncHistoryReport {
+        val state =
+            when (status.state) {
+                HistoryStatus.IDLE -> WaSyncHistoryState.Idle
+                HistoryStatus.SYNCING -> WaSyncHistoryState.Syncing
+                HistoryStatus.DONE -> WaSyncHistoryState.Done
+                else -> history?.state ?: WaSyncHistoryState.Idle
+            }
+        return WaSyncHistoryReport(state, status.progress, status.chats, status.messages, status.oldestMs)
+    }
+
+    /**
+     * Takes in a status answer, or a `state` event at its place in the stream ([fromEvent]): nothing of an older
+     * account can follow such an event, so its wipe waits for no announcement, and an event of an account before
+     * the stored one only names the gateway process.
+     */
+    private fun noted(
+        told: StatusTold,
+        report: WaSyncHistoryReport?,
+        fromEvent: Boolean,
+    ): Noted {
+        val gap = noteEpoch(told.epoch)
+        val newEpoch = told.accountEpoch
+        val was = accountEpoch
+        if (fromEvent && was != null && newEpoch != null && newEpoch < was) return Noted(gap, false, emptyList())
+        val own = told.ownPn?.let(::bare)?.takeIf { WaIds.number(it) != null }
+        val known = ownPn
+        val raised = was != null && newEpoch != null && newEpoch > was
+        val otherNumber = own != null && known != null && own != known
+        // While a status wipe waits for its announcement, an event that names another number is not believed.
+        if (fromEvent && !raised && otherNumber && sweepPending) return Noted(gap, false, emptyList())
+        val changed = raised || otherNumber
+        val deleteFiles = if (changed) wipeAccount(keepOutbox = false) else emptyList()
+        // The announcement is waited for only when one can come: an answer of the same process, a gateway with
+        // account epochs.
+        if (changed) sweepPending = !fromEvent && !gap && newEpoch != null
+        if (newEpoch != null) {
+            accountEpoch = newEpoch
+        } else if (changed) {
+            accountEpoch = null
+        }
+        if (own != null) ownPn = own
+        report?.let {
+            history =
+                WaSyncHistory(
+                    it.state,
+                    it.progress?.coerceAtMost(100),
+                    it.chats,
+                    it.messages,
+                    it.oldestMs,
+                    history?.syncType,
+                    told.nowMs,
+                )
+        }
+        return Noted(gap, changed, deleteFiles)
+    }
+
+    /** The gateway's `account_changed`, at its place in the stream. */
+    private fun announced(
+        oldPn: String?,
+        newPn: String,
+    ): Noted {
+        val new = bare(newPn).takeIf { WaIds.number(it) != null }
+        val old = oldPn?.let(::bare)
+        val known = ownPn
+        val full = new != null && if (known != null) known != new else old != null && old != new
+        val sweep = new != null && known == new && sweepPending
+        val deleteFiles =
+            when {
+                full -> wipeAccount(keepOutbox = false).also { accountEpoch = null }
+                sweep -> wipeAccount(keepOutbox = true)
+                else -> emptyList()
+            }
+        if (full || sweep) sweepPending = false
+        if (new != null) ownPn = new
+        return Noted(gap = false, changed = full || sweep, deleteFiles = deleteFiles)
+    }
+
+    /** A `history_synced` event: its kind, the oldest message so far, the progress, and its messages on top. */
+    private fun historySynced(
+        event: GatewayEvent.HistorySynced,
+        atMs: Long,
+    ) {
+        val before = history ?: WaSyncHistory(WaSyncHistoryState.Syncing, chats = 0, messages = 0, updatedMs = atMs)
+        history =
+            before.copy(
+                progress = event.progress?.coerceAtMost(100) ?: before.progress,
+                messages = before.messages + event.messages,
+                oldestMs = listOfNotNull(before.oldestMs, event.oldestMs).minOrNull(),
+                syncType = event.syncType ?: before.syncType,
+                updatedMs = atMs,
+            )
+    }
+
+    override suspend fun noteStatus(req: WaSyncNoteStatusRequest): Outcome<WaSyncStatusNoted> =
+        synchronized(lock) {
+            writes += req
+            val told = StatusTold(req.epoch, req.accountEpoch, req.ownPn, req.nowMs)
+            val noted = noted(told, req.history, fromEvent = false)
+            ok(
+                WaSyncStatusNoted(
+                    HANDLE,
+                    gap = noted.gap,
+                    accountChanged = noted.changed,
+                    deleteFiles = noted.deleteFiles,
+                    resync = noted.gap || noted.changed,
+                    history = history,
+                ),
+            )
+        }
+
+    override suspend fun accountChanged(req: WaSyncAccountChangedRequest): Outcome<WaSyncIdentityApplied> =
+        synchronized(lock) {
+            writes += req
+            val noted = announced(req.oldPn, req.newPn)
+            ok(
+                WaSyncIdentityApplied(
+                    HANDLE,
+                    emptyList(),
+                    emptyList(),
+                    noted.changed,
+                    noted.changed,
+                    noted.deleteFiles,
+                ),
+            )
+        }
+
+    override suspend fun history(req: WaSyncHandleRequest): Outcome<WaSyncHistoryAnswer> =
+        synchronized(lock) { ok(WaSyncHistoryAnswer(history)) }
+
+    /** Empties the fake; it has no files of its own, so `deleted` is empty. */
+    override suspend fun wipe(req: WaSyncWipeRequest): Outcome<WaSyncWiped> =
+        synchronized(lock) {
+            writes += req
+            if (req.handle == null && req.instanceId == null) {
+                return@synchronized Outcome.Err(RustError.Invalid("wipe names a handle or an instance_id"))
+            }
+            val gone = wipeAccount(keepOutbox = false)
+            seq = null
+            epoch = null
+            accountEpoch = null
+            sweepPending = false
+            capBytes = DEFAULT_CAP_BYTES
+            owed = WaSyncPlan(afterSeq = null, refreshChats = true, fetch = emptyList())
+            ok(WaSyncWiped(emptyList(), gone))
+        }
 
     override suspend fun identityResolve(req: WaSyncResolveRequest): Outcome<WaSyncResolved?> =
         synchronized(lock) {
@@ -576,6 +1259,12 @@ class FakeWaSyncOps(
     override suspend fun identityObserve(req: WaSyncObserveRequest): Outcome<WaSyncIdentityApplied> =
         synchronized(lock) {
             writes += req
+            // The whole status, as `noteStatus` takes it field by field.
+            val noted =
+                req.status?.let { status ->
+                    val told = StatusTold(status.epoch, status.accountEpoch, status.ownJid, req.nowMs)
+                    noted(told, status.history?.let(::report), fromEvent = false)
+                }
             val pairs =
                 req.groups.flatMap { it.participants }.mapNotNull { member ->
                     val lid = member.lid ?: return@mapNotNull null
@@ -583,7 +1272,16 @@ class FakeWaSyncOps(
                 } + req.profiles.mapNotNull { profile -> profile.lid?.let { it to profile.jid } }
             val steps = pairs.mapNotNull { (lid, pn) -> merge(lid, pn) }
             unreported.removeAll(steps)
-            ok(WaSyncIdentityApplied(HANDLE, steps, emptyList(), steps.isNotEmpty(), accountChanged = false))
+            ok(
+                WaSyncIdentityApplied(
+                    HANDLE,
+                    steps,
+                    emptyList(),
+                    resync = steps.isNotEmpty() || noted?.gap == true || noted?.changed == true,
+                    accountChanged = noted?.changed == true,
+                    deleteFiles = noted?.deleteFiles.orEmpty(),
+                ),
+            )
         }
 
     override suspend fun parseId(req: WaIdParseRequest): Outcome<WaIdParsed?> = ok(parsed(req.id))
@@ -591,5 +1289,28 @@ class FakeWaSyncOps(
     companion object {
         /** The handle every answer carries. */
         const val HANDLE = 1L
+
+        /** The schema version the real store writes. */
+        const val SCHEMA_VERSION = 5
+
+        // The constants of `rosty_app_core::wa_sync::media`.
+        const val DEFAULT_CAP_BYTES = 512L * 1024 * 1024
+        const val FREE_SPACE_FLOOR = 500L * 1024 * 1024
+        const val RECENT_USE_MS = 24L * 60 * 60 * 1000
+        const val MAX_ATTEMPTS = 5
+        const val DOWNLOAD_LEASE_MS = 10L * 60 * 1000
+        private const val DEFAULT_DUE = 4
+        private const val MAX_DUE = 32
+        private const val BACKOFF_BASE_MS = 2_000L
+        private const val BACKOFF_MAX_MS = 300_000L
+
+        private val MEDIA_KINDS =
+            setOf(WaSyncKind.Image, WaSyncKind.Video, WaSyncKind.Audio, WaSyncKind.Document, WaSyncKind.Sticker)
+        private val CANCELLABLE =
+            setOf(WaSyncMediaState.Queued, WaSyncMediaState.Downloading, WaSyncMediaState.Failed)
+
+        /** The wait before attempt `attempts + 1`: 2 s doubling to 300 s, as the outbox. */
+        fun backoffMs(attempts: Int): Long =
+            (BACKOFF_BASE_MS shl (attempts - 1).coerceIn(0, 20)).coerceAtMost(BACKOFF_MAX_MS)
     }
 }

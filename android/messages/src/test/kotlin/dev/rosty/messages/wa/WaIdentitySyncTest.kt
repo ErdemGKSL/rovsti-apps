@@ -73,7 +73,7 @@ class WaIdentitySyncTest {
 
     private suspend fun WaSyncStore.ids(chat: String): List<String> = thread(chat, 50).getOrThrow().items.map { it.id }
 
-    @Test fun thePairsAndTheOwnIdsComeBeforeTheChatList() =
+    @Test fun theStatusAndThePairsComeBeforeTheChatList() =
         runTest {
             fake.owed = WaSyncPlan(afterSeq = null, refreshChats = true, fetch = emptyList())
             fake.put(ADA_LID, "L1", 1_000, "under the LID")
@@ -86,17 +86,18 @@ class WaIdentitySyncTest {
 
             assertTrue(runner.catchUp())
 
-            // Page after page from the stored cursor, then the account's own ids, and only then the chat list.
-            assertEquals(listOf("identity", "identity", "status", "chats"), remote.order)
+            // The status first (a gap or another account must be known before anything is stored), then the pairs
+            // page after page from the stored cursor, and only then the chat list.
+            assertEquals(listOf("status", "identity", "identity", "chats"), remote.order)
             assertEquals(listOf(null, "41"), remote.mappingCalls)
             // The two chats of Ada were one before the list was stored, and the merge was followed first.
             assertEquals(listOf("P1", "L1"), store.ids(ADA))
             assertEquals("rekeyed $ADA_LID $ADA", told.first())
             val writes = fake.writes.map { it::class }
             assertTrue(
-                "pairs, own ids, then the chat list: $writes",
-                writes.indexOf(WaSyncCatchUpRequest::class) < writes.indexOf(WaSyncObserveRequest::class) &&
-                    writes.indexOf(WaSyncObserveRequest::class) < writes.indexOf(WaSyncStoreChatsRequest::class),
+                "own ids, pairs, then the chat list: $writes",
+                writes.indexOf(WaSyncObserveRequest::class) < writes.indexOf(WaSyncCatchUpRequest::class) &&
+                    writes.indexOf(WaSyncCatchUpRequest::class) < writes.indexOf(WaSyncStoreChatsRequest::class),
             )
             val observed = fake.writes.filterIsInstance<WaSyncObserveRequest>().single()
             assertEquals(MERT to "777000000000009@lid", observed.status?.ownJid to observed.status?.ownLid)
@@ -151,14 +152,15 @@ class WaIdentitySyncTest {
             assertEquals(listOf("L1"), store.ids(ADA))
         }
 
-    @Test fun theOwnIdsAreHandedInOncePerOpenStore() =
+    @Test fun theStatusIsHandedInOnEveryCatchUp() =
         runTest {
             remote.ownStatus = InstanceStatus("inst1", InstanceState.Connected, MERT, "Me")
             val (_, runner) = runner()
             runner.catchUp()
             runner.catchUp()
-            assertEquals(1, fake.writes.count { it is WaSyncObserveRequest })
-            assertEquals(1, remote.order.count { it == "status" })
+            // Not once per open store: the gateway may have restarted, or another account may be linked now.
+            assertEquals(2, fake.writes.count { it is WaSyncObserveRequest })
+            assertEquals(2, remote.order.count { it == "status" })
         }
 
     @Test fun aGatewayThatCannotBeReachedForThePairsDoesNotStopTheRest() =

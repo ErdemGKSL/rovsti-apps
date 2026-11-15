@@ -14,6 +14,7 @@ import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
 import dev.rosty.core.ops.StopsOps
 import dev.rosty.core.ops.TilesOps
+import dev.rosty.core.ops.WaIdBookOps
 import dev.rosty.core.ops.WaOps
 import dev.rosty.core.ops.WaSettingsOps
 import dev.rosty.core.ops.WaSyncOps
@@ -81,6 +82,7 @@ class ContractFixturesTest {
                 "WaOps" to WaOps.ops,
                 "WaSettingsOps" to WaSettingsOps.ops,
                 "WaSyncOps" to WaSyncOps.ops,
+                "WaIdBookOps" to WaIdBookOps.ops,
             )
         val missing =
             facades.flatMap { (facade, ops) ->

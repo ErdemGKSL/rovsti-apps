@@ -24,20 +24,31 @@
 //!   from the gateway's list of pairs ([`Store::identity_catch_up`]) and from groups, profiles and the instance
 //!   ([`Store::identity_observe`]). A reader that still holds an id of before a merge reads the merged rows
 //!   ([`Store::stored_key`]).
-//! * Full media is a cached file path with LRU bookkeeping; evicting clears the path and keeps the message and its
-//!   thumbnail.
+//! * Full media is a row of `media` per message ([`media`]): a download queue under the owner's auto-download
+//!   rules ([`media::policy`]), a cached file path, and a cap with LRU eviction that spares starred, saved and
+//!   recently used files. Evicting forgets the path and keeps the message and its thumbnail.
+//! * The store follows the gateway process and the linked account ([`Store::note_status`]): another gateway
+//!   epoch is a gap, another account empties the store, and unlinking deletes it ([`Store::wipe`]).
 
 mod apply;
 mod authors;
 mod backfill;
 #[cfg(test)]
 mod contact_match_tests;
+#[cfg(test)]
+mod gateway_wire_tests;
 mod identity;
 #[cfg(test)]
 mod identity_tests;
 #[cfg(test)]
 mod ingest_tests;
-mod media;
+mod link_state;
+#[cfg(test)]
+mod link_state_tests;
+pub mod media;
+mod media_policy;
+#[cfg(test)]
+mod media_tests;
 mod merge;
 mod model;
 mod outbox;
@@ -49,7 +60,15 @@ mod store;
 mod tests;
 
 pub use identity::{IdentityApplied, IdentityCaughtUp, Observed, ResolvedId};
-pub use media::{Evicted, Eviction, MediaInfo};
+pub use link_state::{
+    HistoryBatch, HistoryProgress, HistoryReport, HistoryState, StatusNote, StatusNoted, Wiped,
+    delete_files,
+};
+pub use media::{
+    Conditions, Decision, Evicted, Eviction, Fetch, Fetched, KindUsage, MediaClass, MediaDue,
+    MediaEntry, MediaInfo, MediaQueued, MediaSettled, MediaState, MediaStats, Missing, Network,
+    Reconciled, Usage,
+};
 pub use merge::ChatRekeyed;
 pub use model::{
     AppliedEvents, ChatRow, Kind, MessageRow, PendingOp, RowState, StarredCursor, StarredPage,

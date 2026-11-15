@@ -14,6 +14,8 @@ uses-permission android.permission.SEND_SMS
 uses-permission android.permission.VIBRATE
 uses-permission android.permission.WAKE_LOCK
 uses-permission dev.rosty.permission.READ_PEOPLE
+uses-permission dev.rosty.permission.WA_LINK
 declares dev.rosty.permission.HANDOFF signature
 declares dev.rosty.permission.READ_PEOPLE signature
+declares dev.rosty.permission.WA_LINK signature
 protects activity-alias .WaHandoff dev.rosty.permission.HANDOFF

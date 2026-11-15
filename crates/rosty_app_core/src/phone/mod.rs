@@ -5,3 +5,4 @@
 
 pub mod notes;
 pub mod wa_call;
+pub mod wa_idbook;

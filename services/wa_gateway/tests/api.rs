@@ -118,8 +118,19 @@ impl Events {
             .expect("event stream ended")
     }
 
-    /// The next gateway event, skipping connection bookkeeping.
+    /// The next gateway event, skipping connection bookkeeping and the
+    /// `hello` every socket starts with.
     async fn next_event(&mut self) -> EventEnvelope {
+        loop {
+            let e = self.next_frame().await;
+            if !matches!(e.event, GatewayEvent::Hello { .. }) {
+                return e;
+            }
+        }
+    }
+
+    /// The next frame of the socket, `hello` included.
+    async fn next_frame(&mut self) -> EventEnvelope {
         loop {
             if let ClientEvent::Event(e) = self.next().await {
                 return e;
@@ -309,7 +320,151 @@ async fn resuming_with_after_replays_only_newer_events() {
 
     // A point the gateway never reached means "refetch".
     let mut ahead = watch(&server, &created, Some(500));
-    assert_eq!(ahead.next_event().await.event, GatewayEvent::Resync);
+    let epoch = server.state.hub().epoch().to_owned();
+    assert_eq!(
+        ahead.next_event().await.event,
+        GatewayEvent::Resync { epoch: Some(epoch) }
+    );
+}
+
+/// Every socket starts with `hello`: the epoch of this gateway process, at
+/// the `seq` the socket starts from. The status names the same epoch.
+#[tokio::test]
+async fn every_socket_starts_with_the_epoch() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let epoch = server.state.hub().epoch().to_owned();
+    let hello = GatewayEvent::Hello {
+        epoch: epoch.clone(),
+    };
+
+    // Resuming from the start: `hello` at 0, then the replay.
+    let mut events = watch(&server, &created, Some(0));
+    let first = events.next_frame().await;
+    assert_eq!((first.seq, &first.event), (0, &hello));
+    assert_eq!(events.next_frame().await.seq, 1);
+    assert_eq!(events.next_frame().await.seq, 2);
+    drop(events);
+
+    // Resuming in the middle: `hello` does not move the resume point.
+    let mut resumed = watch(&server, &created, Some(1));
+    let first = resumed.next_frame().await;
+    assert_eq!((first.seq, &first.event), (1, &hello));
+    assert_eq!(resumed.next_frame().await.seq, 2);
+    drop(resumed);
+
+    // Live only: `hello` at the head.
+    let mut live = watch(&server, &created, None);
+    let first = live.next_frame().await;
+    assert_eq!((first.seq, &first.event), (2, &hello));
+    drop(live);
+
+    // A point this process never reached: `hello`, then `resync`, both
+    // naming the epoch.
+    let mut ahead = watch(&server, &created, Some(500));
+    assert_eq!(ahead.next_frame().await.event, hello);
+    let resync = ahead.next_frame().await;
+    assert_eq!(resync.seq, 2);
+    assert_eq!(
+        resync.event,
+        GatewayEvent::Resync {
+            epoch: Some(epoch.clone())
+        }
+    );
+
+    let status = blocking(move || gateway.status()).await.unwrap();
+    assert_eq!(status.epoch, Some(epoch));
+    assert_eq!(status.account_epoch, Some(0));
+    let history = status.history.unwrap();
+    assert_eq!(history.state, rosty_wa_proto::HistoryState::Idle);
+    assert_eq!((history.progress, history.oldest_ms), (None, None));
+}
+
+/// A history chunk through the sink: stored, counted in the status, kept as
+/// the sync state and announced once with what it held.
+#[tokio::test]
+async fn a_history_chunk_is_announced_and_shows_in_the_status() {
+    use rosty_wa_proto::{HistoryState, HistorySyncType};
+    use wa_gateway::store::{ChatSettings, HistoryChat, HistoryMessage};
+
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let id = instance(&created);
+    let sink = server.state.sink(&id);
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let chat = "100000000005@s.whatsapp.net";
+    let message = |n: i64| HistoryMessage {
+        message: WaMessage {
+            id: format!("H{n}"),
+            chat: chat.into(),
+            sender: None,
+            from_me: false,
+            timestamp_ms: 1_600_000_000_000 + n,
+            body: MessageBody::Text("old".into()),
+            reactions: vec![],
+            chat_alt: None,
+            sender_alt: None,
+        },
+        extras: MessageExtras::default(),
+        reactions: vec![],
+    };
+    let chunk = |from: i64, to: i64| {
+        vec![HistoryChat {
+            jid: chat.into(),
+            name: Some("Peer".into()),
+            is_group: false,
+            unread: 0,
+            last_ms: 1_600_000_000_000 + to,
+            messages: (from..to).map(message).collect(),
+            settings: ChatSettings::default(),
+        }]
+    };
+
+    let report = sink.import_history(chunk(10, 40)).await.unwrap();
+    sink.history_synced(HistorySyncType::Recent, Some(40), report)
+        .await;
+    assert_eq!(
+        events.next_event().await.event,
+        GatewayEvent::HistorySynced {
+            chats: 1,
+            progress: Some(40),
+            sync_type: Some(HistorySyncType::Recent),
+            messages: 30,
+            oldest_ms: Some(1_600_000_000_010),
+        }
+    );
+    let g = gateway.clone();
+    let history = blocking(move || g.status()).await.unwrap().history.unwrap();
+    assert_eq!(history.state, HistoryState::Syncing);
+    assert_eq!(history.progress, Some(40));
+    assert_eq!((history.chats, history.messages), (1, 30));
+    assert_eq!(history.oldest_ms, Some(1_600_000_000_010));
+
+    // An overlapping chunk: only what is new counts; the last one ends it.
+    let report = sink.import_history(chunk(0, 20)).await.unwrap();
+    sink.history_synced(HistorySyncType::Recent, Some(100), report)
+        .await;
+    assert_eq!(
+        events.next_event().await.event,
+        GatewayEvent::HistorySynced {
+            chats: 1,
+            progress: Some(100),
+            sync_type: Some(HistorySyncType::Recent),
+            messages: 10,
+            oldest_ms: Some(1_600_000_000_000),
+        }
+    );
+    let history = blocking(move || gateway.status())
+        .await
+        .unwrap()
+        .history
+        .unwrap();
+    assert_eq!(history.state, HistoryState::Done);
+    assert_eq!(history.progress, Some(100));
+    assert_eq!((history.chats, history.messages), (1, 40));
+    assert_eq!(history.oldest_ms, Some(1_600_000_000_000));
 }
 
 #[tokio::test]
@@ -2670,6 +2825,9 @@ async fn the_instance_status_names_the_own_lid() {
         own_jid: Some("905550000009@s.whatsapp.net".into()),
         push_name: None,
         own_lid: Some("777@lid".into()),
+        epoch: None,
+        account_epoch: None,
+        history: None,
     }))
     .await;
     let after = blocking(move || gateway.status()).await.unwrap();

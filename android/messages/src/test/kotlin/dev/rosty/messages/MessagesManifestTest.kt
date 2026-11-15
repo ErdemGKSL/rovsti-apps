@@ -90,6 +90,21 @@ class MessagesManifestTest {
         assertEquals("signature", manifest.declaredPermissions[handoff])
     }
 
+    /** WA-R2: the link hand-over. Exported, but unreachable without the signature permission, in both directions. */
+    @Test fun theWhatsAppLinkProviderIsExportedBehindTheSignaturePermission() {
+        val permission = "dev.rosty.permission.WA_LINK"
+        val provider = manifest.component("dev.rosty.wa.share.WaLinkProvider")
+        assertEquals("provider", provider.kind)
+        assertEquals(true, provider.exported)
+        assertEquals("dev.rosty.messages.walink", provider.attributes["authorities"])
+        assertEquals(permission, provider.attributes["readPermission"])
+        assertEquals(permission, provider.attributes["writePermission"])
+        assertEquals(null, provider.attributes["grantUriPermissions"])
+        assertEquals("signature", manifest.declaredPermissions[permission])
+        assertTrue("this app asks its siblings too", permission in manifest.usesPermissions)
+        assertTrue(manifest.queriedProviders.containsAll(setOf("dev.rosty.phone.walink", "dev.rosty.contacts.walink")))
+    }
+
     @Test fun everyComponentOfTheGpuiManifestSurvives() {
         for (old in gpui.components) {
             val name = if (old.name.startsWith(".")) pkg + old.name else old.name

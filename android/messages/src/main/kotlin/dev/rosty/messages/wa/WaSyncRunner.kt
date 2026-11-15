@@ -3,6 +3,7 @@ package dev.rosty.messages.wa
 import dev.rosty.core.Outcome
 import dev.rosty.core.getOrNull
 import dev.rosty.core.log.RostyLog
+import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.model.wa.WaSyncApplied
@@ -29,16 +30,21 @@ enum class OlderResult {
  * Fills one open [WaSyncStore] from the gateway (E6.4s). The store decides what is owed (`plan`, the pages a chat list
  * names, the next page of a gap); this class makes the calls it asks for and hands the answers back:
  *
- * - [catchUp]: the LID and number pairs the gateway learned and the account's own ids first (so what follows lands on
- *   merged chats), then `plan`, the chat list when it is owed and every open gap page by page until `next` is null;
+ * - [catchUp]: the gateway's status first, every time (its process id, the linked account, the history progress: a
+ *   restarted gateway is a gap, another account empties the store), then the LID and number pairs the gateway
+ *   learned (so what follows lands on merged chats), then `plan`, the chat list when it is owed and every open gap
+ *   page by page until `next` is null;
  * - [refresh]: the pairs, then the chat list again (after a `resync`, or when events were dropped on this side);
- * - [apply]: stream events, oldest first, in batches;
+ * - [apply]: stream events, oldest first, in batches, `hello` and `account_changed` included;
  * - [older]: the page before the oldest stored message of a chat (the thread reached the end of what is stored);
  * - [observe]: group and profile answers fetched elsewhere in the app, which name people by both ids.
  *
  * [onChange] hears the chats whose rows changed (null: all of them). [onRekeyed] hears every key change the store
  * reports (two chats of one person became one), from whichever call caused it, before [onChange] is told: what is
- * kept per chat outside the store follows it ([WaRekeys]). Network fills run one at a time.
+ * kept per chat outside the store follows it ([WaRekeys]). [onAccountChanged] hears that the store emptied itself for
+ * another account, with the media files to delete; it is the only reason anything kept for the link is dropped.
+ * [onHistory] is told when the stored history progress may have moved, [onMedia] which media messages arrived.
+ * Network fills run one at a time.
  */
 class WaSyncRunner(
     private val store: WaSyncStore,
@@ -47,11 +53,11 @@ class WaSyncRunner(
     private val onChange: (Set<String>?) -> Unit,
     private val pageLimit: Int? = null,
     private val onRekeyed: suspend (List<WaSyncRekeyed>) -> Unit = {},
+    private val onAccountChanged: suspend (deleteFiles: List<String>) -> Unit = {},
+    private val onHistory: suspend () -> Unit = {},
+    private val onMedia: suspend (List<WaMediaRef>) -> Unit = {},
 ) {
     private val fill = Mutex()
-
-    /** The account's own number and LID were handed to the store: once per open store is enough. */
-    private var ownIdsKnown = false
 
     /** The `seq` the event socket resumes after; null on the first run or when the store cannot be read. */
     suspend fun afterSeq(): Long? = store.plan(pageLimit).getOrNull()?.afterSeq
@@ -59,10 +65,12 @@ class WaSyncRunner(
     /** Does what the store's plan owes. False when the gateway could not be reached for part of it. */
     suspend fun catchUp(): Boolean =
         fill.withLock {
-            // Identity first: the chat list and the pages that follow are stored under the merged keys.
-            val merged = identityLocked() or ownIdsLocked()
+            // The status first: a gap or another account must be known before anything is stored. Then identity:
+            // the chat list and the pages that follow are stored under the merged keys.
+            val stale = statusLocked()
+            val merged = identityLocked()
             val plan = store.plan(pageLimit).getOrNull() ?: return@withLock false
-            if (plan.refreshChats || merged) refreshLocked(null) else pages(plan.fetch)
+            if (plan.refreshChats || merged || stale) refreshLocked(null) else pages(plan.fetch)
         }
 
     /**
@@ -86,14 +94,18 @@ class WaSyncRunner(
         return caught.resync
     }
 
-    /** Tells the store the account's own number and LID, so its own messages are "mine" under either. */
-    private suspend fun ownIdsLocked(): Boolean {
-        if (ownIdsKnown) return false
+    /**
+     * Hands the gateway's whole status to the store: the account's own number and LID (its own messages are "mine"
+     * under either), the id of the gateway process, the account epoch and the history progress. True when the chat
+     * list must be fetched again (a gap, a merge, another account).
+     */
+    private suspend fun statusLocked(): Boolean {
         val status = remote.status().getOrNull() ?: return false
         val applied = store.observe(now(), status = status).getOrNull() ?: return false
-        ownIdsKnown = true
+        if (applied.accountChanged) onAccountChanged(applied.deleteFiles)
         followed(applied.rekeyed)
-        return applied.resync
+        onHistory()
+        return applied.resync || applied.accountChanged
     }
 
     private suspend fun followed(steps: List<WaSyncRekeyed>) {
@@ -142,6 +154,7 @@ class WaSyncRunner(
                 fetched++
                 followed(stored.rekeyed)
                 onChange(setOf(asked.chat))
+                onMedia(WaDownloads.refsOf(page, now()))
                 // A store that asks for the same page again would loop forever.
                 next = stored.next?.takeIf { it != asked }
             }
@@ -149,7 +162,10 @@ class WaSyncRunner(
         return whole
     }
 
-    /** Applies stream events (oldest first); the answer's `resync` asks for [refresh]. */
+    /**
+     * Applies stream events (oldest first), every one of the socket as it came. The answer's `resync` or
+     * `accountChanged` asks for [refresh].
+     */
     suspend fun apply(events: List<WaSyncEvent>): WaSyncApplied? {
         if (events.isEmpty()) return null
         val applied =
@@ -163,8 +179,15 @@ class WaSyncRunner(
                     return null
                 }
             }
+        if (applied.accountChanged) onAccountChanged(applied.deleteFiles)
         followed(applied.rekeyed)
-        if (applied.chats.isNotEmpty() || applied.reconciled.isNotEmpty()) onChange(applied.chats.toSet())
+        if (applied.accountChanged) {
+            onChange(null)
+        } else if (applied.chats.isNotEmpty() || applied.reconciled.isNotEmpty()) {
+            onChange(applied.chats.toSet())
+        }
+        if (applied.accountChanged || events.any { it.event.movesHistory() }) onHistory()
+        onMedia(WaDownloads.refsOf(events))
         return applied
     }
 
@@ -193,6 +216,8 @@ class WaSyncRunner(
         followed(applied.rekeyed)
         if (applied.resync) refresh()
     }
+
+    private fun GatewayEvent.movesHistory(): Boolean = this is GatewayEvent.State || this is GatewayEvent.HistorySynced
 
     private companion object {
         const val TAG = "wa-sync"

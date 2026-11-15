@@ -10,5 +10,7 @@ uses-permission android.permission.VIBRATE
 uses-permission android.permission.WAKE_LOCK
 uses-permission android.permission.WRITE_CONTACTS
 uses-permission dev.rosty.permission.HANDOFF
+uses-permission dev.rosty.permission.WA_LINK
 declares dev.rosty.permission.HANDOFF signature
 declares dev.rosty.permission.READ_PEOPLE signature
+declares dev.rosty.permission.WA_LINK signature

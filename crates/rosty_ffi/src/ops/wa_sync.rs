@@ -10,6 +10,18 @@
 //! and `wa_sync.identity_observe` what `wa.status`, `wa.group(s)` and `wa.profiles` answered. A merge is reported
 //! as `rekeyed` (`{seq, from_key, into_key}`) by the op that caused it and listed by `wa_sync.rekeyed_since`; the
 //! reads take any id of a chat, so a screen that still holds the old one reads the merged chat.
+//!
+//! Media: the store decides, the caller does the file I/O. `wa_sync.media_enqueue` asks for a file (a tap, or the
+//! auto-download rules under the network the caller names), `wa_sync.media_due` hands out the downloads to make,
+//! `wa_sync.media_settle` reports each, `wa_sync.media_evict` and `wa_sync.media_reconcile` answer the files to
+//! delete, `wa_sync.media_stats` and `wa_sync.media_cap` serve the settings screen.
+//!
+//! The gateway and the account: `wa_sync.note_status` takes the gateway's epoch, account epoch, own ids and
+//! history progress (another epoch is a gap, another account empties the store), `wa_sync.account_changed` takes
+//! the gateway's announcement of an account change, `wa_sync.history` reads the progress back;
+//! `wa_sync.identity_observe` (a whole `wa.status` answer) and `wa_sync.apply_events` (`hello`, `resync`, `state`,
+//! `account_changed`, `history_synced`) take the same from the wire types, so a caller copies no field by hand;
+//! `wa_sync.wipe` closes a store and deletes its files (unlink).
 
 use crate::envelope::{ErrorKind, FfiError};
 use crate::handles;
@@ -18,9 +30,12 @@ use crate::ops::registry::{Case, OpSpec, PLACEHOLDER_HANDLE as H};
 use crate::state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
-    self, Action, AppliedEvents, ChatRekeyed, ChatRow, Due, Eviction, FetchPage, IdentityApplied,
-    IdentityCaughtUp, MessageRow, Observed, Opened, OutboxItem, Outcome, ResolvedId, Settled,
-    StarredCursor, StarredPage, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor, ThreadPage,
+    self, Action, AppliedEvents, ChatRekeyed, ChatRow, Conditions, Decision, Due, Eviction, Fetch,
+    FetchPage, Fetched, HistoryProgress, HistoryReport, IdentityApplied, IdentityCaughtUp,
+    MediaDue, MediaEntry, MediaQueued, MediaSettled, MediaState, MediaStats, MessageRow, Network,
+    Observed, Opened, OutboxItem, Outcome, Reconciled, ResolvedId, Settled, StarredCursor,
+    StarredPage, StatusNote, StatusNoted, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor,
+    ThreadPage, Wiped,
 };
 use rosty_wa_proto::{
     EventEnvelope, GroupInfo, IdentityMappings, InstanceStatus, RichChat, RichMessage, WaProfile,
@@ -144,6 +159,84 @@ pub(super) const OPS: &[OpSpec] = &[
         media_evict_cases
     ),
     op!(
+        "wa_sync.media_policy",
+        MediaPolicyReq,
+        MediaPolicyAns,
+        media_policy,
+        media_policy_cases
+    ),
+    op!(
+        "wa_sync.media_enqueue",
+        MediaEnqueueReq,
+        WithHandle<MediaQueued>,
+        media_enqueue,
+        media_enqueue_cases
+    ),
+    op!(
+        "wa_sync.media_due",
+        MediaDueReq,
+        WithHandle<MediaDue>,
+        media_due,
+        media_due_cases
+    ),
+    op!(
+        "wa_sync.media_settle",
+        MediaSettleReq,
+        WithHandle<MediaSettled>,
+        media_settle,
+        media_settle_cases
+    ),
+    op!(
+        "wa_sync.media_keep",
+        MediaKeepReq,
+        WithHandle<MediaKeptAns>,
+        media_keep,
+        media_keep_cases
+    ),
+    op!(
+        "wa_sync.media_reconcile",
+        ReconcileReq,
+        WithHandle<Reconciled>,
+        media_reconcile,
+        media_reconcile_cases
+    ),
+    op!(
+        "wa_sync.media_stats",
+        MediaStatsReq,
+        MediaStats,
+        media_stats,
+        media_stats_cases
+    ),
+    op!(
+        "wa_sync.media_cap",
+        MediaCapReq,
+        WithHandle<MediaCapAns>,
+        media_cap,
+        media_cap_cases
+    ),
+    op!(
+        "wa_sync.note_status",
+        NoteStatusReq,
+        WithHandle<StatusNoted>,
+        note_status,
+        note_status_cases
+    ),
+    op!(
+        "wa_sync.account_changed",
+        AccountChangedReq,
+        WithHandle<IdentityApplied>,
+        account_changed,
+        account_changed_cases
+    ),
+    op!(
+        "wa_sync.history",
+        HandleReq,
+        HistoryAns,
+        history,
+        history_cases
+    ),
+    op!("wa_sync.wipe", WipeReq, Wiped, wipe, wipe_cases),
+    op!(
         "wa_sync.identity_resolve",
         ResolveReq,
         Option<ResolvedId>,
@@ -180,10 +273,22 @@ pub(super) const OPS: &[OpSpec] = &[
     ),
 ];
 
-type Shared = Arc<Mutex<Store>>;
+/// A store behind its handles. `None` once `wa_sync.wipe` deleted it: the handles that still name it answer
+/// "not found" until they are closed.
+type Shared = Arc<Mutex<Option<Store>>>;
 
-fn lock(store: &Shared) -> MutexGuard<'_, Store> {
+/// The stores open on a file, by path.
+type OpenFiles = HashMap<PathBuf, Weak<Mutex<Option<Store>>>>;
+
+fn lock(store: &Shared) -> MutexGuard<'_, Option<Store>> {
     store.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn wiped(handle: i64) -> FfiError {
+    FfiError::new(
+        ErrorKind::NotFound,
+        format!("the store of wa_sync handle {handle} was wiped"),
+    )
 }
 
 /// The store behind `handle`; the registry is not held while the caller works on it.
@@ -202,7 +307,8 @@ fn shared(handle: i64) -> Result<Shared, FfiError> {
 fn with<T>(handle: i64, f: impl FnOnce(&mut Store) -> wa_sync::Result<T>) -> Result<T, FfiError> {
     let store = shared(handle)?;
     let mut store = lock(&store);
-    f(&mut store).map_err(map_error)
+    let store = store.as_mut().ok_or_else(|| wiped(handle))?;
+    f(store).map_err(map_error)
 }
 
 fn map_error(error: wa_sync::Error) -> FfiError {
@@ -363,39 +469,56 @@ struct OpenReq {
 }
 
 /// The file stores open in this process: a second `wa_sync.open` of a file shares the first one's connection.
-fn open_files() -> MutexGuard<'static, HashMap<PathBuf, Weak<Mutex<Store>>>> {
-    static OPEN: LazyLock<Mutex<HashMap<PathBuf, Weak<Mutex<Store>>>>> =
-        LazyLock::new(Mutex::default);
+fn open_files() -> MutexGuard<'static, OpenFiles> {
+    static OPEN: LazyLock<Mutex<OpenFiles>> = LazyLock::new(Mutex::default);
     OPEN.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The directory of the store files: the one named, else `core.init`'s data dir.
+fn store_dir(dir: Option<&str>) -> Result<PathBuf, FfiError> {
+    match dir {
+        Some(dir) => Ok(dir.into()),
+        None => state::dirs()
+            .map(|dirs| dirs.data_dir.clone())
+            .ok_or_else(|| FfiError::invalid("init was not called")),
+    }
 }
 
 fn open(req: OpenReq) -> Result<WithHandle<Opened>, FfiError> {
     let store: Shared = if req.memory {
-        Arc::new(Mutex::new(
+        Arc::new(Mutex::new(Some(
             Store::open_in_memory(&req.instance_id).map_err(map_error)?,
-        ))
+        )))
     } else {
-        let dir: PathBuf = match &req.dir {
-            Some(dir) => dir.into(),
-            None => state::dirs()
-                .map(|dirs| dirs.data_dir.clone())
-                .ok_or_else(|| FfiError::invalid("init was not called"))?,
-        };
+        let dir = store_dir(req.dir.as_deref())?;
         let path = dir.join(wa_sync::file_name(&req.instance_id));
         let mut open = open_files();
         open.retain(|_, store| store.strong_count() > 0);
-        match open.get(&path).and_then(Weak::upgrade) {
+        // A store that was wiped is not shared again: the instance starts a new file.
+        let live = open
+            .get(&path)
+            .and_then(Weak::upgrade)
+            .filter(|store| lock(store).is_some());
+        match live {
             Some(store) => store,
             None => {
-                let store = Arc::new(Mutex::new(
+                let store = Arc::new(Mutex::new(Some(
                     Store::open(&dir, &req.instance_id).map_err(map_error)?,
-                ));
+                )));
                 open.insert(path, Arc::downgrade(&store));
                 store
             }
         }
     };
-    let opened = lock(&store).opened().map_err(map_error)?;
+    let opened = match lock(&store).as_ref() {
+        Some(store) => store.opened().map_err(map_error)?,
+        None => {
+            return Err(FfiError::new(
+                ErrorKind::Io,
+                "the store was wiped while it opened",
+            ));
+        }
+    };
     Ok(handled(handles::global().insert(store), opened))
 }
 
@@ -537,6 +660,31 @@ fn apply_events_cases() -> Vec<Case> {
             json!({"handle": H, "events": [event(1, json!({"instance_id": "inst1", "state": "connected",
                 "own_jid": "100000000009@s.whatsapp.net", "push_name": null, "own_lid": "777000000000009@lid"}),
                 "state")]}),
+        )),
+        // A socket of a restarted gateway: `hello` names another epoch than the stored one (a gap: `resync`,
+        // the low numbers of the new process are applied), a history batch says its kind, and the `state`
+        // names the gateway, the account and how far its history got (`wa_sync.history` then answers it).
+        on_linked(Case::named(
+            "gateway",
+            json!({"handle": H, "events": [
+                event(1, json!({"epoch": "e2"}), "hello"),
+                event(2, json!({"chats": 12, "progress": 40, "sync_type": "full", "messages": 3500,
+                    "oldest_ms": NOW - 86_400_000}), "history_synced"),
+                event(3, json!({"instance_id": "inst1", "state": "connected", "own_jid": OWN, "push_name": null,
+                    "epoch": "e2", "account_epoch": 1, "history": {"state": "syncing", "progress": 55,
+                    "chats": 120, "messages": 48_000, "oldest_ms": NOW - 86_400_000}}), "state"),
+                event(4, json!({"epoch": "e2"}), "resync"),
+            ]}),
+        )),
+        // The gateway announces another account at its place in the stream: what came before is dropped
+        // (`account_changed`, `delete_files`), what follows is kept.
+        on_linked(Case::named(
+            "account_changed",
+            json!({"handle": H, "events": [
+                event(9, text_msg(ALI, "A9", NOW + 2_500, false, "eski hesaptan"), "message"),
+                event(10, json!({"old_pn": OWN, "new_pn": OTHER_OWN}), "account_changed"),
+                event(11, text_msg(ALI, "B1", NOW + 2_600, false, "yeni hesaptan"), "message"),
+            ]}),
         )),
     ]
 }
@@ -1146,9 +1294,22 @@ struct MediaReq {
 #[derive(Serialize)]
 struct MediaAns {
     thumbnail_b64: Option<String>,
-    /// The cached full file; `null` when not downloaded or evicted.
+    /// The cached full file; `null` unless `state` is `ready`.
     path: Option<String>,
     bytes: Option<u64>,
+    /// `none`, `queued`, `downloading`, `ready`, `evicted`, `failed` or `gone`.
+    state: MediaState,
+    /// The size the gateway named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_expected: Option<u64>,
+    /// Downloads that failed since the file was last asked for.
+    attempts: u32,
+    pinned: bool,
+    /// Where the user saved a copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    saved_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
 }
 
 fn media(req: MediaReq) -> Result<MediaAns, FfiError> {
@@ -1161,10 +1322,17 @@ fn media(req: MediaReq) -> Result<MediaAns, FfiError> {
             format!("message {} of {}", req.id, req.chat),
         )
     })?;
+    let media = info.media;
     Ok(MediaAns {
         thumbnail_b64: info.thumbnail.map(|bytes| STANDARD.encode(bytes)),
-        path: info.path,
-        bytes: info.bytes,
+        path: media.path,
+        bytes: media.bytes,
+        state: media.state,
+        size_expected: media.size_expected,
+        attempts: media.attempts,
+        pinned: media.pinned,
+        saved_uri: media.saved_uri,
+        last_error: media.last_error,
     })
 }
 
@@ -1182,29 +1350,645 @@ fn media_cases() -> Vec<Case> {
             "unknown",
             json!({"handle": H, "chat": GROUP, "id": "nope"}),
         )),
+        // A download that failed once waits for its next attempt.
+        on_downloading(Case::named(
+            "failed_once",
+            json!({"handle": H, "chat": GROUP, "id": "G1"}),
+        ))
+        .after(
+            "wa_sync.media_settle",
+            settle_req(json!({"kind": "failed", "error": "timeout"})),
+        ),
     ]
 }
 
 #[derive(Deserialize)]
 struct EvictReq {
     handle: i64,
-    /// The cap from Settings.
-    max_bytes: u64,
+    /// The cap to bring the cache under; the stored cap (`wa_sync.media_cap`) when left out.
+    #[serde(default)]
+    max_bytes: Option<u64>,
+    /// Now: files used in the last 24 hours are not evicted. Left out: none is spared for that reason.
+    #[serde(default)]
+    now_ms: Option<i64>,
 }
 
 fn media_evict(req: EvictReq) -> Result<Eviction, FfiError> {
-    with(req.handle, |store| store.media_evict(req.max_bytes))
+    with(req.handle, |store| {
+        store.media_evict(req.max_bytes, req.now_ms)
+    })
 }
 
 fn media_evict_cases() -> Vec<Case> {
+    let cached = |case: Case| on_sample(case).after("wa_sync.media_set", media_set_req("G1"));
     vec![
-        on_sample(Case::new(json!({"handle": H, "max_bytes": 1024})))
-            .after("wa_sync.media_set", media_set_req("G1")),
-        on_sample(Case::named(
+        cached(Case::new(json!({"handle": H, "max_bytes": 1024}))),
+        cached(Case::named(
             "under_the_cap",
             json!({"handle": H, "max_bytes": 4096}),
+        )),
+        // The file was used a moment ago: it stays, although it alone is over the cap.
+        cached(Case::named(
+            "recently_used",
+            json!({"handle": H, "max_bytes": 1024, "now_ms": NOW + 1_000}),
+        )),
+        // A starred message keeps its file whatever the cap.
+        cached(Case::named("starred", json!({"handle": H, "max_bytes": 0})))
+            .after("wa_sync.outbox_enqueue", star_req("s1", GROUP, "G1", true)),
+        // No `max_bytes`: the stored cap.
+        cached(Case::named("stored_cap", json!({"handle": H})))
+            .after("wa_sync.media_cap", json!({"handle": H, "cap_bytes": 100})),
+    ]
+}
+
+// ---- wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle
+
+/// The network and the free space the caller measured.
+fn conditions(network: Network, free_bytes: Option<u64>) -> Conditions {
+    Conditions {
+        network,
+        free_bytes,
+    }
+}
+
+#[derive(Deserialize)]
+struct MediaPolicyReq {
+    handle: i64,
+    chat: String,
+    id: String,
+    /// `wifi`, `mobile`, `roaming`, `data_saver` or `none`: the most restrictive that holds.
+    network: Network,
+    /// Free bytes where media is kept; the 500 MiB floor is not applied when left out.
+    #[serde(default)]
+    free_bytes: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct MediaPolicyAns {
+    /// `auto`, `on_tap` or `never`.
+    decision: Decision,
+}
+
+fn media_policy(req: MediaPolicyReq) -> Result<MediaPolicyAns, FfiError> {
+    with(req.handle, |store| {
+        store.media_policy(&req.chat, &req.id, &conditions(req.network, req.free_bytes))
+    })
+    .map(|decision| MediaPolicyAns { decision })
+}
+
+fn media_policy_cases() -> Vec<Case> {
+    let ask = |network: &str| json!({"handle": H, "chat": GROUP, "id": "G1", "network": network});
+    vec![
+        on_sample(Case::new(ask("wifi"))),
+        on_sample(Case::named("roaming", ask("roaming"))),
+        on_sample(Case::named(
+            "low_space",
+            json!({"handle": H, "chat": GROUP, "id": "G1", "network": "wifi", "free_bytes": 1_000_000}),
+        )),
+        // A text has no file.
+        on_sample(Case::named(
+            "not_media",
+            json!({"handle": H, "chat": ALI, "id": "A1", "network": "wifi"}),
+        )),
+        on_sample(Case::named(
+            "unknown",
+            json!({"handle": H, "chat": GROUP, "id": "nope", "network": "wifi"}),
+        )),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MediaEnqueueReq {
+    handle: i64,
+    now_ms: i64,
+    chat: String,
+    id: String,
+    /// The user tapped the media: it is queued whatever the network. Left out: the auto-download rules decide,
+    /// under `network`.
+    #[serde(default)]
+    tap: bool,
+    #[serde(default)]
+    network: Option<Network>,
+    #[serde(default)]
+    free_bytes: Option<u64>,
+}
+
+fn media_enqueue(req: MediaEnqueueReq) -> Result<WithHandle<MediaQueued>, FfiError> {
+    let fetch = match (req.tap, req.network) {
+        (true, _) => Fetch::Tap,
+        (false, Some(network)) => Fetch::Auto(conditions(network, req.free_bytes)),
+        (false, None) => {
+            return Err(FfiError::invalid("an automatic request names the network"));
+        }
+    };
+    with(req.handle, |store| {
+        store.media_enqueue(&req.chat, &req.id, fetch, req.now_ms)
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+/// A request for the sample photo: a tap, or the rules under `network`. What is not said is left out.
+fn enqueue_media_req(tap: bool, network: Option<&str>) -> Value {
+    let mut req = json!({"handle": H, "now_ms": NOW, "chat": GROUP, "id": "G1"});
+    if tap {
+        req["tap"] = json!(true);
+    }
+    if let Some(network) = network {
+        req["network"] = json!(network);
+    }
+    req
+}
+
+/// A case on the sample store whose photo was asked for by a tap.
+fn on_media_queued(case: Case) -> Case {
+    on_sample(case).after("wa_sync.media_enqueue", enqueue_media_req(true, None))
+}
+
+/// A case on the sample store whose photo is being downloaded.
+fn on_downloading(case: Case) -> Case {
+    on_media_queued(case).after(
+        "wa_sync.media_due",
+        json!({"handle": H, "now_ms": NOW + 10}),
+    )
+}
+
+fn media_enqueue_cases() -> Vec<Case> {
+    vec![
+        // The rules queue a photo on Wi-Fi by themselves.
+        on_sample(Case::new(enqueue_media_req(false, Some("wifi")))),
+        // Not while roaming: it waits for a tap.
+        on_sample(Case::named(
+            "held",
+            enqueue_media_req(false, Some("roaming")),
+        )),
+        on_sample(Case::named("tap", enqueue_media_req(true, None))),
+        // A cached file is not queued again.
+        on_sample(Case::named("cached", enqueue_media_req(true, None)))
+            .after("wa_sync.media_set", media_set_req("G1")),
+        on_sample(Case::named("no_network", enqueue_media_req(false, None))),
+        on_sample(Case::named(
+            "unknown",
+            json!({"handle": H, "now_ms": NOW, "chat": GROUP, "id": "nope", "tap": true}),
+        )),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MediaDueReq {
+    handle: i64,
+    now_ms: i64,
+    /// The most downloads to hand out (4 when left out, at most 32).
+    #[serde(default)]
+    limit: Option<u32>,
+    /// With a network, automatic downloads the rules no longer allow stay queued (`held`).
+    #[serde(default)]
+    network: Option<Network>,
+    #[serde(default)]
+    free_bytes: Option<u64>,
+}
+
+fn media_due(req: MediaDueReq) -> Result<WithHandle<MediaDue>, FfiError> {
+    let conditions = req
+        .network
+        .map(|network| conditions(network, req.free_bytes));
+    with(req.handle, |store| {
+        store.media_due(req.now_ms, req.limit, conditions.as_ref())
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+fn media_due_cases() -> Vec<Case> {
+    vec![
+        on_media_queued(Case::new(json!({"handle": H, "now_ms": NOW + 10}))),
+        // Queued by the rules on Wi-Fi, asked for on mobile data while roaming: it waits.
+        on_sample(Case::named(
+            "held",
+            json!({"handle": H, "now_ms": NOW + 10, "network": "roaming"}),
+        ))
+        .after(
+            "wa_sync.media_enqueue",
+            enqueue_media_req(false, Some("wifi")),
+        ),
+        // Already out: nothing more, and when its lease ends.
+        on_downloading(Case::named(
+            "downloading",
+            json!({"handle": H, "now_ms": NOW + 20, "limit": 1}),
+        )),
+        on_sample(Case::named("empty", json!({"handle": H, "now_ms": NOW}))),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MediaSettleReq {
+    handle: i64,
+    now_ms: i64,
+    chat: String,
+    id: String,
+    /// `{kind: "ready", path, bytes, sha256?}`, `{kind: "failed", error?}`, `{kind: "gone", error?}` or
+    /// `{kind: "cancelled"}`.
+    outcome: Fetched,
+}
+
+fn media_settle(req: MediaSettleReq) -> Result<WithHandle<MediaSettled>, FfiError> {
+    with(req.handle, |store| {
+        store.media_settle(&req.chat, &req.id, &req.outcome, req.now_ms)
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+fn settle_req(outcome: Value) -> Value {
+    json!({"handle": H, "now_ms": NOW + 500, "chat": GROUP, "id": "G1", "outcome": outcome})
+}
+
+fn media_settle_cases() -> Vec<Case> {
+    let file = "/data/user/0/dev.rosty.messages/files/wa-media/inst1/files/G1/photo.jpg";
+    vec![
+        on_downloading(Case::new(settle_req(
+            json!({"kind": "ready", "path": file, "bytes": 2100, "sha256": "9f2c"}),
+        ))),
+        on_downloading(Case::named(
+            "failed",
+            settle_req(json!({"kind": "failed", "error": "timeout"})),
+        )),
+        on_downloading(Case::named(
+            "gone",
+            settle_req(json!({"kind": "gone", "error": "the gateway no longer has it"})),
+        )),
+        on_downloading(Case::named(
+            "cancelled",
+            settle_req(json!({"kind": "cancelled"})),
+        )),
+        // Another file for a message that has one: the old file is named for deletion.
+        on_sample(Case::named(
+            "replaced",
+            settle_req(json!({"kind": "ready", "path": file, "bytes": 2100})),
         ))
         .after("wa_sync.media_set", media_set_req("G1")),
+        on_sample(Case::named("unknown", {
+            let mut req = settle_req(json!({"kind": "cancelled"}));
+            req["id"] = json!("nope");
+            req
+        })),
+    ]
+}
+
+// ---- wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap
+
+#[derive(Deserialize)]
+struct MediaKeepReq {
+    handle: i64,
+    chat: String,
+    id: String,
+    /// Never evict the file. Left out: as it is.
+    #[serde(default)]
+    pinned: Option<bool>,
+    /// Where the user saved a copy (a saved file is never evicted); `""` forgets the copy. Left out: as it is.
+    #[serde(default)]
+    saved_uri: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MediaKeptAns {
+    media: MediaEntry,
+}
+
+fn media_keep(req: MediaKeepReq) -> Result<WithHandle<MediaKeptAns>, FfiError> {
+    with(req.handle, |store| {
+        store.media_keep(&req.chat, &req.id, req.pinned, req.saved_uri.as_deref())
+    })
+    .map(|media| handled(req.handle, MediaKeptAns { media }))
+}
+
+fn media_keep_cases() -> Vec<Case> {
+    let cached = |case: Case| on_sample(case).after("wa_sync.media_set", media_set_req("G1"));
+    vec![
+        cached(Case::new(
+            json!({"handle": H, "chat": GROUP, "id": "G1", "saved_uri": "content://media/external/images/media/42"}),
+        )),
+        cached(Case::named(
+            "pinned",
+            json!({"handle": H, "chat": GROUP, "id": "G1", "pinned": true}),
+        )),
+        on_sample(Case::named(
+            "unknown",
+            json!({"handle": H, "chat": GROUP, "id": "nope", "pinned": true}),
+        )),
+    ]
+}
+
+#[derive(Deserialize)]
+struct ReconcileReq {
+    handle: i64,
+    /// Every file under the directories of full media and of outbox files (not the thumbnails), as absolute
+    /// paths. Left out when the listing failed: only cut-off downloads are queued again.
+    #[serde(default)]
+    files: Option<Vec<String>>,
+}
+
+fn media_reconcile(req: ReconcileReq) -> Result<WithHandle<Reconciled>, FfiError> {
+    with(req.handle, |store| {
+        store.media_reconcile(req.files.as_deref())
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+fn media_reconcile_cases() -> Vec<Case> {
+    vec![
+        // The cached file is gone, a download was cut off, and two files belong to nothing.
+        on_sample(Case::new(json!({"handle": H, "files": [
+            "/data/user/0/dev.rosty.messages/files/wa-media/inst1/files/A1/a.jpg.part",
+            "/data/user/0/dev.rosty.messages/files/wa-media/inst1/files/old/stray.bin",
+        ]})))
+        .after("wa_sync.media_set", media_set_req("G1")),
+        on_downloading(Case::named("no_listing", json!({"handle": H}))),
+        // Everything in its place.
+        on_sample(Case::named(
+            "clean",
+            json!({"handle": H, "files": ["/data/user/0/dev.rosty.messages/cache/wa-media/G1.jpg"]}),
+        ))
+        .after("wa_sync.media_set", media_set_req("G1")),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MediaStatsReq {
+    handle: i64,
+    /// Now: files used in the last 24 hours count as exempt.
+    #[serde(default)]
+    now_ms: Option<i64>,
+}
+
+fn media_stats(req: MediaStatsReq) -> Result<MediaStats, FfiError> {
+    with(req.handle, |store| store.media_stats(req.now_ms))
+}
+
+fn media_stats_cases() -> Vec<Case> {
+    vec![
+        on_sample(Case::new(json!({"handle": H, "now_ms": NOW + 1_000})))
+            .after("wa_sync.media_set", media_set_req("G1"))
+            .after(
+                "wa_sync.outbox_enqueue",
+                json!({"handle": H, "now_ms": NOW, "client_id": "m1", "chat": ALI,
+                    "action": {"kind": "send_media", "file": "/data/user/0/dev.rosty.messages/files/out/foto.jpg",
+                        "media": "image", "mime": "image/jpeg", "size": 34567}}),
+            ),
+        on_store(Case::named("empty", json!({"handle": H}))),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MediaCapReq {
+    handle: i64,
+    /// Sets the cap in bytes. Without it and without `no_limit` the op only reads.
+    #[serde(default)]
+    cap_bytes: Option<u64>,
+    /// Sets no limit.
+    #[serde(default)]
+    no_limit: bool,
+}
+
+#[derive(Serialize)]
+struct MediaCapAns {
+    /// The cap as stored now; `null`: no limit.
+    cap_bytes: Option<u64>,
+}
+
+fn media_cap(req: MediaCapReq) -> Result<WithHandle<MediaCapAns>, FfiError> {
+    if req.no_limit && req.cap_bytes.is_some() {
+        return Err(FfiError::invalid(
+            "cap_bytes and no_limit exclude each other",
+        ));
+    }
+    with(req.handle, |store| {
+        if req.no_limit {
+            store.set_media_cap(None)?;
+        } else if req.cap_bytes.is_some() {
+            store.set_media_cap(req.cap_bytes)?;
+        }
+        store.media_cap()
+    })
+    .map(|cap_bytes| handled(req.handle, MediaCapAns { cap_bytes }))
+}
+
+fn media_cap_cases() -> Vec<Case> {
+    vec![
+        // Never set: 512 MiB.
+        on_store(Case::new(json!({"handle": H}))),
+        on_store(Case::named(
+            "set",
+            json!({"handle": H, "cap_bytes": 1_073_741_824_u64}),
+        )),
+        on_store(Case::named(
+            "no_limit",
+            json!({"handle": H, "no_limit": true}),
+        )),
+        on_store(Case::named(
+            "both",
+            json!({"handle": H, "cap_bytes": 1, "no_limit": true}),
+        )),
+    ]
+}
+
+// ---- wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe
+
+#[derive(Deserialize)]
+struct NoteStatusReq {
+    handle: i64,
+    now_ms: i64,
+    /// The gateway's epoch: `InstanceStatus.epoch`, or the `epoch` of the socket's first frame or of a `resync`.
+    #[serde(default)]
+    epoch: Option<String>,
+    /// `InstanceStatus.account_epoch`.
+    #[serde(default)]
+    account_epoch: Option<u32>,
+    /// `InstanceStatus.own_jid`.
+    #[serde(default)]
+    own_pn: Option<String>,
+    /// `InstanceStatus.own_lid`.
+    #[serde(default)]
+    own_lid: Option<String>,
+    /// `InstanceStatus.history`: `{state, progress?, chats?, messages?, oldest_ms?}`.
+    #[serde(default)]
+    history: Option<HistoryReport>,
+}
+
+fn note_status(req: NoteStatusReq) -> Result<WithHandle<StatusNoted>, FfiError> {
+    let note = StatusNote {
+        epoch: req.epoch.as_deref(),
+        account_epoch: req.account_epoch,
+        own_pn: req.own_pn.as_deref(),
+        own_lid: req.own_lid.as_deref(),
+        history: req.history.as_ref(),
+    };
+    with(req.handle, |store| store.note_status(&note, req.now_ms))
+        .map(|out| handled(req.handle, out))
+}
+
+const OWN: &str = "100000000009@s.whatsapp.net";
+const OTHER_OWN: &str = "100000000008@s.whatsapp.net";
+
+fn status_req(epoch: &str, account_epoch: u32, own: &str) -> Value {
+    json!({"handle": H, "now_ms": NOW + 2_000, "epoch": epoch, "account_epoch": account_epoch, "own_pn": own})
+}
+
+/// A case on the sample store that knows its gateway (`e1`), its account and a cached photo.
+fn on_linked(case: Case) -> Case {
+    on_sample(case)
+        .after("wa_sync.note_status", status_req("e1", 1, OWN))
+        .after("wa_sync.media_set", media_set_req("G1"))
+}
+
+fn note_status_cases() -> Vec<Case> {
+    vec![
+        // The first status: the epoch, the account and the history progress are stored. The store already
+        // applied events of a gateway that named no epoch, so this is a gap.
+        on_sample(Case::new(
+            json!({"handle": H, "now_ms": NOW + 2_000, "epoch": "e1", "account_epoch": 1,
+            "own_pn": OWN, "own_lid": "777000000000009@lid",
+            "history": {"state": "syncing", "progress": 40, "chats": 12, "messages": 3400,
+                "oldest_ms": NOW - 86_400_000}}),
+        )),
+        // The same gateway and the same account: nothing changes.
+        on_linked(Case::named("same", status_req("e1", 1, OWN))),
+        // The gateway restarted.
+        on_linked(Case::named("gap", status_req("e2", 1, OWN))),
+        // Another account on the instance: the store is emptied, the cached file is named for deletion.
+        on_linked(Case::named(
+            "account_changed",
+            status_req("e1", 2, OTHER_OWN),
+        )),
+        // An old gateway names nothing.
+        on_linked(Case::named(
+            "nothing",
+            json!({"handle": H, "now_ms": NOW + 2_000}),
+        )),
+    ]
+}
+
+#[derive(Deserialize)]
+struct AccountChangedReq {
+    handle: i64,
+    now_ms: i64,
+    /// The number the instance was linked to before, when the gateway knows it.
+    #[serde(default)]
+    old_pn: Option<String>,
+    new_pn: String,
+}
+
+fn account_changed(req: AccountChangedReq) -> Result<WithHandle<IdentityApplied>, FfiError> {
+    with(req.handle, |store| {
+        store.note_account_event(req.old_pn.as_deref(), &req.new_pn, req.now_ms)
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+fn account_changed_cases() -> Vec<Case> {
+    let announced = json!({"handle": H, "now_ms": NOW + 3_000, "old_pn": OWN, "new_pn": OTHER_OWN});
+    vec![
+        on_linked(Case::new(announced.clone())),
+        // The status said so first and the store was emptied then; the announcement sweeps what arrived since.
+        on_linked(Case::named("swept", announced))
+            .after("wa_sync.note_status", status_req("e1", 2, OTHER_OWN))
+            .after(
+                "wa_sync.apply_events",
+                json!({"handle": H, "events": [
+                    event(9, text_msg(ALI, "A9", NOW + 2_500, false, "eski hesaptan"), "message")]}),
+            ),
+        // The same account: nothing to do.
+        on_linked(Case::named(
+            "same",
+            json!({"handle": H, "now_ms": NOW + 3_000, "old_pn": OWN, "new_pn": OWN}),
+        )),
+    ]
+}
+
+#[derive(Serialize)]
+struct HistoryAns {
+    /// What the gateway last reported; `null` before the first report.
+    history: Option<HistoryProgress>,
+}
+
+fn history(req: HandleReq) -> Result<HistoryAns, FfiError> {
+    with(req.handle, |store| store.history()).map(|history| HistoryAns { history })
+}
+
+fn history_cases() -> Vec<Case> {
+    vec![
+        on_store(Case::new(json!({"handle": H}))).after(
+            "wa_sync.note_status",
+            json!({"handle": H, "now_ms": NOW, "history": {"state": "syncing", "progress": 40, "chats": 12,
+                "messages": 3400, "oldest_ms": NOW - 86_400_000}}),
+        ),
+        on_store(Case::named("done", json!({"handle": H}))).after(
+            "wa_sync.note_status",
+            json!({"handle": H, "now_ms": NOW, "history": {"state": "done", "progress": null, "chats": 40,
+                "messages": 120_000, "oldest_ms": null}}),
+        ),
+        on_store(Case::named("none", json!({"handle": H}))),
+    ]
+}
+
+#[derive(Deserialize)]
+struct WipeReq {
+    /// The open store to wipe. The handle is closed; other handles of the same store answer "not found".
+    #[serde(default)]
+    handle: Option<i64>,
+    /// Without a handle: the instance whose store files are deleted, open or not, in `dir`.
+    #[serde(default)]
+    instance_id: Option<String>,
+    /// The directory of the store files; `core.init`'s data dir when left out.
+    #[serde(default)]
+    dir: Option<String>,
+}
+
+fn wipe(req: WipeReq) -> Result<Wiped, FfiError> {
+    if let Some(handle) = req.handle {
+        let shared = shared(handle)?;
+        let store = lock(&shared).take().ok_or_else(|| wiped(handle))?;
+        handles::global().release(handle);
+        return store.wipe().map_err(map_error);
+    }
+    let instance_id = req
+        .instance_id
+        .ok_or_else(|| FfiError::invalid("wipe names a handle or an instance_id"))?;
+    let dir = store_dir(req.dir.as_deref())?;
+    let path = dir.join(wa_sync::file_name(&instance_id));
+    // The map stays locked: nobody opens the file while it is deleted.
+    let mut open = open_files();
+    let live = open
+        .remove(&path)
+        .and_then(|store| store.upgrade())
+        .and_then(|store| lock(&store).take());
+    let store = match live {
+        Some(store) => Some(store),
+        // Opened only to read which media files it names; a file that does not open is deleted all the same.
+        None if path.exists() => Store::open(&dir, &instance_id).ok(),
+        None => None,
+    };
+    match store {
+        Some(store) => store.wipe().map_err(map_error),
+        None => Ok(Wiped {
+            deleted: wa_sync::delete_files(&dir, &instance_id).map_err(map_error)?,
+            media_files: Vec::new(),
+        }),
+    }
+}
+
+fn wipe_cases() -> Vec<Case> {
+    vec![
+        // A cached file and a file the outbox was about to send.
+        on_linked(Case::new(json!({"handle": H}))).after(
+            "wa_sync.outbox_enqueue",
+            json!({"handle": H, "now_ms": NOW, "client_id": "m1", "chat": ALI,
+                "action": {"kind": "send_media", "file": "/data/user/0/dev.rosty.messages/files/out/foto.jpg",
+                    "media": "image", "mime": "image/jpeg", "size": 34567}}),
+        ),
+        // An instance that was never linked here: nothing to delete.
+        Case::named(
+            "never_linked",
+            json!({"instance_id": "nobody", "dir": "/data/user/0/dev.rosty.fixture/none"}),
+        ),
+        Case::named("no_target", json!({})),
     ]
 }
 
@@ -1350,7 +2134,8 @@ fn identity_catch_up_cases() -> Vec<Case> {
 struct ObserveReq {
     handle: i64,
     now_ms: i64,
-    /// `wa.status`: the account's own number and LID.
+    /// `wa.status`, the whole answer: the account's own number and LID, the gateway's `epoch`, the
+    /// `account_epoch` and the `history` report (what `wa_sync.note_status` takes field by field).
     #[serde(default)]
     status: Option<InstanceStatus>,
     /// `wa.group` / `wa.groups`: members named by LID and number.
@@ -1387,6 +2172,22 @@ fn identity_observe_cases() -> Vec<Case> {
                 "lid": "777000000000002@lid"}],
         }))),
         on_sample(Case::named("nothing", json!({"handle": H, "now_ms": NOW}))),
+        // The whole `wa.status` answer of a gateway that restarted: another epoch is a gap (`resync`), and the
+        // history report is stored.
+        on_linked(Case::named(
+            "gateway",
+            json!({"handle": H, "now_ms": NOW + 3_000,
+                "status": {"instance_id": "inst1", "state": "connected", "own_jid": OWN, "push_name": "Ben",
+                    "epoch": "e2", "account_epoch": 1, "history": {"state": "done", "progress": 100,
+                    "chats": 412, "messages": 120_000, "oldest_ms": NOW - 86_400_000}}}),
+        )),
+        // The status names a raised account epoch: the store is emptied, as `wa_sync.note_status` does.
+        on_linked(Case::named(
+            "account_changed",
+            json!({"handle": H, "now_ms": NOW + 3_000,
+                "status": {"instance_id": "inst1", "state": "connected", "own_jid": OTHER_OWN,
+                    "push_name": null, "epoch": "e1", "account_epoch": 2}}),
+        )),
     ]
 }
 
@@ -1554,15 +2355,178 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    fn files_in(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|entry| {
+                        Some(entry.ok()?.file_name().to_string_lossy().into_owned())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn wipe_deletes_the_store_files_and_every_handle_of_it_stops_answering() {
+        let dir = temp_dir("wipe");
+        let open = |instance: &str| {
+            ok("wa_sync.open", json!({"dir": dir, "instance_id": instance}))["handle"]
+                .as_i64()
+                .expect("handle")
+        };
+        let on = |handle: i64, mut request: Value| {
+            request["handle"] = json!(handle);
+            request
+        };
+        let (ui, worker, other) = (open("inst1"), open("inst1"), open("inst2"));
+        ok("wa_sync.apply_events", on(ui, sample_events()));
+        ok("wa_sync.media_set", on(ui, media_set_req("G1")));
+        assert!(files_in(&dir).contains(&wa_sync::file_name("inst1")));
+
+        // By handle: the store is closed and its files are gone; the other instance is untouched.
+        let wiped = ok("wa_sync.wipe", json!({"handle": ui}));
+        assert_eq!(
+            wiped["media_files"],
+            json!(["/data/user/0/dev.rosty.messages/cache/wa-media/G1.jpg"])
+        );
+        assert!(
+            wiped["deleted"]
+                .as_array()
+                .expect("deleted")
+                .iter()
+                .any(|file| file.as_str().expect("path").ends_with("wa-sync-inst1.db"))
+        );
+        assert!(
+            files_in(&dir)
+                .iter()
+                .all(|name| name.starts_with("wa-sync-inst2"))
+        );
+        for handle in [ui, worker] {
+            assert_eq!(
+                err("wa_sync.chats", json!({"handle": handle})).kind,
+                ErrorKind::NotFound
+            );
+        }
+        assert_eq!(
+            err("wa_sync.wipe", json!({"handle": worker})).kind,
+            ErrorKind::NotFound
+        );
+        handles::global().release(worker);
+
+        // Linking again starts a new, empty file; it is not the wiped store.
+        let again = open("inst1");
+        assert_eq!(
+            ok("wa_sync.chats", json!({"handle": again}))["chats"],
+            json!([])
+        );
+        ok("wa_sync.apply_events", on(again, sample_events()));
+        ok("wa_sync.media_set", on(again, media_set_req("G1")));
+
+        // By instance, while it is open: the same, and its handle stops answering.
+        let wiped = ok("wa_sync.wipe", json!({"dir": dir, "instance_id": "inst1"}));
+        assert_eq!(wiped["media_files"].as_array().expect("files").len(), 1);
+        assert_eq!(
+            err("wa_sync.plan", json!({"handle": again})).kind,
+            ErrorKind::NotFound
+        );
+        handles::global().release(again);
+
+        // By instance, while it is closed: opened only to read its media files, then deleted.
+        ok("wa_sync.apply_events", on(other, sample_events()));
+        ok("wa_sync.media_set", on(other, media_set_req("G1")));
+        ok("wa_sync.close", json!({"handle": other}));
+        let wiped = ok("wa_sync.wipe", json!({"dir": dir, "instance_id": "inst2"}));
+        assert_eq!(wiped["media_files"].as_array().expect("files").len(), 1);
+        assert_eq!(files_in(&dir), Vec::<String>::new());
+        // Nothing left: wiping again is not an error.
+        let nothing = ok("wa_sync.wipe", json!({"dir": dir, "instance_id": "inst2"}));
+        assert_eq!(nothing, json!({"deleted": [], "media_files": []}));
+        assert_eq!(files_in(&dir), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_epoch_the_history_and_a_queued_download_survive_close() {
+        let dir = temp_dir("status");
+        let open = || {
+            ok("wa_sync.open", json!({"dir": dir, "instance_id": "inst1"}))["handle"]
+                .as_i64()
+                .expect("handle")
+        };
+        let on = |handle: i64, mut request: Value| {
+            request["handle"] = json!(handle);
+            request
+        };
+        let handle = open();
+        let status = json!({"now_ms": NOW, "epoch": "e1", "account_epoch": 1, "own_pn": OWN,
+            "history": {"state": "syncing", "progress": 40, "chats": 12, "messages": 3400}});
+        assert_eq!(
+            ok("wa_sync.note_status", on(handle, status.clone()))["gap"],
+            false
+        );
+        ok("wa_sync.apply_events", on(handle, sample_events()));
+        ok(
+            "wa_sync.media_enqueue",
+            on(handle, enqueue_media_req(true, None)),
+        );
+        ok(
+            "wa_sync.media_due",
+            json!({"handle": handle, "now_ms": NOW + 10}),
+        );
+        ok("wa_sync.close", json!({"handle": handle}));
+
+        let handle = open();
+        assert_eq!(
+            ok("wa_sync.history", json!({"handle": handle}))["history"]["progress"],
+            40
+        );
+        // The download that was cut off by the close is queued again.
+        assert_eq!(
+            ok("wa_sync.media_reconcile", json!({"handle": handle}))["requeued"],
+            1
+        );
+        let same = ok("wa_sync.note_status", on(handle, status));
+        assert_eq!(
+            (&same["gap"], &same["account_changed"]),
+            (&json!(false), &json!(false))
+        );
+        // Another epoch after the close: the gap is seen, and the stored messages stay.
+        let restarted = ok(
+            "wa_sync.note_status",
+            json!({"handle": handle, "now_ms": NOW + 1, "epoch": "e2"}),
+        );
+        assert_eq!(restarted["gap"], true);
+        assert_eq!(
+            ok("wa_sync.plan", json!({"handle": handle}))["after_seq"],
+            Value::Null
+        );
+        assert_eq!(
+            ok("wa_sync.chats", json!({"handle": handle}))["chats"]
+                .as_array()
+                .expect("chats")
+                .len(),
+            2
+        );
+        handles::global().release(handle);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_wrong_handle_is_not_found_for_every_op() {
         let foreign = handles::global().insert(7u8);
         for spec in OPS.iter().filter(|spec| spec.name != "wa_sync.open") {
             for handle in [0, foreign] {
-                let request = json!({"handle": handle, "now_ms": 0, "client_id": "c", "chat": "c", "id": "i",
+                let mut request = json!({"handle": handle, "now_ms": 0, "client_id": "c", "chat": "c", "id": "i",
                     "limit": 1, "events": [], "chats": [], "messages": [], "text": "", "max_bytes": 0,
-                    "seq": 0, "items": [],
+                    "seq": 0, "items": [], "network": "wifi", "new_pn": "x",
                     "action": {"kind": "send_text", "text": "x"}, "outcome": {"kind": "sent"}});
+                // A download has other outcomes than a send.
+                if spec.name == "wa_sync.media_settle" {
+                    request["outcome"] = json!({"kind": "cancelled"});
+                }
                 let error = err(spec.name, request);
                 assert_eq!(error.kind, ErrorKind::NotFound, "{}", spec.name);
             }

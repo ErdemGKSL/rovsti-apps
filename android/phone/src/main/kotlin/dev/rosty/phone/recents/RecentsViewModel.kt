@@ -188,6 +188,11 @@ sealed interface RecentsAction {
         val key: String,
     ) : RecentsAction
 
+    /** The row menu's WhatsApp message item: opens the person's chat in Rosty Messages. */
+    data class WhatsAppMessage(
+        val key: String,
+    ) : RecentsAction
+
     data class Message(
         val key: String,
     ) : RecentsAction
@@ -413,6 +418,10 @@ class RecentsViewModel(
     private val forgetWhatsApp: (List<String>) -> Unit = {},
     /** WhatsApp calls can be placed (the link is connected): enables the menu item. */
     val whatsAppAvailable: StateFlow<Boolean> = MutableStateFlow(false),
+    /** Opens the WhatsApp chat of a number in Rosty Messages, with the name the row shows. */
+    private val messageWhatsApp: (number: String, name: String?) -> Unit = { _, _ -> },
+    /** Rosty Messages is installed to take the chat: the menu shows its WhatsApp message item. */
+    val whatsAppMessageAvailable: StateFlow<Boolean> = MutableStateFlow(false),
 ) : ViewModel() {
     private val filter = MutableStateFlow(RecentsFilter.All)
     private val query = MutableStateFlow("")
@@ -602,6 +611,11 @@ class RecentsViewModel(
 
             is RecentsAction.WhatsAppCall -> {
                 withRow(action.key) { placeWhatsApp(it.numberRaw) }
+            }
+
+            is RecentsAction.WhatsAppMessage -> {
+                val name = byKey[action.key]?.second?.takeIf { it.named }?.title
+                withRow(action.key) { messageWhatsApp(it.numberRaw, name) }
             }
 
             is RecentsAction.Message -> {

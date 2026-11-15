@@ -33,6 +33,7 @@ import dev.rosty.platform.files.FilesRepository
 import dev.rosty.wa.R
 import dev.rosty.wa.WaLinkStore
 import dev.rosty.wa.WaRepository
+import dev.rosty.wa.share.WaLinkHandover
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -77,6 +78,8 @@ class WhatsAppSettingsViewModel(
     private val clock: () -> Long,
     private val saved: SavedStateHandle = SavedStateHandle(),
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** The link hand-over between Rosty apps; null for a host that does not take part (the catalog, tests). */
+    private val handover: WaLinkHandover? = null,
 ) : ViewModel() {
     constructor(
         app: AppId,
@@ -90,6 +93,7 @@ class WhatsAppSettingsViewModel(
         stagingDir: File,
         clock: () -> Long,
         saved: SavedStateHandle,
+        handover: WaLinkHandover? = null,
     ) : this(
         app = app,
         machine = machine,
@@ -102,6 +106,7 @@ class WhatsAppSettingsViewModel(
         stagingDir = stagingDir,
         clock = clock,
         saved = saved,
+        handover = handover,
     )
 
     private sealed interface Work {
@@ -110,6 +115,8 @@ class WhatsAppSettingsViewModel(
         data class Send(
             val input: SettingsInput,
         ) : Work
+
+        data object UseSibling : Work
     }
 
     private val inbox = Channel<Work>(Channel.UNLIMITED)
@@ -131,6 +138,7 @@ class WhatsAppSettingsViewModel(
                 when (work) {
                     Work.Start -> start()
                     is Work.Send -> step(work.input)
+                    Work.UseSibling -> useSibling()
                 }
             }
         }
@@ -172,6 +180,10 @@ class WhatsAppSettingsViewModel(
             WaSettingsAction.ToggleKeyQr -> {
                 viewModelScope.launch { toggleKeyQr() }
             }
+
+            WaSettingsAction.UseSiblingLink -> {
+                inbox.trySend(Work.UseSibling)
+            }
         }
     }
 
@@ -188,12 +200,42 @@ class WhatsAppSettingsViewModel(
             // A page that was still working lost its effects with the process: start over instead of waiting for them.
             if (view != null && !view.view.busy) {
                 accept(view, runEffects = false)
+                refreshShare()
                 return
             }
         }
+        // The link screen opens without a link: a sibling Rosty app may have one (WA-R2). Adopting it stores it and
+        // connects, so the read below finds it as if the key had been pasted.
+        handover?.adoptIfUnlinked()
         val stored = store.read()
         val link = (stored as? Outcome.Ok)?.value?.let { SettingsLink(it.gatewayUrl, it.instanceId, it.key) }
         apply(SettingsApplyRequest(link = link, app = app, nowMs = clock()))?.let { accept(it, runEffects = true) }
+        refreshShare()
+    }
+
+    /** "Use the link of ...": the user takes back the link a sibling holds, and the page starts over with it. */
+    private suspend fun useSibling() {
+        val share = handover ?: return
+        if (share.adoptIfUnlinked(explicit = true) !is WaLinkHandover.Result.Adopted) {
+            mutableEvents.tryEmit(WaSettingsEvent.Toast(UiText.Res(R.string.wa_error_generic)))
+            refreshShare()
+            return
+        }
+        saved.remove<String>(MODEL_KEY)
+        model = null
+        start()
+    }
+
+    /**
+     * Sets the two hand-over notes of the state: where the link in use came from and, while this app has no link,
+     * the sibling that has one to offer (the link that was removed here; any other would have been adopted).
+     */
+    private suspend fun refreshShare() {
+        val share = handover ?: return
+        val from = share.adoptedFrom()
+        val linked = (store.read() as? Outcome.Ok)?.value != null
+        val offer = if (linked) null else share.offer()
+        mutableState.value = mutableState.value.copy(sharedFrom = from, siblingOffer = offer)
     }
 
     private suspend fun step(input: SettingsInput) {
@@ -289,11 +331,17 @@ class WhatsAppSettingsViewModel(
 
             "save" -> {
                 val link = json.decodeFromJsonElement(StoredLink.serializer(), value!!)
-                (repo.relinkTo(link) as? Outcome.Err)?.let { SettingsInput.error(it.error.message.orEmpty()) }
+                val failed = repo.relinkTo(link) as? Outcome.Err
+                refreshShare()
+                failed?.let { SettingsInput.error(it.error.message.orEmpty()) }
             }
 
             "forget" -> {
+                // Unlinking is per app: the siblings keep their link, and this one is not taken back unasked.
+                val removed = (store.read() as? Outcome.Ok)?.value
                 repo.forget()
+                handover?.onForget(removed)
+                refreshShare()
                 null
             }
 

@@ -1,1 +1,1 @@
-{"ok":{"instance_id":"inst1","state":"connected","own_jid":"905321234567@s.whatsapp.net","push_name":"Ada"}}
+{"ok":{"instance_id":"inst1","state":"connected","own_jid":"905321234567@s.whatsapp.net","push_name":"Ada","epoch":"9f2c41d07ab35e68","account_epoch":2,"history":{"state":"syncing","progress":55,"chats":120,"messages":48000,"oldest_ms":1500000000000}}}

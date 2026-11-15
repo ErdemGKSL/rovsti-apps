@@ -129,6 +129,7 @@ pub fn all() -> impl Iterator<Item = &'static OpSpec> {
         .chain(super::wa::TABLES.iter().flat_map(|table| table.iter()))
         .chain(super::wa_sync::OPS.iter())
         .chain(super::wa_identity::OPS.iter())
+        .chain(super::wa_idbook::OPS.iter())
 }
 
 /// The op with this wire name.

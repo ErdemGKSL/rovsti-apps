@@ -192,6 +192,52 @@ class WaRepositoryTest {
             assertEquals(2, fake.count("wa.chats_with_meta"))
         }
 
+    @Test fun aHelloOfAnotherGatewayProcessStartsTheSeqOver() =
+        runTest(UnconfinedTestDispatcher()) {
+            val fake = FakeWaGateway(link = link).apply { status = Outcome.Ok(status()) }
+            val repo = repo(fake)
+            repo.start()
+            backgroundScope.launch { repo.chats().toList(mutableListOf()) }
+            fake.emitEvent("inst1", 0, GatewayEvent.Hello("e1"))
+            for (seq in 1L..5L) fake.emitEvent("inst1", seq, typing)
+            // A reconnect to the same process: its first frame changes nothing.
+            fake.emitEvent("inst1", 5, GatewayEvent.Hello("e1"))
+            val before = fake.count("wa.chats_with_meta")
+            assertEquals("the same epoch is no reload", 1, before)
+
+            // The gateway restarted: its `seq` counts from its own start, far below what was seen.
+            fake.emitEvent("inst1", 0, GatewayEvent.Hello("e2"))
+            assertEquals("another epoch reloads once", before + 1, fake.count("wa.chats_with_meta"))
+            fake.emitEvent("inst1", 1, typing)
+            fake.emitEvent("inst1", 2, typing)
+            assertEquals("in order after the restart: no gap", before + 1, fake.count("wa.chats_with_meta"))
+            // A gap in the new numbering is seen, although 4 is below the 5 of the old process.
+            fake.emitEvent("inst1", 4, typing)
+            assertEquals(before + 2, fake.count("wa.chats_with_meta"))
+        }
+
+    @Test fun aGatewayWithoutEpochsThatStartsBelowWhatWasSeenAlsoStartsOver() =
+        runTest(UnconfinedTestDispatcher()) {
+            val fake = FakeWaGateway(link = link).apply { status = Outcome.Ok(status()) }
+            val repo = repo(fake)
+            repo.start()
+            val heard = mutableListOf<GatewayEvent>()
+            backgroundScope.launch { repo.events.toList(heard) }
+            backgroundScope.launch { repo.chats().toList(mutableListOf()) }
+            // Events of a process that sent no first frame, then the first frame of its successor.
+            for (seq in 7L..9L) fake.emitEvent("inst1", seq, typing)
+            val before = fake.count("wa.chats_with_meta")
+
+            fake.emitEvent("inst1", 0, GatewayEvent.Hello("e1"))
+            fake.emitEvent("inst1", 1, typing)
+            fake.emitEvent("inst1", 3, typing)
+
+            // One reload for the restart, one for the gap between 1 and 3.
+            assertEquals(before + 2, fake.count("wa.chats_with_meta"))
+            // The frame still reaches the listeners.
+            assertTrue(heard.any { it == GatewayEvent.Hello("e1") })
+        }
+
     @Test fun aResyncEventRefetchesOnce() =
         runTest(UnconfinedTestDispatcher()) {
             val fake = FakeWaGateway(link = link).apply { status = Outcome.Ok(status()) }
@@ -199,7 +245,7 @@ class WaRepositoryTest {
             repo.start()
             backgroundScope.launch { repo.chats().toList(mutableListOf()) }
             val before = fake.count("wa.chats_with_meta")
-            fake.emitEvent("inst1", 1, GatewayEvent.Resync)
+            fake.emitEvent("inst1", 1, GatewayEvent.Resync())
             assertEquals(before + 1, fake.count("wa.chats_with_meta"))
         }
 
@@ -211,7 +257,7 @@ class WaRepositoryTest {
             backgroundScope.launch { repo.chats().toList(mutableListOf()) }
             fake.emitEvent("inst1", 1, typing)
             val before = fake.count("wa.chats_with_meta")
-            fake.emitEvent("inst1", 9, GatewayEvent.Resync)
+            fake.emitEvent("inst1", 9, GatewayEvent.Resync())
             assertEquals(before + 1, fake.count("wa.chats_with_meta"))
         }
 
@@ -232,7 +278,7 @@ class WaRepositoryTest {
             assertEquals(1, fake.count("wa.messages_with_meta"))
             fake.emitEvent("inst1", 2, GatewayEvent.MessageDeleted("c1@s.whatsapp.net", "m1"))
             assertEquals(2, fake.count("wa.messages_with_meta"))
-            fake.emitEvent("inst1", 4, GatewayEvent.Resync)
+            fake.emitEvent("inst1", 4, GatewayEvent.Resync())
             assertEquals(3, fake.count("wa.messages_with_meta"))
         }
 

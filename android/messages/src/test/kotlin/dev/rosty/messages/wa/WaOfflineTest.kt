@@ -146,7 +146,7 @@ class WaOfflineTest {
             assertEquals(0, kit.remote.chatCalls)
 
             kit.connect()
-            kit.remote.emit(7, GatewayEvent.Resync)
+            kit.remote.emit(7, GatewayEvent.Resync())
             settle()
             assertEquals(1, kit.remote.chatCalls)
 

@@ -163,6 +163,7 @@
     <string name="recents_menu_call_back">Call back</string>
     <string name="recents_menu_message">Message</string>
     <string name="recents_menu_whatsapp">WhatsApp call</string>
+    <string name="recents_menu_whatsapp_message">WhatsApp message</string>
     <string name="recents_menu_quick_reply">Quick reply</string>
     <string name="recents_menu_remind">Remind me later</string>
     <string name="recents_menu_copy_number">Copy number</string>
@@ -394,6 +395,7 @@
     <string name="wa_refused_busy">Another call is in progress</string>
     <string name="wa_refused_country_code">Add the country code to call this number on WhatsApp</string>
     <string name="details_menu_whatsapp">WhatsApp call</string>
+    <string name="details_menu_whatsapp_message">WhatsApp message</string>
 
     <!-- E5.10 Call statistics -->
     <string name="settings_stats">Call statistics</string>
@@ -640,4 +642,6 @@
     <string name="notes_notice_delete_failed">Couldn\'t delete the note</string>
     <string name="notes_notice_undo_failed">Couldn\'t undo</string>
     <string name="notes_notice_export_failed">Couldn\'t export the notes</string>
+    <!-- A WhatsApp caller known only by a LID nobody mapped to a number (WA-R2): never its digits. -->
+    <string name="wa_user_unknown">WhatsApp user</string>
 </resources>

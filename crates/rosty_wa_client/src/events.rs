@@ -4,6 +4,13 @@
 //! connects, forwards every [`EventEnvelope`], remembers the last `seq` and,
 //! when the socket drops, reconnects with backoff and jitter, resuming after
 //! that `seq`. A rejected key stops the stream for good.
+//!
+//! Sequences start over when the gateway restarts. The gateway names its
+//! process in the `hello` frame that opens every socket and in `resync`
+//! (`epoch`); both are forwarded like any event, and the stream moves its
+//! own resume point back when they say the old one is void ([`Cursor`]). The
+//! consumer keeps the epoch next to its own last `seq` and refetches when a
+//! frame names another one.
 
 use std::io;
 use std::thread;
@@ -13,7 +20,7 @@ use futures::channel::mpsc;
 use futures::{FutureExt, StreamExt};
 use rosty_wa_proto::api::routes;
 use rosty_wa_proto::limit::backoff_ms;
-use rosty_wa_proto::{ConnectKey, EventEnvelope, GatewayUrl};
+use rosty_wa_proto::{ConnectKey, EventEnvelope, GatewayEvent, GatewayUrl};
 use std::sync::Arc;
 
 use tokio::sync::{Notify, oneshot};
@@ -79,6 +86,46 @@ pub(crate) fn decode_event(text: &str) -> Option<EventEnvelope> {
         Err(error) => {
             log::warn!("wa events: undecodable event: {error}");
             None
+        }
+    }
+}
+
+/// Where the stream resumes after a drop: the last `seq` it saw and the
+/// gateway process that numbered it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Cursor {
+    pub last: Option<u64>,
+    epoch: Option<String>,
+}
+
+impl Cursor {
+    pub(crate) fn new(last: Option<u64>) -> Self {
+        Self { last, epoch: None }
+    }
+
+    /// Takes one frame into account. Normally the resume point only moves
+    /// forward. A `resync`, or a `hello` from another gateway process than
+    /// the one seen before, says the numbers start over: the point moves to
+    /// the frame's `seq` even when that is lower, so the next reconnect does
+    /// not ask for a `seq` of the old run (which would skip the events of
+    /// the new run below it).
+    pub(crate) fn note(&mut self, envelope: &EventEnvelope) {
+        let restarted = match &envelope.event {
+            GatewayEvent::Resync { epoch } => {
+                if let Some(epoch) = epoch {
+                    self.epoch = Some(epoch.clone());
+                }
+                true
+            }
+            GatewayEvent::Hello { epoch } => {
+                let other = self.epoch.as_ref().is_some_and(|known| known != epoch);
+                self.epoch = Some(epoch.clone());
+                other
+            }
+            _ => false,
+        };
+        if restarted || self.last.is_none_or(|seq| envelope.seq > seq) {
+            self.last = Some(envelope.seq);
         }
     }
 }
@@ -173,17 +220,18 @@ enum Ended {
 async fn run(
     url: GatewayUrl,
     key: ConnectKey,
-    mut last: Option<u64>,
+    last: Option<u64>,
     connector: Connector,
     events: mpsc::UnboundedSender<ClientEvent>,
     mut stop: oneshot::Receiver<()>,
     kick: Arc<Notify>,
 ) {
     let mut attempt = 0u32;
+    let mut cursor = Cursor::new(last);
     loop {
         let ended = tokio::select! {
             _ = &mut stop => Ended::Stopped,
-            ended = session(&url, &key, &mut last, &connector, &events, &mut attempt, &kick) => ended,
+            ended = session(&url, &key, &mut cursor, &connector, &events, &mut attempt, &kick) => ended,
         };
         match ended {
             Ended::Stopped => return,
@@ -221,13 +269,13 @@ async fn run(
 async fn session(
     url: &GatewayUrl,
     key: &ConnectKey,
-    last: &mut Option<u64>,
+    cursor: &mut Cursor,
     connector: &Connector,
     events: &mpsc::UnboundedSender<ClientEvent>,
     attempt: &mut u32,
     kick: &Notify,
 ) -> Ended {
-    let request = match ws_request(url, &events_path(*last), key) {
+    let request = match ws_request(url, &events_path(cursor.last), key) {
         Ok(request) => request,
         Err(error) => return Ended::Lost(error.to_string()),
     };
@@ -269,9 +317,7 @@ async fn session(
         match message {
             Message::Text(text) => {
                 if let Some(envelope) = decode_event(&text) {
-                    if last.is_none_or(|seq| envelope.seq > seq) {
-                        *last = Some(envelope.seq);
-                    }
+                    cursor.note(&envelope);
                     if events.unbounded_send(ClientEvent::Event(envelope)).is_err() {
                         return Ended::Stopped;
                     }
@@ -355,6 +401,143 @@ mod tests {
             None
         );
         assert_eq!(decode_event("not json"), None);
+    }
+
+    /// The frames of a gateway that names its epoch, and of one that does
+    /// not, as they come off the socket.
+    #[test]
+    fn epoch_account_and_history_frames_decode() {
+        use rosty_wa_proto::{GatewayEvent, HistorySyncType};
+
+        let hello = decode_event(
+            r#"{"seq":41,"at_ms":9,"event":{"type":"hello","epoch":"9f2c41d07ab35e68"}}"#,
+        )
+        .unwrap();
+        assert_eq!(hello.seq, 41);
+        assert_eq!(
+            hello.event,
+            GatewayEvent::Hello {
+                epoch: "9f2c41d07ab35e68".into()
+            }
+        );
+        assert_eq!(
+            decode_event(
+                r#"{"seq":41,"at_ms":9,"event":{"type":"resync","epoch":"9f2c41d07ab35e68"}}"#
+            )
+            .unwrap()
+            .event,
+            GatewayEvent::Resync {
+                epoch: Some("9f2c41d07ab35e68".into())
+            }
+        );
+        // An older gateway.
+        assert_eq!(
+            decode_event(r#"{"seq":41,"at_ms":9,"event":{"type":"resync"}}"#)
+                .unwrap()
+                .event,
+            GatewayEvent::Resync { epoch: None }
+        );
+        assert_eq!(
+            decode_event(
+                r#"{"seq":42,"at_ms":9,"event":{"type":"account_changed","old_pn":"100000000001@s.whatsapp.net","new_pn":"100000000002@s.whatsapp.net"}}"#
+            )
+            .unwrap()
+            .event,
+            GatewayEvent::AccountChanged {
+                old_pn: Some("100000000001@s.whatsapp.net".into()),
+                new_pn: "100000000002@s.whatsapp.net".into(),
+            }
+        );
+        assert_eq!(
+            decode_event(
+                r#"{"seq":43,"at_ms":9,"event":{"type":"history_synced","chats":4,"progress":60,"sync_type":"recent","messages":900,"oldest_ms":1500000000000}}"#
+            )
+            .unwrap()
+            .event,
+            GatewayEvent::HistorySynced {
+                chats: 4,
+                progress: Some(60),
+                sync_type: Some(HistorySyncType::Recent),
+                messages: 900,
+                oldest_ms: Some(1_500_000_000_000),
+            }
+        );
+        assert_eq!(
+            decode_event(
+                r#"{"seq":44,"at_ms":9,"event":{"type":"history_synced","chats":4,"progress":null}}"#
+            )
+            .unwrap()
+            .event,
+            GatewayEvent::HistorySynced {
+                chats: 4,
+                progress: None,
+                sync_type: None,
+                messages: 0,
+                oldest_ms: None,
+            }
+        );
+    }
+
+    fn frame(seq: u64, event: rosty_wa_proto::GatewayEvent) -> EventEnvelope {
+        EventEnvelope {
+            seq,
+            at_ms: 0,
+            event,
+        }
+    }
+
+    #[test]
+    fn the_resume_point_follows_the_gateway_process() {
+        use rosty_wa_proto::GatewayEvent::{Hello, KeyRevoked, Resync};
+        let hello = |epoch: &str| Hello {
+            epoch: epoch.into(),
+        };
+
+        // A fresh stream: `hello` gives it the head to resume from.
+        let mut cursor = Cursor::new(None);
+        cursor.note(&frame(7, hello("a")));
+        assert_eq!(cursor.last, Some(7));
+        // Events move it forward only.
+        cursor.note(&frame(9, KeyRevoked));
+        cursor.note(&frame(8, KeyRevoked));
+        assert_eq!(cursor.last, Some(9));
+        // Reconnecting to the same process: `hello` at the resume point.
+        cursor.note(&frame(9, hello("a")));
+        assert_eq!(cursor.last, Some(9));
+
+        // The gateway restarted and has three events: `hello` and `resync`
+        // name the new process, and the point moves back to its head.
+        cursor.note(&frame(3, hello("b")));
+        assert_eq!(cursor.last, Some(3));
+        cursor.note(&frame(
+            3,
+            Resync {
+                epoch: Some("b".into()),
+            },
+        ));
+        assert_eq!(cursor.last, Some(3));
+        cursor.note(&frame(4, KeyRevoked));
+        assert_eq!(cursor.last, Some(4));
+
+        // A stream that starts with a `seq` of an older run cannot know the
+        // process changed from `hello` alone; the `resync` still resets it.
+        let mut stale = Cursor::new(Some(500));
+        stale.note(&frame(3, hello("b")));
+        assert_eq!(stale.last, Some(500));
+        stale.note(&frame(
+            3,
+            Resync {
+                epoch: Some("b".into()),
+            },
+        ));
+        assert_eq!(stale.last, Some(3));
+
+        // An older gateway: no `hello`, a bare `resync`.
+        let mut old = Cursor::new(Some(500));
+        old.note(&frame(2, Resync { epoch: None }));
+        assert_eq!(old.last, Some(2));
+        old.note(&frame(3, KeyRevoked));
+        assert_eq!(old.last, Some(3));
     }
 
     #[test]

@@ -15,10 +15,11 @@ use rosty_wa_proto::{GroupInfo, IdentityMappings, InstanceStatus, WaProfile};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
+use super::Result;
 use super::authors::Moved;
+use super::link_state::{Told, Wipe};
 use super::merge::{self, ChatRekeyed};
 use super::store::Store;
-use super::{Result, backfill};
 
 /// `merge_log.reason` of a merge the gateway announced for a pair that is not a LID and its number.
 pub(super) const REASON_GATEWAY: &str = "chat_merged";
@@ -48,8 +49,12 @@ pub struct IdentityApplied {
     pub rejected: Vec<Rejected>,
     /// The chat list must be refreshed ([`Store::store_chats`]): a merge moved rows.
     pub resync: bool,
-    /// The own number is another one than before: the identity tables were reset.
+    /// The own number is another one than before: another account was linked and the store was emptied
+    /// ([`Store::note_status`]).
     pub account_changed: bool,
+    /// Media files of the old account to delete.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub delete_files: Vec<String>,
 }
 
 /// What the gateway answered outside the event stream that names a person by both ids: the instance (the
@@ -248,7 +253,7 @@ impl<'a> Ids<'a> {
 }
 
 /// The account's own number and LID as stored, bare.
-fn own(conn: &Connection) -> Result<(Option<String>, Option<String>)> {
+pub(super) fn own(conn: &Connection) -> Result<(Option<String>, Option<String>)> {
     Ok(conn.query_row(
         "SELECT own_pn, own_lid FROM sync_state WHERE id = 1",
         [],
@@ -369,33 +374,11 @@ pub(super) fn persist(conn: &Connection, changes: &Changes, at_ms: i64) -> Resul
 }
 
 /// The bare id of `text` when it is of `kind`.
-fn bare_of(text: Option<&str>, kind: WaIdKind) -> Option<String> {
+pub(super) fn bare_of(text: Option<&str>, kind: WaIdKind) -> Option<String> {
     text.and_then(parse)
         .map(|parsed| parsed.id)
         .filter(|id| id.kind() == kind)
         .map(|id| id.bare())
-}
-
-/// Forgets every person, alias and key change: the store now belongs to another WhatsApp account. The merge
-/// cursor moves past the dropped log, so sequence numbers never repeat and nothing of the old account replays;
-/// the gateway's pairs are asked for from the start again.
-fn reset_identity_tables(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "DELETE FROM person;
-         DELETE FROM alias;
-         DELETE FROM merge_log;
-         UPDATE sync_state SET identity_backfill = NULL, identity_cursor = NULL, own_pn = NULL, own_lid = NULL,
-            merge_cursor = COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'merge_log'), 0);",
-    )?;
-    Ok(())
-}
-
-/// Runs in the transaction that resets the identity tables when another account is linked to this instance.
-///
-/// The full wipe of the store (chats, messages, outbox, cursors) belongs here; it is a later round. Until then the
-/// rows of the previous account stay and the backfill makes the new map know their ids.
-fn account_changed_hook(_conn: &Connection) -> Result<()> {
-    Ok(())
 }
 
 impl Store {
@@ -428,6 +411,7 @@ impl Store {
             rejected,
             resync,
             account_changed: false,
+            delete_files: Vec::new(),
         })
     }
 
@@ -458,26 +442,49 @@ impl Store {
         })
     }
 
-    /// Names the account's own number and LID (JIDs, device allowed). `None`, or an id of the wrong kind, keeps
-    /// what is stored. An own number other than the stored one means another account was linked to this instance:
-    /// the identity tables start over (`account_changed` in the answer).
+    /// Names the account's own number and LID (JIDs, device allowed), as an answer outside the event stream said.
+    /// `None`, or an id of the wrong kind, keeps what is stored. An own number other than the stored one means
+    /// another account was linked to this instance: the store is emptied (`account_changed` and `delete_files`
+    /// in the answer; see [`Store::note_status`]). A number that is unknown on either side proves nothing.
     pub fn identity_set_own(
         &mut self,
         pn: Option<&str>,
         lid: Option<&str>,
         at_ms: i64,
     ) -> Result<IdentityApplied> {
+        self.set_own(pn, lid, at_ms, Told::Answer)
+    }
+
+    /// [`Self::identity_set_own`], with who said so. While the store waits for the announcement of an account
+    /// change it already followed, an event that names another own number is an event of the old account still
+    /// in the gateway's ring: it is not believed.
+    pub(super) fn set_own(
+        &mut self,
+        pn: Option<&str>,
+        lid: Option<&str>,
+        at_ms: i64,
+        told: Told,
+    ) -> Result<IdentityApplied> {
         let new_pn = bare_of(pn, WaIdKind::Pn);
         let new_lid = bare_of(lid, WaIdKind::Lid);
         let (stored_pn, stored_lid) = own(&self.conn)?;
         let account_changed =
             matches!((&stored_pn, &new_pn), (Some(stored), Some(new)) if stored != new);
+        let mut delete_files = Vec::new();
         if account_changed {
-            let reset = reset_for_account(&mut self.conn);
-            self.healed(reset)?;
-            self.identity = IdentityMap::new();
-            let filled = backfill::run(&mut self.conn, &mut self.identity);
-            self.healed(filled)?;
+            let sweep: bool = self.conn.query_row(
+                "SELECT account_sweep FROM sync_state WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )?;
+            if told == Told::Event && sweep {
+                return Ok(IdentityApplied::default());
+            }
+            delete_files = self.account_wipe(Wipe {
+                keep_outbox: false,
+                account_epoch: None,
+                sweep: told == Told::Answer,
+            })?;
         }
         let (pn, lid) = if account_changed {
             (new_pn, new_lid)
@@ -491,6 +498,8 @@ impl Store {
         let mut applied =
             self.identity_change(at_ms, |map| map.set_own(pn.as_deref(), lid.as_deref()))?;
         applied.account_changed = account_changed;
+        applied.resync |= account_changed;
+        applied.delete_files = delete_files;
         Ok(applied)
     }
 
@@ -584,16 +593,29 @@ impl Store {
     }
 
     /// Learns from what the gateway answered outside the event stream: the instance names the account's own
-    /// number and LID ([`Self::identity_set_own`]), a group names its members by both ids, a profile names the
-    /// LID of a number. Hand the answers in as they came; what names no pair teaches nothing.
+    /// number and LID, a group names its members by both ids, a profile names the LID of a number. Hand the
+    /// answers in as they came; what names no pair teaches nothing.
+    ///
+    /// The instance status is taken in whole ([`Self::note_instance_status`]): its epoch (another one than the
+    /// stored is a gap, answered as `resync`), the account epoch and own ids (another account empties the store:
+    /// `account_changed`, `delete_files`) and the history report ([`Self::history`]).
     pub fn identity_observe(
         &mut self,
         seen: &Observed<'_>,
         now_ms: i64,
     ) -> Result<IdentityApplied> {
-        let mut applied = match seen.status.filter(|status| status.own_jid.is_some()) {
+        // The whole status: the gateway's epoch (another one is a gap, `resync`), the account (another one
+        // empties the store) and the history report, next to the own ids.
+        let mut applied = match seen.status {
             Some(status) => {
-                self.identity_set_own(status.own_jid.as_deref(), status.own_lid.as_deref(), now_ms)?
+                let noted = self.note_instance_status(status, now_ms)?;
+                IdentityApplied {
+                    rekeyed: noted.rekeyed,
+                    rejected: noted.rejected,
+                    resync: noted.resync,
+                    account_changed: noted.account_changed,
+                    delete_files: noted.delete_files,
+                }
             }
             None => IdentityApplied::default(),
         };
@@ -678,12 +700,4 @@ fn write_change(
     persist(&tx, &changes, at_ms)?;
     tx.commit()?;
     Ok(changes.rejected)
-}
-
-fn reset_for_account(conn: &mut Connection) -> Result<()> {
-    let tx = conn.transaction()?;
-    reset_identity_tables(&tx)?;
-    account_changed_hook(&tx)?;
-    tx.commit()?;
-    Ok(())
 }

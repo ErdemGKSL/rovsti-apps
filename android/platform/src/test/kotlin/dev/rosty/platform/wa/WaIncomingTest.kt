@@ -72,6 +72,37 @@ class WaIncomingTest {
         assertTrue(asked.isEmpty())
     }
 
+    @Test fun aLidTheAppCanMapIsNamedByItsNumber() {
+        // WA-R2: Phone's identity table knows the number behind the LID; the contact that owns it names the call.
+        val table = mapOf("777000000000001@lid" to "+100000000001")
+        val book = mapOf("+100000000001" to "Ayşe")
+        val lid = call("name" to "Push name", "sender" to "777000000000001@lid")
+        assertEquals("Ayşe", WaIncomingNotice.of(lid, book::get, table::get)?.title)
+        assertEquals("+100000000001", waCallerNumber(mapOf("sender" to "777000000000001@lid"), table::get))
+        // Nobody owns the number: the WhatsApp name, else the number, never the LID's digits.
+        assertEquals("Push name", WaIncomingNotice.of(lid, { null }, table::get)?.title)
+        assertEquals(
+            "+100000000001",
+            WaIncomingNotice.of(call("sender" to "777000000000001@lid"), { null }, table::get)?.title,
+        )
+        assertEquals(
+            "Ayşe",
+            WaMissedNotice.of(end("sender" to "777000000000001@lid"), book::get, table::get)?.title,
+        )
+        // A LID the table does not hold stays without a number, and the table is never asked about a phone JID.
+        val asked = ArrayList<String>()
+        val lookup = { jid: String ->
+            asked += jid
+            null
+        }
+        assertEquals(
+            "WhatsApp call",
+            WaIncomingNotice.of(call("sender" to "777000000000002@lid"), { null }, lookup)?.title,
+        )
+        WaIncomingNotice.of(call("sender" to "100000000003@s.whatsapp.net"), { null }, lookup)
+        assertEquals(listOf("777000000000002@lid"), asked)
+    }
+
     @Test fun aBareNumberTitleIsFormattedForReading() {
         val context = RuntimeEnvironment.getApplication()
         assertEquals("Ayse", WaIncoming.displayTitle(context, "Ayse"))

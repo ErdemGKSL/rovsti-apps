@@ -7,6 +7,8 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:8787";
 pub const DEFAULT_MAX_INSTANCES: u32 = 4;
 /// Largest file `POST /v1/messages/media` accepts (WhatsApp itself stops at 100 MB).
 pub const DEFAULT_MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
+/// A newly paired device asks for the full chat history.
+pub const DEFAULT_FULL_HISTORY: bool = true;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FcmConfig {
@@ -26,6 +28,10 @@ pub struct Config {
     pub trust_proxy: bool,
     /// Request body limit of the media upload route.
     pub max_media_bytes: usize,
+    /// Pair new devices asking WhatsApp for the full chat history, not only
+    /// the recent messages. Decided when a device is paired: changing it
+    /// does nothing for an account that is already linked.
+    pub full_history: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,6 +63,7 @@ struct FileConfig {
     fcm_project_id: Option<String>,
     fcm_service_account: Option<PathBuf>,
     trust_proxy: Option<bool>,
+    full_history: Option<bool>,
 }
 
 fn parse_bool(name: &'static str, value: &str) -> Result<bool, ConfigError> {
@@ -109,6 +116,11 @@ impl Config {
             None => file.trust_proxy.unwrap_or(false),
         };
 
+        let full_history = match env("WA_GATEWAY_FULL_HISTORY") {
+            Some(v) => parse_bool("full_history", &v)?,
+            None => file.full_history.unwrap_or(DEFAULT_FULL_HISTORY),
+        };
+
         let project = env("WA_GATEWAY_FCM_PROJECT").or(file.fcm_project_id);
         let account = env("WA_GATEWAY_FCM_SA")
             .map(PathBuf::from)
@@ -134,6 +146,7 @@ impl Config {
             fcm,
             trust_proxy,
             max_media_bytes: DEFAULT_MAX_MEDIA_BYTES,
+            full_history,
         })
     }
 
@@ -192,6 +205,7 @@ CONFIG KEYS (file) / ENVIRONMENT OVERRIDES:
     fcm_project_id       WA_GATEWAY_FCM_PROJECT     push is off unless both FCM keys are set
     fcm_service_account  WA_GATEWAY_FCM_SA
     trust_proxy          WA_GATEWAY_TRUST_PROXY     believe X-Forwarded-For (default false)
+    full_history         WA_GATEWAY_FULL_HISTORY    pair asking for the full chat history (default true)
 
 The gateway speaks plain HTTP; put a TLS reverse proxy in front of it.
 ";
@@ -234,6 +248,7 @@ mod tests {
         assert_eq!(c.max_instances, 4);
         assert_eq!(c.fcm, None);
         assert!(!c.trust_proxy);
+        assert!(c.full_history);
         assert_eq!(c.max_media_bytes, 64 * 1024 * 1024);
         assert_eq!(
             c.media_dir("abc"),
@@ -286,6 +301,27 @@ mod tests {
     }
 
     #[test]
+    fn the_full_history_can_be_turned_off() {
+        let off = Config::from_parts(Some("full_history = false"), &env_of(&[])).unwrap();
+        assert!(!off.full_history);
+        // The environment wins over the file, both ways.
+        let env = env_of(&[("WA_GATEWAY_FULL_HISTORY", "on")]);
+        assert!(
+            Config::from_parts(Some("full_history = false"), &env)
+                .unwrap()
+                .full_history
+        );
+        let env = env_of(&[("WA_GATEWAY_FULL_HISTORY", "0")]);
+        assert!(
+            !Config::from_parts(Some("full_history = true"), &env)
+                .unwrap()
+                .full_history
+        );
+        let bad = Config::from_parts(None, &env_of(&[("WA_GATEWAY_FULL_HISTORY", "all")]));
+        assert!(bad.unwrap_err().to_string().contains("full_history"));
+    }
+
+    #[test]
     fn empty_env_counts_as_unset() {
         let toml = "max_instances = 3";
         let env = env_of(&[("WA_GATEWAY_MAX_INSTANCES", "  ")]);
@@ -319,6 +355,7 @@ mod tests {
         assert_eq!(c.data_dir, PathBuf::from("/var/lib/wa-gateway"));
         assert_eq!(c.max_instances, DEFAULT_MAX_INSTANCES);
         assert!(!c.trust_proxy);
+        assert_eq!(c.full_history, DEFAULT_FULL_HISTORY);
         assert_eq!(c.fcm, None);
     }
 

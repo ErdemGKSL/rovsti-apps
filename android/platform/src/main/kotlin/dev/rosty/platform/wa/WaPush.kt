@@ -23,6 +23,12 @@ object WaPush {
     /** The `PlatformEvents` kind that means "the gateway has news: reconnect now". */
     const val EVENT = "wa_push"
 
+    /**
+     * The phone number behind a `@lid` caller, from the app's own identity table (WA-R2); the app that keeps one
+     * installs it. Called off the main thread and may block briefly; null (the default) for a LID nobody mapped.
+     */
+    @Volatile var lidNumber: (String) -> String? = { null }
+
     /** The FCM token, or "" when Firebase is not packaged or the token is not ready. Blocks up to 3 s: not the main thread. */
     fun token(): String =
         try {
@@ -69,10 +75,17 @@ object WaPush {
                 null
             }
         }
-        WaIncomingNotice.of(data, contactName)?.let { WaIncoming.show(app, it) }
+        val lidNumber = { jid: String ->
+            try {
+                this.lidNumber(jid)
+            } catch (_: RuntimeException) {
+                null
+            }
+        }
+        WaIncomingNotice.of(data, contactName, lidNumber)?.let { WaIncoming.show(app, it) }
         if (data["kind"] == "call_end") {
             data["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }
-            WaMissedNotice.of(data, contactName)?.let { WaIncoming.showMissed(app, it) }
+            WaMissedNotice.of(data, contactName, lidNumber)?.let { WaIncoming.showMissed(app, it) }
         }
         PlatformEvents.emit(EVENT, payload(data))
     }

@@ -41,12 +41,14 @@ import dev.rosty.messages.starred.realStarCenter
 import dev.rosty.messages.wa.GatewayWaRemote
 import dev.rosty.messages.wa.StoreWaChats
 import dev.rosty.messages.wa.WaChats
+import dev.rosty.messages.wa.WaDownloads
 import dev.rosty.messages.wa.WaMedia
 import dev.rosty.messages.wa.WaOffline
 import dev.rosty.messages.wa.WaRecentEmoji
 import dev.rosty.messages.wa.WaRekeys
 import dev.rosty.messages.wa.WaRemote
 import dev.rosty.messages.wa.WaVoiceNotes
+import dev.rosty.messages.wa.realWaDownloads
 import dev.rosty.messages.wa.realWaOffline
 import dev.rosty.messages.wa.realWaRekeys
 import dev.rosty.messages.wa.realWaVoice
@@ -196,10 +198,16 @@ open class MessagesContainer(
     /** The WhatsApp chats of the inbox and their actions, read from the offline store. */
     val waChats: WaChats by lazy { createWaChats() }
 
+    /** The download queue of WhatsApp media: the store's rules and cap, this app's files (E6-WA R2). */
+    val waDownloads: WaDownloads by lazy { realWaDownloads(this) }
+
     /** Thumbnails, downloads and the files to send of WhatsApp messages (E6.4b), kept through the store's LRU. */
-    val waMedia: WaMedia by lazy {
-        WaMedia(waOffline, waRemote, java.io.File(context.filesDir, "wa-media"), System::currentTimeMillis)
-    }
+    val waMedia: WaMedia get() = waMediaOnce.value
+
+    private val waMediaOnce = lazy { WaMedia(waOffline, waRemote, waDownloads, System::currentTimeMillis) }
+
+    /** [waMedia] when something already made it. */
+    val waMediaIfMade: WaMedia? get() = if (waMediaOnce.isInitialized()) waMedia else null
 
     /** The voice note player (M17): one note at a time. */
     val waVoice: WaVoiceNotes by lazy { realWaVoice(this) }

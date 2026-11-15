@@ -28,6 +28,7 @@ class RecentsStrings(
     val callBack: String = res.getString(R.string.recents_menu_call_back)
     val message: String = res.getString(R.string.recents_menu_message)
     val whatsApp: String = res.getString(R.string.recents_menu_whatsapp)
+    val whatsAppMessage: String = res.getString(R.string.recents_menu_whatsapp_message)
     val quickReply: String = res.getString(R.string.recents_menu_quick_reply)
     val remind: String = res.getString(R.string.recents_menu_remind)
     val copyNumber: String = res.getString(R.string.recents_menu_copy_number)

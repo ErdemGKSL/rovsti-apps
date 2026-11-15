@@ -630,15 +630,28 @@ fun recentsMenu(
     strings: RecentsStrings,
     onAction: (RecentsAction) -> Unit,
     whatsApp: Boolean = false,
+    /** Rosty Messages is installed: the menu offers the person's WhatsApp chat there (hidden without it). */
+    whatsAppMessage: Boolean = false,
 ): ImmutableList<MenuItem> {
     val key = row.key
     val call = row.callable
+    val chat =
+        if (whatsAppMessage) {
+            listOf(
+                MenuItem.Action(strings.whatsAppMessage, RostyIcons.WhatsApp, enabled = call && whatsApp) {
+                    onAction(RecentsAction.WhatsAppMessage(key))
+                },
+            )
+        } else {
+            emptyList()
+        }
     return persistentListOf<MenuItem>(
         MenuItem.Action(strings.callBack, RostyIcons.Phone, enabled = call) { onAction(RecentsAction.CallBack(key)) },
         MenuItem.Action(strings.message, RostyIcons.Message, enabled = call) { onAction(RecentsAction.Message(key)) },
         MenuItem.Action(strings.whatsApp, RostyIcons.WhatsApp, enabled = call && whatsApp) {
             onAction(RecentsAction.WhatsAppCall(key))
         },
+        *chat.toTypedArray(),
         MenuItem.Separator,
         MenuItem.Action(strings.quickReply, RostyIcons.Forward, enabled = call) {
             onAction(RecentsAction.AskQuickReply(key))
@@ -842,8 +855,11 @@ fun RecentsScreen(
     LaunchedEffect(model) { model.onAction(RecentsAction.Opened) }
     RecentsEffects(model, host, strings)
     val whatsApp by model.whatsAppAvailable.collectAsState()
+    val whatsAppMessage by model.whatsAppMessageAvailable.collectAsState()
     val menuFor: (RecentsRowUi) -> ImmutableList<MenuItem> =
-        remember(strings, model, whatsApp) { { row -> recentsMenu(row, strings, model::onAction, whatsApp) } }
+        remember(strings, model, whatsApp, whatsAppMessage) {
+            { row -> recentsMenu(row, strings, model::onAction, whatsApp, whatsAppMessage) }
+        }
     SwipeRowGroup {
         RecentsContent(
             ui = ui,

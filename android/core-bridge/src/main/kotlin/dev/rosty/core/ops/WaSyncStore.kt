@@ -13,6 +13,7 @@ import dev.rosty.core.model.wa.RichMessage
 import dev.rosty.core.model.wa.WaIdParseRequest
 import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaProfile
+import dev.rosty.core.model.wa.WaSyncAccountChangedRequest
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
@@ -28,14 +29,32 @@ import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncFetch
+import dev.rosty.core.model.wa.WaSyncFetched
 import dev.rosty.core.model.wa.WaSyncHandleRequest
+import dev.rosty.core.model.wa.WaSyncHistory
+import dev.rosty.core.model.wa.WaSyncHistoryReport
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncIdentityCatchUp
 import dev.rosty.core.model.wa.WaSyncMedia
+import dev.rosty.core.model.wa.WaSyncMediaCapRequest
+import dev.rosty.core.model.wa.WaSyncMediaDecision
+import dev.rosty.core.model.wa.WaSyncMediaDue
+import dev.rosty.core.model.wa.WaSyncMediaDueRequest
+import dev.rosty.core.model.wa.WaSyncMediaEnqueueRequest
+import dev.rosty.core.model.wa.WaSyncMediaEntry
+import dev.rosty.core.model.wa.WaSyncMediaKeepRequest
+import dev.rosty.core.model.wa.WaSyncMediaPolicyRequest
+import dev.rosty.core.model.wa.WaSyncMediaQueued
 import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
+import dev.rosty.core.model.wa.WaSyncMediaSettleRequest
+import dev.rosty.core.model.wa.WaSyncMediaSettled
+import dev.rosty.core.model.wa.WaSyncMediaStats
+import dev.rosty.core.model.wa.WaSyncMediaStatsRequest
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncNetwork
+import dev.rosty.core.model.wa.WaSyncNoteStatusRequest
 import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderRequest
 import dev.rosty.core.model.wa.WaSyncOpenRequest
@@ -45,6 +64,8 @@ import dev.rosty.core.model.wa.WaSyncOutboxItem
 import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncReconcileRequest
+import dev.rosty.core.model.wa.WaSyncReconciled
 import dev.rosty.core.model.wa.WaSyncRekeyed
 import dev.rosty.core.model.wa.WaSyncRekeyedRequest
 import dev.rosty.core.model.wa.WaSyncResolveRequest
@@ -54,12 +75,15 @@ import dev.rosty.core.model.wa.WaSyncSettled
 import dev.rosty.core.model.wa.WaSyncStarredCursor
 import dev.rosty.core.model.wa.WaSyncStarredPage
 import dev.rosty.core.model.wa.WaSyncStarredRequest
+import dev.rosty.core.model.wa.WaSyncStatusNoted
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.model.wa.WaSyncStorePageRequest
 import dev.rosty.core.model.wa.WaSyncStoredChats
 import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.model.wa.WaSyncWipeRequest
+import dev.rosty.core.model.wa.WaSyncWiped
 
 /**
  * The offline store of one linked WhatsApp instance: [open] it once per instance (app container scope), [close] it on
@@ -86,7 +110,13 @@ class WaSyncStore internal constructor(
     /** What is owed: the `seq` for `wa.events_start`, a chat list refresh, the pages of unfinished resyncs. */
     suspend fun plan(limit: Int? = null): Outcome<WaSyncPlan> = live { ops.plan(WaSyncPlanRequest(id, limit)) }
 
-    /** Applies gateway events, oldest first; `resync` in the answer asks for a chat list refresh. */
+    /**
+     * Applies gateway events, oldest first; `resync` in the answer asks for a chat list refresh. Hand in every event
+     * of the socket as it came, `hello` and `account_changed` included: the store takes the gateway's epoch from
+     * `hello`, `resync` and `state` (another one than the stored is a gap, as in [noteStatus]), empties itself at an
+     * `account_changed` or a `state` of another account (`accountChanged`, `deleteFiles` in the answer, to be treated
+     * as in [noteStatus]) and keeps the history progress `state` and `history_synced` report ([history]).
+     */
     suspend fun applyEvents(events: List<WaSyncEvent>): Outcome<WaSyncApplied> =
         live { ops.applyEvents(WaSyncEventsRequest(id, events)) }
 
@@ -193,9 +223,158 @@ class WaSyncStore internal constructor(
         usedMs: Long? = null,
     ): Outcome<WaSyncMedia> = live { ops.media(WaSyncMediaRequest(id, chat, messageId, usedMs)) }
 
-    /** Brings the cached media under [maxBytes]; delete the files the answer names. */
-    suspend fun evictMedia(maxBytes: Long): Outcome<WaSyncEviction> =
-        live { ops.mediaEvict(WaSyncEvictRequest(id, maxBytes)) }
+    // ---- media: the store decides, the caller does the file I/O
+
+    /**
+     * What the auto-download rules say about the file of a message on [network]: on Wi-Fi images, voice notes and
+     * stickers download by themselves, on mobile data images and voice notes; video and documents wait for a tap;
+     * view-once media never downloads; nothing downloads by itself on roaming, with Data Saver, offline, or when
+     * [freeBytes] minus the file would be under 500 MiB. [enqueueMedia] applies the same rules; ask here only to
+     * show them.
+     */
+    suspend fun mediaPolicy(
+        chat: String,
+        messageId: String,
+        network: WaSyncNetwork,
+        freeBytes: Long? = null,
+    ): Outcome<WaSyncMediaDecision> =
+        live { ops.mediaPolicy(WaSyncMediaPolicyRequest(id, chat, messageId, network, freeBytes)).map { it.decision } }
+
+    /**
+     * Asks for the full file of a message. With [tap] it is queued whatever the network (never view-once media).
+     * Without it the rules decide under [network], which must then be given: call it for every media row that
+     * arrives or comes into view. A cached file stays as it is; a file that failed for good or is gone from the
+     * gateway is only tried again on a tap.
+     */
+    suspend fun enqueueMedia(
+        chat: String,
+        messageId: String,
+        nowMs: Long,
+        tap: Boolean = false,
+        network: WaSyncNetwork? = null,
+        freeBytes: Long? = null,
+    ): Outcome<WaSyncMediaQueued> =
+        live { ops.mediaEnqueue(WaSyncMediaEnqueueRequest(id, nowMs, chat, messageId, tap, network, freeBytes)) }
+
+    /**
+     * The downloads to make now, taps first. Download each to `<file>.part`, sync, rename, then [settleMedia]. With
+     * [network], automatic downloads the rules no longer allow stay queued (`held`). A download nobody settled is
+     * handed out again after ten minutes.
+     */
+    suspend fun dueMedia(
+        nowMs: Long,
+        limit: Int? = null,
+        network: WaSyncNetwork? = null,
+        freeBytes: Long? = null,
+    ): Outcome<WaSyncMediaDue> = live { ops.mediaDue(WaSyncMediaDueRequest(id, nowMs, limit, network, freeBytes)) }
+
+    /**
+     * Reports how a download ended: [WaSyncFetched.Ready] with the file, [WaSyncFetched.Failed] (it is queued again
+     * after a back-off, five times), [WaSyncFetched.Gone] (the gateway no longer has it) or
+     * [WaSyncFetched.Cancelled]. Delete the answer's `replaced` file when it names one, then [evictMedia].
+     */
+    suspend fun settleMedia(
+        chat: String,
+        messageId: String,
+        outcome: WaSyncFetched,
+        nowMs: Long,
+    ): Outcome<WaSyncMediaSettled> =
+        live { ops.mediaSettle(WaSyncMediaSettleRequest(id, nowMs, chat, messageId, outcome)) }
+
+    /**
+     * Keeps the file of a message out of eviction: [pinned], or [savedUri] once the user saved a copy to the gallery
+     * (`""` forgets the copy). Null leaves a value as it is.
+     */
+    suspend fun keepMedia(
+        chat: String,
+        messageId: String,
+        pinned: Boolean? = null,
+        savedUri: String? = null,
+    ): Outcome<WaSyncMediaEntry> =
+        live { ops.mediaKeep(WaSyncMediaKeepRequest(id, chat, messageId, pinned, savedUri)).map { it.media } }
+
+    /**
+     * Brings the cached media under [maxBytes], or under the stored cap ([mediaCap]) when it is null; delete the
+     * files the answer names. Files of starred messages, pinned and saved files, files an unsent message sends and,
+     * with [nowMs], files used in the last 24 hours are never evicted, also when they alone are over the cap.
+     */
+    suspend fun evictMedia(
+        maxBytes: Long? = null,
+        nowMs: Long? = null,
+    ): Outcome<WaSyncEviction> = live { ops.mediaEvict(WaSyncEvictRequest(id, maxBytes, nowMs)) }
+
+    /**
+     * Run once after the store opens. Downloads that were cut off are queued again. With [files] (every file under
+     * the directories of full media and of outbox files, as absolute paths; not the thumbnails), a row whose file is
+     * missing becomes `evicted` and the answer's `delete` names the files to remove: `*.part` files and files nothing
+     * names. Pass null when the directory could not be listed: an empty list would evict every row.
+     */
+    suspend fun reconcileMedia(files: List<String>?): Outcome<WaSyncReconciled> =
+        live { ops.mediaReconcile(WaSyncReconcileRequest(id, files)) }
+
+    /** The cache in numbers for the settings screen: total, exempt, by kind, the queue and the cap. */
+    suspend fun mediaStats(nowMs: Long? = null): Outcome<WaSyncMediaStats> =
+        live { ops.mediaStats(WaSyncMediaStatsRequest(id, nowMs)) }
+
+    /** The cap of the media cache in bytes; null: no limit. 512 MiB until it is set. */
+    suspend fun mediaCap(): Outcome<Long?> = live { ops.mediaCap(WaSyncMediaCapRequest(id)).map { it.capBytes } }
+
+    /** Sets the cap ([capBytes] null: no limit) and answers it. Nothing is evicted here: call [evictMedia]. */
+    suspend fun setMediaCap(capBytes: Long?): Outcome<Long?> =
+        live {
+            ops.mediaCap(WaSyncMediaCapRequest(id, capBytes, noLimit = capBytes == null)).map { it.capBytes }
+        }
+
+    // ---- the gateway process, the linked account, history progress, unlink
+
+    /**
+     * Takes in what the gateway says about itself and the linked account, field by field. [observe] does the same
+     * with a whole `wa.status` answer and [applyEvents] with the events of the socket (`hello`, `resync`, `state`,
+     * `account_changed`), so this is for a caller that holds the values alone.
+     *
+     * - Another [epoch] than the stored one: `gap`. The stored `seq` is forgotten, so restart the event stream from
+     *   [plan]'s `afterSeq` (null now) and refresh the chat list.
+     * - An [accountEpoch] above the stored one, or an [ownPn] other than the stored one: `accountChanged`. The store
+     *   was emptied; delete the answer's `deleteFiles`, the rest of the instance's media directory and everything
+     *   kept per chat outside the store. An unknown value on either side changes nothing.
+     * - [history] is stored and answered back; [history] reads it after a restart.
+     */
+    suspend fun noteStatus(
+        nowMs: Long,
+        epoch: String? = null,
+        accountEpoch: Int? = null,
+        ownPn: String? = null,
+        ownLid: String? = null,
+        history: WaSyncHistoryReport? = null,
+    ): Outcome<WaSyncStatusNoted> =
+        live { ops.noteStatus(WaSyncNoteStatusRequest(id, nowMs, epoch, accountEpoch, ownPn, ownLid, history)) }
+
+    /**
+     * The gateway's `account_changed` event, handed in at its place in the event stream (before the events after
+     * it are applied), for a caller that does not hand the event itself to [applyEvents]; never both. A store of another account is emptied; one already emptied by [noteStatus] is swept of what
+     * arrived in between. Treat `accountChanged` in the answer as in [noteStatus].
+     */
+    suspend fun accountChanged(
+        oldPn: String?,
+        newPn: String,
+        nowMs: Long,
+    ): Outcome<WaSyncIdentityApplied> =
+        live { ops.accountChanged(WaSyncAccountChangedRequest(id, nowMs, oldPn, newPn)) }
+
+    /** The history progress the gateway last reported; null before the first report. */
+    suspend fun history(): Outcome<WaSyncHistory?> = live { ops.history(WaSyncHandleRequest(id)).map { it.history } }
+
+    /**
+     * Unlink: closes this store and deletes its files. The answer names the media files the store knew; delete them
+     * and the instance's media directory. Every other [WaSyncStore] of the same instance answers
+     * [RustError.NotFound] from now on.
+     */
+    suspend fun wipe(): Outcome<WaSyncWiped> {
+        if (released) return Outcome.Err(RustError.NotFound("wa_sync store $id is closed"))
+        val wiped = ops.wipe(WaSyncWipeRequest(handle = id))
+        if (wiped is Outcome.Ok) close()
+        return wiped
+    }
 
     // ---- identity: one person is one chat, whichever id the gateway names them by
 
@@ -226,8 +405,9 @@ class WaSyncStore internal constructor(
         live { ops.rekeyedSince(WaSyncRekeyedRequest(id, seq)).map { it.rekeyed } }
 
     /**
-     * Learns from what the gateway answered outside the event stream: [status] (`wa.status`: the account's own
-     * number and LID), [groups] (`wa.group` / `wa.groups`: members named by both ids) and [profiles]
+     * Learns from what the gateway answered outside the event stream: [status] (`wa.status`, the whole answer: the
+     * account's own number and LID, and its epoch, account epoch and history report, taken in as [noteStatus] takes
+     * them, so a gap reads as `resync` and another account as `accountChanged` with `deleteFiles`), [groups] (`wa.group` / `wa.groups`: members named by both ids) and [profiles]
      * (`wa.profiles`). Hand the answers in as they came; the answer lists the chats that merged.
      */
     suspend fun observe(
@@ -294,6 +474,17 @@ class WaSyncStore internal constructor(
     companion object {
         /** A stop for one catch-up on identity pairs; the cursor is stored, so the next run continues. */
         private const val MAX_IDENTITY_PAGES = 200
+
+        /**
+         * Unlink without a store at hand: deletes the store files of [instanceId] in [dir] (the core's data
+         * directory when null), whether a store of it is open or not. An instance without a store answers two
+         * empty lists.
+         */
+        suspend fun wipe(
+            instanceId: String,
+            dir: String? = null,
+            ops: WaSyncOps = NativeWaSyncOps(),
+        ): Outcome<WaSyncWiped> = ops.wipe(WaSyncWipeRequest(instanceId = instanceId, dir = dir))
 
         /** Opens the store of [instanceId]; [dir] defaults to the core's data directory. The store is the caller's to close. */
         suspend fun open(

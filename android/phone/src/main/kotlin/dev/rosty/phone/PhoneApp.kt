@@ -224,6 +224,8 @@ private fun rememberRecentsViewModel(container: PhoneContainer): RecentsViewMode
                         placeWhatsApp = container.waLauncher::place,
                         forgetWhatsApp = container.waCalls::forget,
                         whatsAppAvailable = container.waLauncher.available,
+                        messageWhatsApp = container.waChat::open,
+                        whatsAppMessageAvailable = container.waChat.also { it.refresh() }.available,
                     )
                 }
             }
@@ -705,7 +707,8 @@ fun PhoneApp(
             }
             entry<PhoneRoute.Settings> {
                 val context = LocalContext.current
-                val version = remember(context) { context.aboutInfo(context.getString(R.string.app_name)).versionName }
+                val appName = stringResource(R.string.app_name)
+                val version = remember(context, appName) { context.aboutInfo(appName).versionName }
                 // The rows of the Setup section carry out their own effects (role dialog, permission dialogs, system pages).
                 SetupEffectsRunner(setupModel, container.specialAccess, container.permissions)
                 val blockList by container.block.list.collectAsState()

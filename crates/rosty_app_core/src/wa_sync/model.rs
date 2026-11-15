@@ -7,6 +7,7 @@ use rosty_wa_proto::{
 };
 use serde::{Deserialize, Serialize};
 
+use super::media::MediaState;
 use super::merge::ChatRekeyed;
 use super::outbox::OutboxState;
 use super::plan::FetchPage;
@@ -16,7 +17,7 @@ fn is_false(flag: &bool) -> bool {
 }
 
 /// What a message is. Stored as its wire name.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Text,
@@ -227,6 +228,10 @@ pub struct MessageRow {
     /// The cached full media file; `None` when not downloaded or evicted. For an outbox media send: the file to send.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_path: Option<String>,
+    /// Where the full file is in its download (`Store::media_enqueue`); left out when nothing was ever asked
+    /// for, and for an outbox row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_state: Option<MediaState>,
     /// The outbox client id this message was sent with, or still waits under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
@@ -315,7 +320,9 @@ pub struct AppliedEvents {
     pub last_seq: Option<u64>,
     /// Events applied (stale ones are skipped).
     pub applied: u32,
-    /// A `resync` came: refresh the chat list ([`super::Store::store_chats`]).
+    /// Refresh the chat list ([`super::Store::store_chats`]): a `resync` came, a `hello`, `resync` or `state`
+    /// named another gateway epoch than the stored one (a gap), history arrived, a merge moved rows or the
+    /// account changed.
     pub resync: bool,
     /// Chats whose rows changed, in first-change order.
     pub chats: Vec<String>,
@@ -329,6 +336,14 @@ pub struct AppliedEvents {
     /// LID is held by, a pair that would join the account's own id to someone else), each once: for the log.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rejected: Vec<Rejected>,
+    /// An `account_changed` event, or a `state` event that named another own number or a raised account epoch:
+    /// another account was linked and the store was emptied
+    /// ([`super::Store::note_status`]). What is kept per chat outside the store belongs to the old account too.
+    #[serde(skip_serializing_if = "is_false")]
+    pub account_changed: bool,
+    /// Media files of the old account to delete.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub delete_files: Vec<String>,
 }
 
 /// What [`super::Store::store_chats`] did.

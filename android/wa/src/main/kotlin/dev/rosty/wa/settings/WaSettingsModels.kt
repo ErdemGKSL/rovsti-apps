@@ -28,7 +28,7 @@ data class PasteRequest(
  * What the settings screen draws. [view] is the page the state machine is on; [page] is what is drawn behind it: the
  * same page, except while [view] is a confirmation (`confirm_*`), when the page the confirmation came from stays
  * visible and the confirmation is an alert on top. [qr] is the matrix of `view.qrPayload`, [keyQr] the matrix of the
- * connect key when the user asked for it.
+ * connect key when the user asked for it. [sharedFrom] and [siblingOffer] are the link hand-over between Rosty apps.
  */
 @Immutable
 data class WaSettingsUiState(
@@ -37,6 +37,13 @@ data class WaSettingsUiState(
     val qr: QrMatrix? = null,
     val keyQr: QrMatrix? = null,
     val paste: PasteRequest? = null,
+    /** The package of the sibling Rosty app the link in use was taken from (WA-R2); null for a link of this app. */
+    val sharedFrom: String? = null,
+    /**
+     * The package of a sibling Rosty app that holds the link the user removed here: the start page offers to use
+     * it again. Null while this app is linked or no sibling has that link.
+     */
+    val siblingOffer: String? = null,
 )
 
 /** What the screen reports. A button of the view carries its own [SettingsInput]; the rest are platform actions. */
@@ -62,6 +69,9 @@ sealed interface WaSettingsAction {
 
     /** "Show as QR" on the connect key page, toggled. */
     data object ToggleKeyQr : WaSettingsAction
+
+    /** "Use the link of ...": take the link of the sibling app the start page offers ([WaSettingsUiState.siblingOffer]). */
+    data object UseSiblingLink : WaSettingsAction
 }
 
 /** One-shot things the screen host does: a toast, a share sheet. */

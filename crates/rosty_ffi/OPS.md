@@ -163,7 +163,7 @@ WhatsApp (E2.14): `wa.open {url, key?, cache_dir?}` answers `{handle}`, a `rosty
 `detail.source` = `whatsapp` | `gateway`) and `parse`. Bytes (`wa.media`, `wa.thumbnail`, `wa.status_media`, `wa.status_thumbnail`, `wa.picture`)
 answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the handle's cache directory (Kotlin deletes it). `wa.send_media(_with)` takes `data_b64` or a `path`.
 `wa.events_start {handle, instance, after?}` answers a stream handle and emits every socket message as event `wa.event` `{instance, event}` with `event.kind` one of `connected`,
-`event` (`seq`, `at_ms`, `event` = the gateway event, tagged `type`), `disconnected {reason}`, `unauthorized`; `wa.events_reconnect_now`, `RustNative.release` stops it. `wa.call_audio_open
+`event` (`seq`, `at_ms`, `event` = the gateway event, tagged `type`; since E6-WA R2 also `hello {epoch}` as the first frame of every socket, `account_changed {old_pn?, new_pn}`, `resync {epoch?}`, `history_synced {chats, progress, sync_type?, messages, oldest_ms?}`, and `state` and `wa.status` carry `epoch?`, `account_epoch?`, `history?: {state, progress, chats, messages, oldest_ms}`), `disconnected {reason}`, `unauthorized`; `wa.events_reconnect_now`, `RustNative.release` stops it. `wa.call_audio_open
 {handle, call_id}` answers an audio handle for `RustNative.audioPush` / `audioPull` (push takes microphone frames of exactly 1 920 bytes and drops any other size; the socket asks for 20 ms speaker frames (`?spk_ms=20`), and pull waits up to 20 ms and answers the frame's bytes: 640 from a gateway that sends 20 ms frames, 1 920 from an older one; 0 when nothing came, -1 when the call ended). Fixtures run against a loopback stub that answers `crates/rosty_ffi/tests/data/wa/<stem>.json` (`tests/support/mod.rs`); each file also states the request
 the client must have sent. Pure: `wa.push_parse` (FCM wake), `wa.link_read` / `wa.link_write` (`whatsapp-link.json`), `wa.avatars_plan` (picture file names and the disk prune plan; the
 `AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up), `wa.settings_apply {model?, link?, app, now_ms, input?}` (the stateless WhatsApp settings state machine: answers `{model, effects, view}`, a render-ready page; the caller keeps `model` as JSON; the gateway URL and `rwk_` key checks run inside it).
@@ -187,7 +187,7 @@ instance_id, schema_version, last_seq, needs_resync}`; a second open of the same
 answers in. The ops that write repeat `handle` in their answer. Sync: `wa_sync.plan {handle, limit?}` answers `{after_seq,
 refresh_chats, fetch: [{chat, before, limit}]}` (what to subscribe after, whether `GET /v1/chats` is owed, the next page of every open
 gap); `wa_sync.apply_events {handle, events: [{seq, at_ms, event}]}` applies gateway events in order (stale `seq` skipped, a `resync`
-resets it) and answers `{last_seq, applied, resync, chats, reconciled}`; `wa_sync.store_chats {handle, now_ms, chats, limit?,
+resets it) and answers `{last_seq, applied, resync, chats, reconciled, account_changed?, delete_files?}`; `wa_sync.store_chats {handle, now_ms, chats, limit?,
 refresh_recent_ms?}` stores the chat list and opens a gap for each chat that missed messages (`{chats, fetch}`); `wa_sync.store_page
 {handle, now_ms, chat, before?, limit, messages}` stores one `GET .../messages` page (`{stored, new, next?, reached_start,
 reconciled}`; `next` is the following page of the gap); `wa_sync.older {handle, chat, limit?}` answers the page before the oldest
@@ -204,9 +204,75 @@ that have not gone out), `wa_sync.outbox_due {handle,
 now_ms, network_back?}` (at most one row per chat, the oldest; marks them `sending`; `held` counts sends kept back until the sync is
 done; `next_wake_ms`), `wa_sync.outbox_settle {handle, now_ms, client_id, outcome}` (`outcome.kind`: `sent {message_id?,
 timestamp_ms?}` or `error {error: network|gateway|rejected, message, retry_after_ms?}`; answers `state`: `done`, `waiting` or `failed`; a rejected `star` is undone and dropped, it leaves no failed row),
-`wa_sync.outbox_cancel`, `wa_sync.outbox_edit {handle, client_id, text}`, `wa_sync.outbox_retry`, `wa_sync.outbox`. Media:
-`wa_sync.media_set {handle, now_ms, chat, id, thumbnail_b64?, path?, bytes?}`, `wa_sync.media {handle, chat, id, used_ms?}`,
-`wa_sync.media_evict {handle, max_bytes}` (answers the files to delete, least recently used first; the messages and thumbnails stay).
+`wa_sync.outbox_cancel`, `wa_sync.outbox_edit {handle, client_id, text}`, `wa_sync.outbox_retry`, `wa_sync.outbox`.
+Media (E6-WA R2, schema v5): the full file of a message is a row of the store's `media` table; the store decides and Kotlin does the
+file I/O. A row's `state` is `none`, `queued`, `downloading`, `ready`, `evicted`, `failed` or `gone`; a media row in an answer is
+`{chat, id, kind, mime?, size_expected?, state, path?, bytes?, sha256?, used_ms?, pinned?, saved_uri?, by_tap?, attempts?,
+next_attempt_ms?, last_error?}` (`path` and `bytes` only while `ready`; flags and counters left out when false or 0). Thread rows
+carry `media_path?` (the cached file) and `media_state?` (left out while nothing was ever asked for).
+`wa_sync.media_policy {handle, chat, id, network, free_bytes?}` answers `{decision: auto|on_tap|never}`, the owner's rules:
+`network` is `wifi`, `mobile`, `roaming`, `data_saver` or `none` (the caller names the most restrictive that holds); on Wi-Fi images,
+voice notes and stickers are `auto`, on mobile data images and voice notes; video, documents and other audio are `on_tap`; view-once
+media and messages without a file are `never`; nothing is `auto` on `roaming`, `data_saver` or `none`, nor when `free_bytes` minus the
+file's size is under 500 MiB. `wa_sync.media_enqueue {handle, now_ms, chat, id, tap?, network?, free_bytes?}` asks for the file:
+with `tap` it is queued whatever the network (never view-once), without it the rules decide under `network` (required then) and a
+deleted message, a `failed` and a `gone` file are left alone; answers `{queued, decision, media}` (`queued`: it waits or is being
+downloaded; a `ready` file stays as it is; a tap on a file that waits for its next attempt sends it first, now).
+`wa_sync.media_due {handle, now_ms, limit?, network?, free_bytes?}` hands out the downloads to make (`{items, held, next_wake_ms?}`;
+taps first, then the order queued; at most `limit`, 4 by default, 32 at most; each is `downloading` until settled and is handed out
+again 10 minutes later if nobody settled it; with `network`, automatic downloads the rules no longer allow stay queued and are counted
+in `held`). `wa_sync.media_settle {handle, now_ms, chat, id, outcome}` reports one (`outcome.kind`: `ready {path, bytes, sha256?}`,
+`failed {error?}`, `gone {error?}`, `cancelled`) and answers `{media, replaced?}`: a failure queues the file again after the
+outbox back-off (2 s doubling to 300 s) and after 5 failures it is `failed` until a tap; `replaced` is a file the row named before
+and no longer does (delete it). `wa_sync.media_set {handle, now_ms, chat, id, thumbnail_b64?, path?, bytes?}` stores the thumbnail
+(kept for good) and/or records a downloaded file without the queue (the same as settling `ready`). `wa_sync.media {handle, chat, id,
+used_ms?}` answers `{thumbnail_b64, path, bytes, state, size_expected?, attempts, pinned, saved_uri?, last_error?}`; `used_ms` makes
+a cached file the most recently used. `wa_sync.media_keep {handle, chat, id, pinned?, saved_uri?}` keeps a file out of eviction
+(`saved_uri: ""` forgets the saved copy) and answers `{media}`. `wa_sync.media_cap {handle, cap_bytes?, no_limit?}` reads the cap,
+or sets it first, and answers `{cap_bytes}` (`null`: no limit; 512 MiB until set); it evicts nothing.
+`wa_sync.media_evict {handle, max_bytes?, now_ms?}` brings the cache under `max_bytes`, or under the stored cap when left out, and
+answers `{evicted: [{chat, id, path, bytes}], bytes_left, exempt_bytes}`: the files to delete, least recently used first; their rows
+become `evicted` and keep message and thumbnail, and can be queued again. Never evicted: the file of a starred message, a pinned or
+saved file, a file an unsent outbox row sends, and (when `now_ms` is given) a file used in the last 24 hours; when those alone are
+over the cap the others go and they stay (`exempt_bytes` > cap). `wa_sync.media_reconcile {handle, files?}` puts rows and files in
+step when the store opens: downloads that were cut off are queued again (`requeued`), and with `files` (every file under the
+directories of full media and of outbox files, absolute paths, not the thumbnails) a `ready` row whose file is not listed becomes
+`evicted` (`missing: [{chat, id, path}]`) and `delete` names the listed files to remove: `*.part` files and files neither a row nor an
+unsent outbox row names. Leave `files` out when the listing failed: an empty list would evict every row. `wa_sync.media_stats
+{handle, now_ms?}` answers `{total: {files, bytes}, exempt: {files, bytes}, by_kind: [{kind, files, bytes}], outbox: {files, bytes},
+queued, downloading, failed, cap_bytes?, exempt_over_cap}` for the settings screen (`outbox`: files of unsent sends that are not
+cached files; `cap_bytes` left out without a limit). A merge of two chats moves the media rows too; a message both chats held keeps
+the row that has the file.
+Gateway and account (E6-WA R2): `wa_sync.note_status {handle, now_ms, epoch?, account_epoch?, own_pn?, own_lid?, history?}` takes
+what the gateway says about itself (every `wa.status` answer, and the `epoch` alone of the event socket's first frame or of a
+`resync`) and answers `{gap, account_changed, delete_files?, rekeyed?, rejected?, resync, history?}`. A stored `epoch` other than
+the gateway's is a gap (`gap`: the stored `seq` is forgotten, so `wa_sync.plan` answers `after_seq: null`, and the chat list must be
+refreshed, as after a `resync`); the first epoch a store with a `seq` sees is a gap too; no `epoch` changes nothing. An
+`account_epoch` above the stored one, or an `own_pn` other than the stored one, is another account on the instance: the store is
+emptied in one transaction (chats, cursors, messages with their reactions, ticks and stars, media rows, the outbox, identity tables
+and merge log, own ids, the pairs cursor, the history progress; the event `seq`, the epoch and the media cap stay) and the answer
+says `account_changed` and lists the media files to delete; what is kept per chat outside the store (drafts, mutes, the rekey
+cursor) belongs to the old account too. A value that is unknown on either side wipes nothing, nor does the same account linked
+again. `wa_sync.identity_observe` does all of this with the whole `wa.status` answer in `status` (epoch, account epoch, own ids,
+history report; a gap reads as `resync`), so the fields need not be copied into `wa_sync.note_status`. `wa_sync.apply_events`
+takes the same from the stream, so every `wa.event` is handed in as it came: a `hello` or a `resync` that names another epoch than
+the stored one is the gap (`resync` in the answer; `last_seq` is `null` after a `hello` gap until the next event; a `hello` of the
+stored epoch changes nothing and never moves the `seq`; no epoch changes nothing); a `state` event is taken in like a status
+answer (epoch, account epoch, own ids, history report; one of an account before the stored one, by its lower `account_epoch`,
+is not believed); an `account_changed` event is applied at its place in the batch as `wa_sync.account_changed` does
+(`account_changed?`, `delete_files?` in the answer: what came before it in the batch is dropped, what follows is kept); a
+`history_synced` event keeps its `sync_type` and the oldest `oldest_ms` and adds its `messages` to the stored count until the next
+status report sets it. `wa_sync.account_changed {handle, now_ms, old_pn?, new_pn}`
+takes the gateway's `account_changed` event at its place in the stream (for a caller that does not hand the event to
+`wa_sync.apply_events`; never both) and answers `{rekeyed, rejected, resync, account_changed,
+delete_files?}`: a store of another number is emptied; a store already emptied for `new_pn` by a status answer is swept once more
+(events of the old account may have arrived in between; the outbox stays); the same account does nothing. `history` is
+`{state: idle|syncing|done, progress?, chats?, messages?, oldest_ms?}` as the gateway reports it; it is stored (`progress` capped at
+100) and `wa_sync.history {handle}` answers `{history: {state, progress?, chats, messages, oldest_ms?, sync_type?, updated_ms} |
+null}` after a restart; a `history_synced` event updates `progress`, `sync_type`, `oldest_ms` and `messages`. `wa_sync.wipe {handle}` or `{instance_id, dir?}` is the
+unlink: it closes the store (every handle of it then answers `not_found`), deletes the database with its `-wal` and `-shm`, and
+answers `{deleted, media_files}`: the store files removed and the media files the store named (cached files and files of unsent
+outbox rows); Kotlin deletes those and the instance's media directory. An instance without a store answers two empty lists.
 Identity (E6-WA R1): one person is one chat, whichever id the gateway names them by (a phone-number JID or a LID). A chat is keyed by
 the number when it is known, else by the LID; when a pair is learned the rows stored under the LID move to the number, and that move
 is a `rekeyed` step `{seq, from_key, into_key}` that everything kept per chat outside the store (drafts, prefs, notification tags,
@@ -219,9 +285,10 @@ takes one page of `wa.identity_mappings` and answers `{pairs, since, more, rekey
 `wa_sync.plan`'s `identity_since?` (left out before the first page) when the store opens, when the socket reconnects and after a
 `resync`, and go on with `since` while `more`. `wa.identity_mappings {handle, since?}` answers `{supported, items: [{lid, pn,
 source, learned_ms}], next}`; `supported: false` is a gateway from before the route (404), not an error. `wa_sync.identity_observe
-{handle, now_ms, status?, groups?, profiles?}` learns from the answers of `wa.status` (the account's own ids; another own number
-resets the identity tables: `account_changed`), `wa.group(s)` (members' `lid` / `pn`) and `wa.profiles` (`lid`) and answers
-`{rekeyed, rejected, resync, account_changed}`. `wa_sync.identity_resolve {handle, id}` answers `{key, kind, wire, person_id?}`
+{handle, now_ms, status?, groups?, profiles?}` learns from the answers of `wa.status` (the whole answer: the account's own ids, and its `epoch`, `account_epoch` and
+`history` as `wa_sync.note_status` takes them; another epoch is a gap: `resync`; another account
+empties the store: `account_changed`, `delete_files?`), `wa.group(s)` (members' `lid` / `pn`) and `wa.profiles` (`lid`) and answers
+`{rekeyed, rejected, resync, account_changed, delete_files?}`. `wa_sync.identity_resolve {handle, id}` answers `{key, kind, wire, person_id?}`
 (the key the chat of `id` is stored under, the kind of `id` as written, `id` without device for the wire, the person of a number or
 LID) or `null` when `id` is not a JID; `wa_sync.rekeyed_since {handle, seq?}` answers `{rekeyed}`, the steps after `seq`, oldest
 first, for a consumer's own cursor; `wa_sync.identity_numbers {handle, id}` answers `{numbers}`, the phone numbers of the
@@ -231,6 +298,20 @@ before a merge reads the merged chat, and the rows name the key. Chat rows carry
 chat, when it is not `jid`) and message rows `wire_sender?` (the id the author arrived under, when it is not `sender`: what an
 outbound message key names). `wa_identity.parse {id}` (pure, no handle) answers `{kind: pn|lid|group|broadcast|status|newsletter|
 bot|other, user, bare, number?, device?}` or `null`; a LID has no `number`, whatever its digits.
+Phone's identity table (WA-R2, `rosty_app_core::phone::wa_idbook`): Phone shows no WhatsApp messages and never opens the `wa_sync`
+store, so it keeps its own small table of LID and number pairs, the same `rosty_core::wa_identity::IdentityMap`, in `wa-identity.json`
+under the data dir (or `dir`), one instance per file (read for another `instance_id` it is empty; a damaged or newer file too). No op
+touches the network. `wa_idbook.snapshot {dir?, instance_id}` answers `{since?, own_pn?, own_lid?, pairs: [{lid, pn}]}`: every LID the
+table can name with the current number of its person (bare ids), and `since` for the next `wa.identity_mappings` (left out before the
+first page). `wa_idbook.catch_up {dir?, instance_id, items, next?}` takes one page of `wa.identity_mappings` and answers `{pairs,
+since?, more, changed}`: ask at start and after a reconnect or a `resync`, and go on with `since` while `more`; the cursor only moves
+with a page that names one, so a catch-up cut short resumes. `wa_idbook.learn {dir?, instance_id, now_ms, pairs?: [{id, alt, source?,
+learned_ms?}], number_changes?: [{old_pn, new_pn, old_lid?, new_lid?}]}` answers `{changed}`: `pairs` are two ids of one person in
+either order (an `identity_mapped` event, a call's `peer` and `peer_alt`; `source` defaults to `call`; two ids that are not a LID and
+a number teach nothing), `number_changes` are `identity_number_changed` events. `wa_idbook.account {dir?, instance_id, own_pn?,
+own_lid?, account_epoch?, changed?}` answers `{reset}`: another own number or another `account_epoch` than the stored one empties the
+table and its cursor (a value left out never does), `changed: true` is the `account_changed` event and always empties it.
+`wa_idbook.wipe {dir?}` removes the file (unlink). After `changed` or `reset`, read `wa_idbook.snapshot` again.
 Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
 
 | Item | Used by | Domain | Class | Target |
@@ -311,8 +392,9 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
-| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
+| `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

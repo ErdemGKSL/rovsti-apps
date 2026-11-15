@@ -82,6 +82,20 @@ class LiveWaNames(
         }
     }
 
+    /**
+     * Drops every answer, in memory and in the [store]: the WhatsApp account they were asked through is gone
+     * (another one was linked, or the link was forgotten). A number is asked again when it is next needed.
+     */
+    suspend fun forget() {
+        restoring.withLock {
+            restored = true
+            val named = known.values.any { it.name != null }
+            known.clear()
+            store?.let { keep -> withContext(io) { keep.save(emptyMap()) } }
+            if (named) changes.value += 1
+        }
+    }
+
     private fun fresh(key: String): Boolean = known[key]?.let { clock() - it.atMs < ttlMs } == true
 
     /** Reads the stored answers once; the ones past their lifetime are left out. A name found moves [revision]. */

@@ -238,7 +238,10 @@ data class WaSyncCaughtUp(
 data class WaSyncObserveRequest(
     val handle: Long,
     @SerialName("now_ms") val nowMs: Long,
-    /** `wa.status`: the account's own number and LID. */
+    /**
+     * `wa.status`, the whole answer: the account's own number and LID, the gateway's epoch, the account epoch and
+     * the history report, taken in as `wa_sync.note_status` takes them.
+     */
     @EncodeDefault(NEVER) val status: InstanceStatus? = null,
     /** `wa.group` / `wa.groups`: members named by LID and number. */
     @EncodeDefault(NEVER) val groups: List<GroupInfo> = emptyList(),
@@ -251,10 +254,18 @@ data class WaSyncIdentityApplied(
     val handle: Long,
     val rekeyed: List<WaSyncRekeyed>,
     val rejected: List<WaSyncRejected>,
-    /** A merge moved rows: refresh the chat list. */
+    /**
+     * Refresh the chat list: a merge moved rows, the status named another gateway epoch than the stored one (the
+     * stored `seq` is forgotten too) or another account.
+     */
     val resync: Boolean,
-    /** The own number is another one than before: another account was linked, the identity tables started over. */
+    /**
+     * Another account was linked (another own number, or a raised account epoch) and the store was emptied
+     * ([WaSyncStatusNoted.accountChanged]).
+     */
     @SerialName("account_changed") val accountChanged: Boolean,
+    /** Media files of the old account to delete. */
+    @SerialName("delete_files") @EncodeDefault(NEVER) val deleteFiles: List<String> = emptyList(),
 )
 
 /** What a whole catch-up on the gateway's pairs came to (`WaSyncStore.identityCatchUp`). */
@@ -301,7 +312,10 @@ data class WaSyncApplied(
     @SerialName("last_seq") val lastSeq: Long?,
     /** Events applied; ones at or before the stored `seq` are skipped. */
     val applied: Int,
-    /** A `resync` came: refresh the chat list. */
+    /**
+     * Refresh the chat list: a `resync` came, a `hello`, `resync` or `state` named another gateway epoch than the
+     * stored one (a gap: the stored `seq` was forgotten), history arrived, or the account changed.
+     */
     val resync: Boolean,
     /** Chats whose rows changed. */
     val chats: List<String>,
@@ -311,6 +325,13 @@ data class WaSyncApplied(
     @EncodeDefault(NEVER) val rekeyed: List<WaSyncRekeyed> = emptyList(),
     /** Pairs the events named that changed nothing, for the log. */
     @EncodeDefault(NEVER) val rejected: List<WaSyncRejected> = emptyList(),
+    /**
+     * An `account_changed` event, or a `state` event that named another own number or a raised account epoch:
+     * another account was linked and the store was emptied ([WaSyncStatusNoted.accountChanged]).
+     */
+    @SerialName("account_changed") @EncodeDefault(NEVER) val accountChanged: Boolean = false,
+    /** Media files of the old account to delete. */
+    @SerialName("delete_files") @EncodeDefault(NEVER) val deleteFiles: List<String> = emptyList(),
 )
 
 @Serializable
@@ -510,6 +531,11 @@ data class WaSyncMessage(
      * message key names (a reaction, a delete, a read mark of this message).
      */
     @SerialName("wire_sender") @EncodeDefault(NEVER) val wireSender: String? = null,
+    /**
+     * Where the full file is in its download (`WaSyncStore.enqueueMedia`); null while nothing was ever asked for,
+     * and for an outbox row. [mediaPath] is set while it is [WaSyncMediaState.Ready].
+     */
+    @SerialName("media_state") @EncodeDefault(NEVER) val mediaState: WaSyncMediaState? = null,
 )
 
 @Serializable
@@ -842,19 +868,63 @@ data class WaSyncMediaRequest(
     @SerialName("used_ms") @EncodeDefault(NEVER) val usedMs: Long? = null,
 )
 
+/** Where the full file of a message is. */
+@Serializable
+enum class WaSyncMediaState {
+    /** Nothing was asked for. */
+    @SerialName("none")
+    None,
+
+    @SerialName("queued")
+    Queued,
+
+    @SerialName("downloading")
+    Downloading,
+
+    /** The file is cached. */
+    @SerialName("ready")
+    Ready,
+
+    /** The cap took the file; the thumbnail stays and the file can be asked for again. */
+    @SerialName("evicted")
+    Evicted,
+
+    /** Attempts ran out; a tap starts over. */
+    @SerialName("failed")
+    Failed,
+
+    /** The gateway no longer has the file. */
+    @SerialName("gone")
+    Gone,
+}
+
+/** `wa_sync.media`: the thumbnail and the full file of a message. */
 @Serializable
 data class WaSyncMedia(
     @SerialName("thumbnail_b64") val thumbnailB64: String?,
-    /** The cached full file; null when not downloaded or evicted. */
+    /** The cached full file; null unless [state] is [WaSyncMediaState.Ready]. */
     val path: String?,
     val bytes: Long?,
+    val state: WaSyncMediaState = WaSyncMediaState.None,
+    /** The size the gateway named. */
+    @SerialName("size_expected") @EncodeDefault(NEVER) val sizeExpected: Long? = null,
+    /** Downloads that failed since the file was last asked for. */
+    val attempts: Int = 0,
+    val pinned: Boolean = false,
+    /** Where the user saved a copy. */
+    @SerialName("saved_uri") @EncodeDefault(NEVER) val savedUri: String? = null,
+    @SerialName("last_error") @EncodeDefault(NEVER) val lastError: String? = null,
 )
 
+/**
+ * `wa_sync.media_evict`. [maxBytes] null: the stored cap ([WaSyncMediaCap]). [nowMs]: files used in the last 24
+ * hours are spared; without it none is spared for that reason.
+ */
 @Serializable
 data class WaSyncEvictRequest(
     val handle: Long,
-    /** The cap from Settings. */
-    @SerialName("max_bytes") val maxBytes: Long,
+    @SerialName("max_bytes") @EncodeDefault(NEVER) val maxBytes: Long? = null,
+    @SerialName("now_ms") @EncodeDefault(NEVER) val nowMs: Long? = null,
 )
 
 /** A file the cache no longer counts: delete it. */
@@ -871,4 +941,399 @@ data class WaSyncEviction(
     /** Least recently used first. */
     val evicted: List<WaSyncEvicted>,
     @SerialName("bytes_left") val bytesLeft: Long,
+    /**
+     * The part of [bytesLeft] that is never evicted (starred, pinned, saved, being sent, used in the last 24 hours);
+     * more than the cap when those files alone are over it.
+     */
+    @SerialName("exempt_bytes") val exemptBytes: Long = 0,
+)
+
+/** The connection the device is on. Name the most restrictive that holds: Data Saver before roaming before mobile. */
+@Serializable
+enum class WaSyncNetwork {
+    @SerialName("wifi")
+    Wifi,
+
+    @SerialName("mobile")
+    Mobile,
+
+    @SerialName("roaming")
+    Roaming,
+
+    /** Data Saver is on, or the network is metered and background data is restricted. */
+    @SerialName("data_saver")
+    DataSaver,
+
+    @SerialName("none")
+    None,
+}
+
+/** What the auto-download rules say about one file. */
+@Serializable
+enum class WaSyncMediaDecision {
+    /** Download it without being asked. */
+    @SerialName("auto")
+    Auto,
+
+    /** Download it when the user taps it. */
+    @SerialName("on_tap")
+    OnTap,
+
+    /** Never download it into the cache (view-once media, a message without a file). */
+    @SerialName("never")
+    Never,
+}
+
+/** The media row of one message: where its full file is. Flags and counters that are false or 0 are left out. */
+@Serializable
+data class WaSyncMediaEntry(
+    val chat: String,
+    val id: String,
+    val kind: WaSyncKind,
+    @EncodeDefault(NEVER) val mime: String? = null,
+    /** The size the gateway named. */
+    @SerialName("size_expected") @EncodeDefault(NEVER) val sizeExpected: Long? = null,
+    val state: WaSyncMediaState,
+    /** The cached file; only while [state] is [WaSyncMediaState.Ready]. */
+    @EncodeDefault(NEVER) val path: String? = null,
+    @EncodeDefault(NEVER) val bytes: Long? = null,
+    /** Hex, when the caller hashed the file. */
+    @EncodeDefault(NEVER) val sha256: String? = null,
+    @SerialName("used_ms") @EncodeDefault(NEVER) val usedMs: Long? = null,
+    @EncodeDefault(NEVER) val pinned: Boolean = false,
+    /** Where the user saved a copy. */
+    @SerialName("saved_uri") @EncodeDefault(NEVER) val savedUri: String? = null,
+    /** Asked for by a tap, not by the auto-download rules. */
+    @SerialName("by_tap") @EncodeDefault(NEVER) val byTap: Boolean = false,
+    /** Downloads that failed since the file was last asked for. */
+    @EncodeDefault(NEVER) val attempts: Int = 0,
+    /** When a queued download may be tried again; null: now. */
+    @SerialName("next_attempt_ms") @EncodeDefault(NEVER) val nextAttemptMs: Long? = null,
+    @SerialName("last_error") @EncodeDefault(NEVER) val lastError: String? = null,
+)
+
+/** `wa_sync.media_policy`: [freeBytes] null does not apply the 500 MiB floor. */
+@Serializable
+data class WaSyncMediaPolicyRequest(
+    val handle: Long,
+    val chat: String,
+    val id: String,
+    val network: WaSyncNetwork,
+    @SerialName("free_bytes") @EncodeDefault(NEVER) val freeBytes: Long? = null,
+)
+
+@Serializable
+data class WaSyncMediaPolicy(
+    val decision: WaSyncMediaDecision,
+)
+
+/** `wa_sync.media_enqueue`: a [tap], or the auto-download rules under [network] (required without a tap). */
+@Serializable
+data class WaSyncMediaEnqueueRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    val chat: String,
+    val id: String,
+    @EncodeDefault(NEVER) val tap: Boolean = false,
+    @EncodeDefault(NEVER) val network: WaSyncNetwork? = null,
+    @SerialName("free_bytes") @EncodeDefault(NEVER) val freeBytes: Long? = null,
+)
+
+@Serializable
+data class WaSyncMediaQueued(
+    val handle: Long,
+    /** The file waits in the queue or is being downloaded. */
+    val queued: Boolean,
+    /** What the rules say about the file ([WaSyncMediaDecision.OnTap] for a tap). */
+    val decision: WaSyncMediaDecision,
+    val media: WaSyncMediaEntry,
+)
+
+/** `wa_sync.media_due`: with [network], automatic downloads the rules no longer allow stay queued. */
+@Serializable
+data class WaSyncMediaDueRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    /** The most downloads to hand out (4 when left out, at most 32). */
+    @EncodeDefault(NEVER) val limit: Int? = null,
+    @EncodeDefault(NEVER) val network: WaSyncNetwork? = null,
+    @SerialName("free_bytes") @EncodeDefault(NEVER) val freeBytes: Long? = null,
+)
+
+@Serializable
+data class WaSyncMediaDue(
+    val handle: Long,
+    /** Download these now, in this order (taps first); each must be answered with `settleMedia`. */
+    val items: List<WaSyncMediaEntry>,
+    /** Automatic downloads that wait for a better network or more free space. */
+    val held: Int,
+    /** When a download that waits for its next attempt (or an unanswered one) comes due. */
+    @SerialName("next_wake_ms") @EncodeDefault(NEVER) val nextWakeMs: Long? = null,
+)
+
+/** How a download ended (`rosty_app_core::wa_sync::Fetched`). */
+@Serializable
+@JsonClassDiscriminator("kind")
+sealed interface WaSyncFetched {
+    /** The file is in place: written to a `.part` file, synced and renamed. */
+    @Serializable
+    @SerialName("ready")
+    data class Ready(
+        val path: String,
+        val bytes: Long,
+        /** Hex, when the file was hashed. */
+        @EncodeDefault(NEVER) val sha256: String? = null,
+    ) : WaSyncFetched
+
+    /** The attempt failed and may work later (no network, a timeout, a gateway error). */
+    @Serializable
+    @SerialName("failed")
+    data class Failed(
+        @EncodeDefault(NEVER) val error: String? = null,
+    ) : WaSyncFetched
+
+    /** The gateway no longer has the file. */
+    @Serializable
+    @SerialName("gone")
+    data class Gone(
+        @EncodeDefault(NEVER) val error: String? = null,
+    ) : WaSyncFetched
+
+    /** The user stopped the download. */
+    @Serializable
+    @SerialName("cancelled")
+    data object Cancelled : WaSyncFetched
+}
+
+@Serializable
+data class WaSyncMediaSettleRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    val chat: String,
+    val id: String,
+    val outcome: WaSyncFetched,
+)
+
+@Serializable
+data class WaSyncMediaSettled(
+    val handle: Long,
+    val media: WaSyncMediaEntry,
+    /** A file the row named before and no longer does: delete it. */
+    @EncodeDefault(NEVER) val replaced: String? = null,
+)
+
+/** `wa_sync.media_keep`: null leaves a value as it is; [savedUri] `""` forgets the saved copy. */
+@Serializable
+data class WaSyncMediaKeepRequest(
+    val handle: Long,
+    val chat: String,
+    val id: String,
+    @EncodeDefault(NEVER) val pinned: Boolean? = null,
+    @SerialName("saved_uri") @EncodeDefault(NEVER) val savedUri: String? = null,
+)
+
+@Serializable
+data class WaSyncMediaKept(
+    val handle: Long,
+    val media: WaSyncMediaEntry,
+)
+
+/**
+ * `wa_sync.media_reconcile`. [files]: every file under the directories of full media and of outbox files (absolute
+ * paths, not the thumbnails); null when the listing failed.
+ */
+@Serializable
+data class WaSyncReconcileRequest(
+    val handle: Long,
+    @EncodeDefault(NEVER) val files: List<String>? = null,
+)
+
+/** A row that was `ready` without its file; it is `evicted` now. */
+@Serializable
+data class WaSyncMissing(
+    val chat: String,
+    val id: String,
+    val path: String,
+)
+
+@Serializable
+data class WaSyncReconciled(
+    val handle: Long,
+    /** Downloads that were cut off and are queued again. */
+    val requeued: Int,
+    val missing: List<WaSyncMissing>,
+    /** Files to delete: unfinished downloads (`*.part`) and files nothing names. */
+    val delete: List<String>,
+)
+
+@Serializable
+data class WaSyncMediaStatsRequest(
+    val handle: Long,
+    /** Now: files used in the last 24 hours count as exempt. */
+    @SerialName("now_ms") @EncodeDefault(NEVER) val nowMs: Long? = null,
+)
+
+@Serializable
+data class WaSyncUsage(
+    val files: Int,
+    val bytes: Long,
+)
+
+@Serializable
+data class WaSyncKindUsage(
+    val kind: WaSyncKind,
+    val files: Int,
+    val bytes: Long,
+)
+
+/** The media cache in numbers, for the settings screen. */
+@Serializable
+data class WaSyncMediaStats(
+    /** Every cached file. */
+    val total: WaSyncUsage,
+    /** The cached files the cap never takes. */
+    val exempt: WaSyncUsage,
+    /** Largest first; kinds without a cached file are left out. */
+    @SerialName("by_kind") val byKind: List<WaSyncKindUsage>,
+    /** Files of unsent sends that are not cached files. */
+    val outbox: WaSyncUsage,
+    val queued: Int,
+    val downloading: Int,
+    val failed: Int,
+    /** The cap; null: no limit. */
+    @SerialName("cap_bytes") @EncodeDefault(NEVER) val capBytes: Long? = null,
+    /** The exempt files alone are over the cap: eviction cannot bring the cache under it. */
+    @SerialName("exempt_over_cap") val exemptOverCap: Boolean,
+)
+
+/** `wa_sync.media_cap`: sets [capBytes] or [noLimit] first when one is given, then answers the cap. */
+@Serializable
+data class WaSyncMediaCapRequest(
+    val handle: Long,
+    @SerialName("cap_bytes") @EncodeDefault(NEVER) val capBytes: Long? = null,
+    @SerialName("no_limit") @EncodeDefault(NEVER) val noLimit: Boolean = false,
+)
+
+@Serializable
+data class WaSyncMediaCap(
+    val handle: Long,
+    /** The cap in bytes; null: no limit. 512 MiB until it is set. */
+    @SerialName("cap_bytes") val capBytes: Long?,
+)
+
+// ---- the gateway process, the linked account, history progress, unlink
+
+/** How far the phone's history has arrived at the gateway. */
+@Serializable
+enum class WaSyncHistoryState {
+    @SerialName("idle")
+    Idle,
+
+    @SerialName("syncing")
+    Syncing,
+
+    @SerialName("done")
+    Done,
+}
+
+/** `InstanceStatus.history` as the gateway reports it. */
+@Serializable
+data class WaSyncHistoryReport(
+    val state: WaSyncHistoryState,
+    /** 0 to 100; null while the phone has not said. */
+    @EncodeDefault(NEVER) val progress: Int? = null,
+    @EncodeDefault(NEVER) val chats: Int = 0,
+    @EncodeDefault(NEVER) val messages: Long = 0,
+    @SerialName("oldest_ms") @EncodeDefault(NEVER) val oldestMs: Long? = null,
+)
+
+/** The history progress the store keeps (`wa_sync.history`). */
+@Serializable
+data class WaSyncHistory(
+    val state: WaSyncHistoryState,
+    /** 0 to 100. */
+    @EncodeDefault(NEVER) val progress: Int? = null,
+    /** Chats and messages the gateway holds so far. */
+    val chats: Int,
+    val messages: Long,
+    /** The oldest message that arrived. */
+    @SerialName("oldest_ms") @EncodeDefault(NEVER) val oldestMs: Long? = null,
+    /** The kind of the last batch: `initial`, `recent`, `full`, `on_demand` or `other`. */
+    @SerialName("sync_type") @EncodeDefault(NEVER) val syncType: String? = null,
+    /** When this was last reported. */
+    @SerialName("updated_ms") val updatedMs: Long,
+)
+
+@Serializable
+data class WaSyncHistoryAnswer(
+    /** Null before the gateway reported any. */
+    val history: WaSyncHistory?,
+)
+
+/**
+ * `wa_sync.note_status`: what the gateway says about itself and the linked account. Every part is optional: an old
+ * gateway names none of it, and the socket's first frame names the [epoch] alone.
+ */
+@Serializable
+data class WaSyncNoteStatusRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    /** One id per gateway process (`InstanceStatus.epoch`, the socket's first frame, a `resync`). */
+    @EncodeDefault(NEVER) val epoch: String? = null,
+    /** `InstanceStatus.account_epoch`: raised when another account is linked. */
+    @SerialName("account_epoch") @EncodeDefault(NEVER) val accountEpoch: Int? = null,
+    /** `InstanceStatus.own_jid`. */
+    @SerialName("own_pn") @EncodeDefault(NEVER) val ownPn: String? = null,
+    /** `InstanceStatus.own_lid`. */
+    @SerialName("own_lid") @EncodeDefault(NEVER) val ownLid: String? = null,
+    @EncodeDefault(NEVER) val history: WaSyncHistoryReport? = null,
+)
+
+@Serializable
+data class WaSyncStatusNoted(
+    val handle: Long,
+    /**
+     * The gateway is another process than the one the stored `seq` came from: subscribe from the start (`plan` now
+     * answers `afterSeq` null) and refresh the chat list.
+     */
+    val gap: Boolean,
+    /**
+     * Another account is linked to the instance: the store was emptied. What is kept per chat outside the store
+     * (drafts, mutes, the rekey cursor, names) belongs to the old account too; delete [deleteFiles] and the rest of
+     * the instance's media directory.
+     */
+    @SerialName("account_changed") val accountChanged: Boolean,
+    /** Media files of the old account: cached files and files unsent outbox rows named. */
+    @SerialName("delete_files") @EncodeDefault(NEVER) val deleteFiles: List<String> = emptyList(),
+    @EncodeDefault(NEVER) val rekeyed: List<WaSyncRekeyed> = emptyList(),
+    @EncodeDefault(NEVER) val rejected: List<WaSyncRejected> = emptyList(),
+    /** Refresh the chat list. */
+    val resync: Boolean,
+    /** The history progress as stored now. */
+    @EncodeDefault(NEVER) val history: WaSyncHistory? = null,
+)
+
+/** `wa_sync.account_changed`: the gateway's `account_changed` event, at its place in the stream. */
+@Serializable
+data class WaSyncAccountChangedRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    @SerialName("old_pn") @EncodeDefault(NEVER) val oldPn: String? = null,
+    @SerialName("new_pn") val newPn: String,
+)
+
+/** `wa_sync.wipe`: the open store behind [handle], or the store files of [instanceId] in [dir]. */
+@Serializable
+data class WaSyncWipeRequest(
+    @EncodeDefault(NEVER) val handle: Long? = null,
+    @SerialName("instance_id") @EncodeDefault(NEVER) val instanceId: String? = null,
+    @EncodeDefault(NEVER) val dir: String? = null,
+)
+
+@Serializable
+data class WaSyncWiped(
+    /** The store files that were deleted (the database, its `-wal` and `-shm`). */
+    val deleted: List<String>,
+    /** Media files the store named: delete them, and the rest of the instance's media directory. */
+    @SerialName("media_files") val mediaFiles: List<String>,
 )

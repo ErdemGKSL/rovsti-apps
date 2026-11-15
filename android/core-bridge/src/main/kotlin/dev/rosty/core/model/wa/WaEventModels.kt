@@ -81,8 +81,12 @@ sealed interface GatewayEvent {
         @SerialName("own_jid") val ownJid: String? = null,
         @SerialName("push_name") val pushName: String? = null,
         @SerialName("own_lid") @EncodeDefault(NEVER) val ownLid: String? = null,
+        /** The id of the gateway process ([InstanceStatus.epoch]); older gateways leave it out. */
+        @EncodeDefault(NEVER) val epoch: String? = null,
+        @SerialName("account_epoch") @EncodeDefault(NEVER) val accountEpoch: Int? = null,
+        @EncodeDefault(NEVER) val history: HistoryStatus? = null,
     ) : GatewayEvent {
-        fun status() = InstanceStatus(instanceId, state, ownJid, pushName, ownLid)
+        fun status() = InstanceStatus(instanceId, state, ownJid, pushName, ownLid, epoch, accountEpoch, history)
     }
 
     @Serializable
@@ -141,8 +145,19 @@ sealed interface GatewayEvent {
     @Serializable
     @SerialName("history_synced")
     data class HistorySynced(
+        /** Chats the chunk wrote. */
         val chats: Int,
+        /** What WhatsApp said for the chunk, 0 to 100 within its [syncType]. */
         val progress: Int? = null,
+        /**
+         * The kind of chunk: `initial`, `recent`, `full`, `on_demand` or `other` (a newer gateway may name another).
+         * Older gateways leave it out.
+         */
+        @SerialName("sync_type") @EncodeDefault(NEVER) val syncType: String? = null,
+        /** Messages of the chunk the gateway did not hold before; 0 from an older gateway. */
+        val messages: Long = 0,
+        /** Time of the oldest message in the chunk (unix ms); older gateways leave it out. */
+        @SerialName("oldest_ms") @EncodeDefault(NEVER) val oldestMs: Long? = null,
     ) : GatewayEvent
 
     @Serializable
@@ -268,10 +283,36 @@ sealed interface GatewayEvent {
         @SerialName("new_lid") @EncodeDefault(NEVER) val newLid: String? = null,
     ) : GatewayEvent
 
-    /** The gateway lost track of what it sent: reload. */
+    /**
+     * Another WhatsApp account (own number) was linked to the instance. The gateway dropped everything it held for
+     * the account before and raised [InstanceStatus.accountEpoch] before it sent this. Hand the event to the offline
+     * store (`WaSyncStore.applyEvents`), which empties itself at this place in the stream; what is kept per chat
+     * outside the store belongs to the old account too. The ids are bare phone-number JIDs.
+     */
+    @Serializable
+    @SerialName("account_changed")
+    data class AccountChanged(
+        @SerialName("old_pn") @EncodeDefault(NEVER) val oldPn: String? = null,
+        @SerialName("new_pn") val newPn: String,
+    ) : GatewayEvent
+
+    /**
+     * The first frame of every event socket: the id of the gateway process ([InstanceStatus.epoch]). Its `seq` is the
+     * point the socket starts from, not an event of the log. For the offline store, which treats another epoch than
+     * the one it stored as a gap. Older gateways do not send it.
+     */
+    @Serializable
+    @SerialName("hello")
+    data class Hello(
+        val epoch: String,
+    ) : GatewayEvent
+
+    /** The gateway lost track of what it sent: reload. [epoch] is the id of its process; older gateways leave it out. */
     @Serializable
     @SerialName("resync")
-    data object Resync : GatewayEvent
+    data class Resync(
+        @EncodeDefault(NEVER) val epoch: String? = null,
+    ) : GatewayEvent
 
     /** This app's key was revoked; unlink. */
     @Serializable

@@ -1,6 +1,8 @@
 //! Events the gateway pushes over `GET /v1/events`.
 
-use crate::api::{InstanceStatus, MessageBody, Reaction, ScheduledText, TypingState, WaMessage};
+use crate::api::{
+    HistorySyncType, InstanceStatus, MessageBody, Reaction, ScheduledText, TypingState, WaMessage,
+};
 use crate::call::{CallDirection, CallPhase};
 use crate::meta::{ChatMeta, MessageMeta, WaProfile};
 
@@ -87,9 +89,23 @@ pub enum GatewayEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         jid_alt: Option<String>,
     },
+    /// One chunk of WhatsApp's history sync was stored. `chats` is how many
+    /// chats the chunk wrote and `progress` what WhatsApp said for the chunk
+    /// (0 to 100 within its `sync_type`).
     HistorySynced {
         chats: u32,
         progress: Option<u32>,
+        /// The kind of chunk. Older gateways omit it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sync_type: Option<HistorySyncType>,
+        /// Messages of the chunk that were not stored before. Older gateways
+        /// omit it (0).
+        #[serde(default)]
+        messages: u32,
+        /// Time of the oldest message in the chunk (unix ms). Older gateways
+        /// omit it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oldest_ms: Option<i64>,
     },
     GroupChanged {
         jid: String,
@@ -175,8 +191,31 @@ pub enum GatewayEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         new_lid: Option<String>,
     },
-    /// The client missed events; refetch chats.
-    Resync,
+    /// Another WhatsApp account (own number) was linked to the instance. The
+    /// gateway cleared everything it held for the account before (chats,
+    /// messages, profiles, statuses, scheduled texts, identity pairs, cached
+    /// media) and raised `InstanceStatus.account_epoch` before it sent this:
+    /// drop the local copy too. The ids are bare phone-number JIDs. Older
+    /// clients skip it.
+    AccountChanged {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        old_pn: Option<String>,
+        new_pn: String,
+    },
+    /// The first frame of every event socket: the id of this gateway process
+    /// (`InstanceStatus.epoch`). Its `seq` is the point the socket starts
+    /// from (the `after` it resumes, or the newest event), so it never moves
+    /// a resume point forward past an event that was not sent. Older gateways
+    /// do not send it; older clients skip it.
+    Hello {
+        epoch: String,
+    },
+    /// The client missed events; refetch chats. `epoch` is the id of this
+    /// gateway process; older gateways omit it.
+    Resync {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        epoch: Option<String>,
+    },
     /// The key used for this socket was revoked.
     KeyRevoked,
 }
@@ -240,6 +279,9 @@ mod tests {
                     own_jid: None,
                     push_name: None,
                     own_lid: None,
+                    epoch: None,
+                    account_epoch: None,
+                    history: None,
                 }),
                 r#"{"type":"state","instance_id":"i","state":"logged_out","own_jid":null,"push_name":null}"#,
             ),
@@ -282,8 +324,11 @@ mod tests {
                 GatewayEvent::HistorySynced {
                     chats: 3,
                     progress: None,
+                    sync_type: None,
+                    messages: 0,
+                    oldest_ms: None,
                 },
-                r#"{"type":"history_synced","chats":3,"progress":null}"#,
+                r#"{"type":"history_synced","chats":3,"progress":null,"messages":0}"#,
             ),
             (
                 GatewayEvent::GroupChanged { jid: "g".into() },
@@ -461,6 +506,9 @@ mod tests {
                     own_jid: Some("905550000009@s.whatsapp.net".into()),
                     push_name: None,
                     own_lid: Some("9@lid".into()),
+                    epoch: None,
+                    account_epoch: None,
+                    history: None,
                 }),
                 r#"{"type":"state","instance_id":"i","state":"connected","own_jid":"905550000009@s.whatsapp.net","push_name":null,"own_lid":"9@lid"}"#,
             ),
@@ -472,13 +520,224 @@ mod tests {
                 }),
                 r#"{"type":"profile","jid":"905550000001@s.whatsapp.net","push_name":null,"contact_name":null,"about":null,"picture_id":null,"business":false,"verified_name":null,"fetched_ms":0,"lid":"1@lid"}"#,
             ),
-            (GatewayEvent::Resync, r#"{"type":"resync"}"#),
+            (GatewayEvent::Resync { epoch: None }, r#"{"type":"resync"}"#),
             (GatewayEvent::KeyRevoked, r#"{"type":"key_revoked"}"#),
         ];
         for (event, text) in cases {
             assert_eq!(json(&event), text);
             assert_eq!(serde_json::from_str::<GatewayEvent>(text).unwrap(), event);
         }
+    }
+
+    /// The additions of the epoch, account and history round, as the gateway
+    /// sends them.
+    #[test]
+    fn epoch_account_and_history_events_are_pinned() {
+        use crate::api::{HistoryState, HistoryStatus};
+
+        let cases: Vec<(GatewayEvent, &str)> = vec![
+            (
+                GatewayEvent::Hello {
+                    epoch: "9f2c41d07ab35e68".into(),
+                },
+                r#"{"type":"hello","epoch":"9f2c41d07ab35e68"}"#,
+            ),
+            (
+                GatewayEvent::Resync {
+                    epoch: Some("9f2c41d07ab35e68".into()),
+                },
+                r#"{"type":"resync","epoch":"9f2c41d07ab35e68"}"#,
+            ),
+            (
+                GatewayEvent::AccountChanged {
+                    old_pn: Some("100000000001@s.whatsapp.net".into()),
+                    new_pn: "100000000002@s.whatsapp.net".into(),
+                },
+                r#"{"type":"account_changed","old_pn":"100000000001@s.whatsapp.net","new_pn":"100000000002@s.whatsapp.net"}"#,
+            ),
+            (
+                GatewayEvent::AccountChanged {
+                    old_pn: None,
+                    new_pn: "100000000002@s.whatsapp.net".into(),
+                },
+                r#"{"type":"account_changed","new_pn":"100000000002@s.whatsapp.net"}"#,
+            ),
+            (
+                GatewayEvent::HistorySynced {
+                    chats: 12,
+                    progress: Some(40),
+                    sync_type: Some(HistorySyncType::Full),
+                    messages: 3500,
+                    oldest_ms: Some(1_500_000_000_000),
+                },
+                r#"{"type":"history_synced","chats":12,"progress":40,"sync_type":"full","messages":3500,"oldest_ms":1500000000000}"#,
+            ),
+            (
+                GatewayEvent::HistorySynced {
+                    chats: 0,
+                    progress: None,
+                    sync_type: Some(HistorySyncType::OnDemand),
+                    messages: 0,
+                    oldest_ms: None,
+                },
+                r#"{"type":"history_synced","chats":0,"progress":null,"sync_type":"on_demand","messages":0}"#,
+            ),
+            (
+                GatewayEvent::State(InstanceStatus {
+                    instance_id: "i".into(),
+                    state: InstanceState::Connected,
+                    own_jid: Some("100000000001@s.whatsapp.net".into()),
+                    push_name: None,
+                    own_lid: None,
+                    epoch: Some("9f2c41d07ab35e68".into()),
+                    account_epoch: Some(2),
+                    history: Some(HistoryStatus {
+                        state: HistoryState::Syncing,
+                        progress: Some(55),
+                        chats: 120,
+                        messages: 48_000,
+                        oldest_ms: Some(1_500_000_000_000),
+                    }),
+                }),
+                r#"{"type":"state","instance_id":"i","state":"connected","own_jid":"100000000001@s.whatsapp.net","push_name":null,"epoch":"9f2c41d07ab35e68","account_epoch":2,"history":{"state":"syncing","progress":55,"chats":120,"messages":48000,"oldest_ms":1500000000000}}"#,
+            ),
+        ];
+        for (event, text) in cases {
+            assert_eq!(json(&event), text);
+            assert_eq!(serde_json::from_str::<GatewayEvent>(text).unwrap(), event);
+        }
+    }
+
+    /// What a gateway from before this round sends still parses, and a sync
+    /// kind from a newer one reads as `other`.
+    #[test]
+    fn older_and_newer_gateways_parse() {
+        assert_eq!(
+            serde_json::from_str::<GatewayEvent>(r#"{"type":"resync"}"#).unwrap(),
+            GatewayEvent::Resync { epoch: None }
+        );
+        assert_eq!(
+            serde_json::from_str::<GatewayEvent>(
+                r#"{"type":"history_synced","chats":3,"progress":null}"#
+            )
+            .unwrap(),
+            GatewayEvent::HistorySynced {
+                chats: 3,
+                progress: None,
+                sync_type: None,
+                messages: 0,
+                oldest_ms: None,
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<GatewayEvent>(
+                r#"{"type":"history_synced","chats":1,"progress":7,"sync_type":"from_the_future","messages":2}"#
+            )
+            .unwrap(),
+            GatewayEvent::HistorySynced {
+                chats: 1,
+                progress: Some(7),
+                sync_type: Some(HistorySyncType::Other),
+                messages: 2,
+                oldest_ms: None,
+            }
+        );
+    }
+
+    /// The events as a client built before this round declares them: the new
+    /// frames must still parse there, and `hello` and `account_changed` must
+    /// fail to parse (such a client skips a frame it cannot read).
+    #[test]
+    fn a_client_from_before_the_epoch_reads_the_new_frames() {
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        struct OldStatus {
+            instance_id: String,
+            state: InstanceState,
+            own_jid: Option<String>,
+            push_name: Option<String>,
+            #[serde(default)]
+            own_lid: Option<String>,
+        }
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum OldEvent {
+            State(OldStatus),
+            HistorySynced { chats: u32, progress: Option<u32> },
+            Resync,
+            KeyRevoked,
+        }
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        struct OldEnvelope {
+            seq: u64,
+            at_ms: i64,
+            event: OldEvent,
+        }
+        let old = |event: &GatewayEvent| {
+            let text = serde_json::to_string(&EventEnvelope {
+                seq: 3,
+                at_ms: 4,
+                event: event.clone(),
+            })
+            .unwrap();
+            serde_json::from_str::<OldEnvelope>(&text).map(|e| (e.seq, e.at_ms, e.event))
+        };
+
+        assert_eq!(
+            old(&GatewayEvent::Resync {
+                epoch: Some("e".into())
+            })
+            .unwrap(),
+            (3, 4, OldEvent::Resync)
+        );
+        assert_eq!(
+            old(&GatewayEvent::KeyRevoked).unwrap().2,
+            OldEvent::KeyRevoked
+        );
+        assert_eq!(
+            old(&GatewayEvent::HistorySynced {
+                chats: 2,
+                progress: Some(9),
+                sync_type: Some(HistorySyncType::Recent),
+                messages: 5,
+                oldest_ms: Some(1),
+            })
+            .unwrap()
+            .2,
+            OldEvent::HistorySynced {
+                chats: 2,
+                progress: Some(9)
+            }
+        );
+        let state = old(&GatewayEvent::State(InstanceStatus {
+            instance_id: "i".into(),
+            state: InstanceState::Connected,
+            own_jid: None,
+            push_name: None,
+            own_lid: None,
+            epoch: Some("e".into()),
+            account_epoch: Some(1),
+            history: Some(crate::api::HistoryStatus::default()),
+        }))
+        .unwrap()
+        .2;
+        assert_eq!(
+            state,
+            OldEvent::State(OldStatus {
+                instance_id: "i".into(),
+                state: InstanceState::Connected,
+                own_jid: None,
+                push_name: None,
+                own_lid: None,
+            })
+        );
+        assert!(old(&GatewayEvent::Hello { epoch: "e".into() }).is_err());
+        assert!(
+            old(&GatewayEvent::AccountChanged {
+                old_pn: None,
+                new_pn: "100000000002@s.whatsapp.net".into(),
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -621,6 +880,9 @@ mod tests {
                     own_jid: Some("1@s.whatsapp.net".into()),
                     push_name: Some("Ada".into()),
                     own_lid: None,
+                    epoch: None,
+                    account_epoch: None,
+                    history: None,
                 }),
             ),
             (

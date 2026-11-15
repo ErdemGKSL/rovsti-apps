@@ -19,4 +19,12 @@
     <string name="wa_link_key_refused">Ağ geçidi bu uygulamanın bağlantı anahtarını artık kabul etmiyor</string>
     <string name="wa_link_unreachable">WhatsApp ağ geçidine ulaşılamıyor</string>
     <string name="wa_link_failed">WhatsApp şu anda kullanılamıyor</string>
+
+    <!-- Rosty uygulamaları arasında bağlantı devri (WA-R2). %1$s diğer uygulamanın adıdır. -->
+    <string name="wa_link_shared_from">Bu bağlantı %1$s uygulamasından alındı. Buradan kaldırmak oradaki bağlantıyı etkilemez.</string>
+    <string name="wa_link_shared_from_other">Bu bağlantı başka bir Rosty uygulamasından alındı. Buradan kaldırmak oradaki bağlantıyı etkilemez.</string>
+    <string name="wa_link_use_sibling">%1$s bağlantısını kullan</string>
+    <string name="wa_link_use_sibling_other">Başka bir Rosty uygulamasının bağlantısını kullan</string>
+    <string name="wa_link_use_sibling_detail">Bu telefonda zaten bağlı, anahtar yapıştırmak gerekmez</string>
+    <string name="wa_link_sibling_section">Diğer Rosty uygulamaları</string>
 </resources>

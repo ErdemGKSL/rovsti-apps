@@ -14,6 +14,7 @@ import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.SharePayload
 import dev.rosty.messages.data.Book
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.platform.sms.SmsRepository
 import dev.rosty.wa.WaLinkState
 import dev.rosty.wa.WaRepository
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -76,6 +78,8 @@ class NewConversationViewModel(
     private val waOps: WaOps,
     private val e164: (String) -> String?,
     share: SharePayload?,
+    /** The name-order rule, for a typed number: its contact or WhatsApp name stands above it. */
+    private val names: PersonNames = PersonNames({ null }, emptyFlow<Unit>()),
 ) : ViewModel() {
     private val ui = MutableStateFlow(NewConversationUi(share = share))
     val state: StateFlow<NewConversationUi> = ui.asStateFlow()
@@ -85,13 +89,25 @@ class NewConversationViewModel(
 
     init {
         viewModelScope.launch { book.collect { refresh(ui.value.query) } }
+        // The WhatsApp name asked for a typed number arrived: the row is named.
+        viewModelScope.launch { names.changes.collect { refresh(ui.value.query) } }
     }
 
     fun setQuery(text: String) {
         viewModelScope.launch { refresh(text) }
     }
 
+    /** A typed number that is a whole phone number, titled by the rule; anything else stays as typed. */
+    private suspend fun named(typed: RecipientOption): RecipientOption {
+        if (e164(typed.number) == null) return typed
+        val who = names.of(typed.number)
+        return if (who.named) typed.copy(title = who.text) else typed
+    }
+
+    private var latest = ""
+
     private suspend fun refresh(text: String) {
+        latest = text
         val current = book.value
         val query = text.trim()
         val contacts: List<WireContact> =
@@ -100,7 +116,9 @@ class NewConversationViewModel(
             } else {
                 (current.index?.queryLoose(query, MAX_OPTIONS) as? Outcome.Ok)?.value?.rows.orEmpty()
             }
-        ui.value = ui.value.copy(query = text, options = options(query, contacts).toImmutableList())
+        val found = options(query, contacts).map { if (it.typed) named(it) else it }
+        // A slower answer for an older text never replaces the newer one.
+        if (text == latest) ui.value = ui.value.copy(query = text, options = found.toImmutableList())
     }
 
     fun pick(option: RecipientOption) {

@@ -189,8 +189,7 @@ fun rememberWaThreadViewModel(
                             offline = container.waOffline,
                             remote = container.waRemote,
                             drafts = StoreWaDrafts(container.store),
-                            nameOf = { number -> container.book.owner(number)?.displayName },
-                            bookChanges = container.book.book,
+                            names = container.names,
                             divider = { incoming, unread ->
                                 container.chat
                                     .unreadDivider(UnreadDividerRequest(incoming, unread))

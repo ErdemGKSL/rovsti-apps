@@ -3,9 +3,10 @@ package dev.rosty.messages
 import android.app.Application
 import androidx.work.Configuration
 import dev.rosty.core.log.RostyLog
-import dev.rosty.messages.notify.MessagesNotifier
+import dev.rosty.messages.notify.NotificationNames
 import dev.rosty.platform.PlatformComponents
 import dev.rosty.platform.notify.PlatformChannels
+import dev.rosty.platform.sms.MessageNotifier
 import dev.rosty.platform.sms.MmsCodec
 import dev.rosty.platform.sms.MmsInbox
 import dev.rosty.shell.HasContainer
@@ -33,8 +34,9 @@ class RostyMessagesApp :
         }
         step("mms") {
             MmsCodec.downloadedHandler = MmsCodec.DownloadedHandler(MmsInbox::onDownloaded)
-            // The app's own renderer: avatars, the group summary, labels in the phone's language (E6.9).
-            MmsInbox.notifier = MessagesNotifier.notifier
+            // The app's own renderer: avatars, the group summary, labels in the phone's language (E6.9); a sender
+            // no contact names gets its WhatsApp name (the name-order rule).
+            MmsInbox.notifier = MessageNotifier(NotificationNames::showIncoming)
         }
         // Channel names and descriptions in the phone's language, again after a language change (F32).
         step("channels") { PlatformChannels.followLocale(this) }

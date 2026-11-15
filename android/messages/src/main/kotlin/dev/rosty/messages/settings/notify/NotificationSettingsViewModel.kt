@@ -12,8 +12,11 @@ import dev.rosty.messages.notify.NotifyPolicy
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -60,9 +63,12 @@ class NotificationSettingsViewModel(
     private val ops: MessagesOps,
     private val nameOf: suspend (String) -> String?,
     private val now: () -> Long,
+    /** Moves when a name may read differently (a contact saved, a WhatsApp name arrived): the list is named again. */
+    nameChanges: Flow<*> = flowOf(Unit),
 ) : ViewModel() {
     val state: StateFlow<NotificationSettingsUi> =
         store.prefs
+            .combine(nameChanges) { prefs, _ -> prefs }
             .mapLatest { prefs -> prefs?.let { build(it) } ?: NotificationSettingsUi() }
             .stateIn(viewModelScope, SharingStarted.Eagerly, NotificationSettingsUi())
 

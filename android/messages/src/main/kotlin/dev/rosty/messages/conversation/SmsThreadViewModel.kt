@@ -26,6 +26,8 @@ import dev.rosty.messages.R
 import dev.rosty.messages.data.Book
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.RowAvatar
+import dev.rosty.messages.names.PersonName
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.platform.Headless
 import dev.rosty.platform.sms.SendHandle
 import dev.rosty.platform.sms.SmsRepository
@@ -107,7 +109,8 @@ class SmsThreadSources(
     val ops: MessagesOps,
     val chat: ChatOps,
     val store: MessagesStore,
-    val book: StateFlow<Book>,
+    /** The name-order rule: who the thread is with. */
+    val names: PersonNames,
     val roleHeld: StateFlow<Boolean>,
     val now: () -> Long,
     /** The core's `mms_send_req`: a base64 `m-send-req` for a picture and text (blocking; called off the main thread). */
@@ -188,7 +191,8 @@ class SmsThreadViewModel(
                 }
         }
         viewModelScope.launch { sources.roleHeld.collect { rebuild() } }
-        viewModelScope.launch { sources.book.collect { rebuild() } }
+        // A contact was saved, or the WhatsApp name asked for an unknown number arrived: the header is named again.
+        viewModelScope.launch { sources.names.changes.collect { rebuild() } }
     }
 
     private suspend fun loadNewest() {
@@ -234,11 +238,12 @@ class SmsThreadViewModel(
             items
                 .filter { providerKey(it) !in hidden }
                 .map { bubbleOf(it, now) }
-        val title = titleOf()
+        val who = whoOf()
+        val title = who?.text ?: to.map { sources.names.of(it).text }.joinToString(", ")
         ui.value =
             ui.value.copy(
                 title = title,
-                subtitle = subtitleOf(title),
+                subtitle = subtitleOf(who),
                 avatar = avatarOf(title),
                 items = withDays(bubbles, days, now, dividerOf(bubbles)).toImmutableList(),
                 loaded = true,
@@ -259,24 +264,14 @@ class SmsThreadViewModel(
         return bubbles.getOrNull(at)?.let { it.key to words.unread(unread) }
     }
 
-    private fun titleOf(): String {
-        val book = sources.book.value
-        val contacts = book.contacts.values
-        if (to.size > 1) return to.joinToString(", ")
-        val number = to.firstOrNull().orEmpty()
-        val digits = number.filter(Char::isDigit).takeLast(MATCH_DIGITS)
-        val contact =
-            contacts.firstOrNull { c ->
-                digits.length >= MIN_DIGITS &&
-                    c.numbers.any { it.raw.filter(Char::isDigit).endsWith(digits) }
-            }
-        return contact?.displayName?.takeIf { it.isNotBlank() } ?: number
-    }
+    /** The one person of the thread by the name-order rule; null for a group thread (each member is named). */
+    private suspend fun whoOf(): PersonName? = if (to.size > 1) null else sources.names.of(to.firstOrNull().orEmpty())
 
-    private fun subtitleOf(title: String): String? =
+    /** The number under a name; nothing under a title that is the number itself. */
+    private fun subtitleOf(who: PersonName?): String? =
         when {
             to.size > 1 -> words.people(to.size)
-            to.singleOrNull() != null && to.single() != title -> to.single()
+            who?.named == true -> to.singleOrNull()
             else -> null
         }
 
@@ -660,8 +655,6 @@ class SmsThreadViewModel(
         private const val INBOX_BOX = 1
         private const val NOW_MS = 60_000L
         private const val COUNTER_WITHIN = 30
-        private const val MATCH_DIGITS = 9
-        private const val MIN_DIGITS = 7
 
         fun keyOf(key: SmsKey): String =
             when (key) {

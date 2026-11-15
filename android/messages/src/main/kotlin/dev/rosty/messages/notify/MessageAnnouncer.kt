@@ -10,7 +10,8 @@ import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.ops.MessagesOps
-import dev.rosty.messages.inbox.numberOfJid
+import dev.rosty.messages.names.PersonNames
+import dev.rosty.messages.names.WaNames
 import dev.rosty.messages.wa.isConversation
 import dev.rosty.platform.PlatformEvents
 import dev.rosty.platform.notify.NotificationSpec
@@ -58,8 +59,8 @@ class AnnouncerSources(
     val live: Flow<GatewayEvent>,
     /** The stored chat of a JID (title, group, mute), or null. */
     val chatOf: suspend (jid: String) -> RichChat?,
-    /** The contact name of a number, or null. */
-    val nameOf: suspend (number: String) -> String?,
+    /** The name-order rule: who a chat or a group sender is. */
+    val names: PersonNames,
     /** The one-line text of a message body ("Photo", a caption, the text). */
     val preview: (MessageBody) -> String,
     /** True when a push service posts the WhatsApp digest while no UI is attached (the firebase flavor, AD-MSG5). */
@@ -82,6 +83,8 @@ class MessageAnnouncer(
     private val scope: CoroutineScope,
     private val sources: AnnouncerSources,
     private val post: (Context, Digest) -> Boolean = MessagesNotifier::show,
+    /** What the notification of a tag shows now (to rename it in place). */
+    private val shown: (Context, String) -> Digest? = MessagesNotifier::shown,
 ) {
     private val digests = Digests()
     private val started = AtomicBoolean(false)
@@ -119,15 +122,28 @@ class MessageAnnouncer(
         val incoming =
             Incoming(
                 thread = tag,
-                senderTitle = if (group) personOf(message.sender, null) else "",
+                senderTitle = if (group) sources.names.sender(message.sender, null) else "",
                 body = body,
                 atMs = message.timestampMs,
                 verdictSpam = false,
             )
         val recent = digests.push(incoming)
-        val title = if (group) chatTitle(chat, jid) else personOf(jid, chat)
+        val who = if (group) null else sources.names.ofJid(jid, WaNames.of(chat))
+        val title = who?.text ?: sources.names.chatTitle(jid, chat)
         val spec = plan(title, group, recent, body) ?: return false
-        return post(context, Digest(spec))
+        val posted = post(context, Digest(spec))
+        // Nobody names the number yet: WhatsApp was asked, and the notification is renamed when the answer lands.
+        if (posted && who != null && !who.named) {
+            NotificationNames.renameLater(
+                scope,
+                sources.names,
+                spec.tag,
+                who = { sources.names.ofJid(jid, WaNames.of(chat)) },
+                shown = { shown(context, it) },
+                post = { post(context, it) },
+            )
+        }
+        return posted
     }
 
     /** Rust's digest for the conversation; a plain one when Rust gives none; null when only spam is left. */
@@ -158,24 +174,6 @@ class MessageAnnouncer(
             }
         }
     }
-
-    /** The contact, else the name WhatsApp knows, else the number. */
-    private suspend fun personOf(
-        jid: String?,
-        chat: RichChat?,
-    ): String {
-        val number = jid?.let(::numberOfJid)
-        return number?.let { sources.nameOf(it) }?.takeIf { it.isNotBlank() }
-            ?: chat?.name?.takeIf { it.isNotBlank() }
-            ?: chat?.meta?.pushName?.takeIf { it.isNotBlank() }
-            ?: number
-            ?: jid?.substringBefore('@').orEmpty()
-    }
-
-    private fun chatTitle(
-        chat: RichChat?,
-        jid: String,
-    ): String = chat?.name?.takeIf { it.isNotBlank() } ?: jid.substringBefore('@')
 
     private fun isChat(jid: String): Boolean =
         jid != STATUS_JID && !jid.endsWith("@newsletter") && !jid.endsWith("@broadcast")

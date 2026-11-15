@@ -15,10 +15,12 @@ import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncRowState
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.ops.WaSyncOps
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaTestKit.Companion.ADA
 import dev.rosty.messages.wa.WaTestKit.Companion.INSTANCE
 import dev.rosty.messages.wa.WaTestKit.Companion.MERT
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
@@ -243,7 +245,7 @@ class WaOfflineTest {
             kit.remote.down = true
             kit.chat(ADA, name = "Ada", unread = 2)
             kit.ops.chats[0] = kit.ops.chats[0].copy(last = WaTestKit.text(ADA, "m1", 1_000, "see you"), lastMs = 1_000)
-            val chats = StoreWaChats(kit.offline, kit.remote)
+            val chats = StoreWaChats(kit.offline, kit.remote, PersonNames({ null }, emptyFlow<Unit>()))
             kit.offline.start()
             settle()
 

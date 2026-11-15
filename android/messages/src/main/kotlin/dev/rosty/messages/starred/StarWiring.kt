@@ -7,8 +7,8 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
 import dev.rosty.messages.inbox.InboxWords
 import dev.rosty.messages.inbox.ResourceInboxWords
-import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.waPreview
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaOffline
 import dev.rosty.messages.wa.toBody
 import dev.rosty.messages.wa.toMeta
@@ -25,7 +25,14 @@ fun realStarCenter(container: MessagesContainer): StarCenter {
             WaStarSeams(
                 online = container.waOffline.online,
                 changes = container.waOffline.changes,
-                scan = { scanStoredStars(container.waOffline, words, res.getString(R.string.tools_me)) },
+                scan = {
+                    scanStoredStars(
+                        container.waOffline,
+                        words,
+                        res.getString(R.string.tools_me),
+                        container.names,
+                    )
+                },
                 star = { chat, id, starred -> container.waRemote.star(chat, id, starred) is Outcome.Ok },
             ),
         file = File(container.context.filesDir, StarCenter.FILE),
@@ -43,15 +50,12 @@ internal suspend fun scanStoredStars(
     offline: WaOffline,
     words: InboxWords,
     me: String,
+    names: PersonNames,
 ): List<WaStarRow>? {
     val store = offline.session.value?.store ?: return null
     val chats = store.chats(includeArchived = true).getOrNull() ?: return null
     return chats.take(SCAN_CHATS).flatMap { chat ->
-        val title =
-            chat.name?.takeIf { it.isNotBlank() }
-                ?: chat.pushName?.takeIf { it.isNotBlank() }
-                ?: numberOfJid(chat.jid)
-                ?: chat.jid
+        val title = names.chatTitle(chat.jid, chat)
         store
             .thread(chat.jid, SCAN_ROWS)
             .getOrNull()
@@ -66,8 +70,7 @@ internal suspend fun scanStoredStars(
                         }
 
                         chat.isGroup -> {
-                            row.senderName?.takeIf { it.isNotBlank() } ?: row.sender?.let(::numberOfJid)
-                                ?: title
+                            names.sender(row.sender, row.senderName)
                         }
 
                         else -> {

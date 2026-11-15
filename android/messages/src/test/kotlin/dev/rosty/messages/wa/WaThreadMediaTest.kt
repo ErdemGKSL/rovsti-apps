@@ -21,6 +21,7 @@ import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.conversation.DayLabels
 import dev.rosty.messages.conversation.MediaAction
 import dev.rosty.messages.inbox.EnglishInboxWords
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.wa.WaTestKit.Companion.ADA
 import dev.rosty.messages.wa.WaTestKit.Companion.GROUP
 import dev.rosty.messages.wa.WaTestKit.Companion.MERT
@@ -83,8 +84,7 @@ class WaThreadMediaTest {
                 offline = kit.offline,
                 remote = kit.remote,
                 drafts = MemoryDrafts(),
-                nameOf = { mapOf("+905550000001" to "Ada Lovelace")[it] },
-                bookChanges = MutableStateFlow(Unit),
+                names = PersonNames({ mapOf("+905550000001" to "Ada Lovelace")[it] }, MutableStateFlow(Unit)),
                 now = { kit.now },
                 media = media,
                 voice = voice,

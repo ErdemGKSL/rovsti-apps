@@ -1593,16 +1593,16 @@ AD-MSG9, AD-WA11), then polish.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E6.1 | App module, SMS role, manifest parity, tabs, permissions, migration test | R1 | in-progress |
-| E6.2 | Unified inbox | R1 | in-progress |
-| E6.3 | SMS and MMS conversation | R1 | in-progress |
-| E6.4s | WhatsApp offline store and per-device sync engine (owner request 2026-11-10; before E6.2 and E6.4a) | R1 | in-progress |
-| E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | in-progress |
+| E6.1 | App module, SMS role, manifest parity, tabs, permissions, migration test | R1 | done (R1 evidence) |
+| E6.2 | Unified inbox | R1 | done (R1 evidence) |
+| E6.3 | SMS and MMS conversation | R1, R2 | in-progress (R2: MMS attachment send, M46 paste image, unblock row) |
+| E6.4s | WhatsApp offline store and per-device sync engine (owner request 2026-11-10; before E6.2 and E6.4a) | R1 | done (R1 evidence; media cache wiring goes with E6.4b) |
+| E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | done (R1 evidence) |
 | E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | todo |
 | E6.5 | Message context menu, select mode, detection pills | R2 | todo |
-| E6.6 | Conversation tools | R1 | in-progress |
-| E6.7 | Viewers: images, status, contact card, attachments | R1 | in-progress |
-| E6.8 | New conversation, forward, share-in, intents | R1 | in-progress |
+| E6.6 | Conversation tools | R1, R2 | in-progress (R2: M50 sender mini card, M43 next unread, M48 zip, M27 clear chat, M29, M22) |
+| E6.7 | Viewers: images, status, contact card, attachments | R1, R2 | in-progress (R2: M26 contact card sheet, M28 attachments, M4 header photo, attachment menu) |
+| E6.8 | New conversation, forward, share-in, intents | R1 | done (R1 evidence) |
 | E6.9 | Notifications and inline reply | R2 | todo |
 | E6.10 | Scheduled send | R2 | todo |
 | E6.11 | Spam | R2 | todo |

@@ -1396,7 +1396,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | Story | Title | Round | Status |
 |---|---|---|---|
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
-| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | in-progress (plan `plans/round-16.md`) |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16 | done (plan `plans/round-16.md`; Evidence at the end of the X.2 section; known open item there) |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1507,7 +1507,7 @@ contact with vCard QR, new number) and the glass panel with glisse-ported refrac
 5 Contacts Card Studio sheet (menu, birthday row chip, Upcoming); 6 share and save (share provider, MediaStore, birthday
 notification action); 7 budgets and cancellation; 8 **F40** (X.1 goldens use featureless gradient "photos" that cannot
 prove the WhatsApp picture, e.g. `x1-wa-avatar-incoming-dark` looks like an aura: use recognisable test portraits),
-checklist, full gate, close X.2. Next planner after X.2: F40. E6 and E7 run in parallel sessions (see E6, E7); after F40 the `ui-overhaul` workflow plans no E6/E7 rounds.
+checklist, full gate, close X.2. Next planner after X.2: **E6 R1**. E6 and E7 run in parallel sessions (see E6, E7); after F40 the `ui-overhaul` workflow plans no E6/E7 rounds.
 
 - Use **Takumi** (Rust, `takumi` crate, MIT OR Apache-2.0, https://github.com/kane50613/takumi; pin a release at least
   two weeks old, check its current API on docs.rs) inside the Rust core to render designed cards from node trees to
@@ -1558,6 +1558,28 @@ checklist, full gate, close X.2. Next planner after X.2: F40. E6 and E7 run in p
 - Tests: Rust golden renders (hash or pixel-diff tolerance) for static frames and the first/last GIF frame, size/time
   budget (static card under ~300 ms, GIF under ~3 s on the phone), Kotlin flow tests; screenshots
   `x2-card-preview-birthday`, `x2-card-preview-contact`, `x2-card-preview-gif`.
+
+**X.2 status: done (round-16 step 8).**
+**Evidence (step 8, uncommitted at the time of writing):**
+- F40: `:testing` `portraitImage` (`android/testing/src/main/kotlin/dev/rosty/testing/PortraitImage.kt`) draws a
+  head-and-shoulders portrait in code (wall pattern: boards, bokeh or window; shoulders, neck, ears, hair, eyes, brows,
+  nose, mouth, vignette; one face per request text, no binary assets). `X1AvatarShotTest` (Contacts) and
+  `X1PhoneAvatarShotTest` (Phone) use it as `imageProducer`. All 12 `x1-wa-avatar-*` goldens re-recorded.
+  Opened with Read: `contacts/x1-wa-avatar-list-light` (faces in the rows, initials-only people stay as coloured
+  initial discs, one WhatsApp glyph per row, the last row scrolls under the tab bar as a list does) and
+  `phone/x1-wa-avatar-incoming-dark` (the backdrop is a blurred portrait: head, neck and shoulders, a window light and a
+  warm shirt colour at the bottom; it reads as a photographic backdrop rather than a flat tinted aura; the blur is the
+  design's, so the face is not sharp).
+- Checklist: `docs/kotlin-ui/checklist-e4.md`, section "X.2 checklist record".
+- Gate: `cargo fmt --all`, clippy (Kotlin-facing crates, `--profile checks`), `bash scripts/kotlin-ui-check.sh` ALL GREEN
+  (includes cargo test of those crates, `cargo check --release` of `rosty_android` and `rosty_ffi` for
+  aarch64-linux-android, Gradle spotless, lint, unit tests, shot verification, APK JNI export check, stability, orphans).
+- Size: `librosty_ffi.so` (arm64-v8a, release) 12,519,024 bytes vs 10,030,336 before Takumi (+2,488,688, +24.8 %).
+  Contacts release APK `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk` 17,624,083 bytes.
+- **Known open item (not fixed in step 8's F40 scope):** the card headline in the x2 goldens is wider than the inner
+  panel / cut off in Turkish, and the date line is not localised ("October 3"); the Card Studio preview description lacks
+  the template and person name. Both are listed in the checklist record; the layout fix needs its own render test and a
+  re-record of the x2 goldens.
 
 ## E6. Messages including WhatsApp (`:messages`)
 

@@ -135,3 +135,57 @@ contacts.png` opened again in E4.16).
   manual clock, goldens light and dark, fs2/rtl variants listed above.
 - pass: contact sheet `docs/kotlin-ui/screenshots/contacts.png` built by `:contacts:contactSheet`, opened and judged (see
   epics.md E4.16 Evidence).
+
+# X.2 checklist record: Card Studio (round-16 step 8)
+
+The pass of `references/checklist.md` over the Card Studio sheet (`android/contacts/.../cards/CardStudioSheet.kt`,
+`CardStudioViewModel.kt`, `CardStudioEntry.kt`). Method: grep of the sources, the tests in
+`android/contacts/src/test/kotlin/dev/rosty/contacts/cards/` (`CardStudioSheetTest`, `CardStudioViewModelTest`), and the
+`x2-*` goldens in `android/contacts/screenshots/` (opened). Items: `pass`, `deviation` or `open`.
+
+## A. Licence and provenance
+- pass: Rosty code only; no Convx port in the cards package. No GPUI, no Material, no `Popup`/`Dialog`.
+
+## B. Layout
+- pass: the sheet is a `SheetEntry` (medium detent); the preview keeps its size while it renders
+  (`thePreviewBoxKeepsItsSizeWhileItRenders`), so nothing reflows when a render finishes.
+- pass: one non-wrapping colour row; Share, Save and More sit in one row above the bottom inset.
+- open (owner-visible, found in the `x2-*` goldens, not fixed in this step): the card headline is wider than the inner
+  panel ("Happy birthday, Ayse Yilmaz!" touches the card edges in `x2-share-animated-fs2-light`; the Turkish headline is
+  cut at both sides in `x2-share-still-menu-tr-light`), and the date line stays English ("October 3") under the Turkish
+  locale. The cause is the card layout/text fit, not the sheet. Round-16 step 8 lists the wrap, floor size, ellipsis and
+  locale date fix; it needs a render test with a long Turkish name and a re-record of the x2 goldens.
+
+## C. Motion
+- pass: preview changes use `Crossfade` with `RostyMotion.appear`; the Still/Animated switch and the swatches use the
+  design-system controls, so press feedback is transform/alpha only.
+- pass: the render is cancelled when the sheet closes (`closingTheSheetCancelsTheRunningRender`); taps closer than 150 ms
+  cost one render (`tapsUnder150MsApartCostOneRender`).
+
+## D. Overlays
+- pass: the sheet and its share menu are `OverlayHost` entries; back closes the sheet before the page
+  (`backClosesTheSheetBeforeThePage`); the Share toast goes through `showToast`.
+- pass: `SheetEntry(title = ...)` gives the sheet a pane title ("Make a Card") for TalkBack; the page behind is cleared
+  from semantics by the host.
+
+## E. Glass
+- pass: glass only on the sheet and the buttons; the card preview itself is a flat picture.
+
+## F. Controls, haptics, a11y
+- pass: haptics through `LocalRostyHaptics` (`reject()` when Share is refused); swatches and buttons are
+  not measured against 48 dp in a test (not checked in this pass); templates are `Role.RadioButton` with `selected`.
+- deviation: the preview's description is "Card preview" (+ "Making the card" while it renders), not the planned
+  "Birthday card for <name>". It is announced, but without the person; a follow-up should add the template and name
+  (`card_studio_preview` takes the arguments) with its Turkish string.
+- not run on a device (no device): TalkBack order should follow the layout: title, template picker, preview, colours, Still/Animated, Save, Share, More (source order, unverified).
+- n/a: no text field in the sheet (no IME handling needed).
+
+## G. Performance
+- pass: one render per settled choice; the render job runs off Main in the view model; the preview bitmap is decoded in
+  `produceState` off Main and keyed on the path; no JNI on Main.
+
+## H. Tests and evidence
+- pass: `CardStudioSheetTest` (8 tests), `CardStudioViewModelTest`, goldens `x2-*` light, dark, fs2 and tr, all opened.
+- pass (F40, this step): the `x1-wa-avatar-*` goldens use portraits drawn in code (`:testing` `portraitImage`), so the
+  WhatsApp pictures read as photos: Contacts list rows show faces next to initials-only people, the Phone incoming
+  backdrop is a blurred portrait (head, neck, shoulders, window light), not a tinted aura.

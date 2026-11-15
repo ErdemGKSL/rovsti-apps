@@ -25,15 +25,19 @@ import dev.rosty.phone.recents.RecentsItem
 import dev.rosty.phone.recents.RecentsSample
 import dev.rosty.phone.recents.RecentsStrings
 import dev.rosty.testing.ShotTest
+import dev.rosty.testing.portraitImage
 import org.junit.Test
 import org.robolectric.annotation.Config
 
 /**
  * X.1d screenshots: a WhatsApp picture on Recents rows (also strangers), as the incoming call's backdrop, and on the
- * avatar of the sheet of a number nobody saved. The pictures are the fake loader's gradients.
+ * avatar of the sheet of a number nobody saved. The pictures are portraits drawn in code ([portraitImage]).
  */
 @Config(sdk = [35])
 class X1PhoneAvatarShotTest : ShotTest() {
+    /** Every picture is a drawn head-and-shoulders portrait, one face per person (F40). */
+    override val imageProducer: (Any, Int, Int) -> android.graphics.Bitmap? = ::portraitImage
+
     private val options =
         RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0.01f))
 

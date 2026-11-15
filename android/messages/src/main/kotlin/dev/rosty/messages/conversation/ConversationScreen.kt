@@ -115,6 +115,11 @@ object ConversationTags {
     fun sender(key: String) = "sender-$key"
 }
 
+/** Test hook (E6.14): told the key of every bubble row that composes or recomposes. Null in the app. */
+internal object ConversationProbe {
+    @Volatile var onBubbleComposed: ((String) -> Unit)? = null
+}
+
 /** What a conversation page does with taps; the view model behind it (SMS or WhatsApp) answers. */
 class ConversationActions(
     val onBack: () -> Unit,
@@ -552,6 +557,7 @@ private fun BubbleRow(
     voice: VoiceUi? = null,
     speedLabel: String = "",
 ) {
+    ConversationProbe.onBubbleComposed?.invoke(bubble.key)
     val overlays = LocalOverlayOrNull.current
     val maxWidth = (LocalConfiguration.current.screenWidthDp * MessagesMetrics.BubbleMaxFraction).dp
     val (fill, ink) = bubbleColors(bubble.outgoing)

@@ -209,6 +209,10 @@ class ConversationTools(
             ?.copyText
     }
 
+    /** The files of the loaded messages that are on the phone (M48 zip), oldest first. */
+    fun mediaFiles(): List<java.io.File> =
+        ordered().flatMap { b -> b.media.mapNotNull { it.model as? java.io.File } }.distinct()
+
     /** The picture of each loaded media message by bubble key, for the gallery grid. */
     fun mediaModels(): Map<String, Any?> =
         bubbles()

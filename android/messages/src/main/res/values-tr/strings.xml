@@ -417,4 +417,5 @@
     </plurals>
     <string name="schedule_wa_failed">%1$s kişisine zamanlanan WhatsApp mesajı gönderilemedi</string>
     <string name="schedule_reopen">Aç</string>
+    <string name="tools_export_zip">Medyayla Dışa Aktar</string>
 </resources>

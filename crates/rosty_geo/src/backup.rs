@@ -159,6 +159,29 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_keeps_the_note_and_old_backups_have_none() {
+        let mut b = sample();
+        let id = b.saved.stops[0].id;
+        b.saved.set_note(id, "Back door, platform 2").unwrap();
+        let json = to_json(&b);
+        assert_eq!(json.matches("\"note\"").count(), 1);
+        let back = parse(&json).unwrap();
+        assert_eq!(back.saved.stops[0].note, "Back door, platform 2");
+        assert_eq!(back, b);
+        // A backup made before notes existed restores with empty notes.
+        let old = to_json(&sample());
+        assert!(!old.contains("\"note\""));
+        assert!(
+            parse(&old)
+                .unwrap()
+                .saved
+                .stops
+                .iter()
+                .all(|s| s.note.is_empty())
+        );
+    }
+
+    #[test]
     fn round_trip_keeps_colour() {
         let mut b = sample();
         let id = b.saved.stops[0].id;

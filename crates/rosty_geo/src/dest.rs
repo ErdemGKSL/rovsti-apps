@@ -71,6 +71,16 @@ pub fn stop_share_text(name: &str, a: Coord, b: Coord) -> String {
     }
 }
 
+/// [`stop_share_text`] with the stop's note (S44) as a last line when it has one. `parse_stop_share` reads the
+/// name and the two points back and leaves the note out.
+pub fn stop_share_text_noted(name: &str, note: &str, a: Coord, b: Coord) -> String {
+    let text = stop_share_text(name, a, b);
+    match note.trim() {
+        "" => text,
+        note => format!("{text}\n{note}"),
+    }
+}
+
 /// Reads text from `stop_share_text`: the first location link is A, the
 /// second B, and the name is the first line without a link (empty if none).
 /// Fewer than two links gives `None`.
@@ -822,5 +832,19 @@ mod tests {
         ] {
             assert!(!e.message().is_empty());
         }
+    }
+
+    #[test]
+    fn a_stop_shared_with_its_note_still_reads_back() {
+        let (a, b) = (Coord::new(41.0, 28.994), Coord::new(41.0, 29.006));
+        let plain = stop_share_text("Pier", a, b);
+        assert_eq!(stop_share_text_noted("Pier", "", a, b), plain);
+        assert_eq!(stop_share_text_noted("Pier", "   ", a, b), plain);
+        let noted = stop_share_text_noted("Pier", " Back door, platform 2 ", a, b);
+        assert_eq!(noted, format!("{plain}\nBack door, platform 2"));
+        // The name and both points come back; the note is not mistaken for the name.
+        let (name, pa, pb) = parse_stop_share(&noted).unwrap();
+        assert_eq!(name, "Pier");
+        assert!(pa.coord.distance_m(a) < 1.0 && pb.coord.distance_m(b) < 1.0);
     }
 }

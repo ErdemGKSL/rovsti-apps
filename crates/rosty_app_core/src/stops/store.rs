@@ -95,6 +95,16 @@ pub fn end_trip(dir: &Path, outcome: Outcome, now_ms: i64) -> io::Result<Option<
     Ok((!recorded).then_some(record))
 }
 
+/// Deletes `trip.json` without recording anything: a trip that never ran (Android refused to start the service).
+/// Returns whether a file was there. Hold [`lock`] around it, like every other change of the file.
+pub fn clear_trip(dir: &Path) -> io::Result<bool> {
+    match std::fs::remove_file(dir.join(TRIP_FILE)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// Helpers for the tests of this crate and of the apps that re-export it.
 #[allow(clippy::unwrap_used)]
 #[doc(hidden)]
@@ -158,6 +168,33 @@ mod tests {
         assert!(load_trip(&dir).is_none());
         let history: History = storage::load_json(&dir, HISTORY_FILE).unwrap();
         assert_eq!(history.records.len(), 1);
+    }
+
+    #[test]
+    fn clearing_a_trip_removes_the_file_and_records_nothing() {
+        let dir = tmp("store-clear");
+        // Nothing there, and not even a directory: both are "no trip", not an error.
+        assert!(!clear_trip(&dir).unwrap());
+        assert!(!clear_trip(&dir.join("never-made")).unwrap());
+        save_trip(&dir, &trip(4)).unwrap();
+        assert!(clear_trip(&dir).unwrap());
+        assert!(load_trip(&dir).is_none());
+        assert!(!dir.join(TRIP_FILE).exists());
+        // Unlike `end_trip` it leaves the history alone.
+        assert!(storage::load_json::<History>(&dir, HISTORY_FILE).is_none());
+        // Again, and again: still fine.
+        assert!(!clear_trip(&dir).unwrap());
+        // The id is free for a real trip later, which is then recorded as usual.
+        save_trip(&dir, &trip(4)).unwrap();
+        assert!(end_trip(&dir, Outcome::Arrived, 9).unwrap().is_some());
+    }
+
+    #[test]
+    fn clearing_does_not_touch_a_trip_file_that_is_a_directory() {
+        let dir = tmp("store-clear-dir");
+        std::fs::create_dir_all(dir.join(TRIP_FILE)).unwrap();
+        assert!(clear_trip(&dir).is_err());
+        assert!(dir.join(TRIP_FILE).is_dir());
     }
 
     #[test]

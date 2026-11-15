@@ -77,6 +77,16 @@ class E79ShotTest : ShotTest() {
         toolShot("e7.9-measure-two-legs-tr") { measureThreePoints("Mesafe ölç") }
     }
 
+    @Test fun measureLargeText() = toolShot("e7.9-measure-two-legs-fs2", fontScale = 2f) { measureThreePoints() }
+
+    @Test fun myLocationLargeText() =
+        toolShot("e7.9-my-location-sheet-fs2", fontScale = 2f) {
+            compose
+                .onNodeWithTag(HomeTags.Locate, useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.OnLongClick)
+            settleRust()
+        }
+
     @Test fun measureMoreMenu() =
         toolShot("e7.9-measure-more-menu") {
             measureThreePoints()

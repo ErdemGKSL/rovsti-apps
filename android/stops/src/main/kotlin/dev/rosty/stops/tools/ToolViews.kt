@@ -1,19 +1,24 @@
 package dev.rosty.stops.tools
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -25,6 +30,7 @@ import dev.rosty.design.glass.GlassPreset
 import dev.rosty.design.glass.rostyGlass
 import dev.rosty.design.list.InsetGroupedSection
 import dev.rosty.design.list.ListRow
+import dev.rosty.design.motion.RostyMotion
 import dev.rosty.design.overlay.ButtonMenuEntry
 import dev.rosty.design.overlay.Detent
 import dev.rosty.design.overlay.LocalOverlay
@@ -81,10 +87,20 @@ fun MeasureCard(
     val result = state.result
     // Written on placement, read on the tap (not state: a move must not recompose the card).
     val moreAnchor = remember { arrayOf(Rect.Zero) }
+    // It comes in like the other floating chrome: a critically damped fade and a slight grow from the pill above
+    // (no overshoot, so nothing to gate for reduce motion); read in the layer, not in composition.
+    val shown = remember { Animatable(0f) }
+    LaunchedEffect(shown) { shown.animateTo(1f, RostyMotion.appear(APPEAR_THRESHOLD)) }
     Column(
         modifier
             .fillMaxWidth()
-            .rostyGlass(GlassPreset.Bar, RostyShapes.card, "stops.measure")
+            .graphicsLayer {
+                val t = shown.value
+                alpha = t
+                scaleX = APPEAR_FROM + (1f - APPEAR_FROM) * t
+                scaleY = scaleX
+                transformOrigin = TransformOrigin(0.5f, 0f)
+            }.rostyGlass(GlassPreset.Bar, RostyShapes.card, "stops.measure")
             .padding(Spacing.m)
             .testTag(ToolTags.MeasureCard),
         verticalArrangement = Arrangement.spacedBy(Spacing.s),
@@ -104,36 +120,44 @@ fun MeasureCard(
                 Modifier.testTag(ToolTags.MeasureDone),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        // Equal thirds; with large text each keeps its own width, one under the other, instead of cutting labels.
+        val large = LocalDensity.current.fontScale >= LARGE_FONT_SCALE
+        val more = {
+            result?.let {
+                overlays.present(
+                    ButtonMenuEntry(moreAnchor[0], tools.moreItems(summary, it).toImmutableList()),
+                )
+            }
+        }
+        val buttons: @Composable (Modifier) -> Unit = { share ->
             CapsuleButton(
                 stringResource(R.string.measure_undo_last),
                 tools.measure::undo,
-                Modifier.weight(1f).testTag(ToolTags.MeasureUndo),
+                share.testTag(ToolTags.MeasureUndo),
                 enabled = state.points.isNotEmpty(),
-                fillWidth = true,
+                fillWidth = !large,
             )
             CapsuleButton(
                 stringResource(R.string.measure_clear),
                 tools::clearMeasure,
-                Modifier.weight(1f).testTag(ToolTags.MeasureClear),
+                share.testTag(ToolTags.MeasureClear),
                 enabled = state.points.isNotEmpty(),
-                fillWidth = true,
+                fillWidth = !large,
             )
             CapsuleButton(
                 stringResource(R.string.measure_more),
-                {
-                    result?.let {
-                        val items = tools.moreItems(summary, it).toImmutableList()
-                        overlays.present(ButtonMenuEntry(moreAnchor[0], items))
-                    }
-                },
-                Modifier
-                    .weight(1f)
+                { more() },
+                share
                     .onGloballyPositioned { moreAnchor[0] = it.boundsInWindow() }
                     .testTag(ToolTags.MeasureMore),
                 enabled = result != null,
-                fillWidth = true,
+                fillWidth = !large,
             )
+        }
+        if (large) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) { buttons(Modifier) }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) { buttons(Modifier.weight(1f)) }
         }
     }
 }
@@ -221,3 +245,11 @@ fun OverlayController.presentMyLocationSheet(
             }
         }
     }.also { present(it) }
+
+/** From this font scale the measure card's buttons keep their own widths, one under the other. */
+private const val LARGE_FONT_SCALE = 1.5f
+
+/** The card grows from this scale as it appears. */
+private const val APPEAR_FROM = 0.96f
+
+private const val APPEAR_THRESHOLD = 0.001f

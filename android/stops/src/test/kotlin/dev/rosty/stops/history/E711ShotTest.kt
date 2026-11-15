@@ -45,12 +45,13 @@ class E711ShotTest : ShotTest() {
     private fun historyShot(
         name: String,
         large: Boolean = true,
+        fontScale: Float = 1f,
         then: () -> Unit = {},
     ) {
         for (dark in listOf(false, true)) {
             compose.runOnUiThread { compose.activity.viewModelStore.clear() }
             val fixture = HistoryFixtures.app()
-            composeFrame(dark = dark) { fixture.Content() }
+            composeFrame(dark = dark, fontScale = fontScale) { fixture.Content() }
             settleRust()
             compose
                 .onNodeWithTag(HomeSheetTags.HistoryRow, useUnmergedTree = true)
@@ -68,6 +69,18 @@ class E711ShotTest : ShotTest() {
     @Test fun history() = historyShot("e7.11-history", large = false)
 
     @Test fun historyStats() = historyShot("e7.11-history-stats")
+
+    @Test fun historyLargeText() =
+        historyShot("e7.11-history-fs2", fontScale = 2f) {
+            compose
+                .onNodeWithTag(
+                    HistoryTags.List,
+                    useUnmergedTree = true,
+                ).performSemanticsAction(SemanticsActions.ScrollBy) {
+                    it(0f, 2600f)
+                }
+            settleRust(800)
+        }
 
     @Test fun historyTurkish() {
         RuntimeEnvironment.setQualifiers("+tr")

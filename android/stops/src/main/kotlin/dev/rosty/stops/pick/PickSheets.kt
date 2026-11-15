@@ -20,6 +20,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -127,21 +128,41 @@ private fun ColumnScope.PickBody(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter, vertical = Spacing.s),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-        ) {
-            SearchField(
-                text,
-                Modifier.weight(1f).testTag(PickTags.Field),
-                placeholder = stringResource(R.string.pick_field),
-            )
+        // Large text: the field takes the whole width (its hint would be cut to two words) and Paste goes under it.
+        val stacked = LocalDensity.current.fontScale >= STACK_FONT_SCALE
+        val paste: @Composable (Modifier) -> Unit = { modifier ->
             CapsuleButton(
                 stringResource(R.string.pick_paste),
                 { viewModel.onAction(PickAction.Paste(clipboard())) },
-                Modifier.testTag(PickTags.Paste),
+                modifier.testTag(PickTags.Paste),
             )
+        }
+        if (stacked) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter, vertical = Spacing.s),
+                verticalArrangement = Arrangement.spacedBy(Spacing.s),
+                horizontalAlignment = Alignment.End,
+            ) {
+                SearchField(
+                    text,
+                    Modifier.fillMaxWidth().testTag(PickTags.Field),
+                    placeholder = stringResource(R.string.pick_field),
+                )
+                paste(Modifier)
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter, vertical = Spacing.s),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+            ) {
+                SearchField(
+                    text,
+                    Modifier.weight(1f).testTag(PickTags.Field),
+                    placeholder = stringResource(R.string.pick_field),
+                )
+                paste(Modifier)
+            }
         }
         LazyColumn(
             Modifier
@@ -417,3 +438,6 @@ fun OverlayController.presentCopyAsSheet(
             }
         }
     }.also { present(it) }
+
+/** From this font scale the pick field and Paste stack. */
+private const val STACK_FONT_SCALE = 1.5f

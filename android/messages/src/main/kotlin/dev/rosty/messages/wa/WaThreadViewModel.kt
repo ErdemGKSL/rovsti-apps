@@ -360,7 +360,8 @@ class WaThreadViewModel(
         ui.value =
             ui.value.copy(
                 title = title,
-                subtitle = typing ?: number?.takeIf { !group && it != title },
+                // The number as people read it (`+90 555 000 00 01`), as on the SMS header.
+                subtitle = typing ?: number?.let { sources.readable(it) }?.takeIf { !group && it != title },
                 avatar =
                     RowAvatar(
                         numbers = listOfNotNull(number).toImmutableList(),
@@ -399,7 +400,7 @@ class WaThreadViewModel(
         return number?.let { nameOf(it) }
             ?: stored
             ?: chat?.pushName?.takeIf { it.isNotBlank() }
-            ?: number
+            ?: number?.let { sources.readable(it) }
             ?: jid.substringBefore('@')
     }
 

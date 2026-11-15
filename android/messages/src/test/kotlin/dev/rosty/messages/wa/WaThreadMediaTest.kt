@@ -136,6 +136,17 @@ class WaThreadMediaTest {
 
     // ---- replies (M31)
 
+    @Test fun theHeaderShowsTheNumberAsPeopleReadIt() =
+        scope.runTest {
+            val (kit, _) = WaTestKit.withMedia(backgroundScope)
+            kit.chat(ADA, name = "Ada")
+            kit.message(WaTestKit.text(ADA, "m1", NOW - 10 * minute, "Hi"))
+            val model = model(kit)
+            settle()
+            assertEquals("Ada Lovelace", model.state.value.title)
+            assertEquals("+90 555 0000001", model.state.value.subtitle)
+        }
+
     @Test fun aSwipeQuotesTheMessageAndTheReplyCarriesIt() =
         scope.runTest {
             val (kit, _) = WaTestKit.withMedia(backgroundScope)

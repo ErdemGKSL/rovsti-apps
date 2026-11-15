@@ -31,7 +31,7 @@ enum class MuteFor(
 }
 
 /** The bulk actions of select mode (GPUI `inbox_bulk::actions`). */
-enum class BulkKind { MarkRead, MarkUnread, Mute, Unmute, Pin, Unpin, Archive, Unarchive, Delete }
+enum class BulkKind { MarkRead, MarkUnread, Mute, Unmute, Pin, Unpin, Archive, Unarchive, Delete, NotSpam }
 
 @Immutable
 data class SelectUi(
@@ -137,6 +137,22 @@ sealed interface InboxAction {
 
     data class Delete(
         val key: String,
+    ) : InboxAction
+
+    /** The row's sender joins the allow list, so it leaves the Spam folder (E6.11). */
+    data class NotSpam(
+        val key: String,
+    ) : InboxAction
+
+    /** A sender rule for the row's sender, so it moves into the Spam folder (E6.11). */
+    data class MoveToSpam(
+        val key: String,
+    ) : InboxAction
+
+    /** Puts the row's sender on the system blocklist, or takes it off. */
+    data class Block(
+        val key: String,
+        val blocked: Boolean,
     ) : InboxAction
 
     data object MarkAllRead : InboxAction

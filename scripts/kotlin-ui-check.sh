@@ -62,8 +62,11 @@ if [[ -z "${SKIP_GRADLE:-}" ]]; then
     # :phone has product flavors (plain, firebase): its tasks carry the flavor, and the firebase flavor's own tests run too.
     phone_shot="${shot/Release/PlainRelease}"
     # :phone has no plain testReleaseUnitTest (flavors): :phone:testPlainReleaseUnitTest is named explicitly.
-    step "gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :core-bridge:testRustBridge assembleRelease $shot :phone:$phone_shot" \
-      gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :core-bridge:testRustBridge assembleRelease "$shot" ":phone:$phone_shot"
+    # :messages has the same flavors: its tests, lint and shots are named the same way.
+    step "gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest :messages:testPlainReleaseUnitTest :messages:testFirebaseReleaseUnitTest :messages:lintPlainRelease :core-bridge:testRustBridge assembleRelease $shot :phone:$phone_shot :messages:$phone_shot" \
+      gradle spotlessCheck lintRelease testReleaseUnitTest :phone:testPlainReleaseUnitTest :phone:testFirebaseReleaseUnitTest \
+      :messages:testPlainReleaseUnitTest :messages:testFirebaseReleaseUnitTest :messages:lintPlainRelease \
+      :core-bridge:testRustBridge assembleRelease "$shot" ":phone:$phone_shot" ":messages:$phone_shot"
     step "release APKs have librosty_ffi.so (arm64-v8a) with the JNI exports" bash scripts/check-catalog-apk.sh
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck

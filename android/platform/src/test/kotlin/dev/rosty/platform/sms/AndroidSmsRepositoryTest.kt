@@ -293,6 +293,26 @@ class AndroidSmsRepositoryTest {
             val page = repo.messages(1, null, 5)
             assertTrue(page.sms.isEmpty() && page.mms.isEmpty() && !page.hasOlder)
             assertTrue(repo.search("%x%").sms.isEmpty())
+            assertTrue(repo.backupSms().toList().isEmpty())
+            mms.failWith = SecurityException("no")
+            assertTrue(repo.backupMms().toList().isEmpty())
+        }
+
+    @Test fun backupPagesAskForTheNextKeyAfterAFullPage() =
+        runTest(UnconfinedTestDispatcher()) {
+            sms.respond(Telephony.Sms.CONTENT_URI) { call ->
+                if (call.args == null) {
+                    listOf(smsRow(9, 1, "111", "b", 2_000), smsRow(8, 1, "111", "a", 2_000))
+                } else {
+                    emptyList()
+                }
+            }
+            val pages = repo(UnconfinedTestDispatcher(testScheduler)).backupSms(pageSize = 2).toList()
+            assertEquals(listOf(listOf(9L, 8L)), pages.map { page -> page.map { it.id } })
+            val next = sms.queriesTo(Telephony.Sms.CONTENT_URI).last()
+            assertEquals("(date < ? OR (date = ? AND _id < ?))", next.selection)
+            assertEquals(listOf("2000", "2000", "8"), next.args)
+            assertEquals("date DESC, _id DESC LIMIT 2", next.sortOrder)
         }
 
     @Test fun searchEscapesWithTheGivenPattern() =

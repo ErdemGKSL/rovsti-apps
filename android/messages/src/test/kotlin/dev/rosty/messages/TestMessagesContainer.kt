@@ -25,6 +25,9 @@ open class TestMessagesContainer(
 
     override fun createRust(): RustCore = fakeRust
 
+    // The eager start runs on a pool thread and could outlive the test (it once failed MessageAnnouncerTest).
+    override fun startsDevLogAtCreate(): Boolean = false
+
     override fun createSms(): SmsRepository = fakeSms
 
     override fun createContacts(): ContactsRepository = FakeContactsRepository()

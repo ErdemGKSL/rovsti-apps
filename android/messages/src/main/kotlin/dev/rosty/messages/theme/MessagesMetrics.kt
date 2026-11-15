@@ -15,7 +15,7 @@ object MessagesMetrics {
     val FolderGlyph = 18.dp
     val BubbleMaxFraction = 0.78f
     val BubbleCorner = 18.dp
-    val BubbleTail = 6.dp
+    val BubbleTail = 12.dp
     val BubblePadH = 12.dp
     val BubblePadV = 7.dp
     val BubbleGap = 2.dp
@@ -29,4 +29,10 @@ object MessagesMetrics {
     /** The gallery grid: hairline gaps, slightly rounded thumbnails. */
     val GalleryGap = 2.dp
     val GalleryCorner = 4.dp
+
+    /** The check circle of a bubble in select mode (M20). */
+    val SelectCircle = 22.dp
+
+    /** The avatar on a shared contact card (M26). */
+    val CardAvatar = 72.dp
 }

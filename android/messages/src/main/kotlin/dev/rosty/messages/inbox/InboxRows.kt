@@ -66,9 +66,25 @@ data class InboxRowUi(
     /** The passcode of an unread incoming message, for the "Copy code" chip. */
     val otp: String? = null,
     val contactId: Long? = null,
+    /** The row sits in the Spam folder (AD-MSG8). */
+    val inSpam: Boolean = false,
+    /** The one sender of the SMS thread is on the system blocklist. */
+    val blocked: Boolean = false,
 ) {
     val isUnread: Boolean get() = unread > 0 || markedUnread
+
+    /** GPUI `SmsActionContext::can_be_spam`: a one-to-one SMS-only row of a stranger, not in Spam yet. */
+    val canMoveToSpam: Boolean
+        get() = !inSpam && smsSender != null && contactId == null && channels == listOf(Channel.Sms)
+
+    /** Block and Unblock need a sender that is a phone number (not an id like `GARANTI`). */
+    val senderIsNumber: Boolean
+        get() =
+            smsSender?.let { s -> s.any(Char::isDigit) && s.all { it.isDigit() || it in NUMBER_PUNCTUATION } } ==
+                true
 }
+
+private const val NUMBER_PUNCTUATION = "+ -()."
 
 /** The inbox split as the GPUI app showed it: the normal rows (pins first), the archived ones and the spam. */
 @Immutable
@@ -94,6 +110,8 @@ data class InboxInputs(
     val drafts: Map<String, String> = emptyMap(),
     /** SMS threads judged spam (only one-to-one SMS-only rows can be, AD-MSG8). */
     val spamThreads: Set<Long> = emptySet(),
+    /** One-to-one SMS threads whose sender is on the system blocklist. */
+    val blockedThreads: Set<Long> = emptySet(),
     val otps: Map<String, String> = emptyMap(),
     val nowMs: Long = 0,
 )
@@ -118,7 +136,7 @@ class InboxBuilder(
         return InboxView(
             rows = pinsFirst(normal).toImmutableList(),
             archived = archived.toImmutableList(),
-            spam = spamKeys.toImmutableList(),
+            spam = spamKeys.map { it.copy(inSpam = true) }.toImmutableList(),
         )
     }
 
@@ -194,6 +212,7 @@ class InboxBuilder(
             tick = if (latest == Channel.WhatsApp && chat?.last?.fromMe == true) tickOf(chat.lastMeta) else null,
             otp = inputs.otps[key],
             contactId = contactId,
+            blocked = sms != null && sms in inputs.blockedThreads,
         )
     }
 

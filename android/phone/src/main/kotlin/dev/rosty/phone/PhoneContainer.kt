@@ -29,6 +29,7 @@ import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
 import dev.rosty.people.AvatarResolver
+import dev.rosty.people.LiveWaNames
 import dev.rosty.people.PeopleIdentitySource
 import dev.rosty.people.PeopleSource
 import dev.rosty.people.PeopleSources
@@ -393,8 +394,31 @@ open class PhoneContainer(
      */
     fun identifyBlocking(number: String): CallerIdentity? {
         val ids = callerIds
-        if (!ids.ready) return ContactsQuery.identity(context, number, homeRegion)
-        return runBlocking { ids.resolve(number) }
+        val who =
+            if (ids.ready) {
+                runBlocking { ids.resolve(number) }
+            } else {
+                // Cold process: Android's PhoneLookup for the contact, then the WhatsApp names already in memory.
+                val contact = ContactsQuery.identity(context, number, homeRegion)
+                val wa =
+                    runBlocking {
+                        PeopleIdentitySource(peopleIndex).lookup(listOf(number))[number]
+                            ?: liveWaNames.lookup(listOf(number))[number]
+                    }
+                if (contact != null && wa != null) contact.orElse(wa) else contact ?: wa
+            }
+        // Nobody owns the number: show it now and ask WhatsApp; a name found re-names the call in place.
+        if (who?.title == null) liveWaNames.ask(number)
+        return who
+    }
+
+    /** WhatsApp names asked on demand for numbers no contact or cached person covers (contact, WhatsApp, number). */
+    val liveWaNames: LiveWaNames by lazy {
+        LiveWaNames(
+            gateway = { wa.gateway() },
+            e164 = { PhoneNumbers.e164(it, homeRegion) },
+            scope = scope,
+        )
     }
 
     /** Changes whenever [callerIds] may answer differently (the contacts changed). */
@@ -755,6 +779,8 @@ open class PhoneContainer(
                 ),
                 // WhatsApp names and pictures from the people cache: they only add what a contact lacks (X.1d).
                 PeopleIdentitySource(peopleIndex),
+                // Names asked from WhatsApp for an unknown caller; last, so a contact or cached name always wins.
+                liveWaNames,
             ),
         )
 

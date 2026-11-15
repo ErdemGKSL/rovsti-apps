@@ -573,6 +573,8 @@ Pipeline:
 
 Fallback: if E7.13's device check shows the renderer misses the frame budget, MapLibre is re-evaluated as a
 separate decision; the floating-chrome layout does not change.
+The device check is in [acceptance.md](acceptance.md) (Stops, "The map at 120 Hz"); the record that opens if it fails,
+with the host numbers of R1, is [decisions/stops-map-renderer.md](decisions/stops-map-renderer.md).
 
 ## 9. Visual verification (no device)
 

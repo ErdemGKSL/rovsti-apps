@@ -1,5 +1,6 @@
 package dev.rosty.messages.conversation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -58,10 +60,8 @@ import dev.rosty.design.controls.GlassIconButton
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.media.SizedImage
-import dev.rosty.design.overlay.ContextMenuStyle
 import dev.rosty.design.overlay.LocalOverlayOrNull
 import dev.rosty.design.overlay.MenuItem
-import dev.rosty.design.overlay.longPressMenu
 import dev.rosty.design.overlay.menuTrigger
 import dev.rosty.design.text.ComposerField
 import dev.rosty.design.text.SearchField
@@ -90,6 +90,12 @@ object ConversationTags {
     const val Find = "conversation-find"
     const val FindLabel = "conversation-find-label"
     const val JumpLatest = "conversation-jump-latest"
+    const val Lifted = "bubble-lifted"
+    const val BubblePanel = "bubble-panel"
+    const val Pills = "bubble-pills"
+    const val SelectBar = "conversation-select-bar"
+    const val SelectText = "conversation-select-text"
+    const val Info = "conversation-info"
 
     fun bubble(key: String) = "bubble-$key"
 }
@@ -110,6 +116,15 @@ class ConversationActions(
     val onFindNewer: () -> Unit = {},
     val onFindClose: () -> Unit = {},
     val onScrolled: () -> Unit = {},
+    /** E6.5: the reaction row of a bubble's menu (empty: no row) and what a tap on one does. */
+    val reactionsFor: (BubbleUi) -> List<String> = { emptyList() },
+    val onReact: (BubbleUi, String) -> Unit = { _, _ -> },
+    /** E6.5: the detection pills of a bubble (null: none) and what a tap on one does. */
+    val pillsFor: (suspend (BubbleUi) -> List<PillUi>)? = null,
+    val onPill: (PillUi) -> Unit = {},
+    /** M20 select mode: a tap on a bubble adds or removes it; the bar's buttons. */
+    val onToggleSelect: (String) -> Unit = {},
+    val onSelectAction: (SelectAction) -> Unit = {},
 )
 
 /** The labels of the tools on a conversation page. */
@@ -140,8 +155,10 @@ fun ConversationScreen(
     olderLabel: String,
     tools: ToolsUi = ToolsUi(),
     labels: ToolLabels? = null,
+    selectLabels: SelectLabels? = null,
 ) {
     val overlays = LocalOverlayOrNull.current
+    BackHandler(enabled = tools.selected != null) { actions.onSelectAction(SelectAction.Cancel) }
     // Find, jump to date: scroll the target into view once, then let the tools know.
     LaunchedEffect(tools.scrollTo) {
         val target = tools.scrollTo ?: return@LaunchedEffect
@@ -212,6 +229,7 @@ fun ConversationScreen(
                                     actions,
                                     glow =
                                         item.key == tools.highlight,
+                                    selected = tools.selected,
                                 )
                             }
                         }
@@ -260,57 +278,62 @@ fun ConversationScreen(
                     )
                 }
             }
-            when (val mode = state.composer) {
-                is ComposerMode.Ready -> {
-                    if (mode.simLabel != null || mode.counter != null) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-                        ) {
-                            mode.simLabel?.let {
-                                CapsuleButton(
-                                    it,
-                                    onClick = actions.onSim,
-                                    modifier = Modifier.testTag(ConversationTags.Sim),
-                                    icon = RostyIcons.Sim,
-                                )
-                            }
-                            Box(Modifier.weight(1f))
-                            mode.counter?.let {
-                                RostyText(
-                                    it,
-                                    modifier = Modifier.testTag(ConversationTags.Counter),
-                                    style = RostyTheme.type.caption1,
-                                    color = RostyTheme.colors.labelSecondary,
-                                )
+            val chosen = tools.selected
+            if (chosen != null && selectLabels != null) {
+                SelectBar(chosen.size, selectLabels, actions.onSelectAction)
+            } else {
+                when (val mode = state.composer) {
+                    is ComposerMode.Ready -> {
+                        if (mode.simLabel != null || mode.counter != null) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                            ) {
+                                mode.simLabel?.let {
+                                    CapsuleButton(
+                                        it,
+                                        onClick = actions.onSim,
+                                        modifier = Modifier.testTag(ConversationTags.Sim),
+                                        icon = RostyIcons.Sim,
+                                    )
+                                }
+                                Box(Modifier.weight(1f))
+                                mode.counter?.let {
+                                    RostyText(
+                                        it,
+                                        modifier = Modifier.testTag(ConversationTags.Counter),
+                                        style = RostyTheme.type.caption1,
+                                        color = RostyTheme.colors.labelSecondary,
+                                    )
+                                }
                             }
                         }
+                        ComposerField(
+                            state = composer,
+                            onSend = actions.onSend,
+                            fieldModifier = Modifier.testTag(ConversationTags.Composer),
+                            placeholder = mode.placeholder,
+                            sendLabel = sendLabel,
+                        )
                     }
-                    ComposerField(
-                        state = composer,
-                        onSend = actions.onSend,
-                        fieldModifier = Modifier.testTag(ConversationTags.Composer),
-                        placeholder = mode.placeholder,
-                        sendLabel = sendLabel,
-                    )
-                }
 
-                ComposerMode.NeedsRole -> {
-                    DefaultSmsCard(
-                        onResult = actions.onRoleResult,
-                        Modifier.navigationBarsPadding().padding(bottom = Spacing.s),
-                    )
-                }
+                    ComposerMode.NeedsRole -> {
+                        DefaultSmsCard(
+                            onResult = actions.onRoleResult,
+                            Modifier.navigationBarsPadding().padding(bottom = Spacing.s),
+                        )
+                    }
 
-                is ComposerMode.ReadOnly -> {
-                    RostyText(
-                        mode.reason,
-                        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(Spacing.l),
-                        style = RostyTheme.type.footnote,
-                        color = RostyTheme.colors.labelSecondary,
-                        textAlign = TextAlign.Center,
-                    )
+                    is ComposerMode.ReadOnly -> {
+                        RostyText(
+                            mode.reason,
+                            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(Spacing.l),
+                            style = RostyTheme.type.footnote,
+                            color = RostyTheme.colors.labelSecondary,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         }
@@ -424,6 +447,7 @@ private fun BubbleRow(
     bubble: BubbleUi,
     actions: ConversationActions,
     glow: Boolean = false,
+    selected: ImmutableList<String>? = null,
 ) {
     val overlays = LocalOverlayOrNull.current
     val maxWidth = (LocalConfiguration.current.screenWidthDp * MessagesMetrics.BubbleMaxFraction).dp
@@ -449,26 +473,41 @@ private fun BubbleRow(
                 maxLines = 1,
             )
         }
+        val reactions = remember(bubble, actions) { actions.reactionsFor(bubble) }
         val press =
-            if (overlays != null && menu.isNotEmpty()) {
-                Modifier.longPressMenu(
-                    overlays,
-                    menu,
-                    ContextMenuStyle.Lifted(preview = {
-                        BubbleBody(bubble, fill, ink, maxWidth)
-                    }),
-                    onTap = tap,
-                )
-            } else {
-                Modifier.clickable(onClick = tap)
+            when {
+                selected != null -> {
+                    Modifier.clickable { actions.onToggleSelect(bubble.key) }
+                }
+
+                overlays != null && menu.isNotEmpty() -> {
+                    Modifier.bubbleMenu(
+                        overlays,
+                        menu,
+                        reactions,
+                        onReact = { actions.onReact(bubble, it) },
+                        onTap = tap,
+                    ) { BubbleBody(bubble, fill, ink, maxWidth) }
+                }
+
+                else -> {
+                    Modifier.clickable(onClick = tap)
+                }
             }
         val glowAlpha by animateFloatAsState(if (glow) GLOW_ALPHA else 0f, label = "glow")
-        Box(
-            press
-                .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
-                .drawBehind { drawRect(GlowColor.copy(alpha = glowAlpha)) }
-                .padding(MessagesMetrics.GlowPad),
-        ) { BubbleBody(bubble, fill, ink, maxWidth) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (selected != null) SelectCircle(bubble.key in selected)
+            Box(
+                press
+                    .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
+                    .drawBehind { drawRect(GlowColor.copy(alpha = glowAlpha)) }
+                    .padding(MessagesMetrics.GlowPad),
+            ) { BubbleBody(bubble, fill, ink, maxWidth) }
+        }
+        actions.pillsFor?.let { detect ->
+            val pills by produceState(emptyList<PillUi>(), bubble.key, bubble.text) { value = detect(bubble) }
+            if (selected == null) PillsRow(pills, bubble.outgoing, actions.onPill)
+        }
         bubble.reactions?.let {
             RostyText(
                 it,

@@ -29,4 +29,7 @@ object MessagesMetrics {
     /** The gallery grid: hairline gaps, slightly rounded thumbnails. */
     val GalleryGap = 2.dp
     val GalleryCorner = 4.dp
+
+    /** The check circle of a bubble in select mode (M20). */
+    val SelectCircle = 22.dp
 }

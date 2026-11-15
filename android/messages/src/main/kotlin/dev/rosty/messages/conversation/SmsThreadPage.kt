@@ -44,6 +44,7 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import java.time.ZoneId
 
 /** [SmsWords] from the app's resources. */
@@ -95,12 +96,23 @@ fun rememberDayLabels(): DayLabels {
     }
 }
 
-/** The bubble menu of an SMS (E6.3; the full menu with reactions is E6.5): failed ones retry, copy or delete. */
+/** What the SMS bubble menu does besides the view model's own actions (E6.5). */
+class SmsMenuHooks(
+    val onForward: (BubbleUi) -> Unit = {},
+    val onSelectText: (BubbleUi) -> Unit = {},
+    val onSelect: (BubbleUi) -> Unit = {},
+    val onInfo: (BubbleUi) -> Unit = {},
+)
+
+/**
+ * The bubble menu of an SMS (E6.3, E6.5): Retry for a failed one, Copy, Select Text (M16), Forward (M9), Select (M20),
+ * Info (M14), then Delete.
+ */
 fun smsBubbleMenu(
     bubble: BubbleUi,
     res: Resources,
     model: SmsThreadViewModel,
-    onForward: (BubbleUi) -> Unit = {},
+    hooks: SmsMenuHooks = SmsMenuHooks(),
 ): ImmutableList<MenuItem> {
     val items = ArrayList<MenuItem>()
     if (bubble.state == BubbleState.Failed) {
@@ -108,8 +120,16 @@ fun smsBubbleMenu(
     }
     items += MenuItem.Action(res.getString(R.string.conversation_copy), RostyIcons.Copy) { model.copy(bubble.key) }
     if (bubble.text.isNotBlank()) {
-        items += MenuItem.Action(res.getString(R.string.conversation_forward), RostyIcons.Forward) { onForward(bubble) }
+        items +=
+            MenuItem.Action(res.getString(R.string.menu_select_text), RostyIcons.Pencil) { hooks.onSelectText(bubble) }
+        items +=
+            MenuItem.Action(
+                res.getString(R.string.conversation_forward),
+                RostyIcons.Forward,
+            ) { hooks.onForward(bubble) }
     }
+    items += MenuItem.Action(res.getString(R.string.menu_select), RostyIcons.CircleCheck) { hooks.onSelect(bubble) }
+    items += MenuItem.Action(res.getString(R.string.menu_info), RostyIcons.Info) { hooks.onInfo(bubble) }
     items += MenuItem.Separator
     items +=
         MenuItem.Action(res.getString(R.string.inbox_delete), RostyIcons.Trash, destructive = true) {
@@ -179,6 +199,23 @@ fun SmsThreadPage(
     val forward: (BubbleUi) -> Unit = { bubble ->
         overlays.presentForward(context, inbox.state.value.rows, model.tag, bubble.text, onOpen)
     }
+    val hooks =
+        remember(model, host) {
+            SmsMenuHooks(
+                onForward = forward,
+                onSelectText = { overlays.presentSelectText(context, it.text) },
+                onSelect = { host.tools.enterSelect(it.key) },
+                onInfo = { b ->
+                    val mms = b.key.startsWith("mms:")
+                    overlays.presentInfo(
+                        context,
+                        infoRows(res, b, res.getString(if (mms) R.string.info_mms else R.string.inbox_chip_sms)),
+                    )
+                },
+            )
+        }
+    val detector = rememberDetector(container)
+    val selectLabels = rememberSelectLabels()
     val labels = rememberToolLabels()
     val actions =
         remember(model, res, onBack, overlays, host, state.title) {
@@ -207,7 +244,64 @@ fun SmsThreadPage(
                         }
                     }
                 },
-                menuFor = { smsBubbleMenu(it, res, model, forward) },
+                menuFor = { smsBubbleMenu(it, res, model, hooks) },
+                pillsFor = detector::pills,
+                onPill = { pill ->
+                    handlePill(
+                        context,
+                        pill,
+                        overlays,
+                    ) { text, sensitive -> container.clipboard.copy(text, sensitive = sensitive) }
+                },
+                onToggleSelect = host.tools::toggleSelect,
+                onSelectAction = { action ->
+                    val chosen =
+                        host.tools.state.value.selected
+                            .orEmpty()
+                    when (action) {
+                        SelectAction.Copy -> {
+                            container.scope.launch {
+                                host.tools
+                                    .selectionText(
+                                        model.state.value.title,
+                                        res.getString(R.string.tools_me),
+                                    )?.let(host.copy)
+                                host.tools.exitSelect()
+                            }
+                        }
+
+                        SelectAction.Forward -> {
+                            container.scope.launch {
+                                val text =
+                                    host.tools.selectionText(
+                                        model.state.value.title,
+                                        res.getString(R.string.tools_me),
+                                    )
+                                host.tools.exitSelect()
+                                if (text !=
+                                    null
+                                ) {
+                                    overlays.presentForward(
+                                        context,
+                                        inbox.state.value.rows,
+                                        model.tag,
+                                        text,
+                                        onOpen,
+                                    )
+                                }
+                            }
+                        }
+
+                        SelectAction.Delete -> {
+                            model.deleteAll(chosen)
+                            host.tools.exitSelect()
+                        }
+
+                        SelectAction.Cancel -> {
+                            host.tools.exitSelect()
+                        }
+                    }
+                },
                 onSim = model::nextSim,
                 headerMenu =
                     headerMenu(
@@ -244,6 +338,7 @@ fun SmsThreadPage(
                 ),
             tools = toolsState,
             labels = labels,
+            selectLabels = selectLabels,
         )
     }
 }

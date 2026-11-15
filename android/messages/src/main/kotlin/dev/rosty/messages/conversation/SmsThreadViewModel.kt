@@ -476,6 +476,33 @@ class SmsThreadViewModel(
         }
     }
 
+    /** Deletes the messages of [keys] (select mode, M20) behind one Undo; needs the role. */
+    fun deleteAll(keys: List<String>) {
+        val providers = keys.mapNotNull { k -> items.firstOrNull { keyOf(it.key) == k }?.let(::providerKey) }
+        if (providers.isEmpty()) return
+        if (!sources.roleHeld.value) {
+            effectChannel.trySend(ConversationEffect.NeedsRole)
+            return
+        }
+        viewModelScope.launch {
+            for (p in providers) pending("add", p)?.let { pendingDeletes = it.pending }
+            rebuild()
+            effectChannel.trySend(
+                ConversationEffect.Undo(
+                    UiText.Res(R.string.sms_messages_deleted),
+                    {
+                        viewModelScope.launch {
+                            for (p in providers) pending("undo", p)?.let { pendingDeletes = it.pending }
+                            rebuild()
+                        }
+                    },
+                    UNDO_DELETE_MS,
+                ),
+            )
+            tickDeletes()
+        }
+    }
+
     private suspend fun pending(
         action: String,
         key: String = "",

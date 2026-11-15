@@ -251,4 +251,34 @@
     <string name="inbox_results_no_sms">SMS not searched (no access)</string>
     <string name="tools_message_gone">That message is no longer here</string>
     <string name="conversation_forwarded">Forwarded</string>
+    <!-- E6.5 message menu, pills, select mode -->
+    <string name="menu_select_text">Select Text</string>
+    <string name="menu_select">Select</string>
+    <string name="menu_info">Info</string>
+    <string name="info_sent">Sent</string>
+    <string name="info_received">Received</string>
+    <string name="info_status">Status</string>
+    <string name="info_channel">Sent with</string>
+    <string name="info_waiting">Waiting for connection</string>
+    <string name="info_sending">Sending</string>
+    <string name="info_sent_state">Sent</string>
+    <string name="info_delivered">Delivered</string>
+    <string name="info_read">Read</string>
+    <string name="info_failed">Not sent</string>
+    <string name="info_mms">MMS</string>
+    <string name="pill_call">Call %1$s</string>
+    <string name="pill_message">Message</string>
+    <string name="pill_copy_number">Copy Number</string>
+    <string name="pill_email">Email %1$s</string>
+    <string name="pill_copy_email">Copy Email</string>
+    <string name="pill_copy_code">Copy %1$s</string>
+    <string name="pill_calendar">Add to Calendar</string>
+    <string name="pill_map">Open in Maps</string>
+    <string name="pill_link">Open %1$s</string>
+    <string name="pill_no_app">No app can open this</string>
+    <string name="sms_messages_deleted">Messages deleted</string>
+    <plurals name="menu_selected">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
 </resources>

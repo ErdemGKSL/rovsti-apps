@@ -85,6 +85,7 @@ import kotlinx.collections.immutable.toImmutableList
 object InboxTags {
     const val Root = "inbox"
     const val MessagesHeader = "inbox-messages"
+    const val Scheduled = "inbox-scheduled"
 
     fun hit(key: String) = "inbox-hit-$key"
 
@@ -153,6 +154,9 @@ data class InboxStrings(
     val resultsCount: (Int) -> String = { it.toString() },
     val partialNote: String = "",
     val smsMissingNote: String = "",
+    /** E6.10: the Scheduled overview row. */
+    val scheduledRow: String = "",
+    val scheduledCount: (Int) -> String = { it.toString() },
     /** The spam and blocklist rows of the menu (E6.11). */
     val notSpam: String = "",
     val moveToSpam: String = "",
@@ -251,6 +255,8 @@ fun rememberInboxStrings(): InboxStrings {
         resultsCount = { n -> res.getQuantityString(R.plurals.inbox_results, n, n) },
         partialNote = stringResource(R.string.inbox_results_partial),
         smsMissingNote = stringResource(R.string.inbox_results_no_sms),
+        scheduledRow = stringResource(R.string.scheduled_title),
+        scheduledCount = { n -> res.getQuantityString(R.plurals.scheduled_count, n, n) },
         notSpam = bulks.getValue(BulkKind.NotSpam),
         moveToSpam = stringResource(R.string.inbox_move_to_spam),
         block = stringResource(R.string.inbox_block),
@@ -591,6 +597,22 @@ fun InboxSelectToolbar(
             }, Modifier.testTag(InboxTags.bulk(kind)), enabled = any)
         }
     }
+}
+
+/** The inbox row of the Scheduled overview ("Scheduled · 3 messages"). */
+@Composable
+internal fun ScheduledRow(
+    count: Int,
+    strings: InboxStrings,
+    onClick: () -> Unit,
+) {
+    FolderRow(
+        icon = RostyIcons.Clock,
+        title = strings.scheduledRow,
+        detail = strings.scheduledCount(count),
+        modifier = Modifier.testTag(InboxTags.Scheduled),
+        onClick = onClick,
+    )
 }
 
 @Composable

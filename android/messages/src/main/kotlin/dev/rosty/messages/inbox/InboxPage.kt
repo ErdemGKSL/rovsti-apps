@@ -30,6 +30,7 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
+import dev.rosty.messages.schedule.scheduledCount
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
 import kotlinx.collections.immutable.toImmutableList
@@ -112,6 +113,8 @@ fun ChatsPage(
                 },
             )
         }
+    val schedule by container.schedule.state.collectAsState()
+    val scheduled = remember(schedule) { scheduledCount(schedule) }
     CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
         InboxScreen(
             state = state,
@@ -121,12 +124,18 @@ fun ChatsPage(
             actions = actions,
             onNewMessage = { navigator.push(MessagesRoute.NewConversation()) },
             banner =
-                if (!state.roleHeld) {
+                if (!state.roleHeld || scheduled > 0) {
                     {
-                        DefaultSmsCard(
-                            onResult = { container.refreshSmsRole() },
-                            Modifier.padding(vertical = Spacing.s),
-                        )
+                        if (!state.roleHeld) {
+                            DefaultSmsCard(
+                                onResult = { container.refreshSmsRole() },
+                                Modifier.padding(vertical = Spacing.s),
+                            )
+                        }
+                        if (scheduled > 0) {
+                            // E6.10: what waits to be sent, across conversations.
+                            ScheduledRow(scheduled, strings) { navigator.push(MessagesRoute.Scheduled) }
+                        }
                     }
                 } else {
                     null

@@ -59,6 +59,10 @@ sealed interface MessagesRoute {
     @Serializable
     data object SpamSettings : MessagesRoute
 
+    /** Every scheduled message, by conversation (E6.10 overview, from the inbox). */
+    @Serializable
+    data object Scheduled : MessagesRoute
+
     // The common settings pages (shell CommonSettingsPage + the licence detail).
     @Serializable
     data object Appearance : MessagesRoute
@@ -143,6 +147,10 @@ fun chromeFor(
 
         MessagesRoute.WhatsAppSettings -> {
             ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
+        }
+
+        MessagesRoute.Scheduled -> {
+            ChromeSpec(TabBarMode.Visible)
         }
 
         MessagesRoute.SpamSettings -> {

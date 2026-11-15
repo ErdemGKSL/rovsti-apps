@@ -18,6 +18,7 @@ import dev.rosty.messages.inbox.ChatsPage
 import dev.rosty.messages.inbox.InboxSelectToolbar
 import dev.rosty.messages.inbox.rememberInboxStrings
 import dev.rosty.messages.inbox.rememberInboxViewModel
+import dev.rosty.messages.schedule.ScheduledPage
 import dev.rosty.messages.settings.AboutEntry
 import dev.rosty.messages.settings.AppearanceEntry
 import dev.rosty.messages.settings.HapticsEntry
@@ -113,6 +114,7 @@ fun MessagesApp(
             LicencesEntry(onOpen = { navigator.push(MessagesRoute.LicenceDetail(it)) }, pop, popToRoot)
         }
         entry<MessagesRoute.LicenceDetail> { route -> LicenceDetailEntry(route.id, pop, popToRoot) }
+        entry<MessagesRoute.Scheduled> { ScheduledPage(container, pop) }
         entry<MessagesRoute.Logs> { route -> LogsEntry(container, route.tag, pop, popToRoot) }
     }
 }

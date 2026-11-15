@@ -436,4 +436,10 @@
     <string name="tools_export_zip">Export with Media</string>
     <string name="thread_not_spam">Not Spam</string>
     <string name="thread_move_to_spam">Move to Spam</string>
+    <string name="scheduled_title">Scheduled</string>
+    <string name="scheduled_none">Nothing is scheduled</string>
+    <plurals name="scheduled_count">
+        <item quantity="one">%d message</item>
+        <item quantity="other">%d messages</item>
+    </plurals>
 </resources>

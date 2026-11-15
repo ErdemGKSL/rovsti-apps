@@ -30,6 +30,8 @@
     <string name="channel_trip_desc">Stops yolculuğunuzu izlerken görünür</string>
     <string name="channel_people_sync">WhatsApp eşitleme</string>
     <string name="channel_people_sync_desc">WhatsApp adları ve fotoğrafları eşitlenirken görünür</string>
+    <string name="channel_map_download">Harita indirmeleri</string>
+    <string name="channel_map_download_desc">Stops çevrimdışı kullanım için bir harita alanı indirirken görünür</string>
     <string name="channel_trip_alarm">Varış alarmı</string>
     <string name="channel_trip_alarm_desc">Varmak üzereyken çalar</string>
     <string name="channel_ongoing">Süren arama</string>

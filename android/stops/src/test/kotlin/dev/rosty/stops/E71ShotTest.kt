@@ -93,11 +93,14 @@ class E71ShotTest : ShotTest() {
                     waitForIdle()
                     simulateBars(activity!!)
                 }
-                // The core answers on its own threads, through the main looper.
+                // The core answers on its own threads: each step waits for the calls in flight.
                 repeat(30) {
+                    Background.await { waitForIdle() }
                     mainClock.advanceTimeBy(100)
                     Thread.sleep(15)
                 }
+                Background.await { waitForIdle() }
+                mainClock.advanceTimeByFrame()
                 waitForIdle()
                 onRoot().captureRoboImage(
                     "screenshots/e7.1-home-landscape-${if (dark) "dark" else "light"}.png",

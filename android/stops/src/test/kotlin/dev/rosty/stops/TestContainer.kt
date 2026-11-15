@@ -41,6 +41,8 @@ import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AlarmEvent
 import dev.rosty.wa.FakeWaRepository
 import dev.rosty.wa.WaRepository
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -114,7 +116,13 @@ class FakeStopsCore(
     val core = FakeRustCore()
 
     /** What the container calls: the fake, or the fake in front of the real core. */
-    val rust: RustCore get() = real?.let { HybridCore(core, it) } ?: core
+    val rust: RustCore get() = real?.let { HybridCore(core, it) { holdRealAnswers } } ?: core
+
+    /**
+     * A screen test on a manual clock ([AppFixture]) sets this: the real core's answers are handed over only at
+     * `Background.await`, so they land in the same clock step in every run.
+     */
+    var holdRealAnswers = false
     val usesRealCore: Boolean get() = real != null
     val savedPrefs = mutableListOf<StopsPrefs>()
     val writes = mutableListOf<StoreWriteRequest>()
@@ -210,6 +218,9 @@ open class TestStopsContainer(
     val tileSource = FakeTileSource.city()
 
     override fun createTileSource(): TileSource = tileSource
+
+    /** Tiles are painted on the test's own thread, in the clock step that asked for them: no race with the picture. */
+    override val tileRasterDispatcher: CoroutineDispatcher = Dispatchers.Unconfined
 }
 
 /** The alarm of `:platform` without sound: counts the answers, [push] plays an event. */

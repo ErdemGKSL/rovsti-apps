@@ -58,4 +58,24 @@ of `e6-status.md` (gateway commits, backup need, what to try), message to the ma
 
 ## Evidence
 
-(filled as steps land)
+- **Steps 1 and 2** (`748a7973` proto and client, `91b74e14` gateway, merge `bc12444c`): the wire additions as agreed,
+  plus a first socket frame `hello { epoch }`. Store migration v8 (six columns on `instances`, additive).
+  - Another phone number on a link wipes the instance's account data in one transaction, deletes its media and
+    pictures, raises `account_epoch`, then announces `account_changed`. Only two known, different numbers count.
+  - Full history: config `full_history` (`WA_GATEWAY_FULL_HISTORY`, default on). **Device props go out only when a
+    device registers** (`wacore-0.7.0/src/store/device.rs` `get_registration_payload`; `whatsapp-rust-0.7.0/src/bot.rs:1178`
+    "Only applied on the initial pairing"), so an existing link must be relinked to get it. The gateway then pairs as
+    the Windows client row (`UWP`, `require_full_sync`, `full_sync_days_limit: 365`): the phone lists the device as
+    Windows. History is imported in transactions of at most 2 000 rows; the state survives a restart.
+  - `history.progress` (0 to 25 recent, 25 to 100 full) and the "quiet for 30 minutes reads done" rule are guesses,
+    not WhatsApp facts. Never run against WhatsApp.
+- **Steps 3 to 5** (`wa_sync` schema v5, FFI, bridge; merge `bbda725c`): table `media` (backfilled; the three
+  `messages.media_*` columns are no longer used), pure policy by network, download queue with back-off, cap (default
+  512 MiB) with starred, pinned, saved, unsent and recently used files exempt, reconcile at open; stored epoch
+  (another epoch is a gap), account wipe on a proven different own number or a higher `account_epoch`, history
+  progress, `wa_sync.wipe`. Twelve new ops and their fixtures; `WaSyncStore` facade and `FakeWaSyncOps` follow.
+- **Connection** (merge `5b8b9374`): `hello`, `resync { epoch }`, `account_changed`, the richer `history_synced` and
+  the status fields of a `state` event reach the store through `apply_events`; `identity_observe` takes the whole
+  status answer. Kotlin wire models carry the new events and fields (`GatewayEvent.Resync` is now a class).
+  Rust: 2 589 tests on the touched package set, 0 failed; `:core-bridge` 124 unit and 104 native tests.
+- Not built from the research: the copy before a multi-step migration, `quick_check` on a failed open.

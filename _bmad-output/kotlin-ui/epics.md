@@ -1761,13 +1761,13 @@ to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (A
 | E7.5 | Trip start, preflight, live card | R1 | done (R1; evidence in `plans/e7-r1.md`) |
 | E7.6 | Alarm and arrival | R1 | done (R1; evidence in `plans/e7-r1.md`) |
 | E7.7 | Saved stops | R1 | done (R1; evidence in `plans/e7-r1.md`) |
-| E7.8 | Pick sheets | R2 | in-progress |
-| E7.9 | Map options, measure, share location | R2 | in-progress |
-| E7.10 | Settings | R2 | in-progress |
-| E7.11 | History, stats, backup | R2 | in-progress |
-| E7.12 | Saved stops import and export | R2 | in-progress |
-| E7.13 | Tile renderer device check and MapLibre decision record | R2 | in-progress (AC1 done in R1 with E7.2b) |
-| E7.14 | Polish | R2 | in-progress |
+| E7.8 | Pick sheets | R2 | done (R2; evidence in `plans/e7-r2.md`) |
+| E7.9 | Map options, measure, share location | R2 | done (R2; evidence in `plans/e7-r2.md`) |
+| E7.10 | Settings | R2 | done (R2; evidence in `plans/e7-r2.md`) |
+| E7.11 | History, stats, backup | R2 | done (R2; evidence in `plans/e7-r2.md`) |
+| E7.12 | Saved stops import and export | R2 | done (R2; evidence in `plans/e7-r2.md`) |
+| E7.13 | Tile renderer device check and MapLibre decision record | R2 | done (AC1 in R1; AC2 entry and decision record in R2, device run by the owner in E8.7) |
+| E7.14 | Polish | R2 | done (R2; evidence in `plans/e7-r2.md`) |
 
 **E7 R1 closed (2026-11-15, `stops-kotlin`)**: plan and per-story Evidence in `_bmad-output/kotlin-ui/plans/e7-r1.md`,
 approach notes `e7-r1-approach-map.md` (Fable subagent: map engine, radar, picking, GTFS ops) and `e7-r1-approach-app.md`.

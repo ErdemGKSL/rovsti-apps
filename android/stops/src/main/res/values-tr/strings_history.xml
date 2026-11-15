@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- History, statistics, export and backup (E7.11). -->
+<resources>
+    <string name="history_search">Yolculuklarda ara</string>
+    <string name="history_filter_all">Tümü</string>
+    <string name="history_filter_arrived">Varıldı</string>
+    <string name="history_filter_cancelled">İptal edildi</string>
+    <string name="history_stats">İstatistikler</string>
+    <string name="history_stat_trips">Yolculuklar</string>
+    <string name="history_stat_arrived">Varılan</string>
+    <string name="history_stat_distance">Toplam mesafe</string>
+    <string name="history_stat_average">Ortalama yolculuk</string>
+    <string name="history_stat_last30">Son 30 gün</string>
+    <string name="history_stat_top">En sık yerler</string>
+    <string name="history_percent">%%%1$d</string>
+    <string name="history_top_count">%1$s · %2$d</string>
+    <string name="history_trips">Yolculuklar</string>
+    <string name="history_empty_title">Henüz yolculuk yok</string>
+    <string name="history_empty_message">Biten ve iptal edilen yolculuklar burada, bazı istatistiklerle listelenir.</string>
+    <string name="history_no_match_title">Eşleşen yolculuk yok</string>
+    <string name="history_no_match_message">Başka bir sözcük dene ya da tüm yolculukları göster.</string>
+    <string name="history_start_again">Yeniden başlat</string>
+    <string name="history_show_on_map">Haritada göster</string>
+    <string name="history_copy">Kopyala</string>
+    <string name="history_delete">Sil</string>
+    <string name="history_copied">Yolculuk kopyalandı</string>
+    <string name="history_deleted">%1$s kaldırıldı</string>
+    <string name="history_cleared">Geçmiş temizlendi</string>
+    <string name="history_not_saved">Geçmiş kaydedilemedi</string>
+    <string name="history_nothing_to_export">Dışa aktarılacak yolculuk yok</string>
+    <string name="history_export_csv">CSV olarak dışa aktar</string>
+    <string name="history_export_gpx">GPX olarak dışa aktar</string>
+    <string name="history_exported">Geçmiş dışa aktarıldı</string>
+    <string name="history_export_failed">Geçmiş dışa aktarılamadı</string>
+    <string name="history_clear">Geçmişi temizle</string>
+    <string name="history_trip_running">Yolculuk sürerken olmaz</string>
+    <string name="history_row_detail">%1$s · %2$s</string>
+    <string name="history_row_menu">Yolculuk işlemleri</string>
+    <string name="backup_export">Her şeyi yedekle</string>
+    <string name="backup_restore">Yedekten geri yükle…</string>
+    <string name="backup_saved">Yedek kaydedildi</string>
+    <string name="backup_failed">Yedek kaydedilemedi</string>
+    <string name="backup_unreadable">Bu dosya bir Stops yedeği değil</string>
+    <string name="backup_confirm_title">Bu yedek geri yüklensin mi?</string>
+    <string name="backup_confirm_message">Kayıtlı duraklar, yolculuk geçmişi ve ayarlar yedektekilerle değiştirilir. Hemen ardından geri alabilirsin.</string>
+    <string name="backup_restore_button">Geri yükle</string>
+    <string name="backup_restored">Yedek geri yüklendi</string>
+    <string name="backup_during_trip">Geri yükleme, yolculuk yokken çalışır</string>
+    <plurals name="history_pruned">
+        <item quantity="one">%d eski yolculuk silindi</item>
+        <item quantity="other">%d eski yolculuk silindi</item>
+    </plurals>
+    <plurals name="history_prune_choice">
+        <item quantity="one">%2$d günden eski %1$d yolculuğu sil</item>
+        <item quantity="other">%2$d günden eski %1$d yolculuğu sil</item>
+    </plurals>
+</resources>

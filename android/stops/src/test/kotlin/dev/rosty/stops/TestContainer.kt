@@ -157,6 +157,7 @@ class FakeStopsCore(
         core.onTyped("stops.store_write", StoreWriteRequest.serializer(), Empty.serializer()) {
             writes += it
             if (it.file == "saved") saved = Json.decodeFromJsonElement(SavedStops.serializer(), it.value)
+            if (it.file == "history") history = Json.decodeFromJsonElement(History.serializer(), it.value)
             Outcome.Ok(Empty)
         }
         if (scriptTransit) {

@@ -52,6 +52,7 @@ import dev.rosty.stops.R
 import dev.rosty.stops.StopsContainer
 import dev.rosty.stops.StopsLink
 import dev.rosty.stops.StopsRoute
+import dev.rosty.stops.history.presentHistorySheet
 import dev.rosty.stops.map.MapAttribution
 import dev.rosty.stops.map.MapFollowMode
 import dev.rosty.stops.map.MapMotionEffect
@@ -206,6 +207,37 @@ fun HomeEntry(
     val trip = rememberTripViewModel(container)
     val alarm = rememberAlarmViewModel(container)
     val preflight = rememberPreflight()
+    // The History sheet (E7.11); what it hands back goes through these, defined once the map exists.
+    var historyStart: (Destination, Destination) -> Unit = { _, _ -> }
+    var historyShow: (Destination, Destination) -> Unit = { _, _ -> }
+    val history =
+        rememberHistory(
+            container,
+            object : HistoryHost {
+                override val tripRunning: Boolean get() = trip.state.value.trip != null
+
+                override fun start(
+                    a: Destination,
+                    b: Destination,
+                ) = historyStart(a, b)
+
+                override fun showOnMap(
+                    a: Destination,
+                    b: Destination,
+                ) = historyShow(a, b)
+
+                override fun saveGate(
+                    a: Destination,
+                    b: Destination,
+                ) = saved.onAction(SavedAction.SaveGate(a, b))
+
+                override fun reloaded() {
+                    viewModel.refresh()
+                    saved.refresh()
+                    container.scope.launch { container.saved.reload() }
+                }
+            },
+        )
     val loaded by viewModel.state.collectAsState()
     val savedFile by container.saved.saved.collectAsState()
     // The saved stops follow every edit (the map markers, "Save as stop" offers) without reading the files again.
@@ -242,10 +274,10 @@ fun HomeEntry(
         lateinit var entry: SheetEntry
         val gone = { if (open?.second === entry) open = null }
         entry =
-            if (which == HomeSheet.Saved) {
-                overlays.presentSavedSheet(title, saved) { gone() }
-            } else {
-                overlays.presentHomeSheet(which, title, shared) { gone() }
+            when (which) {
+                HomeSheet.Saved -> overlays.presentSavedSheet(title, saved) { gone() }
+                HomeSheet.History -> overlays.presentHistorySheet(title, history.first, history.second) { gone() }
+                HomeSheet.Pick -> overlays.presentHomeSheet(which, title, shared) { gone() }
             }
         open = which to entry
     }
@@ -363,6 +395,16 @@ fun HomeEntry(
             },
         )
     picker = rememberPicker(container, map, overlays) { trip.state.value.trip != null }
+    historyStart = { a, b ->
+        closeSheet()
+        map.showPair(a, b)
+        startTrip(a, b)
+    }
+    historyShow = { a, b ->
+        closeSheet()
+        map.showPair(a, b)
+    }
+
     var savedOnMap by remember { mutableStateOf<Boolean?>(null) }
     val mapTools =
         rememberMapTools(

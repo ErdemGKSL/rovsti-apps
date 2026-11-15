@@ -68,6 +68,23 @@ class SavedStore(
             }
         }
 
+    /** Writes [saved] as it is (a restored backup, an import, their Undo). */
+    suspend fun replace(saved: SavedStops): Outcome<SavedStops> =
+        mutex.withLock {
+            val json = Json.encodeToJsonElement(SavedStops.serializer(), saved)
+            when (val written = ops.storeWrite(StoreWriteRequest(FILE, json, dir))) {
+                is Outcome.Err -> {
+                    written
+                }
+
+                is Outcome.Ok -> {
+                    loaded = true
+                    state.value = saved
+                    Outcome.Ok(saved)
+                }
+            }
+        }
+
     private suspend fun ensureLoaded(): SavedStops {
         state.value?.takeIf { loaded }?.let { return it }
         val read = (ops.storeRead(StoreReadRequest(FILE, dir)) as? Outcome.Ok)?.value?.value

@@ -34,6 +34,7 @@ import dev.rosty.core.model.stops.Slot
 import dev.rosty.core.model.stops.StopsPrefs
 import dev.rosty.core.model.stops.StoreWriteRequest
 import dev.rosty.design.chrome.TabItem
+import dev.rosty.design.controls.ChipModel
 import dev.rosty.design.haptics.LocalRostyHaptics
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.overlay.LocalOverlay
@@ -51,7 +52,9 @@ import dev.rosty.stops.R
 import dev.rosty.stops.StopsContainer
 import dev.rosty.stops.StopsLink
 import dev.rosty.stops.StopsRoute
+import dev.rosty.stops.history.presentHistorySheet
 import dev.rosty.stops.map.MapAttribution
+import dev.rosty.stops.map.MapFollowMode
 import dev.rosty.stops.map.MapMotionEffect
 import dev.rosty.stops.map.MapScaleBar
 import dev.rosty.stops.map.PickListener
@@ -62,12 +65,19 @@ import dev.rosty.stops.map.presentPinMenu
 import dev.rosty.stops.map.rememberPinMenuStrings
 import dev.rosty.stops.map.rememberRadarOverlay
 import dev.rosty.stops.map.showThirdTapHint
+import dev.rosty.stops.pick.Picker
+import dev.rosty.stops.pick.rememberPicker
+import dev.rosty.stops.saved.PlacesTransfer
 import dev.rosty.stops.saved.SavedAction
 import dev.rosty.stops.saved.SavedEffect
 import dev.rosty.stops.saved.SavedViewModel
 import dev.rosty.stops.saved.presentSavedSheet
 import dev.rosty.stops.saved.presentSavedStopSheet
+import dev.rosty.stops.saved.rememberSavedFiles
 import dev.rosty.stops.saved.toDestination
+import dev.rosty.stops.tools.MapTools
+import dev.rosty.stops.tools.MeasureCard
+import dev.rosty.stops.tools.rememberMapTools
 import dev.rosty.stops.trip.AlarmAction
 import dev.rosty.stops.trip.AlarmEffect
 import dev.rosty.stops.trip.AlarmEntry
@@ -199,6 +209,43 @@ fun HomeEntry(
     val trip = rememberTripViewModel(container)
     val alarm = rememberAlarmViewModel(container)
     val preflight = rememberPreflight()
+    // S5: the saved stops to and from a file (E7.12).
+    val savedFiles =
+        rememberSavedFiles(
+            container.files,
+            remember(container) { PlacesTransfer(container.ops, container.saved, TripClock::nowMillis, ::localToday) },
+        ) { viewModel.refresh() }
+    // The History sheet (E7.11); what it hands back goes through these, defined once the map exists.
+    var historyStart: (Destination, Destination) -> Unit = { _, _ -> }
+    var historyShow: (Destination, Destination) -> Unit = { _, _ -> }
+    val history =
+        rememberHistory(
+            container,
+            object : HistoryHost {
+                override val tripRunning: Boolean get() = trip.state.value.trip != null
+
+                override fun start(
+                    a: Destination,
+                    b: Destination,
+                ) = historyStart(a, b)
+
+                override fun showOnMap(
+                    a: Destination,
+                    b: Destination,
+                ) = historyShow(a, b)
+
+                override fun saveGate(
+                    a: Destination,
+                    b: Destination,
+                ) = saved.onAction(SavedAction.SaveGate(a, b))
+
+                override fun reloaded() {
+                    viewModel.refresh()
+                    saved.refresh()
+                    container.scope.launch { container.saved.reload() }
+                }
+            },
+        )
     val loaded by viewModel.state.collectAsState()
     val savedFile by container.saved.saved.collectAsState()
     // The saved stops follow every edit (the map markers, "Save as stop" offers) without reading the files again.
@@ -211,6 +258,10 @@ fun HomeEntry(
     val haptics = LocalRostyHaptics.current
     val menuStrings = rememberPinMenuStrings()
     var open by remember { mutableStateOf<Pair<HomeSheet, SheetEntry>?>(null) }
+
+    // The pick sheets (E7.8) and the map tools (E7.9); made once the map exists, below.
+    var picker: Picker? = null
+    var tools: MapTools? = null
 
     fun openSheet(
         which: HomeSheet,
@@ -231,10 +282,10 @@ fun HomeEntry(
         lateinit var entry: SheetEntry
         val gone = { if (open?.second === entry) open = null }
         entry =
-            if (which == HomeSheet.Saved) {
-                overlays.presentSavedSheet(title, saved) { gone() }
-            } else {
-                overlays.presentHomeSheet(which, title, shared) { gone() }
+            when (which) {
+                HomeSheet.Saved -> overlays.presentSavedSheet(title, saved, savedFiles) { gone() }
+                HomeSheet.History -> overlays.presentHistorySheet(title, history.first, history.second) { gone() }
+                HomeSheet.Pick -> overlays.presentHomeSheet(which, title, shared) { gone() }
             }
         open = which to entry
     }
@@ -242,6 +293,7 @@ fun HomeEntry(
     fun closeSheet() {
         open?.second?.let(overlays::dismiss)
         open = null
+        picker?.close()
     }
 
     // Start: the preflight sheet first while something blocks (ARCH 7.5), else straight away.
@@ -274,7 +326,8 @@ fun HomeEntry(
             // A stop shortcut starts that stop's trip (GPUI `open_stop`).
             is StopsLink.Stop -> saved.onAction(SavedAction.Start(now.id))
 
-            is StopsLink.Place -> openSheet(HomeSheet.Pick, now.text)
+            // A shared place or stop: the Confirm sheet, or both ends of a stop (E7.8).
+            is StopsLink.Place -> picker?.offer(now.text)
         }
         if (link != null) container.pendingLink.value = null
     }
@@ -302,8 +355,9 @@ fun HomeEntry(
                 if (!context.openInMaps(geoUri)) overlays.showToast(resources.getString(R.string.home_no_maps_app))
             }
 
-            // S34 "Measure from here" arrives with the measure tool (E7.9).
-            override fun measureFrom(from: Coord) = Unit
+            override fun measureFrom(from: Coord) {
+                tools?.measureFrom(from)
+            }
 
             override fun saveAsStop() {
                 val ends = map.pick.state.value.ends
@@ -337,6 +391,10 @@ fun HomeEntry(
                     overlays.presentSavedStopSheet(saved, id)
                 }
 
+                override fun onPositionTap() {
+                    tools?.openMyLocation()
+                }
+
                 override fun onThirdTap() {
                     overlays.showThirdTapHint(menuStrings)
                 }
@@ -344,11 +402,33 @@ fun HomeEntry(
                 override fun onSnapped() = haptics.selection()
             },
         )
+    picker = rememberPicker(container, map, overlays) { trip.state.value.trip != null }
+    historyStart = { a, b ->
+        closeSheet()
+        map.showPair(a, b)
+        startTrip(a, b)
+    }
+    historyShow = { a, b ->
+        closeSheet()
+        map.showPair(a, b)
+    }
+
+    var savedOnMap by remember { mutableStateOf<Boolean?>(null) }
+    val mapTools =
+        rememberMapTools(
+            container,
+            map,
+            overlays,
+            menuStrings,
+            mapToolsHost(container, trip, state, savedOnMap, { savedOnMap = it }, saved, picker),
+        )
+    tools = mapTools
+    val measuring by mapTools.measure.state.collectAsState()
     val pickState by map.pick.state.collectAsState()
     val padding = remember { MapCameraPadding() }
     FollowCameraPadding(map, padding)
     PlaceFirstView(map, state, container.location)
-    FeedRadar(map, state)
+    FeedRadar(map, savedOnMap?.let { state.copy(savedOnMap = it) } ?: state)
     LivePosition(map, container)
     MapMotionEffect(map.camera, map.motion)
     SettingsHooks(map, container)
@@ -438,6 +518,7 @@ fun HomeEntry(
         }
     }
     val tripState by trip.state.collectAsState()
+    val savedState by saved.state.collectAsState()
     // The trip in progress is on the map: its pins, its circle and its line (the pick controller draws them through
     // Rust as for a pick); picking is off until it ends (GPUI `pins_grabbable`).
     val runningTrip = tripState.trip
@@ -531,7 +612,7 @@ fun HomeEntry(
                 map.tiles,
                 dark,
                 modifier.pickAnchorOrigin(map.pick).testTag(HomeMapTag),
-                gesturePolicy = map.pick,
+                gesturePolicy = mapTools.gestures,
                 overlay = overlay,
             )
         },
@@ -539,11 +620,18 @@ fun HomeEntry(
         selectedTab = if (open?.first == HomeSheet.Saved) HomeTab.Saved else HomeTab.Trip,
         camera = padding,
         hint = if (runningTrip != null) null else pickState.pairLabel ?: pickState.hintText,
+        topCard = if (measuring.on) ({ MeasureCard(mapTools) }) else null,
+        following = mapTools.follow == MapFollowMode.Following,
         mapFooter = {
             MapScaleBar(map.camera, Modifier.testTag(HomeTags.ScaleBar))
             MapAttribution()
         },
         motionFrozen = { map.motion.frozen },
+        // S37: one tap starts the trip to the saved stop nearest the position, while nothing is picked.
+        chips = nearestChips(savedState.nearest, pickState.ends, tripState.trip != null || measuring.on),
+        onChip = { id ->
+            savedState.nearest?.takeIf { id == NEAREST_CHIP }?.let { saved.onAction(SavedAction.Start(it.id)) }
+        },
         sheetContent = {
             val live = tripState.live
             MapSheetContent(
@@ -589,9 +677,16 @@ fun HomeEntry(
                         }
                     }
                 },
-                onSearch = { openSheet(HomeSheet.Pick) },
+                onSearch = {
+                    closeSheet()
+                    picker?.open()
+                },
                 onOpenSaved = { openSheet(HomeSheet.Saved) },
                 onOpenHistory = { openSheet(HomeSheet.History) },
+                onLocate = mapTools::onLocate,
+                onLocateLong = mapTools::openMyLocation,
+                onLayers = mapTools::openLayers,
+                onMapOptions = mapTools::openOptions,
             ),
     )
 }
@@ -660,6 +755,19 @@ private fun Context.share(text: String) {
     } catch (_: android.content.ActivityNotFoundException) {
         Unit
     }
+}
+
+private const val NEAREST_CHIP = "nearest"
+
+/** The S37 chip: shown with a nearby saved stop, nothing picked and no trip running (GPUI `nearest_row_visible`). */
+@Composable
+private fun nearestChips(
+    nearest: dev.rosty.core.model.stops.NearestStop?,
+    ends: Ends,
+    tripRunning: Boolean,
+): kotlinx.collections.immutable.ImmutableList<ChipModel> {
+    if (nearest == null || ends.a != null || ends.b != null || tripRunning) return persistentListOf()
+    return persistentListOf(ChipModel(NEAREST_CHIP, stringResource(R.string.home_nearest, nearest.name)))
 }
 
 internal fun Context.findComponentActivity(): ComponentActivity {

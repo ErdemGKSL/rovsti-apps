@@ -14,6 +14,7 @@ import androidx.compose.ui.test.runAndroidComposeUiTest
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rosty.design.theme.RostyTheme
+import dev.rosty.stops.saved.settleRust
 import dev.rosty.testing.ShotTest
 import org.junit.Test
 import org.robolectric.RuntimeEnvironment
@@ -46,7 +47,8 @@ class E71ShotTest : ShotTest() {
     ) {
         for (dark in listOf(false, true)) {
             composeFrame(dark = dark, fontScale = fontScale, content = content)
-            run(1500)
+            // Real waits between the steps: the tiles load on their own threads (a busy run caught them unloaded).
+            settleRust(1500)
             before()
             compose.onRoot().captureRoboImage("screenshots/$name-${if (dark) "dark" else "light"}.png", options)
         }

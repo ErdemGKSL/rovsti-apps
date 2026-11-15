@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Saved stops to and from a file (E7.12, S5). -->
+<resources>
+    <string name="places_export_gpx">GPX olarak dışa aktar</string>
+    <string name="places_export_json">JSON olarak dışa aktar</string>
+    <string name="places_import">Durakları içe aktar…</string>
+    <string name="places_exported">Duraklar dışa aktarıldı</string>
+    <string name="places_export_failed">Duraklar dışa aktarılamadı</string>
+    <string name="places_unreadable">Bu dosyadan durak okunamadı</string>
+    <string name="places_import_title">Durakları içe aktar</string>
+    <string name="places_import_button">İçe aktar</string>
+    <string name="places_import_list">Eklenecekler</string>
+    <string name="places_nothing_new">Eklenecek yeni bir şey yok.</string>
+    <string name="places_nothing_added">Hiçbir şey eklenmedi</string>
+    <plurals name="places_add">
+        <item quantity="one">%d durak ekle.</item>
+        <item quantity="other">%d durak ekle.</item>
+    </plurals>
+    <plurals name="places_duplicates">
+        <item quantity="one">%d tanesi zaten kayıtlı.</item>
+        <item quantity="other">%d tanesi zaten kayıtlı.</item>
+    </plurals>
+    <plurals name="places_invalid">
+        <item quantity="one">%d tanesi kullanılamaz.</item>
+        <item quantity="other">%d tanesi kullanılamaz.</item>
+    </plurals>
+    <plurals name="places_over_cap">
+        <item quantity="one">%d tanesi durak sınırını aşıyor.</item>
+        <item quantity="other">%d tanesi durak sınırını aşıyor.</item>
+    </plurals>
+    <plurals name="places_imported">
+        <item quantity="one">%d durak içe aktarıldı</item>
+        <item quantity="other">%d durak içe aktarıldı</item>
+    </plurals>
+</resources>

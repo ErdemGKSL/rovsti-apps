@@ -37,9 +37,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -47,6 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,12 +59,14 @@ import dev.rosty.design.chrome.RostyTabBar
 import dev.rosty.design.chrome.TabItem
 import dev.rosty.design.controls.ChipModel
 import dev.rosty.design.controls.ChipRow
+import dev.rosty.design.controls.GlassCircleButton
 import dev.rosty.design.controls.GlassIconButton
 import dev.rosty.design.glass.GlassPreset
 import dev.rosty.design.glass.LocalAppBackdropFrozen
 import dev.rosty.design.glass.rostyGlass
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
+import dev.rosty.design.ios.foundation.LocalIosContentColor
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.press.scalePress
 import dev.rosty.design.theme.RostyText
@@ -99,8 +104,11 @@ class HomeActions(
     val onOpenSaved: () -> Unit = {},
     val onOpenHistory: () -> Unit = {},
     val onLocate: () -> Unit = {},
-    val onLayers: () -> Unit = {},
-    val onMapOptions: () -> Unit = {},
+    /** The locate button held (S25 "My location"). */
+    val onLocateLong: () -> Unit = {},
+    /** The layers and map options buttons open popovers at their window bounds. */
+    val onLayers: (Rect) -> Unit = {},
+    val onMapOptions: (Rect) -> Unit = {},
 )
 
 /**
@@ -124,7 +132,12 @@ fun StopsHome(
     modifier: Modifier = Modifier,
     camera: MapCameraPadding = remember { MapCameraPadding() },
     chips: ImmutableList<ChipModel> = persistentListOf(),
+    onChip: (String) -> Unit = {},
     hint: String? = null,
+    /** Shown under the search pill in place of [hint] (the measure card, E7.9). */
+    topCard: (@Composable () -> Unit)? = null,
+    /** The locate button is tinted while the view follows the position (S17). */
+    following: Boolean = false,
     mapFooter: @Composable RowScope.() -> Unit = {},
     motionFrozen: () -> Boolean = { false },
     sheetContent: @Composable () -> Unit = { MapSheetContent(state, actions.onOpenSaved, actions.onOpenHistory) },
@@ -235,7 +248,6 @@ fun StopsHome(
                             ).padding(top = Spacing.s)
                             .widthIn(max = Sizes.contentMaxWidth)
                             .fillMaxWidth()
-                            .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom }
                             .graphicsLayer {
                                 // Hidden under a large map sheet and under a modal sheet's push-back (read in draw).
                                 val sheet = entry.sheet
@@ -244,8 +256,18 @@ fun StopsHome(
                             }.then(if (topHidden) Modifier.clearAndSetSemantics {}.blockTouches() else Modifier)
                             .testTag(HomeTags.Top),
                     ) {
-                        SearchPill(actions.onSearch, Modifier.padding(horizontal = Spacing.gutter))
-                        if (!hint.isNullOrBlank()) {
+                        // The camera clears the search pill only: the hint and the chips below it come and go with
+                        // answers from the core, and the first view must not depend on which came first.
+                        SearchPill(
+                            actions.onSearch,
+                            Modifier
+                                .padding(horizontal = Spacing.gutter)
+                                .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom },
+                        )
+                        if (topCard != null) {
+                            Spacer(Modifier.height(Spacing.s))
+                            Box(Modifier.padding(horizontal = Spacing.gutter)) { topCard() }
+                        } else if (!hint.isNullOrBlank()) {
                             Spacer(Modifier.height(Spacing.s))
                             HintPill(hint, Modifier.align(Alignment.CenterHorizontally))
                         }
@@ -254,7 +276,7 @@ fun StopsHome(
                             ChipRow(
                                 chips = chips,
                                 selected = "",
-                                onSelect = {},
+                                onSelect = onChip,
                                 modifier = Modifier.height(StopsSizes.chipRow).testTag(HomeTags.Chips),
                             )
                         }
@@ -302,6 +324,7 @@ fun StopsHome(
                         }
                         MapButtons(
                             actions,
+                            following,
                             Modifier
                                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                                 .padding(end = StopsSizes.buttonColumnEnd)
@@ -449,30 +472,44 @@ private fun HintPill(
     )
 }
 
-/** Locate / follow, layers and map options: 44 dp glass circles in 48 dp hit boxes (E7.9 wires them). */
+/** Locate / follow, layers and map options: 44 dp glass circles in 48 dp hit boxes. */
 @Composable
 private fun MapButtons(
     actions: HomeActions,
+    following: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    // Written on placement, read on the tap: the popovers hang off the buttons.
+    val bounds = remember { arrayOf(Rect.Zero, Rect.Zero) }
+    val locate = stringResource(R.string.home_locate)
     Column(modifier.testTag(HomeTags.Buttons)) {
-        GlassIconButton(
-            StopsIcons.Locate,
-            stringResource(R.string.home_locate),
-            actions.onLocate,
-            Modifier.testTag(HomeTags.Locate),
-        )
+        GlassCircleButton(
+            onClick = actions.onLocate,
+            modifier = Modifier.semantics { contentDescription = locate }.testTag(HomeTags.Locate),
+            onLongClick = actions.onLocateLong,
+            // The dark glass adds white over its content: off while following, so the accent tint reads.
+            applyAdditiveChrome = !following,
+            size = Sizes.button,
+            touchTarget = Sizes.touch,
+        ) {
+            RostyIcon(
+                StopsIcons.Locate,
+                null,
+                tint = if (following) RostyTheme.colors.accent else LocalIosContentColor.current,
+                size = StopsSizes.mapIcon,
+            )
+        }
         GlassIconButton(
             StopsIcons.Layers,
             stringResource(R.string.home_layers),
-            actions.onLayers,
-            Modifier.testTag(HomeTags.Layers),
+            { actions.onLayers(bounds[0]) },
+            Modifier.onGloballyPositioned { bounds[0] = it.boundsInWindow() }.testTag(HomeTags.Layers),
         )
         GlassIconButton(
             RostyIcons.Map,
             stringResource(R.string.home_map_options),
-            actions.onMapOptions,
-            Modifier.testTag(HomeTags.Options),
+            { actions.onMapOptions(bounds[1]) },
+            Modifier.onGloballyPositioned { bounds[1] = it.boundsInWindow() }.testTag(HomeTags.Options),
         )
     }
 }

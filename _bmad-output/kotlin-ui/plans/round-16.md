@@ -310,6 +310,9 @@ item 6 also applies: Turkish strings, notification icons, and no crash on platfo
   number itself ("+90 5xx xxx xx xx", digits, spaces and a plus) and that has no birthday, Card Studio opens on the **Birthday** tab and the preview stays an empty grey box. The toast
   "Kart hazırlanamadı" (`card_studio_failed`) shows, so the render op returned `Outcome.Err`. The screenshot is at
   `/tmp/claude-0/-home-user-rovsti-apps/fec9d351-b8cd-5c7f-af54-f98d09255a4a/scratchpad/x2-device-failed.jpg`.
+  - **Update from the owner:** a contact with a short, ordinary name fails the same way. The render fails on the device
+    for every contact, so the cause is not the contact data. Look first at the release/arm64 path (fonts in the `.so`,
+    R8/JNI, the aarch64 Takumi build).
   - Find the cause; the host tests pass, so suspect what differs on device.
     - Bundled fonts in the release `.so`.
     - R8 or the JNI keep rules for the new ops.

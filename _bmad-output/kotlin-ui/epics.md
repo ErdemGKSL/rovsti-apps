@@ -1733,7 +1733,8 @@ thread: `_bmad-output/kotlin-ui/plans/e6-status.md`.
 |---|---|---|---|
 | WA-R1 | Identity (LID, phone JID, one person) | `plans/e6wa-r1.md` | done (2026-11-15) |
 | WA-R2 | Media limits, full history, account change, connect key sharing, Phone identity | `plans/e6wa-r2.md` | done (2026-11-15) |
-| WA-R3 to WA-R7 | Media, message actions, rich content and presence, groups, account and history | not planned yet | |
+| WA-R3 | Media: viewer, video, GIF, stickers, view-once, save and share, several files, voice notes | `plans/e6wa-r3.md` | in progress |
+| WA-R4 to WA-R7 | Message actions, rich content and presence, groups, account and history | not planned yet | |
 
 ## E7. Stops (`:stops`)
 

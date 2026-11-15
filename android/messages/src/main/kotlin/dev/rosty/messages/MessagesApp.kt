@@ -12,6 +12,7 @@ import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.text.resolve
 import dev.rosty.design.transition.TabBarMode
 import dev.rosty.design.transition.TabNavigator
+import dev.rosty.messages.backup.BackupEntry
 import dev.rosty.messages.compose.NewConversationPage
 import dev.rosty.messages.conversation.SmsThreadPage
 import dev.rosty.messages.inbox.ChatsPage
@@ -26,7 +27,11 @@ import dev.rosty.messages.settings.LicencesEntry
 import dev.rosty.messages.settings.LogsEntry
 import dev.rosty.messages.settings.MessagesSettingsPage
 import dev.rosty.messages.settings.SettingsLinks
+import dev.rosty.messages.settings.SettingsSummary
 import dev.rosty.messages.settings.WhatsAppSettingsEntry
+import dev.rosty.messages.settings.notify.NotificationSettingsEntry
+import dev.rosty.messages.settings.replies.QuickRepliesEntry
+import dev.rosty.messages.settings.textsize.TextSizeEntry
 import dev.rosty.messages.spam.SpamSettingsEntry
 import dev.rosty.messages.wa.WaThreadPage
 import dev.rosty.messages.wa.WhatsAppPage
@@ -87,13 +92,19 @@ fun MessagesApp(
         entry<MessagesRoute.WhatsApp> { WhatsAppPage(container, navigator) }
         entry<MessagesRoute.Settings> {
             val held by container.smsRole.collectAsState()
+            val prefs by container.store.prefs.collectAsState()
             MessagesSettingsPage(
                 smsRoleHeld = held,
+                summary = SettingsSummary.of(prefs),
                 settings = container.commonSettings,
                 links =
                     SettingsLinks(
                         openWhatsApp = { navigator.push(MessagesRoute.WhatsAppSettings) },
                         openSpam = { navigator.push(MessagesRoute.SpamSettings) },
+                        openNotifications = { navigator.push(MessagesRoute.NotificationSettings) },
+                        openQuickReplies = { navigator.push(MessagesRoute.QuickReplies) },
+                        openTextSize = { navigator.push(MessagesRoute.TextSize) },
+                        openBackup = { navigator.push(MessagesRoute.Backup) },
                         openCommon = { page -> navigator.push(page.route()) },
                     ),
                 onRoleResult = { container.refreshSmsRole() },
@@ -104,6 +115,10 @@ fun MessagesApp(
         entry<MessagesRoute.NewConversation> { route -> NewConversationPage(container, route, navigator, pop) }
         entry<MessagesRoute.WhatsAppSettings> { WhatsAppSettingsEntry(container) }
         entry<MessagesRoute.SpamSettings> { SpamSettingsEntry(container, pop, popToRoot) }
+        entry<MessagesRoute.NotificationSettings> { NotificationSettingsEntry(container, pop, popToRoot) }
+        entry<MessagesRoute.QuickReplies> { QuickRepliesEntry(container, pop, popToRoot) }
+        entry<MessagesRoute.TextSize> { TextSizeEntry(container, pop, popToRoot) }
+        entry<MessagesRoute.Backup> { BackupEntry(container, pop, popToRoot) }
         entry<MessagesRoute.Appearance> { AppearanceEntry(container.commonSettings, pop, popToRoot) }
         entry<MessagesRoute.Haptics> { HapticsEntry(container.commonSettings, pop, popToRoot) }
         entry<MessagesRoute.About> {

@@ -320,7 +320,9 @@ pub struct AppliedEvents {
     pub last_seq: Option<u64>,
     /// Events applied (stale ones are skipped).
     pub applied: u32,
-    /// A `resync` came: refresh the chat list ([`super::Store::store_chats`]).
+    /// Refresh the chat list ([`super::Store::store_chats`]): a `resync` came, a `hello`, `resync` or `state`
+    /// named another gateway epoch than the stored one (a gap), history arrived, a merge moved rows or the
+    /// account changed.
     pub resync: bool,
     /// Chats whose rows changed, in first-change order.
     pub chats: Vec<String>,
@@ -334,7 +336,8 @@ pub struct AppliedEvents {
     /// LID is held by, a pair that would join the account's own id to someone else), each once: for the log.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rejected: Vec<Rejected>,
-    /// A `state` event named another own number: another account was linked and the store was emptied
+    /// An `account_changed` event, or a `state` event that named another own number or a raised account epoch:
+    /// another account was linked and the store was emptied
     /// ([`super::Store::note_status`]). What is kept per chat outside the store belongs to the old account too.
     #[serde(skip_serializing_if = "is_false")]
     pub account_changed: bool,

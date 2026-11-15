@@ -110,7 +110,13 @@ class WaSyncStore internal constructor(
     /** What is owed: the `seq` for `wa.events_start`, a chat list refresh, the pages of unfinished resyncs. */
     suspend fun plan(limit: Int? = null): Outcome<WaSyncPlan> = live { ops.plan(WaSyncPlanRequest(id, limit)) }
 
-    /** Applies gateway events, oldest first; `resync` in the answer asks for a chat list refresh. */
+    /**
+     * Applies gateway events, oldest first; `resync` in the answer asks for a chat list refresh. Hand in every event
+     * of the socket as it came, `hello` and `account_changed` included: the store takes the gateway's epoch from
+     * `hello`, `resync` and `state` (another one than the stored is a gap, as in [noteStatus]), empties itself at an
+     * `account_changed` or a `state` of another account (`accountChanged`, `deleteFiles` in the answer, to be treated
+     * as in [noteStatus]) and keeps the history progress `state` and `history_synced` report ([history]).
+     */
     suspend fun applyEvents(events: List<WaSyncEvent>): Outcome<WaSyncApplied> =
         live { ops.applyEvents(WaSyncEventsRequest(id, events)) }
 
@@ -322,8 +328,9 @@ class WaSyncStore internal constructor(
     // ---- the gateway process, the linked account, history progress, unlink
 
     /**
-     * Takes in what the gateway says about itself and the linked account. Call it with every `wa.status` answer,
-     * before the catch-up, and with the [epoch] alone when the event socket opens or a `resync` names one.
+     * Takes in what the gateway says about itself and the linked account, field by field. [observe] does the same
+     * with a whole `wa.status` answer and [applyEvents] with the events of the socket (`hello`, `resync`, `state`,
+     * `account_changed`), so this is for a caller that holds the values alone.
      *
      * - Another [epoch] than the stored one: `gap`. The stored `seq` is forgotten, so restart the event stream from
      *   [plan]'s `afterSeq` (null now) and refresh the chat list.
@@ -344,7 +351,7 @@ class WaSyncStore internal constructor(
 
     /**
      * The gateway's `account_changed` event, handed in at its place in the event stream (before the events after
-     * it are applied). A store of another account is emptied; one already emptied by [noteStatus] is swept of what
+     * it are applied), for a caller that does not hand the event itself to [applyEvents]; never both. A store of another account is emptied; one already emptied by [noteStatus] is swept of what
      * arrived in between. Treat `accountChanged` in the answer as in [noteStatus].
      */
     suspend fun accountChanged(
@@ -398,8 +405,9 @@ class WaSyncStore internal constructor(
         live { ops.rekeyedSince(WaSyncRekeyedRequest(id, seq)).map { it.rekeyed } }
 
     /**
-     * Learns from what the gateway answered outside the event stream: [status] (`wa.status`: the account's own
-     * number and LID), [groups] (`wa.group` / `wa.groups`: members named by both ids) and [profiles]
+     * Learns from what the gateway answered outside the event stream: [status] (`wa.status`, the whole answer: the
+     * account's own number and LID, and its epoch, account epoch and history report, taken in as [noteStatus] takes
+     * them, so a gap reads as `resync` and another account as `accountChanged` with `deleteFiles`), [groups] (`wa.group` / `wa.groups`: members named by both ids) and [profiles]
      * (`wa.profiles`). Hand the answers in as they came; the answer lists the chats that merged.
      */
     suspend fun observe(

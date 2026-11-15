@@ -337,7 +337,7 @@ class WaCallFlowTest {
             eventually("the WhatsApp offer is declined") { fake.count("wa.reject_call") == 1 }
             event("c5", CallPhase.Ringing)
             fake.calls = listOf(summary("c5", CallPhase.Ringing))
-            fake.emitEvent("inst1", ++seq, GatewayEvent.Resync)
+            fake.emitEvent("inst1", ++seq, GatewayEvent.Resync())
             Thread.sleep(300)
             assertEquals("once per call id", 1, fake.count("wa.reject_call"))
             assertNull("the offer never reached the screen", waCall())

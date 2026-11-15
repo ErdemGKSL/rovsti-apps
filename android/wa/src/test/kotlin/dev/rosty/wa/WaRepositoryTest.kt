@@ -199,7 +199,7 @@ class WaRepositoryTest {
             repo.start()
             backgroundScope.launch { repo.chats().toList(mutableListOf()) }
             val before = fake.count("wa.chats_with_meta")
-            fake.emitEvent("inst1", 1, GatewayEvent.Resync)
+            fake.emitEvent("inst1", 1, GatewayEvent.Resync())
             assertEquals(before + 1, fake.count("wa.chats_with_meta"))
         }
 
@@ -211,7 +211,7 @@ class WaRepositoryTest {
             backgroundScope.launch { repo.chats().toList(mutableListOf()) }
             fake.emitEvent("inst1", 1, typing)
             val before = fake.count("wa.chats_with_meta")
-            fake.emitEvent("inst1", 9, GatewayEvent.Resync)
+            fake.emitEvent("inst1", 9, GatewayEvent.Resync())
             assertEquals(before + 1, fake.count("wa.chats_with_meta"))
         }
 
@@ -232,7 +232,7 @@ class WaRepositoryTest {
             assertEquals(1, fake.count("wa.messages_with_meta"))
             fake.emitEvent("inst1", 2, GatewayEvent.MessageDeleted("c1@s.whatsapp.net", "m1"))
             assertEquals(2, fake.count("wa.messages_with_meta"))
-            fake.emitEvent("inst1", 4, GatewayEvent.Resync)
+            fake.emitEvent("inst1", 4, GatewayEvent.Resync())
             assertEquals(3, fake.count("wa.messages_with_meta"))
         }
 

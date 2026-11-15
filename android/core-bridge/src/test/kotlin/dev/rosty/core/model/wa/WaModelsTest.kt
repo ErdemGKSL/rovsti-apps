@@ -69,10 +69,118 @@ class WaModelsTest {
             ) as GatewayEvent.MessageMetaChanged
         assertNull(meta.body)
         assertEquals(DeliveryStatus.Read, meta.meta.status)
-        assertEquals(GatewayEvent.Resync, json.decodeFromString(GatewayEvent.serializer(), """{"type":"resync"}"""))
+        assertEquals(GatewayEvent.Resync(), json.decodeFromString(GatewayEvent.serializer(), """{"type":"resync"}"""))
         assertEquals(
             GatewayEvent.StatusChanged(null),
             json.decodeFromString(GatewayEvent.serializer(), """{"type":"status_changed"}"""),
+        )
+    }
+
+    /** The JSON pinned in `rosty_wa_proto` (`epoch_account_and_history_events_are_pinned`). */
+    @Test
+    fun theEpochAccountAndHistoryFramesDecodeAndEncodeBackAsTheGatewayWroteThem() {
+        val wire =
+            Json {
+                explicitNulls = true
+                encodeDefaults = true
+            }
+        val history = HistoryStatus(HistoryStatus.SYNCING, 55, 120, 48_000, 1_500_000_000_000)
+        val frames =
+            listOf(
+                Pair(
+                    """{"type":"hello","epoch":"9f2c41d07ab35e68"}""",
+                    GatewayEvent.Hello("9f2c41d07ab35e68"),
+                ),
+                Pair(
+                    """{"type":"resync","epoch":"9f2c41d07ab35e68"}""",
+                    GatewayEvent.Resync("9f2c41d07ab35e68"),
+                ),
+                Pair(
+                    """{"type":"resync"}""",
+                    GatewayEvent.Resync(),
+                ),
+                Pair(
+                    """{"type":"account_changed","old_pn":"100000000001@s.whatsapp.net","new_pn":"100000000002@s.whatsapp.net"}""",
+                    GatewayEvent.AccountChanged("100000000001@s.whatsapp.net", "100000000002@s.whatsapp.net"),
+                ),
+                Pair(
+                    """{"type":"account_changed","new_pn":"100000000002@s.whatsapp.net"}""",
+                    GatewayEvent.AccountChanged(newPn = "100000000002@s.whatsapp.net"),
+                ),
+                Pair(
+                    """{"type":"history_synced","chats":12,"progress":40,"sync_type":"full","messages":3500,"oldest_ms":1500000000000}""",
+                    GatewayEvent.HistorySynced(12, 40, "full", 3_500, 1_500_000_000_000),
+                ),
+                Pair(
+                    """{"type":"history_synced","chats":0,"progress":null,"sync_type":"on_demand","messages":0}""",
+                    GatewayEvent.HistorySynced(0, null, "on_demand"),
+                ),
+                Pair(
+                    """{"type":"state","instance_id":"i","state":"connected","own_jid":"100000000001@s.whatsapp.net","push_name":null,"epoch":"9f2c41d07ab35e68","account_epoch":2,"history":{"state":"syncing","progress":55,"chats":120,"messages":48000,"oldest_ms":1500000000000}}""",
+                    GatewayEvent.State(
+                        "i",
+                        InstanceState.Connected,
+                        "100000000001@s.whatsapp.net",
+                        epoch = "9f2c41d07ab35e68",
+                        accountEpoch = 2,
+                        history = history,
+                    ),
+                ),
+            )
+        for ((text, event) in frames) {
+            assertEquals(event, json.decodeFromString(GatewayEvent.serializer(), text))
+            assertEquals(text, wire.encodeToString(GatewayEvent.serializer(), event))
+        }
+        val state = frames.last().second as GatewayEvent.State
+        assertEquals(
+            InstanceStatus(
+                "i",
+                InstanceState.Connected,
+                "100000000001@s.whatsapp.net",
+                epoch = "9f2c41d07ab35e68",
+                accountEpoch = 2,
+                history = history,
+            ),
+            state.status(),
+        )
+        val status =
+            """{"instance_id":"i","state":"connected","own_jid":null,"push_name":null,"account_epoch":3,"history":{"state":"done","progress":100,"chats":412,"messages":5000000000,"oldest_ms":1400000000000}}"""
+        val decoded = json.decodeFromString(InstanceStatus.serializer(), status)
+        assertEquals(HistoryStatus(HistoryStatus.DONE, 100, 412, 5_000_000_000, 1_400_000_000_000), decoded.history)
+        assertEquals(status, wire.encodeToString(InstanceStatus.serializer(), decoded))
+    }
+
+    /** What a gateway from before the round sends, and a kind or state a newer one adds. */
+    @Test
+    fun framesOfOlderAndNewerGatewaysDecode() {
+        assertEquals(
+            GatewayEvent.HistorySynced(3),
+            json.decodeFromString(GatewayEvent.serializer(), """{"type":"history_synced","chats":3,"progress":null}"""),
+        )
+        val old =
+            json.decodeFromString(
+                InstanceStatus.serializer(),
+                """{"instance_id":"i","state":"connected","own_jid":null,"push_name":null}""",
+            )
+        assertNull(old.epoch)
+        assertNull(old.accountEpoch)
+        assertNull(old.history)
+        val newer =
+            json.decodeFromString(
+                GatewayEvent.serializer(),
+                """{"type":"history_synced","chats":1,"progress":7,"sync_type":"from_the_future","messages":2}""",
+            ) as GatewayEvent.HistorySynced
+        assertEquals("from_the_future", newer.syncType)
+        val later =
+            json.decodeFromString(
+                HistoryStatus.serializer(),
+                """{"state":"later_state","progress":null,"chats":0,"messages":0,"oldest_ms":null}""",
+            )
+        assertEquals("later_state", later.state)
+        // Handed on to the store, the counts are written even when they are zero: Rust requires them.
+        assertEquals(
+            """{"state":"idle","chats":0,"messages":0}""",
+            json.encodeToString(HistoryStatus.serializer(), HistoryStatus(HistoryStatus.IDLE)),
         )
     }
 

@@ -89,7 +89,19 @@ object WaSyncContracts : ContractModels {
             op<WaSyncPlanRequest, WaSyncPlan>("wa_sync.plan", ok = listOf("gap"))
             op<WaSyncEventsRequest, WaSyncApplied>(
                 "wa_sync.apply_events",
-                ok = listOf("resync", "stale", "echo", "identity", "alt_ids", "other_forms", "rejected", "own_ids"),
+                ok =
+                    listOf(
+                        "resync",
+                        "stale",
+                        "echo",
+                        "identity",
+                        "alt_ids",
+                        "other_forms",
+                        "rejected",
+                        "own_ids",
+                        "gateway",
+                        "account_changed",
+                    ),
             )
             op<WaSyncStoreChatsRequest, WaSyncStoredChats>("wa_sync.store_chats", ok = listOf("missed", "alt"))
             op<WaSyncStorePageRequest, WaSyncStoredPage>("wa_sync.store_page", ok = listOf("overlap", "alt", "older"))
@@ -109,7 +121,10 @@ object WaSyncContracts : ContractModels {
                 ok = listOf("former", "unknown_lid", "unknown_number", "group"),
             )
             op<WaSyncCatchUpRequest, WaSyncCaughtUp>("wa_sync.identity_catch_up", ok = listOf("done", "rejected"))
-            op<WaSyncObserveRequest, WaSyncIdentityApplied>("wa_sync.identity_observe", ok = listOf("nothing"))
+            op<WaSyncObserveRequest, WaSyncIdentityApplied>(
+                "wa_sync.identity_observe",
+                ok = listOf("nothing", "gateway", "account_changed"),
+            )
             op<WaIdParseRequest, WaIdParsed?>(
                 "wa_identity.parse",
                 ok = listOf("lid", "c_us", "group", "status", "newsletter", "service", "not_an_id"),

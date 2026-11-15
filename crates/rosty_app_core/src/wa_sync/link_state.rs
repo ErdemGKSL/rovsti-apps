@@ -16,6 +16,7 @@
 use std::path::{Path, PathBuf};
 
 use rosty_core::wa_identity::{IdentityMap, Rejected, WaIdKind};
+use rosty_wa_proto::{HistoryStatus, InstanceStatus};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
@@ -228,6 +229,25 @@ fn store_history(conn: &Connection, history: &HistoryProgress) -> Result<()> {
     Ok(())
 }
 
+/// `InstanceStatus.history` as the wire type has it. A state this build does not know (a newer gateway) keeps
+/// the stored one.
+fn report_of(conn: &Connection, history: &HistoryStatus) -> Result<HistoryReport> {
+    use rosty_wa_proto::HistoryState as Wire;
+    let state = match history.state {
+        Wire::Idle => HistoryState::Idle,
+        Wire::Syncing => HistoryState::Syncing,
+        Wire::Done => HistoryState::Done,
+        Wire::Unknown => stored_history(conn)?.map_or(HistoryState::Idle, |stored| stored.state),
+    };
+    Ok(HistoryReport {
+        state,
+        progress: history.progress,
+        chats: history.chats,
+        messages: history.messages,
+        oldest_ms: history.oldest_ms,
+    })
+}
+
 /// Keeps what the gateway's status says about the history. The kind of the last batch is the event's to tell
 /// ([`history_synced`]) and stays.
 fn note_history(conn: &Connection, report: &HistoryReport, now_ms: i64) -> Result<HistoryProgress> {
@@ -254,10 +274,14 @@ pub struct HistoryBatch<'a> {
     pub oldest_ms: Option<i64>,
     /// 0 to 100, when the phone said.
     pub progress: Option<u32>,
+    /// Messages of the batch the gateway did not hold before.
+    pub messages: u32,
 }
 
 /// A `history_synced` event: keeps the kind of the batch, the oldest message seen so far and the progress, in
-/// the caller's transaction. The counts of chats and messages are the status's to tell.
+/// the caller's transaction. The messages the batch added are counted on top of what the status last reported,
+/// so the count moves between two status answers; the next status answer sets it. The count of chats is the
+/// status's to tell (a batch names the chats it wrote, not the new ones).
 pub(super) fn history_synced(
     conn: &Connection,
     batch: &HistoryBatch<'_>,
@@ -277,6 +301,7 @@ pub(super) fn history_synced(
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     };
+    history.messages = history.messages.saturating_add(u64::from(batch.messages));
     history.updated_ms = at_ms;
     store_history(conn, &history)
 }
@@ -323,6 +348,49 @@ impl Store {
     ///   unknown on either side keeps everything; so does the same account linked again.
     /// * The history progress is stored as reported.
     pub fn note_status(&mut self, note: &StatusNote<'_>, now_ms: i64) -> Result<StatusNoted> {
+        self.note_gateway(note, None, now_ms, Told::Answer)
+    }
+
+    /// [`Self::note_status`] with a whole status answer (`wa.status`): its epoch, account epoch, own ids and
+    /// history report.
+    pub fn note_instance_status(
+        &mut self,
+        status: &InstanceStatus,
+        now_ms: i64,
+    ) -> Result<StatusNoted> {
+        self.note_status_told(status, now_ms, Told::Answer)
+    }
+
+    /// A whole status, as an answer or as a `state` event of the stream.
+    pub(super) fn note_status_told(
+        &mut self,
+        status: &InstanceStatus,
+        now_ms: i64,
+        told: Told,
+    ) -> Result<StatusNoted> {
+        let note = StatusNote {
+            epoch: status.epoch.as_deref(),
+            account_epoch: status.account_epoch,
+            own_pn: status.own_jid.as_deref(),
+            own_lid: status.own_lid.as_deref(),
+            history: None,
+        };
+        self.note_gateway(&note, status.history.as_ref(), now_ms, told)
+    }
+
+    /// [`Self::note_status`], with who said so. `wire_history` is the history report as the wire type has it,
+    /// for a note without `history`.
+    ///
+    /// A `state` event ([`Told::Event`]) stands at its place in the stream, so nothing of an account before it
+    /// can follow: its wipe waits for no announcement. A `state` event of an account before the stored one (a
+    /// lower `account_epoch`: the event was still in the gateway's ring) only names the gateway process.
+    fn note_gateway(
+        &mut self,
+        note: &StatusNote<'_>,
+        wire_history: Option<&HistoryStatus>,
+        now_ms: i64,
+        told: Told,
+    ) -> Result<StatusNoted> {
         let mut noted = StatusNoted {
             gap: note_epoch(&self.conn, note.epoch)?,
             ..StatusNoted::default()
@@ -332,18 +400,25 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
+        let of_an_older_account = told == Told::Event
+            && matches!((stored_epoch, note.account_epoch), (Some(stored), Some(new)) if new < stored);
+        if of_an_older_account {
+            noted.resync = noted.gap;
+            noted.history = stored_history(&self.conn)?;
+            return Ok(noted);
+        }
         let raised =
             matches!((stored_epoch, note.account_epoch), (Some(stored), Some(new)) if new > stored);
         if raised {
             noted.delete_files = self.account_wipe(Wipe {
                 keep_outbox: false,
                 account_epoch: note.account_epoch,
-                sweep: !noted.gap,
+                sweep: told == Told::Answer && !noted.gap,
             })?;
             noted.account_changed = true;
         }
         if note.own_pn.is_some() || note.own_lid.is_some() {
-            let own = self.set_own(note.own_pn, note.own_lid, now_ms, Told::Answer)?;
+            let own = self.set_own(note.own_pn, note.own_lid, now_ms, told)?;
             noted.account_changed |= own.account_changed;
             noted.delete_files.extend(own.delete_files);
             noted.rekeyed = own.rekeyed;
@@ -361,7 +436,11 @@ impl Store {
              WHERE id = 1",
             params![note.account_epoch, no_announcement],
         )?;
-        if let Some(report) = note.history {
+        let wire_report = match (note.history, wire_history) {
+            (None, Some(history)) => Some(report_of(&self.conn, history)?),
+            _ => None,
+        };
+        if let Some(report) = note.history.or(wire_report.as_ref()) {
             note_history(&self.conn, report, now_ms)?;
         }
         noted.resync |= noted.gap || noted.account_changed;

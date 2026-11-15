@@ -25,7 +25,7 @@ const ACCOUNT_TABLES: [&str; 8] = [
     "merge_log",
 ];
 
-fn status(
+pub(super) fn status(
     epoch: Option<&'static str>,
     account_epoch: Option<u32>,
     own: Option<&'static str>,
@@ -80,7 +80,7 @@ fn send_file(file: &str) -> Action {
 /// A store of account [`OWN`] at gateway epoch `e1`, account epoch 1, with something in every table: two chats
 /// that merged, a group, a starred photo with its cached file and thumbnail, a queued download, a text and a
 /// file in the outbox, a chat list cursor, a pairs cursor and a history report.
-fn full(store: &mut Store) {
+pub(super) fn full(store: &mut Store) {
     store
         .note_status(
             &StatusNote {
@@ -172,7 +172,7 @@ fn rows(store: &Store) -> Vec<i64> {
 
 /// Nothing of the old account is left; `own` is how many own ids the new account has named so far (each is a
 /// person with one alias).
-fn assert_wiped(store: &Store, own: i64) {
+pub(super) fn assert_wiped(store: &Store, own: i64) {
     assert_eq!(rows(store), [0, 0, 0, 0, 0, own, own, 0]);
     let plan = store.plan(None).unwrap();
     assert!(plan.refresh_chats && plan.fetch.is_empty());
@@ -655,6 +655,7 @@ fn batch(sync_type: Option<&'static str>, oldest_ms: Option<i64>) -> HistoryBatc
         sync_type,
         oldest_ms,
         progress: None,
+        messages: 0,
     }
 }
 

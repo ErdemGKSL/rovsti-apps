@@ -31,6 +31,9 @@ fn state(own_jid: Option<&str>, own_lid: Option<&str>) -> GatewayEvent {
         own_jid: own_jid.map(str::to_owned),
         push_name: None,
         own_lid: own_lid.map(str::to_owned),
+        epoch: None,
+        account_epoch: None,
+        history: None,
     })
 }
 
@@ -467,6 +470,9 @@ fn groups_profiles_and_the_instance_are_observed() {
         own_jid: Some("905550000009:3@s.whatsapp.net".into()),
         push_name: None,
         own_lid: Some(OWN_LID.into()),
+        epoch: None,
+        account_epoch: None,
+        history: None,
     };
     let applied = store
         .identity_observe(
@@ -739,7 +745,7 @@ fn a_catch_up_cut_short_goes_on_from_the_stored_cursor() {
     );
     assert!(one_person(&store, LID, PN));
     // A `resync` event starts the chat list over, not the list of pairs.
-    let applied = apply(&mut store, vec![GatewayEvent::Resync]);
+    let applied = apply(&mut store, vec![GatewayEvent::Resync { epoch: None }]);
     assert!(applied.resync);
     assert_eq!(store.identity_since().unwrap().as_deref(), Some("c1"));
     let next = store

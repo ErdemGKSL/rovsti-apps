@@ -2,6 +2,7 @@ package dev.rosty.core
 
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.HandleAnswer
+import dev.rosty.core.model.wa.HistoryStatus
 import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichMessage
@@ -31,6 +32,8 @@ import dev.rosty.core.model.wa.WaSyncFetched
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistory
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
+import dev.rosty.core.model.wa.WaSyncHistoryReport
+import dev.rosty.core.model.wa.WaSyncHistoryState
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncKind
@@ -114,8 +117,9 @@ import dev.rosty.core.ops.WaSyncOps
  * Media follows the store's rules: the auto-download table ([mediaPolicy]), the queue with its back-off and five
  * attempts, the cap with its exemptions (starred, pinned, saved, a file an unsent row sends, used in the last 24
  * hours) and the reconcile. A thread row carries the cached file and the state of its download, as in Rust. The
- * gateway epoch and the account wipe ([noteStatus], [accountChanged], a `state` event that names another own
- * number) follow the same conditions; what is wiped is everything seeded here.
+ * gateway epoch and the account wipe ([noteStatus], [accountChanged], a whole status handed to [identityObserve],
+ * and in [applyEvents] a `hello`, a `resync`, a `state` and an `account_changed` event) follow the same conditions;
+ * what is wiped is everything seeded here. A `history_synced` event and a status report keep [history].
  */
 class FakeWaSyncOps(
     private val instanceId: String = "fake-instance",
@@ -411,35 +415,66 @@ class FakeWaSyncOps(
             writes += req
             val changed = linkedSetOf<String>()
             var accountChanged = false
+            var resync = false
             val deleteFiles = mutableListOf<String>()
             for (envelope in req.events) {
-                seq = envelope.seq
-                // Another own number in the stream: another account. Not believed while a status already said so
-                // and old events may still arrive.
-                val own = (envelope.event as? GatewayEvent.State)?.ownJid?.let(::bare)
-                val known = ownPn
-                if (own != null && known != null && own != known && !sweepPending) {
-                    deleteFiles += wipeAccount(keepOutbox = false)
-                    accountEpoch = null
-                    accountChanged = true
-                    changed.clear()
+                val event = envelope.event
+                if (event is GatewayEvent.Hello) {
+                    // The first frame of a socket: another epoch is a gap, and its `seq` is never taken.
+                    resync = noteEpoch(event.epoch) || resync
+                    continue
                 }
-                if (own != null && (known == null || accountChanged)) ownPn = own
-                if (envelope.event is GatewayEvent.Resync) sweepPending = false
-                val mapped = envelope.event as? GatewayEvent.IdentityMapped
+                if (event is GatewayEvent.Resync) {
+                    noteEpoch(event.epoch)
+                    sweepPending = false
+                    resync = true
+                }
+                val told =
+                    when (event) {
+                        is GatewayEvent.State -> {
+                            val status = event.status()
+                            noted(
+                                StatusTold(status.epoch, status.accountEpoch, status.ownJid, envelope.atMs),
+                                status.history?.let(::report),
+                                fromEvent = true,
+                            )
+                        }
+
+                        is GatewayEvent.AccountChanged -> {
+                            announced(event.oldPn, event.newPn)
+                        }
+
+                        else -> {
+                            null
+                        }
+                    }
+                if (told != null) {
+                    resync = resync || told.gap || told.changed
+                    if (told.changed) {
+                        accountChanged = true
+                        deleteFiles += told.deleteFiles
+                        changed.clear()
+                    }
+                }
+                seq = envelope.seq
+                if (event is GatewayEvent.HistorySynced) {
+                    historySynced(event, envelope.atMs)
+                    resync = true
+                }
+                val mapped = event as? GatewayEvent.IdentityMapped
                 if (mapped != null) merge(mapped.lid, mapped.pn)?.let { changed += it.intoKey }
-                val event = envelope.event as? GatewayEvent.Message ?: continue
-                val chat = keyOf(event.chat)
+                val message = event as? GatewayEvent.Message ?: continue
+                val chat = keyOf(message.chat)
                 store(
                     stored(
                         RichMessage(
-                            event.id,
+                            message.id,
                             chat,
-                            event.sender?.let(::keyOf),
-                            event.fromMe,
-                            event.timestampMs,
-                            event.body,
-                            event.reactions,
+                            message.sender?.let(::keyOf),
+                            message.fromMe,
+                            message.timestampMs,
+                            message.body,
+                            message.reactions,
                         ),
                     ),
                 )
@@ -452,7 +487,7 @@ class FakeWaSyncOps(
                     HANDLE,
                     seq,
                     req.events.size,
-                    resync = steps.isNotEmpty() || accountChanged,
+                    resync = steps.isNotEmpty() || resync,
                     chats = changed.toList(),
                     reconciled = emptyList(),
                     rekeyed = steps,
@@ -1009,47 +1044,141 @@ class FakeWaSyncOps(
             ok(WaSyncMediaCap(HANDLE, capBytes))
         }
 
+    /** What a status or a `state` event says about the gateway and the account. */
+    private class StatusTold(
+        val epoch: String?,
+        val accountEpoch: Int?,
+        val ownPn: String?,
+        val nowMs: Long,
+    )
+
+    /** What taking in a status, a `state` event or an announcement did. */
+    private class Noted(
+        val gap: Boolean,
+        val changed: Boolean,
+        val deleteFiles: List<String>,
+    )
+
+    /** Another epoch than the stored one is a gap; so is the first epoch a store with a `seq` hears. */
+    private fun noteEpoch(told: String?): Boolean {
+        val named = told?.takeIf { it.isNotEmpty() } ?: return false
+        val gap = named != epoch && (epoch != null || seq != null)
+        epoch = named
+        if (gap) {
+            seq = null
+            sweepPending = false
+            owed = owed.copy(afterSeq = null, refreshChats = true)
+        }
+        return gap
+    }
+
+    /** The wire's report as the store's; a state of a newer gateway keeps the stored one. */
+    private fun report(status: HistoryStatus): WaSyncHistoryReport {
+        val state =
+            when (status.state) {
+                HistoryStatus.IDLE -> WaSyncHistoryState.Idle
+                HistoryStatus.SYNCING -> WaSyncHistoryState.Syncing
+                HistoryStatus.DONE -> WaSyncHistoryState.Done
+                else -> history?.state ?: WaSyncHistoryState.Idle
+            }
+        return WaSyncHistoryReport(state, status.progress, status.chats, status.messages, status.oldestMs)
+    }
+
+    /**
+     * Takes in a status answer, or a `state` event at its place in the stream ([fromEvent]): nothing of an older
+     * account can follow such an event, so its wipe waits for no announcement, and an event of an account before
+     * the stored one only names the gateway process.
+     */
+    private fun noted(
+        told: StatusTold,
+        report: WaSyncHistoryReport?,
+        fromEvent: Boolean,
+    ): Noted {
+        val gap = noteEpoch(told.epoch)
+        val newEpoch = told.accountEpoch
+        val was = accountEpoch
+        if (fromEvent && was != null && newEpoch != null && newEpoch < was) return Noted(gap, false, emptyList())
+        val own = told.ownPn?.let(::bare)?.takeIf { WaIds.number(it) != null }
+        val known = ownPn
+        val raised = was != null && newEpoch != null && newEpoch > was
+        val otherNumber = own != null && known != null && own != known
+        // While a status wipe waits for its announcement, an event that names another number is not believed.
+        if (fromEvent && !raised && otherNumber && sweepPending) return Noted(gap, false, emptyList())
+        val changed = raised || otherNumber
+        val deleteFiles = if (changed) wipeAccount(keepOutbox = false) else emptyList()
+        // The announcement is waited for only when one can come: an answer of the same process, a gateway with
+        // account epochs.
+        if (changed) sweepPending = !fromEvent && !gap && newEpoch != null
+        if (newEpoch != null) {
+            accountEpoch = newEpoch
+        } else if (changed) {
+            accountEpoch = null
+        }
+        if (own != null) ownPn = own
+        report?.let {
+            history =
+                WaSyncHistory(
+                    it.state,
+                    it.progress?.coerceAtMost(100),
+                    it.chats,
+                    it.messages,
+                    it.oldestMs,
+                    history?.syncType,
+                    told.nowMs,
+                )
+        }
+        return Noted(gap, changed, deleteFiles)
+    }
+
+    /** The gateway's `account_changed`, at its place in the stream. */
+    private fun announced(
+        oldPn: String?,
+        newPn: String,
+    ): Noted {
+        val new = bare(newPn).takeIf { WaIds.number(it) != null }
+        val old = oldPn?.let(::bare)
+        val known = ownPn
+        val full = new != null && if (known != null) known != new else old != null && old != new
+        val sweep = new != null && known == new && sweepPending
+        val deleteFiles =
+            when {
+                full -> wipeAccount(keepOutbox = false).also { accountEpoch = null }
+                sweep -> wipeAccount(keepOutbox = true)
+                else -> emptyList()
+            }
+        if (full || sweep) sweepPending = false
+        if (new != null) ownPn = new
+        return Noted(gap = false, changed = full || sweep, deleteFiles = deleteFiles)
+    }
+
+    /** A `history_synced` event: its kind, the oldest message so far, the progress, and its messages on top. */
+    private fun historySynced(
+        event: GatewayEvent.HistorySynced,
+        atMs: Long,
+    ) {
+        val before = history ?: WaSyncHistory(WaSyncHistoryState.Syncing, chats = 0, messages = 0, updatedMs = atMs)
+        history =
+            before.copy(
+                progress = event.progress?.coerceAtMost(100) ?: before.progress,
+                messages = before.messages + event.messages,
+                oldestMs = listOfNotNull(before.oldestMs, event.oldestMs).minOrNull(),
+                syncType = event.syncType ?: before.syncType,
+                updatedMs = atMs,
+            )
+    }
+
     override suspend fun noteStatus(req: WaSyncNoteStatusRequest): Outcome<WaSyncStatusNoted> =
         synchronized(lock) {
             writes += req
-            val named = req.epoch?.takeIf { it.isNotEmpty() }
-            val gap = named != null && named != epoch && (epoch != null || seq != null)
-            if (named != null) epoch = named
-            if (gap) {
-                seq = null
-                sweepPending = false
-                owed = owed.copy(afterSeq = null, refreshChats = true)
-            }
-            val newEpoch = req.accountEpoch
-            val was = accountEpoch
-            val own = req.ownPn?.let(::bare)?.takeIf { WaIds.number(it) != null }
-            val known = ownPn
-            val changed =
-                (was != null && newEpoch != null && newEpoch > was) || (own != null && known != null && own != known)
-            val deleteFiles = if (changed) wipeAccount(keepOutbox = false) else emptyList()
-            // The announcement is waited for only when one can come: the same process, a gateway with epochs.
-            if (changed) sweepPending = !gap && newEpoch != null
-            if (newEpoch != null) accountEpoch = newEpoch
-            if (own != null) ownPn = own
-            req.history?.let {
-                history =
-                    WaSyncHistory(
-                        it.state,
-                        it.progress?.coerceAtMost(100),
-                        it.chats,
-                        it.messages,
-                        it.oldestMs,
-                        history?.syncType,
-                        req.nowMs,
-                    )
-            }
+            val told = StatusTold(req.epoch, req.accountEpoch, req.ownPn, req.nowMs)
+            val noted = noted(told, req.history, fromEvent = false)
             ok(
                 WaSyncStatusNoted(
                     HANDLE,
-                    gap = gap,
-                    accountChanged = changed,
-                    deleteFiles = deleteFiles,
-                    resync = gap || changed,
+                    gap = noted.gap,
+                    accountChanged = noted.changed,
+                    deleteFiles = noted.deleteFiles,
+                    resync = noted.gap || noted.changed,
                     history = history,
                 ),
             )
@@ -1058,21 +1187,17 @@ class FakeWaSyncOps(
     override suspend fun accountChanged(req: WaSyncAccountChangedRequest): Outcome<WaSyncIdentityApplied> =
         synchronized(lock) {
             writes += req
-            val new = bare(req.newPn).takeIf { WaIds.number(it) != null }
-            val old = req.oldPn?.let(::bare)
-            val known = ownPn
-            val full = new != null && if (known != null) known != new else old != null && old != new
-            val sweep = new != null && known == new && sweepPending
-            val deleteFiles =
-                when {
-                    full -> wipeAccount(keepOutbox = false).also { accountEpoch = null }
-                    sweep -> wipeAccount(keepOutbox = true)
-                    else -> emptyList()
-                }
-            if (full || sweep) sweepPending = false
-            if (new != null) ownPn = new
-            val changed = full || sweep
-            ok(WaSyncIdentityApplied(HANDLE, emptyList(), emptyList(), changed, changed, deleteFiles))
+            val noted = announced(req.oldPn, req.newPn)
+            ok(
+                WaSyncIdentityApplied(
+                    HANDLE,
+                    emptyList(),
+                    emptyList(),
+                    noted.changed,
+                    noted.changed,
+                    noted.deleteFiles,
+                ),
+            )
         }
 
     override suspend fun history(req: WaSyncHandleRequest): Outcome<WaSyncHistoryAnswer> =
@@ -1134,6 +1259,12 @@ class FakeWaSyncOps(
     override suspend fun identityObserve(req: WaSyncObserveRequest): Outcome<WaSyncIdentityApplied> =
         synchronized(lock) {
             writes += req
+            // The whole status, as `noteStatus` takes it field by field.
+            val noted =
+                req.status?.let { status ->
+                    val told = StatusTold(status.epoch, status.accountEpoch, status.ownJid, req.nowMs)
+                    noted(told, status.history?.let(::report), fromEvent = false)
+                }
             val pairs =
                 req.groups.flatMap { it.participants }.mapNotNull { member ->
                     val lid = member.lid ?: return@mapNotNull null
@@ -1141,7 +1272,16 @@ class FakeWaSyncOps(
                 } + req.profiles.mapNotNull { profile -> profile.lid?.let { it to profile.jid } }
             val steps = pairs.mapNotNull { (lid, pn) -> merge(lid, pn) }
             unreported.removeAll(steps)
-            ok(WaSyncIdentityApplied(HANDLE, steps, emptyList(), steps.isNotEmpty(), accountChanged = false))
+            ok(
+                WaSyncIdentityApplied(
+                    HANDLE,
+                    steps,
+                    emptyList(),
+                    resync = steps.isNotEmpty() || noted?.gap == true || noted?.changed == true,
+                    accountChanged = noted?.changed == true,
+                    deleteFiles = noted?.deleteFiles.orEmpty(),
+                ),
+            )
         }
 
     override suspend fun parseId(req: WaIdParseRequest): Outcome<WaIdParsed?> = ok(parsed(req.id))

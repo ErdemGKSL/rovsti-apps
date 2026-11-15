@@ -1,12 +1,16 @@
 package dev.rosty.core
 
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.HistoryStatus
 import dev.rosty.core.model.wa.InstanceState
+import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
+import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncEvent
 import dev.rosty.core.model.wa.WaSyncFetched
+import dev.rosty.core.model.wa.WaSyncHistory
 import dev.rosty.core.model.wa.WaSyncHistoryReport
 import dev.rosty.core.model.wa.WaSyncHistoryState
 import dev.rosty.core.model.wa.WaSyncKind
@@ -254,7 +258,7 @@ class WaSyncMediaFakeTest {
             store.setMedia(chat, "P1", now, path = "/m/P1.jpg", bytes = 1_000).getOrThrow()
             val first = store.noteStatus(now, epoch = "e1", accountEpoch = 1, ownPn = own).getOrThrow()
             assertFalse(first.gap || first.accountChanged)
-            store.applyEvents(listOf(WaSyncEvent(7, now, GatewayEvent.Resync))).getOrThrow()
+            store.applyEvents(listOf(WaSyncEvent(7, now, GatewayEvent.Resync()))).getOrThrow()
             fake.owed = fake.owed.copy(afterSeq = 7, refreshChats = false)
 
             // Unknown values and the same account change nothing.
@@ -305,6 +309,118 @@ class WaSyncMediaFakeTest {
             assertFalse(
                 store.noteStatus(now, epoch = "e2", accountEpoch = 2, ownPn = other).getOrThrow().accountChanged,
             )
+        }
+
+    @Test
+    fun theEventsOfTheSocketTellTheEpochTheAccountAndTheHistory() =
+        runTest {
+            val fake = FakeWaSyncOps()
+            val store = store(fake, media("P1", WaSyncKind.Image, 1_000))
+            store.setMedia(chat, "P1", now, path = "/m/P1.jpg", bytes = 1_000).getOrThrow()
+            store.noteStatus(now, epoch = "e1", accountEpoch = 1, ownPn = own).getOrThrow()
+            store.applyEvents(listOf(WaSyncEvent(7, now, GatewayEvent.Resync("e1")))).getOrThrow()
+            fake.owed = fake.owed.copy(afterSeq = 7, refreshChats = false)
+
+            // A hello of the stored epoch changes nothing and does not move the `seq`.
+            val same = store.applyEvents(listOf(WaSyncEvent(40, now, GatewayEvent.Hello("e1")))).getOrThrow()
+            assertFalse(same.resync)
+            assertEquals(7L, same.lastSeq)
+
+            // Another epoch is a gap; the history batch and the state event of that socket are kept.
+            val history = HistoryStatus(HistoryStatus.SYNCING, 55, 120, 48_000, 5_000)
+            val restarted =
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(1, now, GatewayEvent.Hello("e2")),
+                            WaSyncEvent(
+                                2,
+                                now,
+                                GatewayEvent.State(
+                                    "inst1",
+                                    InstanceState.Connected,
+                                    ownJid = own,
+                                    epoch = "e2",
+                                    accountEpoch = 1,
+                                    history = history,
+                                ),
+                            ),
+                            WaSyncEvent(3, now, GatewayEvent.HistorySynced(2, 60, "full", 500, 4_000)),
+                        ),
+                    ).getOrThrow()
+            assertTrue(restarted.resync && !restarted.accountChanged)
+            assertEquals(3L, restarted.lastSeq)
+            assertEquals("e2", fake.epoch)
+            assertEquals(
+                WaSyncHistory(WaSyncHistoryState.Syncing, 60, 120, 48_500, 4_000, "full", now),
+                store.history().getOrThrow(),
+            )
+
+            // The announcement in the batch: what came before it goes, what follows stays.
+            val changed =
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(4, now, GatewayEvent.AccountChanged(own, other)),
+                            WaSyncEvent(
+                                5,
+                                now,
+                                GatewayEvent.Message(
+                                    "N1",
+                                    chat,
+                                    chat,
+                                    false,
+                                    now,
+                                    MessageBody.Text("new"),
+                                    emptyList(),
+                                ),
+                            ),
+                        ),
+                    ).getOrThrow()
+            assertTrue(changed.accountChanged && changed.resync)
+            assertEquals(listOf("/m/P1.jpg"), changed.deleteFiles)
+            assertEquals(
+                listOf("N1"),
+                store
+                    .thread(chat, 10)
+                    .getOrThrow()
+                    .items
+                    .map { it.id },
+            )
+            assertNull(store.history().getOrThrow())
+        }
+
+    @Test
+    fun aWholeStatusAnswerIsNotedThroughObserve() =
+        runTest {
+            val fake = FakeWaSyncOps()
+            val store = store(fake, media("P1", WaSyncKind.Image, 1_000))
+            store.setMedia(chat, "P1", now, path = "/m/P1.jpg", bytes = 1_000).getOrThrow()
+            val status =
+                InstanceStatus(
+                    "inst1",
+                    InstanceState.Connected,
+                    own,
+                    epoch = "e1",
+                    accountEpoch = 1,
+                    history = HistoryStatus(HistoryStatus.DONE, 100, 4, 90),
+                )
+            val first = store.observe(now, status = status).getOrThrow()
+            assertFalse(first.resync || first.accountChanged)
+            assertEquals(WaSyncHistoryState.Done, store.history().getOrThrow()?.state)
+            store.applyEvents(listOf(WaSyncEvent(7, now, GatewayEvent.Resync("e1")))).getOrThrow()
+
+            // The gateway restarted: a gap reads as `resync`, and the plan starts from the beginning.
+            val restarted = store.observe(now, status = status.copy(epoch = "e2")).getOrThrow()
+            assertTrue(restarted.resync && !restarted.accountChanged)
+            assertNull(store.plan().getOrThrow().afterSeq)
+
+            // Another account, whose history has not been reported yet: the store is emptied and its files are named.
+            val next = status.copy(epoch = "e2", accountEpoch = 2, ownJid = other, history = null)
+            val changed = store.observe(now, status = next)
+            assertTrue(changed.getOrThrow().accountChanged)
+            assertEquals(listOf("/m/P1.jpg"), changed.getOrThrow().deleteFiles)
+            assertNull(store.history().getOrThrow())
         }
 
     @Test

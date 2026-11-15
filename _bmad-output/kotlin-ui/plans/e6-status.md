@@ -2,9 +2,12 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
-## E6-WA R2 closing (2026-11-15): media limits, full history, account and link
+## E6-WA R2 closed (2026-11-15) at `832ca834` plus this note: media limits, full history, account and link
 
-Merged with `origin/ui-overhaul`. Gate: **running** (this line is replaced when it ends).
+Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 3 074 tests with `wa_gateway`, the Android
+checks); the Gradle steps green **without the Stops tests** (`-x :stops:testReleaseUnitTest
+-x :stops:verifyRoborazziRelease`), with `:phone:lintPlainRelease` added, APK check and compose stability included. The
+orphan-golden check lists only Stops goldens, because its shots were not run here.
 Plan and evidence: `plans/e6wa-r2.md`.
 
 **Gateway commits (deploy these; nothing was deployed from here)**: `91b74e14` (epoch, account change wipe, full

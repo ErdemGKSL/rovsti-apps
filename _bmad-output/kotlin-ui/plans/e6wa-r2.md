@@ -105,3 +105,8 @@ of `e6-status.md` (gateway commits, backup need, what to try), message to the ma
     (`dev.rosty.action.WA_CHAT`); hidden while Messages is not installed. Phone now holds `HANDOFF`.
   - Not proven here: the signature check on a device (no keystore), the hand-over between two installed apps, a real
     LID call. A call from a LID nobody maps is still left out of Recents (it has no number to list or dial).
+- **Steps 6 and 7** (merge `aa227001`): `:platform` `DeviceData`; Messages `WaDownloads` (queue worker, `.part`
+  then rename, reconcile and eviction at open), storage settings, history card, account-change and unlink cleanup;
+  the runner observes the status on every catch-up. 20 new goldens (`e6wa-r2-*`), none changed.
+- **Close**: merged `origin/ui-overhaul` (`4df9a7f2`); gate green without the Stops tests at `832ca834` (Rust 3 074
+  tests). See the WA-R2 note in `e6-status.md`.

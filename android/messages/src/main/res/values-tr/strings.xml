@@ -426,4 +426,6 @@
         <item quantity="one">%d mesaj</item>
         <item quantity="other">%d mesaj</item>
     </plurals>
+    <string name="thread_clear">Sohbeti Temizle</string>
+    <string name="thread_clear_confirm">Bu sohbetteki tüm mesajlar silinsin mi? Bu geri alınamaz.</string>
 </resources>

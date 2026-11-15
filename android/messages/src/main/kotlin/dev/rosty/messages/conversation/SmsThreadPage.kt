@@ -37,6 +37,7 @@ import dev.rosty.design.media.showPhotoViewer
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.OverlayController
+import dev.rosty.design.overlay.confirmDestructive
 import dev.rosty.design.overlay.showToast
 import dev.rosty.design.overlay.showUndo
 import dev.rosty.design.text.resolve
@@ -55,6 +56,7 @@ import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.messages.viewer.openAttachment
 import dev.rosty.messages.viewer.picturesOf
 import dev.rosty.messages.viewer.showConversationPictures
+import dev.rosty.platform.sms.SmsResult
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -400,6 +402,27 @@ fun SmsThreadPage(
                                             null
                                         }
                                     }
+                                },
+                                // M27: clear the chat (every message of the thread, after a confirm; needs the role).
+                                MenuItem.Action(
+                                    res.getString(R.string.thread_clear),
+                                    RostyIcons.Trash,
+                                    destructive = true,
+                                ) {
+                                    overlays.confirmDestructive(
+                                        destructiveLabel = res.getString(R.string.thread_clear),
+                                        onConfirm = {
+                                            container.scope.launch {
+                                                if (!container.smsRole.value) {
+                                                    overlays.showToast(res.getString(R.string.inbox_needs_role))
+                                                } else if (container.sms.deleteThread(route.threadId) is SmsResult.Ok) {
+                                                    onBack()
+                                                }
+                                            }
+                                        },
+                                        message = res.getString(R.string.thread_clear_confirm),
+                                        cancelLabel = res.getString(R.string.inbox_cancel),
+                                    )
                                 },
                                 // M43: the next chat with unread messages, in the inbox's order.
                                 MenuItem.Action(res.getString(R.string.tools_next_unread), RostyIcons.ArrowDown) {

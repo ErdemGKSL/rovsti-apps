@@ -442,4 +442,6 @@
         <item quantity="one">%d message</item>
         <item quantity="other">%d messages</item>
     </plurals>
+    <string name="thread_clear">Clear Chat</string>
+    <string name="thread_clear_confirm">Delete every message in this conversation? This can\'t be undone.</string>
 </resources>

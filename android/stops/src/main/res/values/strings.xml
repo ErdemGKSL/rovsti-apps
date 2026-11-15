@@ -299,27 +299,27 @@
         <item quantity="other">Map server works (%1$d layers)</item>
     </plurals>
     <plurals name="offline_estimate">
-        <item quantity="one">%1$d tile, about %2$s, up to zoom %3$d</item>
-        <item quantity="other">%1$d tiles, about %2$s, up to zoom %3$d</item>
+        <item quantity="one">%1$,d tile, about %2$s, up to zoom %3$d</item>
+        <item quantity="other">%1$,d tiles, about %2$s, up to zoom %3$d</item>
     </plurals>
     <plurals name="offline_confirm_title">
-        <item quantity="one">Download %1$d tile?</item>
-        <item quantity="other">Download %1$d tiles?</item>
+        <item quantity="one">Download %1$,d tile?</item>
+        <item quantity="other">Download %1$,d tiles?</item>
     </plurals>
     <plurals name="offline_progress">
-        <item quantity="one">Downloading %1$d of %2$d tile</item>
-        <item quantity="other">Downloading %1$d of %2$d tiles</item>
+        <item quantity="one">Downloading %1$,d of %2$,d tile</item>
+        <item quantity="other">Downloading %1$,d of %2$,d tiles</item>
     </plurals>
     <plurals name="offline_cancelled">
-        <item quantity="one">Download stopped: %1$d of %2$d tile kept</item>
-        <item quantity="other">Download stopped: %1$d of %2$d tiles kept</item>
+        <item quantity="one">Download stopped: %1$,d of %2$,d tile kept</item>
+        <item quantity="other">Download stopped: %1$,d of %2$,d tiles kept</item>
     </plurals>
     <plurals name="offline_failed">
-        <item quantity="one">Done, but %1$d of %2$d tiles failed</item>
-        <item quantity="other">Done, but %1$d of %2$d tiles failed</item>
+        <item quantity="one">Done, but %1$,d of %2$,d tiles failed</item>
+        <item quantity="other">Done, but %1$,d of %2$,d tiles failed</item>
     </plurals>
     <plurals name="offline_done">
-        <item quantity="one">Map area downloaded (%1$d tile)</item>
-        <item quantity="other">Map area downloaded (%1$d tiles)</item>
+        <item quantity="one">Map area downloaded (%1$,d tile)</item>
+        <item quantity="other">Map area downloaded (%1$,d tiles)</item>
     </plurals>
 </resources>

@@ -236,8 +236,7 @@ fun StopsSettingsPage(
                                 Modifier.testTag(SettingsTags.Alarm),
                             )
                         },
-                        trailingContent = { ValueChevron(stringResource(alarmSummary(state.alarm))) },
-                        trailingShrinks = true,
+                        description = { IosText(stringResource(alarmSummary(state.alarm))) },
                         onClick = { actions.open(StopsRoute.AlarmSettings) },
                     ),
                 ),
@@ -256,13 +255,10 @@ fun StopsSettingsPage(
                                     Modifier.testTag(SettingsTags.MapTiles),
                                 )
                             },
-                            trailingContent = {
-                                ValueChevron(
-                                    state.tileHost,
-                                    Modifier.testTag(SettingsTags.TileServer),
-                                )
+                            // The host is long: it reads whole under the title rather than cut beside it.
+                            description = {
+                                IosText(state.tileHost, Modifier.testTag(SettingsTags.TileServer), maxLines = 1)
                             },
-                            trailingShrinks = true,
                             onClick = { actions.open(StopsRoute.MapTiles) },
                         ),
                     )

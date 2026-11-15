@@ -207,6 +207,8 @@ fun TilesSettingsPage(
                     autoCorrectEnabled = false,
                 ),
             onSubmit = actions.test,
+            // A whole template is long: it wraps instead of scrolling out of sight.
+            maxLines = URL_LINES,
         )
         Footnote(stringResource(R.string.tiles_url_footer))
         IosSettingsGroup(
@@ -277,7 +279,9 @@ fun TilesSettingsPage(
                                     )
                                 },
                                 description = { IosText(bytesText(context, cache.otherBytes)) },
-                                trailingContent = { Value(stringResource(R.string.tiles_clear)) },
+                                trailingContent = {
+                                    IosText(stringResource(R.string.tiles_clear), color = IosTheme.tint, maxLines = 1)
+                                },
                                 onClick = actions.clearOthers,
                             ),
                         )
@@ -340,7 +344,9 @@ private fun offlineItems(
                 IosSettingsItem(
                     icon = tile(RostyIcons.Download),
                     title = { IosText(offlineText(context, offline), Modifier.testTag(TilesTags.Done)) },
-                    trailingContent = { Value(stringResource(R.string.offline_ok)) },
+                    trailingContent = {
+                        IosText(stringResource(R.string.offline_ok), color = IosTheme.tint, maxLines = 1)
+                    },
                     onClick = actions.dismissDone,
                 ),
             )
@@ -368,3 +374,6 @@ private fun offlineItems(
         }
     }
 }
+
+/** The URL field grows to this many lines. */
+private const val URL_LINES = 3

@@ -9,7 +9,6 @@ internal object SettingsMetrics {
     /** The empty trailing slot of an action row (no chevron), as wide as the tick of a radio row. */
     val CheckSlot = 22.dp
     val Gap = 8.dp
-    val ValueMax = 160.dp
 
     /** Space under a footer, so the next group title does not touch it. */
     val AfterFooter = 16.dp

@@ -293,27 +293,27 @@
         <item quantity="other">Harita sunucusu çalışıyor (%1$d katman)</item>
     </plurals>
     <plurals name="offline_estimate">
-        <item quantity="one">%1$d karo, yaklaşık %2$s, %3$d yakınlığa kadar</item>
-        <item quantity="other">%1$d karo, yaklaşık %2$s, %3$d yakınlığa kadar</item>
+        <item quantity="one">%1$,d karo, yaklaşık %2$s, %3$d yakınlığa kadar</item>
+        <item quantity="other">%1$,d karo, yaklaşık %2$s, %3$d yakınlığa kadar</item>
     </plurals>
     <plurals name="offline_confirm_title">
-        <item quantity="one">%1$d karo indirilsin mi?</item>
-        <item quantity="other">%1$d karo indirilsin mi?</item>
+        <item quantity="one">%1$,d karo indirilsin mi?</item>
+        <item quantity="other">%1$,d karo indirilsin mi?</item>
     </plurals>
     <plurals name="offline_progress">
-        <item quantity="one">%2$d karodan %1$d iniyor</item>
-        <item quantity="other">%2$d karodan %1$d iniyor</item>
+        <item quantity="one">%2$,d karodan %1$,d iniyor</item>
+        <item quantity="other">%2$,d karodan %1$,d iniyor</item>
     </plurals>
     <plurals name="offline_cancelled">
-        <item quantity="one">İndirme durdu: %2$d karodan %1$d kaldı</item>
-        <item quantity="other">İndirme durdu: %2$d karodan %1$d kaldı</item>
+        <item quantity="one">İndirme durdu: %2$,d karodan %1$,d kaldı</item>
+        <item quantity="other">İndirme durdu: %2$,d karodan %1$,d kaldı</item>
     </plurals>
     <plurals name="offline_failed">
-        <item quantity="one">Bitti, ama %2$d karodan %1$d inmedi</item>
-        <item quantity="other">Bitti, ama %2$d karodan %1$d inmedi</item>
+        <item quantity="one">Bitti, ama %2$,d karodan %1$,d inmedi</item>
+        <item quantity="other">Bitti, ama %2$,d karodan %1$,d inmedi</item>
     </plurals>
     <plurals name="offline_done">
-        <item quantity="one">Harita alanı indirildi (%1$d karo)</item>
-        <item quantity="other">Harita alanı indirildi (%1$d karo)</item>
+        <item quantity="one">Harita alanı indirildi (%1$,d karo)</item>
+        <item quantity="other">Harita alanı indirildi (%1$,d karo)</item>
     </plurals>
 </resources>

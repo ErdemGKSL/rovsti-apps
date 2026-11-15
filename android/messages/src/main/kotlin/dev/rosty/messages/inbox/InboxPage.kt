@@ -65,6 +65,9 @@ fun rememberInboxViewModel(container: MessagesContainer): InboxViewModel {
                             ops = container.ops,
                             chat = container.chat,
                             now = System::currentTimeMillis,
+                            spam = container.spamActions,
+                            blocked = container.blocklist.numbers(),
+                            cleanup = container.codeCleanup,
                         ),
                         InboxBuilder(words, time),
                         words,
@@ -104,7 +107,8 @@ fun ChatsPage(
                 onAvatar = { row -> viewModel.onAction(InboxAction.Open(row.key)) },
                 onCopyCode = { code ->
                     container.clipboard.copy(code, sensitive = true)
-                    overlays.showToast(res.getString(R.string.inbox_code_copied, code))
+                    // The pill comes from the view model: it also says when M47 will delete the message.
+                    viewModel.codeCopied(code)
                 },
             )
         }

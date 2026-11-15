@@ -16,6 +16,7 @@ import dev.rosty.core.model.messages.PrefsEditRequest
 import dev.rosty.core.model.messages.RowFacts
 import dev.rosty.core.model.messages.SmsMarks
 import dev.rosty.core.model.messages.SmsThreadRow
+import dev.rosty.core.model.phone.BlockedNumber
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.ops.ChatOps
@@ -25,6 +26,12 @@ import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.data.Book
 import dev.rosty.messages.data.MessagesStore
+import dev.rosty.messages.spam.BlockOutcome
+import dev.rosty.messages.spam.CodeCleanup
+import dev.rosty.messages.spam.MarkOutcome
+import dev.rosty.messages.spam.SpamActions
+import dev.rosty.messages.spam.SpamFacts
+import dev.rosty.messages.spam.SpamVerdicts
 import dev.rosty.messages.wa.WaChats
 import dev.rosty.messages.wa.toInboxThread
 import dev.rosty.platform.sms.SmsRepository
@@ -65,6 +72,12 @@ class InboxSources(
     val ops: MessagesOps,
     val chat: ChatOps,
     val now: () -> Long,
+    /** Spam rules, allow list and blocklist changes (E6.11); null keeps the menus without them. */
+    val spam: SpamActions? = null,
+    /** The system blocklist, for the spam verdicts and Block / Unblock. */
+    val blocked: Flow<List<BlockedNumber>> = flowOf(emptyList()),
+    /** M47, told when a passcode is copied. */
+    val cleanup: CodeCleanup? = null,
 )
 
 /**
@@ -88,6 +101,7 @@ class InboxViewModel(
     val effects: Flow<InboxEffect> = effectChannel.receiveAsFlow()
 
     @Volatile private var view: InboxView = InboxView.Empty
+    private val verdicts = SpamVerdicts(sources.ops)
     private val waByJid = MutableStateFlow<Map<String, RichChat>>(emptyMap())
 
     init {
@@ -120,15 +134,19 @@ class InboxViewModel(
                 }
             }
         val waRows = sources.wa.chats.onStart { emit(emptyList()) }
+        val prefsAndBlocked =
+            combine(sources.store.prefs, sources.blocked.onStart { emit(emptyList()) }) { prefs, blocked ->
+                prefs to blocked
+            }
         viewModelScope.launch {
             combine(
                 smsRows,
                 waRows,
                 sources.book,
-                sources.store.prefs,
+                prefsAndBlocked,
                 sources.store.drafts,
-            ) { sms, wa, book, prefs, drafts ->
-                Snapshot(sms, wa, book, prefs, drafts)
+            ) { sms, wa, book, (prefs, blocked), drafts ->
+                Snapshot(sms, wa, book, prefs, drafts, blocked)
             }.conflate()
                 .map { build(it) }
                 .flowOn(default)
@@ -146,6 +164,7 @@ class InboxViewModel(
         val book: Book,
         val prefs: MessagesPrefs?,
         val drafts: Map<String, String>,
+        val blocked: List<BlockedNumber> = emptyList(),
     )
 
     private suspend fun build(s: Snapshot): Pair<InboxView, SmsAccess> {
@@ -156,9 +175,11 @@ class InboxViewModel(
         waByJid.value = s.wa.associateBy { it.jid }
         val merged = (sources.ops.merge(MergeRequest(index.id, sms, wa)) as? Outcome.Ok)?.value?.rows.orEmpty()
         val prefs = s.prefs
+        val smsById = sms.associateBy { it.threadId }
+        val facts = prefs?.let { verdicts.judge(merged, smsById, it.spam, s.blocked) } ?: SpamFacts.None
         val inputs =
             InboxInputs(
-                sms = sms.associateBy { it.threadId },
+                sms = smsById,
                 wa = waByJid.value,
                 contacts = s.book.contacts,
                 marks = prefs?.smsMarks ?: SmsMarks(),
@@ -166,6 +187,8 @@ class InboxViewModel(
                 muteUntil = prefs?.muteUntil.orEmpty(),
                 drafts = s.drafts,
                 otps = otps(merged, prefs?.otpCopy != false),
+                spamThreads = facts.spam,
+                blockedThreads = facts.blocked,
                 nowMs = sources.now(),
             )
         return builder.build(merged, inputs) to access
@@ -288,6 +311,18 @@ class InboxViewModel(
 
             is InboxAction.Delete -> {
                 withRow(action.key) { askDelete(listOf(it)) }
+            }
+
+            is InboxAction.NotSpam -> {
+                withRow(action.key) { notSpam(listOf(it)) }
+            }
+
+            is InboxAction.MoveToSpam -> {
+                withRow(action.key) { moveToSpam(it) }
+            }
+
+            is InboxAction.Block -> {
+                withRow(action.key) { block(it, action.blocked) }
             }
 
             InboxAction.MarkAllRead -> {
@@ -575,11 +610,106 @@ class InboxViewModel(
                 askDelete(rows)
                 return
             }
+
+            BulkKind.NotSpam -> {
+                notSpam(rows)
+            }
         }
         if (kind == BulkKind.MarkRead) {
             effectChannel.trySend(InboxEffect.Toast(UiText.Plural(R.plurals.inbox_marked_read_n, rows.size)))
         }
         restate { it.copy(select = null) }
+    }
+
+    // ---- spam (E6.11)
+
+    /** Not spam: every sender joins the allow list (Rust), with Undo. */
+    private suspend fun notSpam(rows: List<InboxRowUi>) {
+        val spam = sources.spam ?: return
+        val senders = rows.mapNotNull { it.smsSender }.filter { spam.allow(it) }
+        if (senders.isEmpty()) {
+            toast(R.string.spam_allow_exists)
+            return
+        }
+        val text =
+            senders.singleOrNull()?.let { UiText.Res(R.string.inbox_not_spam_done, listOf(it)) }
+                ?: UiText.Plural(R.plurals.inbox_not_spam_n, senders.size)
+        effectChannel.trySend(
+            InboxEffect.Undo(text) {
+                launch {
+                    senders.forEach { spam.unallow(it) }
+                    toast(R.string.inbox_back_in_spam)
+                }
+            },
+        )
+        restate { it.copy(select = null) }
+    }
+
+    /** Move to Spam: a sender rule and off the allow list (Rust `mark_spam`), with Undo. */
+    private suspend fun moveToSpam(row: InboxRowUi) {
+        val spam = sources.spam ?: return
+        val sender = row.smsSender ?: return
+        when (val outcome = spam.markSpam(sender)) {
+            is MarkOutcome.Marked -> {
+                effectChannel.trySend(
+                    InboxEffect.Undo(UiText.Res(R.string.inbox_moved_to_spam, listOf(row.title))) {
+                        launch {
+                            spam.unmarkSpam(sender, outcome.mark)
+                            toast(R.string.inbox_back_in_inbox)
+                        }
+                    },
+                )
+            }
+
+            MarkOutcome.Full -> {
+                toast(R.string.spam_err_full)
+            }
+
+            MarkOutcome.Failed -> {
+                toast(R.string.inbox_spam_failed)
+            }
+        }
+    }
+
+    /** Block or Unblock the row's sender on the system blocklist (shared with Phone), with Undo. */
+    private suspend fun block(
+        row: InboxRowUi,
+        blocked: Boolean,
+    ) {
+        val spam = sources.spam ?: return
+        val sender = row.smsSender ?: return
+        val outcome = if (blocked) spam.block(sender) else spam.unblock(sender)
+        when (outcome) {
+            BlockOutcome.Done -> {
+                val text = UiText.Res(if (blocked) R.string.spam_blocked_done else R.string.spam_unblocked_done, listOf(sender))
+                effectChannel.trySend(
+                    InboxEffect.Undo(text) {
+                        launch { if (blocked) spam.unblock(sender) else spam.block(sender) }
+                    },
+                )
+            }
+
+            BlockOutcome.Refused -> {
+                toast(R.string.spam_block_refused)
+            }
+
+            BlockOutcome.Unavailable -> {
+                toast(R.string.spam_block_failed)
+            }
+        }
+    }
+
+    /**
+     * A passcode was copied from the row showing [code]: M47 books the message's deletion when it is on, and the pill
+     * says so.
+     */
+    fun codeCopied(code: String) {
+        val row = (view.rows + view.archived + view.spam).firstOrNull { it.otp == code }
+        launch {
+            val thread = row?.smsThread
+            val booked = thread != null && sources.cleanup?.copied(thread, code) == true
+            toast(if (booked) R.string.inbox_code_copied_delete else R.string.inbox_code_copied, code)
+        }
     }
 
     companion object {
@@ -599,11 +729,22 @@ class InboxViewModel(
             folder: InboxFolder,
         ): List<BulkKind> {
             if (rows.isEmpty()) return emptyList()
+            if (folder == InboxFolder.Spam) return spamBulkActions(rows)
             val out = ArrayList<BulkKind>()
             out += if (rows.any { it.isUnread }) BulkKind.MarkRead else BulkKind.MarkUnread
             out += if (rows.all { it.muted }) BulkKind.Unmute else BulkKind.Mute
             if (folder != InboxFolder.Archived) out += if (rows.all { it.pinned }) BulkKind.Unpin else BulkKind.Pin
             out += if (folder == InboxFolder.Archived) BulkKind.Unarchive else BulkKind.Archive
+            if (rows.all { it.smsThread != null && it.waChat == null }) out += BulkKind.Delete
+            return out
+        }
+
+        /** In the Spam folder: read, mute, Not spam, Delete (no pin, no archive, as the row menu there). */
+        private fun spamBulkActions(rows: List<InboxRowUi>): List<BulkKind> {
+            val out = ArrayList<BulkKind>()
+            out += if (rows.any { it.isUnread }) BulkKind.MarkRead else BulkKind.MarkUnread
+            out += if (rows.all { it.muted }) BulkKind.Unmute else BulkKind.Mute
+            out += BulkKind.NotSpam
             if (rows.all { it.smsThread != null && it.waChat == null }) out += BulkKind.Delete
             return out
         }

@@ -153,6 +153,11 @@ data class InboxStrings(
     val resultsCount: (Int) -> String = { it.toString() },
     val partialNote: String = "",
     val smsMissingNote: String = "",
+    /** The spam and blocklist rows of the menu (E6.11). */
+    val notSpam: String = "",
+    val moveToSpam: String = "",
+    val block: String = "",
+    val unblock: String = "",
 )
 
 @Composable
@@ -194,6 +199,7 @@ fun rememberInboxStrings(): InboxStrings {
                     BulkKind.Archive -> R.string.inbox_archive
                     BulkKind.Unarchive -> R.string.inbox_unarchive
                     BulkKind.Delete -> R.string.inbox_delete
+                    BulkKind.NotSpam -> R.string.inbox_not_spam
                 },
             )
         }
@@ -245,6 +251,10 @@ fun rememberInboxStrings(): InboxStrings {
         resultsCount = { n -> res.getQuantityString(R.plurals.inbox_results, n, n) },
         partialNote = stringResource(R.string.inbox_results_partial),
         smsMissingNote = stringResource(R.string.inbox_results_no_sms),
+        notSpam = bulks.getValue(BulkKind.NotSpam),
+        moveToSpam = stringResource(R.string.inbox_move_to_spam),
+        block = stringResource(R.string.inbox_block),
+        unblock = stringResource(R.string.inbox_unblock),
     )
 }
 
@@ -256,7 +266,10 @@ class RowMenuActions(
     val onCopyCode: (String) -> Unit,
 )
 
-/** The row menu (GPUI `row_menu::row_menu_items`, the parts of R1): Select; Pin, read, mute, archive; Delete. */
+/**
+ * The row menu (GPUI `row_menu::row_menu_items` and `sms_actions::actions`): Select; Pin, read, mute, archive; Move to
+ * Spam or Not spam, Block or Unblock; Delete. A row in the Spam folder is neither pinned nor archived there.
+ */
 fun rowMenu(
     row: InboxRowUi,
     strings: InboxStrings,
@@ -266,10 +279,12 @@ fun rowMenu(
     val items = ArrayList<MenuItem>()
     items += MenuItem.Action(strings.select, RostyIcons.CircleCheck) { act(InboxAction.EnterSelect(row.key)) }
     items += MenuItem.Separator
-    items +=
-        MenuItem.Action(if (row.pinned) strings.unpin else strings.pin, RostyIcons.Star) {
-            act(InboxAction.Pin(row.key, !row.pinned))
-        }
+    if (!row.inSpam) {
+        items +=
+            MenuItem.Action(if (row.pinned) strings.unpin else strings.pin, RostyIcons.Star) {
+                act(InboxAction.Pin(row.key, !row.pinned))
+            }
+    }
     items +=
         MenuItem.Action(if (row.isUnread) strings.markRead else strings.markUnread, RostyIcons.Message) {
             act(InboxAction.MarkRead(row.key, row.isUnread))
@@ -280,16 +295,44 @@ fun rowMenu(
         } else {
             MenuItem.Action(strings.mute, RostyIcons.BellSlash) { actions.onMute(row) }
         }
-    items +=
-        MenuItem.Action(if (row.archived) strings.unarchive else strings.archive, RostyIcons.Folder) {
-            act(InboxAction.Archive(row.key, !row.archived))
-        }
+    if (!row.inSpam) {
+        items +=
+            MenuItem.Action(if (row.archived) strings.unarchive else strings.archive, RostyIcons.Folder) {
+                act(InboxAction.Archive(row.key, !row.archived))
+            }
+    }
+    spamItems(row, strings, act)?.let {
+        items += MenuItem.Separator
+        items += it
+    }
     if (row.smsThread != null && row.waChat == null) {
         items += MenuItem.Separator
         items +=
             MenuItem.Action(strings.delete, RostyIcons.Trash, destructive = true) { act(InboxAction.Delete(row.key)) }
     }
     return items.toImmutableList()
+}
+
+/** Move to Spam or Not spam, then Block or Unblock (E6.11); null when the row has none of them. */
+private fun spamItems(
+    row: InboxRowUi,
+    strings: InboxStrings,
+    act: (InboxAction) -> Unit,
+): List<MenuItem>? {
+    val out = ArrayList<MenuItem>()
+    if (row.canMoveToSpam) {
+        out += MenuItem.Action(strings.moveToSpam, RostyIcons.Shield) { act(InboxAction.MoveToSpam(row.key)) }
+    }
+    if (row.inSpam && row.smsSender != null) {
+        out += MenuItem.Action(strings.notSpam, RostyIcons.ShieldCheck) { act(InboxAction.NotSpam(row.key)) }
+    }
+    if (row.senderIsNumber) {
+        out +=
+            MenuItem.Action(if (row.blocked) strings.unblock else strings.block, RostyIcons.Block) {
+                act(InboxAction.Block(row.key, !row.blocked))
+            }
+    }
+    return out.takeIf { it.isNotEmpty() }
 }
 
 /**
@@ -518,6 +561,7 @@ private fun BulkKind.icon(): ImageVector =
         BulkKind.Unpin -> RostyIcons.StarFilled
         BulkKind.Archive, BulkKind.Unarchive -> RostyIcons.Folder
         BulkKind.Delete -> RostyIcons.Trash
+        BulkKind.NotSpam -> RostyIcons.ShieldCheck
     }
 
 /**
@@ -636,7 +680,15 @@ private fun InboxRowItem(
                 )
             }
         val trailing =
-            remember(row.key, row.archived, row.pinned, strings, ios) {
+            remember(row.key, row.archived, row.pinned, row.inSpam, strings, ios) {
+                if (row.inSpam) {
+                    // Spam rows are neither pinned nor archived (GPUI): the one swipe there is Not spam.
+                    return@remember persistentListOf(
+                        SwipeAction(strings.notSpam, ios.systemGreen, { SwipeGlyph(RostyIcons.ShieldCheck) }) {
+                            actions.onAction(InboxAction.NotSpam(row.key))
+                        },
+                    )
+                }
                 persistentListOf(
                     SwipeAction(
                         if (row.pinned) strings.unpin else strings.pin,

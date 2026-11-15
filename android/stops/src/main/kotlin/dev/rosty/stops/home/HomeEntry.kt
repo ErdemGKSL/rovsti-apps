@@ -53,6 +53,7 @@ import dev.rosty.stops.StopsContainer
 import dev.rosty.stops.StopsLink
 import dev.rosty.stops.StopsRoute
 import dev.rosty.stops.map.MapAttribution
+import dev.rosty.stops.map.MapFollowMode
 import dev.rosty.stops.map.MapMotionEffect
 import dev.rosty.stops.map.MapScaleBar
 import dev.rosty.stops.map.PickListener
@@ -71,6 +72,9 @@ import dev.rosty.stops.saved.SavedViewModel
 import dev.rosty.stops.saved.presentSavedSheet
 import dev.rosty.stops.saved.presentSavedStopSheet
 import dev.rosty.stops.saved.toDestination
+import dev.rosty.stops.tools.MapTools
+import dev.rosty.stops.tools.MeasureCard
+import dev.rosty.stops.tools.rememberMapTools
 import dev.rosty.stops.trip.AlarmAction
 import dev.rosty.stops.trip.AlarmEffect
 import dev.rosty.stops.trip.AlarmEntry
@@ -215,8 +219,9 @@ fun HomeEntry(
     val menuStrings = rememberPinMenuStrings()
     var open by remember { mutableStateOf<Pair<HomeSheet, SheetEntry>?>(null) }
 
-    // The pick sheets (E7.8); made once the map exists, below.
+    // The pick sheets (E7.8) and the map tools (E7.9); made once the map exists, below.
     var picker: Picker? = null
+    var tools: MapTools? = null
 
     fun openSheet(
         which: HomeSheet,
@@ -310,8 +315,9 @@ fun HomeEntry(
                 if (!context.openInMaps(geoUri)) overlays.showToast(resources.getString(R.string.home_no_maps_app))
             }
 
-            // S34 "Measure from here" arrives with the measure tool (E7.9).
-            override fun measureFrom(from: Coord) = Unit
+            override fun measureFrom(from: Coord) {
+                tools?.measureFrom(from)
+            }
 
             override fun saveAsStop() {
                 val ends = map.pick.state.value.ends
@@ -345,6 +351,10 @@ fun HomeEntry(
                     overlays.presentSavedStopSheet(saved, id)
                 }
 
+                override fun onPositionTap() {
+                    tools?.openMyLocation()
+                }
+
                 override fun onThirdTap() {
                     overlays.showThirdTapHint(menuStrings)
                 }
@@ -353,11 +363,22 @@ fun HomeEntry(
             },
         )
     picker = rememberPicker(container, map, overlays) { trip.state.value.trip != null }
+    var savedOnMap by remember { mutableStateOf<Boolean?>(null) }
+    val mapTools =
+        rememberMapTools(
+            container,
+            map,
+            overlays,
+            menuStrings,
+            mapToolsHost(container, trip, state, savedOnMap, { savedOnMap = it }, saved, picker),
+        )
+    tools = mapTools
+    val measuring by mapTools.measure.state.collectAsState()
     val pickState by map.pick.state.collectAsState()
     val padding = remember { MapCameraPadding() }
     FollowCameraPadding(map, padding)
     PlaceFirstView(map, state, container.location)
-    FeedRadar(map, state)
+    FeedRadar(map, savedOnMap?.let { state.copy(savedOnMap = it) } ?: state)
     LivePosition(map, container)
     MapMotionEffect(map.camera, map.motion)
     // The picked ends survive a restart, as the GPUI app kept them in `draft.json`.
@@ -540,7 +561,7 @@ fun HomeEntry(
                 map.tiles,
                 dark,
                 modifier.pickAnchorOrigin(map.pick).testTag(HomeMapTag),
-                gesturePolicy = map.pick,
+                gesturePolicy = mapTools.gestures,
                 overlay = overlay,
             )
         },
@@ -548,13 +569,15 @@ fun HomeEntry(
         selectedTab = if (open?.first == HomeSheet.Saved) HomeTab.Saved else HomeTab.Trip,
         camera = padding,
         hint = if (runningTrip != null) null else pickState.pairLabel ?: pickState.hintText,
+        topCard = if (measuring.on) ({ MeasureCard(mapTools) }) else null,
+        following = mapTools.follow == MapFollowMode.Following,
         mapFooter = {
             MapScaleBar(map.camera, Modifier.testTag(HomeTags.ScaleBar))
             MapAttribution()
         },
         motionFrozen = { map.motion.frozen },
         // S37: one tap starts the trip to the saved stop nearest the position, while nothing is picked.
-        chips = nearestChips(savedState.nearest, pickState.ends, tripState.trip != null),
+        chips = nearestChips(savedState.nearest, pickState.ends, tripState.trip != null || measuring.on),
         onChip = { id ->
             savedState.nearest?.takeIf { id == NEAREST_CHIP }?.let { saved.onAction(SavedAction.Start(it.id)) }
         },
@@ -609,6 +632,10 @@ fun HomeEntry(
                 },
                 onOpenSaved = { openSheet(HomeSheet.Saved) },
                 onOpenHistory = { openSheet(HomeSheet.History) },
+                onLocate = mapTools::onLocate,
+                onLocateLong = mapTools::openMyLocation,
+                onLayers = mapTools::openLayers,
+                onMapOptions = mapTools::openOptions,
             ),
     )
 }

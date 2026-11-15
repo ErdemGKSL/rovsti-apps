@@ -115,7 +115,8 @@ class Picker internal constructor(
         return true
     }
 
-    private fun place(
+    /** Puts [dest] on [slot] and centres it (not while a trip runs). */
+    fun place(
         slot: Slot,
         dest: Destination,
     ) {

@@ -288,4 +288,5 @@
     <!-- E6.7 attachments -->
     <string name="card_unnamed">Contact</string>
     <string name="card_add">Add to Contacts</string>
+    <string name="tools_next_unread">Next Unread Chat</string>
 </resources>

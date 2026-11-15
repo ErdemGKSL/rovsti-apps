@@ -26,6 +26,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.getOrNull
+import dev.rosty.core.model.chat.ChatUnread
+import dev.rosty.core.model.chat.NextUnreadRequest
 import dev.rosty.core.model.chat.SearchJumpRequest
 import dev.rosty.core.model.chat.SearchJumpStep
 import dev.rosty.core.ops.ChatOps
@@ -40,6 +42,8 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.compose.presentForward
+import dev.rosty.messages.inbox.InboxAction
+import dev.rosty.messages.inbox.presentMute
 import dev.rosty.messages.inbox.rememberInboxViewModel
 import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.ui.LocalWantAvatar
@@ -340,6 +344,45 @@ fun SmsThreadPage(
                                     res.getString(R.string.tools_copy_name) to it
                                 },
                                 route.addresses.singleOrNull()?.let { res.getString(R.string.tools_copy_number) to it },
+                            ),
+                        extra =
+                            listOfNotNull(
+                                inbox.state.value.rows.firstOrNull { it.smsThread == route.threadId }?.let { row ->
+                                    // M29: mute this conversation from inside it.
+                                    MenuItem.Action(res.getString(R.string.inbox_mute_menu), RostyIcons.BellSlash) {
+                                        presentMute(overlays, res) { inbox.onAction(InboxAction.Mute(row.key, it)) }
+                                    }
+                                },
+                                // M43: the next chat with unread messages, in the inbox's order.
+                                MenuItem.Action(res.getString(R.string.tools_next_unread), RostyIcons.ArrowDown) {
+                                    container.scope.launch {
+                                        val rows = inbox.state.value.rows
+                                        val current = rows.firstOrNull { it.smsThread == route.threadId }?.key
+                                        val next =
+                                            container.chat
+                                                .nextUnread(
+                                                    NextUnreadRequest(
+                                                        rows.map { ChatUnread(it.key, it.isUnread) },
+                                                        current,
+                                                    ),
+                                                ).getOrNull()
+                                                ?.index
+                                                ?.let(rows::getOrNull)
+                                        val target =
+                                            next?.smsThread?.let {
+                                                MessagesRoute.SmsThread(
+                                                    it,
+                                                    listOfNotNull(next.smsSender),
+                                                )
+                                            }
+                                                ?: next?.waChat?.let { MessagesRoute.WaThread(it) }
+                                        if (target == null) {
+                                            overlays.showToast(res.getString(R.string.inbox_none_unread))
+                                        } else {
+                                            onOpen(target)
+                                        }
+                                    }
+                                },
                             ),
                     ),
                 onFindQuery = host.tools::setQuery,

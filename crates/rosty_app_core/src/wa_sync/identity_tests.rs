@@ -50,6 +50,8 @@ fn by(chat: &str, sender: &str, id: &str, ts: i64, body: &str) -> WaMessage {
         timestamp_ms: ts,
         body: MessageBody::Text(body.into()),
         reactions: Vec::new(),
+        chat_alt: None,
+        sender_alt: None,
     }
 }
 
@@ -66,6 +68,7 @@ fn reaction(sender: &str, emoji: &str) -> Reaction {
         sender: Some(sender.into()),
         from_me: false,
         emoji: emoji.into(),
+        sender_alt: None,
     }
 }
 
@@ -109,6 +112,7 @@ fn listed(jid: &str, last: Option<WaMessage>, unread: u32) -> RichChat {
             last,
             unread,
             is_group: jid.ends_with("@g.us"),
+            alt: None,
         },
         meta: ChatMeta::default(),
         last_meta: None,

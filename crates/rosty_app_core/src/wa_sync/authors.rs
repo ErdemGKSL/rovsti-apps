@@ -178,6 +178,7 @@ mod tests {
             sender: sender.map(str::to_owned),
             from_me,
             emoji: emoji.to_owned(),
+            sender_alt: None,
         }
     }
 

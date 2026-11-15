@@ -94,6 +94,8 @@ struct Audio {
 }
 
 /// One stream event as Kotlin receives it, under the key `event` of `wa.event`.
+// The gateway event is the common case; boxing it would cost an allocation per event.
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum EventDto {

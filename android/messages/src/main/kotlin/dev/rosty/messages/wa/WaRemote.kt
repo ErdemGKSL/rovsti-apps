@@ -94,13 +94,6 @@ interface WaRemote {
     suspend fun statusThumbnail(statusId: String): Outcome<BytesAnswer>
 
     suspend fun markStatusViewed(ids: List<String>): Outcome<Unit>
-
-    /** E6.13: stars or unstars a message on the account (M10). The store follows from the gateway's event. */
-    suspend fun star(
-        chat: String,
-        messageId: String,
-        starred: Boolean,
-    ): Outcome<Unit> = Outcome.Err(RustError.Unsupported("star"))
 }
 
 /**
@@ -216,6 +209,13 @@ class GatewayWaRemote(
                 is WaSyncAction.MarkRead -> {
                     gateway.markRead(MarkRead(chat, action.sender, action.ids)).map { WaSyncOutcome.Sent() }
                 }
+
+                // E6.13: the account's own star (M10).
+                is WaSyncAction.Star -> {
+                    gateway
+                        .starMessage(StarMessage(chat, action.messageId, action.starred))
+                        .map { WaSyncOutcome.Sent() }
+                }
             }
         }
 
@@ -240,12 +240,6 @@ class GatewayWaRemote(
     override suspend fun statusThumbnail(statusId: String): Outcome<BytesAnswer> = call { it.statusThumbnail(statusId) }
 
     override suspend fun markStatusViewed(ids: List<String>): Outcome<Unit> = call { it.markStatusViewed(ids).map { } }
-
-    override suspend fun star(
-        chat: String,
-        messageId: String,
-        starred: Boolean,
-    ): Outcome<Unit> = call { it.starMessage(StarMessage(chat, messageId, starred)).map { } }
 
     companion object {
         /** The `instance` label of the sync's own event socket (echoed in each `wa.event`). */

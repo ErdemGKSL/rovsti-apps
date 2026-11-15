@@ -1152,6 +1152,7 @@ wa_sync.outbox_enqueue.media
 wa_sync.outbox_enqueue.no_chat
 wa_sync.outbox_enqueue.react
 wa_sync.outbox_enqueue.revoke
+wa_sync.outbox_enqueue.star
 wa_sync.outbox_retry
 wa_sync.outbox_retry.gone
 wa_sync.outbox_settle
@@ -1159,8 +1160,13 @@ wa_sync.outbox_settle.gone
 wa_sync.outbox_settle.network
 wa_sync.outbox_settle.rate_limited
 wa_sync.outbox_settle.rejected
+wa_sync.outbox_settle.star_rejected
 wa_sync.plan
 wa_sync.plan.gap
+wa_sync.starred
+wa_sync.starred.empty
+wa_sync.starred.older
+wa_sync.starred.unstarred
 wa_sync.store_chats
 wa_sync.store_chats.missed
 wa_sync.store_page

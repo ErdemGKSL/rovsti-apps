@@ -2,6 +2,62 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## R5 closed (2026-11-15) at `50e05ebe`: name order follow-ups
+
+Gate: Rust steps of `scripts/kotlin-ui-check.sh` green; the Gradle steps green **without the Stops tests**
+(`-x :stops:testReleaseUnitTest -x :stops:verifyRoborazziRelease`), APK check, compose stability and orphan goldens
+included. Two full runs each failed on a different Stops test (`SavedViewModelTest.noPositionNoDistance`, then the
+golden of `E75ShotTest.preflightSheet` dark); the first passes alone. Stops is not this branch's module.
+Plan and evidence: `plans/e6-r5.md`.
+
+**What landed**
+- The Starred list is read again when a name changes.
+- `LiveWaNames` answers persist across restarts (`:people`, `LiveNameStore`), wired in Messages and Phone.
+- Group lines of a closed-app push name their writers by the rule; Rust `wa_digest` adds `senders` for a group
+  (no gateway change).
+- Dropped by the owner: making `apps/*` compile again (nothing committed there).
+
+**Shared code touched (own commits)**: `:people` `328b1cae`, Phone wiring `50e05ebe`, Rust `wa_digest` `351c0534`.
+
+**What to test on a device**
+1. Ask a name for an unknown number, kill the app, open it: the name is there at once and no lookup is sent.
+2. A group message arrives with the app closed (firebase build): the lines read "Name: text", a saved contact first.
+3. Save a contact for a starred WhatsApp message's writer: the Starred row takes the name.
+
+## R4 closed (2026-11-15) at `184fd173`: cross-layer follow-ups and the name order
+
+Merged with `origin/ui-overhaul` (`e823684`, gateway host). Gate: `scripts/kotlin-ui-check.sh` ALL GREEN (Rust steps at
+`f947682b`, Gradle at `c323c2ad`); after the last merge the Rust and Kotlin tests of the touched modules pass. Plan and
+evidence: `plans/e6-r4.md`.
+
+**What landed**
+- (a) Rust `wa_sync`: outbox Star/Unstar and `wa_sync.starred`; the Starred page and stars use them (sent with the app
+  closed, all chats listed). Store schema is now v3 (older builds refuse a v3 store).
+- (b) `:platform` bulk text-only SMS/MMS read; the backup uses it; a seal/open/restore round trip on the real Rust core.
+- (c) `:design` `GlassSecureTextField` and `ActivityIndicator`; the backup sheet uses them.
+- (d) `:shell` `startsDevLogAtCreate()` seam; the Messages test container opts out (the `MessageAnnouncerTest` flake).
+- Name order on every Messages surface: contact, WhatsApp name (verified, push, stored chat name), readable number;
+  unknown numbers are asked through `LiveWaNames` and swap in.
+
+**Shared code touched (own commits)**: `:design` (`a333b98c`), `:shell` (`72abebe0`), `:platform` (in `1618dc35`),
+`:core-bridge` and Rust `wa_sync` / `rosty_ffi` (in `b1b67edf`).
+
+**For the main thread**
+- `cargo clippy --workspace` and `cargo test --workspace` do not compile on this base: the GPUI apps `apps/messages`,
+  `apps/phone`, `apps/contacts` miss `WireNumber.normalized`, the `marked_contacts` arity and `MessageDeleted` fields.
+  Not from this branch; the Rust checks were run on the gate's package set.
+- A refused star is undone and dropped (the other outbox actions stay as failed rows); pending stars of an older
+  install's `wa-stars.json` are not migrated.
+- Name order leftovers: the Starred list re-reads names on store changes only; `LiveWaNames` answers are memory-only
+  (asked again after a process start, paced); group lines inside the closed-app push keep the core's sender names.
+- Not on a device yet: backup/restore, the star outbox job with the app closed, the live name swap.
+
+**What to test on a device**
+1. Unknown number sends an SMS: the row and header show the number, then the WhatsApp name; save the contact: its name wins.
+2. WhatsApp chat of a saved contact with a different push name: the contact name everywhere (inbox, header, notification).
+3. Star a WhatsApp message in airplane mode, close the app, go online: it is starred on the account; Starred lists old stars.
+4. Backup with thousands of messages: export time, restore preview counts, a second restore adds nothing.
+
 ## R3 closed (2026-11-15) at `c2ea78f9`, last E6 round
 
 Merged with `origin/ui-overhaul`: nothing new since R2 (the `:design` tab-bar glass fix is not there yet; when it lands,

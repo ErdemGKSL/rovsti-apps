@@ -37,6 +37,7 @@ import dev.rosty.messages.inbox.RowAvatar
 import dev.rosty.messages.inbox.duration
 import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.waPreview
+import dev.rosty.messages.names.PersonNames
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
@@ -147,10 +148,8 @@ class WaThreadSources(
     val offline: WaOffline,
     val remote: WaRemote,
     val drafts: WaDrafts,
-    /** The address-book name of a number, or null. */
-    val nameOf: suspend (number: String) -> String?,
-    /** Emits when the address book changed: names are looked up again. */
-    val bookChanges: Flow<*>,
+    /** The name-order rule: the chat's title, the group senders, the quotes, the typing line. */
+    val names: PersonNames,
     /** Rust's `unread_jump.divider`: the index (oldest first) the unread run begins at. */
     val divider: suspend (incoming: List<Boolean>, unread: Int) -> Int? = { _, _ -> null },
     /** Rust's `global_search.jump`: the next step towards a search hit that is not loaded; null: it cannot say. */
@@ -212,10 +211,11 @@ class WaThreadViewModel(
     private var wanted = PAGE
     private var rows: List<WaSyncMessage> = emptyList()
     private var chat: WaSyncChat? = null
+    private var chatRead = false
     private var hasStoredOlder = false
     private var reachedStart = false
     private var syncing = false
-    private val names = HashMap<String, String?>()
+    private val senders = HashMap<Pair<String?, String?>, String>()
     private val marked = HashSet<String>()
     private var unreadAtOpen: Int? = null
     private var typing: String? = null
@@ -276,8 +276,9 @@ class WaThreadViewModel(
         }
         viewModelScope.launch { sources.emoji.load() }
         viewModelScope.launch {
-            sources.bookChanges.collect {
-                names.clear()
+            // A contact was saved, or a WhatsApp name that was asked for arrived: everyone is named again.
+            sources.names.changes.collect {
+                senders.clear()
                 publish()
             }
         }
@@ -305,6 +306,7 @@ class WaThreadViewModel(
                 .chats(includeArchived = true)
                 .getOrNull()
                 ?.firstOrNull { it.jid == jid }
+        chatRead = true
         if (unreadAtOpen == null) unreadAtOpen = chat?.unread ?: 0
         publish()
         markRead()
@@ -354,7 +356,8 @@ class WaThreadViewModel(
         val group = chat?.isGroup ?: jid.endsWith(GROUP_SUFFIX)
         // Oldest first, the order `withDays` and the divider want.
         val bubbles = rows.asReversed().map { bubbleOf(it, group, now) }
-        val title = titleOf(group)
+        // Until the stored chat was read its names are unknown: the number shows, WhatsApp is not asked yet.
+        val title = sources.names.chatTitle(jid, chat, ask = chatRead)
         val number = numberOfJid(jid)
         val online = sources.offline.online.value
         ui.value =
@@ -393,37 +396,20 @@ class WaThreadViewModel(
             )
     }
 
-    private suspend fun titleOf(group: Boolean): String {
-        val stored = chat?.name?.takeIf { it.isNotBlank() }
-        if (group) return stored ?: jid.substringBefore('@')
-        val number = numberOfJid(jid)
-        return number?.let { nameOf(it) }
-            ?: stored
-            ?: chat?.pushName?.takeIf { it.isNotBlank() }
-            ?: number?.let { sources.readable(it) }
-            ?: jid.substringBefore('@')
-    }
-
-    /** The address-book name of [number], looked up once per book. */
-    private suspend fun nameOf(number: String): String? =
-        if (number in names) {
-            names[number]
-        } else {
-            sources.nameOf(number)?.takeIf { it.isNotBlank() }.also { names[number] = it }
-        }
-
-    /** Who wrote a group message: the address-book name, the name WhatsApp carries, the number. */
+    /**
+     * Who wrote a group message, by the name-order rule: the address-book name, the name WhatsApp carries, the
+     * number. Looked up once per sender until the names change.
+     */
     private suspend fun senderOf(
         sender: String?,
         carried: String?,
     ): String {
-        val number = sender?.let(::numberOfJid)
-        return number?.let { nameOf(it) }
-            ?: carried?.takeIf { it.isNotBlank() }
-            // A quote or a typing line names no one: the name a loaded message of theirs carried.
-            ?: rows.firstOrNull { it.sender == sender && !it.senderName.isNullOrBlank() }?.senderName
-            ?: number
-            ?: sender?.substringBefore('@').orEmpty()
+        val push =
+            carried?.takeIf { it.isNotBlank() }
+                // A quote or a typing line names no one: the name a loaded message of theirs carried.
+                ?: rows.firstOrNull { it.sender == sender && !it.senderName.isNullOrBlank() }?.senderName
+        val key = sender to push
+        return senders[key] ?: sources.names.sender(sender, push).also { senders[key] = it }
     }
 
     private suspend fun bubbleOf(
@@ -924,7 +910,7 @@ class WaThreadViewModel(
                     waJid = senderJid,
                     colorKey = number ?: senderJid,
                 ),
-            saved = number?.let { nameOf(it) } != null,
+            saved = number?.let { sources.names.of(it).saved } == true,
         )
     }
 

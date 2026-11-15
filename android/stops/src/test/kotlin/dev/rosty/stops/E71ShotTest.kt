@@ -95,8 +95,9 @@ class E71ShotTest : ShotTest() {
                     waitForIdle()
                     simulateBars(activity!!)
                 }
-                // The core answers on its own threads: each step waits for the calls in flight.
-                repeat(30) {
+                // The core answers on its own threads: each step first hands over the answers that are due
+                // ([Background]); the tiles are painted inline.
+                repeat(60) {
                     Background.await { waitForIdle() }
                     mainClock.advanceTimeBy(100)
                     Thread.sleep(15)

@@ -5,6 +5,10 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.res.Resources
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -14,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -623,9 +628,22 @@ fun HomeEntry(
         hint = if (runningTrip != null) null else pickState.pairLabel ?: pickState.hintText,
         topCard = if (measuring.on) ({ MeasureCard(mapTools) }) else null,
         following = mapTools.follow == MapFollowMode.Following,
-        mapFooter = {
-            MapScaleBar(map.camera, Modifier.testTag(HomeTags.ScaleBar))
-            MapAttribution()
+        mapFooter = { stacked ->
+            if (stacked) {
+                Column {
+                    MapScaleBar(map.camera, Modifier.testTag(HomeTags.ScaleBar))
+                    MapAttribution()
+                }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    MapScaleBar(map.camera, Modifier.testTag(HomeTags.ScaleBar))
+                    MapAttribution()
+                }
+            }
         },
         motionFrozen = { map.motion.frozen },
         // S37: one tap starts the trip to the saved stop nearest the position, while nothing is picked.

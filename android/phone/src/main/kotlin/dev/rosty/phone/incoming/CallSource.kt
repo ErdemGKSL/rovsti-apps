@@ -6,6 +6,7 @@ import dev.rosty.core.model.phone.CallUpdate
 import dev.rosty.core.model.phone.WireCall
 import dev.rosty.platform.telephony.CallsApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,13 +41,15 @@ data class WaCallMeta(
 )
 
 /**
- * [CallSource] over `CallsApi.snapshot()` (the JSON the registry built, AD-4), re-read each time the registry's typed
- * call list changes (it emits after the snapshot text is set, so the two never disagree). A text that does not decode
- * is an empty snapshot, never an exception: a call screen must not crash while a call rings.
+ * [CallSource] over `CallsApi.snapshot()` (the JSON the registry built, AD-4), re-read on each emission of [changes]:
+ * the registry's snapshot seq (`CallRegistry.snapshotSeq`), which moves on every rebuild (it is set after the snapshot
+ * text, so the two never disagree). Not the typed call list: it stays equal when only the audio route, mute or the
+ * keyguard changes, and a state flow does not emit an equal value, so the Speaker button would never light up. A text
+ * that does not decode is an empty snapshot, never an exception: a call screen must not crash while a call rings.
  */
 class RegistryCallSource(
     private val calls: CallsApi,
-    changes: StateFlow<List<WireCall>>,
+    changes: Flow<Long>,
     scope: CoroutineScope,
 ) : CallSource {
     override val snapshot: StateFlow<CallSnapshot> =

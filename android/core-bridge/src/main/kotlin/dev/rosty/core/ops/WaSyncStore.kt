@@ -37,6 +37,9 @@ import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
 import dev.rosty.core.model.wa.WaSyncSettleRequest
 import dev.rosty.core.model.wa.WaSyncSettled
+import dev.rosty.core.model.wa.WaSyncStarredCursor
+import dev.rosty.core.model.wa.WaSyncStarredPage
+import dev.rosty.core.model.wa.WaSyncStarredRequest
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.model.wa.WaSyncStorePageRequest
 import dev.rosty.core.model.wa.WaSyncStoredChats
@@ -109,6 +112,12 @@ class WaSyncStore internal constructor(
         chat: String,
         messageId: String,
     ): Outcome<WaSyncMessage?> = live { ops.message(WaSyncMessageRequest(id, chat, messageId)).map { it.message } }
+
+    /** A page of the starred messages of every chat, newest first; [before] is the `next` of the page before. */
+    suspend fun starred(
+        limit: Int,
+        before: WaSyncStarredCursor? = null,
+    ): Outcome<WaSyncStarredPage> = live { ops.starred(WaSyncStarredRequest(id, limit, before)) }
 
     /** Queues [action] under [clientId] (a fresh UUID per action); it shows in the thread at once. */
     suspend fun enqueue(

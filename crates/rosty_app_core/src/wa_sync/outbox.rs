@@ -7,6 +7,8 @@
 //!   whichever of the answer and the echo event comes second finds the message already stored. When the answer
 //!   never came (the app died, the network dropped after the request left), the row is `maybe_sent`: an echo of
 //!   my own message with the same content, not older than the attempt, confirms it instead of sending again.
+//! * A star shows on the stored message at once and holds against what the gateway still says until it went out. A
+//!   later star of the same message replaces one that has not gone out; a refused one is undone and dropped.
 
 use rosty_wa_proto::{MediaKind, MessageBody, Reaction, WaMessage};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -82,6 +84,11 @@ pub enum Action {
         sender: Option<String>,
         ids: Vec<String>,
     },
+    /// Star or unstar a stored message on the account.
+    Star {
+        message_id: String,
+        starred: bool,
+    },
 }
 
 impl Action {
@@ -93,6 +100,7 @@ impl Action {
             Action::Revoke { .. } => "revoke",
             Action::React { .. } => "react",
             Action::MarkRead { .. } => "mark_read",
+            Action::Star { .. } => "star",
         }
     }
 
@@ -105,7 +113,8 @@ impl Action {
         match self {
             Action::Edit { message_id, .. }
             | Action::Revoke { message_id, .. }
-            | Action::React { message_id, .. } => Some(message_id),
+            | Action::React { message_id, .. }
+            | Action::Star { message_id, .. } => Some(message_id),
             Action::SendText { .. } | Action::SendMedia { .. } | Action::MarkRead { .. } => None,
         }
     }
@@ -335,6 +344,30 @@ pub(super) fn has_pending_read(conn: &Connection, chat: &str) -> Result<bool> {
     )?)
 }
 
+/// What the newest star of message `id` still in the outbox asks for: the stored flag holds it until it went out.
+pub(super) fn pending_star(conn: &Connection, chat: &str, id: &str) -> Result<Option<bool>> {
+    Ok(
+        items_where(conn, "chat = ?1 AND kind = 'star'", Some(chat))?
+            .into_iter()
+            .rev()
+            .find_map(|item| match item.action {
+                Action::Star {
+                    message_id,
+                    starred,
+                } if message_id == id => Some(starred),
+                _ => None,
+            }),
+    )
+}
+
+fn set_starred(conn: &Connection, chat: &str, id: &str, starred: bool) -> Result<()> {
+    conn.execute(
+        "UPDATE messages SET starred = ?3 WHERE chat = ?1 AND id = ?2",
+        params![chat, id, starred],
+    )?;
+    Ok(())
+}
+
 /// The sends of `chat` still in the outbox, newest first, as thread rows.
 pub(super) fn pending_rows(conn: &Connection, chat: &str) -> Result<Vec<MessageRow>> {
     let mut rows: Vec<MessageRow> = items_where(
@@ -471,7 +504,8 @@ pub(super) fn reconcile_echo(conn: &Connection, message: &WaMessage) -> Result<O
     Ok(None)
 }
 
-/// Shows an action on the stored rows at once: a read mark clears the unread count, a reaction replaces mine.
+/// Shows an action on the stored rows at once: a read mark clears the unread count, a reaction replaces mine, a
+/// star sets the flag.
 fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()> {
     match action {
         Action::MarkRead { .. } => {
@@ -507,6 +541,10 @@ fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()
                 )?;
             }
         }
+        Action::Star {
+            message_id,
+            starred,
+        } => set_starred(conn, chat, message_id, *starred)?,
         Action::SendText { .. }
         | Action::SendMedia { .. }
         | Action::Edit { .. }
@@ -515,9 +553,25 @@ fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()
     Ok(())
 }
 
+/// Takes the stars of message `id` that have not gone out from the outbox: a newer one replaces them.
+fn supersede_stars(conn: &Connection, chat: &str, id: &str) -> Result<()> {
+    let waiting = items_where(
+        conn,
+        "chat = ?1 AND kind = 'star' AND state != 'sending'",
+        Some(chat),
+    )?;
+    for item in waiting {
+        if item.action.target() == Some(id) {
+            conn.execute("DELETE FROM outbox WHERE client_id = ?1", [&item.client_id])?;
+        }
+    }
+    Ok(())
+}
+
 impl Store {
     /// Queues `action` for `chat` under `client_id` (the caller's random id). Queuing the same client id again
-    /// changes nothing and answers the stored row, so a retried call cannot double.
+    /// changes nothing and answers the stored row, so a retried call cannot double. A star replaces the stars of the
+    /// same message that have not gone out, so a star and its unstar written offline are one call.
     pub fn outbox_enqueue(
         &mut self,
         client_id: &str,
@@ -533,6 +587,9 @@ impl Store {
         let tx = self.conn.transaction()?;
         if let Some(existing) = item(&tx, client_id)? {
             return Ok(existing);
+        }
+        if let Action::Star { message_id, .. } = action {
+            supersede_stars(&tx, chat, message_id)?;
         }
         tx.execute(
             "INSERT INTO outbox (client_id, chat, kind, payload, created_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -657,6 +714,23 @@ impl Store {
                     message_id: message_id.clone().filter(|_| row.action.is_send()),
                 }
             }
+            // A refused star has nothing to retry or edit: it is undone and dropped, unless a newer star of the
+            // message waits (that one decides the flag).
+            Outcome::Error {
+                error: ErrorKind::Rejected,
+                ..
+            } if matches!(row.action, Action::Star { .. }) => {
+                tx.execute("DELETE FROM outbox WHERE client_id = ?1", [client_id])?;
+                if let Action::Star {
+                    message_id,
+                    starred,
+                } = &row.action
+                    && pending_star(&tx, &row.chat, message_id)?.is_none()
+                {
+                    set_starred(&tx, &row.chat, message_id, !starred)?;
+                }
+                Settled::Failed
+            }
             Outcome::Error {
                 error: ErrorKind::Rejected,
                 message,
@@ -715,7 +789,10 @@ impl Store {
             Action::SendMedia { caption, .. } => {
                 *caption = (!text.is_empty()).then(|| text.to_owned());
             }
-            Action::Revoke { .. } | Action::React { .. } | Action::MarkRead { .. } => {
+            Action::Revoke { .. }
+            | Action::React { .. }
+            | Action::MarkRead { .. }
+            | Action::Star { .. } => {
                 return Err(Error::Invalid("only a message text can be edited".into()));
             }
         }
@@ -746,7 +823,8 @@ impl Store {
     }
 }
 
-/// Shows an edit or a delete that went out on the stored row at once; the gateway's event says the same later.
+/// Shows an edit, a delete or a star that went out on the stored row at once; the gateway's event says the same
+/// later.
 fn apply_sent(conn: &Connection, row: &OutboxItem, now_ms: i64) -> Result<()> {
     match &row.action {
         Action::Edit { message_id, text } => {
@@ -782,6 +860,14 @@ fn apply_sent(conn: &Connection, row: &OutboxItem, now_ms: i64) -> Result<()> {
                 Some(now_ms),
                 rosty_wa_proto::DELETED_BY_ME,
             )?;
+        }
+        // `row` is still in the outbox here: the newest star of the message decides the flag.
+        Action::Star {
+            message_id,
+            starred,
+        } => {
+            let newest = pending_star(conn, &row.chat, message_id)?;
+            set_starred(conn, &row.chat, message_id, newest.unwrap_or(*starred))?;
         }
         Action::SendText { .. }
         | Action::SendMedia { .. }

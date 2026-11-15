@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import dev.rosty.core.FakeRustCore
 import dev.rosty.core.RustCore
+import dev.rosty.people.LiveWaNames
 import dev.rosty.platform.contacts.ContactsRepository
 import dev.rosty.platform.contacts.FakeContactsRepository
 import dev.rosty.platform.sms.FakeSmsRepository
@@ -35,6 +36,9 @@ open class TestMessagesContainer(
     override fun createSpecialAccess(): SpecialAccess = fakeSpecial
 
     override fun createWa(): WaRepository = fakeWa
+
+    // No gateway: a number nobody names stays a number.
+    override fun createLiveWaNames(): LiveWaNames = LiveWaNames(gateway = { null }, e164 = { null }, scope = scope)
 }
 
 class TestMessagesApp :

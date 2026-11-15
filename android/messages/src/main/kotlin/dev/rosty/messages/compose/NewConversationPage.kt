@@ -74,6 +74,7 @@ fun NewConversationPage(
                             waOps = container.waOps,
                             e164 = { PhoneNumbers.e164(it, container.homeRegion) },
                             share = route.share,
+                            names = container.names,
                         )
                     }
                 }

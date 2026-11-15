@@ -43,6 +43,9 @@ import dev.rosty.core.model.wa.WaSyncRetried
 import dev.rosty.core.model.wa.WaSyncRowState
 import dev.rosty.core.model.wa.WaSyncSettleRequest
 import dev.rosty.core.model.wa.WaSyncSettled
+import dev.rosty.core.model.wa.WaSyncStarredCursor
+import dev.rosty.core.model.wa.WaSyncStarredPage
+import dev.rosty.core.model.wa.WaSyncStarredRequest
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.model.wa.WaSyncStorePageRequest
 import dev.rosty.core.model.wa.WaSyncStoredChats
@@ -54,8 +57,9 @@ import dev.rosty.core.ops.WaSyncOps
 /**
  * An in-memory [WaSyncOps] for view-model and screen tests (no native library): seed [chats] and [messages], read
  * them back through the facade, queue and settle sends. It keeps rows the way the real store shows them (newest
- * first, waiting sends on top) but none of the sync rules (gaps, echo matching, edit history, backoff): those are
- * tested in Rust and against the real library (`WaSyncStoreNativeTest`).
+ * first, waiting sends on top; a star sets the flag at once, replaces a waiting star of the same message and is
+ * undone when refused) but none of the sync rules (gaps, echo matching, edit history, backoff): those are tested in
+ * Rust and against the real library (`WaSyncStoreNativeTest`).
  */
 class FakeWaSyncOps(
     private val instanceId: String = "fake-instance",
@@ -157,6 +161,14 @@ class FakeWaSyncOps(
         )
     }
 
+    private fun setStarred(
+        chat: String,
+        id: String,
+        starred: Boolean,
+    ) {
+        messages[chat]?.replaceAll { if (it.id == id) it.copy(starred = starred) else it }
+    }
+
     private fun <T> ok(value: T): Outcome<T> = Outcome.Ok(value)
 
     override suspend fun open(req: WaSyncOpenRequest) = ok(WaSyncOpened(HANDLE, instanceId, 2, seq, owed.refreshChats))
@@ -245,9 +257,45 @@ class FakeWaSyncOps(
     override suspend fun message(req: WaSyncMessageRequest): Outcome<WaSyncMessageAnswer> =
         synchronized(lock) { ok(WaSyncMessageAnswer(messages[req.chat].orEmpty().firstOrNull { it.id == req.id })) }
 
+    override suspend fun starred(req: WaSyncStarredRequest): Outcome<WaSyncStarredPage> =
+        synchronized(lock) {
+            val before = req.before
+            val order =
+                compareByDescending<WaSyncMessage> { it.timestampMs }
+                    .thenByDescending { it.chat }
+                    .thenByDescending { it.id }
+            val all =
+                messages.values
+                    .flatten()
+                    .filter { it.starred && !it.deleted }
+                    .sortedWith(order)
+                    .filter {
+                        before == null || it.timestampMs < before.timestampMs ||
+                            (
+                                it.timestampMs == before.timestampMs &&
+                                    (it.chat < before.chat || (it.chat == before.chat && it.id < before.id))
+                            )
+                    }
+            val page = all.take(req.limit)
+            val next =
+                page
+                    .lastOrNull()
+                    ?.takeIf { all.size > page.size }
+                    ?.let { WaSyncStarredCursor(it.timestampMs, it.chat, it.id) }
+            ok(WaSyncStarredPage(page, next))
+        }
+
     override suspend fun outboxEnqueue(req: WaSyncEnqueueRequest): Outcome<WaSyncItemAnswer> =
         synchronized(lock) {
             writes += req
+            val star = req.action as? WaSyncAction.Star
+            if (star != null && queue.none { it.clientId == req.clientId }) {
+                queue.removeAll {
+                    it.chat == req.chat && it.state != WaSyncOutboxState.Sending &&
+                        (it.action as? WaSyncAction.Star)?.messageId == star.messageId
+                }
+                setStarred(req.chat, star.messageId, star.starred)
+            }
             val item =
                 queue.firstOrNull { it.clientId == req.clientId }
                     ?: WaSyncOutboxItem(
@@ -304,6 +352,16 @@ class FakeWaSyncOps(
 
                 is WaSyncOutcome.Error -> {
                     val failed = outcome.error == dev.rosty.core.model.wa.WaSyncErrorKind.Rejected
+                    val star = item.action as? WaSyncAction.Star
+                    if (failed && star != null) {
+                        queue.remove(item)
+                        val newer =
+                            queue.any {
+                                it.chat == item.chat && (it.action as? WaSyncAction.Star)?.messageId == star.messageId
+                            }
+                        if (!newer) setStarred(item.chat, star.messageId, !star.starred)
+                        return@synchronized ok(WaSyncSettled(HANDLE, WaSyncSettled.FAILED))
+                    }
                     val state = if (failed) WaSyncOutboxState.Failed else WaSyncOutboxState.Waiting
                     queue.replaceAll {
                         if (it.clientId ==

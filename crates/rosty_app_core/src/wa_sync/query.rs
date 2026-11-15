@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use rusqlite::{Connection, Row, params};
 
 use super::apply::{self, COLUMN_COUNT, COLUMNS, Stored};
-use super::model::{ChatRow, MessageRow, PendingOp, RowState, ThreadCursor, ThreadPage};
+use super::model::{
+    ChatRow, MessageRow, PendingOp, RowState, StarredCursor, StarredPage, ThreadCursor, ThreadPage,
+};
 use super::store::Store;
 use super::{Result, outbox};
 
@@ -181,6 +183,50 @@ impl Store {
             reached_start: cursor.reached_start,
             syncing: cursor.gap.is_some(),
         })
+    }
+
+    /// A page of the starred messages of every chat, newest first: at most `limit` older than `before` (`None`:
+    /// from the newest). A star still in the outbox counts (the flag is set when it is queued). Left out: deleted
+    /// messages, and what the thread does not show either (a chat deleted on another device, messages cleared there).
+    pub fn starred(&self, limit: u32, before: Option<&StarredCursor>) -> Result<StarredPage> {
+        let limit = limit.clamp(1, MAX_THREAD_PAGE);
+        let (before_ts, before_chat, before_id) = before.map_or((i64::MAX, "", ""), |cursor| {
+            (
+                cursor.timestamp_ms,
+                cursor.chat.as_str(),
+                cursor.id.as_str(),
+            )
+        });
+        let sql = format!(
+            "SELECT {} FROM messages LEFT JOIN chats ON jid = chat
+             WHERE starred = 1 AND deleted = 0 AND COALESCE(hidden, 0) = 0 AND ts > COALESCE(cleared_ts, ?1)
+                AND (?2 OR ts < ?3 OR (ts = ?3 AND (chat < ?4 OR (chat = ?4 AND id < ?5))))
+             ORDER BY ts DESC, chat DESC, id DESC LIMIT ?6",
+            row_columns()
+        );
+        let mut stmt = self.conn.prepare_cached(&sql)?;
+        // One more than asked tells whether an older page exists.
+        let mut items: Vec<MessageRow> = stmt
+            .query_map(
+                params![
+                    i64::MIN,
+                    before.is_none(),
+                    before_ts,
+                    before_chat,
+                    before_id,
+                    limit + 1
+                ],
+                read_row,
+            )?
+            .collect::<rusqlite::Result<_>>()?;
+        let more = items.len() > limit as usize;
+        items.truncate(limit as usize);
+        let next = items.last().filter(|_| more).map(|last| StarredCursor {
+            timestamp_ms: last.timestamp_ms,
+            chat: last.chat.clone(),
+            id: last.id.clone(),
+        });
+        Ok(StarredPage { items, next })
     }
 
     /// One stored message.

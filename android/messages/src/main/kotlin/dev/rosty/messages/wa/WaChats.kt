@@ -14,6 +14,7 @@ import dev.rosty.core.model.wa.RichChat
 import dev.rosty.messages.inbox.InboxWords
 import dev.rosty.messages.inbox.numberOfJid
 import dev.rosty.messages.inbox.waPreview
+import dev.rosty.messages.names.PersonNames
 import dev.rosty.wa.WaRepository
 import kotlinx.coroutines.flow.Flow
 
@@ -78,7 +79,8 @@ fun RichChat.toInboxThread(words: InboxWords): InboxThread? {
                 read = unread == 0,
             ),
         unread = unread,
-        title = name?.takeIf { it.isNotBlank() } ?: meta.pushName?.takeIf { it.isNotBlank() },
+        // WhatsApp's side of the rule; the merge puts a contact before it and the inbox asks for the rest.
+        title = PersonNames.storedTitle(this),
         isGroup = isGroup,
     )
 }

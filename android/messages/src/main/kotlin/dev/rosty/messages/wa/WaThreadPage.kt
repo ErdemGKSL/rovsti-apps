@@ -52,6 +52,7 @@ import dev.rosty.messages.notify.TrackOpenConversation
 import dev.rosty.messages.schedule.ScheduledStrip
 import dev.rosty.messages.schedule.rememberWaScheduleHost
 import dev.rosty.messages.settings.findComponentActivity
+import dev.rosty.messages.settings.replies.rememberComposerExtras
 import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.platform.identity.PhoneNumbers
@@ -336,6 +337,7 @@ fun WaThreadPage(
                 senderCard = { bubble -> WaSenderCard(bubble, model, container, navigator, overlays) },
             )
         }
+    val extras = rememberComposerExtras(container, composer)
     CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
         ConversationScreen(
             state = marks.marked(state),
@@ -354,6 +356,9 @@ fun WaThreadPage(
             onSendLongPress = schedule::ask,
             sendLaterLabel = schedule.words.title,
             aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
+            textScale = extras.textScale,
+            quickReplies = extras.chips,
+            onQuickReply = extras.insert,
         )
     }
 }

@@ -82,6 +82,9 @@ import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.access.DefaultSmsCard
 import dev.rosty.messages.schedule.sendLongPress
+import dev.rosty.messages.settings.replies.QuickReplyRow
+import dev.rosty.messages.settings.replies.ReplyChip
+import dev.rosty.messages.settings.textsize.scaledBy
 import dev.rosty.messages.theme.MediaMetrics
 import dev.rosty.messages.theme.MessagesColors
 import dev.rosty.messages.theme.MessagesMetrics
@@ -203,6 +206,11 @@ fun ConversationScreen(
     sendLaterLabel: String? = null,
     /** Drawn between the list and the composer (the Scheduled strip). */
     aboveComposer: (@Composable () -> Unit)? = null,
+    /** M34: the factor of the bubble text size (Settings, Text size); 1 keeps the body style. */
+    textScale: Float = 1f,
+    /** M11: the quick replies offered above the empty composer (Settings, Quick replies), and what a tap does. */
+    quickReplies: ImmutableList<ReplyChip> = kotlinx.collections.immutable.persistentListOf(),
+    onQuickReply: (ReplyChip) -> Unit = {},
 ) {
     val overlays = LocalOverlayOrNull.current
     BackHandler(enabled = tools.selected != null) { actions.onSelectAction(SelectAction.Cancel) }
@@ -282,6 +290,7 @@ fun ConversationScreen(
                                     selected = tools.selected,
                                     voice = voice?.takeIf { it.key == item.key },
                                     speedLabel = state.voiceSpeed,
+                                    textScale = textScale,
                                 )
                             }
                         }
@@ -337,6 +346,10 @@ fun ConversationScreen(
                 when (val mode = state.composer) {
                     is ComposerMode.Ready -> {
                         aboveComposer?.invoke()
+                        if (quickReplies.isNotEmpty()) {
+                            val empty by remember(composer) { derivedStateOf { composer.text.isEmpty() } }
+                            if (empty && state.attachment == null) QuickReplyRow(quickReplies, onQuickReply)
+                        }
                         if (mode.simLabel != null || mode.counter != null) {
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
@@ -560,6 +573,7 @@ private fun BubbleRow(
     selected: ImmutableList<String>? = null,
     voice: VoiceUi? = null,
     speedLabel: String = "",
+    textScale: Float = 1f,
 ) {
     ConversationProbe.onBubbleComposed?.invoke(bubble.key)
     val overlays = LocalOverlayOrNull.current
@@ -621,7 +635,7 @@ private fun BubbleRow(
                             onReact = { actions.onReact(bubble, it) },
                             onTap = tap,
                             onOpened = { actions.onMenuOpened(bubble, it) },
-                        ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel) }
+                        ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel, textScale) }
                     }
 
                     else -> {
@@ -636,7 +650,7 @@ private fun BubbleRow(
                         .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
                         .drawBehind { drawRect(GlowColor.copy(alpha = glowAlpha)) }
                         .padding(MessagesMetrics.GlowPad),
-                ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel) }
+                ) { BubbleBody(bubble, fill, ink, maxWidth, actions, voice, speedLabel, textScale) }
             }
             actions.pillsFor?.let { detect ->
                 val pills by produceState(emptyList<PillUi>(), bubble.key, bubble.text) { value = detect(bubble) }
@@ -662,6 +676,7 @@ private fun BubbleBody(
     actions: ConversationActions,
     voice: VoiceUi? = null,
     speedLabel: String = "",
+    textScale: Float = 1f,
 ) {
     val corner = MessagesMetrics.BubbleCorner
     val tail = MessagesMetrics.BubbleTail
@@ -747,11 +762,11 @@ private fun BubbleBody(
                 bubble.text.rtlSafe(),
                 style =
                     if (bubble.deleted) {
-                        RostyTheme.type.body.copy(
+                        RostyTheme.type.body.scaledBy(textScale).copy(
                             fontStyle = FontStyle.Italic,
                         )
                     } else {
-                        RostyTheme.type.body
+                        RostyTheme.type.body.scaledBy(textScale)
                     },
                 color = if (bubble.deleted) RostyTheme.colors.labelSecondary else ink,
             )

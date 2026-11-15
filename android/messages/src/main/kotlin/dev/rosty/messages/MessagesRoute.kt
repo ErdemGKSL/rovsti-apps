@@ -67,6 +67,22 @@ sealed interface MessagesRoute {
     @Serializable
     data object Scheduled : MessagesRoute
 
+    /** Settings, Notifications: the switches and the muted conversations (E6.12). */
+    @Serializable
+    data object NotificationSettings : MessagesRoute
+
+    /** Settings, Quick replies (M11, E6.12). */
+    @Serializable
+    data object QuickReplies : MessagesRoute
+
+    /** Settings, Text size of the bubbles (M34, E6.12). */
+    @Serializable
+    data object TextSize : MessagesRoute
+
+    /** Settings, Backup: encrypted export and restore (AD-MSG7, E6.12). */
+    @Serializable
+    data object Backup : MessagesRoute
+
     // The common settings pages (shell CommonSettingsPage + the licence detail).
     @Serializable
     data object Appearance : MessagesRoute
@@ -163,6 +179,22 @@ fun chromeFor(
 
         MessagesRoute.SpamSettings -> {
             ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.settings_spam_row)))
+        }
+
+        MessagesRoute.NotificationSettings -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.notify_settings_title)))
+        }
+
+        MessagesRoute.QuickReplies -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.quick_replies_title)))
+        }
+
+        MessagesRoute.TextSize -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.text_size_title)))
+        }
+
+        MessagesRoute.Backup -> {
+            ChromeSpec(TabBarMode.Visible, largeTitle = text(UiText.Res(R.string.backup_title)))
         }
 
         MessagesRoute.Appearance -> {

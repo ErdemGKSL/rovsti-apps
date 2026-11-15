@@ -322,6 +322,9 @@ fn prefs_choices(req: ChoicesReq) -> Result<Value, FfiError> {
             "pattern_ms": v.pattern_ms(), "preview_ms": v.preview_ms()})).collect::<Vec<_>>(),
         "notice_when": NoticeWhen::ALL.iter().map(|w| json!({"id": w, "label": w.label_in(lang)})).collect::<Vec<_>>(),
         "default_template": notice::default_template(lang),
+        // The default of every language: a stored message that is one of them was never rewritten, so a page
+        // shows it (and a trip sends it) as the default of the language in use.
+        "default_templates": Lang::ALL.iter().map(|l| notice::default_template(*l)).collect::<Vec<_>>(),
         "default_tile_url": DEFAULT_TILE_URL,
         "attribution": ATTRIBUTION,
     }))

@@ -94,7 +94,8 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
 - The trip keeps its language: `stops.trip_start {locale}` stores it in `trip.json` (`lang`, absent for English), and it is the
   language of the texts the trip writes on its own: the status (`FixOut.title`, `FixOut.text`: the service's notification) and the
   "a few" of an arriving-soon message without an ETA. A message the user never rewrote (still a default of either language) goes
-  out as the default of the trip's language. `stops.trip_{restore, fix, status_share, end}` and the headless `trip_fix` take an
+  out as the default of the trip's language (`stops.prefs_choices` lists every language's default as `default_templates`, so the
+  settings page shows such a message in the phone's language too). `stops.trip_{restore, fix, status_share, end}` and the headless `trip_fix` take an
   optional `locale` that replaces the stored one (the phone's language changed during the trip); without it the stored one holds.
   A point without a name is stored as "Point A" / "A noktası"; both read as "no name" in either language.
 - `stops.gtfs_import {zip, now_ms, save?, dir?}` reads the zip at a path (a tiny feed lives in `tests/data/gtfs-tiny.zip`; fixture requests

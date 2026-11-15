@@ -12,6 +12,7 @@ import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Endpoint
 import dev.rosty.core.model.stops.FormatDistanceRequest
 import dev.rosty.core.model.stops.History
+import dev.rosty.core.model.stops.NearestStop
 import dev.rosty.core.model.stops.SavedEdit
 import dev.rosty.core.model.stops.SavedEditAnswer
 import dev.rosty.core.model.stops.SavedListRequest
@@ -79,6 +80,8 @@ data class SavedUiState(
     val maxNameChars: Int = DEFAULT_NAME_CHARS,
     /** S44: a refused note of stop [NoteError.id], shown under the note field (the field keeps the text). */
     val noteError: NoteError? = null,
+    /** S37: the saved stop nearest the last position, when one is close (`saved_list` `nearest`). */
+    val nearest: NearestStop? = null,
 ) {
     /** The user's own order, unfiltered: what Move and the drag change is what is shown (GPUI `reorderable`). */
     val canReorder: Boolean get() = sort == SavedSort.Saved && (!showSearch(stops.size) || query.isBlank())
@@ -410,6 +413,7 @@ class SavedViewModel(
                         stops = saved.stops.toImmutableList(),
                         listText = list.text,
                         maxNameChars = list.maxNameChars,
+                        nearest = list.nearest,
                     )
                 mutable.value = next.copy(editing = next.editing && next.canReorder && next.stops.size > 1)
             }

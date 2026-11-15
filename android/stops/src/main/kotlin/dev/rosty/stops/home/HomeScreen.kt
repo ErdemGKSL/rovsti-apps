@@ -124,6 +124,7 @@ fun StopsHome(
     modifier: Modifier = Modifier,
     camera: MapCameraPadding = remember { MapCameraPadding() },
     chips: ImmutableList<ChipModel> = persistentListOf(),
+    onChip: (String) -> Unit = {},
     hint: String? = null,
     mapFooter: @Composable RowScope.() -> Unit = {},
     motionFrozen: () -> Boolean = { false },
@@ -254,7 +255,7 @@ fun StopsHome(
                             ChipRow(
                                 chips = chips,
                                 selected = "",
-                                onSelect = {},
+                                onSelect = onChip,
                                 modifier = Modifier.height(StopsSizes.chipRow).testTag(HomeTags.Chips),
                             )
                         }

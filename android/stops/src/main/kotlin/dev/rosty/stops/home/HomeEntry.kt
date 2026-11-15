@@ -34,6 +34,7 @@ import dev.rosty.core.model.stops.Slot
 import dev.rosty.core.model.stops.StopsPrefs
 import dev.rosty.core.model.stops.StoreWriteRequest
 import dev.rosty.design.chrome.TabItem
+import dev.rosty.design.controls.ChipModel
 import dev.rosty.design.haptics.LocalRostyHaptics
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.overlay.LocalOverlay
@@ -62,6 +63,8 @@ import dev.rosty.stops.map.presentPinMenu
 import dev.rosty.stops.map.rememberPinMenuStrings
 import dev.rosty.stops.map.rememberRadarOverlay
 import dev.rosty.stops.map.showThirdTapHint
+import dev.rosty.stops.pick.Picker
+import dev.rosty.stops.pick.rememberPicker
 import dev.rosty.stops.saved.SavedAction
 import dev.rosty.stops.saved.SavedEffect
 import dev.rosty.stops.saved.SavedViewModel
@@ -212,6 +215,9 @@ fun HomeEntry(
     val menuStrings = rememberPinMenuStrings()
     var open by remember { mutableStateOf<Pair<HomeSheet, SheetEntry>?>(null) }
 
+    // The pick sheets (E7.8); made once the map exists, below.
+    var picker: Picker? = null
+
     fun openSheet(
         which: HomeSheet,
         shared: String? = null,
@@ -242,6 +248,7 @@ fun HomeEntry(
     fun closeSheet() {
         open?.second?.let(overlays::dismiss)
         open = null
+        picker?.close()
     }
 
     // Start: the preflight sheet first while something blocks (ARCH 7.5), else straight away.
@@ -274,7 +281,8 @@ fun HomeEntry(
             // A stop shortcut starts that stop's trip (GPUI `open_stop`).
             is StopsLink.Stop -> saved.onAction(SavedAction.Start(now.id))
 
-            is StopsLink.Place -> openSheet(HomeSheet.Pick, now.text)
+            // A shared place or stop: the Confirm sheet, or both ends of a stop (E7.8).
+            is StopsLink.Place -> picker?.offer(now.text)
         }
         if (link != null) container.pendingLink.value = null
     }
@@ -344,6 +352,7 @@ fun HomeEntry(
                 override fun onSnapped() = haptics.selection()
             },
         )
+    picker = rememberPicker(container, map, overlays) { trip.state.value.trip != null }
     val pickState by map.pick.state.collectAsState()
     val padding = remember { MapCameraPadding() }
     FollowCameraPadding(map, padding)
@@ -437,6 +446,7 @@ fun HomeEntry(
         }
     }
     val tripState by trip.state.collectAsState()
+    val savedState by saved.state.collectAsState()
     // The trip in progress is on the map: its pins, its circle and its line (the pick controller draws them through
     // Rust as for a pick); picking is off until it ends (GPUI `pins_grabbable`).
     val runningTrip = tripState.trip
@@ -543,6 +553,11 @@ fun HomeEntry(
             MapAttribution()
         },
         motionFrozen = { map.motion.frozen },
+        // S37: one tap starts the trip to the saved stop nearest the position, while nothing is picked.
+        chips = nearestChips(savedState.nearest, pickState.ends, tripState.trip != null),
+        onChip = { id ->
+            savedState.nearest?.takeIf { id == NEAREST_CHIP }?.let { saved.onAction(SavedAction.Start(it.id)) }
+        },
         sheetContent = {
             val live = tripState.live
             MapSheetContent(
@@ -588,7 +603,10 @@ fun HomeEntry(
                         }
                     }
                 },
-                onSearch = { openSheet(HomeSheet.Pick) },
+                onSearch = {
+                    closeSheet()
+                    picker?.open()
+                },
                 onOpenSaved = { openSheet(HomeSheet.Saved) },
                 onOpenHistory = { openSheet(HomeSheet.History) },
             ),
@@ -659,6 +677,19 @@ private fun Context.share(text: String) {
     } catch (_: android.content.ActivityNotFoundException) {
         Unit
     }
+}
+
+private const val NEAREST_CHIP = "nearest"
+
+/** The S37 chip: shown with a nearby saved stop, nothing picked and no trip running (GPUI `nearest_row_visible`). */
+@Composable
+private fun nearestChips(
+    nearest: dev.rosty.core.model.stops.NearestStop?,
+    ends: Ends,
+    tripRunning: Boolean,
+): kotlinx.collections.immutable.ImmutableList<ChipModel> {
+    if (nearest == null || ends.a != null || ends.b != null || tripRunning) return persistentListOf()
+    return persistentListOf(ChipModel(NEAREST_CHIP, stringResource(R.string.home_nearest, nearest.name)))
 }
 
 internal fun Context.findComponentActivity(): ComponentActivity {

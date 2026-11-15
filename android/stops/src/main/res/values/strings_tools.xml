@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The map's own tools (E7.9): follow-me, map options, layers, measure, my location. -->
+<resources>
+    <string name="tools_following">Following you</string>
+    <string name="tools_stopped_following">Stopped following</string>
+    <string name="tools_allow_location">Allow location to see where you are.</string>
+    <string name="tools_looking">Looking for your location…</string>
+    <string name="tools_no_fix">No location yet</string>
+    <string name="tools_appearance_auto">Automatic</string>
+    <string name="tools_appearance_light">Light</string>
+    <string name="tools_appearance_dark">Dark</string>
+    <string name="tools_appearance_set">Appearance: %1$s</string>
+    <string name="tools_copy_link">Copy map link</string>
+    <string name="tools_link_copied">Map link copied</string>
+    <string name="tools_share_view">Share this view</string>
+    <string name="tools_copy_centre">Copy centre as…</string>
+    <string name="tools_centre_title">Map centre</string>
+    <string name="tools_saved_on_map">Saved stops on map</string>
+    <string name="tools_saved_shown">Saved stops shown</string>
+    <string name="tools_saved_hidden">Saved stops hidden</string>
+    <string name="tools_measure">Measure distance</string>
+    <string name="tools_my_location">My location</string>
+    <string name="tools_accuracy">Accurate to %1$d m</string>
+    <string name="tools_copied_format">%1$s copied</string>
+    <string name="measure_start">Tap the map to add points</string>
+    <string name="measure_second">Tap a second point</string>
+    <plurals name="measure_summary">
+        <item quantity="one">Total %1$s, %2$d leg</item>
+        <item quantity="other">Total %1$s, %2$d legs</item>
+    </plurals>
+    <string name="measure_leg">%1$d. %2$s</string>
+    <string name="measure_undo">Undo</string>
+    <string name="measure_undo_last">Undo last</string>
+    <string name="measure_clear">Clear</string>
+    <string name="measure_more">More</string>
+    <string name="measure_done">Done</string>
+    <string name="measure_cleared">Measurement cleared</string>
+    <string name="measure_finished">Measuring done</string>
+    <string name="measure_copy">Copy result</string>
+    <string name="measure_copied">Measurement copied</string>
+    <string name="measure_gpx">Export as GPX</string>
+    <string name="measure_exported">Measurement exported</string>
+    <string name="measure_export_failed">Couldn’t export the measurement</string>
+    <string name="measure_gpx_name">Measurement %1$s</string>
+    <string name="measure_full">At most %1$d points</string>
+    <string name="measure_after_trip">Measuring works when no trip is running</string>
+</resources>

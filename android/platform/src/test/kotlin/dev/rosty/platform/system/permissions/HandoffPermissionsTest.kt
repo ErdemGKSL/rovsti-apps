@@ -53,6 +53,8 @@ class HandoffPermissionsTest {
                     "uses-permission android.permission.RECEIVE_BOOT_COMPLETED",
                     "uses-permission android.permission.WAKE_LOCK",
                 ),
+            // E7.10 (S10): the offline map area download runs as a dataSync foreground worker.
+            "stops" to listOf("uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC"),
         )
 
     private fun fromManifest(app: String): List<String> {

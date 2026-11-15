@@ -11,8 +11,8 @@ use crate::op;
 use crate::ops::registry::{Case, OpSpec};
 use rosty_app_core::stops::pick::{self, Hint, Picking, TapOutcome};
 use rosty_app_core::stops::snap::{self, DropInput, DropSnap, VelocityTracker};
-use rosty_app_core::stops::types::{Destination, Ends, Slot, coord_text, distance_text};
-use rosty_geo::{Coord, Endpoint, SavedStops};
+use rosty_app_core::stops::types::{Destination, Ends, Slot, coord_text, distance_text_in};
+use rosty_geo::{Coord, Endpoint, Lang, SavedStops};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -77,6 +77,8 @@ enum Event {
 struct ReplayReq {
     #[serde(default)]
     events: Vec<Event>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn replay(req: ReplayReq) -> Result<Value, FfiError> {
@@ -129,7 +131,7 @@ fn replay(req: ReplayReq) -> Result<Value, FfiError> {
     Ok(json!({
         "ends": p.ends,
         "outcomes": outcomes,
-        "hint": {"kind": hint_kind, "text": hint.text(), "metres": metres},
+        "hint": {"kind": hint_kind, "text": hint.text_in(req.locale), "metres": metres},
         "can_start": p.can_start(),
         "moving": p.moving().map(slot_name),
         "menu": p.menu().map(slot_name),
@@ -194,6 +196,10 @@ fn replay_cases() -> Vec<Case> {
                 {"kind": "drag_start", "slot": "b"}
             ]}),
         ),
+        super::tr_case(json!({"events": [
+            {"kind": "tap", "dest": dropped(41.0, 28.994)},
+            {"kind": "tap", "dest": named("Work", 41.0, 29.006)}
+        ]})),
     ]
 }
 
@@ -214,39 +220,42 @@ struct LabelsReq {
     /// A stored endpoint (a recent trip) to turn back into a destination.
     #[serde(default)]
     endpoint: Option<Endpoint>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn labels(req: LabelsReq) -> Result<Value, FfiError> {
+    let lang = req.locale;
     let side = |slot: Slot| match req.ends.get(slot) {
         None => Value::Null,
         Some(d) => json!({
-            "label": pick::point_label(slot, Some(d)),
-            "title": d.title(),
+            "label": pick::point_label_in(lang, slot, Some(d)),
+            "title": d.title_in(lang),
             "named": d.is_named(),
             "details": pick::details_text(d),
-            "queued": pick::queued_text(slot, d),
-            "endpoint": pick::trip_endpoint(slot, d),
+            "queued": pick::queued_text_in(lang, slot, d),
+            "endpoint": pick::trip_endpoint_in(lang, slot, d),
         }),
     };
     let pair = match (&req.ends.a, &req.ends.b) {
         (Some(a), Some(b)) => Some(format!(
             "A-B {}",
-            distance_text(a.coord.distance_m(b.coord))
+            distance_text_in(lang, a.coord.distance_m(b.coord))
         )),
         _ => None,
     };
     Ok(json!({
         "a": side(Slot::A),
         "b": side(Slot::B),
-        "empty_label_a": pick::point_label(Slot::A, None),
-        "empty_label_b": pick::point_label(Slot::B, None),
-        "picker_title_a": Slot::A.picker_title(),
-        "picker_title_b": Slot::B.picker_title(),
+        "empty_label_a": pick::point_label_in(lang, Slot::A, None),
+        "empty_label_b": pick::point_label_in(lang, Slot::B, None),
+        "picker_title_a": Slot::A.picker_title_in(lang),
+        "picker_title_b": Slot::B.picker_title_in(lang),
         "pair": pair,
         "next_slot": slot_name(req.ends.next_slot()),
         "paste": req.paste.as_deref().map(|p| pick::clean_paste(Some(p))),
-        "no_match": req.query.as_deref().map(|q| pick::no_match_text(q, req.has_feed)),
-        "row_label": req.row_label.as_deref().map(pick::row_label),
+        "no_match": req.query.as_deref().map(|q| pick::no_match_text_in(lang, q, req.has_feed)),
+        "row_label": req.row_label.as_deref().map(|l| pick::row_label_in(lang, l)),
         "destination": req.endpoint.as_ref().map(pick::dest_from_endpoint),
         "coord_text": req.ends.a.as_ref().map(|d| coord_text(d.coord)),
     }))
@@ -264,6 +273,14 @@ fn labels_cases() -> Vec<Case> {
             "endpoint": {"label": "Point A", "coord": g["a"]["coord"]}
         })),
         Case::named("empty", json!({"ends": {"a": null, "b": null}})),
+        super::tr_case(json!({
+            "ends": {"a": named("Home", 41.0, 28.994), "b": dropped(41.0, 29.006)},
+            "paste": "  41.0082,\n 28.9784  ",
+            "query": " moda ",
+            "has_feed": false,
+            "row_label": "  ",
+            "endpoint": {"label": "Point A", "coord": g["a"]["coord"]}
+        })),
     ]
 }
 

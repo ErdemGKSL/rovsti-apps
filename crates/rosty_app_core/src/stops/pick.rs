@@ -4,19 +4,29 @@
 //! reads the stage, the hint and the labels out. Points are shown by name or
 //! as "Point A" / "Point B"; a coordinate is only ever a details line.
 
-use rosty_geo::{Coord, DiameterError, Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M, SavedStops};
+use rosty_geo::{Coord, DiameterError, Endpoint, Lang, MAX_DIAMETER_M, MIN_DIAMETER_M, SavedStops};
 
-use super::types::{Destination, Ends, Slot, coord_text, distance_text};
+use super::types::{Destination, Ends, Slot, coord_text, distance_text_in};
 
 /// The empty-search line of the stop picker.
 pub fn no_match_text(query: &str, has_feed: bool) -> String {
+    no_match_text_in(Lang::En, query, has_feed)
+}
+
+/// [`no_match_text`] in `lang`.
+pub fn no_match_text_in(lang: Lang, query: &str, has_feed: bool) -> String {
     let q = query.trim();
-    if has_feed {
-        format!("No stops or saved stops match \u{201c}{q}\u{201d}.")
-    } else {
-        format!(
+    match (lang, has_feed) {
+        (Lang::En, true) => format!("No stops or saved stops match \u{201c}{q}\u{201d}."),
+        (Lang::En, false) => format!(
             "No saved stops match \u{201c}{q}\u{201d}. Import a GTFS feed in Settings to search stops too."
-        )
+        ),
+        (Lang::Tr, true) => {
+            format!("\u{201c}{q}\u{201d} ile eşleşen durak ya da kayıtlı durak yok.")
+        }
+        (Lang::Tr, false) => format!(
+            "\u{201c}{q}\u{201d} ile eşleşen kayıtlı durak yok. Durakları da aramak için Ayarlar'dan bir GTFS verisi içe aktarın."
+        ),
     }
 }
 
@@ -53,29 +63,45 @@ pub enum Hint {
 
 impl Hint {
     pub fn text(&self) -> String {
-        match self {
-            Self::SetA => "Tap the map to set A".to_owned(),
-            Self::SetB => "Tap the map to set B".to_owned(),
-            Self::Moving(slot) => format!("Tap the map to move {}", slot.label()),
-            Self::Ready { metres } => distance_line(*metres),
-            Self::Invalid(DiameterError::TooShort | DiameterError::SamePoint) => format!(
-                "A and B are too close. Drag a pin at least {} m away.",
-                MIN_DIAMETER_M as i64
-            ),
-            Self::Invalid(DiameterError::TooLong) => format!(
-                "A and B are more than {} km apart. Move a pin closer.",
-                (MAX_DIAMETER_M / 1_000.0) as i64
-            ),
-            Self::Invalid(error) => error.message().to_owned(),
+        self.text_in(Lang::En)
+    }
+
+    /// [`Self::text`] in `lang`.
+    pub fn text_in(&self, lang: Lang) -> String {
+        let min_m = MIN_DIAMETER_M as i64;
+        let max_km = (MAX_DIAMETER_M / 1_000.0) as i64;
+        match (lang, self) {
+            (_, Self::Ready { metres }) => distance_line(lang, *metres),
+            (Lang::En, Self::SetA) => "Tap the map to set A".to_owned(),
+            (Lang::En, Self::SetB) => "Tap the map to set B".to_owned(),
+            (Lang::En, Self::Moving(slot)) => format!("Tap the map to move {}", slot.label()),
+            (Lang::En, Self::Invalid(DiameterError::TooShort | DiameterError::SamePoint)) => {
+                format!("A and B are too close. Drag a pin at least {min_m} m away.")
+            }
+            (Lang::En, Self::Invalid(DiameterError::TooLong)) => {
+                format!("A and B are more than {max_km} km apart. Move a pin closer.")
+            }
+            (Lang::Tr, Self::SetA) => "A için haritaya dokunun".to_owned(),
+            (Lang::Tr, Self::SetB) => "B için haritaya dokunun".to_owned(),
+            (Lang::Tr, Self::Moving(Slot::A)) => "A'yı taşımak için haritaya dokunun".to_owned(),
+            (Lang::Tr, Self::Moving(Slot::B)) => "B'yi taşımak için haritaya dokunun".to_owned(),
+            (Lang::Tr, Self::Invalid(DiameterError::TooShort | DiameterError::SamePoint)) => {
+                format!("A ve B çok yakın. Bir iğneyi en az {min_m} m uzağa sürükleyin.")
+            }
+            (Lang::Tr, Self::Invalid(DiameterError::TooLong)) => {
+                format!("A ile B arasında {max_km} km'den fazla var. Bir iğneyi yaklaştırın.")
+            }
+            (_, Self::Invalid(error)) => error.message_in(lang).to_owned(),
         }
     }
 }
 
-/// A stored endpoint as a destination: generic labels ("Point A") mean no name.
+/// A stored endpoint as a destination: generic labels ("Point A", "A noktası") mean no name.
 pub fn dest_from_endpoint(ep: &Endpoint) -> Destination {
-    match ep.label.trim() {
-        "" | "Point" | "Point A" | "Point B" => Destination::dropped(ep.coord),
-        label => Destination::new(label, ep.coord),
+    if rosty_geo::history::is_generic_label(&ep.label) {
+        Destination::dropped(ep.coord)
+    } else {
+        Destination::new(ep.label.trim(), ep.coord)
     }
 }
 
@@ -294,15 +320,20 @@ impl Picking {
 }
 
 /// "A-B 850 m".
-fn distance_line(metres: f64) -> String {
-    format!("A-B {}", distance_text(metres))
+fn distance_line(lang: Lang, metres: f64) -> String {
+    format!("A-B {}", distance_text_in(lang, metres))
 }
 
 /// What a point is called: its name, else "Point A" / "Point B".
 pub fn point_label(slot: Slot, dest: Option<&Destination>) -> String {
+    point_label_in(Lang::En, slot, dest)
+}
+
+/// [`point_label`] in `lang`: its name, else "A noktası" / "B noktası".
+pub fn point_label_in(lang: Lang, slot: Slot, dest: Option<&Destination>) -> String {
     match dest {
         Some(d) if d.is_named() => d.label.trim().to_owned(),
-        _ => format!("Point {}", slot.label()),
+        _ => rosty_geo::history::point_name(lang, slot.label()),
     }
 }
 
@@ -316,19 +347,29 @@ pub fn clean_paste(text: Option<&str>) -> Option<String> {
 /// Pill text after a point is queued for the next trip.
 #[allow(dead_code)] // wired up by a later step
 pub fn queued_text(slot: Slot, dest: &Destination) -> String {
-    format!(
-        "{} is {} for your next trip",
-        point_label(slot, Some(dest)),
-        slot.label()
-    )
+    queued_text_in(Lang::En, slot, dest)
+}
+
+/// [`queued_text`] in `lang`: "Sonraki yolculuğunuzda A: Kadıköy".
+pub fn queued_text_in(lang: Lang, slot: Slot, dest: &Destination) -> String {
+    let point = point_label_in(lang, slot, Some(dest));
+    match lang {
+        Lang::En => format!("{point} is {} for your next trip", slot.label()),
+        Lang::Tr => format!("Sonraki yolculuğunuzda {}: {point}", slot.label()),
+    }
 }
 
 /// A stored label for a list row: itself, else "Point" (a dropped point has
 /// none, and an old record may not either).
 pub fn row_label(label: &str) -> String {
+    row_label_in(Lang::En, label)
+}
+
+/// [`row_label`] in `lang`: itself, else "Nokta".
+pub fn row_label_in(lang: Lang, label: &str) -> String {
     let label = label.trim();
     if label.is_empty() {
-        "Point".to_owned()
+        lang.pick("Point", "Nokta").to_owned()
     } else {
         label.to_owned()
     }
@@ -338,7 +379,7 @@ pub fn row_label(label: &str) -> String {
 #[cfg(test)]
 pub fn pair_text(ends: &Ends) -> Option<String> {
     let (a, b) = (ends.a.as_ref()?, ends.b.as_ref()?);
-    Some(distance_line(a.coord.distance_m(b.coord)))
+    Some(distance_line(Lang::En, a.coord.distance_m(b.coord)))
 }
 
 /// The coordinates, for an optional details line only.
@@ -348,8 +389,13 @@ pub fn details_text(dest: &Destination) -> String {
 
 /// The point as the trip stores it, its label frozen to what the user saw.
 pub fn trip_endpoint(slot: Slot, dest: &Destination) -> Endpoint {
+    trip_endpoint_in(Lang::En, slot, dest)
+}
+
+/// [`trip_endpoint`], an end without a name stored as "A noktası" / "B noktası" in Turkish.
+pub fn trip_endpoint_in(lang: Lang, slot: Slot, dest: &Destination) -> Endpoint {
     Endpoint {
-        label: point_label(slot, Some(dest)),
+        label: point_label_in(lang, slot, Some(dest)),
         coord: dest.coord,
     }
 }
@@ -792,5 +838,115 @@ mod tests {
                 name: "Gate".into()
             }
         );
+    }
+
+    #[test]
+    fn every_sentence_in_both_languages() {
+        use Lang::{En, Tr};
+        assert_eq!(
+            no_match_text_in(Tr, " moda ", true),
+            "\u{201c}moda\u{201d} ile eşleşen durak ya da kayıtlı durak yok."
+        );
+        assert_eq!(
+            no_match_text_in(Tr, "moda", false),
+            "\u{201c}moda\u{201d} ile eşleşen kayıtlı durak yok. Durakları da aramak için Ayarlar'dan bir GTFS verisi içe aktarın."
+        );
+        assert_eq!(
+            no_match_text_in(En, "moda", true),
+            no_match_text("moda", true)
+        );
+
+        let hints = [
+            (
+                Hint::SetA,
+                "Tap the map to set A",
+                "A için haritaya dokunun",
+            ),
+            (
+                Hint::SetB,
+                "Tap the map to set B",
+                "B için haritaya dokunun",
+            ),
+            (
+                Hint::Moving(Slot::A),
+                "Tap the map to move A",
+                "A'yı taşımak için haritaya dokunun",
+            ),
+            (
+                Hint::Moving(Slot::B),
+                "Tap the map to move B",
+                "B'yi taşımak için haritaya dokunun",
+            ),
+            (Hint::Ready { metres: 850.0 }, "A-B 850 m", "A-B 850 m"),
+            (Hint::Ready { metres: 1_240.0 }, "A-B 1.2 km", "A-B 1,2 km"),
+            (Hint::Ready { metres: 0.0 }, "A-B 0 m", "A-B 0 m"),
+            (Hint::Ready { metres: f64::NAN }, "A-B 0 m", "A-B 0 m"),
+            (
+                Hint::Invalid(DiameterError::TooShort),
+                "A and B are too close. Drag a pin at least 20 m away.",
+                "A ve B çok yakın. Bir iğneyi en az 20 m uzağa sürükleyin.",
+            ),
+            (
+                Hint::Invalid(DiameterError::SamePoint),
+                "A and B are too close. Drag a pin at least 20 m away.",
+                "A ve B çok yakın. Bir iğneyi en az 20 m uzağa sürükleyin.",
+            ),
+            (
+                Hint::Invalid(DiameterError::TooLong),
+                "A and B are more than 50 km apart. Move a pin closer.",
+                "A ile B arasında 50 km'den fazla var. Bir iğneyi yaklaştırın.",
+            ),
+            (
+                Hint::Invalid(DiameterError::InvalidCoord),
+                "These coordinates are not on Earth.",
+                "Bu koordinatlar Dünya üzerinde değil.",
+            ),
+        ];
+        for (hint, en, tr) in hints {
+            assert_eq!(hint.text_in(En), en);
+            assert_eq!(hint.text_in(Tr), tr);
+            assert_eq!(hint.text(), en);
+        }
+
+        let named = stop("Kadıköy");
+        let dropped = at(100.0);
+        assert_eq!(point_label_in(Tr, Slot::A, Some(&named)), "Kadıköy");
+        assert_eq!(point_label_in(En, Slot::A, Some(&dropped)), "Point A");
+        assert_eq!(point_label_in(Tr, Slot::A, Some(&dropped)), "A noktası");
+        assert_eq!(point_label_in(Tr, Slot::B, None), "B noktası");
+        assert_eq!(
+            queued_text_in(En, Slot::B, &named),
+            "Kadıköy is B for your next trip"
+        );
+        assert_eq!(
+            queued_text_in(Tr, Slot::B, &named),
+            "Sonraki yolculuğunuzda B: Kadıköy"
+        );
+        assert_eq!(
+            queued_text_in(Tr, Slot::A, &dropped),
+            "Sonraki yolculuğunuzda A: A noktası"
+        );
+        assert_eq!(row_label_in(En, "  "), "Point");
+        assert_eq!(row_label_in(Tr, "  "), "Nokta");
+        assert_eq!(row_label_in(Tr, " Pier "), "Pier");
+        assert_eq!(named.title_in(En), "Use Kadıköy");
+        assert_eq!(named.title_in(Tr), "Kullan: Kadıköy");
+        assert_eq!(dropped.title_in(En), "Use this point");
+        assert_eq!(dropped.title_in(Tr), "Bu noktayı kullan");
+        assert_eq!(Slot::A.picker_title_in(Tr), "A'yı seç");
+        assert_eq!(Slot::B.picker_title_in(Tr), "B'yi seç");
+        assert_eq!(Slot::B.picker_title_in(En), "Choose B");
+
+        // An end stored under the generic name of either language is a dropped point again, and
+        // a trip's end is stored under the name the user saw.
+        assert_eq!(trip_endpoint_in(Tr, Slot::A, &dropped).label, "A noktası");
+        assert_eq!(trip_endpoint_in(En, Slot::B, &dropped).label, "Point B");
+        for label in ["A noktası", "Point B", "Nokta", " "] {
+            let ep = Endpoint {
+                label: label.into(),
+                coord: dropped.coord,
+            };
+            assert!(!dest_from_endpoint(&ep).is_named(), "{label}");
+        }
     }
 }

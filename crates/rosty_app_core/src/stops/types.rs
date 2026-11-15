@@ -2,7 +2,7 @@
 //! machine and the apps: [`Destination`], [`Slot`], [`Ends`] and the text
 //! helpers that describe them.
 
-use rosty_geo::{Coord, Diameter, DiameterError};
+use rosty_geo::{Coord, Diameter, DiameterError, Lang};
 
 /// Where a trip is headed.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -39,10 +39,16 @@ impl Destination {
 
     /// The confirmation sheet's heading.
     pub fn title(&self) -> String {
-        if self.is_named() {
-            format!("Use {}", self.label)
-        } else {
-            "Use this point".to_owned()
+        self.title_in(Lang::En)
+    }
+
+    /// [`Self::title`] in `lang`: "Kullan: Kadıköy", "Bu noktayı kullan".
+    pub fn title_in(&self, lang: Lang) -> String {
+        match (lang, self.is_named()) {
+            (Lang::En, true) => format!("Use {}", self.label),
+            (Lang::En, false) => "Use this point".to_owned(),
+            (Lang::Tr, true) => format!("Kullan: {}", self.label),
+            (Lang::Tr, false) => "Bu noktayı kullan".to_owned(),
         }
     }
 }
@@ -68,6 +74,15 @@ impl Slot {
         match self {
             Self::A => "Choose A",
             Self::B => "Choose B",
+        }
+    }
+
+    /// [`Self::picker_title`] in `lang`.
+    pub fn picker_title_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.picker_title(),
+            (Lang::Tr, Self::A) => "A'yı seç",
+            (Lang::Tr, Self::B) => "B'yi seç",
         }
     }
 }
@@ -129,11 +144,10 @@ pub fn coord_text(coord: Coord) -> String {
 
 /// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
 pub fn distance_text(metres: f64) -> String {
-    // Rounded first, so 995 m reads "1.0 km", never "1000 m".
-    let tens = (metres.max(0.0) / 10.0).round() as i64 * 10;
-    if tens < 1_000 {
-        format!("{tens} m")
-    } else {
-        format!("{:.1} km", metres / 1_000.0)
-    }
+    distance_text_in(Lang::En, metres)
+}
+
+/// [`distance_text`] in `lang`: "1,2 km".
+pub fn distance_text_in(lang: Lang, metres: f64) -> String {
+    rosty_geo::format_distance_in(lang, metres)
 }

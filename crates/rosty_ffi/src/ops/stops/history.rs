@@ -5,10 +5,11 @@ use super::{NOW, TZ};
 use crate::envelope::FfiError;
 use crate::op;
 use crate::ops::registry::{Case, OpSpec};
-use rosty_geo::history::{self, format_duration, snoozes_text};
+use rosty_geo::history::{
+    self, format_duration_in, prune_label_in, snoozes_text_in, usage_text_in,
+};
 use rosty_geo::{
-    Coord, DAY_MS, History, OutcomeFilter, PRUNE_CHOICES_DAYS, TripRecord, history_io, prune_label,
-    usage_text,
+    Coord, DAY_MS, History, Lang, OutcomeFilter, PRUNE_CHOICES_DAYS, TripRecord, history_io,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -59,14 +60,14 @@ fn filter_name(f: OutcomeFilter) -> &'static str {
     }
 }
 
-fn row(index: usize, r: &TripRecord) -> Value {
+fn row(lang: Lang, index: usize, r: &TripRecord) -> Value {
     json!({
         "index": index,
         "record": r,
-        "title": r.title(),
-        "summary_line": r.summary_line(),
-        "duration_text": format_duration(r.duration_ms()),
-        "snoozes_text": snoozes_text(r.snoozes),
+        "title": r.title_in(lang),
+        "summary_line": r.summary_line_in(lang),
+        "duration_text": format_duration_in(lang, r.duration_ms()),
+        "snoozes_text": snoozes_text_in(lang, r.snoozes),
     })
 }
 
@@ -101,6 +102,8 @@ struct ListReq {
     #[serde(default)]
     filter: Option<String>,
     now_ms: i64,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn list(req: ListReq) -> Result<Value, FfiError> {
@@ -109,7 +112,7 @@ fn list(req: ListReq) -> Result<Value, FfiError> {
         .history
         .matching(&req.query, filter)
         .into_iter()
-        .filter_map(|i| req.history.records.get(i).map(|r| row(i, r)))
+        .filter_map(|i| req.history.records.get(i).map(|r| row(req.locale, i, r)))
         .collect();
     let last = req.history.last_finished(req.now_ms).map(|r| {
         let i = req
@@ -118,15 +121,15 @@ fn list(req: ListReq) -> Result<Value, FfiError> {
             .iter()
             .position(|x| x.id == r.id)
             .unwrap_or(0);
-        row(i, r)
+        row(req.locale, i, r)
     });
     Ok(json!({
         "rows": rows,
         "total": req.history.records.len(),
         "filter": filter_name(filter),
         "next_filter": filter_name(filter.next()),
-        "filter_label": filter.label(),
-        "next_filter_label": filter.next().label(),
+        "filter_label": filter.label_in(req.locale),
+        "next_filter_label": filter.next().label_in(req.locale),
         "last_trip": last,
         "max_records": history::MAX_RECORDS,
     }))
@@ -144,6 +147,7 @@ fn list_cases() -> Vec<Case> {
             "bad_filter",
             json!({"history": sample(), "filter": "x", "now_ms": NOW}),
         ),
+        super::tr_case(json!({"history": sample(), "now_ms": NOW})),
     ]
 }
 
@@ -208,6 +212,8 @@ fn edit_cases() -> Vec<Case> {
 struct PruneReq {
     history: History,
     now_ms: i64,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// The "Delete N trips older than D days" choices with their counts.
@@ -216,14 +222,17 @@ fn prune_plan(req: PruneReq) -> Result<Value, FfiError> {
         .iter()
         .map(|&days| {
             let n = req.history.older_than(req.now_ms, days);
-            json!({"days": days, "count": n, "label": prune_label(n, days), "enabled": n > 0})
+            json!({"days": days, "count": n, "label": prune_label_in(req.locale, n, days), "enabled": n > 0})
         })
         .collect();
     Ok(json!({"choices": choices}))
 }
 
 fn prune_cases() -> Vec<Case> {
-    vec![Case::new(json!({"history": sample(), "now_ms": NOW}))]
+    vec![
+        Case::new(json!({"history": sample(), "now_ms": NOW})),
+        super::tr_case(json!({"history": sample(), "now_ms": NOW})),
+    ]
 }
 
 #[derive(Deserialize)]
@@ -233,13 +242,15 @@ struct UsageReq {
     b: Coord,
     now_ms: i64,
     tz_offset_s: i32,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// "Used 4 times, last 5 Nov" for a gate, when it was used.
 fn usage(req: UsageReq) -> Result<Value, FfiError> {
     Ok(match req.history.usage_of(req.a, req.b) {
         Some(u) => json!({"count": u.count, "last_ms": u.last_ms,
-                          "text": usage_text(u, req.now_ms, req.tz_offset_s)}),
+                          "text": usage_text_in(req.locale, u, req.now_ms, req.tz_offset_s)}),
         None => json!({"count": 0, "last_ms": null, "text": null}),
     })
 }
@@ -254,6 +265,10 @@ fn usage_cases() -> Vec<Case> {
             "unused",
             json!({"history": sample(), "a": {"lat": 10.0, "lon": 10.0},
                          "b": {"lat": 10.0, "lon": 10.01}, "now_ms": NOW, "tz_offset_s": TZ}),
+        ),
+        super::tr_case(
+            json!({"history": sample(), "a": {"lat": 41.0, "lon": 28.994}, "b": {"lat": 41.0, "lon": 29.006},
+                         "now_ms": NOW, "tz_offset_s": TZ}),
         ),
     ]
 }
@@ -337,16 +352,18 @@ struct TextReq {
     prune_count: Option<usize>,
     #[serde(default)]
     prune_days: Option<u32>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// Small texts: a record's share text, a duration, a prune label.
 fn text(req: TextReq) -> Result<Value, FfiError> {
     Ok(json!({
-        "share": req.record.as_ref().map(|r| history_io::share_text(r, req.tz_offset_s)),
-        "title": req.record.as_ref().map(TripRecord::title),
-        "duration": req.duration_ms.map(format_duration),
+        "share": req.record.as_ref().map(|r| history_io::share_text_in(req.locale, r, req.tz_offset_s)),
+        "title": req.record.as_ref().map(|r| r.title_in(req.locale)),
+        "duration": req.duration_ms.map(|ms| format_duration_in(req.locale, ms)),
         "prune": match (req.prune_count, req.prune_days) {
-            (Some(n), Some(d)) => Some(prune_label(n, d)),
+            (Some(n), Some(d)) => Some(prune_label_in(req.locale, n, d)),
             _ => None,
         },
     }))
@@ -359,6 +376,10 @@ fn text_cases() -> Vec<Case> {
                          "prune_count": 1, "prune_days": 90}),
         ),
         Case::named("empty", json!({})),
+        super::tr_case(
+            json!({"record": sample()["records"][0], "tz_offset_s": TZ, "duration_ms": 3_900_000,
+                         "prune_count": 1, "prune_days": 90}),
+        ),
     ]
 }
 
@@ -366,6 +387,8 @@ fn text_cases() -> Vec<Case> {
 struct StatsReq {
     history: History,
     now_ms: i64,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn stats(req: StatsReq) -> Result<Value, FfiError> {
@@ -379,8 +402,8 @@ fn stats(req: StatsReq) -> Result<Value, FfiError> {
         "avg_ms": s.avg_ms,
         "last_30_days": s.last_30_days,
         "arrived_percent": s.arrived_percent(),
-        "total_text": rosty_geo::format_distance(s.total_m),
-        "avg_text": format_duration(s.avg_ms),
+        "total_text": rosty_geo::format_distance_in(req.locale, s.total_m),
+        "avg_text": format_duration_in(req.locale, s.avg_ms),
         "top": s.top.iter().map(|(label, n)| json!({"label": label, "count": n})).collect::<Vec<_>>(),
     }))
 }
@@ -389,5 +412,6 @@ fn stats_cases() -> Vec<Case> {
     vec![
         Case::new(json!({"history": sample(), "now_ms": NOW})),
         Case::named("empty", json!({"history": {"records": []}, "now_ms": NOW})),
+        super::tr_case(json!({"history": sample(), "now_ms": NOW})),
     ]
 }

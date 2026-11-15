@@ -12,6 +12,7 @@ import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Endpoint
 import dev.rosty.core.model.stops.FormatDistanceRequest
 import dev.rosty.core.model.stops.History
+import dev.rosty.core.model.stops.NearestStop
 import dev.rosty.core.model.stops.SavedEdit
 import dev.rosty.core.model.stops.SavedEditAnswer
 import dev.rosty.core.model.stops.SavedListRequest
@@ -26,12 +27,12 @@ import dev.rosty.core.model.stops.UsageRequest
 import dev.rosty.core.ops.StopsOps
 import dev.rosty.design.text.UiText
 import dev.rosty.stops.R
+import dev.rosty.stops.data.Latest
 import dev.rosty.stops.data.SavedStore
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,6 +80,8 @@ data class SavedUiState(
     val maxNameChars: Int = DEFAULT_NAME_CHARS,
     /** S44: a refused note of stop [NoteError.id], shown under the note field (the field keeps the text). */
     val noteError: NoteError? = null,
+    /** S37: the saved stop nearest the last position, when one is close (`saved_list` `nearest`). */
+    val nearest: NearestStop? = null,
 ) {
     /** The user's own order, unfiltered: what Move and the drag change is what is shown (GPUI `reorderable`). */
     val canReorder: Boolean get() = sort == SavedSort.Saved && (!showSearch(stops.size) || query.isBlank())
@@ -262,7 +265,7 @@ class SavedViewModel(
     val effects: Flow<SavedEffect> = effectChannel.receiveAsFlow()
 
     private var history: History? = null
-    private var listJob: Job? = null
+    private val listing = Latest(work)
 
     init {
         work.launch {
@@ -386,33 +389,33 @@ class SavedViewModel(
     }
 
     private fun relist(saved: SavedStops) {
-        listJob?.cancel()
+        // Called from the store's collector, refresh() and actions, on any thread: the latest call wins.
         val now = mutable.value
-        listJob =
-            work.launch {
-                val request =
-                    SavedListRequest(saved, query = now.query.ifBlank { null }, sort = now.sort.wire, here = here())
-                val list = (ops.savedList(request) as? Outcome.Ok)?.value ?: return@launch
-                val rows =
-                    list.rows.map { row ->
-                        SavedRowUi(
-                            stop = row.stop,
-                            length = text(row.lengthM),
-                            distance = row.distanceM?.let { text(it) },
-                            usage = usage(row.stop),
-                            valid = row.valid,
-                        )
-                    }
-                val next =
-                    mutable.value.copy(
-                        loading = false,
-                        rows = rows.toImmutableList(),
-                        stops = saved.stops.toImmutableList(),
-                        listText = list.text,
-                        maxNameChars = list.maxNameChars,
+        listing.launch {
+            val request =
+                SavedListRequest(saved, query = now.query.ifBlank { null }, sort = now.sort.wire, here = here())
+            val list = (ops.savedList(request) as? Outcome.Ok)?.value ?: return@launch
+            val rows =
+                list.rows.map { row ->
+                    SavedRowUi(
+                        stop = row.stop,
+                        length = text(row.lengthM),
+                        distance = row.distanceM?.let { text(it) },
+                        usage = usage(row.stop),
+                        valid = row.valid,
                     )
-                mutable.value = next.copy(editing = next.editing && next.canReorder && next.stops.size > 1)
-            }
+                }
+            val next =
+                mutable.value.copy(
+                    loading = false,
+                    rows = rows.toImmutableList(),
+                    stops = saved.stops.toImmutableList(),
+                    listText = list.text,
+                    maxNameChars = list.maxNameChars,
+                    nearest = list.nearest,
+                )
+            publish { mutable.value = next.copy(editing = next.editing && next.canReorder && next.stops.size > 1) }
+        }
     }
 
     private suspend fun text(metres: Double): String =

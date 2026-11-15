@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tools_following">Seni takip ediyor</string>
+    <string name="tools_stopped_following">Takip durdu</string>
+    <string name="tools_allow_location">Nerede olduğunu görmek için konuma izin ver.</string>
+    <string name="tools_looking">Konumun aranıyor…</string>
+    <string name="tools_no_fix">Henüz konum yok</string>
+    <string name="tools_appearance_auto">Otomatik</string>
+    <string name="tools_appearance_light">Açık</string>
+    <string name="tools_appearance_dark">Koyu</string>
+    <string name="tools_appearance_set">Görünüm: %1$s</string>
+    <string name="tools_copy_link">Harita bağlantısını kopyala</string>
+    <string name="tools_link_copied">Harita bağlantısı kopyalandı</string>
+    <string name="tools_share_view">Bu görünümü paylaş</string>
+    <string name="tools_copy_centre">Merkezi farklı kopyala…</string>
+    <string name="tools_centre_title">Harita merkezi</string>
+    <string name="tools_saved_on_map">Haritada kayıtlı duraklar</string>
+    <string name="tools_saved_shown">Kayıtlı duraklar gösteriliyor</string>
+    <string name="tools_saved_hidden">Kayıtlı duraklar gizlendi</string>
+    <string name="tools_measure">Mesafe ölç</string>
+    <string name="tools_my_location">Konumum</string>
+    <string name="tools_accuracy">%1$d m hassasiyetle</string>
+    <string name="tools_copied_format">%1$s kopyalandı</string>
+    <string name="measure_start">Nokta eklemek için haritaya dokun</string>
+    <string name="measure_second">İkinci bir noktaya dokun</string>
+    <plurals name="measure_summary">
+        <item quantity="one">Toplam %1$s, %2$d bölüm</item>
+        <item quantity="other">Toplam %1$s, %2$d bölüm</item>
+    </plurals>
+    <string name="measure_leg">%1$d. %2$s</string>
+    <string name="measure_undo">Geri al</string>
+    <string name="measure_undo_last">Geri al</string>
+    <string name="measure_clear">Temizle</string>
+    <string name="measure_more">Diğer</string>
+    <string name="measure_done">Bitti</string>
+    <string name="measure_cleared">Ölçüm temizlendi</string>
+    <string name="measure_finished">Ölçüm bitti</string>
+    <string name="measure_copy">Sonucu kopyala</string>
+    <string name="measure_copied">Ölçüm kopyalandı</string>
+    <string name="measure_gpx">GPX olarak dışa aktar</string>
+    <string name="measure_exported">Ölçüm dışa aktarıldı</string>
+    <string name="measure_export_failed">Ölçüm dışa aktarılamadı</string>
+    <string name="measure_gpx_name">Ölçüm %1$s</string>
+    <string name="measure_full">En fazla %1$d nokta</string>
+    <string name="measure_after_trip">Ölçüm, yolculuk yokken çalışır</string>
+</resources>

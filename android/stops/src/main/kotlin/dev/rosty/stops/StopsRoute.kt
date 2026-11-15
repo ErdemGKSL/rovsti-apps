@@ -22,6 +22,26 @@ sealed interface StopsRoute {
     @Serializable
     data object Settings : StopsRoute
 
+    /** Settings > Alarm: sound, vibration, pattern, volume, snooze, tests and reset (S12-S14, S39). */
+    @Serializable
+    data object AlarmSettings : StopsRoute
+
+    /** Settings > Map tiles: the server, the cache and the offline area (S10, S22). */
+    @Serializable
+    data object MapTiles : StopsRoute
+
+    /** Settings > Arriving-soon message (AD-ST7). */
+    @Serializable
+    data object ArrivingSoon : StopsRoute
+
+    /** The chat picker of the arriving-soon message. */
+    @Serializable
+    data object ArrivingSoonChat : StopsRoute
+
+    /** Settings > WhatsApp: the shared link screen of `:wa`. */
+    @Serializable
+    data object WhatsApp : StopsRoute
+
     // The common settings pages (shell CommonSettingsPage + the licence detail).
     @Serializable
     data object Appearance : StopsRoute
@@ -73,6 +93,11 @@ fun chromeFor(route: StopsRoute): ChromeSpec =
         }
 
         StopsRoute.Settings,
+        StopsRoute.AlarmSettings,
+        StopsRoute.MapTiles,
+        StopsRoute.ArrivingSoon,
+        StopsRoute.ArrivingSoonChat,
+        StopsRoute.WhatsApp,
         StopsRoute.Appearance,
         StopsRoute.About,
         StopsRoute.Licences,

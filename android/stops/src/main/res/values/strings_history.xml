@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- History, statistics, export and backup (E7.11). -->
+<resources>
+    <string name="history_search">Search trips</string>
+    <string name="history_filter_all">All</string>
+    <string name="history_filter_arrived">Arrived</string>
+    <string name="history_filter_cancelled">Cancelled</string>
+    <string name="history_stats">Statistics</string>
+    <string name="history_stat_trips">Trips</string>
+    <string name="history_stat_arrived">Arrived</string>
+    <string name="history_stat_distance">Total distance</string>
+    <string name="history_stat_average">Average trip</string>
+    <string name="history_stat_last30">Last 30 days</string>
+    <string name="history_stat_top">Top places</string>
+    <string name="history_percent">%1$d%%</string>
+    <string name="history_top_count">%1$s · %2$d</string>
+    <string name="history_trips">Trips</string>
+    <string name="history_empty_title">No trips yet</string>
+    <string name="history_empty_message">Finished and cancelled trips are listed here, with some statistics.</string>
+    <string name="history_no_match_title">No trips match</string>
+    <string name="history_no_match_message">Try another word, or show all trips.</string>
+    <string name="history_start_again">Start again</string>
+    <string name="history_show_on_map">Show on map</string>
+    <string name="history_copy">Copy</string>
+    <string name="history_delete">Delete</string>
+    <string name="history_copied">Trip copied</string>
+    <string name="history_deleted">Removed %1$s</string>
+    <string name="history_cleared">History cleared</string>
+    <string name="history_not_saved">Couldn’t save the history</string>
+    <string name="history_nothing_to_export">No trips to export</string>
+    <string name="history_export_csv">Export CSV</string>
+    <string name="history_export_gpx">Export GPX</string>
+    <string name="history_exported">History exported</string>
+    <string name="history_export_failed">Couldn’t export the history</string>
+    <string name="history_clear">Clear history</string>
+    <string name="history_trip_running">Not while a trip is running</string>
+    <string name="history_row_detail">%1$s · %2$s</string>
+    <string name="history_row_menu">Trip actions</string>
+    <string name="backup_export">Back up everything</string>
+    <string name="backup_restore">Restore from backup…</string>
+    <string name="backup_saved">Backup saved</string>
+    <string name="backup_failed">Couldn’t save the backup</string>
+    <string name="backup_unreadable">This file isn’t a Stops backup</string>
+    <string name="backup_confirm_title">Restore this backup?</string>
+    <string name="backup_confirm_message">Saved stops, trip history and settings are replaced by the backup’s. You can undo right after.</string>
+    <string name="backup_restore_button">Restore</string>
+    <string name="backup_restored">Backup restored</string>
+    <string name="backup_during_trip">Restore works when no trip is running</string>
+    <plurals name="history_pruned">
+        <item quantity="one">Deleted %d old trip</item>
+        <item quantity="other">Deleted %d old trips</item>
+    </plurals>
+    <plurals name="history_prune_choice">
+        <item quantity="one">Delete %1$d trip older than %2$d days</item>
+        <item quantity="other">Delete %1$d trips older than %2$d days</item>
+    </plurals>
+</resources>

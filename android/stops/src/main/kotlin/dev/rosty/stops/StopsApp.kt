@@ -11,12 +11,17 @@ import dev.rosty.shell.RostyShell
 import dev.rosty.stops.home.HomeEntry
 import dev.rosty.stops.home.HomeSheet
 import dev.rosty.stops.home.homeTabItems
+import dev.rosty.stops.notice.ArrivingSoonChatEntry
+import dev.rosty.stops.notice.ArrivingSoonEntry
+import dev.rosty.stops.notice.StopsWhatsAppEntry
 import dev.rosty.stops.settings.AboutEntry
+import dev.rosty.stops.settings.AlarmSettingsEntry
 import dev.rosty.stops.settings.AppearanceEntry
 import dev.rosty.stops.settings.LicenceDetailEntry
 import dev.rosty.stops.settings.LicencesEntry
 import dev.rosty.stops.settings.LogsEntry
 import dev.rosty.stops.settings.StopsSettingsEntry
+import dev.rosty.stops.settings.TilesSettingsEntry
 
 /**
  * The screens of Rosty Stops: one [RostyShell] over the activity's navigator (the shell provides the overlay host and
@@ -72,6 +77,11 @@ fun StopsApp(
     ) {
         entry<StopsRoute.Home> { HomeEntry(container, navigator) }
         entry<StopsRoute.Settings> { StopsSettingsEntry(container, onOpen = navigator::push, onBack = pop) }
+        entry<StopsRoute.AlarmSettings> { AlarmSettingsEntry(container, pop, popToRoot) }
+        entry<StopsRoute.MapTiles> { TilesSettingsEntry(container, pop, popToRoot) }
+        entry<StopsRoute.ArrivingSoon> { ArrivingSoonEntry(container, navigator::push, pop, popToRoot) }
+        entry<StopsRoute.ArrivingSoonChat> { ArrivingSoonChatEntry(container, pop, popToRoot) }
+        entry<StopsRoute.WhatsApp> { StopsWhatsAppEntry(container) }
         entry<StopsRoute.Appearance> { AppearanceEntry(container.commonSettings, pop, popToRoot) }
         entry<StopsRoute.About> {
             AboutEntry(container, onOpenLicences = { navigator.push(StopsRoute.Licences) }, pop, popToRoot)

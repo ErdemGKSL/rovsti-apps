@@ -34,8 +34,10 @@ import dev.rosty.stops.map.PickListener
 import dev.rosty.stops.map.RadarPosition
 import dev.rosty.stops.map.RadarSaved
 import dev.rosty.stops.map.StopsPickOps
+import dev.rosty.stops.offline.visibleArea
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -93,7 +95,13 @@ fun rememberHomeMap(
                 }
             HomeMap(
                 camera = camera,
-                tiles = MapTileStore(container.createTileSource(), scope, MapTileStore.bitmapBudget(context)),
+                tiles =
+                    MapTileStore(
+                        container.createTileSource(),
+                        scope,
+                        MapTileStore.bitmapBudget(context),
+                        rasterDispatcher = container.tileRasterDispatcher,
+                    ),
                 pick = PickController(StopsPickOps(container.ops), scope, camera, forward),
                 motion = MotionGate(scope),
             )
@@ -310,3 +318,19 @@ fun Context.openInMaps(geoUri: String): Boolean =
     } catch (_: SecurityException) {
         false
     }
+
+/**
+ * The two hooks Settings (E7.10) needs from the map. The view as the map leaves the screen (a page is pushed over it,
+ * Settings among them) becomes `container.mapView`, the offline area to download (S10): read once, nothing runs while
+ * the map moves. A transit feed imported or removed in Settings makes the pick controller ask for its stops again.
+ */
+@Composable
+fun SettingsHooks(
+    map: HomeMap,
+    container: StopsContainer,
+) {
+    DisposableEffect(map) {
+        onDispose { visibleArea(map.camera)?.let { container.mapView.value = it } }
+    }
+    LaunchedEffect(map) { container.transitVersion.drop(1).collect { map.pick.refreshTransit() } }
+}

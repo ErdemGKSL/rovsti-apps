@@ -110,6 +110,8 @@ sealed interface PickEvent {
 @Serializable
 data class PickReplayRequest(
     val events: List<PickEvent> = emptyList(),
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** The line that tells the user what to do next. [kind] is `set_a`, `set_b`, `moving`, `ready` or `invalid`. */
@@ -149,6 +151,8 @@ data class PickLabelsRequest(
     @SerialName("row_label") @EncodeDefault(NEVER) val rowLabel: String? = null,
     /** A stored endpoint (a recent trip) to turn back into a destination. */
     @EncodeDefault(NEVER) val endpoint: Endpoint? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** The texts of one picked end. */

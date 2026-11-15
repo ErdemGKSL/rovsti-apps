@@ -16,6 +16,7 @@ import dev.rosty.shell.settings.dev.DevTags
 import dev.rosty.stops.home.HomeMapTag
 import dev.rosty.stops.home.HomeSheetTags
 import dev.rosty.stops.home.HomeTags
+import dev.rosty.stops.pick.PickTags
 import dev.rosty.stops.saved.SavedTags
 import dev.rosty.stops.settings.SettingsTags
 import dev.rosty.testing.ShotTest
@@ -157,7 +158,7 @@ class StopsAppTest : ShotTest() {
         advance(1500)
         compose.onNodeWithTag(HomeTags.Search).performClick()
         advance(1200)
-        compose.onNodeWithTag(HomeSheetTags.Pick, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(PickTags.Sheet, useUnmergedTree = true).assertExists()
     }
 
     @Test fun theSavedTabOpensTheSavedSheetAndTripClosesIt() {
@@ -169,12 +170,11 @@ class StopsAppTest : ShotTest() {
         compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertExists()
     }
 
-    @Test fun aSharedLinkOpensThePickSheetOnce() {
+    /** The link is taken once (the Confirm sheet it opens is `PickAppTest`'s). */
+    @Test fun aSharedLinkIsTakenOnce() {
         val fixture = start()
         compose.runOnUiThread { fixture.container.pendingLink.value = StopsLink.Place("geo:41.0,29.0") }
         advance(1500)
-        compose.onNodeWithTag(HomeSheetTags.Pick, useUnmergedTree = true).assertExists()
-        compose.onNodeWithText("Shared with Stops: geo:41.0,29.0").assertExists()
         assertEquals(null, fixture.container.pendingLink.value)
     }
 }

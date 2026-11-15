@@ -66,11 +66,13 @@ object HostCore {
 
 /**
  * [fake]'s scripted answers first (the files, the prefs, the trip), the [real] core for every op the fake does not
- * script.
+ * script. The real calls are counted in [Background], and held there for a screen test.
  */
 class HybridCore(
     private val fake: FakeRustCore,
     private val real: RustCore,
+    /** The real answers wait for [Background.await] (a screen test on a manual clock); else they come as they come. */
+    private val held: () -> Boolean = { false },
 ) : RustCore {
     override suspend fun version(): Outcome<String> = real.version()
 
@@ -84,13 +86,16 @@ class HybridCore(
                 answer.error.message
                     .orEmpty()
                     .startsWith(UNSCRIPTED)
-        return if (unscripted) real.call(op, request) else answer
+        return if (unscripted) Background.counted(held()) { real.call(op, request) } else answer
     }
 
     override suspend fun headless(
         kind: String,
         json: String,
-    ): String = fake.headless(kind, json).ifEmpty { real.headless(kind, json) }
+    ): String {
+        val scripted = fake.headless(kind, json)
+        return scripted.ifEmpty { Background.counted(held()) { real.headless(kind, json) } }
+    }
 
     private companion object {
         /** How [FakeRustCore] answers an op it has no script for. */

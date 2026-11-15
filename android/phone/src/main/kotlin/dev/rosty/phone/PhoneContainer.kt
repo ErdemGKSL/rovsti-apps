@@ -650,7 +650,7 @@ open class PhoneContainer(
 
     protected open fun createCallSource(): CallSource =
         WaMergedCallSource(
-            base = RegistryCallSource(registryCalls, CallRegistry.state, scope),
+            base = RegistryCallSource(registryCalls, CallRegistry.snapshotSeq, scope),
             waCalls = waCallsNamed,
             muted = waCalls.mutedCalls,
             speaker = waCalls.speakerOn,
@@ -805,6 +805,8 @@ open class PhoneContainer(
             extras = waCalls.calls.map { RecentsRepository.extraCalls(it) },
             ids = callerIds,
             idsChanged = callerIdsChanged,
+            // Re-reads the log when READ_CALL_LOG is granted while the process runs (first launch after install).
+            callLogGranted = permissions.state(PermissionGroup.CALL_LOG).map { it == PermissionState.Granted },
             locale = { DeviceLocaleTime.now(context, clock()) },
             lastSeenMs = { store.prefs.value.ui.missedSeenMs },
         ).also { it.start() }

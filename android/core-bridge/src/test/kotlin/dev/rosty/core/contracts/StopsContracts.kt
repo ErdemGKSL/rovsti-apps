@@ -53,6 +53,8 @@ import dev.rosty.core.model.stops.HistoryTextRequest
 import dev.rosty.core.model.stops.MeasureAnswer
 import dev.rosty.core.model.stops.MeasureRequest
 import dev.rosty.core.model.stops.NameAnswer
+import dev.rosty.core.model.stops.NoticeChatsAnswer
+import dev.rosty.core.model.stops.NoticeChatsRequest
 import dev.rosty.core.model.stops.NoticeRenderRequest
 import dev.rosty.core.model.stops.NoticeResultAnswer
 import dev.rosty.core.model.stops.NoticeResultRequest
@@ -68,6 +70,7 @@ import dev.rosty.core.model.stops.PlacesImportRequest
 import dev.rosty.core.model.stops.PollAnswer
 import dev.rosty.core.model.stops.PollRequest
 import dev.rosty.core.model.stops.PrefsChoicesAnswer
+import dev.rosty.core.model.stops.PrefsChoicesRequest
 import dev.rosty.core.model.stops.PrefsEditAnswer
 import dev.rosty.core.model.stops.PrefsEditRequest
 import dev.rosty.core.model.stops.PrefsLoadAnswer
@@ -95,6 +98,7 @@ import dev.rosty.core.model.stops.SnoozeRequest
 import dev.rosty.core.model.stops.StatsAnswer
 import dev.rosty.core.model.stops.StatsRequest
 import dev.rosty.core.model.stops.StatusShareRequest
+import dev.rosty.core.model.stops.StoreGtfsRemoveAnswer
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripClearAnswer
@@ -129,8 +133,8 @@ object StopsContracts : ContractModels {
         buildMap {
             op<TripStartRequest, TripView>(
                 "stops.trip_start",
-                ok = listOf("notice"),
-                err = listOf("same_point", "too_short"),
+                ok = listOf("notice", "tr"),
+                err = listOf("same_point", "too_short", "tr_too_short"),
             )
             op<TripRestoreRequest, TripView>(
                 "stops.trip_restore",
@@ -141,7 +145,7 @@ object StopsContracts : ContractModels {
             )
             op<TripFixRequest, TripFixAnswer>(
                 "stops.trip_fix",
-                ok = listOf("far", "inaccurate"),
+                ok = listOf("far", "inaccurate", "started_in_turkish", "tr"),
                 err = listOf("closed"),
             )
             op<NoticeResultRequest, NoticeResultAnswer>(
@@ -161,12 +165,12 @@ object StopsContracts : ContractModels {
             )
             op<StatusShareRequest, TextAnswer>(
                 "stops.trip_status_share",
-                ok = listOf("crossed"),
+                ok = listOf("crossed", "started_in_turkish", "tr"),
             )
             op<TripEndRequest, TripEndAnswer>(
                 "stops.trip_end",
                 ok = listOf("cancelled"),
-                err = listOf("bad_outcome"),
+                err = listOf("bad_outcome", "tr"),
             )
             op<ArrivalClockRequest, ClockAnswer>(
                 "stops.arrival_clock",
@@ -174,7 +178,7 @@ object StopsContracts : ContractModels {
             )
             op<CrossingValidateRequest, CrossingValidateAnswer>(
                 "stops.crossing_validate",
-                err = listOf("invalid_coord", "too_long", "too_short"),
+                err = listOf("invalid_coord", "too_long", "too_short", "tr_too_long"),
             )
             op<CrossingReadRequest, CrossingReadAnswer>(
                 "stops.crossing_read",
@@ -184,7 +188,7 @@ object StopsContracts : ContractModels {
             op<DestParseRequest, DestParseAnswer>(
                 "stops.dest_parse",
                 ok = listOf("bare", "geo_uri", "stop_share"),
-                err = listOf("nothing", "short_link"),
+                err = listOf("nothing", "short_link", "tr_nothing"),
             )
             op<DestShareRequest, DestShareAnswer>(
                 "stops.dest_share",
@@ -192,11 +196,11 @@ object StopsContracts : ContractModels {
             )
             op<PickReplayRequest, PickReplayAnswer>(
                 "stops.pick_replay",
-                ok = listOf("drag", "empty", "full_and_menu", "moving", "too_close"),
+                ok = listOf("drag", "empty", "full_and_menu", "moving", "too_close", "tr"),
             )
             op<PickLabelsRequest, PickLabelsAnswer>(
                 "stops.pick_labels",
-                ok = listOf("empty"),
+                ok = listOf("empty", "tr"),
             )
             op<SaveOfferRequest, SaveOfferAnswer>(
                 "stops.pick_save_offer",
@@ -236,7 +240,7 @@ object StopsContracts : ContractModels {
             )
             op<SavedListRequest, SavedListAnswer>(
                 "stops.saved_list",
-                ok = listOf("by_name", "empty", "search"),
+                ok = listOf("by_name", "empty", "search", "tr"),
                 err = listOf("bad_sort"),
             )
             op<SuggestNameRequest, NameAnswer>(
@@ -254,12 +258,12 @@ object StopsContracts : ContractModels {
             )
             op<PlacesImportRequest, PlacesImportAnswer>(
                 "stops.places_import",
-                ok = listOf("apply"),
+                ok = listOf("apply", "tr"),
                 err = listOf("empty", "garbage"),
             )
             op<HistoryListRequest, HistoryListAnswer>(
                 "stops.history_list",
-                ok = listOf("arrived_work", "none"),
+                ok = listOf("arrived_work", "none", "tr"),
                 err = listOf("bad_filter"),
             )
             op<HistoryEditRequest, HistoryEditAnswer>(
@@ -268,10 +272,11 @@ object StopsContracts : ContractModels {
             )
             op<PrunePlanRequest, PrunePlanAnswer>(
                 "stops.history_prune_plan",
+                ok = listOf("tr"),
             )
             op<UsageRequest, UsageAnswer>(
                 "stops.history_usage",
-                ok = listOf("unused"),
+                ok = listOf("tr", "unused"),
             )
             op<RecentRequest, RecentAnswer>(
                 "stops.history_recent",
@@ -283,11 +288,11 @@ object StopsContracts : ContractModels {
             )
             op<HistoryTextRequest, HistoryTextAnswer>(
                 "stops.history_text",
-                ok = listOf("empty"),
+                ok = listOf("empty", "tr"),
             )
             op<StatsRequest, StatsAnswer>(
                 "stops.stats",
-                ok = listOf("empty"),
+                ok = listOf("empty", "tr"),
             )
             op<DirRequest, StoreTripLoadAnswer>(
                 "stops.store_trip_load",
@@ -304,6 +309,10 @@ object StopsContracts : ContractModels {
             op<DirRequest, StoreTripClearAnswer>(
                 "stops.store_trip_clear",
                 ok = listOf("no_trip"),
+            )
+            op<DirRequest, StoreGtfsRemoveAnswer>(
+                "stops.store_gtfs_remove",
+                ok = listOf("no_feed"),
             )
             op<StoreReadRequest, StoreReadAnswer>(
                 "stops.store_read",
@@ -340,22 +349,27 @@ object StopsContracts : ContractModels {
                         "template",
                         "tile_url",
                     ),
-                err = listOf("template_empty", "tile_url_bad"),
+                err = listOf("template_empty", "tile_url_bad", "tr_template_empty", "tr_tile_url_bad"),
             )
-            op<Empty, PrefsChoicesAnswer>(
+            op<PrefsChoicesRequest, PrefsChoicesAnswer>(
                 "stops.prefs_choices",
+                ok = listOf("tr"),
             )
             op<NoticeRenderRequest, TextAnswer>(
                 "stops.notice_render",
-                ok = listOf("no_eta"),
+                ok = listOf("no_eta", "tr"),
             )
             op<NoticeValidateRequest, NoticeValidateAnswer>(
                 "stops.notice_validate",
-                err = listOf("empty", "too_long"),
+                err = listOf("empty", "too_long", "tr_empty"),
+            )
+            op<NoticeChatsRequest, NoticeChatsAnswer>(
+                "stops.notice_chats",
+                ok = listOf("empty", "tr"),
             )
             op<AlarmPlanRequest, AlarmPlanAnswer>(
                 "stops.alarm_plan",
-                ok = listOf("custom"),
+                ok = listOf("custom", "tr"),
             )
             op<PollRequest, PollAnswer>(
                 "stops.poll",
@@ -372,11 +386,11 @@ object StopsContracts : ContractModels {
             )
             op<GtfsLinesRequest, GtfsLinesAnswer>(
                 "stops.gtfs_lines",
-                ok = listOf("by_id", "first_stop", "no_feed", "out_of_range", "unknown_stop"),
+                ok = listOf("by_id", "first_stop", "no_feed", "out_of_range", "tr", "unknown_stop"),
             )
             op<GtfsSummaryRequest, GtfsSummaryAnswer>(
                 "stops.gtfs_summary",
-                ok = listOf("another_year", "no_feed", "skipped_rows"),
+                ok = listOf("another_year", "no_feed", "skipped_rows", "tr"),
             )
             op<GtfsViewRequest, GtfsViewAnswer>(
                 "stops.gtfs_view",
@@ -384,7 +398,7 @@ object StopsContracts : ContractModels {
             )
             op<CoordFormatRequest, CoordFormatAnswer>(
                 "stops.coord_format",
-                ok = listOf("plain"),
+                ok = listOf("plain", "tr"),
             )
             op<CoordParseRequest, CoordParseAnswer>(
                 "stops.coord_parse",
@@ -392,18 +406,20 @@ object StopsContracts : ContractModels {
             )
             op<MeasureRequest, MeasureAnswer>(
                 "stops.measure",
-                ok = listOf("empty", "one_point"),
+                ok = listOf("empty", "one_point", "tr"),
             )
             op<BackupExportRequest, BackupExportAnswer>(
                 "stops.backup_export",
+                ok = listOf("tr"),
             )
             op<BackupParseRequest, BackupParseAnswer>(
                 "stops.backup_parse",
-                err = listOf("newer", "not_json", "other_app"),
+                ok = listOf("tr"),
+                err = listOf("newer", "not_json", "other_app", "tr_not_json"),
             )
             op<FormatDistanceRequest, TextAnswer>(
                 "stops.format_distance",
-                ok = listOf("km"),
+                ok = listOf("km", "tr"),
             )
             op<ProjectRequest, ProjectAnswer>(
                 "view.project",

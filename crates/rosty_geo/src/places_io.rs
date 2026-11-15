@@ -6,7 +6,7 @@ use rosty_core::location_link::is_valid;
 use crate::saved_stops::{
     DUPLICATE_GATE_M, MAX_NAME_CHARS, MAX_STOPS, SavedStop, SavedStops, StopColour,
 };
-use crate::{Coord, Diameter, Endpoint};
+use crate::{Coord, Diameter, Endpoint, Lang};
 
 /// Largest import text accepted, in bytes.
 pub const MAX_IMPORT_BYTES: usize = 2 * 1024 * 1024;
@@ -42,6 +42,16 @@ impl ImportError {
             Self::Empty => "That file is empty.",
             Self::NotRecognised => "That file is not a GPX or Rosty stops file.",
             Self::TooLarge => "That file is too large (2 MB at most).",
+        }
+    }
+
+    /// [`Self::message`] in `lang`.
+    pub fn message_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.message(),
+            (Lang::Tr, Self::Empty) => "Bu dosya boş.",
+            (Lang::Tr, Self::NotRecognised) => "Bu dosya bir GPX ya da Rosty durak dosyası değil.",
+            (Lang::Tr, Self::TooLarge) => "Bu dosya çok büyük (en fazla 2 MB).",
         }
     }
 }
@@ -107,18 +117,34 @@ pub fn to_gpx(stops: &SavedStops) -> String {
     out
 }
 
+/// The name cut to the cap; empty when the file gave none ([`parse_import_in`] names those).
 fn clean_name(raw: &str) -> String {
     let name: String = raw.trim().chars().take(MAX_NAME_CHARS).collect();
-    let name = name.trim();
-    if name.is_empty() {
-        DEFAULT_NAME.to_owned()
-    } else {
-        name.to_owned()
-    }
+    name.trim().to_owned()
+}
+
+/// The name of an imported stop whose file gave none.
+pub fn default_name(lang: Lang) -> &'static str {
+    lang.pick(DEFAULT_NAME, "İçe aktarılan durak")
 }
 
 /// Reads an import file: our JSON (v2 file or a bare array of stops) or GPX.
 pub fn parse_import(text: &str) -> Result<Vec<Incoming>, ImportError> {
+    parse_import_in(Lang::En, text)
+}
+
+/// [`parse_import`]; a stop without a name is called [`default_name`] in `lang`.
+pub fn parse_import_in(lang: Lang, text: &str) -> Result<Vec<Incoming>, ImportError> {
+    let mut stops = parse_unnamed(text)?;
+    for stop in &mut stops {
+        if stop.name.is_empty() {
+            stop.name = default_name(lang).to_owned();
+        }
+    }
+    Ok(stops)
+}
+
+fn parse_unnamed(text: &str) -> Result<Vec<Incoming>, ImportError> {
     if text.len() > MAX_IMPORT_BYTES {
         return Err(ImportError::TooLarge);
     }
@@ -448,32 +474,40 @@ pub fn merge_plan(existing: &SavedStops, incoming: Vec<Incoming>) -> MergePlan {
     plan
 }
 
-fn stops_word(n: usize) -> String {
-    if n == 1 {
-        "1 stop".to_owned()
-    } else {
-        format!("{n} stops")
-    }
-}
-
 /// One-line description for the confirm sheet.
 pub fn summary(plan: &MergePlan) -> String {
-    let mut out = if plan.add.is_empty() {
-        "Nothing new to add.".to_owned()
-    } else {
-        format!("Add {}.", stops_word(plan.add.len()))
+    summary_in(Lang::En, plan)
+}
+
+/// [`summary`] in `lang`: "3 durak eklenecek. 2 durak zaten kayıtlı."
+pub fn summary_in(lang: Lang, plan: &MergePlan) -> String {
+    let mut out = match (lang, plan.add.len()) {
+        (Lang::En, 0) => "Nothing new to add.".to_owned(),
+        (Lang::En, 1) => "Add 1 stop.".to_owned(),
+        (Lang::En, n) => format!("Add {n} stops."),
+        (Lang::Tr, 0) => "Eklenecek yeni durak yok.".to_owned(),
+        (Lang::Tr, n) => format!("{n} durak eklenecek."),
     };
     if plan.duplicates > 0 {
-        out.push_str(&format!(" {} already saved.", plan.duplicates));
+        out.push_str(&match lang {
+            Lang::En => format!(" {} already saved.", plan.duplicates),
+            Lang::Tr => format!(" {} durak zaten kayıtlı.", plan.duplicates),
+        });
     }
     if plan.invalid > 0 {
-        out.push_str(&format!(" {} not usable.", plan.invalid));
+        out.push_str(&match lang {
+            Lang::En => format!(" {} not usable.", plan.invalid),
+            Lang::Tr => format!(" {} durak kullanılamıyor.", plan.invalid),
+        });
     }
     if plan.over_cap > 0 {
-        out.push_str(&format!(
-            " {} over the {MAX_STOPS} stop limit.",
-            plan.over_cap
-        ));
+        out.push_str(&match lang {
+            Lang::En => format!(" {} over the {MAX_STOPS} stop limit.", plan.over_cap),
+            Lang::Tr => format!(
+                " {} durak {MAX_STOPS} durak sınırını aşıyor.",
+                plan.over_cap
+            ),
+        });
     }
     out
 }

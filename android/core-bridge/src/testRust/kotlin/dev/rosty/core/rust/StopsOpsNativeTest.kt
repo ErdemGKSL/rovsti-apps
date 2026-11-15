@@ -15,6 +15,8 @@ import dev.rosty.core.model.stops.GtfsImportRequest
 import dev.rosty.core.model.stops.GtfsLinesRequest
 import dev.rosty.core.model.stops.GtfsSummaryRequest
 import dev.rosty.core.model.stops.GtfsViewRequest
+import dev.rosty.core.model.stops.NoticeChatInput
+import dev.rosty.core.model.stops.NoticeChatsRequest
 import dev.rosty.core.model.stops.PickEvent
 import dev.rosty.core.model.stops.PickReplayRequest
 import dev.rosty.core.model.stops.PlacesExportRequest
@@ -25,6 +27,7 @@ import dev.rosty.core.model.stops.SavedEditRequest
 import dev.rosty.core.model.stops.SavedStops
 import dev.rosty.core.model.stops.Side
 import dev.rosty.core.model.stops.Slot
+import dev.rosty.core.model.stops.TripFixRequest
 import dev.rosty.core.model.stops.TripState
 import dev.rosty.core.model.stops.Viewport
 import dev.rosty.core.ops.ActiveTripHandle
@@ -339,6 +342,75 @@ class StopsOpsNativeTest {
             // Another year, a calendar west of UTC (still 31 Dec there), and rows the import dropped.
             val later = GtfsSummaryRequest(nowMs = 400 * day, tzOffsetS = -5 * 3_600, skippedRows = 1_200, dir = dir)
             assertEquals("Imported 31 Dec 1969, 1 200 unusable rows skipped", ops.gtfsSummary(later).getOrOk().imported)
+        }
+
+    @Test
+    fun theSentencesFollowTheLocaleTheOpsWereMadeWith() =
+        runBlocking {
+            var tag: String? = "tr-TR"
+            val localized = NativeStopsOps(TestRust.core) { tag }
+            val far =
+                dev.rosty.core.model.stops
+                    .FormatDistanceRequest(1_240.0)
+            assertEquals("1,2 km", localized.formatDistance(far).getOrOk().text)
+            // A request that names its own language keeps it; no locale at all is English.
+            assertEquals("1.2 km", localized.formatDistance(far.copy(locale = "en")).getOrOk().text)
+            assertEquals("1.2 km", ops.formatDistance(far).getOrOk().text)
+            // The choices have no request of their own: the provider is their language.
+            val choices = localized.prefsChoices(dev.rosty.core.model.core.Empty).getOrOk()
+            assertEquals(listOf("Otomatik", "Açık", "Koyu"), choices.appearance.map { it.label })
+            assertEquals("Yaklaşık {min} dk sonra varıyorum: {stop}.", choices.defaultTemplate)
+            assertEquals(
+                "Auto",
+                ops
+                    .prefsChoices(dev.rosty.core.model.core.Empty)
+                    .getOrOk()
+                    .appearance[0]
+                    .label,
+            )
+            // An error is a sentence too.
+            val tooClose =
+                dev.rosty.core.model.stops
+                    .CrossingValidateRequest(Coord(41.0, 29.0), Coord(41.0, 29.0001))
+            val refused = localized.crossingValidate(tooClose) as Outcome.Err
+            assertEquals("A ile B arasında en az 20 m olmalı.", refused.error.message)
+
+            // A trip started in Turkish writes its status in Turkish, also for ops that name no language ...
+            val trip = ActiveTripHandle.start(9, home, work, 1_000, ops = localized).getOrOk()
+            trip.use {
+                val out = ops.tripFix(TripFixRequest(it.id, fix(41.2, 29.4, 2_000))).getOrOk().out
+                assertTrue(out.text, out.text.startsWith("Çemberin dışında, "))
+                // ... and follows the phone when its language changes during the trip.
+                tag = "en-GB"
+                val english = it.fix(fix(41.2, 29.4, 3_000)).getOrOk().out
+                assertTrue(english.text, english.text.startsWith("Outside the circle, "))
+                tag = null
+                val kept = it.fix(fix(41.2, 29.4, 4_000)).getOrOk().out
+                assertTrue(kept.text, kept.text.startsWith("Outside the circle, "))
+            }
+        }
+
+    @Test
+    fun theArrivingSoonChatsAreNamedByContactThenWhatsAppThenNumber() =
+        runBlocking {
+            val chats =
+                listOf(
+                    NoticeChatInput("905550001122@s.whatsapp.net", contact = "Ayşe Demir", push = "ayse"),
+                    NoticeChatInput("905550003344@s.whatsapp.net", verified = "Corner Bakery", push = "shop"),
+                    NoticeChatInput("905550005566@s.whatsapp.net"),
+                    NoticeChatInput("120363000000000001@g.us", group = true, chatName = "Family"),
+                    NoticeChatInput("98765432101234@lid"),
+                )
+            val named = ops.noticeChats(NoticeChatsRequest(chats)).getOrOk().chats
+            assertEquals(
+                listOf("Ayşe Demir", "Corner Bakery", "+905550005566", "Family", "WhatsApp user"),
+                named.map { it.name },
+            )
+            assertEquals(listOf("contact", "verified", "number", "stored_chat", "unknown"), named.map { it.tier })
+            // The number is a second line only under a name; a group and a hidden id have none.
+            assertEquals(listOf("+905550001122", "+905550003344", null, null, null), named.map { it.number })
+            val turkish = NativeStopsOps(TestRust.core) { "tr" }.noticeChats(NoticeChatsRequest(chats)).getOrOk()
+            assertEquals("WhatsApp kullanıcısı", turkish.chats.last().name)
         }
 
     @Test

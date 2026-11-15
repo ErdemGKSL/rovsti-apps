@@ -145,7 +145,8 @@ class TripServiceTest {
         assertTrue("trip_fix was not asked", seen.await(10, TimeUnit.SECONDS))
 
         val model = Envelope.json.decodeFromString(TripFixRequest.serializer(), checkNotNull(request))
-        assertEquals(TripFixRequest(dir, 41.0, 28.9, 10.0, 10.0, 2_000L), model)
+        // The phone's language goes with every fix: the notification follows it.
+        assertEquals(TripFixRequest(dir, 41.0, 28.9, 10.0, 10.0, 2_000L, locale = "en-US"), model)
         val golden = File(System.getProperty("rosty.ffi.fixtures"), "headless.trip_fix.request.json").readText()
         assertEquals(
             org.json

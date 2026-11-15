@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
 import org.junit.After
@@ -252,5 +253,40 @@ class RecentsRepositoryTest {
             eventually("first model") { recents.model.value.ready }
             assertTrue(threads.isNotEmpty())
             assertTrue(threads.toString(), threads.none { it == "main" })
+        }
+
+    /**
+     * The provider read as `AndroidCallLogRepository` does it: one query per collect, empty while READ_CALL_LOG is
+     * missing (the SecurityException path of `liveQuery`), and no change notification when the permission is granted.
+     */
+    private class PermissionGatedLog(
+        private val rows: List<dev.rosty.core.model.phone.CallLogEntry>,
+    ) : dev.rosty.platform.calllog.CallLogRepository by FakeCallLogRepository(rows) {
+        @Volatile var granted = false
+
+        override fun entries(limit: Int) = flow { emit(if (granted) rows.take(limit) else emptyList()) }
+    }
+
+    @Test fun theLogIsReadAgainWhenTheCallLogPermissionIsGrantedWhileTheAppRuns() =
+        runBlocking {
+            // A fresh install: Recents is built before the setup sheet's grant.
+            val provider = PermissionGatedLog(log)
+            val granted = MutableStateFlow(false)
+            val recents =
+                RecentsRepository(
+                    callLog = provider,
+                    ops = NativePhoneOps(counting),
+                    scope = scope,
+                    locale = { locale },
+                    clock = { T0 + 60_000 },
+                    windowMs = 12,
+                    callLogGranted = granted,
+                ).also { it.start() }
+            eventually("first model") { recents.model.value.ready }
+            assertEquals("nothing to read before the grant", 0, recents.model.value.rows.size)
+
+            provider.granted = true
+            granted.value = true
+            eventually("the rows after the grant, without a restart") { recents.model.value.rows.size == 3 }
         }
 }

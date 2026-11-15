@@ -76,6 +76,13 @@ pub(super) const OPS: &[OpSpec] = &[
         encode_cases
     ),
     op!(
+        "tiles.offline_plan",
+        PlanReq,
+        PlanAns,
+        offline_plan,
+        plan_cases
+    ),
+    op!(
         "tiles.offline_start",
         OfflineReq,
         OfflineAns,
@@ -660,6 +667,58 @@ struct OfflineAns {
     estimate_bytes: u64,
 }
 
+/// An area to estimate: the same `bbox` / `circle` / `zooms` as `tiles.offline_start`, without a handle.
+#[derive(Deserialize)]
+struct PlanReq {
+    #[serde(default)]
+    bbox: Option<Bbox>,
+    #[serde(default)]
+    circle: Option<Circle>,
+    #[serde(default)]
+    zooms: Zooms,
+}
+
+#[derive(Serialize)]
+struct PlanAns {
+    total: usize,
+    /// The highest zoom the budget allowed.
+    top_zoom: u8,
+    /// The area was cut short of the wanted zoom by the tile budget ("zoom in for street detail").
+    capped: bool,
+    estimate_bytes: u64,
+}
+
+/// What downloading an area would take, before anything is fetched: the Settings row's estimate (S10).
+fn offline_plan(req: PlanReq) -> Result<PlanAns, FfiError> {
+    let plan = plan_area(req.bbox.as_ref(), req.circle.as_ref(), &req.zooms)?;
+    let total = plan.tiles.len();
+    Ok(PlanAns {
+        total,
+        top_zoom: plan.top_zoom,
+        capped: plan.capped,
+        estimate_bytes: estimate_bytes(total),
+    })
+}
+
+fn plan_cases() -> Vec<Case> {
+    // Istanbul, about 2 km a side: every zoom fits the budget; the whole of Turkey does not.
+    let area = json!({"south": 41.00, "west": 28.96, "north": 41.02, "east": 28.99});
+    let country = json!({"south": 36.0, "west": 26.0, "north": 42.0, "east": 45.0});
+    vec![
+        Case::new(json!({"bbox": area})),
+        Case::named("capped", json!({"bbox": country})),
+        Case::named(
+            "circle",
+            json!({"circle": {"center": {"lat": 41.0, "lon": 28.994}, "radius_m": 600.0}}),
+        ),
+        Case::named("no_area", json!({})),
+        Case::named(
+            "bad_bbox",
+            json!({"bbox": {"south": 42.0, "west": 28.0, "north": 41.0, "east": 29.0}}),
+        ),
+    ]
+}
+
 type Emit = Arc<dyn Fn(&Value) + Send + Sync>;
 
 fn offline_start(req: OfflineReq) -> Result<OfflineAns, FfiError> {
@@ -669,16 +728,21 @@ fn offline_start(req: OfflineReq) -> Result<OfflineAns, FfiError> {
     start_job(req, emit)
 }
 
-fn start_job(req: OfflineReq, emit: Emit) -> Result<OfflineAns, FfiError> {
-    let h = state_of(req.handle)?;
-    let min = req.zooms.min.unwrap_or(AREA_MIN_ZOOM);
-    let max = req.zooms.max.unwrap_or(MAX_TILE_ZOOM);
+/// The tiles of an area (a box or a circle, exactly one) between the zooms, under the tile budget: what
+/// `tiles.offline_plan` estimates and `tiles.offline_start` downloads.
+fn plan_area(
+    bbox: Option<&Bbox>,
+    circle: Option<&Circle>,
+    zooms: &Zooms,
+) -> Result<rosty_geo::tiles::AreaPlan, FfiError> {
+    let min = zooms.min.unwrap_or(AREA_MIN_ZOOM);
+    let max = zooms.max.unwrap_or(MAX_TILE_ZOOM);
     if min > max {
         return Err(
             FfiError::invalid("the zoom range is empty").with_detail(json!({"reason": "zooms"}))
         );
     }
-    let (tiles, top_zoom, capped) = match (&req.bbox, &req.circle) {
+    let (tiles, top_zoom, capped) = match (bbox, circle) {
         (Some(b), None) => {
             let sane = [b.south, b.west, b.north, b.east]
                 .iter()
@@ -739,6 +803,12 @@ fn start_job(req: OfflineReq, emit: Emit) -> Result<OfflineAns, FfiError> {
             FfiError::invalid("that map area has no tiles").with_detail(json!({"reason": "empty"}))
         );
     }
+    Ok(plan)
+}
+
+fn start_job(req: OfflineReq, emit: Emit) -> Result<OfflineAns, FfiError> {
+    let h = state_of(req.handle)?;
+    let plan = plan_area(req.bbox.as_ref(), req.circle.as_ref(), &req.zooms)?;
     let total = plan.tiles.len();
     let area = Arc::new(Mutex::new(AreaDownload::new(plan.tiles.iter().copied())));
     let cancel = Arc::new(AtomicBool::new(false));

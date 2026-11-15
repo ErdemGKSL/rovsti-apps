@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::Lang;
 use crate::history::{History, MAX_RECORDS};
 use crate::prefs::StopsPrefs;
 use crate::saved_stops::{FORMAT_VERSION, MAX_STOPS, SavedStops};
@@ -62,6 +63,17 @@ impl BackupError {
             Self::BadStops => "The saved stops in that backup are damaged",
         }
     }
+
+    /// [`Self::message`] in `lang`.
+    pub fn message_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.message(),
+            (Lang::Tr, Self::NotJson) => "Bu dosya bir yedek değil",
+            (Lang::Tr, Self::NotStops) => "Bu yedek başka bir uygulamaya ait",
+            (Lang::Tr, Self::Newer) => "Bu yedek daha yeni bir sürüme ait",
+            (Lang::Tr, Self::BadStops) => "Bu yedekteki kayıtlı duraklar bozuk",
+        }
+    }
 }
 
 /// The backup as pretty JSON.
@@ -94,19 +106,19 @@ pub fn parse(text: &str) -> Result<Backup, BackupError> {
 /// One line for the confirmation sheet, e.g. "12 stops, 48 trips and settings from
 /// 5 Nov 2026".
 pub fn summary(backup: &Backup, tz_offset_s: i32) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    fn count(n: usize, one: &str, many: &str) -> String {
-        format!("{n} {}", if n == 1 { one } else { many })
-    }
+    summary_in(Lang::En, backup, tz_offset_s)
+}
+
+/// [`summary`] in `lang`: "5 Kas 2026 tarihli yedek: 12 durak, 48 yolculuk ve ayarlar".
+pub fn summary_in(lang: Lang, backup: &Backup, tz_offset_s: i32) -> String {
     let (y, m, d) = rosty_core::contact_dates::local_ymd(backup.created_ms, tz_offset_s);
-    format!(
-        "{}, {} and settings from {d} {} {y}",
-        count(backup.saved.stops.len(), "stop", "stops"),
-        count(backup.history.records.len(), "trip", "trips"),
-        MONTHS[usize::from(m.clamp(1, 12) - 1)],
-    )
+    let stops = lang.count(backup.saved.stops.len(), "stop", "stops", "durak");
+    let trips = lang.count(backup.history.records.len(), "trip", "trips", "yolculuk");
+    let month = lang.month(m);
+    match lang {
+        Lang::En => format!("{stops}, {trips} and settings from {d} {month} {y}"),
+        Lang::Tr => format!("{d} {month} {y} tarihli yedek: {stops}, {trips} ve ayarlar"),
+    }
 }
 
 /// The suggested file name for a backup made on `today` (e.g. `2026-11-05`).

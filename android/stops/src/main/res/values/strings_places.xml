@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Saved stops to and from a file (E7.12, S5). -->
+<resources>
+    <string name="places_export_gpx">Export as GPX</string>
+    <string name="places_export_json">Export as JSON</string>
+    <string name="places_import">Import stops…</string>
+    <string name="places_exported">Stops exported</string>
+    <string name="places_export_failed">Couldn’t export the stops</string>
+    <string name="places_unreadable">No stops could be read from this file</string>
+    <string name="places_import_title">Import stops</string>
+    <string name="places_import_button">Import</string>
+    <string name="places_import_list">To add</string>
+    <string name="places_nothing_new">Nothing new to add.</string>
+    <string name="places_nothing_added">Nothing was added</string>
+    <plurals name="places_add">
+        <item quantity="one">Add %d stop.</item>
+        <item quantity="other">Add %d stops.</item>
+    </plurals>
+    <plurals name="places_duplicates">
+        <item quantity="one">%d already saved.</item>
+        <item quantity="other">%d already saved.</item>
+    </plurals>
+    <plurals name="places_invalid">
+        <item quantity="one">%d not usable.</item>
+        <item quantity="other">%d not usable.</item>
+    </plurals>
+    <plurals name="places_over_cap">
+        <item quantity="one">%d over the stop limit.</item>
+        <item quantity="other">%d over the stop limit.</item>
+    </plurals>
+    <plurals name="places_imported">
+        <item quantity="one">Imported %d stop</item>
+        <item quantity="other">Imported %d stops</item>
+    </plurals>
+</resources>

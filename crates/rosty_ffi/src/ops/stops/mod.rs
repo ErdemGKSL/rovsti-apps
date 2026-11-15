@@ -15,6 +15,7 @@ mod store;
 mod trip;
 mod view;
 
+use super::registry::Case;
 use super::registry::OpSpec;
 use crate::envelope::FfiError;
 use crate::state;
@@ -49,6 +50,17 @@ pub(super) fn data_dir(dir: &Option<String>) -> Result<PathBuf, FfiError> {
             .map(|d| d.data_dir.clone())
             .ok_or_else(|| FfiError::invalid("init was not called")),
     }
+}
+
+/// The same request asked in Turkish: the fixture case `tr` of an op that writes sentences.
+pub(super) fn tr_case(request: Value) -> Case {
+    tr_named("tr", request)
+}
+
+/// [`tr_case`] under another name (an op with more than one Turkish case).
+pub(super) fn tr_named(name: &'static str, mut request: Value) -> Case {
+    request["locale"] = json!("tr-TR");
+    Case::named(name, request)
 }
 
 pub(super) fn coord(c: Coord) -> Value {

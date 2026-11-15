@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notice_group">WhatsApp</string>
+    <string name="notice_group_footer">Stops, varmanıza az kala bir WhatsApp sohbetine mesaj atabilir. Stops\'un telefonunuzdan gönderdiği tek şey budur.</string>
+    <string name="notice_title">Varış Mesajı</string>
+    <string name="notice_row_to">Alıcı: %1$s</string>
+    <string name="notice_row_off">Kapalı</string>
+    <string name="notice_row_needs_whatsapp">Önce WhatsApp\'ı bağlayın</string>
+    <string name="notice_whatsapp">WhatsApp</string>
+    <string name="notice_wa_connected">Bağlı</string>
+    <string name="notice_wa_not_connected">Bağlı değil</string>
+    <string name="notice_wa_linking">Bağlanıyor</string>
+    <string name="notice_wa_logged_out">Oturum kapandı</string>
+    <string name="notice_wa_banned">Numara yasaklandı</string>
+    <string name="notice_send_to">Alıcı</string>
+    <string name="notice_chat">Sohbet</string>
+    <string name="notice_none">Yok</string>
+    <string name="notice_turn_off">Kapat</string>
+    <string name="notice_on_footer">Mesaj her yolculukta bu sohbete gider. Başlamadan önce tek bir yolculuk için kapatabilirsiniz.</string>
+    <string name="notice_off_footer">Yolculuklarınızda mesaj göndermek için bir sohbet seçin.</string>
+    <string name="notice_message">Mesaj</string>
+    <string name="notice_preview">Şöyle okunur: %1$s</string>
+    <string name="notice_problem_empty">Önce bir mesaj yazın.</string>
+    <string name="notice_problem_long">Mesaj çok uzun (en fazla %1$d karakter).</string>
+    <string name="notice_message_footer">{stop} gittiğiniz yer, {min} kalan dakikadır. Her yolculukta en fazla bir kez gönderilir.</string>
+    <string name="notice_save">Mesajı Kaydet</string>
+    <string name="notice_use_default">Varsayılan Mesajı Kullan</string>
+    <string name="notice_save_failed">Kaydedilemedi</string>
+    <string name="notice_turned_off">Varış mesajı kapatıldı</string>
+    <string name="notice_when">Ne Zaman</string>
+    <string name="notice_when_footer">Çemberden önce: durağınızın çevresindeki çembere o kadar dakika kaldığında.</string>
+    <string name="notice_not_connected_footer">Mesajın kime gideceğini seçmek için WhatsApp\'ı bağlayın. Mesajınız saklanır.</string>
+    <string name="notice_sample_stop">Kadıköy İskelesi</string>
+    <string name="notice_pick_title">Sohbet Seç</string>
+    <string name="notice_pick_search">Ara</string>
+    <string name="notice_pick_loading">Sohbetler yükleniyor…</string>
+    <string name="notice_pick_empty">Henüz sohbet yok</string>
+    <string name="notice_pick_no_match">Eşleşen sohbet yok</string>
+    <string name="notice_pick_group">Grup</string>
+    <string name="notice_toggle">Varırken mesaj at: %1$s</string>
+    <string name="notice_line_planned">Varırken mesaj atılacak</string>
+    <string name="notice_line_sent">Varış mesajı gönderildi</string>
+    <string name="notice_line_failed">Varış mesajı gönderilemedi</string>
+</resources>

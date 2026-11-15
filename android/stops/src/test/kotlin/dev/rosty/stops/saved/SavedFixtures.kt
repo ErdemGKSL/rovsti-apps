@@ -5,6 +5,7 @@ import dev.rosty.core.model.stops.Endpoint
 import dev.rosty.core.model.stops.SavedStop
 import dev.rosty.core.model.stops.SavedStops
 import dev.rosty.core.model.stops.StopColour
+import dev.rosty.stops.Background
 import dev.rosty.stops.FakeStopsCore
 import dev.rosty.stops.HostCore
 import dev.rosty.stops.SampleStops
@@ -53,14 +54,19 @@ internal object SavedFixtures {
 }
 
 /**
- * Lets the real core answer: its calls run on their own threads and come back through the main looper, so the clock
- * moves in small steps with short waits in between.
+ * Lets the real core answer: its calls run on their own threads, so the clock moves in small steps and each step
+ * first hands over the answers that are due ([Background.await] waits for the calls themselves, so an answer lands
+ * in the step that asked for it however busy the machine is). The short real wait after each step is for the app's
+ * other threads (the container's scope, the permission controller), which no counter sees.
  */
 internal fun ShotTest.settleRust(ms: Long = 1500) {
     repeat((ms / STEP).toInt()) {
+        Background.await { compose.waitForIdle() }
         advance(STEP)
         Thread.sleep(WAIT)
     }
+    Background.await { compose.waitForIdle() }
+    advance(STEP)
 }
 
 private const val STEP = 100L

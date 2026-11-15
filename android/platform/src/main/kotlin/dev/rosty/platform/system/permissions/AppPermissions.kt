@@ -182,6 +182,8 @@ class AppPermissions(
                     setOf(
                         Manifest.permission.FOREGROUND_SERVICE,
                         "android.permission.FOREGROUND_SERVICE_LOCATION",
+                        // E7.10 (S10): the offline map area download runs as a dataSync foreground worker.
+                        DATA_SYNC,
                         Manifest.permission.VIBRATE,
                         Manifest.permission.WAKE_LOCK,
                         Manifest.permission.RECEIVE_BOOT_COMPLETED,

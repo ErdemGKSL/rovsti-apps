@@ -35,6 +35,9 @@ object PlatformChannels {
     /** The WhatsApp names and photos sync while it runs (people sync v2 S11): low, silent, no badge. */
     const val PEOPLE_SYNC = "people_sync"
 
+    /** Stops' offline map area download while it runs (E7.10, S10): low, silent, no badge. */
+    const val MAP_DOWNLOAD = "map_download"
+
     /** The channel the destination alarm used before `trip_alarm_v2`; `TripAlarm` deletes it. */
     const val TRIP_ALARM_OLD = "trip_alarm"
 
@@ -149,6 +152,17 @@ object PlatformChannels {
                 R.string.channel_people_sync,
                 NotificationManager.IMPORTANCE_LOW,
                 R.string.channel_people_sync_desc,
+            ) {
+                setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
+                enableLights(false)
+            },
+            Spec(
+                MAP_DOWNLOAD,
+                R.string.channel_map_download,
+                NotificationManager.IMPORTANCE_LOW,
+                R.string.channel_map_download_desc,
             ) {
                 setShowBadge(false)
                 setSound(null, null)

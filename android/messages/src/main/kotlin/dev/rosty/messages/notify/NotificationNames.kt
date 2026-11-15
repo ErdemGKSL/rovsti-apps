@@ -4,6 +4,7 @@ import android.content.Context
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.names.PersonName
 import dev.rosty.messages.names.PersonNames
+import dev.rosty.messages.names.WaNames
 import dev.rosty.shell.HasContainer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -25,6 +26,7 @@ object NotificationNames {
     private const val LOOKUP_MS = 1_500L
     private const val MIN_DIGITS = 7
     private const val NUMBER_PUNCTUATION = "+ -()."
+    private const val GROUP_SUFFIX = "@g.us"
 
     /**
      * Waits for [who] to be named ([PersonNames.changes] moves when an asked name lands or a contact is saved) and
@@ -80,6 +82,45 @@ object NotificationNames {
         }
         return posted
     }
+
+    /**
+     * Posts the WhatsApp notification [specJson] the core built for [chat] while the app was closed (the push path).
+     * The core names a person by the push name; the rule goes on here for a one-to-one chat: a saved contact first,
+     * that push name next, the readable number last, renamed later when WhatsApp answers. A group keeps its title.
+     */
+    fun showWaPush(
+        context: Context,
+        chat: String,
+        specJson: String,
+    ): Boolean {
+        val digest = Digest.parse(specJson) ?: return false
+        val container = (context.applicationContext as? HasContainer<*>)?.container as? MessagesContainer
+        if (container == null || chat.endsWith(GROUP_SUFFIX)) return MessagesNotifier.show(context, digest)
+        val names = container.names
+        val who = suspend { names.ofJid(chat, waNamesOfTitle(digest.spec.title)) }
+        val name = runBlocking { withTimeoutOrNull(LOOKUP_MS) { who() } }
+        val posted = MessagesNotifier.show(context, retitled(digest, name?.text))
+        if (posted && name?.named != true) {
+            renameLater(
+                container.scope,
+                names,
+                digest.spec.tag,
+                who = who,
+                shown = { tag -> MessagesNotifier.shown(context, tag) },
+                post = { next -> MessagesNotifier.show(context, next) },
+            )
+        }
+        return posted
+    }
+
+    /** Pure: what the core's push title says about the person: a name is their push name, a number says nothing. */
+    fun waNamesOfTitle(title: String): WaNames = if (isNumber(title)) WaNames.None else WaNames(push = title)
+
+    /** Pure: [digest] under [title]; unchanged when there is none. */
+    fun retitled(
+        digest: Digest,
+        title: String?,
+    ): Digest = if (title.isNullOrBlank()) digest else digest.copy(spec = digest.spec.copy(title = title))
 
     /** Pure: a title that is a phone number (not a contact name, not a sender id like `GARANTI`). */
     fun isNumber(title: String): Boolean =

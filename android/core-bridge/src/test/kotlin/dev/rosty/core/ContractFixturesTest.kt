@@ -15,6 +15,7 @@ import dev.rosty.core.ops.StopsOps
 import dev.rosty.core.ops.TilesOps
 import dev.rosty.core.ops.WaOps
 import dev.rosty.core.ops.WaSettingsOps
+import dev.rosty.core.ops.WaSyncOps
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -77,6 +78,7 @@ class ContractFixturesTest {
                 "TilesOps" to TilesOps.ops,
                 "WaOps" to WaOps.ops,
                 "WaSettingsOps" to WaSettingsOps.ops,
+                "WaSyncOps" to WaSyncOps.ops,
             )
         val missing =
             facades.flatMap { (facade, ops) ->

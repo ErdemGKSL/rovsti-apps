@@ -35,6 +35,14 @@ class HandoffPermissionsTest {
                     "uses-permission android.permission.ACCESS_NETWORK_STATE",
                     "uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                 ),
+            // E6.1: :design's haptics, Contacts' people provider (X.1) and WorkManager (the WhatsApp outbox, E6.4s).
+            "messages" to
+                listOf(
+                    "uses-permission android.permission.VIBRATE",
+                    "uses-permission dev.rosty.permission.READ_PEOPLE",
+                    "uses-permission android.permission.FOREGROUND_SERVICE",
+                    "uses-permission android.permission.WAKE_LOCK",
+                ),
             // X.1b: the people sync's WorkManager merges these.
             "contacts" to
                 listOf(
@@ -71,7 +79,7 @@ class HandoffPermissionsTest {
                 .map { "declares ${it.attr("name")} ${it.attr("protectionLevel")}" }
                 .plus(
                     if (app in
-                        listOf("phone", "contacts")
+                        listOf("phone", "messages", "contacts")
                     ) {
                         listOf("declares $READ_PEOPLE signature")
                     } else {

@@ -13,3 +13,4 @@ pub mod phone;
 pub mod stops;
 pub mod storage;
 pub mod wa_link;
+pub mod wa_sync;

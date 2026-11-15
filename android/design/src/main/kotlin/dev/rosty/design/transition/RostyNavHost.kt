@@ -68,6 +68,16 @@ class RostyEntries<R : Any> {
     }
 }
 
+/**
+ * Which bar item is selected and what a tap on one does, for an app whose bar items are not all navigator tabs
+ * (ORIGINAL; Stops: one stack under a Trip / Saved / Settings bar, so pushed pages keep the full bar, owner rule F16).
+ * [selectedId] names the item of the top route; [onSelect] gets the id of a tapped item, the selected one included.
+ */
+class TabSelection<R : Any>(
+    val selectedId: (R) -> String,
+    val onSelect: (String) -> Unit,
+)
+
 /** Test tag of the page container of the stack entry `<tab>-<depth>` (depth 0 is the tab's root). */
 fun pageTag(
     tab: Tab,
@@ -93,6 +103,8 @@ fun pageTag(
  * @param isMorphRoute a page that grows out of a tile of the page below: it slides in with the artwork easing and the
  *   page below holds still and dims.
  * @param chrome extra floating chrome (a mini player, a call banner), drawn with the glass locals of the root.
+ * @param tabSelection null (the default): the bar's items are the navigator's tabs. Otherwise it decides the selected
+ *   item and what a tap does.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -107,6 +119,7 @@ fun <R : Any> RostyNavHost(
     // The pill that rides on the tab bar (folded: beside the circle). Null: none. The bar's measured height includes it,
     // so pages leave room for it through `LocalContentInsets`.
     accessory: (@Composable (modifier: Modifier, isInline: Boolean) -> Unit)? = null,
+    tabSelection: TabSelection<R>? = null,
     entries: RostyEntries<R>.() -> Unit,
 ) {
     val keys = navigator.keys()
@@ -119,7 +132,8 @@ fun <R : Any> RostyNavHost(
     val registryNow by rememberUpdatedState(registry)
     val transitions = remember(isMorphRoute) { NavTransitions(isMorphRoute) }
     val barMode = chromeFor(top.route).tabBar
-    val selectedIndex = tabs.indexOfFirst { it.id == navigator.currentTab.id }.coerceAtLeast(0)
+    val selectedId = tabSelection?.selectedId?.invoke(top.route) ?: navigator.currentTab.id
+    val selectedIndex = tabs.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
 
     LaunchedEffect(routeId) { minimizer.expand() }
 
@@ -155,8 +169,8 @@ fun <R : Any> RostyNavHost(
                         RostyTabBar(
                             tabs = tabs,
                             selected = selectedIndex,
-                            onSelect = { navigator.select(Tab(tabs[it].id)) },
-                            onReselect = { navigator.select(Tab(tabs[it].id)) },
+                            onSelect = { pickTab(navigator, tabSelection, tabs[it].id) },
+                            onReselect = { pickTab(navigator, tabSelection, tabs[it].id) },
                             modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
                             minimizer = minimizer,
                             // A tap on the folded circle only unfolds the bar (the minimizer): it is not a reselect, so
@@ -213,6 +227,14 @@ fun <R : Any> RostyNavHost(
             )
         }
     }
+}
+
+private fun <R : Any> pickTab(
+    navigator: TabNavigator<R>,
+    selection: TabSelection<R>?,
+    id: String,
+) {
+    if (selection != null) selection.onSelect(id) else navigator.select(Tab(id))
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)

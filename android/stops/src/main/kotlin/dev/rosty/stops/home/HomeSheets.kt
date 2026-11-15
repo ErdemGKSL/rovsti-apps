@@ -100,23 +100,26 @@ internal fun MapSheetContent(
     state: HomeState,
     onOpenSaved: () -> Unit,
     onOpenHistory: () -> Unit,
+    subtitle: String? = null,
+    title: String? = null,
+    trip: @Composable () -> Unit = {},
 ) {
     val colors = RostyTheme.colors
     val type = RostyTheme.type
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag(HomeSheetTags.Main)) {
         Column(Modifier.padding(horizontal = Spacing.gutter)) {
             RostyText(
-                stringResource(R.string.home_sheet_title),
+                title ?: stringResource(R.string.home_sheet_title),
                 Modifier.testTag(HomeSheetTags.Title),
                 style = type.title3,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(Spacing.textGap))
-            val trip = state.trip
+            val running = state.trip
             RostyText(
-                if (trip != null) {
-                    stringResource(R.string.home_trip_running, trip.label)
+                subtitle ?: if (running != null) {
+                    stringResource(R.string.home_trip_running, running.label)
                 } else {
                     stringResource(R.string.home_sheet_hint)
                 },
@@ -128,6 +131,8 @@ internal fun MapSheetContent(
         }
         // The rows start just below what the peek detent shows (grabber, title, one line), so peek ends on a clean edge.
         Spacer(Modifier.height(StopsSizes.peekRowsGap))
+        trip()
+        Spacer(Modifier.height(Spacing.m))
         InsetGroupedSection {
             row {
                 ListRow(

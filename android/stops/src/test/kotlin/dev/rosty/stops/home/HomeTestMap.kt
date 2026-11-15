@@ -2,6 +2,7 @@ package dev.rosty.stops.home
 
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -22,7 +23,7 @@ class HomeTestMap {
     var taps = 0
         private set
 
-    val layer: MapLayer = { modifier, _ ->
+    val layer: @Composable (Modifier) -> Unit = { modifier ->
         val p = if (RostyTheme.colors.isDark) Dark else Light
         Box(
             modifier

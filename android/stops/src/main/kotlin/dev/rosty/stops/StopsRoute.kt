@@ -62,19 +62,49 @@ enum class HomeTab(
 }
 
 /**
- * The chrome of each route (pure, `StopsRoutesTest`). The host never draws its bar: the home draws its own folded bar
- * over the map (it rides the sheet), and the pushed pages are full pages with a back button.
+ * The chrome of each route (pure, `StopsRoutesTest`). The map draws its own folded bar (it rides the sheet), so the host
+ * draws none there; Settings and its pages keep the full Trip / Saved / Settings bar with Settings selected (owner rule
+ * F16), through [stopsTabSelection].
  */
 fun chromeFor(route: StopsRoute): ChromeSpec =
     when (route) {
-        StopsRoute.Home,
+        StopsRoute.Home -> {
+            ChromeSpec(TabBarMode.Hidden)
+        }
+
         StopsRoute.Settings,
         StopsRoute.Appearance,
         StopsRoute.About,
         StopsRoute.Licences,
         is StopsRoute.LicenceDetail,
         is StopsRoute.Logs,
-        -> ChromeSpec(TabBarMode.Hidden)
+        -> {
+            ChromeSpec(TabBarMode.Visible)
+        }
+    }
+
+/** The bar item of [route] (pure): the map is Trip, every pushed page belongs to Settings. */
+fun selectedHomeTab(route: StopsRoute): HomeTab = if (route == StopsRoute.Home) HomeTab.Trip else HomeTab.Settings
+
+/** What a tap on a bar item of a pushed page does (pure); the caller runs it on the navigator. */
+sealed interface BarTap {
+    /** Back to the map. */
+    data object ToMap : BarTap
+
+    /** Back to the map with the Saved sheet open. */
+    data object ToSaved : BarTap
+
+    /** Back to the Settings page (from one of its sub-pages; nothing on Settings itself). */
+    data object ToSettings : BarTap
+}
+
+/** The tap on item [id] of the full bar (pure). */
+fun barTap(id: String): BarTap? =
+    when (id) {
+        HomeTab.Trip.id -> BarTap.ToMap
+        HomeTab.Saved.id -> BarTap.ToSaved
+        HomeTab.Settings.id -> BarTap.ToSettings
+        else -> null
     }
 
 /** Something an intent hands to the map: the home consumes it once (E7.8 turns a place into the Confirm sheet). */

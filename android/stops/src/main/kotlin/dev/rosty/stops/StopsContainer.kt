@@ -3,23 +3,33 @@ package dev.rosty.stops
 import android.content.Context
 import dev.rosty.core.Outcome
 import dev.rosty.core.model.stops.TilesOpenRequest
+import dev.rosty.core.ops.NativeQrOps
 import dev.rosty.core.ops.NativeStopsOps
 import dev.rosty.core.ops.NativeTilesOps
+import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.StopsOps
 import dev.rosty.core.ops.TileHandle
 import dev.rosty.core.ops.TilesOps
+import dev.rosty.platform.contacts.AndroidShortcutsRepository
+import dev.rosty.platform.contacts.ShortcutsRepository
 import dev.rosty.platform.location.AndroidLocationRepository
 import dev.rosty.platform.location.AndroidTripRepository
 import dev.rosty.platform.location.LocationRepository
+import dev.rosty.platform.location.TripClock
 import dev.rosty.platform.location.TripRepository
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.shell.ShellContainer
 import dev.rosty.shell.settings.CommonSettings
+import dev.rosty.stops.data.SavedStore
 import dev.rosty.stops.data.StopsCommonSettings
 import dev.rosty.stops.data.StopsStore
 import dev.rosty.stops.data.StopsTiles
 import dev.rosty.stops.home.CoreHomeData
 import dev.rosty.stops.home.HomeData
+import dev.rosty.stops.home.HomeSheet
+import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.trip.AlarmControl
+import dev.rosty.stops.trip.AndroidAlarmControl
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 
@@ -52,6 +62,21 @@ open class StopsContainer(
         )
     }
 
+    /**
+     * Where the map screen gets its tiles: the open [tiles] handle, opened on the first tile asked for (so the
+     * container stays cheap) and reopened when the server changes.
+     */
+    open fun createTileSource(): TileSource =
+        TileSource { z, x, y, dark ->
+            when (val handle = tiles.handle()) {
+                is Outcome.Err -> handle
+                is Outcome.Ok -> handle.value.tile(z, x, y, dark = dark)
+            }
+        }
+
+    /** QR codes of places and stops (S3). */
+    val qr: QrOps by lazy { createQr() }
+
     /** One-shot fixes and live updates for the map's blue dot and follow mode. */
     val location: LocationRepository by lazy { createLocation() }
 
@@ -61,8 +86,23 @@ open class StopsContainer(
     /** What the first screen reads (prefs, trip, saved stops, history, GTFS). */
     val homeData: HomeData by lazy { createHomeData() }
 
+    /** The saved stops (E7.7): one `saved.json` for the list, the map markers and "Save as stop". */
+    val saved: SavedStore by lazy { SavedStore(ops, nowMs = TripClock::nowMillis) }
+
+    /** The data directory Rust was started with: the trip service reads `trip.json` there. */
+    open val dataDir: String get() = context.noBackupFilesDir.absolutePath
+
+    /** The ringing alarm of `:platform` for the in-app alarm screen (E7.6). */
+    val alarm: AlarmControl by lazy { createAlarm() }
+
+    /** S18: stop shortcuts on the Home screen. */
+    val shortcuts: ShortcutsRepository by lazy { createShortcuts() }
+
     /** A link an intent brought (a shared place, a stop shortcut); the home consumes and clears it. */
     val pendingLink: MutableStateFlow<StopsLink?> = MutableStateFlow(null)
+
+    /** A sheet a page asked the map to open on the way back (the bar's Saved on Settings); the home clears it. */
+    val pendingSheet: MutableStateFlow<HomeSheet?> = MutableStateFlow(null)
 
     protected open fun createOps(): StopsOps = NativeStopsOps(rust)
 
@@ -71,11 +111,17 @@ open class StopsContainer(
     protected open suspend fun openTiles(request: TilesOpenRequest): Outcome<TileHandle> =
         TileHandle.open(request, tilesOps)
 
+    protected open fun createQr(): QrOps = NativeQrOps(rust)
+
     protected open fun createLocation(): LocationRepository = AndroidLocationRepository(context)
 
     protected open fun createTrips(): TripRepository = AndroidTripRepository(context)
 
     protected open fun createHomeData(): HomeData = CoreHomeData(ops, store)
+
+    protected open fun createAlarm(): AlarmControl = AndroidAlarmControl(context)
+
+    protected open fun createShortcuts(): ShortcutsRepository = AndroidShortcutsRepository(context)
 
     private companion object {
         /** `rosty_stops::tiles::cache_root`: the GPUI app's cache, one folder per server under it. */

@@ -4,37 +4,55 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import dev.rosty.design.chrome.TabItem
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.transition.TabNavigator
+import dev.rosty.design.transition.TabSelection
 import dev.rosty.shell.RostyShell
 import dev.rosty.stops.home.HomeEntry
-import dev.rosty.stops.home.MapLayer
-import dev.rosty.stops.home.RadarMapLayer
-import dev.rosty.stops.home.StopsIcons
+import dev.rosty.stops.home.HomeSheet
+import dev.rosty.stops.home.homeTabItems
 import dev.rosty.stops.settings.AboutEntry
 import dev.rosty.stops.settings.AppearanceEntry
 import dev.rosty.stops.settings.LicenceDetailEntry
 import dev.rosty.stops.settings.LicencesEntry
 import dev.rosty.stops.settings.LogsEntry
 import dev.rosty.stops.settings.StopsSettingsEntry
-import kotlinx.collections.immutable.persistentListOf
 
 /**
  * The screens of Rosty Stops: one [RostyShell] over the activity's navigator (the shell provides the overlay host and
- * the backdrop root above every page). [mapLayer] is the map under the home; until the tile renderer (E7.2a/b) is
- * wired it is the radar background, and tests pass a fixed picture.
+ * the backdrop root above every page).
  */
 @Composable
 fun StopsApp(
     container: StopsContainer,
     navigator: TabNavigator<StopsRoute>,
     overlays: OverlayController = remember { OverlayController() },
-    mapLayer: MapLayer = RadarMapLayer,
 ) {
-    // The host's own bar is never shown (chromeFor hides it); the tab list only names the one stack.
-    val tabs = persistentListOf(TabItem(TripTab.id, stringResource(R.string.tab_trip), StopsIcons.Navigation))
+    // The Trip / Saved / Settings bar: the map draws it folded itself, the pushed pages get it from the host (F16).
+    val tabs = homeTabItems()
+    val selection =
+        remember(navigator, container) {
+            TabSelection<StopsRoute>(selectedId = { selectedHomeTab(it).id }) { id ->
+                when (barTap(id)) {
+                    BarTap.ToMap -> {
+                        navigator.select(TripTab)
+                    }
+
+                    BarTap.ToSaved -> {
+                        navigator.select(TripTab)
+                        container.pendingSheet.value = HomeSheet.Saved
+                    }
+
+                    BarTap.ToSettings -> {
+                        while (navigator.current != StopsRoute.Settings && navigator.pop()) Unit
+                    }
+
+                    null -> {
+                        Unit
+                    }
+                }
+            }
+        }
     val pop: () -> Unit =
         remember(navigator) {
             {
@@ -50,8 +68,9 @@ fun StopsApp(
         chromeFor = ::chromeFor,
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
+        tabSelection = selection,
     ) {
-        entry<StopsRoute.Home> { HomeEntry(container, navigator, mapLayer) }
+        entry<StopsRoute.Home> { HomeEntry(container, navigator) }
         entry<StopsRoute.Settings> { StopsSettingsEntry(container, onOpen = navigator::push, onBack = pop) }
         entry<StopsRoute.Appearance> { AppearanceEntry(container.commonSettings, pop, popToRoot) }
         entry<StopsRoute.About> {

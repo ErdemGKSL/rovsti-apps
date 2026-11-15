@@ -3,6 +3,7 @@ package dev.rosty.stops.home
 import dev.rosty.core.Outcome
 import dev.rosty.core.model.phone.DirRequest
 import dev.rosty.core.model.stops.Endpoint
+import dev.rosty.core.model.stops.Ends
 import dev.rosty.core.model.stops.GtfsSearchRequest
 import dev.rosty.core.model.stops.History
 import dev.rosty.core.model.stops.SavedStops
@@ -23,6 +24,8 @@ data class HomeSnapshot(
     val history: History?,
     /** When the GTFS feed (`gtfs.json`) was imported; null without a feed. */
     val transitImportedMs: Long?,
+    /** The ends picked in the last session (`draft.json`), put back on the map. */
+    val draft: Ends? = null,
 )
 
 /** The trip in progress as the home shows it before the live card (E7.5) takes over. */
@@ -60,6 +63,7 @@ class CoreHomeData(
             saved = saved,
             history = history,
             transitImportedMs = feed?.takeIf { it.hasFeed }?.importedMs,
+            draft = read("draft")?.let { decode(Ends.serializer(), it) },
         )
     }
 

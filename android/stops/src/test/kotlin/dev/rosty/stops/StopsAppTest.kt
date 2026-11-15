@@ -16,9 +16,11 @@ import dev.rosty.shell.settings.dev.DevTags
 import dev.rosty.stops.home.HomeMapTag
 import dev.rosty.stops.home.HomeSheetTags
 import dev.rosty.stops.home.HomeTags
+import dev.rosty.stops.saved.SavedTags
 import dev.rosty.stops.settings.SettingsTags
 import dev.rosty.testing.ShotTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.robolectric.annotation.Config
 
@@ -50,6 +52,17 @@ class StopsAppTest : ShotTest() {
         compose.onNodeWithText("Plan a trip").assertIsDisplayed()
     }
 
+    @Test fun theRealMapDrawsWithItsScaleBarAttributionAndHint() {
+        val fixture = start()
+        compose.onNodeWithTag(HomeTags.ScaleBar, useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("© OpenStreetMap contributors", substring = true, useUnmergedTree = true).assertExists()
+        // The fixture tile around the fake position was asked for.
+        assertTrue(
+            fixture.container.tileSource.requests
+                .isNotEmpty(),
+        )
+    }
+
     @Test fun theSheetShowsWhatTheFilesHold() {
         val fixture = start(AppFixture(FakeStopsCore(trip = SampleStops.pierW to SampleStops.pierE)))
         compose.onNodeWithText("Trip in progress: Pier West – Pier East").assertExists()
@@ -75,6 +88,33 @@ class StopsAppTest : ShotTest() {
         assertEquals(0, compose.onAllNodes(hasText("Haptics")).fetchSemanticsNodes().size)
         // The map sheet left with the map.
         compose.onNodeWithTag(HomeSheetTags.Title).assertDoesNotExist()
+    }
+
+    @Test fun pushedPagesKeepTheFullBarWhoseItemsLeadBackToTheMap() {
+        val fixture = start()
+        compose.runOnUiThread {
+            fixture.navigator.push(StopsRoute.Settings)
+            fixture.navigator.push(StopsRoute.About)
+        }
+        advance(1500)
+        // Settings is selected on its sub-page; tapping it goes back to the Settings page.
+        compose.onAllNodesWithTag("tab-settings", useUnmergedTree = true).onFirst().performClick()
+        advance(1500)
+        assertEquals(StopsRoute.Settings, fixture.navigator.current)
+        // Saved goes back to the map and opens the Saved sheet there.
+        compose.onAllNodesWithTag("tab-saved", useUnmergedTree = true).onFirst().performClick()
+        advance(2000)
+        assertEquals(StopsRoute.Home, fixture.navigator.current)
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun tripOnAPushedPageGoesBackToTheMap() {
+        val fixture = start()
+        compose.runOnUiThread { fixture.navigator.push(StopsRoute.Settings) }
+        advance(1500)
+        compose.onAllNodesWithTag("tab-trip", useUnmergedTree = true).onFirst().performClick()
+        advance(1500)
+        assertEquals(listOf<StopsRoute>(StopsRoute.Home), fixture.navigator.stack(TripTab))
     }
 
     @Test fun aboutShowsTheVersionRowThatHoldsDeveloperMode() {
@@ -104,11 +144,11 @@ class StopsAppTest : ShotTest() {
         advance(1500)
         compose.onNodeWithTag(HomeSheetTags.SavedRow).performClick()
         advance(1200)
-        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertExists()
         // Back closes the modal sheet; the map sheet stays.
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
         advance(1500)
-        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag(HomeSheetTags.Title).assertIsDisplayed()
         compose.onNodeWithTag(HomeSheetTags.HistoryRow).performClick()
         advance(1200)
@@ -126,7 +166,7 @@ class StopsAppTest : ShotTest() {
         advance(800)
         compose.onAllNodesWithTag("tab-saved", useUnmergedTree = true).onFirst().performClick()
         advance(1200)
-        compose.onNodeWithTag(HomeSheetTags.Saved, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SavedTags.Sheet, useUnmergedTree = true).assertExists()
     }
 
     @Test fun aSharedLinkOpensThePickSheetOnce() {

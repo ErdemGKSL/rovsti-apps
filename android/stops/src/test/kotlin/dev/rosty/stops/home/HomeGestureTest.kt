@@ -32,7 +32,7 @@ class HomeGestureTest : ShotTest() {
             OverlayHost(controller) {
                 StopsHome(
                     state = HomeState(loading = false),
-                    mapLayer = map.layer,
+                    map = map.layer,
                     tabs = homeTabItems(),
                     selectedTab = HomeTab.Trip,
                     actions = HomeActions(onLocate = { locate++ }),

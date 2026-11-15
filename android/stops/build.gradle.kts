@@ -60,6 +60,10 @@ android {
                 it.inputs.dir(rustFixtures).withPropertyName("rustFixtureDirs")
                 // The old single-destination trip (AD-SX8) sits beside the dirs, in the crate's fixture root.
                 it.inputs.file(rustFixtures.resolve("../trip.legacy.json")).withPropertyName("legacyTripFixture")
+                // The map tests read the Rust fixtures (the zoom 14 tile, the view.* and tiles.* pairs, the GTFS feed).
+                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rosty_ffi/fixtures")
+                it.systemProperty("rosty.ffi.fixtures", ffiFixtures.absolutePath)
+                it.inputs.dir(ffiFixtures).withPropertyName("ffiFixtures")
                 it.inputs.files(fileTree("src/main")).withPropertyName("mainSources")
                 // StopsMigrationTest runs the real Rust core on the host library that :core-bridge builds (E2.6).
                 val hostLib = coreBridge.tasks.named("cargoBuildHost").flatMap { (it as CargoBuildTask).outputDir }

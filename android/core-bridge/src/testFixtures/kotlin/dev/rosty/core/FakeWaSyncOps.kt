@@ -4,9 +4,14 @@ import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichMessage
+import dev.rosty.core.model.wa.WaIdKind
+import dev.rosty.core.model.wa.WaIdParseRequest
+import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
+import dev.rosty.core.model.wa.WaSyncCatchUpRequest
+import dev.rosty.core.model.wa.WaSyncCaughtUp
 import dev.rosty.core.model.wa.WaSyncChat
 import dev.rosty.core.model.wa.WaSyncChatsAnswer
 import dev.rosty.core.model.wa.WaSyncChatsRequest
@@ -20,6 +25,7 @@ import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncHandleRequest
+import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncKind
 import dev.rosty.core.model.wa.WaSyncMedia
@@ -28,6 +34,7 @@ import dev.rosty.core.model.wa.WaSyncMediaSetRequest
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
 import dev.rosty.core.model.wa.WaSyncOlderRequest
 import dev.rosty.core.model.wa.WaSyncOpenRequest
@@ -39,6 +46,11 @@ import dev.rosty.core.model.wa.WaSyncOutboxState
 import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncRekeyed
+import dev.rosty.core.model.wa.WaSyncRekeyedAnswer
+import dev.rosty.core.model.wa.WaSyncRekeyedRequest
+import dev.rosty.core.model.wa.WaSyncResolveRequest
+import dev.rosty.core.model.wa.WaSyncResolved
 import dev.rosty.core.model.wa.WaSyncRetried
 import dev.rosty.core.model.wa.WaSyncRowState
 import dev.rosty.core.model.wa.WaSyncSettleRequest
@@ -60,6 +72,10 @@ import dev.rosty.core.ops.WaSyncOps
  * first, waiting sends on top; a star sets the flag at once, replaces a waiting star of the same message and is
  * undone when refused) but none of the sync rules (gaps, echo matching, edit history, backoff): those are tested in
  * Rust and against the real library (`WaSyncStoreNativeTest`).
+ *
+ * Identity is a scripted alias map: [merge] (or an `identity_mapped` event, a catch-up page, an observed group member
+ * or profile) makes two ids one chat, reads under the old id follow it, and the step is reported as `rekeyed`. None
+ * of the real rules (source ranks, number changes, own ids) are modelled.
  */
 class FakeWaSyncOps(
     private val instanceId: String = "fake-instance",
@@ -81,8 +97,87 @@ class FakeWaSyncOps(
     /** The requests of every write, for assertions. */
     val writes = mutableListOf<Any>()
 
+    /**
+     * Ids that are another chat's by now: an old key (a LID) to the key its rows live under. Script a merge with
+     * [merge]; an `identity_mapped` event and a catch-up page do the same.
+     */
+    val aliases = mutableMapOf<String, String>()
+
+    /** Every key change so far, oldest first (`rekeyedSince`). */
+    val rekeyed = mutableListOf<WaSyncRekeyed>()
+
     private val media = mutableMapOf<Pair<String, String>, WaSyncMedia>()
     private var seq: Long? = null
+
+    /** The key the rows of [id] live under: the id without device, followed through [aliases]. */
+    fun keyOf(id: String): String {
+        var key = bare(id)
+        repeat(aliases.size) { key = aliases[key] ?: return key }
+        return key
+    }
+
+    /**
+     * Makes [from] and [into] one chat under [into], the way a learned LID and number pair does: messages, the
+     * chat row, queued sends and cached media move, and the step is reported by the next `applyEvents` (and by
+     * `rekeyedSince`). Nothing happens when they are one chat already.
+     */
+    fun merge(
+        from: String,
+        into: String,
+    ): WaSyncRekeyed? =
+        synchronized(lock) {
+            val (old, key) = keyOf(from) to keyOf(into)
+            if (old == key) return@synchronized null
+            aliases[old] = key
+            messages.remove(old)?.forEach { store(it.copy(chat = key)) }
+            messages[key]?.replaceAll { if (it.sender == old) it.copy(sender = key, wireSender = old) else it }
+            val moved = chats.firstOrNull { it.jid == old }
+            chats.removeAll { it.jid == old }
+            if (moved != null && chats.none { it.jid == key }) chats += moved.copy(jid = key, wireJid = old)
+            queue.replaceAll { if (it.chat == old) it.copy(chat = key) else it }
+            for (file in media.keys.filter { it.first == old }) {
+                media.remove(file)?.let { media[key to file.second] = it }
+            }
+            val step = WaSyncRekeyed(rekeyed.size + 1L, old, key)
+            rekeyed += step
+            unreported += step
+            step
+        }
+
+    private val unreported = mutableListOf<WaSyncRekeyed>()
+
+    private fun bare(id: String): String {
+        val at = id.lastIndexOf('@')
+        if (at <= 0) return id
+        return id.substring(0, at).substringBefore(':') + id.substring(at)
+    }
+
+    private fun kindOf(server: String): WaIdKind =
+        when (server) {
+            "s.whatsapp.net", "c.us" -> WaIdKind.Pn
+            "lid" -> WaIdKind.Lid
+            "g.us" -> WaIdKind.Group
+            "newsletter" -> WaIdKind.Newsletter
+            "broadcast" -> WaIdKind.Broadcast
+            else -> WaIdKind.Other
+        }
+
+    private fun parsed(id: String): WaIdParsed? {
+        val at = id.lastIndexOf('@')
+        if (at <= 0 || at == id.lastIndex) return null
+        val local = id.substring(0, at)
+        val kind = kindOf(id.substring(at + 1))
+        val user = local.substringBefore(':')
+        if (kind == WaIdKind.Pn && !user.all(Char::isDigit)) return null
+        val server = if (kind == WaIdKind.Pn) "s.whatsapp.net" else id.substring(at + 1)
+        return WaIdParsed(
+            kind = kind,
+            user = user,
+            bare = "$user@$server",
+            number = if (kind == WaIdKind.Pn) "+$user" else null,
+            device = local.substringAfter(':', "").toIntOrNull(),
+        )
+    }
 
     /** Seeds one stored text message. */
     fun put(
@@ -183,13 +278,16 @@ class FakeWaSyncOps(
             val changed = linkedSetOf<String>()
             for (envelope in req.events) {
                 seq = envelope.seq
+                val mapped = envelope.event as? GatewayEvent.IdentityMapped
+                if (mapped != null) merge(mapped.lid, mapped.pn)?.let { changed += it.intoKey }
                 val event = envelope.event as? GatewayEvent.Message ?: continue
+                val chat = keyOf(event.chat)
                 store(
                     stored(
                         RichMessage(
                             event.id,
-                            event.chat,
-                            event.sender,
+                            chat,
+                            event.sender?.let(::keyOf),
                             event.fromMe,
                             event.timestampMs,
                             event.body,
@@ -197,9 +295,21 @@ class FakeWaSyncOps(
                         ),
                     ),
                 )
-                changed += event.chat
+                changed += chat
             }
-            ok(WaSyncApplied(HANDLE, seq, req.events.size, false, changed.toList(), emptyList()))
+            val steps = unreported.toList()
+            unreported.clear()
+            ok(
+                WaSyncApplied(
+                    HANDLE,
+                    seq,
+                    req.events.size,
+                    resync = steps.isNotEmpty(),
+                    chats = changed.toList(),
+                    reconciled = emptyList(),
+                    rekeyed = steps,
+                ),
+            )
         }
 
     override suspend fun storeChats(req: WaSyncStoreChatsRequest): Outcome<WaSyncStoredChats> =
@@ -233,8 +343,10 @@ class FakeWaSyncOps(
     override suspend fun thread(req: WaSyncThreadRequest): Outcome<WaSyncThreadPage> =
         synchronized(lock) {
             val before = req.before
+            // A reader that still holds an old key reads the chat its rows moved to.
+            val chat = keyOf(req.chat)
             val all =
-                messages[req.chat]
+                messages[chat]
                     .orEmpty()
                     .sortedWith(compareByDescending<WaSyncMessage> { it.timestampMs }.thenByDescending { it.id })
                     .filter {
@@ -246,7 +358,7 @@ class FakeWaSyncOps(
                 if (before ==
                     null
                 ) {
-                    queue.filter { it.chat == req.chat }.mapNotNull(::waiting).reversed()
+                    queue.filter { it.chat == chat }.mapNotNull(::waiting).reversed()
                 } else {
                     emptyList()
                 }
@@ -255,7 +367,9 @@ class FakeWaSyncOps(
         }
 
     override suspend fun message(req: WaSyncMessageRequest): Outcome<WaSyncMessageAnswer> =
-        synchronized(lock) { ok(WaSyncMessageAnswer(messages[req.chat].orEmpty().firstOrNull { it.id == req.id })) }
+        synchronized(lock) {
+            ok(WaSyncMessageAnswer(messages[keyOf(req.chat)].orEmpty().firstOrNull { it.id == req.id }))
+        }
 
     override suspend fun starred(req: WaSyncStarredRequest): Outcome<WaSyncStarredPage> =
         synchronized(lock) {
@@ -438,6 +552,48 @@ class FakeWaSyncOps(
 
     override suspend fun mediaEvict(req: WaSyncEvictRequest): Outcome<WaSyncEviction> =
         synchronized(lock) { ok(WaSyncEviction(emptyList(), media.values.sumOf { it.bytes ?: 0 })) }
+
+    override suspend fun identityResolve(req: WaSyncResolveRequest): Outcome<WaSyncResolved?> =
+        synchronized(lock) {
+            val id = parsed(req.id) ?: return@synchronized ok(null)
+            ok(WaSyncResolved(key = keyOf(id.bare), kind = id.kind, wire = id.bare))
+        }
+
+    override suspend fun rekeyedSince(req: WaSyncRekeyedRequest): Outcome<WaSyncRekeyedAnswer> =
+        synchronized(lock) { ok(WaSyncRekeyedAnswer(rekeyed.filter { it.seq > (req.seq ?: 0) })) }
+
+    override suspend fun identityCatchUp(req: WaSyncCatchUpRequest): Outcome<WaSyncCaughtUp> =
+        synchronized(lock) {
+            writes += req
+            val steps = req.items.mapNotNull { merge(it.lid, it.pn) }
+            unreported.removeAll(steps)
+            if (req.next != null) owed = owed.copy(identitySince = req.next)
+            ok(
+                WaSyncCaughtUp(
+                    HANDLE,
+                    pairs = req.items.size,
+                    since = owed.identitySince,
+                    more = req.next != null,
+                    rekeyed = steps,
+                    resync = steps.isNotEmpty(),
+                ),
+            )
+        }
+
+    override suspend fun identityObserve(req: WaSyncObserveRequest): Outcome<WaSyncIdentityApplied> =
+        synchronized(lock) {
+            writes += req
+            val pairs =
+                req.groups.flatMap { it.participants }.mapNotNull { member ->
+                    val lid = member.lid ?: return@mapNotNull null
+                    lid to (member.pn ?: return@mapNotNull null)
+                } + req.profiles.mapNotNull { profile -> profile.lid?.let { it to profile.jid } }
+            val steps = pairs.mapNotNull { (lid, pn) -> merge(lid, pn) }
+            unreported.removeAll(steps)
+            ok(WaSyncIdentityApplied(HANDLE, steps, emptyList(), steps.isNotEmpty(), accountChanged = false))
+        }
+
+    override suspend fun parseId(req: WaIdParseRequest): Outcome<WaIdParsed?> = ok(parsed(req.id))
 
     companion object {
         /** The handle every answer carries. */

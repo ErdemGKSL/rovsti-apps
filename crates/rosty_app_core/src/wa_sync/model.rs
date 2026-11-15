@@ -1,5 +1,6 @@
 //! What the store answers: chat rows, message rows and the results of its writes.
 
+use rosty_core::wa_identity::Rejected;
 use rosty_wa_proto::{
     DeliveryStatus, EditRecord, Location, MediaKind, MediaMeta, MessageBody, Quoted, Reaction,
     SharedContact,
@@ -324,6 +325,10 @@ pub struct AppliedEvents {
     /// one left over from before), oldest first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rekeyed: Vec<ChatRekeyed>,
+    /// Pairs the events named that changed nothing (an id that does not read, a weaker source than the one the
+    /// LID is held by, a pair that would join the account's own id to someone else), each once: for the log.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected: Vec<Rejected>,
 }
 
 /// What [`super::Store::store_chats`] did.
@@ -332,6 +337,11 @@ pub struct StoredChats {
     pub chats: u32,
     /// The first page of every chat that missed messages.
     pub fetch: Vec<FetchPage>,
+    /// Key changes the stored rows followed: the list named a pair the store did not know.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rekeyed: Vec<ChatRekeyed>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected: Vec<Rejected>,
 }
 
 /// What [`super::Store::store_page`] did.
@@ -345,4 +355,9 @@ pub struct StoredPage {
     pub reached_start: bool,
     /// Outbox sends this page confirmed.
     pub reconciled: Vec<String>,
+    /// Key changes the stored rows followed: the page named a pair the store did not know.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rekeyed: Vec<ChatRekeyed>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected: Vec<Rejected>,
 }

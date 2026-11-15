@@ -440,7 +440,8 @@ fn a_resync_pages_down_to_the_stored_history_and_drops_nothing() {
         SyncPlan {
             after_seq: Some(3),
             refresh_chats: false,
-            fetch: Vec::new()
+            fetch: Vec::new(),
+            identity_since: None,
         }
     );
 
@@ -914,7 +915,20 @@ fn a_merged_chat_moves_its_messages_and_asks_for_a_refresh() {
         ids(&store.thread(ALI, 10, None).unwrap()),
         ["c1", "SAME", "L1"]
     );
-    assert!(store.thread(lid, 10, None).unwrap().items.is_empty());
+    // Nothing is left under the LID; a reader that still holds it reads the merged chat.
+    let left: i64 = store
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE chat = ?1",
+            [lid],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(
+        ids(&store.thread(lid, 10, None).unwrap()),
+        ["c1", "SAME", "L1"]
+    );
     assert_eq!(store.cursor(ALI).unwrap().oldest_ts, Some(1_000));
 }
 

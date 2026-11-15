@@ -5,8 +5,12 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.RustCore
 import dev.rosty.core.call
 import dev.rosty.core.model.wa.HandleAnswer
+import dev.rosty.core.model.wa.WaIdParseRequest
+import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
+import dev.rosty.core.model.wa.WaSyncCatchUpRequest
+import dev.rosty.core.model.wa.WaSyncCaughtUp
 import dev.rosty.core.model.wa.WaSyncChatsAnswer
 import dev.rosty.core.model.wa.WaSyncChatsRequest
 import dev.rosty.core.model.wa.WaSyncClientIdRequest
@@ -18,12 +22,14 @@ import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncHandleRequest
+import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncMedia
 import dev.rosty.core.model.wa.WaSyncMediaRequest
 import dev.rosty.core.model.wa.WaSyncMediaSetRequest
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
+import dev.rosty.core.model.wa.WaSyncObserveRequest
 import dev.rosty.core.model.wa.WaSyncOlderAnswer
 import dev.rosty.core.model.wa.WaSyncOlderRequest
 import dev.rosty.core.model.wa.WaSyncOpenRequest
@@ -32,6 +38,10 @@ import dev.rosty.core.model.wa.WaSyncOutboxAnswer
 import dev.rosty.core.model.wa.WaSyncOutboxEditRequest
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncRekeyedAnswer
+import dev.rosty.core.model.wa.WaSyncRekeyedRequest
+import dev.rosty.core.model.wa.WaSyncResolveRequest
+import dev.rosty.core.model.wa.WaSyncResolved
 import dev.rosty.core.model.wa.WaSyncRetried
 import dev.rosty.core.model.wa.WaSyncSettleRequest
 import dev.rosty.core.model.wa.WaSyncSettled
@@ -43,6 +53,7 @@ import dev.rosty.core.model.wa.WaSyncStoredChats
 import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import kotlinx.serialization.builtins.nullable
 
 /**
  * The WhatsApp offline store (E6.4s): a SQLite file per linked instance, kept by the Rust core. The inbox and the
@@ -108,6 +119,21 @@ interface WaSyncOps {
     /** Brings the media cache under a cap; answers the files to delete. */
     suspend fun mediaEvict(req: WaSyncEvictRequest): Outcome<WaSyncEviction>
 
+    /** The key an id's chat is stored under, its kind and its wire form; null when the text is not a JID. */
+    suspend fun identityResolve(req: WaSyncResolveRequest): Outcome<WaSyncResolved?>
+
+    /** The key changes logged after a `seq`, oldest first. */
+    suspend fun rekeyedSince(req: WaSyncRekeyedRequest): Outcome<WaSyncRekeyedAnswer>
+
+    /** Takes in one page of the gateway's LID and number pairs (`wa.identity_mappings`). */
+    suspend fun identityCatchUp(req: WaSyncCatchUpRequest): Outcome<WaSyncCaughtUp>
+
+    /** Learns from the answers of `wa.status`, `wa.group(s)` and `wa.profiles`. */
+    suspend fun identityObserve(req: WaSyncObserveRequest): Outcome<WaSyncIdentityApplied>
+
+    /** Takes a JID apart (`wa_identity.parse`, no store needed); null when the text is not a JID. */
+    suspend fun parseId(req: WaIdParseRequest): Outcome<WaIdParsed?>
+
     companion object {
         /** The Rust op behind each method. */
         val ops: List<String> =
@@ -133,6 +159,11 @@ interface WaSyncOps {
                 "wa_sync.media_set",
                 "wa_sync.media",
                 "wa_sync.media_evict",
+                "wa_sync.identity_resolve",
+                "wa_sync.rekeyed_since",
+                "wa_sync.identity_catch_up",
+                "wa_sync.identity_observe",
+                "wa_identity.parse",
             )
     }
 }
@@ -203,4 +234,29 @@ class NativeWaSyncOps(
 
     override suspend fun mediaEvict(req: WaSyncEvictRequest) =
         core.call("wa_sync.media_evict", req, WaSyncEvictRequest.serializer(), WaSyncEviction.serializer())
+
+    override suspend fun identityResolve(req: WaSyncResolveRequest) =
+        core.call(
+            "wa_sync.identity_resolve",
+            req,
+            WaSyncResolveRequest.serializer(),
+            WaSyncResolved.serializer().nullable,
+        )
+
+    override suspend fun rekeyedSince(req: WaSyncRekeyedRequest) =
+        core.call("wa_sync.rekeyed_since", req, WaSyncRekeyedRequest.serializer(), WaSyncRekeyedAnswer.serializer())
+
+    override suspend fun identityCatchUp(req: WaSyncCatchUpRequest) =
+        core.call("wa_sync.identity_catch_up", req, WaSyncCatchUpRequest.serializer(), WaSyncCaughtUp.serializer())
+
+    override suspend fun identityObserve(req: WaSyncObserveRequest) =
+        core.call(
+            "wa_sync.identity_observe",
+            req,
+            WaSyncObserveRequest.serializer(),
+            WaSyncIdentityApplied.serializer(),
+        )
+
+    override suspend fun parseId(req: WaIdParseRequest) =
+        core.call("wa_identity.parse", req, WaIdParseRequest.serializer(), WaIdParsed.serializer().nullable)
 }

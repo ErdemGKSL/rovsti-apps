@@ -19,7 +19,11 @@
 //! * One person is one chat, whichever id the gateway names them by: a phone-number JID or a LID. Every id is
 //!   resolved through the identity map before it is matched ([`Store::identity_resolve`]), a pair learned later
 //!   ([`Store::identity_learn`]) merges what was stored under both, and each merge is a logged step the rows
-//!   follow ([`Store::apply_pending_merges`], [`ChatRekeyed`]).
+//!   follow ([`Store::apply_pending_merges`], [`ChatRekeyed`]). Pairs come from the `identity_mapped` and
+//!   `identity_number_changed` events, from the other form an event, a message or a chat carries next to an id,
+//!   from the gateway's list of pairs ([`Store::identity_catch_up`]) and from groups, profiles and the instance
+//!   ([`Store::identity_observe`]). A reader that still holds an id of before a merge reads the merged rows
+//!   ([`Store::stored_key`]).
 //! * Full media is a cached file path with LRU bookkeeping; evicting clears the path and keeps the message and its
 //!   thumbnail.
 
@@ -29,6 +33,8 @@ mod backfill;
 mod identity;
 #[cfg(test)]
 mod identity_tests;
+#[cfg(test)]
+mod ingest_tests;
 mod media;
 mod merge;
 mod model;
@@ -40,7 +46,7 @@ mod store;
 #[cfg(test)]
 mod tests;
 
-pub use identity::{IdentityApplied, ResolvedId};
+pub use identity::{IdentityApplied, IdentityCaughtUp, Observed, ResolvedId};
 pub use media::{Evicted, Eviction, MediaInfo};
 pub use merge::ChatRekeyed;
 pub use model::{

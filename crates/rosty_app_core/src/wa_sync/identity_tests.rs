@@ -14,34 +14,34 @@ use super::*;
 use super::{backfill, identity, merge, schema};
 
 /// One person: a LID and the number behind it.
-const LID: &str = "777000000000001@lid";
-const PN: &str = "905550000001@s.whatsapp.net";
+pub(super) const LID: &str = "777000000000001@lid";
+pub(super) const PN: &str = "905550000001@s.whatsapp.net";
 /// Another person.
-const LID2: &str = "777000000000002@lid";
-const PN2: &str = "905550000002@s.whatsapp.net";
+pub(super) const LID2: &str = "777000000000002@lid";
+pub(super) const PN2: &str = "905550000002@s.whatsapp.net";
 /// A third, who never shows a number.
-const LID3: &str = "777000000000003@lid";
-const OWN_PN: &str = "905550000009@s.whatsapp.net";
-const OWN_LID: &str = "777000000000009@lid";
-const GROUP: &str = "120000000000000001@g.us";
+pub(super) const LID3: &str = "777000000000003@lid";
+pub(super) const OWN_PN: &str = "905550000009@s.whatsapp.net";
+pub(super) const OWN_LID: &str = "777000000000009@lid";
+pub(super) const GROUP: &str = "120000000000000001@g.us";
 
-fn store() -> Store {
+pub(super) fn store() -> Store {
     Store::open_in_memory("inst1").unwrap()
 }
 
-fn temp_dir(name: &str) -> PathBuf {
+pub(super) fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("rosty-wa-identity-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
 
-fn text(chat: &str, id: &str, ts: i64, body: &str) -> WaMessage {
+pub(super) fn text(chat: &str, id: &str, ts: i64, body: &str) -> WaMessage {
     by(chat, chat, id, ts, body)
 }
 
 /// A message of `sender` in `chat` (a group author).
-fn by(chat: &str, sender: &str, id: &str, ts: i64, body: &str) -> WaMessage {
+pub(super) fn by(chat: &str, sender: &str, id: &str, ts: i64, body: &str) -> WaMessage {
     WaMessage {
         id: id.into(),
         chat: chat.into(),
@@ -55,7 +55,7 @@ fn by(chat: &str, sender: &str, id: &str, ts: i64, body: &str) -> WaMessage {
     }
 }
 
-fn mine(chat: &str, id: &str, ts: i64, body: &str) -> WaMessage {
+pub(super) fn mine(chat: &str, id: &str, ts: i64, body: &str) -> WaMessage {
     WaMessage {
         sender: None,
         from_me: true,
@@ -63,7 +63,7 @@ fn mine(chat: &str, id: &str, ts: i64, body: &str) -> WaMessage {
     }
 }
 
-fn reaction(sender: &str, emoji: &str) -> Reaction {
+pub(super) fn reaction(sender: &str, emoji: &str) -> Reaction {
     Reaction {
         sender: Some(sender.into()),
         from_me: false,
@@ -72,7 +72,7 @@ fn reaction(sender: &str, emoji: &str) -> Reaction {
     }
 }
 
-fn env(seq: u64, event: GatewayEvent) -> EventEnvelope {
+pub(super) fn env(seq: u64, event: GatewayEvent) -> EventEnvelope {
     EventEnvelope {
         seq,
         at_ms: 1_000_000 + seq as i64,
@@ -81,7 +81,7 @@ fn env(seq: u64, event: GatewayEvent) -> EventEnvelope {
 }
 
 /// Applies `events` with sequence numbers after everything applied so far.
-fn apply(store: &mut Store, events: Vec<GatewayEvent>) -> AppliedEvents {
+pub(super) fn apply(store: &mut Store, events: Vec<GatewayEvent>) -> AppliedEvents {
     let base = store.sync_state().unwrap().last_seq.unwrap_or(0);
     let envelopes: Vec<_> = events
         .into_iter()
@@ -91,11 +91,11 @@ fn apply(store: &mut Store, events: Vec<GatewayEvent>) -> AppliedEvents {
     store.apply_events(&envelopes).unwrap()
 }
 
-fn message(event: WaMessage) -> GatewayEvent {
+pub(super) fn message(event: WaMessage) -> GatewayEvent {
     GatewayEvent::Message(event)
 }
 
-fn meta_event(chat: &str, id: &str, meta: MessageMeta) -> GatewayEvent {
+pub(super) fn meta_event(chat: &str, id: &str, meta: MessageMeta) -> GatewayEvent {
     GatewayEvent::MessageMeta {
         chat: chat.into(),
         id: id.into(),
@@ -104,7 +104,7 @@ fn meta_event(chat: &str, id: &str, meta: MessageMeta) -> GatewayEvent {
     }
 }
 
-fn listed(jid: &str, last: Option<WaMessage>, unread: u32) -> RichChat {
+pub(super) fn listed(jid: &str, last: Option<WaMessage>, unread: u32) -> RichChat {
     RichChat {
         chat: ChatSummary {
             jid: jid.into(),
@@ -119,7 +119,7 @@ fn listed(jid: &str, last: Option<WaMessage>, unread: u32) -> RichChat {
     }
 }
 
-fn thread_ids(store: &Store, chat: &str) -> Vec<String> {
+pub(super) fn thread_ids(store: &Store, chat: &str) -> Vec<String> {
     store
         .thread(chat, 100, None)
         .unwrap()
@@ -129,7 +129,7 @@ fn thread_ids(store: &Store, chat: &str) -> Vec<String> {
         .collect()
 }
 
-fn chat_row(store: &Store, jid: &str) -> Option<ChatRow> {
+pub(super) fn chat_row(store: &Store, jid: &str) -> Option<ChatRow> {
     store
         .chats(true)
         .unwrap()
@@ -137,12 +137,23 @@ fn chat_row(store: &Store, jid: &str) -> Option<ChatRow> {
         .find(|chat| chat.jid == jid)
 }
 
-fn count(conn: &Connection, sql: &str) -> i64 {
+pub(super) fn count(conn: &Connection, sql: &str) -> i64 {
     conn.query_row(sql, [], |row| row.get(0)).unwrap()
 }
 
+/// How many messages are stored under `key` itself. A read under an id of the chat follows the map, so it does
+/// not tell where the rows are.
+pub(super) fn stored_under(conn: &Connection, key: &str) -> i64 {
+    conn.query_row(
+        "SELECT COUNT(*) FROM messages WHERE chat = ?1",
+        [key],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
 /// How many stored values still name `key`, the kept wire ids aside.
-fn references(conn: &Connection, key: &str) -> i64 {
+pub(super) fn references(conn: &Connection, key: &str) -> i64 {
     conn.query_row(
         "SELECT (SELECT COUNT(*) FROM chats WHERE jid = ?1)
             + (SELECT COUNT(*) FROM chat_sync WHERE jid = ?1)
@@ -157,7 +168,7 @@ fn references(conn: &Connection, key: &str) -> i64 {
 }
 
 /// Every row of every table, for "nothing changed" checks.
-fn dump(conn: &Connection) -> Vec<String> {
+pub(super) fn dump(conn: &Connection) -> Vec<String> {
     let mut out = Vec::new();
     for table in [
         "sync_state",
@@ -185,12 +196,12 @@ fn dump(conn: &Connection) -> Vec<String> {
 }
 
 /// The tables hold exactly what the map in memory holds.
-fn assert_tables_match_map(store: &Store) {
+pub(super) fn assert_tables_match_map(store: &Store) {
     let loaded = identity::load(&store.conn).unwrap();
     assert_eq!(loaded.rows(), store.identity().rows());
 }
 
-fn key_of(store: &Store, text: &str) -> String {
+pub(super) fn key_of(store: &Store, text: &str) -> String {
     store
         .identity()
         .lookup(text)
@@ -200,7 +211,7 @@ fn key_of(store: &Store, text: &str) -> String {
         .to_owned()
 }
 
-fn tables(conn: &Connection) -> Vec<String> {
+pub(super) fn tables(conn: &Connection) -> Vec<String> {
     conn.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     )
@@ -211,7 +222,7 @@ fn tables(conn: &Connection) -> Vec<String> {
     .unwrap()
 }
 
-fn columns(conn: &Connection, table: &str) -> Vec<String> {
+pub(super) fn columns(conn: &Connection, table: &str) -> Vec<String> {
     conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
         .unwrap()
         .query_map([], |row| row.get(0))
@@ -222,7 +233,7 @@ fn columns(conn: &Connection, table: &str) -> Vec<String> {
 
 /// A file at schema `version` (1 to 3) holding a LID chat and the number chat of the same person, a group with
 /// LID authors, and from version 2 on an outbox row.
-fn old_file(dir: &std::path::Path, version: u32) -> PathBuf {
+pub(super) fn old_file(dir: &std::path::Path, version: u32) -> PathBuf {
     let path = dir.join(file_name("inst1"));
     let mut conn = Connection::open(&path).unwrap();
     schema::migrate_to(&mut conn, version).unwrap();
@@ -289,7 +300,13 @@ fn a_new_file_has_the_identity_tables_and_columns() {
     for (table, added) in [
         (
             "sync_state",
-            &["own_pn", "own_lid", "merge_cursor", "identity_backfill"][..],
+            &[
+                "own_pn",
+                "own_lid",
+                "merge_cursor",
+                "identity_backfill",
+                "identity_cursor",
+            ][..],
         ),
         ("chats", &["wire_jid"][..]),
         ("messages", &["wire_sender"][..]),
@@ -363,7 +380,9 @@ fn an_upgraded_store_with_a_lid_chat_and_a_number_chat_becomes_one_chat_once_the
     assert!(applied.resync && applied.rejected.is_empty());
     // One chat with every message, the queued send first.
     assert_eq!(thread_ids(&store, PN), ["c1", "P1", "L2", "L1"]);
-    assert!(thread_ids(&store, LID).is_empty());
+    assert_eq!(stored_under(&store.conn, LID), 0);
+    // A reader that still holds the LID reads the merged chat.
+    assert_eq!(thread_ids(&store, LID), thread_ids(&store, PN));
     assert!(chat_row(&store, LID).is_none());
     let chat = chat_row(&store, PN).unwrap();
     assert_eq!((chat.unread, chat.pinned), (3, true));
@@ -860,13 +879,13 @@ fn steps_logged_before_a_kill_are_replayed_from_the_cursor_when_the_store_opens(
         identity::persist(&store.conn, &changes, 6_000).unwrap();
         assert_eq!(count(&store.conn, "SELECT merge_cursor FROM sync_state"), 1);
         assert_eq!(count(&store.conn, "SELECT COUNT(*) FROM merge_log"), 2);
-        assert_eq!(thread_ids(&store, LID2), ["M1"]);
+        assert_eq!(stored_under(&store.conn, LID2), 1);
     }
     let mut store = Store::open(&dir, "inst1").unwrap();
     assert_eq!(count(&store.conn, "SELECT merge_cursor FROM sync_state"), 2);
     assert_eq!(thread_ids(&store, PN2), ["N1", "M1"]);
     assert_eq!(thread_ids(&store, PN), ["P1", "L1"]);
-    assert!(thread_ids(&store, LID2).is_empty());
+    assert_eq!(stored_under(&store.conn, LID2), 0);
     assert_eq!(references(&store.conn, LID2), 0);
     // Whoever keeps drafts and prefs per chat replays the log from its own cursor.
     let since: Vec<_> = store
@@ -1207,7 +1226,15 @@ fn cursors_widen_a_gap_stays_open_and_the_chat_list_is_refreshed() {
     assert!(!cursor.reached_start);
     let gap = cursor.gap.expect("the open gap stays open");
     assert_eq!((gap.floor_ts, gap.before), (5_000, None));
-    assert_eq!(store.cursor(LID).unwrap(), ChatCursor::default());
+    assert_eq!(
+        count(
+            &store.conn,
+            &format!("SELECT COUNT(*) FROM chat_sync WHERE jid = '{LID}'")
+        ),
+        0
+    );
+    // Asked under the LID, the cursor is the merged chat's.
+    assert_eq!(store.cursor(LID).unwrap(), store.cursor(PN).unwrap());
     let plan = store.plan(None).unwrap();
     assert!(plan.refresh_chats);
     assert_eq!(

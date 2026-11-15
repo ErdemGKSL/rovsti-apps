@@ -44,7 +44,7 @@ internal fun WhatsAppSettingsPage() {
                 )
             val repo = FakeWaRepository()
             repo.gatewayOpener =
-                { (gateway.urlOpener.open("https://rovsti.erdemdev.tr", "rwk_demo") as? Outcome.Ok)?.value }
+                { (gateway.urlOpener.open("https://rosty.erdemdev.tr", "rwk_demo") as? Outcome.Ok)?.value }
             // What the gateway sends after an instance is created: a QR, or a code when a number was given.
             repo.onRelinkTo = {
                 val asked = gateway.createRequests.lastOrNull()?.link

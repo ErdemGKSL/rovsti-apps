@@ -81,6 +81,20 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   `invalid` with `reason: "note_too_long"`. The note is a line under the stop in `stops.saved_list`'s share text, the last line of
   `stop_text` of `stops.dest_share {note}`, kept by the JSON export/import (`Incoming.note`, cut to the cap) and by the backup; GPX
   has none.
+- Language (`locale`): every sentence Stops shows from Rust exists in English and Turkish (`rosty_geo::Lang`). The ops that write
+  one take an optional `locale` (any tag a phone writes: `tr`, `tr-TR`, `tr_TR`; absent, `null` or unknown is English, so old
+  requests answer as before): `stops.pick_{replay, labels}`, `stops.crossing_{validate, read}`, `stops.saved_{edit, list}`,
+  `stops.saved_shortcut`, `stops.places_import`, `stops.history_{list, prune_plan, usage, text}`, `stops.stats`, `stops.prefs_{edit,
+  choices}`, `stops.notice_{render, validate}`, `stops.alarm_plan`, `stops.gtfs_{lines, summary}`, `stops.coord_format`,
+  `stops.measure`, `stops.backup_{export, parse}`, `stops.format_distance`, `stops.dest_parse`. Turkish writes "1,2 km", "1.234 durak",
+  K/KD/D/GD/G/GB/B/KB and keeps nouns singular after a number; no suffix follows a name the user typed. The fixture case `tr` (and
+  `tr_*` for errors) of each op pins the Turkish answer.
+- The trip keeps its language: `stops.trip_start {locale}` stores it in `trip.json` (`lang`, absent for English), and it is the
+  language of the texts the trip writes on its own: the status (`FixOut.title`, `FixOut.text`: the service's notification) and the
+  "a few" of an arriving-soon message without an ETA. A message the user never rewrote (still a default of either language) goes
+  out as the default of the trip's language. `stops.trip_{restore, fix, status_share, end}` and the headless `trip_fix` take an
+  optional `locale` that replaces the stored one (the phone's language changed during the trip); without it the stored one holds.
+  A point without a name is stored as "Point A" / "A noktası"; both read as "no name" in either language.
 - `stops.gtfs_import {zip, now_ms, save?, dir?}` reads the zip at a path (a tiny feed lives in `tests/data/gtfs-tiny.zip`; fixture requests
   write it as `$DATA/gtfs-tiny.zip`) and answers the `FeedReport`; `save` writes `gtfs.json`, which `stops.gtfs_search` and
   `stops.saved_suggest_name` read. `stops.measure` takes the point list (Kotlin keeps it; undo drops the last point).

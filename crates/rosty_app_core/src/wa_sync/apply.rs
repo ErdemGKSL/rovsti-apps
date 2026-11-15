@@ -13,7 +13,7 @@ use rosty_core::wa_identity::{Source, WaIdKind, parse};
 
 use super::identity::{self, Canon, Ids};
 use super::model::{AppliedEvents, Content, Kind};
-use super::{Result, authors, outbox};
+use super::{Result, authors, link_state, outbox};
 
 /// Location, contact card and mentions of a message, one JSON column.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -767,15 +767,22 @@ pub(super) fn apply_event(
                 touched(out, &jid);
             }
         }
-        GatewayEvent::HistorySynced { .. } => {
+        GatewayEvent::HistorySynced { progress, .. } => {
             // The phone delivered history without one event per message: chats may have older and newer
             // messages than the cursors say.
             conn.execute("UPDATE chat_sync SET reached_start = 0", [])?;
             conn.execute("UPDATE sync_state SET needs_resync = 1", [])?;
+            // The kind of the batch and its oldest message go here once the event carries them.
+            let batch = link_state::HistoryBatch {
+                progress: *progress,
+                ..Default::default()
+            };
+            link_state::history_synced(conn, &batch, at_ms)?;
             out.resync = true;
         }
         GatewayEvent::Resync => {
             conn.execute("UPDATE sync_state SET needs_resync = 1", [])?;
+            link_state::resynced(conn)?;
             out.resync = true;
         }
         GatewayEvent::IdentityMapped {

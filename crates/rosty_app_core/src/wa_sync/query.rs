@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, Row, params};
 
 use super::apply::{self, COLUMN_COUNT, COLUMNS, Stored};
+use super::media::MediaState;
 use super::model::{
     ChatRow, MessageRow, PendingOp, RowState, StarredCursor, StarredPage, ThreadCursor, ThreadPage,
 };
@@ -14,10 +15,16 @@ use super::{Result, outbox};
 /// The largest thread page.
 pub const MAX_THREAD_PAGE: u32 = 500;
 
-/// `id`, `chat`, the gateway columns, then whether a thumbnail is stored, the cached file, the client id and the
-/// wire sender.
+/// `id`, `chat`, the gateway columns, then whether a thumbnail is stored, the cached file, the client id, the
+/// wire sender and the state of the full file. Read from `messages` under its own name.
 fn row_columns() -> String {
-    format!("id, chat, {COLUMNS}, thumb IS NOT NULL, media_path, client_id, wire_sender")
+    format!(
+        "id, chat, {COLUMNS}, thumb IS NOT NULL,
+         (SELECT path FROM media WHERE media.chat = messages.chat AND media.id = messages.id
+            AND media.state = 'ready'),
+         client_id, wire_sender,
+         (SELECT state FROM media WHERE media.chat = messages.chat AND media.id = messages.id)"
+    )
 }
 
 fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
@@ -50,6 +57,10 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         mentions: stored.extra.mentions,
         has_thumbnail: row.get(tail)?,
         media_path: row.get(tail + 1)?,
+        media_state: row
+            .get::<_, Option<String>>(tail + 4)?
+            .map(|name| MediaState::from_name(&name))
+            .filter(|state| *state != MediaState::None),
         client_id: row.get(tail + 2)?,
         wire_sender: row.get(tail + 3)?,
         error: None,

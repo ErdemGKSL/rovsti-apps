@@ -1882,6 +1882,7 @@ fn a_new_file_gets_the_whole_schema() {
             "alias",
             "chat_sync",
             "chats",
+            "media",
             "merge_log",
             "messages",
             "outbox",
@@ -2096,17 +2097,18 @@ fn eviction_drops_the_least_recently_used_files_and_keeps_messages_and_thumbnail
             .media(ALI, "P1", Some(100))
             .unwrap()
             .unwrap()
+            .media
             .path
             .as_deref(),
         Some("/media/P1.jpg")
     );
     assert_eq!(
-        store.media_evict(4_000).unwrap().evicted,
+        store.media_evict(Some(4_000), None).unwrap().evicted,
         [],
         "under the cap"
     );
 
-    let eviction = store.media_evict(2_500).unwrap();
+    let eviction = store.media_evict(Some(2_500), None).unwrap();
     let gone: Vec<_> = eviction
         .evicted
         .iter()
@@ -2126,7 +2128,7 @@ fn eviction_drops_the_least_recently_used_files_and_keeps_messages_and_thumbnail
     assert_eq!(evicted.kind, Kind::Image);
     let media = store.media(ALI, "P2", None).unwrap().unwrap();
     assert_eq!(
-        (media.thumbnail.as_deref(), media.path),
+        (media.thumbnail.as_deref(), media.media.path),
         (Some(&b"P2"[..]), None)
     );
     assert!(
@@ -2137,6 +2139,6 @@ fn eviction_drops_the_least_recently_used_files_and_keeps_messages_and_thumbnail
             .media_path
             .is_some()
     );
-    assert_eq!(store.media_evict(0).unwrap().bytes_left, 0);
+    assert_eq!(store.media_evict(Some(0), None).unwrap().bytes_left, 0);
     assert_eq!(store.media(ALI, "NOPE", None).unwrap(), None);
 }

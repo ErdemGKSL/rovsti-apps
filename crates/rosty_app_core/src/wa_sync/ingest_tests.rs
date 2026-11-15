@@ -884,6 +884,7 @@ fn a_reader_holding_the_old_key_reads_the_merged_chat() {
             .media(PN, "L1", Some(9_600))
             .unwrap()
             .unwrap()
+            .media
             .path
             .as_deref(),
         Some("/cache/L1.jpg")

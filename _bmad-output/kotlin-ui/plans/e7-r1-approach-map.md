@@ -305,3 +305,10 @@ dates before 1970 and at `i64::MIN`/`MAX`, and offsets from -12 to +14 including
   rule is per axis: in landscape under a sheet the height falls back while the width keeps its padding. Tested with
   an 891 x 411 dp window and a medium sheet (60 dp left), the exact threshold, oversized margins and padding, and
   a viewport smaller than the minimum.
+- **A gate is fitted as its circle.** The home fitted a trip (first view, `showGate`, `showPair`) to its two ends.
+  A west-east gate in a wide window then filled the width and its circle, and with a short free strip the pins
+  too, ended up under the chrome. `MapCamera.fitGate` fits the bounding box of the circle on AB (computed on the
+  Mercator plane, where it is drawn); `FirstView.Gate` carries it. Margins may shrink a strip down to `MIN_FIT_DP`
+  (60 dp), which is separate from the 120 dp below which padding is ignored: a 207 dp landscape strip keeps its
+  48 dp margins. The landscape golden runs on the real core behind the scripted trip, so the pins and the circle
+  are drawn.

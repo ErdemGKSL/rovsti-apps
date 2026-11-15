@@ -220,7 +220,7 @@ class WaAvatars(
             }
 
             // Two ids became one person: a picture missed under one of them is asked for again.
-            GatewayEvent.Resync,
+            is GatewayEvent.Resync,
             is GatewayEvent.ChatMerged,
             is GatewayEvent.IdentityMapped,
             is GatewayEvent.IdentityNumberChanged,

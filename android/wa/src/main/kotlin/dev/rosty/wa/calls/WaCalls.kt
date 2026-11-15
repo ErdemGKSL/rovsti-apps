@@ -349,7 +349,7 @@ class WaCalls(
 
     private suspend fun onEvent(event: GatewayEvent) {
         when (event) {
-            GatewayEvent.Resync -> reload()
+            is GatewayEvent.Resync -> reload()
             is GatewayEvent.Call -> onCall(event)
             else -> Unit
         }

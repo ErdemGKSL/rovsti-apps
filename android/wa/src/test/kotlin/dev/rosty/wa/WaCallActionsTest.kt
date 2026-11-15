@@ -175,7 +175,7 @@ class WaCallActionsTest {
             val r = rig(ringing = true)
             r.fake.calls = listOf(summary("c1", CallPhase.Ended("missed")), summary("c2", CallPhase.Ended("hangup")))
             r.calls.forget(listOf("c1"))
-            r.fake.emitEvent("inst1", 1, GatewayEvent.Resync)
+            r.fake.emitEvent("inst1", 1, GatewayEvent.Resync())
             assertEquals(
                 listOf("c2"),
                 r.calls.calls.value
@@ -189,7 +189,7 @@ class WaCallActionsTest {
             val r = rig()
             val before = r.fake.count("wa.calls")
             r.fake.calls = listOf(summary("c9", CallPhase.Ended("missed")))
-            r.fake.emitEvent("inst1", 1, GatewayEvent.Resync)
+            r.fake.emitEvent("inst1", 1, GatewayEvent.Resync())
             assertEquals("a resync reads them again", before + 1, r.fake.count("wa.calls"))
             assertEquals(
                 listOf("c9"),

@@ -9,6 +9,7 @@ description = "App-level logic of the four Rosty apps without UI or JNI."
 [dependencies]
 base64.workspace = true
 log.workspace = true
+qrcode.workspace = true
 rosty_core.workspace = true
 rosty_geo.workspace = true
 rosty_wa_client.workspace = true
@@ -23,7 +24,7 @@ takumi.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-image.workspace = true
+image = { workspace = true, features = ["gif"] }
 
 [lints]
 workspace = true

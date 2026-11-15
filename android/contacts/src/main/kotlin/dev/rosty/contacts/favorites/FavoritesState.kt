@@ -26,6 +26,9 @@ data class UpcomingItem(
     val pageLine: String,
     val canWish: Boolean,
     val numbers: List<String> = emptyList(),
+    /** Days until the event and the age it reaches: Card Studio prints the date and age from them. */
+    val inDays: Long = 0,
+    val turning: Long? = null,
 ) {
     val face: AvatarFace get() = AvatarFace(photoUri, numbers)
 }

@@ -2,6 +2,7 @@ package dev.rosty.core
 
 import dev.rosty.core.contracts.AllContracts
 import dev.rosty.core.model.core.VersionInfo
+import dev.rosty.core.ops.CardsOps
 import dev.rosty.core.ops.ChatOps
 import dev.rosty.core.ops.ContactsOps
 import dev.rosty.core.ops.ContactsWaOps
@@ -71,6 +72,7 @@ class ContractFixturesTest {
                 "ContactsOps" to ContactsOps.ops,
                 "ContactsWaOps" to ContactsWaOps.ops,
                 "QrOps" to QrOps.ops,
+                "CardsOps" to CardsOps.ops,
                 "PeopleOps" to PeopleOps.ops,
                 "MessagesOps" to MessagesOps.ops,
                 "ChatOps" to ChatOps.ops,

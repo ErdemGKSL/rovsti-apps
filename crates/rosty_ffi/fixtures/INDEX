@@ -55,6 +55,14 @@ calling_code.line.home
 calling_code.list
 calling_code.of_cc
 calling_code.of_cc.unknown
+cards.cancel
+cards.render
+cards.render.animated
+cards.render.number_name
+cards.render.out_invalid
+cards.render.out_unwritable
+cards.render.text_missing
+cards.templates
 chat_export.block
 chat_export.notice
 chat_export.notice.failed

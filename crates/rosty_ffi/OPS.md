@@ -57,6 +57,17 @@ takes `w * h` 8-bit luma bytes (row-major, base64, at most 1600 x 1600) and answ
 size mismatch is `invalid`, bad base64 `parse`. The decoder is `rqrr` (through `contact_scan::decode_luma`); there is no ZXing or ML Kit.
 Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 
+Cards (X.2): share cards drawn by `rosty_app_core::cards` (Takumi, bundled Inter, no system fonts). `cards.templates {}` answers
+`{templates: [{id, animatable, texts, required, still: {width, height}, animated}], palettes}`. `cards.render {spec, out}` takes a
+`spec` (`template`: `birthday` | `contact` | `new_number`, `palette`: `dawn` | `lagoon` | `meadow` | `dusk` | `ink`, `animated`,
+`texts` by key, `photo` (an absolute file path or null), `initials`, `qr`) and an absolute `out` path, writes a 720 x 900 PNG, or a
+540 x 675 GIF that plays once (no NETSCAPE block) when `animated` and the template moves, and answers `{path, width, height, bytes,
+frames}`. Every word comes from the app's string resources; Rust only lays out, and every text block is fitted inside the glass
+panel (wrap on at most 2-3 lines, shrink to a floor, then "…"). A missing or unreadable photo draws the initials. Errors are codes in
+`message`, never sentences: `text_missing` (`detail.key`), `out_invalid`, `cancelled`, `render_failed` (all `invalid`) and
+`out_unwritable` (`io`). `cards.cancel {out}` stops the running render of `out` between frames and answers `{cancelled}`; the
+cancelled render leaves no file. Kotlin: `NativeCardsOps` in `:core-bridge` (Contacts' Card Studio).
+
 Stops (E2.12): `stops.trip_start` / `stops.trip_restore` answer `{handle, ...}` (a `TripView` with the whole persisted trip as `snapshot`),
 the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, timeout, dismiss, status_share, end}` send it back and
 `RustNative.release` frees it (Kotlin: `ActiveTripHandle`). Every other `stops.*` and `view.*` op is stateless. Choices worth knowing:
@@ -233,6 +244,9 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(bridge) core.emit_test` | - | bridge | op | core.emit_test |
 | `(qr) qr.encode` | contacts | qr | op | qr.encode |
 | `(qr) qr.decode` | contacts | qr | op | qr.decode |
+| `(cards) cards.templates` | contacts | cards | op | cards.templates |
+| `(cards) cards.render` | contacts | cards | op | cards.render |
+| `(cards) cards.cancel` | contacts | cards | op | cards.cancel |
 | `(wa) wa.call_audio_open` | - | wa | op | wa.call_audio_open |
 | `(wa) wa.events_reconnect_now` | - | wa | op | wa.events_reconnect_now |
 | `(wa) wa.events_start` | - | wa | op | wa.events_start |

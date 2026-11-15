@@ -1,12 +1,16 @@
 package dev.rosty.contacts.cards
 
 import android.content.Context
+import android.text.format.DateFormat
 import androidx.compose.runtime.Immutable
 import dev.rosty.contacts.R
 import dev.rosty.core.ops.CardPalette
 import dev.rosty.core.ops.CardSpec
 import dev.rosty.core.ops.CardTemplate
 import dev.rosty.design.text.UiText
+import java.time.MonthDay
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Test tags of the Card Studio sheet. */
 object CardStudioTags {
@@ -25,8 +29,10 @@ object CardStudioTags {
 
 /**
  * Who the card is for, as the entry points know them: the card page and the Upcoming rows both build one. [birthday]
- * is whether the contact has a birthday (the Birthday template needs it), [dateLine] the date it prints and [ageYears]
- * the age it reaches, when the year is known. [photo] is a readable picture URI or null (initials are drawn then).
+ * is whether the contact has a birthday (the Birthday template needs it), [birthMonth] and [birthDay] its date (the
+ * card prints it in the app's locale: "3 Ekim", "October 3"), [dateLine] a ready-made fallback when the date is not
+ * known as numbers, and [ageYears] the age it reaches, when the year is known. [photo] is a readable picture URI or
+ * null (initials are drawn then).
  */
 @Immutable
 data class CardStudioSubject(
@@ -35,6 +41,8 @@ data class CardStudioSubject(
     val birthday: Boolean,
     val dateLine: String? = null,
     val ageYears: Int? = null,
+    val birthMonth: Int? = null,
+    val birthDay: Int? = null,
     val photo: String? = null,
     val numbers: List<String> = emptyList(),
     val vcard: String? = null,
@@ -150,7 +158,9 @@ internal fun cardTexts(
                 subject.ageYears?.takeIf { it > 0 }?.let {
                     put("age_line", context.resources.getQuantityString(R.plurals.card_birthday_age, it, it))
                 }
-                subject.dateLine?.let { put("date_line", it) }
+                (cardDate(context, subject.birthMonth, subject.birthDay) ?: subject.dateLine)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { put("date_line", it) }
             }
 
             CardTemplate.Contact -> {
@@ -165,6 +175,32 @@ internal fun cardTexts(
             }
         }
     }
+
+/**
+ * The birthday as the card prints it, in the app's locale: "3 Ekim" in Turkish, "October 3" in English. Null when the
+ * month or day is unknown or not a real date.
+ */
+internal fun cardDate(
+    context: Context,
+    month: Int?,
+    day: Int?,
+): String? {
+    if (month == null || day == null) return null
+    val date = runCatching { MonthDay.of(month, day) }.getOrNull() ?: return null
+    val locale = context.resources.configuration.locales[0] ?: Locale.getDefault()
+    val pattern = DateFormat.getBestDateTimePattern(locale, "MMMMd")
+    return DateTimeFormatter.ofPattern(pattern, locale).format(date)
+}
+
+/** Month and day of a contact event date (`YYYY-MM-DD` or `--MM-DD`), or null when it is not one. */
+fun eventMonthDay(date: String): Pair<Int, Int>? {
+    val match = EVENT_DATE.matchEntire(date.trim()) ?: return null
+    val month = match.groupValues[1].toInt()
+    val day = match.groupValues[2].toInt()
+    return runCatching { MonthDay.of(month, day) }.getOrNull()?.let { month to day }
+}
+
+private val EVENT_DATE = Regex("^(?:\\d{4}|-)-(\\d{2})-(\\d{2})$")
 
 internal fun CardStudioState.toSpec(texts: Map<String, String>): CardSpec =
     CardSpec(

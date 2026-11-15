@@ -1,5 +1,6 @@
 package dev.rosty.platform.system
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -61,6 +62,7 @@ class AndroidDeviceData(
 ) : DeviceData {
     private val app = context.applicationContext
 
+    @SuppressLint("MissingPermission") // declared by the app manifest; without it the catch reads no network
     override fun network(): DataNetwork {
         val manager = app.getSystemService(ConnectivityManager::class.java) ?: return DataNetwork.None
         return try {

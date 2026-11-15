@@ -14,8 +14,12 @@ import dev.rosty.core.ops.NativeSharedOps
 import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
+import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.messages.data.ContactBook
 import dev.rosty.messages.data.MessagesStore
+import dev.rosty.messages.spam.CodeCleanup
+import dev.rosty.messages.spam.CodeCleanupWorker
+import dev.rosty.messages.spam.SpamActions
 import dev.rosty.messages.wa.GatewayWaRemote
 import dev.rosty.messages.wa.StoreWaChats
 import dev.rosty.messages.wa.WaChats
@@ -27,6 +31,8 @@ import dev.rosty.people.AvatarResolver
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.PeopleSources
 import dev.rosty.people.ProviderSource
+import dev.rosty.platform.calllog.AndroidBlocklistRepository
+import dev.rosty.platform.calllog.BlocklistRepository
 import dev.rosty.platform.contacts.AndroidContactsRepository
 import dev.rosty.platform.contacts.ContactsRepository
 import dev.rosty.platform.identity.PhoneNumbers
@@ -120,6 +126,15 @@ open class MessagesContainer(
         StatusFeed(scope, waOffline, waRemote, java.io.File(context.cacheDir, "wa-status")).also { it.start() }
     }
 
+    /** The system blocklist (shared with Phone); the default SMS app may write it. */
+    val blocklist: BlocklistRepository by lazy { createBlocklist() }
+
+    /** Spam rules, allow list and blocklist changes (E6.11, AD-MSG8). */
+    val spamActions: SpamActions by lazy { SpamActions(store, ops, blocklist) }
+
+    /** M47: passcode messages deleted 24 h after their code was copied. */
+    val codeCleanup: CodeCleanup by lazy { createCodeCleanup() }
+
     /** The WhatsApp chats of the inbox and their actions, read from the offline store. */
     val waChats: WaChats by lazy { createWaChats() }
 
@@ -162,6 +177,17 @@ open class MessagesContainer(
     protected open fun createSims(): SimRepository = AndroidSimRepository(context, Dispatchers.IO)
 
     protected open fun createOps(): MessagesOps = NativeMessagesOps(rust)
+
+    protected open fun createBlocklist(): BlocklistRepository = AndroidBlocklistRepository(context, Dispatchers.IO)
+
+    protected open fun createCodeCleanup(): CodeCleanup =
+        CodeCleanup(
+            file = java.io.File(context.noBackupFilesDir, CodeCleanup.FILE),
+            sms = sms,
+            roleHeld = { readSmsRole() },
+            wake = { delay -> CodeCleanupWorker.schedule(context, delay) },
+            now = SystemRostyClock::nowMillis,
+        )
 
     protected open fun createChat(): ChatOps = NativeChatOps(rust)
 

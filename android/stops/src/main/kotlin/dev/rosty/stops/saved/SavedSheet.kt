@@ -78,6 +78,7 @@ import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.stops.R
+import dev.rosty.stops.home.OnSheet
 import dev.rosty.stops.map.RadarPalette
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -124,7 +125,7 @@ fun OverlayController.presentSavedSheet(
         detents = persistentListOf(Detent.Medium, Detent.Large),
         onDismissed = onDismissed,
     ) { sheet ->
-        SavedList(viewModel, this@presentSavedSheet, sheet)
+        OnSheet { SavedList(viewModel, this@presentSavedSheet, sheet) }
     }.also { present(it) }
 
 @Composable
@@ -490,7 +491,7 @@ fun OverlayController.presentSavedStopSheet(
             ?.name
             .orEmpty()
     return SheetEntry(title = name, detents = persistentListOf(Detent.Medium, Detent.Large)) { sheet ->
-        SavedStopBody(viewModel, id, this@presentSavedStopSheet, sheet)
+        OnSheet { SavedStopBody(viewModel, id, this@presentSavedStopSheet, sheet) }
     }.also { present(it) }
 }
 
@@ -589,35 +590,37 @@ fun OverlayController.presentRenameSheet(
 ): SheetEntry =
     SheetEntry(title = title, detents = persistentListOf(Detent.Medium)) { sheet ->
         val field = rememberTextFieldState(name)
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(SavedTags.Rename),
-            verticalArrangement = Arrangement.spacedBy(Spacing.m),
-        ) {
-            RostyText(title, style = RostyTheme.type.title3)
-            GlassTextField(
-                field,
-                placeholder = context.getString(R.string.saved_name),
-                modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameField),
-                onSubmit = {
-                    sheet.dismiss()
-                    onSave(field.text.toString())
-                },
-            )
-            RostyText(
-                context.resources.getQuantityString(R.plurals.saved_name_limit, maxChars, maxChars),
-                style = RostyTheme.type.footnote,
-                color = RostyTheme.colors.labelSecondary,
-            )
-            CapsuleButton(
-                context.getString(R.string.saved_save),
-                onClick = {
-                    sheet.dismiss()
-                    onSave(field.text.toString())
-                },
-                modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameSave),
-                style = CapsuleStyle.Filled,
-                fillWidth = true,
-            )
+        OnSheet {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(SavedTags.Rename),
+                verticalArrangement = Arrangement.spacedBy(Spacing.m),
+            ) {
+                RostyText(title, style = RostyTheme.type.title3)
+                GlassTextField(
+                    field,
+                    placeholder = context.getString(R.string.saved_name),
+                    modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameField),
+                    onSubmit = {
+                        sheet.dismiss()
+                        onSave(field.text.toString())
+                    },
+                )
+                RostyText(
+                    context.resources.getQuantityString(R.plurals.saved_name_limit, maxChars, maxChars),
+                    style = RostyTheme.type.footnote,
+                    color = RostyTheme.colors.labelSecondary,
+                )
+                CapsuleButton(
+                    context.getString(R.string.saved_save),
+                    onClick = {
+                        sheet.dismiss()
+                        onSave(field.text.toString())
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameSave),
+                    style = CapsuleStyle.Filled,
+                    fillWidth = true,
+                )
+            }
         }
     }.also { present(it) }
 

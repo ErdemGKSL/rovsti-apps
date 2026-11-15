@@ -169,4 +169,7 @@
         <item quantity="one">Up to %d character.</item>
         <item quantity="other">Up to %d characters.</item>
     </plurals>
+    <string name="trip_full_screen">Full-screen alarm</string>
+    <string name="trip_full_screen_on">The alarm can take over the screen</string>
+    <string name="trip_full_screen_off">The alarm shows as a banner only</string>
 </resources>

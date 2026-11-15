@@ -14,6 +14,7 @@ import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.CoordFormatRequest
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Endpoint
+import dev.rosty.core.model.stops.Ends
 import dev.rosty.core.model.stops.FormatDistanceRequest
 import dev.rosty.core.model.stops.GtfsLineChoice
 import dev.rosty.core.model.stops.GtfsLinesRequest
@@ -53,7 +54,12 @@ data class RunningTrip(
     val label: String,
     val a: Endpoint,
     val b: Endpoint,
+    /** The transit line chosen for the trip (drawn on the map); known only to the app that started it. */
+    val pattern: Int? = null,
 ) {
+    /** The trip as the pick's two ends, the line on the end it was chosen for (B, as the trip UI offers it). */
+    fun ends(): Ends = Ends(Destination(a.label, a.coord), Destination(b.label, b.coord, pattern = pattern))
+
     /** The middle of the gate: where the bearing points. */
     val center: Coord get() = Coord((a.coord.lat + b.coord.lat) / 2.0, (a.coord.lon + b.coord.lon) / 2.0)
 }
@@ -239,7 +245,15 @@ class TripViewModel(
         tripJson = json
         val summary = json?.let { tripSummary(it, answer.label) }
         val trip =
-            if (summary?.a != null && summary.b != null) RunningTrip(summary.label, summary.a, summary.b) else null
+            if (summary?.a != null && summary.b != null) {
+                val kept =
+                    mutable.value.trip
+                        ?.takeIf { it.a == summary.a && it.b == summary.b }
+                        ?.pattern
+                RunningTrip(summary.label, summary.a, summary.b, kept)
+            } else {
+                null
+            }
         val was = mutable.value.trip
         mutable.value =
             mutable.value.copy(
@@ -312,7 +326,7 @@ class TripViewModel(
                     alarm = plan?.let { Json.encodeToString(AlarmPlan.serializer(), it) },
                 )
             if (trips.start(spec) == StartResult.Started) {
-                val trip = RunningTrip(view.label, view.a, view.b)
+                val trip = RunningTrip(view.label, view.a, view.b, b.pattern ?: a.pattern)
                 mutable.value = mutable.value.copy(trip = trip, live = null, problem = null)
                 reloadJson()
                 emit(TripEffect.Started(trip))

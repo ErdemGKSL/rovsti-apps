@@ -41,7 +41,22 @@ class TripAppTest : ShotTest() {
 
     private fun running(fixture: AppFixture): AppFixture {
         TripFixtures.grant(fixture, *TripFixtures.foreground, *TripFixtures.notifications)
-        click(TripTags.Start)
+        settleRust()
+        // The start runs on the real core: give it time, and tap again if the sheet was still settling.
+        repeat(START_TRIES) {
+            if (fixture.container.fakeTrips.started
+                    .isEmpty()
+            ) {
+                click(TripTags.Start)
+            }
+            repeat(START_WAITS) {
+                if (fixture.container.fakeTrips.started
+                        .isEmpty()
+                ) {
+                    settleRust(300)
+                }
+            }
+        }
         assertEquals(1, fixture.container.fakeTrips.started.size)
         return fixture
     }
@@ -56,6 +71,19 @@ class TripAppTest : ShotTest() {
         compose.onNodeWithText("420 m", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("Left side", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("Next check in 20 s", useUnmergedTree = true).assertExists()
+    }
+
+    /** The running trip is drawn by the pick controller (its ends go on the map, as the draft shows) and picking is off. */
+    @Test fun theRunningTripIsOnTheMap() {
+        val fixture = running(start(TripFixtures.app(TripFixtures.bStop)))
+        val draft =
+            fixture.container.fake.writes
+                .last { it.file == "draft" }
+                .let { Json.decodeFromJsonElement(Ends.serializer(), it.value) }
+        assertEquals(TripFixtures.a.coord, draft.a?.coord)
+        assertEquals(TripFixtures.b.coord, draft.b?.coord)
+        // No hint pill while a trip runs: the map is not picking.
+        compose.onNodeWithTag(dev.rosty.stops.home.HomeTags.Hint, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun withoutLocationThePreflightSheetComesFirst() {
@@ -130,5 +158,10 @@ class TripAppTest : ShotTest() {
                 .let { Json.decodeFromJsonElement(Ends.serializer(), it.value) }
         assertEquals("PE", draft.b?.gtfsStop)
         assertTrue(draft.b?.pattern != null)
+    }
+
+    private companion object {
+        const val START_TRIES = 2
+        const val START_WAITS = 5
     }
 }

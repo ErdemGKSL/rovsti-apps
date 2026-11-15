@@ -163,4 +163,7 @@
         <item quantity="one">En çok %d karakter.</item>
         <item quantity="other">En çok %d karakter.</item>
     </plurals>
+    <string name="trip_full_screen">Tam ekran alarm</string>
+    <string name="trip_full_screen_on">Alarm ekranı kaplayabilir</string>
+    <string name="trip_full_screen_off">Alarm yalnızca bildirim olarak görünür</string>
 </resources>

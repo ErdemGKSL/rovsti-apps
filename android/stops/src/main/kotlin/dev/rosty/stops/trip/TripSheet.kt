@@ -35,6 +35,7 @@ import dev.rosty.design.overlay.Detent
 import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.SheetEntry
+import dev.rosty.design.overlay.SheetState
 import dev.rosty.design.overlay.menuTrigger
 import dev.rosty.design.theme.RostyShapes
 import dev.rosty.design.theme.RostyText
@@ -49,7 +50,9 @@ import dev.rosty.shell.permissions.LocalPermissionController
 import dev.rosty.shell.permissions.LocalSpecialAccess
 import dev.rosty.shell.permissions.PermissionRow
 import dev.rosty.shell.permissions.SpecialAccessRow
+import dev.rosty.shell.permissions.SpecialRowTexts
 import dev.rosty.stops.R
+import dev.rosty.stops.home.OnSheet
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 
@@ -407,7 +410,7 @@ private fun RecommendedRows(preflight: Preflight) {
     if (!preflight.backgroundRow && !preflight.fullScreenRow && !preflight.batteryRow) return
     InsetGroupedSection(footer = stringResource(R.string.trip_recommended_footer)) {
         if (preflight.backgroundRow) row { PermissionRow(PermissionGroup.BACKGROUND_LOCATION) }
-        if (preflight.fullScreenRow) row { SpecialAccessRow(SpecialKind.FullScreenIntent) }
+        if (preflight.fullScreenRow) row { SpecialAccessRow(SpecialKind.FullScreenIntent, texts = fullScreenTexts()) }
         if (preflight.batteryRow) row { SpecialAccessRow(SpecialKind.BatteryOptimisation) }
     }
 }
@@ -421,57 +424,76 @@ fun OverlayController.presentPreflightSheet(
     onStart: () -> Unit,
 ): SheetEntry =
     SheetEntry(title = title, detents = persistentListOf(Detent.Large)) { sheet ->
-        val preflight = rememberPreflight()
-        Column(
-            Modifier.fillMaxWidth().testTag(TripTags.Preflight),
-            verticalArrangement = Arrangement.spacedBy(Spacing.m),
-        ) {
-            Column(Modifier.padding(horizontal = Spacing.gutter)) {
-                RostyText(title, style = RostyTheme.type.title2)
-                RostyText(
-                    stringResource(
-                        when (preflight.nextStep) {
-                            PreflightStep.Location -> R.string.trip_preflight_location
-                            PreflightStep.Notifications -> R.string.trip_preflight_notifications
-                            null -> R.string.trip_preflight_ready
-                        },
-                    ),
-                    style = RostyTheme.type.subheadline,
-                    color = RostyTheme.colors.labelSecondary,
-                )
-            }
-            InsetGroupedSection(header = stringResource(R.string.trip_preflight_needed)) {
-                row { PermissionRow(PermissionGroup.LOCATION) }
-                row { PermissionRow(PermissionGroup.NOTIFICATIONS) }
-            }
-            InsetGroupedSection(
-                header = stringResource(R.string.trip_preflight_recommended),
-                footer = stringResource(R.string.trip_recommended_footer),
-            ) {
-                // AD-SA7: "all the time" is a separate second step, offered once foreground location is granted.
-                if (preflight.location ==
-                    PermissionState.Granted
-                ) {
-                    row { PermissionRow(PermissionGroup.BACKGROUND_LOCATION) }
-                }
-                row { SpecialAccessRow(SpecialKind.FullScreenIntent) }
-                row { SpecialAccessRow(SpecialKind.BatteryOptimisation) }
-            }
-            CapsuleButton(
-                stringResource(R.string.trip_start),
-                {
-                    sheet.dismiss()
-                    onStart()
-                },
-                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(TripTags.PreflightStart),
-                style = CapsuleStyle.Filled,
-                enabled = preflight.nextStep == null,
-                fillWidth = true,
-            )
-        }
+        OnSheet { PreflightBody(title, sheet, onStart) }
     }.also { present(it) }
 
+@Composable
+private fun PreflightBody(
+    title: String,
+    sheet: SheetState,
+    onStart: () -> Unit,
+) {
+    val preflight = rememberPreflight()
+    Column(
+        Modifier.fillMaxWidth().testTag(TripTags.Preflight),
+        verticalArrangement = Arrangement.spacedBy(Spacing.m),
+    ) {
+        Column(Modifier.padding(horizontal = Spacing.gutter)) {
+            RostyText(title, style = RostyTheme.type.title2)
+            RostyText(
+                stringResource(
+                    when (preflight.nextStep) {
+                        PreflightStep.Location -> R.string.trip_preflight_location
+                        PreflightStep.Notifications -> R.string.trip_preflight_notifications
+                        null -> R.string.trip_preflight_ready
+                    },
+                ),
+                style = RostyTheme.type.subheadline,
+                color = RostyTheme.colors.labelSecondary,
+            )
+        }
+        InsetGroupedSection(header = stringResource(R.string.trip_preflight_needed)) {
+            row { PermissionRow(PermissionGroup.LOCATION) }
+            row { PermissionRow(PermissionGroup.NOTIFICATIONS) }
+        }
+        InsetGroupedSection(
+            header = stringResource(R.string.trip_preflight_recommended),
+            footer = stringResource(R.string.trip_recommended_footer),
+        ) {
+            // AD-SA7: "all the time" is a separate second step, offered once foreground location is granted.
+            if (preflight.location ==
+                PermissionState.Granted
+            ) {
+                row { PermissionRow(PermissionGroup.BACKGROUND_LOCATION) }
+            }
+            row { SpecialAccessRow(SpecialKind.FullScreenIntent, texts = fullScreenTexts()) }
+            row { SpecialAccessRow(SpecialKind.BatteryOptimisation) }
+        }
+        CapsuleButton(
+            stringResource(R.string.trip_start),
+            {
+                sheet.dismiss()
+                onStart()
+            },
+            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(TripTags.PreflightStart),
+            style = CapsuleStyle.Filled,
+            enabled = preflight.nextStep == null,
+            fillWidth = true,
+        )
+    }
+}
+
 private val CARD_SHAPE = RostyShapes.card
+
+/** Stops' full-screen access is for the alarm over the lock screen, not for calls. */
+@Composable
+private fun fullScreenTexts(): SpecialRowTexts =
+    SpecialRowTexts(
+        title = stringResource(R.string.trip_full_screen),
+        on = stringResource(R.string.trip_full_screen_on),
+        off = stringResource(R.string.trip_full_screen_off),
+    )
+
 private const val CHIP_ALPHA = 0.18f
 private const val MS_PER_S = 1000L
 private const val S_PER_MIN = 60

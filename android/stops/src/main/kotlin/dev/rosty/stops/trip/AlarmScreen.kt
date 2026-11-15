@@ -39,6 +39,7 @@ import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
 import dev.rosty.stops.R
+import dev.rosty.stops.home.OnSheet
 
 /** Test tags of the alarm and arrival UI. */
 object AlarmTags {
@@ -73,7 +74,7 @@ class AlarmEntry(
         ) {
             val shown = remember { arrayOfNulls<AlarmUi>(1) }
             if (alarm != null) shown[0] = alarm
-            shown[0]?.let { AlarmContent(it, viewModel::onAction) }
+            shown[0]?.let { OnSheet { AlarmContent(it, viewModel::onAction) } }
         }
     }
 }

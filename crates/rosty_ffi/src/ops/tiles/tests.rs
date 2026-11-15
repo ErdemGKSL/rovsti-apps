@@ -607,3 +607,53 @@ fn a_circle_around_a_crossing_downloads_its_tiles() {
     handles::global().release(handle);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn a_plan_estimates_what_a_start_would_download_without_a_handle() {
+    let small = area((9, 14), 0.02);
+    let plan = offline_plan(PlanReq {
+        bbox: small.bbox,
+        circle: None,
+        zooms: Zooms {
+            min: Some(9),
+            max: Some(14),
+        },
+    })
+    .unwrap();
+    assert!(plan.total > 0);
+    assert_eq!(plan.top_zoom, 14);
+    assert!(!plan.capped);
+    assert_eq!(plan.estimate_bytes, estimate_bytes(plan.total));
+
+    // The same area started for real plans the same tiles.
+    let root = temp("plan-same");
+    let handle = open_at(Some("http://127.0.0.1:1/{z}/{x}/{y}"), &root, None);
+    let mut req = area((9, 14), 0.02);
+    req.handle = handle;
+    let started = start_job(req, Arc::new(|_| {})).unwrap();
+    assert_eq!(started.total, plan.total);
+    handles::global().release(started.handle);
+    handles::global().release(handle);
+    let _ = std::fs::remove_dir_all(root);
+
+    // A country is cut short by the budget; a bad area is refused with its reason.
+    let wide = offline_plan(PlanReq {
+        bbox: Some(Bbox {
+            south: 36.0,
+            west: 26.0,
+            north: 42.0,
+            east: 45.0,
+        }),
+        circle: None,
+        zooms: Zooms::default(),
+    })
+    .unwrap();
+    assert!(wide.capped);
+    assert!(wide.total <= AREA_TILE_BUDGET);
+    let none = offline_plan(PlanReq {
+        bbox: None,
+        circle: None,
+        zooms: Zooms::default(),
+    });
+    assert_eq!(none.err().unwrap().detail.unwrap()["reason"], "area");
+}

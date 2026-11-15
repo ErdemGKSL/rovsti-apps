@@ -162,6 +162,24 @@ data class TilesOfflineRequest(
     @EncodeDefault(NEVER) val zooms: TilesZooms? = null,
 )
 
+/** What downloading an area would take, before anything is fetched (S10). An area is a [bbox] or a [circle]. */
+@Serializable
+data class TilesPlanRequest(
+    @EncodeDefault(NEVER) val bbox: TilesBbox? = null,
+    @EncodeDefault(NEVER) val circle: TilesCircle? = null,
+    @EncodeDefault(NEVER) val zooms: TilesZooms? = null,
+)
+
+@Serializable
+data class TilesPlanAnswer(
+    val total: Int,
+    /** The highest zoom the budget allowed. */
+    @SerialName("top_zoom") val topZoom: Int,
+    /** The area was cut short of the wanted zoom by the tile budget. */
+    val capped: Boolean,
+    @SerialName("estimate_bytes") val estimateBytes: Long,
+)
+
 @Serializable
 data class TilesOfflineAnswer(
     /** The job: cancel it with `tiles.offline_cancel`, release it when done. */

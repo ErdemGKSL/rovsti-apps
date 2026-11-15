@@ -24,7 +24,9 @@ import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripLoadAnswer
 import dev.rosty.core.model.stops.StoreWriteRequest
+import dev.rosty.core.model.stops.TilesOpenRequest
 import dev.rosty.core.model.stops.TripRecord
+import dev.rosty.core.ops.TileHandle
 import dev.rosty.platform.contacts.ShortcutsRepository
 import dev.rosty.platform.location.FakeLocationRepository
 import dev.rosty.platform.location.FakeTripRepository
@@ -37,6 +39,9 @@ import dev.rosty.shell.HasContainer
 import dev.rosty.stops.map.FakeTileSource
 import dev.rosty.stops.map.MapFixtures
 import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.offline.MapArea
+import dev.rosty.stops.settings.AlarmDevice
+import dev.rosty.stops.settings.FakeAlarmDevice
 import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AlarmEvent
 import dev.rosty.wa.FakeWaRepository
@@ -213,6 +218,26 @@ open class TestStopsContainer(
     override fun createLocation(): LocationRepository = fakeLocation
 
     override fun createTrips(): TripRepository = fakeTrips
+
+    /** E7.10: the alarm the settings pages play, recorded. */
+    val fakeAlarmDevice = FakeAlarmDevice()
+
+    override fun createAlarmDevice(): AlarmDevice = fakeAlarmDevice
+
+    /** E7.10: what Settings > Map tiles opens; null keeps the core's own `tiles.open`. */
+    var tileOpener: (suspend (TilesOpenRequest) -> Outcome<TileHandle>)? = null
+
+    override suspend fun openTiles(request: TilesOpenRequest): Outcome<TileHandle> =
+        tileOpener?.invoke(request) ?: super.openTiles(request)
+
+    /** The offline downloads asked for (no WorkManager in these tests). */
+    val scheduledAreas = mutableListOf<MapArea>()
+
+    override fun scheduleOffline(area: MapArea) {
+        scheduledAreas += area
+    }
+
+    override fun unscheduleOffline() = Unit
 
     /** The fixture village and nothing else: no network, deterministic tiles. */
     val tileSource = FakeTileSource.city()

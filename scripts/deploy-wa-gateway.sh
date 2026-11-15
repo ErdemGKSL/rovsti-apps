@@ -254,7 +254,7 @@ cmd_deploy() {
 
 The gateway is running on $DEPLOY_HOST at http://$GATEWAY_BIND (loopback only).
 Next: in Cloudflare Zero Trust > Networks > Tunnels > (your tunnel) > Public hostname, send
-https://rovsti.erdemdev.tr to  HTTP  localhost:${GATEWAY_BIND##*:}  and enter that address in the apps.
+https://rosty.erdemdev.tr to  HTTP  localhost:${GATEWAY_BIND##*:}  and enter that address in the apps.
 Check later with:  scripts/deploy-wa-gateway.sh status
 EOF
 }

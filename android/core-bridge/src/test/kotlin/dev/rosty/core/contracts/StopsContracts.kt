@@ -96,6 +96,7 @@ import dev.rosty.core.model.stops.SnoozeRequest
 import dev.rosty.core.model.stops.StatsAnswer
 import dev.rosty.core.model.stops.StatsRequest
 import dev.rosty.core.model.stops.StatusShareRequest
+import dev.rosty.core.model.stops.StoreGtfsRemoveAnswer
 import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripClearAnswer
@@ -306,6 +307,10 @@ object StopsContracts : ContractModels {
             op<DirRequest, StoreTripClearAnswer>(
                 "stops.store_trip_clear",
                 ok = listOf("no_trip"),
+            )
+            op<DirRequest, StoreGtfsRemoveAnswer>(
+                "stops.store_gtfs_remove",
+                ok = listOf("no_feed"),
             )
             op<StoreReadRequest, StoreReadAnswer>(
                 "stops.store_read",

@@ -74,6 +74,8 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   value (Kotlin saves it); the rules (name length, duplicates, the 200-stop cap, favourites first, sound-or-vibrate) stay in Rust.
 - `stops.store_trip_clear {dir?}` deletes `trip.json` under the trip lock and records nothing (`{removed}`; clearing again answers
   `false`): for a start Android refused, where `store_trip_end` would put a trip that never ran into the history.
+- `stops.store_gtfs_remove {dir?}` deletes the imported feed `gtfs.json` (Settings > Transit data > Remove; `{removed}`, removing again
+  answers `false`).
 - The trip status (`FixOut`: the headless `trip_fix` answer and `out` of `stops.trip_fix`) carries `eta_min`, the whole minutes of
   "about 14 min" in its `text` (null without a speed), so the live card can ask `stops.arrival_clock` (S41).
 - Saved stop notes (S44): `SavedStop.note` (absent from `saved.json` when empty, so the file stays version 2 both ways; one trimmed
@@ -125,6 +127,8 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 - Download errors are envelopes with a sentence in `message` and a stable `detail.reason`: `unreachable` (`network`), `refused` (`auth`),
   `no_tile` (`not_found`), `status` (`network`, with `status`), `too_large` (`invalid`), `not_vector` (`parse`), `storage` (`io`); a bad server URL is
   `invalid` with `scheme`, `placeholder`, `whitespace`, `too_long` or `empty`.
+- `tiles.offline_plan {bbox | circle, zooms?}` (no handle) answers `{total, top_zoom, capped, estimate_bytes}` for the same area without
+  downloading anything: the estimate Settings shows before the download (S10). It plans exactly as `tiles.offline_start`.
 - `tiles.offline_start {handle, bbox | circle, zooms?}` plans the tiles (`bbox {south, west, north, east}` with `tiles_for_area` and the 2 500-tile
   budget, or `circle {center, radius_m, margin_m?, budget?}` with `tiles_for_circle` for a trip), answers `{handle, total, top_zoom, capped,
   estimate_bytes}` and downloads on a background thread with four workers. Progress arrives as `tiles.offline` events `{job, done, saved, failed,
@@ -266,7 +270,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
 | `rosty_app_core::stops::pick` | stops | stops | op | stops.pick_replay, stops.pick_labels, stops.pick_save_offer |
 | `rosty_app_core::stops::snap` | stops | stops | op | stops.snap |
-| `rosty_app_core::stops::store` | stops | stops | op | stops.store_trip_load, stops.store_trip_save, stops.store_trip_end, stops.store_trip_clear, stops.store_read, stops.store_write |
+| `rosty_app_core::stops::store` | stops | stops | op | stops.store_trip_load, stops.store_trip_save, stops.store_trip_end, stops.store_trip_clear, stops.store_gtfs_remove, stops.store_read, stops.store_write |
 | `rosty_app_core::stops::types` | stops | stops | op | stops.pick_replay, stops.pick_labels, stops.pick_save_offer |
 | `rosty_app_core::storage::BackupRefusal` | rosty_ui | platform | op | phone.backup_export, phone.backup_import |
 | `rosty_app_core::storage::Loaded` | rosty_ui | platform | op | phone.prefs_load, phone.prefs_save |
@@ -815,17 +819,17 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::share_text` | stops | stops | op | stops.dest_parse, stops.dest_share |
 | `rosty_geo::shortcut_spec` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
 | `rosty_geo::status_share_text` | stops | stops | op | stops.pick_labels, stops.trip_status_share |
-| `rosty_geo::tiles::AREA_MIN_ZOOM` | stops | tiles | op | tiles.offline_start |
-| `rosty_geo::tiles::AREA_TILE_BUDGET` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::AREA_MIN_ZOOM` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
+| `rosty_geo::tiles::AREA_TILE_BUDGET` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::ATTRIBUTION` | stops | tiles | op | stops.prefs_choices |
 | `rosty_geo::tiles::AreaDownload` | stops | tiles | op | tiles.offline_start, tiles.offline_cancel |
-| `rosty_geo::tiles::AreaPlan` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::AreaPlan` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::ClassGeometry` | stops | tiles | op | tiles.encode_mvt |
 | `rosty_geo::tiles::DEFAULT_TILE_URL` | stops | tiles | op | stops.prefs_choices, tiles.open |
 | `rosty_geo::tiles::DrawClass` | stops | tiles | op | tiles.encode_mvt |
 | `rosty_geo::tiles::FetchQueue` | stops | tiles | kotlin | :stops TileScheduler.kt (dedupes view requests; every `tile` call is one blocking Rust read, offline downloads use four Rust workers) |
 | `rosty_geo::tiles::LruIndex` | stops | tiles | op | tiles.open, tiles.usage, tiles.set_cap |
-| `rosty_geo::tiles::MAX_TILE_ZOOM` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::MAX_TILE_ZOOM` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::MapStyle` | stops | tiles | op | tiles.encode_mvt |
 | `rosty_geo::tiles::Priority` | stops | tiles | kotlin | :stops TileScheduler.kt (view requests before prefetch) |
 | `rosty_geo::tiles::Rgba8` | stops | tiles | op | tiles.encode_mvt |
@@ -839,12 +843,12 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::tiles::TileUrlError` | stops | tiles | op | tiles.open, tiles.test_server |
 | `rosty_geo::tiles::build_layer` | stops | tiles | kotlin | :stops MapTileLayer.kt (clip and merge per frame; vertex budget by class) |
 | `rosty_geo::tiles::display_zoom` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
-| `rosty_geo::tiles::estimate_bytes` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::estimate_bytes` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::frac_to_coord` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rosty_geo::tiles::line_width` | stops | tiles | kotlin | :stops MapTileLayer.kt (`w14 * 2^clamp(zoom - 14, -3, 2)`, at least 0.5 px; width14 is in the buffer) |
 | `rosty_geo::tiles::stand_in` | stops | tiles | op | tiles.stand_in |
-| `rosty_geo::tiles::tiles_for_area` | stops | tiles | op | tiles.offline_start |
-| `rosty_geo::tiles::tiles_for_circle` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::tiles_for_area` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
+| `rosty_geo::tiles::tiles_for_circle` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::tiles_for_view` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rosty_geo::usage_text` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
 | `rosty_geo::view::FollowMode` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |

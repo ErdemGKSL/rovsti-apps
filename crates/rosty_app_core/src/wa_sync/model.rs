@@ -284,6 +284,22 @@ pub struct ThreadPage {
     pub syncing: bool,
 }
 
+/// Where a page of starred messages ended: pass it back as `before` for the next (older) page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StarredCursor {
+    pub timestamp_ms: i64,
+    pub chat: String,
+    pub id: String,
+}
+
+/// A page of the starred messages of every chat, newest first.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct StarredPage {
+    pub items: Vec<MessageRow>,
+    /// The cursor of the next page; `None` when nothing older is starred.
+    pub next: Option<StarredCursor>,
+}
+
 /// What [`super::Store::apply_events`] did.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct AppliedEvents {

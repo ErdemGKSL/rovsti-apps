@@ -1411,6 +1411,383 @@ fn edits_deletes_reactions_and_read_marks_queue_too() {
     assert!(row.pending.is_empty());
 }
 
+fn star(id: &str, starred: bool) -> Action {
+    Action::Star {
+        message_id: id.into(),
+        starred,
+    }
+}
+
+/// A page row as the gateway has it, with its star.
+fn starred_rich(message: WaMessage, starred: bool) -> RichMessage {
+    let mut rich = rich(message);
+    rich.meta.starred = starred;
+    rich
+}
+
+fn is_starred(store: &Store, chat: &str, id: &str) -> bool {
+    store.message(chat, id).unwrap().unwrap().starred
+}
+
+fn starred_ids(page: &StarredPage) -> Vec<(&str, &str)> {
+    page.items
+        .iter()
+        .map(|row| (row.chat.as_str(), row.id.as_str()))
+        .collect()
+}
+
+#[test]
+fn a_star_shows_at_once_holds_against_the_gateway_and_goes_out() {
+    let mut store = store();
+    store
+        .apply_events(&[env(1, GatewayEvent::Message(text(ALI, "A", 1_000, "hi")))])
+        .unwrap();
+    let queued = store
+        .outbox_enqueue("s1", ALI, &star("A", true), 2_000)
+        .unwrap();
+    assert_eq!(queued.action.kind(), "star");
+    assert_eq!(queued.state, OutboxState::Waiting);
+    assert!(is_starred(&store, ALI, "A"), "starred before it went out");
+    assert_eq!(
+        starred_ids(&store.starred(10, None).unwrap()),
+        [(ALI, "A")],
+        "the Starred list has it while it waits"
+    );
+    // It is not a thread row and not a pending mark of its message.
+    let thread = store.thread(ALI, 10, None).unwrap();
+    assert_eq!(ids(&thread), ["A"]);
+    assert!(thread.items[0].pending.is_empty());
+    // Queuing the same client id again is the same row.
+    store
+        .outbox_enqueue("s1", ALI, &star("A", true), 2_001)
+        .unwrap();
+    assert_eq!(store.outbox().unwrap().len(), 1);
+
+    // A page fetched before the star went out still says "not starred": the star holds.
+    store
+        .store_page(
+            ALI,
+            None,
+            50,
+            &[starred_rich(text(ALI, "A", 1_000, "hi"), false)],
+            2_500,
+        )
+        .unwrap();
+    assert!(is_starred(&store, ALI, "A"));
+
+    // A gateway that did not do it is asked again; the star stays.
+    assert_eq!(
+        store.outbox_due(3_000, false).unwrap().items[0].client_id,
+        "s1"
+    );
+    assert_eq!(
+        store
+            .outbox_settle("s1", &error(ErrorKind::Gateway), 3_000)
+            .unwrap(),
+        Settled::Waiting {
+            next_attempt_ms: 3_000 + BACKOFF_BASE_MS
+        }
+    );
+    assert!(is_starred(&store, ALI, "A"));
+    let due = store.outbox_due(3_100, true).unwrap();
+    assert_eq!(due.items[0].action, star("A", true));
+    assert_eq!(
+        store
+            .outbox_settle(
+                "s1",
+                &Outcome::Sent {
+                    message_id: None,
+                    timestamp_ms: None
+                },
+                3_200
+            )
+            .unwrap(),
+        Settled::Done { message_id: None }
+    );
+    assert!(store.outbox().unwrap().is_empty());
+    assert!(is_starred(&store, ALI, "A"));
+
+    // Nothing waits any more: an unstar made on another device is followed.
+    store
+        .store_page(
+            ALI,
+            None,
+            50,
+            &[starred_rich(text(ALI, "A", 1_000, "hi"), false)],
+            4_000,
+        )
+        .unwrap();
+    assert!(!is_starred(&store, ALI, "A"));
+    assert!(store.starred(10, None).unwrap().items.is_empty());
+}
+
+#[test]
+fn a_refused_star_is_undone_and_dropped() {
+    let mut store = store();
+    store
+        .store_page(
+            ALI,
+            None,
+            50,
+            &[
+                starred_rich(text(ALI, "B", 2_000, "starred"), true),
+                rich(text(ALI, "A", 1_000, "plain")),
+            ],
+            0,
+        )
+        .unwrap();
+    store
+        .outbox_enqueue("s1", ALI, &star("A", true), 3_000)
+        .unwrap();
+    store
+        .outbox_enqueue("c1", ALI, &send("next"), 3_001)
+        .unwrap();
+    assert!(is_starred(&store, ALI, "A"));
+    store.outbox_due(3_100, false).unwrap();
+    assert_eq!(
+        store
+            .outbox_settle("s1", &error(ErrorKind::Rejected), 3_200)
+            .unwrap(),
+        Settled::Failed
+    );
+    assert!(!is_starred(&store, ALI, "A"), "the star is taken back");
+    // No failed row is left behind, and the chat's next row goes out.
+    let left: Vec<_> = store
+        .outbox()
+        .unwrap()
+        .into_iter()
+        .map(|item| item.client_id)
+        .collect();
+    assert_eq!(left, ["c1"]);
+    assert_eq!(
+        store.outbox_due(3_300, false).unwrap().items[0].client_id,
+        "c1"
+    );
+    store
+        .outbox_settle("c1", &sent("S1", 3_400), 3_400)
+        .unwrap();
+
+    // A refused unstar brings the star back.
+    store
+        .outbox_enqueue("s2", ALI, &star("B", false), 4_000)
+        .unwrap();
+    assert!(!is_starred(&store, ALI, "B"));
+    store.outbox_due(4_100, false).unwrap();
+    store
+        .outbox_settle("s2", &error(ErrorKind::Rejected), 4_200)
+        .unwrap();
+    assert!(is_starred(&store, ALI, "B"));
+    assert!(store.outbox().unwrap().is_empty());
+}
+
+#[test]
+fn a_star_and_its_unstar_written_offline_are_one_call() {
+    let mut store = store();
+    store
+        .apply_events(&[
+            env(1, GatewayEvent::Message(text(ALI, "A", 1_000, "one"))),
+            env(2, GatewayEvent::Message(text(ALI, "B", 2_000, "two"))),
+        ])
+        .unwrap();
+    store
+        .outbox_enqueue("s1", ALI, &star("A", true), 3_000)
+        .unwrap();
+    store
+        .outbox_enqueue("s2", ALI, &star("B", true), 3_001)
+        .unwrap();
+    store
+        .outbox_enqueue("s3", ALI, &star("A", false), 3_002)
+        .unwrap();
+    // The unstar replaced the star of the same message; the other message's star is untouched.
+    let queued: Vec<_> = store
+        .outbox()
+        .unwrap()
+        .into_iter()
+        .map(|item| (item.client_id, item.action))
+        .collect();
+    assert_eq!(
+        queued,
+        [
+            ("s2".to_owned(), star("B", true)),
+            ("s3".to_owned(), star("A", false))
+        ]
+    );
+    assert!(!is_starred(&store, ALI, "A"));
+    assert!(is_starred(&store, ALI, "B"));
+    assert_eq!(starred_ids(&store.starred(10, None).unwrap()), [(ALI, "B")]);
+
+    // One in flight cannot be taken back: the newer wish waits behind it and decides the flag whatever comes back.
+    assert_eq!(
+        store.outbox_due(4_000, false).unwrap().items[0].client_id,
+        "s2"
+    );
+    store
+        .outbox_enqueue("s4", ALI, &star("B", false), 4_001)
+        .unwrap();
+    assert_eq!(store.outbox().unwrap().len(), 3);
+    assert!(!is_starred(&store, ALI, "B"));
+    let done = Outcome::Sent {
+        message_id: None,
+        timestamp_ms: None,
+    };
+    store.outbox_settle("s2", &done, 4_100).unwrap();
+    assert!(
+        !is_starred(&store, ALI, "B"),
+        "the newer unstar still holds"
+    );
+    // Undo: the star again replaces the unstar that has not gone out.
+    store
+        .outbox_enqueue("s5", ALI, &star("B", true), 4_200)
+        .unwrap();
+    let queued: Vec<_> = store
+        .outbox()
+        .unwrap()
+        .into_iter()
+        .map(|item| item.client_id)
+        .collect();
+    assert_eq!(queued, ["s3", "s5"]);
+    assert!(is_starred(&store, ALI, "B"));
+    // A refused star that a newer one replaced in the meantime leaves the flag to the newer one.
+    assert_eq!(
+        store.outbox_due(4_300, false).unwrap().items[0].client_id,
+        "s3"
+    );
+    store
+        .outbox_enqueue("s6", ALI, &star("A", true), 4_301)
+        .unwrap();
+    store
+        .outbox_settle("s3", &error(ErrorKind::Rejected), 4_400)
+        .unwrap();
+    assert!(is_starred(&store, ALI, "A"));
+    // A star cannot be edited like a text.
+    assert!(matches!(
+        store.outbox_edit("s6", "x"),
+        Err(Error::Invalid(_))
+    ));
+}
+
+#[test]
+fn starred_messages_of_every_chat_are_listed_newest_first_in_pages() {
+    let mut store = store();
+    store
+        .store_page(
+            ALI,
+            None,
+            50,
+            &[
+                starred_rich(text(ALI, "A5", 5_000, "five"), true),
+                rich(text(ALI, "A4", 4_000, "not starred")),
+                starred_rich(text(ALI, "A3", 3_000, "three"), true),
+                starred_rich(mine(ALI, "A1", 1_000, "one"), true),
+            ],
+            0,
+        )
+        .unwrap();
+    store
+        .store_page(
+            BERK,
+            None,
+            50,
+            &[
+                starred_rich(text(BERK, "B4", 4_000, "four"), true),
+                // Same time as A3 and the same id as a message of the other chat.
+                starred_rich(text(BERK, "A3", 3_000, "three too"), true),
+                starred_rich(text(BERK, "B2", 2_000, "two"), true),
+            ],
+            0,
+        )
+        .unwrap();
+    store
+        .store_page(
+            GROUP,
+            None,
+            50,
+            &[starred_rich(text(GROUP, "G6", 6_000, "six"), true)],
+            0,
+        )
+        .unwrap();
+
+    let all = store.starred(50, None).unwrap();
+    assert_eq!(
+        starred_ids(&all),
+        [
+            (GROUP, "G6"),
+            (ALI, "A5"),
+            (BERK, "B4"),
+            (BERK, "A3"),
+            (ALI, "A3"),
+            (BERK, "B2"),
+            (ALI, "A1"),
+        ]
+    );
+    assert_eq!(all.next, None);
+    assert!(all.items.iter().all(|row| row.starred));
+    assert!(all.items[6].from_me);
+
+    // Pages follow the cursor without gaps or repeats, also across messages of one time.
+    let mut seen = Vec::new();
+    let mut before: Option<StarredCursor> = None;
+    let mut pages = 0;
+    loop {
+        let page = store.starred(3, before.as_ref()).unwrap();
+        assert!(page.items.len() <= 3);
+        seen.extend(
+            page.items
+                .iter()
+                .map(|row| (row.chat.clone(), row.id.clone())),
+        );
+        pages += 1;
+        match page.next {
+            Some(next) => before = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(pages, 3);
+    let expected: Vec<_> = all
+        .items
+        .iter()
+        .map(|row| (row.chat.clone(), row.id.clone()))
+        .collect();
+    assert_eq!(seen, expected);
+    // A full last page names no next one.
+    let first = store.starred(4, None).unwrap();
+    assert_eq!(
+        first.next,
+        Some(StarredCursor {
+            timestamp_ms: 3_000,
+            chat: BERK.into(),
+            id: "A3".into()
+        })
+    );
+    let rest = store.starred(3, first.next.as_ref()).unwrap();
+    assert_eq!(rest.items.len(), 3);
+    assert_eq!(rest.next, None);
+
+    // Left out: a deleted message, the messages cleared on another device, a chat deleted there.
+    store
+        .apply_events(&[
+            env(
+                1,
+                GatewayEvent::MessageDeleted {
+                    chat: GROUP.into(),
+                    id: "G6".into(),
+                    deleted_at: Some(7_000),
+                    deleted_by: None,
+                },
+            ),
+            env(2, GatewayEvent::ChatCleared { jid: BERK.into() }),
+        ])
+        .unwrap();
+    assert_eq!(
+        starred_ids(&store.starred(50, None).unwrap()),
+        [(ALI, "A5"), (ALI, "A3"), (ALI, "A1")]
+    );
+    store
+        .apply_events(&[env(3, GatewayEvent::ChatDeleted { jid: ALI.into() })])
+        .unwrap();
+    assert!(store.starred(50, None).unwrap().items.is_empty());
+}
+
 #[test]
 fn a_media_send_queues_with_its_file_and_keeps_it_as_the_cached_media() {
     let mut store = store();
@@ -1522,7 +1899,7 @@ fn a_version_one_file_upgrades_and_keeps_its_data() {
     let opened = store.opened().unwrap();
     assert_eq!(
         (opened.schema_version, opened.last_seq, opened.needs_resync),
-        (2, Some(41), false)
+        (SCHEMA_VERSION, Some(41), false)
     );
     let row = store.message(ALI, "A").unwrap().unwrap();
     assert_eq!(row.text.as_deref(), Some("from version one"));
@@ -1545,6 +1922,23 @@ fn a_version_one_file_upgrades_and_keeps_its_data() {
             .as_deref(),
         Some("c1")
     );
+    // And what version three added: the index the Starred list reads.
+    let index: String = store
+        .conn
+        .query_row(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'messages_starred'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(index, "messages_starred");
+    store
+        .outbox_enqueue("s1", ALI, &star("S1", true), 2_200)
+        .unwrap();
+    assert_eq!(
+        starred_ids(&store.starred(10, None).unwrap()),
+        [(ALI, "S1")]
+    );
     drop(store);
     // Opening again migrates nothing.
     assert_eq!(
@@ -1553,7 +1947,7 @@ fn a_version_one_file_upgrades_and_keeps_its_data() {
             .opened()
             .unwrap()
             .schema_version,
-        2
+        SCHEMA_VERSION
     );
     let _ = std::fs::remove_dir_all(dir);
 }

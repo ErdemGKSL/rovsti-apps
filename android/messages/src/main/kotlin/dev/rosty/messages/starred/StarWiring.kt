@@ -1,8 +1,9 @@
 package dev.rosty.messages.starred
 
-import dev.rosty.core.Outcome
 import dev.rosty.core.getOrNull
-import dev.rosty.core.model.wa.WaSyncRowState
+import dev.rosty.core.model.wa.WaSyncAction
+import dev.rosty.core.model.wa.WaSyncMessage
+import dev.rosty.core.model.wa.WaSyncStarredCursor
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
 import dev.rosty.messages.inbox.InboxWords
@@ -12,74 +13,89 @@ import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.wa.WaOffline
 import dev.rosty.messages.wa.toBody
 import dev.rosty.messages.wa.toMeta
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 
-/** The app's [StarCenter]: the prefs file, the offline WhatsApp store and the gateway's star call. */
+/** The app's [StarCenter]: the prefs file and the offline WhatsApp store with its outbox. */
 fun realStarCenter(container: MessagesContainer): StarCenter {
     val res = container.context.resources
-    val words = ResourceInboxWords(res)
+    // Builds before the outbox knew stars kept the pending ones in a file of their own; nothing reads it any more.
+    container.scope.launch(Dispatchers.IO) { File(container.context.filesDir, LEGACY_FILE).delete() }
     return StarCenter(
         chat = container.chat,
         store = container.store,
-        wa =
-            WaStarSeams(
-                online = container.waOffline.online,
-                changes = container.waOffline.changes,
-                scan = { scanStoredStars(container.waOffline, words, res.getString(R.string.tools_me)) },
-                star = { chat, id, starred -> container.waRemote.star(chat, id, starred) is Outcome.Ok },
-            ),
-        file = File(container.context.filesDir, StarCenter.FILE),
+        wa = waStarSeams(container.waOffline, ResourceInboxWords(res), res.getString(R.string.tools_me)),
         scope = container.scope,
-        now = System::currentTimeMillis,
     )
 }
 
 /**
- * The starred messages among the newest [SCAN_ROWS] stored rows of the [SCAN_CHATS] most recent chats. The store has
- * no query for stars across chats, so this is what can be read without one; a star made on this phone is in
- * [StarCenter]'s own file as well, however old the message is.
+ * The WhatsApp side of [StarCenter] over [offline]: a star is an outbox action like a send (shown at once, sent now or
+ * by the outbox job when a network is back), and the Starred list is the store's own query across all chats.
  */
-internal suspend fun scanStoredStars(
+internal fun waStarSeams(
+    offline: WaOffline,
+    words: InboxWords,
+    me: String,
+): WaStarSeams =
+    WaStarSeams(
+        changes = offline.changes,
+        starred = { storedStars(offline, words, me) },
+        star = { chat, id, starred -> offline.enqueue(chat, WaSyncAction.Star(id, starred)) },
+    )
+
+/**
+ * The starred messages of every chat of the store (`wa_sync.starred`), newest first, at most [MAX_STARS]; null while
+ * WhatsApp is not linked.
+ */
+internal suspend fun storedStars(
     offline: WaOffline,
     words: InboxWords,
     me: String,
 ): List<WaStarRow>? {
     val store = offline.session.value?.store ?: return null
-    val chats = store.chats(includeArchived = true).getOrNull() ?: return null
-    return chats.take(SCAN_CHATS).flatMap { chat ->
-        val title =
-            chat.name?.takeIf { it.isNotBlank() }
-                ?: chat.pushName?.takeIf { it.isNotBlank() }
-                ?: numberOfJid(chat.jid)
-                ?: chat.jid
+    val rows = ArrayList<WaSyncMessage>()
+    var before: WaSyncStarredCursor? = null
+    while (rows.size < MAX_STARS) {
+        val page = store.starred(PAGE, before).getOrNull() ?: return null
+        rows += page.items
+        before = page.next ?: break
+    }
+    if (rows.isEmpty()) return emptyList()
+    val chats =
         store
-            .thread(chat.jid, SCAN_ROWS)
+            .chats(includeArchived = true)
             .getOrNull()
-            ?.items
             .orEmpty()
-            .filter { it.starred && !it.deleted && it.state !in QUEUED }
-            .map { row ->
-                val author =
-                    when {
-                        row.fromMe -> {
-                            me
-                        }
+            .associateBy { it.jid }
+    return rows.map { row ->
+        val chat = chats[row.chat]
+        val title =
+            chat?.name?.takeIf { it.isNotBlank() }
+                ?: chat?.pushName?.takeIf { it.isNotBlank() }
+                ?: numberOfJid(row.chat)
+                ?: row.chat
+        val author =
+            when {
+                row.fromMe -> {
+                    me
+                }
 
-                        chat.isGroup -> {
-                            row.senderName?.takeIf { it.isNotBlank() } ?: row.sender?.let(::numberOfJid)
-                                ?: title
-                        }
+                chat?.isGroup ?: row.chat.endsWith(GROUP_SERVER) -> {
+                    row.senderName?.takeIf { it.isNotBlank() } ?: row.sender?.let(::numberOfJid) ?: title
+                }
 
-                        else -> {
-                            title
-                        }
-                    }
-                val preview = row.text?.takeIf { it.isNotBlank() } ?: waPreview(row.toBody(), row.toMeta(), words)
-                WaStarRow(chat.jid, row.id, row.timestampMs, author, preview, title)
+                else -> {
+                    title
+                }
             }
+        val preview = row.text?.takeIf { it.isNotBlank() } ?: waPreview(row.toBody(), row.toMeta(), words)
+        WaStarRow(row.chat, row.id, row.timestampMs, author, preview, title)
     }
 }
 
-private val QUEUED = setOf(WaSyncRowState.Waiting, WaSyncRowState.Sending, WaSyncRowState.Failed)
-private const val SCAN_CHATS = 40
-private const val SCAN_ROWS = 200
+private const val LEGACY_FILE = "wa-stars.json"
+private const val GROUP_SERVER = "@g.us"
+private const val PAGE = 200
+private const val MAX_STARS = 1_000

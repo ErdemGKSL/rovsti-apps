@@ -35,6 +35,8 @@ import dev.rosty.core.model.wa.WaSyncPlanRequest
 import dev.rosty.core.model.wa.WaSyncRetried
 import dev.rosty.core.model.wa.WaSyncSettleRequest
 import dev.rosty.core.model.wa.WaSyncSettled
+import dev.rosty.core.model.wa.WaSyncStarredPage
+import dev.rosty.core.model.wa.WaSyncStarredRequest
 import dev.rosty.core.model.wa.WaSyncStoreChatsRequest
 import dev.rosty.core.model.wa.WaSyncStorePageRequest
 import dev.rosty.core.model.wa.WaSyncStoredChats
@@ -76,7 +78,10 @@ interface WaSyncOps {
 
     suspend fun message(req: WaSyncMessageRequest): Outcome<WaSyncMessageAnswer>
 
-    /** Queues a send, edit, delete, reaction or read mark; it shows in the thread at once. */
+    /** A page of the starred messages of every chat, newest first. */
+    suspend fun starred(req: WaSyncStarredRequest): Outcome<WaSyncStarredPage>
+
+    /** Queues a send, edit, delete, reaction, read mark or star; it shows in the thread at once. */
     suspend fun outboxEnqueue(req: WaSyncEnqueueRequest): Outcome<WaSyncItemAnswer>
 
     /** The rows to send now (one per chat, in the order written); they are `sending` until settled. */
@@ -117,6 +122,7 @@ interface WaSyncOps {
                 "wa_sync.chats",
                 "wa_sync.thread",
                 "wa_sync.message",
+                "wa_sync.starred",
                 "wa_sync.outbox_enqueue",
                 "wa_sync.outbox_due",
                 "wa_sync.outbox_settle",
@@ -164,6 +170,9 @@ class NativeWaSyncOps(
 
     override suspend fun message(req: WaSyncMessageRequest) =
         core.call("wa_sync.message", req, WaSyncMessageRequest.serializer(), WaSyncMessageAnswer.serializer())
+
+    override suspend fun starred(req: WaSyncStarredRequest) =
+        core.call("wa_sync.starred", req, WaSyncStarredRequest.serializer(), WaSyncStarredPage.serializer())
 
     override suspend fun outboxEnqueue(req: WaSyncEnqueueRequest) =
         core.call("wa_sync.outbox_enqueue", req, WaSyncEnqueueRequest.serializer(), WaSyncItemAnswer.serializer())

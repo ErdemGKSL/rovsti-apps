@@ -179,7 +179,7 @@ open class MessagesContainer(
     /** Scheduled send (E6.10, AD-MSG6): the local SMS queue with its alarms and the gateway's WhatsApp items. */
     val schedule: ScheduleCenter by lazy { createSchedule() }
 
-    /** Stars (E6.13): SMS/MMS in the prefs (M23), WhatsApp through the gateway (M10), and the Starred list. */
+    /** Stars (E6.13): SMS/MMS in the prefs (M23), WhatsApp through the store's outbox (M10), and the Starred list. */
     val stars: StarCenter by lazy { createStars().also { it.start() } }
 
     /** "Remind me" on a message (M33): Rust's slots and payload, `:platform`'s alarms. */

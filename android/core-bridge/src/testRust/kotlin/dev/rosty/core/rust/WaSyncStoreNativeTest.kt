@@ -117,6 +117,66 @@ class WaSyncStoreNativeTest {
         }
 
     @Test
+    fun aStarWrittenOfflineShowsAtOnceIsListedAndIsUndoneWhenRefused() =
+        runBlocking {
+            val dir = dir()
+            open(dir).use { store ->
+                store
+                    .applyEvents(
+                        listOf(
+                            WaSyncEvent(1, 1_000, text(ali, "A1", 1_000, "merhaba")),
+                            WaSyncEvent(2, 2_000, text(group, "G1", 2_000, "toplantı 5'te")),
+                            WaSyncEvent(3, 3_000, text(ali, "A2", 3_000, "selam", fromMe = true)),
+                        ),
+                    ).getOrOk()
+                store.enqueue("s1", ali, WaSyncAction.Star("A1", true), nowMs = 4_000).getOrOk()
+                store.enqueue("s2", group, WaSyncAction.Star("G1", true), nowMs = 4_001).getOrOk()
+                store.enqueue("s3", ali, WaSyncAction.Star("A2", true), nowMs = 4_002).getOrOk()
+                // Starred before anything went out, in every chat, newest message first, in pages.
+                assertTrue(store.message(ali, "A1").getOrOk()!!.starred)
+                val first = store.starred(limit = 2).getOrOk()
+                assertEquals(listOf("A2", "G1"), first.items.map { it.id })
+                val rest = store.starred(limit = 2, before = first.next).getOrOk()
+                assertEquals(listOf("A1"), rest.items.map { it.id })
+                assertNull(rest.next)
+                // A star and its unstar written offline are one call.
+                store.enqueue("s4", ali, WaSyncAction.Star("A2", false), nowMs = 4_003).getOrOk()
+                assertEquals(listOf("s1", "s2", "s4"), store.outbox().getOrOk().map { it.clientId })
+            }
+
+            // The queue survives the close; the gateway takes one star and refuses the other.
+            open(dir).use { store ->
+                assertEquals(
+                    listOf("G1", "A1"),
+                    store
+                        .starred(limit = 50)
+                        .getOrOk()
+                        .items
+                        .map { it.id },
+                )
+                val due = store.due(nowMs = 5_000).getOrOk().items
+                assertEquals(listOf("s1", "s2"), due.map { it.clientId })
+                assertEquals(WaSyncAction.Star("A1", true), due[0].action)
+                assertEquals(
+                    WaSyncSettled.DONE,
+                    store.settle("s2", WaSyncOutcome.Sent(), nowMs = 5_100).getOrOk().state,
+                )
+                val refused = WaSyncOutcome.Error(WaSyncErrorKind.Rejected, "no such message")
+                assertEquals(WaSyncSettled.FAILED, store.settle("s1", refused, nowMs = 5_101).getOrOk().state)
+                assertFalse(store.message(ali, "A1").getOrOk()!!.starred)
+                assertEquals(
+                    listOf("G1"),
+                    store
+                        .starred(limit = 50)
+                        .getOrOk()
+                        .items
+                        .map { it.id },
+                )
+                assertEquals(listOf("s4"), store.outbox().getOrOk().map { it.clientId })
+            }
+        }
+
+    @Test
     fun aGapIsRepairedByPagingDownToTheStoredHistory() =
         runBlocking {
             open(dir()).use { store ->

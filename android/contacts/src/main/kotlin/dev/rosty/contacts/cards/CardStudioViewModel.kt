@@ -2,6 +2,7 @@ package dev.rosty.contacts.cards
 
 import dev.rosty.contacts.R
 import dev.rosty.core.Outcome
+import dev.rosty.core.log.RostyLog
 import dev.rosty.core.ops.CardPalette
 import dev.rosty.core.ops.CardRenderRequest
 import dev.rosty.core.ops.CardSpec
@@ -144,6 +145,8 @@ class CardStudioViewModel(
                     }
 
                     is Outcome.Err -> {
+                        // The reason reaches the developer-mode Logs page (masked), so a device report carries it.
+                        RostyLog.w("cards", "render failed: template=${spec.template} (${answer.error})")
                         mutable.update { it.copy(rendering = false, failed = true) }
                         outbox.trySend(CardStudioEffect.Toast(UiText.Res(R.string.card_studio_failed)))
                     }

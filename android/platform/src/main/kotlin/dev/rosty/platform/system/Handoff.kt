@@ -3,6 +3,7 @@ package dev.rosty.platform.system
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import org.json.JSONObject
 
@@ -41,9 +42,42 @@ object Handoff {
             .toString()
     }
 
-    /** Starts the first signature-matching app that handles [action]; false when none does. The app manifest carries
-     * the `<queries>` entry for the hand-off actions (ARCH 7.2). */
+    /**
+     * The activity of the first signature-matching app that handles [action]; null when none is installed (or
+     * visible: the app manifest carries the `<queries>` entry that shows the sibling, ARCH 7.2).
+     */
     @SuppressLint("QueryPermissionsNeeded")
+    private fun target(
+        context: Context,
+        action: String,
+    ): ActivityInfo? {
+        val pm = context.packageManager
+
+        @Suppress("DEPRECATION")
+        return pm
+            .queryIntentActivities(Intent(action), 0)
+            .map { it.activityInfo }
+            .firstOrNull {
+                pm.checkSignatures(
+                    context.packageName,
+                    it.packageName,
+                ) == PackageManager.SIGNATURE_MATCH
+            }
+    }
+
+    /** Whether a sibling Rosty app (signed like this one) can take [action]: an action nobody takes is not offered. */
+    fun canStart(
+        context: Context,
+        action: String,
+    ): Boolean =
+        isHandoffAction(action) &&
+            try {
+                target(context, action) != null
+            } catch (_: Exception) {
+                false
+            }
+
+    /** Starts the first signature-matching app that handles [action]; false when none does. */
     fun start(
         context: Context,
         action: String,
@@ -52,21 +86,7 @@ object Handoff {
     ): Boolean {
         if (!isHandoffAction(action) || jid.isEmpty()) return false
         return try {
-            val pm = context.packageManager
-            val probe = Intent(action)
-
-            @Suppress("DEPRECATION")
-            val target =
-                pm
-                    .queryIntentActivities(probe, 0)
-                    .map { it.activityInfo }
-                    .firstOrNull {
-                        pm.checkSignatures(
-                            context.packageName,
-                            it.packageName,
-                        ) == PackageManager.SIGNATURE_MATCH
-                    }
-                    ?: return false
+            val target = target(context, action) ?: return false
             val intent =
                 Intent(action)
                     .setClassName(target.packageName, target.name)

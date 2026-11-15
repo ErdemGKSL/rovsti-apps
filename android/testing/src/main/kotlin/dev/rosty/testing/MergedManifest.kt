@@ -80,6 +80,14 @@ class MergedManifest private constructor(
         children(root, "queries").flatMap { q -> children(q, "intent").map(::intentSpec) }
     }
 
+    /** The authorities of the `<provider>` entries of `<queries>`. */
+    val queriedProviders: Set<String> by lazy {
+        children(root, "queries")
+            .flatMap { q -> children(q, "provider") }
+            .mapNotNull { it.android("authorities") }
+            .toSet()
+    }
+
     fun component(name: String): Component = components.single { it.name == name }
 
     private fun intentSpec(e: Element): IntentSpec {

@@ -19,4 +19,12 @@
     <string name="wa_link_key_refused">The gateway no longer accepts this app\'s connect key</string>
     <string name="wa_link_unreachable">Can\'t reach the WhatsApp gateway</string>
     <string name="wa_link_failed">WhatsApp is not available right now</string>
+
+    <!-- Link hand-over between Rosty apps (WA-R2). %1$s is the name of the other app. -->
+    <string name="wa_link_shared_from">This link was taken from %1$s. Unlinking here leaves it linked there.</string>
+    <string name="wa_link_shared_from_other">This link was taken from another Rosty app. Unlinking here leaves it linked there.</string>
+    <string name="wa_link_use_sibling">Use the link from %1$s</string>
+    <string name="wa_link_use_sibling_other">Use the link from another Rosty app</string>
+    <string name="wa_link_use_sibling_detail">Already linked on this phone, no key to paste</string>
+    <string name="wa_link_sibling_section">Other Rosty apps</string>
 </resources>

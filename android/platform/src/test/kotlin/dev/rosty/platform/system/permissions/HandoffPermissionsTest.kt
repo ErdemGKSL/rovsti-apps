@@ -34,6 +34,9 @@ class HandoffPermissionsTest {
                     // People sync v2 S11: the foreground people-sync worker (WorkManager's network check).
                     "uses-permission android.permission.ACCESS_NETWORK_STATE",
                     "uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                    // WA-R2: the WhatsApp link shared between Rosty apps, and "Message" handed to Rosty Messages.
+                    "uses-permission dev.rosty.permission.WA_LINK",
+                    "uses-permission dev.rosty.permission.HANDOFF",
                 ),
             // E6.1: :design's haptics, Contacts' people provider (X.1) and WorkManager (the WhatsApp outbox, E6.4s).
             "messages" to
@@ -42,6 +45,8 @@ class HandoffPermissionsTest {
                     "uses-permission dev.rosty.permission.READ_PEOPLE",
                     "uses-permission android.permission.FOREGROUND_SERVICE",
                     "uses-permission android.permission.WAKE_LOCK",
+                    // WA-R2: the WhatsApp link shared between Rosty apps.
+                    "uses-permission dev.rosty.permission.WA_LINK",
                 ),
             // X.1b: the people sync's WorkManager merges these.
             "contacts" to
@@ -52,6 +57,8 @@ class HandoffPermissionsTest {
                     "uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                     "uses-permission android.permission.RECEIVE_BOOT_COMPLETED",
                     "uses-permission android.permission.WAKE_LOCK",
+                    // WA-R2: the WhatsApp link shared between Rosty apps.
+                    "uses-permission dev.rosty.permission.WA_LINK",
                 ),
             // E7.10 (S10): the offline map area download runs as a dataSync foreground worker.
             "stops" to listOf("uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC"),
@@ -83,7 +90,7 @@ class HandoffPermissionsTest {
                     if (app in
                         listOf("phone", "messages", "contacts")
                     ) {
-                        listOf("declares $READ_PEOPLE signature")
+                        listOf("declares $READ_PEOPLE signature", "declares $WA_LINK signature")
                     } else {
                         emptyList()
                     },
@@ -172,5 +179,6 @@ class HandoffPermissionsTest {
     private companion object {
         const val HANDOFF = "dev.rosty.permission.HANDOFF"
         const val READ_PEOPLE = "dev.rosty.permission.READ_PEOPLE"
+        const val WA_LINK = "dev.rosty.permission.WA_LINK"
     }
 }

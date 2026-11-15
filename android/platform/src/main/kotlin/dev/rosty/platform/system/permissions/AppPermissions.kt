@@ -29,6 +29,8 @@ class AppPermissions(
     val handoffUses: Boolean = false,
     /** Reads Contacts' people provider (X.1b): holds `dev.rosty.permission.READ_PEOPLE`. */
     val peopleUses: Boolean = false,
+    /** Shares its WhatsApp link with the sibling apps (WA-R2): holds `dev.rosty.permission.WA_LINK`. */
+    val waLinkUses: Boolean = false,
     /** What a library merges into the manifest (WorkManager's network, wake lock and boot entries), not asked of the user. */
     val libraryPermissions: Set<String> = emptySet(),
 ) {
@@ -95,6 +97,9 @@ class AppPermissions(
                     ),
                 specialPermissions = setOf(FSI, BATTERY, "android.permission.SCHEDULE_EXACT_ALARM"),
                 peopleUses = true,
+                waLinkUses = true,
+                // "Message" on a person opens the chat in Rosty Messages (WA-R2).
+                handoffUses = true,
                 // work-runtime (the people sync, S11) merges this one; the other three it adds are listed above.
                 libraryPermissions = setOf("android.permission.ACCESS_NETWORK_STATE"),
             )
@@ -127,6 +132,7 @@ class AppPermissions(
                 specialPermissions = setOf("android.permission.SCHEDULE_EXACT_ALARM"),
                 // Names and WhatsApp pictures from Contacts' people provider (X.1).
                 peopleUses = true,
+                waLinkUses = true,
                 // work-runtime (the WhatsApp outbox and sync jobs, E6.4s) merges these two.
                 libraryPermissions = setOf(Manifest.permission.WAKE_LOCK, Manifest.permission.FOREGROUND_SERVICE),
             )
@@ -149,6 +155,7 @@ class AppPermissions(
                 installTime = setOf(Manifest.permission.VIBRATE, Manifest.permission.INTERNET, DATA_SYNC),
                 specialPermissions = emptySet(),
                 handoffUses = true,
+                waLinkUses = true,
                 // work-runtime (the people sync, X.1b) merges these four.
                 libraryPermissions =
                     setOf(

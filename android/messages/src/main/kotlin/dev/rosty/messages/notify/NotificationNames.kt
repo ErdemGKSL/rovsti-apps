@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONException
+import org.json.JSONObject
 
 /**
  * The name-order rule on notifications. A notification of a number nobody names is posted with the number at once;
@@ -27,6 +29,7 @@ object NotificationNames {
     private const val MIN_DIGITS = 7
     private const val NUMBER_PUNCTUATION = "+ -()."
     private const val GROUP_SUFFIX = "@g.us"
+    private const val LINE_SEPARATOR = ": "
 
     /**
      * Waits for [who] to be named ([PersonNames.changes] moves when an asked name lands or a contact is saved) and
@@ -86,7 +89,8 @@ object NotificationNames {
     /**
      * Posts the WhatsApp notification [specJson] the core built for [chat] while the app was closed (the push path).
      * The core names a person by the push name; the rule goes on here for a one-to-one chat: a saved contact first,
-     * that push name next, the readable number last, renamed later when WhatsApp answers. A group keeps its title.
+     * that push name next, the readable number last, renamed later when WhatsApp answers. A group keeps its title and
+     * the writers of its lines are named the same way.
      */
     fun showWaPush(
         context: Context,
@@ -95,8 +99,17 @@ object NotificationNames {
     ): Boolean {
         val digest = Digest.parse(specJson) ?: return false
         val container = (context.applicationContext as? HasContainer<*>)?.container as? MessagesContainer
-        if (container == null || chat.endsWith(GROUP_SUFFIX)) return MessagesNotifier.show(context, digest)
+        if (container == null) return MessagesNotifier.show(context, digest)
         val names = container.names
+        if (chat.endsWith(GROUP_SUFFIX)) {
+            // A group keeps its subject; the people inside its lines are named by the rule.
+            val senders = pushSenders(specJson)
+            val lines =
+                runBlocking {
+                    withTimeoutOrNull(LOOKUP_MS) { groupLines(digest.spec.lines, senders) { names.sender(it, null) } }
+                } ?: digest.spec.lines
+            return MessagesNotifier.show(context, digest.copy(spec = digest.spec.copy(lines = lines)))
+        }
         val who = suspend { names.ofJid(chat, waNamesOfTitle(digest.spec.title)) }
         val name = runBlocking { withTimeoutOrNull(LOOKUP_MS) { who() } }
         val posted = MessagesNotifier.show(context, retitled(digest, name?.text))
@@ -112,6 +125,33 @@ object NotificationNames {
         }
         return posted
     }
+
+    /** The `senders` of the core's group digest (`wa_digest`): the writer's JID per line, empty for none. */
+    fun pushSenders(specJson: String): List<String> =
+        try {
+            JSONObject(specJson).optJSONArray("senders")?.let { a -> (0 until a.length()).map { a.optString(it, "") } }
+        } catch (_: JSONException) {
+            null
+        }.orEmpty()
+
+    /**
+     * The lines of a group digest with each writer named by [nameOf]. The core starts a line with the writer's number
+     * (`905550000001: text`); a line whose sender is unknown, or that does not start that way, is left as it is.
+     */
+    suspend fun groupLines(
+        lines: List<String>,
+        senders: List<String>,
+        nameOf: suspend (jid: String) -> String,
+    ): List<String> =
+        lines.mapIndexed { i, line ->
+            val jid = senders.getOrNull(i).orEmpty()
+            val prefix = jid.substringBefore('@') + LINE_SEPARATOR
+            if (jid.isEmpty() || !line.startsWith(prefix)) {
+                line
+            } else {
+                nameOf(jid).takeIf { it.isNotBlank() }?.let { it + LINE_SEPARATOR + line.removePrefix(prefix) } ?: line
+            }
+        }
 
     /** Pure: what the core's push title says about the person: a name is their push name, a number says nothing. */
     fun waNamesOfTitle(title: String): WaNames = if (isNumber(title)) WaNames.None else WaNames(push = title)

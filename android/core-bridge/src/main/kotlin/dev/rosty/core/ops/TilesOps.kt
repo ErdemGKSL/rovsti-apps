@@ -15,6 +15,8 @@ import dev.rosty.core.model.stops.TilesOfflineAnswer
 import dev.rosty.core.model.stops.TilesOfflineRequest
 import dev.rosty.core.model.stops.TilesOpenAnswer
 import dev.rosty.core.model.stops.TilesOpenRequest
+import dev.rosty.core.model.stops.TilesPlanAnswer
+import dev.rosty.core.model.stops.TilesPlanRequest
 import dev.rosty.core.model.stops.TilesSetCapRequest
 import dev.rosty.core.model.stops.TilesSourcesAnswer
 import dev.rosty.core.model.stops.TilesStandInAnswer
@@ -49,6 +51,9 @@ interface TilesOps {
     /** A vector tile to a tile buffer without a cache or a network (base64 both ways). */
     suspend fun encodeMvt(req: TilesEncodeMvtRequest): Outcome<TilesEncodeMvtAnswer>
 
+    /** Plans an area without downloading it: the tile count and size estimate (no handle). */
+    suspend fun offlinePlan(req: TilesPlanRequest): Outcome<TilesPlanAnswer>
+
     /** Plans an area and starts downloading it in the background; progress arrives as `tiles.offline` events. */
     suspend fun offlineStart(req: TilesOfflineRequest): Outcome<TilesOfflineAnswer>
 
@@ -67,6 +72,7 @@ interface TilesOps {
                 "tiles.test_server",
                 "tiles.stand_in",
                 "tiles.encode_mvt",
+                "tiles.offline_plan",
                 "tiles.offline_start",
                 "tiles.offline_cancel",
             )
@@ -103,6 +109,9 @@ class NativeTilesOps(
 
     override suspend fun encodeMvt(req: TilesEncodeMvtRequest) =
         core.call("tiles.encode_mvt", req, TilesEncodeMvtRequest.serializer(), TilesEncodeMvtAnswer.serializer())
+
+    override suspend fun offlinePlan(req: TilesPlanRequest) =
+        core.call("tiles.offline_plan", req, TilesPlanRequest.serializer(), TilesPlanAnswer.serializer())
 
     override suspend fun offlineStart(req: TilesOfflineRequest) =
         core.call("tiles.offline_start", req, TilesOfflineRequest.serializer(), TilesOfflineAnswer.serializer())

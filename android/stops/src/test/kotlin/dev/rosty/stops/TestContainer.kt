@@ -24,7 +24,9 @@ import dev.rosty.core.model.stops.StoreReadAnswer
 import dev.rosty.core.model.stops.StoreReadRequest
 import dev.rosty.core.model.stops.StoreTripLoadAnswer
 import dev.rosty.core.model.stops.StoreWriteRequest
+import dev.rosty.core.model.stops.TilesOpenRequest
 import dev.rosty.core.model.stops.TripRecord
+import dev.rosty.core.ops.TileHandle
 import dev.rosty.platform.contacts.ShortcutsRepository
 import dev.rosty.platform.location.FakeLocationRepository
 import dev.rosty.platform.location.FakeTripRepository
@@ -37,10 +39,15 @@ import dev.rosty.shell.HasContainer
 import dev.rosty.stops.map.FakeTileSource
 import dev.rosty.stops.map.MapFixtures
 import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.offline.MapArea
+import dev.rosty.stops.settings.AlarmDevice
+import dev.rosty.stops.settings.FakeAlarmDevice
 import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AlarmEvent
 import dev.rosty.wa.FakeWaRepository
 import dev.rosty.wa.WaRepository
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -108,13 +115,21 @@ class FakeStopsCore(
     var transitImportedMs: Long? = 1_790_000_000_000L,
     /** `draft.json`: the ends of the last session, put back on the map. */
     var draft: Ends? = null,
+    /** False lets the real core answer `stops.gtfs_search` (the pick sheet's stop search over a test feed). */
+    private val scriptTransit: Boolean = true,
     /** The real core behind the scripted ops ([HostCore.real]); null keeps the fake alone. */
     private val real: RustCore? = null,
 ) {
     val core = FakeRustCore()
 
     /** What the container calls: the fake, or the fake in front of the real core. */
-    val rust: RustCore get() = real?.let { HybridCore(core, it) } ?: core
+    val rust: RustCore get() = real?.let { HybridCore(core, it) { holdRealAnswers } } ?: core
+
+    /**
+     * A screen test on a manual clock ([AppFixture]) sets this: the real core's answers are handed over only at
+     * `Background.await`, so they land in the same clock step in every run.
+     */
+    var holdRealAnswers = false
     val usesRealCore: Boolean get() = real != null
     val savedPrefs = mutableListOf<StopsPrefs>()
     val writes = mutableListOf<StoreWriteRequest>()
@@ -155,10 +170,13 @@ class FakeStopsCore(
         core.onTyped("stops.store_write", StoreWriteRequest.serializer(), Empty.serializer()) {
             writes += it
             if (it.file == "saved") saved = Json.decodeFromJsonElement(SavedStops.serializer(), it.value)
+            if (it.file == "history") history = Json.decodeFromJsonElement(History.serializer(), it.value)
             Outcome.Ok(Empty)
         }
-        core.onTyped("stops.gtfs_search", GtfsSearchRequest.serializer(), GtfsSearchAnswer.serializer()) {
-            Outcome.Ok(GtfsSearchAnswer(transitImportedMs != null, transitImportedMs, emptyList()))
+        if (scriptTransit) {
+            core.onTyped("stops.gtfs_search", GtfsSearchRequest.serializer(), GtfsSearchAnswer.serializer()) {
+                Outcome.Ok(GtfsSearchAnswer(transitImportedMs != null, transitImportedMs, emptyList()))
+            }
         }
     }
 
@@ -198,7 +216,10 @@ open class TestStopsContainer(
 
     override fun createShortcuts(): ShortcutsRepository = fakeShortcuts
 
-    override fun createWa(): WaRepository = FakeWaRepository()
+    /** WhatsApp without a gateway: not linked until a test says otherwise ([FakeWaRepository.setState]). */
+    val fakeWa = FakeWaRepository()
+
+    override fun createWa(): WaRepository = fakeWa
 
     override fun createSpecialAccess(): SpecialAccess = fakeSpecial
 
@@ -206,10 +227,33 @@ open class TestStopsContainer(
 
     override fun createTrips(): TripRepository = fakeTrips
 
+    /** E7.10: the alarm the settings pages play, recorded. */
+    val fakeAlarmDevice = FakeAlarmDevice()
+
+    override fun createAlarmDevice(): AlarmDevice = fakeAlarmDevice
+
+    /** E7.10: what Settings > Map tiles opens; null keeps the core's own `tiles.open`. */
+    var tileOpener: (suspend (TilesOpenRequest) -> Outcome<TileHandle>)? = null
+
+    override suspend fun openTiles(request: TilesOpenRequest): Outcome<TileHandle> =
+        tileOpener?.invoke(request) ?: super.openTiles(request)
+
+    /** The offline downloads asked for (no WorkManager in these tests). */
+    val scheduledAreas = mutableListOf<MapArea>()
+
+    override fun scheduleOffline(area: MapArea) {
+        scheduledAreas += area
+    }
+
+    override fun unscheduleOffline() = Unit
+
     /** The fixture village and nothing else: no network, deterministic tiles. */
     val tileSource = FakeTileSource.city()
 
     override fun createTileSource(): TileSource = tileSource
+
+    /** Tiles are painted on the test's own thread, in the clock step that asked for them: no race with the picture. */
+    override val tileRasterDispatcher: CoroutineDispatcher = Dispatchers.Unconfined
 }
 
 /** The alarm of `:platform` without sound: counts the answers, [push] plays an event. */

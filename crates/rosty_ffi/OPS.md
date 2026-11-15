@@ -74,6 +74,8 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   value (Kotlin saves it); the rules (name length, duplicates, the 200-stop cap, favourites first, sound-or-vibrate) stay in Rust.
 - `stops.store_trip_clear {dir?}` deletes `trip.json` under the trip lock and records nothing (`{removed}`; clearing again answers
   `false`): for a start Android refused, where `store_trip_end` would put a trip that never ran into the history.
+- `stops.store_gtfs_remove {dir?}` deletes the imported feed `gtfs.json` (Settings > Transit data > Remove; `{removed}`, removing again
+  answers `false`).
 - The trip status (`FixOut`: the headless `trip_fix` answer and `out` of `stops.trip_fix`) carries `eta_min`, the whole minutes of
   "about 14 min" in its `text` (null without a speed), so the live card can ask `stops.arrival_clock` (S41).
 - Saved stop notes (S44): `SavedStop.note` (absent from `saved.json` when empty, so the file stays version 2 both ways; one trimmed
@@ -81,6 +83,24 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   `invalid` with `reason: "note_too_long"`. The note is a line under the stop in `stops.saved_list`'s share text, the last line of
   `stop_text` of `stops.dest_share {note}`, kept by the JSON export/import (`Incoming.note`, cut to the cap) and by the backup; GPX
   has none.
+- Language (`locale`): every sentence Stops shows from Rust exists in English and Turkish (`rosty_geo::Lang`). The ops that write
+  one take an optional `locale` (any tag a phone writes: `tr`, `tr-TR`, `tr_TR`; absent, `null` or unknown is English, so old
+  requests answer as before): `stops.pick_{replay, labels}`, `stops.crossing_{validate, read}`, `stops.saved_{edit, list}`,
+  `stops.saved_shortcut`, `stops.places_import`, `stops.history_{list, prune_plan, usage, text}`, `stops.stats`, `stops.prefs_{edit,
+  choices}`, `stops.notice_{render, validate}`, `stops.alarm_plan`, `stops.gtfs_{lines, summary}`, `stops.coord_format`,
+  `stops.measure`, `stops.backup_{export, parse}`, `stops.format_distance`, `stops.dest_parse`. Turkish writes "1,2 km", "1.234 durak",
+  K/KD/D/GD/G/GB/B/KB and keeps nouns singular after a number; no suffix follows a name the user typed. The fixture case `tr` (and
+  `tr_*` for errors) of each op pins the Turkish answer.
+- The trip keeps its language: `stops.trip_start {locale}` stores it in `trip.json` (`lang`, absent for English), and it is the
+  language of the texts the trip writes on its own: the status (`FixOut.title`, `FixOut.text`: the service's notification) and the
+  "a few" of an arriving-soon message without an ETA. A message the user never rewrote (still a default of either language) goes
+  out as the default of the trip's language (`stops.prefs_choices` lists every language's default as `default_templates`, so the
+  settings page shows such a message in the phone's language too). `stops.trip_{restore, fix, status_share, end}` and the headless `trip_fix` take an
+  optional `locale` that replaces the stored one (the phone's language changed during the trip); without it the stored one holds.
+  A point without a name is stored as "Point A" / "A noktası"; both read as "no name" in either language.
+- `stops.notice_chats {chats: [{jid, group?, contact?, verified?, push?, chat_name?}], locale?}` names the chats the arriving-soon
+  message can go to with the shared rule of `rosty_core::wa_identity` (contact, verified, push, the chat's own name, the number,
+  else "WhatsApp user"), in the order given; `number` is the row's second line (null for a group and for a bare number).
 - `stops.gtfs_import {zip, now_ms, save?, dir?}` reads the zip at a path (a tiny feed lives in `tests/data/gtfs-tiny.zip`; fixture requests
   write it as `$DATA/gtfs-tiny.zip`) and answers the `FeedReport`; `save` writes `gtfs.json`, which `stops.gtfs_search` and
   `stops.saved_suggest_name` read. `stops.measure` takes the point list (Kotlin keeps it; undo drops the last point).
@@ -111,6 +131,8 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 - Download errors are envelopes with a sentence in `message` and a stable `detail.reason`: `unreachable` (`network`), `refused` (`auth`),
   `no_tile` (`not_found`), `status` (`network`, with `status`), `too_large` (`invalid`), `not_vector` (`parse`), `storage` (`io`); a bad server URL is
   `invalid` with `scheme`, `placeholder`, `whitespace`, `too_long` or `empty`.
+- `tiles.offline_plan {bbox | circle, zooms?}` (no handle) answers `{total, top_zoom, capped, estimate_bytes}` for the same area without
+  downloading anything: the estimate Settings shows before the download (S10). It plans exactly as `tiles.offline_start`.
 - `tiles.offline_start {handle, bbox | circle, zooms?}` plans the tiles (`bbox {south, west, north, east}` with `tiles_for_area` and the 2 500-tile
   budget, or `circle {center, radius_m, margin_m?, budget?}` with `tiles_for_circle` for a trip), answers `{handle, total, top_zoom, capped,
   estimate_bytes}` and downloads on a background thread with four workers. Progress arrives as `tiles.offline` events `{job, done, saved, failed,
@@ -256,7 +278,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
 | `rosty_app_core::stops::pick` | stops | stops | op | stops.pick_replay, stops.pick_labels, stops.pick_save_offer |
 | `rosty_app_core::stops::snap` | stops | stops | op | stops.snap |
-| `rosty_app_core::stops::store` | stops | stops | op | stops.store_trip_load, stops.store_trip_save, stops.store_trip_end, stops.store_trip_clear, stops.store_read, stops.store_write |
+| `rosty_app_core::stops::store` | stops | stops | op | stops.store_trip_load, stops.store_trip_save, stops.store_trip_end, stops.store_trip_clear, stops.store_gtfs_remove, stops.store_read, stops.store_write |
 | `rosty_app_core::stops::types` | stops | stops | op | stops.pick_replay, stops.pick_labels, stops.pick_save_offer |
 | `rosty_app_core::storage::BackupRefusal` | rosty_ui | platform | op | phone.backup_export, phone.backup_import |
 | `rosty_app_core::storage::Loaded` | rosty_ui | platform | op | phone.prefs_load, phone.prefs_save |
@@ -790,6 +812,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::notice::DEFAULT_TEMPLATE` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
 | `rosty_geo::notice::render` | stops | stops | op | stops.notice_render, stops.notice_validate |
 | `rosty_geo::notice::validate` | stops | stops | op | stops.notice_render, stops.notice_validate |
+| `rosty_core::wa_identity::display_name` (the arriving-soon picker's chats) | stops | stops | op | stops.notice_chats |
 | `rosty_geo::places_io::MergePlan` | stops | stops | op | stops.places_export, stops.places_import |
 | `rosty_geo::poll::MAX_POLL` | stops | stops | op | stops.poll |
 | `rosty_geo::poll::MIN_POLL` | stops | stops | op | stops.poll |
@@ -805,17 +828,17 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::share_text` | stops | stops | op | stops.dest_parse, stops.dest_share |
 | `rosty_geo::shortcut_spec` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
 | `rosty_geo::status_share_text` | stops | stops | op | stops.pick_labels, stops.trip_status_share |
-| `rosty_geo::tiles::AREA_MIN_ZOOM` | stops | tiles | op | tiles.offline_start |
-| `rosty_geo::tiles::AREA_TILE_BUDGET` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::AREA_MIN_ZOOM` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
+| `rosty_geo::tiles::AREA_TILE_BUDGET` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::ATTRIBUTION` | stops | tiles | op | stops.prefs_choices |
 | `rosty_geo::tiles::AreaDownload` | stops | tiles | op | tiles.offline_start, tiles.offline_cancel |
-| `rosty_geo::tiles::AreaPlan` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::AreaPlan` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::ClassGeometry` | stops | tiles | op | tiles.encode_mvt |
 | `rosty_geo::tiles::DEFAULT_TILE_URL` | stops | tiles | op | stops.prefs_choices, tiles.open |
 | `rosty_geo::tiles::DrawClass` | stops | tiles | op | tiles.encode_mvt |
 | `rosty_geo::tiles::FetchQueue` | stops | tiles | kotlin | :stops TileScheduler.kt (dedupes view requests; every `tile` call is one blocking Rust read, offline downloads use four Rust workers) |
 | `rosty_geo::tiles::LruIndex` | stops | tiles | op | tiles.open, tiles.usage, tiles.set_cap |
-| `rosty_geo::tiles::MAX_TILE_ZOOM` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::MAX_TILE_ZOOM` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::MapStyle` | stops | tiles | op | tiles.encode_mvt |
 | `rosty_geo::tiles::Priority` | stops | tiles | kotlin | :stops TileScheduler.kt (view requests before prefetch) |
 | `rosty_geo::tiles::Rgba8` | stops | tiles | op | tiles.encode_mvt |
@@ -829,12 +852,12 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::tiles::TileUrlError` | stops | tiles | op | tiles.open, tiles.test_server |
 | `rosty_geo::tiles::build_layer` | stops | tiles | kotlin | :stops MapTileLayer.kt (clip and merge per frame; vertex budget by class) |
 | `rosty_geo::tiles::display_zoom` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
-| `rosty_geo::tiles::estimate_bytes` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::estimate_bytes` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::frac_to_coord` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rosty_geo::tiles::line_width` | stops | tiles | kotlin | :stops MapTileLayer.kt (`w14 * 2^clamp(zoom - 14, -3, 2)`, at least 0.5 px; width14 is in the buffer) |
 | `rosty_geo::tiles::stand_in` | stops | tiles | op | tiles.stand_in |
-| `rosty_geo::tiles::tiles_for_area` | stops | tiles | op | tiles.offline_start |
-| `rosty_geo::tiles::tiles_for_circle` | stops | tiles | op | tiles.offline_start |
+| `rosty_geo::tiles::tiles_for_area` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
+| `rosty_geo::tiles::tiles_for_circle` | stops | tiles | op | tiles.offline_plan, tiles.offline_start |
 | `rosty_geo::tiles::tiles_for_view` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rosty_geo::usage_text` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
 | `rosty_geo::view::FollowMode` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |

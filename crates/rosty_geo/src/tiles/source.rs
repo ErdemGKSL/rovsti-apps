@@ -23,6 +23,21 @@ pub enum TileUrlError {
     TooLong,
 }
 
+impl TileUrlError {
+    /// A sentence for the user (English is the `Display` text).
+    pub fn message_in(&self, lang: crate::Lang) -> String {
+        use crate::Lang;
+        match (lang, self) {
+            (Lang::En, _) => self.to_string(),
+            (Lang::Tr, Self::Empty) => "Bir döşeme adresi girin".to_owned(),
+            (Lang::Tr, Self::Scheme) => "Adres http:// ya da https:// ile başlamalı".to_owned(),
+            (Lang::Tr, Self::Missing(part)) => format!("Adreste {part} tam olarak bir kez geçmeli"),
+            (Lang::Tr, Self::Whitespace) => "Adreste boşluk olmamalı".to_owned(),
+            (Lang::Tr, Self::TooLong) => "Adres çok uzun".to_owned(),
+        }
+    }
+}
+
 /// A validated tile URL template.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TileSource {

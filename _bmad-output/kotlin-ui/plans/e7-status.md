@@ -1,5 +1,33 @@
 # E7 Stops: status notes for the main thread (newest first)
 
+## R2 closed: merge `stops-kotlin` at the commit that adds this note
+
+**Base:** `ui-overhaul` bc047b6 merged (Messages R5, `rosty_core::wa_identity`, gateway host `rosty.erdemdev.tr`).
+
+**What landed:** E7.8 pick sheets, E7.9 map tools (follow-me, my location, Layers / Map options, measure), E7.10
+settings (alarm, map tiles, offline area worker, transit feed, WhatsApp arriving-soon message and per-trip switch),
+E7.11 history / stats / backup, E7.12 saved stops to and from a file, E7.13 checklist entry and decision record,
+E7.14 checklist record `docs/kotlin-ui/checklist-e7.md` and contact sheet `docs/kotlin-ui/screenshots/stops.png`.
+Rust sentences now come in Turkish (optional `locale` on the stops ops). Both reported flakes fixed at the root
+(`E75ShotTest` real-core timing; `SavedViewModelTest` list race, `data/Latest.kt`). Evidence: `plans/e7-r2.md`.
+
+**Shared changes (own commits):** `:platform` `AlarmPreview`, `map_download` channel, Stops' `FOREGROUND_SERVICE_DATA_SYNC`
+permission; `:core-bridge` `TilesOps.offlinePlan`, `StopsOps.storeGtfsRemove` / `noticeChats`, `locale` on requests;
+`rosty_ffi` ops `tiles.offline_plan`, `stops.store_gtfs_remove`, `stops.notice_chats` (uses `wa_identity::display_name`),
+`prefs_choices.default_templates`; `rosty_geo` / `rosty_app_core` `_in(lang, ..)` text producers; the trip service sends
+the phone's locale with each fix.
+
+**Gate:** `scripts/kotlin-ui-check.sh` Rust steps green; its Gradle steps re-run with the Central mirror init script
+(Maven Central 429 on one jar) and green: spotless, lint, all unit tests, testRustBridge, assembleRelease, every
+verifyRoborazzi, APK check, compose stability, orphan goldens none.
+
+**What to test on a phone:** offline area download (notification, Cancel); arriving-soon message to a linked WhatsApp
+chat; Me without location permission; alarm sound picker and volume test; file import/export (GPX/JSON, CSV, backup);
+pan and pinch at 120 Hz for E7.13 AC2.
+
+**Open:** see "Open items" in `docs/kotlin-ui/checklist-e7.md` (S43 units, GPUI rules with no Rust op, chosen line across
+a restart, placing ends during a trip).
+
 ## R1 closed: merge `stops-kotlin` at the commit that adds this note
 
 **Base:** `ui-overhaul` 9e3432e, with later `ui-overhaul` merged in up to Messages E6 R1, 7120032.

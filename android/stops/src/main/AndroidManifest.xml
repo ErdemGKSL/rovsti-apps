@@ -4,7 +4,8 @@
      are gone (Compose recreates the activity on a configuration change; the navigator state is saved). Every permission
      :platform mirrors (location, VIBRATE, full-screen intent) is one Stops uses, so none is removed here.
      StopsManifestTest compares the merged result with platform/src/test/resources/manifest/stops.permissions.txt. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -14,6 +15,9 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- The offline map area download (E7.10, S10) runs as a dataSync foreground service: it moves user-chosen data
+         (map tiles) from the network to the phone, which is what dataSync is for; it is neither location nor media. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -125,6 +129,16 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- S10: WorkManager runs the foreground OfflineAreaWorker in its own service, as dataSync; the notification's
+             Cancel is the receiver below. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+        <receiver
+            android:name=".offline.OfflineCancelReceiver"
+            android:exported="false" />
 
         <!-- Images handed to the share sheet (cache/share only, read-only). -->
         <provider

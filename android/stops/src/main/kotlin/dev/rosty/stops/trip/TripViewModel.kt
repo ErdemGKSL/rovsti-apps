@@ -1,5 +1,6 @@
 package dev.rosty.stops.trip
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -42,6 +43,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /** The trip in progress as the live card names it (`trip.json`). */
 @Immutable
@@ -51,6 +53,8 @@ data class RunningTrip(
     val b: Endpoint,
     /** The transit line chosen for the trip (drawn on the map); known only to the app that started it. */
     val pattern: Int? = null,
+    /** The trip carries an arriving-soon message (AD-ST7). */
+    val notice: Boolean = false,
 ) {
     /** The trip as the pick's two ends, the line on the end it was chosen for (B, as the trip UI offers it). */
     fun ends(): Ends = Ends(Destination(a.label, a.coord), Destination(b.label, b.coord, pattern = pattern))
@@ -76,6 +80,10 @@ data class LiveTrip(
     val etaMin: Int? = null,
     /** S41: the local clock time of [etaMin] from now ("18:42"). */
     val arrive: String? = null,
+    /** The arriving-soon message went out. */
+    val noticeSent: Boolean = false,
+    /** The arriving-soon message was given up (an auth or API error, or three failed tries). */
+    val noticeFailed: Boolean = false,
 )
 
 /** Why the trip is not tracking as it should; each is a row with the next action (ARCH 7.5). */
@@ -172,8 +180,10 @@ interface ArrivingSoonHook {
         b: Destination,
     ): NoticePrefs? = null
 
-    /** Whether the card shows the per-trip toggle row. */
-    val showsRow: Boolean get() = false
+    /** The per-trip switch under Start ("Text <chat> when arriving"); nothing while no message is set up. */
+    @Composable
+    fun PlanRow() {
+    }
 
     companion object {
         /** No arriving-soon message (until the `:wa` story fills it in). */
@@ -254,7 +264,7 @@ class TripViewModel(
                     mutable.value.trip
                         ?.takeIf { it.a == summary.a && it.b == summary.b }
                         ?.pattern
-                RunningTrip(summary.label, summary.a, summary.b, kept)
+                RunningTrip(summary.label, summary.a, summary.b, kept, notice = hasNotice(json))
             } else {
                 null
             }
@@ -296,6 +306,7 @@ class TripViewModel(
         mutable.value = now.copy(busy = true, problem = null)
         try {
             val plan = (ops.alarmPlan(AlarmPlanRequest(prefs())) as? Outcome.Ok)?.value?.plan
+            val notice = arrivingSoon.noticeFor(a, b)
             val started = nowMs()
             val opened =
                 ActiveTripHandle.start(
@@ -303,7 +314,7 @@ class TripViewModel(
                     a = Endpoint(a.label, a.coord),
                     b = Endpoint(b.label, b.coord),
                     startedMs = started,
-                    notice = arrivingSoon.noticeFor(a, b),
+                    notice = notice,
                     dir = dir,
                     ops = ops,
                 )
@@ -330,7 +341,7 @@ class TripViewModel(
                     alarm = plan?.let { Json.encodeToString(AlarmPlan.serializer(), it) },
                 )
             if (trips.start(spec) == StartResult.Started) {
-                val trip = RunningTrip(view.label, view.a, view.b, b.pattern ?: a.pattern)
+                val trip = RunningTrip(view.label, view.a, view.b, b.pattern ?: a.pattern, notice = notice != null)
                 mutable.value = mutable.value.copy(trip = trip, live = null, problem = null)
                 reloadJson()
                 emit(TripEffect.Started(trip))
@@ -345,6 +356,9 @@ class TripViewModel(
             mutable.value = mutable.value.copy(busy = false)
         }
     }
+
+    /** Whether the stored trip ([json], `trip.json`) carries an arriving-soon message. */
+    private fun hasNotice(json: JsonElement?): Boolean = (json as? JsonObject)?.get("notice") is JsonObject
 
     private suspend fun reloadJson() {
         tripJson = (ops.storeTripLoad(DirRequest(dir)) as? Outcome.Ok)?.value?.trip
@@ -399,6 +413,8 @@ class TripViewModel(
                         nextFixMs = out.nextFixMs,
                         etaMin = out.etaMin,
                         arrive = out.etaMin?.let { clock(it) },
+                        noticeSent = out.noticeSent,
+                        noticeFailed = out.noticeFailed,
                     )
                 val problem =
                     mutable.value.problem.takeUnless {

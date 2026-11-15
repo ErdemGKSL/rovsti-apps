@@ -2,6 +2,9 @@ package dev.rosty.stops.data
 
 import dev.rosty.core.Outcome
 import dev.rosty.core.model.phone.DirRequest
+import dev.rosty.core.model.stops.PrefsEdit
+import dev.rosty.core.model.stops.PrefsEditAnswer
+import dev.rosty.core.model.stops.PrefsEditRequest
 import dev.rosty.core.model.stops.PrefsSaveRequest
 import dev.rosty.core.model.stops.StopsPrefs
 import dev.rosty.core.ops.StopsOps
@@ -52,6 +55,66 @@ class StopsStore(
                 }
             }
         }
+
+    /**
+     * Applies the named [edit] in Rust (`stops.prefs_edit`: the rules stay there) and saves the result when it changed.
+     * With [until], the edit is applied again (at most [maxSteps] times, all in memory) until the preferences satisfy it:
+     * a value picked from `stops.prefs_choices` reached through Rust's own `next_*` cycle. One write at the end.
+     */
+    suspend fun edit(
+        edit: PrefsEdit,
+        maxSteps: Int = 1,
+        until: ((StopsPrefs) -> Boolean)? = null,
+    ): Outcome<PrefsEditAnswer> =
+        mutex.withLock {
+            val current =
+                when (val read = ensureLoaded()) {
+                    is Outcome.Err -> return@withLock read
+                    is Outcome.Ok -> read.value
+                }
+            var answer: PrefsEditAnswer? = null
+            var prefs = current
+            var steps = 0
+            val limit = maxSteps.coerceAtLeast(1)
+            while (steps < limit && if (until == null) steps == 0 else !until(prefs)) {
+                answer =
+                    when (val edited = ops.prefsEdit(PrefsEditRequest(prefs, edit))) {
+                        is Outcome.Err -> return@withLock edited
+                        is Outcome.Ok -> edited.value
+                    }
+                prefs = answer.prefs
+                steps++
+            }
+            val done =
+                answer
+                    // Nothing to do: describe the held value (a no-op edit answers the derived fields).
+                    ?: when (
+                        val described =
+                            ops.prefsEdit(
+                                PrefsEditRequest(prefs, PrefsEdit.SetShowSaved(prefs.showSavedOnMap)),
+                            )
+                    ) {
+                        is Outcome.Err -> return@withLock described
+                        is Outcome.Ok -> described.value.copy(changed = false)
+                    }
+            if (done.prefs == current) return@withLock Outcome.Ok(done.copy(changed = false))
+            when (val saved = ops.prefsSave(PrefsSaveRequest(done.prefs, dir))) {
+                is Outcome.Err -> {
+                    saved
+                }
+
+                is Outcome.Ok -> {
+                    state.value = done.prefs
+                    Outcome.Ok(done)
+                }
+            }
+        }
+
+    /** What the held preferences derive to (alarm label and default flag, tile URL), changing nothing. */
+    suspend fun describe(): Outcome<PrefsEditAnswer> =
+        edit(PrefsEdit.SetShowSaved(prefs.value.showSavedOnMap), until = {
+            true
+        })
 
     /** Reads the stored file once. The caller holds the lock. */
     private suspend fun ensureLoaded(): Outcome<StopsPrefs> {

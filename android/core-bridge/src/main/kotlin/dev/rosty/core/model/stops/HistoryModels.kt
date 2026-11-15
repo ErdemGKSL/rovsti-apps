@@ -18,6 +18,8 @@ data class HistoryListRequest(
     @SerialName("now_ms") val nowMs: Long,
     @EncodeDefault(NEVER) val query: String? = null,
     @EncodeDefault(NEVER) val filter: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -96,6 +98,8 @@ data class HistoryEditAnswer(
 data class PrunePlanRequest(
     val history: History,
     @SerialName("now_ms") val nowMs: Long,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -119,6 +123,8 @@ data class UsageRequest(
     val b: Coord,
     @SerialName("now_ms") val nowMs: Long,
     @SerialName("tz_offset_s") val tzOffsetS: Int,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** How often a gate was used: [text] is "Used 4 times, last 5 Nov", null when never. */
@@ -172,6 +178,8 @@ data class HistoryTextRequest(
     @SerialName("duration_ms") @EncodeDefault(NEVER) val durationMs: Long? = null,
     @SerialName("prune_count") @EncodeDefault(NEVER) val pruneCount: Int? = null,
     @SerialName("prune_days") @EncodeDefault(NEVER) val pruneDays: Int? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -186,6 +194,8 @@ data class HistoryTextAnswer(
 data class StatsRequest(
     val history: History,
     @SerialName("now_ms") val nowMs: Long,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable

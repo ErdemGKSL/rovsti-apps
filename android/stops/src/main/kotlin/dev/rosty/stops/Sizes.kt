@@ -38,6 +38,9 @@ internal object StopsSizes {
     /** The floating chrome rides the sheet up to its medium detent, then fades over this distance. */
     val rideFade = 96.dp
 
+    /** The glyph in a map button's 44 dp circle (`:design`'s icon button size). */
+    val mapIcon = 20.dp
+
     /** The QR code card of the QR sheet (the Contacts sheet's size). */
     val qrCode = 200.dp
 }

@@ -2,8 +2,8 @@
 //! destination. Pure string work: nothing is ever fetched, so short links and
 //! address-only queries are refused rather than resolved.
 
-use crate::Coord;
 use crate::coord_format::parse_coord;
+use crate::{Coord, Lang};
 
 /// Longest label kept from a share, in characters.
 const MAX_LABEL_CHARS: usize = 100;
@@ -34,6 +34,20 @@ impl DestError {
             }
             Self::OutOfRange => "These coordinates are not on Earth. Check the link.",
             Self::NotALocation => "This does not look like a location.",
+        }
+    }
+
+    /// [`Self::message`] in `lang`.
+    pub fn message_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.message(),
+            (Lang::Tr, Self::NoCoordinates) => {
+                "Bu bağlantıda koordinat yok. Bunun yerine harita uygulamanızdan konumu paylaşın."
+            }
+            (Lang::Tr, Self::OutOfRange) => {
+                "Bu koordinatlar Dünya üzerinde değil. Bağlantıyı kontrol edin."
+            }
+            (Lang::Tr, Self::NotALocation) => "Bu bir konuma benzemiyor.",
         }
     }
 }

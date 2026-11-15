@@ -21,12 +21,16 @@ data class TripStartRequest(
     @SerialName("started_ms") val startedMs: Long,
     @EncodeDefault(NEVER) val notice: NoticePrefs? = null,
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** `stops.trip_restore` request: a [TripView.snapshot] or the content of `trip.json`. */
 @Serializable
 data class TripRestoreRequest(
     val trip: JsonElement,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** The arrival message of a running trip. */
@@ -87,6 +91,8 @@ data class TripFixRequest(
     val handle: Long,
     val fix: FixIn,
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** A position with its uncertainty, as shown on the map. */
@@ -183,6 +189,8 @@ data class StatusShareRequest(
     @EncodeDefault(NEVER) val crossed: Boolean? = null,
     /** Local clock text from `stops.arrival_clock`. */
     @EncodeDefault(NEVER) val arrive: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** An op that answers one sentence. */
@@ -198,6 +206,8 @@ data class TripEndRequest(
     val outcome: String,
     @SerialName("now_ms") val nowMs: Long,
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -225,6 +235,8 @@ data class ClockAnswer(
 data class CrossingValidateRequest(
     val a: Coord,
     val b: Coord,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -244,6 +256,8 @@ data class CrossingReadRequest(
     @SerialName("accuracy_m") @EncodeDefault(NEVER) val accuracyM: Double? = null,
     /** Points of the circle outline to draw; none by default. */
     @SerialName("outline_points") @EncodeDefault(NEVER) val outlinePoints: Int? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** [kind] is `side` (with [side]) or `on_line`. */

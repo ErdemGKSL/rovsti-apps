@@ -30,7 +30,10 @@ class SavedViewModelTest {
     private val ops = NativeStopsOps(fake.rust)
     private val store = SavedStore(ops, nowMs = { NOW })
     private var here: Coord? = Coord(SampleStops.here.lat, SampleStops.here.lon)
-    private val model = SavedViewModel(store, ops, { here }, { NOW }, { 0 }, scope)
+
+    // Built on first use, so a test sets [here] before the model's first listing reads it (no listing with a stale
+    // position can come first).
+    private val model by lazy { SavedViewModel(store, ops, { here }, { NOW }, { 0 }, scope) }
 
     @After fun tearDown() = scope.cancel()
 

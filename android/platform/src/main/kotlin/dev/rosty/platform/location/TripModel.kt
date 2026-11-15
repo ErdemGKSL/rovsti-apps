@@ -148,7 +148,11 @@ internal data class TripAnswer(
     }
 }
 
-/** Pure: the `trip_fix` request (`rosty_geo::session::FixIn` plus `dir`). */
+/**
+ * Pure: the `trip_fix` request (`rosty_geo::session::FixIn` plus `dir`). [locale] is the phone's language now (a tag
+ * such as `tr-TR`): the notification's title and text follow it; without it they stay in the language the trip
+ * started in.
+ */
 internal fun tripFixJson(
     dir: String,
     lat: Double,
@@ -156,6 +160,7 @@ internal fun tripFixJson(
     accuracyM: Double,
     speedMps: Double?,
     atMs: Long,
+    locale: String? = null,
 ): String {
     val o =
         JSONObject()
@@ -165,6 +170,7 @@ internal fun tripFixJson(
             .put("accuracy_m", accuracyM)
             .put("at_ms", atMs)
     if (speedMps != null && speedMps >= 0.0 && !speedMps.isNaN()) o.put("speed_mps", speedMps)
+    if (!locale.isNullOrBlank()) o.put("locale", locale)
     return o.toString()
 }
 

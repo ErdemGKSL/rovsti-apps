@@ -30,7 +30,7 @@ class NotificationChannelsTest {
             .filter { it.isNotBlank() && !it.startsWith("#") }
             .map { line -> line.split('\t').let { Row(it[0], it[1].toInt(), it[2]) } }
 
-    @Test fun theTableHasThirteenChannels() = assertEquals(13, table.size)
+    @Test fun theTableHasFourteenChannels() = assertEquals(14, table.size)
 
     @Test fun ensuringEveryChannelGivesExactlyTheCommittedIdsAndImportances() {
         for (row in table) assertTrue(PlatformChannels.ensure(app, row.id))

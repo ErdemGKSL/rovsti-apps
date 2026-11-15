@@ -102,6 +102,8 @@ sealed interface PrefsEdit {
 data class PrefsEditRequest(
     val prefs: StopsPrefs,
     val edit: PrefsEdit,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -135,6 +137,12 @@ data class NoticeWhenChoice(
     val label: String,
 )
 
+/** Request of `stops.prefs_choices`: only the language of the labels (absent for English). */
+@Serializable
+data class PrefsChoicesRequest(
+    @EncodeDefault(NEVER) val locale: String? = null,
+)
+
 /** The fixed choices the settings page lists, with their labels. */
 @Serializable
 data class PrefsChoicesAnswer(
@@ -147,6 +155,8 @@ data class PrefsChoicesAnswer(
     val vibration: List<VibrationChoice>,
     @SerialName("notice_when") val noticeWhen: List<NoticeWhenChoice>,
     @SerialName("default_template") val defaultTemplate: String,
+    /** The default message of every language: a stored message that is one of them was never rewritten. */
+    @SerialName("default_templates") val defaultTemplates: List<String> = emptyList(),
     @SerialName("default_tile_url") val defaultTileUrl: String,
     val attribution: String,
 )
@@ -157,12 +167,16 @@ data class NoticeRenderRequest(
     val template: String,
     val stop: String,
     @SerialName("eta_s") @EncodeDefault(NEVER) val etaS: Long? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** A template that cannot be saved answers `RustError.Invalid` with the reason as its message. */
 @Serializable
 data class NoticeValidateRequest(
     val template: String,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -171,9 +185,52 @@ data class NoticeValidateAnswer(
     val trimmed: String,
 )
 
+/** One chat of `stops.notice_chats`, with what is known about the person behind it (each absent when unknown). */
+@Serializable
+data class NoticeChatInput(
+    val jid: String,
+    @EncodeDefault(NEVER) val group: Boolean = false,
+    /** The saved contact name. */
+    @EncodeDefault(NEVER) val contact: String? = null,
+    /** The verified business name. */
+    @EncodeDefault(NEVER) val verified: String? = null,
+    /** The name the person set on WhatsApp. */
+    @EncodeDefault(NEVER) val push: String? = null,
+    /** The name stored with the chat (a group's subject). */
+    @SerialName("chat_name") @EncodeDefault(NEVER) val chatName: String? = null,
+)
+
+@Serializable
+data class NoticeChatsRequest(
+    val chats: List<NoticeChatInput>,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
+)
+
+/**
+ * A chat as the arriving-soon picker lists it: [name] by the shared rule (contact, verified business, push name,
+ * the chat's own name, the number, else "WhatsApp user"), [tier] says which of them it is (`contact`, `verified`,
+ * `push`, `stored_chat`, `number`, `unknown`), [number] is the second line (null for a group and a bare number).
+ */
+@Serializable
+data class NamedNoticeChat(
+    val jid: String,
+    val name: String,
+    val tier: String,
+    val number: String?,
+    val group: Boolean,
+)
+
+@Serializable
+data class NoticeChatsAnswer(
+    val chats: List<NamedNoticeChat>,
+)
+
 @Serializable
 data class AlarmPlanRequest(
     val prefs: StopsPrefs,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** The plan plus the two flags the service reads when it rings. */
@@ -325,6 +382,8 @@ data class GtfsLinesRequest(
     /** The most lines to list; [GtfsLinesAnswer.maxLines] when absent. */
     @EncodeDefault(NEVER) val limit: Int? = null,
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** One line that calls at a stop and has a stop before it, as the stop sheet lists it. */
@@ -361,6 +420,8 @@ data class GtfsSummaryRequest(
     @SerialName("tz_offset_s") @EncodeDefault(NEVER) val tzOffsetS: Int? = null,
     @SerialName("skipped_rows") @EncodeDefault(NEVER) val skippedRows: Long? = null,
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -383,6 +444,8 @@ data class CoordFormatRequest(
     /** Where the user is, for the "1.2 km from you, NE" line. */
     @EncodeDefault(NEVER) val here: Coord? = null,
     @EncodeDefault(NEVER) val zoom: Double? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -423,6 +486,8 @@ data class MeasureRequest(
     val points: List<Coord>,
     @EncodeDefault(NEVER) val name: String? = null,
     @EncodeDefault(NEVER) val today: String? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -453,6 +518,8 @@ data class BackupExportRequest(
     @SerialName("now_ms") val nowMs: Long,
     @SerialName("tz_offset_s") val tzOffsetS: Int,
     val today: String,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -467,6 +534,8 @@ data class BackupExportAnswer(
 data class BackupParseRequest(
     val text: String,
     @SerialName("tz_offset_s") val tzOffsetS: Int,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -481,4 +550,6 @@ data class BackupParseAnswer(
 @Serializable
 data class FormatDistanceRequest(
     val metres: Double,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )

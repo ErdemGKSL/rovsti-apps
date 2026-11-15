@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::Lang;
 use crate::coord::{Coord, EARTH_RADIUS_M};
 use crate::poll::{IDLE_POLL, poll_interval};
 use crate::trip::{Fix, MAX_ACCURACY_M, MIN_SPEED_MPS, TripState};
@@ -46,6 +47,17 @@ impl DiameterError {
             Self::TooLong => "A and B must be at most 50 km apart.",
         }
     }
+
+    /// [`Self::message`] in `lang`.
+    pub fn message_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.message(),
+            (Lang::Tr, Self::InvalidCoord) => "Bu koordinatlar Dünya üzerinde değil.",
+            (Lang::Tr, Self::SamePoint) => "A ve B aynı yer.",
+            (Lang::Tr, Self::TooShort) => "A ile B arasında en az 20 m olmalı.",
+            (Lang::Tr, Self::TooLong) => "A ile B arasında en fazla 50 km olmalı.",
+        }
+    }
 }
 
 impl fmt::Display for DiameterError {
@@ -76,6 +88,15 @@ impl Side {
         match self {
             Self::Left => "Left",
             Self::Right => "Right",
+        }
+    }
+
+    /// [`Self::label`] in `lang`.
+    pub fn label_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.label(),
+            (Lang::Tr, Self::Left) => "Sol",
+            (Lang::Tr, Self::Right) => "Sağ",
         }
     }
 }

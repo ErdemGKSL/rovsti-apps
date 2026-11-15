@@ -47,6 +47,13 @@ pub(super) const OPS: &[OpSpec] = &[
         trip_clear,
         trip_clear_cases
     ),
+    op!(
+        "stops.store_gtfs_remove",
+        DirReq,
+        Value,
+        gtfs_remove,
+        gtfs_remove_cases
+    ),
     op!("stops.store_read", ReadReq, Value, read, read_cases),
     op!("stops.store_write", WriteReq, Empty, write, write_cases),
     op!(
@@ -143,6 +150,20 @@ fn trip_clear_cases() -> Vec<Case> {
     vec![
         Case::new(json!({"dir": "$DIR"})).seeded("stops"),
         Case::named("no_trip", json!({"dir": "$DIR/nothing-here"})).seeded("stops"),
+    ]
+}
+
+/// Deletes the imported transit feed (`gtfs.json`, Settings > Transit data > Remove). `removed` says whether a feed
+/// was there; removing twice is fine.
+fn gtfs_remove(req: DirReq) -> Result<Value, FfiError> {
+    let dir = data_dir(&req.dir)?;
+    Ok(json!({"removed": store::remove_gtfs(&dir)?}))
+}
+
+fn gtfs_remove_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"dir": "$DIR"})).seeded("stops_gtfs"),
+        Case::named("no_feed", json!({"dir": "$DIR/nothing-here"})).seeded("stops_gtfs"),
     ]
 }
 

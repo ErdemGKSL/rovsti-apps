@@ -1,6 +1,6 @@
 //! The map's measure tool: an ordered polyline of tapped points.
 
-use crate::{Coord, Diameter};
+use crate::{Coord, Diameter, Lang};
 
 /// Most points a measurement keeps.
 pub const MAX_POINTS: usize = 50;
@@ -51,14 +51,19 @@ impl Measure {
 
     /// "1.4 km, 3 legs"; empty while there is no leg.
     pub fn summary_text(&self) -> String {
+        self.summary_text_in(Lang::En)
+    }
+
+    /// [`Self::summary_text`] in `lang`: "1,4 km, 3 bölüm".
+    pub fn summary_text_in(&self, lang: Lang) -> String {
         let legs = self.points.len().saturating_sub(1);
         if legs == 0 {
             return String::new();
         }
         format!(
-            "{}, {legs} {}",
-            crate::format_distance(self.total_m()),
-            if legs == 1 { "leg" } else { "legs" }
+            "{}, {}",
+            crate::format_distance_in(lang, self.total_m()),
+            lang.count(legs, "leg", "legs", "bölüm")
         )
     }
 

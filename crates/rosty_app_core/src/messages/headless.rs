@@ -11,7 +11,7 @@
 //! | `mms_notification` | `{pdu_b64}`                                               | `{ok, transaction_id, content_location, ..}` |
 //! | `mms_retrieved`    | `{pdu_b64, dir?, known?, blocked?}`                       | `{ok, from, to, text, parts, spam, otp, ..}` |
 //! | `mms_send_req`     | `{local_id, to[], text?, image_path?, sub_id?}`           | `{ok, pdu_b64}`                              |
-//! | `wa_digest`        | `{dir, chat}`                                             | a `NotificationSpec`, or `{}`                |
+//! | `wa_digest`        | `{dir, chat}`                                             | a `NotificationSpec` (+ `senders` in a group), or `{}` |
 //! | `wa_reply`         | `{dir, chat, text}`                                       | `{ok}`                                       |
 //! | `msg_remind`       | `{tag, title, body, minutes?=60, now_ms, tz_offset_s}`    | `{ok, arm, toast}`                           |
 //!

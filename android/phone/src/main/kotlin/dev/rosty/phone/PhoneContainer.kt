@@ -29,6 +29,7 @@ import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
 import dev.rosty.people.AvatarResolver
+import dev.rosty.people.FileLiveNameStore
 import dev.rosty.people.LiveWaNames
 import dev.rosty.people.PeopleIdentitySource
 import dev.rosty.people.PeopleSource
@@ -418,6 +419,8 @@ open class PhoneContainer(
             gateway = { wa.gateway() },
             e164 = { PhoneNumbers.e164(it, homeRegion) },
             scope = scope,
+            // Kept between runs, so a restart does not ask WhatsApp for the same numbers again.
+            store = FileLiveNameStore(File(context.noBackupFilesDir, "wa-live-names.json")),
         )
     }
 

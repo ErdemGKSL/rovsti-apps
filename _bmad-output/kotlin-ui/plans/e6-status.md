@@ -2,6 +2,28 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## R5 closed (2026-11-15) at `50e05ebe`: name order follow-ups
+
+Gate: Rust steps of `scripts/kotlin-ui-check.sh` green; the Gradle steps green **without the Stops tests**
+(`-x :stops:testReleaseUnitTest -x :stops:verifyRoborazziRelease`), APK check, compose stability and orphan goldens
+included. Two full runs each failed on a different Stops test (`SavedViewModelTest.noPositionNoDistance`, then the
+golden of `E75ShotTest.preflightSheet` dark); the first passes alone. Stops is not this branch's module.
+Plan and evidence: `plans/e6-r5.md`.
+
+**What landed**
+- The Starred list is read again when a name changes.
+- `LiveWaNames` answers persist across restarts (`:people`, `LiveNameStore`), wired in Messages and Phone.
+- Group lines of a closed-app push name their writers by the rule; Rust `wa_digest` adds `senders` for a group
+  (no gateway change).
+- Dropped by the owner: making `apps/*` compile again (nothing committed there).
+
+**Shared code touched (own commits)**: `:people` `328b1cae`, Phone wiring `50e05ebe`, Rust `wa_digest` `351c0534`.
+
+**What to test on a device**
+1. Ask a name for an unknown number, kill the app, open it: the name is there at once and no lookup is sent.
+2. A group message arrives with the app closed (firebase build): the lines read "Name: text", a saved contact first.
+3. Save a contact for a starred WhatsApp message's writer: the Starred row takes the name.
+
 ## R4 closed (2026-11-15) at `184fd173`: cross-layer follow-ups and the name order
 
 Merged with `origin/ui-overhaul` (`e823684`, gateway host). Gate: `scripts/kotlin-ui-check.sh` ALL GREEN (Rust steps at

@@ -11,8 +11,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /** The name-order rule on the notification the core builds for a WhatsApp push while the app is closed. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = android.app.Application::class)
 class NotificationNamesTest {
     private val jid = "905550000001@s.whatsapp.net"
     private val number = "+905550000001"
@@ -50,4 +55,27 @@ class NotificationNamesTest {
         assertSame(digest, NotificationNames.retitled(digest, null))
         assertSame(digest, NotificationNames.retitled(digest, " "))
     }
+
+    @Test fun theWritersOfAGroupPushAreNamedByTheRule() =
+        runTest {
+            val json =
+                """{"tag":"wa:120363@g.us","title":"Flatmates","lines":["905550000001: Rent is due","Hi all"],""" +
+                    """"otp":null,"reply":true,"silent":false,"senders":["$jid",""]}"""
+            assertEquals(listOf(jid, ""), NotificationNames.pushSenders(json))
+            assertEquals(emptyList<String>(), NotificationNames.pushSenders("{not json"))
+            val saved = names("Ada Lovelace")
+            val lines =
+                NotificationNames.groupLines(listOf("905550000001: Rent is due", "Hi all"), listOf(jid, "")) {
+                    saved.sender(it, null)
+                }
+            assertEquals(listOf("Ada Lovelace: Rent is due", "Hi all"), lines)
+            // Nobody names the number: it reads as a number; a line that does not start with it is left alone.
+            val unknown = names(null)
+            assertEquals(
+                listOf("+90 555 000 00 01: Rent is due", "Deniz: hello"),
+                NotificationNames.groupLines(listOf("905550000001: Rent is due", "Deniz: hello"), listOf(jid, jid)) {
+                    unknown.sender(it, null)
+                },
+            )
+        }
 }

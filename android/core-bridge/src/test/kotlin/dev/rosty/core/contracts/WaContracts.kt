@@ -20,6 +20,8 @@ import dev.rosty.core.model.wa.EditMessage
 import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.IdBody
+import dev.rosty.core.model.wa.IdentityMappingsAnswer
+import dev.rosty.core.model.wa.IdentityMappingsBody
 import dev.rosty.core.model.wa.IdsBody
 import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.IssuedKey
@@ -116,6 +118,11 @@ object WaContracts : ContractModels {
                 "wa.picture",
                 ok = listOf("unchanged", "none"),
                 err = listOf("rate_limited"),
+            )
+            handleOp<IdentityMappingsBody, IdentityMappingsAnswer>(
+                "wa.identity_mappings",
+                ok = listOf("since", "old_gateway"),
+                err = listOf("unauthorized"),
             )
             handleOp<Empty, StatusList>("wa.statuses")
             handleOp<IdBody, BytesAnswer>("wa.status_media")

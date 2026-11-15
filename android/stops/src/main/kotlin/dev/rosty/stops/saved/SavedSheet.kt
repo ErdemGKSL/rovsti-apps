@@ -604,7 +604,7 @@ fun OverlayController.presentRenameSheet(
                 },
             )
             RostyText(
-                context.getString(R.string.saved_name_limit, maxChars),
+                context.resources.getQuantityString(R.plurals.saved_name_limit, maxChars, maxChars),
                 style = RostyTheme.type.footnote,
                 color = RostyTheme.colors.labelSecondary,
             )

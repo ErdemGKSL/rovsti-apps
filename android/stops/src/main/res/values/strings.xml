@@ -74,7 +74,6 @@
     <string name="saved_home_screen">Home screen</string>
     <string name="saved_rename_title">Rename stop</string>
     <string name="saved_name">Name</string>
-    <string name="saved_name_limit">Up to %1$d characters.</string>
     <string name="saved_save">Save</string>
     <string name="saved_colour">Colour: %1$s</string>
     <string name="saved_colour_orange">Orange</string>
@@ -137,7 +136,6 @@
     <string name="trip_preflight_ready">Everything the alarm needs is allowed.</string>
     <string name="trip_preflight_needed">Needed</string>
     <string name="trip_preflight_recommended">Recommended</string>
-    <string name="trip_started_next">Set for your next trip</string>
     <plurals name="trip_wait_seconds">
         <item quantity="one">%d s</item>
         <item quantity="other">%d s</item>
@@ -149,4 +147,26 @@
     <string name="trip_waiting_fix">Waiting for a location fix</string>
     <string name="home_trip_live">%1$s to the line · %2$s</string>
     <string name="home_sheet_trip">Your trip</string>
+    <string name="alarm_title">Alarm</string>
+    <string name="alarm_wake_up">Wake up</string>
+    <string name="alarm_crossed">Crossed %1$s</string>
+    <string name="alarm_dismiss">Dismiss</string>
+    <string name="alarm_snooze">Snooze %1$d min</string>
+    <string name="alarm_no_snoozes">No snoozes left</string>
+    <string name="alarm_dismissed">Alarm dismissed</string>
+    <string name="alarm_rearm">Re-arm</string>
+    <string name="last_trip_arrived">Arrived at %1$s</string>
+    <string name="last_trip_stopped">Trip stopped: %1$s</string>
+    <string name="last_trip_start">Start again</string>
+    <string name="last_trip_save">Save as stop</string>
+    <string name="last_trip_share">Share</string>
+    <string name="last_trip_close">Close</string>
+    <plurals name="alarm_snoozed">
+        <item quantity="one">Snoozed. Ringing again in %d min.</item>
+        <item quantity="other">Snoozed. Ringing again in %d min.</item>
+    </plurals>
+    <plurals name="saved_name_limit">
+        <item quantity="one">Up to %d character.</item>
+        <item quantity="other">Up to %d characters.</item>
+    </plurals>
 </resources>

@@ -185,7 +185,7 @@ fun StopsHome(
                     -sheetRideTranslation(inputs.settledVisiblePx, bottomInsetPx, maxVisible)
                 }
             toastMetrics.bottomBarPx =
-                toastBarPx(inputs.blockPx + lift, inputs.settledVisiblePx, bottomInsetPx, barMarginPx)
+                toastBarPx(inputs.blockPx + lift, inputs.settledVisiblePx, bottomInsetPx, barMarginPx, inputs.windowPx)
             with(density) {
                 camera.update(
                     PaddingValues(
@@ -341,14 +341,23 @@ private data class CameraInputs(
 /**
  * The toast's clearance above the window's bottom inset (pure), as `ChromeMetrics.bottomBarPx`: the higher of the
  * riding block's top ([blockTopPx], from the window bottom, insets included) and the settled sheet's top, less the
- * inset and the bar margin the toast maths adds back.
+ * inset and the bar margin the toast maths adds back. A sheet settled above the middle of the window ([windowPx]) is not
+ * cleared (nor the block riding it): the toast would leave the screen, so it keeps its own place near the bottom, over
+ * the sheet.
  */
 fun toastBarPx(
     blockTopPx: Float,
     sheetTopPx: Float,
     bottomInsetPx: Float,
     barMarginPx: Float,
-): Int = (maxOf(blockTopPx, sheetTopPx) - bottomInsetPx - barMarginPx).coerceAtLeast(0f).toInt()
+    windowPx: Float = Float.MAX_VALUE,
+): Int {
+    if (sheetTopPx > windowPx * TOAST_MAX_RISE) return 0
+    return (maxOf(blockTopPx, sheetTopPx) - bottomInsetPx - barMarginPx).coerceAtLeast(0f).toInt()
+}
+
+/** The highest a toast follows the sheet, as a share of the window height. */
+private const val TOAST_MAX_RISE = 0.5f
 
 /**
  * The top pill: a glass capsule that reads like a search field; a tap opens the pick sheet (E7.8: search, paste a

@@ -66,6 +66,11 @@ import dev.rosty.stops.saved.SavedViewModel
 import dev.rosty.stops.saved.presentSavedSheet
 import dev.rosty.stops.saved.presentSavedStopSheet
 import dev.rosty.stops.saved.toDestination
+import dev.rosty.stops.trip.AlarmAction
+import dev.rosty.stops.trip.AlarmEffect
+import dev.rosty.stops.trip.AlarmEntry
+import dev.rosty.stops.trip.AlarmViewModel
+import dev.rosty.stops.trip.LastTripCard
 import dev.rosty.stops.trip.TripAction
 import dev.rosty.stops.trip.TripEffect
 import dev.rosty.stops.trip.TripProblem
@@ -117,6 +122,29 @@ fun rememberSavedViewModel(container: StopsContainer): SavedViewModel {
 
 private const val MS_PER_S = 1000
 
+/** The alarm's view model, owned by the activity like the home's. */
+@Composable
+fun rememberAlarmViewModel(container: StopsContainer): AlarmViewModel {
+    val context = LocalContext.current
+    val owner = remember(context) { context.findComponentActivity() }
+    return remember(owner, container) {
+        val factory =
+            viewModelFactory {
+                initializer {
+                    AlarmViewModel(
+                        ops = container.ops,
+                        control = container.alarm,
+                        prefs = { (container.store.load() as? Outcome.Ok)?.value ?: StopsPrefs() },
+                        dir = container.dataDir,
+                        nowMs = TripClock::nowMillis,
+                        tzOffsetS = { TimeZone.getDefault().getOffset(TripClock.nowMillis()) / MS_PER_S },
+                    )
+                }
+            }
+        ViewModelProvider(owner, factory)[AlarmViewModel::class.java]
+    }
+}
+
 /** The trip's view model, owned by the activity like the home's. */
 @Composable
 fun rememberTripViewModel(container: StopsContainer): TripViewModel {
@@ -164,6 +192,7 @@ fun HomeEntry(
     val viewModel = rememberHomeViewModel(container)
     val saved = rememberSavedViewModel(container)
     val trip = rememberTripViewModel(container)
+    val alarm = rememberAlarmViewModel(container)
     val preflight = rememberPreflight()
     val loaded by viewModel.state.collectAsState()
     val savedFile by container.saved.saved.collectAsState()
@@ -369,10 +398,11 @@ fun HomeEntry(
                 is TripEffect.Over -> {
                     viewModel.refresh()
                     saved.refresh()
+                    alarm.onAction(AlarmAction.Refresh)
                 }
 
                 is TripEffect.Ring -> {
-                    Unit
+                    alarm.onAction(AlarmAction.Ring(effect.trip))
                 }
 
                 is TripEffect.Toast -> {
@@ -397,10 +427,71 @@ fun HomeEntry(
     LaunchedEffect(trip, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             trip.onAction(TripAction.Refresh)
+            alarm.onAction(AlarmAction.Refresh)
             if (trip.state.value.problem == TripProblem.Restart) trip.onAction(TripAction.Resume)
         }
     }
     val tripState by trip.state.collectAsState()
+    // The in-app alarm: presented while the alarm rings, gone with the answer.
+    val alarmState by alarm.state.collectAsState()
+    val alarmTitle = stringResource(R.string.alarm_title)
+    val alarmEntry = remember(alarm) { arrayOfNulls<AlarmEntry>(1) }
+    LaunchedEffect(alarmState.alarm != null) {
+        val ringing = alarmState.alarm != null
+        val entry = alarmEntry[0]
+        if (ringing && entry == null) {
+            closeSheet()
+            alarmEntry[0] = AlarmEntry(alarm, alarmTitle).also { overlays.present(it) }
+        } else if (!ringing && entry != null) {
+            overlays.dismiss(entry)
+            alarmEntry[0] = null
+        }
+    }
+    LaunchedEffect(alarm) {
+        alarm.effects.collect { effect ->
+            when (effect) {
+                is AlarmEffect.Dismissed -> {
+                    val ends = effect.ends
+                    val text = resources.getString(R.string.alarm_dismissed)
+                    if (ends == null) {
+                        overlays.showToast(text)
+                    } else {
+                        // S21: Re-arm starts the same A and B again.
+                        overlays.showUndo(
+                            text,
+                            { startTrip(ends.first, ends.second) },
+                            resources.getString(R.string.alarm_rearm),
+                        )
+                    }
+                }
+
+                is AlarmEffect.Snoozed -> {
+                    overlays.showToast(
+                        resources.getQuantityString(R.plurals.alarm_snoozed, effect.minutes, effect.minutes),
+                    )
+                }
+
+                is AlarmEffect.Share -> {
+                    context.share(effect.text)
+                }
+
+                is AlarmEffect.Start -> {
+                    map.showPair(effect.a, effect.b)
+                    startTrip(effect.a, effect.b)
+                }
+
+                is AlarmEffect.Save -> {
+                    saved.onAction(SavedAction.SaveGate(effect.a, effect.b))
+                }
+
+                AlarmEffect.TripOver -> {
+                    trip.onAction(TripAction.Refresh)
+                    viewModel.refresh()
+                    saved.refresh()
+                }
+            }
+        }
+    }
     val dark = RostyTheme.colors.isDark
     val overlay = rememberRadarOverlay(map.pick.radar, dark)
 
@@ -445,6 +536,7 @@ fun HomeEntry(
                         onClear = { map.pick.clear() },
                         onLine = { slot, dest -> map.pick.place(slot, dest) },
                         overlays = overlays,
+                        lastTrip = { LastTripCard(alarm) },
                     )
                 },
             )

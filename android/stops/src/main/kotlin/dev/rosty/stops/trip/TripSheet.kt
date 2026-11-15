@@ -111,6 +111,7 @@ fun TripSection(
     onLine: (Slot, Destination) -> Unit,
     overlays: OverlayController,
     arrivingSoon: ArrivingSoonHook = ArrivingSoonHook.None,
+    lastTrip: @Composable () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val preflight = rememberPreflight()
@@ -127,6 +128,7 @@ fun TripSection(
             if (stop.gtfsStop != null) LineRow(viewModel, slot, stop, overlays, onLine)
             if (state.problem == TripProblem.CouldNotStart) ProblemRows(state.problem, preflight, viewModel::onAction)
         }
+        if (trip == null) lastTrip()
     }
 }
 

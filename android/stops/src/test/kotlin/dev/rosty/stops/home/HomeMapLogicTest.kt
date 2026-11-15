@@ -31,5 +31,8 @@ class HomeMapLogicTest {
         assertEquals(360 - 72 - 24, toastBarPx(300f, 360f, 72f, 24f))
         assertEquals(500 - 72 - 24, toastBarPx(500f, 360f, 72f, 24f))
         assertTrue(toastBarPx(0f, 0f, 72f, 24f) == 0)
+        // A sheet at large (above the middle) is not followed: the toast keeps its own place, over the sheet.
+        assertEquals(0, toastBarPx(1900f, 1800f, 72f, 24f, windowPx = 2400f))
+        assertEquals(1000 - 72 - 24, toastBarPx(300f, 1000f, 72f, 24f, windowPx = 2400f))
     }
 }

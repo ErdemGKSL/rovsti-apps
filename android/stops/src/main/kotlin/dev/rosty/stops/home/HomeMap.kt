@@ -3,7 +3,6 @@ package dev.rosty.stops.home
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -16,6 +15,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The map of the home screen: one camera, one tile store over the container's tile source and the pick controller
@@ -144,6 +145,14 @@ fun PlaceFirstView(
             map.camera.observe()
             map.camera.widthPx > 0 && map.camera.heightPx > 0
         }.first { it }
+        // The view aims at the free area: wait for the settled sheet's padding (it always covers the bottom), so the
+        // first view does not depend on which of the two came first; a sheet that never settles does not hold it.
+        withTimeoutOrNull(PADDING_WAIT_MS) {
+            snapshotFlow {
+                map.camera.observe()
+                map.camera.paddingBottom
+            }.first { it > 0f }
+        }
         map.placed = true
         when (val view = firstView(state, location.lastKnown())) {
             is FirstView.Fit -> {
@@ -164,6 +173,8 @@ fun PlaceFirstView(
 }
 
 private const val FIT_MARGIN_DP = 48f
+
+private const val PADDING_WAIT_MS = 1_000L
 
 /** The scale of a view on one place (GPUI `map::STREET_MPP`). */
 private const val STREET_METRES_PER_DP = 1.5
@@ -279,7 +290,7 @@ fun Context.openInMaps(geoUri: String): Boolean =
     try {
         startActivity(
             Intent
-                .createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(geoUri)), null)
+                .createChooser(Intent(Intent.ACTION_VIEW, geoUri.toUri()), null)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
         true

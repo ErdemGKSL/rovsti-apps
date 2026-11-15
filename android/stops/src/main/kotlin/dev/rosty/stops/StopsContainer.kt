@@ -28,6 +28,8 @@ import dev.rosty.stops.home.CoreHomeData
 import dev.rosty.stops.home.HomeData
 import dev.rosty.stops.home.HomeSheet
 import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.trip.AlarmControl
+import dev.rosty.stops.trip.AndroidAlarmControl
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 
@@ -90,6 +92,9 @@ open class StopsContainer(
     /** The data directory Rust was started with: the trip service reads `trip.json` there. */
     open val dataDir: String get() = context.noBackupFilesDir.absolutePath
 
+    /** The ringing alarm of `:platform` for the in-app alarm screen (E7.6). */
+    val alarm: AlarmControl by lazy { createAlarm() }
+
     /** S18: stop shortcuts on the Home screen. */
     val shortcuts: ShortcutsRepository by lazy { createShortcuts() }
 
@@ -113,6 +118,8 @@ open class StopsContainer(
     protected open fun createTrips(): TripRepository = AndroidTripRepository(context)
 
     protected open fun createHomeData(): HomeData = CoreHomeData(ops, store)
+
+    protected open fun createAlarm(): AlarmControl = AndroidAlarmControl(context)
 
     protected open fun createShortcuts(): ShortcutsRepository = AndroidShortcutsRepository(context)
 

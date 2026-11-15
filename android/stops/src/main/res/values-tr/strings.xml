@@ -68,7 +68,6 @@
     <string name="saved_home_screen">Ana ekran</string>
     <string name="saved_rename_title">Durağı yeniden adlandır</string>
     <string name="saved_name">Ad</string>
-    <string name="saved_name_limit">En çok %1$d karakter.</string>
     <string name="saved_save">Kaydet</string>
     <string name="saved_colour">Renk: %1$s</string>
     <string name="saved_colour_orange">Turuncu</string>
@@ -131,7 +130,6 @@
     <string name="trip_preflight_ready">Alarmın ihtiyaç duyduğu her şeye izin verildi.</string>
     <string name="trip_preflight_needed">Gerekli</string>
     <string name="trip_preflight_recommended">Önerilen</string>
-    <string name="trip_started_next">Sonraki yolculuğunuz için ayarlandı</string>
     <plurals name="trip_wait_seconds">
         <item quantity="one">%d sn</item>
         <item quantity="other">%d sn</item>
@@ -143,4 +141,26 @@
     <string name="trip_waiting_fix">Konum bekleniyor</string>
     <string name="home_trip_live">Çizgiye %1$s · %2$s</string>
     <string name="home_sheet_trip">Yolculuğunuz</string>
+    <string name="alarm_title">Alarm</string>
+    <string name="alarm_wake_up">Uyanın</string>
+    <string name="alarm_crossed">%1$s geçildi</string>
+    <string name="alarm_dismiss">Kapat</string>
+    <string name="alarm_snooze">%1$d dk ertele</string>
+    <string name="alarm_no_snoozes">Erteleme hakkı kalmadı</string>
+    <string name="alarm_dismissed">Alarm kapatıldı</string>
+    <string name="alarm_rearm">Yeniden kur</string>
+    <string name="last_trip_arrived">%1$s varıldı</string>
+    <string name="last_trip_stopped">Yolculuk durduruldu: %1$s</string>
+    <string name="last_trip_start">Yeniden başlat</string>
+    <string name="last_trip_save">Durak olarak kaydet</string>
+    <string name="last_trip_share">Paylaş</string>
+    <string name="last_trip_close">Kapat</string>
+    <plurals name="alarm_snoozed">
+        <item quantity="one">Ertelendi. %d dk sonra yeniden çalacak.</item>
+        <item quantity="other">Ertelendi. %d dk sonra yeniden çalacak.</item>
+    </plurals>
+    <plurals name="saved_name_limit">
+        <item quantity="one">En çok %d karakter.</item>
+        <item quantity="other">En çok %d karakter.</item>
+    </plurals>
 </resources>

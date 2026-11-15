@@ -37,8 +37,13 @@ import dev.rosty.shell.HasContainer
 import dev.rosty.stops.map.FakeTileSource
 import dev.rosty.stops.map.MapFixtures
 import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.trip.AlarmControl
+import dev.rosty.stops.trip.AlarmEvent
 import dev.rosty.wa.FakeWaRepository
 import dev.rosty.wa.WaRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -187,6 +192,10 @@ open class TestStopsContainer(
 
     val fakeShortcuts = FakeShortcuts()
 
+    val fakeAlarm = FakeAlarmControl()
+
+    override fun createAlarm(): AlarmControl = fakeAlarm
+
     override fun createShortcuts(): ShortcutsRepository = fakeShortcuts
 
     override fun createWa(): WaRepository = FakeWaRepository()
@@ -201,6 +210,29 @@ open class TestStopsContainer(
     val tileSource = FakeTileSource.city()
 
     override fun createTileSource(): TileSource = tileSource
+}
+
+/** The alarm of `:platform` without sound: counts the answers, [push] plays an event. */
+class FakeAlarmControl : AlarmControl {
+    private val bus = MutableSharedFlow<AlarmEvent>(extraBufferCapacity = 16)
+    var dismissed = 0
+        private set
+    var snoozed = 0
+        private set
+
+    override val events: Flow<AlarmEvent> = bus.asSharedFlow()
+
+    override fun dismiss() {
+        dismissed++
+    }
+
+    override fun snooze() {
+        snoozed++
+    }
+
+    fun push(event: AlarmEvent) {
+        bus.tryEmit(event)
+    }
 }
 
 /** The launcher: says yes to every stop shortcut and keeps them. */

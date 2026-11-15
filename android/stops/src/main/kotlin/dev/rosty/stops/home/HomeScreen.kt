@@ -248,7 +248,6 @@ fun StopsHome(
                             ).padding(top = Spacing.s)
                             .widthIn(max = Sizes.contentMaxWidth)
                             .fillMaxWidth()
-                            .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom }
                             .graphicsLayer {
                                 // Hidden under a large map sheet and under a modal sheet's push-back (read in draw).
                                 val sheet = entry.sheet
@@ -257,7 +256,14 @@ fun StopsHome(
                             }.then(if (topHidden) Modifier.clearAndSetSemantics {}.blockTouches() else Modifier)
                             .testTag(HomeTags.Top),
                     ) {
-                        SearchPill(actions.onSearch, Modifier.padding(horizontal = Spacing.gutter))
+                        // The camera clears the search pill only: the hint and the chips below it come and go with
+                        // answers from the core, and the first view must not depend on which came first.
+                        SearchPill(
+                            actions.onSearch,
+                            Modifier
+                                .padding(horizontal = Spacing.gutter)
+                                .onGloballyPositioned { topChromeBottomPx = it.boundsInRoot().bottom },
+                        )
                         if (topCard != null) {
                             Spacer(Modifier.height(Spacing.s))
                             Box(Modifier.padding(horizontal = Spacing.gutter)) { topCard() }

@@ -54,7 +54,9 @@ class SavedViewModelTest {
 
     @Test fun noPositionNoDistance() {
         here = null
-        val state = settled { it.rows.size == 2 }
+        // The model may have listed once with the old position before the line above: list again.
+        model.refresh()
+        val state = settled { it.rows.size == 2 && it.nearest == null }
         assertTrue(state.rows.all { it.distance == null })
     }
 

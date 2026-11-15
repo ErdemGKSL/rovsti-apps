@@ -15,7 +15,7 @@ internal class AppFixture(
     fake: FakeStopsCore = FakeStopsCore(),
     val app: Application = RuntimeEnvironment.getApplication(),
 ) {
-    val container = TestStopsContainer(app, fake)
+    val container = TestStopsContainer(app, fake.also { it.holdRealAnswers = it.usesRealCore })
     val navigator = TabNavigator(StopsTabs, StopsRoots)
     val overlays = OverlayController()
 

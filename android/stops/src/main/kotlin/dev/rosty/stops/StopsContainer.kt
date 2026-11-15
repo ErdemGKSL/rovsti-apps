@@ -27,7 +27,9 @@ import dev.rosty.stops.data.StopsTiles
 import dev.rosty.stops.home.CoreHomeData
 import dev.rosty.stops.home.HomeData
 import dev.rosty.stops.home.HomeSheet
+import dev.rosty.stops.map.MapTileStore
 import dev.rosty.stops.map.TileSource
+import dev.rosty.stops.notice.TripNotice
 import dev.rosty.stops.offline.MapArea
 import dev.rosty.stops.offline.OfflineAreaWorker
 import dev.rosty.stops.offline.OfflineDownloads
@@ -35,6 +37,8 @@ import dev.rosty.stops.settings.AlarmDevice
 import dev.rosty.stops.settings.AndroidAlarmDevice
 import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AndroidAlarmControl
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 
@@ -48,6 +52,16 @@ open class StopsContainer(
 ) : ShellContainer(context, AppPermissions.stops) {
     /** Every Stops decision the Rust core makes (E2.12): trip, pick, saved stops, history, prefs, GTFS, `view.*`. */
     val ops: StopsOps by lazy { createOps() }
+
+    /** AD-ST7: whether a trip carries the arriving-soon message, and the per-trip switch under Start. */
+    val arrivingSoon: TripNotice by lazy {
+        TripNotice(
+            prefs = store.prefs,
+            load = { (store.load() as? Outcome.Ok)?.value ?: store.prefs.value },
+            link = wa.linkState,
+            settled = wa.settled,
+        )
+    }
 
     /** The tile cache and source management (E2.13). */
     val tilesOps: TilesOps by lazy { createTilesOps() }
@@ -65,6 +79,11 @@ open class StopsContainer(
             cacheRoot = File(context.noBackupFilesDir, TILES_DIR).absolutePath,
             open = { request -> openTiles(request) },
         )
+    }
+
+    /** The threads the map paints its tiles on (never the main thread); a screen test paints them where it stands. */
+    open val tileRasterDispatcher: CoroutineDispatcher by lazy {
+        Dispatchers.Default.limitedParallelism(MapTileStore.RASTER_THREADS)
     }
 
     /**
@@ -109,6 +128,16 @@ open class StopsContainer(
     /** A sheet a page asked the map to open on the way back (the bar's Saved on Settings); the home clears it. */
     val pendingSheet: MutableStateFlow<HomeSheet?> = MutableStateFlow(null)
 
+    private val appContext: Context = context.applicationContext
+
+    /**
+     * The language the user reads Stops in, as a tag (`tr-TR`): read at every call, so a language change needs no
+     * restart. The Rust core writes its sentences (labels, hints, distances, the trip's status) in it.
+     */
+    fun localeTag(): String =
+        appContext.resources.configuration.locales[0]
+            .toLanguageTag()
+
     /** S10: the offline area download, run by a foreground worker; Settings and its notification follow it. */
     val offline: OfflineDownloads by lazy {
         OfflineDownloads(tiles, scope, schedule = ::scheduleOffline, unschedule = ::unscheduleOffline)
@@ -123,7 +152,7 @@ open class StopsContainer(
     /** The sound picker's previews, the volume test and the test ring (S12-S14). */
     val alarmDevice: AlarmDevice by lazy { createAlarmDevice() }
 
-    protected open fun createOps(): StopsOps = NativeStopsOps(rust)
+    protected open fun createOps(): StopsOps = NativeStopsOps(rust) { localeTag() }
 
     protected open fun scheduleOffline(area: MapArea) = OfflineAreaWorker.enqueue(context, area)
 

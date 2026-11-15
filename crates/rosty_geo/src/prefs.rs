@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::NoticeRule;
 use crate::alarm::{AlarmPlan, MIN_ALARM_VOLUME_PCT, VibrationPattern};
 use crate::notice::{DEFAULT_TEMPLATE, TemplateError, validate};
 use crate::session::NoticeState;
 use crate::tiles::TileSource;
+use crate::{Lang, NoticeRule};
 
 /// Snooze lengths the Settings row cycles through, minutes.
 pub const SNOOZE_CHOICES: [u8; 5] = [1, 3, 5, 10, 15];
@@ -38,9 +38,16 @@ impl NoticeWhen {
     ];
 
     pub fn label(self) -> String {
-        match self {
-            Self::WithAlarm => "When you cross the line".to_owned(),
-            Self::MinutesBefore(m) => format!("{m} min before the circle"),
+        self.label_in(Lang::En)
+    }
+
+    /// [`Self::label`] in `lang`: "Çizgiyi geçtiğinizde", "Çembere 10 dk kala".
+    pub fn label_in(self, lang: Lang) -> String {
+        match (lang, self) {
+            (Lang::En, Self::WithAlarm) => "When you cross the line".to_owned(),
+            (Lang::En, Self::MinutesBefore(m)) => format!("{m} min before the circle"),
+            (Lang::Tr, Self::WithAlarm) => "Çizgiyi geçtiğinizde".to_owned(),
+            (Lang::Tr, Self::MinutesBefore(m)) => format!("Çembere {m} dk kala"),
         }
     }
 }
@@ -113,6 +120,16 @@ impl Appearance {
             Self::Auto => "Auto",
             Self::Light => "Light",
             Self::Dark => "Dark",
+        }
+    }
+
+    /// [`Self::label`] in `lang`.
+    pub fn label_in(self, lang: Lang) -> &'static str {
+        match (lang, self) {
+            (Lang::En, _) => self.label(),
+            (Lang::Tr, Self::Auto) => "Otomatik",
+            (Lang::Tr, Self::Light) => "Açık",
+            (Lang::Tr, Self::Dark) => "Koyu",
         }
     }
 
@@ -258,9 +275,15 @@ impl StopsPrefs {
 
     /// Name of the alarm sound for the Settings row.
     pub fn alarm_sound_label(&self) -> String {
-        self.alarm_sound
-            .as_ref()
-            .map_or_else(|| "Default alarm".to_owned(), |s| s.title.clone())
+        self.alarm_sound_label_in(Lang::En)
+    }
+
+    /// [`Self::alarm_sound_label`] in `lang`.
+    pub fn alarm_sound_label_in(&self, lang: Lang) -> String {
+        self.alarm_sound.as_ref().map_or_else(
+            || lang.pick("Default alarm", "Varsayılan alarm").to_owned(),
+            |s| s.title.clone(),
+        )
     }
 
     /// The next cache size in [`TILE_CACHE_CHOICES_MB`] (wrapping); a stored

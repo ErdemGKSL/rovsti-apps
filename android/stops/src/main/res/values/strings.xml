@@ -115,7 +115,6 @@
     <string name="trip_inside">Inside the circle</string>
     <string name="trip_to_circle">%1$s to the circle</string>
     <string name="trip_next_check">Next check in %1$s</string>
-    <string name="trip_arriving_soon">Text when arriving</string>
     <string name="trip_copy_status">Copy status</string>
     <string name="trip_share_status">Share status</string>
     <string name="trip_status_copied">Status copied</string>

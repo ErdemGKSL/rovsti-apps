@@ -109,7 +109,6 @@
     <string name="trip_inside">Dairenin içinde</string>
     <string name="trip_to_circle">Daireye %1$s</string>
     <string name="trip_next_check">Sonraki kontrol %1$s sonra</string>
-    <string name="trip_arriving_soon">Varırken mesaj at</string>
     <string name="trip_copy_status">Durumu kopyala</string>
     <string name="trip_share_status">Durumu paylaş</string>
     <string name="trip_status_copied">Durum kopyalandı</string>

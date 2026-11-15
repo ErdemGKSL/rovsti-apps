@@ -98,6 +98,8 @@ data class SavedEditRequest(
     val saved: SavedStops,
     val edit: SavedEdit,
     @SerialName("now_ms") @EncodeDefault(NEVER) val nowMs: Long? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /**
@@ -121,6 +123,8 @@ data class SavedListRequest(
     @EncodeDefault(NEVER) val query: String? = null,
     @EncodeDefault(NEVER) val sort: String? = null,
     @EncodeDefault(NEVER) val here: Coord? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -176,6 +180,8 @@ data class NameAnswer(
 @Serializable
 data class ShortcutRequest(
     val stop: SavedStop,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 /** What the launcher needs to pin a shortcut that starts a saved stop's trip. */
@@ -208,6 +214,8 @@ data class PlacesImportRequest(
     val text: String,
     @SerialName("now_ms") val nowMs: Long,
     @EncodeDefault(NEVER) val apply: Boolean? = null,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable
@@ -242,6 +250,8 @@ data class PlacesImportAnswer(
 @Serializable
 data class DestParseRequest(
     val text: String,
+    /** The language of the sentences in the answer (a locale tag); absent for English. */
+    @EncodeDefault(NEVER) val locale: String? = null,
 )
 
 @Serializable

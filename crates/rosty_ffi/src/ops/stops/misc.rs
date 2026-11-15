@@ -17,7 +17,7 @@ use rosty_geo::prefs::{
 };
 use rosty_geo::tiles::{ATTRIBUTION, DEFAULT_TILE_URL, TileSource};
 use rosty_geo::{
-    AlarmSound, BBox, Coord, Feed, History, Measure, SavedStops, StopsPrefs, backup, notice,
+    AlarmSound, BBox, Coord, Feed, History, Lang, Measure, SavedStops, StopsPrefs, backup, notice,
     read_zip, transit,
 };
 use serde::Deserialize;
@@ -52,6 +52,13 @@ pub(super) const OPS: &[OpSpec] = &[
         Value,
         notice_validate,
         validate_cases
+    ),
+    op!(
+        "stops.notice_chats",
+        NoticeChatsReq,
+        Value,
+        notice_chats,
+        notice_chats_cases
     ),
     op!("stops.alarm_plan", PlanReq, Value, alarm_plan, plan_cases),
     op!("stops.poll", PollReq, Value, poll_op, poll_cases),
@@ -157,6 +164,8 @@ enum PrefsEdit {
 struct PrefsEditReq {
     prefs: StopsPrefs,
     edit: PrefsEdit,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn rejected(message: String, reason: &str) -> FfiError {
@@ -166,6 +175,7 @@ fn rejected(message: String, reason: &str) -> FfiError {
 /// One named edit, so the rules (the sound/vibrate pair keeps one on, the choices cycle, the template and tile URL
 /// are validated) stay in Rust and Kotlin only saves the result.
 fn prefs_edit(req: PrefsEditReq) -> Result<Value, FfiError> {
+    let lang = req.locale;
     let mut p = req.prefs;
     let mut changed = true;
     match req.edit {
@@ -181,7 +191,7 @@ fn prefs_edit(req: PrefsEditReq) -> Result<Value, FfiError> {
             let mut n = p.notice.take().unwrap_or_default();
             let result = n.set_template(&text);
             p.notice = Some(n);
-            result.map_err(|e| rejected(e.to_string(), "template"))?;
+            result.map_err(|e| rejected(e.message_in(lang), "template"))?;
         }
         PrefsEdit::SetNotice { chat, chat_name } => {
             let n = p.notice.get_or_insert_with(NoticePrefs::default);
@@ -196,8 +206,8 @@ fn prefs_edit(req: PrefsEditReq) -> Result<Value, FfiError> {
             match url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
                 None => p.tile_url = None,
                 Some(text) => {
-                    let source =
-                        TileSource::parse(text).map_err(|e| rejected(e.to_string(), "tile_url"))?;
+                    let source = TileSource::parse(text)
+                        .map_err(|e| rejected(e.message_in(lang), "tile_url"))?;
                     p.set_tile_url(&source);
                 }
             }
@@ -210,7 +220,7 @@ fn prefs_edit(req: PrefsEditReq) -> Result<Value, FfiError> {
         "prefs": p,
         "changed": changed,
         "alarm_is_default": p.alarm_is_default(),
-        "alarm_sound_label": p.alarm_sound_label(),
+        "alarm_sound_label": p.alarm_sound_label_in(lang),
         "tile_cache_bytes": p.tile_cache_bytes(),
         "tile_url": p.tile_source().template(),
     }))
@@ -261,6 +271,14 @@ fn prefs_edit_cases() -> Vec<Case> {
             "template_empty",
             json!({"prefs": p(), "edit": {"kind": "set_template", "text": "  "}}),
         ),
+        super::tr_named(
+            "tr_template_empty",
+            json!({"prefs": p(), "edit": {"kind": "set_template", "text": "  "}}),
+        ),
+        super::tr_named(
+            "tr_tile_url_bad",
+            json!({"prefs": p(), "edit": {"kind": "set_tile_url", "url": "ftp://x"}}),
+        ),
         Case::named(
             "notice",
             json!({"prefs": p(), "edit": {"kind": "set_notice", "chat": "90532@s.whatsapp.net",
@@ -292,28 +310,35 @@ fn prefs_edit_cases() -> Vec<Case> {
 }
 
 #[derive(Deserialize)]
-struct ChoicesReq {}
+struct ChoicesReq {
+    #[serde(default)]
+    locale: Lang,
+}
 
 /// The fixed choices the settings page lists, with their labels.
-fn prefs_choices(_: ChoicesReq) -> Result<Value, FfiError> {
+fn prefs_choices(req: ChoicesReq) -> Result<Value, FfiError> {
+    let lang = req.locale;
     Ok(json!({
         "snooze_min": SNOOZE_CHOICES,
         "tile_cache_mb": TILE_CACHE_CHOICES_MB,
         "notice_minutes": NOTICE_MINUTES,
         "volume_pct": alarm::VOLUME_CHOICES,
         "min_volume_pct": alarm::MIN_ALARM_VOLUME_PCT,
-        "appearance": Appearance::ALL.iter().map(|a| json!({"id": a, "label": a.label()})).collect::<Vec<_>>(),
-        "vibration": VibrationPattern::ALL.iter().map(|v| json!({"id": v, "label": v.label(),
+        "appearance": Appearance::ALL.iter().map(|a| json!({"id": a, "label": a.label_in(lang)})).collect::<Vec<_>>(),
+        "vibration": VibrationPattern::ALL.iter().map(|v| json!({"id": v, "label": v.label_in(lang),
             "pattern_ms": v.pattern_ms(), "preview_ms": v.preview_ms()})).collect::<Vec<_>>(),
-        "notice_when": NoticeWhen::ALL.iter().map(|w| json!({"id": w, "label": w.label()})).collect::<Vec<_>>(),
-        "default_template": notice::DEFAULT_TEMPLATE,
+        "notice_when": NoticeWhen::ALL.iter().map(|w| json!({"id": w, "label": w.label_in(lang)})).collect::<Vec<_>>(),
+        "default_template": notice::default_template(lang),
+        // The default of every language: a stored message that is one of them was never rewritten, so a page
+        // shows it (and a trip sends it) as the default of the language in use.
+        "default_templates": Lang::ALL.iter().map(|l| notice::default_template(*l)).collect::<Vec<_>>(),
         "default_tile_url": DEFAULT_TILE_URL,
         "attribution": ATTRIBUTION,
     }))
 }
 
 fn choices_cases() -> Vec<Case> {
-    vec![Case::new(json!({}))]
+    vec![Case::new(json!({})), super::tr_case(json!({}))]
 }
 
 // ---- notice ----
@@ -324,11 +349,13 @@ struct RenderReq {
     stop: String,
     #[serde(default)]
     eta_s: Option<u64>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn notice_render(req: RenderReq) -> Result<Value, FfiError> {
     Ok(
-        json!({"text": notice::render(&req.template, &req.stop, req.eta_s.map(Duration::from_secs))}),
+        json!({"text": notice::render_in(req.locale, &req.template, &req.stop, req.eta_s.map(Duration::from_secs))}),
     )
 }
 
@@ -339,12 +366,15 @@ fn render_cases() -> Vec<Case> {
             "no_eta",
             json!({"template": notice::DEFAULT_TEMPLATE, "stop": "Work"}),
         ),
+        super::tr_case(json!({"template": notice::DEFAULT_TEMPLATE, "stop": "Work", "eta_s": 540})),
     ]
 }
 
 #[derive(Deserialize)]
 struct ValidateReq {
     template: String,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// `ok` when the template can be saved; else `invalid` with the reason in `message`.
@@ -354,7 +384,7 @@ fn notice_validate(req: ValidateReq) -> Result<Value, FfiError> {
             notice::TemplateError::Empty => "empty",
             notice::TemplateError::TooLong => "too_long",
         };
-        rejected(e.to_string(), reason)
+        rejected(e.message_in(req.locale), reason)
     })?;
     Ok(json!({"max_chars": 500, "trimmed": req.template.trim()}))
 }
@@ -364,6 +394,103 @@ fn validate_cases() -> Vec<Case> {
         Case::new(json!({"template": " Arriving at {stop} "})),
         Case::named("empty", json!({"template": "   "})),
         Case::named("too_long", json!({"template": "x".repeat(501)})),
+        super::tr_named("tr_empty", json!({"template": "   "})),
+    ]
+}
+
+/// One chat the arriving-soon message can go to, with what is known about the person behind it.
+#[derive(Deserialize)]
+struct NoticeChatIn {
+    jid: String,
+    #[serde(default)]
+    group: bool,
+    /// The saved contact name.
+    #[serde(default)]
+    contact: Option<String>,
+    /// The verified business name.
+    #[serde(default)]
+    verified: Option<String>,
+    /// The name the person set on WhatsApp.
+    #[serde(default)]
+    push: Option<String>,
+    /// The name stored with the chat (a group's subject).
+    #[serde(default)]
+    chat_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct NoticeChatsReq {
+    chats: Vec<NoticeChatIn>,
+    #[serde(default)]
+    locale: Lang,
+}
+
+/// Names the chats of the arriving-soon picker, in the order given, by the one rule every app shows a WhatsApp
+/// person with (`rosty_core::wa_identity::display_name`): the saved contact name, then the verified business
+/// name, the push name and the chat's own name, the number last, and "WhatsApp user" when not even a number is
+/// known (a LID); a group is its subject, else "Group". `number` is the second line of a row: the number of a person shown by a name, null for a group
+/// and for a row that already is the number.
+fn notice_chats(req: NoticeChatsReq) -> Result<Value, FfiError> {
+    use rosty_app_core::wa_link::names::number_label;
+    use rosty_core::wa_identity::{NameInputs, NameTier, display_name};
+    let unknown = req.locale.pick("WhatsApp user", "WhatsApp kullanıcısı");
+    let unknown_group = req.locale.pick("Group", "Grup");
+    let chats: Vec<Value> = req
+        .chats
+        .iter()
+        .map(|chat| {
+            // Only a phone-number id has a number to show; a group's id and a LID are not for reading.
+            let number = (!chat.group && rosty_wa_proto::is_pn_jid(&chat.jid))
+                .then(|| number_label(&chat.jid));
+            let shown = display_name(
+                &NameInputs {
+                    contact: if chat.group {
+                        None
+                    } else {
+                        chat.contact.as_deref()
+                    },
+                    verified: if chat.group {
+                        None
+                    } else {
+                        chat.verified.as_deref()
+                    },
+                    push: if chat.group {
+                        None
+                    } else {
+                        chat.push.as_deref()
+                    },
+                    stored_chat: chat.chat_name.as_deref(),
+                    number: number.as_deref(),
+                },
+                if chat.group { unknown_group } else { unknown },
+            );
+            let named = !matches!(shown.tier, NameTier::Number | NameTier::Unknown);
+            json!({
+                "jid": chat.jid,
+                "name": shown.text,
+                "tier": shown.tier,
+                "number": number.filter(|_| named),
+                "group": chat.group,
+            })
+        })
+        .collect();
+    Ok(json!({"chats": chats}))
+}
+
+fn notice_chats_cases() -> Vec<Case> {
+    let chats = json!([
+        {"jid": "905550001122@s.whatsapp.net", "contact": "Ayşe Demir", "push": "ayse", "chat_name": "ayse"},
+        {"jid": "905550003344@s.whatsapp.net", "verified": "Corner Bakery", "push": "shop"},
+        {"jid": "905550007788@s.whatsapp.net", "push": " deniz ", "contact": "  "},
+        {"jid": "905550005566@s.whatsapp.net"},
+        {"jid": "120363000000000001@g.us", "group": true, "chat_name": "Family", "push": "not a person"},
+        {"jid": "120363000000000002@g.us", "group": true},
+        {"jid": "98765432101234@lid"},
+    ]);
+    vec![
+        Case::new(json!({"chats": chats})),
+        Case::named("empty", json!({"chats": []})),
+        super::tr_case(json!({"chats": chats})),
     ]
 }
 
@@ -372,6 +499,8 @@ fn validate_cases() -> Vec<Case> {
 #[derive(Deserialize)]
 struct PlanReq {
     prefs: StopsPrefs,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn alarm_plan(req: PlanReq) -> Result<Value, FfiError> {
@@ -383,7 +512,7 @@ fn alarm_plan(req: PlanReq) -> Result<Value, FfiError> {
         "sound": p.sound,
         "vibrate": p.vibrate,
         "next_volume_pct": alarm::next_volume(p.volume_pct),
-        "alarm_sound_label": p.alarm_sound_label(),
+        "alarm_sound_label": p.alarm_sound_label_in(req.locale),
     }))
 }
 
@@ -398,6 +527,7 @@ fn plan_cases() -> Vec<Case> {
             alarm_sound: Some(AlarmSound {uri: "content://media/1".into(), title: "Birds".into()}),
             ..StopsPrefs::default()}}),
         ),
+        super::tr_case(json!({"prefs": StopsPrefs::default()})),
     ]
 }
 
@@ -609,6 +739,8 @@ struct LinesReq {
     /// The most lines to list; `transit::MAX_LINES` when absent.
     #[serde(default)]
     limit: Option<usize>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// The lines that call at a stop and have a stop before it, as the stop sheet lists them: one entry per line and
@@ -644,8 +776,8 @@ fn gtfs_lines(req: LinesReq) -> Result<Value, FfiError> {
                     "name": l.name,
                     "headsign": l.headsign,
                     "before": l.before,
-                    "title": transit::line_title(&l.name, &l.headsign),
-                    "earlier": transit::earlier_text(l.before),
+                    "title": transit::line_title_in(req.locale, &l.name, &l.headsign),
+                    "earlier": transit::earlier_text_in(req.locale, l.before),
                 })
             })
             .collect();
@@ -666,6 +798,7 @@ fn lines_cases() -> Vec<Case> {
         Case::named("unknown_stop", json!({"dir": "$DIR", "stop_id": "nope"})).seeded("stops_gtfs"),
         Case::named("out_of_range", json!({"dir": "$DIR", "stop": 99})).seeded("stops_gtfs"),
         Case::named("no_feed", json!({"dir": "$DIR", "stop": 1})).seeded("stops_files"),
+        super::tr_case(json!({"dir": "$DIR", "stop": 1})).seeded("stops_gtfs"),
     ]
 }
 
@@ -680,6 +813,8 @@ struct SummaryReq {
     /// Rows the import dropped (`report.skipped_rows` of `stops.gtfs_import`), for the note after an import.
     #[serde(default)]
     skipped_rows: u64,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// The Settings row of the imported feed: "1 234 stops, 87 lines" and "Imported 5 Nov" (with the year when it is not
@@ -694,8 +829,8 @@ fn gtfs_summary(req: SummaryReq) -> Result<Value, FfiError> {
     };
     Ok(json!({
         "has_feed": true,
-        "summary": transit::feed_summary(&feed),
-        "imported": transit::imported_text(&feed, req.skipped_rows, req.now_ms, req.tz_offset_s),
+        "summary": transit::feed_summary_in(req.locale, &feed),
+        "imported": transit::imported_text_in(req.locale, &feed, req.skipped_rows, req.now_ms, req.tz_offset_s),
         "imported_ms": feed.imported_ms,
         "stops": feed.stops.len(),
         "routes": feed.routes.len(),
@@ -717,6 +852,8 @@ fn summary_cases() -> Vec<Case> {
         )
         .seeded("stops_gtfs"),
         Case::named("no_feed", json!({"dir": "$DIR", "now_ms": NOW})).seeded("stops_files"),
+        super::tr_case(json!({"dir": "$DIR", "now_ms": NOW, "tz_offset_s": TZ}))
+            .seeded("stops_gtfs"),
     ]
 }
 
@@ -732,25 +869,27 @@ struct FormatReq {
     here: Option<Coord>,
     #[serde(default)]
     zoom: Option<f64>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn coord_format_op(req: FormatReq) -> Result<Value, FfiError> {
     let formats: Vec<Value> = CoordFormat::ALL
         .iter()
         .map(|&f| {
-            json!({"id": format!("{f:?}").to_lowercase(), "label": f.label(),
+            json!({"id": format!("{f:?}").to_lowercase(), "label": f.label_in(req.locale),
                    "text": coord_format::format(req.at, f, req.label.as_deref())})
         })
         .collect();
     let zoom = req.zoom;
     Ok(json!({
         "formats": formats,
-        "from_you": req.here.map(|h| coord_format::from_you_text(h, req.at)),
-        "bearing": req.here.map(|h| coord_format::cardinal(h.bearing_deg(req.at))),
+        "from_you": req.here.map(|h| coord_format::from_you_text_in(req.locale, h, req.at)),
+        "bearing": req.here.map(|h| coord_format::cardinal_in(req.locale, h.bearing_deg(req.at))),
         "view": zoom.map(|z| json!({
             "osm_url": coord_format::osm_view_url(req.at, z),
             "geo_url": coord_format::geo_view_url(req.at, z),
-            "share_text": coord_format::map_view_share_text(req.at, z),
+            "share_text": coord_format::map_view_share_text_in(req.locale, req.at, z),
         })),
         "plus_code": coord_format::plus_code(req.at),
     }))
@@ -763,6 +902,10 @@ fn format_cases() -> Vec<Case> {
                          "here": {"lat": 41.0370, "lon": 28.9850}, "zoom": 15.4}),
         ),
         Case::named("plain", json!({"at": {"lat": -33.8688, "lon": 151.2093}})),
+        super::tr_case(
+            json!({"at": {"lat": 41.0082, "lon": 28.9784}, "label": "Sultanahmet",
+                         "here": {"lat": 41.0370, "lon": 28.9850}, "zoom": 15.4}),
+        ),
     ]
 }
 
@@ -793,6 +936,8 @@ struct MeasureReq {
     name: Option<String>,
     #[serde(default)]
     today: Option<String>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// The measure tool over a list of points (Kotlin keeps the list; undo is dropping the last). Points past the cap
@@ -809,8 +954,12 @@ fn measure(req: MeasureReq) -> Result<Value, FfiError> {
         "accepted": accepted,
         "legs_m": m.legs_m(),
         "total_m": m.total_m(),
-        "summary": m.summary_text(),
-        "gpx": m.to_gpx(req.name.as_deref().unwrap_or("Measurement")),
+        "summary": m.summary_text_in(req.locale),
+        "gpx": m.to_gpx(
+            req.name
+                .as_deref()
+                .unwrap_or(req.locale.pick("Measurement", "Ölçüm")),
+        ),
         "gate": m.as_gate().map(|(a, b)| json!({"a": a, "b": b})),
         "file_name": req.today.as_deref().map(Measure::export_file_name),
         "max_points": rosty_geo::measure::MAX_POINTS,
@@ -828,6 +977,10 @@ fn measure_cases() -> Vec<Case> {
             json!({"points": [{"lat": 41.0, "lon": 28.994}]}),
         ),
         Case::named("empty", json!({"points": []})),
+        super::tr_case(
+            json!({"points": [{"lat": 41.0, "lon": 28.994}, {"lat": 41.0, "lon": 29.0},
+                                    {"lat": 41.01, "lon": 29.0}], "name": "Walk", "today": "2026-09-21"}),
+        ),
     ]
 }
 
@@ -841,6 +994,8 @@ struct ExportReq {
     now_ms: i64,
     tz_offset_s: i32,
     today: String,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn backup_export(req: ExportReq) -> Result<Value, FfiError> {
@@ -848,21 +1003,29 @@ fn backup_export(req: ExportReq) -> Result<Value, FfiError> {
     Ok(json!({
         "text": backup::to_json(&b),
         "file_name": backup::export_file_name(&req.today),
-        "summary": backup::summary(&b, req.tz_offset_s),
+        "summary": backup::summary_in(req.locale, &b, req.tz_offset_s),
     }))
 }
 
 fn export_cases() -> Vec<Case> {
-    vec![Case::new(
-        json!({"saved": saved_sample(), "history": history_sample(), "prefs": StopsPrefs::default(),
+    vec![
+        Case::new(
+            json!({"saved": saved_sample(), "history": history_sample(), "prefs": StopsPrefs::default(),
                           "now_ms": NOW, "tz_offset_s": TZ, "today": "2026-09-21"}),
-    )]
+        ),
+        super::tr_case(
+            json!({"saved": saved_sample(), "history": history_sample(), "prefs": StopsPrefs::default(),
+                          "now_ms": NOW, "tz_offset_s": TZ, "today": "2026-09-21"}),
+        ),
+    ]
 }
 
 #[derive(Deserialize)]
 struct BackupParseReq {
     text: String,
     tz_offset_s: i32,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn backup_parse(req: BackupParseReq) -> Result<Value, FfiError> {
@@ -873,10 +1036,10 @@ fn backup_parse(req: BackupParseReq) -> Result<Value, FfiError> {
             backup::BackupError::Newer => "newer",
             backup::BackupError::BadStops => "bad_stops",
         };
-        rejected(e.message().to_owned(), reason)
+        rejected(e.message_in(req.locale).to_owned(), reason)
     })?;
     Ok(json!({
-        "summary": backup::summary(&b, req.tz_offset_s),
+        "summary": backup::summary_in(req.locale, &b, req.tz_offset_s),
         "created_ms": b.created_ms,
         "saved": b.saved,
         "history": b.history,
@@ -894,6 +1057,7 @@ fn backup_parse_cases() -> Vec<Case> {
     vec![
         Case::new(json!({"text": good, "tz_offset_s": TZ})),
         Case::named("not_json", json!({"text": "hello", "tz_offset_s": 0})),
+        super::tr_named("tr_not_json", json!({"text": "merhaba", "tz_offset_s": 0})),
         Case::named(
             "other_app",
             json!({"text": "{\"app\":\"rosty-phone\",\"version\":1,\"created_ms\":1,\"saved\":{\"version\":2,\"next_id\":1,\"stops\":[]},\"history\":{},\"prefs\":{}}", "tz_offset_s": 0}),
@@ -902,6 +1066,7 @@ fn backup_parse_cases() -> Vec<Case> {
             "newer",
             json!({"text": "{\"app\":\"rosty-stops\",\"version\":99,\"created_ms\":1,\"saved\":{\"version\":2,\"next_id\":1,\"stops\":[]},\"history\":{},\"prefs\":{}}", "tz_offset_s": 0}),
         ),
+        super::tr_case(json!({"text": good, "tz_offset_s": TZ})),
     ]
 }
 
@@ -910,16 +1075,19 @@ fn backup_parse_cases() -> Vec<Case> {
 #[derive(Deserialize)]
 struct DistanceReq {
     metres: f64,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn format_distance(req: DistanceReq) -> Result<Value, FfiError> {
-    Ok(json!({"text": rosty_geo::format_distance(req.metres)}))
+    Ok(json!({"text": rosty_geo::format_distance_in(req.locale, req.metres)}))
 }
 
 fn distance_cases() -> Vec<Case> {
     vec![
         Case::new(json!({"metres": 450.0})),
         Case::named("km", json!({"metres": 1840.0})),
+        super::tr_case(json!({"metres": 450.0})),
     ]
 }
 
@@ -928,6 +1096,8 @@ fn distance_cases() -> Vec<Case> {
 #[derive(Deserialize)]
 struct DestParseReq {
     text: String,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn place_json(p: &rosty_geo::SharedPlace) -> Value {
@@ -947,7 +1117,7 @@ fn dest_parse(req: DestParseReq) -> Result<Value, FfiError> {
             rosty_geo::DestError::OutOfRange => "out_of_range",
             rosty_geo::DestError::NotALocation => "not_a_location",
         };
-        rejected(e.message().to_owned(), reason)
+        rejected(e.message_in(req.locale).to_owned(), reason)
     })?;
     Ok(json!({"kind": "place", "place": place_json(&place), "stop": null}))
 }
@@ -970,6 +1140,7 @@ fn dest_parse_cases() -> Vec<Case> {
             json!({"text": "https://maps.app.goo.gl/abc123"}),
         ),
         Case::named("nothing", json!({"text": "see you at six"})),
+        super::tr_named("tr_nothing", json!({"text": "saat altıda görüşürüz"})),
     ]
 }
 

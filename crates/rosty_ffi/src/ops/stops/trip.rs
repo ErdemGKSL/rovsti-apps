@@ -13,8 +13,8 @@ use crate::op;
 use crate::ops::registry::{Case, OpSpec, PLACEHOLDER_HANDLE as H};
 use rosty_app_core::stops::store;
 use rosty_geo::{
-    ActiveTrip, Coord, Diameter, DiameterError, Endpoint, FixIn, NoticeDelivery, NoticePrefs,
-    Outcome, TripRecord, TripState, status_share_text,
+    ActiveTrip, Coord, Diameter, DiameterError, Endpoint, FixIn, Lang, NoticeDelivery, NoticePrefs,
+    Outcome, TripRecord, TripState, notice, status_share_text_in,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -89,15 +89,15 @@ fn with_trip<R>(
     })
 }
 
-/// A `DiameterError` as an `invalid` error: the sentence in `message`, a stable `reason` in `detail`.
-pub(super) fn diameter_error(error: DiameterError) -> FfiError {
+/// A `DiameterError` as an `invalid` error in `lang`: the sentence in `message`, a stable `reason` in `detail`.
+pub(super) fn diameter_error_in(lang: Lang, error: DiameterError) -> FfiError {
     let reason = match error {
         DiameterError::InvalidCoord => "invalid_coord",
         DiameterError::SamePoint => "same_point",
         DiameterError::TooShort => "too_short",
         DiameterError::TooLong => "too_long",
     };
-    FfiError::invalid(error.message()).with_detail(json!({"reason": reason}))
+    FfiError::invalid(error.message_in(lang)).with_detail(json!({"reason": reason}))
 }
 
 fn persist(dir: &Option<String>, trip: &ActiveTrip) -> Result<(), FfiError> {
@@ -158,14 +158,24 @@ struct StartReq {
     notice: Option<NoticePrefs>,
     #[serde(default)]
     dir: Option<String>,
+    /// The language of the texts the trip writes on its own (the service's notification, the
+    /// arriving-soon message): kept in `trip.json`.
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn start(req: StartReq) -> Result<Value, FfiError> {
-    let mut trip = ActiveTrip::new(req.id, req.a, req.b, req.started_ms).map_err(diameter_error)?;
-    trip.notice = req
-        .notice
-        .filter(|n| !n.chat.is_empty())
-        .map(|n| n.to_notice_state());
+    let lang = req.locale;
+    let mut trip = ActiveTrip::new(req.id, req.a, req.b, req.started_ms)
+        .map_err(|e| diameter_error_in(lang, e))?;
+    trip.lang = lang;
+    trip.notice = req.notice.filter(|n| !n.chat.is_empty()).map(|mut n| {
+        // A message the user never rewrote goes out in the phone's language.
+        if notice::is_default_template(&n.template) {
+            n.template = notice::default_template(lang).to_owned();
+        }
+        n.to_notice_state()
+    });
     persist(&req.dir, &trip)?;
     let view = view_of(&trip)?;
     Ok(with_handle(handles::global().insert(trip), view))
@@ -191,6 +201,16 @@ fn start_cases() -> Vec<Case> {
             "same_point",
             json!({"id": 9, "a": g["a"], "b": g["a"], "started_ms": NOW}),
         ),
+        // A Turkish phone: the trip keeps the language and the untouched default message follows it.
+        super::tr_case(json!({"id": 8, "a": g["a"], "b": g["b"], "started_ms": NOW,
+                   "notice": {"chat": "905321234567@s.whatsapp.net", "chat_name": "Ayşe",
+                              "template": "Arriving at {stop} in about {min} min.",
+                              "when": {"MinutesBefore": 10}}})),
+        super::tr_named(
+            "tr_too_short",
+            json!({"id": 9, "a": g["a"], "b": {"label": "Near", "coord": {"lat": 41.0, "lon": 28.9941}},
+                   "started_ms": NOW}),
+        ),
     ]
 }
 
@@ -198,11 +218,18 @@ fn start_cases() -> Vec<Case> {
 struct RestoreReq {
     /// A `snapshot` of an earlier answer, or the content of `trip.json`.
     trip: ActiveTrip,
+    /// The phone's locale now; absent keeps the language the trip has.
+    #[serde(default)]
+    locale: Option<Lang>,
 }
 
 fn restore(req: RestoreReq) -> Result<Value, FfiError> {
-    let view = view_of(&req.trip)?;
-    Ok(with_handle(handles::global().insert(req.trip), view))
+    let mut trip = req.trip;
+    if let Some(lang) = req.locale {
+        trip.lang = lang;
+    }
+    let view = view_of(&trip)?;
+    Ok(with_handle(handles::global().insert(trip), view))
 }
 
 fn restore_cases() -> Vec<Case> {
@@ -252,10 +279,16 @@ struct FixReq {
     fix: FixIn,
     #[serde(default)]
     dir: Option<String>,
+    /// The phone's locale now; absent keeps the language the trip has.
+    #[serde(default)]
+    locale: Option<Lang>,
 }
 
 fn fix(req: FixReq) -> Result<Value, FfiError> {
     with_trip(req.handle, |trip| {
+        if let Some(lang) = req.locale {
+            trip.lang = lang;
+        }
         let outcome = trip.on_fix(req.fix.fix(), req.fix.at_ms);
         let out = trip.fix_out(&outcome);
         persist(&req.dir, trip)?;
@@ -293,6 +326,15 @@ fn fix_cases() -> Vec<Case> {
         )
         .after("stops.trip_start", open()),
         Case::named("closed", json!({"handle": 12345, "fix": fix_at(41.0, 29.0, None)})),
+        // The phone's language changed since the trip started: the fix names it.
+        super::tr_case(json!({"handle": H, "fix": fix_at(41.003, 28.999, Some(10.0))}))
+            .after("stops.trip_start", open()),
+        // Outside the circle, in the language the trip was started in.
+        Case::named(
+            "started_in_turkish",
+            json!({"handle": H, "fix": fix_at(41.05, 29.1, None)}),
+        )
+        .after("stops.trip_start", super::tr_case(open()).request),
     ]
 }
 
@@ -428,11 +470,15 @@ struct ShareReq {
     /// Local clock text from `stops.arrival_clock`.
     #[serde(default)]
     arrive: Option<String>,
+    /// The phone's locale now; absent keeps the language the trip has.
+    #[serde(default)]
+    locale: Option<Lang>,
 }
 
 fn share(req: ShareReq) -> Result<Value, FfiError> {
     with_trip(req.handle, |trip| {
-        let text = status_share_text(
+        let text = status_share_text_in(
+            req.locale.unwrap_or(trip.lang),
             &trip.label(),
             req.line_m,
             req.eta_min,
@@ -452,6 +498,12 @@ fn share_cases() -> Vec<Case> {
         .after("stops.trip_start", open_req()),
         Case::named("crossed", json!({"handle": H, "crossed": true}))
             .after("stops.trip_start", open_req()),
+        super::tr_case(json!({"handle": H, "line_m": 640.0, "eta_min": 4,
+                         "here": {"lat": 41.0, "lon": 28.99}, "arrive": "20:41"}))
+        .after("stops.trip_start", open_req()),
+        // No locale in the request: the language the trip was started in.
+        Case::named("started_in_turkish", json!({"handle": H, "crossed": true}))
+            .after("stops.trip_start", super::tr_case(open_req()).request),
     ]
 }
 
@@ -464,6 +516,9 @@ struct EndReq {
     /// With a `dir` the trip is written, moved into `history.json` and `trip.json` removed (under the store lock).
     #[serde(default)]
     dir: Option<String>,
+    /// The phone's locale now; absent keeps the language the trip has.
+    #[serde(default)]
+    locale: Option<Lang>,
 }
 
 fn end(req: EndReq) -> Result<Value, FfiError> {
@@ -481,10 +536,11 @@ fn end(req: EndReq) -> Result<Value, FfiError> {
             store::save_trip(&dir, trip)?;
             recorded = store::end_trip(&dir, outcome, req.now_ms)?.is_some();
         }
+        let lang = req.locale.unwrap_or(trip.lang);
         Ok(json!({
             "record": record,
-            "title": record.title(),
-            "summary_line": record.summary_line(),
+            "title": record.title_in(lang),
+            "summary_line": record.summary_line_in(lang),
             "recorded": recorded,
         }))
     })
@@ -504,6 +560,7 @@ fn end_cases() -> Vec<Case> {
             json!({"handle": H, "outcome": "lost", "now_ms": NOW}),
         )
         .after("stops.trip_start", open_req()),
+        super::tr_case(json!({"handle": H, "outcome": "arrived", "now_ms": NOW + 600_000})),
     ]
 }
 
@@ -534,11 +591,13 @@ fn clock_cases() -> Vec<Case> {
 struct ValidateReq {
     a: Coord,
     b: Coord,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// The circle on AB, or why A and B cannot form one (`invalid`, the sentence in `message`).
 fn validate(req: ValidateReq) -> Result<Value, FfiError> {
-    let d = Diameter::new(req.a, req.b).map_err(diameter_error)?;
+    let d = Diameter::new(req.a, req.b).map_err(|e| diameter_error_in(req.locale, e))?;
     Ok(json!({
         "length_m": d.length_m(),
         "radius_m": d.radius_m(),
@@ -560,6 +619,10 @@ fn validate_cases() -> Vec<Case> {
             "too_long",
             json!({"a": {"lat": 41.0, "lon": 29.0}, "b": {"lat": 42.0, "lon": 29.0}}),
         ),
+        super::tr_named(
+            "tr_too_long",
+            json!({"a": {"lat": 41.0, "lon": 29.0}, "b": {"lat": 42.0, "lon": 29.0}}),
+        ),
         Case::named(
             "invalid_coord",
             json!({"a": {"lat": 95.0, "lon": 29.0}, "b": {"lat": 41.0, "lon": 29.0}}),
@@ -577,12 +640,14 @@ struct ReadReq {
     /// Points of the circle outline to draw (0 for none).
     #[serde(default)]
     outline_points: usize,
+    #[serde(default)]
+    locale: Lang,
 }
 
 /// Where `at` is against the gate: side, distances and (for the map) the circle outline and the two half discs.
 fn read(req: ReadReq) -> Result<Value, FfiError> {
     use rosty_geo::{Side, SideReading};
-    let d = Diameter::new(req.a, req.b).map_err(diameter_error)?;
+    let d = Diameter::new(req.a, req.b).map_err(|e| diameter_error_in(req.locale, e))?;
     let reading = match d.read_side(req.at, req.accuracy_m) {
         SideReading::Side(side) => json!({"kind": "side", "side": side}),
         SideReading::OnLine => json!({"kind": "on_line", "side": null}),

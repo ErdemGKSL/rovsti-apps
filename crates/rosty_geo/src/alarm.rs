@@ -52,6 +52,18 @@ impl VibrationPattern {
         }
     }
 
+    /// [`Self::label`] in `lang`.
+    pub fn label_in(self, lang: crate::Lang) -> &'static str {
+        use crate::Lang;
+        match (lang, self) {
+            (Lang::En, _) => self.label(),
+            (Lang::Tr, Self::Standard) => "Standart",
+            (Lang::Tr, Self::Pulse) => "Darbeli",
+            (Lang::Tr, Self::Long) => "Uzun",
+            (Lang::Tr, Self::Heartbeat) => "Kalp atışı",
+        }
+    }
+
     /// The next pattern (wrapping).
     pub fn next(self) -> Self {
         let i = Self::ALL.iter().position(|p| *p == self).unwrap_or(0);

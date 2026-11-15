@@ -55,6 +55,8 @@ import dev.rosty.core.model.stops.HistoryTextRequest
 import dev.rosty.core.model.stops.MeasureAnswer
 import dev.rosty.core.model.stops.MeasureRequest
 import dev.rosty.core.model.stops.NameAnswer
+import dev.rosty.core.model.stops.NoticeChatsAnswer
+import dev.rosty.core.model.stops.NoticeChatsRequest
 import dev.rosty.core.model.stops.NoticeRenderRequest
 import dev.rosty.core.model.stops.NoticeResultAnswer
 import dev.rosty.core.model.stops.NoticeResultRequest
@@ -70,6 +72,7 @@ import dev.rosty.core.model.stops.PlacesImportRequest
 import dev.rosty.core.model.stops.PollAnswer
 import dev.rosty.core.model.stops.PollRequest
 import dev.rosty.core.model.stops.PrefsChoicesAnswer
+import dev.rosty.core.model.stops.PrefsChoicesRequest
 import dev.rosty.core.model.stops.PrefsEditAnswer
 import dev.rosty.core.model.stops.PrefsEditRequest
 import dev.rosty.core.model.stops.PrefsLoadAnswer
@@ -275,6 +278,9 @@ interface StopsOps {
     /** Checks a template (`RustError.Invalid` with the reason). */
     suspend fun noticeValidate(req: NoticeValidateRequest): Outcome<NoticeValidateAnswer>
 
+    /** The chats the arriving-soon message can go to, named by the shared rule (contact, WhatsApp's name, number). */
+    suspend fun noticeChats(req: NoticeChatsRequest): Outcome<NoticeChatsAnswer>
+
     /** What the service needs to ring, from the preferences. */
     suspend fun alarmPlan(req: AlarmPlanRequest): Outcome<AlarmPlanAnswer>
 
@@ -380,6 +386,7 @@ interface StopsOps {
                 "stops.prefs_choices",
                 "stops.notice_render",
                 "stops.notice_validate",
+                "stops.notice_chats",
                 "stops.alarm_plan",
                 "stops.poll",
                 "stops.gtfs_import",
@@ -402,21 +409,44 @@ interface StopsOps {
     }
 }
 
-/** [StopsOps] over a [RustCore]; the real core runs every call on `RustDispatcher`. */
+/**
+ * [StopsOps] over a [RustCore]; the real core runs every call on `RustDispatcher`.
+ *
+ * [locale] is the language the user reads the app in, as a tag (`tr-TR`): every op that answers a sentence gets it
+ * unless its request names one itself, so no caller has to pass it. Null (the default) is English.
+ */
 class NativeStopsOps(
     private val core: RustCore = NativeRustCore(),
+    private val locale: () -> String? = { null },
 ) : StopsOps {
+    private fun tag(): String? = locale()
+
     override suspend fun tripStart(req: TripStartRequest) =
-        core.call("stops.trip_start", req, TripStartRequest.serializer(), TripView.serializer())
+        core.call(
+            "stops.trip_start",
+            req.copy(locale = req.locale ?: tag()),
+            TripStartRequest.serializer(),
+            TripView.serializer(),
+        )
 
     override suspend fun tripRestore(req: TripRestoreRequest) =
-        core.call("stops.trip_restore", req, TripRestoreRequest.serializer(), TripView.serializer())
+        core.call(
+            "stops.trip_restore",
+            req.copy(locale = req.locale ?: tag()),
+            TripRestoreRequest.serializer(),
+            TripView.serializer(),
+        )
 
     override suspend fun tripState(req: TripHandleRequest) =
         core.call("stops.trip_state", req, TripHandleRequest.serializer(), TripView.serializer())
 
     override suspend fun tripFix(req: TripFixRequest) =
-        core.call("stops.trip_fix", req, TripFixRequest.serializer(), TripFixAnswer.serializer())
+        core.call(
+            "stops.trip_fix",
+            req.copy(locale = req.locale ?: tag()),
+            TripFixRequest.serializer(),
+            TripFixAnswer.serializer(),
+        )
 
     override suspend fun tripNoticeResult(req: NoticeResultRequest) =
         core.call("stops.trip_notice_result", req, NoticeResultRequest.serializer(), NoticeResultAnswer.serializer())
@@ -431,10 +461,20 @@ class NativeStopsOps(
         core.call("stops.trip_dismiss", req, DismissRequest.serializer(), DismissAnswer.serializer())
 
     override suspend fun tripStatusShare(req: StatusShareRequest) =
-        core.call("stops.trip_status_share", req, StatusShareRequest.serializer(), TextAnswer.serializer())
+        core.call(
+            "stops.trip_status_share",
+            req.copy(locale = req.locale ?: tag()),
+            StatusShareRequest.serializer(),
+            TextAnswer.serializer(),
+        )
 
     override suspend fun tripEnd(req: TripEndRequest) =
-        core.call("stops.trip_end", req, TripEndRequest.serializer(), TripEndAnswer.serializer())
+        core.call(
+            "stops.trip_end",
+            req.copy(locale = req.locale ?: tag()),
+            TripEndRequest.serializer(),
+            TripEndAnswer.serializer(),
+        )
 
     override suspend fun arrivalClock(req: ArrivalClockRequest) =
         core.call("stops.arrival_clock", req, ArrivalClockRequest.serializer(), ClockAnswer.serializer())
@@ -442,25 +482,45 @@ class NativeStopsOps(
     override suspend fun crossingValidate(req: CrossingValidateRequest) =
         core.call(
             "stops.crossing_validate",
-            req,
+            req.copy(locale = req.locale ?: tag()),
             CrossingValidateRequest.serializer(),
             CrossingValidateAnswer.serializer(),
         )
 
     override suspend fun crossingRead(req: CrossingReadRequest) =
-        core.call("stops.crossing_read", req, CrossingReadRequest.serializer(), CrossingReadAnswer.serializer())
+        core.call(
+            "stops.crossing_read",
+            req.copy(locale = req.locale ?: tag()),
+            CrossingReadRequest.serializer(),
+            CrossingReadAnswer.serializer(),
+        )
 
     override suspend fun destParse(req: DestParseRequest) =
-        core.call("stops.dest_parse", req, DestParseRequest.serializer(), DestParseAnswer.serializer())
+        core.call(
+            "stops.dest_parse",
+            req.copy(locale = req.locale ?: tag()),
+            DestParseRequest.serializer(),
+            DestParseAnswer.serializer(),
+        )
 
     override suspend fun destShare(req: DestShareRequest) =
         core.call("stops.dest_share", req, DestShareRequest.serializer(), DestShareAnswer.serializer())
 
     override suspend fun pickReplay(req: PickReplayRequest) =
-        core.call("stops.pick_replay", req, PickReplayRequest.serializer(), PickReplayAnswer.serializer())
+        core.call(
+            "stops.pick_replay",
+            req.copy(locale = req.locale ?: tag()),
+            PickReplayRequest.serializer(),
+            PickReplayAnswer.serializer(),
+        )
 
     override suspend fun pickLabels(req: PickLabelsRequest) =
-        core.call("stops.pick_labels", req, PickLabelsRequest.serializer(), PickLabelsAnswer.serializer())
+        core.call(
+            "stops.pick_labels",
+            req.copy(locale = req.locale ?: tag()),
+            PickLabelsRequest.serializer(),
+            PickLabelsAnswer.serializer(),
+        )
 
     override suspend fun pickSaveOffer(req: SaveOfferRequest) =
         core.call("stops.pick_save_offer", req, SaveOfferRequest.serializer(), SaveOfferAnswer.serializer())
@@ -472,34 +532,69 @@ class NativeStopsOps(
         core.call("stops.saved_load", req, SavedLoadRequest.serializer(), SavedLoadAnswer.serializer())
 
     override suspend fun savedEdit(req: SavedEditRequest) =
-        core.call("stops.saved_edit", req, SavedEditRequest.serializer(), SavedEditAnswer.serializer())
+        core.call(
+            "stops.saved_edit",
+            req.copy(locale = req.locale ?: tag()),
+            SavedEditRequest.serializer(),
+            SavedEditAnswer.serializer(),
+        )
 
     override suspend fun savedList(req: SavedListRequest) =
-        core.call("stops.saved_list", req, SavedListRequest.serializer(), SavedListAnswer.serializer())
+        core.call(
+            "stops.saved_list",
+            req.copy(locale = req.locale ?: tag()),
+            SavedListRequest.serializer(),
+            SavedListAnswer.serializer(),
+        )
 
     override suspend fun savedSuggestName(req: SuggestNameRequest) =
         core.call("stops.saved_suggest_name", req, SuggestNameRequest.serializer(), NameAnswer.serializer())
 
     override suspend fun savedShortcut(req: ShortcutRequest) =
-        core.call("stops.saved_shortcut", req, ShortcutRequest.serializer(), ShortcutAnswer.serializer())
+        core.call(
+            "stops.saved_shortcut",
+            req.copy(locale = req.locale ?: tag()),
+            ShortcutRequest.serializer(),
+            ShortcutAnswer.serializer(),
+        )
 
     override suspend fun placesExport(req: PlacesExportRequest) =
         core.call("stops.places_export", req, PlacesExportRequest.serializer(), FileTextAnswer.serializer())
 
     override suspend fun placesImport(req: PlacesImportRequest) =
-        core.call("stops.places_import", req, PlacesImportRequest.serializer(), PlacesImportAnswer.serializer())
+        core.call(
+            "stops.places_import",
+            req.copy(locale = req.locale ?: tag()),
+            PlacesImportRequest.serializer(),
+            PlacesImportAnswer.serializer(),
+        )
 
     override suspend fun historyList(req: HistoryListRequest) =
-        core.call("stops.history_list", req, HistoryListRequest.serializer(), HistoryListAnswer.serializer())
+        core.call(
+            "stops.history_list",
+            req.copy(locale = req.locale ?: tag()),
+            HistoryListRequest.serializer(),
+            HistoryListAnswer.serializer(),
+        )
 
     override suspend fun historyEdit(req: HistoryEditRequest) =
         core.call("stops.history_edit", req, HistoryEditRequest.serializer(), HistoryEditAnswer.serializer())
 
     override suspend fun historyPrunePlan(req: PrunePlanRequest) =
-        core.call("stops.history_prune_plan", req, PrunePlanRequest.serializer(), PrunePlanAnswer.serializer())
+        core.call(
+            "stops.history_prune_plan",
+            req.copy(locale = req.locale ?: tag()),
+            PrunePlanRequest.serializer(),
+            PrunePlanAnswer.serializer(),
+        )
 
     override suspend fun historyUsage(req: UsageRequest) =
-        core.call("stops.history_usage", req, UsageRequest.serializer(), UsageAnswer.serializer())
+        core.call(
+            "stops.history_usage",
+            req.copy(locale = req.locale ?: tag()),
+            UsageRequest.serializer(),
+            UsageAnswer.serializer(),
+        )
 
     override suspend fun historyRecent(req: RecentRequest) =
         core.call("stops.history_recent", req, RecentRequest.serializer(), RecentAnswer.serializer())
@@ -508,10 +603,20 @@ class NativeStopsOps(
         core.call("stops.history_export", req, HistoryExportRequest.serializer(), HistoryExportAnswer.serializer())
 
     override suspend fun historyText(req: HistoryTextRequest) =
-        core.call("stops.history_text", req, HistoryTextRequest.serializer(), HistoryTextAnswer.serializer())
+        core.call(
+            "stops.history_text",
+            req.copy(locale = req.locale ?: tag()),
+            HistoryTextRequest.serializer(),
+            HistoryTextAnswer.serializer(),
+        )
 
     override suspend fun stats(req: StatsRequest) =
-        core.call("stops.stats", req, StatsRequest.serializer(), StatsAnswer.serializer())
+        core.call(
+            "stops.stats",
+            req.copy(locale = req.locale ?: tag()),
+            StatsRequest.serializer(),
+            StatsAnswer.serializer(),
+        )
 
     override suspend fun storeTripLoad(req: DirRequest) =
         core.call("stops.store_trip_load", req, DirRequest.serializer(), StoreTripLoadAnswer.serializer())
@@ -541,19 +646,52 @@ class NativeStopsOps(
         core.call("stops.prefs_save", req, PrefsSaveRequest.serializer(), Empty.serializer())
 
     override suspend fun prefsEdit(req: PrefsEditRequest) =
-        core.call("stops.prefs_edit", req, PrefsEditRequest.serializer(), PrefsEditAnswer.serializer())
+        core.call(
+            "stops.prefs_edit",
+            req.copy(locale = req.locale ?: tag()),
+            PrefsEditRequest.serializer(),
+            PrefsEditAnswer.serializer(),
+        )
 
     override suspend fun prefsChoices(req: Empty) =
-        core.call("stops.prefs_choices", req, Empty.serializer(), PrefsChoicesAnswer.serializer())
+        core.call(
+            "stops.prefs_choices",
+            PrefsChoicesRequest(tag()),
+            PrefsChoicesRequest.serializer(),
+            PrefsChoicesAnswer.serializer(),
+        )
 
     override suspend fun noticeRender(req: NoticeRenderRequest) =
-        core.call("stops.notice_render", req, NoticeRenderRequest.serializer(), TextAnswer.serializer())
+        core.call(
+            "stops.notice_render",
+            req.copy(locale = req.locale ?: tag()),
+            NoticeRenderRequest.serializer(),
+            TextAnswer.serializer(),
+        )
 
     override suspend fun noticeValidate(req: NoticeValidateRequest) =
-        core.call("stops.notice_validate", req, NoticeValidateRequest.serializer(), NoticeValidateAnswer.serializer())
+        core.call(
+            "stops.notice_validate",
+            req.copy(locale = req.locale ?: tag()),
+            NoticeValidateRequest.serializer(),
+            NoticeValidateAnswer.serializer(),
+        )
+
+    override suspend fun noticeChats(req: NoticeChatsRequest) =
+        core.call(
+            "stops.notice_chats",
+            req.copy(locale = req.locale ?: tag()),
+            NoticeChatsRequest.serializer(),
+            NoticeChatsAnswer.serializer(),
+        )
 
     override suspend fun alarmPlan(req: AlarmPlanRequest) =
-        core.call("stops.alarm_plan", req, AlarmPlanRequest.serializer(), AlarmPlanAnswer.serializer())
+        core.call(
+            "stops.alarm_plan",
+            req.copy(locale = req.locale ?: tag()),
+            AlarmPlanRequest.serializer(),
+            AlarmPlanAnswer.serializer(),
+        )
 
     override suspend fun poll(req: PollRequest) =
         core.call("stops.poll", req, PollRequest.serializer(), PollAnswer.serializer())
@@ -568,28 +706,63 @@ class NativeStopsOps(
         core.call("stops.gtfs_view", req, GtfsViewRequest.serializer(), GtfsViewAnswer.serializer())
 
     override suspend fun gtfsLines(req: GtfsLinesRequest) =
-        core.call("stops.gtfs_lines", req, GtfsLinesRequest.serializer(), GtfsLinesAnswer.serializer())
+        core.call(
+            "stops.gtfs_lines",
+            req.copy(locale = req.locale ?: tag()),
+            GtfsLinesRequest.serializer(),
+            GtfsLinesAnswer.serializer(),
+        )
 
     override suspend fun gtfsSummary(req: GtfsSummaryRequest) =
-        core.call("stops.gtfs_summary", req, GtfsSummaryRequest.serializer(), GtfsSummaryAnswer.serializer())
+        core.call(
+            "stops.gtfs_summary",
+            req.copy(locale = req.locale ?: tag()),
+            GtfsSummaryRequest.serializer(),
+            GtfsSummaryAnswer.serializer(),
+        )
 
     override suspend fun coordFormat(req: CoordFormatRequest) =
-        core.call("stops.coord_format", req, CoordFormatRequest.serializer(), CoordFormatAnswer.serializer())
+        core.call(
+            "stops.coord_format",
+            req.copy(locale = req.locale ?: tag()),
+            CoordFormatRequest.serializer(),
+            CoordFormatAnswer.serializer(),
+        )
 
     override suspend fun coordParse(req: CoordParseRequest) =
         core.call("stops.coord_parse", req, CoordParseRequest.serializer(), CoordParseAnswer.serializer())
 
     override suspend fun measure(req: MeasureRequest) =
-        core.call("stops.measure", req, MeasureRequest.serializer(), MeasureAnswer.serializer())
+        core.call(
+            "stops.measure",
+            req.copy(locale = req.locale ?: tag()),
+            MeasureRequest.serializer(),
+            MeasureAnswer.serializer(),
+        )
 
     override suspend fun backupExport(req: BackupExportRequest) =
-        core.call("stops.backup_export", req, BackupExportRequest.serializer(), BackupExportAnswer.serializer())
+        core.call(
+            "stops.backup_export",
+            req.copy(locale = req.locale ?: tag()),
+            BackupExportRequest.serializer(),
+            BackupExportAnswer.serializer(),
+        )
 
     override suspend fun backupParse(req: BackupParseRequest) =
-        core.call("stops.backup_parse", req, BackupParseRequest.serializer(), BackupParseAnswer.serializer())
+        core.call(
+            "stops.backup_parse",
+            req.copy(locale = req.locale ?: tag()),
+            BackupParseRequest.serializer(),
+            BackupParseAnswer.serializer(),
+        )
 
     override suspend fun formatDistance(req: FormatDistanceRequest) =
-        core.call("stops.format_distance", req, FormatDistanceRequest.serializer(), TextAnswer.serializer())
+        core.call(
+            "stops.format_distance",
+            req.copy(locale = req.locale ?: tag()),
+            FormatDistanceRequest.serializer(),
+            TextAnswer.serializer(),
+        )
 
     override suspend fun viewProject(req: ProjectRequest) =
         core.call("view.project", req, ProjectRequest.serializer(), ProjectAnswer.serializer())

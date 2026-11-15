@@ -95,12 +95,15 @@ class E71ShotTest : ShotTest() {
                     waitForIdle()
                     simulateBars(activity!!)
                 }
-                // The core answers on its own threads, through the main looper (and the tiles load on theirs: a busy
-                // full run needed longer than three seconds).
+                // The core answers on its own threads: each step first hands over the answers that are due
+                // ([Background]); the tiles are painted inline.
                 repeat(60) {
+                    Background.await { waitForIdle() }
                     mainClock.advanceTimeBy(100)
                     Thread.sleep(15)
                 }
+                Background.await { waitForIdle() }
+                mainClock.advanceTimeByFrame()
                 waitForIdle()
                 onRoot().captureRoboImage(
                     "screenshots/e7.1-home-landscape-${if (dark) "dark" else "light"}.png",

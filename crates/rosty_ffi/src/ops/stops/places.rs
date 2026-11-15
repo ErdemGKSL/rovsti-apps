@@ -5,15 +5,14 @@
 //! inside the favourite group) stay in Rust.
 
 use super::pick::saved_sample;
-use super::trip::diameter_error;
+use super::trip::diameter_error_in;
 use super::{NOW, coord};
 use crate::envelope::{ErrorKind, FfiError};
 use crate::op;
 use crate::ops::registry::{Case, OpSpec};
 use rosty_geo::saved_stops::{self, NEAREST_CHIP_M, SavedSort};
 use rosty_geo::{
-    Coord, Endpoint, Feed, SavedStop, SavedStopError, SavedStops, StopColour, places_io,
-    shortcut_spec,
+    Coord, Endpoint, Feed, Lang, SavedStop, SavedStopError, SavedStops, StopColour, places_io,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -52,18 +51,18 @@ pub(super) const OPS: &[OpSpec] = &[
     ),
 ];
 
-fn saved_error(error: SavedStopError) -> FfiError {
+fn saved_error(lang: Lang, error: SavedStopError) -> FfiError {
     let (reason, id) = match error {
         SavedStopError::InvalidName => ("invalid_name", None),
         SavedStopError::InvalidGate(inner) => {
-            return diameter_error(inner).with_detail(json!({"reason": "invalid_gate"}));
+            return diameter_error_in(lang, inner).with_detail(json!({"reason": "invalid_gate"}));
         }
         SavedStopError::Duplicate(id) => ("duplicate", Some(id)),
         SavedStopError::Full => ("full", None),
         SavedStopError::NotFound => ("not_found", None),
         SavedStopError::NoteTooLong => ("note_too_long", None),
     };
-    FfiError::new(ErrorKind::Invalid, error.message())
+    FfiError::new(ErrorKind::Invalid, error.message_in(lang))
         .with_detail(json!({"reason": reason, "id": id}))
 }
 
@@ -138,9 +137,12 @@ struct EditReq {
     edit: Edit,
     #[serde(default)]
     now_ms: i64,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn saved_edit(req: EditReq) -> Result<Value, FfiError> {
+    let lang = req.locale;
     let mut saved = req.saved;
     // `id`: the stop touched; `removed`/`index`: what a delete took out (for undo); `flag`: the favourite or
     // moved result; `colour`: the colour now set.
@@ -151,17 +153,21 @@ fn saved_edit(req: EditReq) -> Result<Value, FfiError> {
     let mut colour = None;
     match req.edit {
         Edit::Add { name, a, b } => {
-            id = Some(saved.add(&name, a, b, req.now_ms).map_err(saved_error)?)
+            id = Some(
+                saved
+                    .add(&name, a, b, req.now_ms)
+                    .map_err(|e| saved_error(lang, e))?,
+            )
         }
         Edit::Rename { id: i, name } => {
-            saved.rename(i, &name).map_err(saved_error)?;
+            saved.rename(i, &name).map_err(|e| saved_error(lang, e))?;
             id = Some(i);
         }
         Edit::Remove { id: i } => {
             let at = saved.stops.iter().position(|s| s.id == i);
             let stop = saved.get(i).cloned();
             if !saved.remove(i) {
-                return Err(saved_error(SavedStopError::NotFound));
+                return Err(saved_error(lang, SavedStopError::NotFound));
             }
             id = Some(i);
             removed = stop;
@@ -171,7 +177,7 @@ fn saved_edit(req: EditReq) -> Result<Value, FfiError> {
             flag = Some(
                 saved
                     .toggle_favourite(i)
-                    .ok_or_else(|| saved_error(SavedStopError::NotFound))?,
+                    .ok_or_else(|| saved_error(lang, SavedStopError::NotFound))?,
             );
             id = Some(i);
         }
@@ -179,13 +185,13 @@ fn saved_edit(req: EditReq) -> Result<Value, FfiError> {
             colour = Some(
                 saved
                     .cycle_colour(i)
-                    .ok_or_else(|| saved_error(SavedStopError::NotFound))?,
+                    .ok_or_else(|| saved_error(lang, SavedStopError::NotFound))?,
             );
             id = Some(i);
         }
         Edit::SetColour { id: i, colour: c } => {
             if !saved.set_colour(i, c) {
-                return Err(saved_error(SavedStopError::NotFound));
+                return Err(saved_error(lang, SavedStopError::NotFound));
             }
             colour = Some(c);
             id = Some(i);
@@ -199,7 +205,7 @@ fn saved_edit(req: EditReq) -> Result<Value, FfiError> {
             saved.restore(stop, at);
         }
         Edit::SetNote { id: i, note } => {
-            saved.set_note(i, &note).map_err(saved_error)?;
+            saved.set_note(i, &note).map_err(|e| saved_error(lang, e))?;
             id = Some(i);
         }
     }
@@ -294,6 +300,8 @@ struct ListReq {
     sort: Option<String>,
     #[serde(default)]
     here: Option<Coord>,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn saved_list(req: ListReq) -> Result<Value, FfiError> {
@@ -313,7 +321,7 @@ fn saved_list(req: ListReq) -> Result<Value, FfiError> {
                 "length_m": s.length_m(),
                 "valid": s.diameter().is_ok(),
                 "distance_m": req.here.map(|h| h.distance_m(s.center())),
-                "colour_label": s.colour.label(),
+                "colour_label": s.colour.label_in(req.locale),
             })
         })
         .collect();
@@ -326,10 +334,10 @@ fn saved_list(req: ListReq) -> Result<Value, FfiError> {
         "total": req.saved.stops.len(),
         "nearest": nearest,
         "nearest_chip_m": NEAREST_CHIP_M,
-        "text": saved_stops::list_text(&hits, req.here),
+        "text": saved_stops::list_text_in(req.locale, &hits, req.here),
         "max_stops": saved_stops::MAX_STOPS,
         "max_name_chars": saved_stops::MAX_NAME_CHARS,
-        "colours": StopColour::ALL.iter().map(|c| json!({"id": c, "label": c.label(), "next": c.next()})).collect::<Vec<_>>(),
+        "colours": StopColour::ALL.iter().map(|c| json!({"id": c, "label": c.label_in(req.locale), "next": c.next()})).collect::<Vec<_>>(),
     }))
 }
 
@@ -347,6 +355,9 @@ fn list_cases() -> Vec<Case> {
         Case::named(
             "bad_sort",
             json!({"saved": saved_sample(), "sort": "random"}),
+        ),
+        super::tr_case(
+            json!({"saved": saved_sample(), "sort": "nearest", "here": {"lat": 41.001, "lon": 29.0}}),
         ),
     ]
 }
@@ -389,10 +400,14 @@ fn suggest_cases() -> Vec<Case> {
 #[derive(Deserialize)]
 struct ShortcutReq {
     stop: SavedStop,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn shortcut(req: ShortcutReq) -> Result<Value, FfiError> {
-    Ok(serde_json::to_value(shortcut_spec(&req.stop))?)
+    Ok(serde_json::to_value(saved_stops::shortcut_spec_in(
+        req.locale, &req.stop,
+    ))?)
 }
 
 fn shortcut_cases() -> Vec<Case> {
@@ -447,16 +462,18 @@ struct ImportReq {
     /// Add the planned stops to `saved` (the user confirmed); else the list comes back unchanged.
     #[serde(default)]
     apply: bool,
+    #[serde(default)]
+    locale: Lang,
 }
 
 fn places_import(req: ImportReq) -> Result<Value, FfiError> {
-    let incoming = places_io::parse_import(&req.text).map_err(|e| {
+    let incoming = places_io::parse_import_in(req.locale, &req.text).map_err(|e| {
         let reason = match e {
             places_io::ImportError::Empty => "empty",
             places_io::ImportError::NotRecognised => "not_recognised",
             places_io::ImportError::TooLarge => "too_large",
         };
-        FfiError::invalid(e.message()).with_detail(json!({"reason": reason}))
+        FfiError::invalid(e.message_in(req.locale)).with_detail(json!({"reason": reason}))
     })?;
     let plan = places_io::merge_plan(&req.saved, incoming);
     let mut saved = req.saved;
@@ -472,7 +489,7 @@ fn places_import(req: ImportReq) -> Result<Value, FfiError> {
         .collect();
     Ok(json!({
         "plan": {"add": add, "duplicates": plan.duplicates, "invalid": plan.invalid, "over_cap": plan.over_cap},
-        "summary": places_io::summary(&plan),
+        "summary": places_io::summary_in(req.locale, &plan),
         "added": added,
         "saved": saved,
         "max_bytes": places_io::MAX_IMPORT_BYTES,
@@ -496,5 +513,6 @@ fn import_cases() -> Vec<Case> {
             "garbage",
             json!({"saved": saved_sample(), "text": "hello", "now_ms": NOW}),
         ),
+        super::tr_case(json!({"saved": saved_sample(), "text": gpx, "now_ms": NOW})),
     ]
 }

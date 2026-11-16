@@ -21,6 +21,10 @@ pub const ACCOUNT_TABLES: &[&str] = &[
     "statuses",
     "scheduled",
     "identity_pairs",
+    // People sync v3: the job, its numbers and the lookup answers belong to the account that asked.
+    "people_jobs",
+    "people_job_numbers",
+    "people_lookups",
 ];
 
 /// How the account that just linked or connected relates to the one the
@@ -495,6 +499,23 @@ mod tests {
         .unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO profiles (instance_id, jid, push_name) VALUES (?1, ?2, 'Peer')",
+            params![instance.as_str(), chat],
+        )
+        .unwrap();
+        // People sync v3: a job, one of its numbers, one lookup answer.
+        conn.execute(
+            "INSERT INTO people_jobs (instance_id, job_id, digest, mode, state, phase, created_ms, updated_ms)
+             VALUES (?1, 'job', 'd', 'auto', 'running', 'lookup', 1, 1)",
+            [instance.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO people_job_numbers (instance_id, seq, jid) VALUES (?1, 1, ?2)",
+            params![instance.as_str(), chat],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO people_lookups (instance_id, jid, on_whatsapp, checked_ms) VALUES (?1, ?2, 1, 1)",
             params![instance.as_str(), chat],
         )
         .unwrap();

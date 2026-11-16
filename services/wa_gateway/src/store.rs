@@ -16,6 +16,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 mod account;
 mod identity;
 mod merge;
+mod people;
 mod rich;
 mod status;
 pub use account::{
@@ -24,6 +25,10 @@ pub use account::{
 };
 pub use identity::{IdentityPage, LearnedPair, MAX_IDENTITY_PAGE, NewPair};
 pub use merge::MergeReport;
+pub use people::{
+    BeginOutcome, CancelOutcome, JobChange, JobRow, LookupRow, NewJob, NumberMarks, NumberRow,
+    PICTURED_FAILED, PICTURED_OK, PICTURED_TODO,
+};
 pub use rich::{
     ChatChange, ChatSettings, FetchedProfile, GroupReceipt, MAX_THUMBNAIL_BYTES, MessageChange,
     MessageExtras, ProfileChange, ReceiptCounts, WireIds, apply_change, group_status, merge_edit,
@@ -413,6 +418,58 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE instances ADD COLUMN history_progress INTEGER;
     ALTER TABLE instances ADD COLUMN history_overall INTEGER;
     ALTER TABLE instances ADD COLUMN history_ms INTEGER;
+    ",
+    // v9: people sync v3 (`store/people.rs`). One people job per instance
+    // (the primary key), its numbers in the device's order with what is
+    // done for each, and the lookup answers WhatsApp gave (until now kept in
+    // memory only), so a restart, a cancel or the next job never asks twice
+    // for a fresh answer. Only new tables: no existing row is touched.
+    "
+    CREATE TABLE people_jobs (
+        instance_id TEXT PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+        job_id TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        state TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        rev INTEGER NOT NULL DEFAULT 0,
+        done INTEGER NOT NULL DEFAULT 0,
+        total INTEGER NOT NULL DEFAULT 0,
+        numbers INTEGER NOT NULL DEFAULT 0,
+        eta_ms INTEGER,
+        wait_until_ms INTEGER,
+        wait_source TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        result_records INTEGER,
+        result_pictures INTEGER,
+        result_bytes INTEGER,
+        account_epoch INTEGER NOT NULL DEFAULT 0,
+        created_ms INTEGER NOT NULL,
+        updated_ms INTEGER NOT NULL,
+        finished_ms INTEGER
+    );
+    CREATE TABLE people_job_numbers (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        jid TEXT NOT NULL,
+        have_hash TEXT,
+        have_picture TEXT,
+        looked INTEGER NOT NULL DEFAULT 0,
+        profiled INTEGER NOT NULL DEFAULT 0,
+        pictured INTEGER NOT NULL DEFAULT 0,
+        spooled_id TEXT,
+        PRIMARY KEY (instance_id, seq)
+    );
+    CREATE TABLE people_lookups (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        jid TEXT NOT NULL,
+        on_whatsapp INTEGER NOT NULL,
+        business INTEGER NOT NULL DEFAULT 0,
+        verified_name TEXT,
+        checked_ms INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, jid)
+    );
     ",
 ];
 
@@ -1460,6 +1517,9 @@ mod tests {
             "receipts",
             "statuses",
             "message_edits",
+            "people_jobs",
+            "people_job_numbers",
+            "people_lookups",
         ] {
             assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
         }
@@ -1583,7 +1643,81 @@ mod tests {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, MIGRATIONS.len() as u32);
+    }
+
+    /// A v8 database (the release before people sync v3) upgrades in place: v9 only adds the three people
+    /// tables, every row stays, and opening again migrates nothing.
+    #[tokio::test]
+    async fn v8_database_upgrades_to_the_people_tables_and_keeps_its_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+            let tx = conn.transaction().unwrap();
+            for sql in &MIGRATIONS[..8] {
+                tx.execute_batch(sql).unwrap();
+            }
+            tx.execute_batch("PRAGMA user_version = 8").unwrap();
+            tx.execute(
+                "INSERT INTO instances (id, created_ms, state, own_jid, account_epoch)
+                 VALUES ('old', 1, 'connected', '100000000001@s.whatsapp.net', 2)",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO profiles (instance_id, jid, push_name) VALUES ('old', '100000000002@s.whatsapp.net', 'Ada')",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let profiles = store
+            .profiles(
+                InstanceId::new("old"),
+                vec!["100000000002@s.whatsapp.net".into()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(profiles[0].push_name.as_deref(), Some("Ada"));
+        assert!(
+            store
+                .people_job(InstanceId::new("old"), 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // A job takes the instance's account epoch.
+        let (_, job) = store
+            .people_begin(
+                InstanceId::new("old"),
+                NewJob {
+                    job_id: "j".into(),
+                    digest: "d".into(),
+                    mode: rosty_wa_proto::PeopleSyncMode::Auto,
+                    entries: Vec::new(),
+                },
+                5,
+            )
+            .await
+            .unwrap();
+        assert_eq!(job.account_epoch, 2);
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        assert!(
+            store
+                .people_job(InstanceId::new("old"), 6)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let conn = Connection::open(&path).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 9);
     }
 
     fn history_chat(jid: &str, ids: std::ops::Range<i64>) -> HistoryChat {

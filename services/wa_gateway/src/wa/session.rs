@@ -369,8 +369,9 @@ pub fn quote_context(
 
 /// The directories under an instance's own that cache what its account
 /// downloaded: decrypted media and profile pictures
-/// (`Config::media_dir`, `Config::pictures_dir`).
-const ACCOUNT_CACHE_DIRS: [&str; 2] = ["media", "pictures"];
+/// (`Config::media_dir`, `Config::pictures_dir`), and the picture bytes a
+/// people job holds for the device (`Config::people_job_dir`).
+const ACCOUNT_CACHE_DIRS: [&str; 3] = ["media", "pictures", "people-job"];
 
 /// What the handlers of one instance need to tell that another account was
 /// linked, and to clean up after it.
@@ -2152,7 +2153,11 @@ mod tests {
         assert!(!account.full_history);
         assert_eq!(
             account.cache_dirs.to_vec(),
-            [config.media_dir("abc"), config.pictures_dir("abc")]
+            [
+                config.media_dir("abc"),
+                config.pictures_dir("abc"),
+                config.people_job_dir("abc")
+            ]
         );
     }
 

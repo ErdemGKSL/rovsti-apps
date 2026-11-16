@@ -433,12 +433,12 @@ fn picture_response(headers: &HeaderMap, id: &str, bytes: Vec<u8>) -> Response {
 }
 
 /// The cache key of one picture size of one picture id.
-fn picture_key(jid: &str, preview: bool, id: &str) -> String {
+pub(crate) fn picture_key(jid: &str, preview: bool, id: &str) -> String {
     let size = if preview { "preview" } else { "full" };
     format!("{jid}\n{size}\n{id}")
 }
 
-async fn cached(cache: &MediaCache, key: String) -> Option<Vec<u8>> {
+pub(crate) async fn cached(cache: &MediaCache, key: String) -> Option<Vec<u8>> {
     let cache = cache.clone();
     tokio::task::spawn_blocking(move || cache.get(&key))
         .await

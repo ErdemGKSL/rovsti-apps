@@ -91,6 +91,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::wa::calls::routes())
         .merge(crate::rich_routes::routes())
         .merge(crate::status_routes::routes())
+        .merge(crate::people_routes::routes())
         .layer(axum::middleware::from_fn(crate::request_log::log_request))
         .with_state(state)
 }
@@ -243,6 +244,7 @@ async fn delete_instance(State(state): State<AppState>, auth: Authed) -> ApiResu
     state.hub().remove(&auth.instance);
     state.forget_calls(&auth.instance);
     state.forget_lookups(&auth.instance);
+    crate::people_job::forget(&state, &auth.instance).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

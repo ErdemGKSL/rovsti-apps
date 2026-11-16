@@ -2,6 +2,47 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## E6-WA R3 closed (2026-11-16): media
+
+Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 3 139 tests with `wa_gateway`, the Android
+checks); the Gradle steps green **without the Stops tests**, with `:phone:lintPlainRelease`, APK check and compose
+stability included. Plan and evidence: `plans/e6wa-r3.md`. Merged into `ui-overhaul` from here (owner's rule).
+
+**Gateway commits (deploy these)**: `1cb00880` (thumbnail, size, waveform, GIF and view once on sent media, waveform
+of received voice notes, route `/v1/messages/media/options`) and `84163bdc` (view once, bot and hosted messages
+stored as placeholders). Proto and client: `4dbd2820`, `98e5368d`. **No gateway DB migration**: no backup needed for
+this round. Device store: schema v6 (older builds refuse it). Never run against WhatsApp.
+
+**What landed**
+- Full-screen viewer for the photos and videos of a chat (zoom, swipe, drag down to close), video played in the app,
+  GIFs looping, Save to the gallery (kept from eviction), Share, Forward.
+- Voice notes: hold to record, slide to cancel, slide up to lock and review; waveform sent and drawn; the other side
+  sees "recording"; a received note is marked played once.
+- Stickers without a bubble, animated; a received view once shows "open it on your phone" (WhatsApp sends a linked
+  device only a placeholder; before, these messages vanished); photos and videos can be sent as view once.
+- Several files picked or shared in, captioned and ordered in a send preview, sent one by one with size, length and
+  preview measured on the device.
+- Owner asks: read ticks are light cyan; a conversation shown again after 15 minutes away opens at the newest message.
+
+**What to try on the real gateway**
+1. Send a photo and a video from Rosty: on the phone they show a preview and the right size before download.
+2. Record a voice note in Rosty: on the phone it plays as a voice note with bars; the phone shows "recording…" while
+   Rosty records.
+3. Send a view-once photo from the phone to the linked account: Rosty shows the view-once bubble, the gateway log has
+   no error. Send a view-once photo from Rosty: the phone opens it once.
+
+**What to test on a device**
+1. Tap a WhatsApp photo: the viewer opens; pinch, swipe to the next, drag down; a video plays with sound and seek.
+2. Save from the viewer: the file is in Pictures/Rosty; Save again says it is already saved.
+3. Hold the microphone, slide left (cancel), hold again and slide up (lock), stop, play, send.
+4. Pick five photos: the preview lets you caption, reorder, mark one view once; they arrive in order.
+5. Leave a chat scrolled up, go home for 15 minutes, come back: the newest message is shown.
+
+**For the main thread**
+- Not verified without a device: the video player and audio focus, MediaStore writes, recording quality and how the
+  waveform looks on another phone, animated WebP stickers, the photo picker limit, sharing several files in.
+- Long-press drag to reorder files is not built (move buttons instead).
+
 ## E6-WA R2 closed (2026-11-15) at `832ca834` plus this note: media limits, full history, account and link
 
 Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 3 074 tests with `wa_gateway`, the Android

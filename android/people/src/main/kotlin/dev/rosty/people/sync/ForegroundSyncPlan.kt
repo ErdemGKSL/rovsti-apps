@@ -27,6 +27,15 @@ object ForegroundSyncPlan {
     /** A slice that could not reach WhatsApp is tried again after this. */
     const val OFFLINE_DELAY_MS = 15L * 60_000
 
+    /** People sync v3: a slice that left the gateway working comes back after its job's ETA, at least this... */
+    const val SERVER_MIN_MS = 60_000L
+
+    /** ...and at most this (people sync v3, section 4.4). */
+    const val SERVER_MAX_MS = 30L * 60_000
+
+    /** When to come back to a gateway job that still works: its [etaMs] clamped to 1 to 30 minutes. */
+    fun serverWorkingDelay(etaMs: Long?): Long = (etaMs ?: SERVER_MIN_MS).coerceIn(SERVER_MIN_MS, SERVER_MAX_MS)
+
     /** What comes next. */
     sealed interface Next {
         /** Stay foreground, wait [ms] (the notification shows the limit) and run the next slice. */
@@ -99,6 +108,13 @@ object ForegroundSyncPlan {
             is SliceResult.Interrupted -> {
                 when (result.reason) {
                     SyncWire.WA_DISCONNECTED, SyncWire.NETWORK -> OFFLINE_DELAY_MS
+
+                    // People sync v3: the gateway still works; come back when it expects to be ready.
+                    SyncWire.SERVER_WORKING -> serverWorkingDelay(result.etaMs)
+
+                    // The user's Stop: nothing continues by itself (Continue or the next period does).
+                    SyncWire.CANCELLED -> null
+
                     else -> PeopleSyncRunner.CONTINUE_DELAY_MS
                 }
             }

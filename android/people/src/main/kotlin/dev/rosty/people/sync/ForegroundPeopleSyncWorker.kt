@@ -33,6 +33,11 @@ import kotlinx.coroutines.selects.select
  * service (a start from the background on Android 12+: `ForegroundServiceStartNotAllowedException`), it falls back to
  * the 8-minute slices of S6 and continues later, as before.
  *
+ * People sync v3: every run still shows the notification (the owner's answer to Q1 of the v3 plan, automatic 12-hourly
+ * runs too). In job mode the foreground slice follows the gateway's job live (long-polls, the notification says what
+ * the gateway does) and downloads the result; an 8-minute fallback slice that ends while the gateway still works
+ * (`interrupted(server_working)`) continues at the job's ETA ([ForegroundSyncPlan.serverWorkingDelay]).
+ *
  * Stopping: the Stop button and the notification's Stop cancel the slice through [PeopleSyncRunner.cancel]; the run
  * keeps its checkpoint (`interrupted(cancelled)`) and nothing is scheduled. When the system stops the worker
  * (Android 15's dataSync time budget, `Service.onTimeout`, which WorkManager turns into a stop; a lost constraint), the

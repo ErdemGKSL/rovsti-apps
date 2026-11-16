@@ -10,4 +10,8 @@
         <item quantity="other">WhatsApp sınırı, %d dk sonra devam edecek</item>
     </plurals>
     <string name="people_sync_notice_stop">Durdur</string>
+    <string name="people_sync_notice_server_lookup">Ağ geçidi numaraları denetliyor %1$d/%2$d</string>
+    <string name="people_sync_notice_server_profiles">Ağ geçidi adları alıyor %1$d/%2$d</string>
+    <string name="people_sync_notice_server_pictures">Ağ geçidi fotoğrafları alıyor %1$d/%2$d</string>
+    <string name="people_sync_notice_download">Değişiklikler indiriliyor %1$d/%2$d</string>
 </resources>

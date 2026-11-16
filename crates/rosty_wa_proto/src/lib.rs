@@ -18,6 +18,7 @@ pub mod log;
 pub mod lookup;
 pub mod media;
 pub mod meta;
+pub mod people;
 pub mod presence;
 pub mod push;
 pub mod status;
@@ -45,6 +46,11 @@ pub use meta::{
     EditRecord, KeptContent, Location, MAX_PROFILES, MUTED_FOREVER, MediaMeta, MediaOptions,
     MessageMeta, ProfilesRequest, Quoted, RevokeMessage, RichChat, RichMessage, SharedContact,
     StarMessage, Unavailable, WaProfile,
+};
+pub use people::{
+    BundleEnd, BundleError, BundleHeader, BundleWriter, PeopleEntry, PeopleJobError,
+    PeopleJobPhase, PeopleJobResult, PeopleJobState, PeopleJobStatus, PeopleRecord, PeopleSyncMode,
+    PeopleSyncStart, PeopleWait, PeopleWaitSource, people_hash,
 };
 pub use presence::{PresenceBook, presence_label};
 pub use push::{Wake, parse_wake};

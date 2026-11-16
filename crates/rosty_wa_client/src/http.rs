@@ -11,10 +11,10 @@ use rosty_wa_proto::{
     ApiError, CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey,
     CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, GatewayUrl, GroupInfo,
     IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead,
-    MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions, MintKey, PlaceCall,
-    ProfilesRequest, PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText,
-    ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage, StatusList,
-    SubscribePresence, WaMessage, WaProfile, WaUser,
+    MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions, MintKey, PeopleJobStatus,
+    PeopleRecord, PeopleSyncStart, PlaceCall, ProfilesRequest, PushRegistration, RevokeMessage,
+    RichChat, RichMessage, ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted,
+    SetPresence, StarMessage, StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -242,6 +242,33 @@ pub(crate) fn mappings_path(since: Option<&str>) -> String {
         Some(cursor) => format!("{}?since={}", routes::IDENTITY_MAPPINGS, enc(cursor)),
         None => routes::IDENTITY_MAPPINGS.to_owned(),
     }
+}
+
+/// The status path of a people sync job; with `rev` (and `wait_ms`) the gateway answers when the job changed past
+/// that revision, or when `wait_ms` is over.
+pub(crate) fn people_status_path(job_id: &str, rev: Option<u64>, wait_ms: Option<u64>) -> String {
+    let mut path = routes::fill(routes::PEOPLE_SYNC_JOB, "job_id", job_id);
+    let mut sep = '?';
+    if let Some(rev) = rev {
+        path.push_str(&format!("{sep}rev={rev}"));
+        sep = '&';
+    }
+    if let Some(wait) = wait_ms {
+        path.push_str(&format!("{sep}wait_ms={wait}"));
+    }
+    path
+}
+
+/// The path of one bundle part: the records after `after`, about `max_bytes` (the gateway's default when `None`).
+pub(crate) fn people_bundle_path(job_id: &str, after: u32, max_bytes: Option<u64>) -> String {
+    let mut path = format!(
+        "{}?after={after}",
+        routes::fill(routes::PEOPLE_SYNC_BUNDLE, "job_id", job_id)
+    );
+    if let Some(max) = max_bytes {
+        path.push_str(&format!("&max_bytes={max}"));
+    }
+    path
 }
 
 /// The picture id an `ETag` header names (`"123"`, `W/"123"` or `123`).
@@ -809,6 +836,100 @@ impl Gateway {
                 &body,
                 "this gateway does not list identity mappings",
             )),
+        }
+    }
+
+    /// People sync v3: starts the instance's people job, or joins the running one with the same request.
+    ///
+    /// A gateway from before the job routes answers the router's bare 404: that comes back as an API error with
+    /// [`rosty_wa_proto::ErrorCode::NotFound`] ([`ClientError::is_not_found`]), which here means "use the
+    /// per-contact routes", not "try again".
+    pub fn people_sync_start(&self, req: &PeopleSyncStart) -> Result<PeopleJobStatus, ClientError> {
+        let key = self.key.as_ref().ok_or(ClientError::Unauthorized)?;
+        let body = serde_json::to_vec(req).map_err(|e| ClientError::Decode(e.to_string()))?;
+        let mut req = request(
+            Method::POST,
+            &self.url,
+            routes::PEOPLE_SYNC,
+            Some(key),
+            body,
+        )?;
+        req.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        match self.run_raw(req)? {
+            Answer::Ok(resp) => decode(resp),
+            Answer::Refused { status, body } => Err(from_status_optional(
+                status,
+                &body,
+                "this gateway has no people sync job",
+            )),
+        }
+    }
+
+    /// The status of people job `job_id`. With `rev` (the revision the caller holds) and `wait_ms`, the gateway
+    /// answers as soon as the job changes, or after `wait_ms` (at most 25 s) with the same status. A job the
+    /// gateway no longer has (expired, dropped, the account changed) is an API `not_found`.
+    pub fn people_sync_status(
+        &self,
+        job_id: &str,
+        rev: Option<u64>,
+        wait_ms: Option<u64>,
+    ) -> Result<PeopleJobStatus, ClientError> {
+        self.get(&people_status_path(job_id, rev, wait_ms))
+    }
+
+    /// Reads one part of a ready job's bundle: the records after `after` (each with its picture bytes, if any)
+    /// go to `on_record` as they arrive; the answer is the part's end line (`last_seq` is the next `after`, `more`
+    /// says another part follows). A part that ends early is [`ClientError::Http`] ("cut"): keep what was
+    /// committed and ask again from the cursor.
+    pub fn people_sync_bundle<F>(
+        &self,
+        job_id: &str,
+        after: u32,
+        max_bytes: Option<u64>,
+        on_record: F,
+    ) -> Result<rosty_wa_proto::BundleEnd, ClientError>
+    where
+        F: FnMut(PeopleRecord, Option<Vec<u8>>) -> Result<(), ClientError>,
+    {
+        let mut resp = self.exec(
+            Method::GET,
+            &people_bundle_path(job_id, after, max_bytes),
+            true,
+            Payload::None,
+        )?;
+        // ureq 3.5: `Body::with_config` -> `BodyWithConfig::limit` -> `reader` (src/body/mod.rs:421, 502, 557).
+        let reader = resp
+            .body_mut()
+            .with_config()
+            .limit(rosty_wa_proto::people::BUNDLE_READ_LIMIT)
+            .reader();
+        let mut reader = std::io::BufReader::new(reader);
+        let (header, end) = rosty_wa_proto::people::read_bundle(&mut reader, on_record)?;
+        if header.job_id != job_id || header.after != after {
+            return Err(ClientError::Decode(
+                "the bundle part is not the one asked for".to_owned(),
+            ));
+        }
+        Ok(end)
+    }
+
+    /// Cancels people job `job_id` (it stops asking WhatsApp), or drops a finished one. A job that is already
+    /// gone (or a gateway without the route) is not an error.
+    pub fn people_sync_cancel(&self, job_id: &str) -> Result<(), ClientError> {
+        let key = self.key.as_ref().ok_or(ClientError::Unauthorized)?;
+        let path = routes::fill(routes::PEOPLE_SYNC_JOB, "job_id", job_id);
+        let req = request(Method::DELETE, &self.url, &path, Some(key), ())?;
+        match self.run_raw(req)? {
+            Answer::Ok(_) => Ok(()),
+            Answer::Refused { status, body } => {
+                match from_status_optional(status, &body, "no such people job") {
+                    error if error.is_not_found() => Ok(()),
+                    error => Err(error),
+                }
+            }
         }
     }
 

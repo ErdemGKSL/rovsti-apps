@@ -1825,6 +1825,7 @@ fn a_media_send_queues_with_its_file_and_keeps_it_as_the_cached_media() {
         file_name: None,
         seconds: None,
         voice_note: false,
+        extras: MediaExtras::default(),
     };
     store.outbox_enqueue("c1", ALI, &photo, 1_000).unwrap();
     let row = store.thread(ALI, 10, None).unwrap().items.remove(0);

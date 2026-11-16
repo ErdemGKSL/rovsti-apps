@@ -171,6 +171,8 @@ fn move_messages(conn: &Connection, from: &str, into: &str) -> Result<bool> {
             "UPDATE messages SET
                 thumb = COALESCE(messages.thumb, f.thumb),
                 client_id = COALESCE(messages.client_id, f.client_id),
+                viewed_ms = COALESCE(messages.viewed_ms, f.viewed_ms),
+                played_ms = COALESCE(messages.played_ms, f.played_ms),
                 wire_sender = COALESCE(messages.wire_sender, f.wire_sender,
                     CASE WHEN f.sender IS NOT messages.sender THEN f.sender END)
              FROM (SELECT * FROM messages WHERE chat = ?1 AND id = ?3) AS f
@@ -436,7 +438,8 @@ fn rename_sender(action: &mut Action, from: &str, into: &str) -> bool {
     let sender = match action {
         Action::Revoke { sender, .. }
         | Action::React { sender, .. }
-        | Action::MarkRead { sender, .. } => sender,
+        | Action::MarkRead { sender, .. }
+        | Action::MarkPlayed { sender, .. } => sender,
         Action::SendText { .. }
         | Action::SendMedia { .. }
         | Action::Edit { .. }

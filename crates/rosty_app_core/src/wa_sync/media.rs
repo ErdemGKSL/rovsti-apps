@@ -279,6 +279,18 @@ pub struct MediaSettled {
     pub replaced: Option<String>,
 }
 
+/// What [`Store::media_viewed`] did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Viewed {
+    /// The media row as it is now: `gone`.
+    pub media: MediaEntry,
+    /// The cached file the message had: delete it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete: Option<String>,
+    /// This call marked the message; `false` when it was viewed before.
+    pub first: bool,
+}
+
 /// A `ready` row whose file was not there.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Missing {
@@ -348,6 +360,9 @@ struct Facts {
     size: Option<u64>,
     meta: Option<MediaMeta>,
     deleted: bool,
+    from_me: bool,
+    /// A view-once message that was opened here.
+    viewed: bool,
 }
 
 impl Facts {
@@ -362,7 +377,8 @@ fn not_found(chat: &str, id: &str) -> Error {
 
 fn facts(conn: &Connection, chat: &str, id: &str) -> Result<Facts> {
     conn.query_row(
-        "SELECT kind, mime, size, media_json, deleted FROM messages WHERE chat = ?1 AND id = ?2",
+        "SELECT kind, mime, size, media_json, deleted, from_me, viewed_ms IS NOT NULL FROM messages
+         WHERE chat = ?1 AND id = ?2",
         params![chat, id],
         |row| {
             let kind: String = row.get(0)?;
@@ -373,6 +389,8 @@ fn facts(conn: &Connection, chat: &str, id: &str) -> Result<Facts> {
                 size: row.get(2)?,
                 meta: meta.and_then(|text| serde_json::from_str(&text).ok()),
                 deleted: row.get(4)?,
+                from_me: row.get(5)?,
+                viewed: row.get(6)?,
             })
         },
     )
@@ -686,6 +704,10 @@ impl Store {
     /// Asks for the full file of a message. A tap queues it whatever the network (unless the rules say never);
     /// an automatic request queues it only when the rules say [`Decision::Auto`], and never for a deleted
     /// message or a file that already failed for good. A cached file stays as it is.
+    ///
+    /// View-once media is never fetched by itself. A tap fetches a received one that was not opened yet (the
+    /// tap is what opens it); once it was opened ([`Self::media_viewed`]), and for one the owner sent, the
+    /// answer is [`Decision::Never`].
     pub fn media_enqueue(
         &mut self,
         chat: &str,
@@ -700,13 +722,20 @@ impl Store {
             Fetch::Tap => (
                 true,
                 match facts.class() {
-                    MediaClass::ViewOnce | MediaClass::NotMedia => Decision::Never,
+                    MediaClass::NotMedia => Decision::Never,
+                    MediaClass::ViewOnce if facts.viewed || facts.from_me => Decision::Never,
                     _ => Decision::OnTap,
                 },
             ),
             Fetch::Auto(conditions) => (false, policy(facts.class(), facts.size, &conditions)),
         };
         let state = stored_entry(&tx, chat, id)?.map_or(MediaState::None, |entry| entry.state);
+        // Whatever the rules say: a message that was opened once has no file any more.
+        let decision = if facts.viewed {
+            Decision::Never
+        } else {
+            decision
+        };
         let wanted = match decision {
             Decision::Never => false,
             Decision::OnTap => tap,
@@ -811,6 +840,9 @@ impl Store {
     /// Reports how a download ended. A failure queues the file again after a back-off
     /// ([`outbox::backoff_ms`]) until [`MAX_ATTEMPTS`], then it is `failed` and waits for a tap. A file that is
     /// in place is counted as just used; bring the cache under the cap afterwards ([`Self::media_evict`]).
+    ///
+    /// A file that arrives for a view-once message that was opened meanwhile is not recorded: the row stays
+    /// `gone` and `replaced` names the new file, to delete.
     pub fn media_settle(
         &mut self,
         chat: &str,
@@ -822,6 +854,9 @@ impl Store {
         let tx = self.conn.transaction()?;
         let mut replaced = None;
         match outcome {
+            Fetched::Ready { path, .. } if facts(&tx, chat, id)?.viewed => {
+                replaced = Some(path.clone());
+            }
             Fetched::Ready {
                 path,
                 bytes,
@@ -873,6 +908,44 @@ impl Store {
         let media = entry(&tx, chat, id)?;
         tx.commit()?;
         Ok(MediaSettled { media, replaced })
+    }
+
+    /// The owner opened a view-once message: it is marked viewed, its media row is `gone` for good (never
+    /// queued again, by itself or by a tap), its thumbnail is dropped and the answer names the cached file to
+    /// delete. Calling it again changes nothing. A message that is not view once is refused.
+    pub fn media_viewed(&mut self, chat: &str, id: &str, now_ms: i64) -> Result<Viewed> {
+        let chat = &self.stored_key(chat);
+        let tx = self.conn.transaction()?;
+        let facts = facts(&tx, chat, id)?;
+        if facts.class() != MediaClass::ViewOnce {
+            return Err(Error::Invalid(format!(
+                "message {id} of {chat} is not view once"
+            )));
+        }
+        ensure_row(&tx, chat, id, &facts)?;
+        let delete: Option<String> = tx.query_row(
+            "SELECT path FROM media WHERE chat = ?1 AND id = ?2",
+            params![chat, id],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "UPDATE messages SET viewed_ms = COALESCE(viewed_ms, ?3), thumb = NULL WHERE chat = ?1 AND id = ?2",
+            params![chat, id, now_ms],
+        )?;
+        tx.execute(
+            "UPDATE media SET state = 'gone', path = NULL, bytes = NULL, sha256 = NULL, used_ms = NULL,
+                pinned = 0, saved_uri = NULL, by_tap = 0, queued_ms = NULL, attempts = 0, next_attempt_ms = 0,
+                attempted_ms = NULL, last_error = NULL
+             WHERE chat = ?1 AND id = ?2",
+            params![chat, id],
+        )?;
+        let media = entry(&tx, chat, id)?;
+        tx.commit()?;
+        Ok(Viewed {
+            media,
+            delete,
+            first: !facts.viewed,
+        })
     }
 
     /// Keeps the file of a message out of eviction: `pinned`, and `saved_uri` when the user saved a copy

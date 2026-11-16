@@ -25,6 +25,7 @@ import dev.rosty.platform.system.permissions.AndroidSpecialAccess
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionController
 import dev.rosty.platform.system.permissions.SpecialAccess
+import dev.rosty.platform.wa.WaPush
 import dev.rosty.shell.settings.CommonSettings
 import dev.rosty.shell.settings.NoCommonSettings
 import dev.rosty.wa.DefaultWaRepository
@@ -137,7 +138,20 @@ abstract class ShellContainer(
             // hand-over of the process, so this ask and the link screen's never run side by side; it reads [wa],
             // which is this repository once the lazy has it.
             scope.launch { waLinkHandover.adoptIfUnlinked() }
+            // Where the gateway wakes this app: its FCM token, once the link is up (nothing in the plain flavor).
+            waPush =
+                WaPushRegistrar.appOf(context.packageName)?.let { app ->
+                    WaPushRegistrar(wa = repo, app = app, scope = scope, token = WaPush::token).also { it.start() }
+                }
         }
+
+    /**
+     * Registers this app's FCM token with the gateway whenever the WhatsApp link comes up; set when [wa] is created,
+     * null before that and for a package the gateway has no app id for. The firebase flavor's messaging service calls
+     * [WaPushRegistrar.refresh] on a new token.
+     */
+    @Volatile var waPush: WaPushRegistrar? = null
+        private set
 
     protected open fun createWaLinkHandover(): WaLinkHandover =
         WaLinkHandover(

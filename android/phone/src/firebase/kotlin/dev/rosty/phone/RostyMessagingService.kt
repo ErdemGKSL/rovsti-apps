@@ -11,6 +11,15 @@ import dev.rosty.platform.wa.WaPush
  * into the `firebase` flavor only.
  */
 class RostyMessagingService : FirebaseMessagingService() {
+    /** A new FCM token: the gateway must learn it, or pushes go to the old one. */
+    override fun onNewToken(token: String) {
+        try {
+            (application as? dev.rosty.shell.HasContainer<*>)?.container?.waPush?.refresh()
+        } catch (e: RuntimeException) {
+            Log.e("Rosty", "push token refresh failed", e)
+        }
+    }
+
     override fun onMessageReceived(message: RemoteMessage) {
         // Runs in a process that may have no UI at all: a throw here is a "keeps stopping" dialog on every push.
         try {

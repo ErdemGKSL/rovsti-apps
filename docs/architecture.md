@@ -115,7 +115,7 @@ crates/rosty_core, rosty_geo     pure Rust, no I/O, unit-tested
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rosty.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RostyBridge` intents as Phone |
 | Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rosty_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `TripAlarm`/`AlarmSound` (alarm-usage audio focus, `STREAM_ALARM` volume raise and restore, `CATEGORY_ALARM` channel), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
 
-### Stops: decisions (AD-ST1 to AD-ST9, AD-SA1 to AD-SA9, AD-SX1 to AD-SX8)
+### Stops: decisions (AD-ST1 to AD-ST9, AD-SA1 to AD-SA10, AD-SX1 to AD-SX8)
 
 - **AD-ST1 Pure first.** The trip session, destination parsing, saved stops, history and
   statistics, prefs, the arriving-soon template, GTFS parsing and the map projection are
@@ -138,6 +138,7 @@ crates/rosty_core, rosty_geo     pure Rust, no I/O, unit-tested
   unseen. Unknown distance (no usable fix yet) gives 300 s; unknown or unusable accuracy counts as
   `MAX_ACCURACY_M` (pessimistic); a garbage fix reuses the last usable distance; a trip that is not
   tracking polls at `IDLE_POLL` (60 s). Tests: monotonic, exact 300 s cap, 3 s floor, safety bound.
+  Since E7 R4 this curve is the floor of the trip's cadence (AD-SA10), not the cadence itself.
 - **AD-SA2 Retry window.** `retry_after(interval) = interval + clamp(interval / 4, 5 s, 30 s)`.
   Rust sends it as `FixOut.retry_ms`; `TripService` arms the watchdog with it (a mirrored formula
   covers the start spec), so a missing fix triggers a retry, never silence. On a `null` location
@@ -182,6 +183,25 @@ crates/rosty_core, rosty_geo     pure Rust, no I/O, unit-tested
   directly (re-arm, then ask for a fix on the service's worker) and calls `startForegroundService`
   only when no instance exists or it is shutting down, so a watchdog tick never needs a foreground
   start from the background while the service is alive.
+- **AD-SA10 The cadence follows the speed, never the line** (`rosty_geo::cadence`, E7 R4). The next fix is
+  asked for as late as possible such that the user cannot reach the line before it: with
+  `slack` as in AD-SA1 and `v` an upper bound of the speed now, `T = clamp(max(R0, min(R1, R2)), 3 s, 300 s)`
+  rounded down to a ladder (3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 75, 90, 120, 150, 180, 240,
+  300 s), where `R0` is the AD-SA1 curve, `R1 = slack / (2 v)` and `R2` the largest `T` with
+  `reach(T + grace(T), v) <= slack` (`reach`: accelerating at `A_MAX = 2 m/s²` up to `V_MAX = 60 m/s`;
+  `grace` the AD-SA2 window). `v = max(bound, 1.5 * 5-minute average, 2 m/s)`, the bound being
+  `sqrt(mean_step^2 + 2 * A_MAX * step)` with `step = displacement + both accuracies` (tightened by a GPS
+  speed `s` to `1.2 s + 1`), and `V_MAX` on a first fix. Safety: under top speed, top acceleration, fixes
+  wrong by at most their accuracy and the next fix within `T + grace`, no interval longer than 3 s lets
+  the user reach the line (sweep and simulation tests), and the cadence never asks more often than
+  `R0` rounded down. A longer rung needs 15 % margin, a shorter one is taken at once; high accuracy
+  is on at 15 s or less or under 75 s to the line at the measured speed, off at 25 s and 120 s. A
+  pending arriving-soon message adds its own target. The history (48 fixes, 5 minutes, monotonic
+  clock `FixIn.elapsed_ms`) lives in `trip.json`. When no provider finds a fix the service calls the
+  headless `trip_no_fix`, which dead-reckons from the last usable fix (denser retries, GPS near the
+  line) and never rings; the status stays `searching`. The request asks for exactly `T` (minimum
+  interval `T`, no minimum distance, no batching). While a trip runs the map's blue dot follows the
+  trip's fixes and asks for its own only while following.
 - **AD-ST4 Map: vector tiles under a vector radar.** No region is bundled with the app (it bloats
   the APK and goes stale). Stops downloads Shortbread 1.0 vector tiles (MVT, zoom 0-14, overzoomed
   beyond 14) from a VersaTiles-compatible server that the user sets (default
@@ -246,6 +266,7 @@ The trigger is a diameter crossing (`rosty_geo::crossing`); the earlier radius, 
   refused on load.
 - **AD-SX5 Polling.** Slack is the distance to AB minus accuracy and dead band; next fix in
   `(slack / 60 m/s / 2)` clamped to 3..300 s, high accuracy at 15 s or less (as the old trip).
+  Superseded for a running trip by the speed-aware cadence of AD-SA10, which keeps this as its floor.
 - **AD-SX6 Notice.** "With the alarm" sends with the crossing; "N min before" sends when the
   time to the circle edge is within N minutes, or when the fix is already inside the circle.
 - **AD-SX7 Superseded code is removed.** `AlarmRule`, `RuleChoice`, the "Wake me" chips,

@@ -1854,6 +1854,10 @@ plus the drawn line (`stops.gtfs_lines`), screenshot `e7.5-line-choice-in-stop-u
 New ops: `stops.gtfs_view`, `stops.gtfs_lines`, `stops.gtfs_summary`, `stops.store_trip_clear`; `eta_min` on the trip status;
 S44 saved-stop note. Carried to R2: see "Carried to R2" in `plans/e7-r1.md`.
 
+**E7 R4 location cadence (`stops-map`)**: the trip asks for the location from its speed and distance with a safety bound
+(AD-SA10, `rosty_geo::cadence`; never more often than the old curve), `trip_no_fix` on a missing fix, the blue dot on the
+trip's fixes during a trip. Plan, owner decisions, interval table and evidence in `plans/e7-r4-location-cadence.md`.
+
 Shared AC for every E7 story: the map is the full window in every state; no screen shows a map inside a box; every
 control floats over the map as glass chrome; the sheet at peek and medium lets the map pan and take taps; floating
 buttons ride the sheet by translation only; camera padding follows the settled sheet detent.

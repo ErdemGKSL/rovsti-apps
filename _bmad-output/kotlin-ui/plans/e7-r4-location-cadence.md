@@ -1,6 +1,6 @@
 # E7 R4: how often a trip asks for the location (plan)
 
-Status: plan only, nothing is implemented. One implementation round (step list in section 6).
+Status: implemented on `stops-map` (evidence in section 7). One implementation round (step list in section 6).
 
 ## The owner's request
 
@@ -418,3 +418,96 @@ of today, drops from one GPS fix every 5.7 s to one network fix every 15 s. Real
 
 Not in this round: the blue dot (question 1), a tunnel alarm (question 2), motion sensors to stretch the standing-still
 case further.
+
+## 7. Implementation evidence (E7 R4)
+
+Owner decisions on section 5: (1) during a trip the blue dot follows the trip's fixes and asks for its own fast
+updates only while "follow me" is on; (2) `trip_no_fix` tightens the retries but rings nothing, the status stays
+"searching"; (3) `A_MAX` stays 2.0 m/s² (cars and taxis).
+
+**Where it landed.**
+
+- `crates/rosty_geo/src/cadence.rs` (new): `reach_m`, `grace_s`, `slack_m`, `safe_interval`, `ladder_floor`, `plan`,
+  `SpeedHistory` (`push`, `estimate`, `record`), `SpeedEstimate`, `SpeedBasis`, `LastPlan`, `CadenceInput`, `Cadence`.
+  Tests in `cadence/tests.rs` (25): sections 4.1 to 4.11 of this plan, plus `whole_approaches_ask_less_often_than_today`.
+- `crates/rosty_geo/src/session.rs`: `ActiveTrip.speed` (`#[serde(default)]`, left out when empty), `on_fix(fix, t_ms)`
+  pushes the sample and plans (`FixOutcome.cadence`, `FixOutcome.speed_mps`), the notice target, the measured-speed ETA
+  and notice fallback, `no_fix(now_ms)` and `no_fix_out`, `FixIn.elapsed_ms` + `clock_ms()`, `FixOut.{speed_mps,
+  assumed_mps, cadence, late}`. Tests: an old `trip.json` loads, the answer fields, idle after ringing, the measured-speed
+  ETA and notice, a pending notice asks sooner, `no_fix` tightens, and 1 500 simulated trips through `ActiveTrip` that
+  all ring within `3 s + 5 s + (band + accuracy) / speed` of the crossing.
+- `crates/rosty_app_core/src/stops/headless.rs`: kind `trip_no_fix {dir, now_ms, elapsed_ms?}`; `trip_fix` uses
+  `FixIn::clock_ms()`. `crates/rosty_ffi`: op `stops.cadence` (`misc.rs`), `stops.trip_fix` uses the monotonic clock,
+  fixtures `stops.cadence{,.close,.cold,.hysteresis,.notice,.unknown,.walking_700}` and `headless.trip_no_fix`, the
+  `trip_fix` answers regenerated, `INDEX`, `OPS.md`. `tests/kotlin_contract.rs`: the request settings, `elapsed_ms`,
+  `trip_no_fix`, the log line.
+- `:core-bridge`: `TripNoFixRequest`, the new optional fields on both `TripFixAnswer` / `FixOut` models and on both
+  fix requests, `StopsOps.cadence` with `CadenceRequest` / `CadenceAnswer`, contract models, `StopsOpsNativeTest`.
+- `:platform`: `requestUpdates` asks for `setMinUpdateIntervalMillis(T)`, `setMinUpdateDistanceMeters(0f)`,
+  `setMaxUpdateDelayMillis(0)`; `onFix` sends `elapsed_ms` and logs one line; a null fix from both providers calls
+  `trip_no_fix` (`onNoFix`) and applies only its interval, priority and watchdog. `TripClock.elapsed`.
+- `:stops`: `LivePosition(map, container, tripRunning, following)`; `HomeEntry` passes both.
+
+**The interval table from the implementation** (`cadence::tests::example_table`, steady movement, accuracy 10 m, the
+interval asked for at the first fix at or past each distance; `b` balanced, `H` high accuracy; "Doppler": the provider
+reports the speed):
+
+| | 5 km | 2 km | 700 m | 300 m | 100 m |
+|---|---|---|---|---|---|
+| Today, any speed | 41 s b | 16 s b | 5 s H | 3 s H | 3 s H |
+| Standing still | 75 s b | 30 s b | 15 s b | 6 s H | 3 s H |
+| Standing still, Doppler | 75 s b | 30 s b | 20 s b | 10 s H | 3 s H |
+| Walking, 1.4 m/s | 60 s b | 30 s b | 15 s b | 6 s H | 3 s H |
+| Walking, 1.4 m/s, Doppler | 75 s b | 30 s b | 15 s b | 10 s H | 3 s H |
+| Bus, 8 m/s | 50 s b | 25 s b | 10 s H | 4 s H | 3 s H |
+| Bus, 8 m/s, Doppler | 60 s b | 30 s b | 15 s b | 6 s H | 3 s H |
+| Train, 25 m/s | 40 s b | 15 s H | 5 s H | 3 s H | 3 s H |
+| Train, 25 m/s, Doppler | 50 s b | 15 s H | 6 s H | 3 s H | 3 s H |
+| First fix (cold) | 40 s b | 15 s b | 5 s H | 3 s H | 3 s H |
+
+Whole approaches (`whole_approaches_ask_less_often_than_today`, fixes taken exactly when asked):
+
+| Approach | Fixes today | Fixes new | GPS-on time today | GPS-on time new |
+|---|---|---|---|---|
+| Walk the last 5 km | 315 | 185 | 21.6 min | 8.1 min |
+| Walk the last 5 km, Doppler | 315 | 152 | 21.6 min | 5.5 min |
+| Walk the last 700 m | 145 | 93 | 8.3 min | 8.1 min |
+| Bus, last 5 km | 54 | 38 | 3.7 min | 1.9 min |
+| Train, last 5 km | 17 | 16 | 1.1 min | 1.1 min |
+| Stand still at 700 m, one hour | 636 | 241 | 60.1 min | 0.1 min |
+
+**Deviations from the plan.**
+
+- The bound uses `step = displacement + acc_prev + acc_now` (the plan: `+ max(acc_prev, acc_now)`). Under P3 the true
+  step can be longer than the measured one by both errors, so the sum is the sound bound; it costs a little on foot
+  (300 m walking: 6 s instead of the plan's 10 s without Doppler; 10 s with Doppler).
+- `v_last` counts only a step longer than both accuracies (as the `path` gate), so jitter shows no speed and no ETA.
+- The arriving-soon target only shortens the adaptive part: `T = max(R0_line, min(adaptive_line, adaptive_notice))`, so
+  the cadence never asks more often than the old curve, the notice included (the plan took `R0` per target). Test 11
+  checks `next <= max(R0 rounded, half the time left)`. A message already due adds no target.
+- The hysteresis never goes below the old curve rounded down (`max(.., ladder_floor(R0))`), and a cold previous plan
+  latches neither the interval nor the priority (otherwise a trip started at 700 m kept GPS on at 15 s).
+- In the invariant simulation (4.9) the "today's curve decided" case is checked against its own margin (a fix one whole
+  interval late), as in the sweep (4.2): with a 4 s rung the 5 s grace is longer than the interval, which is the old
+  curve's limit, not the new rule's. Every interval decided by the adaptive rules stays outside the dead band with the
+  whole grace.
+- `trip_no_fix` without any usable fix yet answers the old unknown-distance value (300 s) and an empty `text`.
+- The worked table is measured at the first fix at or past each distance, so its numbers differ slightly from 2.8.
+- The `apps/*` GPUI crates are retired and not built: `apps/stops` builds a `FixIn` literal and no longer compiles; the
+  Rust checks ran on the Kotlin-facing packages of `scripts/kotlin-ui-check.sh`.
+
+
+**Gate (release only).** Rust on the Kotlin-facing packages: `cargo fmt --all`, `cargo clippy --all-targets --profile
+checks` clean, `cargo test --profile checks` green, `cargo check --release -p rosty_android --target
+aarch64-linux-android` and `rosty_ffi` for arm64-v8a (through `cargo ndk --platform 26`, the NDK is not on the PATH)
+green. Gradle (`spotlessCheck lintRelease testReleaseUnitTest`, the phone and messages flavours, `:messages:lintPlainRelease`,
+`:core-bridge:testRustBridge`, `assembleRelease`, the Roborazzi verifications) green except one flake,
+`WaViewerShotTest.viewerChromeOverAPhotoTurkish` in `:messages` (not touched here), which passed on the rerun of
+`:messages:verifyRoborazziPlainRelease`; then `:design:checkComposeStability` with compose reports,
+`check-catalog-apk.sh` and `orphan-goldens.sh` green. No golden changed.
+
+**On the phone.** Settings, About, hold Version, Logs; tag `trip`, one line per fix, `nofix` when no provider answered:
+`fix t=12:04:31 d=702m acc=9 v=1.3 assumed=11.2 next=15s high=false basis=bound late=false`. Read `t=` gaps against
+`next=` of the line before. Pass when: on foot at about 700 m `next` is 12 to 20 s with `high=false`; `next` never grows
+while `d` falls at a steady speed; the first line after boarding a bus has a shorter `next`; the alarm rings within a
+few seconds of the line; `searching` lasts no longer than before.

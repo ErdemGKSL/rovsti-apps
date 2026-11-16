@@ -163,7 +163,12 @@ Evidence:
   `TileMathTest`, `TileRasterizerTest`, `TileLayerPainterTest`, `ByteLruTest`, `RadarPainterTest`, `RadarHitTestTest`,
   `PickControllerTest`, `PickGesturesTest`, `ScaleBarsTest`, `StopsMapRecompositionTest`.
 - **JVM / Robolectric, home:** `HomeGestureTest`, `HomeMapLogicTest`, `HomeStateTest`, `SheetRideTest`,
-  `LivePositionTest`.
+  `LivePositionTest` (E7 R4: during a trip the dot follows the trip's fixes, its own updates only while following).
+- **Location cadence (E7 R4, AD-SA10):** Rust `rosty_geo::cadence` tests (invariant sweep and seeded simulation, monotonic,
+  never denser than the old curve, ladder, hysteresis, estimator, worked table), `session` cadence tests (a simulated trip
+  always rings soon after the crossing, `no_fix`), `headless` `trip_no_fix`, fixtures `stops.cadence.*` and
+  `headless.trip_no_fix`; `:platform` `TripServiceTest` (the request settings, `trip_no_fix` on a missing fix),
+  `TripFixJsonTest` (the log line), `TripStatusTest`; `:core-bridge` `StopsOpsNativeTest` (`cadence`).
 - **JVM / Robolectric, trip and alarm:** `TripViewModelTest`, `TripAppTest`, `PreflightTest`, `AlarmViewModelTest`,
   `AlarmAppTest`.
 - **JVM / Robolectric, lists and tools:** `SavedViewModelTest`, `SavedAppTest`, `SavedLogicTest`,

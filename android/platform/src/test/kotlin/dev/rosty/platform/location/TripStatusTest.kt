@@ -31,7 +31,38 @@ class TripStatusTest {
         val raw = File(System.getProperty("rosty.ffi.fixtures"), "headless.trip_fix.answer.json").readText()
         val status = TripStatus.parse(raw) as TripStatus.Fixed
         assertEquals(TripState.Tracking, status.answer.state)
-        assertEquals(65_570L, status.answer.nextFixMs)
+        // The cadence's ladder: 60 s, where the old curve asked every 65.6 s; a first fix assumes the top speed.
+        assertEquals(60_000L, status.answer.nextFixMs)
+        assertEquals("cold", status.answer.cadence)
+        assertEquals(60.0, status.answer.assumedMps!!, 0.0)
+        assertEquals(10.0, status.answer.speedMps!!, 0.0)
+        assertEquals(false, status.answer.late)
+    }
+
+    @Test fun anAnswerFromBeforeTheCadenceStillParses() {
+        val raw = File(System.getProperty("rosty.ffi.fixtures"), "headless.trip_fix.answer.json").readText()
+        val old =
+            org.json.JSONObject(raw).apply {
+                remove("speed_mps")
+                remove("assumed_mps")
+                remove("cadence")
+                remove("late")
+            }
+        val status = TripStatus.parse(old.toString()) as TripStatus.Fixed
+        assertEquals(null, status.answer.cadence)
+        assertEquals(false, status.answer.late)
+        val parsed = checkNotNull(TripAnswer.parse(old.toString()))
+        assertEquals(null, parsed.assumedMps)
+        assertEquals(null, parsed.cadence)
+    }
+
+    @Test fun aNoFixAnswerParsesAsAFixWithoutPosition() {
+        val raw = File(System.getProperty("rosty.ffi.fixtures"), "headless.trip_no_fix.answer.json").readText()
+        val answer = checkNotNull(TripAnswer.parse(raw))
+        assertTrue(answer.late)
+        assertEquals("cold", answer.cadence)
+        val status = TripStatus.parse(raw) as TripStatus.Fixed
+        assertEquals(null, status.answer.at)
     }
 
     @Test fun theRepositoryStatusFlowCarriesTheEmittedStatuses() {

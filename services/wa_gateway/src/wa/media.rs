@@ -64,6 +64,17 @@ pub struct Details<'a> {
     pub seconds: Option<u32>,
     /// Mark audio as a voice note whatever its MIME type.
     pub voice_note: bool,
+    /// JPEG preview of a photo, video or document.
+    pub thumbnail: Option<&'a [u8]>,
+    /// Pixel size of a photo, video or sticker.
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// Waveform of an audio message (64 samples, 0..=100).
+    pub waveform: Option<&'a [u8]>,
+    /// A video that plays as a GIF, or an animated sticker.
+    pub animated: bool,
+    /// View once: photo, video or audio.
+    pub view_once: bool,
 }
 
 /// The message that sends `up` to a chat.
@@ -76,7 +87,11 @@ pub fn build_message(
     build_message_with(kind, up, mime, caption, &Details::default())
 }
 
-/// [`build_message`] with file name, duration and voice-note flag.
+/// [`build_message`] with file name, duration, voice-note flag, preview,
+/// pixel size, waveform, GIF flag and the inline view-once flag. Nothing is
+/// set that `details` does not carry, and a detail that the kind has no
+/// field for is left out. A view-once message also needs
+/// [`wrap_view_once`], after the reply context is set.
 pub fn build_message_with(
     kind: MediaKind,
     up: &Uploaded,
@@ -85,16 +100,45 @@ pub fn build_message_with(
     details: &Details<'_>,
 ) -> wa::Message {
     let mut message = build_plain(kind, up, mime, caption);
+    let thumbnail = || {
+        details
+            .thumbnail
+            .filter(|t| !t.is_empty())
+            .map(<[u8]>::to_vec)
+    };
+    let view_once = details.view_once.then_some(true);
+    if let Some(m) = message.image_message.as_option_mut() {
+        m.jpeg_thumbnail = thumbnail();
+        m.width = details.width;
+        m.height = details.height;
+        m.view_once = view_once;
+    }
     if let Some(m) = message.audio_message.as_option_mut() {
         m.seconds = details.seconds;
         if details.voice_note {
             m.ptt = Some(true);
         }
+        m.waveform = details
+            .waveform
+            .filter(|w| !w.is_empty())
+            .map(<[u8]>::to_vec);
+        m.view_once = view_once;
     }
     if let Some(m) = message.video_message.as_option_mut() {
         m.seconds = details.seconds;
+        m.jpeg_thumbnail = thumbnail();
+        m.width = details.width;
+        m.height = details.height;
+        m.gif_playback = details.animated.then_some(true);
+        m.view_once = view_once;
+    }
+    if let Some(m) = message.sticker_message.as_option_mut() {
+        m.width = details.width;
+        m.height = details.height;
+        m.is_animated = details.animated.then_some(true);
     }
     if let Some(m) = message.document_message.as_option_mut() {
+        m.jpeg_thumbnail = thumbnail();
         let name = details
             .file_name
             .map(str::trim)
@@ -104,6 +148,19 @@ pub fn build_message_with(
         m.file_name = name;
     }
     message
+}
+
+/// Puts a view-once media message in the wrapper WhatsApp clients send it
+/// in (`viewOnceMessage`). The media message inside keeps its own
+/// `view_once` flag; the library marks the stanza from either
+/// (`MessageExt::is_view_once`).
+pub fn wrap_view_once(message: wa::Message) -> wa::Message {
+    wa::Message {
+        view_once_message: MessageField::some(wa::message::FutureProofMessage {
+            message: MessageField::some(message),
+        }),
+        ..Default::default()
+    }
 }
 
 fn build_plain(kind: MediaKind, up: &Uploaded, mime: &str, caption: Option<&str>) -> wa::Message {
@@ -321,6 +378,7 @@ mod tests {
             file_name: Some(" report.pdf "),
             seconds: Some(12),
             voice_note: true,
+            ..Default::default()
         };
         let doc = build_message_with(
             MediaKind::Document,
@@ -337,6 +395,105 @@ mod tests {
         assert_eq!((a.seconds, a.ptt), (Some(12), Some(true)));
         let video = build_message_with(MediaKind::Video, &uploaded(), "video/mp4", None, &details);
         assert_eq!(video.video_message.as_option().unwrap().seconds, Some(12));
+    }
+
+    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 1];
+
+    fn rich() -> Details<'static> {
+        Details {
+            file_name: Some("a.pdf"),
+            seconds: Some(5),
+            voice_note: true,
+            thumbnail: Some(JPEG),
+            width: Some(640),
+            height: Some(480),
+            waveform: Some(&[42; 64]),
+            animated: true,
+            view_once: true,
+        }
+    }
+
+    #[test]
+    fn details_reach_the_fields_each_kind_has() {
+        let up = uploaded();
+        let image = build_message_with(MediaKind::Image, &up, "image/jpeg", None, &rich());
+        let m = image.image_message.as_option().unwrap();
+        assert_eq!(m.jpeg_thumbnail.as_deref(), Some(JPEG));
+        assert_eq!((m.width, m.height), (Some(640), Some(480)));
+        assert_eq!(m.view_once, Some(true));
+
+        let video = build_message_with(MediaKind::Video, &up, "video/mp4", None, &rich());
+        let m = video.video_message.as_option().unwrap();
+        assert_eq!(m.jpeg_thumbnail.as_deref(), Some(JPEG));
+        assert_eq!((m.width, m.height), (Some(640), Some(480)));
+        assert_eq!((m.seconds, m.gif_playback), (Some(5), Some(true)));
+        assert_eq!(m.view_once, Some(true));
+
+        let voice = build_message_with(MediaKind::Audio, &up, "audio/ogg", None, &rich());
+        let m = voice.audio_message.as_option().unwrap();
+        assert_eq!(m.waveform.as_deref(), Some(&[42u8; 64][..]));
+        assert_eq!((m.seconds, m.ptt), (Some(5), Some(true)));
+        assert_eq!(m.view_once, Some(true));
+
+        let doc = build_message_with(MediaKind::Document, &up, "application/pdf", None, &rich());
+        let m = doc.document_message.as_option().unwrap();
+        assert_eq!(m.jpeg_thumbnail.as_deref(), Some(JPEG));
+        assert_eq!(m.file_name.as_deref(), Some("a.pdf"));
+
+        let sticker = build_message_with(MediaKind::Sticker, &up, "image/webp", None, &rich());
+        let m = sticker.sticker_message.as_option().unwrap();
+        assert_eq!((m.width, m.height), (Some(640), Some(480)));
+        assert_eq!(m.is_animated, Some(true));
+    }
+
+    #[test]
+    fn nothing_is_made_up_without_details() {
+        let up = uploaded();
+        let image = build_message(MediaKind::Image, &up, "image/jpeg", None);
+        let m = image.image_message.as_option().unwrap();
+        assert_eq!(m.jpeg_thumbnail, None);
+        assert_eq!((m.width, m.height, m.view_once), (None, None, None));
+        let video = build_message(MediaKind::Video, &up, "video/mp4", None);
+        let m = video.video_message.as_option().unwrap();
+        assert_eq!((m.jpeg_thumbnail.clone(), m.gif_playback), (None, None));
+        assert_eq!((m.width, m.height, m.view_once), (None, None, None));
+        let voice = build_message(MediaKind::Audio, &up, "audio/ogg", None);
+        let m = voice.audio_message.as_option().unwrap();
+        assert_eq!((m.waveform.clone(), m.view_once), (None, None));
+        let sticker = build_message(MediaKind::Sticker, &up, "image/webp", None);
+        assert_eq!(
+            sticker.sticker_message.as_option().unwrap().is_animated,
+            None
+        );
+        // An empty preview or waveform is no preview or waveform.
+        let empty = Details {
+            thumbnail: Some(&[]),
+            waveform: Some(&[]),
+            ..Default::default()
+        };
+        let image = build_message_with(MediaKind::Image, &up, "image/jpeg", None, &empty);
+        assert_eq!(
+            image.image_message.as_option().unwrap().jpeg_thumbnail,
+            None
+        );
+        let voice = build_message_with(MediaKind::Audio, &up, "audio/ogg", None, &empty);
+        assert_eq!(voice.audio_message.as_option().unwrap().waveform, None);
+    }
+
+    #[test]
+    fn view_once_wrapper_is_seen_by_the_library_and_keeps_the_media() {
+        let up = uploaded();
+        let plain = build_message(MediaKind::Image, &up, "image/jpeg", None);
+        assert!(!plain.is_view_once());
+        let inner = build_message_with(MediaKind::Image, &up, "image/jpeg", None, &rich());
+        assert!(inner.is_view_once());
+        let wrapped = wrap_view_once(inner);
+        assert!(wrapped.is_view_once());
+        assert!(wrapped.image_message.as_option().is_none());
+        let decoded = decode(&wrapped.encode_to_vec()).unwrap();
+        let media = media_of(&decoded).expect("media under the wrapper");
+        assert_eq!(media.kind(), MediaKind::Image);
+        assert_eq!(media.downloadable().direct_path(), Some("/o1/v/t62/abc"));
     }
 
     #[test]

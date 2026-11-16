@@ -203,6 +203,11 @@ instead", and type the code.
 - `POST /v1/messages/text`, `POST /v1/read`, `POST /v1/presence`, `POST /v1/chatstate`
   and `POST /v1/presence/subscribe` act on the instance behind the bearer key. A
   malformed JID is a `400 bad_request`.
+- `POST /v1/chatstate` takes `{"chat": "<jid>", "state": "typing" | "recording" | "paused"}`.
+  `recording` is what a voice-note recorder sends (the library's
+  `chatstate().send_recording`); `paused` ends either. The `typing` event names the
+  same three states for the other side (`{"type":"typing","chat","jid","state"}`), so
+  an app shows "recording…" from it.
 - If WhatsApp unlinks the device (from the phone, or a server-side logout) the
   instance goes to `logged_out` and its `wa.db` is deleted. Link again with
   `POST /v1/instance/link`, or delete the instance with `DELETE /v1/instance`.
@@ -343,7 +348,7 @@ A message's `meta` (`MessageMeta`) can hold:
 | `revoked` | deleted for everyone; the body is `unsupported`, nothing else is kept |
 | `status` | ticks of my messages: `sent`, `delivered`, `read`, `played` (only forward) |
 | `sender_name` | the author's push name when it arrived (groups) |
-| `media` | `file_name`, `seconds`, `width`, `height`, `pages`, `voice_note`, `animated`, `view_once`, `thumbnail` |
+| `media` | `file_name`, `seconds`, `width`, `height`, `pages`, `voice_note`, `animated`, `view_once`, `thumbnail`, `waveform_b64` |
 | `location` | `{latitude, longitude, name, address, live}` (the body stays `unsupported`) |
 | `contact` | a shared contact card `{display_name, vcard}` (body `unsupported`) |
 | `starred` | starred on any device |
@@ -486,6 +491,58 @@ Each one is sent to WhatsApp first, then stored and announced (`message_meta`,
 `POST /v1/messages/media` also takes `quoted_id` (reply), `file_name` (documents;
 no path separators, at most 255 bytes), `seconds` and `voice_note=true` in its query.
 Client: `send_media_with(chat, kind, mime, caption, &MediaOptions, bytes)`.
+
+More options of the same send (all optional; a request without them is sent as
+before, and the gateway makes nothing up for a missing one). They are taken on
+`POST /v1/messages/media` and on `POST /v1/messages/media/options`, which is the
+same handler under a second path:
+
+| Query | For | What it sets |
+|---|---|---|
+| `thumbnail_len=<n>` | photo, video, document | The body starts with `n` bytes of JPEG preview and the file follows. At most 64 KiB (65 536), must start with the JPEG marker, and something must follow it. Becomes the message's `jpegThumbnail`; the gateway stores it, so `meta.media.thumbnail` is true and `GET /v1/messages/{id}/thumbnail` serves it. The preview does not count against `max_media_bytes`. |
+| `width`, `height` | photo, video, sticker | Pixel size. |
+| `waveform_b64` | audio | The waveform of a voice note: base64 of exactly 64 bytes, each 0 to 100. |
+| `animated=true` | video, sticker | A video plays as a GIF (`gifPlayback`); a sticker is marked animated. |
+| `view_once=true` | photo, video, audio | View once: the inline flag on the media message, inside a `viewOnceMessage` wrapper. |
+
+A preview over 64 KiB, a preview that is not a JPEG, a `thumbnail_len` longer than
+the body, a waveform that is not base64 or not 64 samples of 0 to 100, and
+`view_once` on a document or sticker are `400 bad_request`. An option the kind has
+no field for (a waveform on a photo, a size on a document) is ignored. The preview
+travels in the body, not as base64 in the query, because a URL of that size does
+not pass a proxy (Cloudflare documents a 16 KB limit for a URL).
+
+Why the second path: a gateway from before these options ignores query keys it does
+not know. On the plain route it would send a view-once photo as an ordinary one and
+read a preview in the body as part of the file. It has no `/v1/messages/media/options`,
+so there it answers 404, and the client knows. `send_media_with` asks the second
+path whenever one of the newer options is set. On that 404 (the router's, without
+an API body) it sends the file the old way, without the newer options, as every
+send was before; a view-once send is not sent at all and comes back as a
+`not_found` API error. A send without the newer options asks the plain route with
+the request it always made.
+
+`MediaOptions` has the same options by name: `thumbnail_b64` (the client decodes it
+and puts it in front of the body), `width`, `height`, `waveform_b64`, `animated`,
+`view_once`. The client checks them and answers a `bad_request` API error without
+a request when the gateway would refuse them.
+
+```
+curl -X POST 'https://rosty.erdemdev.tr/v1/messages/media/options?chat=100000000001%40s.whatsapp.net&kind=audio&mime=audio%2Fogg&seconds=7&voice_note=true&waveform_b64=<base64 of 64 bytes>' \
+  -H 'Authorization: Bearer <key>' --data-binary @note.ogg
+```
+
+A received voice note carries its waveform in `meta.media.waveform_b64`: the bytes
+WhatsApp sent, base64, as they came (64 samples of 0 to 100 from the official
+apps; a reader checks that before drawing). A message that came through history
+sync has it too. A message stored by a gateway before this change gains it when it
+arrives again (history), not by a migration: the meta is stored as JSON and the
+store did not change.
+
+View once: `meta.media.view_once` is true for the inline flag and for media inside
+any of the three view-once wrappers. The gateway keeps serving the file of a
+view-once message like any other; opening it once and forgetting the file is the
+app's job (the device store has a "viewed" mark).
 
 `GET /v1/messages/{id}/thumbnail` answers the small preview image that came inside
 a photo, video, document, sticker or location (`meta.media.thumbnail`), up to 64 KiB,

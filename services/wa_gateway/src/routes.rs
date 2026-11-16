@@ -14,9 +14,10 @@ use rosty_wa_proto::api::routes as r;
 use rosty_wa_proto::{
     ChatState, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope, GatewayEvent, GroupInfo,
     IdentityMappings, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest,
-    LookupUsers, MAX_LOOKUP, MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, RichChat,
-    RichMessage, ScheduleText, ScheduledState, ScheduledText, SendReaction, SendText, Sent,
-    SetPresence, SubscribePresence, WaUser,
+    LookupUsers, MAX_LOOKUP, MAX_SEND_THUMBNAIL_BYTES, MarkRead, MediaKind, MediaOptionError,
+    MessageBody, MintKey, PushRegistration, RichChat, RichMessage, ScheduleText, ScheduledState,
+    ScheduledText, SendReaction, SendText, Sent, SetPresence, SubscribePresence, WaUser,
+    check_thumbnail, check_view_once, check_waveform, decode_b64,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -69,7 +70,17 @@ pub fn router(state: AppState) -> Router {
         .route(r::PRESENCE_SUBSCRIBE, post(subscribe_presence))
         .route(
             r::SEND_MEDIA,
-            post(send_media).layer(DefaultBodyLimit::max(media_limit)),
+            // The file may be preceded by its preview image.
+            post(send_media).layer(DefaultBodyLimit::max(
+                media_limit.saturating_add(MAX_SEND_THUMBNAIL_BYTES),
+            )),
+        )
+        // The same send; what a client asks when it carries a newer option.
+        .route(
+            r::SEND_MEDIA_OPTIONS,
+            post(send_media).layer(DefaultBodyLimit::max(
+                media_limit.saturating_add(MAX_SEND_THUMBNAIL_BYTES),
+            )),
         )
         .route(r::MESSAGE_MEDIA, get(message_media))
         .route(r::REACT, post(react))
@@ -622,6 +633,45 @@ struct SendMediaQuery {
     seconds: Option<u32>,
     #[serde(default)]
     voice_note: bool,
+    /// The body starts with this many bytes of JPEG preview; the file
+    /// follows. (A preview does not fit a URL behind a proxy.)
+    #[serde(default)]
+    thumbnail_len: Option<usize>,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
+    #[serde(default)]
+    waveform_b64: Option<String>,
+    #[serde(default)]
+    animated: bool,
+    #[serde(default)]
+    view_once: bool,
+}
+
+/// Splits the body of a media send into the preview image, when
+/// `thumbnail_len` announces one, and the file.
+fn split_thumbnail(
+    body: Bytes,
+    thumbnail_len: Option<usize>,
+) -> Result<(Option<Vec<u8>>, Bytes), MediaOptionError> {
+    let Some(len) = thumbnail_len.filter(|len| *len > 0) else {
+        return Ok((None, body));
+    };
+    if len > MAX_SEND_THUMBNAIL_BYTES {
+        return Err(MediaOptionError::ThumbnailTooLarge { len });
+    }
+    if len > body.len() {
+        // The announced preview is longer than everything that was sent.
+        return Err(MediaOptionError::ThumbnailLength {
+            len,
+            body: body.len(),
+        });
+    }
+    let file = body.slice(len..);
+    let thumbnail = body[..len].to_vec();
+    check_thumbnail(&thumbnail)?;
+    Ok((Some(thumbnail), file))
 }
 
 /// A document file name: printable, no path, at most 255 bytes.
@@ -658,12 +708,45 @@ async fn send_media(
     auth: Authed,
     Query(query): Query<SendMediaQuery>,
     body: Bytes,
+) -> Response {
+    // The body limit of the route leaves room for a preview image; the file
+    // itself keeps the limit it always had, and the same answer over it.
+    let preview = query
+        .thumbnail_len
+        .unwrap_or(0)
+        .min(MAX_SEND_THUMBNAIL_BYTES);
+    if body.len().saturating_sub(preview) > state.config().max_media_bytes {
+        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+    }
+    match send_media_checked(state, auth, query, body).await {
+        Ok(sent) => sent.into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn send_media_checked(
+    state: AppState,
+    auth: Authed,
+    query: SendMediaQuery,
+    body: Bytes,
 ) -> ApiResult<Json<Sent>> {
     check_jid(&query.chat)?;
     check_mime(&query.mime)?;
+    let bad_option = |e: MediaOptionError| HttpError::bad_request(e.to_string());
+    let (thumbnail, body) = split_thumbnail(body, query.thumbnail_len).map_err(bad_option)?;
     if body.is_empty() {
         return Err(HttpError::bad_request("the request body is empty"));
     }
+    let waveform = match query.waveform_b64.as_deref().filter(|w| !w.is_empty()) {
+        Some(text) => {
+            let bytes = decode_b64(text).ok_or(MediaOptionError::WaveformNotBase64);
+            let bytes = bytes.map_err(bad_option)?;
+            check_waveform(&bytes).map_err(bad_option)?;
+            Some(bytes)
+        }
+        None => None,
+    };
+    check_view_once(query.kind, query.view_once).map_err(bad_option)?;
     let caption = query.caption.filter(|c| !c.is_empty());
     if caption
         .as_ref()
@@ -685,6 +768,12 @@ async fn send_media(
         file_name,
         seconds: query.seconds,
         voice_note: query.voice_note,
+        thumbnail,
+        width: query.width.filter(|w| *w > 0),
+        height: query.height.filter(|h| *h > 0),
+        waveform,
+        animated: query.animated,
+        view_once: query.view_once,
     };
     Ok(Json(state.driver().send_media(&auth.instance, req).await?))
 }

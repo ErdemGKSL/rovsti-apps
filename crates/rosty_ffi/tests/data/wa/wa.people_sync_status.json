@@ -1,0 +1,25 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/people/sync/5f0c9a1b22d4e7a3?rev=3&wait_ms=25000"
+ },
+ "status": 200,
+ "body": {
+  "job_id": "5f0c9a1b22d4e7a3",
+  "rev": 4,
+  "state": "waiting",
+  "phase": "profiles",
+  "done": 15,
+  "total": 40,
+  "numbers": 812,
+  "wait": {
+   "until_ms": 1790000090000,
+   "source": "whatsapp"
+  },
+  "eta_ms": 125000,
+  "account_epoch": 0,
+  "created_ms": 1790000000000,
+  "updated_ms": 1790000030000,
+  "expires_ms": 1790021600000
+ }
+}

@@ -1,0 +1,1 @@
+{"handle":7777777777,"now_ms":1790000001000,"rand":0,"report":{"kind":"job","status":{"job_id":"5f0c9a1b22d4e7a3","rev":9,"state":"ready","phase":"bundle","done":3,"total":3,"numbers":3,"account_epoch":0,"created_ms":1789996400000,"updated_ms":1790000000000,"expires_ms":1790086400000,"result":{"records":2,"pictures":1,"bytes":61234}}}}

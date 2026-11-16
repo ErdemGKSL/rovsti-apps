@@ -58,6 +58,12 @@ pub mod routes {
     /// `?since=<cursor>` ([`crate::IdentityMappings`]). Older gateways do not
     /// have it and answer 404.
     pub const IDENTITY_MAPPINGS: &str = "/v1/identity/mappings";
+    /// People sync v3: start or join the instance's job (`POST`).
+    pub const PEOPLE_SYNC: &str = "/v1/people/sync";
+    /// The job's status, long-polled with `?rev=&wait_ms=` (`GET`), or its cancel (`DELETE`).
+    pub const PEOPLE_SYNC_JOB: &str = "/v1/people/sync/{job_id}";
+    /// One part of a ready job's bundle, `?after=&max_bytes=` (`GET`).
+    pub const PEOPLE_SYNC_BUNDLE: &str = "/v1/people/sync/{job_id}/bundle";
 
     /// Replaces `{name}` in `template` with `value`, percent-encoding every
     /// byte that is not unreserved (so a JID's `@` is safe in a path).

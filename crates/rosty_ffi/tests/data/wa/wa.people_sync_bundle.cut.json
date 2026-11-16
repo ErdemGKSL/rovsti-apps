@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/people/sync/5f0c9a1b22d4e7a3/bundle?after=2"
+ },
+ "status": 200,
+ "headers": {
+  "Content-Type": "application/x-rosty-people-bundle"
+ },
+ "body_b64": "eyJ2IjoxLCJqb2JfaWQiOiI1ZjBjOWExYjIyZDRlN2EzIiwiYWZ0ZXIiOjJ9Cnsic2VxIjozLCJudW1iZXIiOiIrMTAwMDAwMDAwMDAzIiwiaGFzaCI6Ijc3YWEwMDAwMDAwMDAwMDAiLCJvbl93aGF0c2FwcCI6dHJ1ZSwiamlkIjoiMTAwMDAwMDAwMDAzQHMud2hhdHNhcHAubmV0IiwicGljdHVyZV9pZCI6IjE3MTYiLCJwaWN0dXJlX21pc3NpbmciOnRydWV9Cg=="
+}

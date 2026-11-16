@@ -5,6 +5,13 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.RustCore
 import dev.rosty.core.call
 import dev.rosty.core.model.core.Empty
+import dev.rosty.core.model.people.PeopleSyncBundleAnswer
+import dev.rosty.core.model.people.PeopleSyncBundleBody
+import dev.rosty.core.model.people.PeopleSyncJobBody
+import dev.rosty.core.model.people.PeopleSyncStartAnswer
+import dev.rosty.core.model.people.PeopleSyncStartBody
+import dev.rosty.core.model.people.PeopleSyncStatusAnswer
+import dev.rosty.core.model.people.PeopleSyncStatusBody
 import dev.rosty.core.model.wa.AvatarsPlanAnswer
 import dev.rosty.core.model.wa.AvatarsPlanRequest
 import dev.rosty.core.model.wa.BytesAnswer
@@ -265,6 +272,30 @@ interface WaOps {
         since: String?,
     ): Outcome<IdentityMappingsAnswer>
 
+    /** People sync v3: starts or joins the gateway's people job; `supported = false` on a gateway without it. */
+    suspend fun peopleSyncStart(
+        handle: Long,
+        body: PeopleSyncStartBody,
+    ): Outcome<PeopleSyncStartAnswer>
+
+    /** People sync v3: the job's status, long-polled up to `waitMs`; `gone = true` when the gateway lost it. */
+    suspend fun peopleSyncStatus(
+        handle: Long,
+        body: PeopleSyncStatusBody,
+    ): Outcome<PeopleSyncStatusAnswer>
+
+    /** People sync v3: one bundle part; pictures come as temp files (`picturePath`). */
+    suspend fun peopleSyncBundle(
+        handle: Long,
+        body: PeopleSyncBundleBody,
+    ): Outcome<PeopleSyncBundleAnswer>
+
+    /** People sync v3: cancels a working job or drops a finished one. */
+    suspend fun peopleSyncCancel(
+        handle: Long,
+        jobId: String,
+    ): Outcome<Empty>
+
     /** The status updates (stories), mine and everyone else's. */
     suspend fun statuses(handle: Long): Outcome<StatusList>
 
@@ -423,6 +454,10 @@ interface WaOps {
                 "wa.refresh_profiles",
                 "wa.picture",
                 "wa.identity_mappings",
+                "wa.people_sync_start",
+                "wa.people_sync_status",
+                "wa.people_sync_bundle",
+                "wa.people_sync_cancel",
                 "wa.statuses",
                 "wa.status_media",
                 "wa.status_thumbnail",
@@ -641,6 +676,50 @@ class NativeWaOps(
         IdentityMappingsBody(since),
         IdentityMappingsBody.serializer(),
         IdentityMappingsAnswer.serializer(),
+    )
+
+    override suspend fun peopleSyncStart(
+        handle: Long,
+        body: PeopleSyncStartBody,
+    ) = gateway(
+        "wa.people_sync_start",
+        handle,
+        body,
+        PeopleSyncStartBody.serializer(),
+        PeopleSyncStartAnswer.serializer(),
+    )
+
+    override suspend fun peopleSyncStatus(
+        handle: Long,
+        body: PeopleSyncStatusBody,
+    ) = gateway(
+        "wa.people_sync_status",
+        handle,
+        body,
+        PeopleSyncStatusBody.serializer(),
+        PeopleSyncStatusAnswer.serializer(),
+    )
+
+    override suspend fun peopleSyncBundle(
+        handle: Long,
+        body: PeopleSyncBundleBody,
+    ) = gateway(
+        "wa.people_sync_bundle",
+        handle,
+        body,
+        PeopleSyncBundleBody.serializer(),
+        PeopleSyncBundleAnswer.serializer(),
+    )
+
+    override suspend fun peopleSyncCancel(
+        handle: Long,
+        jobId: String,
+    ) = gateway(
+        "wa.people_sync_cancel",
+        handle,
+        PeopleSyncJobBody(jobId),
+        PeopleSyncJobBody.serializer(),
+        Empty.serializer(),
     )
 
     override suspend fun statuses(handle: Long) =

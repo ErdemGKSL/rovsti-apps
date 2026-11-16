@@ -12,6 +12,15 @@
 //!   pictures; no burst. A 429 doubles the gap, halves the batch and backs off; successes recover slowly. The pace
 //!   is persisted, so the next slice (or process) starts as careful as the last one ended.
 //! * Interruptions are phases of the stored run ([`Phase`]); [`begin`] resumes them.
+//!
+//! People sync v3 (`_bmad-output/kotlin-ui/plans/people-sync-v3.md`) adds the **job mode** (stages
+//! [`Stage::Server`] and [`Stage::Download`]): the gateway runs the lookups, profiles and pictures as one job; the
+//! planner starts or joins it ([`Step::JobStart`]), watches it ([`Step::JobWatch`]), downloads the result in bundle
+//! parts ([`Step::JobFetch`]) and closes it ([`Step::JobDone`]). The device sends, per number, the hash the gateway
+//! gave last time ([`Remote::synced`]) and the picture id whose file it holds, so the bundle carries only what
+//! changed; an unchanged run commits nothing to the book. Against a gateway without the job routes
+//! ([`Report::JobUnsupported`]) the run continues in the v2 steps above (the **legacy mode**), and the job routes
+//! are asked again after [`REMOTE_RETRY_MS`].
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
@@ -20,6 +29,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use rosty_wa_proto::people::{
+    BUNDLE_MAX_BYTES, PEOPLE_WAIT_MAX_MS, PeopleEntry, PeopleJobPhase, PeopleJobState,
+    PeopleJobStatus, PeopleSyncMode, PeopleWaitSource,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::people::{self, Book, FileInfo, Refresh, Update};
@@ -87,8 +100,29 @@ pub const MAX_NEGATIVES: usize = 5_000;
 /// A profile an (old) gateway leaves unanswered this many times in one run is given up for that run.
 pub const MAX_UNANSWERED: u8 = 3;
 
+// ---- job mode (people sync v3) -------------------------------------------------------------------
+
+/// A gateway that answered "no job routes" is asked again after this long.
+pub const REMOTE_RETRY_MS: i64 = 24 * 3_600_000;
+/// The longest one [`Step::JobWatch`] waits for a change (the gateway's cap).
+pub const JOB_WATCH_MS: i64 = PEOPLE_WAIT_MAX_MS as i64;
+/// How often in one slice the gateway may lose the job before the run fails.
+pub const MAX_JOB_GONE: u32 = 2;
+
 const PHONE_SUFFIX: &str = "@s.whatsapp.net";
 const LOG: &str = "rosty::sync";
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
 
 // ---- checkpoint ----------------------------------------------------------------------------------
 
@@ -114,6 +148,9 @@ pub struct Checkpoint {
     /// The last finished run, for the settings row.
     #[serde(default)]
     pub last: Option<Finished>,
+    /// What the job mode remembers: whether the gateway has the job routes, and the hashes it delivered.
+    #[serde(default)]
+    pub remote: Remote,
 }
 
 impl Default for Checkpoint {
@@ -126,8 +163,128 @@ impl Default for Checkpoint {
             negatives: BTreeMap::new(),
             profiled_ms: BTreeMap::new(),
             last: None,
+            remote: Remote::default(),
         }
     }
+}
+
+/// The job mode's memory, part of the checkpoint. Every field defaults, so an older checkpoint reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Remote {
+    /// `None`: not asked yet. `Some(false)`: the gateway has no job routes (asked again after [`REMOTE_RETRY_MS`]).
+    #[serde(default)]
+    pub support: Option<bool>,
+    #[serde(default)]
+    pub unsupported_ms: i64,
+    /// Phone JID -> what the gateway last delivered for that number.
+    #[serde(default)]
+    pub synced: BTreeMap<String, Synced>,
+    /// The account epoch the hashes belong to (`PeopleJobStatus::account_epoch`).
+    #[serde(default)]
+    pub account_epoch: Option<u32>,
+    /// When a run was last started or resumed (the triggers' debounce).
+    #[serde(default)]
+    pub attempt_ms: i64,
+}
+
+/// What the gateway last delivered for one number: its hash (opaque, sent back as `h`) and whether it was on
+/// WhatsApp.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Synced {
+    pub hash: String,
+    #[serde(default)]
+    pub on_whatsapp: bool,
+}
+
+/// The gateway job a run follows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobRef {
+    pub id: String,
+    /// The bundle cursor: records up to this `seq` are committed.
+    #[serde(default)]
+    pub after: u32,
+    #[serde(default)]
+    pub rev: u64,
+    /// False: another device's job, watched until it is over.
+    #[serde(default = "yes")]
+    pub mine: bool,
+    /// The last status the gateway answered.
+    #[serde(default)]
+    pub status: Option<PeopleJobStatus>,
+    /// The whole bundle is committed.
+    #[serde(default)]
+    pub fetched: bool,
+    /// The job was closed on the gateway after the download.
+    #[serde(default)]
+    pub closed: bool,
+}
+
+impl JobRef {
+    fn new(status: PeopleJobStatus) -> Self {
+        Self {
+            id: status.job_id.clone(),
+            after: 0,
+            rev: status.rev,
+            mine: status.mine,
+            status: Some(status),
+            fetched: false,
+            closed: false,
+        }
+    }
+
+    fn state(&self) -> Option<PeopleJobState> {
+        self.status.as_ref().map(|s| s.state)
+    }
+
+    /// What the settings row shows of it.
+    pub fn view(&self) -> Option<JobView> {
+        let s = self.status.as_ref()?;
+        Some(JobView {
+            job_id: s.job_id.clone(),
+            state: s.state,
+            phase: s.phase,
+            done: s.done,
+            total: s.total,
+            numbers: s.numbers,
+            wait_until_ms: s.wait.map(|w| w.until_ms),
+            wait_source: s.wait.map(|w| w.source),
+            eta_ms: s.eta_ms,
+            records: s.result.map(|r| r.records),
+            pictures: s.result.map(|r| r.pictures),
+            bytes: s.result.map(|r| r.bytes),
+            mine: self.mine,
+        })
+    }
+}
+
+/// The gateway job as the settings row and the notification show it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobView {
+    pub job_id: String,
+    pub state: PeopleJobState,
+    /// `lookup`, `profiles`, `pictures`, `bundle`.
+    pub phase: PeopleJobPhase,
+    /// Of the phase.
+    pub done: u32,
+    pub total: u32,
+    /// Numbers the gateway accepted.
+    pub numbers: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_source: Option<PeopleWaitSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eta_ms: Option<u64>,
+    /// Once ready: the bundle's records, records with a picture, bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub records: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pictures: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    /// False: another device's job (this run waits for it to end).
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub mine: bool,
 }
 
 /// The WhatsApp link a checkpoint belongs to: the instance and a fingerprint of the gateway URL.
@@ -167,6 +324,10 @@ pub enum Stage {
     Lookup,
     Profiles,
     Pictures,
+    /// Job mode: the gateway works (or the job is being started).
+    Server,
+    /// Job mode: the bundle is being downloaded.
+    Download,
 }
 
 impl Stage {
@@ -175,7 +336,14 @@ impl Stage {
             Self::Lookup => "lookup",
             Self::Profiles => "profiles",
             Self::Pictures => "pictures",
+            Self::Server => "server",
+            Self::Download => "download",
         }
+    }
+
+    /// A stage of the job mode.
+    pub fn is_job(self) -> bool {
+        matches!(self, Self::Server | Self::Download)
     }
 }
 
@@ -209,6 +377,9 @@ pub enum Interrupt {
     SliceBudget,
     Cancelled,
     LinkNotReady,
+    /// Job mode: the slice ended while the gateway still works; the job goes on without the phone. Continue at
+    /// the job's `eta_ms`.
+    ServerWorking,
 }
 
 impl Interrupt {
@@ -220,6 +391,7 @@ impl Interrupt {
             Self::SliceBudget => "slice_budget",
             Self::Cancelled => "cancelled",
             Self::LinkNotReady => "link_not_ready",
+            Self::ServerWorking => "server_working",
         }
     }
 }
@@ -269,6 +441,12 @@ pub struct Totals {
     pub lookup: Progress,
     pub profiles: Progress,
     pub pictures: Progress,
+    /// Job mode: the gateway's phase.
+    #[serde(default)]
+    pub server: Progress,
+    /// Job mode: records committed of the bundle's.
+    #[serde(default)]
+    pub download: Progress,
 }
 
 impl Totals {
@@ -277,6 +455,8 @@ impl Totals {
             Stage::Lookup => self.lookup,
             Stage::Profiles => self.profiles,
             Stage::Pictures => self.pictures,
+            Stage::Server => self.server,
+            Stage::Download => self.download,
         }
     }
 }
@@ -320,6 +500,18 @@ pub struct Run {
     pub heartbeat_ms: i64,
     #[serde(default)]
     pub slices: u32,
+    /// Job mode: the gateway job this run follows.
+    #[serde(default)]
+    pub job: Option<JobRef>,
+    /// Job mode: a job to close (cancel) on the gateway before going on.
+    #[serde(default)]
+    pub cancel_job: Option<String>,
+    /// People added or changed in the book by this run.
+    #[serde(default)]
+    pub changed: u32,
+    /// Job mode: bundle bytes downloaded.
+    #[serde(default)]
+    pub bytes: u64,
 }
 
 impl Run {
@@ -338,6 +530,10 @@ impl Run {
             stats: Stats::default(),
             heartbeat_ms: now_ms,
             slices: 1,
+            job: None,
+            cancel_job: None,
+            changed: 0,
+            bytes: 0,
         }
     }
 
@@ -388,6 +584,12 @@ pub struct Finished {
     pub people: u32,
     pub downloaded: u32,
     pub duration_ms: i64,
+    /// People the run added or changed in the book (absent for a run of an older build).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed: Option<u32>,
+    /// Job mode: bundle bytes downloaded.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub bytes: u64,
 }
 
 // ---- storage -------------------------------------------------------------------------------------
@@ -495,6 +697,10 @@ enum Inflight {
     Profiles,
     PlanPictures,
     Picture(String),
+    JobStart,
+    JobWatch,
+    JobFetch,
+    JobDone,
 }
 
 /// One slice in memory: the targets of this slice and the picture plan.
@@ -509,6 +715,10 @@ pub struct Session {
     queue: Option<VecDeque<Refresh>>,
     /// The picture file names that were on disk at plan time.
     files: HashSet<String>,
+    /// The files were listed this slice ([`Report::Files`]).
+    files_listed: bool,
+    /// Job mode: how often the gateway lost the job this slice.
+    gone: u32,
     inflight: Option<Inflight>,
     /// The jittered gap drawn for the request in flight.
     gap_ms: i64,
@@ -582,6 +792,29 @@ pub enum Step {
     Stop {
         stopped: Stopped,
     },
+    /// Job mode: `wa.people_sync_start` with this mode and these entries; answer [`Report::JobStarted`] (or
+    /// [`Report::JobUnsupported`] when the gateway has no job routes).
+    JobStart {
+        mode: PeopleSyncMode,
+        entries: Vec<PeopleEntry>,
+    },
+    /// Job mode: `wa.people_sync_status` (a long-poll of at most `wait_ms`); answer [`Report::Job`] (or
+    /// [`Report::JobGone`]).
+    JobWatch {
+        job_id: String,
+        rev: u64,
+        wait_ms: i64,
+    },
+    /// Job mode: `wa.people_sync_bundle` from `after`; store the pictures, then answer [`Report::Bundle`].
+    JobFetch {
+        job_id: String,
+        after: u32,
+        max_bytes: u64,
+    },
+    /// Job mode: `wa.people_sync_cancel` (errors do not matter); answer [`Report::JobClosed`].
+    JobDone {
+        job_id: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -650,6 +883,65 @@ pub enum Report {
         message: String,
     },
     Cancelled,
+    /// The gateway started or joined a job (or another device's works: `mine: false`).
+    JobStarted {
+        status: PeopleJobStatus,
+    },
+    /// The gateway has no job routes (the router's bare 404 to the start): the run goes on in the legacy mode.
+    JobUnsupported,
+    /// The job's status.
+    Job {
+        status: PeopleJobStatus,
+    },
+    /// The gateway no longer has the job (404): it is started again.
+    JobGone,
+    /// One bundle part, its pictures stored. `last_seq` and `more` are the part's end line; `bytes` its size.
+    Bundle {
+        job_id: String,
+        #[serde(default)]
+        records: Vec<JobRecord>,
+        last_seq: u32,
+        #[serde(default)]
+        more: bool,
+        #[serde(default)]
+        bytes: u64,
+    },
+    /// The job is closed on the gateway.
+    JobClosed,
+}
+
+/// One record of a bundle part as the caller reports it: the gateway's record and what became of its picture.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobRecord {
+    pub seq: u32,
+    /// E.164.
+    pub number: String,
+    pub hash: String,
+    pub on_whatsapp: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture_id: Option<String>,
+    /// The gateway could not get the picture: the old file keeps showing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub picture_missing: bool,
+    /// What the caller did with the picture bytes the record carried; absent when it carried none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<JobPicture>,
+}
+
+/// The picture bytes of a record: stored as `file` (`avatars::file_name(jid, picture_id)`), or not storable.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JobPicture {
+    Stored { file: String },
+    Failed,
 }
 
 /// What a report committed.
@@ -662,6 +954,9 @@ pub struct Committed {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage: Option<Stage>,
     pub progress: Progress,
+    /// Job mode: the gateway job now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobView>,
     /// The book changed and must be saved (before the checkpoint).
     #[serde(skip)]
     pub book_dirty: bool,
@@ -677,6 +972,9 @@ pub struct Status {
     /// WhatsApp's penalty runs until then: both buttons wait (D8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_before_ms: Option<i64>,
+    /// When a run was last started or resumed (the triggers' debounce).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -691,6 +989,9 @@ pub struct RunStatus {
     pub resumable: bool,
     pub heartbeat_ms: i64,
     pub stats: Stats,
+    /// Job mode: the gateway job.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobView>,
 }
 
 /// `+905321234567` -> `905321234567@s.whatsapp.net`; `None` when it is not a plausible number.
@@ -700,8 +1001,8 @@ pub fn jid_of(e164: &str) -> Option<String> {
         .then(|| format!("{digits}{PHONE_SUFFIX}"))
 }
 
-/// Starts a slice. Applies the link rule, prunes what no longer belongs to anybody, and resumes or creates a run
-/// as `start` says. `numbers` are E.164 numbers in priority order.
+/// Starts a slice of the v2 (legacy) sync only: [`begin_with`] without the job mode. A stored job-mode run goes on
+/// in the legacy steps.
 pub fn begin(
     cp: &mut Checkpoint,
     book: &Book,
@@ -711,14 +1012,33 @@ pub fn begin(
     slice_ms: Option<i64>,
     now_ms: i64,
 ) -> Result<Session, Refused> {
+    begin_with(cp, book, link, numbers, start, slice_ms, now_ms, false)
+}
+
+/// Starts a slice. Applies the link rule, prunes what no longer belongs to anybody, and resumes or creates a run
+/// as `start` says. `numbers` are E.164 numbers in priority order. With `jobs` (a caller that performs the
+/// `Step::Job*` steps) a new run uses the gateway's people job unless the gateway said it has none
+/// ([`REMOTE_RETRY_MS`]).
+#[allow(clippy::too_many_arguments)]
+pub fn begin_with(
+    cp: &mut Checkpoint,
+    book: &Book,
+    link: LinkId,
+    numbers: &[String],
+    start: Start,
+    slice_ms: Option<i64>,
+    now_ms: i64,
+    jobs: bool,
+) -> Result<Session, Refused> {
     if cp.link.as_ref() != Some(&link) {
         if cp.link.is_some() {
-            log::info!(target: LOG, "link_changed reset=run,negatives,profiled,pace");
+            log::info!(target: LOG, "link_changed reset=run,negatives,profiled,pace,remote");
             cp.run = None;
             cp.negatives.clear();
             cp.profiled_ms.clear();
             cp.pace = Pace::default();
             cp.last = None;
+            cp.remote = Remote::default();
         }
         cp.link = Some(link);
     }
@@ -739,6 +1059,16 @@ pub fn begin(
     if start != Start::LivePictures {
         prune(cp, book, &numbers_of);
     }
+    // Job mode unless the gateway said it has no job routes (asked again after a day).
+    let job_mode = jobs
+        && start != Start::LivePictures
+        && (cp.remote.support != Some(false)
+            || now_ms - cp.remote.unsupported_ms >= REMOTE_RETRY_MS);
+    let first_stage = if job_mode {
+        Stage::Server
+    } else {
+        Stage::Lookup
+    };
 
     if cp.run.as_ref().is_some_and(|r| r.expired(now_ms)) {
         log::info!(target: LOG, "run_expired");
@@ -767,6 +1097,8 @@ pub fn begin(
         deadline_ms: slice_ms.map(|ms| now_ms + ms.max(0)),
         queue: None,
         files: HashSet::new(),
+        files_listed: false,
+        gone: 0,
         inflight: None,
         gap_ms: 0,
         stopped: None,
@@ -782,20 +1114,60 @@ pub fn begin(
         Start::Resume => true,
         Start::Auto if cp.run.is_some() => true,
         Start::Auto => {
-            cp.run = Some(Run::new(now_ms, Mode::Incremental, Stage::Lookup));
+            cp.run = Some(Run::new(now_ms, Mode::Incremental, first_stage));
             false
         }
         Start::Restart => {
-            cp.run = Some(Run::new(now_ms, Mode::Full, Stage::Lookup));
+            // "Sync Now" while a job runs: that job is closed on the gateway first.
+            let old = cp.run.as_ref().and_then(|r| {
+                r.job
+                    .as_ref()
+                    .map(|j| j.id.clone())
+                    .or(r.cancel_job.clone())
+            });
+            let mut run = Run::new(now_ms, Mode::Full, first_stage);
+            run.cancel_job = old.filter(|_| job_mode);
+            cp.run = Some(run);
             false
         }
     };
     if resumed && let Some(run) = cp.run.as_mut() {
+        let user_stopped = run.phase
+            == Phase::Interrupted {
+                reason: Interrupt::Cancelled,
+            };
         run.phase = Phase::Running;
         run.slices = run.slices.saturating_add(1);
         run.heartbeat_ms = now_ms;
         let wanted: HashSet<&String> = session.targets.iter().collect();
         run.looked.retain(|jid| wanted.contains(jid));
+        if run.stage.is_job() {
+            // "Continue" after "Stop": the stopped job is closed (the app cancelled it already) and a new one
+            // starts; it reuses every answer the gateway kept. A job that failed or was cancelled elsewhere is
+            // started again too.
+            let over = run.job.as_ref().is_some_and(|j| {
+                j.mine
+                    && matches!(
+                        j.state(),
+                        Some(PeopleJobState::Failed | PeopleJobState::Cancelled)
+                    )
+            });
+            if (user_stopped || over)
+                && let Some(job) = run.job.take()
+                && !job.closed
+            {
+                run.cancel_job = Some(job.id);
+            }
+            if !job_mode {
+                log::info!(target: LOG, "job_mode_off stage=lookup");
+                run.job = None;
+                run.cancel_job = None;
+                run.stage = Stage::Lookup;
+            }
+        }
+    }
+    if start != Start::LivePictures {
+        cp.remote.attempt_ms = now_ms;
     }
     session.enter(cp);
     if let Some(run) = cp.run.as_mut() {
@@ -820,9 +1192,11 @@ pub fn begin(
     Ok(session)
 }
 
-/// Negatives only for current targets (newest kept), profile times only for people in the book.
+/// Negatives and synced hashes only for current targets (newest negatives kept), profile times only for people in
+/// the book.
 fn prune(cp: &mut Checkpoint, book: &Book, targets: &HashMap<String, String>) {
     cp.negatives.retain(|jid, _| targets.contains_key(jid));
+    cp.remote.synced.retain(|jid, _| targets.contains_key(jid));
     if cp.negatives.len() > MAX_NEGATIVES {
         let mut by_age: Vec<(i64, String)> = cp
             .negatives
@@ -903,6 +1277,10 @@ fn refresh_totals(
     profiled_ms: &BTreeMap<String, i64>,
     now_ms: i64,
 ) {
+    if run.stage.is_job() {
+        // The gateway's numbers; see `job_report`.
+        return;
+    }
     if run.stage == Stage::Lookup || run.totals.lookup.total == 0 {
         let left = lookup_work(run, s, book, negatives, now_ms).len();
         let wanted: HashSet<&String> = s.targets.iter().collect();
@@ -983,6 +1361,14 @@ fn next_step(cp: &mut Checkpoint, s: &mut Session, book: &Book, now_ms: i64, ran
             };
         }
     }
+    if run.stage.is_job() {
+        if cp.pace.not_before_ms > now_ms {
+            let ms = cp.pace.not_before_ms - now_ms;
+            let source = cp.pace.source.unwrap_or(LimitSource::Whatsapp);
+            return sleep_or_stop(run, s, now_ms, ms, Why::RateLimit, source);
+        }
+        return job_next(cp, s, book, now_ms);
+    }
     if s.deadline_ms.is_some_and(|d| now_ms >= d) {
         return interrupt(run, Interrupt::SliceBudget);
     }
@@ -1060,8 +1446,176 @@ fn next_step(cp: &mut Checkpoint, s: &mut Session, book: &Book, now_ms: i64, ran
                 s.gap_ms = jitter(cp.pace.picture_gap_ms, rand);
                 return Step::Picture { jid, known_id };
             }
+            // Handled before the loop.
+            Stage::Server | Stage::Download => {
+                return Step::Stop {
+                    stopped: Stopped::Done,
+                };
+            }
         }
     }
+}
+
+/// What the job mode does next for a job it follows.
+enum JobNext {
+    Finish,
+    Close(String),
+    Fetch(String, u32),
+    Failed(String),
+    Cancelled,
+    Again,
+    Watch(String, u64),
+}
+
+/// The job mode's next step (section 4.3 of the plan): close a job that is to go; without a job, list the picture
+/// files and start one; watch it while the gateway works; download its bundle; close it; finish.
+fn job_next(cp: &mut Checkpoint, s: &mut Session, book: &Book, now_ms: i64) -> Step {
+    loop {
+        let Checkpoint { run, remote, .. } = &mut *cp;
+        let Some(run) = run.as_mut() else {
+            return Step::Stop {
+                stopped: Stopped::Done,
+            };
+        };
+        if let Some(job_id) = run.cancel_job.clone() {
+            s.inflight = Some(Inflight::JobDone);
+            return Step::JobDone { job_id };
+        }
+        let Some(job) = run.job.as_ref() else {
+            if s.deadline_ms.is_some_and(|d| now_ms >= d) {
+                return interrupt(run, Interrupt::SliceBudget);
+            }
+            // The picture files on disk decide which picture ids the start names (`p`).
+            if !s.files_listed {
+                s.inflight = Some(Inflight::PlanPictures);
+                return Step::PlanPictures;
+            }
+            run.stage = Stage::Server;
+            let mode = match run.mode {
+                Mode::Full => PeopleSyncMode::Full,
+                Mode::Incremental => PeopleSyncMode::Auto,
+            };
+            let entries = job_entries(remote, s, book);
+            log::info!(
+                target: LOG,
+                "job_start mode={} numbers={} hashes={} pictures={}",
+                mode.as_str(),
+                entries.len(),
+                entries.iter().filter(|e| e.h.is_some()).count(),
+                entries.iter().filter(|e| e.p.is_some()).count(),
+            );
+            s.inflight = Some(Inflight::JobStart);
+            return Step::JobStart { mode, entries };
+        };
+        let next = if job.closed {
+            JobNext::Finish
+        } else {
+            match job.state() {
+                Some(PeopleJobState::Ready) if job.mine && job.fetched => {
+                    JobNext::Close(job.id.clone())
+                }
+                Some(PeopleJobState::Ready) if job.mine => {
+                    JobNext::Fetch(job.id.clone(), job.after)
+                }
+                Some(PeopleJobState::Failed) if job.mine => JobNext::Failed(
+                    job.status
+                        .as_ref()
+                        .and_then(|s| s.error.as_ref())
+                        .map_or_else(
+                            || "the gateway job failed".to_owned(),
+                            |e| e.message.clone(),
+                        ),
+                ),
+                Some(PeopleJobState::Cancelled) if job.mine => JobNext::Cancelled,
+                // Another device's job is over: start ours.
+                Some(
+                    PeopleJobState::Ready | PeopleJobState::Failed | PeopleJobState::Cancelled,
+                ) => JobNext::Again,
+                _ => JobNext::Watch(job.id.clone(), job.rev),
+            }
+        };
+        return match next {
+            JobNext::Finish => finish(cp, s, book, now_ms),
+            JobNext::Close(job_id) => {
+                s.inflight = Some(Inflight::JobDone);
+                Step::JobDone { job_id }
+            }
+            JobNext::Fetch(job_id, after) => {
+                if s.deadline_ms.is_some_and(|d| now_ms >= d) {
+                    return interrupt(run, Interrupt::SliceBudget);
+                }
+                run.stage = Stage::Download;
+                s.inflight = Some(Inflight::JobFetch);
+                Step::JobFetch {
+                    job_id,
+                    after,
+                    max_bytes: BUNDLE_MAX_BYTES,
+                }
+            }
+            JobNext::Failed(message) => {
+                run.job = None;
+                fail(run, FailReason::Gateway, message.clone());
+                Step::Stop {
+                    stopped: Stopped::Failed {
+                        reason: FailReason::Gateway,
+                        message,
+                    },
+                }
+            }
+            JobNext::Cancelled => {
+                run.job = None;
+                interrupt(run, Interrupt::Cancelled)
+            }
+            JobNext::Again => {
+                run.job = None;
+                continue;
+            }
+            JobNext::Watch(job_id, rev) => {
+                let wait_ms = s
+                    .deadline_ms
+                    .map_or(JOB_WATCH_MS, |d| (d - now_ms).min(JOB_WATCH_MS));
+                if wait_ms <= 0 {
+                    return interrupt(run, Interrupt::ServerWorking);
+                }
+                s.inflight = Some(Inflight::JobWatch);
+                Step::JobWatch {
+                    job_id,
+                    rev,
+                    wait_ms,
+                }
+            }
+        };
+    }
+}
+
+/// The start entries: every target in order, with the hash the gateway gave last time while the book still holds
+/// what it described (`h`), and the picture id whose current file is on disk (`p`).
+fn job_entries(remote: &Remote, s: &Session, book: &Book) -> Vec<PeopleEntry> {
+    s.targets
+        .iter()
+        .map(|jid| {
+            let person = book.lookup(jid);
+            let on = person.is_some_and(|p| p.on_whatsapp);
+            let h = remote
+                .synced
+                .get(jid)
+                .filter(|synced| synced.on_whatsapp == on)
+                .map(|synced| synced.hash.clone());
+            let p = person
+                .filter(|p| {
+                    p.on_whatsapp
+                        && !p.picture_stale
+                        && p.picture_format >= people::PICTURE_FORMAT
+                        && p.picture_file.as_ref().is_some_and(|f| s.files.contains(f))
+                })
+                .and_then(|p| p.picture_id.clone());
+            PeopleEntry {
+                n: format!("+{}", jid.trim_end_matches(PHONE_SUFFIX)),
+                h,
+                p,
+            }
+        })
+        .collect()
 }
 
 fn advance(run: &mut Run, stage: Stage) {
@@ -1132,7 +1686,10 @@ fn finish(cp: &mut Checkpoint, s: &Session, book: &Book, now_ms: i64) -> Step {
         let people = count(book.people.iter().filter(|p| p.on_whatsapp).count());
         log::info!(
             target: LOG,
-            "run_end outcome=done people={people} downloaded={} batches={} rate_limits={} waited_ms={} ms={}",
+            "run_end outcome=done stage={} people={people} changed={} bytes={} downloaded={} batches={} rate_limits={} waited_ms={} ms={}",
+            run.stage.name(),
+            run.changed,
+            run.bytes,
             run.stats.downloaded,
             run.stats.batches,
             run.stats.rate_limits,
@@ -1144,6 +1701,8 @@ fn finish(cp: &mut Checkpoint, s: &Session, book: &Book, now_ms: i64) -> Step {
             people,
             downloaded: run.stats.downloaded,
             duration_ms: now_ms - run.id,
+            changed: Some(run.changed),
+            bytes: run.bytes,
         });
     }
     Step::Stop {
@@ -1163,6 +1722,8 @@ pub fn report(
     s.enter(cp);
     let mut out = report_inner(cp, s, book, now_ms, rand, r);
     if let Some(run) = cp.run.as_mut() {
+        run.changed = run.changed.saturating_add(count(out.changed));
+        out.job = run.job.as_ref().and_then(JobRef::view);
         run.stats.dropped = run
             .stats
             .dropped
@@ -1194,6 +1755,7 @@ fn report_inner(
         pace,
         negatives,
         profiled_ms,
+        remote,
         ..
     } = cp;
     let Some(run) = run.as_mut() else {
@@ -1300,6 +1862,7 @@ fn report_inner(
                 files.len()
             );
             s.queue = Some(plan.refresh.into());
+            s.files_listed = true;
             out.drop_files = plan.remove;
         }
         Report::Picture { jid, result } => {
@@ -1400,8 +1963,168 @@ fn report_inner(
         Report::Cancelled => {
             interrupt(run, Interrupt::Cancelled);
         }
+        Report::JobStarted { status } => job_started(run, remote, status),
+        Report::JobUnsupported => {
+            log::info!(target: LOG, "job_unsupported fallback=legacy retry_after_ms={REMOTE_RETRY_MS}");
+            remote.support = Some(false);
+            remote.unsupported_ms = now_ms;
+            run.job = None;
+            run.cancel_job = None;
+            run.stage = Stage::Lookup;
+        }
+        Report::Job { status } => job_status(run, status),
+        Report::JobGone => {
+            log::info!(target: LOG, "job_gone");
+            run.job = None;
+            s.gone += 1;
+            if s.gone > MAX_JOB_GONE {
+                fail(
+                    run,
+                    FailReason::Gateway,
+                    "the gateway keeps losing the people job".to_owned(),
+                );
+            }
+        }
+        Report::Bundle {
+            job_id,
+            records,
+            last_seq,
+            more,
+            bytes,
+        } => {
+            let Some(job) = run.job.as_mut().filter(|j| j.id == job_id) else {
+                log::warn!(target: LOG, "bundle_ignored reason=other_job");
+                return out;
+            };
+            let n = records.len();
+            commit_records(book, remote, records, now_ms, &mut out);
+            job.after = job.after.max(last_seq);
+            job.fetched = !more;
+            run.stage = Stage::Download;
+            run.totals.download.done = run.totals.download.done.saturating_add(count(n));
+            run.bytes = run.bytes.saturating_add(bytes);
+            log::info!(
+                target: LOG,
+                "bundle records={n} changed={} last_seq={last_seq} more={more} bytes={bytes}",
+                out.changed
+            );
+        }
+        Report::JobClosed => {
+            if run.cancel_job.take().is_none()
+                && let Some(job) = run.job.as_mut()
+            {
+                job.closed = true;
+            }
+        }
     }
     out
+}
+
+/// The gateway answered a start.
+fn job_started(run: &mut Run, remote: &mut Remote, status: PeopleJobStatus) {
+    remote.support = Some(true);
+    let epoch = status.account_epoch;
+    log::info!(
+        target: LOG,
+        "job_started state={} mine={} numbers={} epoch={epoch}",
+        status.state.as_str(),
+        status.mine,
+        status.numbers
+    );
+    if remote.account_epoch.is_some_and(|e| e != epoch) {
+        // Another WhatsApp account: the hashes were the old account's. The book stays (names and pictures belong
+        // to numbers); a job of ours that used the old hashes is closed and started again without them.
+        log::info!(target: LOG, "account_changed reset=synced");
+        remote.synced.clear();
+        remote.account_epoch = Some(epoch);
+        if status.mine {
+            run.job = None;
+            run.cancel_job = Some(status.job_id);
+            return;
+        }
+    }
+    remote.account_epoch = Some(epoch);
+    run.stage = Stage::Server;
+    run.totals.server = Progress {
+        done: status.done,
+        total: status.total,
+    };
+    run.job = Some(JobRef::new(status));
+}
+
+/// The gateway answered a watch.
+fn job_status(run: &mut Run, status: PeopleJobStatus) {
+    let Some(job) = run.job.as_mut().filter(|j| j.id == status.job_id) else {
+        return;
+    };
+    run.totals.server = Progress {
+        done: status.done,
+        total: status.total,
+    };
+    if status.state == PeopleJobState::Ready
+        && let Some(result) = status.result
+    {
+        run.totals.download.total = result.records;
+    }
+    job.rev = status.rev;
+    job.status = Some(status);
+}
+
+/// A bundle part into the book (section 4.2): one upsert, so the book is saved once and only when something
+/// changed; every record's hash is remembered.
+fn commit_records(
+    book: &mut Book,
+    remote: &mut Remote,
+    records: Vec<JobRecord>,
+    now_ms: i64,
+    out: &mut Committed,
+) {
+    let mut updates = Vec::new();
+    for record in records {
+        let Some(key) = jid_of(&record.number) else {
+            continue;
+        };
+        let held = book.lookup(&key);
+        if record.on_whatsapp {
+            let mut update = Update {
+                jid: record.jid.clone().unwrap_or_else(|| key.clone()),
+                number: Some(record.number.clone()),
+                lid: record.lid.clone(),
+                push_name: record.push_name.clone(),
+                verified_name: record.verified_name.clone(),
+                on_whatsapp: Some(true),
+                ..Update::default()
+            };
+            match (&record.picture_id, &record.picture) {
+                (Some(id), Some(JobPicture::Stored { file })) => {
+                    update.picture_id = Some(id.clone());
+                    update.picture_file = Some(file.clone());
+                }
+                // Not stored, missing on the gateway, or no bytes (the file on disk is that picture): the id
+                // alone, which marks a changed picture stale and leaves the same one as it is.
+                (Some(id), _) => update.picture_id = Some(id.clone()),
+                (None, _) => {
+                    update.picture_removed =
+                        held.is_some_and(|p| p.picture_id.is_some() || p.picture_file.is_some());
+                }
+            }
+            updates.push(update);
+        } else if held.is_some_and(|p| p.on_whatsapp) {
+            updates.push(Update {
+                jid: key.clone(),
+                on_whatsapp: Some(false),
+                ..Update::default()
+            });
+        }
+        remote.synced.insert(
+            key,
+            Synced {
+                hash: record.hash,
+                on_whatsapp: record.on_whatsapp,
+            },
+        );
+    }
+    commit(book, &updates, now_ms, out);
 }
 
 fn commit(book: &mut Book, updates: &[Update], now_ms: i64, out: &mut Committed) {
@@ -1531,14 +2254,20 @@ pub fn status(cp: &Checkpoint, now_ms: i64) -> Status {
             resumable: r.phase != Phase::Running,
             heartbeat_ms: r.heartbeat_ms,
             stats: r.stats,
+            job: r.job.as_ref().and_then(JobRef::view),
         });
     Status {
         run,
         last: cp.last,
         not_before_ms: (cp.pace.not_before_ms > now_ms).then_some(cp.pace.not_before_ms),
+        attempt_ms: (cp.remote.attempt_ms > 0).then_some(cp.remote.attempt_ms),
     }
 }
 
 #[cfg(test)]
 #[path = "people_sync_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "people_sync_job_tests.rs"]
+mod job_tests;

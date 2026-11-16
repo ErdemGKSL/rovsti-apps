@@ -179,6 +179,15 @@ impl Config {
             .join(instance)
             .join("pictures")
     }
+
+    /// Where the people job of an instance keeps the picture bytes it fetched until the device downloads them
+    /// (one folder per job, named by its id).
+    pub fn people_job_dir(&self, instance: &str) -> PathBuf {
+        self.data_dir
+            .join("instances")
+            .join(instance)
+            .join("people-job")
+    }
 }
 
 /// What the command line asked for.

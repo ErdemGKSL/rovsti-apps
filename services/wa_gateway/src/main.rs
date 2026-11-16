@@ -65,6 +65,15 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
         "listening on {}, {restarted} instance(s) restarted",
         listener.local_addr().map_err(|e| e.to_string())?
     );
+    // People jobs that were working when the gateway stopped go on from their stored progress.
+    let resumed = wa_gateway::people_job::resume_all(&state)
+        .await
+        .map_err(|e| e.to_string())?;
+    if resumed > 0 {
+        log::info!("{resumed} people job(s) resumed");
+    }
+    let _people_tick =
+        wa_gateway::people_job::spawn_tick(state.clone(), wa_gateway::people_job::TICK_EVERY);
     let _sweeper = wa_gateway::schedule::spawn_sweeper(state.clone(), SWEEP_EVERY);
     let _purger = wa_gateway::status_routes::spawn_purger(
         state.clone(),

@@ -41,6 +41,18 @@ impl From<ureq::Error> for ClientError {
     }
 }
 
+impl From<rosty_wa_proto::BundleError> for ClientError {
+    fn from(e: rosty_wa_proto::BundleError) -> Self {
+        match e {
+            // A cut part and a failed read are transport problems: ask again from the cursor.
+            rosty_wa_proto::BundleError::Cut | rosty_wa_proto::BundleError::Io(_) => {
+                Self::Http(e.to_string())
+            }
+            rosty_wa_proto::BundleError::Bad(message) => Self::Decode(message),
+        }
+    }
+}
+
 /// Maps a non-2xx response to an error: 401 is [`ClientError::Unauthorized`],
 /// a body that parses as an [`ApiError`] is [`ClientError::Api`], anything else
 /// is a plain HTTP error carrying the status.

@@ -4,12 +4,15 @@
 //! apps over HTTP and WebSocket. See `_bmad-output/plans/wa-gateway.md`.
 
 pub mod auth;
+pub mod clock;
 pub mod config;
 pub mod cooldown;
 pub mod driver;
 pub mod error;
 pub mod hub;
 pub mod media_cache;
+pub mod people_job;
+pub mod people_routes;
 pub mod push;
 pub mod request_log;
 pub mod rich_routes;
@@ -28,11 +31,13 @@ use rosty_wa_proto::LookupCache;
 use rosty_wa_proto::limit::{AuthLimiter, TokenBucket};
 use rosty_wa_proto::{ApiError, InstanceState, LimitSource};
 
+use crate::clock::{Clock, SystemClock};
 use crate::config::Config;
 use crate::cooldown::{Check, Cooldown};
 use crate::driver::{EventSink, WaDriver};
 use crate::error::HttpError;
 use crate::hub::Hub;
+use crate::people_job::{JobPace, PeopleJobs};
 use crate::push::{NoopPusher, Pusher};
 use crate::store::{InstanceId, Store};
 use crate::wa::calls::{CallTable, RING_TIMEOUT};
@@ -155,6 +160,10 @@ struct Inner {
     limiter: Mutex<AuthLimiter>,
     calls: Mutex<HashMap<InstanceId, Arc<CallTable>>>,
     lookups: Mutex<HashMap<InstanceId, Lookups>>,
+    /// The time the contact allowances, the cooldown and the people jobs pace themselves by.
+    clock: Arc<dyn Clock>,
+    /// People sync v3: the running jobs and their watchers.
+    people: PeopleJobs,
 }
 
 impl std::fmt::Debug for AppState {
@@ -175,6 +184,25 @@ impl AppState {
         driver: Arc<dyn WaDriver>,
         pusher: Arc<dyn Pusher>,
     ) -> Self {
+        Self::with_parts(
+            config,
+            store,
+            driver,
+            pusher,
+            Arc::new(SystemClock),
+            JobPace::default(),
+        )
+    }
+
+    /// Everything given: tests pass a hand-driven clock and a faster pace for the people jobs.
+    pub fn with_parts(
+        config: Config,
+        store: Store,
+        driver: Arc<dyn WaDriver>,
+        pusher: Arc<dyn Pusher>,
+        clock: Arc<dyn Clock>,
+        pace: JobPace,
+    ) -> Self {
         Self(Arc::new(Inner {
             config,
             store,
@@ -188,7 +216,24 @@ impl AppState {
             )),
             calls: Mutex::new(HashMap::new()),
             lookups: Mutex::new(HashMap::new()),
+            clock,
+            people: PeopleJobs::new(pace),
         }))
+    }
+
+    /// Now, by the state's clock (unix ms).
+    pub fn now(&self) -> i64 {
+        self.0.clock.now_ms()
+    }
+
+    /// The state's clock.
+    pub fn clock(&self) -> &Arc<dyn Clock> {
+        &self.0.clock
+    }
+
+    /// The people jobs of every instance.
+    pub fn people(&self) -> &PeopleJobs {
+        &self.0.people
     }
 
     pub fn config(&self) -> &Config {
@@ -248,7 +293,7 @@ impl AppState {
         instance: &InstanceId,
         jids: &[String],
     ) -> Result<(Vec<rosty_wa_proto::WaUser>, Vec<String>), Refused> {
-        let now = now_ms();
+        let now = self.now();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
         let (hits, misses) = entry.cache.split(jids, now);
@@ -271,11 +316,36 @@ impl AppState {
 
     /// Remembers what WhatsApp answered for `instance`.
     pub fn lookup_store(&self, instance: &InstanceId, users: &[rosty_wa_proto::WaUser]) {
-        let now = now_ms();
+        let now = self.now();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
         for user in users {
             entry.cache.put(user.clone(), now);
+        }
+    }
+
+    /// Charges `n` lookups to the instance's lookup allowance without asking
+    /// the cache (a people job's "Sync Now" asks again on purpose); refused
+    /// (and nothing charged) while WhatsApp's pause runs or over the
+    /// allowance.
+    pub fn charge_lookups(&self, instance: &InstanceId, n: usize) -> Result<(), Refused> {
+        if n == 0 {
+            return Ok(());
+        }
+        let now = self.now();
+        let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
+        if let Some(refused) = entry.paused(instance, now) {
+            return Err(refused);
+        }
+        let cost = u32::try_from(n).unwrap_or(u32::MAX);
+        let at = u64::try_from(now).unwrap_or(0);
+        if entry.bucket.try_take_n(cost, at) {
+            Ok(())
+        } else {
+            Err(Refused::Bucket {
+                retry_after_ms: entry.bucket.wait_ms(cost, at),
+            })
         }
     }
 
@@ -285,7 +355,7 @@ impl AppState {
         if n == 0 {
             return Ok(());
         }
-        let now = now_ms();
+        let now = self.now();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
         if let Some(refused) = entry.paused(instance, now) {
@@ -305,7 +375,7 @@ impl AppState {
     /// Records that WhatsApp rate-limited `instance` (its hint in
     /// `retry_after_s`) and starts or extends the pause. Returns the pause.
     pub fn note_upstream_limit(&self, instance: &InstanceId, retry_after_s: Option<u32>) -> u64 {
-        let now = now_ms();
+        let now = self.now();
         let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
         let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
         let hint = retry_after_s.map(|s| u64::from(s) * 1000);

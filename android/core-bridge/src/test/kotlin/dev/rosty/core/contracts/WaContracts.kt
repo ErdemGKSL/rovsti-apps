@@ -3,6 +3,13 @@ package dev.rosty.core.contracts
 import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.core.ErrEnvelope
 import dev.rosty.core.model.core.OkEnvelope
+import dev.rosty.core.model.people.PeopleSyncBundleAnswer
+import dev.rosty.core.model.people.PeopleSyncBundleBody
+import dev.rosty.core.model.people.PeopleSyncJobBody
+import dev.rosty.core.model.people.PeopleSyncStartAnswer
+import dev.rosty.core.model.people.PeopleSyncStartBody
+import dev.rosty.core.model.people.PeopleSyncStatusAnswer
+import dev.rosty.core.model.people.PeopleSyncStatusBody
 import dev.rosty.core.model.wa.AvatarsPlanAnswer
 import dev.rosty.core.model.wa.AvatarsPlanRequest
 import dev.rosty.core.model.wa.BytesAnswer
@@ -123,6 +130,14 @@ object WaContracts : ContractModels {
                 ok = listOf("unchanged", "none"),
                 err = listOf("rate_limited"),
             )
+            handleOp<PeopleSyncStartBody, PeopleSyncStartAnswer>("wa.people_sync_start", ok = listOf("unsupported"))
+            handleOp<PeopleSyncStatusBody, PeopleSyncStatusAnswer>("wa.people_sync_status", ok = listOf("gone"))
+            handleOp<PeopleSyncBundleBody, PeopleSyncBundleAnswer>(
+                "wa.people_sync_bundle",
+                ok = listOf("gone"),
+                err = listOf("cut"),
+            )
+            handleOp<PeopleSyncJobBody, Empty>("wa.people_sync_cancel")
             handleOp<IdentityMappingsBody, IdentityMappingsAnswer>(
                 "wa.identity_mappings",
                 ok = listOf("since", "old_gateway"),

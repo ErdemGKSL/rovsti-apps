@@ -646,6 +646,91 @@ header. Older clients ignore them (no field is required, unknown fields are allo
 `announce` (only admins may send) and each participant's `name` (push name or saved
 name) when the gateway knows it. Client: `groups()`, `group(jid)`.
 
+## People sync job
+
+People sync v3 (`_bmad-output/kotlin-ui/plans/people-sync-v3.md`): instead of one paced
+request per contact step, the app hands the gateway its numbers once; the gateway looks
+them up, asks for the profiles and fetches the pictures as one **job**, at the same pace
+and under the same allowances and WhatsApp cooldown as the per-contact routes above, and
+the app downloads the result in one **bundle** at the end. Code:
+`services/wa_gateway/src/people_job.rs` (the task), `people_routes.rs` (the routes),
+`store/people.rs` (schema v9); wire types in `rosty_wa_proto::people`.
+
+| Route | |
+|---|---|
+| `POST /v1/people/sync` | Start or join. Body `{"mode": "auto"\|"full", "entries": [{"n": "+100000000001", "h": "<hash>", "p": "<picture id>"}, ...]}`, at most 5 000 entries (more: 400). Answers the job status. |
+| `GET /v1/people/sync/{job_id}?rev=<n>&wait_ms=<ms>` | The status. With `rev` equal to the job's and a working job, waits up to `wait_ms` (at most 25 000) for the next change. 404 `not_found` when the gateway no longer has the job. |
+| `GET /v1/people/sync/{job_id}/bundle?after=<seq>&max_bytes=<n>` | One part of a `ready` job's bundle (409 `conflict` before). |
+| `DELETE /v1/people/sync/{job_id}` | Cancel a working job, or drop a finished one; 204 also when it is gone. |
+
+```json
+{"job_id": "5f0c9a1b22d4e7a3", "rev": 42, "state": "waiting", "phase": "profiles",
+ "done": 120, "total": 340, "numbers": 812,
+ "wait": {"until_ms": 1795000000000, "source": "whatsapp"}, "eta_ms": 95000,
+ "account_epoch": 3, "created_ms": 1794999000000, "updated_ms": 1794999100000,
+ "expires_ms": 1795020600000}
+```
+
+- **States** `running`, `waiting` (`wait.source`: `whatsapp` = WhatsApp's 429 or the
+  cooldown, `gateway` = the instance's own allowance, `not_connected` = the WhatsApp
+  session is down, tried again every minute), `ready` (with `result: {records, pictures,
+  bytes}`), `failed` (with `error: {code, message}`, codes `expired`, `whatsapp`,
+  `internal`), `cancelled`. **Phases** `lookup`, `profiles`, `pictures`, `bundle`;
+  `done`/`total` belong to the phase. `mine: false` (only on a start answer): another
+  device's job works on the instance and was left alone; watch it and start again when it
+  is over. Every enum has an `other` catch-all for older clients.
+- **One job per instance.** The same request (same mode and entries) joins its working
+  job, or gets its `ready` job back; another request replaces a finished job.
+- **What is asked.** Lookups: numbers without a stored answer; `auto` also negatives older
+  than 7 days and positives older than 30 days; `full` all. Profiles: numbers on WhatsApp
+  whose profile is older than a day (`full`: all). Pictures: numbers on WhatsApp whose
+  picture id differs from the app's `p` (full size; from the picture cache when it holds
+  that id). An unchanged run asks WhatsApp nothing.
+- **Pace.** 15 JIDs per usync request, 20 s apart (lookups and profiles share it), one
+  picture every 3 s, every gap ±20 %. Each request is charged to the instance's lookup or
+  profile allowance; a refusal or WhatsApp's 429 makes the job `waiting` until the
+  allowance or the cooldown allows it (at least WhatsApp's `backoff`, a minute doubling per
+  strike, at most 30 min), halves the batch (at least 5) and doubles the gap (at most
+  5 min, 1 min for pictures); five successes in a row start the recovery. Nothing is sent
+  before the wait ends. Other errors are retried twice, then the job fails; a single
+  picture that fails is delivered as `picture_missing`.
+- **Persistence.** Jobs, their numbers (with per-number progress) and the lookup answers
+  are in `gateway.db` (schema v9); picture bytes wait in
+  `instances/<id>/people-job/<job_id>/` (at most 256 MiB a job). After a restart every
+  working job continues from its progress (a stored wait is slept out first). A job not
+  ready within 6 h fails as `expired`; a finished job is deleted 24 h after it ended;
+  lookup answers (negatives included) are kept 30 days. The tables are cleared with the
+  account (another number linked) and with the instance. The job writes profiles straight
+  to the store and publishes no `profile` event.
+- **Hash.** `h` is what the gateway sent as `hash` last time: SHA-256 over
+  `rosty-people-v1\n` and seven fields, each `<byte length>:<bytes>,` (number, `1`/`0` for
+  on WhatsApp, phone JID, LID JID, push name, verified name, picture id; absent = empty,
+  trimmed), first 8 bytes in lower-case hex. The app stores it opaquely.
+- **Bundle.** `Content-Type: application/x-rosty-people-bundle`: JSON lines. The first is
+  `{"v":1,"job_id":"…","after":0}`; then one record per number whose hash differs from
+  `h` or whose picture id differs from `p`, in request order, a record with
+  `"picture_bytes": n` followed by exactly n raw bytes and `\n`; the last line is
+  `{"end":true,"last_seq":<n>,"more":<bool>}`. A part stops after about `max_bytes`
+  (default and cap 8 MiB, at least one record); ask again with `after=last_seq` while
+  `more`. A part without its end line was cut: ask again from your cursor. An unchanged
+  run's bundle is the two framing lines.
+
+```
+{"seq":17,"number":"+100000000001","hash":"9a41c0de5b7e1f02","on_whatsapp":true,"jid":"100000000001@s.whatsapp.net","lid":"123456@lid","push_name":"Ada","picture_id":"1716839201","picture_bytes":61234}
+{"seq":18,"number":"+100000000002","hash":"0c11d2e3f4a5b6c7","on_whatsapp":false}
+```
+
+- **Logging.** `instance=<id> people job started|phase=…|waiting|rate limited|ready|
+  cancelled|bundle …` with counts only, never a number or JID.
+- **Old and new.** An older app keeps using the per-contact routes; nothing changed for it.
+  A newer app against an older gateway gets the router's bare 404 on `POST` and falls back
+  to the per-contact steps (asking again after a day).
+- **Deploy.** Schema v9 only adds three tables, in one transaction. Take a backup first:
+  `sqlite3 /var/lib/wa-gateway/gateway.db ".backup gateway-v8.db"`; an older binary
+  refuses a v9 file ("newer than this gateway").
+- Client: `people_sync_start`, `people_sync_status`, `people_sync_bundle`,
+  `people_sync_cancel` (`rosty_wa_client`); FFI `wa.people_sync_*`.
+
 ## Status updates (stories)
 
 WhatsApp delivers Status updates as messages to `status@broadcast`. The gateway keeps

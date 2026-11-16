@@ -610,8 +610,14 @@ fn an_old_gateway_runs_the_v2_steps_and_is_asked_again_after_a_day() {
     w.next(&mut s);
     w.files(&mut s, &[]);
     w.next(&mut s);
+    assert!(
+        s.queue.is_some(),
+        "the start listed the files and planned the pictures"
+    );
     let c = w.report(&mut s, Report::JobUnsupported);
     assert_eq!(c.stage, Some(Stage::Lookup));
+    // That plan predates the lookups and profiles to come: the picture stage plans again from their answers.
+    assert!(s.queue.is_none());
     // The v2 steps, as a v2 run would ask them.
     let mut legacy = Checkpoint::default();
     let mut legacy_session = begin(

@@ -155,6 +155,30 @@ Owner rules stay in force:
   - `CardStudioViewModelTest` covers both cases.
 - Proof: open every golden with Read and write what was seen into this file.
 
+#### Step 3 result (implemented)
+
+- `card.rs`: the blur and tint moved to a `.glass` sibling layer under the panel, with the panel's radius, overflow
+  hidden and the same transform and opacity. (A child glass layer inside the panel was tried first and blurred the
+  panel's own text, so it is a sibling.) The date pill now hugs its text (`width: auto`). The Contact QR room is 264 px
+  at 720 wide (the box is about 285 px); it still decodes through `contact_scan::decode_luma`. The Contact column was
+  already centred (content 178-724 in a panel 72-828); the empty look came from the small QR.
+- Kotlin: `CardStudioSubject.templates` now offers all three templates (a contact without a birthday still has a
+  Birthday tab: a greeting by name, no age line, no date pill); the sheet opens on Contact for those contacts.
+  `CardTextsTest` covers en/tr dates, `cardDate` and the Birthday card without a date; `CardStudioViewModelTest` covers
+  the Contact default and the Birthday tab without a birthday.
+- Goldens opened with Read (`crates/rosty_app_core/tests/cards/`, 720x900), all pass `assert_text_inside`:
+  - `birthday-dawn-en`: avatar "AY", "Happy birthday, / Ayse Yilmaz!" on 2 lines, "Turning 36", a compact "October 3"
+    pill; even margins, rounded panel corner clean, no tint step.
+  - `birthday-dawn-tr`: 3-line headline "Dogum gunun / kutlu olsun, Ayse / Yilmaz!", "36 yasina giriyorsun", compact
+    "3 Ekim" pill (was full-width before).
+  - `birthday-ink-tr`: same on dark glass, light ink readable on the dark tint, pill subtle.
+  - `contact-dawn-en`: avatar, name, number, QR about 285 px in its white box, vertically centred.
+  - `contact-lagoon-en`: two numbers stacked, QR below, nothing clipped, centred.
+  - `number-meadow-tr`: "Yeni numaram", the number in a large size, the name; the column centred; no QR.
+  - `birthday-long-name-tr` (40 chars): 3-line headline shrunk to fit, age and date below, inside the panel.
+  - `contact-number-name`: number as title and number line (the number appears twice, accepted), the initials show "9"
+    because "+" is not alphanumeric; QR fully visible.
+
 ### Step 4. Glass optics for the one-shot animation (glisse port)
 
 - New file `crates/rosty_app_core/src/cards/refraction.rs`. Header: `Portions ported from glisse

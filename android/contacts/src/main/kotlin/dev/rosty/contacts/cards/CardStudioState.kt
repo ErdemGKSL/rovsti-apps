@@ -50,9 +50,12 @@ data class CardStudioSubject(
     /** The template the sheet opens on: Birthday for a contact with one, else Contact. */
     val defaultTemplate: CardTemplate get() = if (birthday) CardTemplate.Birthday else CardTemplate.Contact
 
-    /** The templates the picker offers: no Birthday card for somebody without a birthday. */
+    /**
+     * The templates the picker offers: all of them. A contact without a birthday still gets a Birthday card (a
+     * greeting by name with no age and no date pill), the sheet just does not open on it.
+     */
     val templates: List<CardTemplate>
-        get() = CardTemplate.entries.filter { it != CardTemplate.Birthday || birthday }
+        get() = CardTemplate.entries.toList()
 
     val initials: String
         get() =

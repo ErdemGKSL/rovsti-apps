@@ -41,6 +41,9 @@ pub const ANIMATED: (u32, u32) = (540, 675);
 pub const HOLD_MS: u32 = 600;
 /// Side padding of the date pill, in design pixels.
 const PILL_X: f32 = 22.0;
+/// Room for the QR code's modules in the Contact card, in design pixels (the white box adds its padding; 240 px at
+/// least at 720 wide).
+const QR_ROOM: f32 = 264.0;
 /// Largest photo file read; a bigger one draws initials.
 const MAX_PHOTO_BYTES: u64 = 24 * 1024 * 1024;
 
@@ -267,7 +270,7 @@ impl Prepared {
                 .qr
                 .as_deref()
                 .filter(|q| !q.trim().is_empty())
-                .and_then(|q| qr_pixels(q, (196.0 * u) as u32)),
+                .and_then(|q| qr_pixels(q, (QR_ROOM * u) as u32)),
             _ => None,
         };
         Ok(Self {
@@ -361,12 +364,15 @@ impl Prepared {
              .blob2 {{ position: absolute; left: {b2x}px; top: {b2y}px; width: {b2s}px; height: {b2s}px; \
                 border-radius: 50%; background: {b2}; opacity: 0.7; }}
              .panel {{ position: absolute; left: {px}px; top: {py}px; width: {pw}px; height: {ph}px; \
-                border-radius: {r}px; overflow: hidden; background: {tint}; \
-                backdrop-filter: blur({blur}px) saturate(1.6); border: {rimw}px solid {rim}; \
+                border-radius: {r}px; overflow: hidden; border: {rimw}px solid {rim}; \
                 box-shadow: 0 {sy}px {sb}px rgba(0, 0, 0, 0.16); \
                 transform: translate(0px, {dy}px) scale({sx}, {sy2}); opacity: {alpha}; \
                 display: flex; flex-direction: column; align-items: center; justify-content: center; \
                 padding: {pad}px; gap: {gap}px; }}
+             .glass {{ position: absolute; left: {px}px; top: {py}px; width: {pw}px; height: {ph}px; \
+                border-radius: {r}px; overflow: hidden; background: {tint}; \
+                backdrop-filter: blur({blur}px) saturate(1.6); \
+                transform: translate(0px, {dy}px) scale({sx}, {sy2}); opacity: {alpha}; }}
              .shine {{ position: absolute; left: 0; top: 0; width: {pw}px; height: {shine_h}px; \
                 background: linear-gradient(180deg, {highlight} 0%, rgba(255, 255, 255, 0) 100%); }}
              .avatar {{ width: {av}px; height: {av}px; border-radius: 50%; overflow: hidden; flex-shrink: 0; \
@@ -443,9 +449,15 @@ impl Prepared {
             let mut lines = Vec::new();
             for (li, fitted) in block.fitted.iter().enumerate() {
                 let class = format!("t{bi}_{li}");
+                // The date hugs its text inside the pill instead of filling the panel's width.
+                let hug = if block.class == "date" {
+                    " width: auto;"
+                } else {
+                    ""
+                };
                 let _ = write!(
                     css,
-                    "\n.{class} {{ {} }}",
+                    "\n.{class} {{ {}{hug} }}",
                     fitted.css(&block.rule, block.width)
                 );
                 lines.push(
@@ -492,6 +504,10 @@ impl Prepared {
         let mut bg_children = vec![
             Node::container(vec![]).with_class_name("blob1"),
             Node::container(vec![]).with_class_name("blob2"),
+            // The glass layer is a sibling under the panel, not a child: a child's backdrop filter blurs the panel's
+            // own text. It carries the blur and the tint and is clipped to the panel's radius, so no blurred colour
+            // leaks past the rounded corner.
+            Node::container(vec![]).with_class_name("glass"),
             Node::container(panel_children).with_class_name("panel"),
         ];
         for (i, piece) in motion.confetti.iter().enumerate() {

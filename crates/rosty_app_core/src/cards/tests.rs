@@ -495,6 +495,54 @@ fn golden_specs() -> Vec<(&'static str, CardSpec)> {
             ),
         ),
         ("contact-dawn-en", contact),
+        (
+            "birthday-ink-tr",
+            spec(
+                Template::Birthday,
+                Palette::Ink,
+                &[
+                    ("name", "Ayşe Yılmaz"),
+                    ("title", "Doğum günün kutlu olsun, Ayşe Yılmaz!"),
+                    ("age_line", "36 yaşına giriyorsun"),
+                    ("date_line", "3 Ekim"),
+                ],
+            ),
+        ),
+        ("contact-lagoon-en", {
+            let mut s = spec(
+                Template::Contact,
+                Palette::Lagoon,
+                &[
+                    ("name", "Ayşe Yılmaz"),
+                    ("title", "Ayşe Yılmaz"),
+                    ("numbers", "+90 532 000 11 22\n+90 212 000 33 44"),
+                ],
+            );
+            s.qr = Some(vcard.to_owned());
+            s
+        }),
+        (
+            "number-meadow-tr",
+            spec(
+                Template::NewNumber,
+                Palette::Meadow,
+                &[
+                    ("name", "Ayşe Yılmaz"),
+                    ("title", "Ayşe Yılmaz"),
+                    ("subtitle", "Yeni numaram"),
+                    ("numbers", "+90 532 000 11 22"),
+                ],
+            ),
+        ),
+        // The owner's long case: a 40-character Turkish name.
+        ("birthday-long-name-tr", {
+            let name = "Ayşe Yılmaz Karadenizoğlu Çağlayangiller";
+            assert_eq!(name.chars().count(), 40);
+            let mut s = birthday_tr(name);
+            s.texts.insert("name".into(), name.to_owned());
+            s
+        }),
+        ("contact-number-name", number_contact()),
     ]
 }
 

@@ -23,11 +23,15 @@ internal object StopsSizes {
     /** The one-line chip row under the pill: 44 dp hit boxes (layout.md 2.9). */
     val chipRow = 44.dp
 
-    /** The sheet's resting heights: peek shows the handle and the first row (ARCH 8.4, ~120 dp). */
+    /**
+     * The map sheet's peek before its content is measured (ARCH 8.4, ~120 dp), and the least the large-text or landscape
+     * cap may cut a measured peek to. The measured peek reaches down to the content's buttons
+     * ([dev.rosty.stops.home.mapSheetPeekPx]).
+     */
     val sheetPeek = 120.dp
 
-    /** Between the sheet's first line and its rows: at peek the rows start under the sheet's visible edge. */
-    val peekRowsGap = 40.dp
+    /** The measured peek stays at least this far under the medium detent (large text, landscape). */
+    val peekBelowMedium = 48.dp
 
     /**
      * The side room a wide window needs beside the centred sheet for the chrome to stay put: the folded bar's circle

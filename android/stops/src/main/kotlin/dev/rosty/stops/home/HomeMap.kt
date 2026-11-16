@@ -139,7 +139,7 @@ fun FollowCameraPadding(
 
 /**
  * Puts the first view on the most useful thing, once the map has a size and the files are read (pure choice in
- * [firstView]): the trip in progress, else the user's last known position, else the saved stops, else the default
+ * [firstView]): the trip in progress, else the pair of the last session, else the user's last known position, else the saved stops, else the default
  * city.
  */
 @Composable
@@ -191,6 +191,42 @@ private const val PADDING_WAIT_MS = 1_000L
 
 /** The scale of a view on one place (GPUI `map::STREET_MPP`). */
 private const val STREET_METRES_PER_DP = 1.5
+
+/**
+ * A pin of the plan ([ys], screen px) the settled sheet covers (pure): lower than [marginPx] above the camera's bottom
+ * padding ([bottomPx]) in a [heightPx] tall view. The peek grows with the plan's buttons, so a pin set low on the map
+ * can end up under it.
+ */
+fun pinCovered(
+    ys: FloatArray,
+    heightPx: Float,
+    bottomPx: Float,
+    marginPx: Float,
+): Boolean = ys.any { it > heightPx - bottomPx - marginPx }
+
+/** True when a pin of the gate [a]-[b] is under the camera's bottom padding (the settled sheet). */
+fun HomeMap.gateCovered(
+    a: Coord,
+    b: Coord,
+): Boolean =
+    camera.heightPx > 0 &&
+        pinCovered(
+            floatArrayOf(camera.screenY(a.lat), camera.screenY(b.lat)),
+            camera.heightPx.toFloat(),
+            camera.paddingBottom,
+            PIN_CLEAR_DP * camera.density,
+        )
+
+/** How far above the sheet a pin's centre must stay (its caption hangs under it). */
+private const val PIN_CLEAR_DP = 32f
+
+/** The view fits the gate of the plan (both ends set): a pin went under the taller peek. */
+fun HomeMap.showPlanGate(
+    a: Coord,
+    b: Coord,
+) {
+    fitGate(a, b)
+}
 
 /** The view fits the gate of a trip that just started (GPUI follows the trip). */
 fun HomeMap.showGate(trip: dev.rosty.stops.trip.RunningTrip) {
@@ -245,6 +281,10 @@ fun firstView(
     if (trip?.a != null && trip.b != null) {
         return FirstView.Gate(trip.a.coord, trip.b.coord)
     }
+    // The pair of the last session goes back on the map (FeedRadar): its circle, clear of the measured peek.
+    val draftA = state.draft?.a
+    val draftB = state.draft?.b
+    if (draftA != null && draftB != null) return FirstView.Gate(draftA.coord, draftB.coord)
     if (fix != null && fix.lat.isFinite() && fix.lon.isFinite()) return FirstView.Centre(fix.lat, fix.lon)
     if (state.saved.isNotEmpty()) {
         val points = DoubleArray(state.saved.size * 4)

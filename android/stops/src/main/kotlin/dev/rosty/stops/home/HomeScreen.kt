@@ -79,6 +79,7 @@ import dev.rosty.stops.StopsSizes
 import dev.rosty.stops.sideRoomDp
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlin.math.roundToInt
 
 /** Test tags of the home's floating chrome. */
 object HomeTags {
@@ -144,8 +145,12 @@ fun StopsHome(
     sheetContent: @Composable () -> Unit = { MapSheetContent(state, actions.onOpenSaved, actions.onOpenHistory) },
 ) {
     var detentFromTallest by rememberSaveable { mutableIntStateOf(MapSheetDetents.lastIndex) }
+    // Peek reaches down to the content's buttons (the plan's Start and Save, the trip's Stop): measured, never guessed.
+    val peek = remember { MapSheetPeek() }
     val entry =
-        rememberMapSheet(detentFromTallest) { _ -> sheetContent() }
+        rememberMapSheet(detentFromTallest) { _ ->
+            CompositionLocalProvider(LocalMapSheetPeek provides peek) { sheetContent() }
+        }
     val density = LocalDensity.current
     // Large text: the attribution goes under the scale bar instead of off the edge.
     val stackedFooter = density.fontScale >= STACKED_FOOTER_SCALE
@@ -177,6 +182,19 @@ fun StopsHome(
     // bar keeps to the start edge, so the sheet never covers it.
     val sideRoom = with(density) { sideRoomDp(windowWidthPx.toDp(), Sizes.sheetMaxWidth) }
     val wide = sideRoom >= StopsSizes.sideChromeMin
+
+    // The peek detent follows the measured content (a layout change, never a frame of the drag); the sheet keeps the
+    // detent it rests on, and the camera padding below follows the new settled height.
+    LaunchedEffect(entry, peek, density, bottomInsetPx) {
+        val grabberPx = with(density) { MapSheetGrabber.toPx() }
+        val peekGapPx = with(density) { Spacing.m.toPx() }
+        val minPx = with(density) { StopsSizes.sheetPeek.toPx() }
+        val belowMediumPx = with(density) { StopsSizes.peekBelowMedium.toPx() }
+        snapshotFlow {
+            mapSheetPeekPx(peek.contentBottomPx, grabberPx, peekGapPx, bottomInsetPx, windowPx, minPx, belowMediumPx)
+                .roundToInt()
+        }.collect { px -> entry.updateDetents(mapSheetDetents(with(density) { px.toDp() })) }
+    }
 
     // The settled detent: remembered for the next visit, and the camera padding (on settle, never per frame).
     LaunchedEffect(entry, camera) {
@@ -373,9 +391,6 @@ private fun Modifier.blockTouches(): Modifier =
             while (true) awaitPointerEvent().changes.forEach { it.consume() }
         }
     }
-
-/** The medium detent's share of the window (`Detent.Medium`). */
-private const val MEDIUM_SHARE = 0.5f
 
 /** What the camera padding is computed from; a data class so `snapshotFlow` emits on a real change only. */
 private data class CameraInputs(

@@ -166,7 +166,10 @@ pub(super) const OPS: &[OpSpec] = &[
         Call<ChatState>,
         Empty,
         chat_state,
-        || vec![case(json!({"chat": CHAT, "state": "typing"}))]
+        || vec![
+            case(json!({"chat": CHAT, "state": "typing"})),
+            named("recording", json!({"chat": CHAT, "state": "recording"})),
+        ]
     ),
     wa_op!("wa.groups", Call<Nothing>, Vec<GroupInfo>, groups, || vec![
         case(json!({}))
@@ -327,11 +330,39 @@ pub(super) const MEDIA_OPS: &[OpSpec] = &[
         Call<SendMediaWith>,
         Sent,
         send_media_with,
-        || vec![case(
-            json!({"chat": CHAT, "kind": "audio", "mime": "audio/ogg",
+        || vec![
+            case(json!({"chat": CHAT, "kind": "audio", "mime": "audio/ogg",
                    "data_b64": "T0dH",
-                   "options": {"quoted_id": "3EB0A1", "file_name": null, "seconds": 7, "voice_note": true}})
-        )]
+                   "options": {"quoted_id": "3EB0A1", "file_name": null, "seconds": 7, "voice_note": true}})),
+            // A view-once GIF with its preview and pixel size: the preview travels in front of the file.
+            named(
+                "options",
+                json!({"chat": CHAT, "kind": "video", "mime": "video/mp4", "data_b64": "T0dH",
+                   "options": {"quoted_id": null, "file_name": null, "seconds": 3, "voice_note": false,
+                           "thumbnail_b64": "/9j/4A==", "width": 640, "height": 360,
+                       "animated": true, "view_once": true}})
+            ),
+            // A voice note with its waveform (64 samples).
+            named(
+                "waveform",
+                json!({"chat": CHAT, "kind": "audio", "mime": "audio/ogg", "data_b64": "T0dH",
+                   "options": {"quoted_id": null, "file_name": null, "seconds": 7, "voice_note": true,
+                       "waveform_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw=="}})
+            ),
+            // Refused before anything is uploaded.
+            named(
+                "bad_waveform",
+                json!({"chat": CHAT, "kind": "audio", "mime": "audio/ogg", "data_b64": "T0dH",
+                   "options": {"quoted_id": null, "file_name": null, "seconds": null, "voice_note": true,
+                           "waveform_b64": "AAEC"}})
+            ),
+            named(
+                "view_once_document",
+                json!({"chat": CHAT, "kind": "document", "mime": "application/pdf", "data_b64": "T0dH",
+                   "options": {"quoted_id": null, "file_name": "a.pdf", "seconds": null, "voice_note": false,
+                           "view_once": true}})
+            ),
+        ]
     ),
     wa_op!("wa.media", Call<MessageRef>, BytesAns, media, || vec![
         case(json!({"message_id": "3EB0A1"})),

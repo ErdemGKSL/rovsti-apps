@@ -784,7 +784,7 @@ private fun BubbleBody(
                 color = if (failed && !bubble.outgoing) RostyTheme.colors.destructive else secondary,
                 maxLines = 1,
             )
-            if (bubble.outgoing) StateGlyph(bubble.state, secondary, read = ink)
+            if (bubble.outgoing) StateGlyph(bubble.state, secondary, read = readTickColor())
         }
     }
 }
@@ -814,6 +814,14 @@ private fun MarkGlyphs(
         )
     }
 }
+
+/**
+ * The colour of read ticks on my bubble. WhatsApp's blue would vanish on the blue bubble, and the bubble's own ink
+ * read almost like the delivered ticks next to it: light cyan on the deep blue bubble of the light theme, white on
+ * the light blue bubble of the dark theme (its ink is dark navy, so delivered ticks are dark and read ticks light).
+ */
+@Composable
+private fun readTickColor(): Color = if (RostyTheme.colors.isDark) ReadTickDark else ReadTickLight
 
 /** The clock of a waiting message, one tick sent, two delivered, two blue read (GPUI `ticks.rs`). */
 @Composable
@@ -878,6 +886,8 @@ private fun DoubleTick(tint: Color) {
 }
 
 private const val META_ALPHA = 0.75f
+private val ReadTickLight = Color(0xFF7FE9FF)
+private val ReadTickDark = Color(0xFFFFFFFF)
 private const val GLOW_ALPHA = 0.45f
 private const val NOTICE_ALPHA = 0.9f
 private val GlowColor = Color(0xFFFFD60A)

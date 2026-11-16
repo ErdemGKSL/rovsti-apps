@@ -289,7 +289,7 @@ fn fix(req: FixReq) -> Result<Value, FfiError> {
         if let Some(lang) = req.locale {
             trip.lang = lang;
         }
-        let outcome = trip.on_fix(req.fix.fix(), req.fix.at_ms);
+        let outcome = trip.on_fix(req.fix.fix(), req.fix.clock_ms());
         let out = trip.fix_out(&outcome);
         persist(&req.dir, trip)?;
         Ok(json!({

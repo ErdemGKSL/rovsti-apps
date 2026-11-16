@@ -2,6 +2,7 @@ package dev.rosty.core.rust
 
 import dev.rosty.core.Outcome
 import dev.rosty.core.RustError
+import dev.rosty.core.model.stops.CadenceRequest
 import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.CoordFormatRequest
 import dev.rosty.core.model.stops.CrossingValidateRequest
@@ -387,6 +388,33 @@ class StopsOpsNativeTest {
                 tag = null
                 val kept = it.fix(fix(41.2, 29.4, 4_000)).getOrOk().out
                 assertTrue(kept.text, kept.text.startsWith("Outside the circle, "))
+            }
+        }
+
+    @Test
+    fun theCadenceAsksAWalkerLessOftenThanTheOldCurveAndATripReportsIt() =
+        runBlocking {
+            // 700 m on foot (one row of the table in rosty_geo::cadence): 15 s on the balanced provider, where the
+            // old curve asked every 5.7 s on GPS.
+            val walker =
+                ops.cadence(CadenceRequest(lineM = 700.0, accuracyM = 10.0, assumedMps = 11.3, estMps = 1.4)).getOrOk()
+            assertEquals(15_000L, walker.intervalMs)
+            assertEquals(20_000L, walker.retryMs)
+            assertFalse(walker.highAccuracy)
+            assertEquals(5_666L, walker.coldMs)
+            // Without a speed it is the old curve on the ladder.
+            val cold = ops.cadence(CadenceRequest(lineM = 5_000.0, accuracyM = 10.0)).getOrOk()
+            assertEquals(40_000L, cold.intervalMs)
+            assertEquals(60.0, cold.assumedMps, 0.0)
+
+            open().use {
+                val first = it.fix(fix(41.02, 29.0, 10_000).copy(elapsedMs = 1_000)).getOrOk().out
+                assertEquals("cold", first.cadence)
+                assertFalse(first.late)
+                val second = it.fix(fix(41.0199, 29.0, 40_000).copy(elapsedMs = 31_000)).getOrOk().out
+                assertEquals("bound", second.cadence)
+                assertTrue(second.nextFixMs >= first.nextFixMs)
+                assertNotNull(second.assumedMps)
             }
         }
 

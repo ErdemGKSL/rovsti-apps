@@ -84,6 +84,8 @@ data class FixIn(
     @SerialName("accuracy_m") val accuracyM: Double,
     @SerialName("at_ms") val atMs: Long,
     @SerialName("speed_mps") @EncodeDefault(NEVER) val speedMps: Double? = null,
+    /** The fix's monotonic clock in ms; the trip's speed history uses it when present. */
+    @SerialName("elapsed_ms") @EncodeDefault(NEVER) val elapsedMs: Long? = null,
 )
 
 @Serializable
@@ -122,6 +124,14 @@ data class FixOut(
     @SerialName("eta_min") val etaMin: Int? = null,
     @SerialName("circle_m") val circleM: Double?,
     val at: FixPos?,
+    /** The measured speed, m/s, when there is one. Absent from statuses written by older builds. */
+    @SerialName("speed_mps") val speedMps: Double? = null,
+    /** The speed the cadence assumed for [nextFixMs]; null when not tracking. */
+    @SerialName("assumed_mps") val assumedMps: Double? = null,
+    /** What decided that speed (`cold`, `bound`, `doppler`, `average`, `floor`); null when not tracking. */
+    val cadence: String? = null,
+    /** The fix came after the previous answer's [retryMs]. */
+    val late: Boolean = false,
 )
 
 /** [sendNotice] is the rendered arrival message to send now, if the rule is met. */

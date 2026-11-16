@@ -1,4 +1,5 @@
-//! The smaller Stops ops: preferences edits, the arrival message, the alarm plan, polling, the GTFS import,
+//! The smaller Stops ops: preferences edits, the arrival message, the alarm plan, polling and the trip's
+//! cadence, the GTFS import,
 //! coordinate texts, the measure tool and the backup file. All stateless.
 
 use super::history::sample as history_sample;
@@ -10,6 +11,7 @@ use crate::ops::registry::{Case, OpSpec};
 use rosty_app_core::stops::store::GTFS_FILE;
 use rosty_app_core::storage;
 use rosty_geo::alarm::{self, VibrationPattern};
+use rosty_geo::cadence::{self, CadenceInput, SpeedBasis};
 use rosty_geo::coord_format::{self, CoordFormat};
 use rosty_geo::poll;
 use rosty_geo::prefs::{
@@ -62,6 +64,13 @@ pub(super) const OPS: &[OpSpec] = &[
     ),
     op!("stops.alarm_plan", PlanReq, Value, alarm_plan, plan_cases),
     op!("stops.poll", PollReq, Value, poll_op, poll_cases),
+    op!(
+        "stops.cadence",
+        CadenceReq,
+        Value,
+        cadence_op,
+        cadence_cases
+    ),
     op!(
         "stops.gtfs_import",
         ImportReq,
@@ -556,6 +565,86 @@ fn poll_cases() -> Vec<Case> {
         Case::new(json!({"line_m": 5000.0, "accuracy_m": 10.0})),
         Case::named("close", json!({"line_m": 30.0, "accuracy_m": 10.0})),
         Case::named("unknown", json!({})),
+    ]
+}
+
+#[derive(Deserialize)]
+struct CadenceReq {
+    #[serde(default)]
+    line_m: Option<f64>,
+    #[serde(default)]
+    accuracy_m: Option<f64>,
+    /// Metres to where a pending arriving-soon message is due.
+    #[serde(default)]
+    notice_m: Option<f64>,
+    /// The speed to plan with; absent is the top speed (a first fix).
+    #[serde(default)]
+    assumed_mps: Option<f64>,
+    /// The measured speed, for the priority's time to the line.
+    #[serde(default)]
+    est_mps: Option<f64>,
+    /// The interval asked for last time (the hysteresis).
+    #[serde(default)]
+    prev_ms: Option<u64>,
+    #[serde(default)]
+    prev_high: bool,
+}
+
+/// One step of the trip's cadence (`rosty_geo::cadence::plan`, AD-SA10), next to today's curve (`cold_ms`).
+/// The trip plans itself in `trip_fix`; this op gives the curve contract fixtures and a table to read.
+fn cadence_op(req: CadenceReq) -> Result<Value, FfiError> {
+    let basis = if req.assumed_mps.is_some() {
+        SpeedBasis::Bound
+    } else {
+        SpeedBasis::Cold
+    };
+    let c = cadence::plan(&CadenceInput {
+        line_m: req.line_m,
+        accuracy_m: req.accuracy_m,
+        notice_m: req.notice_m,
+        assumed_mps: req.assumed_mps.unwrap_or(cadence::V_MAX_MPS),
+        est_mps: req.est_mps.unwrap_or(0.0),
+        basis,
+        prev: req.prev_ms.map(Duration::from_millis),
+        prev_high: req.prev_high,
+    });
+    let cold = poll::poll_interval(req.line_m, req.accuracy_m);
+    Ok(json!({
+        "interval_ms": c.next_fix_in.as_millis() as u64,
+        "retry_ms": c.retry_after.as_millis() as u64,
+        "high_accuracy": c.high_accuracy,
+        "assumed_mps": c.assumed_mps,
+        "cold_ms": cold.as_millis() as u64,
+    }))
+}
+
+fn cadence_cases() -> Vec<Case> {
+    vec![
+        // A walker 5 km out: a minute where today asks every 41.5 s.
+        Case::new(
+            json!({"line_m": 5000.0, "accuracy_m": 10.0, "assumed_mps": 11.3, "est_mps": 1.4}),
+        ),
+        // 700 m on foot: 15 s on the balanced provider instead of 5.7 s on GPS.
+        Case::named(
+            "walking_700",
+            json!({"line_m": 700.0, "accuracy_m": 10.0, "assumed_mps": 11.3, "est_mps": 1.4}),
+        ),
+        Case::named(
+            "close",
+            json!({"line_m": 30.0, "accuracy_m": 10.0, "assumed_mps": 2.0}),
+        ),
+        // No speed yet: today's curve on the ladder.
+        Case::named("cold", json!({"line_m": 5000.0, "accuracy_m": 10.0})),
+        Case::named("unknown", json!({})),
+        // From 15 s, a raw 21 s is not enough margin for 20 s.
+        Case::named(
+            "hysteresis",
+            json!({"line_m": 600.0, "accuracy_m": 10.0, "assumed_mps": 2.0, "prev_ms": 15000, "prev_high": true}),
+        ),
+        Case::named(
+            "notice",
+            json!({"line_m": 5000.0, "accuracy_m": 10.0, "assumed_mps": 11.3, "est_mps": 1.4, "notice_m": 400.0}),
+        ),
     ]
 }
 

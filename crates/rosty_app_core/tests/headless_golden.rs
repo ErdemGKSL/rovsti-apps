@@ -63,6 +63,7 @@ golden!(wa_digest, "messages", "wa_digest");
 golden!(wa_reply, "messages", "wa_reply");
 golden!(msg_remind, "messages", "msg_remind");
 golden!(trip_fix, "stops", "trip_fix");
+golden!(trip_no_fix, "stops", "trip_no_fix");
 golden!(trip_alarm, "stops", "trip_alarm");
 golden!(trip_end, "stops", "trip_end");
 
@@ -89,6 +90,7 @@ fn every_fixture_kind_is_covered_by_a_test() {
             "trip_alarm",
             "trip_end",
             "trip_fix",
+            "trip_no_fix",
             "wa_digest",
             "wa_reply"
         ]
@@ -105,7 +107,7 @@ fn an_unknown_kind_answers_empty() {
 
 #[test]
 fn malformed_json_never_panics_and_trip_kinds_answer_empty() {
-    for kind in ["trip_fix", "trip_alarm", "trip_end"] {
+    for kind in ["trip_fix", "trip_no_fix", "trip_alarm", "trip_end"] {
         assert_eq!(handle_any(kind, "{not json"), "", "{kind}");
         assert_eq!(handle_any(kind, ""), "", "{kind}");
     }

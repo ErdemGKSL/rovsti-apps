@@ -47,6 +47,8 @@ sealed interface MessagesRoute {
         val revealAtMs: Long? = null,
         /** A forwarded file (a content URI) to put above the composer (E6-WA R3). */
         val attach: String? = null,
+        /** Files shared into the app (content URIs, one or several) for the send preview (E6-WA R3). */
+        val share: List<String> = emptyList(),
     ) : MessagesRoute
 
     /** New conversation: a number or a contact, by SMS or WhatsApp. [share] carries a share-in to send. */
@@ -111,13 +113,18 @@ sealed interface MessagesRoute {
     ) : MessagesRoute
 }
 
-/** A text or an image shared into the app (SEND), waiting for the person to pick a chat. */
+/** A text or files shared into the app (SEND, SEND_MULTIPLE), waiting for the person to pick a chat. */
 @Serializable
 data class SharePayload(
     val text: String? = null,
     val streamUri: String? = null,
     val mime: String? = null,
-)
+    /** Every file of a SEND_MULTIPLE (E6-WA R3); [streamUri] is the first. */
+    val streamUris: List<String> = emptyList(),
+) {
+    /** The files to attach: all of a SEND_MULTIPLE, else the one of a SEND. */
+    fun files(): List<String> = streamUris.ifEmpty { listOfNotNull(streamUri) }
+}
 
 internal val ChatsTab = Tab("chats")
 internal val WhatsAppTab = Tab("whatsapp")
@@ -284,7 +291,11 @@ fun messagesRouteFor(facts: IntentFacts): Pair<Tab, List<MessagesRoute>>? {
 
         is ComposeRequest.Share -> {
             ChatsTab to
-                listOf(MessagesRoute.NewConversation(SharePayload(compose.text, compose.streamUri, compose.mime)))
+                listOf(
+                    MessagesRoute.NewConversation(
+                        SharePayload(compose.text, compose.streamUri, compose.mime, compose.streamUris),
+                    ),
+                )
         }
 
         null -> {

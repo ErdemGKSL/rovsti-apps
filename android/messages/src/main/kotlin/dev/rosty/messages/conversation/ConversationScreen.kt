@@ -779,6 +779,10 @@ private fun BubbleBody(
         } else {
             RoundedCornerShape(corner, corner, corner, if (bubble.firstOfRun) tail else corner)
         }
+    bubble.sticker()?.let {
+        StickerBody(bubble, it, fill, ink)
+        return
+    }
     val failed = bubble.state == BubbleState.Failed
     val secondary = if (bubble.outgoing) ink.copy(alpha = META_ALPHA) else RostyTheme.colors.labelSecondary
     Column(
@@ -884,7 +888,7 @@ private fun BubbleBody(
 
 /** E6.13: the bell and clock of an armed reminder (M33) and the star (M10, M23), before the time. */
 @Composable
-private fun MarkGlyphs(
+internal fun MarkGlyphs(
     bubble: BubbleUi,
     tint: Color,
 ) {
@@ -910,7 +914,7 @@ private fun MarkGlyphs(
 
 /** The clock of a waiting message, one tick sent, two delivered, two blue read (GPUI `ticks.rs`). */
 @Composable
-private fun StateGlyph(
+internal fun StateGlyph(
     state: BubbleState,
     tint: Color,
     /** Read ticks: [ReadTick] on my bubble. */
@@ -976,7 +980,7 @@ private const val META_ALPHA = 0.75f
  * Read ticks on my bubble (blue with white ink in both themes): WhatsApp's blue would vanish on it, and the ink read
  * almost like the delivered ticks next to it, so read ticks are light cyan.
  */
-private val ReadTick = Color(0xFF7FE9FF)
+internal val ReadTick = Color(0xFF7FE9FF)
 private const val GLOW_ALPHA = 0.45f
 private const val NOTICE_ALPHA = 0.9f
 private val GlowColor = Color(0xFFFFD60A)

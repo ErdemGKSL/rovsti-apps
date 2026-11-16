@@ -67,6 +67,7 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         location: stored.extra.location,
         contact: stored.extra.contact,
         mentions: stored.extra.mentions,
+        unavailable: stored.extra.unavailable,
         has_thumbnail: row.get(tail)?,
         media_path: row.get(tail + 1)?,
         media_state: row

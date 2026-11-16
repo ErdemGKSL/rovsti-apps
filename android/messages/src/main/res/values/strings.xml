@@ -627,4 +627,26 @@
     <string name="backup_fail_corrupt">The backup is damaged.</string>
     <string name="backup_fail_failed">The backup couldn\'t be made. Try again.</string>
     <string name="backup_fail_not_saved">The backup wasn\'t saved.</string>
+    <!-- E6-WA R3 steps 6 and 7: view once, stickers, several files. -->
+    <string name="wa_view_once">View once message</string>
+    <string name="wa_view_once_open_phone">View once message. Open it on your phone.</string>
+    <string name="wa_view_once_photo">View once photo</string>
+    <string name="wa_view_once_video">View once video</string>
+    <string name="wa_view_once_voice">View once voice message</string>
+    <string name="wa_unavailable">Message not available here</string>
+    <string name="wa_unavailable_open_phone">This message is not available on this device. Open it on your phone.</string>
+    <string name="wa_view_once_toggle">View once</string>
+    <string name="wa_view_once_toggle_on">View once is on</string>
+    <string name="wa_view_once_toggle_off">View once is off</string>
+    <string name="wa_batch_caption">Add a caption…</string>
+    <string name="wa_batch_send">Send %1$d</string>
+    <string name="wa_batch_position">%1$d of %2$d</string>
+    <string name="wa_batch_remove">Remove</string>
+    <string name="wa_batch_earlier">Move earlier</string>
+    <string name="wa_batch_later">Move later</string>
+    <string name="wa_batch_close">Close</string>
+    <plurals name="wa_batch_too_large">
+        <item quantity="one">%1$d file is over %2$d MB and was left out</item>
+        <item quantity="other">%1$d files are over %2$d MB and were left out</item>
+    </plurals>
 </resources>

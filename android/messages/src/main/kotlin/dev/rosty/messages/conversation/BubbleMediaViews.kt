@@ -99,8 +99,16 @@ internal fun BubbleMediaView(
 ) {
     when (media.kind) {
         BubbleMediaKind.Picture, BubbleMediaKind.Video -> PictureMedia(media, host)
+
         BubbleMediaKind.Voice -> VoiceNote(media, host)
+
         BubbleMediaKind.File -> FileRow(media, host)
+
+        BubbleMediaKind.Unavailable -> UnavailableRow(media, host)
+
+        // A sticker alone is drawn without a bubble (StickerBody); with a caption it sits in the bubble as a picture.
+        BubbleMediaKind.Sticker -> PictureMedia(media, host)
+
         null -> Unit
     }
 }

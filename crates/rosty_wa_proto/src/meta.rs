@@ -108,6 +108,23 @@ impl MediaMeta {
     }
 }
 
+/// Why a message arrived without content on this linked device
+/// ([`MessageMeta::unavailable`]). WhatsApp never shares this content with a
+/// companion: only the phone can open it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unavailable {
+    /// A view-once photo, video or voice note.
+    ViewOnce,
+    /// A message of a business whose account is hosted by Meta.
+    Hosted,
+    /// A message of a WhatsApp bot.
+    Bot,
+    /// A reason a newer gateway names that this build does not know.
+    #[serde(other)]
+    Other,
+}
+
 /// A shared location.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Location {
@@ -186,6 +203,12 @@ pub struct MessageMeta {
     /// current text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edit_history: Vec<EditRecord>,
+    /// The message reached this linked device as a placeholder only (a
+    /// view-once message, above all): the body reads as `unsupported`, as it
+    /// always did, so an older client shows an unsupported message. Show
+    /// "open it on your phone"; there is nothing to download.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<Unavailable>,
 }
 
 /// [`MessageMeta::deleted_by`] of a message this account deleted.
@@ -883,6 +906,50 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(odd.waveform(), None);
+    }
+
+    #[test]
+    fn unavailable_placeholder_is_additive() {
+        let rich = RichMessage {
+            message: WaMessage {
+                from_me: false,
+                body: MessageBody::Unsupported,
+                ..text("x")
+            },
+            meta: MessageMeta {
+                unavailable: Some(Unavailable::ViewOnce),
+                ..Default::default()
+            },
+        };
+        let json = serde_json::to_string(&rich).unwrap();
+        assert_eq!(
+            json,
+            r#"{"id":"m","chat":"c@s.whatsapp.net","sender":null,"from_me":false,"timestamp_ms":1,"body":"unsupported","reactions":[],"meta":{"unavailable":"view_once"}}"#
+        );
+        assert_eq!(serde_json::from_str::<RichMessage>(&json).unwrap(), rich);
+        // An old reader sees an unsupported message, as before.
+        assert_eq!(
+            serde_json::from_str::<WaMessage>(&json).unwrap().body,
+            MessageBody::Unsupported
+        );
+        for (kind, name) in [
+            (Unavailable::ViewOnce, "view_once"),
+            (Unavailable::Hosted, "hosted"),
+            (Unavailable::Bot, "bot"),
+        ] {
+            let meta = MessageMeta {
+                unavailable: Some(kind),
+                ..Default::default()
+            };
+            let json = format!(r#"{{"unavailable":"{name}"}}"#);
+            assert_eq!(serde_json::to_string(&meta).unwrap(), json);
+            assert_eq!(serde_json::from_str::<MessageMeta>(&json).unwrap(), meta);
+        }
+        // A reason of a newer gateway still reads; an older gateway names none.
+        let newer: MessageMeta = serde_json::from_str(r#"{"unavailable":"later"}"#).unwrap();
+        assert_eq!(newer.unavailable, Some(Unavailable::Other));
+        let old: MessageMeta = serde_json::from_str(r#"{"forwarded":true}"#).unwrap();
+        assert_eq!(old.unavailable, None);
     }
 
     #[test]

@@ -1321,6 +1321,7 @@ wa_sync.thread.media_waiting
 wa_sync.thread.old_key
 wa_sync.thread.older
 wa_sync.thread.pending
+wa_sync.thread.placeholder
 wa_sync.thread.unknown_chat
 wa_sync.wipe
 wa_sync.wipe.never_linked

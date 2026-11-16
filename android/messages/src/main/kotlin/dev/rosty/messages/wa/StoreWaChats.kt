@@ -177,6 +177,7 @@ fun WaSyncMessage.toMeta(): MessageMeta =
         deleted = deleted,
         deletedAt = deletedAt,
         deletedBy = deletedBy,
+        unavailable = unavailable,
     )
 
 /** Whether I deleted this message myself (not "deleted for everyone" by its sender). */

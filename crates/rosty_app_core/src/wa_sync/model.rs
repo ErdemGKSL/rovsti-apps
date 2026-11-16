@@ -3,7 +3,7 @@
 use rosty_core::wa_identity::Rejected;
 use rosty_wa_proto::{
     DeliveryStatus, EditRecord, Location, MediaKind, MediaMeta, MessageBody, Quoted, Reaction,
-    SharedContact,
+    SharedContact, Unavailable,
 };
 use serde::{Deserialize, Serialize};
 
@@ -222,6 +222,10 @@ pub struct MessageRow {
     pub contact: Option<SharedContact>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<String>,
+    /// The message reached this account's linked devices as a placeholder only (`kind` stays `unsupported`): a
+    /// view-once message someone sent, or a bot's or hosted business's message. Show "open it on your phone".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<Unavailable>,
     /// A thumbnail is stored (`Store::media`).
     #[serde(skip_serializing_if = "is_false")]
     pub has_thumbnail: bool,

@@ -611,4 +611,26 @@
     <string name="backup_fail_corrupt">Yedek bozuk.</string>
     <string name="backup_fail_failed">Yedek alınamadı. Tekrar deneyin.</string>
     <string name="backup_fail_not_saved">Yedek kaydedilmedi.</string>
+    <!-- E6-WA R3 adım 6 ve 7: tek seferlik, çıkartmalar, birden fazla dosya. -->
+    <string name="wa_view_once">Tek seferlik mesaj</string>
+    <string name="wa_view_once_open_phone">Tek seferlik mesaj. Telefonunuzda açın.</string>
+    <string name="wa_view_once_photo">Tek seferlik fotoğraf</string>
+    <string name="wa_view_once_video">Tek seferlik video</string>
+    <string name="wa_view_once_voice">Tek seferlik sesli mesaj</string>
+    <string name="wa_unavailable">Mesaj burada görüntülenemiyor</string>
+    <string name="wa_unavailable_open_phone">Bu mesaj bu cihazda görüntülenemiyor. Telefonunuzda açın.</string>
+    <string name="wa_view_once_toggle">Tek seferlik</string>
+    <string name="wa_view_once_toggle_on">Tek seferlik açık</string>
+    <string name="wa_view_once_toggle_off">Tek seferlik kapalı</string>
+    <string name="wa_batch_caption">Açıklama ekleyin…</string>
+    <string name="wa_batch_send">%1$d gönder</string>
+    <string name="wa_batch_position">%1$d / %2$d</string>
+    <string name="wa_batch_remove">Kaldır</string>
+    <string name="wa_batch_earlier">Öne al</string>
+    <string name="wa_batch_later">Sona al</string>
+    <string name="wa_batch_close">Kapat</string>
+    <plurals name="wa_batch_too_large">
+        <item quantity="one">%1$d dosya %2$d MB\'tan büyük, eklenmedi</item>
+        <item quantity="other">%1$d dosya %2$d MB\'tan büyük, eklenmedi</item>
+    </plurals>
 </resources>

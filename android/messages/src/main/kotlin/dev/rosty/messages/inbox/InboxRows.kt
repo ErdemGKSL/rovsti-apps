@@ -290,6 +290,7 @@ fun waPreview(
     meta: MessageMeta,
     words: InboxWords,
 ): String {
+    meta.unavailable?.let { return words.unavailable(it) }
     meta.location?.let { return words.location(it.live, it.name ?: it.address) }
     meta.contact?.let { return words.contact(it.displayName) }
     return when (body) {
@@ -307,6 +308,8 @@ fun waPreview(
                     true
                 ) {
                     words.voice(m.seconds)
+                } else if (m?.viewOnce == true) {
+                    words.viewOnce(body.kind)
                 } else {
                     words.media(body.kind, body.caption)
                 }

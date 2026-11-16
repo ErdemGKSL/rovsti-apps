@@ -4,6 +4,12 @@ import androidx.compose.ui.unit.dp
 
 /** The sizes of bubble media, the reply swipe and the composer bars (E6.4b) that are not design tokens. */
 internal object MediaMetrics {
+    /** A sticker fits in a square this big, its aspect kept (WhatsApp's own size). */
+    val Sticker = 160.dp
+
+    /** The glyph of a view-once row (the 1 in a circle). */
+    val ViewOnceGlyph = 24.dp
+
     /** A picture in a bubble is at most this wide, so a portrait one does not fill the screen. */
     val PictureMax = 232.dp
 
@@ -93,4 +99,16 @@ internal object MediaMetrics {
 
     /** The grid of the icon set (`RostyIcons`), which the viewer's own glyphs follow. */
     val IconGrid = 24.dp
+
+    /** E6-WA R3: the send preview of picked files (buttons, the strip, a document page). */
+    val BatchTouch = 48.dp
+    val BatchButton = 44.dp
+    val BatchGlyph = 24.dp
+    val BatchSmallGlyph = 16.dp
+    val BatchMark = 56.dp
+    val BatchThumb = 52.dp
+    val BatchRing = 2.dp
+    val BatchDocTile = 96.dp
+    val BatchDocGlyph = 48.dp
+    val BatchDocName = 280.dp
 }

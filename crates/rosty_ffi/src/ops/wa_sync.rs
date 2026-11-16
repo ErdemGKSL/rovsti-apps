@@ -932,6 +932,9 @@ fn thread_cases() -> Vec<Case> {
         on_sample(Case::named("media", json!({"handle": H, "chat": GROUP, "limit": 50}))),
         // A voice note with its waveform (played), a GIF, and a view-once photo that was opened.
         on_marked(Case::named("media_round", json!({"handle": H, "chat": ALI, "limit": 3}))),
+        // A view-once message Ali sent, which only the phone can open: a placeholder row.
+        on_sample(Case::named("placeholder", json!({"handle": H, "chat": ALI, "limit": 1})))
+            .after("wa_sync.apply_events", placeholder_events()),
         // A view-once voice note that waits in the outbox shows what it was queued with.
         on_sample(Case::named("media_waiting", json!({"handle": H, "chat": ALI, "limit": 1})))
             .after("wa_sync.outbox_enqueue", voice_send_req("v1")),
@@ -1755,6 +1758,19 @@ fn media_round_events() -> Value {
         media_meta_event(27, "ONCE", json!({"view_once": true})),
         media_event(28, "VOICE", NOW - 400, "audio", "audio/ogg; codecs=opus"),
         media_meta_event(29, "VOICE", json!({"seconds": 7, "voice_note": true, "waveform_b64": waveform_b64()})),
+    ]})
+}
+
+/// Ali sends a view-once photo, which reaches linked devices as a placeholder only.
+fn placeholder_events() -> Value {
+    json!({"handle": H, "events": [
+        event(
+            40,
+            json!({"id": "VO1", "chat": ALI, "sender": ALI, "from_me": false, "timestamp_ms": NOW - 100,
+                "body": "unsupported", "reactions": []}),
+            "message",
+        ),
+        event(41, json!({"chat": ALI, "id": "VO1", "meta": {"unavailable": "view_once"}}), "message_meta"),
     ]})
 }
 

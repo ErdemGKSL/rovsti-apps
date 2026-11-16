@@ -352,6 +352,7 @@ A message's `meta` (`MessageMeta`) can hold:
 | `location` | `{latitude, longitude, name, address, live}` (the body stays `unsupported`) |
 | `contact` | a shared contact card `{display_name, vcard}` (body `unsupported`) |
 | `starred` | starred on any device |
+| `unavailable` | `view_once`, `hosted` or `bot`: a placeholder only, the body is `unsupported` (below) |
 
 A chat's `meta` (`ChatMeta`) holds `picture_id`, the other person's `push_name`,
 `archived`, `pinned`, `muted_until_ms` (`-1` is "until unmuted") and `marked_unread`;
@@ -543,6 +544,30 @@ View once: `meta.media.view_once` is true for the inline flag and for media insi
 any of the three view-once wrappers. The gateway keeps serving the file of a
 view-once message like any other; opening it once and forgetting the file is the
 app's job (the device store has a "viewed" mark).
+
+A view-once message someone sends me never reaches a linked device: WhatsApp
+sends the gateway an `<unavailable type="view_once">` placeholder, which
+whatsapp-rust reports as `Event::UndecryptableMessage` with
+`unavailable_type: ViewOnce` and does not ask the phone for (it never shares
+it). The gateway stores and announces it as an ordinary message whose body is
+`unsupported` and whose `meta.unavailable` is `"view_once"`: the id, chat,
+author, time and `from_me` come from the envelope (`MessageInfo`). The two other
+fanouts the phone never resends, a bot's message and one of a business hosted by
+Meta, are stored the same way with `"hosted"` or `"bot"`. A plain fanout is left
+to the library (the phone resends it and it arrives as usual), and so is a
+message that failed to decrypt. History sync: a view-once wrapper with nothing
+inside reads as the same placeholder. An older client reads an unsupported
+message, as before. A reason a newer gateway adds reads as `other` in
+`rosty_wa_proto::Unavailable`.
+
+```json
+{"seq": 41, "at_ms": 1700000000500, "event": {"type": "message", "id": "3EB0VO1",
+  "chat": "100000000001@s.whatsapp.net", "sender": null, "from_me": false,
+  "timestamp_ms": 1700000000000, "body": "unsupported", "reactions": []}}
+{"seq": 42, "at_ms": 1700000000500, "event": {"type": "message_meta",
+  "chat": "100000000001@s.whatsapp.net", "id": "3EB0VO1",
+  "meta": {"unavailable": "view_once"}}}
+```
 
 `GET /v1/messages/{id}/thumbnail` answers the small preview image that came inside
 a photo, video, document, sticker or location (`meta.media.thumbnail`), up to 64 KiB,

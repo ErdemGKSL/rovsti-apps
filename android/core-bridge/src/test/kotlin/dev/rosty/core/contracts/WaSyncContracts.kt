@@ -115,7 +115,17 @@ object WaSyncContracts : ContractModels {
             op<WaSyncChatsRequest, WaSyncChatsAnswer>("wa_sync.chats", ok = listOf("empty", "merged"))
             op<WaSyncThreadRequest, WaSyncThreadPage>(
                 "wa_sync.thread",
-                ok = listOf("older", "media", "media_round", "media_waiting", "pending", "unknown_chat", "old_key"),
+                ok =
+                    listOf(
+                        "older",
+                        "media",
+                        "media_round",
+                        "placeholder",
+                        "media_waiting",
+                        "pending",
+                        "unknown_chat",
+                        "old_key",
+                    ),
             )
             op<WaSyncResolveRequest, WaSyncResolved?>(
                 "wa_sync.identity_resolve",

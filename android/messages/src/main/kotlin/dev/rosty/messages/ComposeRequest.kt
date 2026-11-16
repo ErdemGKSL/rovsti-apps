@@ -16,6 +16,8 @@ sealed interface ComposeRequest {
         val text: String?,
         val streamUri: String?,
         val mime: String?,
+        /** Every file of a `SEND_MULTIPLE`; empty for a `SEND`. */
+        val streamUris: List<String> = emptyList(),
     ) : ComposeRequest
 
     companion object {
@@ -78,6 +80,7 @@ sealed interface ComposeRequest {
             smsBody: String?,
             streamUri: String?,
             mime: String?,
+            streamUris: List<String> = emptyList(),
         ): ComposeRequest? =
             when (action) {
                 Intent.ACTION_SENDTO, Intent.ACTION_VIEW -> {
@@ -99,6 +102,16 @@ sealed interface ComposeRequest {
                     if (body == null && stream == null) null else Share(body, stream, mime?.takeIf { it.isNotEmpty() })
                 }
 
+                Intent.ACTION_SEND_MULTIPLE -> {
+                    val files = streamUris.filter { it.isNotEmpty() }
+                    val body = extraText?.takeIf { it.isNotEmpty() }
+                    if (files.isEmpty() && body == null) {
+                        null
+                    } else {
+                        Share(body, files.firstOrNull(), mime?.takeIf { it.isNotEmpty() }, files)
+                    }
+                }
+
                 else -> {
                     null
                 }
@@ -113,13 +126,27 @@ sealed interface ComposeRequest {
                 } catch (_: RuntimeException) {
                     null
                 }
+            val streams =
+                if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+                    try {
+                        intent
+                            .getParcelableArrayListExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                            ?.map { it.toString() }
+                            .orEmpty()
+                    } catch (_: RuntimeException) {
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
             return build(
                 intent.action,
                 intent.data?.schemeSpecificPart,
                 intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
                 intent.getStringExtra("sms_body"),
-                stream,
+                stream.takeIf { intent.action != Intent.ACTION_SEND_MULTIPLE },
                 intent.type,
+                streams,
             )
         }
 

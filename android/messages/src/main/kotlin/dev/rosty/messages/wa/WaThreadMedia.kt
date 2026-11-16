@@ -35,6 +35,7 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
 import dev.rosty.messages.compose.presentForward
+import dev.rosty.messages.conversation.BubbleMediaKind
 import dev.rosty.messages.conversation.BubbleUi
 import dev.rosty.messages.conversation.MediaAction
 import dev.rosty.messages.conversation.MediaAnchors
@@ -50,8 +51,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * The + menu of the WhatsApp composer: a photo or a video from the system picker, any document, or the picture on the
- * clipboard (M46). What is chosen is copied into app storage and waits above the composer for Send.
+ * The + menu of the WhatsApp composer: photos or videos from the system picker (up to [WaSendBatch.MAX_PICK] at once),
+ * documents, or the picture on the clipboard (M46). Picked files open the send preview (E6-WA R3: a caption each, view
+ * once, reorder); the pasted picture waits above the composer for Send.
  */
 @Composable
 fun rememberWaAttachMenu(
@@ -61,12 +63,14 @@ fun rememberWaAttachMenu(
     val context = LocalContext.current
     val res = LocalResources.current
     val media =
-        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-            uri?.let { model.attach(it.toString()) }
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.PickMultipleVisualMedia(WaSendBatch.MAX_PICK),
+        ) { uris ->
+            model.pick(uris.map { it.toString() })
         }
     val document =
-        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            uri?.let { model.attach(it.toString()) }
+        rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+            model.pick(uris.map { it.toString() })
         }
     return remember(model, overlays, media, document, res) {
         persistentListOf(
@@ -337,7 +341,7 @@ fun waMediaMenu(
     onAction: (MediaAction) -> Unit,
 ): List<MenuItem> {
     val media = bubble.media.firstOrNull() ?: return emptyList()
-    if (bubble.deleted || queued || media.viewOnce) return emptyList()
+    if (bubble.deleted || queued || media.viewOnce || media.kind == BubbleMediaKind.Unavailable) return emptyList()
     return listOf(
         MenuItem.Action(res.getString(R.string.viewer_save), RostyIcons.Download) { onAction(MediaAction.Save) },
         MenuItem.Action(res.getString(R.string.viewer_share), RostyIcons.Share) { onAction(MediaAction.Share) },

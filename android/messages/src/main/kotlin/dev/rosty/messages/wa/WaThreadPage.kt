@@ -2,6 +2,8 @@ package dev.rosty.messages.wa
 
 import android.content.res.Resources
 import android.text.format.Formatter
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -27,6 +29,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.getOrNull
 import dev.rosty.core.model.chat.UnreadDividerRequest
+import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.WaIds
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.overlay.LocalOverlay
@@ -59,6 +62,7 @@ import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
 import dev.rosty.platform.audio.AndroidVoiceRecorder
 import dev.rosty.platform.identity.PhoneNumbers
+import dev.rosty.platform.media.AndroidMediaProbe
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
@@ -101,6 +105,20 @@ class ResourceWaWords(
     override fun size(bytes: Long) = sizeOf(bytes)
 
     override val gone = res.getString(R.string.wa_media_gone)
+
+    override val viewOnceOpenPhone = res.getString(R.string.wa_view_once_open_phone)
+
+    override val viewOnce = res.getString(R.string.wa_view_once)
+
+    override fun viewOnceOf(kind: MediaKind): String =
+        when (kind) {
+            MediaKind.Image -> res.getString(R.string.wa_view_once_photo)
+            MediaKind.Video -> res.getString(R.string.wa_view_once_video)
+            MediaKind.Audio -> res.getString(R.string.wa_view_once_voice)
+            else -> viewOnce
+        }
+
+    override val unavailableOpenPhone = res.getString(R.string.wa_unavailable_open_phone)
 }
 
 /** "512 B", "340 KB", "1.2 MB": a file size without a context (1024-based, one decimal from a megabyte up). */
@@ -221,6 +239,7 @@ fun rememberWaThreadViewModel(
                             rekeys = container.waOffline.rekeys.rekeys,
                             recorder = AndroidVoiceRecorder(context.applicationContext),
                             preview = MediaVoiceEngine(),
+                            probe = AndroidMediaProbe(),
                         ),
                         jid,
                         ResourceWaWords(res) { bytes -> Formatter.formatShortFileSize(context, bytes) },
@@ -250,6 +269,9 @@ fun WaThreadPage(
     LaunchedEffect(model) { composer.setTextAndPlaceCursorAtEnd(model.initialDraft(route.draft)) }
     // A file forwarded from another chat waits above the composer (E6-WA R3).
     LaunchedEffect(model, route.attach) { route.attach?.let(model::attach) }
+    // Files shared into the app (one or several) open the send preview.
+    LaunchedEffect(model, route.share) { if (route.share.isNotEmpty()) model.pick(route.share) }
+    val batch by model.batch.collectAsState()
     LaunchedEffect(model) {
         @OptIn(FlowPreview::class)
         snapshotFlow { composer.text.toString() }.drop(1).debounce(DRAFT_DEBOUNCE_MS).collect(model::onDraft)
@@ -363,29 +385,33 @@ fun WaThreadPage(
             )
         }
     val extras = rememberComposerExtras(container, composer)
-    CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
-        ConversationScreen(
-            state = marks.marked(state),
-            composer = composer,
-            listState = listState,
-            actions = actions,
-            sendLabel = stringResource(R.string.conversation_send),
-            olderLabel =
-                stringResource(
-                    if (state.loadingOlder) R.string.conversation_loading else R.string.conversation_load_earlier,
-                ),
-            tools = toolsState,
-            labels = labels,
-            voice = voice,
-            record = record,
-            composerModifier = Modifier.pastedPictures(model),
-            onSendLongPress = schedule::ask,
-            sendLaterLabel = schedule.words.title,
-            aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
-            textScale = extras.textScale,
-            quickReplies = extras.chips,
-            onQuickReply = extras.insert,
-        )
+    val batchActions = remember(model) { WaBatchActions.of(model) }
+    Box(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalWantAvatar provides container.avatars::want) {
+            ConversationScreen(
+                state = marks.marked(state),
+                composer = composer,
+                listState = listState,
+                actions = actions,
+                sendLabel = stringResource(R.string.conversation_send),
+                olderLabel =
+                    stringResource(
+                        if (state.loadingOlder) R.string.conversation_loading else R.string.conversation_load_earlier,
+                    ),
+                tools = toolsState,
+                labels = labels,
+                voice = voice,
+                record = record,
+                composerModifier = Modifier.pastedPictures(model),
+                onSendLongPress = schedule::ask,
+                sendLaterLabel = schedule.words.title,
+                aboveComposer = { ScheduledStrip(schedule.strip, schedule.words, schedule::cancel, schedule::expand) },
+                textScale = extras.textScale,
+                quickReplies = extras.chips,
+                onQuickReply = extras.insert,
+            )
+        }
+        batch?.let { WaBatchScreen(it, batchActions) { bytes -> Formatter.formatShortFileSize(context, bytes) } }
     }
 }
 

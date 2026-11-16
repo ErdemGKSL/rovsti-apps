@@ -3,8 +3,8 @@
 
 use rosty_core::wa_identity::Source;
 use rosty_wa_proto::{
-    GatewayEvent, MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, WAVEFORM_LEN,
-    WaMessage, encode_b64,
+    GatewayEvent, MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, RichMessage,
+    Unavailable, WAVEFORM_LEN, WaMessage, encode_b64,
 };
 use rusqlite::Connection;
 
@@ -890,5 +890,110 @@ fn the_gallery_reads_its_index_not_the_whole_thread() {
     assert!(
         !plan.iter().any(|step| step.contains("TEMP B-TREE")),
         "{plan:?}"
+    );
+}
+
+// ---- placeholders (a view-once message someone sent, which the phone keeps)
+
+fn placeholder(chat: &str, id: &str, ts: i64) -> WaMessage {
+    WaMessage {
+        body: MessageBody::Unsupported,
+        ..text(chat, id, ts, "")
+    }
+}
+
+fn unavailable(reason: Unavailable) -> MessageMeta {
+    MessageMeta {
+        unavailable: Some(reason),
+        ..MessageMeta::default()
+    }
+}
+
+#[test]
+fn a_view_once_placeholder_is_a_row_the_chat_list_shows_and_nothing_is_fetched() {
+    let mut store = store();
+    apply(
+        &mut store,
+        vec![
+            message(placeholder(ALI, "VO", 1_000)),
+            meta_event(ALI, "VO", unavailable(Unavailable::ViewOnce)),
+        ],
+    );
+    let stored = row(&store, ALI, "VO");
+    assert_eq!(stored.kind, Kind::Unsupported);
+    assert_eq!(stored.unavailable, Some(Unavailable::ViewOnce));
+    assert!(stored.media.is_none() && !stored.has_thumbnail);
+    let json = serde_json::to_value(&stored).unwrap();
+    assert_eq!(json["kind"], "unsupported");
+    assert_eq!(json["unavailable"], "view_once");
+
+    let chats = store.chats(false).unwrap();
+    let last = chats[0].last.as_ref().unwrap();
+    assert_eq!(
+        (last.id.as_str(), last.unavailable),
+        ("VO", Some(Unavailable::ViewOnce))
+    );
+    assert_eq!(chats[0].unread, 1);
+
+    for fetch in [Fetch::Tap, Fetch::Auto(WIFI)] {
+        let asked = store.media_enqueue(ALI, "VO", fetch, NOW).unwrap();
+        assert_eq!((asked.queued, asked.decision), (false, Decision::Never));
+    }
+    // A text row says nothing about a placeholder.
+    apply(&mut store, vec![message(text(ALI, "T", 2_000, "hi"))]);
+    let json = serde_json::to_value(row(&store, ALI, "T")).unwrap();
+    assert!(json.get("unavailable").is_none(), "{json}");
+}
+
+#[test]
+fn a_page_names_the_placeholder_and_the_content_that_comes_later_replaces_it() {
+    let mut store = store();
+    let page = [
+        RichMessage {
+            message: placeholder(ALI, "BOT", 2_000),
+            meta: unavailable(Unavailable::Bot),
+        },
+        RichMessage {
+            message: placeholder(ALI, "LATER", 1_000),
+            meta: unavailable(Unavailable::Other),
+        },
+    ];
+    store.store_page(ALI, None, 50, &page, NOW).unwrap();
+    assert_eq!(row(&store, ALI, "BOT").unavailable, Some(Unavailable::Bot));
+    assert_eq!(
+        row(&store, ALI, "LATER").unavailable,
+        Some(Unavailable::Other)
+    );
+    // A bare repeat of the message keeps what is stored.
+    apply(&mut store, vec![message(placeholder(ALI, "BOT", 2_000))]);
+    assert_eq!(row(&store, ALI, "BOT").unavailable, Some(Unavailable::Bot));
+    // The real content after all: a text, no placeholder any more.
+    apply(&mut store, vec![message(text(ALI, "BOT", 2_000, "hello"))]);
+    let now = row(&store, ALI, "BOT");
+    assert_eq!(
+        (now.kind, now.text.as_deref(), now.unavailable),
+        (Kind::Text, Some("hello"), None)
+    );
+}
+
+#[test]
+fn a_placeholder_survives_a_merge_of_the_two_forms_of_a_chat() {
+    let mut store = store();
+    apply(
+        &mut store,
+        vec![
+            message(placeholder(ALI_LID, "VO", 1_000)),
+            meta_event(ALI_LID, "VO", unavailable(Unavailable::ViewOnce)),
+            GatewayEvent::IdentityMapped {
+                lid: ALI_LID.into(),
+                pn: ALI.into(),
+                source: "receipt".into(),
+                learned_ms: 5,
+            },
+        ],
+    );
+    assert_eq!(
+        row(&store, ALI, "VO").unavailable,
+        Some(Unavailable::ViewOnce)
     );
 }

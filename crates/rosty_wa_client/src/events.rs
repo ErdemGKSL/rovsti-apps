@@ -403,6 +403,40 @@ mod tests {
         assert_eq!(decode_event("not json"), None);
     }
 
+    /// A view-once placeholder: an unsupported message, then its meta. An
+    /// older build reads the same frames as an unsupported message.
+    #[test]
+    fn view_once_placeholder_frames_decode() {
+        use rosty_wa_proto::{GatewayEvent, MessageBody, Unavailable};
+
+        let message = decode_event(
+            r#"{"seq":41,"at_ms":9,"event":{"type":"message","id":"VO1","chat":"100000000001@s.whatsapp.net","sender":null,"from_me":false,"timestamp_ms":8,"body":"unsupported","reactions":[]}}"#,
+        )
+        .unwrap();
+        let GatewayEvent::Message(message) = message.event else {
+            panic!("expected a message");
+        };
+        assert_eq!(message.body, MessageBody::Unsupported);
+        let meta = decode_event(
+            r#"{"seq":42,"at_ms":9,"event":{"type":"message_meta","chat":"100000000001@s.whatsapp.net","id":"VO1","meta":{"unavailable":"view_once"}}}"#,
+        )
+        .unwrap();
+        let GatewayEvent::MessageMeta { id, meta, .. } = meta.event else {
+            panic!("expected message meta");
+        };
+        assert_eq!(id, "VO1");
+        assert_eq!(meta.unavailable, Some(Unavailable::ViewOnce));
+        // A reason this build does not know still decodes.
+        let later = decode_event(
+            r#"{"seq":43,"at_ms":9,"event":{"type":"message_meta","chat":"c","id":"X","meta":{"unavailable":"later"}}}"#,
+        )
+        .unwrap();
+        let GatewayEvent::MessageMeta { meta, .. } = later.event else {
+            panic!("expected message meta");
+        };
+        assert_eq!(meta.unavailable, Some(Unavailable::Other));
+    }
+
     /// The frames of a gateway that names its epoch, and of one that does
     /// not, as they come off the socket.
     #[test]

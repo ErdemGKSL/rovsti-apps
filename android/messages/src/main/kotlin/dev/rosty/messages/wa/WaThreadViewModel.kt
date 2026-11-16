@@ -102,9 +102,13 @@ interface WaWords {
 
 /** What a tap on a bubble's media asks the page to do (the page owns the viewer, the pickers and the intents). */
 sealed interface WaMediaEffect {
-    /** Open the picture viewer on the bubble [key]. */
-    data class ShowPictures(
+    /**
+     * Open the viewer on the photo or video [row] (the bubble [key]): at once, with its thumbnail; the viewer downloads
+     * what is not on the phone and pages through the chat's other photos and videos.
+     */
+    data class ShowViewer(
         val key: String,
+        val row: WaSyncMessage,
     ) : WaMediaEffect
 
     /** Hand a downloaded video or document to an app that shows it. */
@@ -114,12 +118,22 @@ sealed interface WaMediaEffect {
         val name: String,
     ) : WaMediaEffect
 
-    /** "Save as" for a received file (a picture goes to Photos). */
+    /** Save a copy to the phone's gallery or downloads (MediaStore), recorded on the message [chat] / [id]. */
     data class Save(
         val file: File,
         val mime: String,
         val name: String,
         val picture: Boolean,
+        val chat: String = "",
+        val id: String = "",
+    ) : WaMediaEffect
+
+    /** "Forward to": the chooser, then the chat picked with [file] attached and [caption] in its composer. */
+    data class Forward(
+        val file: File,
+        val mime: String,
+        val name: String,
+        val caption: String,
     ) : WaMediaEffect
 
     data class Share(
@@ -625,6 +639,7 @@ class WaThreadViewModel(
                     detail = gone,
                     busy = busy,
                     local = local != null,
+                    viewOnce = meta?.viewOnce == true,
                 )
             }
 
@@ -638,6 +653,8 @@ class WaThreadViewModel(
                     detail = gone ?: listOfNotNull(length, size).joinToString(" · ").ifEmpty { null },
                     busy = busy,
                     local = local != null,
+                    loop = local?.takeIf { meta?.animated == true },
+                    viewOnce = meta?.viewOnce == true,
                 )
             }
 
@@ -656,6 +673,7 @@ class WaThreadViewModel(
                             ?.waveform()
                             ?.let(VoiceWaveform::bars)
                             ?.toImmutableList() ?: persistentListOf(),
+                    viewOnce = meta?.viewOnce == true,
                 )
             }
 
@@ -941,8 +959,9 @@ class WaThreadViewModel(
     ): String = row.media?.fileName?.takeIf { it.isNotBlank() } ?: file.name
 
     /**
-     * A tap on a bubble with an attachment: a picture opens in the viewer, a voice note plays or pauses, a video or
-     * document is downloaded and handed to an app that shows it. False: the bubble has nothing to open.
+     * A tap on a bubble with an attachment: a picture or a video opens in the viewer at once (which downloads it), a
+     * voice note plays or pauses, a document is downloaded and handed to an app that shows it. False: the bubble has
+     * nothing to open.
      */
     fun openMedia(key: String): Boolean {
         val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS } ?: return false
@@ -950,34 +969,43 @@ class WaThreadViewModel(
             toggleVoice(key)
             return true
         }
+        if (row.kind in VISUAL_KINDS) {
+            mediaChannel.trySend(WaMediaEffect.ShowViewer(key, row))
+            return true
+        }
         viewModelScope.launch {
             val file = fileOf(row) ?: return@launch
-            if (row.kind in PICTURE_KINDS) {
-                // The viewer pages over the pictures of the state: it must know this one is there now.
-                sources.offline.session.value
-                    ?.let { reload(it) }
-                mediaChannel.trySend(WaMediaEffect.ShowPictures(key))
-            } else {
-                mediaChannel.trySend(WaMediaEffect.Open(file, row.mime.orEmpty(), fileName(row, file)))
-            }
+            mediaChannel.trySend(WaMediaEffect.Open(file, row.mime.orEmpty(), fileName(row, file)))
         }
         return true
     }
 
-    /** Save or Share of a received file (downloaded first when it is not on the phone). */
+    /**
+     * Save, Share or Forward of a received file (downloaded first when it is not on the phone). A view-once message
+     * offers none of them.
+     */
     fun mediaAction(
         key: String,
         action: MediaAction,
     ) {
-        val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS } ?: return
+        val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS && it.media?.viewOnce != true } ?: return
         viewModelScope.launch {
             val file = fileOf(row) ?: return@launch
             val name = fileName(row, file)
             val mime = row.mime.orEmpty()
             mediaChannel.trySend(
                 when (action) {
-                    MediaAction.Save -> WaMediaEffect.Save(file, mime, name, row.kind in PICTURE_KINDS)
-                    MediaAction.Share -> WaMediaEffect.Share(file, mime, name)
+                    MediaAction.Save -> {
+                        WaMediaEffect.Save(file, mime, name, row.kind in PICTURE_KINDS, row.chat, row.id)
+                    }
+
+                    MediaAction.Share -> {
+                        WaMediaEffect.Share(file, mime, name)
+                    }
+
+                    MediaAction.Forward -> {
+                        WaMediaEffect.Forward(file, mime, name, row.text.orEmpty())
+                    }
                 },
             )
         }

@@ -282,6 +282,23 @@
     <string name="wa_media_not_saved">Dosya kaydedilemedi</string>
     <string name="wa_media_cant_share">Dosya paylaşılamadı</string>
     <string name="wa_media_gone">Artık kullanılamıyor</string>
+    <!-- E6-WA R3: the media viewer, video, save, share and forward. -->
+    <string name="wa_viewer_saved">Kaydedildi</string>
+    <string name="wa_viewer_already_saved">Zaten kaydedildi</string>
+    <string name="wa_viewer_saved_photos">Fotoğraflar\'a kaydedildi</string>
+    <string name="wa_viewer_saved_movies">Filmler\'e kaydedildi</string>
+    <string name="wa_viewer_saved_downloads">İndirilenler\'e kaydedildi</string>
+    <string name="wa_viewer_download">İndir</string>
+    <string name="wa_viewer_download_size">İndir · %1$s</string>
+    <string name="wa_viewer_downloading">İndiriliyor…</string>
+    <string name="wa_viewer_retry">Yeniden Dene</string>
+    <string name="wa_viewer_play">Oynat</string>
+    <string name="wa_viewer_pause">Duraklat</string>
+    <string name="wa_viewer_mute">Sesi Kapat</string>
+    <string name="wa_viewer_unmute">Sesi Aç</string>
+    <string name="wa_viewer_position">Oynatma konumu</string>
+    <string name="wa_viewer_byline">%1$s · %2$s</string>
+    <string name="wa_viewer_cant_play">Bu video oynatılamıyor</string>
     <string name="wa_history_title">WhatsApp geçmişiniz yükleniyor…</string>
     <string name="wa_history_title_percent">WhatsApp geçmişiniz yükleniyor · %%%1$d</string>
     <string name="wa_history_counts">Şimdiye kadar %1$s · %2$s</string>

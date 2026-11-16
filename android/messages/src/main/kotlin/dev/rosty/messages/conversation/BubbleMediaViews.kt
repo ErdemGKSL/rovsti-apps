@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -43,6 +44,8 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -61,6 +64,7 @@ import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.theme.MediaMetrics
 import dev.rosty.messages.theme.MessagesMetrics
+import dev.rosty.messages.viewer.LoopingVideo
 
 /** Test tags of the media inside a bubble. */
 object MediaTags {
@@ -113,12 +117,23 @@ private fun PictureMedia(
 ) {
     val aspect = media.aspect ?: DEFAULT_MEDIA_ASPECT
     val shape = RoundedCornerShape(MessagesMetrics.FolderTileCorner)
+    val anchors = host.actions.mediaAnchors
+    val key = host.bubble.key
+    if (anchors != null) DisposableEffect(anchors, key) { onDispose { anchors.remove(key) } }
     Box(
         Modifier
             .padding(bottom = Spacing.xs)
             .width(minOf(host.maxWidth, MediaMetrics.PictureMax))
             .aspectRatio(aspect)
-            .clip(shape)
+            .then(
+                if (anchors ==
+                    null
+                ) {
+                    Modifier
+                } else {
+                    Modifier.onGloballyPositioned { anchors.put(key, it.boundsInWindow()) }
+                },
+            ).clip(shape)
             .background(host.secondary.copy(alpha = PLACEHOLDER_ALPHA))
             .semantics { contentDescription = media.label },
         contentAlignment = Alignment.Center,
@@ -140,7 +155,9 @@ private fun PictureMedia(
                 size = MediaMetrics.MarkGlyph,
             )
         }
-        val video = media.kind == BubbleMediaKind.Video
+        // A GIF on the phone plays where it is, muted and over and over; its thumbnail stays under it until it runs.
+        media.loop?.let { LoopingVideo(it, Modifier.fillMaxSize()) }
+        val video = media.kind == BubbleMediaKind.Video && media.loop == null
         when {
             media.busy -> Mark { Spinner() }
             host.bubble.state == BubbleState.Waiting -> Mark { MarkIcon(RostyIcons.Clock) }

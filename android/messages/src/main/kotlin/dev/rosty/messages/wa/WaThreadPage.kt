@@ -40,6 +40,7 @@ import dev.rosty.messages.conversation.BubbleUi
 import dev.rosty.messages.conversation.ConversationActions
 import dev.rosty.messages.conversation.ConversationEffects
 import dev.rosty.messages.conversation.ConversationScreen
+import dev.rosty.messages.conversation.MediaAnchors
 import dev.rosty.messages.conversation.bubblesOf
 import dev.rosty.messages.conversation.handlePill
 import dev.rosty.messages.conversation.headerMenu
@@ -152,6 +153,7 @@ fun waBubbleMenu(
     if (!bubble.deleted && bubble.text.isNotEmpty()) {
         items += MenuItem.Action(res.getString(R.string.conversation_copy), RostyIcons.Copy) { model.copy(bubble.key) }
     }
+    items += waMediaMenu(bubble, res, queued) { model.mediaAction(bubble.key, it) }
     items += marks(bubble)
     if (queued && bubble.state != BubbleState.Sending) {
         items +=
@@ -246,6 +248,8 @@ fun WaThreadPage(
     val listState = rememberLazyListState()
     val overlays = LocalOverlay.current
     LaunchedEffect(model) { composer.setTextAndPlaceCursorAtEnd(model.initialDraft(route.draft)) }
+    // A file forwarded from another chat waits above the composer (E6-WA R3).
+    LaunchedEffect(model, route.attach) { route.attach?.let(model::attach) }
     LaunchedEffect(model) {
         @OptIn(FlowPreview::class)
         snapshotFlow { composer.text.toString() }.drop(1).debounce(DRAFT_DEBOUNCE_MS).collect(model::onDraft)
@@ -254,7 +258,8 @@ fun WaThreadPage(
     WhileResumed(model)
     OlderOnReachingTheEnd(listState, state.items.size, state.hasOlder && !state.loadingOlder, model::loadOlder)
     ConversationEffects(model.effects, overlays, composer) { container.clipboard.copy(it) }
-    WaMediaEffects(model, container, overlays)
+    val anchors = remember(model) { MediaAnchors() }
+    WaMediaEffects(model, container, overlays, navigator, anchors)
     val voice by model.voice.collectAsState()
     val record by model.record.collectAsState()
     val recordActions = rememberRecordActions(model, container.permissions, container.specialAccess, overlays)
@@ -354,6 +359,7 @@ fun WaThreadPage(
                 onVoiceSpeed = model::nextVoiceSpeed,
                 senderCard = { bubble -> WaSenderCard(bubble, model, container, navigator, overlays) },
                 record = recordActions,
+                mediaAnchors = anchors,
             )
         }
     val extras = rememberComposerExtras(container, composer)

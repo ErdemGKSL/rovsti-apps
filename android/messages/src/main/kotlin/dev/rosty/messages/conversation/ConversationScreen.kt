@@ -171,6 +171,8 @@ class ConversationActions(
     val onMenuOpened: (BubbleUi, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
     /** E6-WA R3: the microphone beside the empty composer (voice notes); null: no microphone. */
     val record: RecordActions? = null,
+    /** E6-WA R3: where the pictures on screen are, for the viewer's flight; null: nothing is tracked. */
+    val mediaAnchors: MediaAnchors? = null,
 )
 
 /** The labels of the tools on a conversation page. */

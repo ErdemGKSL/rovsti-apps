@@ -26,7 +26,36 @@ data class BubbleMedia(
     val busy: Boolean = false,
     /** The full file is on the phone (a picture shows it, a file can be saved or shared at once). */
     val local: Boolean = false,
+    /**
+     * A video sent as a GIF (WhatsApp `gif_playback`) whose file is on the phone: the bubble loops it, muted, over its
+     * thumbnail. Null for everything else.
+     */
+    val loop: java.io.File? = null,
+    /** A view-once message (E6-WA R3): never saved, shared or forwarded. */
+    val viewOnce: Boolean = false,
 )
+
+/**
+ * Where the pictures of the bubbles on screen are, in window pixels, by bubble key: the viewer flies out of the
+ * tapped one and back into it (the shared-element flight of an overlay, which a `SharedTransitionScope` cannot carry).
+ * A bubble that scrolled away is not in it; the viewer then closes with its fade.
+ */
+class MediaAnchors {
+    private val rects = HashMap<String, androidx.compose.ui.geometry.Rect>()
+
+    operator fun get(key: String): androidx.compose.ui.geometry.Rect? = rects[key]
+
+    fun put(
+        key: String,
+        rect: androidx.compose.ui.geometry.Rect,
+    ) {
+        if (rect.width > 0f && rect.height > 0f) rects[key] = rect else rects.remove(key)
+    }
+
+    fun remove(key: String) {
+        rects.remove(key)
+    }
+}
 
 /** How a [BubbleMedia] is drawn (E6.4b). */
 enum class BubbleMediaKind {
@@ -44,7 +73,7 @@ enum class BubbleMediaKind {
 }
 
 /** What the buttons of a file row do. */
-enum class MediaAction { Save, Share }
+enum class MediaAction { Save, Share, Forward }
 
 /** The one voice note that is loaded in the player (M17); every other note shows its idle row. */
 @Immutable

@@ -165,6 +165,8 @@ class ConversationActions(
     val senderCard: (@Composable (BubbleUi) -> Unit)? = null,
     /** E6.13: the menu of a bubble opened at this rect (the "Remind me" popover grows out of the same place). */
     val onMenuOpened: (BubbleUi, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
+    /** E6-WA R3: where the pictures on screen are, for the viewer's flight; null: nothing is tracked. */
+    val mediaAnchors: MediaAnchors? = null,
 )
 
 /** The labels of the tools on a conversation page. */

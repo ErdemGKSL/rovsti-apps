@@ -501,42 +501,43 @@ class WaThreadMediaTest {
             assertEquals(listOf("p1"), kit.remote.mediaCalls)
         }
 
-    @Test fun aTapOnAPictureOpensTheViewerAndMarksItUsed() =
+    @Test fun aTapOnAPictureOrAVideoOpensTheViewerAtOnce() =
         scope.runTest {
             val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
             kit.chat(ADA, name = "Ada")
             kit.message(
                 WaTestKit.media(ADA, "p1", NOW - 5 * minute, WaSyncKind.Image, "image/jpeg", 2_048, pictureMeta),
             )
+            kit.message(
+                WaTestKit.media(
+                    ADA,
+                    "v1",
+                    NOW - 4 * minute,
+                    WaSyncKind.Video,
+                    "video/mp4",
+                    4_096,
+                    MediaMeta(seconds = 9),
+                ),
+            )
             kit.remote.files["p1"] = BytesAnswer(3, dataB64 = "SU1H")
             kit.remote.down = true
             val model = model(kit)
             settle()
             val opened = mediaEffectsOf(model)
-            val effects = effectsOf(model)
 
-            // No connection and nothing cached: the tap says so.
+            // No connection and nothing cached: the viewer opens all the same, on the thumbnail; it downloads.
             assertTrue(model.openMedia("p1"))
             settle()
-            assertTrue(opened.isEmpty())
-            assertEquals(ConversationEffect.Toast(UiText.Res(R.string.wa_media_cant_download)), effects.last())
+            val show = opened.single() as WaMediaEffect.ShowViewer
+            assertEquals("p1", show.key)
+            assertEquals("p1", show.row.id)
+            assertTrue(kit.remote.mediaCalls.isEmpty())
 
-            kit.remote.down = false
-            kit.connect()
+            // A video opens in the same viewer, not in another app.
+            assertTrue(model.openMedia("v1"))
             settle()
-            // The failed download waits for its next attempt; a tap does not wait.
-            kit.now += minute
-            assertTrue(model.openMedia("p1"))
-            settle()
-            assertEquals(listOf<WaMediaEffect>(WaMediaEffect.ShowPictures("p1")), opened)
-            val downloads = kit.remote.mediaCalls.size
-            kit.now += minute
-            assertTrue(model.openMedia("p1"))
-            settle()
-            assertEquals(2, opened.size)
-            // The cached file was used, not downloaded again, and the viewer pages over it.
-            assertEquals(downloads, kit.remote.mediaCalls.size)
-            assertEquals(listOf("p1"), waPicturesOf(model.state.value.items).map { it.first })
+            assertEquals("v1", (opened.last() as WaMediaEffect.ShowViewer).row.id)
+            assertTrue(opened.none { it is WaMediaEffect.Open })
             // A text message has nothing to open.
             assertFalse(model.openMedia("nope"))
         }
@@ -627,8 +628,11 @@ class WaThreadMediaTest {
             val opened = mediaEffectsOf(model)
             assertTrue(model.openMedia("p1"))
             settle()
+            val show = opened.single() as WaMediaEffect.ShowViewer
+            // The viewer asks for the file as a tap does.
+            assertTrue(mediaOf(kit).fetch(show.row) != null)
+            settle()
             assertEquals(2, kit.remote.mediaCalls.size)
-            assertEquals(listOf<WaMediaEffect>(WaMediaEffect.ShowPictures("p1")), opened)
             media = bubble(model, "p1").media.single()
             assertTrue(media.local)
         }
@@ -665,6 +669,63 @@ class WaThreadMediaTest {
             assertEquals(EnglishWaWords.gone, row.detail)
             assertFalse(row.local)
             assertFalse(row.busy)
+        }
+
+    @Test fun aPictureIsSavedAndForwardedWithItsCaptionAndAViewOnceOneOffersNeither() =
+        scope.runTest {
+            val (kit, _) = WaTestKit.withMedia(backgroundScope, mediaDir = mediaDir, io = dispatcher)
+            kit.chat(ADA, name = "Ada")
+            kit.message(
+                WaTestKit.media(
+                    ADA,
+                    "p1",
+                    NOW - 5 * minute,
+                    WaSyncKind.Image,
+                    "image/jpeg",
+                    2_048,
+                    pictureMeta,
+                    caption = "The harbour this morning",
+                ),
+            )
+            kit.message(
+                WaTestKit.media(
+                    ADA,
+                    "o1",
+                    NOW - 4 * minute,
+                    WaSyncKind.Image,
+                    "image/jpeg",
+                    2_048,
+                    pictureMeta.copy(viewOnce = true),
+                ),
+            )
+            kit.remote.files["p1"] = BytesAnswer(3, dataB64 = "SU1H")
+            kit.remote.files["o1"] = BytesAnswer(3, dataB64 = "SU1H")
+            val model = model(kit)
+            settle()
+            kit.connect()
+            settle()
+            val asked = mediaEffectsOf(model)
+
+            model.mediaAction("p1", MediaAction.Forward)
+            settle()
+            val forward = asked.single() as WaMediaEffect.Forward
+            assertEquals("The harbour this morning", forward.caption)
+            assertEquals("image/jpeg", forward.mime)
+            assertEquals("IMG", forward.file.readText())
+
+            model.mediaAction("p1", MediaAction.Save)
+            settle()
+            val save = asked.last() as WaMediaEffect.Save
+            // What Save records the copy on.
+            assertEquals(ADA, save.chat)
+            assertEquals("p1", save.id)
+            assertTrue(save.picture)
+
+            // View once: the bubble says so and none of the three is done.
+            assertTrue(bubble(model, "o1").media.single().viewOnce)
+            for (action in MediaAction.entries) model.mediaAction("o1", action)
+            settle()
+            assertEquals(2, asked.size)
         }
 
     // ---- the sender card (M50)

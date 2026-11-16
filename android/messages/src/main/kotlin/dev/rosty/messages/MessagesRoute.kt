@@ -45,6 +45,8 @@ sealed interface MessagesRoute {
         /** A message to scroll to and light up once loaded (a global search hit), and when it was sent. */
         val reveal: String? = null,
         val revealAtMs: Long? = null,
+        /** A forwarded file (a content URI) to put above the composer (E6-WA R3). */
+        val attach: String? = null,
     ) : MessagesRoute
 
     /** New conversation: a number or a contact, by SMS or WhatsApp. [share] carries a share-in to send. */

@@ -46,4 +46,19 @@ internal object MediaMetrics {
     val CardAvatar = 48.dp
     val CardWidth = 280.dp
     val Hairline = 0.5.dp
+
+    // ---- the media viewer (E6-WA R3)
+
+    /** The disc of a download mark in the viewer and its glyph. */
+    val ViewerDisc = 56.dp
+    val ViewerDiscGlyph = 26.dp
+
+    /** The rounded touch area of the Download button (disc and label). */
+    val ViewerDownloadCorner = 16.dp
+
+    /** A long caption scrolls past this height instead of covering the photo. */
+    val ViewerCaptionMax = 120.dp
+
+    /** The grid of the icon set (`RostyIcons`), which the viewer's own glyphs follow. */
+    val IconGrid = 24.dp
 }

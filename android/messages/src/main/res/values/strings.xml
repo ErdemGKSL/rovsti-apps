@@ -298,6 +298,23 @@
     <string name="wa_media_not_saved">Couldn\'t save the file</string>
     <string name="wa_media_cant_share">Couldn\'t share the file</string>
     <string name="wa_media_gone">No longer available</string>
+    <!-- E6-WA R3: the media viewer, video, save, share and forward. -->
+    <string name="wa_viewer_saved">Saved</string>
+    <string name="wa_viewer_already_saved">Already saved</string>
+    <string name="wa_viewer_saved_photos">Saved to Photos</string>
+    <string name="wa_viewer_saved_movies">Saved to Movies</string>
+    <string name="wa_viewer_saved_downloads">Saved to Downloads</string>
+    <string name="wa_viewer_download">Download</string>
+    <string name="wa_viewer_download_size">Download · %1$s</string>
+    <string name="wa_viewer_downloading">Downloading…</string>
+    <string name="wa_viewer_retry">Try Again</string>
+    <string name="wa_viewer_play">Play</string>
+    <string name="wa_viewer_pause">Pause</string>
+    <string name="wa_viewer_mute">Mute</string>
+    <string name="wa_viewer_unmute">Unmute</string>
+    <string name="wa_viewer_position">Playback position</string>
+    <string name="wa_viewer_byline">%1$s · %2$s</string>
+    <string name="wa_viewer_cant_play">This video can\'t be played</string>
     <string name="wa_history_title">Loading your WhatsApp history…</string>
     <string name="wa_history_title_percent">Loading your WhatsApp history · %1$d%%</string>
     <string name="wa_history_counts">%1$s · %2$s so far</string>

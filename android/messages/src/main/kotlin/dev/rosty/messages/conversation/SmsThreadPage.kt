@@ -48,6 +48,7 @@ import dev.rosty.messages.compose.presentForward
 import dev.rosty.messages.inbox.InboxAction
 import dev.rosty.messages.inbox.presentMute
 import dev.rosty.messages.inbox.rememberInboxViewModel
+import dev.rosty.messages.notify.ThreadOpens
 import dev.rosty.messages.notify.TrackOpenConversation
 import dev.rosty.messages.schedule.ScheduledStrip
 import dev.rosty.messages.schedule.rememberSmsScheduleHost
@@ -205,6 +206,8 @@ fun SmsThreadPage(
     val state by model.state.collectAsState()
     val composer = rememberTextFieldState()
     val listState = rememberLazyListState()
+    // This page's opening: it opens at the unread messages once their divider is in the rows.
+    val openSeq = rememberSaveable(model) { model.opened() }
     val overlays = LocalOverlay.current
     LaunchedEffect(model) { composer.setTextAndPlaceCursorAtEnd(model.initialDraft(route.draft)) }
     LaunchedEffect(model) {
@@ -250,6 +253,7 @@ fun SmsThreadPage(
     val selectLabels = rememberSelectLabels()
     val labels = rememberToolLabels()
     TrackOpenConversation(model.tag)
+    val reopen = remember(model.tag) { ThreadOpens.of(model.tag) }
     val schedule = rememberSmsScheduleHost(container, overlays, route, composer)
     val actions =
         remember(model, res, onBack, overlays, host, state.title, hooks) {
@@ -497,6 +501,9 @@ fun SmsThreadPage(
             textScale = extras.textScale,
             quickReplies = extras.chips,
             onQuickReply = extras.insert,
+            openSeq = openSeq,
+            openAtTarget = route.reveal != null,
+            reopen = reopen,
         )
     }
 }

@@ -205,6 +205,12 @@ class OverlayController {
     /** True while at least one entry is present or leaving. */
     val hasEntries: Boolean get() = entries.isNotEmpty()
 
+    /**
+     * True while a modal entry (a popover, menu, sheet, alert, viewer) is presented and not leaving; toasts and the
+     * undo pill are not modal. Snapshot state: a conversation holds new messages under it.
+     */
+    val hasModal: Boolean get() = entries.any { it.modal && it.state.targetState }
+
     internal fun removeFinished() {
         entries.removeAll { it.isRemovable }
     }

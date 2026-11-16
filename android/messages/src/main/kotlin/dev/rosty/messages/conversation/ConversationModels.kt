@@ -264,4 +264,9 @@ data class ConversationUi(
     val attachment: AttachmentUi? = null,
     /** The label of the voice speed pill ("1×", "1.5×", "2×"). */
     val voiceSpeed: String = "",
+    /**
+     * How many openings of this thread have their unread count in [items] (the view model's `opened()`): a page
+     * opens at the unread divider only once the divider of its own opening is there.
+     */
+    val opens: Int = 0,
 )

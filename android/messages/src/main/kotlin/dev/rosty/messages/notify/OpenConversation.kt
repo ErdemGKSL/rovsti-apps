@@ -7,6 +7,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.rosty.platform.PlatformEvents
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 
 /**
  * The conversation on screen (`sms:<thread>` or `wa:<jid>`), for the `uiAttached` rule: while the UI is attached, the
@@ -38,6 +42,22 @@ object OpenConversation {
 
     /** True while the user is looking at [tag]: the UI is attached and that conversation is open. */
     fun isShowing(tag: String): Boolean = PlatformEvents.uiAttached && open == tag
+}
+
+/**
+ * Notification taps that open a conversation (`sms:<thread>` or `wa:<jid>`) without naming a message. A page that is
+ * already up for that conversation goes to the newest message; a page that opens for it misses the tap on purpose
+ * (opening at the unread messages is its own rule).
+ */
+object ThreadOpens {
+    private val taps = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    fun opened(tag: String) {
+        taps.tryEmit(tag)
+    }
+
+    /** The taps for [tag]. */
+    fun of(tag: String): Flow<Unit> = taps.filter { it == tag }.map { }
 }
 
 /**

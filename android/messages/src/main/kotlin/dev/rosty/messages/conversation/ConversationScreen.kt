@@ -31,12 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,7 +90,7 @@ import dev.rosty.messages.theme.MessagesColors
 import dev.rosty.messages.theme.MessagesMetrics
 import dev.rosty.messages.ui.MessagesAvatar
 import kotlinx.collections.immutable.ImmutableList
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
 import kotlin.math.roundToInt
 
 /** Test tags of a conversation page. */
@@ -109,6 +106,7 @@ object ConversationTags {
     const val Find = "conversation-find"
     const val FindLabel = "conversation-find-label"
     const val JumpLatest = "conversation-jump-latest"
+    const val JumpBadge = "conversation-jump-badge"
     const val Lifted = "bubble-lifted"
     const val BubblePanel = "bubble-panel"
     const val Pills = "bubble-pills"
@@ -220,19 +218,39 @@ fun ConversationScreen(
     /** M11: the quick replies offered above the empty composer (Settings, Quick replies), and what a tap does. */
     quickReplies: ImmutableList<ReplyChip> = kotlinx.collections.immutable.persistentListOf(),
     onQuickReply: (ReplyChip) -> Unit = {},
+    /** The opening this page belongs to (the view model's `opened()`): opening waits for its unread divider. */
+    openSeq: Int = 0,
+    /** The page opens on a message (a search hit, a reminder): the reveal scroll wins over the unread divider. */
+    openAtTarget: Boolean = false,
+    /** A notification tap for this thread while the page is up: back to the newest message. */
+    reopen: Flow<Unit>? = null,
+    /** Wall clock, for the time away (15 minutes scrolled up and away: back at the newest). */
+    now: () -> Long = System::currentTimeMillis,
 ) {
     val overlays = LocalOverlayOrNull.current
     BackHandler(enabled = tools.selected != null) { actions.onSelectAction(SelectAction.Cancel) }
     val sendLater by rememberUpdatedState(onSendLongPress)
     val haptics = LocalRostyHaptics.current
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    // Back after a long time away: the newest message, not where it was left.
-    ScrollToNewestAfterAway(listState)
+    // Where the list stays when messages arrive, the page comes back or the thread opens (ThreadScroll.kt).
+    val scroll = rememberThreadScroll(listState, now)
+    val selecting by rememberUpdatedState(tools.selected != null)
+    ThreadScrollEffects(
+        scroll,
+        state.items,
+        ready = state.loaded && state.opens >= openSeq,
+        openAtTarget = openAtTarget,
+        // A finger on the list, select mode or an open overlay: a new message waits until it ends.
+        held = {
+            (listState.isScrollInProgress && !scroll.programmatic) || selecting || overlays?.hasModal == true
+        },
+        reopen = reopen,
+    )
     // Find, jump to date: scroll the target into view once, then let the tools know.
     LaunchedEffect(tools.scrollTo) {
         val target = tools.scrollTo ?: return@LaunchedEffect
         val index = state.items.indexOfFirst { it.key == target }
-        if (index >= 0) listState.animateScrollToItem(index)
+        if (index >= 0) scroll.jumpTo(index)
         actions.onScrolled()
     }
     ScreenScaffold(
@@ -320,7 +338,7 @@ fun ConversationScreen(
                     }
                 }
                 if (labels != null) {
-                    JumpToLatest(listState, state, labels, Modifier.align(Alignment.BottomEnd))
+                    JumpToLatest(scroll, labels, Modifier.align(Alignment.BottomEnd))
                     tools.find?.let { find -> FindBar(find, labels, actions, Modifier.align(Alignment.TopCenter)) }
                 }
                 val lines =
@@ -583,36 +601,27 @@ private fun bubbleColors(outgoing: Boolean): Pair<Color, Color> {
 }
 
 /**
- * The round button that brings the newest message back (M12), shown once the list is scrolled away from the end; its
- * badge counts what arrived meanwhile ("99+" above 99).
+ * The round button that brings the newest message back (M12), shown while the reader holds a place above it; its
+ * badge counts the incoming messages that arrived below the screen ("99+" above 99).
  */
 @Composable
 private fun JumpToLatest(
-    listState: LazyListState,
-    state: ConversationUi,
+    scroll: ThreadScrollState,
     labels: ToolLabels,
     modifier: Modifier = Modifier,
 ) {
-    val away by remember { derivedStateOf { listState.firstVisibleItemIndex > JUMP_AFTER_ITEMS } }
-    var seenNewest by remember { mutableStateOf<String?>(null) }
-    val keys = state.items.mapNotNull { (it as? ConversationItem.Bubble)?.key }
-    LaunchedEffect(keys.firstOrNull(), away) {
-        if (!away || seenNewest == null) seenNewest = keys.firstOrNull()
-    }
-    // Every bubble above the newest one seen at the end arrived while the list was scrolled away.
-    val arrived = seenNewest?.let { keys.indexOf(it) }?.coerceAtLeast(0) ?: 0
-    if (!away) return
-    val scope = rememberCoroutineScope()
+    if (!scroll.jumpVisible) return
+    val arrived = scroll.unseen
     Box(modifier.padding(Spacing.gutter)) {
         GlassIconButton(
             RostyIcons.ArrowDown,
             labels.jumpLatest,
-            onClick = { scope.launch { listState.animateScrollToItem(0) } },
+            onClick = scroll::jumpToNewest,
             modifier = Modifier.testTag(ConversationTags.JumpLatest),
         )
         if (arrived > 0) {
             // Above the glass button, which draws in its own layer.
-            Box(Modifier.align(Alignment.TopEnd).zIndex(1f)) {
+            Box(Modifier.align(Alignment.TopEnd).zIndex(1f).testTag(ConversationTags.JumpBadge)) {
                 dev.rosty.messages.inbox
                     .UnreadBadge(minOf(arrived, JUMP_CAP), quiet = false)
             }
@@ -985,7 +994,6 @@ internal val ReadTick = Color(0xFF7FE9FF)
 private const val GLOW_ALPHA = 0.45f
 private const val NOTICE_ALPHA = 0.9f
 private val GlowColor = Color(0xFFFFD60A)
-private const val JUMP_AFTER_ITEMS = 2
 private const val JUMP_CAP = 99
 private const val QUOTE_ALPHA = 0.18f
 private const val DEFAULT_ASPECT = 4f / 3f

@@ -308,6 +308,15 @@ class WaThreadViewModel(
     private val senders = HashMap<Pair<String?, String?>, String>()
     private val marked = HashSet<String>()
     private var unreadAtOpen: Int? = null
+
+    /** The bubble the unread divider of this opening sits above, once placed: it stays there while the page is up. */
+    private var dividerKey: String? = null
+
+    /** How many times a page opened this thread ([opened]); the view model's own first load is the first opening. */
+    private var openCalls = 0
+
+    /** The opening [unreadAtOpen] belongs to. */
+    private var unreadOpening = 1
     private var typing: String? = null
     private var typingClear: Job? = null
     private var lastTypingSentMs = 0L
@@ -524,6 +533,7 @@ class WaThreadViewModel(
                     ),
                 items = withDays(bubbles, days, now, dividerOf(bubbles)).toImmutableList(),
                 loaded = true,
+                opens = if (unreadAtOpen != null) unreadOpening else 0,
                 hasOlder = hasStoredOlder || (!reachedStart && rows.isNotEmpty()),
                 composer = ComposerMode.Ready(words.placeholder),
                 reply = replyOf(),
@@ -798,10 +808,34 @@ class WaThreadViewModel(
             .joinToString(" ") { (emoji, count) -> if (count > 1) "$emoji $count" else emoji }
     }
 
+    /**
+     * The divider above the first message that was unread when the thread opened. Placed once per opening by Rust's
+     * `unread_jump.divider`, then kept on that bubble: messages that arrive while the page is up do not move it.
+     */
     private suspend fun dividerOf(bubbles: List<BubbleUi>): Pair<String, String>? {
         val unread = unreadAtOpen?.takeIf { it > 0 } ?: return null
-        val at = sources.divider(bubbles.map { !it.outgoing }, unread) ?: return null
-        return bubbles.getOrNull(at)?.let { it.key to words.unread(unread) }
+        val kept = dividerKey?.takeIf { key -> bubbles.any { it.key == key } }
+        val key =
+            kept ?: sources.divider(bubbles.map { !it.outgoing }, unread)?.let { bubbles.getOrNull(it)?.key }
+        dividerKey = key
+        return key?.let { it to words.unread(unread) }
+    }
+
+    /**
+     * A page opened this thread; answers the number of this opening ([ConversationUi.opens] reaches it once the unread
+     * count of this opening is in the rows). A view model kept from an earlier visit starts a new opening: the unread
+     * count of this moment, a new divider.
+     */
+    fun opened(): Int {
+        openCalls++
+        if (openCalls > 1) {
+            unreadOpening = openCalls
+            // The reload this asks for reads the chat again and counts its unread messages for this opening.
+            unreadAtOpen = null
+            dividerKey = null
+            reloads.tryEmit(Unit)
+        }
+        return openCalls
     }
 
     // ---- reading

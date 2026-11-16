@@ -403,6 +403,49 @@ class WaThreadViewModelTest {
             assertEquals("m4", bubbles(model.state.value).first().key)
         }
 
+    @Test fun theDividerStaysWhereItOpenedAndANewOpeningPlacesItAgain() =
+        scope.runTest {
+            val kit = WaTestKit(backgroundScope)
+            kit.chat(ADA, name = "Ada", unread = 2)
+            kit.message(WaTestKit.text(ADA, "m1", NOW - 30 * minute, "old"))
+            kit.message(WaTestKit.text(ADA, "m2", NOW - 20 * minute, "new one"))
+            kit.message(WaTestKit.text(ADA, "m3", NOW - 10 * minute, "new two"))
+            val model = model(kit)
+            assertEquals(1, model.opened())
+            settle()
+            kit.connect()
+            settle()
+            assertEquals(1, model.state.value.opens)
+            assertEquals("m2", aboveDivider(model.state.value))
+
+            // A message that arrives while the page is up does not move the divider.
+            kit.remote.emit(6, WaTestKit.incoming(ADA, "m4", NOW - minute, "here"))
+            settle()
+            assertEquals("m4", bubbles(model.state.value).first().key)
+            assertEquals("m2", aboveDivider(model.state.value))
+
+            // The thread is opened again on the kept view model: the unread count of that moment, a new divider.
+            kit.ops.chats.removeAll { it.jid == ADA }
+            kit.chat(ADA, name = "Ada", unread = 1)
+            assertEquals(2, model.opened())
+            settle()
+            assertEquals(2, model.state.value.opens)
+            assertEquals("m4", aboveDivider(model.state.value))
+            assertEquals(
+                "1 unread message",
+                (
+                    model.state.value.items
+                        .first { it is ConversationItem.Divider } as ConversationItem.Divider
+                ).label,
+            )
+        }
+
+    /** The key of the bubble just under the unread divider (the first unread one). */
+    private fun aboveDivider(state: ConversationUi): String? {
+        val at = state.items.indexOfFirst { it is ConversationItem.Divider }
+        return if (at > 0) state.items[at - 1].key else null
+    }
+
     @Test fun attachmentsSayWhatTheyAreUntilTheMediaStoryShowsThem() =
         scope.runTest {
             val kit = WaTestKit(backgroundScope)

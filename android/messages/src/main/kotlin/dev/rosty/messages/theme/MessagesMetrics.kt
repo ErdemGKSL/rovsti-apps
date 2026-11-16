@@ -5,6 +5,12 @@ import androidx.compose.ui.unit.dp
 /** The few sizes of Messages that are not design tokens (convention: no raw dp at call sites). */
 object MessagesMetrics {
     val None = 0.dp
+
+    /** Thread scroll: how much of the newest row may be hidden while the reader still counts as at the newest. */
+    val AtNewestSlop = 48.dp
+
+    /** Thread scroll: room above the unread divider when a thread opens at it (a sliver of the last read message). */
+    val UnreadRoom = 64.dp
     val RowAccessory = 14.dp
     val SwipeGlyph = 20.dp
     val UnreadBadgeMin = 20.dp

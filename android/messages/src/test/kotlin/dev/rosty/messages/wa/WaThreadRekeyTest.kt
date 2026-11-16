@@ -160,6 +160,9 @@ class WaThreadRekeyTest {
             val state = model.state.value
             // The same page, now with the rows of both chats, the reply bar still up.
             assertEquals(listOf("l2", "l1", "p1"), bubbles(state).map { it.key })
+            // Bubble keys are message ids, not chat ids: the scroll anchor of the page survives the merge.
+            assertEquals(listOf("l2", "l1"), bubbles(states.first()).map { it.key })
+            assertEquals(listOf("l2", "l1"), bubbles(state).map { it.key }.filter { it.startsWith("l") })
             assertEquals("l2", state.reply?.key)
             assertEquals("Ada Lovelace", state.title)
             assertEquals("+905550000001", state.subtitle)

@@ -859,7 +859,12 @@ private fun RowBody(
                     row.snippet.rtlSafe(),
                     modifier = Modifier.weight(1f),
                     style = type.subheadline,
-                    color = if (row.draft) colors.destructive else colors.labelSecondary,
+                    color =
+                        when {
+                            row.live -> colors.accent
+                            row.draft -> colors.destructive
+                            else -> colors.labelSecondary
+                        },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

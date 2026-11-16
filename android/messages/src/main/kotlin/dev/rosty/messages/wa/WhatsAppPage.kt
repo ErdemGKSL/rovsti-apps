@@ -122,6 +122,7 @@ fun rememberWaInboxViewModel(container: MessagesContainer): InboxViewModel {
                             chat = container.chat,
                             now = System::currentTimeMillis,
                             names = container.names,
+                            chatStates = container.waChatStates.now,
                         ),
                         InboxBuilder(words, time),
                         words,

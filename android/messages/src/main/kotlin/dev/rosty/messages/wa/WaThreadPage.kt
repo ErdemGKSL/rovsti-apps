@@ -56,6 +56,7 @@ import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.settings.replies.rememberComposerExtras
 import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
+import dev.rosty.platform.audio.AndroidVoiceRecorder
 import dev.rosty.platform.identity.PhoneNumbers
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
@@ -216,6 +217,8 @@ fun rememberWaThreadViewModel(
                                 }
                             },
                             rekeys = container.waOffline.rekeys.rekeys,
+                            recorder = AndroidVoiceRecorder(context.applicationContext),
+                            preview = MediaVoiceEngine(),
                         ),
                         jid,
                         ResourceWaWords(res) { bytes -> Formatter.formatShortFileSize(context, bytes) },
@@ -253,6 +256,8 @@ fun WaThreadPage(
     ConversationEffects(model.effects, overlays, composer) { container.clipboard.copy(it) }
     WaMediaEffects(model, container, overlays)
     val voice by model.voice.collectAsState()
+    val record by model.record.collectAsState()
+    val recordActions = rememberRecordActions(model, container.permissions, container.specialAccess, overlays)
     DisposableEffect(model) { onDispose { model.stopVoice() } }
     val attachMenu = rememberWaAttachMenu(model, overlays)
     val host =
@@ -284,7 +289,7 @@ fun WaThreadPage(
     val schedule = rememberWaScheduleHost(container, overlays, jid, composer)
     val marks = rememberMarkHost(container, overlays, tag, rememberDayLabels()) { model.state.value.title }
     val actions =
-        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks, number) {
+        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks, number, recordActions) {
             ConversationActions(
                 onBack = onBack,
                 onMenuOpened = marks::menuOpened,
@@ -348,6 +353,7 @@ fun WaThreadPage(
                 onVoiceSeek = { bubble, fraction -> model.seekVoice(bubble.key, fraction) },
                 onVoiceSpeed = model::nextVoiceSpeed,
                 senderCard = { bubble -> WaSenderCard(bubble, model, container, navigator, overlays) },
+                record = recordActions,
             )
         }
     val extras = rememberComposerExtras(container, composer)
@@ -365,6 +371,7 @@ fun WaThreadPage(
             tools = toolsState,
             labels = labels,
             voice = voice,
+            record = record,
             composerModifier = Modifier.pastedPictures(model),
             onSendLongPress = schedule::ask,
             sendLaterLabel = schedule.words.title,

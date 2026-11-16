@@ -450,6 +450,20 @@ class WaOffline(
         return true
     }
 
+    /**
+     * The owner played the received voice note [messageId] of [chat]: its played receipt is queued (once per message)
+     * and goes out like any outbox row. True when a receipt was queued now.
+     */
+    suspend fun markPlayed(
+        chat: String,
+        messageId: String,
+    ): Boolean {
+        val session = sessionState.value ?: return false
+        if (!session.outbox.markPlayed(newId(), chat, messageId)) return false
+        kick(session)
+        return true
+    }
+
     /** Lets a failed row go out again. */
     suspend fun retry(
         chat: String,

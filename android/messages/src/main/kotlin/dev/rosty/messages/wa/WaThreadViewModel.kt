@@ -8,6 +8,7 @@ import dev.rosty.core.model.chat.SearchJumpStep
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
+import dev.rosty.core.model.wa.MediaWaveform
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.TypingState
 import dev.rosty.core.model.wa.WaIds
@@ -31,6 +32,7 @@ import dev.rosty.messages.conversation.ConversationEffect
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.conversation.DayLabels
 import dev.rosty.messages.conversation.MediaAction
+import dev.rosty.messages.conversation.RecordUi
 import dev.rosty.messages.conversation.ReplyUi
 import dev.rosty.messages.conversation.VoiceUi
 import dev.rosty.messages.conversation.withDays
@@ -39,6 +41,7 @@ import dev.rosty.messages.inbox.RowAvatar
 import dev.rosty.messages.inbox.duration
 import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.names.PersonNames
+import dev.rosty.platform.audio.VoiceRecorder
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
@@ -60,6 +63,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 /** The words of a WhatsApp thread, from `strings.xml` (English and Turkish). */
 interface WaWords {
@@ -172,7 +176,17 @@ class WaThreadSources(
     val readable: suspend (number: String) -> String = { it },
     /** The key changes of the store, after what is kept per chat was moved ([WaRekeys.rekeys]). */
     val rekeys: Flow<Rekey> = emptyFlow(),
+    /** The microphone of the composer's voice notes (E6-WA R3); null: the composer has no microphone. */
+    val recorder: VoiceRecorder? = null,
+    /** Plays a recorded take before it is sent. */
+    val preview: VoiceEngine? = null,
+    /** Where a take is recorded; null: next to the files to send ([WaMedia.outgoing]). */
+    val voiceFile: (() -> File?)? = null,
+    /** A monotonic clock in milliseconds, for the length of a take. */
+    val recordClock: () -> Long = { System.nanoTime() / NANOS_PER_MS },
 )
+
+private const val NANOS_PER_MS = 1_000_000L
 
 /**
  * A WhatsApp conversation (E6.4a) read from the offline store only (E6.4s): `wa_sync.thread` pages, read again when
@@ -211,6 +225,33 @@ class WaThreadViewModel(
 
     /** The voice note in the player. */
     val voice: StateFlow<VoiceUi?> get() = sources.voice?.state ?: noVoice
+
+    /**
+     * The voice note recorder of the composer (E6-WA R3); null without a microphone. A take goes out through the
+     * outbox as a voice note, with its length and waveform, answering the quoted message like a text would.
+     */
+    val recording: VoiceRecording? =
+        sources.recorder?.let { recorder ->
+            VoiceRecording(
+                scope = viewModelScope,
+                recorder = recorder,
+                preview = sources.preview ?: NoVoiceEngine,
+                newFile = sources.voiceFile ?: { sources.media?.outgoing(UUID.randomUUID().toString(), VOICE_FILE) },
+                discard = ::discardTake,
+                clock = sources.recordClock,
+                chatState = { state -> if (sources.offline.online.value) sources.remote.typing(jid, state) },
+                hint = { text -> effectChannel.trySend(ConversationEffect.Toast(text)) },
+                onTake = ::sendVoice,
+            )
+        }
+
+    private val noRecord = MutableStateFlow<RecordUi?>(null)
+
+    /** The voice note being recorded in the composer. */
+    val record: StateFlow<RecordUi?> get() = recording?.state ?: noRecord
+
+    /** Received voice notes whose played receipt was asked for in this visit. */
+    private val playedAsked = HashSet<String>()
 
     private val revealChannel = Channel<String>(Channel.BUFFERED)
 
@@ -609,6 +650,12 @@ class WaThreadViewModel(
                     detail = gone ?: length ?: size,
                     busy = busy,
                     local = local != null,
+                    // The 64 bars WhatsApp carries for a voice note; without them the plain bar.
+                    waveform =
+                        meta
+                            ?.waveform()
+                            ?.let(VoiceWaveform::bars)
+                            ?.toImmutableList() ?: persistentListOf(),
                 )
             }
 
@@ -938,7 +985,10 @@ class WaThreadViewModel(
 
     // ---- voice notes (M17)
 
-    /** Play or pause of the voice note [key]; another note that was playing stops. */
+    /**
+     * Play or pause of the voice note [key]; another note that was playing stops. The first play of a received voice
+     * note queues its played receipt (blue microphone on the other phone), once; my own notes never send one.
+     */
     fun toggleVoice(key: String) {
         val voice = sources.voice ?: return
         val row = rowOf(key)?.takeIf { !it.deleted && it.kind == WaSyncKind.Audio } ?: return
@@ -946,8 +996,48 @@ class WaThreadViewModel(
             val file = fileOf(row) ?: return@launch
             if (!voice.toggle(key, file.absolutePath)) {
                 effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_voice_cant_play)))
+                return@launch
             }
+            if (playedOwed(row) && playedAsked.add(row.id)) sources.offline.markPlayed(jid, row.id)
         }
+    }
+
+    /** A received voice note whose played receipt has not been queued yet. */
+    private fun playedOwed(row: WaSyncMessage): Boolean =
+        !row.fromMe && !row.played && row.media?.voiceNote == true && row.state !in OUTBOX_STATES
+
+    /** A recorded take goes out as a voice note through the outbox (E6-WA R3). */
+    private suspend fun sendVoice(take: VoiceTake) {
+        val quoted = replyTo
+        replyTo = null
+        val action =
+            WaSyncAction.SendMedia(
+                file = take.file.absolutePath,
+                media = MediaKind.Audio,
+                mime = VoiceRecording.MIME,
+                size = take.file.length(),
+                quotedId = quoted,
+                seconds = take.seconds,
+                voiceNote = true,
+                waveformB64 = MediaWaveform.encode(take.waveform),
+            )
+        if (!sources.offline.enqueue(jid, action)) {
+            replyTo = quoted
+            discardTake(take.file)
+            effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
+        }
+        publish()
+    }
+
+    private suspend fun discardTake(file: File) {
+        val media = sources.media
+        if (media != null) media.discard(file.absolutePath) else file.delete()
+    }
+
+    /** The thread is gone for good: a take that was not sent is thrown away. */
+    override fun onCleared() {
+        recording?.dispose()
+        sources.preview?.release()
     }
 
     /** Scrubbing the bar of the note in the player to [fraction] (0..1). */
@@ -1142,6 +1232,9 @@ class WaThreadViewModel(
         private const val MAX_ASPECT = 1.9f
         private const val MAX_TYPE = 5
         private const val BYTES_PER_MB = 1024L * 1024L
+
+        /** The file name of a recorded voice note (WhatsApp shows none). */
+        private const val VOICE_FILE = "voice-note.ogg"
 
         /** Two taps this close together are a double tap (Android's own timeout). */
         const val DOUBLE_TAP_MS = 300L

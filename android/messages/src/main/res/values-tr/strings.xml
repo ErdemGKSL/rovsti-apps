@@ -312,6 +312,19 @@
     <string name="wa_voice_play">Oynat</string>
     <string name="wa_voice_pause">Duraklat</string>
     <string name="wa_voice_speed">Oynatma hızı %1$s</string>
+    <!-- E6-WA R3: recording voice notes in the WhatsApp composer. -->
+    <string name="wa_record_mic">Sesli mesaj kaydet</string>
+    <string name="wa_record_cancel_hint">İptal için kaydırın</string>
+    <string name="wa_record_lock">Kayda devam için yukarı kaydırın</string>
+    <string name="wa_record_stop">Kaydı durdur</string>
+    <string name="wa_record_delete">Kaydı sil</string>
+    <string name="wa_record_send">Sesli mesajı gönder</string>
+    <string name="wa_record_hold">Kaydetmek için basılı tutun, göndermek için bırakın</string>
+    <string name="wa_record_failed">Mikrofon kullanılamadı</string>
+    <string name="wa_record_denied_title">Mikrofon kapalı</string>
+    <string name="wa_record_denied_body">Sesli mesaj kaydetmek için Ayarlar\'da Rosty Mesajlar\'a mikrofon izni verin.</string>
+    <string name="wa_record_not_now">Şimdi Değil</string>
+    <string name="wa_record_settings">Ayarları Aç</string>
     <string name="wa_reply">Yanıtla</string>
     <string name="wa_reply_cancel">Yanıtı iptal et</string>
     <string name="wa_attachment_remove">Eki kaldır</string>

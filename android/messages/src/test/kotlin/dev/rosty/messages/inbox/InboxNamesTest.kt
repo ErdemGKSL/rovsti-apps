@@ -34,6 +34,7 @@ import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.names.FakeLiveNames
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.spam.SpamCore
+import dev.rosty.messages.wa.WaChatState
 import dev.rosty.messages.wa.WaChats
 import dev.rosty.platform.sms.FakeSmsRepository
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +113,7 @@ class InboxNamesTest {
         core: SpamCore,
         wa: WaChats,
         book: MutableStateFlow<Book>,
+        chatStates: Flow<Map<String, WaChatState>> = MutableStateFlow(emptyMap()),
     ): InboxViewModel {
         core.core.onTyped("search.index_new", IndexNewRequest.serializer(), IndexAnswer.serializer()) {
             Outcome.Ok(IndexAnswer(1, 0))
@@ -154,6 +156,7 @@ class InboxNamesTest {
                 chat = chat,
                 now = { now },
                 names = names,
+                chatStates = chatStates,
             ),
             InboxBuilder(EnglishInboxWords, time),
             EnglishInboxWords,
@@ -189,6 +192,42 @@ class InboxNamesTest {
             assertEquals(listOf("read:$stranger", "Mert K."), model.titles())
             // A stored WhatsApp name is a name: only the nameless number is asked.
             assertEquals(setOf(stranger), live.asked.toSet())
+        }
+
+    @Test fun aWhatsAppRowSaysRecordingAudioWhileTheOtherSideRecords() =
+        scope.runTest {
+            val last = WaMessage("m1", mert, mert, false, now - 5, MessageBody.Text("On my way"), emptyList())
+            val chat = RichChat(mert, "mert.k", last, 0, false, ChatMeta(pushName = "Mert K."))
+            val states = MutableStateFlow<Map<String, WaChatState>>(emptyMap())
+            val model = model(SpamCore(), FixedWaChats(listOf(chat)), MutableStateFlow(Book.Empty), states)
+            advanceUntilIdle()
+
+            fun row() =
+                model.state.value.rows
+                    .first { it.waChat == mert }
+            val before = row().snippet
+            assertTrue(before.contains("On my way"))
+
+            states.value = mapOf(mert to WaChatState(mert, recording = true))
+            advanceUntilIdle()
+            assertEquals("recording audio…", row().snippet)
+            assertTrue(row().live)
+            // The SMS row of another person keeps its snippet.
+            assertTrue(
+                model.state.value.rows
+                    .first { it.waChat == null }
+                    .snippet
+                    .contains("Dinner at eight"),
+            )
+
+            states.value = mapOf(mert to WaChatState(mert, recording = false))
+            advanceUntilIdle()
+            assertEquals("typing…", row().snippet)
+
+            states.value = emptyMap()
+            advanceUntilIdle()
+            assertEquals(before, row().snippet)
+            assertEquals(false, row().live)
         }
 
     @Test fun aSearchResultIsCalledWhatItsInboxRowIsCalled() =

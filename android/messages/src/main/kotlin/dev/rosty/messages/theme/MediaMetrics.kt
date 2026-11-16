@@ -42,6 +42,38 @@ internal object MediaMetrics {
     /** The composer pill is 44 dp tall: the attach button sits centred beside its last line. */
     val AttachLift = 4.dp
 
+    /** E6-WA R3: the voice note recorder. A slide this far toward the start edge cancels, this far up locks. */
+    val RecordCancel = 120.dp
+    val RecordLock = 72.dp
+
+    /** The microphone disc; held, it grows past its 48 dp target (drawn outside it). */
+    val MicDisc = 40.dp
+    val MicGlyph = 22.dp
+
+    /** The centre of the composer's send slot above the pill's bottom and from its end: 6 dp inset + half of 32 dp. */
+    val SlotCentre = 22.dp
+
+    /** The recording row ends this far from the pill's end: clear of the held disc (40 dp x 1.4 round the slot). */
+    val HoldingEnd = 56.dp
+
+    /** The composer pill is this tall on one line (`:design` ComposerField). */
+    val ComposerPill = 44.dp
+    val HintGlyph = 14.dp
+    val RecDot = 10.dp
+    val MeterWidth = 28.dp
+    val MeterHeight = 20.dp
+    val BarMin = 2.dp
+    val BarMax = 3.dp
+    val LockWidth = 36.dp
+    val LockGlyph = 16.dp
+    val PanelCorner = 22.dp
+    val StopRing = 36.dp
+    val StopSquare = 14.dp
+    val StopCorner = 3.dp
+
+    /** The bars of a voice note's waveform in the player are at most this tall. */
+    val WaveHeight = 24.dp
+
     /** The sender card (M50). */
     val CardAvatar = 48.dp
     val CardWidth = 280.dp

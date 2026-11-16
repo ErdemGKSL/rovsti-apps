@@ -39,6 +39,17 @@ interface InboxWords {
 
     fun edited(snippet: String): String
 
+    /** What the other side of a WhatsApp chat does right now; [name] in a group. */
+    fun chatState(
+        name: String?,
+        recording: Boolean,
+    ): String =
+        when {
+            name == null -> if (recording) "recording audio…" else "typing…"
+            recording -> "$name is recording audio…"
+            else -> "$name is typing…"
+        }
+
     /** An SMS group without a name: its addresses. */
     fun joined(addresses: List<String>): String = addresses.joinToString(", ")
 }
@@ -91,6 +102,16 @@ class ResourceInboxWords(
     override fun unsupported() = res.getString(R.string.wa_unsupported)
 
     override fun edited(snippet: String) = res.getString(R.string.wa_edited_snippet, snippet)
+
+    override fun chatState(
+        name: String?,
+        recording: Boolean,
+    ): String =
+        when {
+            name == null -> res.getString(if (recording) R.string.wa_thread_recording else R.string.wa_thread_typing)
+            recording -> res.getString(R.string.wa_thread_recording_by, name)
+            else -> res.getString(R.string.wa_thread_typing_by, name)
+        }
 }
 
 /** "0:42", "12:05": minutes and seconds of a voice note. */

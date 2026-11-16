@@ -71,6 +71,8 @@ data class InboxRowUi(
     val inSpam: Boolean = false,
     /** The one sender of the SMS thread is on the system blocklist. */
     val blocked: Boolean = false,
+    /** [snippet] says what the other side does right now ("typing…", "recording audio…"): drawn in the accent. */
+    val live: Boolean = false,
 ) {
     val isUnread: Boolean get() = unread > 0 || markedUnread
 

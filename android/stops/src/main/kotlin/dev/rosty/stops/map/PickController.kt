@@ -589,8 +589,7 @@ class PickController(
         val here = radar.state.position?.let { Coord(it.lat, it.lon) }
         val request = CoordFormatRequest(at = dest.coord, label = dest.label.ifBlank { null }, here = here)
         val formats = (ops.formats(request) as? Outcome.Ok)?.value ?: return null
-        val saved = savedStops
-        val offer = if (saved == null) null else (ops.saveOffer(SaveOfferRequest(ends, saved)) as? Outcome.Ok)?.value
+        val offer = saveOffer()
         return PinMenuModel(
             slot = slot,
             title = if (slot == Slot.A) ui.value.labelA else ui.value.labelB,
@@ -603,7 +602,20 @@ class PickController(
         )
     }
 
+    /**
+     * Whether the pair on the map can be saved as a stop (`stops.pick_save_offer`): `save`, `saved` with the stop
+     * that has this gate, or `none` while an end is missing or the two cannot make a stop. A first run has no
+     * saved file yet: that is an empty list, not "cannot save".
+     */
+    suspend fun saveOffer(): SaveOfferAnswer? {
+        val saved = savedStops ?: SavedStops(version = 2, nextId = 1, stops = emptyList())
+        return (ops.saveOffer(SaveOfferRequest(ui.value.ends, saved)) as? Outcome.Ok)?.value
+    }
+
     companion object {
+        /** `stops.pick_save_offer` kinds. */
+        const val OFFER_SAVED = "saved"
+
         /**
          * How far around the finger a transit stop is looked for, in dp: the largest radius Rust can accept
          * (`snap::FAST_RADIUS_PX`). Whether the stop found takes the pin is Rust's decision (`stops.snap`).
@@ -616,7 +628,7 @@ class PickController(
         private const val SAMPLES = 16
         private const val OUTCOME_FULL = "full"
         private const val DECISION_SNAP = "snap"
-        private const val OFFER_SAVE = "save"
+        const val OFFER_SAVE = "save"
     }
 }
 

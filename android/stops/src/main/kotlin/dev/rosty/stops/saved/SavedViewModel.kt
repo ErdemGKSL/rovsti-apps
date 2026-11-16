@@ -10,9 +10,11 @@ import dev.rosty.core.model.stops.Coord
 import dev.rosty.core.model.stops.DestShareRequest
 import dev.rosty.core.model.stops.Destination
 import dev.rosty.core.model.stops.Endpoint
+import dev.rosty.core.model.stops.Ends
 import dev.rosty.core.model.stops.FormatDistanceRequest
 import dev.rosty.core.model.stops.History
 import dev.rosty.core.model.stops.NearestStop
+import dev.rosty.core.model.stops.SaveOfferRequest
 import dev.rosty.core.model.stops.SavedEdit
 import dev.rosty.core.model.stops.SavedEditAnswer
 import dev.rosty.core.model.stops.SavedListRequest
@@ -87,7 +89,7 @@ data class SavedUiState(
     val canReorder: Boolean get() = sort == SavedSort.Saved && (!showSearch(stops.size) || query.isBlank())
 
     companion object {
-        const val DEFAULT_NAME_CHARS = 40
+        const val DEFAULT_NAME_CHARS = 60
 
         /** The longest note the core keeps (`saved_edit` `set_note`). */
         const val NOTE_MAX_CHARS = 200
@@ -111,6 +113,14 @@ sealed interface SavedEffect {
     data class Deleted(
         val stop: SavedStop,
         val index: Int,
+    ) : SavedEffect
+
+    /** "Save as stop" of the pair [a] [b]: ask for its name, prefilled with [name] (the core's suggestion). */
+    data class AskName(
+        val a: Destination,
+        val b: Destination,
+        val name: String,
+        val maxChars: Int,
     ) : SavedEffect
 
     /** "Save as stop" made stop [id] named [name]: offer Undo. */
@@ -230,8 +240,18 @@ sealed interface SavedAction {
 
     data object ShareAll : SavedAction
 
-    /** "Save as stop" from a pin menu (E7.4): the pair on the map becomes a stop with a suggested name. */
+    /**
+     * "Save as stop" (the plan sheet, a pin menu, a measurement, a past trip): asks for the name of the pair with
+     * [SavedEffect.AskName], or says why the pair cannot be saved.
+     */
     data class SaveGate(
+        val a: Destination,
+        val b: Destination,
+    ) : SavedAction
+
+    /** Save of the name sheet: the pair becomes the stop [name]. */
+    data class Add(
+        val name: String,
         val a: Destination,
         val b: Destination,
     ) : SavedAction
@@ -360,6 +380,13 @@ class SavedViewModel(
 
             is SavedAction.SaveGate -> {
                 saveGate(action.a, action.b)
+            }
+
+            is SavedAction.Add -> {
+                val name = action.name.trim()
+                val a = Endpoint(action.a.label, action.a.coord)
+                val b = Endpoint(action.b.label, action.b.coord)
+                edit(SavedEdit.Add(name, a, b)) { answer -> answer.id?.let { SavedEffect.Saved(it, name) } }
             }
 
             is SavedAction.Unsave -> {
@@ -523,18 +550,38 @@ class SavedViewModel(
         b: Destination,
     ) {
         work.launch {
-            val ea = Endpoint(a.label, a.coord)
-            val eb = Endpoint(b.label, b.coord)
-            val name = (ops.savedSuggestName(SuggestNameRequest(ea, eb)) as? Outcome.Ok)?.value?.name ?: b.label
-            when (val done = store.edit(SavedEdit.Add(name, ea, eb))) {
-                is Outcome.Err -> emit(SavedEffect.Toast(refusal(done.error)))
-                is Outcome.Ok -> done.value.id?.let { emit(SavedEffect.Saved(it, name)) }
+            val saved = store.load()
+            val offer = (ops.pickSaveOffer(SaveOfferRequest(Ends(a, b), saved)) as? Outcome.Ok)?.value
+            when (offer?.kind) {
+                OFFER_SAVED -> {
+                    emit(SavedEffect.Toast(UiText.Res(R.string.saved_already, listOf(offer.name.orEmpty()))))
+                }
+
+                OFFER_NONE -> {
+                    emit(SavedEffect.Toast(UiText.Res(R.string.saved_error_gate)))
+                }
+
+                else -> {
+                    val request =
+                        SuggestNameRequest(
+                            Endpoint(a.label, a.coord),
+                            Endpoint(b.label, b.coord),
+                            names = saved.stops.map { it.name },
+                        )
+                    // The core's suggestion is never empty; an end's own name stands in if the call fails.
+                    val name =
+                        (ops.savedSuggestName(request) as? Outcome.Ok)?.value?.name?.takeIf { it.isNotBlank() }
+                            ?: listOf(b.label, a.label).firstOrNull { it.isNotBlank() }.orEmpty()
+                    emit(SavedEffect.AskName(a, b, name, mutable.value.maxNameChars))
+                }
             }
         }
     }
 
     companion object {
         private const val HISTORY = "history"
+        private const val OFFER_SAVED = "saved"
+        private const val OFFER_NONE = "none"
 
         private val Lenient = Json { ignoreUnknownKeys = true }
 

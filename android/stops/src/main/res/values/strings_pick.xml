@@ -10,6 +10,7 @@
     <string name="pick_menu_swap">Swap A and B</string>
     <string name="pick_menu_remove">Remove</string>
     <string name="pick_menu_lines">Lines</string>
+    <string name="pick_pin_options">Options for %1$s</string>
     <string name="pick_hint_full">Drag a pin to adjust it, or tap Clear.</string>
     <string name="pick_format_decimal">Decimal degrees</string>
     <string name="pick_format_dms">Degrees, minutes, seconds</string>

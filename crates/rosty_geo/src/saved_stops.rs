@@ -504,9 +504,40 @@ fn is_generic(label: &str) -> bool {
     crate::history::is_generic_label(label)
 }
 
-/// A name to prefill when saving the stop AB: the nearest GTFS stop to the gate
-/// midpoint, else the ends' own label, else empty.
+/// A name to prefill when saving the stop AB, in English and with no saved names to avoid.
 pub fn suggest_name(feed: Option<&Feed>, a: &Endpoint, b: &Endpoint) -> String {
+    suggest_name_in(Lang::En, feed, a, b, &[])
+}
+
+/// A name to prefill when saving the stop AB. Never empty, never longer than [`MAX_NAME_CHARS`], and
+/// not one of `taken` (the names saved already, compared without case or accents).
+///
+/// In order: the nearest GTFS stop to the gate midpoint, the first end with a name of its own, and
+/// last "Stop 3" / "Durak 3" numbered after the stops saved so far. A name that is taken gets the
+/// next free number after it ("Pier 2").
+pub fn suggest_name_in(
+    lang: Lang,
+    feed: Option<&Feed>,
+    a: &Endpoint,
+    b: &Endpoint,
+    taken: &[&str],
+) -> String {
+    let taken: Vec<String> = taken.iter().map(|n| fold(n.trim())).collect();
+    let free = |name: &str| !taken.contains(&fold(name));
+    match own_name(feed, a, b) {
+        Some(base) => {
+            let base: String = base.chars().take(MAX_NAME_CHARS).collect();
+            if free(&base) {
+                return base;
+            }
+            numbered(&base, 2, free)
+        }
+        None => numbered(lang.pick("Stop", "Durak"), taken.len() + 1, free),
+    }
+}
+
+/// The name the stop AB brings with it: a GTFS stop near the midpoint, else an end's own label.
+fn own_name<'a>(feed: Option<&'a Feed>, a: &'a Endpoint, b: &'a Endpoint) -> Option<&'a str> {
     let mid = Diameter::new(a.coord, b.coord).map_or_else(
         |_| {
             Coord::new(
@@ -522,19 +553,26 @@ pub fn suggest_name(feed: Option<&Feed>, a: &Endpoint, b: &Endpoint) -> String {
     {
         let name = stop.name.trim();
         if !name.is_empty() {
-            return name.chars().take(MAX_NAME_CHARS).collect();
+            return Some(name);
         }
     }
-    let (la, lb) = (a.label.trim(), b.label.trim());
     // A shared non-generic label is also the first one.
-    let label = if !is_generic(la) {
-        la
-    } else if !is_generic(lb) {
-        lb
-    } else {
-        ""
-    };
-    label.chars().take(MAX_NAME_CHARS).collect()
+    [a.label.trim(), b.label.trim()]
+        .into_iter()
+        .find(|label| !is_generic(label))
+}
+
+/// "`base` n" for the first n from `from` that is free; `base` is cut so the whole name fits.
+fn numbered(base: &str, from: usize, free: impl Fn(&str) -> bool) -> String {
+    (from..)
+        .map(|n| {
+            let number = n.to_string();
+            let room = MAX_NAME_CHARS.saturating_sub(number.len() + 1);
+            let stem: String = base.chars().take(room).collect();
+            format!("{} {number}", stem.trim_end())
+        })
+        .find(|name| free(name))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -858,11 +896,85 @@ mod tests {
     }
 
     #[test]
-    fn suggest_is_empty_for_generic_labels_without_a_feed() {
-        assert_eq!(suggest_name(None, &pa(), &pb()), "");
+    fn suggest_numbers_a_stop_with_no_name_of_its_own() {
+        assert_eq!(suggest_name(None, &pa(), &pb()), "Stop 1");
         let a = ep("", 41.0, 29.0);
         let b = ep("Point", 41.001, 29.0);
-        assert_eq!(suggest_name(None, &a, &b), "");
+        assert_eq!(suggest_name(None, &a, &b), "Stop 1");
+        // Numbered after the stops saved so far, in the user's language.
+        assert_eq!(
+            suggest_name_in(Lang::En, None, &a, &b, &["Home", "Work"]),
+            "Stop 3"
+        );
+        assert_eq!(
+            suggest_name_in(Lang::Tr, None, &a, &b, &["Ev", "İş"]),
+            "Durak 3"
+        );
+        let tr = ep("A noktası", 41.0, 29.0);
+        let tr_b = ep("B noktası", 41.001, 29.0);
+        assert_eq!(suggest_name_in(Lang::Tr, None, &tr, &tr_b, &[]), "Durak 1");
+        // A far feed stop does not name it either.
+        let f = feed();
+        let far_a = ep("Point A", 41.1, 29.0);
+        let far_b = ep("Point B", 41.101, 29.0);
+        assert_eq!(suggest_name(Some(&f), &far_a, &far_b), "Stop 1");
+    }
+
+    #[test]
+    fn suggest_skips_names_that_are_taken() {
+        let a = ep("", 41.0, 29.0);
+        let b = ep("", 41.001, 29.0);
+        assert_eq!(
+            suggest_name_in(Lang::En, None, &a, &b, &["Stop 2", "stop 3"]),
+            "Stop 4"
+        );
+        assert_eq!(
+            suggest_name_in(Lang::Tr, None, &a, &b, &["DURAK 2", "x"]),
+            "Durak 3"
+        );
+        let pier = ep("Pier", 41.1, 29.0);
+        assert_eq!(
+            suggest_name_in(Lang::En, None, &pier, &b, &["pier"]),
+            "Pier 2"
+        );
+        assert_eq!(
+            suggest_name_in(Lang::En, None, &pier, &b, &["Pier", " Pier 2 "]),
+            "Pier 3"
+        );
+        let f = feed();
+        assert_eq!(
+            suggest_name_in(Lang::Tr, Some(&f), &pa(), &pb(), &["Taksim"]),
+            "Taksim 2"
+        );
+    }
+
+    #[test]
+    fn suggest_always_fits_a_name() {
+        let long = "ş".repeat(MAX_NAME_CHARS + 20);
+        let a = ep(&long, 41.0, 29.0);
+        let b = ep("", 41.001, 29.0);
+        let name = suggest_name(None, &a, &b);
+        assert_eq!(name.chars().count(), MAX_NAME_CHARS);
+        assert!(valid_name(&name).is_some());
+        let second = suggest_name_in(Lang::En, None, &a, &b, &[&name]);
+        assert_eq!(second.chars().count(), MAX_NAME_CHARS);
+        assert!(second.ends_with(" 2"));
+        assert!(valid_name(&second).is_some());
+        // Every answer can be saved as it is.
+        let mut saved = SavedStops::default();
+        for i in 0..5 {
+            let names: Vec<&str> = saved.stops.iter().map(|s| s.name.as_str()).collect();
+            let name = suggest_name_in(Lang::Tr, None, &pa(), &pb(), &names);
+            let lat = 41.0 + f64::from(i) * 0.01;
+            saved
+                .add(&name, ep("", lat, 29.0), ep("", lat + 0.001, 29.0), 1)
+                .unwrap();
+        }
+        let names: Vec<&str> = saved.stops.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["Durak 1", "Durak 2", "Durak 3", "Durak 4", "Durak 5"]
+        );
     }
 
     fn three() -> SavedStops {

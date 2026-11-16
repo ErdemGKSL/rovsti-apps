@@ -548,7 +548,12 @@ class NativeStopsOps(
         )
 
     override suspend fun savedSuggestName(req: SuggestNameRequest) =
-        core.call("stops.saved_suggest_name", req, SuggestNameRequest.serializer(), NameAnswer.serializer())
+        core.call(
+            "stops.saved_suggest_name",
+            req.copy(locale = req.locale ?: tag()),
+            SuggestNameRequest.serializer(),
+            NameAnswer.serializer(),
+        )
 
     override suspend fun savedShortcut(req: ShortcutRequest) =
         core.call(

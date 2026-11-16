@@ -17,11 +17,6 @@
     <string name="sheet_saved_title">Kayıtlı Duraklar</string>
     <string name="sheet_history_title">Geçmiş</string>
     <string name="sheet_pick_title">Durak Seç</string>
-    <string name="sheet_coming">Yakında</string>
-    <string name="sheet_saved_message">Kayıtlı duraklarınız burada listelenecek.</string>
-    <string name="sheet_history_message">Geçmiş yolculuklarınız burada listelenecek.</string>
-    <string name="sheet_pick_message">Burada arayabilir, bağlantı yapıştırabilir ya da son yolculuklardan birini seçebilirsiniz.</string>
-    <string name="sheet_pick_shared">Duraklar ile paylaşılan: %1$s</string>
     <plurals name="count_stops">
         <item quantity="one">%1$d durak</item>
         <item quantity="other">%1$d durak</item>
@@ -36,7 +31,7 @@
     <string name="qr_title">QR Kodu</string>
     <string name="qr_share">Paylaş</string>
     <string name="saved_empty_title">Kayıtlı Durak Yok</string>
-    <string name="saved_empty_message">Haritada A ve B noktalarını seçin, sonra bir iğnenin menüsünden Durak olarak kaydet\'i seçin.</string>
+    <string name="saved_empty_message">Haritada A ve B noktalarını seçin, sonra “Durak olarak kaydet” düğmesine dokunun.</string>
     <string name="saved_no_match_title">Eşleşen durak yok</string>
     <string name="saved_no_match_message">Başka bir ad deneyin.</string>
     <string name="saved_edit">Düzenle</string>
@@ -68,6 +63,9 @@
     <string name="saved_rename_title">Durağı yeniden adlandır</string>
     <string name="saved_name">Ad</string>
     <string name="saved_save">Kaydet</string>
+    <string name="saved_save_title">Durak olarak kaydet</string>
+    <string name="saved_cancel">Vazgeç</string>
+    <string name="saved_already">Bu noktalar zaten %1$s adıyla kayıtlı.</string>
     <string name="saved_colour">Renk: %1$s</string>
     <string name="saved_colour_orange">Turuncu</string>
     <string name="saved_colour_red">Kırmızı</string>
@@ -93,6 +91,9 @@
     <string name="trip_start">Başlat</string>
     <string name="trip_starting">Başlatılıyor…</string>
     <string name="trip_clear">Temizle</string>
+    <string name="trip_save_stop">Durak olarak kaydet</string>
+    <string name="trip_saved_as">Kayıtlı durak: %1$s</string>
+    <string name="trip_plan_rule">Başlatın; A ile B arasındaki çizgiyi geçtiğinizde alarm çalar, hangi yönden geçerseniz geçin.</string>
     <string name="trip_stop">Durdur</string>
     <string name="trip_stopping">Durduruluyor…</string>
     <string name="trip_stopped">Yolculuk durduruldu</string>
@@ -184,6 +185,7 @@
     <string name="pick_error_no_coordinates">Bu bağlantıda koordinat yok. Bir harita uygulamasında açıp yeri oradan paylaşın.</string>
     <string name="pick_error_out_of_range">Bu koordinatlar haritanın dışında.</string>
     <string name="pick_error_not_a_location">Bu bir konum değil.</string>
+    <string name="pick_failed">Noktalar değiştirilemedi. Yeniden deneyin.</string>
     <string name="pick_confirm_title">Bu noktayı kullan</string>
     <string name="pick_use_a">A olarak kullan</string>
     <string name="pick_use_b">B olarak kullan</string>

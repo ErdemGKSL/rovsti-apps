@@ -21,11 +21,6 @@
     <string name="sheet_saved_title">Saved Stops</string>
     <string name="sheet_history_title">History</string>
     <string name="sheet_pick_title">Pick a Stop</string>
-    <string name="sheet_coming">Coming soon</string>
-    <string name="sheet_saved_message">Your saved stops will be listed here.</string>
-    <string name="sheet_history_message">Your past trips will be listed here.</string>
-    <string name="sheet_pick_message">Search, paste a link or choose a recent trip here.</string>
-    <string name="sheet_pick_shared">Shared with Stops: %1$s</string>
     <plurals name="count_stops">
         <item quantity="one">%1$d stop</item>
         <item quantity="other">%1$d stops</item>
@@ -42,7 +37,7 @@
     <string name="qr_title">QR Code</string>
     <string name="qr_share">Share</string>
     <string name="saved_empty_title">No Saved Stops</string>
-    <string name="saved_empty_message">Set point A and point B on the map, then choose Save as stop in a pin\'s menu.</string>
+    <string name="saved_empty_message">Set point A and point B on the map, then tap “Save as stop”.</string>
     <string name="saved_no_match_title">No stops match</string>
     <string name="saved_no_match_message">Try another name.</string>
     <string name="saved_edit">Edit</string>
@@ -74,6 +69,9 @@
     <string name="saved_rename_title">Rename stop</string>
     <string name="saved_name">Name</string>
     <string name="saved_save">Save</string>
+    <string name="saved_save_title">Save as stop</string>
+    <string name="saved_cancel">Cancel</string>
+    <string name="saved_already">These points are already saved as %1$s.</string>
     <string name="saved_colour">Colour: %1$s</string>
     <string name="saved_colour_orange">Orange</string>
     <string name="saved_colour_red">Red</string>
@@ -99,6 +97,9 @@
     <string name="trip_start">Start</string>
     <string name="trip_starting">Starting…</string>
     <string name="trip_clear">Clear</string>
+    <string name="trip_save_stop">Save as stop</string>
+    <string name="trip_saved_as">Saved as %1$s</string>
+    <string name="trip_plan_rule">Start, and the alarm rings when you cross the line between A and B, from either side.</string>
     <string name="trip_stop">Stop</string>
     <string name="trip_stopping">Stopping…</string>
     <string name="trip_stopped">Trip stopped</string>
@@ -190,6 +191,7 @@
     <string name="pick_error_no_coordinates">This link has no coordinates. Open it in a maps app and share the place from there.</string>
     <string name="pick_error_out_of_range">These coordinates are outside the map.</string>
     <string name="pick_error_not_a_location">This is not a location.</string>
+    <string name="pick_failed">Could not change the points. Try again.</string>
     <string name="pick_confirm_title">Use this point</string>
     <string name="pick_use_a">Use as A</string>
     <string name="pick_use_b">Use as B</string>

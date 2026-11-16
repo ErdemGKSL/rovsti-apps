@@ -125,14 +125,43 @@ class SavedViewModelTest {
         val a = Destination("Market", Coord(SampleStops.here.lat + 0.004, SampleStops.here.lon))
         val b = Destination("Harbour", Coord(SampleStops.here.lat + 0.004, SampleStops.here.lon + 0.004))
         model.onAction(SavedAction.SaveGate(a, b))
+        // First the name is asked for, with an end's own name as the suggestion; nothing is saved yet.
+        val ask = nextEffect() as SavedEffect.AskName
+        assertEquals("Market", ask.name)
+        assertEquals(60, ask.maxChars)
+        assertEquals(2, model.state.value.rows.size)
+        model.onAction(SavedAction.Add("  Morning ferry ", a, b))
         val saved = nextEffect() as SavedEffect.Saved
-        assertTrue(saved.name.isNotBlank())
+        assertEquals("Morning ferry", saved.name)
         assertEquals(3, settled { it.rows.size == 3 }.rows.size)
-        // The same gate again is a duplicate.
-        model.onAction(SavedAction.SaveGate(a, b))
-        assertEquals(SavedEffect.Toast(UiText.Res(R.string.saved_error_duplicate)), nextEffect())
+        // The same gate again is that stop: no second name sheet.
+        model.onAction(SavedAction.SaveGate(b, a))
+        assertEquals(SavedEffect.Toast(UiText.Res(R.string.saved_already, listOf("Morning ferry"))), nextEffect())
         model.onAction(SavedAction.Unsave(saved.id))
         assertEquals(2, settled { it.rows.size == 2 }.rows.size)
+    }
+
+    /** The owner's bug: two dropped pins have no name, and the save failed on an empty one. */
+    @Test fun pinsWithoutANameGetANumberedSuggestionThatSaves() {
+        settled { it.rows.size == 2 }
+        val a = Destination("", Coord(SampleStops.here.lat + 0.004, SampleStops.here.lon))
+        val b = Destination("", Coord(SampleStops.here.lat + 0.004, SampleStops.here.lon + 0.004))
+        model.onAction(SavedAction.SaveGate(a, b))
+        val ask = nextEffect() as SavedEffect.AskName
+        assertEquals("Stop 3", ask.name)
+        model.onAction(SavedAction.Add(ask.name, a, b))
+        assertEquals("Stop 3", (nextEffect() as SavedEffect.Saved).name)
+        // The next one does not reuse the name.
+        val c = Destination("", Coord(SampleStops.here.lat - 0.01, SampleStops.here.lon))
+        val d = Destination("", Coord(SampleStops.here.lat - 0.01, SampleStops.here.lon + 0.004))
+        model.onAction(SavedAction.SaveGate(c, d))
+        assertEquals("Stop 4", (nextEffect() as SavedEffect.AskName).name)
+        // A name the core refuses is said, and nothing is saved.
+        model.onAction(SavedAction.Add("   ", c, d))
+        assertEquals(SavedEffect.Toast(UiText.Res(R.string.saved_error_name)), nextEffect())
+        // Two points that cannot make a stop never reach the name sheet.
+        model.onAction(SavedAction.SaveGate(a, a))
+        assertEquals(SavedEffect.Toast(UiText.Res(R.string.saved_error_gate)), nextEffect())
     }
 
     @Test fun moveStaysInTheGroup() {

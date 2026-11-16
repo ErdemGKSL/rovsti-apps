@@ -35,7 +35,11 @@ pub use identity::{IdentityMapping, IdentityMappings, IdentitySource};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};
 pub use lookup::{LookupCache, LookupUsers, MAX_LOOKUP, WaTarget, WaUser, chat_users, wa_target};
-pub use media::{MAX_SEND_BYTES, MediaTooLarge, check_size, classify};
+pub use media::{
+    MAX_SEND_BYTES, MAX_SEND_THUMBNAIL_BYTES, MediaOptionError, MediaTooLarge, WAVEFORM_LEN,
+    WAVEFORM_MAX, check_size, check_thumbnail, check_view_once, check_waveform, classify,
+    decode_b64, encode_b64,
+};
 pub use meta::{
     ChatAction, ChatActionKind, ChatMeta, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
     EditRecord, KeptContent, Location, MAX_PROFILES, MUTED_FOREVER, MediaMeta, MediaOptions,

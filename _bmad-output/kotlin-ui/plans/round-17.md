@@ -278,3 +278,28 @@ Owner rules stay in force:
 ## Measurements
 
 (filled in by Steps 2, 4 and 6)
+
+## r17-s2 result (R8 proof and native path)
+
+Done: `CardsOpsNativeTest` (real host `librosty_ffi`, no fakes) now renders the contact "+90 532 000 11 22" without a
+birthday on Contact, Birthday and New number, a one-shot animated card (GIF 540 x 675), and an animated render that is
+polled with `cards.cancel` (the answer says whether it runs) and stopped: it answers `cancelled` and leaves no file.
+There is no separate progress op; `cards.cancel`'s `cancelled` flag is the poll. `CardStudioViewModelTest.aFailedRenderIsLoggedByCode`
+checks the masked `RostyLog` line (`render failed: template=... out_unwritable`). Fixtures `number_name`, `out_invalid`,
+`out_unwritable`, `text_missing` were already in `INDEX`, `OPS.md` and `tests/inventory.rs`.
+
+R8 check, `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk`, `dexdump -d classes.dex`
+(app classes are renamed by R8, so the names come from `mapping.txt`; each obfuscated class descriptor was found in the dex):
+
+```
+Class descriptor  : 'Ldev/rosty/core/RustNative;'          (kept by core-bridge consumer-rules.pro)
+NativeCardsOps                      -> e13   present
+CardRenderRequest / $$serializer    -> ku / iu   present
+CardRenderResult  / $$serializer    -> nu / lu   present
+CardSpec          / $$serializer    -> xu / vu   present
+CardCancelRequest / $$serializer    -> lt / jt   present
+CardCancelAnswer  / $$serializer    -> ht / ft   present
+const-string "cards.render", "cards.cancel" present ("cards.templates" is unused in production and shrunk)
+```
+No new keep rule is needed: the models are `@Serializable` (plugin serializers, no reflection) and `NativeCardsOps`
+is reached by code, not by name.

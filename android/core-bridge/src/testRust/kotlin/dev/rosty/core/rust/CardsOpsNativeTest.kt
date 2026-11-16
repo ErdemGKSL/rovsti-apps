@@ -1,14 +1,21 @@
 package dev.rosty.core.rust
 
 import dev.rosty.core.Outcome
+import dev.rosty.core.RustDispatcher
 import dev.rosty.core.RustError
+import dev.rosty.core.call
+import dev.rosty.core.ops.CardCancelAnswer
+import dev.rosty.core.ops.CardCancelRequest
 import dev.rosty.core.ops.CardPalette
 import dev.rosty.core.ops.CardRenderRequest
 import dev.rosty.core.ops.CardRenderResult
 import dev.rosty.core.ops.CardSpec
 import dev.rosty.core.ops.CardTemplate
 import dev.rosty.core.ops.NativeCardsOps
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -79,14 +86,14 @@ class CardsOpsNativeTest {
     /** The owner's device report: the contact's name is its number and it has no birthday. */
     @Test
     fun aContactNamedWithItsNumberAndNoBirthdayRendersEveryTemplate() {
-        val number = "+90 555 000 12 34"
+        val number = "+90 532 000 11 22"
         val contact =
             CardSpec(
                 template = CardTemplate.Contact,
                 palette = CardPalette.Ink,
                 texts = mapOf("name" to number, "title" to number, "numbers" to number),
                 photo = "content://com.android.contacts/contacts/7/photo",
-                initials = "+3",
+                initials = "+9",
                 qr = "BEGIN:VCARD\nVERSION:3.0\nTEL:$number\nEND:VCARD\n",
             )
         assertPng(render(contact, "contact.png"), 720, 900)
@@ -145,5 +152,45 @@ class CardsOpsNativeTest {
             val templates = (ops.templates() as Outcome.Ok).value
             assertEquals(CardTemplate.entries.toList(), templates.templates.map { it.id })
             assertEquals(CardPalette.entries.toList(), templates.palettes)
+        }
+
+    /** A render on its own thread, polled with `cards.cancel` (it answers whether the render is running) and stopped. */
+    @Test
+    fun anAnimatedRenderIsSeenRunningAndCancelled() =
+        runBlocking {
+            val spec =
+                CardSpec(
+                    template = CardTemplate.Contact,
+                    palette = CardPalette.Dusk,
+                    animated = true,
+                    texts = mapOf("title" to "Ayşe Yılmaz", "numbers" to "+90 532 000 11 22"),
+                    initials = "AY",
+                )
+            val out = File(dir, "cancelled.gif").path
+            val render = async(RustDispatcher) { ops.render(CardRenderRequest(spec, out)) }
+            var stopped = false
+            repeat(400) {
+                if (!stopped && !render.isCompleted) {
+                    val answer =
+                        withContext(RustDispatcher) {
+                            TestRust.core.call(
+                                "cards.cancel",
+                                CardCancelRequest(out),
+                                CardCancelRequest.serializer(),
+                                CardCancelAnswer.serializer(),
+                            )
+                        }
+                    stopped = (answer as Outcome.Ok).value.cancelled
+                    if (!stopped) delay(5)
+                }
+            }
+            val result = render.await()
+            if (stopped) {
+                assertEquals("cancelled", (result as Outcome.Err).error.message)
+                assertFalse(File(out).exists())
+            } else {
+                // The render beat every poll; it must then have finished whole.
+                assertPng(result.let { (it as Outcome.Ok).value }.copy(frames = 1), 540, 675)
+            }
         }
 }

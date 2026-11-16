@@ -127,7 +127,7 @@ fun OverlayController.presentCardStudio(
     return entry
 }
 
-/** The sheet body: template picker, preview, one row of colours, the Animated switch, then Share and Save. */
+/** The sheet body: template picker, the Animated switch, preview, one row of colours, then Share and Save. */
 @Composable
 internal fun ColumnScope.CardStudioContent(
     state: CardStudioState,
@@ -150,8 +150,8 @@ internal fun ColumnScope.CardStudioContent(
             onSelect = { onAction(CardStudioAction.PickTemplate(templates[it])) },
             modifier = Modifier.fillMaxWidth().testTag(CardStudioTags.Templates),
         )
-        Preview(state, Modifier.weight(1f).fillMaxWidth())
-        Swatches(state.palette) { onAction(CardStudioAction.PickPalette(it)) }
+        // Above the preview, not beside the buttons: the "..." menu opens upward from the button row and must never
+        // cover the switch.
         IosToggle(
             checked = state.animated && state.canAnimate,
             onCheckedChange = { onAction(CardStudioAction.SetAnimated(it)) },
@@ -159,6 +159,8 @@ internal fun ColumnScope.CardStudioContent(
             label = stringResource(R.string.card_studio_animated),
             enabled = state.canAnimate,
         )
+        Preview(state, Modifier.weight(1f).fillMaxWidth())
+        Swatches(state.palette) { onAction(CardStudioAction.PickPalette(it)) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
             IosButton(
                 title = stringResource(R.string.card_studio_save),
@@ -190,10 +192,12 @@ private fun ShareMore(
     val overlays = LocalOverlayOrNull.current
     var anchor by remember { mutableStateOf(Rect.Zero) }
     val label = stringResource(R.string.card_studio_share_still)
+    val saveLabel = stringResource(R.string.card_studio_save_still)
     val items =
-        remember(label) {
+        remember(label, saveLabel) {
             persistentListOf<MenuItem>(
                 MenuItem.Action(label = label, onClick = { onAction(CardStudioAction.ShareAsStill) }),
+                MenuItem.Action(label = saveLabel, onClick = { onAction(CardStudioAction.SaveAsStill) }),
             )
         }
     IosButton(
@@ -241,7 +245,15 @@ private fun Preview(
     state: CardStudioState,
     modifier: Modifier,
 ) {
-    val description = stringResource(R.string.card_studio_preview)
+    val description =
+        stringResource(
+            when (state.template) {
+                CardTemplate.Birthday -> R.string.card_studio_preview_birthday
+                CardTemplate.Contact -> R.string.card_studio_preview_contact
+                CardTemplate.NewNumber -> R.string.card_studio_preview_number
+            },
+            state.subject.name,
+        )
     val rendering = stringResource(R.string.card_studio_rendering)
     val colors = RostyTheme.colors
     Box(modifier, contentAlignment = Alignment.Center) {

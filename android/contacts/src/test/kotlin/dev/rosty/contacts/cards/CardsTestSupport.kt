@@ -28,6 +28,9 @@ internal class FakeCardsOps : CardsOps {
     val renders = CopyOnWriteArrayList<CardRenderRequest>()
     val cancelled = CopyOnWriteArrayList<String>()
 
+    /** The requests answered with the drawn placeholder instead of a Rust golden; the screenshot tests assert none. */
+    val placeholders = CopyOnWriteArrayList<CardRenderRequest>()
+
     /** While set, a render waits for it. */
     @Volatile var gate: CompletableDeferred<Unit>? = null
 
@@ -49,6 +52,7 @@ internal class FakeCardsOps : CardsOps {
                 CardRenderResult(req.out, GOLDEN_W, GOLDEN_H, file.length(), if (req.spec.animated) 24 else 1),
             )
         }
+        placeholders += req
         val bitmap = draw(req)
         FileOutputStream(req.out).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         return Outcome.Ok(
@@ -66,16 +70,36 @@ internal class FakeCardsOps : CardsOps {
         cancelled += out
     }
 
-    /** The Rust golden of this spec, if one exists (Dawn, Ayşe Yılmaz, English or Turkish). */
+    /**
+     * The Rust golden of this spec, if one exists: the goldens are keyed by template, palette and (for the birthday) the
+     * language of the title, and are only used for the sample contact. Dawn birthday en/tr, Ink birthday tr, Dawn and
+     * Lagoon contact, Meadow new number.
+     */
     private fun golden(req: CardRenderRequest): File? {
         val spec = req.spec
-        if (spec.palette != CardPalette.Dawn || spec.texts["name"] != StudioSamples.birthday.name) return null
-        val title = spec.texts["title"].orEmpty()
+        if (spec.texts["name"] != StudioSamples.birthday.name) return null
+        val turkish = spec.texts["title"].orEmpty().startsWith("Doğum")
         val name =
             when (spec.template) {
-                CardTemplate.Birthday -> if (title.startsWith("Doğum")) "birthday-dawn-tr" else "birthday-dawn-en"
-                CardTemplate.Contact -> "contact-dawn-en"
-                CardTemplate.NewNumber -> null
+                CardTemplate.Birthday -> {
+                    when {
+                        spec.palette == CardPalette.Dawn -> if (turkish) "birthday-dawn-tr" else "birthday-dawn-en"
+                        spec.palette == CardPalette.Ink && turkish -> "birthday-ink-tr"
+                        else -> null
+                    }
+                }
+
+                CardTemplate.Contact -> {
+                    when (spec.palette) {
+                        CardPalette.Dawn -> "contact-dawn-en"
+                        CardPalette.Lagoon -> "contact-lagoon-en"
+                        else -> null
+                    }
+                }
+
+                CardTemplate.NewNumber -> {
+                    if (spec.palette == CardPalette.Meadow) "number-meadow-tr" else null
+                }
             } ?: return null
         return File(GOLDENS, "$name.png").takeIf { it.isFile }
     }

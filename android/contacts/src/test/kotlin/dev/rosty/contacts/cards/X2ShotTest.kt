@@ -18,6 +18,8 @@ import dev.rosty.core.ops.CardPalette
 import dev.rosty.testing.ShotTest
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.robolectric.annotation.Config
 
@@ -58,6 +60,8 @@ class X2ShotTest : ShotTest() {
             r.show(dark, fontScale)
             r.open()
             steps(r)
+            assertTrue("$name: the Rust golden answered every render", r.ops.renders.isNotEmpty())
+            assertEquals("$name: no placeholder card", emptyList<Any>(), r.ops.placeholders.toList())
             capture(name, dark)
         }
     }
@@ -73,13 +77,11 @@ class X2ShotTest : ShotTest() {
 
     @Test fun gifRendering() =
         studio("x2-card-preview-gif") { r ->
-            compose
-                .onNodeWithTag(
-                    CardStudioTags.Animated,
-                ).performTouchInput { click(centerRight.copy(x = right - 40f)) }
-            r.settle(3)
+            animatedReady(r)
+            // A colour that has a golden (Dawn again after Dusk is not needed): hold the next render open so the ring
+            // shows over the finished picture. The toggle has settled by now (animatedReady runs the clock).
             r.ops.gate = CompletableDeferred()
-            compose.onNodeWithTag(CardStudioTags.swatch(CardPalette.Dusk)).performClick()
+            compose.onNodeWithTag(CardStudioTags.swatch(CardPalette.Lagoon)).performClick()
             advance(300)
             r.settle(2)
         }

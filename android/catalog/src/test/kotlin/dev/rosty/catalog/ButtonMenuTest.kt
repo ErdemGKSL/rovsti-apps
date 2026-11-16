@@ -146,6 +146,8 @@ class ButtonMenuTest : ShotTest() {
                 worst = maxOf(worst, kotlin.math.abs(((a[i] shr shift) and 0xFF) - ((b[i] shr shift) and 0xFF)))
             }
         }
-        assertTrue("trigger differs from an untouched one by $worst (> 6)", worst <= 6)
+        // The menu's own soft shadow reaches the trigger a little. The light scrim is 0.14 (it was 0.28 when this bound was
+        // 6), which dims that residue less, so the bound is 8; a ghost of the anchor would differ by far more.
+        assertTrue("trigger differs from an untouched one by $worst (> 8)", worst <= 8)
     }
 }

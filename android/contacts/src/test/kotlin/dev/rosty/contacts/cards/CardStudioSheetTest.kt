@@ -1,5 +1,7 @@
 package dev.rosty.contacts.cards
 
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -11,6 +13,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.height
@@ -182,6 +185,72 @@ class CardStudioSheetTest : ShotTest() {
                 .last()
                 .second,
         )
+    }
+
+    private fun openMenu(r: CardStudioRig) {
+        r.files.staged = android.net.Uri.parse("content://x/card.gif")
+        compose
+            .onNodeWithTag(CardStudioTags.Animated)
+            .performTouchInput { click(centerRight.copy(x = right - 40f)) }
+        r.settle(3)
+        compose.onNodeWithTag(CardStudioTags.ShareMore).performClick()
+        advance(1200)
+        r.settle(2)
+    }
+
+    private fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+
+    /** F3: the menu opens upward, right-aligned to the button, inside the window and clear of the toggle. */
+    @Test fun theMoreMenuOpensUpwardInsideTheWindowAndLeavesTheToggleAlone() {
+        val r = rig()
+        openMenu(r)
+        val menu = bounds("menu-card")
+        val button = bounds(CardStudioTags.ShareMore)
+        val toggle = bounds(CardStudioTags.Animated)
+        val window = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        assertTrue("inside the window $menu in $window", menu.left >= window.left && menu.right <= window.right)
+        assertTrue("inside the window", menu.top >= window.top && menu.bottom <= window.bottom)
+        assertTrue("above the button row: ${menu.bottom} vs ${button.top}", menu.bottom <= button.top)
+        assertTrue("right-aligned to the button", kotlin.math.abs(menu.right - button.right) <= button.width)
+        val overlapsX = menu.left < toggle.right && menu.right > toggle.left
+        val overlapsY = menu.top < toggle.bottom && menu.bottom > toggle.top
+        assertFalse(
+            "the menu never covers (or half covers) the Animated row: $menu over $toggle",
+            overlapsX && overlapsY,
+        )
+        compose.onNodeWithText("Share as still image").assertIsDisplayed()
+        compose.onNodeWithText("Save as still image").assertIsDisplayed()
+    }
+
+    @Test fun saveAsStillSavesTheFirstFrame() {
+        val r = rig()
+        openMenu(r)
+        compose.onNodeWithText("Save as still image").performClick()
+        advance(800)
+        r.settle(3)
+        assertEquals(
+            true,
+            r.files.stagedCards
+                .last()
+                .second,
+        )
+        assertEquals(1, r.files.gallery.size)
+    }
+
+    @Test fun thePreviewIsDescribedByWhoItIsFor() {
+        rig()
+        compose
+            .onNodeWithTag(CardStudioTags.Preview)
+            .assertContentDescriptionEquals("Birthday card for Ayşe Yılmaz")
+    }
+
+    @Config(qualifiers = "+tr")
+    @Test
+    fun thePreviewDescriptionIsTurkish() {
+        rig()
+        compose
+            .onNodeWithTag(CardStudioTags.Preview)
+            .assertContentDescriptionEquals("Ayşe Yılmaz için doğum günü kartı")
     }
 }
 

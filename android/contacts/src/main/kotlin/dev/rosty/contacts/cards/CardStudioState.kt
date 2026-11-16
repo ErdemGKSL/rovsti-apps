@@ -121,6 +121,9 @@ sealed interface CardStudioAction {
 
     data object Save : CardStudioAction
 
+    /** Save the first frame of an animated card to Pictures/Rosty as a still image. */
+    data object SaveAsStill : CardStudioAction
+
     /** The sheet left the screen: cancels the running render. */
     data object Close : CardStudioAction
 }

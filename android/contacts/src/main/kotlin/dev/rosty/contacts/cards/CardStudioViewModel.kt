@@ -94,6 +94,10 @@ class CardStudioViewModel(
                 scope.launch { share(asStill = true) }
             }
 
+            CardStudioAction.SaveAsStill -> {
+                scope.launch { saveStill() }
+            }
+
             CardStudioAction.Save -> {
                 scope.launch { save() }
             }
@@ -176,6 +180,21 @@ class CardStudioViewModel(
     private suspend fun save() {
         val shown = mutable.value.preview ?: return
         val saved = files.saveToGallery(shown.path, shareName(extension(shown)), mimeOf(shown))
+        outbox.trySend(
+            CardStudioEffect.Toast(
+                UiText.Res(if (saved) R.string.contacts_saved_to_photos else R.string.contacts_cant_save_image),
+            ),
+        )
+        if (!saved) outbox.trySend(CardStudioEffect.Reject)
+    }
+
+    /** Saves the first frame of the animated card as a JPEG or PNG; the same toast and reject haptic as [save]. */
+    private suspend fun saveStill() {
+        val shown = mutable.value.preview ?: return
+        val card = files.stageCard(shown.path, asStill = true)
+        val saved =
+            card != null &&
+                files.saveToGallery(card.file.path, shareName(card.format.extension), card.mime)
         outbox.trySend(
             CardStudioEffect.Toast(
                 UiText.Res(if (saved) R.string.contacts_saved_to_photos else R.string.contacts_cant_save_image),

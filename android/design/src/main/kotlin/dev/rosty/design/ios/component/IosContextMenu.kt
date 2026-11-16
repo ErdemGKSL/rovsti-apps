@@ -254,7 +254,7 @@ open class IosContextMenuEntry(
                     if (targetState) tween(180, easing = MenuEnterEasing) else tween(140, easing = MenuExitEasing)
                 },
                 label = "scrim",
-            ) { open -> if (open) ScrimAlpha else 0f }
+            ) { open -> if (open) scrimTarget else 0f }
 
         // Anchor lift: iOS raises the pressed view a few percent as it leaves the page.
         val liftScale =

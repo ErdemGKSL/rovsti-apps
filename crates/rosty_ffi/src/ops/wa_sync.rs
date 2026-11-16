@@ -16,6 +16,11 @@
 //! `wa_sync.media_settle` reports each, `wa_sync.media_evict` and `wa_sync.media_reconcile` answer the files to
 //! delete, `wa_sync.media_stats` and `wa_sync.media_cap` serve the settings screen.
 //!
+//! Media of a chat and what the owner did with it: `wa_sync.chat_media` pages the photos, videos, audio and
+//! documents of a chat both ways (a viewer), `wa_sync.media_viewed` marks a view-once message opened (its file
+//! is handed back for deletion and never fetched again), `wa_sync.mark_played` queues the played receipt of a
+//! received voice note, once.
+//!
 //! The gateway and the account: `wa_sync.note_status` takes the gateway's epoch, account epoch, own ids and
 //! history progress (another epoch is a gap, another account empties the store), `wa_sync.account_changed` takes
 //! the gateway's announcement of an account change, `wa_sync.history` reads the progress back;
@@ -31,11 +36,11 @@ use crate::state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
     self, Action, AppliedEvents, ChatRekeyed, ChatRow, Conditions, Decision, Due, Eviction, Fetch,
-    FetchPage, Fetched, HistoryProgress, HistoryReport, IdentityApplied, IdentityCaughtUp,
-    MediaDue, MediaEntry, MediaQueued, MediaSettled, MediaState, MediaStats, MessageRow, Network,
-    Observed, Opened, OutboxItem, Outcome, Reconciled, ResolvedId, Settled, StarredCursor,
-    StarredPage, StatusNote, StatusNoted, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor,
-    ThreadPage, Wiped,
+    FetchPage, Fetched, GalleryPage, HistoryProgress, HistoryReport, IdentityApplied,
+    IdentityCaughtUp, Kind, MediaDue, MediaEntry, MediaQueued, MediaSettled, MediaState,
+    MediaStats, MessageRow, Network, Observed, Opened, OutboxItem, Outcome, Played, Reconciled,
+    ResolvedId, Settled, StarredCursor, StarredPage, StatusNote, StatusNoted, Store, StoredChats,
+    StoredPage, SyncPlan, ThreadCursor, ThreadPage, Viewed, Wiped,
 };
 use rosty_wa_proto::{
     EventEnvelope, GroupInfo, IdentityMappings, InstanceStatus, RichChat, RichMessage, WaProfile,
@@ -213,6 +218,27 @@ pub(super) const OPS: &[OpSpec] = &[
         WithHandle<MediaCapAns>,
         media_cap,
         media_cap_cases
+    ),
+    op!(
+        "wa_sync.chat_media",
+        ChatMediaReq,
+        GalleryPage,
+        chat_media,
+        chat_media_cases
+    ),
+    op!(
+        "wa_sync.media_viewed",
+        MediaViewedReq,
+        WithHandle<Viewed>,
+        media_viewed,
+        media_viewed_cases
+    ),
+    op!(
+        "wa_sync.mark_played",
+        MarkPlayedReq,
+        WithHandle<Played>,
+        mark_played,
+        mark_played_cases
     ),
     op!(
         "wa_sync.note_status",
@@ -904,6 +930,14 @@ fn thread_cases() -> Vec<Case> {
             json!({"handle": H, "chat": ALI, "limit": 2, "before": {"timestamp_ms": NOW - 4_000, "id": "A2"}}),
         )),
         on_sample(Case::named("media", json!({"handle": H, "chat": GROUP, "limit": 50}))),
+        // A voice note with its waveform (played), a GIF, and a view-once photo that was opened.
+        on_marked(Case::named("media_round", json!({"handle": H, "chat": ALI, "limit": 3}))),
+        // A view-once message Ali sent, which only the phone can open: a placeholder row.
+        on_sample(Case::named("placeholder", json!({"handle": H, "chat": ALI, "limit": 1})))
+            .after("wa_sync.apply_events", placeholder_events()),
+        // A view-once voice note that waits in the outbox shows what it was queued with.
+        on_sample(Case::named("media_waiting", json!({"handle": H, "chat": ALI, "limit": 1})))
+            .after("wa_sync.outbox_enqueue", voice_send_req("v1")),
         // An edit and a reaction that wait in the outbox show on their messages.
         on_sample(Case::named("pending", json!({"handle": H, "chat": ALI, "limit": 50})))
             .after(
@@ -1028,6 +1062,25 @@ fn outbox_enqueue_cases() -> Vec<Case> {
             json!({"kind": "send_media", "file": "/data/user/0/dev.rosty.messages/files/outbox/c2.jpg",
                 "media": "image", "mime": "image/jpeg", "size": 4096, "caption": "bak", "quoted_id": "A1"}),
         ),
+        // Everything a media send can carry: preview, pixel size, GIF flag, view once.
+        queue(
+            "media_options",
+            json!({"kind": "send_media", "file": "/data/user/0/dev.rosty.messages/files/outbox/c3.mp4",
+                "media": "video", "mime": "video/mp4", "size": 90000, "seconds": 4,
+                "thumbnail_b64": "/9j/4A==", "width": 640, "height": 360, "animated": true, "view_once": true}),
+        ),
+        on_sample(Case::named("voice_note", voice_send_req("voice_note"))),
+        // A waveform that is not 64 samples is refused before it is queued.
+        queue(
+            "bad_waveform",
+            json!({"kind": "send_media", "file": "/f/v.ogg", "media": "audio", "mime": "audio/ogg", "size": 9,
+                "voice_note": true, "waveform_b64": "AAEC"}),
+        ),
+        // A played receipt has its own op.
+        queue(
+            "mark_played",
+            json!({"kind": "mark_played", "message_id": "A1"}),
+        ),
         queue(
             "edit",
             json!({"kind": "edit", "message_id": "A2", "text": "selam :)"}),
@@ -1082,6 +1135,18 @@ fn outbox_due_cases() -> Vec<Case> {
             "empty",
             json!({"handle": H, "now_ms": NOW, "network_back": true}),
         )),
+        // A played receipt and a media send with its options go out like any other row (one per chat: the
+        // receipt was written first).
+        on_media_round(Case::named(
+            "mark_played",
+            json!({"handle": H, "now_ms": NOW + 10}),
+        ))
+        .after("wa_sync.mark_played", played_req("p1", "VOICE")),
+        on_sample(Case::named(
+            "media_options",
+            json!({"handle": H, "now_ms": NOW + 10}),
+        ))
+        .after("wa_sync.outbox_enqueue", voice_send_req("v1")),
     ]
 }
 
@@ -1126,6 +1191,17 @@ fn outbox_settle_cases() -> Vec<Case> {
         )),
         // Its echo confirmed it meanwhile (or it was cancelled): done, nothing to send again.
         on_sample(Case::named("gone", settle(json!({"kind": "sent"})))),
+        // A refused played receipt is dropped: no failed row stays behind, and the message stays played.
+        on_media_round(Case::named(
+            "played_rejected",
+            json!({"handle": H, "now_ms": NOW + 500, "client_id": "p1",
+                "outcome": {"kind": "error", "error": "rejected", "message": "no such message"}}),
+        ))
+        .after("wa_sync.mark_played", played_req("p1", "VOICE"))
+        .after(
+            "wa_sync.outbox_due",
+            json!({"handle": H, "now_ms": NOW + 10}),
+        ),
         // A refused star is undone and dropped: no failed row stays behind.
         on_sample(Case::named(
             "star_rejected",
@@ -1526,6 +1602,19 @@ fn media_enqueue_cases() -> Vec<Case> {
         on_sample(Case::named("cached", enqueue_media_req(true, None)))
             .after("wa_sync.media_set", media_set_req("G1")),
         on_sample(Case::named("no_network", enqueue_media_req(false, None))),
+        // View once: never by itself, by the tap that opens it, and never again once it was opened.
+        on_media_round(Case::named(
+            "view_once_auto",
+            json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": "ONCE", "network": "wifi"}),
+        )),
+        on_media_round(Case::named(
+            "view_once_tap",
+            json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": "ONCE", "tap": true}),
+        )),
+        on_marked(Case::named(
+            "view_once_viewed",
+            json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": "ONCE", "tap": true}),
+        )),
         on_sample(Case::named(
             "unknown",
             json!({"handle": H, "now_ms": NOW, "chat": GROUP, "id": "nope", "tap": true}),
@@ -1629,6 +1718,219 @@ fn media_settle_cases() -> Vec<Case> {
             req["id"] = json!("nope");
             req
         })),
+    ]
+}
+
+// ---- wa_sync.chat_media, wa_sync.media_viewed, wa_sync.mark_played
+
+/// 64 samples rising from 0, as base64.
+fn waveform_b64() -> String {
+    STANDARD.encode((0..64).collect::<Vec<u8>>())
+}
+
+fn media_event(seq: u64, id: &str, ts: i64, kind: &str, mime: &str) -> Value {
+    event(
+        seq,
+        json!({"id": id, "chat": ALI, "sender": ALI, "from_me": false, "timestamp_ms": ts,
+            "body": {"media": {"kind": kind, "caption": null, "mime": mime, "size": 1000}}, "reactions": []}),
+        "message",
+    )
+}
+
+fn media_meta_event(seq: u64, id: &str, media: Value) -> Value {
+    event(
+        seq,
+        json!({"chat": ALI, "id": id, "meta": {"media": media}}),
+        "message_meta",
+    )
+}
+
+/// Ali sends two photos, a document, a GIF, a view-once photo and a voice note with its waveform.
+fn media_round_events() -> Value {
+    json!({"handle": H, "events": [
+        media_event(20, "M1", NOW - 900, "image", "image/jpeg"),
+        media_event(21, "M2", NOW - 800, "image", "image/jpeg"),
+        media_event(22, "D1", NOW - 700, "document", "application/pdf"),
+        media_meta_event(23, "D1", json!({"file_name": "rapor.pdf", "pages": 2})),
+        media_event(24, "GIF", NOW - 600, "video", "video/mp4"),
+        media_meta_event(25, "GIF", json!({"seconds": 2, "width": 320, "height": 240, "animated": true})),
+        media_event(26, "ONCE", NOW - 500, "image", "image/jpeg"),
+        media_meta_event(27, "ONCE", json!({"view_once": true})),
+        media_event(28, "VOICE", NOW - 400, "audio", "audio/ogg; codecs=opus"),
+        media_meta_event(29, "VOICE", json!({"seconds": 7, "voice_note": true, "waveform_b64": waveform_b64()})),
+    ]})
+}
+
+/// Ali sends a view-once photo, which reaches linked devices as a placeholder only.
+fn placeholder_events() -> Value {
+    json!({"handle": H, "events": [
+        event(
+            40,
+            json!({"id": "VO1", "chat": ALI, "sender": ALI, "from_me": false, "timestamp_ms": NOW - 100,
+                "body": "unsupported", "reactions": []}),
+            "message",
+        ),
+        event(41, json!({"chat": ALI, "id": "VO1", "meta": {"unavailable": "view_once"}}), "message_meta"),
+    ]})
+}
+
+/// A case on the sample store that also holds [`media_round_events`].
+fn on_media_round(case: Case) -> Case {
+    on_sample(case).after("wa_sync.apply_events", media_round_events())
+}
+
+fn viewed_req() -> Value {
+    json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": "ONCE"})
+}
+
+fn played_req(client_id: &str, id: &str) -> Value {
+    json!({"handle": H, "now_ms": NOW, "client_id": client_id, "chat": ALI, "id": id})
+}
+
+/// A case on the media store whose view-once photo was opened and whose voice note was played.
+fn on_marked(case: Case) -> Case {
+    on_media_round(case)
+        .after("wa_sync.media_viewed", viewed_req())
+        .after("wa_sync.mark_played", played_req("p1", "VOICE"))
+}
+
+/// A view-once voice note with its waveform, queued under `client_id`.
+fn voice_send_req(client_id: &str) -> Value {
+    json!({"handle": H, "now_ms": NOW, "client_id": client_id, "chat": ALI,
+        "action": {"kind": "send_media", "file": "/data/user/0/dev.rosty.messages/files/outbox/v1.ogg",
+            "media": "audio", "mime": "audio/ogg; codecs=opus", "size": 5000, "seconds": 7, "voice_note": true,
+            "waveform_b64": waveform_b64(), "view_once": true}})
+}
+
+#[derive(Deserialize)]
+struct ChatMediaReq {
+    handle: i64,
+    chat: String,
+    limit: u32,
+    /// Only media older than this row (`older` of a page, or the `timestamp_ms` and `id` of any row).
+    #[serde(default)]
+    before: Option<ThreadCursor>,
+    /// Only media newer than this row (`newer` of a page, or any row). Alone: the page right above it.
+    #[serde(default)]
+    after: Option<ThreadCursor>,
+    /// `image`, `video`, `document`, `audio`. Left out or empty: images and videos.
+    #[serde(default)]
+    kinds: Vec<Kind>,
+}
+
+fn chat_media(req: ChatMediaReq) -> Result<GalleryPage, FfiError> {
+    with(req.handle, |store| {
+        store.chat_media(
+            &req.chat,
+            req.limit,
+            req.before.as_ref(),
+            req.after.as_ref(),
+            &req.kinds,
+        )
+    })
+}
+
+fn chat_media_cases() -> Vec<Case> {
+    let ask = |label: &'static str, extra: Value| {
+        let mut req = json!({"handle": H, "chat": ALI, "limit": 2});
+        for (key, value) in extra.as_object().into_iter().flatten() {
+            req[key.as_str()] = value.clone();
+        }
+        on_media_round(Case::named(label, req))
+    };
+    vec![
+        // Images and videos, newest first; the view-once photo is left out.
+        on_media_round(Case::new(json!({"handle": H, "chat": ALI, "limit": 2}))),
+        ask(
+            "older",
+            json!({"before": {"timestamp_ms": NOW - 800, "id": "M2"}}),
+        ),
+        // A viewer opened on the oldest photo pages up.
+        ask(
+            "newer",
+            json!({"after": {"timestamp_ms": NOW - 900, "id": "M1"}}),
+        ),
+        ask(
+            "kinds",
+            json!({"limit": 50, "kinds": ["document", "audio"]}),
+        ),
+        ask("not_gallery", json!({"kinds": ["sticker"]})),
+        on_sample(Case::named(
+            "empty",
+            json!({"handle": H, "chat": ALI, "limit": 50}),
+        )),
+        // The LID of a chat that merged into its number reads the same gallery.
+        on_merged(Case::named(
+            "old_key",
+            json!({"handle": H, "chat": ALI_LID, "limit": 50}),
+        ))
+        .after("wa_sync.apply_events", media_round_events()),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MediaViewedReq {
+    handle: i64,
+    now_ms: i64,
+    chat: String,
+    id: String,
+}
+
+fn media_viewed(req: MediaViewedReq) -> Result<WithHandle<Viewed>, FfiError> {
+    with(req.handle, |store| {
+        store.media_viewed(&req.chat, &req.id, req.now_ms)
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+fn media_viewed_cases() -> Vec<Case> {
+    let once = |id: &str| json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": id, "tap": true});
+    vec![
+        // Opened by a tap, downloaded, then viewed: the file is handed back to delete.
+        on_media_round(Case::new(viewed_req()))
+            .after("wa_sync.media_enqueue", once("ONCE"))
+            .after(
+                "wa_sync.media_settle",
+                json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": "ONCE",
+                    "outcome": {"kind": "ready", "path": "/media/once.jpg", "bytes": 1000}}),
+            ),
+        on_marked(Case::named("again", viewed_req())),
+        on_media_round(Case::named(
+            "not_view_once",
+            json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": "M1"}),
+        )),
+        on_media_round(Case::named(
+            "unknown",
+            json!({"handle": H, "now_ms": NOW, "chat": ALI, "id": "nope"}),
+        )),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MarkPlayedReq {
+    handle: i64,
+    now_ms: i64,
+    /// The caller's random id of this receipt; queuing it twice is one row.
+    client_id: String,
+    chat: String,
+    /// The received voice note that was played.
+    id: String,
+}
+
+fn mark_played(req: MarkPlayedReq) -> Result<WithHandle<Played>, FfiError> {
+    with(req.handle, |store| {
+        store.mark_played(&req.client_id, &req.chat, &req.id, req.now_ms)
+    })
+    .map(|out| handled(req.handle, out))
+}
+
+fn mark_played_cases() -> Vec<Case> {
+    vec![
+        on_media_round(Case::new(played_req("p1", "VOICE"))),
+        // Played before: nothing is queued again.
+        on_marked(Case::named("again", played_req("p2", "VOICE"))),
+        on_media_round(Case::named("not_a_voice_note", played_req("p1", "M1"))),
+        on_media_round(Case::named("unknown", played_req("p1", "nope"))),
     ]
 }
 

@@ -4,7 +4,7 @@ use rosty_wa_proto::event::ReceiptKind;
 use rosty_wa_proto::{
     ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, EventEnvelope, GatewayEvent,
     HistorySyncType, Location, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction, RichChat,
-    SharedContact, WaMessage, is_status_chat,
+    SharedContact, Unavailable, WaMessage, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -15,7 +15,7 @@ use super::identity::{self, Canon, Ids};
 use super::model::{AppliedEvents, Content, Kind};
 use super::{Result, authors, link_state, outbox};
 
-/// Location, contact card and mentions of a message, one JSON column.
+/// Location, contact card, mentions and the placeholder reason of a message, one JSON column.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(super) struct Extra {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -24,6 +24,9 @@ pub(super) struct Extra {
     pub contact: Option<SharedContact>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<String>,
+    /// The message reached the gateway as a placeholder only (view once): nothing to show or fetch here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<Unavailable>,
 }
 
 /// The gateway-owned columns of a message row.
@@ -234,6 +237,8 @@ pub(super) fn merge(existing: Option<Stored>, incoming: &Incoming<'_>) -> Option
             row.edited_ms = Some(edited_at);
         }
         row.content = new;
+        // The content came after all: no longer a placeholder.
+        row.extra.unavailable = None;
     }
 
     if let Some(meta) = content_meta {
@@ -249,6 +254,9 @@ pub(super) fn merge(existing: Option<Stored>, incoming: &Incoming<'_>) -> Option
         row.extra.contact = meta.contact.clone().or(row.extra.contact);
         if !meta.mentions.is_empty() {
             row.extra.mentions.clone_from(&meta.mentions);
+        }
+        if !row.content.is_known() {
+            row.extra.unavailable = meta.unavailable.or(row.extra.unavailable);
         }
     }
     if let Some(meta) = meta {

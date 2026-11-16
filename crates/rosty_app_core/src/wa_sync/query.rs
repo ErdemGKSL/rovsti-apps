@@ -7,23 +7,35 @@ use rusqlite::{Connection, Row, params};
 use super::apply::{self, COLUMN_COUNT, COLUMNS, Stored};
 use super::media::MediaState;
 use super::model::{
-    ChatRow, MessageRow, PendingOp, RowState, StarredCursor, StarredPage, ThreadCursor, ThreadPage,
+    ChatRow, GalleryPage, Kind, MessageRow, PendingOp, RowState, StarredCursor, StarredPage,
+    ThreadCursor, ThreadPage,
 };
 use super::store::Store;
-use super::{Result, outbox};
+use super::{Error, Result, outbox};
 
 /// The largest thread page.
 pub const MAX_THREAD_PAGE: u32 = 500;
 
+/// The largest gallery page.
+pub const MAX_GALLERY_PAGE: u32 = 200;
+/// What a gallery shows when the caller names no kinds.
+pub const GALLERY_KINDS: [Kind; 2] = [Kind::Image, Kind::Video];
+/// The condition of the `messages_gallery` index, word for word (SQLite uses a partial index only when the
+/// query repeats its condition), then what a gallery never shows: view-once media.
+const GALLERY_ROWS: &str = "kind IN ('image', 'video', 'audio', 'document') AND deleted = 0
+    AND COALESCE(json_extract(media_json, '$.view_once'), 0) = 0";
+
 /// `id`, `chat`, the gateway columns, then whether a thumbnail is stored, the cached file, the client id, the
-/// wire sender and the state of the full file. Read from `messages` under its own name.
+/// wire sender, the state of the full file and the two local marks (viewed, played). Read from `messages` under
+/// its own name.
 fn row_columns() -> String {
     format!(
         "id, chat, {COLUMNS}, thumb IS NOT NULL,
          (SELECT path FROM media WHERE media.chat = messages.chat AND media.id = messages.id
             AND media.state = 'ready'),
          client_id, wire_sender,
-         (SELECT state FROM media WHERE media.chat = messages.chat AND media.id = messages.id)"
+         (SELECT state FROM media WHERE media.chat = messages.chat AND media.id = messages.id),
+         viewed_ms IS NOT NULL, played_ms IS NOT NULL"
     )
 }
 
@@ -55,6 +67,7 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         location: stored.extra.location,
         contact: stored.extra.contact,
         mentions: stored.extra.mentions,
+        unavailable: stored.extra.unavailable,
         has_thumbnail: row.get(tail)?,
         media_path: row.get(tail + 1)?,
         media_state: row
@@ -65,6 +78,8 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         wire_sender: row.get(tail + 3)?,
         error: None,
         pending: Vec::new(),
+        viewed: row.get(tail + 5)?,
+        played: row.get(tail + 6)?,
     })
 }
 
@@ -246,6 +261,131 @@ impl Store {
             id: last.id.clone(),
         });
         Ok(StarredPage { items, next })
+    }
+
+    /// A page of the media of a chat, newest first: at most `limit` stored messages of `kinds`
+    /// ([`GALLERY_KINDS`] when empty; photos, videos, audio and documents can be asked for) that are older than
+    /// `before` and newer than `after`. With `after` alone the page is the one right above the cursor, so a
+    /// viewer pages both ways from the message it opened on: a cursor is the `timestamp_ms` and `id` of any
+    /// row. Left out: deleted messages, view-once media, sends still in the outbox and what the thread does
+    /// not show (messages cleared on another device).
+    ///
+    /// `chat` may be any id of the chat ([`Store::stored_key`]).
+    pub fn chat_media(
+        &self,
+        chat: &str,
+        limit: u32,
+        before: Option<&ThreadCursor>,
+        after: Option<&ThreadCursor>,
+        kinds: &[Kind],
+    ) -> Result<GalleryPage> {
+        let kinds = if kinds.is_empty() {
+            &GALLERY_KINDS[..]
+        } else {
+            kinds
+        };
+        let in_gallery = |kind: &Kind| {
+            matches!(
+                kind,
+                Kind::Image | Kind::Video | Kind::Audio | Kind::Document
+            )
+        };
+        if let Some(other) = kinds.iter().find(|kind| !in_gallery(kind)) {
+            return Err(Error::Invalid(format!(
+                "a gallery has images, videos, audio and documents, not {}",
+                other.as_str()
+            )));
+        }
+        // `,image,video,`: matched with `instr`, so the statement is the same for every choice of kinds.
+        let wanted: String = kinds.iter().fold(String::from(","), |mut list, kind| {
+            list.push_str(kind.as_str());
+            list.push(',');
+            list
+        });
+        let chat = self.stored_key(chat);
+        let chat = chat.as_str();
+        let limit = limit.clamp(1, MAX_GALLERY_PAGE);
+        let cleared_ts: i64 = self
+            .conn
+            .query_row(
+                "SELECT cleared_ts FROM chats WHERE jid = ?1",
+                [chat],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap_or(None)
+            .unwrap_or(i64::MIN);
+        let (before_ts, before_id) = before.map_or((i64::MAX, ""), |cursor| {
+            (cursor.timestamp_ms, cursor.id.as_str())
+        });
+        let (after_ts, after_id) = after.map_or((i64::MIN, ""), |cursor| {
+            (cursor.timestamp_ms, cursor.id.as_str())
+        });
+        // With `after` alone the rows nearest above the cursor are wanted: read upwards, then turn the page.
+        let upwards = after.is_some() && before.is_none();
+        let order = if upwards { "ASC" } else { "DESC" };
+        let sql = format!(
+            "SELECT {} FROM messages
+             WHERE chat = ?1 AND {GALLERY_ROWS} AND ts > ?2 AND instr(?3, ',' || kind || ',') > 0
+                AND (?4 OR ts < ?5 OR (ts = ?5 AND id < ?6))
+                AND (?7 OR ts > ?8 OR (ts = ?8 AND id > ?9))
+             ORDER BY ts {order}, id {order} LIMIT ?10",
+            row_columns()
+        );
+        let mut stmt = self.conn.prepare_cached(&sql)?;
+        let mut items: Vec<MessageRow> = stmt
+            .query_map(
+                params![
+                    chat,
+                    cleared_ts,
+                    wanted,
+                    before.is_none(),
+                    before_ts,
+                    before_id,
+                    after.is_none(),
+                    after_ts,
+                    after_id,
+                    limit
+                ],
+                read_row,
+            )?
+            .collect::<rusqlite::Result<_>>()?;
+        if upwards {
+            items.reverse();
+        }
+        // Whether media lies beyond either end of the page, whatever window was asked for.
+        let beyond = |older: bool, edge: &MessageRow| -> Result<Option<ThreadCursor>> {
+            let side = if older {
+                "(ts < ?4 OR (ts = ?4 AND id < ?5))"
+            } else {
+                "(ts > ?4 OR (ts = ?4 AND id > ?5))"
+            };
+            let sql = format!(
+                "SELECT EXISTS (SELECT 1 FROM messages
+                 WHERE chat = ?1 AND {GALLERY_ROWS} AND ts > ?2 AND instr(?3, ',' || kind || ',') > 0
+                    AND {side})"
+            );
+            let found: bool = self.conn.prepare_cached(&sql)?.query_row(
+                params![chat, cleared_ts, wanted, edge.timestamp_ms, edge.id],
+                |row| row.get(0),
+            )?;
+            Ok(found.then(|| ThreadCursor {
+                timestamp_ms: edge.timestamp_ms,
+                id: edge.id.clone(),
+            }))
+        };
+        let older = match items.last() {
+            Some(last) => beyond(true, last)?,
+            None => None,
+        };
+        let newer = match items.first() {
+            Some(first) => beyond(false, first)?,
+            None => None,
+        };
+        Ok(GalleryPage {
+            items,
+            older,
+            newer,
+        })
     }
 
     /// One stored message. `chat` may be any id of the chat ([`Store::stored_key`]).

@@ -45,10 +45,13 @@ data class ForwardTarget(
     val smsAddress: String? = null,
     val waJid: String? = null,
 ) {
-    /** The conversation to open with [text] in its composer. */
-    fun route(text: String): MessagesRoute =
+    /** The conversation to open with [text] in its composer and, in a WhatsApp chat, the file [attach] above it. */
+    fun route(
+        text: String,
+        attach: String? = null,
+    ): MessagesRoute =
         when (channel) {
-            Channel.WhatsApp -> MessagesRoute.WaThread(requireNotNull(waJid), draft = text)
+            Channel.WhatsApp -> MessagesRoute.WaThread(requireNotNull(waJid), draft = text, attach = attach)
             else -> MessagesRoute.SmsThread(requireNotNull(smsThread), listOfNotNull(smsAddress), draft = text)
         }
 
@@ -98,7 +101,8 @@ object ForwardTags {
 
 /**
  * "Forward to" (E6.8, M9): a search field over the inbox's chats. A pick opens that conversation with [text] in its
- * composer, so the person sees what goes out and sends it (or edits it) there.
+ * composer, so the person sees what goes out and sends it (or edits it) there. With a file to [attach] (a WhatsApp
+ * photo, video or document, E6-WA R3) only WhatsApp chats are offered, and the file waits above the composer.
  */
 fun OverlayController.presentForward(
     c: Context,
@@ -106,6 +110,7 @@ fun OverlayController.presentForward(
     exclude: String?,
     text: String,
     onOpen: (MessagesRoute) -> Unit,
+    attach: String? = null,
 ) {
     val controller = this
     present(
@@ -113,9 +118,9 @@ fun OverlayController.presentForward(
             title = c.getString(R.string.forward_title),
             detents = persistentListOf(Detent.Medium, Detent.Large),
         ) { _ ->
-            ForwardSheet(c, rows, exclude) { target ->
+            ForwardSheet(c, rows, exclude, whatsAppOnly = attach != null) { target ->
                 controller.dismissAll()
-                onOpen(target.route(text))
+                onOpen(target.route(text, attach))
             }
         },
     )
@@ -126,10 +131,18 @@ private fun ForwardSheet(
     c: Context,
     rows: List<InboxRowUi>,
     exclude: String?,
+    whatsAppOnly: Boolean,
     onPick: (ForwardTarget) -> Unit,
 ) {
     val field = rememberTextFieldState()
-    val targets by remember(rows, exclude) { derivedStateOf { ForwardTarget.of(rows, field.text.toString(), exclude) } }
+    val targets by remember(rows, exclude, whatsAppOnly) {
+        derivedStateOf {
+            ForwardTarget
+                .of(rows, field.text.toString(), exclude)
+                .filter { !whatsAppOnly || it.channel == Channel.WhatsApp }
+                .map { if (whatsAppOnly) it.copy(both = false) else it }
+        }
+    }
     val sms = c.getString(R.string.forward_via_sms)
     val wa = c.getString(R.string.forward_via_whatsapp)
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag(ForwardTags.Sheet)) {

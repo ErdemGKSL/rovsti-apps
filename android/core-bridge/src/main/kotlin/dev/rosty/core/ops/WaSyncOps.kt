@@ -12,6 +12,7 @@ import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncCaughtUp
+import dev.rosty.core.model.wa.WaSyncChatMediaRequest
 import dev.rosty.core.model.wa.WaSyncChatsAnswer
 import dev.rosty.core.model.wa.WaSyncChatsRequest
 import dev.rosty.core.model.wa.WaSyncClientIdRequest
@@ -22,10 +23,12 @@ import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
+import dev.rosty.core.model.wa.WaSyncMarkPlayedRequest
 import dev.rosty.core.model.wa.WaSyncMedia
 import dev.rosty.core.model.wa.WaSyncMediaCap
 import dev.rosty.core.model.wa.WaSyncMediaCapRequest
@@ -43,6 +46,7 @@ import dev.rosty.core.model.wa.WaSyncMediaSettleRequest
 import dev.rosty.core.model.wa.WaSyncMediaSettled
 import dev.rosty.core.model.wa.WaSyncMediaStats
 import dev.rosty.core.model.wa.WaSyncMediaStatsRequest
+import dev.rosty.core.model.wa.WaSyncMediaViewedRequest
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
 import dev.rosty.core.model.wa.WaSyncNoteStatusRequest
@@ -56,6 +60,7 @@ import dev.rosty.core.model.wa.WaSyncOutboxAnswer
 import dev.rosty.core.model.wa.WaSyncOutboxEditRequest
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncPlayed
 import dev.rosty.core.model.wa.WaSyncReconcileRequest
 import dev.rosty.core.model.wa.WaSyncReconciled
 import dev.rosty.core.model.wa.WaSyncRekeyedAnswer
@@ -74,6 +79,7 @@ import dev.rosty.core.model.wa.WaSyncStoredChats
 import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.model.wa.WaSyncViewed
 import dev.rosty.core.model.wa.WaSyncWipeRequest
 import dev.rosty.core.model.wa.WaSyncWiped
 import kotlinx.serialization.builtins.nullable
@@ -166,6 +172,15 @@ interface WaSyncOps {
     /** Reads the media cap, or sets it first. */
     suspend fun mediaCap(req: WaSyncMediaCapRequest): Outcome<WaSyncMediaCap>
 
+    /** A page of the photos, videos, audio and documents of a chat, newest first, by cursor both ways. */
+    suspend fun chatMedia(req: WaSyncChatMediaRequest): Outcome<WaSyncGalleryPage>
+
+    /** The owner opened a view-once message: its file is handed back for deletion and never fetched again. */
+    suspend fun mediaViewed(req: WaSyncMediaViewedRequest): Outcome<WaSyncViewed>
+
+    /** Queues the played receipt of a received voice note, once per message. */
+    suspend fun markPlayed(req: WaSyncMarkPlayedRequest): Outcome<WaSyncPlayed>
+
     /** Takes in the gateway's epoch, account epoch, own ids and history progress. */
     suspend fun noteStatus(req: WaSyncNoteStatusRequest): Outcome<WaSyncStatusNoted>
 
@@ -229,6 +244,9 @@ interface WaSyncOps {
                 "wa_sync.media_reconcile",
                 "wa_sync.media_stats",
                 "wa_sync.media_cap",
+                "wa_sync.chat_media",
+                "wa_sync.media_viewed",
+                "wa_sync.mark_played",
                 "wa_sync.note_status",
                 "wa_sync.account_changed",
                 "wa_sync.history",
@@ -348,6 +366,15 @@ class NativeWaSyncOps(
 
     override suspend fun mediaCap(req: WaSyncMediaCapRequest) =
         core.call("wa_sync.media_cap", req, WaSyncMediaCapRequest.serializer(), WaSyncMediaCap.serializer())
+
+    override suspend fun chatMedia(req: WaSyncChatMediaRequest) =
+        core.call("wa_sync.chat_media", req, WaSyncChatMediaRequest.serializer(), WaSyncGalleryPage.serializer())
+
+    override suspend fun mediaViewed(req: WaSyncMediaViewedRequest) =
+        core.call("wa_sync.media_viewed", req, WaSyncMediaViewedRequest.serializer(), WaSyncViewed.serializer())
+
+    override suspend fun markPlayed(req: WaSyncMarkPlayedRequest) =
+        core.call("wa_sync.mark_played", req, WaSyncMarkPlayedRequest.serializer(), WaSyncPlayed.serializer())
 
     override suspend fun noteStatus(req: WaSyncNoteStatusRequest) =
         core.call("wa_sync.note_status", req, WaSyncNoteStatusRequest.serializer(), WaSyncStatusNoted.serializer())

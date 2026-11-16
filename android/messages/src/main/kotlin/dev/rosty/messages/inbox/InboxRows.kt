@@ -71,6 +71,8 @@ data class InboxRowUi(
     val inSpam: Boolean = false,
     /** The one sender of the SMS thread is on the system blocklist. */
     val blocked: Boolean = false,
+    /** [snippet] says what the other side does right now ("typing…", "recording audio…"): drawn in the accent. */
+    val live: Boolean = false,
 ) {
     val isUnread: Boolean get() = unread > 0 || markedUnread
 
@@ -288,6 +290,7 @@ fun waPreview(
     meta: MessageMeta,
     words: InboxWords,
 ): String {
+    meta.unavailable?.let { return words.unavailable(it) }
     meta.location?.let { return words.location(it.live, it.name ?: it.address) }
     meta.contact?.let { return words.contact(it.displayName) }
     return when (body) {
@@ -305,6 +308,8 @@ fun waPreview(
                     true
                 ) {
                     words.voice(m.seconds)
+                } else if (m?.viewOnce == true) {
+                    words.viewOnce(body.kind)
                 } else {
                     words.media(body.kind, body.caption)
                 }

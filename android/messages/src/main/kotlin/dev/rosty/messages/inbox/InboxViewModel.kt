@@ -37,6 +37,7 @@ import dev.rosty.messages.spam.MarkOutcome
 import dev.rosty.messages.spam.SpamActions
 import dev.rosty.messages.spam.SpamFacts
 import dev.rosty.messages.spam.SpamVerdicts
+import dev.rosty.messages.wa.WaChatState
 import dev.rosty.messages.wa.WaChats
 import dev.rosty.messages.wa.toInboxThread
 import dev.rosty.platform.sms.SmsRepository
@@ -86,6 +87,8 @@ class InboxSources(
     val cleanup: CodeCleanup? = null,
     /** The name-order rule for the rows no contact owns (WhatsApp name, else the number). */
     val names: PersonNames = PersonNames({ null }, emptyFlow<Unit>()),
+    /** The WhatsApp chats whose other side types or records right now (E6-WA R3), by chat key. */
+    val chatStates: Flow<Map<String, WaChatState>> = flowOf(emptyMap()),
 )
 
 /**
@@ -111,6 +114,9 @@ class InboxViewModel(
     @Volatile private var view: InboxView = InboxView.Empty
     private val verdicts = SpamVerdicts(sources.ops)
     private val waByJid = MutableStateFlow<Map<String, RichChat>>(emptyMap())
+
+    /** "typing…", "recording audio…" by WhatsApp chat key: shown in place of the row's snippet while it lasts. */
+    @Volatile private var liveLines: Map<String, String> = emptyMap()
 
     init {
         viewModelScope.launch { sources.store.load() }
@@ -165,6 +171,12 @@ class InboxViewModel(
                 }
         }
         viewModelScope.launch { sources.roleHeld.collect { held -> stateFlow.update { it.copy(roleHeld = held) } } }
+        viewModelScope.launch(default) {
+            sources.chatStates.distinctUntilChanged().collect { states ->
+                liveLines = linesOf(states)
+                stateFlow.update { reshape(it) }
+            }
+        }
     }
 
     private data class Snapshot(
@@ -238,6 +250,13 @@ class InboxViewModel(
         return out
     }
 
+    /** The live line of each chat: who (in a group) types or records. */
+    private suspend fun linesOf(states: Map<String, WaChatState>): Map<String, String> =
+        states.mapValues { (chat, state) ->
+            val who = if (WaIds.isGroup(chat)) sources.names.sender(state.who, null) else null
+            words.chatState(who, state.recording)
+        }
+
     /** Passcodes of rows whose newest message is an unread incoming SMS (GPUI shows the chip only while unread). */
     private suspend fun otps(
         rows: List<InboxRow>,
@@ -290,8 +309,15 @@ class InboxViewModel(
                     allSelected = keys.size == shown.size && shown.isNotEmpty(),
                 )
             }
+        val lines = liveLines
         return base.copy(
-            rows = shown.toImmutableList(),
+            rows =
+                shown
+                    .map { row ->
+                        row.waChat
+                            ?.let(lines::get)
+                            ?.let { line -> row.copy(snippet = line, draft = false, live = true) } ?: row
+                    }.toImmutableList(),
             chips = (if (base.folder == InboxFolder.Inbox) chips else emptyList()).toImmutableList(),
             filter = filter,
             archivedCount = v.archived.size,

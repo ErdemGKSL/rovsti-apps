@@ -10,6 +10,7 @@ import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCancelled
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncCaughtUp
+import dev.rosty.core.model.wa.WaSyncChatMediaRequest
 import dev.rosty.core.model.wa.WaSyncChatsAnswer
 import dev.rosty.core.model.wa.WaSyncChatsRequest
 import dev.rosty.core.model.wa.WaSyncClientIdRequest
@@ -20,10 +21,12 @@ import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
+import dev.rosty.core.model.wa.WaSyncMarkPlayedRequest
 import dev.rosty.core.model.wa.WaSyncMedia
 import dev.rosty.core.model.wa.WaSyncMediaCap
 import dev.rosty.core.model.wa.WaSyncMediaCapRequest
@@ -41,6 +44,7 @@ import dev.rosty.core.model.wa.WaSyncMediaSettleRequest
 import dev.rosty.core.model.wa.WaSyncMediaSettled
 import dev.rosty.core.model.wa.WaSyncMediaStats
 import dev.rosty.core.model.wa.WaSyncMediaStatsRequest
+import dev.rosty.core.model.wa.WaSyncMediaViewedRequest
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
 import dev.rosty.core.model.wa.WaSyncNoteStatusRequest
@@ -54,6 +58,7 @@ import dev.rosty.core.model.wa.WaSyncOutboxAnswer
 import dev.rosty.core.model.wa.WaSyncOutboxEditRequest
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncPlayed
 import dev.rosty.core.model.wa.WaSyncReconcileRequest
 import dev.rosty.core.model.wa.WaSyncReconciled
 import dev.rosty.core.model.wa.WaSyncRekeyedAnswer
@@ -72,6 +77,7 @@ import dev.rosty.core.model.wa.WaSyncStoredChats
 import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.model.wa.WaSyncViewed
 import dev.rosty.core.model.wa.WaSyncWipeRequest
 import dev.rosty.core.model.wa.WaSyncWiped
 import kotlinx.serialization.KSerializer
@@ -109,7 +115,17 @@ object WaSyncContracts : ContractModels {
             op<WaSyncChatsRequest, WaSyncChatsAnswer>("wa_sync.chats", ok = listOf("empty", "merged"))
             op<WaSyncThreadRequest, WaSyncThreadPage>(
                 "wa_sync.thread",
-                ok = listOf("older", "media", "pending", "unknown_chat", "old_key"),
+                ok =
+                    listOf(
+                        "older",
+                        "media",
+                        "media_round",
+                        "placeholder",
+                        "media_waiting",
+                        "pending",
+                        "unknown_chat",
+                        "old_key",
+                    ),
             )
             op<WaSyncResolveRequest, WaSyncResolved?>(
                 "wa_sync.identity_resolve",
@@ -133,13 +149,16 @@ object WaSyncContracts : ContractModels {
             op<WaSyncStarredRequest, WaSyncStarredPage>("wa_sync.starred", ok = listOf("older", "unstarred", "empty"))
             op<WaSyncEnqueueRequest, WaSyncItemAnswer>(
                 "wa_sync.outbox_enqueue",
-                ok = listOf("media", "edit", "revoke", "react", "mark_read", "star"),
-                err = listOf("no_chat"),
+                ok = listOf("media", "media_options", "voice_note", "edit", "revoke", "react", "mark_read", "star"),
+                err = listOf("no_chat", "bad_waveform", "mark_played"),
             )
-            op<WaSyncDueRequest, WaSyncDue>("wa_sync.outbox_due", ok = listOf("sending", "empty"))
+            op<WaSyncDueRequest, WaSyncDue>(
+                "wa_sync.outbox_due",
+                ok = listOf("sending", "empty", "mark_played", "media_options"),
+            )
             op<WaSyncSettleRequest, WaSyncSettled>(
                 "wa_sync.outbox_settle",
-                ok = listOf("network", "rate_limited", "rejected", "gone", "star_rejected"),
+                ok = listOf("network", "rate_limited", "rejected", "gone", "star_rejected", "played_rejected"),
             )
             op<WaSyncClientIdRequest, WaSyncCancelled>("wa_sync.outbox_cancel", ok = listOf("in_flight"))
             op<WaSyncOutboxEditRequest, WaSyncItemAnswer>("wa_sync.outbox_edit", err = listOf("in_flight", "gone"))
@@ -162,8 +181,23 @@ object WaSyncContracts : ContractModels {
             )
             op<WaSyncMediaEnqueueRequest, WaSyncMediaQueued>(
                 "wa_sync.media_enqueue",
-                ok = listOf("held", "tap", "cached"),
+                ok = listOf("held", "tap", "cached", "view_once_auto", "view_once_tap", "view_once_viewed"),
                 err = listOf("no_network", "unknown"),
+            )
+            op<WaSyncChatMediaRequest, WaSyncGalleryPage>(
+                "wa_sync.chat_media",
+                ok = listOf("older", "newer", "kinds", "empty", "old_key"),
+                err = listOf("not_gallery"),
+            )
+            op<WaSyncMediaViewedRequest, WaSyncViewed>(
+                "wa_sync.media_viewed",
+                ok = listOf("again"),
+                err = listOf("not_view_once", "unknown"),
+            )
+            op<WaSyncMarkPlayedRequest, WaSyncPlayed>(
+                "wa_sync.mark_played",
+                ok = listOf("again"),
+                err = listOf("not_a_voice_note", "unknown"),
             )
             op<WaSyncMediaDueRequest, WaSyncMediaDue>("wa_sync.media_due", ok = listOf("held", "downloading", "empty"))
             op<WaSyncMediaSettleRequest, WaSyncMediaSettled>(

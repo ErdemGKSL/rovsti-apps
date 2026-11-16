@@ -4,6 +4,12 @@ import androidx.compose.ui.unit.dp
 
 /** The sizes of bubble media, the reply swipe and the composer bars (E6.4b) that are not design tokens. */
 internal object MediaMetrics {
+    /** A sticker fits in a square this big, its aspect kept (WhatsApp's own size). */
+    val Sticker = 160.dp
+
+    /** The glyph of a view-once row (the 1 in a circle). */
+    val ViewOnceGlyph = 24.dp
+
     /** A picture in a bubble is at most this wide, so a portrait one does not fill the screen. */
     val PictureMax = 232.dp
 
@@ -42,8 +48,67 @@ internal object MediaMetrics {
     /** The composer pill is 44 dp tall: the attach button sits centred beside its last line. */
     val AttachLift = 4.dp
 
+    /** E6-WA R3: the voice note recorder. A slide this far toward the start edge cancels, this far up locks. */
+    val RecordCancel = 120.dp
+    val RecordLock = 72.dp
+
+    /** The microphone disc; held, it grows past its 48 dp target (drawn outside it). */
+    val MicDisc = 40.dp
+    val MicGlyph = 22.dp
+
+    /** The centre of the composer's send slot above the pill's bottom and from its end: 6 dp inset + half of 32 dp. */
+    val SlotCentre = 22.dp
+
+    /** The recording row ends this far from the pill's end: clear of the held disc (40 dp x 1.4 round the slot). */
+    val HoldingEnd = 56.dp
+
+    /** The composer pill is this tall on one line (`:design` ComposerField). */
+    val ComposerPill = 44.dp
+    val HintGlyph = 14.dp
+    val RecDot = 10.dp
+    val MeterWidth = 28.dp
+    val MeterHeight = 20.dp
+    val BarMin = 2.dp
+    val BarMax = 3.dp
+    val LockWidth = 36.dp
+    val LockGlyph = 16.dp
+    val PanelCorner = 22.dp
+    val StopRing = 36.dp
+    val StopSquare = 14.dp
+    val StopCorner = 3.dp
+
+    /** The bars of a voice note's waveform in the player are at most this tall. */
+    val WaveHeight = 24.dp
+
     /** The sender card (M50). */
     val CardAvatar = 48.dp
     val CardWidth = 280.dp
     val Hairline = 0.5.dp
+
+    // ---- the media viewer (E6-WA R3)
+
+    /** The disc of a download mark in the viewer and its glyph. */
+    val ViewerDisc = 56.dp
+    val ViewerDiscGlyph = 26.dp
+
+    /** The rounded touch area of the Download button (disc and label). */
+    val ViewerDownloadCorner = 16.dp
+
+    /** A long caption scrolls past this height instead of covering the photo. */
+    val ViewerCaptionMax = 120.dp
+
+    /** The grid of the icon set (`RostyIcons`), which the viewer's own glyphs follow. */
+    val IconGrid = 24.dp
+
+    /** E6-WA R3: the send preview of picked files (buttons, the strip, a document page). */
+    val BatchTouch = 48.dp
+    val BatchButton = 44.dp
+    val BatchGlyph = 24.dp
+    val BatchSmallGlyph = 16.dp
+    val BatchMark = 56.dp
+    val BatchThumb = 52.dp
+    val BatchRing = 2.dp
+    val BatchDocTile = 96.dp
+    val BatchDocGlyph = 48.dp
+    val BatchDocName = 280.dp
 }

@@ -11,7 +11,6 @@ import dev.rosty.core.model.wa.EditMessage
 import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MarkRead
-import dev.rosty.core.model.wa.MediaOptions
 import dev.rosty.core.model.wa.RevokeMessage
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
@@ -205,8 +204,8 @@ class GatewayWaRemote(
                                 mime = action.mime,
                                 caption = action.caption,
                                 path = action.file,
-                                options =
-                                    MediaOptions(action.quotedId, action.fileName, action.seconds, action.voiceNote),
+                                // Preview, pixel size, waveform, GIF flag and view once travel with the row.
+                                options = action.options(),
                             ),
                         ).map { WaSyncOutcome.Sent(it.messageId, it.timestampMs) }
                 }
@@ -229,6 +228,13 @@ class GatewayWaRemote(
 
                 is WaSyncAction.MarkRead -> {
                     gateway.markRead(MarkRead(chat, action.sender, action.ids)).map { WaSyncOutcome.Sent() }
+                }
+
+                // The played receipt of a voice note (`WaSyncStore.markPlayed`).
+                is WaSyncAction.MarkPlayed -> {
+                    gateway
+                        .markPlayed(MarkRead(chat, action.sender, listOf(action.messageId)))
+                        .map { WaSyncOutcome.Sent() }
                 }
 
                 // E6.13: the account's own star (M10).

@@ -148,9 +148,16 @@ class NewConversationViewModel(
             val number = e164(option.number) ?: option.number
             val answer = (waOps.target(WaTargetRequest(listOf(number), emptyList())) as? Outcome.Ok)?.value
             val draft = ui.value.share?.text
+            // The files shared in (one or several) open the send preview of the chat (E6-WA R3).
+            val files =
+                ui.value.share
+                    ?.files()
+                    .orEmpty()
             when (val target = answer?.target) {
                 is WaTarget.Chat -> {
-                    effectChannel.trySend(NewConversationEffect.Open(MessagesRoute.WaThread(target.jid, draft)))
+                    effectChannel.trySend(
+                        NewConversationEffect.Open(MessagesRoute.WaThread(target.jid, draft, share = files)),
+                    )
                 }
 
                 is WaTarget.Number -> {
@@ -163,7 +170,9 @@ class NewConversationViewModel(
                         }
 
                         user?.onWhatsapp == true -> {
-                            effectChannel.trySend(NewConversationEffect.Open(MessagesRoute.WaThread(user.jid, draft)))
+                            effectChannel.trySend(
+                                NewConversationEffect.Open(MessagesRoute.WaThread(user.jid, draft, share = files)),
+                            )
                         }
 
                         else -> {

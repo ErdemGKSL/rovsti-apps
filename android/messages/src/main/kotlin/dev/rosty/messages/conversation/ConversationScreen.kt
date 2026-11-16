@@ -7,12 +7,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -42,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -53,6 +56,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -164,6 +168,10 @@ class ConversationActions(
     val senderCard: (@Composable (BubbleUi) -> Unit)? = null,
     /** E6.13: the menu of a bubble opened at this rect (the "Remind me" popover grows out of the same place). */
     val onMenuOpened: (BubbleUi, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
+    /** E6-WA R3: the microphone beside the empty composer (voice notes); null: no microphone. */
+    val record: RecordActions? = null,
+    /** E6-WA R3: where the pictures on screen are, for the viewer's flight; null: nothing is tracked. */
+    val mediaAnchors: MediaAnchors? = null,
 )
 
 /** The labels of the tools on a conversation page. */
@@ -197,6 +205,8 @@ fun ConversationScreen(
     selectLabels: SelectLabels? = null,
     /** The voice note in the player (M17). */
     voice: VoiceUi? = null,
+    /** E6-WA R3: the voice note being recorded in the composer ([ConversationActions.record]). */
+    record: RecordUi? = null,
     /** Added to the composer's text field (a content receiver for pasted pictures, M46). */
     composerModifier: Modifier = Modifier,
     /** A long press on Send with the composer's text (E6.10 "Send later"); null: Send has no long press. */
@@ -216,6 +226,8 @@ fun ConversationScreen(
     val sendLater by rememberUpdatedState(onSendLongPress)
     val haptics = LocalRostyHaptics.current
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    // Back after a long time away: the newest message, not where it was left.
+    ScrollToNewestAfterAway(listState)
     // Find, jump to date: scroll the target into view once, then let the tools know.
     LaunchedEffect(tools.scrollTo) {
         val target = tools.scrollTo ?: return@LaunchedEffect
@@ -383,54 +395,69 @@ fun ConversationScreen(
                                 onSend = { actions.onSend(composer.text.toString()) },
                             )
                         }
-                        val attach = actions.attachMenu.isNotEmpty()
-                        Box {
-                            ComposerField(
-                                state = composer,
-                                onSend = actions.onSend,
-                                modifier =
-                                    if (attach) {
-                                        Modifier.padding(start = MediaMetrics.AttachButton + Spacing.xs)
-                                    } else {
+                        val recorder = actions.record
+                        val holding = record?.phase == RecordPhase.Holding
+                        if (recorder != null && record != null && !holding) {
+                            RecordPanel(record, recorder)
+                        } else {
+                            val attach = actions.attachMenu.isNotEmpty() && !holding
+                            val drag = remember { RecordDrag() }
+                            Box {
+                                ComposerField(
+                                    state = composer,
+                                    onSend = actions.onSend,
+                                    enabled = !holding,
+                                    modifier =
+                                        if (attach) {
+                                            Modifier.padding(start = MediaMetrics.AttachButton + Spacing.xs)
+                                        } else {
+                                            Modifier
+                                        },
+                                    fieldModifier =
                                         Modifier
-                                    },
-                                fieldModifier =
-                                    Modifier
-                                        .testTag(ConversationTags.Composer)
-                                        .then(composerModifier)
-                                        .then(
-                                            if (onSendLongPress == null) {
-                                                Modifier
-                                            } else {
-                                                Modifier
-                                                    .sendLongPress(rtl, armed = { composer.text.isNotBlank() }) {
-                                                        haptics.longPress()
-                                                        sendLater?.invoke(composer.text.toString())
-                                                    }.semantics {
-                                                        if (sendLaterLabel != null) {
-                                                            customActions =
-                                                                listOf(
-                                                                    CustomAccessibilityAction(sendLaterLabel) {
-                                                                        sendLater?.invoke(composer.text.toString())
-                                                                        true
-                                                                    },
-                                                                )
+                                            .testTag(ConversationTags.Composer)
+                                            .then(composerModifier)
+                                            .then(
+                                                if (onSendLongPress == null) {
+                                                    Modifier
+                                                } else {
+                                                    Modifier
+                                                        .sendLongPress(rtl, armed = { composer.text.isNotBlank() }) {
+                                                            haptics.longPress()
+                                                            sendLater?.invoke(composer.text.toString())
+                                                        }.semantics {
+                                                            if (sendLaterLabel != null) {
+                                                                customActions =
+                                                                    listOf(
+                                                                        CustomAccessibilityAction(sendLaterLabel) {
+                                                                            sendLater?.invoke(composer.text.toString())
+                                                                            true
+                                                                        },
+                                                                    )
+                                                            }
                                                         }
-                                                    }
-                                            },
-                                        ),
-                                placeholder = mode.placeholder,
-                                sendLabel = sendLabel,
-                            )
-                            if (attach) {
-                                AttachButton(
-                                    actions.attachMenu,
-                                    Modifier
-                                        .align(Alignment.BottomStart)
-                                        .navigationBarsPadding()
-                                        .imeOverlapPadding(excludeNavigationBar = false)
-                                        .padding(start = Spacing.gutter, bottom = Spacing.s + MediaMetrics.AttachLift),
+                                                },
+                                            ),
+                                    placeholder = if (holding) "" else mode.placeholder,
+                                    sendLabel = sendLabel,
                                 )
+                                if (attach) {
+                                    AttachButton(
+                                        actions.attachMenu,
+                                        Modifier
+                                            .align(Alignment.BottomStart)
+                                            .navigationBarsPadding()
+                                            .imeOverlapPadding(excludeNavigationBar = false)
+                                            .padding(
+                                                start = Spacing.gutter,
+                                                bottom =
+                                                    Spacing.s + MediaMetrics.AttachLift,
+                                            ),
+                                    )
+                                }
+                                if (recorder != null) {
+                                    Microphone(composer, state.attachment == null, record, recorder, drag)
+                                }
                             }
                         }
                     }
@@ -456,6 +483,74 @@ fun ConversationScreen(
         }
     }
 }
+
+/**
+ * E6-WA R3: the microphone in the send slot of the empty composer, the recording row over the pill while it is held
+ * and the lock capsule above it. Drawn over [ComposerField] (siblings in its box), so the field's own gestures never
+ * see the hold.
+ */
+@Composable
+private fun BoxScope.Microphone(
+    composer: TextFieldState,
+    noAttachment: Boolean,
+    record: RecordUi?,
+    actions: RecordActions,
+    drag: RecordDrag,
+) {
+    val holding = record?.phase == RecordPhase.Holding
+    val empty by remember(composer) { derivedStateOf { composer.text.isEmpty() } }
+    if (!holding && !(empty && noAttachment)) return
+    val dock =
+        Modifier
+            .navigationBarsPadding()
+            .imeOverlapPadding(excludeNavigationBar = false)
+            .padding(horizontal = Spacing.gutter, vertical = Spacing.s)
+    if (record != null && holding) {
+        HoldingRow(
+            record,
+            drag,
+            Modifier
+                .align(Alignment.BottomStart)
+                .then(dock)
+                .fillMaxWidth()
+                .height(MediaMetrics.ComposerPill)
+                .padding(start = Spacing.l, end = MediaMetrics.HoldingEnd),
+        )
+    }
+    // The 48 dp target is centred on the 32 dp send slot of the pill.
+    val toCentre = MediaMetrics.SlotCentre - Sizes.touch / 2
+    LockPill(
+        shown = holding,
+        drag = drag,
+        modifier =
+            Modifier
+                .align(Alignment.BottomEnd)
+                .then(dock)
+                .padding(
+                    end = toCentre + (Sizes.touch - MediaMetrics.LockWidth) / 2,
+                    bottom = MediaMetrics.ComposerPill,
+                ).above(Spacing.l),
+    )
+    MicButton(
+        holding = holding,
+        level = { record?.level ?: 0f },
+        actions = actions,
+        drag = drag,
+        modifier =
+            Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .imeOverlapPadding(excludeNavigationBar = false)
+                .padding(end = Spacing.gutter + toCentre, bottom = Spacing.s + toCentre),
+    )
+}
+
+/** Lays the content out [gap] above this point without taking any height, so the composer's box keeps its size. */
+private fun Modifier.above(gap: androidx.compose.ui.unit.Dp): Modifier =
+    layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+        layout(placeable.width, 0) { placeable.place(0, -placeable.height - gap.roundToPx()) }
+    }
 
 @Composable
 private fun subtitleRoom(state: ConversationUi) =
@@ -685,6 +780,10 @@ private fun BubbleBody(
         } else {
             RoundedCornerShape(corner, corner, corner, if (bubble.firstOfRun) tail else corner)
         }
+    bubble.sticker()?.let {
+        StickerBody(bubble, it, fill, ink)
+        return
+    }
     val failed = bubble.state == BubbleState.Failed
     val secondary = if (bubble.outgoing) ink.copy(alpha = META_ALPHA) else RostyTheme.colors.labelSecondary
     Column(
@@ -783,14 +882,14 @@ private fun BubbleBody(
                 color = if (failed && !bubble.outgoing) RostyTheme.colors.destructive else secondary,
                 maxLines = 1,
             )
-            if (bubble.outgoing) StateGlyph(bubble.state, secondary, read = ink)
+            if (bubble.outgoing) StateGlyph(bubble.state, secondary, read = ReadTick)
         }
     }
 }
 
 /** E6.13: the bell and clock of an armed reminder (M33) and the star (M10, M23), before the time. */
 @Composable
-private fun MarkGlyphs(
+internal fun MarkGlyphs(
     bubble: BubbleUi,
     tint: Color,
 ) {
@@ -816,10 +915,10 @@ private fun MarkGlyphs(
 
 /** The clock of a waiting message, one tick sent, two delivered, two blue read (GPUI `ticks.rs`). */
 @Composable
-private fun StateGlyph(
+internal fun StateGlyph(
     state: BubbleState,
     tint: Color,
-    /** Read ticks: the bubble's own text colour at full strength (teal did not read on the accent bubble). */
+    /** Read ticks: [ReadTick] on my bubble. */
     read: Color,
 ) {
     when (state) {
@@ -877,6 +976,12 @@ private fun DoubleTick(tint: Color) {
 }
 
 private const val META_ALPHA = 0.75f
+
+/**
+ * Read ticks on my bubble (blue with white ink in both themes): WhatsApp's blue would vanish on it, and the ink read
+ * almost like the delivered ticks next to it, so read ticks are light cyan.
+ */
+internal val ReadTick = Color(0xFF7FE9FF)
 private const val GLOW_ALPHA = 0.45f
 private const val NOTICE_ALPHA = 0.9f
 private val GlowColor = Color(0xFFFFD60A)

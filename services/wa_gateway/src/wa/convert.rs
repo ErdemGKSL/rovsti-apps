@@ -5,9 +5,10 @@
 use rosty_wa_proto::meta::body_preview;
 use rosty_wa_proto::{
     DeliveryStatus, Location, MediaKind, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction,
-    SharedContact, WaMessage, WaUser,
+    SharedContact, Unavailable, WaMessage, WaUser,
 };
 use whatsapp_rust::prelude::*;
+use whatsapp_rust::wacore::types::events::{UnavailableType, UndecryptableMessage};
 use whatsapp_rust::wacore::types::message::{MessageInfo, MessageSource};
 use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;
@@ -16,6 +17,9 @@ use whatsapp_rust::waproto::whatsapp::message::protocol_message::Type as Protoco
 use super::lid::{self, LidMap, Pair};
 use crate::driver::DriverError;
 use crate::store::{MAX_THUMBNAIL_BYTES, MessageExtras};
+
+/// Longest waveform passed on (WhatsApp sends 64 samples).
+const MAX_WAVEFORM_BYTES: usize = 256;
 
 /// Longest quote preview kept.
 const QUOTE_PREVIEW_CHARS: usize = 120;
@@ -283,7 +287,16 @@ fn thumb(bytes: &Option<Vec<u8>>) -> Option<Vec<u8>> {
         .cloned()
 }
 
-/// Media details and the embedded preview image of `base`.
+/// The waveform bytes of a voice note, as sent (base64).
+fn waveform_b64(bytes: &Option<Vec<u8>>) -> Option<String> {
+    bytes
+        .as_deref()
+        .filter(|b| !b.is_empty() && b.len() <= MAX_WAVEFORM_BYTES)
+        .map(rosty_wa_proto::encode_b64)
+}
+
+/// Media details and the embedded preview image of `base`. `view_once` is
+/// for the inline flag only; [`extras`] adds the wrapper.
 fn media_details(base: &wa::Message) -> Option<(MediaMeta, Option<Vec<u8>>)> {
     if let Some(m) = base.image_message.as_option() {
         let preview = thumb(&m.jpeg_thumbnail);
@@ -319,6 +332,7 @@ fn media_details(base: &wa::Message) -> Option<(MediaMeta, Option<Vec<u8>>)> {
                 seconds: m.seconds,
                 voice_note: m.ptt.unwrap_or(false),
                 view_once: m.view_once.unwrap_or(false),
+                waveform_b64: waveform_b64(&m.waveform),
                 ..Default::default()
             },
             None,
@@ -395,7 +409,10 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
                     }),
             });
     }
-    if let Some((media, preview)) = media_details(base) {
+    if let Some((mut media, preview)) = media_details(base) {
+        // A view-once wrapper counts even when the media inside lacks the
+        // inline flag.
+        media.view_once = media.view_once || message.is_view_once();
         meta.media = Some(media);
         thumbnail = preview;
     }
@@ -459,6 +476,11 @@ pub fn convert(origin: Origin<'_>, message: &wa::Message) -> Converted {
     match content(message) {
         Content::Body(body) => {
             let mut extras = extras(message);
+            // A view-once wrapper with nothing inside: what the phone leaves
+            // of a view-once message it does not share (history sync).
+            if body == MessageBody::Unsupported && message.is_view_once() {
+                extras.meta.unavailable = Some(Unavailable::ViewOnce);
+            }
             if origin.from_me {
                 extras.meta.status = Some(DeliveryStatus::Sent);
             } else {
@@ -683,6 +705,62 @@ pub fn message(ctx: &MessageContext, map: &LidMap) -> Converted {
     converted
 }
 
+/// The placeholder reason of an `<unavailable>` fanout WhatsApp never
+/// resends to a linked device. `None` for a plain fanout (the library asks
+/// the phone for it and the message arrives as usual) and for a message
+/// that failed to decrypt (the library retries it).
+pub fn unavailable_reason(event: &UndecryptableMessage) -> Option<Unavailable> {
+    if !event.is_unavailable {
+        return None;
+    }
+    match event.unavailable_type {
+        UnavailableType::ViewOnce => Some(Unavailable::ViewOnce),
+        UnavailableType::Hosted => Some(Unavailable::Hosted),
+        UnavailableType::Bot => Some(Unavailable::Bot),
+        UnavailableType::Unknown => None,
+    }
+}
+
+/// A message stored as a placeholder: a view-once (or bot, or hosted)
+/// message WhatsApp keeps from linked devices. The body is `unsupported`
+/// and [`MessageMeta::unavailable`] says why; there is nothing to download.
+pub fn placeholder(info: &MessageInfo, reason: Unavailable, map: &LidMap) -> Converted {
+    let source = &info.source;
+    let to = addressed(source, info.peer_recipient_pn.as_ref(), map);
+    let mut meta = MessageMeta {
+        unavailable: Some(reason),
+        ..MessageMeta::default()
+    };
+    if source.is_from_me {
+        meta.status = Some(DeliveryStatus::Sent);
+    } else {
+        meta.sender_name = Some(info.push_name.trim())
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned);
+    }
+    Converted::Message(
+        WaMessage {
+            id: info.id.to_string(),
+            chat: to.chat,
+            sender: to.sender,
+            from_me: source.is_from_me,
+            timestamp_ms: info.timestamp.timestamp_millis(),
+            body: MessageBody::Unsupported,
+            reactions: Vec::new(),
+            chat_alt: to.chat_alt,
+            sender_alt: to.sender_alt,
+        },
+        Box::new(MessageExtras {
+            meta,
+            raw_proto: None,
+            secret: None,
+            thumbnail: None,
+            wire_chat: Some(to.wire_chat),
+            wire_sender: to.wire_sender,
+        }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,6 +852,68 @@ mod tests {
             .media
             .unwrap();
         assert_eq!((media.seconds, media.voice_note), (Some(7), true));
+        assert_eq!(media.waveform_b64, None);
+
+        // The waveform WhatsApp sends with a voice note is passed on.
+        let samples: Vec<u8> = (0..64).collect();
+        let drawn = wa::Message {
+            audio_message: MessageField::some(wa::message::AudioMessage {
+                ptt: Some(true),
+                waveform: Some(samples.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let media = extras_of(convert(origin(false, None, CHAT), &drawn))
+            .meta
+            .media
+            .unwrap();
+        assert_eq!(media.waveform(), Some(samples.clone()));
+        assert_eq!(
+            media.waveform_b64,
+            Some(rosty_wa_proto::encode_b64(&samples))
+        );
+        // An empty or absurdly long one is dropped.
+        for odd in [vec![], vec![1; MAX_WAVEFORM_BYTES + 1]] {
+            let message = wa::Message {
+                audio_message: MessageField::some(wa::message::AudioMessage {
+                    waveform: Some(odd),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let media = extras_of(convert(origin(false, None, CHAT), &message))
+                .meta
+                .media
+                .unwrap();
+            assert_eq!(media.waveform_b64, None);
+        }
+
+        // View once: the inline flag, or a wrapper around media without it.
+        let photo = |view_once: Option<bool>| wa::Message {
+            image_message: MessageField::some(wa::message::ImageMessage {
+                view_once,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let view_once = |message: &wa::Message| {
+            extras_of(convert(origin(false, None, CHAT), message))
+                .meta
+                .media
+                .unwrap()
+                .view_once
+        };
+        assert!(!view_once(&photo(None)));
+        assert!(view_once(&photo(Some(true))));
+        let wrapped = wa::Message {
+            view_once_message_v2: MessageField::some(wa::message::FutureProofMessage {
+                message: MessageField::some(photo(None)),
+            }),
+            ..Default::default()
+        };
+        assert!(view_once(&wrapped));
+        assert!(view_once(&crate::wa::media::wrap_view_once(photo(None))));
 
         let doc = wa::Message {
             document_message: MessageField::some(wa::message::DocumentMessage {
@@ -1510,5 +1650,140 @@ mod tests {
         // My own messages say nothing about the chat.
         assert_eq!(verified_name(&named(Some("Shop"), true)), None);
         assert_eq!(verified_name(&MessageInfo::default()), None);
+    }
+
+    fn unavailable_event(
+        info: MessageInfo,
+        is_unavailable: bool,
+        kind: UnavailableType,
+    ) -> UndecryptableMessage {
+        use whatsapp_rust::wacore::types::events::DecryptFailMode;
+        UndecryptableMessage::builder()
+            .info(std::sync::Arc::new(info))
+            .is_unavailable(is_unavailable)
+            .unavailable_type(kind)
+            .decrypt_fail_mode(DecryptFailMode::Show)
+            .build()
+    }
+
+    #[test]
+    fn unrecoverable_fanouts_become_placeholders() {
+        let info = MessageInfo::default();
+        let reason = |unavailable, kind| {
+            unavailable_reason(&unavailable_event(info.clone(), unavailable, kind))
+        };
+        assert_eq!(
+            reason(true, UnavailableType::ViewOnce),
+            Some(Unavailable::ViewOnce)
+        );
+        assert_eq!(
+            reason(true, UnavailableType::Hosted),
+            Some(Unavailable::Hosted)
+        );
+        assert_eq!(reason(true, UnavailableType::Bot), Some(Unavailable::Bot));
+        // A plain fanout comes back from the phone; a decrypt failure is retried.
+        assert_eq!(reason(true, UnavailableType::Unknown), None);
+        assert_eq!(reason(false, UnavailableType::ViewOnce), None);
+    }
+
+    #[test]
+    fn a_view_once_placeholder_is_a_stored_message() {
+        let lid = "200000000001@lid";
+        let pn = "100000000001@s.whatsapp.net";
+        let known = LidMap::from_entries([("200000000001", "100000000001")]);
+        let info = MessageInfo {
+            source: MessageSource {
+                chat: jid(lid),
+                sender: jid("200000000001:3@lid"),
+                ..Default::default()
+            },
+            id: "VO1".into(),
+            push_name: " Ada ".into(),
+            timestamp: whatsapp_rust::wacore::chrono::DateTime::from_timestamp(1_700_000_000, 0)
+                .unwrap(),
+            ..Default::default()
+        };
+        let Converted::Message(message, extras) = placeholder(&info, Unavailable::ViewOnce, &known)
+        else {
+            panic!("expected a message");
+        };
+        assert_eq!(message.id, "VO1");
+        assert_eq!(message.chat, pn);
+        assert_eq!(message.chat_alt.as_deref(), Some(lid));
+        assert_eq!(message.sender, None);
+        assert!(!message.from_me);
+        assert_eq!(message.timestamp_ms, 1_700_000_000_000);
+        assert_eq!(message.body, MessageBody::Unsupported);
+        assert_eq!(extras.meta.unavailable, Some(Unavailable::ViewOnce));
+        assert_eq!(extras.meta.sender_name.as_deref(), Some("Ada"));
+        assert_eq!(extras.meta.status, None);
+        assert_eq!(extras.wire_chat.as_deref(), Some(lid));
+        assert!(extras.raw_proto.is_none() && extras.thumbnail.is_none());
+
+        // Sent from my phone into a group: mine, with the author kept.
+        let mine = MessageInfo {
+            source: MessageSource {
+                chat: jid("100000000009-1@g.us"),
+                sender: jid("100000000002:1@s.whatsapp.net"),
+                is_group: true,
+                is_from_me: true,
+                ..Default::default()
+            },
+            id: "VO2".into(),
+            ..Default::default()
+        };
+        let Converted::Message(message, extras) =
+            placeholder(&mine, Unavailable::Bot, &LidMap::default())
+        else {
+            panic!("expected a message");
+        };
+        assert!(message.from_me);
+        assert_eq!(message.chat, "100000000009-1@g.us");
+        assert_eq!(
+            message.sender.as_deref(),
+            Some("100000000002@s.whatsapp.net")
+        );
+        assert_eq!(extras.meta.status, Some(DeliveryStatus::Sent));
+        assert_eq!(extras.meta.sender_name, None);
+        assert_eq!(extras.meta.unavailable, Some(Unavailable::Bot));
+    }
+
+    #[test]
+    fn an_empty_view_once_wrapper_reads_as_a_placeholder() {
+        let empty = wa::Message {
+            view_once_message: MessageField::some(wa::message::FutureProofMessage::default()),
+            ..Default::default()
+        };
+        let Converted::Message(message, extras) =
+            convert(Origin::new("H1", PEER_PN, None, false, 5), &empty)
+        else {
+            panic!("expected a message");
+        };
+        assert_eq!(message.body, MessageBody::Unsupported);
+        assert_eq!(extras.meta.unavailable, Some(Unavailable::ViewOnce));
+        // A view-once photo that came whole is media, not a placeholder.
+        let whole = crate::wa::media::wrap_view_once(wa::Message {
+            image_message: MessageField::some(wa::message::ImageMessage {
+                mimetype: Some("image/jpeg".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let Converted::Message(message, extras) =
+            convert(Origin::new("H2", PEER_PN, None, false, 5), &whole)
+        else {
+            panic!("expected a message");
+        };
+        assert!(matches!(message.body, MessageBody::Media { .. }));
+        assert_eq!(extras.meta.unavailable, None);
+        assert!(extras.meta.media.is_some_and(|m| m.view_once));
+        // Neither is anything else unsupported.
+        let Converted::Message(_, extras) = convert(
+            Origin::new("H3", PEER_PN, None, false, 5),
+            &wa::Message::default(),
+        ) else {
+            panic!("expected a message");
+        };
+        assert_eq!(extras.meta.unavailable, None);
     }
 }

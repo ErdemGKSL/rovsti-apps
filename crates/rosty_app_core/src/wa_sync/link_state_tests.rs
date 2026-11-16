@@ -74,6 +74,7 @@ fn send_file(file: &str) -> Action {
         file_name: None,
         seconds: None,
         voice_note: false,
+        extras: MediaExtras::default(),
     }
 }
 

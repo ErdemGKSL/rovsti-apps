@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use super::{Error, Result};
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// v1: the instance row, chats, the per-chat cursor and messages.
 const V1: &str = "
@@ -215,7 +215,20 @@ ALTER TABLE sync_state ADD COLUMN history_json TEXT;
 ALTER TABLE sync_state ADD COLUMN media_cap_bytes INTEGER NOT NULL DEFAULT 536870912;
 ";
 
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5];
+/// v6: what the owner did with a message on this device, and the gallery of a chat.
+///
+/// `viewed_ms`: a view-once message was opened here ([`super::Store::media_viewed`]); its file is gone for good.
+/// `played_ms`: the played receipt of a received voice note was queued ([`super::Store::mark_played`]); it is
+/// sent once. `messages_gallery` serves [`super::Store::chat_media`]: the photos, videos, audio and documents
+/// of a chat, newest first, without walking its texts. Additive: no stored row changes.
+const V6: &str = "
+ALTER TABLE messages ADD COLUMN viewed_ms INTEGER;
+ALTER TABLE messages ADD COLUMN played_ms INTEGER;
+CREATE INDEX messages_gallery ON messages (chat, ts DESC, id DESC)
+    WHERE kind IN ('image', 'video', 'audio', 'document') AND deleted = 0;
+";
+
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6];
 
 /// The version of the file.
 pub(super) fn version(conn: &Connection) -> Result<u32> {

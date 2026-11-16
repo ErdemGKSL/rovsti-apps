@@ -18,6 +18,7 @@ import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncApplied
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncChat
+import dev.rosty.core.model.wa.WaSyncChatMediaRequest
 import dev.rosty.core.model.wa.WaSyncChatsRequest
 import dev.rosty.core.model.wa.WaSyncClientIdRequest
 import dev.rosty.core.model.wa.WaSyncCursor
@@ -30,11 +31,14 @@ import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncFetch
 import dev.rosty.core.model.wa.WaSyncFetched
+import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistory
 import dev.rosty.core.model.wa.WaSyncHistoryReport
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncIdentityCatchUp
+import dev.rosty.core.model.wa.WaSyncKind
+import dev.rosty.core.model.wa.WaSyncMarkPlayedRequest
 import dev.rosty.core.model.wa.WaSyncMedia
 import dev.rosty.core.model.wa.WaSyncMediaCapRequest
 import dev.rosty.core.model.wa.WaSyncMediaDecision
@@ -51,6 +55,7 @@ import dev.rosty.core.model.wa.WaSyncMediaSettleRequest
 import dev.rosty.core.model.wa.WaSyncMediaSettled
 import dev.rosty.core.model.wa.WaSyncMediaStats
 import dev.rosty.core.model.wa.WaSyncMediaStatsRequest
+import dev.rosty.core.model.wa.WaSyncMediaViewedRequest
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncMessageRequest
 import dev.rosty.core.model.wa.WaSyncNetwork
@@ -64,6 +69,7 @@ import dev.rosty.core.model.wa.WaSyncOutboxItem
 import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncPlayed
 import dev.rosty.core.model.wa.WaSyncReconcileRequest
 import dev.rosty.core.model.wa.WaSyncReconciled
 import dev.rosty.core.model.wa.WaSyncRekeyed
@@ -82,6 +88,7 @@ import dev.rosty.core.model.wa.WaSyncStoredChats
 import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
+import dev.rosty.core.model.wa.WaSyncViewed
 import dev.rosty.core.model.wa.WaSyncWipeRequest
 import dev.rosty.core.model.wa.WaSyncWiped
 
@@ -167,7 +174,14 @@ class WaSyncStore internal constructor(
         before: WaSyncStarredCursor? = null,
     ): Outcome<WaSyncStarredPage> = live { ops.starred(WaSyncStarredRequest(id, limit, before)) }
 
-    /** Queues [action] under [clientId] (a fresh UUID per action); it shows in the thread at once. */
+    /**
+     * Queues [action] under [clientId] (a fresh UUID per action); it shows in the thread at once. A
+     * [WaSyncAction.SendMedia] carries the options of the gateway call (preview, pixel size, waveform, GIF flag,
+     * view once): they are checked here ([RustError.Invalid] for a preview that is not a JPEG of at most 64 KiB, a
+     * waveform that is not 64 samples of 0 to 100, view once on a document or sticker), come back on the due row
+     * ([WaSyncAction.SendMedia.options]) and show on the waiting row and the sent message as `media`. A played
+     * receipt is queued with [markPlayed], not here.
+     */
     suspend fun enqueue(
         clientId: String,
         chat: String,
@@ -241,7 +255,9 @@ class WaSyncStore internal constructor(
         live { ops.mediaPolicy(WaSyncMediaPolicyRequest(id, chat, messageId, network, freeBytes)).map { it.decision } }
 
     /**
-     * Asks for the full file of a message. With [tap] it is queued whatever the network (never view-once media).
+     * Asks for the full file of a message. With [tap] it is queued whatever the network. View-once media is never
+     * queued by the rules; a tap queues a received one that was not opened yet (the tap is what opens it) and
+     * answers [WaSyncMediaDecision.Never] once it was opened ([markViewed]) and for one the owner sent.
      * Without it the rules decide under [network], which must then be given: call it for every media row that
      * arrives or comes into view. A cached file stays as it is; a file that failed for good or is gone from the
      * gateway is only tried again on a tap.
@@ -324,6 +340,51 @@ class WaSyncStore internal constructor(
         live {
             ops.mediaCap(WaSyncMediaCapRequest(id, capBytes, noLimit = capBytes == null)).map { it.capBytes }
         }
+
+    // ---- the media of a chat, view once, played
+
+    /**
+     * A page of the media of [chat] for a viewer or a gallery, newest first. [kinds] is any of Image, Video,
+     * Document, Audio (empty: images and videos). [before] and [after] are cursors of any row
+     * (`WaSyncCursor(row.timestampMs, row.id)`) or the `older` / `newer` of a page: [before] alone is the page
+     * below it, [after] alone the page right above it, both a window. A viewer opened on a message asks for both
+     * sides of it and keeps paging with the answer's `older` and `newer`, which are null at the ends. Deleted
+     * messages, view-once media, sends still in the outbox and messages cleared on another device are left out.
+     * [chat] may be any id of the chat.
+     */
+    suspend fun chatMedia(
+        chat: String,
+        limit: Int,
+        before: WaSyncCursor? = null,
+        after: WaSyncCursor? = null,
+        kinds: List<WaSyncKind> = emptyList(),
+    ): Outcome<WaSyncGalleryPage> =
+        live { ops.chatMedia(WaSyncChatMediaRequest(id, chat, limit, before, after, kinds)) }
+
+    /**
+     * The owner opened a view-once message: call it when the viewer shows it. The row reads `viewed` from now on,
+     * its media is [dev.rosty.core.model.wa.WaSyncMediaState.Gone] for good and its thumbnail is dropped. Delete
+     * the answer's `delete` file once the viewer closed. Calling it again changes nothing (`first` false). A
+     * message that is not view once is [RustError.Invalid].
+     */
+    suspend fun markViewed(
+        chat: String,
+        messageId: String,
+        nowMs: Long,
+    ): Outcome<WaSyncViewed> = live { ops.mediaViewed(WaSyncMediaViewedRequest(id, nowMs, chat, messageId)) }
+
+    /**
+     * A received voice note was played: queues its played receipt under [clientId] (a fresh UUID), once per
+     * message. `queued` false: it was marked before and nothing is sent. The row reads `played` at once; the
+     * receipt goes out with [due] as a [WaSyncAction.MarkPlayed] row. Anything but a received voice note is
+     * [RustError.Invalid].
+     */
+    suspend fun markPlayed(
+        clientId: String,
+        chat: String,
+        messageId: String,
+        nowMs: Long,
+    ): Outcome<WaSyncPlayed> = live { ops.markPlayed(WaSyncMarkPlayedRequest(id, nowMs, clientId, chat, messageId)) }
 
     // ---- the gateway process, the linked account, history progress, unlink
 

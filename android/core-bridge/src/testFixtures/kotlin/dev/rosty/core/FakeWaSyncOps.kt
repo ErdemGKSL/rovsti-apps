@@ -3,7 +3,10 @@ package dev.rosty.core
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.HistoryStatus
+import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
+import dev.rosty.core.model.wa.MediaOptions
+import dev.rosty.core.model.wa.MediaWaveform
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.RichMessage
 import dev.rosty.core.model.wa.WaIdParseRequest
@@ -16,6 +19,7 @@ import dev.rosty.core.model.wa.WaSyncCancelled
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncCaughtUp
 import dev.rosty.core.model.wa.WaSyncChat
+import dev.rosty.core.model.wa.WaSyncChatMediaRequest
 import dev.rosty.core.model.wa.WaSyncChatsAnswer
 import dev.rosty.core.model.wa.WaSyncChatsRequest
 import dev.rosty.core.model.wa.WaSyncClientIdRequest
@@ -29,6 +33,7 @@ import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEvicted
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncFetched
+import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistory
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
@@ -38,6 +43,7 @@ import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncKind
 import dev.rosty.core.model.wa.WaSyncKindUsage
+import dev.rosty.core.model.wa.WaSyncMarkPlayedRequest
 import dev.rosty.core.model.wa.WaSyncMedia
 import dev.rosty.core.model.wa.WaSyncMediaCap
 import dev.rosty.core.model.wa.WaSyncMediaCapRequest
@@ -58,6 +64,7 @@ import dev.rosty.core.model.wa.WaSyncMediaSettled
 import dev.rosty.core.model.wa.WaSyncMediaState
 import dev.rosty.core.model.wa.WaSyncMediaStats
 import dev.rosty.core.model.wa.WaSyncMediaStatsRequest
+import dev.rosty.core.model.wa.WaSyncMediaViewedRequest
 import dev.rosty.core.model.wa.WaSyncMessage
 import dev.rosty.core.model.wa.WaSyncMessageAnswer
 import dev.rosty.core.model.wa.WaSyncMessageRequest
@@ -77,6 +84,7 @@ import dev.rosty.core.model.wa.WaSyncOutboxState
 import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.model.wa.WaSyncPlan
 import dev.rosty.core.model.wa.WaSyncPlanRequest
+import dev.rosty.core.model.wa.WaSyncPlayed
 import dev.rosty.core.model.wa.WaSyncReconcileRequest
 import dev.rosty.core.model.wa.WaSyncReconciled
 import dev.rosty.core.model.wa.WaSyncRekeyed
@@ -99,6 +107,7 @@ import dev.rosty.core.model.wa.WaSyncStoredPage
 import dev.rosty.core.model.wa.WaSyncThreadPage
 import dev.rosty.core.model.wa.WaSyncThreadRequest
 import dev.rosty.core.model.wa.WaSyncUsage
+import dev.rosty.core.model.wa.WaSyncViewed
 import dev.rosty.core.model.wa.WaSyncWipeRequest
 import dev.rosty.core.model.wa.WaSyncWiped
 import dev.rosty.core.ops.WaSyncOps
@@ -120,6 +129,11 @@ import dev.rosty.core.ops.WaSyncOps
  * gateway epoch and the account wipe ([noteStatus], [accountChanged], a whole status handed to [identityObserve],
  * and in [applyEvents] a `hello`, a `resync`, a `state` and an `account_changed` event) follow the same conditions;
  * what is wiped is everything seeded here. A `history_synced` event and a status report keep [history].
+ *
+ * The media round follows the store too: a media send is refused with options the gateway would refuse, shows them
+ * on its waiting row and keeps them on the sent message; view once downloads by a tap only, opens once
+ * ([mediaViewed]) and is gone after; a played receipt is queued once per received voice note ([markPlayed]);
+ * [chatMedia] pages the photos, videos, audio and documents of a chat both ways. Seed media rows with [putMedia].
  */
 class FakeWaSyncOps(
     private val instanceId: String = "fake-instance",
@@ -263,6 +277,34 @@ class FakeWaSyncOps(
         return row
     }
 
+    /** Seeds one stored media message; [media] carries what the gateway said about it (view once, voice note). */
+    fun putMedia(
+        chat: String,
+        id: String,
+        timestampMs: Long,
+        kind: WaSyncKind,
+        media: MediaMeta? = null,
+        fromMe: Boolean = false,
+        size: Long = 1_000,
+        sender: String? = if (fromMe) null else chat,
+    ): WaSyncMessage {
+        val row =
+            WaSyncMessage(
+                id = id,
+                chat = chat,
+                sender = sender,
+                fromMe = fromMe,
+                timestampMs = timestampMs,
+                kind = kind,
+                size = size,
+                reactions = emptyList(),
+                state = if (fromMe) WaSyncRowState.Sent else WaSyncRowState.Received,
+                media = media,
+            )
+        synchronized(lock) { store(row) }
+        return row
+    }
+
     private fun store(row: WaSyncMessage) {
         val rows = messages.getOrPut(row.chat) { mutableListOf() }
         rows.removeAll { it.id == row.id }
@@ -287,20 +329,79 @@ class FakeWaSyncOps(
         )
     }
 
+    /** What the bubble of a media send knows before the gateway describes the message; null: nothing to tell. */
+    private fun mediaOf(action: WaSyncAction.SendMedia): MediaMeta? {
+        val sized = action.media in setOf(MediaKind.Image, MediaKind.Video, MediaKind.Sticker)
+        val audio = action.media == MediaKind.Audio
+        val meta =
+            MediaMeta(
+                fileName = action.fileName.takeIf { action.media == MediaKind.Document },
+                seconds = action.seconds.takeIf { audio || action.media == MediaKind.Video },
+                width = action.width.takeIf { sized },
+                height = action.height.takeIf { sized },
+                voiceNote = action.voiceNote && audio,
+                animated = action.animated && action.media in setOf(MediaKind.Video, MediaKind.Sticker),
+                viewOnce = action.viewOnce,
+                waveformB64 = action.waveformB64.takeIf { audio },
+            )
+        return meta.takeIf { it != MediaMeta() }
+    }
+
+    private fun kindOf(media: MediaKind): WaSyncKind =
+        when (media) {
+            MediaKind.Image -> WaSyncKind.Image
+            MediaKind.Video -> WaSyncKind.Video
+            MediaKind.Audio -> WaSyncKind.Audio
+            MediaKind.Document -> WaSyncKind.Document
+            MediaKind.Sticker -> WaSyncKind.Sticker
+        }
+
+    /** Why the gateway would refuse the options of a media send; null: it would not. */
+    private fun refusal(action: WaSyncAction.SendMedia): String? {
+        val decoder = java.util.Base64.getDecoder()
+        action.thumbnailB64?.takeIf { it.isNotEmpty() }?.let { text ->
+            val bytes =
+                runCatching { decoder.decode(text) }.getOrNull() ?: return "thumbnail_b64 is not valid base64"
+            if (bytes.size > MediaOptions.MAX_THUMBNAIL_BYTES) {
+                return "the thumbnail is ${bytes.size} bytes, the limit is ${MediaOptions.MAX_THUMBNAIL_BYTES}"
+            }
+            val jpeg =
+                bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()
+            if (!jpeg) return "the thumbnail is not a JPEG image"
+        }
+        action.waveformB64?.takeIf { it.isNotEmpty() }?.let { text ->
+            val bytes =
+                runCatching { decoder.decode(text) }.getOrNull() ?: return "waveform_b64 is not valid base64"
+            if (bytes.size != MediaWaveform.SAMPLES) {
+                return "the waveform has ${bytes.size} samples, it must have exactly ${MediaWaveform.SAMPLES}"
+            }
+            if (!MediaWaveform.valid(bytes)) return "a waveform sample is above ${MediaWaveform.MAX}"
+        }
+        val once = action.media in setOf(MediaKind.Image, MediaKind.Video, MediaKind.Audio)
+        if (action.viewOnce && !once) return "only a photo, a video or a voice message can be sent as view once"
+        return null
+    }
+
     private fun waiting(item: WaSyncOutboxItem): WaSyncMessage? {
+        val action = item.action
         val text =
-            when (val action = item.action) {
+            when (action) {
                 is WaSyncAction.SendText -> action.text
                 is WaSyncAction.SendMedia -> action.caption
                 else -> return null
             }
+        val media = action as? WaSyncAction.SendMedia
         return WaSyncMessage(
             id = item.clientId,
             chat = item.chat,
             fromMe = true,
             timestampMs = item.createdMs,
-            kind = if (item.action is WaSyncAction.SendText) WaSyncKind.Text else WaSyncKind.Image,
+            kind = media?.let { kindOf(it.media) } ?: WaSyncKind.Text,
             text = text,
+            mime = media?.mime,
+            size = media?.size,
+            media = media?.let(::mediaOf),
+            mediaPath = media?.file,
             reactions = emptyList(),
             state =
                 when (item.state) {
@@ -365,6 +466,8 @@ class FakeWaSyncOps(
                 network == WaSyncNetwork.Mobile -> row.kind == WaSyncKind.Image || voice
                 else -> false
             }
+        // A message that was opened once has no file any more, whatever the rules say.
+        if (row.viewed) return WaSyncMediaDecision.Never
         val room = freeBytes == null || freeBytes - (row.size ?: 0) >= FREE_SPACE_FLOOR
         return if (auto && room) WaSyncMediaDecision.Auto else WaSyncMediaDecision.OnTap
     }
@@ -587,6 +690,15 @@ class FakeWaSyncOps(
     override suspend fun outboxEnqueue(req: WaSyncEnqueueRequest): Outcome<WaSyncItemAnswer> =
         synchronized(lock) {
             writes += req
+            if (req.action is WaSyncAction.MarkPlayed) {
+                return@synchronized Outcome.Err(RustError.Invalid("a played receipt is queued with mark_played"))
+            }
+            if (req.clientId.isEmpty() || req.chat.isEmpty()) {
+                return@synchronized Outcome.Err(RustError.Invalid("client id and chat must not be empty"))
+            }
+            (req.action as? WaSyncAction.SendMedia)?.let(::refusal)?.let {
+                return@synchronized Outcome.Err(RustError.Invalid(it))
+            }
             val star = req.action as? WaSyncAction.Star
             if (star != null && queue.none { it.clientId == req.clientId }) {
                 queue.removeAll {
@@ -638,11 +750,15 @@ class FakeWaSyncOps(
                     val sent = waiting(item)
                     val id = outcome.messageId
                     if (sent != null && id != null) {
+                        val media = item.action as? WaSyncAction.SendMedia
+                        // The preview is the thumbnail of the sent message; a view-once file is not kept.
+                        media?.thumbnailB64?.let { thumbs.putIfAbsent(item.chat to id, it) }
                         store(
                             sent.copy(
                                 id = id,
                                 timestampMs = outcome.timestampMs ?: req.nowMs,
                                 state = WaSyncRowState.Sent,
+                                mediaPath = sent.mediaPath.takeIf { media?.viewOnce != true },
                             ),
                         )
                     }
@@ -651,6 +767,11 @@ class FakeWaSyncOps(
 
                 is WaSyncOutcome.Error -> {
                     val failed = outcome.error == dev.rosty.core.model.wa.WaSyncErrorKind.Rejected
+                    if (failed && item.action is WaSyncAction.MarkPlayed) {
+                        // Dropped: nothing to retry or edit, and the message stays played.
+                        queue.remove(item)
+                        return@synchronized ok(WaSyncSettled(HANDLE, WaSyncSettled.FAILED))
+                    }
                     val star = item.action as? WaSyncAction.Star
                     if (failed && star != null) {
                         queue.remove(item)
@@ -810,10 +931,18 @@ class FakeWaSyncOps(
             if (!req.tap && network == null) {
                 return@synchronized Outcome.Err(RustError.Invalid("an automatic request names the network"))
             }
+            val once = row.media?.viewOnce == true
             val decision =
                 when {
+                    row.viewed -> WaSyncMediaDecision.Never
+
                     network != null && !req.tap -> decide(row, network, req.freeBytes)
-                    row.kind !in MEDIA_KINDS || row.media?.viewOnce == true -> WaSyncMediaDecision.Never
+
+                    row.kind !in MEDIA_KINDS -> WaSyncMediaDecision.Never
+
+                    // The tap that opens a received view-once message fetches it; its sender cannot open it.
+                    once && row.fromMe -> WaSyncMediaDecision.Never
+
                     else -> WaSyncMediaDecision.OnTap
                 }
             val key = chat to req.id
@@ -908,7 +1037,12 @@ class FakeWaSyncOps(
             val ready = entry.state == WaSyncMediaState.Ready
             var replaced: String? = null
             attemptedMs.remove(key)
-            when (val outcome = req.outcome) {
+            val outcome = req.outcome
+            if (outcome is WaSyncFetched.Ready && row.viewed) {
+                // Opened meanwhile: the file is not recorded, the caller deletes it.
+                return@synchronized ok(WaSyncMediaSettled(HANDLE, files[key] ?: entry, outcome.path))
+            }
+            when (outcome) {
                 is WaSyncFetched.Ready -> {
                     replaced = entry.path?.takeIf { it != outcome.path }
                     files[key] =
@@ -1042,6 +1176,102 @@ class FakeWaSyncOps(
                 capBytes = req.capBytes
             }
             ok(WaSyncMediaCap(HANDLE, capBytes))
+        }
+
+    override suspend fun chatMedia(req: WaSyncChatMediaRequest): Outcome<WaSyncGalleryPage> =
+        synchronized(lock) {
+            val kinds = req.kinds.ifEmpty { listOf(WaSyncKind.Image, WaSyncKind.Video) }
+            kinds.firstOrNull { it !in GALLERY_KINDS }?.let {
+                val name = it.name.lowercase()
+                return@synchronized Outcome.Err(
+                    RustError.Invalid("a gallery has images, videos, audio and documents, not $name"),
+                )
+            }
+            val order = compareByDescending<WaSyncMessage> { it.timestampMs }.thenByDescending { it.id }
+
+            fun below(
+                row: WaSyncMessage,
+                cursor: WaSyncCursor,
+            ) = row.timestampMs < cursor.timestampMs || (row.timestampMs == cursor.timestampMs && row.id < cursor.id)
+
+            fun above(
+                row: WaSyncMessage,
+                cursor: WaSyncCursor,
+            ) = row.timestampMs > cursor.timestampMs || (row.timestampMs == cursor.timestampMs && row.id > cursor.id)
+            val all =
+                messages[keyOf(req.chat)]
+                    .orEmpty()
+                    .filter { it.kind in kinds && !it.deleted && it.media?.viewOnce != true }
+                    .sortedWith(order)
+            val (before, after) = req.before to req.after
+            val window = all.filter { (before == null || below(it, before)) && (after == null || above(it, after)) }
+            val limit = req.limit.coerceIn(1, MAX_GALLERY_PAGE)
+            // With `after` alone the rows nearest above the cursor are wanted.
+            val page = if (after != null && before == null) window.takeLast(limit) else window.take(limit)
+            val older =
+                page.lastOrNull()?.let { WaSyncCursor(it.timestampMs, it.id) }?.takeIf { edge ->
+                    all.any { below(it, edge) }
+                }
+            val newer =
+                page.firstOrNull()?.let { WaSyncCursor(it.timestampMs, it.id) }?.takeIf { edge ->
+                    all.any { above(it, edge) }
+                }
+            ok(WaSyncGalleryPage(page.map(::withMedia), older, newer))
+        }
+
+    override suspend fun mediaViewed(req: WaSyncMediaViewedRequest): Outcome<WaSyncViewed> =
+        synchronized(lock) {
+            writes += req
+            val chat = keyOf(req.chat)
+            val row = row(chat, req.id) ?: return@synchronized missing(chat, req.id)
+            if (row.kind !in MEDIA_KINDS || row.media?.viewOnce != true) {
+                return@synchronized Outcome.Err(RustError.Invalid("message ${req.id} of $chat is not view once"))
+            }
+            val key = chat to req.id
+            val entry = entryOf(row)
+            val gone =
+                WaSyncMediaEntry(
+                    entry.chat,
+                    entry.id,
+                    entry.kind,
+                    entry.mime,
+                    entry.sizeExpected,
+                    WaSyncMediaState.Gone,
+                )
+            files[key] = gone
+            thumbs.remove(key)
+            queuedMs.remove(key)
+            attemptedMs.remove(key)
+            store(row.copy(viewed = true, hasThumbnail = false, mediaPath = null, mediaState = null))
+            ok(WaSyncViewed(HANDLE, gone, delete = entry.path, first = !row.viewed))
+        }
+
+    override suspend fun markPlayed(req: WaSyncMarkPlayedRequest): Outcome<WaSyncPlayed> =
+        synchronized(lock) {
+            writes += req
+            queue.firstOrNull { it.clientId == req.clientId }?.let {
+                return@synchronized ok(WaSyncPlayed(HANDLE, queued = true, item = it))
+            }
+            val chat = keyOf(req.chat)
+            val row = row(chat, req.id) ?: return@synchronized missing(chat, req.id)
+            if (row.fromMe || row.kind != WaSyncKind.Audio || row.media?.voiceNote != true) {
+                return@synchronized Outcome.Err(RustError.Invalid("only a received voice note can be marked played"))
+            }
+            if (row.played) return@synchronized ok(WaSyncPlayed(HANDLE, queued = false))
+            val sender = row.sender.takeIf { chat.endsWith("@g.us") }
+            val item =
+                WaSyncOutboxItem(
+                    req.clientId,
+                    chat,
+                    WaSyncAction.MarkPlayed(req.id, sender),
+                    req.nowMs,
+                    0,
+                    0,
+                    WaSyncOutboxState.Waiting,
+                )
+            queue += item
+            store(row.copy(played = true))
+            ok(WaSyncPlayed(HANDLE, queued = true, item = item))
         }
 
     /** What a status or a `state` event says about the gateway and the account. */
@@ -1291,7 +1521,7 @@ class FakeWaSyncOps(
         const val HANDLE = 1L
 
         /** The schema version the real store writes. */
-        const val SCHEMA_VERSION = 5
+        const val SCHEMA_VERSION = 6
 
         // The constants of `rosty_app_core::wa_sync::media`.
         const val DEFAULT_CAP_BYTES = 512L * 1024 * 1024
@@ -1306,6 +1536,9 @@ class FakeWaSyncOps(
 
         private val MEDIA_KINDS =
             setOf(WaSyncKind.Image, WaSyncKind.Video, WaSyncKind.Audio, WaSyncKind.Document, WaSyncKind.Sticker)
+        private val GALLERY_KINDS =
+            setOf(WaSyncKind.Image, WaSyncKind.Video, WaSyncKind.Audio, WaSyncKind.Document)
+        private const val MAX_GALLERY_PAGE = 200
         private val CANCELLABLE =
             setOf(WaSyncMediaState.Queued, WaSyncMediaState.Downloading, WaSyncMediaState.Failed)
 

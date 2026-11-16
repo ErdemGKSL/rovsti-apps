@@ -9,6 +9,7 @@ uses-permission android.permission.RECEIVE_BOOT_COMPLETED
 uses-permission android.permission.RECEIVE_MMS
 uses-permission android.permission.RECEIVE_SMS
 uses-permission android.permission.RECEIVE_WAP_PUSH
+uses-permission android.permission.RECORD_AUDIO
 uses-permission android.permission.SCHEDULE_EXACT_ALARM
 uses-permission android.permission.SEND_SMS
 uses-permission android.permission.VIBRATE

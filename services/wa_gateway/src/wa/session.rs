@@ -686,6 +686,7 @@ impl WaRuntime {
                     EventKind::ClearChatUpdate,
                     EventKind::DeleteMessageForMeUpdate,
                     EventKind::PairSuccess,
+                    EventKind::UndecryptableMessage,
                 ],
                 {
                     let sink = sink.clone();
@@ -758,6 +759,12 @@ impl WaRuntime {
             file_name: req.file_name.as_deref(),
             seconds: req.seconds,
             voice_note: req.voice_note,
+            thumbnail: req.thumbnail.as_deref(),
+            width: req.width,
+            height: req.height,
+            waveform: req.waveform.as_deref(),
+            animated: req.animated,
+            view_once: req.view_once,
         };
         let mut message = media::build_message_with(
             req.kind,
@@ -779,6 +786,11 @@ impl WaRuntime {
                 own_jid,
             ));
             quoted = Some(quoted_meta(quoted_id, stored.as_ref(), own_jid));
+        }
+        // After the reply context: that is set on the media message itself,
+        // which the wrapper would hide.
+        if req.view_once {
+            message = media::wrap_view_once(message);
         }
         let raw = message.encode_to_vec();
         let mut extras = convert::extras(&message);
@@ -1237,8 +1249,39 @@ async fn handle_event(
                     .await;
             }
         }
+        Event::UndecryptableMessage(event) => on_unavailable(sink, resolver, event).await,
         other => app_state::handle(sink, resolver, other).await,
     }
+}
+
+/// Stores a message WhatsApp keeps from linked devices (view once, bot,
+/// hosted business) as a placeholder, so it does not vanish. Other
+/// undecryptable messages come back on their own (phone resend, retry).
+async fn on_unavailable(
+    sink: &EventSink,
+    resolver: &Resolver,
+    event: &whatsapp_rust::wacore::types::events::UndecryptableMessage,
+) {
+    let Some(reason) = convert::unavailable_reason(event) else {
+        return;
+    };
+    let info = &event.info;
+    if info.source.chat.is_status_broadcast() {
+        return;
+    }
+    let stated = convert::envelope_pairs(info);
+    if !stated.is_empty() {
+        sink.learn_pairs(pairs_from(&stated, IdentitySource::PeerMessage))
+            .await;
+    }
+    let mut jids = lid::source_jids(&info.source);
+    jids.extend(info.peer_recipient_pn.iter());
+    let mut map = resolver.prefetch(&jids).await;
+    for pair in &stated {
+        map.insert_new(pair);
+    }
+    log::info!("[msg:{}] stored as a placeholder ({reason:?})", info.id);
+    app_state::apply_converted(sink, convert::placeholder(info, reason, &map)).await;
 }
 
 impl WaDriver for WaRuntime {

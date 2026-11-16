@@ -298,6 +298,23 @@
     <string name="wa_media_not_saved">Couldn\'t save the file</string>
     <string name="wa_media_cant_share">Couldn\'t share the file</string>
     <string name="wa_media_gone">No longer available</string>
+    <!-- E6-WA R3: the media viewer, video, save, share and forward. -->
+    <string name="wa_viewer_saved">Saved</string>
+    <string name="wa_viewer_already_saved">Already saved</string>
+    <string name="wa_viewer_saved_photos">Saved to Photos</string>
+    <string name="wa_viewer_saved_movies">Saved to Movies</string>
+    <string name="wa_viewer_saved_downloads">Saved to Downloads</string>
+    <string name="wa_viewer_download">Download</string>
+    <string name="wa_viewer_download_size">Download · %1$s</string>
+    <string name="wa_viewer_downloading">Downloading…</string>
+    <string name="wa_viewer_retry">Try Again</string>
+    <string name="wa_viewer_play">Play</string>
+    <string name="wa_viewer_pause">Pause</string>
+    <string name="wa_viewer_mute">Mute</string>
+    <string name="wa_viewer_unmute">Unmute</string>
+    <string name="wa_viewer_position">Playback position</string>
+    <string name="wa_viewer_byline">%1$s · %2$s</string>
+    <string name="wa_viewer_cant_play">This video can\'t be played</string>
     <string name="wa_history_title">Loading your WhatsApp history…</string>
     <string name="wa_history_title_percent">Loading your WhatsApp history · %1$d%%</string>
     <string name="wa_history_counts">%1$s · %2$s so far</string>
@@ -328,6 +345,19 @@
     <string name="wa_voice_play">Play</string>
     <string name="wa_voice_pause">Pause</string>
     <string name="wa_voice_speed">Playback speed %1$s</string>
+    <!-- E6-WA R3: recording voice notes in the WhatsApp composer. -->
+    <string name="wa_record_mic">Record a voice message</string>
+    <string name="wa_record_cancel_hint">Slide to cancel</string>
+    <string name="wa_record_lock">Slide up to keep recording</string>
+    <string name="wa_record_stop">Stop recording</string>
+    <string name="wa_record_delete">Delete recording</string>
+    <string name="wa_record_send">Send voice message</string>
+    <string name="wa_record_hold">Hold to record, release to send</string>
+    <string name="wa_record_failed">Couldn\'t use the microphone</string>
+    <string name="wa_record_denied_title">Microphone is off</string>
+    <string name="wa_record_denied_body">To record voice messages, allow the microphone for Rosty Messages in Settings.</string>
+    <string name="wa_record_not_now">Not Now</string>
+    <string name="wa_record_settings">Open Settings</string>
     <string name="wa_reply">Reply</string>
     <string name="wa_reply_cancel">Cancel reply</string>
     <string name="wa_attachment_remove">Remove attachment</string>
@@ -597,4 +627,26 @@
     <string name="backup_fail_corrupt">The backup is damaged.</string>
     <string name="backup_fail_failed">The backup couldn\'t be made. Try again.</string>
     <string name="backup_fail_not_saved">The backup wasn\'t saved.</string>
+    <!-- E6-WA R3 steps 6 and 7: view once, stickers, several files. -->
+    <string name="wa_view_once">View once message</string>
+    <string name="wa_view_once_open_phone">View once message. Open it on your phone.</string>
+    <string name="wa_view_once_photo">View once photo</string>
+    <string name="wa_view_once_video">View once video</string>
+    <string name="wa_view_once_voice">View once voice message</string>
+    <string name="wa_unavailable">Message not available here</string>
+    <string name="wa_unavailable_open_phone">This message is not available on this device. Open it on your phone.</string>
+    <string name="wa_view_once_toggle">View once</string>
+    <string name="wa_view_once_toggle_on">View once is on</string>
+    <string name="wa_view_once_toggle_off">View once is off</string>
+    <string name="wa_batch_caption">Add a caption…</string>
+    <string name="wa_batch_send">Send %1$d</string>
+    <string name="wa_batch_position">%1$d of %2$d</string>
+    <string name="wa_batch_remove">Remove</string>
+    <string name="wa_batch_earlier">Move earlier</string>
+    <string name="wa_batch_later">Move later</string>
+    <string name="wa_batch_close">Close</string>
+    <plurals name="wa_batch_too_large">
+        <item quantity="one">%1$d file is over %2$d MB and was left out</item>
+        <item quantity="other">%1$d files are over %2$d MB and were left out</item>
+    </plurals>
 </resources>

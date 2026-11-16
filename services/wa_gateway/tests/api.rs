@@ -14,14 +14,14 @@ use rosty_wa_client::{
 };
 use rosty_wa_proto::audio::SpeakerFrames;
 use rosty_wa_proto::{
+    ApiError, ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
+    MediaMeta, MediaOptions, MessageMeta, RevokeMessage, Sent, StarMessage, WaMessage, encode_b64,
+};
+use rosty_wa_proto::{
     AppId, CallPhase, ChatState, ConnectKey, CreateInstance, CreatedInstance, EndReason, ErrorCode,
     EventEnvelope, GatewayEvent, GatewayUrl, GroupInfo, IdentitySource, InstanceState, LinkRequest,
     MarkRead, MediaKind, MessageBody, Participant, ScheduleText, ScheduledState, ScheduledText,
     SendReaction, SendText, TypingState,
-};
-use rosty_wa_proto::{
-    ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
-    MediaOptions, MessageMeta, RevokeMessage, StarMessage, WaMessage,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wa_gateway::config::Config;
@@ -2121,6 +2121,7 @@ async fn media_options_reach_the_driver_and_the_meta() {
         file_name: Some("rapor.pdf".into()),
         seconds: None,
         voice_note: false,
+        ..Default::default()
     };
     let g = gateway.clone();
     let sent = blocking(move || {
@@ -2166,6 +2167,285 @@ async fn media_options_reach_the_driver_and_the_meta() {
     })
     .await;
     assert!(is_code(&refused.unwrap_err(), ErrorCode::BadRequest));
+}
+
+fn jpeg(len: usize) -> Vec<u8> {
+    let mut bytes = vec![0x11; len];
+    bytes[..3].copy_from_slice(&[0xFF, 0xD8, 0xFF]);
+    bytes
+}
+
+async fn media_meta(gateway: &Gateway, id: &str) -> (WaMessage, MediaMeta) {
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(DM, None, 50))
+        .await
+        .unwrap();
+    let found = page.into_iter().find(|m| m.message.id == id).unwrap();
+    (found.message, found.meta.media.unwrap_or_default())
+}
+
+#[tokio::test]
+async fn new_media_options_pass_through_to_the_message() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let preview = jpeg(900);
+    let samples: Vec<u8> = (0..64).map(|i| i % 101).collect();
+
+    // A view-once GIF with a preview and its pixel size.
+    let options = MediaOptions {
+        seconds: Some(3),
+        thumbnail_b64: Some(encode_b64(&preview)),
+        width: Some(640),
+        height: Some(360),
+        animated: true,
+        view_once: true,
+        ..Default::default()
+    };
+    let g = gateway.clone();
+    let file = vec![5u8; 2000];
+    let (bytes, opts) = (file.clone(), options.clone());
+    let sent = blocking(move || {
+        g.send_media_with(DM, MediaKind::Video, "video/mp4", Some("bak"), &opts, bytes)
+    })
+    .await
+    .unwrap();
+    let (message, media) = media_meta(&gateway, &sent.message_id).await;
+    // The preview was cut off the body: the file is the file.
+    assert_eq!(
+        message.body,
+        MessageBody::Media {
+            kind: MediaKind::Video,
+            caption: Some("bak".into()),
+            mime: "video/mp4".into(),
+            size: 2000,
+        }
+    );
+    assert_eq!(
+        media,
+        MediaMeta {
+            seconds: Some(3),
+            width: Some(640),
+            height: Some(360),
+            animated: true,
+            view_once: true,
+            thumbnail: true,
+            ..Default::default()
+        }
+    );
+    let (g, id) = (gateway.clone(), sent.message_id.clone());
+    assert_eq!(blocking(move || g.media(&id)).await.unwrap(), file);
+    let (g, id) = (gateway.clone(), sent.message_id.clone());
+    assert_eq!(blocking(move || g.thumbnail(&id)).await.unwrap(), preview);
+
+    // A voice note with its waveform.
+    let voice = MediaOptions {
+        seconds: Some(7),
+        voice_note: true,
+        waveform_b64: Some(encode_b64(&samples)),
+        ..Default::default()
+    };
+    let g = gateway.clone();
+    let sent = blocking(move || {
+        g.send_media_with(DM, MediaKind::Audio, "audio/ogg", None, &voice, vec![1; 64])
+    })
+    .await
+    .unwrap();
+    let (_, media) = media_meta(&gateway, &sent.message_id).await;
+    assert_eq!(media.waveform(), Some(samples.clone()));
+    assert_eq!((media.seconds, media.voice_note), (Some(7), true));
+    assert!(!media.thumbnail && !media.view_once && !media.animated);
+
+    // Options a kind has no field for are left out, not made up.
+    let stray = MediaOptions {
+        file_name: Some("a.pdf".into()),
+        width: Some(10),
+        height: Some(10),
+        waveform_b64: Some(encode_b64(&samples)),
+        animated: true,
+        ..Default::default()
+    };
+    let g = gateway.clone();
+    let sent = blocking(move || {
+        g.send_media_with(
+            DM,
+            MediaKind::Document,
+            "application/pdf",
+            None,
+            &stray,
+            vec![1],
+        )
+    })
+    .await
+    .unwrap();
+    let (_, media) = media_meta(&gateway, &sent.message_id).await;
+    assert_eq!(
+        media,
+        MediaMeta {
+            file_name: Some("a.pdf".into()),
+            ..Default::default()
+        }
+    );
+}
+
+/// `POST /v1/messages/media` as raw HTTP: the status and the body.
+async fn raw_media(server: &Server, key: &str, query: &str, body: &[u8]) -> (u16, String) {
+    let authority = server.url.as_str().replace("http://", "");
+    let mut stream = tokio::net::TcpStream::connect(authority.trim_end_matches('/'))
+        .await
+        .unwrap();
+    // A query that starts with a slash names another route under the plain one.
+    let target = match query.strip_prefix('/') {
+        Some(rest) => format!("/v1/messages/media/{rest}"),
+        None => format!("/v1/messages/media?{query}"),
+    };
+    let head = format!(
+        "POST {target} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {key}\r\n\
+         Content-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    stream.write_all(body).await.unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).await.unwrap();
+    let text = String::from_utf8_lossy(&answer).into_owned();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap();
+    (
+        head.split(' ').nth(1).unwrap().parse().unwrap(),
+        body.to_owned(),
+    )
+}
+
+#[tokio::test]
+async fn media_option_validation_and_an_old_clients_request() {
+    let server = start_with(4, 4096).await;
+    let (gateway, created) = create(&server).await;
+    let key = created.key.to_string();
+    let base = "chat=100000000001%40s.whatsapp.net&mime=image%2Fjpeg";
+
+    // The request of a client from before the media round: accepted, and
+    // nothing is made up for it.
+    let old = format!("{base}&kind=audio&seconds=9&voice_note=true");
+    let (status, body) = raw_media(&server, &key, &old, &[1, 2, 3]).await;
+    assert_eq!(status, 200, "{body}");
+    let sent: Sent = serde_json::from_str(&body).unwrap();
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta("100000000001@s.whatsapp.net", None, 10))
+        .await
+        .unwrap();
+    assert_eq!(page[0].message.id, sent.message_id);
+    assert_eq!(
+        page[0].meta.media,
+        Some(MediaMeta {
+            seconds: Some(9),
+            voice_note: true,
+            ..Default::default()
+        })
+    );
+
+    let refused = |query: String, body: Vec<u8>| {
+        let (server, key) = (&server, key.clone());
+        async move {
+            let (status, answer) = raw_media(server, &key, &query, &body).await;
+            assert_eq!(status, 400, "{query}: {answer}");
+            let error: ApiError = serde_json::from_str(&answer).unwrap();
+            assert_eq!(error.code, ErrorCode::BadRequest, "{query}");
+            error.message
+        }
+    };
+    let image = format!("{base}&kind=image");
+    let audio = format!("{base}&kind=audio");
+
+    // Preview: over 64 KiB, not a JPEG, longer than the body, nothing after it.
+    let m = refused(format!("{image}&thumbnail_len=65537"), vec![1]).await;
+    assert!(m.contains("65537"), "{m}");
+    let m = refused(format!("{image}&thumbnail_len=4"), b"\x89PNGfile".to_vec()).await;
+    assert!(m.contains("JPEG"), "{m}");
+    let m = refused(format!("{image}&thumbnail_len=9"), jpeg(4)).await;
+    assert!(m.contains("the body has 4 bytes"), "{m}");
+    let m = refused(format!("{image}&thumbnail_len=4"), jpeg(4)).await;
+    assert!(m.contains("empty"), "{m}");
+
+    // Waveform: not base64, 63 and 65 samples, a sample over 100.
+    let wave = |samples: &[u8]| encode_b64(samples).replace('+', "%2B").replace('=', "%3D");
+    let m = refused(format!("{audio}&waveform_b64=***"), vec![1]).await;
+    assert!(m.contains("base64"), "{m}");
+    for len in [63, 65] {
+        let m = refused(
+            format!("{audio}&waveform_b64={}", wave(&vec![1; len])),
+            vec![1],
+        )
+        .await;
+        assert!(m.contains("exactly 64"), "{m}");
+    }
+    let m = refused(
+        format!("{audio}&waveform_b64={}", wave(&[101; 64])),
+        vec![1],
+    )
+    .await;
+    assert!(m.contains("100"), "{m}");
+
+    // View once is for photos, videos and audio.
+    for kind in ["document", "sticker"] {
+        let m = refused(format!("{base}&kind={kind}&view_once=true"), vec![1]).await;
+        assert!(m.contains("view once"), "{m}");
+    }
+
+    // The largest preview is accepted, and it does not count against the
+    // file limit: a file of exactly the limit still goes through, one byte
+    // more is a 413 as before.
+    let preview = jpeg(64 * 1024);
+    let query = format!("{image}&thumbnail_len={}&width=1&height=1", preview.len());
+    let body = [preview.as_slice(), &[7u8; 4096]].concat();
+    let (status, answer) = raw_media(&server, &key, &query, &body).await;
+    assert_eq!(status, 200, "{answer}");
+    let body = [preview.as_slice(), &[7u8; 4097]].concat();
+    let (status, _) = raw_media(&server, &key, &query, &body).await;
+    assert_eq!(status, 413);
+    let (status, _) = raw_media(&server, &key, &image, &[7u8; 4097]).await;
+    assert_eq!(status, 413);
+    // The route a client asks when it carries a newer option is the same send, with the same checks.
+    let on_options = format!("/options?{image}&thumbnail_len=4&view_once=true");
+    let body = [jpeg(4).as_slice(), &[7u8; 10]].concat();
+    let (status, answer) = raw_media(&server, &key, &on_options, &body).await;
+    assert_eq!(status, 200, "{answer}");
+    let sent: Sent = serde_json::from_str(&answer).unwrap();
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta("100000000001@s.whatsapp.net", None, 50))
+        .await
+        .unwrap();
+    let stored = page
+        .iter()
+        .find(|m| m.message.id == sent.message_id)
+        .unwrap();
+    let media = stored.meta.media.clone().unwrap();
+    assert!(media.view_once && media.thumbnail);
+    assert!(matches!(
+        &stored.message.body,
+        MessageBody::Media { size: 10, .. }
+    ));
+    let (status, _) = raw_media(
+        &server,
+        &key,
+        &format!("/options?{base}&kind=document&view_once=true"),
+        &[1],
+    )
+    .await;
+    assert_eq!(status, 400);
+    // An exact waveform is accepted.
+    let ok = format!("{audio}&waveform_b64={}", wave(&[100; 64]));
+    let (status, answer) = raw_media(&server, &key, &ok, &[1]).await;
+    assert_eq!(status, 200, "{answer}");
+
+    // The client refuses the same things before it uploads.
+    let bad = MediaOptions {
+        waveform_b64: Some(encode_b64(&[1; 10])),
+        ..Default::default()
+    };
+    let g = gateway.clone();
+    let early =
+        blocking(move || g.send_media_with(DM, MediaKind::Audio, "audio/ogg", None, &bad, vec![1]))
+            .await;
+    assert!(is_code(&early.unwrap_err(), ErrorCode::BadRequest));
 }
 
 #[tokio::test]

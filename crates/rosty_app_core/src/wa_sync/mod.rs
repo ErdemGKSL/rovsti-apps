@@ -27,6 +27,10 @@
 //! * Full media is a row of `media` per message ([`media`]): a download queue under the owner's auto-download
 //!   rules ([`media::policy`]), a cached file path, and a cap with LRU eviction that spares starred, saved and
 //!   recently used files. Evicting forgets the path and keeps the message and its thumbnail.
+//! * A view-once message downloads only by a tap and opens once: [`Store::media_viewed`] marks it, hands its
+//!   file back for deletion and leaves it `gone`. The played receipt of a received voice note goes out once
+//!   ([`Store::mark_played`]). The photos, videos, audio and documents of a chat page both ways
+//!   ([`Store::chat_media`]).
 //! * The store follows the gateway process and the linked account ([`Store::note_status`]): another gateway
 //!   epoch is a gap, another account empties the store, and unlinking deletes it ([`Store::wipe`]).
 
@@ -48,6 +52,8 @@ mod link_state_tests;
 pub mod media;
 mod media_policy;
 #[cfg(test)]
+mod media_round_tests;
+#[cfg(test)]
 mod media_tests;
 mod merge;
 mod model;
@@ -67,16 +73,16 @@ pub use link_state::{
 pub use media::{
     Conditions, Decision, Evicted, Eviction, Fetch, Fetched, KindUsage, MediaClass, MediaDue,
     MediaEntry, MediaInfo, MediaQueued, MediaSettled, MediaState, MediaStats, Missing, Network,
-    Reconciled, Usage,
+    Reconciled, Usage, Viewed,
 };
 pub use merge::ChatRekeyed;
 pub use model::{
-    AppliedEvents, ChatRow, Kind, MessageRow, PendingOp, RowState, StarredCursor, StarredPage,
-    StoredChats, StoredPage, ThreadCursor, ThreadPage,
+    AppliedEvents, ChatRow, GalleryPage, Kind, MessageRow, PendingOp, RowState, StarredCursor,
+    StarredPage, StoredChats, StoredPage, ThreadCursor, ThreadPage,
 };
 pub use outbox::{
-    Action, BACKOFF_BASE_MS, BACKOFF_MAX_MS, Due, ErrorKind, OutboxItem, OutboxState, Outcome,
-    SENDING_LEASE_MS, Settled, backoff_ms,
+    Action, BACKOFF_BASE_MS, BACKOFF_MAX_MS, Due, ErrorKind, MediaExtras, OutboxItem, OutboxState,
+    Outcome, Played, SENDING_LEASE_MS, Settled, backoff_ms,
 };
 pub use plan::{ChatCursor, FetchPage, Gap, SyncPlan, SyncState};
 pub use schema::SCHEMA_VERSION;

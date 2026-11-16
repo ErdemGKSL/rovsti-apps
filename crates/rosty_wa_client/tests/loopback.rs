@@ -9,6 +9,7 @@ use std::thread;
 use rosty_wa_client::{ClientError, Gateway, Picture};
 use rosty_wa_proto::{
     ChatAction, ChatActionKind, ConnectKey, ErrorCode, GatewayUrl, IdentitySource, InstanceState,
+    MediaKind, MediaOptions,
 };
 
 /// Answers one request with `status` and `body`, returning the raw request
@@ -277,4 +278,151 @@ fn https_builds_tls_and_fails_cleanly() {
     let err = Gateway::new(url, Some(key())).status().unwrap_err();
     assert!(matches!(err, ClientError::Http(_)), "{err:?}");
     handle.join().unwrap();
+}
+
+/// One request seen by a stub: the request line and the body.
+type Asked = (String, Vec<u8>);
+
+/// Answers one request per entry of `answers` (`(status, body)`), each on its
+/// own connection, and returns what was asked: the request line and the body.
+fn stub_each(
+    answers: Vec<(&'static str, &'static str)>,
+) -> (GatewayUrl, thread::JoinHandle<Vec<Asked>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let handle = thread::spawn(move || {
+        let mut asked = Vec::new();
+        for (status, body) in answers {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 1024];
+            let head_end = loop {
+                if let Some(at) = seen.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break at + 4;
+                }
+                let n = stream.read(&mut buf).unwrap();
+                assert!(n > 0, "the request ended before its headers");
+                seen.extend_from_slice(&buf[..n]);
+            };
+            let head = String::from_utf8_lossy(&seen[..head_end]).into_owned();
+            let length: usize = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse().unwrap())
+                })
+                .unwrap_or(0);
+            while seen.len() < head_end + length {
+                let n = stream.read(&mut buf).unwrap();
+                assert!(n > 0, "the request ended before its body");
+                seen.extend_from_slice(&buf[..n]);
+            }
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            let line = head.lines().next().unwrap_or("").to_owned();
+            asked.push((line, seen[head_end..].to_vec()));
+        }
+        asked
+    });
+    let url = GatewayUrl::parse(&format!("http://127.0.0.1:{port}")).unwrap();
+    (url, handle)
+}
+
+const SENT: &str = r#"{"message_id":"M1","timestamp_ms":5}"#;
+const JPEG: [u8; 4] = [0xFF, 0xD8, 0xFF, 0xE0];
+
+fn with_preview() -> MediaOptions {
+    MediaOptions {
+        seconds: Some(4),
+        thumbnail_b64: Some(rosty_wa_proto::encode_b64(&JPEG)),
+        width: Some(640),
+        height: Some(360),
+        ..MediaOptions::default()
+    }
+}
+
+fn send_video(
+    url: GatewayUrl,
+    options: &MediaOptions,
+) -> Result<rosty_wa_proto::Sent, ClientError> {
+    Gateway::new(url, Some(key())).send_media_with(
+        "c",
+        MediaKind::Video,
+        "video/mp4",
+        None,
+        options,
+        b"FILE".to_vec(),
+    )
+}
+
+#[test]
+fn newer_media_options_go_to_their_own_route_with_the_preview_in_front_of_the_file() {
+    let (url, asked) = stub_each(vec![("200 OK", SENT)]);
+    let sent = send_video(url, &with_preview()).unwrap();
+    assert_eq!(sent.message_id, "M1");
+    let asked = asked.join().unwrap();
+    assert_eq!(
+        asked[0].0,
+        "POST /v1/messages/media/options?chat=c&kind=video&mime=video%2Fmp4&seconds=4&width=640&height=360&thumbnail_len=4 HTTP/1.1"
+    );
+    assert_eq!(asked[0].1, [&JPEG[..], b"FILE"].concat());
+
+    // A send without them is the request it always was.
+    let (url, asked) = stub_each(vec![("200 OK", SENT)]);
+    let plain = MediaOptions {
+        seconds: Some(4),
+        ..MediaOptions::default()
+    };
+    send_video(url, &plain).unwrap();
+    let asked = asked.join().unwrap();
+    assert_eq!(
+        asked[0].0,
+        "POST /v1/messages/media?chat=c&kind=video&mime=video%2Fmp4&seconds=4 HTTP/1.1"
+    );
+    assert_eq!(asked[0].1, b"FILE");
+}
+
+#[test]
+fn an_older_gateway_gets_the_file_the_old_way_but_never_a_view_once_one() {
+    // The router's 404 (no API body), then the plain route takes the file alone.
+    let (url, asked) = stub_each(vec![("404 Not Found", ""), ("200 OK", SENT)]);
+    let sent = send_video(url, &with_preview()).unwrap();
+    assert_eq!(sent.message_id, "M1");
+    let asked = asked.join().unwrap();
+    assert!(
+        asked[0].0.starts_with("POST /v1/messages/media/options?"),
+        "{}",
+        asked[0].0
+    );
+    assert_eq!(
+        asked[1].0,
+        "POST /v1/messages/media?chat=c&kind=video&mime=video%2Fmp4&seconds=4 HTTP/1.1"
+    );
+    assert_eq!(asked[1].1, b"FILE");
+
+    // View once is not sent as an ordinary message: one request, then an error.
+    let (url, asked) = stub_each(vec![("404 Not Found", "")]);
+    let once = MediaOptions {
+        view_once: true,
+        ..MediaOptions::default()
+    };
+    let err = send_video(url, &once).unwrap_err();
+    assert!(err.is_not_found(), "{err:?}");
+    assert_eq!(asked.join().unwrap().len(), 1);
+
+    // A 404 the gateway explains is not "no such route": no second request.
+    let (url, asked) = stub_each(vec![(
+        "404 Not Found",
+        r#"{"code":"not_found","message":"no such chat"}"#,
+    )]);
+    let err = send_video(url, &with_preview()).unwrap_err();
+    assert!(
+        matches!(&err, ClientError::Api(e) if e.message == "no such chat"),
+        "{err:?}"
+    );
+    assert_eq!(asked.join().unwrap().len(), 1);
 }

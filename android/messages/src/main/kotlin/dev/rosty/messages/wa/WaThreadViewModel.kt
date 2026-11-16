@@ -8,8 +8,10 @@ import dev.rosty.core.model.chat.SearchJumpStep
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
+import dev.rosty.core.model.wa.MediaWaveform
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.TypingState
+import dev.rosty.core.model.wa.Unavailable
 import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncChat
@@ -31,6 +33,7 @@ import dev.rosty.messages.conversation.ConversationEffect
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.conversation.DayLabels
 import dev.rosty.messages.conversation.MediaAction
+import dev.rosty.messages.conversation.RecordUi
 import dev.rosty.messages.conversation.ReplyUi
 import dev.rosty.messages.conversation.VoiceUi
 import dev.rosty.messages.conversation.withDays
@@ -39,6 +42,8 @@ import dev.rosty.messages.inbox.RowAvatar
 import dev.rosty.messages.inbox.duration
 import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.names.PersonNames
+import dev.rosty.platform.audio.VoiceRecorder
+import dev.rosty.platform.media.MediaProbe
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
@@ -60,6 +65,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 /** The words of a WhatsApp thread, from `strings.xml` (English and Turkish). */
 interface WaWords {
@@ -94,13 +100,35 @@ interface WaWords {
 
     /** What a bubble says about a file the gateway no longer has. */
     val gone: String get() = ""
+
+    /** A view-once message someone sent: only their phone and mine can open it (E6-WA R3). */
+    val viewOnceOpenPhone: String get() = "View once message. Open it on your phone."
+
+    /** A view-once message I sent from my phone; and the label of one whose kind is not known. */
+    val viewOnce: String get() = "View once message"
+
+    /** A view-once photo, video or voice note I sent (I cannot open it again either). */
+    fun viewOnceOf(kind: MediaKind): String =
+        when (kind) {
+            MediaKind.Image -> "View once photo"
+            MediaKind.Video -> "View once video"
+            MediaKind.Audio -> "View once voice message"
+            else -> viewOnce
+        }
+
+    /** A bot's or a hosted business's message, which WhatsApp keeps from linked devices. */
+    val unavailableOpenPhone: String get() = "This message is not available on this device. Open it on your phone."
 }
 
 /** What a tap on a bubble's media asks the page to do (the page owns the viewer, the pickers and the intents). */
 sealed interface WaMediaEffect {
-    /** Open the picture viewer on the bubble [key]. */
-    data class ShowPictures(
+    /**
+     * Open the viewer on the photo or video [row] (the bubble [key]): at once, with its thumbnail; the viewer downloads
+     * what is not on the phone and pages through the chat's other photos and videos.
+     */
+    data class ShowViewer(
         val key: String,
+        val row: WaSyncMessage,
     ) : WaMediaEffect
 
     /** Hand a downloaded video or document to an app that shows it. */
@@ -110,12 +138,22 @@ sealed interface WaMediaEffect {
         val name: String,
     ) : WaMediaEffect
 
-    /** "Save as" for a received file (a picture goes to Photos). */
+    /** Save a copy to the phone's gallery or downloads (MediaStore), recorded on the message [chat] / [id]. */
     data class Save(
         val file: File,
         val mime: String,
         val name: String,
         val picture: Boolean,
+        val chat: String = "",
+        val id: String = "",
+    ) : WaMediaEffect
+
+    /** "Forward to": the chooser, then the chat picked with [file] attached and [caption] in its composer. */
+    data class Forward(
+        val file: File,
+        val mime: String,
+        val name: String,
+        val caption: String,
     ) : WaMediaEffect
 
     data class Share(
@@ -172,7 +210,19 @@ class WaThreadSources(
     val readable: suspend (number: String) -> String = { it },
     /** The key changes of the store, after what is kept per chat was moved ([WaRekeys.rekeys]). */
     val rekeys: Flow<Rekey> = emptyFlow(),
+    /** The microphone of the composer's voice notes (E6-WA R3); null: the composer has no microphone. */
+    val recorder: VoiceRecorder? = null,
+    /** Plays a recorded take before it is sent. */
+    val preview: VoiceEngine? = null,
+    /** Where a take is recorded; null: next to the files to send ([WaMedia.outgoing]). */
+    val voiceFile: (() -> File?)? = null,
+    /** A monotonic clock in milliseconds, for the length of a take. */
+    val recordClock: () -> Long = { System.nanoTime() / NANOS_PER_MS },
+    /** Measures a photo or video to send (size, length, preview); null: they go out without them. */
+    val probe: MediaProbe? = null,
 )
+
+private const val NANOS_PER_MS = 1_000_000L
 
 /**
  * A WhatsApp conversation (E6.4a) read from the offline store only (E6.4s): `wa_sync.thread` pages, read again when
@@ -212,6 +262,33 @@ class WaThreadViewModel(
     /** The voice note in the player. */
     val voice: StateFlow<VoiceUi?> get() = sources.voice?.state ?: noVoice
 
+    /**
+     * The voice note recorder of the composer (E6-WA R3); null without a microphone. A take goes out through the
+     * outbox as a voice note, with its length and waveform, answering the quoted message like a text would.
+     */
+    val recording: VoiceRecording? =
+        sources.recorder?.let { recorder ->
+            VoiceRecording(
+                scope = viewModelScope,
+                recorder = recorder,
+                preview = sources.preview ?: NoVoiceEngine,
+                newFile = sources.voiceFile ?: { sources.media?.outgoing(UUID.randomUUID().toString(), VOICE_FILE) },
+                discard = ::discardTake,
+                clock = sources.recordClock,
+                chatState = { state -> if (sources.offline.online.value) sources.remote.typing(jid, state) },
+                hint = { text -> effectChannel.trySend(ConversationEffect.Toast(text)) },
+                onTake = ::sendVoice,
+            )
+        }
+
+    private val noRecord = MutableStateFlow<RecordUi?>(null)
+
+    /** The voice note being recorded in the composer. */
+    val record: StateFlow<RecordUi?> get() = recording?.state ?: noRecord
+
+    /** Received voice notes whose played receipt was asked for in this visit. */
+    private val playedAsked = HashSet<String>()
+
     private val revealChannel = Channel<String>(Channel.BUFFERED)
 
     /** Bubble keys the page scrolls to and lets glow (a search hit opened from the inbox). */
@@ -235,6 +312,14 @@ class WaThreadViewModel(
     private var typingClear: Job? = null
     private var lastTypingSentMs = 0L
     private var visible = false
+
+    private val batchState = MutableStateFlow<WaSendBatch?>(null)
+
+    /**
+     * The send preview of picked files (E6-WA R3): null while nothing is picked. Each file goes out as its own message,
+     * in this order, with its caption; a photo or video can go as view once.
+     */
+    val batch: StateFlow<WaSendBatch?> = batchState.asStateFlow()
 
     /** The message the composer answers (its id), and the file that goes out with the next Send. */
     private var replyTo: String? = null
@@ -383,7 +468,9 @@ class WaThreadViewModel(
         val stored = rows.filter { !it.deleted && it.state !in OUTBOX_STATES }
         val thumbs =
             stored.filter {
-                it.kind in VISUAL_KINDS && media.thumb(it) == null && it.mediaPath == null &&
+                it.kind in VISUAL_KINDS && media.thumb(
+                    it,
+                ) == null && it.mediaPath == null && placeholderOf(it) == null &&
                     (it.hasThumbnail || it.media?.thumbnail == true) && it.id !in thumbsTried
             }
         val files =
@@ -500,11 +587,23 @@ class WaThreadViewModel(
                 else -> clock
             }
         val isMedia = row.kind in MEDIA_KINDS
+        val placeholder = if (row.deleted) null else placeholderOf(row)
         val text =
             when {
                 row.deleted -> if (row.deletedByMe()) words.youDeleted else words.deleted
+
+                // A placeholder says what it is in its row; a view-once send of mine keeps its caption.
+                placeholder != null -> if (isMedia) row.text.orEmpty() else ""
+
                 row.kind == WaSyncKind.Text || isMedia -> row.text.orEmpty()
+
                 else -> waPreview(row.toBody(), row.toMeta(), preview)
+            }
+        val media =
+            when {
+                placeholder != null -> persistentListOf(placeholder)
+                isMedia && !row.deleted -> persistentListOf(mediaOf(row, state))
+                else -> persistentListOf()
             }
         return BubbleUi(
             key = keyOf(row),
@@ -513,7 +612,7 @@ class WaThreadViewModel(
             meta = meta,
             state = if (row.fromMe) state else BubbleState.None,
             atMs = row.timestampMs,
-            media = if (isMedia && !row.deleted) persistentListOf(mediaOf(row, state)) else persistentListOf(),
+            media = media,
             sender = if (group && !row.fromMe) senderOf(row.sender, row.senderName) else null,
             quote = if (row.deleted) null else quoteOf(row),
             forwarded = row.forwarded && !row.deleted,
@@ -558,6 +657,31 @@ class WaThreadViewModel(
         return ReplyUi(keyOf(row), author, snippetOf(row))
     }
 
+    /**
+     * What this device cannot show (E6-WA R3): a message that reached it as a placeholder only (a view-once message
+     * someone sent, a bot's message), or a view-once photo, video or voice note I sent (I cannot open it again either).
+     * Null for everything else.
+     */
+    private fun placeholderOf(row: WaSyncMessage): BubbleMedia? {
+        val reason = row.unavailable
+        val label =
+            when {
+                reason == Unavailable.ViewOnce -> if (row.fromMe) words.viewOnce else words.viewOnceOpenPhone
+                reason != null -> words.unavailableOpenPhone
+                row.fromMe && row.media?.viewOnce == true && row.kind in MEDIA_KINDS -> words.viewOnceOf(mediaKind(row))
+                else -> return null
+            }
+        return BubbleMedia(
+            model = null,
+            label = label,
+            isImage = false,
+            kind = BubbleMediaKind.Unavailable,
+            viewOnce = reason == null || reason == Unavailable.ViewOnce,
+        )
+    }
+
+    private fun mediaKind(row: WaSyncMessage): MediaKind = (row.toBody() as? MessageBody.Media)?.kind ?: MediaKind.Image
+
     /** How the attachment of [row] is drawn: the picture, the player, the file row. */
     private fun mediaOf(
         row: WaSyncMessage,
@@ -574,7 +698,21 @@ class WaThreadViewModel(
         // The gateway no longer has the file: the bubble says so where it would say the size or the length.
         val gone = words.gone.takeIf { local == null && row.mediaState == WaSyncMediaState.Gone && it.isNotEmpty() }
         return when (row.kind) {
-            WaSyncKind.Image, WaSyncKind.Sticker -> {
+            WaSyncKind.Sticker -> {
+                BubbleMedia(
+                    model = local ?: media?.thumb(row),
+                    label = label,
+                    isImage = true,
+                    kind = BubbleMediaKind.Sticker,
+                    busy = busy,
+                    local = local != null,
+                    animated = local?.takeIf { meta?.animated == true },
+                    width = meta?.width,
+                    height = meta?.height,
+                )
+            }
+
+            WaSyncKind.Image -> {
                 BubbleMedia(
                     model = local ?: media?.thumb(row),
                     label = label,
@@ -584,6 +722,7 @@ class WaThreadViewModel(
                     detail = gone,
                     busy = busy,
                     local = local != null,
+                    viewOnce = meta?.viewOnce == true,
                 )
             }
 
@@ -597,6 +736,8 @@ class WaThreadViewModel(
                     detail = gone ?: listOfNotNull(length, size).joinToString(" · ").ifEmpty { null },
                     busy = busy,
                     local = local != null,
+                    loop = local?.takeIf { meta?.animated == true },
+                    viewOnce = meta?.viewOnce == true,
                 )
             }
 
@@ -609,6 +750,13 @@ class WaThreadViewModel(
                     detail = gone ?: length ?: size,
                     busy = busy,
                     local = local != null,
+                    // The 64 bars WhatsApp carries for a voice note; without them the plain bar.
+                    waveform =
+                        meta
+                            ?.waveform()
+                            ?.let(VoiceWaveform::bars)
+                            ?.toImmutableList() ?: persistentListOf(),
+                    viewOnce = meta?.viewOnce == true,
                 )
             }
 
@@ -858,6 +1006,121 @@ class WaThreadViewModel(
         }
     }
 
+    /**
+     * Picked or shared files ([uris], content URIs), one or many: copied into app storage, measured and put in the send
+     * preview after what is there. A file over WhatsApp's 16 MiB is left out with a pill; the others still come.
+     */
+    fun pick(uris: List<String>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val added = ArrayList<WaBatchItem>()
+            var large = 0
+            var failed = 0
+            for (uri in uris) {
+                when (val result = sources.stage(uri)) {
+                    is WaStageResult.Staged -> {
+                        if (result.file.size > WaMedia.MAX_SEND_BYTES) {
+                            sources.media?.discard(result.file.file.absolutePath)
+                            large++
+                        } else {
+                            added +=
+                                WaBatchItem(UUID.randomUUID().toString(), result.file, measure = measure(result.file))
+                        }
+                    }
+
+                    WaStageResult.TooLarge -> {
+                        large++
+                    }
+
+                    WaStageResult.Failed -> {
+                        failed++
+                    }
+                }
+            }
+            if (large > 0) {
+                val megabytes = (WaMedia.MAX_SEND_BYTES / BYTES_PER_MB).toInt()
+                effectChannel.trySend(
+                    ConversationEffect.Toast(UiText.Plural(R.plurals.wa_batch_too_large, large, listOf(megabytes))),
+                )
+            }
+            if (failed > 0) effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_media_cant_attach)))
+            if (added.isNotEmpty()) batchState.value = (batchState.value ?: WaSendBatch()).add(added)
+        }
+    }
+
+    private suspend fun measure(file: WaStagedFile): dev.rosty.platform.media.MediaMeasure? {
+        val probe = sources.probe ?: return null
+        val kind = mediaKindOf(file.mime)
+        if (kind != MediaKind.Image && kind != MediaKind.Video) return null
+        return probe.measure(file.file, file.mime)
+    }
+
+    /** The preview shows item [index]. */
+    fun batchSelect(index: Int) {
+        batchState.value = batchState.value?.select(index)
+    }
+
+    fun batchCaption(
+        id: String,
+        text: String,
+    ) {
+        batchState.value = batchState.value?.caption(id, text)
+    }
+
+    fun batchViewOnce(id: String) {
+        batchState.value = batchState.value?.toggleViewOnce(id)
+    }
+
+    /** Moves item [id] [by] places (negative: earlier). */
+    fun batchMove(
+        id: String,
+        by: Int,
+    ) {
+        batchState.value = batchState.value?.move(id, by)
+    }
+
+    /** Takes item [id] out of the preview (its copy is deleted); the last one closes the preview. */
+    fun batchRemove(id: String) {
+        val batch = batchState.value ?: return
+        val item = batch.items.firstOrNull { it.id == id } ?: return
+        val rest = batch.remove(id)
+        batchState.value = rest.takeIf { !it.isEmpty }
+        viewModelScope.launch { sources.media?.discard(item.file.file.absolutePath) }
+    }
+
+    /** Closes the preview without sending: the copies are deleted. */
+    fun batchClose() {
+        val batch = batchState.value ?: return
+        batchState.value = null
+        viewModelScope.launch { for (item in batch.items) sources.media?.discard(item.file.file.absolutePath) }
+    }
+
+    /**
+     * Sends the preview: every file its own message through the outbox, in order, with its caption, its options and
+     * (the first one) the reply of the quoted bar. Without a linked account nothing goes and the preview stays.
+     */
+    fun batchSend() {
+        val batch = batchState.value?.takeIf { !it.isEmpty } ?: return
+        val quoted = replyTo
+        batchState.value = null
+        replyTo = null
+        viewModelScope.launch {
+            val actions = batch.actions(quoted)
+            var sent = 0
+            for (action in actions) {
+                if (!sources.offline.enqueue(jid, action)) break
+                sent++
+            }
+            if (sent < actions.size) {
+                // What did not go stays in the preview, in its order.
+                batchState.value = WaSendBatch(batch.items.drop(sent))
+                if (sent == 0) replyTo = quoted
+                effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
+            }
+            publish()
+        }
+    }
+
     private fun tooLarge() {
         val megabytes = (WaMedia.MAX_SEND_BYTES / BYTES_PER_MB).toInt()
         effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_media_too_large, listOf(megabytes))))
@@ -894,43 +1157,55 @@ class WaThreadViewModel(
     ): String = row.media?.fileName?.takeIf { it.isNotBlank() } ?: file.name
 
     /**
-     * A tap on a bubble with an attachment: a picture opens in the viewer, a voice note plays or pauses, a video or
-     * document is downloaded and handed to an app that shows it. False: the bubble has nothing to open.
+     * A tap on a bubble with an attachment: a picture or a video opens in the viewer at once (which downloads it), a
+     * voice note plays or pauses, a document is downloaded and handed to an app that shows it. False: the bubble has
+     * nothing to open.
      */
     fun openMedia(key: String): Boolean {
         val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS } ?: return false
+        // A sticker is all there is to see; a view-once send of mine cannot be opened again.
+        if (row.kind == WaSyncKind.Sticker || placeholderOf(row) != null) return false
         if (row.kind == WaSyncKind.Audio) {
             toggleVoice(key)
             return true
         }
+        if (row.kind in VISUAL_KINDS) {
+            mediaChannel.trySend(WaMediaEffect.ShowViewer(key, row))
+            return true
+        }
         viewModelScope.launch {
             val file = fileOf(row) ?: return@launch
-            if (row.kind in PICTURE_KINDS) {
-                // The viewer pages over the pictures of the state: it must know this one is there now.
-                sources.offline.session.value
-                    ?.let { reload(it) }
-                mediaChannel.trySend(WaMediaEffect.ShowPictures(key))
-            } else {
-                mediaChannel.trySend(WaMediaEffect.Open(file, row.mime.orEmpty(), fileName(row, file)))
-            }
+            mediaChannel.trySend(WaMediaEffect.Open(file, row.mime.orEmpty(), fileName(row, file)))
         }
         return true
     }
 
-    /** Save or Share of a received file (downloaded first when it is not on the phone). */
+    /**
+     * Save, Share or Forward of a received file (downloaded first when it is not on the phone). A view-once message
+     * offers none of them.
+     */
     fun mediaAction(
         key: String,
         action: MediaAction,
     ) {
-        val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS } ?: return
+        val row = rowOf(key)?.takeIf { !it.deleted && it.kind in MEDIA_KINDS && it.media?.viewOnce != true } ?: return
         viewModelScope.launch {
             val file = fileOf(row) ?: return@launch
             val name = fileName(row, file)
             val mime = row.mime.orEmpty()
             mediaChannel.trySend(
                 when (action) {
-                    MediaAction.Save -> WaMediaEffect.Save(file, mime, name, row.kind in PICTURE_KINDS)
-                    MediaAction.Share -> WaMediaEffect.Share(file, mime, name)
+                    MediaAction.Save -> {
+                        WaMediaEffect.Save(file, mime, name, row.kind in PICTURE_KINDS, row.chat, row.id)
+                    }
+
+                    MediaAction.Share -> {
+                        WaMediaEffect.Share(file, mime, name)
+                    }
+
+                    MediaAction.Forward -> {
+                        WaMediaEffect.Forward(file, mime, name, row.text.orEmpty())
+                    }
                 },
             )
         }
@@ -938,7 +1213,10 @@ class WaThreadViewModel(
 
     // ---- voice notes (M17)
 
-    /** Play or pause of the voice note [key]; another note that was playing stops. */
+    /**
+     * Play or pause of the voice note [key]; another note that was playing stops. The first play of a received voice
+     * note queues its played receipt (blue microphone on the other phone), once; my own notes never send one.
+     */
     fun toggleVoice(key: String) {
         val voice = sources.voice ?: return
         val row = rowOf(key)?.takeIf { !it.deleted && it.kind == WaSyncKind.Audio } ?: return
@@ -946,8 +1224,48 @@ class WaThreadViewModel(
             val file = fileOf(row) ?: return@launch
             if (!voice.toggle(key, file.absolutePath)) {
                 effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_voice_cant_play)))
+                return@launch
             }
+            if (playedOwed(row) && playedAsked.add(row.id)) sources.offline.markPlayed(jid, row.id)
         }
+    }
+
+    /** A received voice note whose played receipt has not been queued yet. */
+    private fun playedOwed(row: WaSyncMessage): Boolean =
+        !row.fromMe && !row.played && row.media?.voiceNote == true && row.state !in OUTBOX_STATES
+
+    /** A recorded take goes out as a voice note through the outbox (E6-WA R3). */
+    private suspend fun sendVoice(take: VoiceTake) {
+        val quoted = replyTo
+        replyTo = null
+        val action =
+            WaSyncAction.SendMedia(
+                file = take.file.absolutePath,
+                media = MediaKind.Audio,
+                mime = VoiceRecording.MIME,
+                size = take.file.length(),
+                quotedId = quoted,
+                seconds = take.seconds,
+                voiceNote = true,
+                waveformB64 = MediaWaveform.encode(take.waveform),
+            )
+        if (!sources.offline.enqueue(jid, action)) {
+            replyTo = quoted
+            discardTake(take.file)
+            effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
+        }
+        publish()
+    }
+
+    private suspend fun discardTake(file: File) {
+        val media = sources.media
+        if (media != null) media.discard(file.absolutePath) else file.delete()
+    }
+
+    /** The thread is gone for good: a take that was not sent is thrown away. */
+    override fun onCleared() {
+        recording?.dispose()
+        sources.preview?.release()
     }
 
     /** Scrubbing the bar of the note in the player to [fraction] (0..1). */
@@ -1142,6 +1460,9 @@ class WaThreadViewModel(
         private const val MAX_ASPECT = 1.9f
         private const val MAX_TYPE = 5
         private const val BYTES_PER_MB = 1024L * 1024L
+
+        /** The file name of a recorded voice note (WhatsApp shows none). */
+        private const val VOICE_FILE = "voice-note.ogg"
 
         /** Two taps this close together are a double tap (Android's own timeout). */
         const val DOUBLE_TAP_MS = 300L

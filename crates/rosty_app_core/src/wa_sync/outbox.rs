@@ -10,7 +10,7 @@
 //! * A star shows on the stored message at once and holds against what the gateway still says until it went out. A
 //!   later star of the same message replaces one that has not gone out; a refused one is undone and dropped.
 
-use rosty_wa_proto::{MediaKind, MessageBody, Reaction, WaMessage};
+use rosty_wa_proto::{MediaKind, MediaMeta, MediaOptions, MessageBody, Reaction, WaMessage};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +33,28 @@ pub fn backoff_ms(attempts: u32) -> i64 {
     BACKOFF_BASE_MS
         .saturating_mul(1_i64 << doublings)
         .min(BACKOFF_MAX_MS)
+}
+
+/// What a media send carries beyond the file and its name: the preview image, the pixel size, the waveform of
+/// a voice note, the GIF flag and view once, as [`MediaOptions`] names them. A row written by a build before
+/// these existed has none.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaExtras {
+    /// A small JPEG preview, base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_b64: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    /// 64 samples, each 0..=100, base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_b64: Option<String>,
+    /// A video sent as a GIF, or an animated sticker.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub animated: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub view_once: bool,
 }
 
 /// What a queued row does. `chat` is on the row.
@@ -60,6 +82,9 @@ pub enum Action {
         seconds: Option<u32>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         voice_note: bool,
+        /// Flat in the JSON, next to the fields above.
+        #[serde(flatten)]
+        extras: MediaExtras,
     },
     Edit {
         message_id: String,
@@ -89,6 +114,14 @@ pub enum Action {
         message_id: String,
         starred: bool,
     },
+    /// Tell the sender of a voice note that it was played. Queued by [`Store::mark_played`] only, once per
+    /// message.
+    MarkPlayed {
+        message_id: String,
+        /// The author, in a group.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sender: Option<String>,
+    },
 }
 
 impl Action {
@@ -101,7 +134,62 @@ impl Action {
             Action::React { .. } => "react",
             Action::MarkRead { .. } => "mark_read",
             Action::Star { .. } => "star",
+            Action::MarkPlayed { .. } => "mark_played",
         }
+    }
+
+    /// The options of the gateway call of a media send (`None` for any other action).
+    pub fn media_options(&self) -> Option<MediaOptions> {
+        match self {
+            Action::SendMedia {
+                quoted_id,
+                file_name,
+                seconds,
+                voice_note,
+                extras,
+                ..
+            } => Some(MediaOptions {
+                quoted_id: quoted_id.clone(),
+                file_name: file_name.clone(),
+                seconds: *seconds,
+                voice_note: *voice_note,
+                thumbnail_b64: extras.thumbnail_b64.clone(),
+                width: extras.width,
+                height: extras.height,
+                waveform_b64: extras.waveform_b64.clone(),
+                animated: extras.animated,
+                view_once: extras.view_once,
+            }),
+            _ => None,
+        }
+    }
+
+    /// What the bubble of a media send knows before the gateway describes the message: the same details the
+    /// gateway will send back. `None` when there is nothing to tell.
+    fn media_meta(&self) -> Option<MediaMeta> {
+        let Action::SendMedia { media, .. } = self else {
+            return None;
+        };
+        let options = self.media_options()?;
+        let sized = matches!(
+            media,
+            MediaKind::Image | MediaKind::Video | MediaKind::Sticker
+        );
+        let audio = *media == MediaKind::Audio;
+        let meta = MediaMeta {
+            file_name: options.file_name.filter(|_| *media == MediaKind::Document),
+            seconds: options
+                .seconds
+                .filter(|_| audio || *media == MediaKind::Video),
+            width: options.width.filter(|_| sized),
+            height: options.height.filter(|_| sized),
+            voice_note: options.voice_note && audio,
+            animated: options.animated && matches!(media, MediaKind::Video | MediaKind::Sticker),
+            view_once: options.view_once,
+            waveform_b64: options.waveform_b64.filter(|_| audio),
+            ..MediaMeta::default()
+        };
+        (meta != MediaMeta::default()).then_some(meta)
     }
 
     pub fn is_send(&self) -> bool {
@@ -114,7 +202,8 @@ impl Action {
             Action::Edit { message_id, .. }
             | Action::Revoke { message_id, .. }
             | Action::React { message_id, .. }
-            | Action::Star { message_id, .. } => Some(message_id),
+            | Action::Star { message_id, .. }
+            | Action::MarkPlayed { message_id, .. } => Some(message_id),
             Action::SendText { .. } | Action::SendMedia { .. } | Action::MarkRead { .. } => None,
         }
     }
@@ -252,6 +341,16 @@ pub enum Outcome {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retry_after_ms: Option<i64>,
     },
+}
+
+/// What [`Store::mark_played`] did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Played {
+    /// The receipt waits in the outbox (also when this call repeats the one that queued it). `false`: the
+    /// message was marked played before, nothing is sent again.
+    pub queued: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<OutboxItem>,
 }
 
 /// What became of the row.
@@ -409,6 +508,7 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         Action::SendMedia { file, .. } => Some(file.clone()),
         _ => None,
     };
+    let media = item.action.media_meta();
     Some(MessageRow {
         id: item.client_id.clone(),
         chat: item.chat,
@@ -430,10 +530,11 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         deleted_by: None,
         forwarded: false,
         starred: false,
-        media: None,
+        media,
         location: None,
         contact: None,
         mentions: Vec::new(),
+        unavailable: None,
         has_thumbnail: false,
         media_path,
         media_state: None,
@@ -441,6 +542,8 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         wire_sender: None,
         error: item.last_error,
         pending: Vec::new(),
+        viewed: false,
+        played: false,
     })
 }
 
@@ -567,9 +670,55 @@ fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()
         Action::SendText { .. }
         | Action::SendMedia { .. }
         | Action::Edit { .. }
-        | Action::Revoke { .. } => {}
+        | Action::Revoke { .. }
+        | Action::MarkPlayed { .. } => {}
     }
     Ok(())
+}
+
+/// What [`Store::mark_played`] needs to know about its message.
+struct VoiceNote {
+    played: bool,
+    /// The author, in a group.
+    sender: Option<String>,
+}
+
+/// `from_me, kind, media_json, played, sender` of a message row.
+type VoiceRow = (bool, String, Option<String>, bool, Option<String>);
+
+/// The received voice note `id` of `chat`; an error for anything else.
+fn voice_note(conn: &Connection, chat: &str, id: &str) -> Result<VoiceNote> {
+    let found: Option<VoiceRow> = conn
+        .query_row(
+            "SELECT from_me, kind, media_json, played_ms IS NOT NULL, sender FROM messages
+             WHERE chat = ?1 AND id = ?2",
+            params![chat, id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((from_me, kind, meta, played, sender)) = found else {
+        return Err(Error::NotFound(format!("message {id} of {chat}")));
+    };
+    let meta: Option<MediaMeta> = meta.and_then(|text| serde_json::from_str(&text).ok());
+    let is_voice_note =
+        Kind::from_name(&kind) == Kind::Audio && meta.is_some_and(|meta| meta.voice_note);
+    if from_me || !is_voice_note {
+        return Err(Error::Invalid(
+            "only a received voice note can be marked played".into(),
+        ));
+    }
+    Ok(VoiceNote {
+        played,
+        sender: sender.filter(|_| chat.ends_with("@g.us")),
+    })
 }
 
 /// Takes the stars of message `id` that have not gone out from the outbox: a newer one replaces them.
@@ -598,10 +747,72 @@ impl Store {
         action: &Action,
         now_ms: i64,
     ) -> Result<OutboxItem> {
+        if matches!(action, Action::MarkPlayed { .. }) {
+            return Err(Error::Invalid(
+                "a played receipt is queued with mark_played".into(),
+            ));
+        }
+        self.enqueue(client_id, chat, action, now_ms)
+    }
+
+    /// Queues the played receipt of the received voice note `id` of `chat` under `client_id`, once: the message
+    /// is marked played here and now, and a later call for the same message (another client id) queues nothing.
+    /// Repeating the call with the same client id answers the queued row. A message that is not a received
+    /// voice note is refused. The receipt goes out with the other rows ([`Self::outbox_due`]); one the gateway
+    /// refuses is dropped, and the message stays played.
+    pub fn mark_played(
+        &mut self,
+        client_id: &str,
+        chat: &str,
+        id: &str,
+        now_ms: i64,
+    ) -> Result<Played> {
+        if let Some(existing) = item(&self.conn, client_id)? {
+            return Ok(Played {
+                queued: true,
+                item: Some(existing),
+            });
+        }
+        let key = self.stored_key(chat);
+        let note = voice_note(&self.conn, &key, id)?;
+        if note.played {
+            return Ok(Played {
+                queued: false,
+                item: None,
+            });
+        }
+        let action = Action::MarkPlayed {
+            message_id: id.to_owned(),
+            sender: note.sender,
+        };
+        let queued = self.enqueue(client_id, &key, &action, now_ms)?;
+        self.conn.execute(
+            "UPDATE messages SET played_ms = ?3 WHERE chat = ?1 AND id = ?2 AND played_ms IS NULL",
+            params![queued.chat, id, now_ms],
+        )?;
+        Ok(Played {
+            queued: true,
+            item: Some(queued),
+        })
+    }
+
+    fn enqueue(
+        &mut self,
+        client_id: &str,
+        chat: &str,
+        action: &Action,
+        now_ms: i64,
+    ) -> Result<OutboxItem> {
         if client_id.is_empty() || chat.is_empty() {
             return Err(Error::Invalid(
                 "client id and chat must not be empty".into(),
             ));
+        }
+        // What the gateway would refuse is refused here, while the owner can still change it.
+        if let (Action::SendMedia { media, .. }, Some(options)) = (action, action.media_options()) {
+            options
+                .check(*media)
+                .map_err(|e| Error::Invalid(e.to_string()))?;
         }
         // The row is queued under the chat's key, whichever id of the chat the caller still holds.
         let chat = self
@@ -738,6 +949,14 @@ impl Store {
                     message_id: message_id.clone().filter(|_| row.action.is_send()),
                 }
             }
+            // A refused played receipt has nothing to retry or edit: it is dropped and the message stays played.
+            Outcome::Error {
+                error: ErrorKind::Rejected,
+                ..
+            } if matches!(row.action, Action::MarkPlayed { .. }) => {
+                tx.execute("DELETE FROM outbox WHERE client_id = ?1", [client_id])?;
+                Settled::Failed
+            }
             // A refused star has nothing to retry or edit: it is undone and dropped, unless a newer star of the
             // message waits (that one decides the flag).
             Outcome::Error {
@@ -816,7 +1035,8 @@ impl Store {
             Action::Revoke { .. }
             | Action::React { .. }
             | Action::MarkRead { .. }
-            | Action::Star { .. } => {
+            | Action::Star { .. }
+            | Action::MarkPlayed { .. } => {
                 return Err(Error::Invalid("only a message text can be edited".into()));
             }
         }
@@ -896,7 +1116,8 @@ fn apply_sent(conn: &Connection, row: &OutboxItem, now_ms: i64) -> Result<()> {
         Action::SendText { .. }
         | Action::SendMedia { .. }
         | Action::React { .. }
-        | Action::MarkRead { .. } => {}
+        | Action::MarkRead { .. }
+        | Action::MarkPlayed { .. } => {}
     }
     Ok(())
 }
@@ -952,6 +1173,8 @@ fn confirm_send(
             preview: None,
         }),
         status: Some(rosty_wa_proto::DeliveryStatus::Sent),
+        // What was sent with the file, until the gateway describes the message itself.
+        media: row.action.media_meta(),
         ..Default::default()
     };
     apply::upsert(
@@ -970,9 +1193,25 @@ fn confirm_send(
         "UPDATE messages SET client_id = ?3 WHERE chat = ?1 AND id = ?2",
         params![row.chat, message_id, row.client_id],
     )?;
-    // The file that was sent is the cached full media of the message.
-    if let Action::SendMedia { file, size, .. } = &row.action {
-        media::adopt_sent_file(conn, &row.chat, message_id, file, *size, timestamp_ms)?;
+    if let Action::SendMedia {
+        file, size, extras, ..
+    } = &row.action
+    {
+        if let Some(thumbnail) = extras
+            .thumbnail_b64
+            .as_deref()
+            .and_then(rosty_wa_proto::decode_b64)
+        {
+            conn.execute(
+                "UPDATE messages SET thumb = ?3 WHERE chat = ?1 AND id = ?2 AND thumb IS NULL",
+                params![row.chat, message_id, thumbnail],
+            )?;
+        }
+        // The file that was sent is the cached full media of the message. Not a view-once one: its sender
+        // cannot open it again, so no row names the file and the next reconcile lists it for deletion.
+        if !extras.view_once {
+            media::adopt_sent_file(conn, &row.chat, message_id, file, *size, timestamp_ms)?;
+        }
     }
     Ok(())
 }

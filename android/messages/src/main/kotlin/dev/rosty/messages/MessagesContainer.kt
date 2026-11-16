@@ -40,6 +40,7 @@ import dev.rosty.messages.starred.StarCenter
 import dev.rosty.messages.starred.realStarCenter
 import dev.rosty.messages.wa.GatewayWaRemote
 import dev.rosty.messages.wa.StoreWaChats
+import dev.rosty.messages.wa.WaChatStates
 import dev.rosty.messages.wa.WaChats
 import dev.rosty.messages.wa.WaDownloads
 import dev.rosty.messages.wa.WaMedia
@@ -208,6 +209,9 @@ open class MessagesContainer(
 
     /** [waMedia] when something already made it. */
     val waMediaIfMade: WaMedia? get() = if (waMediaOnce.isInitialized()) waMedia else null
+
+    /** Who types or records a voice note in which WhatsApp chat right now, for the inbox rows (E6-WA R3). */
+    val waChatStates: WaChatStates by lazy { WaChatStates(scope, waOffline.live).start() }
 
     /** The voice note player (M17): one note at a time. */
     val waVoice: WaVoiceNotes by lazy { realWaVoice(this) }

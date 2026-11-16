@@ -26,7 +26,46 @@ data class BubbleMedia(
     val busy: Boolean = false,
     /** The full file is on the phone (a picture shows it, a file can be saved or shared at once). */
     val local: Boolean = false,
+    /** The bars of a voice note (0..1 each, the waveform WhatsApp carries); empty: the plain bar. */
+    val waveform: ImmutableList<Float> = persistentListOf(),
+    /**
+     * A video sent as a GIF (WhatsApp `gif_playback`) whose file is on the phone: the bubble loops it, muted, over its
+     * thumbnail. Null for everything else.
+     */
+    val loop: java.io.File? = null,
+    /** A view-once message (E6-WA R3): never saved, shared or forwarded. */
+    val viewOnce: Boolean = false,
+    /**
+     * An animated sticker whose file is on the phone (E6-WA R3): the bubble animates it with the platform decoder
+     * ([dev.rosty.messages.viewer.AnimatedSticker]). Null for everything else.
+     */
+    val animated: java.io.File? = null,
+    /** The pixel size the message names (a sticker is drawn in its aspect); null when unknown. */
+    val width: Int? = null,
+    val height: Int? = null,
 )
+
+/**
+ * Where the pictures of the bubbles on screen are, in window pixels, by bubble key: the viewer flies out of the
+ * tapped one and back into it (the shared-element flight of an overlay, which a `SharedTransitionScope` cannot carry).
+ * A bubble that scrolled away is not in it; the viewer then closes with its fade.
+ */
+class MediaAnchors {
+    private val rects = HashMap<String, androidx.compose.ui.geometry.Rect>()
+
+    operator fun get(key: String): androidx.compose.ui.geometry.Rect? = rects[key]
+
+    fun put(
+        key: String,
+        rect: androidx.compose.ui.geometry.Rect,
+    ) {
+        if (rect.width > 0f && rect.height > 0f) rects[key] = rect else rects.remove(key)
+    }
+
+    fun remove(key: String) {
+        rects.remove(key)
+    }
+}
 
 /** How a [BubbleMedia] is drawn (E6.4b). */
 enum class BubbleMediaKind {
@@ -41,10 +80,22 @@ enum class BubbleMediaKind {
 
     /** Any other file: name, size, Save and Share. */
     File,
+
+    /**
+     * A sticker (E6-WA R3): drawn at sticker size with no bubble around it, the time in a small pill over its corner; a
+     * tap does nothing.
+     */
+    Sticker,
+
+    /**
+     * What this device cannot show (E6-WA R3): a view-once message someone sent (only the phone opens it), or one I
+     * sent as view once. The glyph and [BubbleMedia.label]; no download, no viewer, no Save, Share or Forward.
+     */
+    Unavailable,
 }
 
 /** What the buttons of a file row do. */
-enum class MediaAction { Save, Share }
+enum class MediaAction { Save, Share, Forward }
 
 /** The one voice note that is loaded in the player (M17); every other note shows its idle row. */
 @Immutable
@@ -56,6 +107,34 @@ data class VoiceUi(
     val progress: Float,
     /** "0:12 / 0:42". */
     val timeLabel: String,
+)
+
+/** Where the voice note being recorded in the composer is (E6-WA R3). */
+enum class RecordPhase {
+    /** The finger holds the microphone: releasing sends, sliding left cancels, sliding up locks. */
+    Holding,
+
+    /** Recording hands-free after the slide up: Stop, Delete and Send. */
+    Locked,
+
+    /** Stopped: the take can be played before it is sent or deleted. */
+    Review,
+}
+
+/** The voice note being recorded; null while the composer shows the microphone. */
+@Immutable
+data class RecordUi(
+    val phase: RecordPhase,
+    /** "0:07": the length of the take (while recording: so far). */
+    val elapsed: String,
+    /** The input level now, 0..1 (while recording). */
+    val level: Float = 0f,
+    /** The bars of the take, 0..1 each ([RecordPhase.Review]). */
+    val bars: ImmutableList<Float> = persistentListOf(),
+    /** The preview plays ([RecordPhase.Review]). */
+    val playing: Boolean = false,
+    /** Fraction of the preview played, 0..1. */
+    val progress: Float = 0f,
 )
 
 /** The message being answered, shown above the composer (M31). */

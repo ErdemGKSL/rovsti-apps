@@ -8,12 +8,13 @@ use std::time::Duration;
 
 use rosty_wa_proto::api::routes;
 use rosty_wa_proto::{
-    CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey, CreateInstance,
-    CreatedInstance, DeleteForMe, EditMessage, GatewayUrl, GroupInfo, IdentityMappings,
-    InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead, MarkStatusViewed,
-    MediaKind, MediaOptions, MintKey, PlaceCall, ProfilesRequest, PushRegistration, RevokeMessage,
-    RichChat, RichMessage, ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted,
-    SetPresence, StarMessage, StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
+    ApiError, CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey,
+    CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, GatewayUrl, GroupInfo,
+    IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead,
+    MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions, MintKey, PlaceCall,
+    ProfilesRequest, PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText,
+    ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage, StatusList,
+    SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -97,9 +98,18 @@ pub(crate) fn send_media_path(
     mime: &str,
     caption: Option<&str>,
 ) -> String {
+    media_path(routes::SEND_MEDIA, chat, kind, mime, caption)
+}
+
+fn media_path(
+    route: &str,
+    chat: &str,
+    kind: MediaKind,
+    mime: &str,
+    caption: Option<&str>,
+) -> String {
     let mut path = format!(
-        "{}?chat={}&kind={}&mime={}",
-        routes::SEND_MEDIA,
+        "{route}?chat={}&kind={}&mime={}",
         enc(chat),
         kind_name(kind),
         enc(mime)
@@ -110,7 +120,8 @@ pub(crate) fn send_media_path(
     path
 }
 
-/// [`send_media_path`] plus reply, file name, duration and voice-note flag.
+/// [`send_media_path`] plus reply, file name, duration and voice-note flag,
+/// and on the route for them the options of the media round.
 pub(crate) fn send_media_path_with(
     chat: &str,
     kind: MediaKind,
@@ -118,7 +129,12 @@ pub(crate) fn send_media_path_with(
     caption: Option<&str>,
     options: &MediaOptions,
 ) -> String {
-    let mut path = send_media_path(chat, kind, mime, caption);
+    let route = if options.has_newer() {
+        routes::SEND_MEDIA_OPTIONS
+    } else {
+        routes::SEND_MEDIA
+    };
+    let mut path = media_path(route, chat, kind, mime, caption);
     if let Some(id) = options.quoted_id.as_deref().filter(|v| !v.is_empty()) {
         path.push_str(&format!("&quoted_id={}", enc(id)));
     }
@@ -131,7 +147,83 @@ pub(crate) fn send_media_path_with(
     if options.voice_note {
         path.push_str("&voice_note=true");
     }
+    if let Some(width) = options.width {
+        path.push_str(&format!("&width={width}"));
+    }
+    if let Some(height) = options.height {
+        path.push_str(&format!("&height={height}"));
+    }
+    if let Some(waveform) = options.waveform_b64.as_deref().filter(|v| !v.is_empty()) {
+        path.push_str(&format!("&waveform_b64={}", enc(waveform)));
+    }
+    if options.animated {
+        path.push_str("&animated=true");
+    }
+    if options.view_once {
+        path.push_str("&view_once=true");
+    }
     path
+}
+
+/// A media send as it goes on the wire.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MediaRequest {
+    /// The route with its query.
+    pub path: String,
+    /// The preview image, when there is one, then the file.
+    pub body: Vec<u8>,
+    /// Bytes of preview in front of the file.
+    pub thumbnail_len: usize,
+    /// The send carries an option of the media round, so it asks
+    /// [`routes::SEND_MEDIA_OPTIONS`].
+    pub newer: bool,
+    /// What to ask a gateway that has no such route: the plain route with
+    /// the options it knows, and the file alone as the body. `None` for a
+    /// plain send, and for view once, which must not go out as an ordinary
+    /// message.
+    pub fallback: Option<String>,
+}
+
+impl MediaRequest {
+    /// The file without the preview in front of it.
+    pub fn file(&self) -> &[u8] {
+        self.body.get(self.thumbnail_len..).unwrap_or(&[])
+    }
+}
+
+/// The path and body of a media send. The preview image does not fit a URL
+/// (a proxy in front of the gateway cuts those at a few kilobytes), so it
+/// travels in the body: `thumbnail_len` bytes of JPEG, then the file.
+/// Options the gateway would refuse are refused here, before the upload.
+pub(crate) fn media_request(
+    chat: &str,
+    kind: MediaKind,
+    mime: &str,
+    caption: Option<&str>,
+    options: &MediaOptions,
+    bytes: Vec<u8>,
+) -> Result<MediaRequest, MediaOptionError> {
+    options.check(kind)?;
+    let newer = options.has_newer();
+    let mut path = send_media_path_with(chat, kind, mime, caption, options);
+    let (body, thumbnail_len) = match options.thumbnail()? {
+        Some(mut body) => {
+            let len = body.len();
+            path.push_str(&format!("&thumbnail_len={len}"));
+            body.extend_from_slice(&bytes);
+            (body, len)
+        }
+        None => (bytes, 0),
+    };
+    let fallback = (newer && !options.view_once)
+        .then(|| send_media_path_with(chat, kind, mime, caption, &options.without_newer()));
+    Ok(MediaRequest {
+        path,
+        body,
+        thumbnail_len,
+        newer,
+        fallback,
+    })
 }
 
 pub(crate) fn picture_path(jid: &str, full: bool) -> String {
@@ -489,7 +581,14 @@ impl Gateway {
     }
 
     /// Like [`Self::send_media`], as a reply or with a document name,
-    /// duration or voice-note flag.
+    /// duration, voice-note flag, preview image, pixel size, waveform, GIF
+    /// flag or view once. An option the gateway would refuse comes back as a
+    /// `bad_request` API error without a request.
+    ///
+    /// A gateway from before the media round has no route for the newer
+    /// options: the file is then sent the old way, without them (as every
+    /// send was before). Not a view-once one: that comes back as a
+    /// `not_found` API error, never as an ordinary message.
     pub fn send_media_with(
         &self,
         chat: &str,
@@ -499,8 +598,37 @@ impl Gateway {
         options: &MediaOptions,
         bytes: Vec<u8>,
     ) -> Result<Sent, ClientError> {
-        let path = send_media_path_with(chat, kind, mime, caption, options);
-        decode(self.exec(Method::POST, &path, true, Payload::Bytes(bytes))?)
+        let req = media_request(chat, kind, mime, caption, options, bytes)
+            .map_err(|e| ClientError::Api(ApiError::new(ErrorCode::BadRequest, e.to_string())))?;
+        let key = self.key.as_ref().ok_or(ClientError::Unauthorized)?;
+        let send = |path: &str, body: &[u8]| -> Result<Answer, ClientError> {
+            let mut request = request(Method::POST, &self.url, path, Some(key), body)?;
+            request.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            );
+            self.run_raw(request)
+        };
+        let (status, body) = match send(&req.path, &req.body)? {
+            Answer::Ok(resp) => return decode(resp),
+            Answer::Refused { status, body } => (status, body),
+        };
+        // The router's own 404 has no API body: a gateway without the route.
+        let no_route =
+            req.newer && status == 404 && serde_json::from_slice::<ApiError>(&body).is_err();
+        if !no_route {
+            return Err(from_status(status, &body));
+        }
+        let Some(plain) = &req.fallback else {
+            return Err(ClientError::Api(ApiError::new(
+                ErrorCode::NotFound,
+                "this gateway cannot send view once media",
+            )));
+        };
+        match send(plain, req.file())? {
+            Answer::Ok(resp) => decode(resp),
+            Answer::Refused { status, body } => Err(from_status(status, &body)),
+        }
     }
 
     /// The small preview image that came with a photo, video, document,
@@ -823,12 +951,121 @@ mod tests {
     }
 
     #[test]
+    fn media_request_carries_the_new_options() {
+        let jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2];
+        let waveform = rosty_wa_proto::encode_b64(&[50; rosty_wa_proto::WAVEFORM_LEN]);
+        let options = MediaOptions {
+            seconds: Some(4),
+            thumbnail_b64: Some(rosty_wa_proto::encode_b64(&jpeg)),
+            width: Some(640),
+            height: Some(480),
+            waveform_b64: Some(waveform.clone()),
+            animated: true,
+            view_once: true,
+            ..Default::default()
+        };
+        let req = media_request(
+            "c",
+            MediaKind::Video,
+            "video/mp4",
+            None,
+            &options,
+            vec![9, 8, 7],
+        )
+        .unwrap();
+        // "MjIy..." has no character a query must escape; padding does.
+        let tail = format!(
+            "&seconds=4&width=640&height=480&waveform_b64={}&animated=true&view_once=true&thumbnail_len=6",
+            waveform.replace('=', "%3D")
+        );
+        assert!(
+            req.path
+                .starts_with("/v1/messages/media/options?chat=c&kind=video"),
+            "{}",
+            req.path
+        );
+        assert!(req.path.ends_with(&tail), "{}", req.path);
+        assert!(!req.path.contains("thumbnail_b64"), "{}", req.path);
+        assert_eq!(req.body, [jpeg.as_slice(), &[9, 8, 7]].concat());
+        assert_eq!((req.thumbnail_len, req.file()), (6, &[9u8, 8, 7][..]));
+        // View once never falls back to a gateway that would send it as an ordinary message.
+        assert!(req.newer);
+        assert_eq!(req.fallback, None);
+
+        // Anything else of the media round falls back to the plain route, without it.
+        let sized = MediaOptions {
+            view_once: false,
+            ..options.clone()
+        };
+        let req = media_request("c", MediaKind::Video, "video/mp4", None, &sized, vec![9]).unwrap();
+        assert_eq!(
+            req.fallback.as_deref(),
+            Some("/v1/messages/media?chat=c&kind=video&mime=video%2Fmp4&seconds=4")
+        );
+
+        // A send without those options is the request it always was.
+        let plain = MediaOptions {
+            file_name: Some("a.pdf".into()),
+            ..Default::default()
+        };
+        let req = media_request("c", MediaKind::Document, "a/b", None, &plain, vec![1]).unwrap();
+        assert_eq!(
+            req,
+            MediaRequest {
+                path: "/v1/messages/media?chat=c&kind=document&mime=a%2Fb&file_name=a.pdf".into(),
+                body: vec![1],
+                thumbnail_len: 0,
+                newer: false,
+                fallback: None,
+            }
+        );
+    }
+
+    #[test]
+    fn media_request_refuses_what_the_gateway_would() {
+        let refuse = |kind, options: MediaOptions| {
+            media_request("c", kind, "a/b", None, &options, vec![1]).unwrap_err()
+        };
+        assert_eq!(
+            refuse(
+                MediaKind::Image,
+                MediaOptions {
+                    thumbnail_b64: Some("iVBORw0K".into()),
+                    ..Default::default()
+                }
+            ),
+            MediaOptionError::ThumbnailNotJpeg
+        );
+        assert_eq!(
+            refuse(
+                MediaKind::Audio,
+                MediaOptions {
+                    waveform_b64: Some("AAEC".into()),
+                    ..Default::default()
+                }
+            ),
+            MediaOptionError::WaveformLength { len: 3 }
+        );
+        assert_eq!(
+            refuse(
+                MediaKind::Document,
+                MediaOptions {
+                    view_once: true,
+                    ..Default::default()
+                }
+            ),
+            MediaOptionError::ViewOnceKind
+        );
+    }
+
+    #[test]
     fn media_options_and_picture_paths() {
         let options = MediaOptions {
             quoted_id: Some("Q 1".into()),
             file_name: Some("rapor 1.pdf".into()),
             seconds: Some(9),
             voice_note: true,
+            ..Default::default()
         };
         let path = send_media_path_with("c", MediaKind::Document, "a/b", None, &options);
         assert!(

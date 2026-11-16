@@ -15,7 +15,11 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -25,6 +29,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -137,6 +142,53 @@ enum class PhotoSource(
 }
 
 /**
+ * The pages of a viewer that can grow while it is open (a chat's gallery read from a store page by page). [count] and
+ * [prepended] are read as state: when pages are put in front of the first one, [prepended] grows by as many and the
+ * viewer keeps the photo on show, so nothing jumps.
+ */
+@Stable
+interface ViewerPages {
+    val count: Int
+
+    /** How many pages were put in front of the first one since the viewer opened. */
+    val prepended: Int
+
+    /** The Coil model (or [ViewerPhoto]) of the page at [index]. */
+    fun model(index: Int): Any?
+}
+
+/** A fixed list of photos. */
+private class FixedPages(
+    private val photos: ImmutableList<Any?>,
+) : ViewerPages {
+    override val count: Int get() = photos.size
+    override val prepended: Int get() = 0
+
+    override fun model(index: Int): Any? = photos[index]
+}
+
+/**
+ * What a caller adds to the viewer beyond photos and one toolbar (a chat's media: videos, downloads, captions). Every
+ * slot is optional; the defaults are the plain photo viewer.
+ */
+@Immutable
+class ViewerExtras(
+    /** The toolbar of the page on show when it differs per page; null keeps the entry's actions. */
+    val actionsFor: ((page: Int) -> ImmutableList<ViewerAction>)? = null,
+    /** The title of the top bar for the page on show; null keeps "3 of 7". */
+    val titleFor: ((page: Int) -> String)? = null,
+    /**
+     * Drawn over a page's picture, inside its letterboxed box, so it flies, zooms and pages with it (a video surface,
+     * a download mark). `current` is true for the page on show.
+     */
+    val pageOverlay: (@Composable BoxScope.(index: Int, current: Boolean) -> Unit)? = null,
+    /** Drawn above the toolbar and faded with the chrome (a caption, a seek bar). */
+    val bottom: (@Composable ColumnScope.(page: Int) -> Unit)? = null,
+    /** The size of a page's picture before its image has loaded (the dimensions a message names). */
+    val sizeHint: (index: Int) -> Size? = { null },
+)
+
+/**
  * What the viewer publishes for tests and accessibility services: the zoom scale, the dim of the background (0..1) and
  * whether the chrome is shown. Read them with `SemanticsMatcher.expectValue`.
  */
@@ -159,6 +211,9 @@ object PhotoViewerTags {
     const val Root = "photo-viewer"
     const val Toolbar = "photo-viewer-toolbar"
 
+    /** The column of [ViewerExtras.bottom] and the toolbar. */
+    const val Bottom = "photo-viewer-bottom"
+
     /** The photo of the current page, at the rectangle it flies through (before the zoom of the finger). */
     const val Photo = "photo-viewer-photo"
 
@@ -170,6 +225,7 @@ private val PageGap = 20.dp
 private const val DismissShrink = 0.25f
 private const val FadeScaleFrom = 0.92f
 private const val ChromeFadeMs = 200
+private val NoExtras = ViewerExtras()
 
 /** The shared-bounds spring of the flight out of and back into the avatar (motion.md): damping 0.85, stiffness 380. */
 private const val SharedBoundsDamping = 0.85f
@@ -185,7 +241,17 @@ fun OverlayController.showPhotoViewer(
     actions: ImmutableList<ViewerAction>,
     anchorFor: (page: Int) -> Rect? = { null },
     onPageChanged: (page: Int) -> Unit = {},
-): OverlayEntry = present(PhotoViewerEntry(photos, initialPage, actions, anchorFor, onPageChanged))
+): OverlayEntry = present(PhotoViewerEntry(FixedPages(photos), initialPage, actions, anchorFor, onPageChanged))
+
+/** Opens the viewer on [pages], which may grow while it is open, with the [extras] of a chat's media. */
+fun OverlayController.showPhotoViewer(
+    pages: ViewerPages,
+    initialPage: Int,
+    actions: ImmutableList<ViewerAction>,
+    extras: ViewerExtras,
+    anchorFor: (page: Int) -> Rect? = { null },
+    onPageChanged: (page: Int) -> Unit = {},
+): OverlayEntry = present(PhotoViewerEntry(pages, initialPage, actions, anchorFor, onPageChanged, extras))
 
 /**
  * The full-screen photo viewer, an [OverlayEntry] (modal, pane title "Photo") with a pager of its own: pager libraries
@@ -197,11 +263,12 @@ fun OverlayController.showPhotoViewer(
  * passes ([anchorFor], which a grid reads from its thumbnail with `onGloballyPositioned`) and the letterboxed photo.
  */
 class PhotoViewerEntry(
-    private val photos: ImmutableList<Any?>,
+    private val pages: ViewerPages,
     private val initialPage: Int,
     private val actions: ImmutableList<ViewerAction>,
     private val anchorFor: (page: Int) -> Rect?,
     private val onPageChanged: (page: Int) -> Unit,
+    private val extras: ViewerExtras = NoExtras,
 ) : OverlayEntry(modal = true, title = "", titleRes = R.string.design_photo) {
     @Composable
     override fun Content(host: OverlayScope) {
@@ -211,14 +278,16 @@ class PhotoViewerEntry(
         val viewer =
             remember {
                 ViewerState(
-                    count = photos.size,
-                    initial = initialPage.coerceIn(0, (photos.size - 1).coerceAtLeast(0)),
+                    countOf = { pages.count },
+                    initial = initialPage.coerceIn(0, (pages.count - 1).coerceAtLeast(0)),
                     scope = scope,
                     gapPx = PageGap.value * density,
                     viewport = host.windowSize,
                     onClose = { host.controller.dismiss(this) },
                     onPage = onPageChanged,
                     hasAnchor = { anchorFor(it) != null },
+                    shiftOf = { pages.prepended },
+                    sizeHint = extras.sizeHint,
                 )
             }
         SideEffect { viewer.viewport = host.windowSize }
@@ -305,7 +374,17 @@ class PhotoViewerEntry(
                         val first = (viewer.page - 1).coerceAtLeast(0)
                         val last = (viewer.page + 1).coerceAtMost(viewer.count - 1)
                         for (i in first..last) {
-                            ViewerPage(viewer, i, photos[i], anchorFor, appear = { appear })
+                            // Keyed by the page itself, not its index: pages put in front keep each one's state.
+                            key(i - pages.prepended) {
+                                ViewerPage(
+                                    viewer,
+                                    i,
+                                    pages.model(i),
+                                    anchorFor,
+                                    appear = { appear },
+                                    extras.pageOverlay,
+                                )
+                            }
                         }
                     }
                 }
@@ -327,20 +406,27 @@ class PhotoViewerEntry(
                             FrostedTopBar(
                                 onBack = viewer.onClose,
                                 backLabel = closeLabel,
-                                title = pageOf,
+                                title = extras.titleFor?.invoke(viewer.page) ?: pageOf,
                                 titleAlpha = 1f,
                                 modifier = Modifier.align(Alignment.TopCenter),
                             )
-                            if (actions.isNotEmpty()) {
-                                ToolbarCapsule(
-                                    Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .navigationBarsPadding()
-                                        .padding(bottom = 16.dp)
-                                        .testTag(PhotoViewerTags.Toolbar),
-                                ) {
-                                    for (action in actions) {
-                                        ViewerActionButton(action, host.controller) { viewer.page }
+                            val shown = extras.actionsFor?.invoke(viewer.page) ?: actions
+                            val bottom = extras.bottom
+                            Column(
+                                Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding()
+                                    .padding(bottom = 16.dp)
+                                    .testTag(PhotoViewerTags.Bottom),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                bottom?.invoke(this, viewer.page)
+                                if (shown.isNotEmpty()) {
+                                    ToolbarCapsule(Modifier.testTag(PhotoViewerTags.Toolbar)) {
+                                        for (action in shown) {
+                                            ViewerActionButton(action, host.controller) { viewer.page }
+                                        }
                                     }
                                 }
                             }
@@ -382,6 +468,7 @@ private fun ViewerPage(
     model: Any?,
     anchorFor: (Int) -> Rect?,
     appear: () -> Float,
+    overlay: (@Composable BoxScope.(index: Int, current: Boolean) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val loader = currentRostyImageLoader()
@@ -481,8 +568,8 @@ private fun ViewerPage(
                     onSuccess = { success ->
                         // The thumbnail sets the box until the full picture says its own size.
                         val size = success.painter.intrinsicSize
-                        if (size.isSpecified && size.width > 0f && size.height > 0f && index !in viewer.natural) {
-                            viewer.natural[index] = size
+                        if (size.isSpecified && size.width > 0f && size.height > 0f && !viewer.hasNatural(index)) {
+                            viewer.setNatural(index, size)
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
@@ -495,10 +582,11 @@ private fun ViewerPage(
                 contentScale = ContentScale.Crop,
                 onSuccess = { success ->
                     val size = success.painter.intrinsicSize
-                    if (size.isSpecified && size.width > 0f && size.height > 0f) viewer.natural[index] = size
+                    if (size.isSpecified && size.width > 0f && size.height > 0f) viewer.setNatural(index, size)
                 },
                 modifier = Modifier.fillMaxSize(),
             )
+            overlay?.invoke(this, index, index == viewer.page)
         }
     }
 }
@@ -516,7 +604,7 @@ private fun lerp(
  */
 @Stable
 internal class ViewerState(
-    val count: Int,
+    private val countOf: () -> Int,
     initial: Int,
     private val scope: CoroutineScope,
     private val gapPx: Float,
@@ -525,9 +613,36 @@ internal class ViewerState(
     private val onPage: (Int) -> Unit,
     /** The photo on show has a thumbnail to fly back into: a dismissing drag then carries on to it. */
     private val hasAnchor: (page: Int) -> Boolean = { false },
+    /** How many pages were put in front so far ([ViewerPages.prepended]). */
+    private val shiftOf: () -> Int = { 0 },
+    private val sizeHint: (index: Int) -> Size? = { null },
 ) {
-    var page by mutableIntStateOf(initial)
-        private set
+    /** A fixed number of pages. */
+    constructor(
+        count: Int,
+        initial: Int,
+        scope: CoroutineScope,
+        gapPx: Float,
+        viewport: Size,
+        onClose: () -> Unit,
+        onPage: (Int) -> Unit,
+        hasAnchor: (page: Int) -> Boolean = { false },
+    ) : this({ count }, initial, scope, gapPx, viewport, onClose, onPage, hasAnchor)
+
+    val count: Int get() = countOf()
+
+    // The page is kept as the index it had when it was set plus the pages put in front since, so the snapshot that
+    // prepends pages also moves the page: the photo on show never changes under the finger.
+    private var setPage by mutableIntStateOf(initial)
+    private var setShift by mutableIntStateOf(shiftOf())
+
+    val page: Int get() = setPage + (shiftOf() - setShift)
+
+    private fun pageTo(target: Int) {
+        setPage = target
+        setShift = shiftOf()
+    }
+
     var viewport by mutableStateOf(viewport)
     var zoom by mutableStateOf(ZoomState.Fit)
         private set
@@ -539,7 +654,18 @@ internal class ViewerState(
         private set
     var chromeOn by mutableStateOf(true)
         private set
-    val natural = mutableStateMapOf<Int, Size>()
+
+    /** The picture sizes, by page counted from the first page the viewer opened with (stable when pages are prepended). */
+    private val natural = mutableStateMapOf<Int, Size>()
+
+    fun hasNatural(index: Int): Boolean = (index - shiftOf()) in natural
+
+    fun setNatural(
+        index: Int,
+        size: Size,
+    ) {
+        natural[index - shiftOf()] = size
+    }
 
     private var rawDrag = 0f
     private var running: Job? = null
@@ -555,7 +681,7 @@ internal class ViewerState(
     val dimProgress: Float get() = if (closing) releasedProgress else dismissProgress
     val isSettled: Boolean get() = running?.isActive != true
 
-    fun fitted(index: Int): Size = ZoomMath.fit(natural[index] ?: viewport, viewport)
+    fun fitted(index: Int): Size = ZoomMath.fit(natural[index - shiftOf()] ?: sizeHint(index) ?: viewport, viewport)
 
     private fun center() = Offset(viewport.width / 2f, viewport.height / 2f)
 
@@ -655,17 +781,19 @@ internal class ViewerState(
         target: Int,
         velocityX: Float,
     ) {
-        val end = -(target - page) * stride
+        // A step, not an index: pages put in front while the strip slides move the page under it, not the step.
+        val step = target - page
+        val end = -step * stride
         val from = stripX
         running?.cancel()
         running =
             scope.launch {
                 animate(from, end, velocityX, RostyMotion.appear(0.5f)) { v, _ -> stripX = v }
                 // One snapshot: the photo that slid into the middle becomes the page, the offset returns to zero.
-                if (target != page) {
-                    page = target
+                if (step != 0) {
+                    pageTo(page + step)
                     zoom = ZoomState.Fit
-                    onPage(target)
+                    onPage(page)
                 }
                 stripX = 0f
                 rawDrag = 0f
@@ -737,8 +865,11 @@ private fun Modifier.viewerGestures(viewer: ViewerState): Modifier =
             tracker.addPointerInputChange(down)
             var mode = Mode.Undecided
             var travelled = Offset.Zero
+            // A button on a page (a download mark) took the tap: the chrome stays as it is.
+            var taken = false
             var event = awaitPointerEvent()
             while (true) {
+                if (mode == Mode.Undecided && event.changes.any { it.isConsumed }) taken = true
                 val pressed = event.changes.filter { it.pressed }
                 if (pressed.isEmpty()) break
                 pressed.forEach { tracker.addPointerInputChange(it) }
@@ -791,6 +922,7 @@ private fun Modifier.viewerGestures(viewer: ViewerState): Modifier =
                 }
 
                 Mode.Undecided -> {
+                    if (taken) return@awaitEachGesture
                     // A tap. A second one inside the double-tap window zooms; otherwise the first toggles the chrome.
                     val second = withTimeoutOrNull(doubleTapTimeout) { awaitFirstDown(requireUnconsumed = false) }
                     if (second == null) {

@@ -282,6 +282,23 @@
     <string name="wa_media_not_saved">Dosya kaydedilemedi</string>
     <string name="wa_media_cant_share">Dosya paylaşılamadı</string>
     <string name="wa_media_gone">Artık kullanılamıyor</string>
+    <!-- E6-WA R3: the media viewer, video, save, share and forward. -->
+    <string name="wa_viewer_saved">Kaydedildi</string>
+    <string name="wa_viewer_already_saved">Zaten kaydedildi</string>
+    <string name="wa_viewer_saved_photos">Fotoğraflar\'a kaydedildi</string>
+    <string name="wa_viewer_saved_movies">Filmler\'e kaydedildi</string>
+    <string name="wa_viewer_saved_downloads">İndirilenler\'e kaydedildi</string>
+    <string name="wa_viewer_download">İndir</string>
+    <string name="wa_viewer_download_size">İndir · %1$s</string>
+    <string name="wa_viewer_downloading">İndiriliyor…</string>
+    <string name="wa_viewer_retry">Yeniden Dene</string>
+    <string name="wa_viewer_play">Oynat</string>
+    <string name="wa_viewer_pause">Duraklat</string>
+    <string name="wa_viewer_mute">Sesi Kapat</string>
+    <string name="wa_viewer_unmute">Sesi Aç</string>
+    <string name="wa_viewer_position">Oynatma konumu</string>
+    <string name="wa_viewer_byline">%1$s · %2$s</string>
+    <string name="wa_viewer_cant_play">Bu video oynatılamıyor</string>
     <string name="wa_history_title">WhatsApp geçmişiniz yükleniyor…</string>
     <string name="wa_history_title_percent">WhatsApp geçmişiniz yükleniyor · %%%1$d</string>
     <string name="wa_history_counts">Şimdiye kadar %1$s · %2$s</string>
@@ -312,6 +329,19 @@
     <string name="wa_voice_play">Oynat</string>
     <string name="wa_voice_pause">Duraklat</string>
     <string name="wa_voice_speed">Oynatma hızı %1$s</string>
+    <!-- E6-WA R3: recording voice notes in the WhatsApp composer. -->
+    <string name="wa_record_mic">Sesli mesaj kaydet</string>
+    <string name="wa_record_cancel_hint">İptal için kaydırın</string>
+    <string name="wa_record_lock">Kayda devam için yukarı kaydırın</string>
+    <string name="wa_record_stop">Kaydı durdur</string>
+    <string name="wa_record_delete">Kaydı sil</string>
+    <string name="wa_record_send">Sesli mesajı gönder</string>
+    <string name="wa_record_hold">Kaydetmek için basılı tutun, göndermek için bırakın</string>
+    <string name="wa_record_failed">Mikrofon kullanılamadı</string>
+    <string name="wa_record_denied_title">Mikrofon kapalı</string>
+    <string name="wa_record_denied_body">Sesli mesaj kaydetmek için Ayarlar\'da Rosty Mesajlar\'a mikrofon izni verin.</string>
+    <string name="wa_record_not_now">Şimdi Değil</string>
+    <string name="wa_record_settings">Ayarları Aç</string>
     <string name="wa_reply">Yanıtla</string>
     <string name="wa_reply_cancel">Yanıtı iptal et</string>
     <string name="wa_attachment_remove">Eki kaldır</string>
@@ -581,4 +611,26 @@
     <string name="backup_fail_corrupt">Yedek bozuk.</string>
     <string name="backup_fail_failed">Yedek alınamadı. Tekrar deneyin.</string>
     <string name="backup_fail_not_saved">Yedek kaydedilmedi.</string>
+    <!-- E6-WA R3 adım 6 ve 7: tek seferlik, çıkartmalar, birden fazla dosya. -->
+    <string name="wa_view_once">Tek seferlik mesaj</string>
+    <string name="wa_view_once_open_phone">Tek seferlik mesaj. Telefonunuzda açın.</string>
+    <string name="wa_view_once_photo">Tek seferlik fotoğraf</string>
+    <string name="wa_view_once_video">Tek seferlik video</string>
+    <string name="wa_view_once_voice">Tek seferlik sesli mesaj</string>
+    <string name="wa_unavailable">Mesaj burada görüntülenemiyor</string>
+    <string name="wa_unavailable_open_phone">Bu mesaj bu cihazda görüntülenemiyor. Telefonunuzda açın.</string>
+    <string name="wa_view_once_toggle">Tek seferlik</string>
+    <string name="wa_view_once_toggle_on">Tek seferlik açık</string>
+    <string name="wa_view_once_toggle_off">Tek seferlik kapalı</string>
+    <string name="wa_batch_caption">Açıklama ekleyin…</string>
+    <string name="wa_batch_send">%1$d gönder</string>
+    <string name="wa_batch_position">%1$d / %2$d</string>
+    <string name="wa_batch_remove">Kaldır</string>
+    <string name="wa_batch_earlier">Öne al</string>
+    <string name="wa_batch_later">Sona al</string>
+    <string name="wa_batch_close">Kapat</string>
+    <plurals name="wa_batch_too_large">
+        <item quantity="one">%1$d dosya %2$d MB\'tan büyük, eklenmedi</item>
+        <item quantity="other">%1$d dosya %2$d MB\'tan büyük, eklenmedi</item>
+    </plurals>
 </resources>

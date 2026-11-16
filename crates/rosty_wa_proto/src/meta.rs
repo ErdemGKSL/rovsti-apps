@@ -8,6 +8,7 @@
 //! [`RichMessage`] / [`RichChat`] read the whole thing.
 
 use crate::api::{ChatSummary, MediaKind, MessageBody, WaMessage};
+use crate::media::MediaOptionError;
 
 /// Most JIDs one profile request may carry.
 pub const MAX_PROFILES: usize = 50;
@@ -90,6 +91,38 @@ pub struct MediaMeta {
     /// `GET /v1/messages/{id}/thumbnail` has a small preview image.
     #[serde(default, skip_serializing_if = "is_false")]
     pub thumbnail: bool,
+    /// The waveform of a voice note as WhatsApp carries it: base64 of
+    /// [`WAVEFORM_LEN`](crate::WAVEFORM_LEN) loudness samples, each 0..=100.
+    /// Whatever the sender put there is passed on, so a reader checks it
+    /// with [`MediaMeta::waveform`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_b64: Option<String>,
+}
+
+impl MediaMeta {
+    /// The waveform samples, when the message has a well-formed one.
+    pub fn waveform(&self) -> Option<Vec<u8>> {
+        let bytes = crate::media::decode_b64(self.waveform_b64.as_deref()?)?;
+        crate::media::check_waveform(&bytes).ok()?;
+        Some(bytes)
+    }
+}
+
+/// Why a message arrived without content on this linked device
+/// ([`MessageMeta::unavailable`]). WhatsApp never shares this content with a
+/// companion: only the phone can open it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unavailable {
+    /// A view-once photo, video or voice note.
+    ViewOnce,
+    /// A message of a business whose account is hosted by Meta.
+    Hosted,
+    /// A message of a WhatsApp bot.
+    Bot,
+    /// A reason a newer gateway names that this build does not know.
+    #[serde(other)]
+    Other,
 }
 
 /// A shared location.
@@ -170,6 +203,12 @@ pub struct MessageMeta {
     /// current text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edit_history: Vec<EditRecord>,
+    /// The message reached this linked device as a placeholder only (a
+    /// view-once message, above all): the body reads as `unsupported`, as it
+    /// always did, so an older client shows an unsupported message. Show
+    /// "open it on your phone"; there is nothing to download.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<Unavailable>,
 }
 
 /// [`MessageMeta::deleted_by`] of a message this account deleted.
@@ -397,6 +436,72 @@ pub struct MediaOptions {
     /// Send audio as a voice note even when the MIME type does not say Opus.
     #[serde(default)]
     pub voice_note: bool,
+    /// A small JPEG preview of a photo, video or document, base64, at most
+    /// [`MAX_SEND_THUMBNAIL_BYTES`](crate::MAX_SEND_THUMBNAIL_BYTES) decoded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_b64: Option<String>,
+    /// Pixel size of a photo, video or sticker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    /// The waveform of a voice note: base64 of exactly
+    /// [`WAVEFORM_LEN`](crate::WAVEFORM_LEN) samples, each 0..=100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform_b64: Option<String>,
+    /// A video that plays as a GIF, or an animated sticker.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub animated: bool,
+    /// View once (photo, video or voice note).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub view_once: bool,
+}
+
+impl MediaOptions {
+    /// The decoded preview image, checked.
+    pub fn thumbnail(&self) -> Result<Option<Vec<u8>>, MediaOptionError> {
+        let Some(text) = self.thumbnail_b64.as_deref().filter(|t| !t.is_empty()) else {
+            return Ok(None);
+        };
+        let bytes = crate::media::decode_b64(text).ok_or(MediaOptionError::ThumbnailNotBase64)?;
+        crate::media::check_thumbnail(&bytes)?;
+        Ok(Some(bytes))
+    }
+
+    /// The decoded waveform, checked.
+    pub fn waveform(&self) -> Result<Option<Vec<u8>>, MediaOptionError> {
+        let Some(text) = self.waveform_b64.as_deref().filter(|t| !t.is_empty()) else {
+            return Ok(None);
+        };
+        let bytes = crate::media::decode_b64(text).ok_or(MediaOptionError::WaveformNotBase64)?;
+        crate::media::check_waveform(&bytes)?;
+        Ok(Some(bytes))
+    }
+
+    /// An option of the media round is set: such a send needs a gateway
+    /// that knows them ([`crate::api::routes::SEND_MEDIA_OPTIONS`]).
+    pub fn has_newer(&self) -> bool {
+        *self != self.without_newer()
+    }
+
+    /// Reply, file name, duration and voice-note flag only: what a gateway
+    /// from before the media round understands.
+    pub fn without_newer(&self) -> MediaOptions {
+        MediaOptions {
+            quoted_id: self.quoted_id.clone(),
+            file_name: self.file_name.clone(),
+            seconds: self.seconds,
+            voice_note: self.voice_note,
+            ..MediaOptions::default()
+        }
+    }
+
+    /// Everything the gateway would refuse, found before the upload.
+    pub fn check(&self, kind: MediaKind) -> Result<(), MediaOptionError> {
+        self.thumbnail()?;
+        self.waveform()?;
+        crate::media::check_view_once(kind, self.view_once)
+    }
 }
 
 /// A label for media in previews and quotes.
@@ -670,6 +775,181 @@ mod tests {
         );
         assert_eq!(body_preview(&MessageBody::Unsupported, 20), None);
         assert_eq!(body_preview(&MessageBody::Text(" ".into()), 20), None);
+    }
+
+    #[test]
+    fn media_options_old_and_new_are_pinned() {
+        // What a client before the media round writes still reads.
+        let old: MediaOptions = serde_json::from_str(
+            r#"{"quoted_id":null,"file_name":"a.pdf","seconds":9,"voice_note":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old,
+            MediaOptions {
+                file_name: Some("a.pdf".into()),
+                seconds: Some(9),
+                voice_note: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<MediaOptions>("{}").unwrap(),
+            MediaOptions::default()
+        );
+        // Unset new options are not written, so the old shape is unchanged.
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"quoted_id":null,"file_name":"a.pdf","seconds":9,"voice_note":true}"#
+        );
+        let new = MediaOptions {
+            seconds: Some(3),
+            voice_note: true,
+            thumbnail_b64: Some("/9j/".into()),
+            width: Some(640),
+            height: Some(480),
+            waveform_b64: Some(crate::encode_b64(&[7; crate::WAVEFORM_LEN])),
+            animated: true,
+            view_once: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&new).unwrap();
+        let waveform = "BwcH".repeat(21) + "Bw==";
+        assert_eq!(
+            json,
+            format!(
+                concat!(
+                    r#"{{"quoted_id":null,"file_name":null,"seconds":3,"voice_note":true,"#,
+                    r#""thumbnail_b64":"/9j/","width":640,"height":480,"#,
+                    r#""waveform_b64":"{}","animated":true,"view_once":true}}"#
+                ),
+                waveform
+            )
+        );
+        assert_eq!(serde_json::from_str::<MediaOptions>(&json).unwrap(), new);
+        assert!(new.has_newer() && !old.has_newer());
+        assert_eq!(
+            new.without_newer(),
+            MediaOptions {
+                seconds: Some(3),
+                voice_note: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(new.thumbnail(), Ok(Some(vec![0xFF, 0xD8, 0xFF])));
+        assert_eq!(new.waveform(), Ok(Some(vec![7; crate::WAVEFORM_LEN])));
+        assert_eq!(new.check(MediaKind::Audio), Ok(()));
+        assert_eq!(
+            new.check(MediaKind::Document),
+            Err(MediaOptionError::ViewOnceKind)
+        );
+    }
+
+    #[test]
+    fn media_options_refuse_bad_values() {
+        let with = |thumbnail: Option<&str>, waveform: Option<&str>| MediaOptions {
+            thumbnail_b64: thumbnail.map(str::to_owned),
+            waveform_b64: waveform.map(str::to_owned),
+            ..Default::default()
+        };
+        assert_eq!(
+            with(Some("***"), None).thumbnail(),
+            Err(MediaOptionError::ThumbnailNotBase64)
+        );
+        assert_eq!(
+            with(Some("iVBORw0K"), None).thumbnail(),
+            Err(MediaOptionError::ThumbnailNotJpeg)
+        );
+        assert_eq!(with(Some(""), Some("")).check(MediaKind::Image), Ok(()));
+        assert_eq!(
+            with(None, Some("***")).waveform(),
+            Err(MediaOptionError::WaveformNotBase64)
+        );
+        assert_eq!(
+            with(None, Some("AAEC")).waveform(),
+            Err(MediaOptionError::WaveformLength { len: 3 })
+        );
+        let loud = crate::encode_b64(&[101; crate::WAVEFORM_LEN]);
+        assert_eq!(
+            with(None, Some(&loud)).waveform(),
+            Err(MediaOptionError::WaveformRange)
+        );
+    }
+
+    #[test]
+    fn media_meta_waveform_is_additive() {
+        // A gateway before the media round sends no waveform.
+        let old: MediaMeta =
+            serde_json::from_str(r#"{"seconds":4,"voice_note":true,"view_once":true}"#).unwrap();
+        assert_eq!(old.waveform_b64, None);
+        assert_eq!(old.waveform(), None);
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"seconds":4,"voice_note":true,"view_once":true}"#
+        );
+        let new = MediaMeta {
+            seconds: Some(4),
+            voice_note: true,
+            waveform_b64: Some(crate::encode_b64(&[1; crate::WAVEFORM_LEN])),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&new).unwrap();
+        assert!(
+            json.starts_with(r#"{"seconds":4,"voice_note":true,"waveform_b64":"AQEB"#),
+            "{json}"
+        );
+        assert_eq!(serde_json::from_str::<MediaMeta>(&json).unwrap(), new);
+        assert_eq!(new.waveform(), Some(vec![1; crate::WAVEFORM_LEN]));
+        // A sender's odd waveform is passed on but does not read as one.
+        let odd = MediaMeta {
+            waveform_b64: Some("AAEC".into()),
+            ..Default::default()
+        };
+        assert_eq!(odd.waveform(), None);
+    }
+
+    #[test]
+    fn unavailable_placeholder_is_additive() {
+        let rich = RichMessage {
+            message: WaMessage {
+                from_me: false,
+                body: MessageBody::Unsupported,
+                ..text("x")
+            },
+            meta: MessageMeta {
+                unavailable: Some(Unavailable::ViewOnce),
+                ..Default::default()
+            },
+        };
+        let json = serde_json::to_string(&rich).unwrap();
+        assert_eq!(
+            json,
+            r#"{"id":"m","chat":"c@s.whatsapp.net","sender":null,"from_me":false,"timestamp_ms":1,"body":"unsupported","reactions":[],"meta":{"unavailable":"view_once"}}"#
+        );
+        assert_eq!(serde_json::from_str::<RichMessage>(&json).unwrap(), rich);
+        // An old reader sees an unsupported message, as before.
+        assert_eq!(
+            serde_json::from_str::<WaMessage>(&json).unwrap().body,
+            MessageBody::Unsupported
+        );
+        for (kind, name) in [
+            (Unavailable::ViewOnce, "view_once"),
+            (Unavailable::Hosted, "hosted"),
+            (Unavailable::Bot, "bot"),
+        ] {
+            let meta = MessageMeta {
+                unavailable: Some(kind),
+                ..Default::default()
+            };
+            let json = format!(r#"{{"unavailable":"{name}"}}"#);
+            assert_eq!(serde_json::to_string(&meta).unwrap(), json);
+            assert_eq!(serde_json::from_str::<MessageMeta>(&json).unwrap(), meta);
+        }
+        // A reason of a newer gateway still reads; an older gateway names none.
+        let newer: MessageMeta = serde_json::from_str(r#"{"unavailable":"later"}"#).unwrap();
+        assert_eq!(newer.unavailable, Some(Unavailable::Other));
+        let old: MessageMeta = serde_json::from_str(r#"{"forwarded":true}"#).unwrap();
+        assert_eq!(old.unavailable, None);
     }
 
     #[test]

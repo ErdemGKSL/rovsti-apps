@@ -118,8 +118,10 @@ class AppPermissions(
                         Manifest.permission.READ_CONTACTS,
                         Manifest.permission.READ_PHONE_STATE,
                         Manifest.permission.POST_NOTIFICATIONS,
+                        // WhatsApp voice notes, asked at the first hold of the composer's microphone (E6-WA R3).
+                        Manifest.permission.RECORD_AUDIO,
                     ),
-                groups = listOf(PermissionGroup.CONTACTS, PermissionGroup.NOTIFICATIONS),
+                groups = listOf(PermissionGroup.CONTACTS, PermissionGroup.NOTIFICATIONS, PermissionGroup.MICROPHONE),
                 special = setOf(SpecialKind.ExactAlarms),
                 installTime =
                     setOf(

@@ -47,6 +47,8 @@ class HandoffPermissionsTest {
                     "uses-permission android.permission.WAKE_LOCK",
                     // WA-R2: the WhatsApp link shared between Rosty apps.
                     "uses-permission dev.rosty.permission.WA_LINK",
+                    // E6-WA R3: WhatsApp voice notes recorded in the composer.
+                    "uses-permission android.permission.RECORD_AUDIO",
                 ),
             // X.1b: the people sync's WorkManager merges these.
             "contacts" to

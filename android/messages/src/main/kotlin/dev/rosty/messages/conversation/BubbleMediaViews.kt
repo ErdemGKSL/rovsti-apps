@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -39,9 +40,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -60,6 +64,7 @@ import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.R
 import dev.rosty.messages.theme.MediaMetrics
 import dev.rosty.messages.theme.MessagesMetrics
+import dev.rosty.messages.viewer.LoopingVideo
 
 /** Test tags of the media inside a bubble. */
 object MediaTags {
@@ -94,8 +99,16 @@ internal fun BubbleMediaView(
 ) {
     when (media.kind) {
         BubbleMediaKind.Picture, BubbleMediaKind.Video -> PictureMedia(media, host)
+
         BubbleMediaKind.Voice -> VoiceNote(media, host)
+
         BubbleMediaKind.File -> FileRow(media, host)
+
+        BubbleMediaKind.Unavailable -> UnavailableRow(media, host)
+
+        // A sticker alone is drawn without a bubble (StickerBody); with a caption it sits in the bubble as a picture.
+        BubbleMediaKind.Sticker -> PictureMedia(media, host)
+
         null -> Unit
     }
 }
@@ -112,12 +125,23 @@ private fun PictureMedia(
 ) {
     val aspect = media.aspect ?: DEFAULT_MEDIA_ASPECT
     val shape = RoundedCornerShape(MessagesMetrics.FolderTileCorner)
+    val anchors = host.actions.mediaAnchors
+    val key = host.bubble.key
+    if (anchors != null) DisposableEffect(anchors, key) { onDispose { anchors.remove(key) } }
     Box(
         Modifier
             .padding(bottom = Spacing.xs)
             .width(minOf(host.maxWidth, MediaMetrics.PictureMax))
             .aspectRatio(aspect)
-            .clip(shape)
+            .then(
+                if (anchors ==
+                    null
+                ) {
+                    Modifier
+                } else {
+                    Modifier.onGloballyPositioned { anchors.put(key, it.boundsInWindow()) }
+                },
+            ).clip(shape)
             .background(host.secondary.copy(alpha = PLACEHOLDER_ALPHA))
             .semantics { contentDescription = media.label },
         contentAlignment = Alignment.Center,
@@ -139,7 +163,9 @@ private fun PictureMedia(
                 size = MediaMetrics.MarkGlyph,
             )
         }
-        val video = media.kind == BubbleMediaKind.Video
+        // A GIF on the phone plays where it is, muted and over and over; its thumbnail stays under it until it runs.
+        media.loop?.let { LoopingVideo(it, Modifier.fillMaxSize()) }
+        val video = media.kind == BubbleMediaKind.Video && media.loop == null
         when {
             media.busy -> Mark { Spinner() }
             host.bubble.state == BubbleState.Waiting -> Mark { MarkIcon(RostyIcons.Clock) }
@@ -269,6 +295,7 @@ private fun VoiceNote(
                 progress = progress,
                 track = host.secondary.copy(alpha = TRACK_ALPHA),
                 fill = host.ink,
+                waveform = media.waveform,
                 enabled = voice != null,
                 onSeek = { actions.onVoiceSeek(bubble, it) },
                 modifier = Modifier.testTag(MediaTags.voiceBar(bubble.key)),
@@ -298,12 +325,16 @@ private fun VoiceNote(
     }
 }
 
-/** The scrub bar: a track, the played part and a thumb. A tap or a drag on an [enabled] bar seeks. */
+/**
+ * The scrub bar: a track, the played part and a thumb; with a [waveform] (the bars WhatsApp carries) the bars in
+ * place of the track, the played ones in [fill]. A tap or a drag on an [enabled] bar seeks.
+ */
 @Composable
 private fun VoiceBar(
     progress: Float,
     track: Color,
     fill: Color,
+    waveform: List<Float>,
     enabled: Boolean,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
@@ -323,13 +354,20 @@ private fun VoiceBar(
                     seek((change.position.x / size.width).coerceIn(0f, 1f))
                 }
             }.drawBehind {
-                val thickness = MediaMetrics.VoiceTrack.toPx()
                 val thumb = MediaMetrics.VoiceThumb.toPx()
-                val y = (size.height - thickness) / 2f
-                val radius = CornerRadius(thickness / 2f)
                 val played = (size.width - thumb) * progress.coerceIn(0f, 1f)
-                drawRoundRect(track, Offset(0f, y), Size(size.width, thickness), radius)
-                drawRoundRect(fill, Offset(0f, y), Size(played + thumb / 2f, thickness), radius)
+                if (waveform.isNotEmpty()) {
+                    val wave = MediaMetrics.WaveHeight.toPx()
+                    translate(top = (size.height - wave) / 2f) {
+                        drawWaveform(waveform, progress, fill, track, Size(size.width, wave))
+                    }
+                } else {
+                    val thickness = MediaMetrics.VoiceTrack.toPx()
+                    val y = (size.height - thickness) / 2f
+                    val radius = CornerRadius(thickness / 2f)
+                    drawRoundRect(track, Offset(0f, y), Size(size.width, thickness), radius)
+                    drawRoundRect(fill, Offset(0f, y), Size(played + thumb / 2f, thickness), radius)
+                }
                 drawCircle(fill, thumb / 2f, Offset(played + thumb / 2f, size.height / 2f))
             },
     )

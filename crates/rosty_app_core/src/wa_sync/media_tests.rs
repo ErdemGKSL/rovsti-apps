@@ -131,6 +131,7 @@ fn send_file(file: &str, size: u64) -> Action {
         file_name: None,
         seconds: None,
         voice_note: false,
+        extras: MediaExtras::default(),
     }
 }
 
@@ -166,7 +167,7 @@ fn a_version_four_file_moves_its_cached_media_into_media_rows() {
     let opened = store.opened().unwrap();
     assert_eq!(
         (opened.schema_version, opened.last_seq, opened.needs_resync),
-        (5, Some(7), false)
+        (SCHEMA_VERSION, Some(7), false)
     );
     assert_eq!(count(&store.conn, "SELECT COUNT(*) FROM media"), 2);
     let a = store.media(ALI, "A", None).unwrap().unwrap();
@@ -266,23 +267,22 @@ fn a_version_three_file_upgrades_through_four_to_five() {
 #[test]
 fn a_build_of_schema_four_would_refuse_this_file() {
     // The rule every build applies: a file with a higher version than it knows is left alone. A build that
-    // knows up to four sees five the way this one sees six.
+    // knows up to four sees five the way this one sees the next.
     let dir = temp_dir("media-newer");
     drop(Store::open(&dir, "inst1").unwrap());
     let path = dir.join(file_name("inst1"));
     let conn = Connection::open(&path).unwrap();
-    assert_eq!(schema::version(&conn).unwrap(), 5);
-    conn.pragma_update(None, "user_version", 6).unwrap();
+    assert_eq!(schema::version(&conn).unwrap(), SCHEMA_VERSION);
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+        .unwrap();
     drop(conn);
     assert!(matches!(
         Store::open(&dir, "inst1"),
-        Err(Error::NewerSchema {
-            found: 6,
-            supported: 5
-        })
+        Err(Error::NewerSchema { found, supported })
+            if found == SCHEMA_VERSION + 1 && supported == SCHEMA_VERSION
     ));
     let conn = Connection::open(&path).unwrap();
-    assert_eq!(schema::version(&conn).unwrap(), 6);
+    assert_eq!(schema::version(&conn).unwrap(), SCHEMA_VERSION + 1);
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM media"), 0);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -356,17 +356,16 @@ fn the_rules_decide_what_an_automatic_request_queues() {
 const FREE_FLOOR: u64 = media::FREE_SPACE_FLOOR;
 
 #[test]
-fn a_tap_queues_what_the_rules_hold_back_but_never_view_once() {
+fn a_tap_queues_what_the_rules_hold_back_also_view_once_but_never_a_text() {
     let mut store = mixed();
-    for id in ["video", "doc", "photo"] {
+    // View once is never fetched by itself; the tap that opens it fetches it (`media_round_tests`).
+    for id in ["video", "doc", "photo", "once"] {
         let queued = store.media_enqueue(ALI, id, Fetch::Tap, NOW).unwrap();
         assert!(queued.queued && queued.media.by_tap, "{id}");
         assert_eq!(queued.decision, Decision::OnTap);
     }
-    for id in ["once", "words"] {
-        let queued = store.media_enqueue(ALI, id, Fetch::Tap, NOW).unwrap();
-        assert_eq!((queued.queued, queued.decision), (false, Decision::Never));
-    }
+    let queued = store.media_enqueue(ALI, "words", Fetch::Tap, NOW).unwrap();
+    assert_eq!((queued.queued, queued.decision), (false, Decision::Never));
     // A deleted message is not fetched by itself; a tap still may.
     apply(
         &mut store,

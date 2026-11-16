@@ -24,6 +24,13 @@ internal object StopsSizes {
     val chipRow = 44.dp
 
     /**
+     * Room between the sheet's grabber and the title of every Stops sheet ([dev.rosty.stops.home.OnSheet]): with the
+     * grabber's own 2 dp under it, the title starts about 14 dp (plus its line's leading) under the grabber, as in iOS
+     * sheets. The map sheet's peek counts it ([dev.rosty.stops.home.MapSheetGrabber]).
+     */
+    val sheetTitleTop = 12.dp
+
+    /**
      * The map sheet's peek before its content is measured (ARCH 8.4, ~120 dp), and the least the large-text or landscape
      * cap may cut a measured peek to. The measured peek reaches down to the content's buttons
      * ([dev.rosty.stops.home.mapSheetPeekPx]).

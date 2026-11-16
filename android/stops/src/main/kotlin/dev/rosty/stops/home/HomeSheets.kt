@@ -61,8 +61,12 @@ internal val MapSheetDetents = mapSheetDetents(StopsSizes.sheetPeek)
 internal fun mapSheetDetents(peek: Dp): ImmutableList<Detent> =
     persistentListOf(Detent.Peek(peek), Detent.Medium, Detent.Large)
 
-/** The sheet's grabber above its content (`:design`'s sheet metrics), part of the peek height. */
-internal val MapSheetGrabber: Dp = SheetMetrics.GrabberTop + SheetMetrics.GrabberHeight + SheetMetrics.GrabberBottom
+/**
+ * What sits above the map sheet's measured content, part of the peek height: the grabber (`:design`'s sheet metrics)
+ * and the room above the title ([OnSheet]).
+ */
+internal val MapSheetGrabber: Dp =
+    SheetMetrics.GrabberTop + SheetMetrics.GrabberHeight + SheetMetrics.GrabberBottom + StopsSizes.sheetTitleTop
 
 /** The detent of an index from the tallest ([SheetState.detentOffsets] order); out of range is Peek. */
 internal fun mapSheetDetent(fromTallest: Int): Detent =

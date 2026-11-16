@@ -9,6 +9,13 @@ import dev.rosty.core.RustHandle
 import dev.rosty.core.RustNative
 import dev.rosty.core.RustThreading
 import dev.rosty.core.model.core.Empty
+import dev.rosty.core.model.people.PeopleEntry
+import dev.rosty.core.model.people.PeopleSyncBundleAnswer
+import dev.rosty.core.model.people.PeopleSyncBundleBody
+import dev.rosty.core.model.people.PeopleSyncStartAnswer
+import dev.rosty.core.model.people.PeopleSyncStartBody
+import dev.rosty.core.model.people.PeopleSyncStatusAnswer
+import dev.rosty.core.model.people.PeopleSyncStatusBody
 import dev.rosty.core.model.wa.BytesAnswer
 import dev.rosty.core.model.wa.CallStarted
 import dev.rosty.core.model.wa.CallSummary
@@ -173,6 +180,41 @@ class WaGateway internal constructor(
      */
     suspend fun identityMappings(since: String?): Outcome<IdentityMappingsAnswer> =
         guarded { ops.identityMappings(id, since) }
+
+    // ---- people sync v3: the gateway's people job (perform the planner's `job_*` steps with these)
+
+    /**
+     * `job_start`: starts or joins the people job with the step's mode and entries. Report `SyncReport.jobStarted`
+     * with the status, or `SyncReport.jobUnsupported` when `supported = false` (a gateway without the job routes).
+     */
+    suspend fun peopleSyncStart(
+        mode: String,
+        entries: List<PeopleEntry>,
+    ): Outcome<PeopleSyncStartAnswer> = guarded { ops.peopleSyncStart(id, PeopleSyncStartBody(mode, entries)) }
+
+    /**
+     * `job_watch`: the job's status; with the step's [rev] and [waitMs] the gateway answers on the next change (at
+     * most 25 s). Report `SyncReport.job`, or `SyncReport.jobGone` when `gone = true`.
+     */
+    suspend fun peopleSyncStatus(
+        jobId: String,
+        rev: Long? = null,
+        waitMs: Long? = null,
+    ): Outcome<PeopleSyncStatusAnswer> = guarded { ops.peopleSyncStatus(id, PeopleSyncStatusBody(jobId, rev, waitMs)) }
+
+    /**
+     * `job_fetch`: one bundle part after [after]. Each `picturePath` is a temp file of the full picture: downscale and
+     * store it, delete it, then report `SyncReport.bundle` (or `SyncReport.jobGone` when `gone = true`).
+     */
+    suspend fun peopleSyncBundle(
+        jobId: String,
+        after: Int,
+        maxBytes: Long? = null,
+    ): Outcome<PeopleSyncBundleAnswer> =
+        guarded { ops.peopleSyncBundle(id, PeopleSyncBundleBody(jobId, after, maxBytes)) }
+
+    /** `job_done` and the user's Stop: cancels a working job or drops a finished one; a gone job is fine. */
+    suspend fun peopleSyncCancel(jobId: String): Outcome<Empty> = guarded { ops.peopleSyncCancel(id, jobId) }
 
     /** The status updates (stories), mine and everyone else's. */
     suspend fun statuses(): Outcome<StatusList> = guarded { ops.statuses(id) }

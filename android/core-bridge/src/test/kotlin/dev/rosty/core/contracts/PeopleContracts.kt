@@ -33,13 +33,26 @@ object PeopleContracts : ContractModels {
             )
             op<PeoplePlanRequest, PeoplePlanAnswer>("people.plan", ok = listOf("nothing_to_do"))
             op<PeopleSnapshotRequest, PeopleSnapshotAnswer>("people.snapshot", ok = listOf("missing"))
-            op<SyncStatusRequest, SyncStatus>("people.sync_status", ok = listOf("never"))
+            op<SyncStatusRequest, SyncStatus>("people.sync_status", ok = listOf("never", "job"))
             op<SyncBeginRequest, SyncBeginAnswer>(
                 "people.sync_begin",
-                ok = listOf("resume", "nothing_to_resume", "not_before"),
+                ok = listOf("resume", "nothing_to_resume", "not_before", "job"),
             )
-            op<SyncNextRequest, SyncStep>("people.sync_next")
-            op<SyncReportRequest, SyncCommitted>("people.sync_report", ok = listOf("rate_limited", "files"))
+            op<SyncNextRequest, SyncStep>("people.sync_next", ok = listOf("job_watch"))
+            op<SyncReportRequest, SyncCommitted>(
+                "people.sync_report",
+                ok =
+                    listOf(
+                        "rate_limited",
+                        "files",
+                        "job_started",
+                        "job_unsupported",
+                        "job",
+                        "job_gone",
+                        "bundle",
+                        "job_closed",
+                    ),
+            )
             op<SyncStopRequest, SyncStatus>("people.sync_stop", ok = listOf("unlink"))
         }
 

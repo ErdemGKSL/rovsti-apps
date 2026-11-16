@@ -6,6 +6,13 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.RustError
 import dev.rosty.core.RustEvents
 import dev.rosty.core.model.core.Empty
+import dev.rosty.core.model.people.PeopleSyncBundleAnswer
+import dev.rosty.core.model.people.PeopleSyncBundleBody
+import dev.rosty.core.model.people.PeopleSyncJobBody
+import dev.rosty.core.model.people.PeopleSyncStartAnswer
+import dev.rosty.core.model.people.PeopleSyncStartBody
+import dev.rosty.core.model.people.PeopleSyncStatusAnswer
+import dev.rosty.core.model.people.PeopleSyncStatusBody
 import dev.rosty.core.model.wa.AvatarsPlanAnswer
 import dev.rosty.core.model.wa.AvatarsPlanRequest
 import dev.rosty.core.model.wa.CallIdBody
@@ -94,6 +101,33 @@ class FakeWaGateway(
     /** What `wa.profiles` answers for the asked jids. */
     @Volatile var profiles: (List<String>) -> Outcome<List<WaProfile>> = { Outcome.Ok(emptyList()) }
 
+    /**
+     * People sync v3: what `wa.people_sync_start` answers. The default is a gateway without the job routes
+     * (`supported = false`), so a sync against this fake runs the v2 steps unless a test scripts a job.
+     */
+    @Volatile var peopleStart: (PeopleSyncStartBody) -> Outcome<PeopleSyncStartAnswer> =
+        { Outcome.Ok(PeopleSyncStartAnswer(supported = false)) }
+
+    /** People sync v3: what `wa.people_sync_status` answers; the default: the job is gone. */
+    @Volatile var peopleStatus: (PeopleSyncStatusBody) -> Outcome<PeopleSyncStatusAnswer> =
+        { Outcome.Ok(PeopleSyncStatusAnswer(gone = true)) }
+
+    /** People sync v3: what `wa.people_sync_bundle` answers; the default: the job is gone. */
+    @Volatile var peopleBundle: (PeopleSyncBundleBody) -> Outcome<PeopleSyncBundleAnswer> =
+        {
+            Outcome.Ok(
+                PeopleSyncBundleAnswer(gone = true, records = emptyList(), lastSeq = it.after, more = false, bytes = 0),
+            )
+        }
+
+    /** People sync v3: the requests the job ops saw, in order. */
+    val peopleStarts = CopyOnWriteArrayList<PeopleSyncStartBody>()
+    val peopleWatches = CopyOnWriteArrayList<PeopleSyncStatusBody>()
+    val peopleFetches = CopyOnWriteArrayList<PeopleSyncBundleBody>()
+
+    /** People sync v3: the job ids `wa.people_sync_cancel` saw. */
+    val peopleCancels = CopyOnWriteArrayList<String>()
+
     val opener =
         WaGatewayOpener { WaGateway.open(it.gatewayUrl, it.key, null, ops, audio, release = { id -> released += id }) }
 
@@ -157,6 +191,22 @@ class FakeWaGateway(
         ok("wa.call_audio_open", HandleAnswer.serializer()) { Outcome.Ok(HandleAnswer(AUDIO)) }
         handled("wa.picture", PictureBody.serializer(), PictureAnswer.serializer()) { picture(it) }
         handled("wa.profiles", JidsBody.serializer(), ListSerializer(WaProfile.serializer())) { profiles(it.jids) }
+        handled("wa.people_sync_start", PeopleSyncStartBody.serializer(), PeopleSyncStartAnswer.serializer()) {
+            peopleStarts += it
+            peopleStart(it)
+        }
+        handled("wa.people_sync_status", PeopleSyncStatusBody.serializer(), PeopleSyncStatusAnswer.serializer()) {
+            peopleWatches += it
+            peopleStatus(it)
+        }
+        handled("wa.people_sync_bundle", PeopleSyncBundleBody.serializer(), PeopleSyncBundleAnswer.serializer()) {
+            peopleFetches += it
+            peopleBundle(it)
+        }
+        handled("wa.people_sync_cancel", PeopleSyncJobBody.serializer(), Empty.serializer()) {
+            peopleCancels += it.jobId
+            Outcome.Ok(Empty)
+        }
         core.onTyped("wa.avatars_plan", AvatarsPlanRequest.serializer(), AvatarsPlanAnswer.serializer()) {
             Outcome.Ok(FakeAvatarsPlan.answer(it))
         }

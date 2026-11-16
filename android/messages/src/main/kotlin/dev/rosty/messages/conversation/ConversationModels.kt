@@ -26,6 +26,8 @@ data class BubbleMedia(
     val busy: Boolean = false,
     /** The full file is on the phone (a picture shows it, a file can be saved or shared at once). */
     val local: Boolean = false,
+    /** The bars of a voice note (0..1 each, the waveform WhatsApp carries); empty: the plain bar. */
+    val waveform: ImmutableList<Float> = persistentListOf(),
 )
 
 /** How a [BubbleMedia] is drawn (E6.4b). */
@@ -56,6 +58,34 @@ data class VoiceUi(
     val progress: Float,
     /** "0:12 / 0:42". */
     val timeLabel: String,
+)
+
+/** Where the voice note being recorded in the composer is (E6-WA R3). */
+enum class RecordPhase {
+    /** The finger holds the microphone: releasing sends, sliding left cancels, sliding up locks. */
+    Holding,
+
+    /** Recording hands-free after the slide up: Stop, Delete and Send. */
+    Locked,
+
+    /** Stopped: the take can be played before it is sent or deleted. */
+    Review,
+}
+
+/** The voice note being recorded; null while the composer shows the microphone. */
+@Immutable
+data class RecordUi(
+    val phase: RecordPhase,
+    /** "0:07": the length of the take (while recording: so far). */
+    val elapsed: String,
+    /** The input level now, 0..1 (while recording). */
+    val level: Float = 0f,
+    /** The bars of the take, 0..1 each ([RecordPhase.Review]). */
+    val bars: ImmutableList<Float> = persistentListOf(),
+    /** The preview plays ([RecordPhase.Review]). */
+    val playing: Boolean = false,
+    /** Fraction of the preview played, 0..1. */
+    val progress: Float = 0f,
 )
 
 /** The message being answered, shown above the composer (M31). */

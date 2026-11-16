@@ -83,6 +83,20 @@ class WaOutbox(
         return item
     }
 
+    /**
+     * Queues the played receipt of the received voice note [messageId] (`WaSyncStore.markPlayed`), once per message.
+     * True when a receipt waits in the outbox now; false when it was marked before or the store refused it.
+     */
+    suspend fun markPlayed(
+        clientId: String,
+        chat: String,
+        messageId: String,
+    ): Boolean {
+        val played = store.markPlayed(clientId, chat, messageId, now()).getOrNull() ?: return false
+        if (played.queued) onChange(setOf(chat))
+        return played.queued
+    }
+
     suspend fun retry(
         chat: String,
         clientId: String,

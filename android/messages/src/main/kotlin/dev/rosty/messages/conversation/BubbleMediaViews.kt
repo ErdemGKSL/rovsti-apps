@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -269,6 +270,7 @@ private fun VoiceNote(
                 progress = progress,
                 track = host.secondary.copy(alpha = TRACK_ALPHA),
                 fill = host.ink,
+                waveform = media.waveform,
                 enabled = voice != null,
                 onSeek = { actions.onVoiceSeek(bubble, it) },
                 modifier = Modifier.testTag(MediaTags.voiceBar(bubble.key)),
@@ -298,12 +300,16 @@ private fun VoiceNote(
     }
 }
 
-/** The scrub bar: a track, the played part and a thumb. A tap or a drag on an [enabled] bar seeks. */
+/**
+ * The scrub bar: a track, the played part and a thumb; with a [waveform] (the bars WhatsApp carries) the bars in
+ * place of the track, the played ones in [fill]. A tap or a drag on an [enabled] bar seeks.
+ */
 @Composable
 private fun VoiceBar(
     progress: Float,
     track: Color,
     fill: Color,
+    waveform: List<Float>,
     enabled: Boolean,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
@@ -323,13 +329,20 @@ private fun VoiceBar(
                     seek((change.position.x / size.width).coerceIn(0f, 1f))
                 }
             }.drawBehind {
-                val thickness = MediaMetrics.VoiceTrack.toPx()
                 val thumb = MediaMetrics.VoiceThumb.toPx()
-                val y = (size.height - thickness) / 2f
-                val radius = CornerRadius(thickness / 2f)
                 val played = (size.width - thumb) * progress.coerceIn(0f, 1f)
-                drawRoundRect(track, Offset(0f, y), Size(size.width, thickness), radius)
-                drawRoundRect(fill, Offset(0f, y), Size(played + thumb / 2f, thickness), radius)
+                if (waveform.isNotEmpty()) {
+                    val wave = MediaMetrics.WaveHeight.toPx()
+                    translate(top = (size.height - wave) / 2f) {
+                        drawWaveform(waveform, progress, fill, track, Size(size.width, wave))
+                    }
+                } else {
+                    val thickness = MediaMetrics.VoiceTrack.toPx()
+                    val y = (size.height - thickness) / 2f
+                    val radius = CornerRadius(thickness / 2f)
+                    drawRoundRect(track, Offset(0f, y), Size(size.width, thickness), radius)
+                    drawRoundRect(fill, Offset(0f, y), Size(played + thumb / 2f, thickness), radius)
+                }
                 drawCircle(fill, thumb / 2f, Offset(played + thumb / 2f, size.height / 2f))
             },
     )

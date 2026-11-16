@@ -328,6 +328,19 @@
     <string name="wa_voice_play">Play</string>
     <string name="wa_voice_pause">Pause</string>
     <string name="wa_voice_speed">Playback speed %1$s</string>
+    <!-- E6-WA R3: recording voice notes in the WhatsApp composer. -->
+    <string name="wa_record_mic">Record a voice message</string>
+    <string name="wa_record_cancel_hint">Slide to cancel</string>
+    <string name="wa_record_lock">Slide up to keep recording</string>
+    <string name="wa_record_stop">Stop recording</string>
+    <string name="wa_record_delete">Delete recording</string>
+    <string name="wa_record_send">Send voice message</string>
+    <string name="wa_record_hold">Hold to record, release to send</string>
+    <string name="wa_record_failed">Couldn\'t use the microphone</string>
+    <string name="wa_record_denied_title">Microphone is off</string>
+    <string name="wa_record_denied_body">To record voice messages, allow the microphone for Rosty Messages in Settings.</string>
+    <string name="wa_record_not_now">Not Now</string>
+    <string name="wa_record_settings">Open Settings</string>
     <string name="wa_reply">Reply</string>
     <string name="wa_reply_cancel">Cancel reply</string>
     <string name="wa_attachment_remove">Remove attachment</string>

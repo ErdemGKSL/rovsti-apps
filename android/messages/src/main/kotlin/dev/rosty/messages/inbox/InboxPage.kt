@@ -70,6 +70,7 @@ fun rememberInboxViewModel(container: MessagesContainer): InboxViewModel {
                             blocked = container.blocklist.numbers(),
                             cleanup = container.codeCleanup,
                             names = container.names,
+                            chatStates = container.waChatStates.now,
                         ),
                         InboxBuilder(words, time),
                         words,

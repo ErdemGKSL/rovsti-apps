@@ -38,6 +38,9 @@ class SheetState(
 
     private var offsets = FloatArray(0)
 
+    /** The offsets replaced before the sheet was presented ([present] maps a target given for them). */
+    private var replaced = FloatArray(0)
+
     /** The detent the sheet last came to rest on (a pixel offset); a state so a page can follow the settled detent. */
     var settledOffset by mutableFloatStateOf(Float.NaN)
         private set
@@ -71,25 +74,39 @@ class SheetState(
     /** The ascending detent offsets in pixels. */
     val detentOffsets: FloatArray get() = offsets.copyOf()
 
-    /** Describes the geometry. Cheap and idempotent: call it whenever the window or its insets change. */
+    /**
+     * Describes the geometry. Cheap and idempotent: call it whenever the window, its insets or the detents change.
+     * When the detents moved (a rotation, a font change, a peek measured from the content), a sheet at rest follows
+     * its detent ([followDetent]) with the settle spring; one under a finger keeps following it.
+     */
     fun configure(
         height: Float,
         detentOffsets: FloatArray,
     ) {
         containerHeight = height
+        if (detentOffsets.contentEquals(offsets)) return
+        val before = offsets
         offsets = detentOffsets
-        if (!settledOffset.isNaN()) {
-            // A rotation or font change moved the detents: stay on the nearest one.
-            settledOffset = offsets.minByOrNull { kotlin.math.abs(it - settledOffset) } ?: settledOffset
+        if (settledOffset.isNaN()) {
+            // Not presented yet: [present] maps its target through these.
+            replaced = before
+            return
+        }
+        val next = followDetent(settledOffset, before, offsets)
+        if (next == settledOffset) return
+        settledOffset = next
+        if (!isDragging && !leaving) {
+            scope.launch { offset.animateTo(next, RostyMotion.sheetSettle(0.5f)) }
         }
     }
 
-    /** Slides in from below to [target] (a detent offset). */
+    /** Slides in from below to [target] (a detent offset; one of detents replaced meanwhile maps to its successor). */
     fun present(target: Float): Job =
         scope.launch {
             offset.snapTo(containerHeight)
-            settledOffset = target
-            offset.animateTo(target, RostyMotion.sheetSettle(0.5f))
+            val to = if (offsets.isEmpty()) target else followDetent(target, replaced, offsets)
+            settledOffset = to
+            offset.animateTo(to, RostyMotion.sheetSettle(0.5f))
         }
 
     /** Moves the sheet with a finger by [dy] px. Rubber band above the top detent (and below the lowest if pinned). */

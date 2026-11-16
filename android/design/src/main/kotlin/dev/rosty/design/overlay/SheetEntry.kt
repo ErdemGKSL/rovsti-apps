@@ -77,10 +77,11 @@ import kotlin.math.roundToInt
  *
  * [content] fills the space under the grabber; it is given the [SheetState] to dismiss or move the sheet.
  * [compactLargeOnly] false keeps the short detents in a window under 480 dp tall (the map sheet in landscape).
+ * [updateDetents] moves the resting heights while the sheet is shown (a peek measured from its content).
  */
 class SheetEntry(
     title: String,
-    private val detents: ImmutableList<Detent> = persistentListOf(Detent.Medium, Detent.Large),
+    detents: ImmutableList<Detent> = persistentListOf(Detent.Medium, Detent.Large),
     private val initialDetent: Detent = detents.first(),
     modal: Boolean = true,
     private val dismissible: Boolean = modal,
@@ -91,6 +92,20 @@ class SheetEntry(
     private val content: @Composable ColumnScope.(SheetState) -> Unit,
 ) : OverlayEntry(modal = modal, title = title) {
     private var sheetRef by mutableStateOf<SheetState?>(null)
+
+    private var detentList by mutableStateOf(detents)
+
+    /** The detents the sheet rests on now: the constructor's, or the last [updateDetents]. */
+    val detents: ImmutableList<Detent> get() = detentList
+
+    /**
+     * Replaces the detents while the sheet is shown. A sheet resting on a detent springs to the detent at the same
+     * place in the new list (the nearest one when the count changed); a sheet under a finger keeps following it.
+     * Cheap when nothing changed, so a page may call it on every measure.
+     */
+    fun updateDetents(next: ImmutableList<Detent>) {
+        if (next != detentList) detentList = next
+    }
 
     /** The sheet's position once it has been composed; for tests and for pages that follow its detent. */
     val sheet: SheetState? get() = sheetRef
@@ -111,6 +126,7 @@ class SheetEntry(
         val lowerTop = remember { if (modal) host.controller.topBelow(this) else Float.NaN }
         val stepBackPx = SheetMetrics.StackLift.value * density.density
         val gapPx = SheetMetrics.StackMinGap.value * density.density
+        val detents = detentList
         val offsets =
             remember(height, host.safe.top, density.density, detents) {
                 detentOffsets(detents, height, host.safe.top, density.density, compactLargeOnly)

@@ -131,6 +131,24 @@ fun detentOffsets(
     return merged.toFloatArray()
 }
 
+/**
+ * Where a sheet resting at [settled] (px from the top) goes when the detents change from [before] to [after], both
+ * ascending as [detentOffsets] returns them: to the detent at the same index when [settled] was one of [before] and the
+ * count is unchanged (peek stays peek however far it moved), else to the detent of [after] nearest to [settled].
+ */
+fun followDetent(
+    settled: Float,
+    before: FloatArray,
+    after: FloatArray,
+): Float {
+    if (after.isEmpty()) return settled
+    if (before.size == after.size) {
+        val index = before.indexOfFirst { abs(it - settled) < 0.5f }
+        if (index >= 0) return after[index]
+    }
+    return after.minBy { abs(it - settled) }
+}
+
 /** What a released sheet does next. */
 sealed interface SheetTarget {
     data class Snap(

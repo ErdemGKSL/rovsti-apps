@@ -7,6 +7,7 @@ import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.ops.WaGateway
 import dev.rosty.platform.identity.CallerIdentity
 import dev.rosty.platform.identity.IdentitySource
+import dev.rosty.wa.avatars.rateLimit
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,9 @@ class LiveWaNames(
     private val asking = ConcurrentHashMap.newKeySet<String>()
     private val changes = MutableStateFlow(0L)
 
+    /** No question goes out before this time (wall clock): the gateway answered 429 and named the wait. */
+    @Volatile private var pausedUntilMs = 0L
+
     override val revision: StateFlow<Long> get() = changes
 
     /** Memory only: always answerable; an empty answer means "not asked yet" or "not on WhatsApp". */
@@ -70,12 +74,14 @@ class LiveWaNames(
     fun ask(number: String) {
         val key = keyOf(number) ?: return
         if (fresh(key)) return
+        // WhatsApp or the gateway said wait: nothing is asked (the number is asked again when next needed).
+        if (paused()) return
         if (!asking.add(key)) return
         scope.launch {
             try {
                 restore()
                 // A stored answer may cover it now that the file is read.
-                if (!fresh(key)) query(key)
+                if (!fresh(key) && !paused()) query(key)
             } finally {
                 asking.remove(key)
             }
@@ -94,6 +100,16 @@ class LiveWaNames(
             store?.let { keep -> withContext(io) { keep.save(emptyMap()) } }
             if (named) changes.value += 1
         }
+    }
+
+    private fun paused(): Boolean = clock() < pausedUntilMs
+
+    /** A 429 pauses every question for the wait it names ([RATE_LIMIT_PAUSE_MS] when it names none). */
+    private fun pauseOn(error: dev.rosty.core.RustError) {
+        val limit = error.rateLimit() ?: return
+        val until = clock() + (limit.retryAfterMs?.takeIf { it > 0 } ?: RATE_LIMIT_PAUSE_MS)
+        if (until > pausedUntilMs) pausedUntilMs = until
+        RostyLog.i(TAG, "live name: rate limited (${limit.source}), paused for ${until - clock()} ms")
     }
 
     private fun fresh(key: String): Boolean = known[key]?.let { clock() - it.atMs < ttlMs } == true
@@ -132,6 +148,7 @@ class LiveWaNames(
                 }
 
                 is Outcome.Err -> {
+                    pauseOn(answer.error)
                     RostyLog.i(TAG, "live name: lookup failed (${answer.error})")
                     return
                 }
@@ -151,6 +168,7 @@ class LiveWaNames(
                 }
 
                 is Outcome.Err -> {
+                    pauseOn(answer.error)
                     RostyLog.i(TAG, "live name: profile failed (${answer.error})")
                     null
                 }
@@ -184,6 +202,9 @@ class LiveWaNames(
 
         /** How long an answer (also "not on WhatsApp") is trusted before a new call asks again. */
         const val TTL_MS: Long = 6 * 60 * 60 * 1000L
+
+        /** The pause after a 429 that named no wait (an older gateway). */
+        const val RATE_LIMIT_PAUSE_MS: Long = 60_000L
 
         /** Pure: the name to show, verified business name first, else the push name; null when both are blank. */
         fun nameOf(

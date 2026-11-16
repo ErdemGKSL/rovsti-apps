@@ -226,6 +226,8 @@ fun ConversationScreen(
     val sendLater by rememberUpdatedState(onSendLongPress)
     val haptics = LocalRostyHaptics.current
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    // Back after a long time away: the newest message, not where it was left.
+    ScrollToNewestAfterAway(listState)
     // Find, jump to date: scroll the target into view once, then let the tools know.
     LaunchedEffect(tools.scrollTo) {
         val target = tools.scrollTo ?: return@LaunchedEffect

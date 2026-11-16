@@ -38,8 +38,11 @@ class SheetState(
 
     private var offsets = FloatArray(0)
 
-    /** The offsets replaced before the sheet was presented ([present] maps a target given for them). */
+    /** The offsets an explicit update replaced before the sheet was presented ([present] maps its target through them). */
     private var replaced = FloatArray(0)
+
+    /** Set once a `follow` [configure] ran before [present]: only then is the present target mapped. */
+    private var followedBeforePresent = false
 
     /** The detent the sheet last came to rest on (a pixel offset); a state so a page can follow the settled detent. */
     var settledOffset by mutableFloatStateOf(Float.NaN)
@@ -75,21 +78,34 @@ class SheetState(
     val detentOffsets: FloatArray get() = offsets.copyOf()
 
     /**
-     * Describes the geometry. Cheap and idempotent: call it whenever the window, its insets or the detents change.
-     * When the detents moved (a rotation, a font change, a peek measured from the content), a sheet at rest follows
-     * its detent ([followDetent]) with the settle spring; one under a finger keeps following it.
+     * Describes the geometry. Cheap and idempotent: call it whenever the window or its insets change. A sheet at rest
+     * then keeps the detent nearest to where it settled and stays where it is (a rotation or font change).
+     *
+     * [follow] true says the detents themselves were replaced (an explicit update, such as a peek measured from the
+     * content): a sheet at rest then follows its detent ([followDetent]) with the settle spring, one under a finger keeps
+     * following it, and before [present] its target maps onto the new detents.
      */
     fun configure(
         height: Float,
         detentOffsets: FloatArray,
+        follow: Boolean = false,
     ) {
         containerHeight = height
+        if (!follow) {
+            offsets = detentOffsets
+            if (!settledOffset.isNaN()) {
+                // A rotation or font change moved the detents: stay on the nearest one.
+                settledOffset = offsets.minByOrNull { kotlin.math.abs(it - settledOffset) } ?: settledOffset
+            }
+            return
+        }
         if (detentOffsets.contentEquals(offsets)) return
         val before = offsets
         offsets = detentOffsets
         if (settledOffset.isNaN()) {
             // Not presented yet: [present] maps its target through these.
             replaced = before
+            followedBeforePresent = true
             return
         }
         val next = followDetent(settledOffset, before, offsets)
@@ -100,11 +116,21 @@ class SheetState(
         }
     }
 
-    /** Slides in from below to [target] (a detent offset; one of detents replaced meanwhile maps to its successor). */
+    /**
+     * Slides in from below to [target] (a detent offset; after a `follow` [configure] one of the replaced detents maps
+     * to its successor).
+     */
     fun present(target: Float): Job =
         scope.launch {
             offset.snapTo(containerHeight)
-            val to = if (offsets.isEmpty()) target else followDetent(target, replaced, offsets)
+            val to =
+                if (followedBeforePresent &&
+                    offsets.isNotEmpty()
+                ) {
+                    followDetent(target, replaced, offsets)
+                } else {
+                    target
+                }
             settledOffset = to
             offset.animateTo(to, RostyMotion.sheetSettle(0.5f))
         }

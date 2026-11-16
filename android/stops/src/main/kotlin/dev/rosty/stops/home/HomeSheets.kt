@@ -14,10 +14,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import dev.rosty.design.controls.EmptyState
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
@@ -28,26 +30,43 @@ import dev.rosty.design.overlay.Detent
 import dev.rosty.design.overlay.LocalOverlay
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.SheetEntry
+import dev.rosty.design.overlay.SheetMetrics
 import dev.rosty.design.overlay.SheetState
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
 import dev.rosty.stops.R
 import dev.rosty.stops.StopsSizes
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
 /** Test tags of the home's sheets. */
 object HomeSheetTags {
     const val Main = "home-sheet"
     const val Title = "home-sheet-title"
+    const val Subtitle = "home-sheet-subtitle"
     const val SavedRow = "home-sheet-saved"
     const val HistoryRow = "home-sheet-history"
     const val TransitRow = "home-sheet-transit"
     const val History = "sheet-history"
 }
 
-/** The map sheet's detents, tallest first: index 0 Large, 1 Medium, 2 Peek ([SheetState.detentOffsets] order). */
-internal val MapSheetDetents = persistentListOf(Detent.Peek(StopsSizes.sheetPeek), Detent.Medium, Detent.Large)
+/**
+ * The map sheet's detents before its content is measured; [SheetState.detentOffsets] orders them tallest first: index
+ * 0 Large, 1 Medium, 2 Peek. The home replaces the peek with the measured one ([mapSheetDetents]).
+ */
+internal val MapSheetDetents = mapSheetDetents(StopsSizes.sheetPeek)
+
+/** The map sheet's detents with a peek [peek] tall (the measured content, [mapSheetPeekPx]). */
+internal fun mapSheetDetents(peek: Dp): ImmutableList<Detent> =
+    persistentListOf(Detent.Peek(peek), Detent.Medium, Detent.Large)
+
+/**
+ * What sits above the map sheet's measured content, part of the peek height: the grabber (`:design`'s sheet metrics)
+ * and the room above the title ([OnSheet]).
+ */
+internal val MapSheetGrabber: Dp =
+    SheetMetrics.GrabberTop + SheetMetrics.GrabberHeight + SheetMetrics.GrabberBottom + StopsSizes.sheetTitleTop
 
 /** The detent of an index from the tallest ([SheetState.detentOffsets] order); out of range is Peek. */
 internal fun mapSheetDetent(fromTallest: Int): Detent =
@@ -104,7 +123,15 @@ internal fun MapSheetContent(
 ) {
     val colors = RostyTheme.colors
     val type = RostyTheme.type
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag(HomeSheetTags.Main)) {
+    val peek = LocalMapSheetPeek.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            // After the scroll: the content's own coordinates, so the peek measure does not move with the scroll.
+            .then(if (peek != null) Modifier.onGloballyPositioned(peek::root) else Modifier)
+            .testTag(HomeSheetTags.Main),
+    ) {
         Column(Modifier.padding(horizontal = Spacing.gutter)) {
             RostyText(
                 title ?: stringResource(R.string.home_sheet_title),
@@ -121,14 +148,16 @@ internal fun MapSheetContent(
                 } else {
                     stringResource(R.string.home_sheet_hint)
                 },
+                // Peek always shows the title and this line (the hint with no plan); the plan and the trip add theirs.
+                rememberPeekEnd().testTag(HomeSheetTags.Subtitle),
                 style = type.subheadline,
                 color = colors.labelSecondary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // The rows start just below what the peek detent shows (grabber, title, one line), so peek ends on a clean edge.
-        Spacer(Modifier.height(StopsSizes.peekRowsGap))
+        // Peek ends a gap under its last element ([mapSheetPeekPx]), so what follows starts at the sheet's edge.
+        Spacer(Modifier.height(Spacing.l))
         trip()
         Spacer(Modifier.height(Spacing.m))
         InsetGroupedSection {

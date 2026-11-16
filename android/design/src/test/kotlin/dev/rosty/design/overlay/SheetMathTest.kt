@@ -145,4 +145,24 @@ class SheetMathTest {
         // No sheet below: untouched.
         assertEquals(12f, upperDetentOffset(12f, Float.NaN, step, gap), 0.001f)
     }
+
+    @Test
+    fun aRestingSheetKeepsItsDetentWhenThePeekMoves() {
+        val before = offsets()
+        val after = detentOffsets(listOf(Detent.Large, Detent.Peek(300.dp), Detent.Medium), height, status, density)
+        assertEquals(after[2], followDetent(before[2], before, after), 0.01f)
+        assertEquals(after[1], followDetent(before[1], before, after), 0.01f)
+        assertEquals(after[0], followDetent(before[0], before, after), 0.01f)
+    }
+
+    @Test
+    fun aChangedCountOrAnOffDetentPositionGoesToTheNearest() {
+        val before = offsets()
+        val after = detentOffsets(listOf(Detent.Large, Detent.Medium), height, status, density)
+        assertEquals(after[1], followDetent(before[2], before, after), 0.01f)
+        // A sheet that was between detents (not on one of them) takes the nearest new detent.
+        val shifted = before.map { it + 100f }.toFloatArray()
+        assertEquals(shifted[0], followDetent(before[0] + 3f, before, shifted), 0.01f)
+        assertEquals(42f, followDetent(42f, before, FloatArray(0)), 0f)
+    }
 }

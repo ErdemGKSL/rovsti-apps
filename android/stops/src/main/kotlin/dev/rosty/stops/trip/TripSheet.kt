@@ -55,6 +55,7 @@ import dev.rosty.shell.permissions.SpecialRowTexts
 import dev.rosty.stops.R
 import dev.rosty.stops.home.OnSheet
 import dev.rosty.stops.home.StopsIcons
+import dev.rosty.stops.home.rememberPeekEnd
 import dev.rosty.stops.notice.noticeLine
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -158,7 +159,8 @@ private fun StartRow(
     onClear: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
+        // The map sheet's peek shows Start and Clear (and Save under them).
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).then(rememberPeekEnd()),
         horizontalArrangement = Arrangement.spacedBy(Spacing.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -203,7 +205,11 @@ private fun SaveRow(save: PlanSave) {
             CapsuleButton(
                 stringResource(R.string.trip_save_stop),
                 save.onSave,
-                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(TripTags.Save),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.gutter)
+                    .then(rememberPeekEnd())
+                    .testTag(TripTags.Save),
                 icon = StopsIcons.Bookmark,
                 fillWidth = true,
             )
@@ -212,7 +218,11 @@ private fun SaveRow(save: PlanSave) {
         is PlanSave.Saved -> {
             RostyText(
                 stringResource(R.string.trip_saved_as, save.name),
-                Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(TripTags.Saved),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.gutter)
+                    .then(rememberPeekEnd())
+                    .testTag(TripTags.Saved),
                 style = RostyTheme.type.footnote,
                 color = RostyTheme.colors.labelSecondary,
                 maxLines = 2,
@@ -266,7 +276,10 @@ private fun LineRow(
     }
 }
 
-/** The live card (GPUI `live_card`): the distance to the line, the side, the rule, the details, S20 and Stop. */
+/**
+ * The live card (GPUI `live_card`): the distance to the line and the side, then S20 (copy, share) and Stop, then the
+ * rule and the details. The buttons come before the details so the map sheet's peek shows them.
+ */
 @Composable
 private fun LiveCard(
     state: TripUiState,
@@ -308,7 +321,26 @@ private fun LiveCard(
             maxLines = 2,
         )
         if (live != null && !crossed) SideChip(live.side)
-        Detail(stringResource(R.string.trip_rule, trip.label))
+        Row(
+            Modifier.padding(top = Spacing.s),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+        ) {
+            CapsuleButton(stringResource(R.string.trip_copy_status), {
+                onAction(TripAction.CopyStatus)
+            }, Modifier.testTag(TripTags.Copy))
+            CapsuleButton(stringResource(R.string.trip_share_status), {
+                onAction(TripAction.ShareStatus)
+            }, Modifier.testTag(TripTags.Share))
+        }
+        CapsuleButton(
+            stringResource(if (state.busy) R.string.trip_stopping else R.string.trip_stop),
+            { onAction(TripAction.Stop) },
+            // The map sheet's peek ends here: the key line and the buttons; the details follow under its edge.
+            Modifier.padding(top = Spacing.s).then(rememberPeekEnd()).testTag(TripTags.Stop),
+            tint = colors.destructive,
+            enabled = !state.busy,
+        )
+        Detail(stringResource(R.string.trip_rule, trip.label), Modifier.padding(top = Spacing.s))
         if (live != null && !crossed) {
             if (live.inside) {
                 Detail(stringResource(R.string.trip_inside))
@@ -331,24 +363,6 @@ private fun LiveCard(
         noticeLine(trip.notice, live?.noticeSent == true, live?.noticeFailed == true)?.let {
             Detail(stringResource(it), Modifier.testTag(TripTags.ArrivingSoon))
         }
-        Row(
-            Modifier.padding(top = Spacing.s),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-        ) {
-            CapsuleButton(stringResource(R.string.trip_copy_status), {
-                onAction(TripAction.CopyStatus)
-            }, Modifier.testTag(TripTags.Copy))
-            CapsuleButton(stringResource(R.string.trip_share_status), {
-                onAction(TripAction.ShareStatus)
-            }, Modifier.testTag(TripTags.Share))
-        }
-        CapsuleButton(
-            stringResource(if (state.busy) R.string.trip_stopping else R.string.trip_stop),
-            { onAction(TripAction.Stop) },
-            Modifier.padding(top = Spacing.s).testTag(TripTags.Stop),
-            tint = colors.destructive,
-            enabled = !state.busy,
-        )
     }
 }
 

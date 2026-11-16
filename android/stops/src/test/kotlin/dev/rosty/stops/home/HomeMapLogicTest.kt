@@ -1,7 +1,9 @@
 package dev.rosty.stops.home
 
+import dev.rosty.core.model.stops.Ends
 import dev.rosty.platform.location.Fix
 import dev.rosty.stops.SampleStops
+import dev.rosty.stops.trip.TripFixtures
 import kotlinx.collections.immutable.toImmutableList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -14,6 +16,19 @@ class HomeMapLogicTest {
         val state = HomeState(trip = TripSummary("A – B", SampleStops.pierW, SampleStops.pierE))
         // The gate, so the view fits its whole circle and not only the two ends.
         assertEquals(FirstView.Gate(SampleStops.pierW.coord, SampleStops.pierE.coord), firstView(state, fix))
+    }
+
+    @Test fun thenThePairOfTheLastSession() {
+        val state = HomeState(draft = Ends(TripFixtures.a, TripFixtures.b))
+        assertEquals(FirstView.Gate(TripFixtures.a.coord, TripFixtures.b.coord), firstView(state, fix))
+        // One end alone is no pair: the position wins.
+        assertEquals(FirstView.Centre(41.1, 29.2), firstView(HomeState(draft = Ends(TripFixtures.a, null)), fix))
+    }
+
+    @Test fun aPinLowerThanTheMarginAboveTheSheetIsCovered() {
+        // A 2000 px view, the sheet's padding 600 px, a 50 px margin: the free area ends at 1350.
+        assertTrue(pinCovered(floatArrayOf(400f, 1400f), 2000f, 600f, 50f))
+        assertTrue(!pinCovered(floatArrayOf(400f, 1300f), 2000f, 600f, 50f))
     }
 
     @Test fun thenMyPositionThenTheSavedStopsThenTheDefault() {

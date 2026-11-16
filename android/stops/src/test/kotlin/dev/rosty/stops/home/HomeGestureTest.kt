@@ -1,12 +1,22 @@
 package dev.rosty.stops.home
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.OverlayHost
 import dev.rosty.stops.HomeTab
@@ -26,7 +36,7 @@ class HomeGestureTest : ShotTest() {
     private val camera = MapCameraPadding()
     private var locate = 0
 
-    private fun start() {
+    private fun start(sheetContent: (@Composable () -> Unit)? = null) {
         val controller = OverlayController()
         composeFrame {
             OverlayHost(controller) {
@@ -37,6 +47,7 @@ class HomeGestureTest : ShotTest() {
                     selectedTab = HomeTab.Trip,
                     actions = HomeActions(onLocate = { locate++ }),
                     camera = camera,
+                    sheetContent = sheetContent ?: { MapSheetContent(HomeState(loading = false), {}, {}) },
                 )
             }
         }
@@ -68,9 +79,12 @@ class HomeGestureTest : ShotTest() {
     @Test fun theSheetOpensAtPeekWithTheButtonsAboveIt() {
         start()
         val sheetTop = top("sheet")
-        assertEquals(windowHeight() - 120f * density, sheetTop, 2f)
+        // Peek ends a gap under the hint (the measured peek), above the 24 dp gesture bar.
+        val hint = bottom(HomeSheetTags.Subtitle)
+        assertTrue(hint <= windowHeight() - 24f * density)
+        assertEquals(windowHeight() - 24f * density, hint + 12f * density, 2f)
         assertTrue("the buttons sit above the sheet", bottom(HomeTags.Buttons) <= sheetTop)
-        assertEquals(120f, camera.insets.calculateBottomPadding().value, 1f)
+        assertEquals((windowHeight() - sheetTop) / density, camera.insets.calculateBottomPadding().value, 1f)
     }
 
     @Test fun theMapTakesTapsAtPeekAndMedium() {
@@ -102,7 +116,7 @@ class HomeGestureTest : ShotTest() {
             advance(16)
         }
         // Mid-drag: the sheet moved, the camera did not.
-        assertTrue(top("sheet") < windowHeight() - 300f * density)
+        assertTrue(top("sheet") < windowHeight() - (peek + 150f) * density)
         assertEquals(before, camera.updates)
         assertEquals(peek, camera.insets.calculateBottomPadding().value, 0.01f)
         grabber.performTouchInput { up() }
@@ -125,5 +139,37 @@ class HomeGestureTest : ShotTest() {
         compose.onNodeWithTag("sheet-grabber").performSemanticsAction(SemanticsActions.OnClick)
         run(1500)
         assertEquals("no relayout: the block keeps its size", sizeAtPeek, buttons.fetchSemanticsNode().size)
+    }
+
+    /** The owner's request: peek reaches down to the content's last peek element; the camera clears the new peek. */
+    @Test fun thePeekReachesTheMarkedContentAndTheCameraFollows() {
+        var tall by mutableStateOf(false)
+        start {
+            MapSheetContent(HomeState(loading = false), {}, {}, trip = {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(if (tall) TALL else SHORT)
+                        .then(rememberPeekEnd())
+                        .testTag("block"),
+                )
+            })
+        }
+        val first = camera.insets.calculateBottomPadding().value
+        assertTrue("a short block still peeks", first > 120f)
+        assertTrue("the block shows in full", bottom("block") <= windowHeight() - 24f * density)
+
+        tall = true
+        run(1500)
+        val second = camera.insets.calculateBottomPadding().value
+        assertEquals((TALL - SHORT).value, second - first, 1.5f)
+        assertEquals(windowHeight() - second * density, top("sheet"), 2f)
+        assertTrue("the taller block shows in full", bottom("block") <= windowHeight() - 24f * density)
+        assertTrue("the buttons ride above the sheet", bottom(HomeTags.Buttons) <= top("sheet"))
+    }
+
+    private companion object {
+        val SHORT = 80.dp
+        val TALL = 200.dp
     }
 }

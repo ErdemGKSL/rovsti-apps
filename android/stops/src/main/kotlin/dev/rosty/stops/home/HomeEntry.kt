@@ -561,6 +561,27 @@ fun HomeEntry(
             map.showGate(trip)
         }
     }
+    // A plan (A and B, no trip): the peek grows to show its buttons, so a pin set low on the map can end under the
+    // sheet. When the settled sheet's padding changes and covers a pin, the view fits the gate again.
+    val planA =
+        pickState.ends.a
+            ?.coord
+            ?.takeIf { runningTrip == null }
+    val planB =
+        pickState.ends.b
+            ?.coord
+            ?.takeIf { runningTrip == null }
+    LaunchedEffect(map, planA, planB, padding, density) {
+        if (planA == null || planB == null) return@LaunchedEffect
+        snapshotFlow { padding.insets }.collectLatest { insets ->
+            val bottom = with(density) { insets.calculateBottomPadding().toPx() }
+            snapshotFlow {
+                map.camera.observe()
+                map.camera.paddingBottom
+            }.first { abs(it - bottom) < 1f }
+            if (map.gateCovered(planA, planB)) map.showPlanGate(planA, planB)
+        }
+    }
     // The in-app alarm: presented while the alarm rings, gone with the answer.
     val alarmState by alarm.state.collectAsState()
     val alarmTitle = stringResource(R.string.alarm_title)

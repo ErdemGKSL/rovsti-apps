@@ -73,7 +73,7 @@ class AlarmEntry(
         ) {
             val shown = remember { arrayOfNulls<AlarmUi>(1) }
             if (alarm != null) shown[0] = alarm
-            shown[0]?.let { OnSheet { AlarmContent(it, viewModel::onAction) } }
+            shown[0]?.let { OnSheet(titleGap = false) { AlarmContent(it, viewModel::onAction) } }
         }
     }
 }

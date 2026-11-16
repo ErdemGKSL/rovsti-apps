@@ -66,7 +66,7 @@ class PeopleSyncWorker(
             nowMs: Long,
         ): Long? = ForegroundSyncPlan.continueInMs(result, nowMs)
 
-        /** The request WorkManager repeats: about every six hours, on a network, not while the battery is low. */
+        /** The request WorkManager repeats: about every twelve hours, on a network, not while the battery is low. */
         fun request(): androidx.work.PeriodicWorkRequest =
             PeriodicWorkRequestBuilder<PeopleSyncWorker>(PeopleSync.PERIOD_MS, TimeUnit.MILLISECONDS)
                 .setConstraints(PeopleSyncWork.network(batteryNotLow = true))
@@ -81,11 +81,14 @@ class PeopleSyncWorker(
         fun nowRequest(start: String): androidx.work.OneTimeWorkRequest =
             PeopleSyncWork.nowRequest(PeopleSyncWorker::class.java, start)
 
-        /** Makes sure the periodic work exists; an existing one keeps its schedule (`KEEP`). */
+        /**
+         * Makes sure the periodic work exists. `UPDATE`: an existing one takes this request (an installed app moves from
+         * the old six hours to twelve) and keeps its id; WorkManager resets its next run time once (people sync v3, R5).
+         */
         fun schedule(context: Context) {
             WorkManager
                 .getInstance(context)
-                .enqueueUniquePeriodicWork(UNIQUE_NAME, ExistingPeriodicWorkPolicy.KEEP, request())
+                .enqueueUniquePeriodicWork(UNIQUE_NAME, ExistingPeriodicWorkPolicy.UPDATE, request())
         }
 
         /** Enqueues (or moves) the continuation. */

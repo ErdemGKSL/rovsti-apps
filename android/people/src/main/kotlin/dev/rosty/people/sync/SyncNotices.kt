@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import androidx.work.ForegroundInfo
+import dev.rosty.core.model.people.PeopleJobWire
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.people.R
 import dev.rosty.platform.notify.NotificationIcon
@@ -39,6 +40,14 @@ class SyncNotices(
 
             is SyncNotice.Line.Limit -> {
                 context.resources.getQuantityString(R.plurals.people_sync_notice_limit, line.minutes, line.minutes)
+            }
+
+            is SyncNotice.Line.Server -> {
+                context.getString(serverText(line.phase), line.done, line.total)
+            }
+
+            is SyncNotice.Line.Download -> {
+                context.getString(R.string.people_sync_notice_download, line.done, line.total)
             }
         }
 
@@ -118,6 +127,14 @@ class SyncNotices(
                 SyncWire.STAGE_PROFILES -> R.string.people_sync_notice_profiles
                 SyncWire.STAGE_PICTURES -> R.string.people_sync_notice_pictures
                 else -> R.string.people_sync_notice_lookup
+            }
+
+        /** People sync v3: the gateway's phase (`PeopleJobWire.PHASE_*`) as the notification words it. */
+        fun serverText(phase: String): Int =
+            when (phase) {
+                PeopleJobWire.PHASE_PROFILES -> R.string.people_sync_notice_server_profiles
+                PeopleJobWire.PHASE_PICTURES -> R.string.people_sync_notice_server_pictures
+                else -> R.string.people_sync_notice_server_lookup
             }
     }
 }

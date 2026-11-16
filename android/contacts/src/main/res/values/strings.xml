@@ -471,6 +471,20 @@
     <string name="settings_people_failed_gateway">Failed: the gateway reported an error</string>
     <string name="settings_people_failed_storage">Failed: could not save on this phone</string>
     <string name="settings_people_failed_other">Failed, %1$s</string>
+    <!-- People sync v3: the gateway prepares the result, the phone downloads it once. -->
+    <string name="settings_people_server_lookup">Gateway: checking numbers %1$d/%2$d</string>
+    <string name="settings_people_server_profiles">Gateway: getting names %1$d/%2$d</string>
+    <string name="settings_people_server_pictures">Gateway: getting photos %1$d/%2$d</string>
+    <string name="settings_people_server_limit">Gateway is waiting for WhatsApp\'s limit. Continues in %1$s</string>
+    <string name="settings_people_server_offline">Gateway: WhatsApp is not connected. Waiting</string>
+    <string name="settings_people_server_quiet">Being prepared on the gateway. Downloads when ready</string>
+    <string name="settings_people_downloading">Downloading changes %1$d/%2$d</string>
+    <string name="settings_people_synced_unchanged">Synced, %1$s. Nothing changed</string>
+    <string name="settings_people_synced_changed">Synced, %1$s. %2$s</string>
+    <plurals name="settings_people_changes">
+        <item quantity="one">%d change</item>
+        <item quantity="other">%d changes</item>
+    </plurals>
     <plurals name="settings_people_minutes">
         <item quantity="one">%d min</item>
         <item quantity="other">%d min</item>

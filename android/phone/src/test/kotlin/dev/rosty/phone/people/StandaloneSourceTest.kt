@@ -158,6 +158,38 @@ class StandaloneSourceTest {
         assertEquals(onWhatsapp, runBlocking { p.source.load() }.map { it.jid }.toSet())
     }
 
+    /**
+     * People sync v3, section 6: a reconnect of the same link starts a run only when the last one is twelve hours old
+     * (and the last attempt half an hour); another link starts one at once.
+     */
+    @Test fun aReconnectSyncsOnlyAfterTwelveHoursButAnotherLinkSyncsAtOnce() {
+        val starts = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val p = people(request = { starts += it })
+        p.start()
+        connect()
+        waitFor("the first link starts a run") { starts.size == 1 }
+        val result = runBlocking { p.runSlice(dev.rosty.core.model.people.SyncWire.START_AUTO, null) }
+        assertEquals(dev.rosty.people.sync.SliceResult.Done, result)
+
+        repo.setState(WaLinkState.Connected(InstanceStatus("inst", InstanceState.Disconnected)))
+        // The link state is a StateFlow: give the follower time to see the disconnect.
+        Thread.sleep(300)
+        connect()
+        Thread.sleep(300)
+        assertEquals("a reconnect right after a run asks nothing", 1, starts.size)
+
+        now += 13 * 3_600_000L
+        repo.setState(WaLinkState.Connected(InstanceStatus("inst", InstanceState.Disconnected)))
+        // The link state is a StateFlow: give the follower time to see the disconnect.
+        Thread.sleep(300)
+        connect()
+        waitFor("a reconnect twelve hours later starts one") { starts.size == 2 }
+
+        repo.setState(WaLinkState.Connected(InstanceStatus("inst-2", InstanceState.Connected)))
+        waitFor("another link starts one at once") { starts.size == 3 }
+        assertTrue(starts.all { it == dev.rosty.core.model.people.SyncWire.START_AUTO })
+    }
+
     @Test fun linkingSyncsWhoIsOnWhatsAppIntoItsOwnCacheWithThePictures() {
         val p = people()
         p.start()

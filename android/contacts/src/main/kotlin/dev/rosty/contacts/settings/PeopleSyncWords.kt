@@ -2,13 +2,14 @@ package dev.rosty.contacts.settings
 
 import dev.rosty.contacts.R
 import dev.rosty.contacts.people.PeopleSyncStatus
+import dev.rosty.core.model.people.PeopleJobWire
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.design.text.UiText
 
 /**
- * The "WhatsApp Names and Photos" rows for a [PeopleSyncStatus] (people sync v2, section 9): the status line, the
- * progress bar, and which buttons show and take taps. Pure: [nowMs] decides whether a limit's ETA has passed, [ago]
- * words a past time ("5 min. ago"). Null while WhatsApp is not linked (the rows are hidden).
+ * The "WhatsApp Names and Photos" rows for a [PeopleSyncStatus] (people sync v2, section 9; v3, section 5): the status
+ * line, the progress bar, and which buttons show and take taps. Pure: [nowMs] decides whether a limit's ETA has passed,
+ * [ago] words a past time ("5 min. ago"). Null while WhatsApp is not linked (the rows are hidden).
  */
 fun peopleSyncUi(
     status: PeopleSyncStatus,
@@ -26,12 +27,40 @@ fun peopleSyncUi(
 
         is PeopleSyncStatus.Idle -> {
             val last = status.lastMs
+            val changed = status.changed
             PeopleSyncUi(
-                if (last == null) {
-                    UiText.Res(R.string.settings_people_never)
-                } else {
-                    UiText.Res(R.string.settings_people_synced, listOf(ago(last)))
+                when {
+                    last == null -> {
+                        UiText.Res(R.string.settings_people_never)
+                    }
+
+                    changed == null -> {
+                        UiText.Res(R.string.settings_people_synced, listOf(ago(last)))
+                    }
+
+                    changed == 0 -> {
+                        UiText.Res(R.string.settings_people_synced_unchanged, listOf(ago(last)))
+                    }
+
+                    else -> {
+                        UiText.Res(
+                            R.string.settings_people_synced_changed,
+                            listOf(ago(last), UiText.Plural(R.plurals.settings_people_changes, changed)),
+                        )
+                    }
                 },
+            )
+        }
+
+        is PeopleSyncStatus.Preparing -> {
+            preparing(status, nowMs)
+        }
+
+        is PeopleSyncStatus.Downloading -> {
+            PeopleSyncUi(
+                last = UiText.Res(R.string.settings_people_downloading, listOf(status.done, status.total)),
+                running = true,
+                progress = fraction(status.done, status.total),
             )
         }
 
@@ -89,6 +118,48 @@ fun peopleSyncUi(
             )
         }
     }
+
+/**
+ * The gateway prepares (people sync v3): its phase with the count and a bar, a wait for a limit or for WhatsApp, or,
+ * while no slice follows it here, that the result is downloaded when ready. Stop shows in every case.
+ */
+private fun preparing(
+    status: PeopleSyncStatus.Preparing,
+    nowMs: Long,
+): PeopleSyncUi {
+    val bar = fraction(status.done, status.total).takeIf { status.total > 0 }
+    val until = status.waitUntilMs
+    val text =
+        when {
+            !status.watched -> {
+                UiText.Res(R.string.settings_people_server_quiet)
+            }
+
+            status.waitSource == PeopleJobWire.WAIT_NOT_CONNECTED -> {
+                UiText.Res(R.string.settings_people_server_offline)
+            }
+
+            status.waitSource != null && until != null -> {
+                UiText.Res(R.string.settings_people_server_limit, listOf(minutes(until - nowMs)))
+            }
+
+            status.total <= 0 -> {
+                UiText.Res(R.string.settings_people_server_quiet)
+            }
+
+            else -> {
+                UiText.Res(
+                    when (status.phase) {
+                        PeopleJobWire.PHASE_PROFILES -> R.string.settings_people_server_profiles
+                        PeopleJobWire.PHASE_PICTURES -> R.string.settings_people_server_pictures
+                        else -> R.string.settings_people_server_lookup
+                    },
+                    listOf(status.done, status.total),
+                )
+            }
+        }
+    return PeopleSyncUi(last = text, running = true, progress = if (status.watched) bar else null)
+}
 
 private fun running(
     stage: String,

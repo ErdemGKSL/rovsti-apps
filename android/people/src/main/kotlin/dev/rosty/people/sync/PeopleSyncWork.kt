@@ -67,6 +67,12 @@ object PeopleSyncWork {
             .enqueueUniqueWork(NOW_NAME, ExistingWorkPolicy.KEEP, nowRequest(worker, start))
     }
 
+    /** Drops a pending continuation: the user stopped the run between two slices (people sync v3). */
+    fun dropContinuation(context: Context) {
+        RostyLog.event(PeopleSyncRunner.TAG, "continue_dropped")
+        WorkManager.getInstance(context).cancelUniqueWork(CONTINUE_NAME)
+    }
+
     /** Enqueues (or moves) the continuation. */
     fun continueLater(
         context: Context,

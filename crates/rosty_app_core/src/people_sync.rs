@@ -1971,6 +1971,9 @@ fn report_inner(
             run.job = None;
             run.cancel_job = None;
             run.stage = Stage::Lookup;
+            // The picture queue planned before the job start predates the lookups and profiles of the v2 steps:
+            // the picture stage plans again from the book they fill.
+            s.queue = None;
         }
         Report::Job { status } => job_status(run, status),
         Report::JobGone => {

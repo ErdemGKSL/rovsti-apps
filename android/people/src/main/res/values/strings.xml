@@ -11,4 +11,9 @@
         <item quantity="other">WhatsApp limit, continues in %d min</item>
     </plurals>
     <string name="people_sync_notice_stop">Stop</string>
+    <!-- People sync v3: the gateway prepares the result, then the phone downloads it. -->
+    <string name="people_sync_notice_server_lookup">Gateway is checking numbers %1$d/%2$d</string>
+    <string name="people_sync_notice_server_profiles">Gateway is getting names %1$d/%2$d</string>
+    <string name="people_sync_notice_server_pictures">Gateway is getting photos %1$d/%2$d</string>
+    <string name="people_sync_notice_download">Downloading changes %1$d/%2$d</string>
 </resources>

@@ -2,6 +2,8 @@ package dev.rosty.people.sync
 
 import android.app.Application
 import android.app.Notification
+import dev.rosty.core.model.people.PeopleJobWire
+import dev.rosty.core.model.people.SyncJobView
 import dev.rosty.core.model.people.SyncProgress
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.platform.notify.PlatformChannels
@@ -66,6 +68,112 @@ class SyncNoticeTest {
     @Test fun theNormalPaceIsNotALimit() {
         val pace = running(SyncWire.STAGE_LOOKUP, 15, 60).copy(sleepingUntilMs = now + 20_000, limited = false)
         assertEquals(SyncNotice.Line.Stage(SyncWire.STAGE_LOOKUP, 15, 60), SyncNotice.of(pace, now).line)
+    }
+
+    // ---- people sync v3: the gateway's job
+
+    private fun job(
+        phase: String,
+        done: Int,
+        total: Int,
+        state: String = PeopleJobWire.RUNNING,
+        waitUntilMs: Long? = null,
+        waitSource: String? = null,
+    ) = SyncJobView(
+        jobId = "5f0c9a1b22d4e7a3",
+        state = state,
+        phase = phase,
+        done = done,
+        total = total,
+        numbers = 40,
+        waitUntilMs = waitUntilMs,
+        waitSource = waitSource,
+    )
+
+    private fun server(view: SyncJobView) =
+        RunnerState(
+            active = true,
+            stage = SyncWire.STAGE_SERVER,
+            progress = SyncProgress(view.done, view.total),
+            job = view,
+        )
+
+    @Test fun theGatewaysPhaseShowsWithItsCountAndABar() {
+        val notice = SyncNotice.of(server(job(PeopleJobWire.PHASE_LOOKUP, 15, 40)), now)
+        assertEquals(SyncNotice(SyncNotice.Line.Server(PeopleJobWire.PHASE_LOOKUP, 15, 40), 15, 40), notice)
+        assertEquals("Gateway is checking numbers 15/40", notices.text(notice))
+        assertEquals(
+            "Gateway is getting names 3/9",
+            notices.text(SyncNotice.of(server(job(PeopleJobWire.PHASE_PROFILES, 3, 9)), now)),
+        )
+        assertEquals(
+            "Gateway is getting photos 1/4",
+            notices.text(SyncNotice.of(server(job(PeopleJobWire.PHASE_PICTURES, 1, 4)), now)),
+        )
+        assertEquals(
+            "a job that counted nothing yet is starting",
+            SyncNotice.STARTING,
+            SyncNotice.of(server(job(PeopleJobWire.PHASE_BUNDLE, 0, 0)), now),
+        )
+    }
+
+    @Test fun theGatewaysLimitWaitReadsAsALimitAndKeepsTheBar() {
+        val waiting =
+            job(
+                PeopleJobWire.PHASE_PROFILES,
+                15,
+                30,
+                PeopleJobWire.WAITING,
+                now + 3 * 60_000L,
+                PeopleJobWire.WAIT_WHATSAPP,
+            )
+        val notice = SyncNotice.of(server(waiting), now)
+        assertEquals(SyncNotice(SyncNotice.Line.Limit(3), 15, 30), notice)
+        val offline =
+            job(
+                PeopleJobWire.PHASE_PROFILES,
+                15,
+                30,
+                PeopleJobWire.WAITING,
+                now + 60_000,
+                PeopleJobWire.WAIT_NOT_CONNECTED,
+            )
+        assertEquals(
+            "WhatsApp not connected on the gateway is not a limit",
+            SyncNotice.Line.Server(PeopleJobWire.PHASE_PROFILES, 15, 30),
+            SyncNotice.of(server(offline), now).line,
+        )
+    }
+
+    @Test fun theDownloadShowsTheRecordsCommitted() {
+        val state =
+            RunnerState(
+                active = true,
+                stage = SyncWire.STAGE_DOWNLOAD,
+                progress = SyncProgress(3, 12),
+                job = job(PeopleJobWire.PHASE_BUNDLE, 40, 40, PeopleJobWire.READY),
+            )
+        val notice = SyncNotice.of(state, now)
+        assertEquals(SyncNotice(SyncNotice.Line.Download(3, 12), 3, 12), notice)
+        assertEquals("Downloading changes 3/12", notices.text(notice))
+    }
+
+    @Test
+    @Config(qualifiers = "tr")
+    fun turkishGatewayWords() {
+        assertEquals(
+            "Ağ geçidi numaraları denetliyor 15/40",
+            notices.text(SyncNotice(SyncNotice.Line.Server(PeopleJobWire.PHASE_LOOKUP, 15, 40))),
+        )
+        assertEquals(
+            "Ağ geçidi adları alıyor 3/9",
+            notices.text(SyncNotice(SyncNotice.Line.Server(PeopleJobWire.PHASE_PROFILES, 3, 9))),
+        )
+        assertEquals(
+            "Ağ geçidi fotoğrafları alıyor 1/4",
+            notices.text(SyncNotice(SyncNotice.Line.Server(PeopleJobWire.PHASE_PICTURES, 1, 4))),
+        )
+        assertEquals("Değişiklikler indiriliyor 3/12", notices.text(SyncNotice(SyncNotice.Line.Download(3, 12))))
     }
 
     @Test fun minutesRoundUpAndNeverSayZero() {

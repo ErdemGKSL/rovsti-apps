@@ -92,6 +92,35 @@ class ForegroundSyncPlanTest {
         )
     }
 
+    @Test fun aSliceThatLeftTheGatewayWorkingComesBackAtItsEta() {
+        fun after(etaMs: Long?) =
+            ForegroundSyncPlan.afterSlice(
+                SliceResult.Interrupted(SyncWire.SERVER_WORKING, etaMs),
+                now,
+                foreground = false,
+            )
+        assertEquals(Next.Continue(4 * 60_000L), after(4 * 60_000L))
+        assertEquals("at least a minute", Next.Continue(ForegroundSyncPlan.SERVER_MIN_MS), after(5_000))
+        assertEquals("at most half an hour", Next.Continue(ForegroundSyncPlan.SERVER_MAX_MS), after(3 * 3_600_000L))
+        assertEquals("no ETA: a minute", Next.Continue(ForegroundSyncPlan.SERVER_MIN_MS), after(null))
+        assertEquals(
+            "the same in the foreground (its 8-minute fallback)",
+            Next.Continue(10 * 60_000L),
+            ForegroundSyncPlan.afterSlice(
+                SliceResult.Interrupted(SyncWire.SERVER_WORKING, 10 * 60_000L),
+                now,
+                foreground = true,
+            ),
+        )
+    }
+
+    @Test fun aJobCancelledOnTheGatewayContinuesNothing() {
+        assertEquals(
+            Next.End,
+            ForegroundSyncPlan.afterSlice(SliceResult.Interrupted(SyncWire.CANCELLED), now, foreground = true),
+        )
+    }
+
     @Test fun theUsersStopSchedulesNothingTheSystemsStopContinues() {
         assertEquals(Next.End, ForegroundSyncPlan.afterStop(byUser = true))
         assertEquals(Next.Continue(gap), ForegroundSyncPlan.afterStop(byUser = false))

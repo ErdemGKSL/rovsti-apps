@@ -3,6 +3,7 @@ package dev.rosty.phone.people
 import dev.rosty.core.log.RostyLog
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.InstanceState
 import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.PeopleOps
 import dev.rosty.people.GatewaySource
@@ -11,6 +12,7 @@ import dev.rosty.people.sync.PeoplePictureCodec
 import dev.rosty.people.sync.PeopleStore
 import dev.rosty.people.sync.PeopleSyncHost
 import dev.rosty.people.sync.PeopleSyncRunner
+import dev.rosty.people.sync.PeopleSyncTriggers
 import dev.rosty.people.sync.SliceResult
 import dev.rosty.wa.WaLinkState
 import dev.rosty.wa.WaRepository
@@ -31,10 +33,13 @@ import kotlin.random.Random
  * Rust data directory, pictures in [PeopleStore.dir]) and fills it with the same slow, resumable engine as Contacts
  * ([PeopleSyncRunner]), so the two apps never add up to a burst against WhatsApp's limit from the same account.
  *
- * A run starts when the link is read at start and when WhatsApp becomes linked or reconnects. In the app it goes to
+ * When a run starts follows Contacts' rules ([PeopleSyncTriggers], people sync v3, section 6): a link this process has
+ * not followed before (another instance) starts one; the link read at start and a reconnect start one only when the
+ * last run is twelve hours old and the last attempt half an hour, and never over the user's Stop. In the app it goes to
  * [request], which enqueues Phone's foreground worker (`PhonePeopleSyncWorker`, people sync v2 S11: ongoing
- * notification, no time budget, a long rate limit continues through WorkManager), the same worker as Contacts'. Without
- * one (tests) the slice runs in [scope] and a rate limit's end is waited for while the process lives. Live `profile`
+ * notification for every run, the gateway's job followed live, a long rate limit continues through WorkManager), the
+ * same worker as Contacts'. Without one (tests) the slice runs in [scope] and a rate limit's end is waited for while
+ * the process lives. Live `profile`
  * events update a person at once and fetch a changed picture shortly after. On unlink the stored
  * run is interrupted and the cache is deleted ([clear]): Phone keeps nobody's name for a link that is gone.
  * [source] is what the app's `PeopleIndex` follows; it is told after every committed part (at most one per
@@ -58,6 +63,8 @@ class StandalonePeople(
     notifyMinMs: Long = NOTIFY_MIN_MS,
     /** Starts a run (`SyncWire.START_*`) in the worker; null runs it in [scope]. */
     private val request: ((String) -> Unit)? = null,
+    /** Where the gateway writes a bundle's pictures (`<cache_dir>/people-bundle`), emptied when a slice begins. */
+    bundleDir: File? = null,
 ) : PeopleSyncHost {
     /** The cache as the app's `PeopleIndex` reads it: the store's rows, pictures from its folder. */
     val source: GatewaySource =
@@ -83,6 +90,8 @@ class StandalonePeople(
             random = random,
             onPart = notifier::part,
             lockFile = lockFile,
+            bundleDir = bundleDir,
+            background = scope,
         )
 
     private var started = false
@@ -96,7 +105,8 @@ class StandalonePeople(
             started = true
         }
         scope.launch {
-            var syncedFor: String? = null
+            var instance: String? = null
+            var state: String? = null
             var wasLinked = false
             wa.linkState.collect { link ->
                 val connected = link as? WaLinkState.Connected
@@ -104,17 +114,29 @@ class StandalonePeople(
                 when {
                     connected != null -> {
                         wasLinked = true
-                        // A new link, or the same one back after a disconnect: continue (or start) the run.
-                        val key = connected.status.instanceId + connected.status.state.name
-                        if (key != syncedFor) {
-                            syncedFor = key
-                            val worker = request
-                            if (worker != null) worker(SyncWire.START_AUTO) else scope.launch { sync() }
-                        }
+                        val id = connected.status.instanceId
+                        val now = connected.status.state.name
+                        val kind =
+                            when {
+                                // Its WhatsApp session is down: the reconnect decides.
+                                connected.status.state == InstanceState.Disconnected -> null
+
+                                instance == null -> PeopleSyncTriggers.Kind.RECONNECT
+
+                                instance != id -> PeopleSyncTriggers.Kind.NEW_LINK
+
+                                now != state -> PeopleSyncTriggers.Kind.RECONNECT
+
+                                else -> null
+                            }
+                        instance = id
+                        state = now
+                        if (kind != null) trigger(kind)
                     }
 
                     gone && wa.settled.value -> {
-                        syncedFor = null
+                        instance = null
+                        state = null
                         if (wasLinked) forget()
                         wasLinked = false
                     }
@@ -140,6 +162,24 @@ class StandalonePeople(
                     }
                 }
         }
+    }
+
+    /** A link event: starts a run when [PeopleSyncTriggers] says so for [kind]. */
+    private suspend fun trigger(kind: PeopleSyncTriggers.Kind) {
+        val stored = runner.refresh()
+        val go =
+            PeopleSyncTriggers.shouldStart(
+                kind,
+                clock(),
+                lastFinishedMs = stored?.last?.atMs,
+                lastAttemptMs = stored?.attemptMs,
+                run = stored?.run,
+                notBeforeMs = stored?.notBeforeMs,
+            )
+        RostyLog.event(PeopleSyncRunner.TAG, "standalone_trigger", "kind" to kind.name, "start" to go)
+        if (!go) return
+        val worker = request
+        if (worker != null) worker(SyncWire.START_AUTO) else scope.launch { sync() }
     }
 
     override fun now(): Long = clock()

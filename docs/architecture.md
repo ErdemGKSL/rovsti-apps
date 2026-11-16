@@ -479,20 +479,32 @@ thin clients of it through `rosty_wa_client`. Setup and operation:
   `{"kind":"call","call_id","from","name"}` or `{"kind":"message","chat","count"}`.
   The app wakes, opens the event socket and fetches. Firebase is optional in the app;
   see [android.md](android.md#whatsapp-push-and-call-audio).
-- **People sync (people sync v2).** The names and photos of the people the apps meet
-  on WhatsApp live in `people.json` (`rosty_app_core::people`), filled by a slow,
-  resumable sync whose planner is pure Rust (`rosty_app_core::people_sync`, driven
-  step by step through the `people.sync_*` ops). The planner chooses the work (set-based
-  cursor: the JIDs done per run), paces it (one gap for lookups and profiles, both usync
-  queries on WhatsApp's side, one for pictures; no burst), backs off on a 429 without
-  undercutting the gateway's `retry_after_ms`, and keeps everything it learned in
-  `people-sync.json` (saved after the book, so a crash repeats one idempotent batch).
-  Kotlin's `PeopleSyncRunner` (`:people`) only performs the gateway call a step asks
-  for. Contacts runs it from WorkManager in 8-minute slices with a one-time
-  continuation, from "Sync Now" / "Continue" / "Stop" in its settings, and for live
-  picture changes; Phone without Contacts runs the same engine on its own data
-  directory. Writers of `people.json` are serialized in Rust. Decision record:
-  `_bmad-output/plans/people-sync-v2.md`.
+- **People sync (people sync v3).** The names and photos of the people the apps meet
+  on WhatsApp live in `people.json` (`rosty_app_core::people`), filled by a resumable
+  sync whose planner is pure Rust (`rosty_app_core::people_sync`, driven step by step
+  through the `people.sync_*` ops); nothing is written to the device's contacts. Since
+  v3 the **gateway prepares and the phone downloads once**: the planner sends the
+  gateway its numbers, each with the hash of what it last got and the picture id whose
+  file it holds (`job_start`, `POST /v1/people/sync`); the gateway's people job does the
+  lookups, profiles and pictures at WhatsApp's pace while the phone long-polls it
+  (`job_watch`); the result comes as one bundle of only the changed records and new
+  pictures (`job_fetch`, 8 MiB parts), committed with one book write per part and none
+  at all when nothing changed; the job is then closed (`job_done`). The hashes live in
+  `people-sync.json`; a new number has none and is looked up at the next run. Against a
+  gateway without the job routes the planner falls back to the v2 steps (15 JIDs per
+  20 s, one picture per 3 s, backoff on a 429 without undercutting `retry_after_ms`)
+  and asks again after a day. Kotlin's `PeopleSyncRunner` (`:people`) only performs
+  the gateway call a step asks for (it downscales and stores each bundle picture) and
+  opts in with `jobs = true`. Every run is a WorkManager foreground worker with the
+  ongoing notification (the gateway's phase and count, then the download); the
+  periodic work runs every 12 h (`ExistingPeriodicWorkPolicy.UPDATE`), the app coming
+  to the foreground starts a run only when the last is 12 h old and the last attempt
+  30 min (`PeopleSyncTriggers`), and there is no contacts-changed trigger. The user's
+  "Stop" also cancels the job on the gateway; a stop by the system leaves it working
+  and the continuation follows it by id. Contacts shows the job live in its settings
+  row; Phone without Contacts runs the same engine on its own data directory under the
+  same trigger rules. Writers of `people.json` are serialized in Rust. Decision records:
+  `_bmad-output/plans/people-sync-v2.md`, `_bmad-output/kotlin-ui/plans/people-sync-v3.md`.
 - **Logging and developer mode.** App code logs through `RostyLog`
   (`:core-bridge`, `dev.rosty.core.log`; a source scan forbids direct
   `android.util.Log`): every line is masked (`LogMask`, the same rules as

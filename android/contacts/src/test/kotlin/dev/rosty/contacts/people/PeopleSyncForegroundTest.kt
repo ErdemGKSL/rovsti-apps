@@ -10,6 +10,12 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import androidx.work.workDataOf
 import dev.rosty.core.Outcome
+import dev.rosty.core.model.people.PeopleJobResult
+import dev.rosty.core.model.people.PeopleJobStatus
+import dev.rosty.core.model.people.PeopleJobWire
+import dev.rosty.core.model.people.PeopleSyncBundleAnswer
+import dev.rosty.core.model.people.PeopleSyncStartAnswer
+import dev.rosty.core.model.people.PeopleSyncStatusAnswer
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.core.model.wa.PictureAnswer
 import dev.rosty.core.model.wa.WaProfile
@@ -147,6 +153,65 @@ class PeopleSyncForegroundTest {
         assertEquals("continues by itself, not 'stopped'", SyncWire.SLICE_BUDGET, run.phase.reason)
         assertTrue(run.resumable)
         assertEquals(1, continuations().size)
+    }
+
+    /**
+     * People sync v3 with the owner's answer to Q1: an automatic run (the periodic work, `auto`) is foreground too, and
+     * the notification follows what the gateway's job does while the slice long-polls it.
+     */
+    @Test fun anAutomaticRunIsForegroundAndTheNotificationFollowsTheGatewaysJob() {
+        val numbers = (1..10).map { "+1000000000%02d".format(it) }
+        container.numbers = numbers
+        val job = "5f0c9a1b22d4e7a3"
+
+        fun status(
+            state: String,
+            phase: String,
+            done: Int,
+            rev: Long,
+        ) = PeopleJobStatus(
+            jobId = job,
+            rev = rev,
+            state = state,
+            phase = phase,
+            done = done,
+            total = 10,
+            numbers = 10,
+            result = PeopleJobResult(0, 0, 0).takeIf { state == PeopleJobWire.READY },
+        )
+        val gw = container.gw.gateway
+        val seen = java.util.concurrent.CopyOnWriteArrayList<String>()
+        gw.peopleStart = {
+            Outcome.Ok(PeopleSyncStartAnswer(true, status(PeopleJobWire.RUNNING, PeopleJobWire.PHASE_LOOKUP, 4, 1)))
+        }
+        val watches =
+            ArrayDeque(
+                listOf(
+                    status(PeopleJobWire.RUNNING, PeopleJobWire.PHASE_PROFILES, 2, 2),
+                    status(PeopleJobWire.READY, PeopleJobWire.PHASE_BUNDLE, 10, 3),
+                ),
+            )
+        gw.peopleStatus = { body ->
+            // The long-poll takes a while; meanwhile the worker posts (at most every 2 s).
+            Thread.sleep(2_500)
+            shadowOf(context.getSystemService(NotificationManager::class.java))
+                .getNotification(SyncNotices.NOTIFICATION_ID)
+                ?.let { seen += it.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString() }
+            Outcome.Ok(
+                PeopleSyncStatusAnswer(
+                    status =
+                        watches.removeFirstOrNull()
+                            ?: status(PeopleJobWire.READY, PeopleJobWire.PHASE_BUNDLE, 10, body.rev ?: 3),
+                ),
+            )
+        }
+        gw.peopleBundle =
+            { Outcome.Ok(PeopleSyncBundleAnswer(records = emptyList(), lastSeq = 10, more = false, bytes = 0)) }
+
+        assertEquals(ListenableWorker.Result.success(), runBlocking { worker(SyncWire.START_AUTO).doWork() })
+        assertEquals(PeopleJobWire.MODE_AUTO, gw.peopleStarts.single().mode)
+        assertTrue("$seen", seen.any { it == "Gateway is checking numbers 4/10" })
+        assertTrue("done: nothing continues later", continuations().isEmpty())
     }
 
     @Test fun theNotificationShowsTheStageWhileTheRunGoes() {

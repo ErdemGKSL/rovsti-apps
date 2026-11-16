@@ -2,8 +2,10 @@ package dev.rosty.contacts.people
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ListenableWorker
 import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.testing.TestListenableWorkerBuilder
@@ -64,23 +66,31 @@ class PeopleSyncWorkerTest {
 
     // ---- the schedule
 
-    @Test fun theWorkIsUniquePeriodicEverySixHoursOnANetworkWithAFineBattery() {
+    @Test fun theWorkIsUniquePeriodicEveryTwelveHoursOnANetworkWithAFineBattery() {
         PeopleSyncWorker.schedule(context)
         PeopleSyncWorker.schedule(context)
         val infos = work()
-        assertEquals("a second schedule keeps the first (KEEP)", 1, infos.size)
+        assertEquals("a second schedule updates the first (UPDATE)", 1, infos.size)
         val info = infos.single()
-        assertEquals(TimeUnit.HOURS.toMillis(6), info.periodicityInfo!!.repeatIntervalMillis)
+        assertEquals(TimeUnit.HOURS.toMillis(12), info.periodicityInfo!!.repeatIntervalMillis)
         assertEquals(NetworkType.CONNECTED, info.constraints.requiredNetworkType)
         assertTrue(info.constraints.requiresBatteryNotLow())
         assertFalse(info.constraints.requiresCharging())
     }
 
-    @Test fun keepLeavesTheRunningScheduleAlone() {
-        PeopleSyncWorker.schedule(context)
+    @Test fun aSecondScheduleUpdatesTheSameWorkAndKeepsItsId() {
+        // An installed app's stored six-hour request: UPDATE moves it to twelve hours, KEEP would keep it for ever.
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            PeopleSyncWorker.UNIQUE_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<PeopleSyncWorker>(6, TimeUnit.HOURS).build(),
+        )
         val id = work().single().id
         PeopleSyncWorker.schedule(context)
-        assertEquals(id, work().single().id)
+        val info = work().single()
+        assertEquals(id, info.id)
+        assertEquals(TimeUnit.HOURS.toMillis(12), info.periodicityInfo!!.repeatIntervalMillis)
+        assertTrue(info.constraints.requiresBatteryNotLow())
     }
 
     @Test fun theContinuationIsOneTimeOnANetworkAndReplacesAnOlderOne() {
@@ -110,6 +120,15 @@ class PeopleSyncWorkerTest {
             PeopleSyncWorker.continueInMs(SliceResult.Interrupted(SyncWire.NETWORK), now),
         )
         assertEquals(300_000L, PeopleSyncWorker.continueInMs(SliceResult.Refused(now + 300_000), now))
+        assertEquals(
+            "people sync v3: the gateway's ETA",
+            240_000L,
+            PeopleSyncWorker.continueInMs(SliceResult.Interrupted(SyncWire.SERVER_WORKING, 240_000), now),
+        )
+        assertNull(
+            "a job cancelled on the gateway continues nothing",
+            PeopleSyncWorker.continueInMs(SliceResult.Interrupted(SyncWire.CANCELLED), now),
+        )
         assertNull(PeopleSyncWorker.continueInMs(SliceResult.Refused(null), now))
     }
 

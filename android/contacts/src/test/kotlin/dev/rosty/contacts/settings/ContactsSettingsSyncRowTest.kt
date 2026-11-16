@@ -120,6 +120,48 @@ class ContactsSettingsSyncRowTest : ShotTest() {
         assertTrue("no request during the penalty", h.actions.isEmpty())
     }
 
+    @Test fun whileTheGatewayPreparesTheRowShowsItsPhaseABarAndStop() {
+        val sync =
+            PeopleSyncUi(
+                UiText.Res(R.string.settings_people_server_lookup, listOf(30, 120)),
+                running = true,
+                progress = 0.25f,
+            )
+        val h = SettingsHarness(state(sync))
+        page(h)
+        text("Gateway: checking numbers 30/120").assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.PeopleProgress, useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SettingsTags.PeopleContinue, useUnmergedTree = true).assertDoesNotExist()
+        tap(SettingsTags.PeopleSync)
+        assertEquals(listOf<SettingsAction>(SettingsAction.StopPeople), h.actions)
+    }
+
+    @Test fun aJobPreparedWithoutThePhoneHasStopButNoBar() {
+        val h = SettingsHarness(state(PeopleSyncUi(UiText.Res(R.string.settings_people_server_quiet), running = true)))
+        page(h)
+        text("Being prepared on the gateway. Downloads when ready").assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.PeopleProgress, useUnmergedTree = true).assertDoesNotExist()
+        text("Stop").assertIsDisplayed()
+    }
+
+    @Test fun theDownloadAndAnUnchangedRunAreWorded() {
+        page(
+            SettingsHarness(
+                state(
+                    PeopleSyncUi(
+                        UiText.Res(R.string.settings_people_downloading, listOf(3, 12)),
+                        running = true,
+                        progress = 0.25f,
+                    ),
+                ),
+            ),
+        )
+        text("Downloading changes 3/12").assertIsDisplayed()
+        page(SettingsHarness(state(UiText.Res(R.string.settings_people_synced_unchanged, listOf("5 min. ago")))))
+        text("Synced, 5 min. ago. Nothing changed").assertIsDisplayed()
+        text("Sync Now").assertIsDisplayed()
+    }
+
     @Test fun neverSyncedAndFailedAreWorded() {
         page(SettingsHarness(state(UiText.Res(R.string.settings_people_never))))
         text("Not synced yet").assertIsDisplayed()

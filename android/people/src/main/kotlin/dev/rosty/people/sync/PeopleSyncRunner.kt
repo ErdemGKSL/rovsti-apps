@@ -5,8 +5,14 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.RustError
 import dev.rosty.core.log.LogLevel
 import dev.rosty.core.log.RostyLog
+import dev.rosty.core.model.people.PeopleBundleRecord
+import dev.rosty.core.model.people.PeopleJobWire
+import dev.rosty.core.model.people.PeopleSyncBundleAnswer
 import dev.rosty.core.model.people.PersonUpdate
 import dev.rosty.core.model.people.SyncBeginRequest
+import dev.rosty.core.model.people.SyncJobPicture
+import dev.rosty.core.model.people.SyncJobRecord
+import dev.rosty.core.model.people.SyncJobView
 import dev.rosty.core.model.people.SyncNextRequest
 import dev.rosty.core.model.people.SyncPictureResult
 import dev.rosty.core.model.people.SyncProgress
@@ -29,8 +35,11 @@ import dev.rosty.wa.WaRepository
 import dev.rosty.wa.avatars.AvatarCodec
 import dev.rosty.wa.avatars.rateLimit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +47,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -74,9 +84,13 @@ sealed interface SliceResult {
         val untilMs: Long,
     ) : SliceResult
 
-    /** Resumable; [reason] is a `SyncWire` interrupt reason. */
+    /**
+     * Resumable; [reason] is a `SyncWire` interrupt reason. [etaMs]: with `server_working`, how long the gateway expects
+     * its job still to take (people sync v3), null when it did not say.
+     */
     data class Interrupted(
         val reason: String,
+        val etaMs: Long? = null,
     ) : SliceResult
 
     /** Resumable once the cause is gone; [reason] is a `SyncWire` fail reason. */
@@ -101,15 +115,21 @@ data class RunnerState(
     val limited: Boolean = false,
     /** The planner's status, re-read after every slice and every committed part. */
     val stored: SyncStatus? = null,
+    /** People sync v3: the gateway job the active slice follows (stage `server` / `download`); null otherwise. */
+    val job: SyncJobView? = null,
 )
 
 /**
- * Runs the people sync planner (`rosty_app_core::people_sync`, through the `people.sync_*` ops; plan
- * `_bmad-output/plans/people-sync-v2.md`) against the gateway, one slice at a time. Shared by Contacts and Phone.
+ * Runs the people sync planner (`rosty_app_core::people_sync`, through the `people.sync_*` ops; plans
+ * `_bmad-output/plans/people-sync-v2.md` and `_bmad-output/kotlin-ui/plans/people-sync-v3.md`) against the gateway, one
+ * slice at a time. Shared by Contacts and Phone.
  *
- * The loop: `people.sync_next` says what to do; a lookup, profile or picture step calls the gateway and hands the
- * answer to `people.sync_report`, which commits it (book first, checkpoint second); a sleep waits ([pause]); a stop
- * ends the slice. After every committed part with changes the dropped files are deleted and [onPart] is called (the
+ * The loop: `people.sync_next` says what to do; a step calls the gateway and hands the answer to `people.sync_report`,
+ * which commits it (book first, checkpoint second); a sleep waits ([pause]); a stop ends the slice. Every slice opts in
+ * to the gateway's people job (v3, `jobs = true`): the planner starts or joins it (`job_start`), follows it with
+ * long-polls (`job_watch`), downloads its bundle (`job_fetch`, each picture downscaled and stored here) and closes it
+ * (`job_done`). A gateway without the job routes answers `job_unsupported` and the planner goes on with the v2 steps
+ * (`lookup`, `profiles`, `picture`). After every committed part with changes the dropped files are deleted and [onPart] is called (the
  * app coalesces it, see [PartNotifier]). Timing, batching, backoff and resumption are all the planner's: this class
  * only performs.
  *
@@ -117,7 +137,8 @@ data class RunnerState(
  * lock ([lockFile]) guards against a second process. A cancelled slice still ends the slice, so the stored run is never
  * left `running`: stopped by [cancel] (the Stop button and the notification's Stop) it ends `interrupted(cancelled)`;
  * cancelled from outside (the system stopped the worker, people sync v2 S11) it ends `interrupted(slice_budget)`,
- * which the worker continues by itself.
+ * which the worker continues by itself. Only the user's Stop also cancels the gateway's job (from [background], so the
+ * pending long-poll returns at once); a stop by the system leaves the job working on the gateway.
  */
 class PeopleSyncRunner(
     private val store: PeopleStore,
@@ -133,11 +154,21 @@ class PeopleSyncRunner(
     private val onPart: () -> Unit = {},
     /** Held for the slice; null: no cross-process lock (tests). */
     private val lockFile: File? = null,
+    /**
+     * Where the gateway op writes a bundle's picture files (`<cache_dir>/people-bundle`); emptied when a slice begins.
+     * Null: not emptied (tests).
+     */
+    private val bundleDir: File? = null,
+    /** Runs the gateway cancel of the user's Stop, outside the slice that is being cancelled. */
+    private val background: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     private val running = Mutex()
     private val state = MutableStateFlow(RunnerState())
 
     @Volatile private var job: Job? = null
+
+    /** The gateway job of ours the active slice follows: what the user's Stop cancels on the gateway. */
+    @Volatile private var following: Following? = null
 
     private val stopCount = MutableStateFlow(0L)
 
@@ -154,16 +185,54 @@ class PeopleSyncRunner(
         return stored
     }
 
-    /** Stops the active slice (the "Stop" button, the notification's Stop): it ends `interrupted(cancelled)`. */
+    /**
+     * The user's Stop (the "Stop" button, the notification's Stop): the active slice ends `interrupted(cancelled)` and
+     * the gateway's job is cancelled too (people sync v3 D9), from [background] so the slice's pending long-poll returns
+     * at once. With no slice active, a stored job-mode run (the gateway works while the phone waits for it) is cancelled
+     * on the gateway and interrupted here.
+     */
     fun cancel() {
+        val active = job
+        val target = following
+        stop()
+        if (target != null) {
+            background.launch { cancelOnGateway(target.gateway, target.jobId, "stop") }
+        } else if (active == null) {
+            background.launch { stopStoredJob() }
+        }
+    }
+
+    /** Ends the active slice without touching the gateway's job (counted as a Stop, see [stops]). */
+    private fun stop() {
         stopCount.update { it + 1 }
         job?.cancel(CancellationException("people sync cancelled"))
     }
 
     /** WhatsApp was unlinked: a stored run becomes `interrupted(wa_disconnected)` (dropped when another link begins). */
     suspend fun unlinked() {
-        cancel()
+        stop()
         interruptStored(SyncWire.WA_DISCONNECTED)
+    }
+
+    /** A Stop between two slices of a job-mode run: the gateway's job of ours is cancelled, the run interrupted. */
+    private suspend fun stopStoredJob() {
+        if (running.isLocked) return
+        val run = refresh()?.run ?: return
+        if (run.stage != SyncWire.STAGE_SERVER && run.stage != SyncWire.STAGE_DOWNLOAD) return
+        if (run.phase.kind == SyncWire.FAILED) return
+        run.job?.takeIf { it.mine && it.state in WORKING }?.let { view ->
+            wa.gateway()?.let { cancelOnGateway(it, view.jobId, "stop_between_slices") }
+        }
+        interruptStored(SyncWire.CANCELLED)
+    }
+
+    private suspend fun cancelOnGateway(
+        gateway: WaGateway,
+        jobId: String,
+        why: String,
+    ) {
+        val out = gateway.peopleSyncCancel(jobId)
+        RostyLog.event(TAG, "job_cancel", "why" to why, "ok" to (out is Outcome.Ok))
     }
 
     /**
@@ -201,7 +270,7 @@ class PeopleSyncRunner(
             }
         } finally {
             job = null
-            state.update { it.copy(active = false, live = false, sleepingUntilMs = null, limited = false) }
+            state.update { it.copy(active = false, live = false, sleepingUntilMs = null, limited = false, job = null) }
             running.unlock()
         }
     }
@@ -230,6 +299,7 @@ class PeopleSyncRunner(
                 return SliceResult.Interrupted(SyncWire.NETWORK)
             }
         val live = start == SyncWire.START_LIVE_PICTURES
+        if (!live) clearBundleDir()
         val targets = if (live) emptyList() else numbers()
         val begin =
             ops.syncBegin(
@@ -241,6 +311,7 @@ class PeopleSyncRunner(
                     numbers = targets,
                     start = start,
                     sliceMs = sliceMs,
+                    jobs = true,
                 ),
             )
         val begun =
@@ -267,8 +338,10 @@ class PeopleSyncRunner(
                 live = live,
                 stage = begun.status.run?.stage,
                 progress = begun.status.run?.progress,
+                job = begun.status.run?.job,
             )
         }
+        follow(gateway, begun.status.run?.job)
         var parts = 0
         var stopped: SyncStopped? = null
         var stopReason = SyncWire.CANCELLED
@@ -311,7 +384,14 @@ class PeopleSyncRunner(
                                     return SliceResult.Failed(SyncWire.CORE, out.error.message.orEmpty())
                                 }
                             }
-                        state.update { it.copy(stage = committed.stage ?: it.stage, progress = committed.progress) }
+                        state.update {
+                            it.copy(
+                                stage = committed.stage ?: it.stage,
+                                progress = committed.progress,
+                                job = committed.job,
+                            )
+                        }
+                        follow(gateway, committed.job)
                         if (committed.changed > 0 || committed.dropFiles.isNotEmpty()) {
                             store.delete(committed.dropFiles)
                             parts++
@@ -339,6 +419,7 @@ class PeopleSyncRunner(
             }
             throw e
         } finally {
+            following = null
             withContext(NonCancellable) {
                 val req = SyncStopRequest(handle = handle, nowMs = clock(), reason = stopReason)
                 (ops.syncStop(req) as? Outcome.Ok)?.value?.let { stored -> state.update { it.copy(stored = stored) } }
@@ -346,7 +427,26 @@ class PeopleSyncRunner(
         }
         val end = stopped ?: SyncStopped(SyncWire.DONE)
         end(parts, end)
-        return end.result()
+        val result = end.result()
+        return if (result is SliceResult.Interrupted && result.reason == SyncWire.SERVER_WORKING) {
+            result.copy(etaMs = state.value.job?.etaMs)
+        } else {
+            result
+        }
+    }
+
+    /** Remembers the job the slice follows, so a Stop can cancel it: only our own, while it works or holds a result. */
+    private fun follow(
+        gateway: WaGateway,
+        view: SyncJobView?,
+    ) {
+        following = view?.takeIf { it.mine && it.state in WORKING }?.let { Following(gateway, it.jobId) }
+    }
+
+    /** Picture files a slice that died left behind (a finished or cut part deletes its own). */
+    private suspend fun clearBundleDir() {
+        val dir = bundleDir ?: return
+        withContext(Dispatchers.IO) { dir.listFiles()?.forEach { it.delete() } }
     }
 
     private fun end(
@@ -361,6 +461,7 @@ class PeopleSyncRunner(
             "outcome" to stopped.outcome,
             "reason" to (stopped.reason ?: stopped.source),
             "stage" to state.value.stage,
+            "job_state" to state.value.job?.state,
             "done" to progress?.done,
             "total" to progress?.total,
             "parts" to parts,
@@ -390,6 +491,24 @@ class PeopleSyncRunner(
 
                 SyncWire.STEP_PICTURE -> {
                     picture(gateway, step.jid.orEmpty(), step.knownId)
+                }
+
+                SyncWire.STEP_JOB_START -> {
+                    jobStart(gateway, step)
+                }
+
+                SyncWire.STEP_JOB_WATCH -> {
+                    jobWatch(gateway, step)
+                }
+
+                SyncWire.STEP_JOB_FETCH -> {
+                    jobFetch(gateway, step)
+                }
+
+                SyncWire.STEP_JOB_DONE -> {
+                    // Its answer does not matter: the gateway drops a finished job by itself after a day.
+                    cancelOnGateway(gateway, step.jobId.orEmpty(), "done")
+                    SyncReport.jobClosed
                 }
 
                 else -> {
@@ -464,6 +583,109 @@ class PeopleSyncRunner(
                 failure(answer.error)
             }
         }
+
+    private suspend fun jobStart(
+        gateway: WaGateway,
+        step: SyncStep,
+    ): SyncReport =
+        when (val answer = gateway.peopleSyncStart(step.mode ?: PeopleJobWire.MODE_AUTO, step.entries.orEmpty())) {
+            is Outcome.Ok -> {
+                val status = answer.value.status
+                when {
+                    !answer.value.supported -> {
+                        RostyLog.event(TAG, "job_unsupported", "fallback" to "legacy")
+                        SyncReport.jobUnsupported
+                    }
+
+                    status == null -> {
+                        SyncReport.error(SyncWire.GATEWAY, "the gateway's start answer has no status")
+                    }
+
+                    else -> {
+                        RostyLog.event(
+                            TAG,
+                            "job_started",
+                            "state" to status.state,
+                            "mine" to status.mine,
+                            "numbers" to status.numbers,
+                        )
+                        SyncReport.jobStarted(status)
+                    }
+                }
+            }
+
+            is Outcome.Err -> {
+                failure(answer.error)
+            }
+        }
+
+    private suspend fun jobWatch(
+        gateway: WaGateway,
+        step: SyncStep,
+    ): SyncReport =
+        when (val answer = gateway.peopleSyncStatus(step.jobId.orEmpty(), step.rev, step.waitMs)) {
+            is Outcome.Ok -> {
+                val status = answer.value.status
+                if (answer.value.gone || status == null) SyncReport.jobGone else SyncReport.job(status)
+            }
+
+            is Outcome.Err -> {
+                failure(answer.error)
+            }
+        }
+
+    private suspend fun jobFetch(
+        gateway: WaGateway,
+        step: SyncStep,
+    ): SyncReport {
+        val jobId = step.jobId.orEmpty()
+        val part: PeopleSyncBundleAnswer =
+            when (val answer = gateway.peopleSyncBundle(jobId, step.after ?: 0, step.maxBytes)) {
+                is Outcome.Ok -> answer.value
+                is Outcome.Err -> return failure(answer.error)
+            }
+        if (part.gone) {
+            deleteTemp(part.records)
+            return SyncReport.jobGone
+        }
+        val records = part.records.map { SyncJobRecord.of(it, storeBundlePicture(it)) }
+        RostyLog.event(
+            TAG,
+            "bundle_part",
+            "records" to records.size,
+            "pictures" to records.count { it.picture?.kind == SyncJobPicture.STORED },
+            "failed" to records.count { it.picture?.kind == SyncJobPicture.FAILED },
+            "more" to part.more,
+            "bytes" to part.bytes,
+        )
+        return SyncReport.bundle(jobId, records, part.lastSeq, part.more, part.bytes)
+    }
+
+    /**
+     * A record's picture bytes, downscaled and stored exactly as a v2 picture ([saveBytes]); the temp file is deleted
+     * either way. Null when the record carried no bytes.
+     */
+    private suspend fun storeBundlePicture(record: PeopleBundleRecord): SyncJobPicture? {
+        val path = record.picturePath ?: return null
+        val file = File(path)
+        val id = record.pictureId
+        val jid = record.jid
+        return try {
+            val bytes =
+                withContext(Dispatchers.IO) { file.takeIf { it.isFile }?.readBytes() }
+                    ?.let { codec.downscale(it, PICTURE_PX) }
+            val name = if (bytes != null && id != null && jid != null) store.store(jid, id, bytes) else null
+            if (name != null) SyncJobPicture.stored(name) else SyncJobPicture.failed
+        } catch (_: IOException) {
+            SyncJobPicture.failed
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+        }
+    }
+
+    private suspend fun deleteTemp(records: List<PeopleBundleRecord>) {
+        withContext(Dispatchers.IO) { records.mapNotNull { it.picturePath }.forEach { File(it).delete() } }
+    }
 
     private suspend fun pictureResult(
         jid: String,
@@ -571,6 +793,11 @@ class PeopleSyncRunner(
         val lock: FileLock,
     )
 
+    private class Following(
+        val gateway: WaGateway,
+        val jobId: String,
+    )
+
     companion object {
         /** The log tag of everything the sync writes. */
         const val TAG = "sync"
@@ -593,6 +820,9 @@ class PeopleSyncRunner(
         /** Numbers asked about per run (`people_sync::MAX_NUMBERS`). */
         const val MAX_NUMBERS = 2_000
 
+        /** The folder under the app's cache dir where `wa.people_sync_bundle` writes a part's pictures. */
+        const val BUNDLE_DIR = "people-bundle"
+
         /** `people_sync::Why::RateLimit` on the wire: a sleep step that waits out a short limit inline. */
         const val WHY_RATE_LIMIT = "rate_limit"
 
@@ -602,6 +832,9 @@ class PeopleSyncRunner(
          */
         const val PICTURE_PX = 512
         private const val NOT_CONNECTED = "not_connected"
+
+        /** Job states in which the gateway still works or holds the result: a Stop cancels them. */
+        private val WORKING = setOf(PeopleJobWire.RUNNING, PeopleJobWire.WAITING, PeopleJobWire.READY)
 
         /** WhatsApp really answered for this profile (an old gateway answers a throttled one with `fetched_ms: 0`). */
         fun isAnswered(profile: WaProfile): Boolean = profile.fetchedMs > 0 || profile.pictureId != null

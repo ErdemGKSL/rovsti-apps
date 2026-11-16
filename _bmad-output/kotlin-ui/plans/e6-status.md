@@ -2,6 +2,31 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## People sync v3 (2026-11-16): the gateway prepares, the phone downloads once
+
+Plan and evidence: `_bmad-output/kotlin-ui/plans/people-sync-v3.md`. Steps 1 to 6 (wire, gateway, planner, FFI,
+bridge) merged at `d78f21ce`; steps 7 and 8 (Contacts, Phone, `:people` runner, worker, triggers, notification, the
+live settings row, docs) on top.
+
+**Gateway commits to deploy**: `0fc06354` (wire and client), `8377c84b` (the job, its routes, schema **v9**). The new
+app falls back to the v2 steps against the old gateway, so the order does not matter, but only the new gateway removes
+the per-contact calls.
+
+**Database backup before the deploy** (the migration adds three tables, `rollback` to the old binary refuses a v9
+file): `sqlite3 /var/lib/wa-gateway/gateway.db ".backup gateway-v8.db"`, then `scripts/deploy-wa-gateway.sh`.
+
+**What to try on the phone** (the plan's list, section 8, "On the real gateway"):
+1. Journal after the deploy: the v9 migration line, no error.
+2. Contacts, Sync Now: the settings row and the notification show the gateway's phases with counts ("Gateway: checking
+   numbers 30/120"), then "Downloading changes", then "Synced, … N changes".
+3. Sync Now again at once: ready in seconds, no WhatsApp request in the journal, the row says "Nothing changed".
+4. Stop during the first run: the journal shows the job cancelled and no further WhatsApp request; Continue reuses the
+   answers.
+5. Restart the gateway mid-job: the row continues, the job finishes.
+6. Leave the phone for a day: every run shows the notification (owner's Q1), two automatic runs, `adb shell dumpsys
+   jobscheduler | grep people-sync` shows a 12 h period.
+7. An old APK against the new gateway still syncs; the new APK against the old gateway syncs with the v2 steps.
+
 ## E6-WA R3 closed (2026-11-16): media
 
 Merged with `origin/ui-overhaul`. Gate: Rust steps green (fmt, clippy, 3 139 tests with `wa_gateway`, the Android

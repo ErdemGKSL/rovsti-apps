@@ -373,6 +373,7 @@ open class PhoneContainer(
             lockFile = File(context.noBackupFilesDir, PEOPLE_LOCK),
             // Runs go to the foreground worker (people sync v2 S11), so a long first sync outlives the app's screens.
             request = { start -> PhonePeopleSyncWorker.startNow(context, start) },
+            bundleDir = File(context.cacheDir, PeopleSyncRunner.BUNDLE_DIR),
         )
 
     /**

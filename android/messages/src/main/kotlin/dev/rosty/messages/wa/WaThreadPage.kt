@@ -14,8 +14,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -53,6 +55,7 @@ import dev.rosty.messages.conversation.rememberToolHost
 import dev.rosty.messages.conversation.rememberToolLabels
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.ResourceInboxWords
+import dev.rosty.messages.notify.ThreadOpens
 import dev.rosty.messages.notify.TrackOpenConversation
 import dev.rosty.messages.schedule.ScheduledStrip
 import dev.rosty.messages.schedule.rememberWaScheduleHost
@@ -265,6 +268,8 @@ fun WaThreadPage(
     val state by model.state.collectAsState()
     val composer = rememberTextFieldState()
     val listState = rememberLazyListState()
+    // This page's opening: it opens at the unread messages once their divider is in the rows.
+    val openSeq = rememberSaveable(model) { model.opened() }
     val overlays = LocalOverlay.current
     LaunchedEffect(model) { composer.setTextAndPlaceCursorAtEnd(model.initialDraft(route.draft)) }
     // A file forwarded from another chat waits above the composer (E6-WA R3).
@@ -296,7 +301,14 @@ fun WaThreadPage(
         )
     // A search hit opened from the inbox: scroll to it and let it glow once it is loaded.
     LaunchedEffect(model, host) { model.reveals.collect { host.tools.reveal(it) } }
-    LaunchedEffect(model, route.reveal) { route.reveal?.let { model.reveal(it, route.revealAtMs) } }
+    // Once per page: coming back from a page pushed on top must not undo the place the reader kept.
+    val revealed = rememberSaveable(route.reveal) { mutableStateOf(false) }
+    LaunchedEffect(model, route.reveal) {
+        val target = route.reveal ?: return@LaunchedEffect
+        if (revealed.value) return@LaunchedEffect
+        revealed.value = true
+        model.reveal(target, route.revealAtMs)
+    }
     val toolsState by host.tools.state.collectAsState()
     val labels = rememberToolLabels()
     val detector = rememberDetector(container)
@@ -313,6 +325,7 @@ fun WaThreadPage(
                 ?.takeIf { !WaIds.isGroup(jid) }
     }
     TrackOpenConversation(tag)
+    val reopen = remember(tag) { ThreadOpens.of(tag) }
     val schedule = rememberWaScheduleHost(container, overlays, jid, composer)
     val marks = rememberMarkHost(container, overlays, tag, rememberDayLabels()) { model.state.value.title }
     val actions =
@@ -409,6 +422,9 @@ fun WaThreadPage(
                 textScale = extras.textScale,
                 quickReplies = extras.chips,
                 onQuickReply = extras.insert,
+                openSeq = openSeq,
+                openAtTarget = route.reveal != null,
+                reopen = reopen,
             )
         }
         batch?.let { WaBatchScreen(it, batchActions) { bytes -> Formatter.formatShortFileSize(context, bytes) } }

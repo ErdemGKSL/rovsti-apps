@@ -158,6 +158,15 @@ class SmsThreadViewModel(
     /** Unread incoming messages when the thread opened (before it was marked read); the divider sits above them. */
     private var unreadAtOpen: Int? = null
 
+    /** The bubble the unread divider of this opening sits above, once placed: it stays there while the page is up. */
+    private var dividerKey: String? = null
+
+    /** How many times a page opened this thread ([opened]); the view model's own first load is the first opening. */
+    private var openCalls = 0
+
+    /** The opening [unreadAtOpen] belongs to. */
+    private var unreadOpening = 1
+
     /** The tag of drafts and notifications. */
     val tag: String get() = "sms:$thread"
 
@@ -247,21 +256,48 @@ class SmsThreadViewModel(
                 avatar = avatarOf(title),
                 items = withDays(bubbles, days, now, dividerOf(bubbles)).toImmutableList(),
                 loaded = true,
+                // A thread not created yet has nothing unread: its opening is ready at once.
+                opens = if (unreadAtOpen != null || thread <= 0) unreadOpening else 0,
                 hasOlder = answer?.hasOlder ?: ui.value.hasOlder,
                 composer = composerMode(),
             )
     }
 
-    /** Rust's `unread_jump.divider` over the bubbles (oldest first): the key it sits above and its words. */
+    /**
+     * Rust's `unread_jump.divider` over the bubbles (oldest first): the key it sits above and its words. Placed once per
+     * opening, then kept on that bubble: messages that arrive while the page is up do not move it.
+     */
     private suspend fun dividerOf(bubbles: List<BubbleUi>): Pair<String, String>? {
         val unread = unreadAtOpen ?: return null
         if (unread == 0) return null
-        val answer =
-            sources.chat
+        val kept = dividerKey?.takeIf { key -> bubbles.any { it.key == key } }
+        val key =
+            kept ?: sources.chat
                 .unreadDivider(UnreadDividerRequest(incoming = bubbles.map { !it.outgoing }, unread = unread))
-                .getOrNull() ?: return null
-        val at = answer.index ?: return null
-        return bubbles.getOrNull(at)?.let { it.key to words.unread(unread) }
+                .getOrNull()
+                ?.index
+                ?.let { bubbles.getOrNull(it)?.key }
+        dividerKey = key
+        return key?.let { it to words.unread(unread) }
+    }
+
+    /**
+     * A page opened this thread; answers the number of this opening ([ConversationUi.opens] reaches it once the unread
+     * count of this opening is in the rows). A view model kept from an earlier visit starts a new opening: the newest
+     * page is read again and counted before it is marked read, as when the view model was made.
+     */
+    fun opened(): Int {
+        openCalls++
+        if (openCalls > 1) {
+            unreadOpening = openCalls
+            unreadAtOpen = null
+            dividerKey = null
+            viewModelScope.launch {
+                loadNewest()
+                if (thread > 0 && sources.roleHeld.value) sources.sms.markRead(thread)
+            }
+        }
+        return openCalls
     }
 
     /** The one person of the thread by the name-order rule; null for a group thread (each member is named). */

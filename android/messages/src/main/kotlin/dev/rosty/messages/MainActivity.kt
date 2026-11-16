@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.transition.Tab
+import dev.rosty.messages.notify.ThreadOpens
 import dev.rosty.messages.schedule.ScheduleNotices
 import dev.rosty.people.ui.LocalAvatarResolver
 import dev.rosty.platform.PlatformEvents
@@ -36,7 +37,10 @@ class MainActivity : RostyShellActivity<MessagesRoute>() {
         )
 
     override fun routeFor(intent: Intent): Pair<Tab, List<MessagesRoute>>? {
-        val route = messagesRouteFor(IntentFacts.of(intent))
+        val facts = IntentFacts.of(intent)
+        // A notification tap for a conversation: if its page is up, it goes to the newest message.
+        facts.threadTag?.takeIf { facts.messageId.isNullOrBlank() }?.let(ThreadOpens::opened)
+        val route = messagesRouteFor(facts)
         // A link is used once: a rotation or a restart must not open the same conversation again.
         if (route != null) {
             intent.removeExtra(EXTRA_THREAD_TAG)

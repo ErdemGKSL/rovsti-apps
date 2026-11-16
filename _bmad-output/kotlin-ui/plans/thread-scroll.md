@@ -1,6 +1,6 @@
 # Thread scroll position (Messages, SMS and WhatsApp threads)
 
-Status: plan, not implemented. Scope: `android/messages` (Kotlin/Compose) plus one getter in `android/design`.
+Status: implemented 2026-11-16 (see Evidence at the end). Scope: `android/messages` (Kotlin/Compose) plus one getter in `android/design`.
 Owner's request: "When I left the app I was at the bottom; new messages came in; when I come back the chat must
 again be at the bottom, unless I scrolled up manually."
 
@@ -547,3 +547,82 @@ because of `imeOverlapPadding`).
    screen, that is the same as the bottom (the default, in the owner's words).
 3. A scheduled WhatsApp message that fires while reading older messages does not move the list (the default).
 4. A notification tap for the thread on screen while scrolled up goes to the newest (the default).
+
+## Evidence (implementation, 2026-11-16)
+
+### What was built
+
+- `conversation/ThreadScroll.kt`: the model of section 2 (`reduce`, modes, phases, holds, time away, unread
+  opening, seen key and badge); `returnsToNewest`, `THREAD_STALE_MS` and `NOT_LEFT` moved in. `ThreadReturn.kt` and
+  `ThreadReturnTest.kt` are deleted; their three cases are in `ThreadScrollTest` (`t35_returnsToNewest`).
+- `conversation/ThreadScrollState.kt`: the glue of 5.2 (`rememberThreadScroll`, saved with the page;
+  `ThreadScrollEffects`: rows in a `SideEffect` before the measure, spot samples, holds, lifecycle away/back on
+  `ON_STOP`/`ON_START` and dispose, the reopen flow; `ToUnread` with the 64 dp x font scale room).
+- `ConversationScreen`: uses the glue; `JumpToLatest` reads only `jumpVisible`/`unseen` (my own messages no longer
+  count); find/date/reveal go through `jumpTo`; `JUMP_AFTER_ITEMS` removed; new parameters `openSeq`, `openAtTarget`,
+  `reopen`, `now` (all defaulted); new test tag `ConversationTags.JumpBadge`.
+- `ConversationUi.opens`; `opened()` and the frozen divider in `SmsThreadViewModel` and `WaThreadViewModel`; pages pass
+  `openSeq = rememberSaveable { model.opened() }`, `openAtTarget = route.reveal != null` and the reopen flow;
+  WhatsApp reveal runs once per page (step 8).
+- `ThreadOpens` (in `notify/OpenConversation.kt`), emitted by `MainActivity.routeFor(intent)` for a thread tag without
+  a message id (step 9).
+- `OverlayController.hasModal` (`android/design/.../overlay/OverlayHost.kt`). Checked: the lifted bubble menu
+  (`IosContextMenuEntry`), header and attach menus (`ButtonMenuEntry`), sheets (`SheetEntry`, modal by default),
+  alerts, popovers and the media viewer (`PhotoViewer`) are modal; toasts and the undo pill are not.
+  `OverlayMenuEntry` (modal = false) is not used by Messages.
+- Docs: `docs/kotlin-ui/thread-scroll.md`.
+
+### Probe (step 1), `ThreadScrollProbeTest` (bare reversed `LazyColumn`, foundation 1.12.1)
+
+| Assumption | Result |
+|---|---|
+| At rest the spot is (0, 0); `scrollBy(+px)` grows the offset, then the index | confirmed |
+| A row added at index 0 while at (0, 0) leaves the old row first visible (the bug) | confirmed (every layout pass that saw the new row had `r0` first) |
+| `requestScrollToItem(i, -x)`: row `i` ends `x` px above the bottom content edge (`LazyListItemInfo.offset == x`); near the newest end the list clamps to (0, 0) | confirmed |
+| A request made in a `SideEffect` is applied by the measure of the same frame | confirmed: every layout pass that saw the new row had it first (recorded in the items' placement blocks; Robolectric does not draw, and one `advanceTimeByFrame` alone runs no layout) |
+
+No assumption was refuted; the design stands as planned.
+
+### Deviations
+
+1. Model: a non-saved `pendingKey` (the newest row when a follow became pending). While a finger is down, the keyed
+   list moves the old newest to index 1 when a row arrives; without it the next scrolling sample would anchor and the
+   pending follow of case 16 would be lost. A spot on that row within the slop still counts as at the newest.
+2. Model: `Moved` with empty rows is ignored (else case 19, rows gone and back, would lose the anchor); opening
+   pinned sets the seen key to the newest row.
+3. Glue: animated commands run in a `Job` launched undispatched on the page scope (the previous one cancelled), not
+   a conflated channel: the "programmatic" flag is up before the frame that would sample the list half way (that
+   sample would un-pin). A generation counter makes only the last scroll send the closing `Moved`.
+4. Saver: `leftAtMs` is saved as `now()` when the page is still marked visible. Saving only happens when the page goes
+   away (pushed over, the activity stopped), so this does not depend on the order of dispose callbacks.
+5. WhatsApp `opened()` sets `unreadAtOpen = null` (not `chat?.unread`): the reload it asks for reads the chat again,
+   so the count is never from a stale cached chat. SMS: a thread not created yet (`thread <= 0`) is ready at once.
+6. Owner answer 3 needed no code: WhatsApp scheduled texts are sent by the gateway (`wa.schedule_text`), not through
+   the local outbox, so they arrive as sent rows (`RowKind.Outgoing`), never as a new pending bubble. Screen test
+   `t03b`. (An SMS provider row in the Outbox/Queued box maps to `Sending` and would pull a scrolled-up list; that is
+   outside the owner's question and unchanged.)
+7. Screen test 10: a missing anchor at restore cannot be staged on a live page (it re-anchors before it is saved);
+   covered by model test 26. The probes live in their own class `ThreadScrollProbeTest`.
+
+### Tests and shots
+
+- `ThreadScrollTest` (JVM): 37 cases, table 8.1 rows 1 to 36 (35 split into two), 36 = 2 000 random sequences of 40
+  events asserting I1 to I3.
+- `ThreadScrollScreenTest` (Robolectric): 8.2 numbers 1 to 14, plus `t03b` (a sent message from elsewhere keeps the
+  place) and `t15` (the reopen signal goes to the newest), and the shot `threadOpenAtUnread`.
+- `ThreadScrollProbeTest`: 4. `SmsThreadDividerTest`: 1 (frozen divider, new opening). `WaThreadViewModelTest`: +1
+  (same). `WaThreadRekeyTest`: bubble keys asserted before and after the merge.
+- New shots: `android/messages/screenshots/thread-open-at-unread-{light,dark}.png` (reviewed: divider just under the
+  header with a sliver of the last read message above it, first unread right below, jump button with badge above the
+  composer, nothing clipped or wrapped). Existing goldens unchanged, including `e6.6-unread-divider-*` and
+  `e6.6-scroll-to-bottom-count-*`.
+- The 48 dp slop and the 64 dp unread room are `MessagesMetrics.AtNewestSlop` / `UnreadRoom` (the design
+  `ConventionTest` forbids raw dp in app code).
+
+### Checks (release only, `plain` flavor)
+
+`spotlessCheck :design:testReleaseUnitTest :messages:testPlainReleaseUnitTest :messages:testFirebaseReleaseUnitTest
+:messages:lintPlainRelease :messages:verifyRoborazziPlainRelease :phone:compilePlainReleaseKotlin
+:contacts:compileReleaseKotlin`: green. `:design` 372 tests, `:messages` plain 606 and firebase 606, 0 failures. The
+first full run lost its Gradle daemon (low memory) and timed out `E68ShotTest.typingANumber` (New Conversation, not
+touched); the rerun of the messages tasks passed it.

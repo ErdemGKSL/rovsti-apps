@@ -180,6 +180,28 @@ drop_files, stage, progress}`; `people.sync_stop {handle?|dir?, now_ms, reason}`
 (without a handle it interrupts the stored run: unlink); `people.sync_status {dir?, now_ms}` answers `{run?, last?,
 not_before_ms?}` for the settings row. The first `people.sync_*` call for a directory in a process turns a stored
 `running` run into `interrupted(process_death)`.
+
+People sync v3 (plan `_bmad-output/kotlin-ui/plans/people-sync-v3.md`), the job mode: `people.sync_begin {..., jobs: true}`
+(absent or false: the v2 steps only) makes a new run use the gateway's people job. Its steps are `{kind: job_start, mode:
+auto|full, entries: [{n, h?, p?}]}` -> `wa.people_sync_start`, `{kind: job_watch, job_id, rev, wait_ms}` ->
+`wa.people_sync_status`, `{kind: job_fetch, job_id, after, max_bytes}` -> `wa.people_sync_bundle` and `{kind: job_done,
+job_id}` -> `wa.people_sync_cancel`, before which `plan_pictures` lists the picture files (they decide `p`). The reports:
+`{kind: job_started, status}`, `{kind: job_unsupported}` (the run goes on in the v2 steps; asked again after 24 h), `{kind:
+job, status}`, `{kind: job_gone}`, `{kind: bundle, job_id, records: [{seq, number, hash, on_whatsapp, jid?, lid?,
+push_name?, verified_name?, picture_id?, picture_missing?, picture?: {kind: stored, file} | {kind: failed}}], last_seq,
+more, bytes}` and `{kind: job_closed}`. Stage `server` / `download`, interrupt `server_working` (the slice ended while the
+gateway works: continue at the job's `eta_ms`); `run.job`, `committed.job` = `{job_id, state, phase, done, total, numbers,
+wait_until_ms?, wait_source?, eta_ms?, records?, pictures?, bytes?, mine?}`; `last.changed?`, `last.bytes?`, `status.
+attempt_ms?`. A bundle part commits the book once and only when something changed; an unchanged run writes only
+`people-sync.json`.
+
+The gateway's people job: `wa.people_sync_start {handle, mode, entries}` answers `{supported: true, status}` or
+`{supported: false}` (a gateway without the job routes: the router's bare 404); `wa.people_sync_status {handle, job_id,
+rev?, wait_ms?}` answers `{status}` (a long-poll of at most 25 s) or `{gone: true}`; `wa.people_sync_bundle {handle,
+job_id, after, max_bytes?}` streams one part, writes each picture to `<cache_dir>/people-bundle/<job_id>-<seq>.bin` and
+answers `{gone?, records: [{seq, number, hash, on_whatsapp, jid?, lid?, push_name?, verified_name?, picture_id?,
+picture_missing?, picture_path?}], last_seq, more, bytes}` (a cut part is `network`; its files are deleted);
+`wa.people_sync_cancel {handle, job_id}` answers `{}` (a gone job included).
 WhatsApp offline store (E6.4s, `rosty_app_core::wa_sync`): `wa_sync.open {instance_id, dir?, memory?}` opens the SQLite store of
 one linked instance (`wa-sync-<instance>.db` in the data directory; another instance is another file) and answers `{handle,
 instance_id, schema_version, last_seq, needs_resync}`; a second open of the same file in one process shares the store, and
@@ -391,6 +413,10 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(wa) wa.messages` | - | wa | op | wa.messages |
 | `(wa) wa.messages_with_meta` | - | wa | op | wa.messages_with_meta |
 | `(wa) wa.mint_key` | - | wa | op | wa.mint_key |
+| `(wa) wa.people_sync_bundle` | - | wa | op | wa.people_sync_bundle |
+| `(wa) wa.people_sync_cancel` | - | wa | op | wa.people_sync_cancel |
+| `(wa) wa.people_sync_start` | - | wa | op | wa.people_sync_start |
+| `(wa) wa.people_sync_status` | - | wa | op | wa.people_sync_status |
 | `(wa) wa.place_call` | - | wa | op | wa.place_call |
 | `(wa) wa.profiles` | - | wa | op | wa.profiles |
 | `(wa) wa.react` | - | wa | op | wa.react |

@@ -160,6 +160,10 @@ fn kind(step: &Step) -> &'static str {
         Step::Picture { .. } => "picture",
         Step::Sleep { .. } => "sleep",
         Step::Stop { .. } => "stop",
+        Step::JobStart { .. } => "job_start",
+        Step::JobWatch { .. } => "job_watch",
+        Step::JobFetch { .. } => "job_fetch",
+        Step::JobDone { .. } => "job_done",
     }
 }
 

@@ -1,0 +1,7 @@
+{
+ "expect": {
+  "method": "DELETE",
+  "path": "/v1/people/sync/5f0c9a1b22d4e7a3"
+ },
+ "status": 204
+}

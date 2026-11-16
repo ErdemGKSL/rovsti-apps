@@ -78,6 +78,7 @@ pub(super) fn status_cases() -> Vec<Case> {
     vec![
         Case::new(json!({"dir": "$DIR", "now_ms": NOW})).seeded("people_sync"),
         Case::named("never", json!({"dir": "$DIR", "now_ms": NOW})).seeded("people"),
+        Case::named("job", json!({"dir": "$DIR", "now_ms": NOW})).seeded("people_job"),
     ]
 }
 
@@ -97,6 +98,10 @@ pub(super) struct BeginReq {
     /// The slice budget (the worker's); none in the foreground.
     #[serde(default)]
     slice_ms: Option<i64>,
+    /// People sync v3: the caller performs the `job_*` steps, so a new run uses the gateway's people job (falling
+    /// back to the v2 steps on a gateway without it). Absent: the v2 steps only.
+    #[serde(default)]
+    jobs: bool,
 }
 
 #[derive(Serialize)]
@@ -114,7 +119,7 @@ pub(super) fn begin(req: BeginReq) -> Result<BeginAns, FfiError> {
     let mut cp = load(&dir)?;
     let book = people::load(&dir);
     let link = LinkId::new(&req.instance_id, &req.gateway_url);
-    let begun = ps::begin(
+    let begun = ps::begin_with(
         &mut cp,
         &book,
         link,
@@ -122,6 +127,7 @@ pub(super) fn begin(req: BeginReq) -> Result<BeginAns, FfiError> {
         req.start,
         req.slice_ms,
         req.now_ms,
+        req.jobs,
     );
     ps::save(&dir, &cp)?;
     let status = ps::status(&cp, req.now_ms);
@@ -147,9 +153,36 @@ fn begin_req(start: &str) -> serde_json::Value {
         "numbers": ["+905321234567", "+905550000001", "+905550000002"], "start": start})
 }
 
+/// A slice of the job-mode run of the `people_job` seed (people sync v3).
+fn begin_job_req(start: &str) -> serde_json::Value {
+    json!({"dir": "$DIR", "now_ms": NOW, "instance_id": "inst-1", "gateway_url": "https://gw.example.test",
+        "numbers": ["+100000000001", "+100000000002", "+100000000003"], "start": start, "jobs": true})
+}
+
+/// The job status the `people_job` cases report.
+fn job_status(state: &str, rev: u64) -> serde_json::Value {
+    let mut status = json!({"job_id": "5f0c9a1b22d4e7a3", "rev": rev, "state": state, "phase": "bundle",
+        "done": 3, "total": 3, "numbers": 3, "account_epoch": 0, "created_ms": NOW - 3_600_000,
+        "updated_ms": NOW, "expires_ms": NOW + 86_400_000});
+    if state == "ready" {
+        status["result"] = json!({"records": 2, "pictures": 1, "bytes": 61_234});
+    }
+    status
+}
+
+fn job_case(label: &'static str, report: serde_json::Value) -> Case {
+    Case::named(
+        label,
+        json!({"handle": H, "now_ms": NOW + 1_000, "rand": 0, "report": report}),
+    )
+    .seeded("people_job")
+    .after("people.sync_begin", begin_job_req("auto"))
+}
+
 pub(super) fn begin_cases() -> Vec<Case> {
     vec![
         Case::new(begin_req("restart")).seeded("people"),
+        Case::named("job", begin_job_req("auto")).seeded("people_job"),
         Case::named("resume", begin_req("resume")).seeded("people_sync"),
         Case::named("nothing_to_resume", begin_req("resume")).seeded("people"),
         Case::named(
@@ -189,6 +222,10 @@ pub(super) fn next_cases() -> Vec<Case> {
         Case::new(json!({"handle": H, "now_ms": NOW, "rand": 20}))
             .seeded("people")
             .after("people.sync_begin", begin_req("restart")),
+        // People sync v3: a resumed job-mode run watches its job (a long-poll).
+        Case::named("job_watch", json!({"handle": H, "now_ms": NOW, "rand": 0}))
+            .seeded("people_job")
+            .after("people.sync_begin", begin_job_req("auto")),
     ]
 }
 
@@ -248,6 +285,28 @@ pub(super) fn report_cases() -> Vec<Case> {
         )
         .seeded("people")
         .after("people.sync_begin", begin_req("restart")),
+        // People sync v3, the job mode.
+        job_case(
+            "job_started",
+            json!({"kind": "job_started", "status": job_status("running", 1)}),
+        ),
+        job_case("job_unsupported", json!({"kind": "job_unsupported"})),
+        job_case("job", json!({"kind": "job", "status": job_status("ready", 9)})),
+        job_case("job_gone", json!({"kind": "job_gone"})),
+        job_case(
+            "bundle",
+            json!({"kind": "bundle", "job_id": "5f0c9a1b22d4e7a3", "last_seq": 3, "more": false,
+                "bytes": 61_400, "records": [
+                {"seq": 1, "number": "+100000000001", "hash": "1b2c3d4e5f607182", "on_whatsapp": true,
+                    "jid": "100000000001@s.whatsapp.net", "lid": "123456@lid", "push_name": "Ada",
+                    "picture_id": "1716839201",
+                    "picture": {"kind": "stored", "file": "100000000001_s.whatsapp.net~1716839201.jpg"}},
+                {"seq": 2, "number": "+100000000002", "hash": "0c11d2e3f4a5b6c7", "on_whatsapp": false},
+                {"seq": 3, "number": "+100000000003", "hash": "77aa000000000000", "on_whatsapp": true,
+                    "jid": "100000000003@s.whatsapp.net", "picture_id": "1716", "picture_missing": true},
+            ]}),
+        ),
+        job_case("job_closed", json!({"kind": "job_closed"})),
     ]
 }
 
@@ -328,6 +387,7 @@ mod tests {
             numbers: vec!["+905550000001".into()],
             start,
             slice_ms: None,
+            jobs: false,
         })
         .unwrap()
     }
@@ -374,6 +434,82 @@ mod tests {
             })
             .is_err()
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// People sync v3: a bundle without records (nothing changed) writes the checkpoint only.
+    #[test]
+    fn an_unchanged_bundle_leaves_people_json_alone() {
+        let dir = temp("unchanged");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Hand-written spacing that `people::save` would never produce: any rewrite would show.
+        let people = "{ \"schema_version\": 1, \"people\": [ {\"jid\": \"100000000001@s.whatsapp.net\", \
+                      \"numbers\": [\"+100000000001\"], \"on_whatsapp\": true} ] }";
+        std::fs::write(dir.join(people::FILE), people).unwrap();
+        let begun = begin(BeginReq {
+            dir: Some(dir.to_string_lossy().into_owned()),
+            now_ms: NOW,
+            instance_id: "i".into(),
+            gateway_url: "https://rosty.erdemdev.tr".into(),
+            numbers: vec!["+100000000001".into()],
+            start: Start::Auto,
+            slice_ms: None,
+            jobs: true,
+        })
+        .unwrap();
+        let handle = begun.handle.unwrap();
+        let step = || {
+            next(NextReq {
+                handle,
+                now_ms: NOW,
+                rand: 0,
+            })
+            .unwrap()
+        };
+        let say = |report: Report| {
+            super::report(ReportReq {
+                handle,
+                now_ms: NOW,
+                rand: 0,
+                report,
+            })
+            .unwrap()
+        };
+        assert_eq!(step(), Step::PlanPictures);
+        say(Report::Files {
+            files: vec![],
+            max_bytes: 1 << 20,
+        });
+        assert!(matches!(step(), Step::JobStart { .. }));
+        let status: rosty_wa_proto::PeopleJobStatus = serde_json::from_value(json!({
+            "job_id": "j1", "rev": 1, "state": "ready", "phase": "bundle",
+            "result": {"records": 0, "pictures": 0, "bytes": 90}}))
+        .unwrap();
+        say(Report::JobStarted { status });
+        assert!(matches!(step(), Step::JobFetch { .. }));
+        let committed = say(Report::Bundle {
+            job_id: "j1".into(),
+            records: vec![],
+            last_seq: 0,
+            more: false,
+            bytes: 90,
+        });
+        assert_eq!(committed.changed, 0);
+        assert!(matches!(step(), Step::JobDone { .. }));
+        say(Report::JobClosed);
+        assert_eq!(
+            step(),
+            Step::Stop {
+                stopped: ps::Stopped::Done
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(people::FILE)).unwrap(),
+            people
+        );
+        let cp = ps::load(&dir);
+        assert_eq!(cp.last.unwrap().changed, Some(0));
+        assert!(cp.run.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

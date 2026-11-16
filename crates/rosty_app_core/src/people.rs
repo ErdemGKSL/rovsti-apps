@@ -19,7 +19,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::wa_link::avatars::{self, DiskFile, NONE_FOR_MS};
+use crate::wa_link::avatars::{self, DiskFile};
 
 /// File name inside the app data directory.
 pub const FILE: &str = "people.json";
@@ -428,9 +428,9 @@ impl Book {
     ///
     /// A picture is fetched when it is stale, when its id is known but the file is missing from `files` or was made
     /// with an older [`PICTURE_FORMAT`], when it was never asked for, or when it was last fetched more than
-    /// [`REVALIDATE_MS`] ago; "no picture" is
-    /// believed for [`NONE_FOR_MS`]. Only people on WhatsApp are asked for. Files go when they hold an older
-    /// picture of a known person, and then the oldest over `max_bytes`.
+    /// [`REVALIDATE_MS`] ago; "no picture" is believed for [`REVALIDATE_MS`] as well (people sync v3: re-asking
+    /// every 6 hours for people without a picture was most of a periodic run). Only people on WhatsApp are asked
+    /// for. Files go when they hold an older picture of a known person, and then the oldest over `max_bytes`.
     pub fn plan(&self, now_ms: i64, files: &[FileInfo], max_bytes: u64) -> Plan {
         let name_of = |f: &FileInfo| {
             Path::new(&f.path)
@@ -451,7 +451,7 @@ impl Book {
                     || p.picture_format < PICTURE_FORMAT
                     || now_ms - p.fetched_ms > REVALIDATE_MS
             } else {
-                p.fetched_ms == 0 || now_ms - p.fetched_ms > NONE_FOR_MS
+                p.fetched_ms == 0 || now_ms - p.fetched_ms > REVALIDATE_MS
             };
             if due {
                 refresh.push(Refresh {
@@ -787,8 +787,15 @@ mod tests {
         let plan = book.plan(NOW + 1000, &[], 1_000_000);
         let jids: Vec<&str> = plan.refresh.iter().map(|r| r.jid.as_str()).collect();
         assert_eq!(jids, ["1@s.whatsapp.net", "2@s.whatsapp.net"]);
-        // "no picture" is asked again after NONE_FOR_MS
-        let later = book.plan(NOW + NONE_FOR_MS + 1, &[], 1_000_000);
+        // "no picture" is believed for REVALIDATE_MS (7 days), not the 6 h of the avatars' NONE_FOR_MS.
+        let six_hours = book.plan(NOW + avatars::NONE_FOR_MS + 1, &[], 1_000_000);
+        assert!(
+            !six_hours
+                .refresh
+                .iter()
+                .any(|r| r.jid == "3@s.whatsapp.net")
+        );
+        let later = book.plan(NOW + REVALIDATE_MS + 1, &[], 1_000_000);
         assert!(later.refresh.iter().any(|r| r.jid == "3@s.whatsapp.net"));
     }
 

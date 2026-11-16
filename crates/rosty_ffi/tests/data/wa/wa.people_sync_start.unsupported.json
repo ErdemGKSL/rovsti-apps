@@ -1,0 +1,7 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/people/sync"
+ },
+ "status": 404
+}

@@ -1,0 +1,34 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/people/sync",
+  "body": {
+   "mode": "auto",
+   "entries": [
+    {
+     "n": "+100000000001",
+     "h": "9a41c0de5b7e1f02",
+     "p": "1716839201"
+    },
+    {
+     "n": "+100000000002"
+    }
+   ]
+  }
+ },
+ "status": 200,
+ "body": {
+  "job_id": "5f0c9a1b22d4e7a3",
+  "rev": 1,
+  "state": "running",
+  "phase": "lookup",
+  "done": 0,
+  "total": 2,
+  "numbers": 2,
+  "eta_ms": 20000,
+  "account_epoch": 0,
+  "created_ms": 1790000000000,
+  "updated_ms": 1790000000000,
+  "expires_ms": 1790021600000
+ }
+}

@@ -580,3 +580,12 @@ Open questions for the owner (each with the default the plan assumes):
   picture). Default: yes. Alternative: shrink on the gateway (about half the bytes, a new image library on the Pi).
 - **Q5 Numbers kept on the gateway** as in R3 (30 days for answers). Default: yes; shorter means more questions to
   WhatsApp.
+
+## Owner answers (2026-11-16)
+
+- Q1 Notification: **every run shows the notification** (automatic 12-hourly runs too), as in v2 S11. This overrides
+  the plan's default; the long-poll slices of an automatic run therefore run in the foreground with the notification.
+- Q2 Stop: not asked; the default stands (Stop cancels the job on the gateway; Continue starts a new one reusing answers).
+- Q3 New contact: looked up at the next run or on Sync Now; no contacts-changed trigger (the default).
+- Q4 Pictures: not asked; the default stands (the gateway sends the full picture, the phone downscales).
+- Q5 Retention on the gateway: job numbers 24 h, lookup answers (negatives included) up to 30 days (the default).

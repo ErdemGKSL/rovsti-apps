@@ -35,6 +35,14 @@ data class BubbleMedia(
     val loop: java.io.File? = null,
     /** A view-once message (E6-WA R3): never saved, shared or forwarded. */
     val viewOnce: Boolean = false,
+    /**
+     * An animated sticker whose file is on the phone (E6-WA R3): the bubble animates it with the platform decoder
+     * ([dev.rosty.messages.viewer.AnimatedSticker]). Null for everything else.
+     */
+    val animated: java.io.File? = null,
+    /** The pixel size the message names (a sticker is drawn in its aspect); null when unknown. */
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 /**
@@ -72,6 +80,18 @@ enum class BubbleMediaKind {
 
     /** Any other file: name, size, Save and Share. */
     File,
+
+    /**
+     * A sticker (E6-WA R3): drawn at sticker size with no bubble around it, the time in a small pill over its corner; a
+     * tap does nothing.
+     */
+    Sticker,
+
+    /**
+     * What this device cannot show (E6-WA R3): a view-once message someone sent (only the phone opens it), or one I
+     * sent as view once. The glyph and [BubbleMedia.label]; no download, no viewer, no Save, Share or Forward.
+     */
+    Unavailable,
 }
 
 /** What the buttons of a file row do. */

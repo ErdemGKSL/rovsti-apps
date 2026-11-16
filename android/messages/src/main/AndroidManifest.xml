@@ -93,6 +93,13 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="image/*" />
             </intent-filter>
+            <!-- Several photos or videos shared at once go to a WhatsApp chat's send preview (E6-WA R3). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
         </activity>
 
         <!-- WhatsApp handoff from a sibling Rosty app: only same-signed apps hold the permission. -->

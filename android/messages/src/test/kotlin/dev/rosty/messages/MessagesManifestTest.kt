@@ -65,7 +65,10 @@ class MessagesManifestTest {
         assertEquals("singleTop", main.launchMode)
         assertEquals("adjustResize", main.attributes["windowSoftInputMode"])
         assertEquals(gpui.component(".MainActivity").attributes["configChanges"], main.attributes["configChanges"])
-        assertEquals(gpui.component(".MainActivity").filters.toSet(), main.filters.toSet())
+        assertEquals(gpui.component(".MainActivity").filters.toSet(), main.filters.toSet() - sharesOf(main))
+        // E6-WA R3: several photos or videos shared at once (to a WhatsApp chat's send preview).
+        val several = sharesOf(main).single()
+        assertEquals(setOf("image/*", "video/*"), several.mimeTypes.toSet())
         val sendTo = main.filters.single { "android.intent.action.SENDTO" in it.actions }
         assertEquals(setOf("sms", "smsto", "mms", "mmsto"), sendTo.schemes)
     }
@@ -114,7 +117,8 @@ class MessagesManifestTest {
             assertEquals(name, old.kind, now.kind)
             assertEquals(name, old.exported, now.exported)
             assertEquals(name, old.attributes["permission"], now.attributes["permission"])
-            assertEquals(name, old.filters.toSet(), now.filters.toSet())
+            // The one filter added since (E6-WA R3) is checked in mainActivityKeepsItsFiltersAndDocksToTheKeyboard.
+            assertEquals(name, old.filters.toSet(), now.filters.toSet() - sharesOf(now))
         }
         assertEquals("$pkg.mmsfiles", manifest.component("dev.rosty.bridge.MmsFileProvider").authorities)
     }
@@ -136,4 +140,8 @@ class MessagesManifestTest {
         assertFalse("dev.gpui" in text)
         assertFalse("vulkan" in text)
     }
+
+    /** The SEND_MULTIPLE filters of [component], which the GPUI app did not have. */
+    private fun sharesOf(component: MergedManifest.Component) =
+        component.filters.filter { "android.intent.action.SEND_MULTIPLE" in it.actions }.toSet()
 }

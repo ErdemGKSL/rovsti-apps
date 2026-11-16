@@ -42,6 +42,20 @@ class ComposeRequestTest {
         assertNull(ComposeRequest.build(Intent.ACTION_SEND, null, "", null, "", null))
     }
 
+    @Test fun severalSharedFilesAreKeptInOrder() {
+        val files = listOf("content://x/1", "", "content://x/2")
+        val share = ComposeRequest.build(Intent.ACTION_SEND_MULTIPLE, null, null, null, null, "image/*", files)
+        assertEquals(
+            ComposeRequest.Share(null, "content://x/1", "image/*", listOf("content://x/1", "content://x/2")),
+            share,
+        )
+        assertNull(ComposeRequest.build(Intent.ACTION_SEND_MULTIPLE, null, null, null, null, "image/*", emptyList()))
+        // The payload hands the chat all of them, and the one file of a plain share.
+        val payload = SharePayload(null, "content://x/1", "image/*", listOf("content://x/1", "content://x/2"))
+        assertEquals(listOf("content://x/1", "content://x/2"), payload.files())
+        assertEquals(listOf("content://y"), SharePayload(streamUri = "content://y").files())
+    }
+
     @Test fun theQuickReplyNeedsAnActionARecipientAndText() {
         val ok =
             HeadlessSmsSendService.requestOf(

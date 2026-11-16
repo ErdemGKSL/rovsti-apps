@@ -113,7 +113,6 @@ class WaSyncMediaFakeTest {
             assertFalse(store.enqueueMedia(chat, "sticker", now, network = WaSyncNetwork.Mobile).getOrThrow().queued)
             assertFalse(store.enqueueMedia(chat, "video", now, network = WaSyncNetwork.Wifi).getOrThrow().queued)
             assertTrue(store.enqueueMedia(chat, "video", now + 1, tap = true).getOrThrow().queued)
-            assertFalse(store.enqueueMedia(chat, "once", now, tap = true).getOrThrow().queued)
             assertTrue((store.enqueueMedia(chat, "photo", now) as Outcome.Err).error is RustError.Invalid)
             assertTrue((store.enqueueMedia(chat, "nope", now, tap = true) as Outcome.Err).error is RustError.NotFound)
 

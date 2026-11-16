@@ -100,7 +100,11 @@ object WaContracts : ContractModels {
             handleOp<Empty, List<ScheduledText>>("wa.scheduled")
             handleOp<IdBody, Empty>("wa.cancel_scheduled", err = listOf("gone"))
             handleOp<SendMediaBody, Sent>("wa.send_media", err = listOf("both", "bad_base64", "empty"))
-            handleOp<SendMediaWithBody, Sent>("wa.send_media_with")
+            handleOp<SendMediaWithBody, Sent>(
+                "wa.send_media_with",
+                ok = listOf("options", "waveform"),
+                err = listOf("bad_waveform", "view_once_document"),
+            )
             handleOp<MessageIdBody, BytesAnswer>("wa.media", ok = listOf("large"))
             handleOp<MessageIdBody, BytesAnswer>("wa.thumbnail")
             handleOp<SendReaction, Empty>("wa.react")
@@ -108,7 +112,7 @@ object WaContracts : ContractModels {
             handleOp<MarkRead, Empty>("wa.mark_played")
             handleOp<PresenceBody, Empty>("wa.set_presence")
             handleOp<JidBody, Empty>("wa.subscribe_presence")
-            handleOp<ChatState, Empty>("wa.chat_state")
+            handleOp<ChatState, Empty>("wa.chat_state", ok = listOf("recording"))
             handleOp<Empty, List<GroupInfo>>("wa.groups")
             handleOp<JidBody, GroupInfo>("wa.group")
             handleOp<JidsBody, List<WaUser>>("wa.lookup_users")

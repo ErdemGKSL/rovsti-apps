@@ -60,7 +60,7 @@ rqrr = { version = "0.11", default-features = false }
 qrcode = { version = "0.14", default-features = false, features = ["image"] }
 # Share cards (X.2): HTML/CSS-style node tree to PNG without a browser. Pinned: 2.19+ is newer than the two-week rule
 # allowed when it was chosen. rayon stays off until the Android .so size is measured (plans/round-16.md).
-takumi = { version = "=2.18.2", default-features = false, features = ["raster-backend", "png", "jpeg", "webp", "gif", "svg-source", "image-decoding"] }
+takumi = { version = "=2.18.2", default-features = false, features = ["raster-backend", "png", "jpeg", "webp", "gif", "svg-source", "image-decoding", "rayon"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Default features minus `simd`, which needs nightly (portable_simd).
 whatsapp-rust = { version = "0.7", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native"] }
@@ -153,4 +153,18 @@ opt-level = 3
 [profile.release.package.zeno]
 opt-level = 3
 [profile.release.package.tiny-skia]
+opt-level = 3
+# Card Studio (X.2): Takumi renders 40 frames of a one-shot GIF; at "z" a 720 px frame took 180 ms and the GIF encode
+# 3.7 s, so the renderer and the GIF encoder run at full speed (sizes are in round-17.md "Measurements").
+[profile.release.package.takumi]
+opt-level = 3
+[profile.release.package.takumi-core]
+opt-level = 3
+[profile.release.package.takumi-raster]
+opt-level = 3
+[profile.release.package.gif]
+opt-level = 3
+[profile.release.package.weezl]
+opt-level = 3
+[profile.release.package.color_quant]
 opt-level = 3

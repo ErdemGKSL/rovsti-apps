@@ -34,6 +34,9 @@ use super::motion::{Motion, Timeline};
 use super::{CardError, fonts};
 
 /// Size of a still card.
+/// Most frames drawn at once when a card moves.
+const RENDER_LANES: usize = 4;
+
 pub const STILL: (u32, u32) = (720, 900);
 /// Size of a moving card (smaller, so a GIF stays small and fast).
 pub const ANIMATED: (u32, u32) = (540, 675);
@@ -546,13 +549,34 @@ impl Prepared {
                 1
             }
             Some(timeline) => {
-                let mut frames = Vec::new();
-                for motion in timeline.frames() {
+                let motions = timeline.frames();
+                let mut frames = Vec::with_capacity(motions.len());
+                // Frames are independent, so a chunk of them renders on scoped threads (one per core, at most
+                // four); `cancelled` is asked between chunks, so a cancel waits for at most one chunk of frames.
+                let lanes = std::thread::available_parallelism()
+                    .map_or(1, std::num::NonZero::get)
+                    .min(RENDER_LANES);
+                for chunk in motions.chunks(lanes) {
                     if cancelled() {
                         return Err(CardError::Cancelled);
                     }
-                    let bitmap = self.bitmap(&motion.motion)?;
-                    frames.push(AnimationFrame::new(bitmap, motion.duration_ms));
+                    let drawn: Vec<Result<Bitmap, CardError>> = std::thread::scope(|scope| {
+                        let tasks: Vec<_> = chunk
+                            .iter()
+                            .map(|frame| scope.spawn(|| self.bitmap(&frame.motion)))
+                            .collect();
+                        tasks
+                            .into_iter()
+                            .map(|task| {
+                                task.join().unwrap_or_else(|_| {
+                                    Err(CardError::Render("frame panicked".into()))
+                                })
+                            })
+                            .collect()
+                    });
+                    for (frame, bitmap) in chunk.iter().zip(drawn) {
+                        frames.push(AnimationFrame::new(bitmap?, frame.duration_ms));
+                    }
                 }
                 if cancelled() {
                     return Err(CardError::Cancelled);

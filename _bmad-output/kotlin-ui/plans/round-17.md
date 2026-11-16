@@ -262,6 +262,15 @@ Owner rules stay in force:
   - static and GIF times;
   - GIF and WebP sizes.
 
+#### Step 6 result (implemented)
+
+- `cards/tests.rs`: `budget_static_render_under_300_ms`, `budget_birthday_gif_under_3_s` (720 px, 39 moving frames, GIF under 3 MB,
+  prints the WebP size), `a_cancelled_job_leaves_no_partial_file` (cancel after 0, 5, 31, 32, 33 asks: no `.gif`, no `.part`).
+- `CardStudioViewModelTest.closingMidRenderShowsNoLateImage` (the gated fake answers after close: the old preview stays, no failure, not
+  rendering) and `aRotationKeepsTheJob` (the observers of the old activity leave and new ones attach: no cancel, no second render, the
+  preview arrives). The model runs on the container scope, not on the activity.
+- The optics of Step 4 (`refraction.rs`) are not in the tree; the budget was measured on the renderer as shipped. Re-run it after Step 4.
+
 ### Step 7. Device-path proof and share/save checks
 
 - With no emulator, prove the release path statically and on the host:
@@ -301,7 +310,30 @@ Owner rules stay in force:
 
 ## Measurements
 
-(filled in by Steps 2, 4 and 6)
+Step 6 (r17-s6), host `--profile checks`, `RUN_BUDGETS=1 cargo test -p rosty_app_core --profile checks cards::tests:: -- budget --nocapture --test-threads=1` (4 cores; tests that share the cores with other tests run about 2x slower, so the assert only runs when `RUN_BUDGETS=1`):
+
+| Item | Before | After | Budget (asserted at 2x) |
+| --- | --- | --- | --- |
+| Static 720 x 900 birthday | 190 ms | 41-44 ms | 150 ms (assert < 300 ms) |
+| Birthday GIF 720 x 900, 39 moving frames + still, **no optics yet** | 11.1 s | 1.4-1.6 s | 1.5 s (assert < 3 s) |
+| Shipped animated size 540 x 675, same 40 frames | 6.3 s | 0.82-0.9 s | |
+| GIF size 720 px / 540 px | 2,798,578 B | unchanged (same bytes, deterministic) | < 3 MB |
+| Animated WebP 720 px, lossy q75, same frames (size only, not shipped) | | 608,168 B, encode 191 ms | |
+| `librosty_ffi.so` arm64 release (stripped, in the APK) | 19,781,416 B (before the speed overrides) | 20,682,984 B | the 12,519,024 B figure predates Takumi; Takumi itself is +7.3 MB, the speed overrides add +901,568 B |
+| Contacts release APK | | 25,897,967 B | |
+
+Where the time went: Takumi and the GIF quantizer were compiled at the workspace `opt-level = "z"`. Fixes, in the order applied
+(the plan's order 1 to 3 does not apply, see below):
+1. `opt-level = 3` for `takumi`, `takumi-core`, `takumi-raster`, `gif`, `weezl`, `color_quant` (render 180 -> 57 ms per frame, quantize
+   92 -> 38 ms per frame; +0.9 MB in the `.so`).
+2. Takumi `rayon` feature: the GIF encoder quantizes the frames of a batch in parallel (encode 1.5 s -> 0.6 s).
+3. `Prepared::write` renders the frames of a moving card on scoped threads (one per core, at most 4 lanes); `cancelled` is asked between
+   chunks of frames (render 2.3 s -> about 0.7 s).
+Not done: "reuse the background layer across frames". The panel's backdrop blur samples the background including the moving confetti inside
+one Takumi render, so the background cannot be drawn once and reused without redrawing the blur. "Lens only on moving frames" and
+"drop to 540 px" are not needed: the budget holds at 720 px. When Step 4's optics land, re-run the budget test: the lens adds work only on
+frames 8-20 (0.5-1.4 s), and 540 px is the fallback (already 0.85 s without optics).
+
 
 ## r17-s2 result (R8 proof and native path)
 

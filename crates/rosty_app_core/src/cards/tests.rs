@@ -576,3 +576,115 @@ fn card_goldens_match() {
     }
     let _ = std::fs::remove_dir_all(tmp);
 }
+
+// ---- budgets (r17-s6) -------------------------------------------------------------------------------------------
+
+/// Budgets are asserted at 2x the target, only when `RUN_BUDGETS=1` (the checks profile, desktop proxy): wall-clock
+/// limits are noise on a loaded CI box. The measured times are always printed.
+fn budgets_on() -> bool {
+    std::env::var("RUN_BUDGETS").is_ok_and(|v| v == "1")
+}
+
+/// Static budget 150 ms, asserted at 300 ms. One warm-up render first (font and style caches), best of three.
+#[test]
+fn budget_static_render_under_300_ms() {
+    let spec = birthday_tr("Ayşe");
+    let out = std::env::temp_dir().join(format!("rosty-cards-budget-s-{}.png", std::process::id()));
+    render(&spec, &out, &|| false).unwrap();
+    let best = (0..3)
+        .map(|_| {
+            let t = std::time::Instant::now();
+            render(&spec, &out, &|| false).unwrap();
+            t.elapsed()
+        })
+        .min()
+        .unwrap();
+    let size = std::fs::metadata(&out).unwrap().len();
+    let _ = std::fs::remove_file(&out);
+    eprintln!("BUDGET static 720x900: {best:?}, {size} bytes");
+    if budgets_on() {
+        assert!(best.as_millis() < 300, "static render took {best:?}");
+    }
+}
+
+/// GIF budget 1.5 s, asserted at 3 s, for the 720 px, 39-frame birthday card (the optics' size and frame count).
+/// The shipped animated size is [`ANIMATED`]; the 720 px render runs through [`Prepared`] with a 2.6 s timeline.
+#[test]
+fn budget_birthday_gif_under_3_s() {
+    let spec = birthday_tr("Ayşe");
+    let mut timeline = motion::Timeline::of(Template::Birthday, 600).unwrap();
+    timeline.moving_s = 2.6;
+    let frames = timeline.frames().len() - 1;
+    assert_eq!(frames, 39, "39 moving frames plus the held still");
+    let dir = std::env::temp_dir().join(format!("rosty-cards-budget-g-{}", std::process::id()));
+    let gif = |w: u32, h: u32| {
+        let prepared = Prepared::new(&spec, w, h).unwrap();
+        let out = dir.join(format!("b{w}.gif"));
+        let t = std::time::Instant::now();
+        prepared.write(&out, Some(&timeline), &|| false).unwrap();
+        (t.elapsed(), std::fs::metadata(&out).unwrap().len())
+    };
+    let (t720, bytes720) = gif(720, 900);
+    let (t540, bytes540) = gif(ANIMATED.0, ANIMATED.1);
+    let _ = std::fs::remove_dir_all(&dir);
+    // Size only: the same frames as an animated WebP (lossy q75), to compare with the GIF. WebP is not shipped.
+    let prepared = Prepared::new(&spec, 720, 900).unwrap();
+    let webp_frames: Vec<_> = timeline
+        .frames()
+        .iter()
+        .map(|f| {
+            takumi::prelude::AnimationFrame::new(prepared.bitmap(&f.motion).unwrap(), f.duration_ms)
+        })
+        .collect();
+    let mut webp = Vec::new();
+    let options = takumi::prelude::AnimatedWebpOptions::builder()
+        .loop_count(Some(0))
+        .lossless(false)
+        .quality(75)
+        .build();
+    let t = std::time::Instant::now();
+    takumi::write_animated_webp(std::borrow::Cow::Owned(webp_frames), &mut webp, options).unwrap();
+    eprintln!(
+        "BUDGET webp 720x900 x40 frames: {} bytes, encode {:?}",
+        webp.len(),
+        t.elapsed()
+    );
+    eprintln!("BUDGET gif 720x900 x40 frames: {t720:?}, {bytes720} bytes");
+    eprintln!("BUDGET gif 540x675 x40 frames: {t540:?}, {bytes540} bytes");
+    assert!(bytes720 < 3 * 1024 * 1024, "GIF under 3 MB: {bytes720}");
+    if budgets_on() {
+        assert!(t720.as_secs_f32() < 3.0, "720 px GIF took {t720:?}");
+    }
+}
+
+/// A cancelled animated job deletes its partial file: no `.gif` and no `.part` stay next to `out`, whether the
+/// cancel arrives before the first frame, mid-render or at the end.
+#[test]
+fn a_cancelled_job_leaves_no_partial_file() {
+    let dir = std::env::temp_dir().join(format!("rosty-cards-cancel-d-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut moving = birthday_tr("Ayşe");
+    moving.animated = true;
+    for after in [0u32, 5, 31, 32, 33] {
+        let out = dir.join(format!("c{after}.gif"));
+        let asked = std::sync::atomic::AtomicU32::new(0);
+        let result = render(&moving, &out, &|| {
+            asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= after
+        });
+        if let Err(e) = result {
+            assert_eq!(e.code(), "cancelled", "after {after} asks");
+            assert!(!out.exists(), "no file after {after} asks");
+        }
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n.to_string_lossy().ends_with(".part"))
+            .collect();
+        assert!(
+            left.is_empty(),
+            "no .part file after {after} asks: {left:?}"
+        );
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

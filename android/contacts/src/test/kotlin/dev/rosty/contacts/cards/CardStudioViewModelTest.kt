@@ -9,6 +9,7 @@ import dev.rosty.platform.files.FakeFilesRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -175,6 +176,56 @@ class CardStudioViewModelTest {
             m.onAction(CardStudioAction.PickPalette(CardPalette.Dusk))
             settle()
             assertEquals("a closed sheet renders nothing more", 2, ops.renders.size)
+        }
+
+    @Test fun closingMidRenderShowsNoLateImage() =
+        runTest {
+            val m = model()
+            runCurrent()
+            val shown = m.state.value.preview
+            ops.gate = CompletableDeferred()
+            m.onAction(CardStudioAction.SetAnimated(true))
+            advanceTimeBy(CardStudioViewModel.DEBOUNCE_MS + 1)
+            runCurrent()
+            assertTrue(m.state.value.rendering)
+            m.close()
+            runCurrent()
+            // The core answers anyway (a render in flight cannot be stopped from outside): nothing may reach the sheet.
+            ops.gate?.complete(Unit)
+            settle()
+            assertEquals("the old picture stays, no late one", shown, m.state.value.preview)
+            assertFalse(m.state.value.rendering)
+            assertFalse(m.state.value.failed)
+        }
+
+    @Test fun aRotationKeepsTheJob() =
+        runTest {
+            val m = model()
+            runCurrent()
+            ops.gate = CompletableDeferred()
+            m.onAction(CardStudioAction.SetAnimated(true))
+            advanceTimeBy(CardStudioViewModel.DEBOUNCE_MS + 1)
+            runCurrent()
+            assertTrue(m.state.value.rendering)
+            // A rotation drops every observer of the old activity and attaches new ones; the model (the app scope)
+            // is not asked to close, so the render is neither cancelled nor started again.
+            val before = ops.renders.size
+            val old = launch { m.state.collect {} }
+            old.cancel()
+            runCurrent()
+            val again = launch { m.state.collect {} }
+            runCurrent()
+            assertTrue(m.state.value.rendering)
+            assertTrue("no cancel for a rotation", ops.cancelled.isEmpty())
+            assertEquals("no second render", before, ops.renders.size)
+            ops.gate?.complete(Unit)
+            runCurrent()
+            assertTrue(
+                m.state.value.preview
+                    ?.animated == true,
+            )
+            assertFalse(m.state.value.rendering)
+            again.cancel()
         }
 
     @Test fun closingBeforeTheDebounceEndsRendersNothing() =

@@ -534,6 +534,7 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         location: None,
         contact: None,
         mentions: Vec::new(),
+        unavailable: None,
         has_thumbnail: false,
         media_path,
         media_state: None,

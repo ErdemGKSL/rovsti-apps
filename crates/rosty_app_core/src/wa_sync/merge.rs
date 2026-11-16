@@ -148,6 +148,9 @@ fn combine(mut keep: Stored, other: Stored) -> Stored {
     if keep.extra.mentions.is_empty() {
         keep.extra.mentions = other.extra.mentions;
     }
+    if !keep.content.is_known() {
+        keep.extra.unavailable = keep.extra.unavailable.or(other.extra.unavailable);
+    }
     keep
 }
 

@@ -241,6 +241,9 @@ kept as cached media (`wa_sync.media_reconcile` then lists it for deletion). Thr
 `chat_media`, `chats[].last`) carry in `media`: `waveform_b64?` (the 64 samples of a voice note, base64), `animated`, `view_once`,
 `voice_note`, and two local marks, left out when false: `viewed` (a view-once message opened on this device) and `played` (the
 played receipt of a received voice note was queued).
+A message WhatsApp keeps from linked devices (a view-once message someone sent, a bot's or a hosted business's message) is a row
+with `kind: "unsupported"` and `unavailable: "view_once" | "hosted" | "bot" | "other"` (left out on every other row); it has no media
+and `wa_sync.media_enqueue` answers `never` for it. The gateway names it in `meta.unavailable`; real content arriving later clears it.
 `wa_sync.mark_played {handle, now_ms, client_id, chat, id}` queues the played receipt of a received voice note as an outbox row
 (`action: {kind: "mark_played", message_id, sender?}`; `sender` is the author in a group) and answers `{queued, item?}`: once per
 message (`queued: false` and no `item` when it was marked before; the same `client_id` again answers the queued row); anything but

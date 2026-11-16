@@ -2,6 +2,7 @@ package dev.rosty.contacts.card
 
 import dev.rosty.contacts.R
 import dev.rosty.contacts.cards.CardStudioSubject
+import dev.rosty.contacts.cards.eventMonthDay
 import dev.rosty.contacts.data.Book
 import dev.rosty.contacts.data.BookRepository
 import dev.rosty.contacts.data.ContactsStore
@@ -465,7 +466,12 @@ class ContactCardViewModel(
     private suspend fun makeCard() {
         val ui = state.first { it.header != null }
         val header = ui.header ?: return
-        val birthday = ui.sections.flatMap { it.rows }.firstNotNullOfOrNull { it.birthday }
+        // Only a birthday with a real month and day counts: anything else opens on the Contact template.
+        val birthday =
+            ui.sections
+                .flatMap { it.rows }
+                .firstNotNullOfOrNull { it.birthday }
+                ?.takeIf { it.month != null && it.day != null }
         val b = base()
         val payload =
             b?.let {
@@ -484,6 +490,8 @@ class ContactCardViewModel(
                     birthday = birthday != null,
                     dateLine = birthday?.dateLine,
                     ageYears = birthday?.ageYears,
+                    birthMonth = birthday?.month,
+                    birthDay = birthday?.day,
                     photo = header.photoUri,
                     numbers =
                         b
@@ -1001,7 +1009,9 @@ class ContactCardViewModel(
                 wishNumber = primary,
                 birthday =
                     if (event.kind == EventKind.Birthday) {
-                        BirthdayInfo(value, years?.takeIf { it > 0 }?.toInt())
+                        eventMonthDay(event.date).let { md ->
+                            BirthdayInfo(value, years?.takeIf { it > 0 }?.toInt(), md?.first, md?.second)
+                        }
                     } else {
                         null
                     },

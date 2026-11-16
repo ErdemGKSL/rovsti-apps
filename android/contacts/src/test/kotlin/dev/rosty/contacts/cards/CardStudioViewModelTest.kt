@@ -279,4 +279,22 @@ class CardStudioViewModelTest {
             assertTrue(m.state.value.failed)
             assertNotNull(m.state.value.preview)
         }
+
+    /** The error reaches the Logs page by its code, with the text masked (a number in it never survives). */
+    @Test fun aFailedRenderIsLoggedByCode() =
+        runTest {
+            dev.rosty.core.log.RostyLog.ring
+                .clear()
+            val m = model()
+            runCurrent()
+            ops.fail = true
+            m.onAction(CardStudioAction.PickPalette(CardPalette.Ink))
+            settle()
+            val line =
+                dev.rosty.core.log.RostyLog.ring
+                    .snapshot()
+                    .single { it.tag == "cards" }
+            assertTrue(line.text, line.text.startsWith("render failed: template="))
+            assertTrue(line.text, line.text.contains("out_unwritable"))
+        }
 }

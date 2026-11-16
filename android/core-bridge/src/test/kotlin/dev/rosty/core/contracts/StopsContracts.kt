@@ -245,7 +245,7 @@ object StopsContracts : ContractModels {
             )
             op<SuggestNameRequest, NameAnswer>(
                 "stops.saved_suggest_name",
-                ok = listOf("no_feed"),
+                ok = listOf("no_feed", "unnamed", "taken", "tr"),
             )
             op<ShortcutRequest, ShortcutAnswer>(
                 "stops.saved_shortcut",

@@ -169,9 +169,8 @@ sealed interface TripAction {
 }
 
 /**
- * The per-trip "Text … when arriving" toggle (the arriving-soon message over WhatsApp) belongs to the `:wa` work, not
- * to this story: the start asks this hook for the notice and the card shows its row. The stub answers no notice and
- * no row.
+ * The per-trip "Text … when arriving" toggle (the arriving-soon message over WhatsApp): the start asks this hook for
+ * the notice and the card shows its row. The app's hook is `notice.TripNotice`; [None] answers no notice and no row.
  */
 interface ArrivingSoonHook {
     /** The arriving-soon notice of a trip from [a] to [b], or null for none. */
@@ -186,7 +185,7 @@ interface ArrivingSoonHook {
     }
 
     companion object {
-        /** No arriving-soon message (until the `:wa` story fills it in). */
+        /** No arriving-soon message (a container without WhatsApp, and tests). */
         val None: ArrivingSoonHook = object : ArrivingSoonHook {}
     }
 }

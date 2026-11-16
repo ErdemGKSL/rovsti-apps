@@ -1,7 +1,9 @@
-//! Share cards (X.2): a platform-free renderer that turns a node tree plus CSS into a PNG with Takumi.
+//! Share cards (X.2): a platform-free renderer that turns a node tree plus CSS into a PNG or a one-shot GIF with
+//! Takumi.
 //!
-//! This module is the only code that names Takumi types. Step 1 holds the spike: bundled fonts and `render_probe`,
-//! which draws a gradient, a frosted panel (blur and saturate only) and a Turkish line.
+//! This module is the only code that names Takumi types. [`render`] is the entry the `cards.render` op calls:
+//! [`model`] holds the request, [`card`] the templates and the glass panel, [`fit`] keeps every line inside the panel
+//! and [`motion`] the springs and frame timelines. `render_probe` is the Step 1 spike, kept for its font tests.
 //!
 //! # Takumi 2.18.2 call sites (read in `takumi-2.18.2/src/lib.rs`, `takumi-core-0.34.0` and `takumi-raster-0.5.11`)
 //!
@@ -23,9 +25,18 @@
 //!   `write_animated_webp` with `AnimatedGifOptions`, `AnimatedPngOptions` and `AnimatedWebpOptions`; the loop
 //!   setting is read in Step 4.
 
+pub mod card;
+pub mod fit;
 pub mod fonts;
+pub mod model;
+pub mod motion;
+
+use std::path::Path;
 
 use takumi::prelude::{Bitmap, Node, OutputFormat, RenderOptions, StyleSheet, Viewport};
+
+pub use card::{ANIMATED, HOLD_MS, Prepared, Rendered, STILL};
+pub use model::{CardSpec, Palette, Template};
 
 /// Why a card could not be rendered.
 #[derive(Debug, thiserror::Error)]
@@ -45,6 +56,47 @@ pub enum CardError {
     /// A size outside what a card may be.
     #[error("size {0}x{1} is outside 16..=4096")]
     Size(u32, u32),
+    /// A text the template needs is missing or blank (the key).
+    #[error("text {0} is missing")]
+    TextMissing(String),
+    /// The output file could not be written.
+    #[error("out: {0}")]
+    OutUnwritable(String),
+    /// `cards.cancel` stopped the render.
+    #[error("cancelled")]
+    Cancelled,
+}
+
+impl CardError {
+    /// The stable code the app branches on and logs (never shown as text).
+    pub fn code(&self) -> &'static str {
+        match self {
+            CardError::Font(_) => "font_failed",
+            CardError::Style(_) => "style_failed",
+            CardError::Render(_) => "render_failed",
+            CardError::Encode(_) => "encode_failed",
+            CardError::Size(..) => "bad_size",
+            CardError::TextMissing(_) => "text_missing",
+            CardError::OutUnwritable(_) => "out_unwritable",
+            CardError::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Renders `spec` to `out`: a 720 x 900 PNG, or a 540 x 675 one-shot GIF when the spec moves. `cancelled` is asked
+/// between frames; a cancelled or failed render leaves no file at `out`.
+pub fn render(
+    spec: &CardSpec,
+    out: &Path,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Rendered, CardError> {
+    let timeline = spec
+        .moves()
+        .then(|| motion::Timeline::of(spec.template, HOLD_MS))
+        .flatten();
+    let (w, h) = if timeline.is_some() { ANIMATED } else { STILL };
+    let prepared = Prepared::new(spec, w, h)?;
+    prepared.write(out, timeline.as_ref(), cancelled)
 }
 
 /// Smallest and largest side of a probe or card, in pixels.

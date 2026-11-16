@@ -13,16 +13,20 @@ import dev.rosty.contacts.list.ListHarness
 import dev.rosty.contacts.list.SampleBook
 import dev.rosty.people.ui.LocalAvatarResolver
 import dev.rosty.testing.ShotTest
+import dev.rosty.testing.portraitImage
 import org.junit.After
 import org.junit.Test
 import org.robolectric.annotation.Config
 
 /**
  * X.1c screenshots: a WhatsApp picture where the contact has no photo of its own, the contact's photo where it has one,
- * initials where WhatsApp knows nobody. The pictures are the fake loader's gradients.
+ * initials where WhatsApp knows nobody. The pictures are portraits drawn in code ([portraitImage]).
  */
 @Config(sdk = [35])
 class X1AvatarShotTest : ShotTest() {
+    /** Every picture is a drawn head-and-shoulders portrait, one face per person (F40). */
+    override val imageProducer: (Any, Int, Int) -> android.graphics.Bitmap? = ::portraitImage
+
     private var rig: CardRig? = null
 
     @After fun stop() {

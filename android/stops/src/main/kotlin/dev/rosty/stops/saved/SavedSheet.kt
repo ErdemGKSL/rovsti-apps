@@ -103,6 +103,7 @@ object SavedTags {
     const val Rename = "saved-rename"
     const val RenameField = "saved-rename-field"
     const val RenameSave = "saved-rename-save"
+    const val RenameCancel = "saved-rename-cancel"
     const val Note = "saved-note"
     const val NoteSheet = "saved-note-sheet"
     const val NoteField = "saved-note-field"
@@ -701,32 +702,47 @@ private fun NoteBody(
     }
 }
 
+/** Whether [name] can be a stop's name: 1 to [maxChars] characters once trimmed (the core checks it again). */
+internal fun nameFits(
+    name: CharSequence,
+    maxChars: Int,
+): Boolean = name.toString().trim().let { it.isNotEmpty() && it.codePointCount(0, it.length) <= maxChars }
+
 /**
- * Rename: one field holding the name, at most [maxChars] characters, and Save; Rust checks the name and a refusal
- * comes back as a toast.
+ * The name of a stop (Rename, and "Save as stop" with the core's suggestion in the field): one field holding
+ * [name], at most [maxChars] characters, then Save and, with [cancel], Cancel. [detail] is a line under the title
+ * (the pair being saved). Save waits for a name that fits; the core checks it again and a refusal is a toast.
  */
 fun OverlayController.presentRenameSheet(
     context: Context,
     title: String,
     name: String,
     maxChars: Int,
+    detail: String? = null,
+    cancel: Boolean = false,
     onSave: (String) -> Unit,
 ): SheetEntry =
     SheetEntry(title = title, detents = persistentListOf(Detent.Medium)) { sheet ->
         val field = rememberTextFieldState(name)
+        val fits = nameFits(field.text, maxChars)
         OnSheet {
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter).testTag(SavedTags.Rename),
                 verticalArrangement = Arrangement.spacedBy(Spacing.m),
             ) {
                 RostyText(title, style = RostyTheme.type.title3)
+                detail?.let {
+                    RostyText(it, style = RostyTheme.type.subheadline, color = RostyTheme.colors.labelSecondary)
+                }
                 GlassTextField(
                     field,
                     placeholder = context.getString(R.string.saved_name),
                     modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameField),
                     onSubmit = {
-                        sheet.dismiss()
-                        onSave(field.text.toString())
+                        if (fits) {
+                            sheet.dismiss()
+                            onSave(field.text.toString())
+                        }
                     },
                 )
                 RostyText(
@@ -742,8 +758,17 @@ fun OverlayController.presentRenameSheet(
                     },
                     modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameSave),
                     style = CapsuleStyle.Filled,
+                    enabled = fits,
                     fillWidth = true,
                 )
+                if (cancel) {
+                    CapsuleButton(
+                        context.getString(R.string.saved_cancel),
+                        onClick = { sheet.dismiss() },
+                        modifier = Modifier.fillMaxWidth().testTag(SavedTags.RenameCancel),
+                        fillWidth = true,
+                    )
+                }
             }
         }
     }.also { present(it) }

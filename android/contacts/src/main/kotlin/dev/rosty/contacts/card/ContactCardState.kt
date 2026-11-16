@@ -79,11 +79,16 @@ data class FieldMenuItem(
     val op: FieldOp,
 )
 
-/** The date a birthday card prints and the age it reaches, when the year is known. */
+/**
+ * The date a birthday card prints and the age it reaches, when the year is known. [month] and [day] are the date as
+ * numbers, so Card Studio prints it in the app's locale.
+ */
 @Immutable
 data class BirthdayInfo(
     val dateLine: String,
     val ageYears: Int?,
+    val month: Int? = null,
+    val day: Int? = null,
 )
 
 /** A number, e-mail, date, address ... row. [title] is the value, [label] the small caption above/below it. */

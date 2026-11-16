@@ -1,0 +1,1 @@
+{"spec":{"template":"contact","palette":"ink","texts":{"title":"+90 555 000 12 34","numbers":"+90 555 000 12 34"},"photo":"$DIR/junk.jpg","initials":"+9","qr":"BEGIN:VCARD\nVERSION:3.0\nTEL:+90 555 000 12 34\nEND:VCARD\n"},"out":"$DIR/contact.png"}

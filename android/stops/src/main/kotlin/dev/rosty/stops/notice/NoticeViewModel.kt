@@ -239,7 +239,10 @@ class NoticeViewModel(
 
                 is Outcome.Err -> {
                     if (saved.error is RustError.Invalid) {
-                        mutable.update { it.copy(problem = problemOf(saved.error)) }
+                        // A refusal for a text the field has left behind is dropped (its newer check decides).
+                        if (templateField.text.toString() == text) {
+                            mutable.update { it.copy(problem = problemOf(saved.error)) }
+                        }
                     } else {
                         effectChannel.trySend(NoticeEffect.Toast(UiText.Res(R.string.notice_save_failed)))
                     }

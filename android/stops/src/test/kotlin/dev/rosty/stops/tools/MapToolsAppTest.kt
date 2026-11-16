@@ -4,8 +4,10 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -19,6 +21,7 @@ import dev.rosty.stops.SampleStops
 import dev.rosty.stops.home.HomeMapTag
 import dev.rosty.stops.home.HomeTags
 import dev.rosty.stops.pick.PickFixtures
+import dev.rosty.stops.saved.SavedTags
 import dev.rosty.stops.saved.settleRust
 import dev.rosty.testing.ShotTest
 import org.junit.Assert.assertEquals
@@ -103,6 +106,43 @@ class MapToolsAppTest : ShotTest() {
         compose.onNodeWithText("Measurement copied").assertExists()
         tap(ToolTags.MeasureDone)
         compose.onNodeWithTag(ToolTags.MeasureCard, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    /**
+     * S8: "Save as stop" in the measure card's More saves the first and last point as a stop, with Undo. Measured
+     * points have no name: the name field comes numbered ("Stop 3"), never empty.
+     */
+    @Test fun saveAsStopInTheMeasureMenuSavesTheTwoPoints() {
+        val fixture = start()
+        press(HomeTags.Layers)
+        menu("Measure distance")
+        tapMap(0.3f, 0.3f)
+        tapMap(0.7f, 0.35f)
+        tap(ToolTags.MeasureMore)
+        menu("Save as stop")
+        settleRust()
+        compose.onNodeWithTag(SavedTags.RenameField, useUnmergedTree = true).assertTextContains("Stop 3")
+        tap(SavedTags.RenameSave)
+        assertEquals(
+            3,
+            fixture.container.fake.saved!!
+                .stops.size,
+        )
+        assertEquals(
+            "Stop 3",
+            fixture.container.fake.saved!!
+                .stops
+                .last()
+                .name,
+        )
+        compose.onNode(hasTestTag("toast-text") and hasText("Saved as Stop 3")).assertExists()
+        compose.onNodeWithText("Undo").performClick()
+        settleRust()
+        assertEquals(
+            2,
+            fixture.container.fake.saved!!
+                .stops.size,
+        )
     }
 
     @Test fun clearOffersUndo() {

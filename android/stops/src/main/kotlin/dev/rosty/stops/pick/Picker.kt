@@ -142,6 +142,12 @@ class Picker internal constructor(
         overlays.presentStopSheet(StopSheetModel(stop, fromYou, lines.toImmutableList()), stopActions)
     }
 
+    /** The stop sheet of the transit stop under a pin (the pin menu's Lines row). */
+    fun openStopOf(dest: Destination) {
+        val id = dest.gtfsStop ?: return
+        scope.launch { openStop(PickRow.Stop(id, dest.label, dest.coord, distance = null, lines = 0)) }
+    }
+
     private fun destOf(stop: PickRow.Stop): Destination = Destination(stop.name, stop.coord, gtfsStop = stop.id)
 
     private fun copy(

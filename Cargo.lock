@@ -6366,6 +6366,7 @@ dependencies = [
  "base64 0.22.1",
  "image",
  "log",
+ "qrcode",
  "rosty_core",
  "rosty_geo",
  "rosty_wa_client",

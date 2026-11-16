@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import dev.rosty.contacts.card.CardWaPort
 import dev.rosty.contacts.card.RepositoryCardWaPort
+import dev.rosty.contacts.cards.CardPhotos
 import dev.rosty.contacts.data.AndroidReminderPort
 import dev.rosty.contacts.data.BirthdayAlarms
 import dev.rosty.contacts.data.BookRepository
@@ -24,6 +25,7 @@ import dev.rosty.core.model.shared.InferHomeCcRequest
 import dev.rosty.core.ops.CardsOps
 import dev.rosty.core.ops.ContactsOps
 import dev.rosty.core.ops.ContactsWaOps
+import dev.rosty.core.ops.NativeCardsOps
 import dev.rosty.core.ops.NativeContactsOps
 import dev.rosty.core.ops.NativeContactsWaOps
 import dev.rosty.core.ops.NativePeopleOps
@@ -36,7 +38,6 @@ import dev.rosty.core.ops.PhoneOps
 import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
-import dev.rosty.core.ops.UnavailableCardsOps
 import dev.rosty.people.AvatarResolver
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.WaFullPictures
@@ -258,7 +259,8 @@ open class ContactsContainer(
 
     protected open fun createQr(): QrOps = NativeQrOps(rust)
 
-    protected open fun createCards(): CardsOps = UnavailableCardsOps
+    /** The Rust card renderer (`cards.*`); a contact photo URI is copied to a cache file it can read. */
+    protected open fun createCards(): CardsOps = NativeCardsOps(rust, CardPhotos(context)::file)
 
     protected open fun createShortcuts(): ShortcutsRepository = AndroidShortcutsRepository(context)
 }

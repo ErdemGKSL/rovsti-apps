@@ -18,6 +18,7 @@ object AllContracts {
             PhoneContracts,
             ContactsContracts,
             QrContracts,
+            CardsContracts,
             PeopleContracts,
             MessagesContracts,
             ChatContracts,

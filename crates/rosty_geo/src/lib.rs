@@ -7,6 +7,7 @@
 
 pub mod alarm;
 pub mod backup;
+pub mod cadence;
 mod coord;
 pub mod coord_format;
 mod crossing;

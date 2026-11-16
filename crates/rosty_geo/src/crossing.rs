@@ -136,7 +136,7 @@ pub struct Diameter {
     b: Coord,
 }
 
-fn valid_coord(c: Coord) -> bool {
+pub(crate) fn valid_coord(c: Coord) -> bool {
     c.lat.is_finite()
         && c.lon.is_finite()
         && (-90.0..=90.0).contains(&c.lat)

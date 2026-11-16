@@ -43,7 +43,7 @@ of `e6-status.md`, messages to the main thread (gateway commit) and the APK buil
 
 ## Evidence
 
-- **Steps 1 and 2** (uncommitted in the worktree when written; nothing was run against WhatsApp):
+- **Steps 1 and 2** (`4dbd2820` proto and client, `1cb00880` gateway, `48a35940` store v6, `b69b5968` ffi, `df2db2c3` bridge, merge `f574d3c8`; nothing was run against WhatsApp):
   - Wire: `MediaOptions` gained `thumbnail_b64`, `width`, `height`, `waveform_b64`, `animated`, `view_once`;
     `MediaMeta` gained `waveform_b64`. The preview does not travel as base64 in the query (a URL of that size
     does not pass the Cloudflare tunnel): the client puts it in front of the file and names its length
@@ -60,3 +60,18 @@ of `e6-status.md`, messages to the main thread (gateway commit) and the APK buil
   - Device store schema v6: `messages.viewed_ms`, `messages.played_ms`, index `messages_gallery`. New ops
     `wa_sync.chat_media`, `wa_sync.media_viewed`, `wa_sync.mark_played`; the outbox action `mark_played`; a tap
     now fetches a received view-once message that was not opened (before: never).
+- **Steps 3 to 5** (`9dc8e0c7` `:design` viewer pages, `908221bb` `:platform` gallery writer and video player,
+  `74cc60f8` Messages, merge `5e8b510c`): one viewer for the photos and videos of a chat (zoom, swipe, drag down to
+  close, fly-back to the bubble), video on `MediaPlayer` and a `TextureView`, GIFs looping, Save through MediaStore
+  recorded with `keepMedia`, Share and Forward. No new dependency. 12 new goldens, none changed.
+- **Step 8** (`7e15709f` `:platform` recorder, `c54d7f2d` Messages, merge `c304abbf`): hold to record (Opus in Ogg,
+  mono, 16 kHz, 24 kbit/s, 1 s to 15 min), slide to cancel, slide up to lock and review, the waveform measured on the
+  device, `recording` chat state, played once, received waveform drawn; `RECORD_AUDIO`. 30 new goldens.
+- **Steps 6 and 7** (`98e5368d` proto, `84163bdc` gateway, `af90f197` store and ffi, `6e2de3ad` bridge, `3f80262b`
+  `:platform` media probe, `af0e71a5` Messages, merge `5a1560be`): stickers without a bubble, animated through
+  `AnimatedImageDrawable`; a received view once (and bot or hosted messages) is stored by the gateway as an
+  `unsupported` message with `meta.unavailable` and shown as "open it on your phone"; view once on send; several
+  files through a send preview (captions, order, view once per item, size, length and preview measured). No gateway
+  or device store migration. 10 new goldens.
+- **Outside the plan**: read ticks are light cyan (`2417157b`, `6d0c9fd7`), asked by the owner: they looked like the
+  delivered ones.

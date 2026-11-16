@@ -27,6 +27,7 @@ import dev.rosty.phone.settings.SavedWhat
 import dev.rosty.platform.calllog.CallLogRepository
 import dev.rosty.platform.calllog.CallLogResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -155,7 +156,8 @@ class DataViewModel(
     private val work: CoroutineScope = scope ?: viewModelScope
     private val ui = MutableStateFlow(DataUi())
     private val effects = Channel<DataEffect>(Channel.BUFFERED)
-    private var pendingDelete: Job? = null
+
+    @Volatile private var pendingDelete: Job? = null
 
     val state: StateFlow<DataUi> = ui.asStateFlow()
     val effect: Flow<DataEffect> = effects.receiveAsFlow()
@@ -290,9 +292,10 @@ class DataViewModel(
         if (pendingDelete?.isActive == true) return
         if (ui.value.calls == 0) return
         ui.update { it.copy(deletePending = true) }
-        say(DataEffect.DeleteAllPending(undoWindowMs))
-        pendingDelete =
-            work.launch {
+        // Lazy: the job is stored BEFORE the effect is announced, so an Undo that arrives the moment the UI sees the
+        // effect always finds (and cancels) it, even when actions run on different threads.
+        val job =
+            work.launch(start = CoroutineStart.LAZY) {
                 try {
                     delay(undoWindowMs)
                 } finally {
@@ -312,6 +315,9 @@ class DataViewModel(
                     }
                 }
             }
+        pendingDelete = job
+        say(DataEffect.DeleteAllPending(undoWindowMs))
+        job.start()
     }
 
     private fun undoDeleteAll() {

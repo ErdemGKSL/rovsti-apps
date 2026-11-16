@@ -55,8 +55,9 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.LocalDate
+import java.time.Instant
 import java.time.MonthDay
+import java.time.ZoneId
 import java.util.TimeZone
 
 /**
@@ -172,7 +173,8 @@ class FavoritesViewModel(
             is FavoritesAction.MakeCard -> {
                 val item = action.item
                 val birthday = item.kind == EventKind.Birthday
-                val date = MonthDay.from(LocalDate.now().plusDays(item.inDays))
+                val today = Instant.ofEpochMilli(clock()).atZone(ZoneId.systemDefault()).toLocalDate()
+                val date = MonthDay.from(today.plusDays(item.inDays))
                 (if (action.onPage) pageOutbox else outbox).trySend(
                     FavoritesEffect.OpenCardStudio(
                         CardStudioSubject(

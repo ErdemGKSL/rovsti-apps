@@ -43,4 +43,20 @@ of `e6-status.md`, messages to the main thread (gateway commit) and the APK buil
 
 ## Evidence
 
-(filled as steps land)
+- **Steps 1 and 2** (uncommitted in the worktree when written; nothing was run against WhatsApp):
+  - Wire: `MediaOptions` gained `thumbnail_b64`, `width`, `height`, `waveform_b64`, `animated`, `view_once`;
+    `MediaMeta` gained `waveform_b64`. The preview does not travel as base64 in the query (a URL of that size
+    does not pass the Cloudflare tunnel): the client puts it in front of the file and names its length
+    (`thumbnail_len`). A send with a newer option asks `POST /v1/messages/media/options` (the same handler):
+    an older gateway answers 404 there instead of dropping `view_once` without a word; the client then sends the
+    file the old way, except view once, which fails.
+  - whatsapp-rust 0.7.0 has no width or height in its option structs (`src/media.rs:20-63`); the gateway builds
+    the protobuf itself and sets `width`, `height`, `jpegThumbnail`, `waveform`, `gifPlayback`, `isAnimated` and
+    `viewOnce` on it (`waproto-0.7.0/src/whatsapp.proto`). View once is the inline flag inside a
+    `viewOnceMessage` wrapper; the library marks the stanza from either (`src/send/mod.rs:533-536`).
+  - Recording was already there: the route is `POST /v1/chatstate` with `state: "recording"` (not
+    `/v1/chats/{jid}/typing` with `kind`), and the `typing` event carries the same three states.
+  - No gateway store migration (the meta is a JSON column): no backup needed for this step.
+  - Device store schema v6: `messages.viewed_ms`, `messages.played_ms`, index `messages_gallery`. New ops
+    `wa_sync.chat_media`, `wa_sync.media_viewed`, `wa_sync.mark_played`; the outbox action `mark_played`; a tap
+    now fetches a received view-once message that was not opened (before: never).

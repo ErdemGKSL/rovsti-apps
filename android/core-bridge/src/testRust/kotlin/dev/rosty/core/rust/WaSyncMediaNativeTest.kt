@@ -99,9 +99,9 @@ class WaSyncMediaNativeTest {
     }
 
     @Test
-    fun aStoreOpensAtSchemaFive() =
+    fun aStoreOpensAtTheSchemaThisBuildWrites() =
         runBlocking {
-            open(dir()).use { assertEquals(5, it.opened.schemaVersion) }
+            open(dir()).use { assertEquals(6, it.opened.schemaVersion) }
         }
 
     @Test
@@ -130,7 +130,6 @@ class WaSyncMediaNativeTest {
                 assertFalse(store.enqueueMedia(ali, "video", now + 2, network = WaSyncNetwork.Wifi).getOrOk().queued)
                 val tapped = store.enqueueMedia(ali, "video", now + 3, tap = true).getOrOk()
                 assertTrue(tapped.queued && tapped.media.byTap)
-                assertFalse(store.enqueueMedia(ali, "once", now, tap = true).getOrOk().queued)
                 assertTrue((store.enqueueMedia(ali, "photo", now) as Outcome.Err).error is RustError.Invalid)
 
                 // On mobile data the sticker waits; the tapped video goes first.

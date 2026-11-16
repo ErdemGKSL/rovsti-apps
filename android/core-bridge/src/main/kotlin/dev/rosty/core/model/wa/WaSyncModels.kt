@@ -536,6 +536,13 @@ data class WaSyncMessage(
      * and for an outbox row. [mediaPath] is set while it is [WaSyncMediaState.Ready].
      */
     @SerialName("media_state") @EncodeDefault(NEVER) val mediaState: WaSyncMediaState? = null,
+    /**
+     * A view-once message ([MediaMeta.viewOnce]) that was opened on this device (`WaSyncStore.markViewed`): its
+     * file is gone and is never fetched again. Show "Opened".
+     */
+    @EncodeDefault(NEVER) val viewed: Boolean = false,
+    /** A received voice note whose played receipt was queued (`WaSyncStore.markPlayed`). */
+    @EncodeDefault(NEVER) val played: Boolean = false,
 )
 
 @Serializable
@@ -634,6 +641,73 @@ data class WaSyncMessageAnswer(
     val message: WaSyncMessage?,
 )
 
+// ---- the media of a chat, view once, played
+
+/** `wa_sync.chat_media`: a page of the media of [chat], newest first. */
+@Serializable
+data class WaSyncChatMediaRequest(
+    val handle: Long,
+    val chat: String,
+    /** 1 to 200. */
+    val limit: Int,
+    /** Only media older than this row. */
+    @EncodeDefault(NEVER) val before: WaSyncCursor? = null,
+    /** Only media newer than this row; alone, the page right above it. */
+    @EncodeDefault(NEVER) val after: WaSyncCursor? = null,
+    /** Image, Video, Document, Audio; empty: images and videos. */
+    @EncodeDefault(NEVER) val kinds: List<WaSyncKind> = emptyList(),
+)
+
+/** A page of the media of one chat, newest first. */
+@Serializable
+data class WaSyncGalleryPage(
+    val items: List<WaSyncMessage>,
+    /** Older media exists: pass it as `before`. */
+    @EncodeDefault(NEVER) val older: WaSyncCursor? = null,
+    /** Newer media exists: pass it as `after`. */
+    @EncodeDefault(NEVER) val newer: WaSyncCursor? = null,
+)
+
+@Serializable
+data class WaSyncMediaViewedRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    val chat: String,
+    val id: String,
+)
+
+/** `wa_sync.media_viewed`: the view-once message is opened for good. */
+@Serializable
+data class WaSyncViewed(
+    val handle: Long,
+    /** The media row as it is now: [WaSyncMediaState.Gone]. */
+    val media: WaSyncMediaEntry,
+    /** The cached file the message had: delete it. */
+    @EncodeDefault(NEVER) val delete: String? = null,
+    /** This call marked the message; false when it was viewed before. */
+    val first: Boolean,
+)
+
+@Serializable
+data class WaSyncMarkPlayedRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+    /** A fresh id per receipt; the same id twice is one row. */
+    @SerialName("client_id") val clientId: String,
+    val chat: String,
+    /** The received voice note that was played. */
+    val id: String,
+)
+
+/** `wa_sync.mark_played`. */
+@Serializable
+data class WaSyncPlayed(
+    val handle: Long,
+    /** The receipt waits in the outbox. False: the message was marked played before, nothing is sent again. */
+    val queued: Boolean,
+    @EncodeDefault(NEVER) val item: WaSyncOutboxItem? = null,
+)
+
 // ---- outbox
 
 /** What a queued row does (`rosty_app_core::wa_sync::Action`). */
@@ -660,7 +734,32 @@ sealed interface WaSyncAction {
         @SerialName("file_name") @EncodeDefault(NEVER) val fileName: String? = null,
         @EncodeDefault(NEVER) val seconds: Int? = null,
         @SerialName("voice_note") @EncodeDefault(NEVER) val voiceNote: Boolean = false,
-    ) : WaSyncAction
+        /** A small JPEG preview, base64 (photo, video, document); it becomes the thumbnail of the sent message. */
+        @SerialName("thumbnail_b64") @EncodeDefault(NEVER) val thumbnailB64: String? = null,
+        @EncodeDefault(NEVER) val width: Int? = null,
+        @EncodeDefault(NEVER) val height: Int? = null,
+        /** [MediaWaveform.encode] of a voice note. */
+        @SerialName("waveform_b64") @EncodeDefault(NEVER) val waveformB64: String? = null,
+        /** A video sent as a GIF, or an animated sticker. */
+        @EncodeDefault(NEVER) val animated: Boolean = false,
+        /** Photo, video or audio only; the sent file is not kept as cached media. */
+        @SerialName("view_once") @EncodeDefault(NEVER) val viewOnce: Boolean = false,
+    ) : WaSyncAction {
+        /** The options of the `wa.send_media_with` call that sends this row. */
+        fun options(): MediaOptions =
+            MediaOptions(
+                quotedId = quotedId,
+                fileName = fileName,
+                seconds = seconds,
+                voiceNote = voiceNote,
+                thumbnailB64 = thumbnailB64,
+                width = width,
+                height = height,
+                waveformB64 = waveformB64,
+                animated = animated,
+                viewOnce = viewOnce,
+            )
+    }
 
     @Serializable
     @SerialName("edit")
@@ -703,6 +802,18 @@ sealed interface WaSyncAction {
     data class Star(
         @SerialName("message_id") val messageId: String,
         val starred: Boolean,
+    ) : WaSyncAction
+
+    /**
+     * The played receipt of a received voice note. Queued by `WaSyncStore.markPlayed` only (the generic enqueue
+     * refuses it); send it with `wa.mark_played {chat, sender, ids: [messageId]}`. [sender] is the author in a
+     * group.
+     */
+    @Serializable
+    @SerialName("mark_played")
+    data class MarkPlayed(
+        @SerialName("message_id") val messageId: String,
+        @EncodeDefault(NEVER) val sender: String? = null,
     ) : WaSyncAction
 }
 

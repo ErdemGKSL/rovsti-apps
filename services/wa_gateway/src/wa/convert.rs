@@ -17,6 +17,9 @@ use super::lid::{self, LidMap, Pair};
 use crate::driver::DriverError;
 use crate::store::{MAX_THUMBNAIL_BYTES, MessageExtras};
 
+/// Longest waveform passed on (WhatsApp sends 64 samples).
+const MAX_WAVEFORM_BYTES: usize = 256;
+
 /// Longest quote preview kept.
 const QUOTE_PREVIEW_CHARS: usize = 120;
 
@@ -283,7 +286,16 @@ fn thumb(bytes: &Option<Vec<u8>>) -> Option<Vec<u8>> {
         .cloned()
 }
 
-/// Media details and the embedded preview image of `base`.
+/// The waveform bytes of a voice note, as sent (base64).
+fn waveform_b64(bytes: &Option<Vec<u8>>) -> Option<String> {
+    bytes
+        .as_deref()
+        .filter(|b| !b.is_empty() && b.len() <= MAX_WAVEFORM_BYTES)
+        .map(rosty_wa_proto::encode_b64)
+}
+
+/// Media details and the embedded preview image of `base`. `view_once` is
+/// for the inline flag only; [`extras`] adds the wrapper.
 fn media_details(base: &wa::Message) -> Option<(MediaMeta, Option<Vec<u8>>)> {
     if let Some(m) = base.image_message.as_option() {
         let preview = thumb(&m.jpeg_thumbnail);
@@ -319,6 +331,7 @@ fn media_details(base: &wa::Message) -> Option<(MediaMeta, Option<Vec<u8>>)> {
                 seconds: m.seconds,
                 voice_note: m.ptt.unwrap_or(false),
                 view_once: m.view_once.unwrap_or(false),
+                waveform_b64: waveform_b64(&m.waveform),
                 ..Default::default()
             },
             None,
@@ -395,7 +408,10 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
                     }),
             });
     }
-    if let Some((media, preview)) = media_details(base) {
+    if let Some((mut media, preview)) = media_details(base) {
+        // A view-once wrapper counts even when the media inside lacks the
+        // inline flag.
+        media.view_once = media.view_once || message.is_view_once();
         meta.media = Some(media);
         thumbnail = preview;
     }
@@ -774,6 +790,68 @@ mod tests {
             .media
             .unwrap();
         assert_eq!((media.seconds, media.voice_note), (Some(7), true));
+        assert_eq!(media.waveform_b64, None);
+
+        // The waveform WhatsApp sends with a voice note is passed on.
+        let samples: Vec<u8> = (0..64).collect();
+        let drawn = wa::Message {
+            audio_message: MessageField::some(wa::message::AudioMessage {
+                ptt: Some(true),
+                waveform: Some(samples.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let media = extras_of(convert(origin(false, None, CHAT), &drawn))
+            .meta
+            .media
+            .unwrap();
+        assert_eq!(media.waveform(), Some(samples.clone()));
+        assert_eq!(
+            media.waveform_b64,
+            Some(rosty_wa_proto::encode_b64(&samples))
+        );
+        // An empty or absurdly long one is dropped.
+        for odd in [vec![], vec![1; MAX_WAVEFORM_BYTES + 1]] {
+            let message = wa::Message {
+                audio_message: MessageField::some(wa::message::AudioMessage {
+                    waveform: Some(odd),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let media = extras_of(convert(origin(false, None, CHAT), &message))
+                .meta
+                .media
+                .unwrap();
+            assert_eq!(media.waveform_b64, None);
+        }
+
+        // View once: the inline flag, or a wrapper around media without it.
+        let photo = |view_once: Option<bool>| wa::Message {
+            image_message: MessageField::some(wa::message::ImageMessage {
+                view_once,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let view_once = |message: &wa::Message| {
+            extras_of(convert(origin(false, None, CHAT), message))
+                .meta
+                .media
+                .unwrap()
+                .view_once
+        };
+        assert!(!view_once(&photo(None)));
+        assert!(view_once(&photo(Some(true))));
+        let wrapped = wa::Message {
+            view_once_message_v2: MessageField::some(wa::message::FutureProofMessage {
+                message: MessageField::some(photo(None)),
+            }),
+            ..Default::default()
+        };
+        assert!(view_once(&wrapped));
+        assert!(view_once(&crate::wa::media::wrap_view_once(photo(None))));
 
         let doc = wa::Message {
             document_message: MessageField::some(wa::message::DocumentMessage {

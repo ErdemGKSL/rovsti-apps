@@ -19,6 +19,13 @@ pub mod routes {
     pub const SCHEDULED: &str = "/v1/scheduled";
     pub const SCHEDULED_ONE: &str = "/v1/scheduled/{id}";
     pub const SEND_MEDIA: &str = "/v1/messages/media";
+    /// The same send as [`SEND_MEDIA`]. A request that carries an option
+    /// from the media round (preview, pixel size, waveform, GIF flag, view
+    /// once) goes here: a gateway from before those options has no such
+    /// route and answers 404, where on [`SEND_MEDIA`] it would drop them
+    /// without a word (a view-once photo sent as an ordinary one) and read a
+    /// preview in the body as part of the file.
+    pub const SEND_MEDIA_OPTIONS: &str = "/v1/messages/media/options";
     pub const REACT: &str = "/v1/messages/reaction";
     pub const MARK_READ: &str = "/v1/read";
     pub const MESSAGE_MEDIA: &str = "/v1/messages/{message_id}/media";

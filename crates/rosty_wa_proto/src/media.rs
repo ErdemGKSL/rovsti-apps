@@ -23,6 +23,80 @@ pub fn check_size(len: u64) -> Result<(), MediaTooLarge> {
     }
 }
 
+/// Largest preview image sent along with a photo, video or document.
+pub const MAX_SEND_THUMBNAIL_BYTES: usize = 64 * 1024;
+/// Samples in a voice-note waveform.
+pub const WAVEFORM_LEN: usize = 64;
+/// Largest value of one waveform sample.
+pub const WAVEFORM_MAX: u8 = 100;
+
+/// An option of an outgoing media message that the gateway refuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum MediaOptionError {
+    #[error("thumbnail_b64 is not valid base64")]
+    ThumbnailNotBase64,
+    #[error("the thumbnail is {len} bytes, the limit is {MAX_SEND_THUMBNAIL_BYTES}")]
+    ThumbnailTooLarge { len: usize },
+    #[error("the thumbnail is not a JPEG image")]
+    ThumbnailNotJpeg,
+    #[error("thumbnail_len is {len}, the body has {body} bytes")]
+    ThumbnailLength { len: usize, body: usize },
+    #[error("waveform_b64 is not valid base64")]
+    WaveformNotBase64,
+    #[error("the waveform has {len} samples, it must have exactly {WAVEFORM_LEN}")]
+    WaveformLength { len: usize },
+    #[error("a waveform sample is above {WAVEFORM_MAX}")]
+    WaveformRange,
+    #[error("only a photo, a video or a voice message can be sent as view once")]
+    ViewOnceKind,
+}
+
+/// Standard base64, padded (what every `_b64` field carries).
+pub fn encode_b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// The bytes of a `_b64` field; `None` when it is not base64.
+pub fn decode_b64(text: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(text).ok()
+}
+
+/// A preview image: a JPEG of at most [`MAX_SEND_THUMBNAIL_BYTES`].
+pub fn check_thumbnail(bytes: &[u8]) -> Result<(), MediaOptionError> {
+    if bytes.len() > MAX_SEND_THUMBNAIL_BYTES {
+        Err(MediaOptionError::ThumbnailTooLarge { len: bytes.len() })
+    } else if !bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Err(MediaOptionError::ThumbnailNotJpeg)
+    } else {
+        Ok(())
+    }
+}
+
+/// A waveform: exactly [`WAVEFORM_LEN`] samples, none above [`WAVEFORM_MAX`].
+pub fn check_waveform(bytes: &[u8]) -> Result<(), MediaOptionError> {
+    if bytes.len() != WAVEFORM_LEN {
+        Err(MediaOptionError::WaveformLength { len: bytes.len() })
+    } else if bytes.iter().any(|&b| b > WAVEFORM_MAX) {
+        Err(MediaOptionError::WaveformRange)
+    } else {
+        Ok(())
+    }
+}
+
+/// WhatsApp has view once for photos, videos and voice messages only. A
+/// document or sticker asked as view once is refused, never sent as an
+/// ordinary message.
+pub fn check_view_once(kind: MediaKind, view_once: bool) -> Result<(), MediaOptionError> {
+    let can = matches!(kind, MediaKind::Image | MediaKind::Video | MediaKind::Audio);
+    if view_once && !can {
+        Err(MediaOptionError::ViewOnceKind)
+    } else {
+        Ok(())
+    }
+}
+
 /// Decides the media kind and MIME type of a picked file.
 ///
 /// The picker's MIME wins. When it is missing, blank or
@@ -123,6 +197,62 @@ mod tests {
                 (kind, want.to_owned()),
                 "{name}"
             );
+        }
+    }
+
+    #[test]
+    fn thumbnail_rules() {
+        let jpeg = |len: usize| {
+            let mut v = vec![0u8; len];
+            v[..3].copy_from_slice(&[0xFF, 0xD8, 0xFF]);
+            v
+        };
+        assert_eq!(check_thumbnail(&jpeg(MAX_SEND_THUMBNAIL_BYTES)), Ok(()));
+        assert_eq!(
+            check_thumbnail(&jpeg(MAX_SEND_THUMBNAIL_BYTES + 1)),
+            Err(MediaOptionError::ThumbnailTooLarge {
+                len: MAX_SEND_THUMBNAIL_BYTES + 1
+            })
+        );
+        assert_eq!(
+            check_thumbnail(b"\x89PNG\r\n"),
+            Err(MediaOptionError::ThumbnailNotJpeg)
+        );
+        assert_eq!(
+            check_thumbnail(&[]),
+            Err(MediaOptionError::ThumbnailNotJpeg)
+        );
+    }
+
+    #[test]
+    fn waveform_rules() {
+        assert_eq!(check_waveform(&[100; WAVEFORM_LEN]), Ok(()));
+        assert_eq!(check_waveform(&[0; WAVEFORM_LEN]), Ok(()));
+        assert_eq!(
+            check_waveform(&[0; WAVEFORM_LEN - 1]),
+            Err(MediaOptionError::WaveformLength { len: 63 })
+        );
+        assert_eq!(
+            check_waveform(&[0; WAVEFORM_LEN + 1]),
+            Err(MediaOptionError::WaveformLength { len: 65 })
+        );
+        let mut loud = [0u8; WAVEFORM_LEN];
+        loud[63] = 101;
+        assert_eq!(check_waveform(&loud), Err(MediaOptionError::WaveformRange));
+    }
+
+    #[test]
+    fn view_once_kinds() {
+        use MediaKind::*;
+        for kind in [Image, Video, Audio] {
+            assert_eq!(check_view_once(kind, true), Ok(()));
+        }
+        for kind in [Document, Sticker] {
+            assert_eq!(
+                check_view_once(kind, true),
+                Err(MediaOptionError::ViewOnceKind)
+            );
+            assert_eq!(check_view_once(kind, false), Ok(()));
         }
     }
 

@@ -758,6 +758,12 @@ impl WaRuntime {
             file_name: req.file_name.as_deref(),
             seconds: req.seconds,
             voice_note: req.voice_note,
+            thumbnail: req.thumbnail.as_deref(),
+            width: req.width,
+            height: req.height,
+            waveform: req.waveform.as_deref(),
+            animated: req.animated,
+            view_once: req.view_once,
         };
         let mut message = media::build_message_with(
             req.kind,
@@ -779,6 +785,11 @@ impl WaRuntime {
                 own_jid,
             ));
             quoted = Some(quoted_meta(quoted_id, stored.as_ref(), own_jid));
+        }
+        // After the reply context: that is set on the media message itself,
+        // which the wrapper would hide.
+        if req.view_once {
+            message = media::wrap_view_once(message);
         }
         let raw = message.encode_to_vec();
         let mut extras = convert::extras(&message);

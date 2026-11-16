@@ -150,7 +150,7 @@ WhatsApp (E2.14): `wa.open {url, key?, cache_dir?}` answers `{handle}`, a `rosty
 `rosty_wa_proto` request}` and answers the proto type (field names are the gateway's). The client call runs outside the registry lock. Errors: `network`, `auth` (401 and 403),
 `invalid` with the gateway's own sentence (`detail.code` is its error code; a `rate_limited` one may add `detail.retry_after_ms` and
 `detail.source` = `whatsapp` | `gateway`) and `parse`. Bytes (`wa.media`, `wa.thumbnail`, `wa.status_media`, `wa.status_thumbnail`, `wa.picture`)
-answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the handle's cache directory (Kotlin deletes it). `wa.send_media(_with)` takes `data_b64` or a `path`.
+answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the handle's cache directory (Kotlin deletes it). `wa.send_media(_with)` takes `data_b64` or a `path`. `wa.send_media_with` `options` (E6-WA R3, all optional): `quoted_id`, `file_name`, `seconds`, `voice_note`, `thumbnail_b64` (JPEG, at most 64 KiB decoded; photo, video, document), `width`, `height` (photo, video, sticker), `waveform_b64` (exactly 64 bytes, each 0 to 100; audio), `animated` (a video sent as a GIF, an animated sticker), `view_once` (photo, video, audio only). A bad preview or waveform, or view once on a document or sticker, is `invalid` (`detail.code` `bad_request`) before anything is uploaded; an option the kind has no field for is ignored. With one of the newer options set the client asks `POST /v1/messages/media/options` and puts the preview in front of the file (`thumbnail_len`); a gateway from before them answers 404 there, and the file is then sent the old way without them, except a view-once send, which fails (`invalid`, `detail.code` `not_found`). `wa.chat_state` `state` is `typing`, `recording` or `paused`.
 `wa.events_start {handle, instance, after?}` answers a stream handle and emits every socket message as event `wa.event` `{instance, event}` with `event.kind` one of `connected`,
 `event` (`seq`, `at_ms`, `event` = the gateway event, tagged `type`; since E6-WA R2 also `hello {epoch}` as the first frame of every socket, `account_changed {old_pn?, new_pn}`, `resync {epoch?}`, `history_synced {chats, progress, sync_type?, messages, oldest_ms?}`, and `state` and `wa.status` carry `epoch?`, `account_epoch?`, `history?: {state, progress, chats, messages, oldest_ms}`), `disconnected {reason}`, `unauthorized`; `wa.events_reconnect_now`, `RustNative.release` stops it. `wa.call_audio_open
 {handle, call_id}` answers an audio handle for `RustNative.audioPush` / `audioPull` (push takes microphone frames of exactly 1 920 bytes and drops any other size; the socket asks for 20 ms speaker frames (`?spk_ms=20`), and pull waits up to 20 ms and answers the frame's bytes: 640 from a gateway that sends 20 ms frames, 1 920 from an older one; 0 when nothing came, -1 when the call ended). Fixtures run against a loopback stub that answers `crates/rosty_ffi/tests/data/wa/<stem>.json` (`tests/support/mod.rs`); each file also states the request
@@ -204,7 +204,7 @@ carry `media_path?` (the cached file) and `media_state?` (left out while nothing
 voice notes and stickers are `auto`, on mobile data images and voice notes; video, documents and other audio are `on_tap`; view-once
 media and messages without a file are `never`; nothing is `auto` on `roaming`, `data_saver` or `none`, nor when `free_bytes` minus the
 file's size is under 500 MiB. `wa_sync.media_enqueue {handle, now_ms, chat, id, tap?, network?, free_bytes?}` asks for the file:
-with `tap` it is queued whatever the network (never view-once), without it the rules decide under `network` (required then) and a
+with `tap` it is queued whatever the network (view-once: see the media round below), without it the rules decide under `network` (required then) and a
 deleted message, a `failed` and a `gone` file are left alone; answers `{queued, decision, media}` (`queued`: it waits or is being
 downloaded; a `ready` file stays as it is; a tap on a file that waits for its next attempt sends it first, now).
 `wa_sync.media_due {handle, now_ms, limit?, network?, free_bytes?}` hands out the downloads to make (`{items, held, next_wake_ms?}`;
@@ -232,6 +232,32 @@ unsent outbox row names. Leave `files` out when the listing failed: an empty lis
 queued, downloading, failed, cap_bytes?, exempt_over_cap}` for the settings screen (`outbox`: files of unsent sends that are not
 cached files; `cap_bytes` left out without a limit). A merge of two chats moves the media rows too; a message both chats held keeps
 the row that has the file.
+Media round (E6-WA R3, schema v6): a `send_media` action carries, next to `file`, `media`, `mime`, `size`, `caption?`, `quoted_id?`,
+`file_name?`, `seconds?` and `voice_note?`, the options of the gateway call: `thumbnail_b64?`, `width?`, `height?`, `waveform_b64?`,
+`animated?`, `view_once?` (left out when unset, so a row of an older build reads and writes as before). They are checked when the row
+is queued (`invalid`), come back on the due row for `wa.send_media_with`, and show on the waiting row and on the sent message as
+`media` until the gateway describes the message; the preview becomes the message's thumbnail; the file of a view-once send is not
+kept as cached media (`wa_sync.media_reconcile` then lists it for deletion). Thread rows (`thread`, `message`, `starred`,
+`chat_media`, `chats[].last`) carry in `media`: `waveform_b64?` (the 64 samples of a voice note, base64), `animated`, `view_once`,
+`voice_note`, and two local marks, left out when false: `viewed` (a view-once message opened on this device) and `played` (the
+played receipt of a received voice note was queued).
+`wa_sync.mark_played {handle, now_ms, client_id, chat, id}` queues the played receipt of a received voice note as an outbox row
+(`action: {kind: "mark_played", message_id, sender?}`; `sender` is the author in a group) and answers `{queued, item?}`: once per
+message (`queued: false` and no `item` when it was marked before; the same `client_id` again answers the queued row); anything but
+a received voice note is `invalid`, an unknown message `not_found`. The row goes out through `wa_sync.outbox_due` (send it with
+`wa.mark_played {chat, sender?, ids: [message_id]}`) and `wa_sync.outbox_settle`; a rejected one is dropped (`state: failed`, no
+row left) and the message stays played. `wa_sync.outbox_enqueue` refuses a `mark_played` action (`invalid`).
+`wa_sync.media_viewed {handle, now_ms, chat, id}`: the owner opened a view-once message. Answers `{media, delete?, first}`: the
+media row is `gone` for good, `delete` is the cached file to remove, the thumbnail is dropped, `first` is false when it was viewed
+before. Not view once: `invalid`. View-once media is never queued by the auto-download rules; `wa_sync.media_enqueue` with `tap`
+queues a received one that was not viewed yet (the tap that opens it) and answers `never` once it was viewed and for one the owner
+sent; a download that lands after the message was viewed is not recorded (`wa_sync.media_settle` names the file in `replaced`).
+`wa_sync.chat_media {handle, chat, limit, before?, after?, kinds?}` pages the media of a chat for a viewer or a gallery, newest
+first, as thread rows: `{items, older?, newer?}`. `kinds` is any of `image`, `video`, `document`, `audio` (left out: `image` and
+`video`; another kind is `invalid`); `limit` is 1 to 200. `before` and `after` are `{timestamp_ms, id}` of any row: `before` alone
+is the page below it, `after` alone the page right above it (still newest first), both a window between them. `older` (pass as
+`before`) and `newer` (pass as `after`) are present when media lies beyond that end. Left out: deleted messages, view-once media,
+sends still in the outbox, messages cleared on another device. `chat` may be any id of the chat (a merged chat's old key).
 Gateway and account (E6-WA R2): `wa_sync.note_status {handle, now_ms, epoch?, account_epoch?, own_pn?, own_lid?, history?}` takes
 what the gateway says about itself (every `wa.status` answer, and the `epoch` alone of the event socket's first frame or of a
 `resync`) and answers `{gap, account_changed, delete_files?, rekeyed?, rejected?, resync, history?}`. A stored `epoch` other than
@@ -378,7 +404,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
-| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
 | `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |

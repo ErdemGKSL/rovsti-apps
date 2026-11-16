@@ -402,7 +402,47 @@ data class MediaMeta(
     @SerialName("view_once") @EncodeDefault(NEVER) val viewOnce: Boolean = false,
     /** A preview image can be fetched with `thumbnail`. */
     @EncodeDefault(NEVER) val thumbnail: Boolean = false,
-)
+    /**
+     * The waveform of a voice note as WhatsApp carries it: base64 of 64 loudness samples, each 0 to 100. Read it
+     * with [waveform], which checks it.
+     */
+    @SerialName("waveform_b64") @EncodeDefault(NEVER) val waveformB64: String? = null,
+) {
+    /** The 64 samples (0 to 100) of a voice note; null when the message has none or what came is not one. */
+    fun waveform(): ByteArray? = MediaWaveform.decode(waveformB64)
+}
+
+/** The waveform of a voice note on the wire: exactly [SAMPLES] bytes, each 0 to [MAX], as standard base64. */
+object MediaWaveform {
+    const val SAMPLES = 64
+    const val MAX = 100
+
+    /** The samples of [b64]; null when it is missing, not base64, not [SAMPLES] long or out of range. */
+    fun decode(b64: String?): ByteArray? {
+        val text = b64?.takeIf { it.isNotEmpty() } ?: return null
+        val bytes =
+            try {
+                java.util.Base64
+                    .getDecoder()
+                    .decode(text)
+            } catch (_: IllegalArgumentException) {
+                return null
+            }
+        return bytes.takeIf(::valid)
+    }
+
+    /** [samples] for `waveform_b64`; null when they are not a waveform (the gateway would refuse them). */
+    fun encode(samples: ByteArray): String? =
+        if (valid(samples)) {
+            java.util.Base64
+                .getEncoder()
+                .encodeToString(samples)
+        } else {
+            null
+        }
+
+    fun valid(samples: ByteArray): Boolean = samples.size == SAMPLES && samples.all { it in 0..MAX }
+}
 
 @Serializable
 data class Location(
@@ -589,14 +629,33 @@ data class ChatAction(
     val action: ChatActionKind,
 )
 
-/** Extras of a media upload; all four are always sent. */
+/**
+ * Extras of a media upload. The first four are always sent; the rest (E6-WA R3) only when set. The gateway puts
+ * each on the message when the kind has a field for it and makes nothing up when it is missing: [thumbnailB64] on
+ * a photo, video or document, [width] and [height] on a photo, video or sticker, [waveformB64] on audio,
+ * [animated] on a video (it plays as a GIF) or a sticker. [viewOnce] is for a photo, a video or audio only: on a
+ * document or sticker the call is refused. A bad preview or waveform is refused too, before anything is uploaded.
+ */
 @Serializable
 data class MediaOptions(
     @SerialName("quoted_id") val quotedId: String? = null,
     @SerialName("file_name") val fileName: String? = null,
     val seconds: Int? = null,
     @SerialName("voice_note") val voiceNote: Boolean = false,
-)
+    /** A small JPEG preview, base64; at most [MAX_THUMBNAIL_BYTES] decoded. */
+    @SerialName("thumbnail_b64") @EncodeDefault(NEVER) val thumbnailB64: String? = null,
+    @EncodeDefault(NEVER) val width: Int? = null,
+    @EncodeDefault(NEVER) val height: Int? = null,
+    /** [MediaWaveform.encode]: exactly 64 samples, each 0 to 100. */
+    @SerialName("waveform_b64") @EncodeDefault(NEVER) val waveformB64: String? = null,
+    @EncodeDefault(NEVER) val animated: Boolean = false,
+    @SerialName("view_once") @EncodeDefault(NEVER) val viewOnce: Boolean = false,
+) {
+    companion object {
+        /** The largest preview the gateway takes. */
+        const val MAX_THUMBNAIL_BYTES = 64 * 1024
+    }
+}
 
 // ---- groups, lookup
 

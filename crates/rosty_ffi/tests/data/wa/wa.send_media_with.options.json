@@ -1,0 +1,12 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/media/options?chat=905321234567%40s.whatsapp.net&kind=video&mime=video%2Fmp4&seconds=3&width=640&height=360&animated=true&view_once=true&thumbnail_len=4",
+  "body_b64": "/9j/4E9HRw=="
+ },
+ "status": 200,
+ "body": {
+  "message_id": "3EB0B5",
+  "timestamp_ms": 1790000001999
+ }
+}

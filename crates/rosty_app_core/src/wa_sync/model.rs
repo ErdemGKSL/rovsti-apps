@@ -245,6 +245,13 @@ pub struct MessageRow {
     /// Edits, deletes and reactions of this message that wait in the outbox.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pending: Vec<PendingOp>,
+    /// A view-once message that was opened on this device ([`super::Store::media_viewed`]): its file is gone
+    /// and is never fetched again.
+    #[serde(skip_serializing_if = "is_false")]
+    pub viewed: bool,
+    /// A received voice note whose played receipt was queued ([`super::Store::mark_played`]).
+    #[serde(skip_serializing_if = "is_false")]
+    pub played: bool,
 }
 
 /// One row of the chat list.
@@ -296,6 +303,18 @@ pub struct ThreadPage {
     pub reached_start: bool,
     /// A resync of this chat is still filling a hole.
     pub syncing: bool,
+}
+
+/// A page of the media of one chat, newest first ([`super::Store::chat_media`]).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct GalleryPage {
+    pub items: Vec<MessageRow>,
+    /// Older media exists: pass it as `before` for the page that follows this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub older: Option<ThreadCursor>,
+    /// Newer media exists: pass it as `after` for the page that precedes this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub newer: Option<ThreadCursor>,
 }
 
 /// Where a page of starred messages ended: pass it back as `before` for the next (older) page.

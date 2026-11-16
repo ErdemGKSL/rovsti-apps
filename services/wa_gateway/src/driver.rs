@@ -100,6 +100,18 @@ pub struct SendMedia {
     pub seconds: Option<u32>,
     /// Send audio as a voice note.
     pub voice_note: bool,
+    /// A JPEG preview of a photo, video or document (checked by the route).
+    pub thumbnail: Option<Vec<u8>>,
+    /// Pixel size of a photo, video or sticker.
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// Waveform of a voice note: 64 samples, each 0..=100 (checked by the
+    /// route).
+    pub waveform: Option<Vec<u8>>,
+    /// A video that plays as a GIF, or an animated sticker.
+    pub animated: bool,
+    /// View once: photo, video or audio only (checked by the route).
+    pub view_once: bool,
 }
 
 /// A stored message an action targets.
@@ -1542,10 +1554,34 @@ mod fake {
                 let timestamp_ms = now_ms();
                 let message_id = self.next_id();
                 let size = req.data.len() as u64;
+                // The real driver reads these back from the message it
+                // built; the fake applies the same per-kind rules.
+                let sized = matches!(
+                    req.kind,
+                    MediaKind::Image | MediaKind::Video | MediaKind::Sticker
+                );
+                let audio = req.kind == MediaKind::Audio;
+                let thumbnail = req.thumbnail.clone().filter(|_| {
+                    matches!(
+                        req.kind,
+                        MediaKind::Image | MediaKind::Video | MediaKind::Document
+                    )
+                });
                 let media = MediaMeta {
                     file_name: req.file_name.clone(),
                     seconds: req.seconds,
                     voice_note: req.voice_note,
+                    width: req.width.filter(|_| sized),
+                    height: req.height.filter(|_| sized),
+                    animated: req.animated
+                        && matches!(req.kind, MediaKind::Video | MediaKind::Sticker),
+                    view_once: req.view_once,
+                    thumbnail: thumbnail.is_some(),
+                    waveform_b64: req
+                        .waveform
+                        .as_deref()
+                        .filter(|_| audio)
+                        .map(rosty_wa_proto::encode_b64),
                     ..Default::default()
                 };
                 let meta = MessageMeta {
@@ -1574,6 +1610,7 @@ mod fake {
                     MessageExtras {
                         meta,
                         raw_proto: Some(req.data),
+                        thumbnail,
                         ..Default::default()
                     },
                 )

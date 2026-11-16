@@ -589,3 +589,52 @@ Open questions for the owner (each with the default the plan assumes):
 - Q3 New contact: looked up at the next run or on Sync Now; no contacts-changed trigger (the default).
 - Q4 Pictures: not asked; the default stands (the gateway sends the full picture, the phone downscales).
 - Q5 Retention on the gateway: job numbers 24 h, lookup answers (negatives included) up to 30 days (the default).
+
+## Evidence
+
+### Steps 1 to 6: wire, client, gateway, device planner, FFI, bridge (2026-11-16)
+
+Built on `86e6ab31`, uncommitted. Steps 7 and 8 (`android/people`, `android/contacts`, Phone's runner, worker, triggers,
+notification and UI) are not part of this round.
+
+What was built:
+
+- **Wire** (`crates/rosty_wa_proto/src/people.rs`): `PeopleSyncStart`/`PeopleEntry`, `PeopleJobStatus` with
+  `PeopleJobState`/`PeopleJobPhase`/`PeopleWaitSource` (each with an `other` catch-all), `people_hash` (pinned vector
+  `396c0369f4e9255e`, checked independently), `start_digest`, `accept_entries` (the number rule, 5 000 cap),
+  `BundleWriter` and the streaming `read_bundle`; routes `PEOPLE_SYNC`, `PEOPLE_SYNC_JOB`, `PEOPLE_SYNC_BUNDLE`.
+- **Client** (`rosty_wa_client`): `people_sync_start` (bare 404 -> `not_found` via `from_status_optional`),
+  `people_sync_status(job, rev, wait_ms)`, `people_sync_bundle(job, after, max_bytes, on_record)` (ureq 3.5
+  `Body::with_config().limit(..).reader()`, `body/mod.rs:421, 502, 557`; a cut part is `ClientError::Http`),
+  `people_sync_cancel` (404 is fine).
+- **Gateway**: schema v9 (`people_jobs`, `people_job_numbers`, `people_lookups`; additive, one transaction like every
+  migration), `store/people.rs`, `people_job.rs` (pacer, task, `resume_all`, cancel, hourly tick, `forget`),
+  `people_routes.rs`, `clock.rs` (the allowances, the cooldown and the job read time through `AppState::now`, so tests
+  drive a manual clock), `AppState::charge_lookups`; the three tables in `ACCOUNT_TABLES`, `people-job` in
+  `ACCOUNT_CACHE_DIRS`, `Config::people_job_dir`; `main.rs` resumes working jobs and starts the tick.
+- **Device planner** (`rosty_app_core::people_sync`): `Remote`/`Synced`/`JobRef`/`JobView`, stages `server`/`download`,
+  `Interrupt::ServerWorking`, steps `JobStart`/`JobWatch`/`JobFetch`/`JobDone`, reports `JobStarted`/`JobUnsupported`/
+  `Job`/`JobGone`/`Bundle`/`JobClosed`, `Finished.changed`/`bytes`, `Status.attempt_ms`; `Book::plan` believes "no
+  picture" for 7 days (`REVALIDATE_MS`).
+- **FFI**: `wa.people_sync_start|status|bundle|cancel`, `people.sync_begin {jobs}`, fixtures (stub routes in
+  `crates/rosty_ffi/tests/data/wa/`, seed `crates/rosty_app_core/tests/fixtures/dirs/people_job`), `OPS.md`.
+- **Bridge**: `PeopleJobModels.kt`, `SyncModels.kt` additions, `WaOps`/`NativeWaOps`/`WaGateway.peopleSync*`,
+  `FakeWaGateway` (`:wa` testFixtures) scripts for the four ops, contract models, `PeopleSyncJobNativeTest`.
+
+Deviations from the plan:
+
+- `people_jobs` also stores `done`, `total`, `numbers`, `eta_ms` (progress survives a restart and the long-poll reads it
+  from the row); `people_job_numbers` also stores `spooled_id` (which picture id the spooled bytes are), and the spool is
+  one folder per job (`people-job/<job_id>/<seq>.bin`) so a replacing job never reads the old one's bytes.
+- The job checks before every WhatsApp request that it still works (one store read), so a cancel, expiry or account
+  wipe stops it before the next request rather than after it.
+- Job mode is opt-in per slice: `people.sync_begin {jobs: true}` (`begin_with(.., jobs)`); without it the planner is the
+  v2 sync and a stored job-mode run continues in the v2 steps. This keeps today's runner working until step 7 sets it.
+- The FFI ops answer the expected 404s as data (`{supported: false}`, `{gone: true}`) instead of errors.
+- `wa.people_sync_bundle` deletes the picture files of a cut part and the planner re-reads the whole part (the cursor
+  stays at the last complete part).
+- `eta_ms` covers the current phase and the running wait only (later phases are not known yet).
+- No contacts-changed trigger, no `PERIOD_MS`-equivalent in Rust (there is none; 12 h is Kotlin's, step 7).
+
+Not verified: anything against real WhatsApp (pace, `backoff`, usync picture ids, R2), the deploy and the v9
+migration on the Pi's database, Kotlin runner behaviour (step 7).

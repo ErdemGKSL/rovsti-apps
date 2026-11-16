@@ -89,6 +89,16 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
   answers `false`).
 - The trip status (`FixOut`: the headless `trip_fix` answer and `out` of `stops.trip_fix`) carries `eta_min`, the whole minutes of
   "about 14 min" in its `text` (null without a speed), so the live card can ask `stops.arrival_clock` (S41).
+- The trip's cadence (E7 R4, AD-SA10): `FixOut.next_fix_ms` is a rung of `rosty_geo::cadence::LADDER_S`, planned from the
+  speed history kept in `trip.json` (`speed`, absent when empty) so the next fix always lands before the user can reach the
+  line, never more often than the old curve (`stops.poll`). `FixOut` adds `speed_mps` (the measured speed, null without one),
+  `assumed_mps` and `cadence` (`cold` | `bound` | `doppler` | `average` | `floor`; both null when not tracking) and `late`
+  (the fix came after the previous `retry_ms`). `FixIn` takes an optional `elapsed_ms` (the fix's monotonic clock), the
+  history's clock when present. The headless kind `trip_no_fix {dir, now_ms, elapsed_ms?}` is the watchdog's call when no
+  provider found a fix: a `FixOut` without `at` (`late` true, `text` empty before any usable fix) whose interval dead-reckons
+  from the last usable fix; it never rings. `stops.cadence {line_m?, accuracy_m?, notice_m?, assumed_mps?, est_mps?, prev_ms?,
+  prev_high?}` answers one step of the plan `{interval_ms, retry_ms, high_accuracy, assumed_mps, cold_ms}` (`cold_ms` is the
+  old curve); the trip does not call it.
 - Saved stop notes (S44): `SavedStop.note` (absent from `saved.json` when empty, so the file stays version 2 both ways; one trimmed
   line of at most 200 characters). `stops.saved_edit {kind: "set_note", id, note}` sets it, a blank text clears it, a longer one is
   `invalid` with `reason: "note_too_long"`. The note is a line under the stop in `stops.saved_list`'s share text, the last line of
@@ -943,6 +953,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_geo::alarm::MIN_ALARM_VOLUME_PCT` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
 | `rosty_geo::arrival_clock` | stops | stops | op | stops.arrival_clock, stops.format_distance |
 | `rosty_geo::backup::Backup` | stops | stops | op | stops.backup_export, stops.backup_parse |
+| `rosty_geo::cadence::plan` | stops | stops | op | stops.cadence |
 | `rosty_geo::coord_format::CoordFormat` | stops | stops | op | stops.coord_format, stops.coord_parse |
 | `rosty_geo::coord_format::cardinal` | stops | stops | op | stops.coord_format, stops.coord_parse |
 | `rosty_geo::coord_format::from_you_text` | stops | stops | op | stops.coord_format, stops.coord_parse |

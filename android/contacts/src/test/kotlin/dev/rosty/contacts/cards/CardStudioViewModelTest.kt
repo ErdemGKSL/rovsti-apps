@@ -64,13 +64,31 @@ class CardStudioViewModelTest {
             assertFalse(m.state.value.rendering)
         }
 
-    @Test fun aContactWithoutABirthdayOpensOnContactAndHasNoBirthdayTemplate() =
+    @Test fun aContactWithoutABirthdayOpensOnContact() =
         runTest {
             val m = model(StudioSamples.plain)
             runCurrent()
             assertEquals(CardTemplate.Contact, m.state.value.template)
-            assertFalse(CardTemplate.Birthday in StudioSamples.plain.templates)
             assertEquals(1, ops.renders.size)
+        }
+
+    @Test fun theBirthdayTabOfAContactWithoutABirthdayStillRenders() =
+        runTest {
+            val m = model(StudioSamples.plain)
+            runCurrent()
+            m.onAction(CardStudioAction.PickTemplate(CardTemplate.Birthday))
+            settle()
+            val state = m.state.value
+            assertEquals(CardTemplate.Birthday, state.template)
+            assertFalse(state.failed)
+            assertFalse(state.rendering)
+            assertNotNull(state.preview)
+            assertEquals(
+                CardTemplate.Birthday,
+                ops.renders
+                    .last()
+                    .spec.template,
+            )
         }
 
     @Test fun eachSlowSwitchIsOneRender() =

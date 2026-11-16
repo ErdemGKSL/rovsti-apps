@@ -4,6 +4,7 @@ import dev.rosty.core.ops.CardTemplate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -48,10 +49,33 @@ class CardTextsTest {
     fun aNumberNamedContactWithoutABirthdayOpensOnContact() {
         val who = StudioSamples.numberNamed
         assertEquals(CardTemplate.Contact, who.defaultTemplate)
-        assertFalse(CardTemplate.Birthday in who.templates)
+        assertTrue(CardTemplate.Birthday in who.templates)
         val texts = cardTexts(context, who, CardTemplate.Contact)
         assertEquals("+90 555 000 12 34", texts["title"])
         assertEquals("+90 555 000 12 34", texts["numbers"])
         assertNull(texts["date_line"])
+    }
+
+    /** The Birthday tab of a contact without a birthday: a greeting by name, no age line and no date pill. */
+    @Test
+    fun theBirthdayCardWithoutABirthdayHasNoDateAndNoAge() {
+        val texts = cardTexts(context, StudioSamples.numberNamed, CardTemplate.Birthday)
+        assertEquals("Happy birthday, +90 555 000 12 34!", texts["title"])
+        assertFalse("age_line" in texts)
+        assertFalse("date_line" in texts)
+    }
+
+    @Test
+    fun cardDateFollowsTheLocale() {
+        assertEquals("October 3", cardDate(context, 10, 3))
+        assertNull(cardDate(context, null, 3))
+        assertNull(cardDate(context, 2, 30))
+    }
+
+    @Config(qualifiers = "tr")
+    @Test
+    fun cardDateInTurkish() {
+        assertEquals("3 Ekim", cardDate(context, 10, 3))
+        assertEquals("29 Şubat", cardDate(context, 2, 29))
     }
 }

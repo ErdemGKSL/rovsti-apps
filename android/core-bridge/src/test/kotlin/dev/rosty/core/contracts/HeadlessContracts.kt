@@ -16,6 +16,7 @@ import dev.rosty.core.model.headless.TripEndAnswer
 import dev.rosty.core.model.headless.TripEndRequest
 import dev.rosty.core.model.headless.TripFixAnswer
 import dev.rosty.core.model.headless.TripFixRequest
+import dev.rosty.core.model.headless.TripNoFixRequest
 import dev.rosty.core.model.headless.WaDigestAnswer
 import dev.rosty.core.model.headless.WaDigestRequest
 import dev.rosty.core.model.headless.WaReplyAnswer
@@ -35,6 +36,7 @@ object HeadlessContracts : ContractModels {
             pair<WaReplyRequest, WaReplyAnswer>("wa_reply")
             pair<MsgRemindRequest, MsgRemindAnswer>("msg_remind")
             pair<TripFixRequest, TripFixAnswer>("trip_fix")
+            pair<TripNoFixRequest, TripFixAnswer>("trip_no_fix")
             pair<TripAlarmRequest, TripAlarmAnswer>("trip_alarm")
             pair<TripEndRequest, TripEndAnswer>("trip_end")
         }

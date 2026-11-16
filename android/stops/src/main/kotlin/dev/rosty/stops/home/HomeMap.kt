@@ -24,6 +24,7 @@ import dev.rosty.core.model.stops.Destination
 import dev.rosty.design.motion.MotionGate
 import dev.rosty.platform.location.Fix
 import dev.rosty.platform.location.LocationRepository
+import dev.rosty.platform.location.TripStatus
 import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.platform.system.permissions.PermissionState
 import dev.rosty.stops.StopsContainer
@@ -35,10 +36,8 @@ import dev.rosty.stops.map.RadarPosition
 import dev.rosty.stops.map.RadarSaved
 import dev.rosty.stops.map.StopsPickOps
 import dev.rosty.stops.offline.visibleArea
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -320,28 +319,52 @@ fun FeedRadar(
 /**
  * Live position for the blue dot (GPUI: foreground only, stopped in `onPause`): [LocationRepository.updates] runs
  * only while the screen is resumed and the location permission is granted; the last known fix shows first.
+ *
+ * While a trip runs ([tripRunning]) the dot follows the trip's own fixes (the service's `trip_status`), so the open
+ * map adds no location request of its own to the trip's cadence (E7 R4); it asks for its own fast updates again only
+ * while the view follows the position ([following]).
  */
 @Composable
 fun LivePosition(
     map: HomeMap,
     container: StopsContainer,
+    tripRunning: Boolean = false,
+    following: Boolean = false,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(map, lifecycle) {
+    val ownUpdates = !tripRunning || following
+    LaunchedEffect(map, lifecycle, ownUpdates) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             container.permissions.state(PermissionGroup.LOCATION).collectLatest { permission ->
-                val fixes: Flow<Fix> =
-                    if (permission == PermissionState.Granted) container.location.updates() else emptyFlow()
-                if (permission == PermissionState.Granted) container.location.lastKnown()?.let { map.showFix(it) }
-                fixes.collect { map.showFix(it) }
+                if (permission != PermissionState.Granted) return@collectLatest
+                if (map.pick.radar.state.position == null) container.location.lastKnown()?.let { map.showFix(it) }
+                if (ownUpdates) {
+                    container.location.updates().collect { map.showFix(it) }
+                } else {
+                    container.trips.status.collect { status ->
+                        (status as? TripStatus.Fixed)?.answer?.at?.let {
+                            map.showPosition(
+                                it.lat,
+                                it.lon,
+                                it.accuracyM,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-private fun HomeMap.showFix(fix: Fix) {
-    if (!fix.lat.isFinite() || !fix.lon.isFinite()) return
-    pick.radar.update { it.copy(position = RadarPosition(fix.lat, fix.lon, fix.accuracyM)) }
+private fun HomeMap.showFix(fix: Fix) = showPosition(fix.lat, fix.lon, fix.accuracyM)
+
+private fun HomeMap.showPosition(
+    lat: Double,
+    lon: Double,
+    accuracyM: Double,
+) {
+    if (!lat.isFinite() || !lon.isFinite()) return
+    pick.radar.update { it.copy(position = RadarPosition(lat, lon, accuracyM)) }
 }
 
 /** "Open in maps" (S4): the `geo:` URI to whatever map app the user has; false when there is none. */

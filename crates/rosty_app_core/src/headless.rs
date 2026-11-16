@@ -83,7 +83,7 @@ mod tests {
         all.sort_unstable();
         all.dedup();
         assert_eq!(all.len(), total, "a table repeats a kind");
-        assert_eq!(total, 10);
+        assert_eq!(total, 11);
     }
 
     #[test]

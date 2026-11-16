@@ -11,6 +11,8 @@ import dev.rosty.core.model.stops.BackupExportAnswer
 import dev.rosty.core.model.stops.BackupExportRequest
 import dev.rosty.core.model.stops.BackupParseAnswer
 import dev.rosty.core.model.stops.BackupParseRequest
+import dev.rosty.core.model.stops.CadenceAnswer
+import dev.rosty.core.model.stops.CadenceRequest
 import dev.rosty.core.model.stops.ClockAnswer
 import dev.rosty.core.model.stops.CoordFormatAnswer
 import dev.rosty.core.model.stops.CoordFormatRequest
@@ -374,6 +376,10 @@ object StopsContracts : ContractModels {
             op<PollRequest, PollAnswer>(
                 "stops.poll",
                 ok = listOf("close", "unknown"),
+            )
+            op<CadenceRequest, CadenceAnswer>(
+                "stops.cadence",
+                ok = listOf("close", "cold", "hysteresis", "notice", "unknown", "walking_700"),
             )
             op<GtfsImportRequest, GtfsImportAnswer>(
                 "stops.gtfs_import",

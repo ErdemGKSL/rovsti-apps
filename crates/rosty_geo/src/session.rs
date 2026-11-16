@@ -7,9 +7,14 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::alarm::MAX_TIMEOUT_RERINGS;
+use crate::cadence::{
+    self, Cadence, CadenceInput, LastPlan, SpeedBasis, SpeedEstimate, SpeedHistory, SpeedSample,
+    V_MAX_MPS,
+};
+use crate::crossing::valid_coord;
 use crate::notice;
 use crate::poll::retry_after;
-use crate::trip::MAX_ACCURACY_M;
+use crate::trip::{MAX_ACCURACY_M, MIN_SPEED_MPS};
 use crate::{
     Coord, CrossingTrip, CrossingUpdate, Diameter, DiameterError, Endpoint, Fix, Lang, NoticeRule,
     Side, TripState,
@@ -91,6 +96,10 @@ pub struct FixOutcome {
     pub fix: Fix,
     /// Rendered notice text to send now.
     pub send_notice: Option<String>,
+    /// When to ask for the next fix (AD-SA10); `None` once the trip stopped tracking.
+    pub cadence: Option<Cadence>,
+    /// The measured speed (`v_est`), when there is one: the provider's or one from the history.
+    pub speed_mps: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -112,6 +121,9 @@ pub struct ActiveTrip {
     /// message's "a few"): the phone's when the trip started, or of the last fix that named one.
     #[serde(default, skip_serializing_if = "Lang::is_default")]
     pub lang: Lang,
+    /// The usable fixes of the last 5 minutes and the last plan, for the cadence (absent in older files).
+    #[serde(default, skip_serializing_if = "SpeedHistory::is_empty")]
+    pub speed: SpeedHistory,
 }
 
 /// A location fix as delivered by the Android side.
@@ -122,9 +134,17 @@ pub struct FixIn {
     pub accuracy_m: f64,
     pub speed_mps: Option<f64>,
     pub at_ms: i64,
+    /// The monotonic clock of the fix (`Location.getElapsedRealtimeNanos` in ms); absent from older senders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<i64>,
 }
 
 impl FixIn {
+    /// The time the speed history uses: the monotonic clock when given, else the wall clock.
+    pub fn clock_ms(&self) -> i64 {
+        self.elapsed_ms.unwrap_or(self.at_ms)
+    }
+
     pub fn fix(&self) -> Fix {
         Fix {
             at: Coord::new(self.lat, self.lon),
@@ -168,6 +188,18 @@ pub struct FixOut {
     /// Where the phone was, for the map. Absent in answers from older builds.
     #[serde(default)]
     pub at: Option<FixPos>,
+    /// The measured speed (`v_est`), m/s, when there is one.
+    #[serde(default)]
+    pub speed_mps: Option<f64>,
+    /// The speed the cadence assumed for `next_fix_ms`, m/s; null when not tracking.
+    #[serde(default)]
+    pub assumed_mps: Option<f64>,
+    /// Which term decided that speed; null when not tracking.
+    #[serde(default)]
+    pub cadence: Option<SpeedBasis>,
+    /// The fix came after the previous answer's `retry_ms` (or no fix came: `trip_no_fix`).
+    #[serde(default)]
+    pub late: bool,
 }
 
 /// A position with its uncertainty, as shown on the map.
@@ -194,6 +226,7 @@ impl ActiveTrip {
             notice: None,
             timeouts: 0,
             lang: Lang::default(),
+            speed: SpeedHistory::default(),
         })
     }
 
@@ -216,18 +249,47 @@ impl ActiveTrip {
         format!("{} – {}", name(&self.a, "A"), name(&self.b, "B"))
     }
 
-    pub fn on_fix(&mut self, fix: Fix, _at_ms: i64) -> FixOutcome {
-        let update = self.trip.update(fix);
+    /// Feeds one fix taken at `t_ms` (the clock of [`FixIn::clock_ms`]): the crossing, the travelled
+    /// distance, the speed history, the arriving-soon message and the next interval.
+    pub fn on_fix(&mut self, fix: Fix, t_ms: i64) -> FixOutcome {
+        let mut update = self.trip.update(fix);
         self.track.add(&fix);
 
         let usable = fix.accuracy_m <= MAX_ACCURACY_M;
+        let late = self.is_late(t_ms);
+        let estimate = (usable && valid_coord(fix.at)).then(|| {
+            self.speed.push(SpeedSample {
+                t_ms,
+                at: fix.at,
+                accuracy_m: fix.accuracy_m,
+            });
+            self.speed.estimate(fix.speed_mps)
+        });
+        let speed_mps = estimate
+            .filter(|e| e.basis != SpeedBasis::Cold || fix.speed_mps.is_some())
+            .map(|e| e.est_mps);
+        // Without a provider speed the ETA and the arriving-soon rule use the measured one.
+        let measured = match fix.speed_mps {
+            None => speed_mps.filter(|v| *v >= MIN_SPEED_MPS),
+            Some(_) => None,
+        };
+        if let Some(v) = measured
+            && update.eta.is_none()
+        {
+            update.eta = Some(Duration::from_secs_f64(update.line_m / v));
+        }
+        let rule_fix = Fix {
+            speed_mps: fix.speed_mps.or(measured),
+            ..fix
+        };
+
         let send_notice = match &self.notice {
             Some(n)
                 if usable
                     && !n.sent
                     && n.attempts < MAX_NOTICE_ATTEMPTS
                     && self.trip.state() != TripState::Dismissed
-                    && n.rule.is_met(&update, &fix) =>
+                    && n.rule.is_met(&update, &rule_fix) =>
             {
                 Some(notice::render_in(
                     self.lang,
@@ -238,11 +300,176 @@ impl ActiveTrip {
             }
             _ => None,
         };
+
+        let cadence = (self.trip.state() == TripState::Tracking).then(|| {
+            let mut cadence = match estimate {
+                Some(e) => self.plan_after(&update, fix.accuracy_m, e, late),
+                None => self.dead_reckon(t_ms),
+            };
+            cadence.late = late;
+            self.remember(t_ms, &cadence, estimate.is_some());
+            cadence
+        });
         FixOutcome {
             update,
             fix,
             send_notice,
+            cadence,
+            speed_mps,
         }
+    }
+
+    /// No fix came (both providers answered nothing, AD-SA10): the interval dead-reckons from the last usable
+    /// fix, so the retries get denser and switch to high accuracy as the worst case nears the line. The
+    /// state does not change and nothing rings. `None` when the trip is not tracking.
+    pub fn no_fix(&mut self, now_ms: i64) -> Option<Cadence> {
+        if self.trip.state() != TripState::Tracking {
+            return None;
+        }
+        let mut cadence = self.dead_reckon(now_ms);
+        cadence.late = true;
+        self.remember(now_ms, &cadence, false);
+        Some(cadence)
+    }
+
+    /// The status after [`Self::no_fix`]: the last usable position's distances, no position, no ETA; the
+    /// text is empty when no fix was ever usable.
+    pub fn no_fix_out(&self, cadence: Option<Cadence>) -> FixOut {
+        let d = &self.trip.diameter;
+        let known = self
+            .speed
+            .newest()
+            .map(|s| {
+                (
+                    d.distance_to_segment_m(s.at),
+                    d.distance_to_circle_m(s.at),
+                    d.contains(s.at),
+                )
+            })
+            .or_else(|| self.trip.last_line_m().map(|l| (l, l, false)));
+        let (line_m, circle_m, inside) = known.unwrap_or((0.0, 0.0, false));
+        let label = self.label();
+        let side = self.trip.side();
+        // Without any usable fix there is nothing to say yet.
+        let text = known.map_or_else(String::new, |_| {
+            status_text(self.lang, &label, inside, side, line_m, circle_m, None)
+        });
+        let next = cadence.map_or(crate::poll::IDLE_POLL, |c| c.next_fix_in);
+        FixOut {
+            state: self.trip.state(),
+            distance_m: line_m,
+            next_fix_ms: millis(next),
+            retry_ms: millis(retry_after(next)),
+            high_accuracy: cadence.is_some_and(|c| c.high_accuracy),
+            ring: false,
+            title: if self.trip.state() == TripState::Arrived {
+                crossed_title(self.lang, &label)
+            } else {
+                label.clone()
+            },
+            text,
+            notice_sent: self.notice.as_ref().is_some_and(|n| n.sent),
+            notice_failed: self.notice.as_ref().is_some_and(NoticeState::gave_up),
+            side,
+            inside,
+            eta_min: None,
+            circle_m: Some(circle_m),
+            at: None,
+            speed_mps: None,
+            assumed_mps: cadence.map(|c| c.assumed_mps),
+            cadence: cadence.map(|c| c.basis),
+            late: cadence.is_some_and(|c| c.late),
+        }
+    }
+
+    /// The fix came after the previous plan's watchdog window.
+    fn is_late(&self, t_ms: i64) -> bool {
+        self.speed.last_plan().is_some_and(|p| {
+            let window = millis(retry_after(Duration::from_millis(p.next_ms)));
+            t_ms.saturating_sub(p.t_ms) > i64::try_from(window).unwrap_or(i64::MAX)
+        })
+    }
+
+    /// [`cadence::plan`] after a usable fix, with the arriving-soon target when a message is pending.
+    fn plan_after(
+        &self,
+        update: &CrossingUpdate,
+        accuracy_m: f64,
+        e: SpeedEstimate,
+        late: bool,
+    ) -> Cadence {
+        let last = self.speed.last_plan();
+        let notice_m = match &self.notice {
+            Some(n) if !n.sent && n.attempts < MAX_NOTICE_ATTEMPTS && !update.inside => {
+                match n.rule {
+                    NoticeRule::BeforeCircle { before } => {
+                        Some(update.circle_m - e.est_mps * before.as_secs_f64())
+                    }
+                    NoticeRule::WithAlarm => None,
+                }
+            }
+            _ => None,
+        };
+        cadence::plan(&CadenceInput {
+            line_m: Some(update.line_m),
+            accuracy_m: Some(accuracy_m),
+            notice_m,
+            assumed_mps: e.assumed_mps,
+            est_mps: e.est_mps,
+            basis: e.basis,
+            // A cold or late step is no reason to wait for a longer interval.
+            prev: last
+                .filter(|p| !late && p.basis != SpeedBasis::Cold)
+                .map(|p| Duration::from_millis(p.next_ms)),
+            prev_high: last.is_some_and(|p| p.high && p.basis != SpeedBasis::Cold),
+        })
+    }
+
+    /// The plan without a usable fix: the last usable one, moved closer by the farthest the user can have
+    /// gone since, at the top speed. Without any, today's curve on the last distance (300 s if none).
+    fn dead_reckon(&self, now_ms: i64) -> Cadence {
+        let prev_high = self
+            .speed
+            .last_plan()
+            .is_some_and(|p| p.high && p.basis != SpeedBasis::Cold);
+        let (line_m, accuracy_m) = match self.speed.newest() {
+            Some(last) => {
+                let line = self.trip.diameter.distance_to_segment_m(last.at);
+                let elapsed_s = now_ms.saturating_sub(last.t_ms).max(0) as f64 / 1000.0;
+                let v = self.speed.last_plan().map_or(V_MAX_MPS, |p| p.assumed_mps);
+                (
+                    Some(line - cadence::reach_m(elapsed_s, v)),
+                    Some(last.accuracy_m),
+                )
+            }
+            None => (self.trip.last_line_m(), None),
+        };
+        cadence::plan(&CadenceInput {
+            line_m,
+            accuracy_m,
+            notice_m: None,
+            assumed_mps: V_MAX_MPS,
+            est_mps: 0.0,
+            basis: SpeedBasis::Cold,
+            prev: None,
+            prev_high,
+        })
+    }
+
+    /// Records the plan; dead reckoning keeps the speed the last usable fix assumed.
+    fn remember(&mut self, t_ms: i64, cadence: &Cadence, from_fix: bool) {
+        let assumed_mps = if from_fix {
+            cadence.assumed_mps
+        } else {
+            self.speed.last_plan().map_or(V_MAX_MPS, |p| p.assumed_mps)
+        };
+        self.speed.record(LastPlan {
+            t_ms,
+            next_ms: millis(cadence.next_fix_in),
+            high: cadence.high_accuracy,
+            assumed_mps,
+            basis: cadence.basis,
+        });
     }
 
     pub fn notice_result(&mut self, delivered: NoticeDelivery) {
@@ -306,15 +533,21 @@ impl ActiveTrip {
         let text = status_text(
             lang, &label, u.inside, u.side, u.line_m, u.circle_m, eta_min,
         );
+        let c = outcome.cadence;
+        let (next, retry, high) = match c {
+            Some(c) => (c.next_fix_in, c.retry_after, c.high_accuracy),
+            None => (
+                u.next_fix_in,
+                retry_after(u.next_fix_in),
+                u.next_fix_in <= HIGH_ACCURACY_BELOW,
+            ),
+        };
         FixOut {
             state: u.state,
             distance_m: u.line_m,
-            next_fix_ms: u.next_fix_in.as_millis().try_into().unwrap_or(u64::MAX),
-            retry_ms: retry_after(u.next_fix_in)
-                .as_millis()
-                .try_into()
-                .unwrap_or(u64::MAX),
-            high_accuracy: u.next_fix_in <= HIGH_ACCURACY_BELOW,
+            next_fix_ms: millis(next),
+            retry_ms: millis(retry),
+            high_accuracy: high,
             ring: u.ring,
             title: if ringing {
                 crossed_title(lang, &label)
@@ -333,8 +566,16 @@ impl ActiveTrip {
                 lon: outcome.fix.at.lon,
                 accuracy_m: outcome.fix.accuracy_m,
             }),
+            speed_mps: outcome.speed_mps,
+            assumed_mps: c.map(|c| c.assumed_mps),
+            cadence: c.map(|c| c.basis),
+            late: c.is_some_and(|c| c.late),
         }
     }
+}
+
+fn millis(d: Duration) -> u64 {
+    d.as_millis().try_into().unwrap_or(u64::MAX)
 }
 
 /// An ETA in whole minutes, rounded up and never less than one ("about 1 min" is the soonest).
@@ -979,5 +1220,239 @@ mod tests {
             "title":"t","text":"x","notice_sent":false}"#;
         let out: FixOut = serde_json::from_str(old).unwrap();
         assert_eq!(out.eta_min, None);
+    }
+
+    // ---- the cadence (AD-SA10) ----
+
+    /// A fix `north` metres from the line, straight above the middle, at `t_s` seconds.
+    fn timed(t: &mut ActiveTrip, north: f64, t_s: f64, accuracy_m: f64) -> FixOut {
+        let o = t.on_fix(fix(0.0, north, accuracy_m, None), (t_s * 1000.0) as i64);
+        t.fix_out(&o)
+    }
+
+    #[test]
+    fn an_old_trip_without_a_speed_history_loads_and_an_empty_one_is_not_written() {
+        let t = trip();
+        let json = serde_json::to_value(&t).unwrap();
+        assert!(json.get("speed").is_none());
+        let back: ActiveTrip = serde_json::from_value(json).unwrap();
+        assert!(back.speed.is_empty());
+        let mut t = trip();
+        timed(&mut t, 5_000.0, 0.0, 10.0);
+        timed(&mut t, 4_980.0, 15.0, 10.0);
+        let json = serde_json::to_value(&t).unwrap();
+        assert!(json.get("speed").is_some());
+        let back: ActiveTrip = serde_json::from_value(json).unwrap();
+        assert_eq!(back.speed, t.speed);
+    }
+
+    #[test]
+    fn fix_out_carries_the_cadence_and_reads_answers_without_it() {
+        let mut t = trip();
+        let first = timed(&mut t, 2_700.0, 0.0, 10.0);
+        assert_eq!(first.cadence, Some(SpeedBasis::Cold));
+        assert_eq!(first.assumed_mps, Some(V_MAX_MPS));
+        assert_eq!(first.speed_mps, None);
+        assert!(!first.late);
+        // The first fix asks as today did (rounded down to the ladder).
+        assert_eq!(first.next_fix_ms, 20_000);
+        // Walking: the second fix 20 s later has a bound and asks later.
+        let second = timed(&mut t, 2_672.0, 20.0, 10.0);
+        assert_eq!(second.cadence, Some(SpeedBasis::Bound));
+        assert!(second.next_fix_ms > first.next_fix_ms, "{second:?}");
+        assert_eq!(
+            second.retry_ms,
+            millis(retry_after(Duration::from_millis(second.next_fix_ms)))
+        );
+        assert!((second.speed_mps.unwrap() - 1.4).abs() < 0.05, "{second:?}");
+        // A fix after the watchdog window is late.
+        let late = timed(&mut t, 2_600.0, 20.0 + 200.0, 10.0);
+        assert!(late.late);
+
+        let mut json = serde_json::to_value(&second).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        for key in ["speed_mps", "assumed_mps", "cadence", "late"] {
+            assert!(obj.remove(key).is_some(), "{key}");
+        }
+        let old: FixOut = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            (old.speed_mps, old.assumed_mps, old.cadence, old.late),
+            (None, None, None, false)
+        );
+    }
+
+    #[test]
+    fn a_ringing_trip_drops_back_to_the_idle_interval() {
+        let mut t = trip();
+        timed(&mut t, 150.0, 0.0, 5.0);
+        let rang = timed(&mut t, -150.0, 10.0, 5.0);
+        assert!(rang.ring);
+        assert_eq!(rang.next_fix_ms, 60_000);
+        assert_eq!(rang.cadence, None);
+        assert!(!rang.high_accuracy);
+        assert_eq!(t.no_fix(20_000), None);
+    }
+
+    #[test]
+    fn the_eta_and_the_notice_use_the_measured_speed_without_a_provider_one() {
+        let mut t = trip();
+        with_notice(
+            &mut t,
+            NoticeRule::BeforeCircle {
+                before: Duration::from_secs(300),
+            },
+        );
+        // A bus at 10 m/s, 3.5 km from the circle (4 km from the line): 350 s to the circle.
+        let o = t.on_fix(fix(0.0, 4_000.0, 10.0, None), 0);
+        assert!(o.update.eta.is_none() && o.send_notice.is_none());
+        let o = t.on_fix(fix(0.0, 3_800.0, 10.0, None), 20_000);
+        assert!(o.send_notice.is_none());
+        let eta = o.update.eta.unwrap().as_secs_f64();
+        assert!((eta - 380.0).abs() < 5.0, "{eta}");
+        // 2.9 km to the circle: 290 s, under the 300 s of the rule.
+        let o = t.on_fix(fix(0.0, 3_400.0, 10.0, None), 60_000);
+        assert!(o.send_notice.is_some());
+    }
+
+    #[test]
+    fn a_pending_notice_asks_sooner() {
+        let walk = |notice: bool| {
+            let mut t = trip();
+            if notice {
+                with_notice(
+                    &mut t,
+                    NoticeRule::BeforeCircle {
+                        before: Duration::from_secs(600),
+                    },
+                );
+            }
+            timed(&mut t, 2_500.0, 0.0, 10.0);
+            timed(&mut t, 2_472.0, 20.0, 10.0);
+            timed(&mut t, 2_444.0, 40.0, 10.0).next_fix_ms
+        };
+        assert!(walk(true) < walk(false), "{} {}", walk(true), walk(false));
+    }
+
+    #[test]
+    fn no_fix_dead_reckons_and_tightens_with_time() {
+        let mut t = trip();
+        timed(&mut t, 2_000.0, 0.0, 10.0);
+        timed(&mut t, 1_972.0, 20.0, 10.0);
+        let mut prev = u64::MAX;
+        let mut high = false;
+        for k in 1..=40 {
+            let now_ms = 20_000 + k * 5_000;
+            let c = t.no_fix(now_ms).unwrap();
+            let out = t.no_fix_out(Some(c));
+            assert!(out.next_fix_ms <= prev, "{out:?}");
+            assert!(out.late && out.at.is_none() && !out.ring);
+            assert_eq!(out.state, TripState::Tracking);
+            assert_eq!(out.cadence, Some(SpeedBasis::Cold));
+            prev = out.next_fix_ms;
+            high |= out.high_accuracy;
+        }
+        // 200 s without a fix can have covered the 2 km: down to the floor, on GPS.
+        assert_eq!(prev, 3_000);
+        assert!(high);
+        // A fix again: back to a plan from the history.
+        let back = timed(&mut t, 1_700.0, 230.0, 10.0);
+        assert!(back.late);
+        assert_ne!(back.cadence, Some(SpeedBasis::Cold));
+        // An unusable fix dead-reckons too, and is not kept.
+        let n = t.speed.samples().len();
+        let bad = timed(&mut t, 1_690.0, 240.0, 900.0);
+        assert_eq!(t.speed.samples().len(), n);
+        assert_eq!(bad.cadence, Some(SpeedBasis::Cold));
+    }
+
+    #[test]
+    fn no_fix_without_any_fix_keeps_todays_unknown_distance() {
+        let mut t = trip();
+        let c = t.no_fix(1_000).unwrap();
+        assert_eq!(c.next_fix_in, crate::poll::MAX_POLL);
+        let out = t.no_fix_out(Some(c));
+        assert_eq!(out.title, "Home – Work");
+        assert_eq!(out.text, "");
+    }
+
+    /// The traveller heads straight for the middle of the line, `v0` and then accelerating; the trip
+    /// plans its own fixes (late by the whole grace for half of them). Every trip rings, soon after the
+    /// crossing.
+    #[test]
+    fn simulated_trips_always_ring_soon_after_the_crossing() {
+        let mut seed: u64 = 0xC0FF_EE11;
+        let mut rnd = |lo: f64, hi: f64| {
+            seed ^= seed >> 12;
+            seed ^= seed << 25;
+            seed ^= seed >> 27;
+            let unit =
+                (seed.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64;
+            lo + (hi - lo) * unit
+        };
+        for n in 0..1_500 {
+            let start = rnd(150.0, 6_000.0);
+            let v0 = [1.4, 5.0, 8.0][(rnd(0.0, 3.0) as usize).min(2)];
+            let (switch, a) = (rnd(0.0, 600.0), rnd(0.3, cadence::A_MAX_MPS2));
+            let top = rnd(8.0, V_MAX_MPS).max(v0);
+            let acc = rnd(5.0, 60.0);
+            let late = rnd(0.0, 1.0) < 0.5;
+            let doppler = rnd(0.0, 1.0) < 0.5;
+            let speed = |t: f64| {
+                if t <= switch {
+                    v0
+                } else {
+                    (v0 + a * (t - switch)).min(top)
+                }
+            };
+            let travelled = |t: f64| {
+                if t <= switch {
+                    return v0 * t;
+                }
+                let (u, t_acc) = (t - switch, (top - v0) / a);
+                if u <= t_acc {
+                    v0 * switch + v0 * u + a * u * u / 2.0
+                } else {
+                    v0 * switch + v0 * t_acc + a * t_acc * t_acc / 2.0 + top * (u - t_acc)
+                }
+            };
+            let mut t = trip();
+            let mut now = 0.0;
+            let mut rang = None;
+            while now < 6.0 * 3_600.0 {
+                let (r, th) = (acc * rnd(0.0, 1.0).sqrt(), rnd(0.0, std::f64::consts::TAU));
+                let f = Fix {
+                    at: at(r * th.cos(), start - travelled(now) + r * th.sin()),
+                    accuracy_m: acc,
+                    speed_mps: doppler.then(|| (speed(now) + rnd(-0.5, 0.5)).max(0.0)),
+                };
+                let o = t.on_fix(f, (now * 1000.0) as i64);
+                let out = t.fix_out(&o);
+                if out.ring {
+                    rang = Some(now);
+                    break;
+                }
+                let wait = if late { out.retry_ms } else { out.next_fix_ms };
+                now += wait as f64 / 1000.0;
+            }
+            let rang = rang.unwrap_or_else(|| panic!("trip {n} never rang"));
+            // When the line was crossed (bisection on the monotonic travelled distance).
+            let (mut lo, mut hi) = (0.0, rang);
+            for _ in 0..60 {
+                let mid = (lo + hi) / 2.0;
+                if travelled(mid) < start {
+                    lo = mid
+                } else {
+                    hi = mid
+                }
+            }
+            let band = crate::DEAD_BAND_M.max(acc);
+            let limit = 3.0 + 5.0 + (band + acc) / speed(hi) + 0.01;
+            assert!(rang >= hi, "trip {n} rang before the crossing");
+            assert!(
+                rang - hi <= limit,
+                "trip {n}: rang {:.1} s after the crossing (limit {limit:.1})",
+                rang - hi
+            );
+        }
     }
 }

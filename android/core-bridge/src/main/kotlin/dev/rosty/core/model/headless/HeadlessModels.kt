@@ -182,8 +182,19 @@ data class TripFixRequest(
     @SerialName("accuracy_m") val accuracyM: Double,
     @SerialName("speed_mps") val speedMps: Double? = null,
     @SerialName("at_ms") val atMs: Long,
+    /** The fix's monotonic clock (`Location.getElapsedRealtimeNanos` in ms): the clock of the trip's speed history. */
+    @SerialName("elapsed_ms") @EncodeDefault(EncodeDefault.Mode.NEVER) val elapsedMs: Long? = null,
     /** The phone's locale now (a tag); absent keeps the language the trip was started in. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val locale: String? = null,
+)
+
+/** No provider found a fix (AD-SA10): the answer is a [TripFixAnswer] without [TripFixAnswer.at]. */
+@Serializable
+data class TripNoFixRequest(
+    val dir: String,
+    @SerialName("now_ms") val nowMs: Long,
+    /** `SystemClock.elapsedRealtime()`, the clock of [TripFixRequest.elapsedMs]. */
+    @SerialName("elapsed_ms") @EncodeDefault(EncodeDefault.Mode.NEVER) val elapsedMs: Long? = null,
 )
 
 @Serializable
@@ -204,6 +215,14 @@ data class TripFixAnswer(
     @SerialName("eta_min") val etaMin: Int? = null,
     @SerialName("circle_m") val circleM: Double? = null,
     val at: FixPos? = null,
+    /** The measured speed, m/s, when there is one. */
+    @SerialName("speed_mps") val speedMps: Double? = null,
+    /** The speed the cadence assumed for [nextFixMs]; null when not tracking. */
+    @SerialName("assumed_mps") val assumedMps: Double? = null,
+    /** What decided that speed: `cold`, `bound`, `doppler`, `average` or `floor`; null when not tracking. */
+    val cadence: String? = null,
+    /** The fix came after the previous answer's [retryMs], or no fix came (`trip_no_fix`). */
+    val late: Boolean = false,
 )
 
 @Serializable

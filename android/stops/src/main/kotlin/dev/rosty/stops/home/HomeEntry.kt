@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -449,7 +450,10 @@ fun HomeEntry(
     FollowCameraPadding(map, padding)
     PlaceFirstView(map, state, container.location)
     FeedRadar(map, savedOnMap?.let { state.copy(savedOnMap = it) } ?: state)
-    LivePosition(map, container)
+    // During a trip the blue dot follows the trip's fixes; the map asks for its own only while following (E7 R4).
+    val tripUi = trip.state.collectAsState()
+    val tripRunning by remember(tripUi) { derivedStateOf { tripUi.value.trip != null } }
+    LivePosition(map, container, tripRunning, following = mapTools.follow == MapFollowMode.Following)
     MapMotionEffect(map.camera, map.motion)
     SettingsHooks(map, container)
     // The picked ends survive a restart, as the GPUI app kept them in `draft.json`.

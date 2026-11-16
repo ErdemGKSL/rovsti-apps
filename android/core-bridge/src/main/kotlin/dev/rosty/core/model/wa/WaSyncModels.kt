@@ -543,6 +543,12 @@ data class WaSyncMessage(
     @EncodeDefault(NEVER) val viewed: Boolean = false,
     /** A received voice note whose played receipt was queued (`WaSyncStore.markPlayed`). */
     @EncodeDefault(NEVER) val played: Boolean = false,
+    /**
+     * The message reached this account's linked devices as a placeholder only ([kind] stays
+     * [WaSyncKind.Unsupported]): a view-once message someone sent, a bot's or a hosted business's message. Show
+     * "open it on your phone"; there is nothing to download.
+     */
+    @EncodeDefault(NEVER) val unavailable: Unavailable? = null,
 )
 
 @Serializable

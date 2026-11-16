@@ -444,6 +444,25 @@ object MediaWaveform {
     fun valid(samples: ByteArray): Boolean = samples.size == SAMPLES && samples.all { it in 0..MAX }
 }
 
+/**
+ * Why a message reached this linked device as a placeholder only (`rosty_wa_proto::Unavailable`): WhatsApp never
+ * shares it with a companion, only the phone can open it. [Other] is a reason a newer gateway names.
+ */
+@Serializable
+enum class Unavailable {
+    @SerialName("view_once")
+    ViewOnce,
+
+    @SerialName("hosted")
+    Hosted,
+
+    @SerialName("bot")
+    Bot,
+
+    @SerialName("other")
+    Other,
+}
+
 @Serializable
 data class Location(
     val latitude: Double,
@@ -482,6 +501,8 @@ data class MessageMeta(
     @EncodeDefault(NEVER) val original: KeptContent? = null,
     /** Earlier texts of an edited message, oldest first. */
     @SerialName("edit_history") @EncodeDefault(NEVER) val editHistory: List<EditRecord> = emptyList(),
+    /** A placeholder only (a view-once message someone sent): the body is `unsupported`, nothing to download. */
+    @EncodeDefault(NEVER) val unavailable: Unavailable? = null,
 )
 
 /** `rosty_wa_proto::DELETED_BY_ME`. */

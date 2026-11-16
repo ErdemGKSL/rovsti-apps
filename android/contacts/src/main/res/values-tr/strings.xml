@@ -471,6 +471,20 @@
     <string name="settings_people_failed_gateway">Başarısız: ağ geçidi hata bildirdi</string>
     <string name="settings_people_failed_storage">Başarısız: bu telefona kaydedilemedi</string>
     <string name="settings_people_failed_other">Başarısız, %1$s</string>
+    <!-- People sync v3: the gateway prepares the result, the phone downloads it once. -->
+    <string name="settings_people_server_lookup">Ağ geçidi: numaralar denetleniyor %1$d/%2$d</string>
+    <string name="settings_people_server_profiles">Ağ geçidi: adlar alınıyor %1$d/%2$d</string>
+    <string name="settings_people_server_pictures">Ağ geçidi: fotoğraflar alınıyor %1$d/%2$d</string>
+    <string name="settings_people_server_limit">Ağ geçidi WhatsApp sınırını bekliyor. %1$s sonra devam edecek</string>
+    <string name="settings_people_server_offline">Ağ geçidi: WhatsApp bağlı değil. Bekleniyor</string>
+    <string name="settings_people_server_quiet">Ağ geçidinde hazırlanıyor. Hazır olunca indirilecek</string>
+    <string name="settings_people_downloading">Değişiklikler indiriliyor %1$d/%2$d</string>
+    <string name="settings_people_synced_unchanged">Eşitlendi, %1$s. Değişiklik yok</string>
+    <string name="settings_people_synced_changed">Eşitlendi, %1$s. %2$s</string>
+    <plurals name="settings_people_changes">
+        <item quantity="one">%d değişiklik</item>
+        <item quantity="other">%d değişiklik</item>
+    </plurals>
     <plurals name="settings_people_minutes">
         <item quantity="one">%d dk</item>
         <item quantity="other">%d dk</item>

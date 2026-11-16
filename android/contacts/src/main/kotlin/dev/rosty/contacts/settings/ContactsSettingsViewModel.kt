@@ -7,6 +7,7 @@ import dev.rosty.contacts.data.Book
 import dev.rosty.contacts.data.BookRepository
 import dev.rosty.contacts.data.ContactsStore
 import dev.rosty.contacts.people.PeopleSyncControl
+import dev.rosty.contacts.people.PeopleSyncStatus
 import dev.rosty.core.Outcome
 import dev.rosty.core.model.contacts.Account
 import dev.rosty.core.model.contacts.AccountLabelRequest
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -95,6 +97,13 @@ class ContactsSettingsViewModel(
         viewModelScope.launch {
             store.load()
             accounts.value = loadAccounts()
+        }
+        people?.let { sync ->
+            // People sync v3: a run the gateway prepares while nothing here follows it goes live once (attend).
+            viewModelScope.launch {
+                sync.status.first { it is PeopleSyncStatus.Preparing && !it.watched }
+                sync.attend()
+            }
         }
     }
 

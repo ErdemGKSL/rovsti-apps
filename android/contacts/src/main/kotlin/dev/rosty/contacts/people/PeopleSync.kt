@@ -2,6 +2,9 @@ package dev.rosty.contacts.people
 
 import android.content.SharedPreferences
 import dev.rosty.core.log.RostyLog
+import dev.rosty.core.model.people.PeopleJobWire
+import dev.rosty.core.model.people.SyncJobView
+import dev.rosty.core.model.people.SyncRunStatus
 import dev.rosty.core.model.people.SyncStatus
 import dev.rosty.core.model.people.SyncWire
 import dev.rosty.core.model.wa.GatewayEvent
@@ -14,6 +17,7 @@ import dev.rosty.people.sync.PeoplePictureCodec
 import dev.rosty.people.sync.PeopleStore
 import dev.rosty.people.sync.PeopleSyncHost
 import dev.rosty.people.sync.PeopleSyncRunner
+import dev.rosty.people.sync.PeopleSyncTriggers
 import dev.rosty.people.sync.RunnerState
 import dev.rosty.people.sync.SliceResult
 import dev.rosty.wa.WaLinkState
@@ -35,8 +39,8 @@ import java.io.File
 import kotlin.random.Random
 
 /**
- * What the "WhatsApp Names and Photos" rows show (people sync v2, section 9). [stage] values are `SyncWire.STAGE_*`,
- * reasons are `SyncWire` interrupt and fail reasons; done/total are of the current stage.
+ * What the "WhatsApp Names and Photos" rows show (people sync v2, section 9; v3, section 5). [stage] values are
+ * `SyncWire.STAGE_*`, reasons are `SyncWire` interrupt and fail reasons; done/total are of the current stage.
  */
 sealed interface PeopleSyncStatus {
     /** No link: the rows are hidden. */
@@ -45,10 +49,34 @@ sealed interface PeopleSyncStatus {
     /** Linked, but the gateway's WhatsApp session is not connected right now. */
     data object Connecting : PeopleSyncStatus
 
-    /** Nothing under way; [lastMs] is when the last run finished (null: never), with [people] on WhatsApp. */
+    /**
+     * Nothing under way; [lastMs] is when the last run finished (null: never), with [people] on WhatsApp. [changed]:
+     * how many people the last run added or changed (null: a run of an older build, or never).
+     */
     data class Idle(
         val lastMs: Long?,
         val people: Int = 0,
+        val changed: Int? = null,
+    ) : PeopleSyncStatus
+
+    /**
+     * People sync v3: the gateway prepares the result. [phase] is a `PeopleJobWire.PHASE_*` with its count; while the
+     * gateway waits, [waitUntilMs] and [waitSource] (`PeopleJobWire.WAIT_*`) say for what. [watched]: a slice here
+     * follows it live; false: the phone comes back for the result later.
+     */
+    data class Preparing(
+        val phase: String,
+        val done: Int,
+        val total: Int,
+        val waitUntilMs: Long?,
+        val waitSource: String?,
+        val watched: Boolean,
+    ) : PeopleSyncStatus
+
+    /** People sync v3: the prepared changes are downloaded, [done] of [total] records. */
+    data class Downloading(
+        val done: Int,
+        val total: Int,
     ) : PeopleSyncStatus
 
     /** A run is active here; [nextAtMs] when it waits for its pace (null: a request is under way). */
@@ -99,6 +127,12 @@ interface PeopleSyncControl {
 
     /** "Stop": the active run ends stopped and stays resumable. */
     fun stop() {}
+
+    /**
+     * People sync v3: the settings row shows a run the gateway prepares while no slice here follows it; one slice is
+     * started to follow it live (with the notification, as every run).
+     */
+    fun attend() {}
 }
 
 /**
@@ -130,6 +164,10 @@ class PeopleSync(
     private val onChanged: suspend () -> Unit = {},
     /** Starts a run (`SyncWire.START_*`) in the worker; null runs it in [scope]. */
     private val request: ((String) -> Unit)? = null,
+    /** Drops the pending continuation work (a Stop between two slices must not be undone by it). */
+    private val dropContinuation: () -> Unit = {},
+    /** Where the gateway writes a bundle's pictures (`<cache_dir>/people-bundle`), emptied when a slice begins. */
+    bundleDir: File? = null,
 ) : PeopleSyncControl,
     PeopleSyncHost {
     private val notifier = PartNotifier(scope, notifyMinMs) { onChanged() }
@@ -149,6 +187,8 @@ class PeopleSync(
             random = random,
             onPart = notifier::part,
             lockFile = lockFile,
+            bundleDir = bundleDir,
+            background = scope,
         )
 
     private val legacyStatus = MutableStateFlow(readLegacy())
@@ -193,8 +233,17 @@ class PeopleSync(
     /** "Continue where it left off". */
     override fun resume() = start(SyncWire.START_RESUME)
 
-    /** "Stop" (and the notification's Stop): the active run ends `interrupted(cancelled)` and stays resumable. */
-    override fun stop() = runner.cancel()
+    /**
+     * "Stop" (and the notification's Stop): the active run ends `interrupted(cancelled)` and stays resumable, and the
+     * gateway's job is cancelled. Between two slices the continuation is dropped as well.
+     */
+    override fun stop() {
+        if (!runner.status.value.active) dropContinuation()
+        runner.cancel()
+    }
+
+    /** One slice that follows the gateway's job live (people sync v3, section 5). */
+    override fun attend() = start(SyncWire.START_AUTO)
 
     override fun now(): Long = clock()
 
@@ -210,15 +259,25 @@ class PeopleSync(
         if (worker != null) worker(start) else scope.launch { run(start, null) }
     }
 
-    /** The foreground trigger: continues a resumable run, or syncs when the last one is older than [maxAgeMs]. */
-    fun syncIfStale(maxAgeMs: Long = PERIOD_MS) {
+    /**
+     * The foreground trigger (people sync v3, section 6): syncs when the last run is [PERIOD_MS] old and the last attempt
+     * half an hour, unless the user stopped the stored run or it failed ([PeopleSyncTriggers]). A resumable run is left
+     * to its continuation.
+     */
+    fun syncIfStale() {
         scope.launch {
             val stored = runner.refresh()
-            val run = stored?.run
-            val penalty = (stored?.notBeforeMs ?: 0) > clock()
-            val resumable = run?.resumable == true && run.phase.kind != SyncWire.FAILED
-            val last = stored?.last?.atMs ?: legacyStatus.value.lastMs
-            if (!penalty && (resumable || clock() - last >= maxAgeMs)) {
+            val last = stored?.last?.atMs ?: legacyStatus.value.lastMs.takeIf { it > 0 }
+            val go =
+                PeopleSyncTriggers.shouldStart(
+                    PeopleSyncTriggers.Kind.FOREGROUND,
+                    clock(),
+                    lastFinishedMs = last,
+                    lastAttemptMs = stored?.attemptMs,
+                    run = stored?.run,
+                    notBeforeMs = stored?.notBeforeMs,
+                )
+            if (go) {
                 val worker = request
                 if (worker != null) worker(SyncWire.START_AUTO) else run(SyncWire.START_AUTO, null)
             }
@@ -274,6 +333,11 @@ class PeopleSync(
         val run = stored?.run
         if (runner.active && !runner.live) {
             val progress = runner.progress ?: run?.progress
+            val stage = runner.stage ?: run?.stage
+            if (stage == SyncWire.STAGE_DOWNLOAD) {
+                return PeopleSyncStatus.Downloading(progress?.done ?: 0, progress?.total ?: 0)
+            }
+            if (stage == SyncWire.STAGE_SERVER) return preparing(runner.job ?: run?.job, watched = true)
             return PeopleSyncStatus.Running(
                 stage = runner.stage ?: run?.stage ?: SyncWire.STAGE_LOOKUP,
                 done = progress?.done ?: 0,
@@ -281,6 +345,7 @@ class PeopleSync(
                 nextAtMs = runner.sleepingUntilMs,
             )
         }
+        if (run != null && waitsForGateway(run)) return preparing(run.job, watched = false)
         if (run != null) {
             val stage = run.stage
             val (done, total) = run.progress.done to run.progress.total
@@ -308,10 +373,33 @@ class PeopleSync(
         if (link.status.state == InstanceState.Disconnected) return PeopleSyncStatus.Connecting
         val last = stored?.last
         return when {
-            last != null -> PeopleSyncStatus.Idle(last.atMs, last.people)
+            last != null -> PeopleSyncStatus.Idle(last.atMs, last.people, last.changed)
             old.lastMs > 0 -> PeopleSyncStatus.Idle(old.lastMs, old.people)
             else -> PeopleSyncStatus.Idle(null)
         }
+    }
+
+    /** A stored job-mode run whose slice ended while the gateway still works (or another process follows it). */
+    private fun waitsForGateway(run: SyncRunStatus): Boolean =
+        run.stage == SyncWire.STAGE_SERVER &&
+            (
+                run.phase.kind == SyncWire.RUNNING ||
+                    (run.phase.kind == SyncWire.INTERRUPTED && run.phase.reason == SyncWire.SERVER_WORKING)
+            )
+
+    private fun preparing(
+        job: SyncJobView?,
+        watched: Boolean,
+    ): PeopleSyncStatus.Preparing {
+        val waiting = job?.state == PeopleJobWire.WAITING
+        return PeopleSyncStatus.Preparing(
+            phase = job?.phase.orEmpty(),
+            done = job?.done ?: 0,
+            total = job?.total ?: 0,
+            waitUntilMs = job?.waitUntilMs?.takeIf { waiting },
+            waitSource = job?.waitSource?.takeIf { waiting },
+            watched = watched,
+        )
     }
 
     /** The v1 sync's last run, as its prefs remember it. */
@@ -337,8 +425,8 @@ class PeopleSync(
         /** The log tag of everything the sync writes. */
         const val TAG = PeopleSyncRunner.TAG
 
-        /** How often the worker runs. */
-        const val PERIOD_MS = 6L * 3_600_000
+        /** How often the worker runs (people sync v3: twelve hours). */
+        const val PERIOD_MS = PeopleSyncTriggers.PERIOD_MS
 
         /** Numbers asked about per run (recent callers first). */
         const val MAX_NUMBERS = PeopleSyncRunner.MAX_NUMBERS

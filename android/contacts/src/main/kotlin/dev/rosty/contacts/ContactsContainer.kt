@@ -42,6 +42,8 @@ import dev.rosty.people.AvatarResolver
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.WaFullPictures
 import dev.rosty.people.sync.PeopleStore
+import dev.rosty.people.sync.PeopleSyncRunner
+import dev.rosty.people.sync.PeopleSyncWork
 import dev.rosty.platform.calllog.AndroidBlocklistRepository
 import dev.rosty.platform.calllog.AndroidCallLogRepository
 import dev.rosty.platform.calllog.BlocklistRepository
@@ -243,6 +245,8 @@ open class ContactsContainer(
             },
             // Sync Now, Continue and the foreground trigger run in the foreground worker (people sync v2 S11).
             request = { start -> PeopleSyncWorker.startNow(context, start) },
+            dropContinuation = { PeopleSyncWork.dropContinuation(context) },
+            bundleDir = File(context.cacheDir, PeopleSyncRunner.BUNDLE_DIR),
         )
 
     /** E.164 numbers worth asking WhatsApp about: the recent callers first, then the address book. */

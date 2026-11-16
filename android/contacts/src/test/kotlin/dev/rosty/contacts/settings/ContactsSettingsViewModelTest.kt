@@ -79,6 +79,38 @@ class ContactsSettingsViewModelTest {
         override fun stop() {
             calls += "stop"
         }
+
+        override fun attend() {
+            calls += "attend"
+        }
+    }
+
+    /** People sync v3, section 5: a job the gateway prepares while nothing here follows it goes live once. */
+    @Test fun aJobNobodyFollowsIsAttendedOnceWhileTheRowShows() {
+        val r = rig()
+        val sync = FakeSync()
+        val vm =
+            ContactsSettingsViewModel(
+                r.book,
+                r.store,
+                r.repo,
+                r.host.ops,
+                notifications = { permission },
+                people = sync,
+                formatTime = { "5 min. ago" },
+            )
+        r.ready(vm)
+        sync.flow.value = PeopleSyncStatus.Preparing("profiles", 1, 2, null, null, watched = true)
+        r.wait { vm.state.first { it.peopleSync?.running == true } }
+        assertEquals("a followed job needs nothing", emptyList<String>(), sync.calls)
+        sync.flow.value = PeopleSyncStatus.Preparing("profiles", 1, 2, null, null, watched = false)
+        r.wait { while ("attend" !in sync.calls) kotlinx.coroutines.delay(10) }
+        sync.flow.value = PeopleSyncStatus.Idle(5, changed = 0)
+        r.wait { vm.state.first { it.peopleSync?.running == false } }
+        sync.flow.value = PeopleSyncStatus.Preparing("profiles", 1, 2, null, null, watched = false)
+        r.wait { vm.state.first { it.peopleSync?.running == true } }
+        Thread.sleep(200)
+        assertEquals("once per page", listOf("attend"), sync.calls)
     }
 
     @Test fun theSyncRowsFollowTheStatusAndTheButtonsAct() {

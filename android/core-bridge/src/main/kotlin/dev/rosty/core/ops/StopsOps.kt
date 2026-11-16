@@ -13,6 +13,8 @@ import dev.rosty.core.model.stops.BackupExportAnswer
 import dev.rosty.core.model.stops.BackupExportRequest
 import dev.rosty.core.model.stops.BackupParseAnswer
 import dev.rosty.core.model.stops.BackupParseRequest
+import dev.rosty.core.model.stops.CadenceAnswer
+import dev.rosty.core.model.stops.CadenceRequest
 import dev.rosty.core.model.stops.ClockAnswer
 import dev.rosty.core.model.stops.CoordFormatAnswer
 import dev.rosty.core.model.stops.CoordFormatRequest
@@ -287,6 +289,9 @@ interface StopsOps {
     /** When the next fix is wanted. */
     suspend fun poll(req: PollRequest): Outcome<PollAnswer>
 
+    /** One step of the trip's cadence from a speed (the trip plans its own; this reads the curve). */
+    suspend fun cadence(req: CadenceRequest): Outcome<CadenceAnswer>
+
     /** Imports a GTFS zip by path. */
     suspend fun gtfsImport(req: GtfsImportRequest): Outcome<GtfsImportAnswer>
 
@@ -389,6 +394,7 @@ interface StopsOps {
                 "stops.notice_chats",
                 "stops.alarm_plan",
                 "stops.poll",
+                "stops.cadence",
                 "stops.gtfs_import",
                 "stops.gtfs_search",
                 "stops.gtfs_view",
@@ -700,6 +706,9 @@ class NativeStopsOps(
 
     override suspend fun poll(req: PollRequest) =
         core.call("stops.poll", req, PollRequest.serializer(), PollAnswer.serializer())
+
+    override suspend fun cadence(req: CadenceRequest) =
+        core.call("stops.cadence", req, CadenceRequest.serializer(), CadenceAnswer.serializer())
 
     override suspend fun gtfsImport(req: GtfsImportRequest) =
         core.call("stops.gtfs_import", req, GtfsImportRequest.serializer(), GtfsImportAnswer.serializer())

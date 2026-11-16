@@ -113,7 +113,7 @@ data class TripSpec(
     }
 }
 
-/** What Rust answers to `trip_fix` (`rosty_geo::session::FixOut`). */
+/** What Rust answers to `trip_fix` and `trip_no_fix` (`rosty_geo::session::FixOut`). */
 internal data class TripAnswer(
     val state: String,
     val nextFixMs: Long,
@@ -123,6 +123,12 @@ internal data class TripAnswer(
     val text: String,
     /** Rust's own retry window (`retry_ms`); 0 when absent, then [tripWatchdogMs] applies. */
     val retryMs: Long = 0L,
+    /** For the log line only: metres to the line, the measured and the assumed speed, what decided it, lateness. */
+    val distanceM: Double? = null,
+    val speedMps: Double? = null,
+    val assumedMps: Double? = null,
+    val cadence: String? = null,
+    val late: Boolean = false,
 ) {
     val ended: Boolean get() = state == "ended"
 
@@ -140,6 +146,11 @@ internal data class TripAnswer(
                     o.optString("title"),
                     o.optString("text"),
                     o.optLong("retry_ms", 0L).coerceAtLeast(0L),
+                    o.optFiniteDouble("distance_m"),
+                    o.optFiniteDouble("speed_mps"),
+                    o.optFiniteDouble("assumed_mps"),
+                    if (o.isNull("cadence")) null else o.optString("cadence").ifEmpty { null },
+                    o.optBoolean("late", false),
                 )
             } catch (_: JSONException) {
                 null
@@ -148,10 +159,14 @@ internal data class TripAnswer(
     }
 }
 
+private fun JSONObject.optFiniteDouble(key: String): Double? =
+    if (isNull(key)) null else optDouble(key).takeIf { it.isFinite() }
+
 /**
- * Pure: the `trip_fix` request (`rosty_geo::session::FixIn` plus `dir`). [locale] is the phone's language now (a tag
- * such as `tr-TR`): the notification's title and text follow it; without it they stay in the language the trip
- * started in.
+ * Pure: the `trip_fix` request (`rosty_geo::session::FixIn` plus `dir`). [elapsedMs] is the fix's monotonic clock
+ * (`Location.getElapsedRealtimeNanos` in ms), the clock of the trip's speed history. [locale] is the phone's language
+ * now (a tag such as `tr-TR`): the notification's title and text follow it; without it they stay in the language the
+ * trip started in.
  */
 internal fun tripFixJson(
     dir: String,
@@ -161,6 +176,7 @@ internal fun tripFixJson(
     speedMps: Double?,
     atMs: Long,
     locale: String? = null,
+    elapsedMs: Long? = null,
 ): String {
     val o =
         JSONObject()
@@ -170,8 +186,41 @@ internal fun tripFixJson(
             .put("accuracy_m", accuracyM)
             .put("at_ms", atMs)
     if (speedMps != null && speedMps >= 0.0 && !speedMps.isNaN()) o.put("speed_mps", speedMps)
+    if (elapsedMs != null && elapsedMs > 0L) o.put("elapsed_ms", elapsedMs)
     if (!locale.isNullOrBlank()) o.put("locale", locale)
     return o.toString()
+}
+
+/** Pure: the `trip_no_fix` request: no provider found a fix ([elapsedMs] is `SystemClock.elapsedRealtime()`). */
+internal fun tripNoFixJson(
+    dir: String,
+    nowMs: Long,
+    elapsedMs: Long,
+): String =
+    JSONObject()
+        .put("dir", dir)
+        .put("now_ms", nowMs)
+        .put("elapsed_ms", elapsedMs)
+        .toString()
+
+/**
+ * Pure: the log line of one fix (Settings, About, hold Version, Logs), to read the cadence on a phone:
+ * `fix t=12:04:31 d=702m acc=9 v=1.3 assumed=11.2 next=15s high=false basis=bound late=false`. [clock] is the local
+ * time of the fix; `v` is `-` without a measured speed. A missing fix logs `nofix` and its accuracy as `-`.
+ */
+internal fun tripFixLog(
+    answer: TripAnswer,
+    clock: String,
+    accuracyM: Double?,
+    fix: Boolean = true,
+): String {
+    fun one(value: Double?) = value?.let { String.format(java.util.Locale.ROOT, "%.1f", it) } ?: "-"
+    val distance = answer.distanceM?.let { "${Math.round(it)}m" } ?: "-"
+    val accuracy = accuracyM?.let { Math.round(it).toString() } ?: "-"
+    val next = if (answer.nextFixMs % 1000L == 0L) "${answer.nextFixMs / 1000L}s" else "${answer.nextFixMs}ms"
+    return "${if (fix) "fix" else "nofix"} t=$clock d=$distance acc=$accuracy v=${one(answer.speedMps)} " +
+        "assumed=${one(answer.assumedMps)} next=$next high=${answer.highAccuracy} " +
+        "basis=${answer.cadence ?: "-"} late=${answer.late}"
 }
 
 /** The spec of the running trip survives a process restart here. */

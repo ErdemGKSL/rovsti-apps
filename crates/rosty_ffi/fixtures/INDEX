@@ -363,6 +363,7 @@ headless.sms_classify
 headless.trip_alarm
 headless.trip_end
 headless.trip_fix
+headless.trip_no_fix
 headless.wa_digest
 headless.wa_reply
 inbox.bulk
@@ -699,6 +700,13 @@ stops.backup_parse.not_json
 stops.backup_parse.other_app
 stops.backup_parse.tr
 stops.backup_parse.tr_not_json
+stops.cadence
+stops.cadence.close
+stops.cadence.cold
+stops.cadence.hysteresis
+stops.cadence.notice
+stops.cadence.unknown
+stops.cadence.walking_700
 stops.coord_format
 stops.coord_format.plain
 stops.coord_format.tr

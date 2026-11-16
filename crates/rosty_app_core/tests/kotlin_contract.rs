@@ -87,6 +87,25 @@ fn updates_are_requested_on_both_api_paths() {
 }
 
 #[test]
+fn the_request_applies_the_rust_cadence_as_asked() {
+    // AD-SA10: the interval is Rust's, fixes are neither throttled by distance nor batched, and a fix
+    // carries the monotonic clock of the speed history.
+    let service = trip_service();
+    for token in [
+        ".setMinUpdateIntervalMillis(interval)",
+        ".setMinUpdateDistanceMeters(0f)",
+        ".setMaxUpdateDelayMillis(0)",
+        "elapsedRealtimeNanos",
+        "\"elapsed_ms\"",
+        "\"trip_no_fix\"",
+        "tripFixLog(",
+    ] {
+        assert!(service.contains(token), "the trip service lacks {token}");
+    }
+    assert!(!service.contains("interval / 2"));
+}
+
+#[test]
 fn watchdog_mirrors_the_rust_retry_window() {
     let service = trip_service();
     assert!(service.contains("retry_ms"));

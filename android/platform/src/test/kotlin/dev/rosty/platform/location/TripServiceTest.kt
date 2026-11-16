@@ -140,13 +140,15 @@ class TripServiceTest {
                 accuracy = 10f
                 speed = 10f
                 time = 2_000L
+                elapsedRealtimeNanos = 2_000_000_000L
             }
         shadowOf(app.getSystemService(LocationManager::class.java)).simulateLocation(fix)
         assertTrue("trip_fix was not asked", seen.await(10, TimeUnit.SECONDS))
 
         val model = Envelope.json.decodeFromString(TripFixRequest.serializer(), checkNotNull(request))
         // The phone's language goes with every fix: the notification follows it.
-        assertEquals(TripFixRequest(dir, 41.0, 28.9, 10.0, 10.0, 2_000L, locale = "en-US"), model)
+        // The monotonic clock of the fix goes too: the trip's speed history runs on it.
+        assertEquals(TripFixRequest(dir, 41.0, 28.9, 10.0, 10.0, 2_000L, elapsedMs = 2_000L, locale = "en-US"), model)
         val golden = File(System.getProperty("rosty.ffi.fixtures"), "headless.trip_fix.request.json").readText()
         assertEquals(
             org.json
@@ -169,6 +171,68 @@ class TripServiceTest {
             Envelope.json.decodeFromString(TripFixAnswer.serializer(), answer),
             (status as TripStatus.Fixed).answer,
         )
+        controller.destroy()
+    }
+
+    @Test fun theRequestAsksForRustsIntervalWithNoThrottleAndNoBatching() {
+        val controller = Robolectric.buildService(TripService::class.java, startIntent()).create()
+        controller.startCommand(0, 1)
+        val requests =
+            shadowOf(
+                app.getSystemService(LocationManager::class.java),
+            ).getLocationRequests(LocationManager.GPS_PROVIDER)
+        val request = requests.single()
+        assertEquals(10_000L, request.intervalMillis)
+        // Not half of it: fixes other apps trigger would each cost a Rust call, a file write and a notification.
+        assertEquals(10_000L, request.minUpdateIntervalMillis)
+        assertEquals(0f, request.minUpdateDistanceMeters, 0f)
+        assertEquals(0L, request.maxUpdateDelayMillis)
+        assertEquals(android.location.LocationRequest.QUALITY_HIGH_ACCURACY, request.quality)
+        controller.destroy()
+    }
+
+    @Test fun whenNoProviderFindsAFixRustPlansTheRetryAndTheStatusStaysSearching() {
+        val seen = CountDownLatch(1)
+        var request: String? = null
+        val answer = File(System.getProperty("rosty.ffi.fixtures"), "headless.trip_no_fix.answer.json").readText()
+        fake.onHeadless("trip_no_fix") {
+            request = it
+            seen.countDown()
+            answer
+        }
+        TripClock.clock =
+            dev.rosty.design.time
+                .RostyClock { 65_000L }
+        TripClock.elapsed = { 65_000L }
+        val manager = app.getSystemService(LocationManager::class.java)
+        val controller = Robolectric.buildService(TripService::class.java, startIntent()).create()
+        controller.startCommand(0, 1)
+        // Location switched off: both providers answer nothing at once.
+        for (provider in listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.FUSED_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+        )) {
+            shadowOf(manager).setProviderEnabled(provider, false)
+        }
+        TripService.onWatchdog(app)
+        val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (seen.count > 0 && System.nanoTime() < end) {
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            Thread.sleep(20)
+        }
+        assertTrue("trip_no_fix was not asked", seen.await(1, TimeUnit.SECONDS))
+        val golden = File(System.getProperty("rosty.ffi.fixtures"), "headless.trip_no_fix.request.json").readText()
+        val sent = org.json.JSONObject(checkNotNull(request))
+        val wanted = org.json.JSONObject(golden.replace("\$DIR", dir))
+        assertEquals(wanted.keys().asSequence().toSet(), sent.keys().asSequence().toSet())
+        for (key in listOf("dir", "now_ms", "elapsed_ms")) assertEquals(wanted.get(key), sent.get(key))
+        awaitUntil { TripPrefs.load(app)?.nextFixMs == 300_000L }
+        // The status stays "searching": the answer is not a fix.
+        assertTrue(statuses().all { TripStatus.parse(it) == TripStatus.Searching })
+        assertTrue(statuses().isNotEmpty())
+        TripClock.clock = dev.rosty.design.time.SystemRostyClock
+        TripClock.elapsed = { android.os.SystemClock.elapsedRealtime() }
         controller.destroy()
     }
 

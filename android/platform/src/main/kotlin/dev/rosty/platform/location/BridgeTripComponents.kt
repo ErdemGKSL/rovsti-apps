@@ -41,7 +41,9 @@ import dev.rosty.platform.location.TripSpec
 import dev.rosty.platform.location.exactAllowed
 import dev.rosty.platform.location.startFailure
 import dev.rosty.platform.location.tripFixJson
+import dev.rosty.platform.location.tripFixLog
 import dev.rosty.platform.location.tripIntervalMs
+import dev.rosty.platform.location.tripNoFixJson
 import dev.rosty.platform.location.tripProvider
 import dev.rosty.platform.location.tripRestartErrorJson
 import dev.rosty.platform.location.tripStartIsBackground
@@ -213,7 +215,13 @@ class TripService : Service() {
                             } else {
                                 LocationRequest.QUALITY_BALANCED_POWER_ACCURACY
                             },
-                        ).setMinUpdateIntervalMillis(interval / 2)
+                        )
+                        // Rust's interval is the cadence (AD-SA10): no faster fixes from other apps' requests, no
+                        // fix held back for "not moved enough" (it would look missing), no batching (each fix is
+                        // needed when it is taken).
+                        .setMinUpdateIntervalMillis(interval)
+                        .setMinUpdateDistanceMeters(0f)
+                        .setMaxUpdateDelayMillis(0)
                         .build()
                 locations.requestLocationUpdates(provider, request, worker, listener)
             } else {
@@ -246,15 +254,17 @@ class TripService : Service() {
     private fun onFix(location: Location) {
         val current = spec ?: return
         val speed = if (location.hasSpeed()) location.speed.toDouble() else null
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 1_000.0
         val request =
             tripFixJson(
                 current.dir,
                 location.latitude,
                 location.longitude,
-                if (location.hasAccuracy()) location.accuracy.toDouble() else 1_000.0,
+                accuracy,
                 speed,
                 location.time,
                 resources.configuration.locales[0]?.toLanguageTag(),
+                location.elapsedRealtimeNanos / NANOS_PER_MS,
             )
         val raw = Headless.call("trip_fix", request)
         val answer = TripAnswer.parse(raw)
@@ -263,6 +273,7 @@ class TripService : Service() {
             armWatchdog(tripWatchdogMs(current.nextFixMs))
             return
         }
+        if (!answer.ended) RostyLog.i("trip", tripFixLog(answer, logClock(location.time), accuracy))
         // Ring first: an ended trip stops the service right after, and the alarm must outlive it.
         if (answer.ring) TripAlarm.ring(applicationContext)
         if (answer.ended) {
@@ -283,6 +294,38 @@ class TripService : Service() {
         requestUpdates(answer.nextFixMs, answer.highAccuracy)
         armWatchdog(answer.retryMs.takeIf { it > 0 } ?: tripWatchdogMs(answer.nextFixMs))
     }
+
+    /**
+     * Runs on [worker]: no provider found a fix. Rust dead-reckons from the last usable fix (`trip_no_fix`), so the
+     * retries get denser and switch to GPS as the worst case nears the line. The status stays `searching` and the
+     * notification keeps its text; nothing rings from here.
+     */
+    private fun onNoFix(current: TripSpec) {
+        emitStatus(JSONObject().put("state", "searching").toString())
+        val now = TripClock.nowMillis()
+        val raw = Headless.call("trip_no_fix", tripNoFixJson(current.dir, now, TripClock.elapsedMillis()))
+        val answer = TripAnswer.parse(raw)
+        if (answer == null) {
+            armWatchdog(tripWatchdogMs(current.nextFixMs))
+            return
+        }
+        if (answer.ended) {
+            shutdown(emitStopped = false)
+            return
+        }
+        RostyLog.i("trip", tripFixLog(answer, logClock(now), null, fix = false))
+        val updated = current.copy(nextFixMs = answer.nextFixMs, highAccuracy = answer.highAccuracy)
+        spec = updated
+        TripPrefs.save(this, updated)
+        requestUpdates(answer.nextFixMs, answer.highAccuracy)
+        armWatchdog(answer.retryMs.takeIf { it > 0 } ?: tripWatchdogMs(answer.nextFixMs))
+    }
+
+    private fun logClock(atMs: Long): String =
+        java.time.Instant
+            .ofEpochMilli(atMs)
+            .atZone(java.time.ZoneId.systemDefault())
+            .format(LOG_CLOCK)
 
     /**
      * The watchdog fired: no fix arrived in time, so ask for one now. A null location tries the other
@@ -319,8 +362,7 @@ class TripService : Service() {
                 if (location != null) {
                     onFix(location)
                 } else {
-                    emitStatus(JSONObject().put("state", "searching").toString())
-                    armWatchdog(tripWatchdogMs(current.nextFixMs))
+                    onNoFix(current)
                 }
             }
         } catch (_: SecurityException) {
@@ -407,6 +449,10 @@ class TripService : Service() {
         const val ACTION_WATCHDOG = "dev.rosty.trip.WATCHDOG"
         const val EXTRA_SPEC = "spec"
         const val EVENT_STATUS = "trip_status"
+        private const val NANOS_PER_MS = 1_000_000L
+        private val LOG_CLOCK: java.time.format.DateTimeFormatter =
+            java.time.format.DateTimeFormatter
+                .ofPattern("HH:mm:ss")
 
         @Volatile var running = false
             private set

@@ -272,6 +272,28 @@ data class PollAnswer(
     @SerialName("idle_ms") val idleMs: Long,
 )
 
+/** One step of the trip's cadence (`stops.cadence`, AD-SA10); absent [assumedMps] plans a first fix. */
+@Serializable
+data class CadenceRequest(
+    @SerialName("line_m") @EncodeDefault(NEVER) val lineM: Double? = null,
+    @SerialName("accuracy_m") @EncodeDefault(NEVER) val accuracyM: Double? = null,
+    @SerialName("notice_m") @EncodeDefault(NEVER) val noticeM: Double? = null,
+    @SerialName("assumed_mps") @EncodeDefault(NEVER) val assumedMps: Double? = null,
+    @SerialName("est_mps") @EncodeDefault(NEVER) val estMps: Double? = null,
+    @SerialName("prev_ms") @EncodeDefault(NEVER) val prevMs: Long? = null,
+    @SerialName("prev_high") @EncodeDefault(NEVER) val prevHigh: Boolean? = null,
+)
+
+/** The interval and priority of that step; [coldMs] is the old curve (`stops.poll`) for the same fix. */
+@Serializable
+data class CadenceAnswer(
+    @SerialName("interval_ms") val intervalMs: Long,
+    @SerialName("retry_ms") val retryMs: Long,
+    @SerialName("high_accuracy") val highAccuracy: Boolean,
+    @SerialName("assumed_mps") val assumedMps: Double,
+    @SerialName("cold_ms") val coldMs: Long,
+)
+
 /** [zip] is a file path; with [save] the feed is written as `gtfs.json` for `stops.gtfs_search`. */
 @Serializable
 data class GtfsImportRequest(

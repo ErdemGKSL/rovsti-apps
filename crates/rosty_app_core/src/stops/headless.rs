@@ -7,7 +7,8 @@
 //!
 //! | kind         | in                                          | out                                              |
 //! |--------------|---------------------------------------------|--------------------------------------------------|
-//! | `trip_fix`   | `{dir, lat, lon, accuracy_m, speed_mps?, at_ms}` | a `FixOut`, or `{"state":"ended"}`          |
+//! | `trip_fix`   | `{dir, lat, lon, accuracy_m, speed_mps?, at_ms, elapsed_ms?}` | a `FixOut`, or `{"state":"ended"}` |
+//! | `trip_no_fix`| `{dir, now_ms, elapsed_ms?}`                | a `FixOut` without `at`, or `{"state":"ended"}` |
 //! | `trip_alarm` | `{dir, action: "dismiss" \| "snooze" \| "timeout"}` | `{dismissed:true}`, `{ring_at_ms}` or `{silenced:true}` |
 //! | `trip_end`   | `{dir, reason: "arrived" \| "cancelled"}`   | `{"state":"ended"}`                              |
 //!
@@ -15,6 +16,11 @@
 //! re-arms the ring without using up a snooze, and answers `{silenced:true}`
 //! once the re-ring cap is spent (the trip stays arrived). `trip_fix` answers
 //! carry `retry_ms`, the watchdog window for a missing fix.
+//!
+//! `trip_no_fix` is the watchdog's answer when no provider found a fix (AD-SA10): the trip dead-reckons
+//! from its last usable fix, so the retries get denser and switch to high accuracy as the worst case nears
+//! the line. Nothing rings from it. `elapsed_ms` is the monotonic clock (`SystemClock.elapsedRealtime`), the
+//! clock of the fixes' `elapsed_ms`; without it `now_ms` is used.
 //!
 //! `dir` is the app data directory (`Headless.dataDir`). With no trip in
 //! progress every kind answers `{"state":"ended"}`, which stops the service.
@@ -43,6 +49,14 @@ struct FixRequest {
 }
 
 #[derive(Deserialize)]
+struct NoFixRequest {
+    dir: String,
+    now_ms: i64,
+    #[serde(default)]
+    elapsed_ms: Option<i64>,
+}
+
+#[derive(Deserialize)]
 struct AlarmRequest {
     dir: String,
     action: String,
@@ -61,6 +75,7 @@ type SendNotice<'a> = &'a dyn Fn(&str, &str, &str) -> Result<(), SendFailure>;
 /// The kinds this app answers.
 pub const TABLE: &[(&str, Handler)] = &[
     ("trip_fix", trip_fix),
+    ("trip_no_fix", trip_no_fix),
     ("trip_alarm", trip_alarm),
     ("trip_end", trip_end),
 ];
@@ -92,7 +107,7 @@ fn fix_in(dir: &Path, fix: FixIn, locale: Option<Lang>, send: SendNotice<'_>) ->
     if let Some(lang) = locale {
         trip.lang = lang;
     }
-    let outcome = trip.on_fix(fix.fix(), fix.at_ms);
+    let outcome = trip.on_fix(fix.fix(), fix.clock_ms());
     save(dir, &trip);
     drop(guard);
 
@@ -129,6 +144,27 @@ fn fix_in(dir: &Path, fix: FixIn, locale: Option<Lang>, send: SendNotice<'_>) ->
             answer(&trip.fix_out(&outcome))
         }
     }
+}
+
+fn trip_no_fix(_: &str, json: &str) -> String {
+    let Ok(request) = serde_json::from_str::<NoFixRequest>(json) else {
+        return String::new();
+    };
+    no_fix_in(
+        Path::new(&request.dir),
+        request.elapsed_ms.unwrap_or(request.now_ms),
+    )
+}
+
+/// No fix came: plan the next try from the last usable fix, persist the plan, and answer.
+fn no_fix_in(dir: &Path, clock_ms: i64) -> String {
+    let _guard = store::lock();
+    let Some(mut trip) = store::load_trip(dir) else {
+        return ENDED.to_owned();
+    };
+    let cadence = trip.no_fix(clock_ms);
+    save(dir, &trip);
+    answer(&trip.no_fix_out(cadence))
 }
 
 fn trip_alarm(_: &str, json: &str) -> String {
@@ -229,6 +265,7 @@ mod tests {
             accuracy_m: 10.0,
             speed_mps: Some(10.0),
             at_ms,
+            elapsed_ms: None,
         }
     }
 
@@ -471,6 +508,59 @@ mod tests {
     }
 
     #[test]
+    fn no_fix_tightens_with_time_and_never_rings() {
+        let dir = tmp("hl-no-fix");
+        store::save_trip(&dir, &trip(1)).unwrap();
+        let first = run(&dir, fix(3_000.0, 0));
+        let second = run(&dir, fix(2_980.0, 20_000));
+        assert!(second.next_fix_ms >= first.next_fix_ms);
+        let ask = |elapsed_ms: i64| -> FixOut {
+            let json = format!(
+                r#"{{"dir":{:?},"now_ms":1,"elapsed_ms":{elapsed_ms}}}"#,
+                dir.to_str().unwrap()
+            );
+            serde_json::from_str(&handle("trip_no_fix", &json)).unwrap()
+        };
+        let mut prev = u64::MAX;
+        for k in 1..=30 {
+            let out = ask(20_000 + k * 10_000);
+            assert!(out.next_fix_ms <= prev);
+            assert!(out.late && !out.ring && out.at.is_none());
+            assert_eq!(out.state, TripState::Tracking);
+            prev = out.next_fix_ms;
+        }
+        assert_eq!(prev, 3_000);
+        // The plan is kept: a fix after it is late.
+        assert!(store::load_trip(&dir).unwrap().speed.last_plan().is_some());
+        assert!(run(&dir, fix(2_000.0, 330_000)).next_fix_ms > 0);
+        // Without `elapsed_ms` the wall clock is the clock.
+        let json = format!(r#"{{"dir":{:?},"now_ms":340000}}"#, dir.to_str().unwrap());
+        assert!(serde_json::from_str::<FixOut>(&handle("trip_no_fix", &json)).is_ok());
+    }
+
+    #[test]
+    fn no_fix_without_a_trip_answers_ended() {
+        let dir = tmp("hl-no-fix-none");
+        let json = format!(r#"{{"dir":{:?},"now_ms":1}}"#, dir.to_str().unwrap());
+        assert_eq!(handle("trip_no_fix", &json), ENDED);
+    }
+
+    #[test]
+    fn a_fix_uses_the_monotonic_clock_when_it_has_one() {
+        let dir = tmp("hl-elapsed");
+        store::save_trip(&dir, &trip(1)).unwrap();
+        run(
+            &dir,
+            FixIn {
+                elapsed_ms: Some(5_000),
+                ..fix(3_000.0, 1_700_000_000_000)
+            },
+        );
+        let speed = store::load_trip(&dir).unwrap().speed;
+        assert_eq!(speed.newest().unwrap().t_ms, 5_000);
+    }
+
+    #[test]
     fn dismiss_writes_one_history_record() {
         let dir = tmp("hl-dismiss");
         store::save_trip(&dir, &trip(4)).unwrap();
@@ -498,7 +588,7 @@ mod tests {
 
     #[test]
     fn bad_input_answers_empty() {
-        for kind in ["trip_fix", "trip_alarm", "trip_end"] {
+        for kind in ["trip_fix", "trip_no_fix", "trip_alarm", "trip_end"] {
             assert_eq!(handle(kind, "not json"), "");
             assert_eq!(handle(kind, "{}"), "");
         }

@@ -162,7 +162,7 @@ class WaDownloadsTest {
             assertEquals(100L * 1024 * 1024, last.freeBytes)
         }
 
-    @Test fun aTapDownloadsWhateverTheNetworkButNeverViewOnceMedia() =
+    @Test fun aTapDownloadsWhateverTheNetworkAlsoViewOnceMediaThatWasNotOpened() =
         runTest {
             seedAllKinds()
             device.kind = DataNetwork.Roaming
@@ -171,10 +171,11 @@ class WaDownloadsTest {
 
             assertTrue(downloads.tap(store, WaMediaRef(ADA, "video")))
             assertTrue(downloads.tap(store, WaMediaRef(ADA, "doc")))
-            assertFalse(downloads.tap(store, WaMediaRef(ADA, "once")))
+            // View once is never fetched by the rules; the tap that opens it fetches it (E6-WA R3).
+            assertTrue(downloads.tap(store, WaMediaRef(ADA, "once")))
             downloads.kick(store) {}.join()
 
-            assertEquals(listOf("doc", "video"), remote.mediaCalls.sorted())
+            assertEquals(listOf("doc", "once", "video"), remote.mediaCalls.sorted())
             // A document keeps the name it was sent under.
             assertEquals("IMG", fileOf("doc", "Ferry timetable.pdf").readText())
             assertEquals(fileOf("doc", "Ferry timetable.pdf").absolutePath, stateOf(store, "doc").path)

@@ -638,3 +638,67 @@ Deviations from the plan:
 
 Not verified: anything against real WhatsApp (pace, `backoff`, usync picture ids, R2), the deploy and the v9
 migration on the Pi's database, Kotlin runner behaviour (step 7).
+
+### Steps 7 and 8: runner, worker, triggers, live row, notification, docs (2026-11-16)
+
+Built on `d78f21ce`, uncommitted.
+
+What was built:
+
+- **Runner** (`:people`, `PeopleSyncRunner`): every slice opts in with `SyncBeginRequest(jobs = true)` and performs
+  `job_start` (`peopleSyncStart`; `supported = false` -> `SyncReport.jobUnsupported`), `job_watch` (`peopleSyncStatus`
+  with the step's `rev` and `wait_ms`; `gone` -> `jobGone`), `job_fetch` (`peopleSyncBundle`; each `picture_path` is
+  read, downscaled to 512 px with the codec, stored with `PeopleStore.store` and deleted; the record goes back as
+  `SyncJobRecord` with `stored{file}` / `failed`) and `job_done` (`peopleSyncCancel`, answer ignored ->
+  `jobClosed`). `RunnerState.job` carries the `SyncJobView`. The user's Stop (`cancel()`) also sends
+  `peopleSyncCancel` from the host's scope, so the pending long-poll returns at once; a stop by the system does not.
+  A Stop with no slice active cancels a stored job-mode run's job and interrupts it (`stopStoredJob`). A slice ending
+  `interrupted(server_working)` returns `SliceResult.Interrupted(reason, etaMs)`. The `people-bundle` cache folder
+  (`PeopleSyncRunner.BUNDLE_DIR`) is emptied when a slice begins.
+- **Worker** (`ForegroundPeopleSyncWorker`, `ForegroundSyncPlan`): unchanged promotion, so **every run is foreground
+  with the notification** (owner's Q1, overriding D8: no `KEY_ATTENDED`, no 90 s quiet slice). `continueInMs`:
+  `server_working` -> the job's ETA clamped to 1..30 min (`serverWorkingDelay`); `interrupted(cancelled)` -> nothing.
+- **Triggers** (`PeopleSyncTriggers.shouldStart`, `:people`): `PERIOD_MS` 12 h, `ATTEMPT_DEBOUNCE_MS` 30 min, kinds
+  `FOREGROUND`, `RECONNECT`, `NEW_LINK`; never over the user's Stop or a failed run, never during WhatsApp's penalty.
+  `PeopleSync.syncIfStale` (Contacts' `onResume`) and Phone's `StandalonePeople` (first link in the process and a
+  reconnect: the 12 h / 30 min rule; another instance id: at once; a `Disconnected` state: nothing) use it.
+  `PeopleSync.PERIOD_MS` = 12 h, `PeopleSyncWorker.schedule` uses `ExistingPeriodicWorkPolicy.UPDATE`. No
+  contacts-changed trigger.
+- **Contacts row**: `PeopleSyncStatus.Preparing(phase, done, total, waitUntilMs, waitSource, watched)`,
+  `Downloading(done, total)`, `Idle.changed`; `peopleSyncUi` words them as in section 5 (strings
+  `settings_people_server_lookup|profiles|pictures|limit|offline|quiet`, `settings_people_downloading`,
+  `settings_people_synced_unchanged|changed`, plural `settings_people_changes`, en and tr). A stored run in stage
+  `server` that is `interrupted(server_working)` (or `running` with no slice here) is `Preparing(watched = false)`;
+  the settings view model then calls `PeopleSyncControl.attend()` once (a normal `auto` start, so with the
+  notification). Stop between two slices also drops the continuation work (`PeopleSyncWork.dropContinuation`).
+- **Notification**: `SyncNotice.Line.Server(phase, done, total)` and `Line.Download(done, total)`; a job waiting for
+  `whatsapp` / `gateway` reads as the existing `Line.Limit`; strings `people_sync_notice_server_*`,
+  `people_sync_notice_download` (en, tr).
+- **Docs**: `docs/architecture.md` "People sync (people sync v3)", `docs/whatsapp-gateway.md` "How the apps use it";
+  `e6-status.md` note (gateway commits `0fc06354`, `8377c84b`, backup, what to try).
+
+Tests: `PeopleSyncJobTest` (new; job run end to end with the real planner and a scripted gateway; unchanged run sends
+`h`/`p`, no `onChanged`, `people.json` untouched; Stop cancels the job and the long-poll returns; a system stop does
+not, and the continuation follows the job by id; a bounded slice ends `server_working` with the ETA and the row is
+`Preparing(watched = false)`; an old gateway falls back to the v2 steps and is not asked again within a day);
+`PeopleSyncWorkerTest` (`theWorkIsUniquePeriodicEveryTwelveHours...`, `aSecondScheduleUpdatesTheSameWorkAndKeepsItsId`
+replacing `keepLeavesTheRunningScheduleAlone`, ETA and cancelled continuations); `PeopleSyncForegroundTest`
+(`anAutomaticRunIsForegroundAndTheNotificationFollowsTheGatewaysJob`: Q1); `PeopleSyncTriggersTest`,
+`ForegroundSyncPlanTest`, `SyncNoticeTest` (`:people`); `PeopleSyncWordsTest`, `ContactsSettingsSyncRowTest`,
+`ContactsSettingsViewModelTest` (attend once); `StandaloneSourceTest`
+(`aReconnectSyncsOnlyAfterTwelveHoursButAnotherLinkSyncsAtOnce`). Shots in `X1ShotTest`: `x1-people-sync-row-server`,
+`-server-limit`, `-server-quiet`, `-download`, `-unchanged`, `-server-tr` (light and dark); the existing six unchanged.
+
+Deviations from the plan:
+
+- Q1 (owner): every run is foreground with the notification; D8's quiet automatic runs, `QUIET_WATCH_MS` and
+  `KEY_ATTENDED` are not built, and the plan's "auto does not promote" test is the opposite one. `attend()` is a normal
+  start. A foreground slice has no budget, so it follows the job to the end (a long gateway wait keeps the
+  notification up); `server_working` happens only in the 8-minute fallback slice.
+- **Rust fix (step 5 bug)**: after `Report::JobUnsupported` the picture queue planned at the job start (before any
+  lookup) was kept, so the v2 fallback downloaded no pictures. `report_inner` now clears `s.queue` there
+  (`crates/rosty_app_core/src/people_sync.rs`), pinned in `an_old_gateway_runs_the_v2_steps_...`.
+- The row of a running job with nothing counted yet (or an unknown phase) uses the quiet line rather than "0/0".
+
+Not verified: the real gateway and phone (section 8's device list), Android 15's dataSync time budget on a long first
+job.

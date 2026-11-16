@@ -95,6 +95,9 @@ class SheetEntry(
 
     private var detentList by mutableStateOf(detents)
 
+    /** The detents the sheet was last configured with: a change from these came through [updateDetents]. */
+    private var configuredDetents: ImmutableList<Detent> = detents
+
     /** The detents the sheet rests on now: the constructor's, or the last [updateDetents]. */
     val detents: ImmutableList<Detent> get() = detentList
 
@@ -160,7 +163,11 @@ class SheetEntry(
         SideEffect {
             sheet.canDismiss = { latestCanDismiss() }
             sheet.onDismissBlocked = { latestBlocked() }
-            sheet.configure(height, offsets)
+            // Only an explicit [updateDetents] makes a resting sheet follow its detent; a window or inset change
+            // keeps the old behaviour (stay on the nearest detent, no spring).
+            val follow = detents != configuredDetents
+            configuredDetents = detents
+            sheet.configure(height, offsets, follow)
             if (sheetRef !== sheet) sheetRef = sheet
         }
         LaunchedEffect(sheet) { sheet.present(initialOffset) }

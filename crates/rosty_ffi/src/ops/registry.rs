@@ -21,7 +21,13 @@ pub struct Case {
     /// Ops to run first, in order; each answer holds a `handle`. The next setup request (and finally the case
     /// request) names the latest handle as [`PLACEHOLDER_HANDLE`], and the fixture test swaps in the live one.
     pub setup: Vec<(&'static str, Value)>,
+    /// Answer fields (`ok.<name>`) that hold fresh random values (a passphrase, a sealed blob). The fixture test
+    /// writes them as [`VOLATILE`], so the files stay stable while the shape is still checked.
+    pub volatile: &'static [&'static str],
 }
+
+/// What a [`Case::volatile`] field reads in a fixture answer.
+pub const VOLATILE: &str = "$RANDOM";
 
 impl Case {
     /// The main case of an op.
@@ -31,6 +37,7 @@ impl Case {
             request,
             seed: None,
             setup: Vec::new(),
+            volatile: &[],
         }
     }
 
@@ -41,7 +48,14 @@ impl Case {
             request,
             seed: None,
             setup: Vec::new(),
+            volatile: &[],
         }
+    }
+
+    /// Marks answer fields whose values are random on every run.
+    pub fn volatile(mut self, fields: &'static [&'static str]) -> Self {
+        self.volatile = fields;
+        self
     }
 
     pub fn seeded(mut self, seed: &'static str) -> Self {
@@ -130,6 +144,7 @@ pub fn all() -> impl Iterator<Item = &'static OpSpec> {
         .chain(super::wa_sync::OPS.iter())
         .chain(super::wa_identity::OPS.iter())
         .chain(super::wa_idbook::OPS.iter())
+        .chain(super::vault::OPS.iter())
 }
 
 /// The op with this wire name.

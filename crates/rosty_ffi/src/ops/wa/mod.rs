@@ -1,6 +1,6 @@
 //! `wa.*`: the WhatsApp gateway (E2.14).
 //!
-//! `wa.open {url, key?, cache_dir?}` builds a `rosty_wa_client::Gateway` and answers its handle; every network
+//! `wa.open {url?, key?, cache_dir?}` builds a `rosty_wa_client::Gateway` and answers its handle; every network
 //! op then takes `{handle, ...}` and runs the blocking client call (the Kotlin facade runs it on `RustDispatcher`).
 //! The registry is not locked while a request is in flight: an op clones the cheap `Gateway` out first, so a slow
 //! gateway never stalls `release` or another handle.
@@ -200,27 +200,69 @@ pub(crate) mod fixture {
     }
 }
 
-/// `wa.open {url, key?, cache_dir?}`.
+/// `wa.open {url?, key?, cache_dir?}`.
 #[derive(Deserialize)]
 pub(super) struct OpenReq {
-    url: String,
+    /// Required while the vault is locked; with an unlocked vault it defaults to the vault's and must match it.
+    #[serde(default)]
+    url: Option<String>,
+    /// Only while the vault is locked (the pre-vault path, and linking a new instance).
     #[serde(default)]
     key: Option<String>,
     #[serde(default)]
     cache_dir: Option<String>,
 }
 
+fn vault_refusal(message: &str, code: &str) -> FfiError {
+    FfiError::invalid(message).with_detail(json!({ "code": code }))
+}
+
 pub(super) fn open(req: OpenReq) -> Result<HandleAns, FfiError> {
-    let url = GatewayUrl::parse(&req.url).map_err(|e| map_error(e.into()))?;
-    let key = match req.key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
-        Some(key) => Some(ConnectKey::parse(key).map_err(|e| map_error(e.into()))?),
-        None => None,
-    };
+    let given_key = req.key.as_deref().map(str::trim).filter(|k| !k.is_empty());
     let cache_dir = match req.cache_dir {
         Some(dir) => PathBuf::from(dir),
         None => state::dirs()
             .map(|dirs| dirs.cache_dir.join("wa-media"))
             .unwrap_or_else(|| std::env::temp_dir().join("rosty-wa-media")),
+    };
+    // An unlocked vault is the only source of the connect key: a key in the request is refused, and the key never
+    // goes to another gateway than the vault's.
+    if let Some(link) = super::vault::unlocked() {
+        if given_key.is_some() {
+            return Err(vault_refusal(
+                "the vault is unlocked: the connect key comes from the vault",
+                "vault_unlocked",
+            ));
+        }
+        let url = GatewayUrl::parse(&link.url).map_err(|e| map_error(e.into()))?;
+        if let Some(asked) = req.url.as_deref() {
+            let asked = GatewayUrl::parse(asked).map_err(|e| map_error(e.into()))?;
+            if asked != url {
+                return Err(vault_refusal(
+                    "the vault's connect key belongs to another gateway",
+                    "other_gateway",
+                ));
+            }
+        }
+        let key = ConnectKey::parse(&link.key).map_err(|e| map_error(e.into()))?;
+        let gateway = Gateway::new(url.clone(), Some(key.clone()));
+        let handle = handles::global().insert(Wa {
+            gateway,
+            url,
+            key: Some(key),
+            cache_dir,
+        });
+        super::vault::adopt_gateway(link.session, handle);
+        return Ok(HandleAns { handle });
+    }
+    let url = req
+        .url
+        .as_deref()
+        .ok_or_else(|| FfiError::invalid("url is required while the vault is locked"))?;
+    let url = GatewayUrl::parse(url).map_err(|e| map_error(e.into()))?;
+    let key = match given_key {
+        Some(key) => Some(ConnectKey::parse(key).map_err(|e| map_error(e.into()))?),
+        None => None,
     };
     let gateway = Gateway::new(url.clone(), key.clone());
     let handle = handles::global().insert(Wa {
@@ -245,6 +287,23 @@ pub(super) fn open_cases() -> Vec<Case> {
             json!({"url": "http://wa.example.com", "key": fixture::KEY}),
         ),
         Case::named("bad_key", json!({"url": "$WA", "key": "rwk_short"})),
+        Case::named("no_url", json!({"key": fixture::KEY})),
+        // An unlocked vault (the seeded one of `vault.*`) supplies key and URL.
+        Case::named("vault", json!({}))
+            .seeded("wa_vault")
+            .after("vault.unlock", super::vault::seed_unlock_request()),
+        Case::named(
+            "vault_same_url",
+            json!({"url": "https://rosty.erdemdev.tr"}),
+        )
+        .seeded("wa_vault")
+        .after("vault.unlock", super::vault::seed_unlock_request()),
+        Case::named("vault_key_refused", json!({"key": fixture::KEY}))
+            .seeded("wa_vault")
+            .after("vault.unlock", super::vault::seed_unlock_request()),
+        Case::named("vault_other_url", json!({"url": "https://wa.example.com"}))
+            .seeded("wa_vault")
+            .after("vault.unlock", super::vault::seed_unlock_request()),
     ]
 }
 
@@ -290,8 +349,9 @@ mod tests {
 
     #[test]
     fn a_released_handle_is_not_found() {
+        let _vault = crate::ops::vault::test_lock();
         let opened = open(OpenReq {
-            url: "https://wa.example.com".into(),
+            url: Some("https://wa.example.com".into()),
             key: Some(fixture::KEY.into()),
             cache_dir: None,
         })

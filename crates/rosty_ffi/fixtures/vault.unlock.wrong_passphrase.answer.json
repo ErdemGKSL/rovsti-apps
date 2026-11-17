@@ -1,0 +1,1 @@
+{"err":{"kind":"auth","message":"wrong passphrase, or the vault was modified","detail":{"code":"wrong_passphrase"}}}

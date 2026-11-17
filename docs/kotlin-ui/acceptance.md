@@ -4,6 +4,27 @@ What this machine cannot prove: it has no phone and no GPU. Every entry below is
 release build installed, and its result is written under the entry (date, phone, numbers, pass or fail). One section per
 app; the list of what belongs here is E8.7 AC1 in `_bmad-output/kotlin-ui/epics.md`.
 
+## Contacts
+
+### X.2: Card Studio on a number-named contact
+
+**Why.** The host proves the renderer (`CardsOpsNativeTest` runs the real `librosty_ffi` with no fakes) and the release
+APK (`scripts/check-catalog-apk.sh`, the R8 `dexdump` grep in `_bmad-output/kotlin-ui/plans/round-17.md`). It cannot
+prove Share and Save against real chat apps and the real gallery.
+
+**Steps** (Contacts release build, a contact whose name is a phone number, for example "+90 532 000 11 22", with no
+birthday):
+
+1. Open the contact, then Make a Card. Card Studio opens without an error.
+2. The Birthday and Contact templates both render a preview with the number as the name (no empty name, no crash).
+3. Share opens the system sheet with the card; the chat app you pick shows the image (a still as JPEG or PNG, an
+   animated card as GIF).
+4. Save adds the card to Pictures/Rosty in the gallery, visible at once (not stuck as pending).
+5. An animated card plays its GIF once in the preview and then holds the last frame.
+6. Cancel during a render returns to the sheet with no leftover file.
+
+Result (date, phone, Android version, pass or fail, what looked wrong): .
+
 ## Stops
 
 ### E7.13 AC2: the map at 120 Hz

@@ -253,8 +253,11 @@ class NoticeViewModel(
 
     /** The default message of the phone's language goes into the field and is saved. */
     fun useDefault() {
-        templateField.setTextAndPlaceCursorAtEnd(mutable.value.defaultTemplate)
-        saveTemplate()
+        // Inside the work scope so the field is only ever edited by that scope's (serial) coroutines.
+        work.launch {
+            templateField.setTextAndPlaceCursorAtEnd(mutable.value.defaultTemplate)
+            saveTemplate()
+        }
     }
 
     fun setWhen(sendWhen: NoticeWhen) {

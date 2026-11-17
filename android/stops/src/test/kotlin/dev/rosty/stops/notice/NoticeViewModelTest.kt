@@ -28,7 +28,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class NoticeViewModelTest {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default.limitedParallelism(1))
     private val wa = FakeWaRepository(NoticeFixtures.connected).apply { setChats(NoticeFixtures.chats) }
 
     @After fun tearDown() = scope.cancel()

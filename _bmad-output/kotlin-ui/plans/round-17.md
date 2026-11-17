@@ -359,3 +359,14 @@ const-string "cards.render", "cards.cancel" present ("cards.templates" is unused
 ```
 No new keep rule is needed: the models are `@Serializable` (plugin serializers, no reflection) and `NativeCardsOps`
 is reached by code, not by name.
+
+## r17-s7 result (release path without an emulator)
+
+- `bash scripts/check-catalog-apk.sh android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk`: "all 8 RustNative exports present", `librosty_ffi.so` for arm64-v8a.
+- `dexdump -d classes.dex` on the same APK (25,897,967 B), names from `mapping.txt`, each obfuscated descriptor found as `Class descriptor`:
+  `RustNative` (kept, `Ldev/rosty/core/RustNative;`), `NativeCardsOps -> l13`, `CardRenderRequest -> lu` / `$$serializer -> ju`,
+  `CardRenderResult -> ou` / `mu`, `CardSpec -> yu` / `wu`, `CardCancelRequest -> mt` / `kt`, `CardCancelAnswer -> jt` / `gt`: all present.
+  `const-string "cards.render"` and `"cards.cancel"` present. No new keep rule.
+- `:core-bridge:testRustBridge`: `CardsOpsNativeTest` 5/5 pass.
+- Robolectric (`:platform:testReleaseUnitTest`): `CardShareTest` 11/11 (share MIME and `FLAG_GRANT_READ_URI_PERMISSION`, `Pictures/Rosty` with `IS_PENDING` cleared, cache pruned to 20 files), `BirthdayRemindersTest` 10/10 ("Make a Card" PendingIntent). Nothing broke with the real ops.
+- `docs/kotlin-ui/acceptance.md`: new "Contacts / X.2: Card Studio on a number-named contact" entry.

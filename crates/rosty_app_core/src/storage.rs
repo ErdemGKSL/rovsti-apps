@@ -153,12 +153,17 @@ pub fn save_prefs(prefs: &Prefs, dir: &Path) -> std::io::Result<()> {
 /// rename), creating `dir` if needed. A crash leaves the old file or the new
 /// one, never half of each.
 pub fn save_json<T: Serialize>(dir: &Path, name: &str, value: &T) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec(value).map_err(std::io::Error::other)?;
+    save_bytes(dir, name, &bytes)
+}
+
+/// Atomically writes `bytes` to `dir/name`, owner-only, the way [`save_json`] does.
+pub fn save_bytes(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
     let tmp = dir.join(format!("{name}.tmp"));
-    let bytes = serde_json::to_vec(value).map_err(std::io::Error::other)?;
     let _ = fs::remove_file(&tmp); // a stale temp file would keep its old mode
     let mut file = private_create(&tmp)?;
-    file.write_all(&bytes)?;
+    file.write_all(bytes)?;
     file.sync_all()?;
     drop(file);
     fs::rename(&tmp, dir.join(name))

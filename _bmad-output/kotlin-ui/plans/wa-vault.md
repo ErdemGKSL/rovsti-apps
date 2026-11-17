@@ -95,3 +95,55 @@ Rule: cost the gateway less than today's eager sync, never more.
 - Client limits: history concurrency 1, media concurrency 1; token bucket 6 requests in the first 10 s after unlock, 30 per minute after; at most one cold sync per 30 s; exponential backoff with jitter 2 s to 5 min honouring Retry-After and retry_after_ms; no retries while locked.
 - Server-side work added: none.
 To verify during implementation: merges stay correct with lazy identity catch-up; real request count of today's WaSyncRunner as the baseline for a regression test.
+
+## 15. Implementation notes (rounds 1 and 2)
+
+Round 1, `rosty_core::vault` (pure; the caller passes `Entropy`):
+- Blobs, all AES-256-GCM with the header as associated data: key blob `RWVK | ver | kdf id | 3 x u32 kdf words | salt 16 |
+  nonce 12 | DK+tag` (94 bytes); body `RWVB | ver | nonce | JSON{gateway_url, instance_id, connect_key}+tag`; cache `RWVC`
+  (same shape, opaque bytes: the 13.5 identity and picture cache, a separate file so pictures do not rewrite the vault);
+  daily `RWVD | ver | boot count u64 | last unlock ms i64 | nonce | DK+tag`. Distinct magics stop a blob of one kind from
+  being opened as another.
+- KDF: Argon2id (`argon2 =0.5.3`, RustCrypto, no `alloc`/`password-hash` features; working memory zeroized) at m = 64 MiB,
+  t = 3, p = 1, parameters in the header. `calibrate(measured, budget)` picks the strongest of (64 MiB, 3/2/1),
+  (46 MiB, 1), (19 MiB, 2) that fits; nothing weaker. PBKDF2-HMAC-SHA256 600 000 is the `vault-pbkdf2` cargo feature
+  (compile-time default for new vaults; both KDF ids are always readable). About 0.6 s per derivation in the host checks
+  profile.
+- Passphrase: 26 Crockford base32 data characters (130 bits from 17 caller bytes) plus 2 check characters, shown as
+  `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`. The check is a Reed-Solomon code over GF(32) with two check symbols (distance 3):
+  every single wrong character and every swap of two characters is detected; parsing ignores case, spaces and dashes
+  and reads I/L as 1 and O as 0. The KDF input is the 26 upper-case data characters.
+- Change (rotation) makes a new passphrase, salt and DK, so an old key blob fails with the new passphrase and an old
+  body blob fails under the new DK.
+
+Round 2, the Keystore boundary (`rosty_ffi` `vault.*`, `rosty_app_core::wa_vault`):
+- Kotlin never holds DK, KEK_p, the daily key or the connect key. It only seals and unseals ciphertext: the key blob
+  (DK under KEK_p) with K_hw, and the daily blob (DK under a random daily key DDK) with K_daily. The smallest thing it
+  must hold in plain form is therefore one opaque wrapped blob per unlock, which is ciphertext without the passphrase
+  (K_hw layer) or without DDK (K_daily layer).
+- DDK is stored next to the K_daily-sealed blob in `wa-vault-daily.json`: without the biometric-gated K_daily it opens
+  nothing, which is exactly the 13.2 trust model ("DK is also sealed under K_daily"). The boot count and the unlock time
+  are authenticated inside the daily blob; Rust refuses (and deletes the file) on another boot count, after 72 h, or
+  with a clock set back more than 5 minutes. `vault.state {boot_count, now_ms}` applies the same rule from the plain
+  copy, for the BootReceiver path.
+- The passphrase is the one secret Kotlin holds (shown once, typed by the user). It travels in the JSON request; the JNI
+  `call` export zeroizes its request and answer buffers for every `vault.*` op, and Rust keeps it in `Zeroizing`.
+  Kotlin should keep it out of Strings where the UI allows (round 3).
+- DK and the connect key live in a `vault` session handle (one per process; a new unlock replaces it). Releasing it
+  (`vault.lock` or `RustNative.release`) zeroizes them and releases every `wa.open` gateway opened from the session.
+  Event streams and call-audio handles made from such a gateway keep a client clone until Kotlin releases them; round 3
+  must close them on lock.
+- `wa.open` with an unlocked vault takes key and URL from it, refuses a `key` (`vault_unlocked`) and another gateway URL
+  (`other_gateway`). While the vault is locked the old `{url, key}` path stays: every current Kotlin caller (Messages,
+  Phone, Contacts, Stops, the settings link flow, `wa.create_instance` with no key) still passes the plaintext key and
+  is rewritten in round 3; removing it now would break all four apps.
+- Files (data dir, owner-only, atomic temp + rename): `wa-vault.json` {version, hw_alias, hw_sealed, body},
+  `wa-vault-daily.json` {version, alias, sealed, daily_key, stamp}, `wa-vault-cache.bin` (cache blob).
+- Wipe (`vault.wipe_plaintext`, refused while a plaintext link has no vault): data dir `wa-sync-*.db` (+ `-wal`, `-shm`,
+  `-journal`; every row deleted with `secure_delete` and the file vacuumed first), `whatsapp-link.json`,
+  `wa-live-names.json`, `wa-rekeys.json`, `wa-identity.json` (each with `.tmp`), the `wa:` entries of `drafts.json`;
+  files dir `wa-media/`, `wa-stars.json`; cache dir `wa-status/`, `wa-avatars/`, `wa-media/`. Left for Kotlin (round 3):
+  the `rosty_message_reminders` and `wa-link-share` SharedPreferences, the mutes in `messages-prefs.json`, and the
+  Contacts people cache (`people.json`, `people-sync.json`).
+- Not done in round 2: connect-key rotation on the gateway at migration and passphrase change (needs a Rust-side
+  mint/revoke so the new key never reaches Kotlin), the cache ops, and moving `wa_sync` to memory-only.

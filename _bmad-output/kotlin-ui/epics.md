@@ -1396,7 +1396,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | Story | Title | Round | Status |
 |---|---|---|---|
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
-| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | in-progress (reopened in round 17: the `cards.*` op only arrived in the unreviewed `3a03c05` WIP, no glass optics in the GIF, x2 goldens show the old stand-in; plan `plans/round-17.md`) |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17; glisse optics and in-sheet GIF playback deferred, see Evidence) |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1559,10 +1559,27 @@ checklist, full gate, close X.2. **Round 17** -> `_bmad-output/kotlin-ui/plans/r
   budget (static card under ~300 ms, GIF under ~3 s on the phone), Kotlin flow tests; screenshots
   `x2-card-preview-birthday`, `x2-card-preview-contact`, `x2-card-preview-gif`.
 
-**X.2 status: in-progress (reopened by the round-17 planner, 2026-11-15).** The round-16 close in `be4bf61` was premature:
-the real `cards.*` FFI op, `NativeCardsOps` and the Rust templates exist only in `3a03c05 WIP: carry-over` (unreviewed),
-the animated cards have no glisse refraction/glint yet, and the committed `x2-*` goldens still show the Kotlin stand-in
-(cut headline, "October 3" in Turkish). Round 17 (`plans/round-17.md`) finishes it; then the next planner is **E8 R1**.
+**X.2 status: done (round 17 step 8, 2026-11-17). Next planner: E8 R1** (E6 and E7 are done in their tables; E6-WA continues
+in its own session).
+
+**Evidence (round 17):** commits `3a03c05` (carry-over), the "carry-over landed" fix commit, `7ece932` (Card Studio sheet
+fixes R17-F1..F4, re-recorded x2 goldens), `0c1b999` (budgets, sizes, cancellation), `8ace76e` (release-path proof, share/save
+re-check) and the step-8 close.
+- Rust goldens `crates/rosty_app_core/tests/cards/*.png` (8, 720 x 900) opened in round 17 step 3: headlines wrap inside the
+  panel, "3 Ekim" in Turkish, QR centred, no tint step at the panel corner.
+- x2 PNGs opened in step 8: `x2-share-still-menu-light` (menu opens upward from "...", right aligned, leaves the Animated
+  toggle readable, toggle round) and `x2-card-preview-gif-dark` (card in the sheet with a spinner chip while rendering,
+  headline wrapped inside the panel, swatches on one row, buttons clear of the bottom edge, Save/Share dimmed while rendering).
+- Budgets (host, `RUN_BUDGETS=1`): static 41-44 ms, GIF 720 px 39 frames 1.4-1.6 s, both under the asserted 2x limits; GIF
+  2,798,578 B (< 3 MB).
+- Sizes: Contacts release APK `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk` 25,897,967 bytes;
+  `librosty_ffi.so` arm64 20,682,984 bytes.
+- dexdump (steps 2 and 7): `RustNative` and the `CardRenderRequest`/`CardRenderResult`/`CardSpec` serializers are kept.
+- Checklist: `docs/kotlin-ui/checklist-e4.md`, "X.2 checklist record" (round 17).
+- Gate: cargo fmt, clippy and test (`--profile checks`, the gate's package set because the retired GPUI crates do not
+  compile), `cargo check --release -p rosty_android --target aarch64-linux-android`, then `bash scripts/kotlin-ui-check.sh`.
+- **Deferred:** the glisse optics for the animated card (round-17 step 4) are not in the tree, and the Card Studio preview
+  shows GIF frame 0 instead of playing it. No device run (no emulator).
 
 **Fix evidence (2026-11-15, commit "X.2: cards renderer, cards.* ops and the native bridge (carry-over landed)", on top
 of `3a03c05`/`6d8f44b`):** the e04 root cause is fixed and the carry-over is landed and reviewed.
@@ -1595,10 +1612,8 @@ of `3a03c05`/`6d8f44b`):** the e04 root cause is fixed and the carry-over is lan
   predicted). `llvm-nm -D` shows `Java_dev_rosty_core_RustNative_call` (the entry `NativeCardsOps` uses); the `.so`
   holds the `cards.*` op names and the Inter fonts; `dexdump` keeps `RustNative` and the `CardRenderRequest` /
   `CardRenderResult` / `CardSpec` serializers.
-- **Known open items after this fix:** R17-F2..F4 (menu dim, menu covering the toggle, toggle thumb), glisse optics
-  (round 17 step 4), and the animated preview: Card Studio decodes the GIF with `BitmapFactory`, which shows frame 0
-  (the panel mid-drop, faded) instead of playing it. Why the owner's number-named contact counted as having a birthday
-  was not reproduced; the stricter month/day check covers a birthday row with an unreadable date.
+- Why the owner's number-named contact counted as having a birthday was not reproduced; the stricter month/day check covers
+  a birthday row with an unreadable date. (R17-F2..F4 were fixed in `7ece932`; see the round-17 Evidence above.)
 
 **Round-16 Evidence (kept for history):**
 **Evidence (step 8, uncommitted at the time of writing):**
@@ -1617,11 +1632,6 @@ of `3a03c05`/`6d8f44b`):** the e04 root cause is fixed and the carry-over is lan
   aarch64-linux-android, Gradle spotless, lint, unit tests, shot verification, APK JNI export check, stability, orphans).
 - Size: `librosty_ffi.so` (arm64-v8a, release) 12,519,024 bytes vs 10,030,336 before Takumi (+2,488,688, +24.8 %).
   Contacts release APK `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk` 17,624,083 bytes.
-- **Known open item (not fixed in step 8's F40 scope; the layout and date parts are fixed, see "Fix evidence"
-  above):** the card headline in the x2 goldens is wider than the inner
-  panel / cut off in Turkish, and the date line is not localised ("October 3"); the Card Studio preview description lacks
-  the template and person name. Both are listed in the checklist record; the layout fix needs its own render test and a
-  re-record of the x2 goldens.
 
 ## E6. Messages including WhatsApp (`:messages`)
 

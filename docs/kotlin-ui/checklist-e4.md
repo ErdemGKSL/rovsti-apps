@@ -136,56 +136,67 @@ contacts.png` opened again in E4.16).
 - pass: contact sheet `docs/kotlin-ui/screenshots/contacts.png` built by `:contacts:contactSheet`, opened and judged (see
   epics.md E4.16 Evidence).
 
-# X.2 checklist record: Card Studio (round-16 step 8)
+# X.2 checklist record: Card Studio (round-17 step 8)
 
 The pass of `references/checklist.md` over the Card Studio sheet (`android/contacts/.../cards/CardStudioSheet.kt`,
-`CardStudioViewModel.kt`, `CardStudioEntry.kt`). Method: grep of the sources, the tests in
-`android/contacts/src/test/kotlin/dev/rosty/contacts/cards/` (`CardStudioSheetTest`, `CardStudioViewModelTest`), and the
-`x2-*` goldens in `android/contacts/screenshots/` (opened). Items: `pass`, `deviation` or `open`.
+`CardStudioViewModel.kt`, `CardStudioEntry.kt`) after round 17. Method: grep of the sources, the tests in
+`android/contacts/src/test/kotlin/dev/rosty/contacts/cards/` (`CardStudioSheetTest`, `CardStudioViewModelTest`,
+`CardTextsTest`, `CardsWiringGuardTest`) and the `x2-*` goldens in `android/contacts/screenshots/` (opened). Items:
+`pass`, `deviation` or `open`. No device: nothing here is TalkBack- or hand-tested on hardware.
 
 ## A. Licence and provenance
-- pass: Rosty code only; no Convx port in the cards package. No GPUI, no Material, no `Popup`/`Dialog`.
+- pass: Rosty code only in the cards package; no Convx port. No GPUI, no Material, no `Popup`/`Dialog`.
+- open: the glisse optics (lens, glint, fringe; round-17 step 4) are NOT in the tree: `crates/rosty_app_core/src/cards/`
+  has no `refraction.rs`, so no glisse header was needed. The animated card keeps the blur/tint panel and the confetti.
 
 ## B. Layout
 - pass: the sheet is a `SheetEntry` (medium detent); the preview keeps its size while it renders
-  (`thePreviewBoxKeepsItsSizeWhileItRenders`), so nothing reflows when a render finishes.
-- pass: one non-wrapping colour row; Share, Save and More sit in one row above the bottom inset.
-- open (owner-visible, found in the `x2-*` goldens, not fixed in this step): the card headline is wider than the inner
-  panel ("Happy birthday, Ayse Yilmaz!" touches the card edges in `x2-share-animated-fs2-light`; the Turkish headline is
-  cut at both sides in `x2-share-still-menu-tr-light`), and the date line stays English ("October 3") under the Turkish
-  locale. The cause is the card layout/text fit, not the sheet. Round-16 step 8 lists the wrap, floor size, ellipsis and
-  locale date fix; it needs a render test with a long Turkish name and a re-record of the x2 goldens.
+  (`thePreviewBoxKeepsItsSizeWhileItRenders`).
+- pass: the headline wraps inside the panel (Rust `cards/fit.rs`, `a_long_turkish_headline_wraps_inside_the_panel`); the
+  date is localised ("3 Ekim"); opened `x2-share-still-menu-tr-light`, `x2-card-preview-gif-dark`: nothing touches the
+  panel edge. One non-wrapping colour row (also at fs2).
+- pass: Share, Save and "..." share one row above the bottom inset; the Animated toggle sits above the preview so the menu
+  never covers it (R17-F3, `theMoreMenuOpensUpwardInsideTheWindowAndLeavesTheToggleAlone`).
 
 ## C. Motion
-- pass: preview changes use `Crossfade` with `RostyMotion.appear`; the Still/Animated switch and the swatches use the
-  design-system controls, so press feedback is transform/alpha only.
-- pass: the render is cancelled when the sheet closes (`closingTheSheetCancelsTheRunningRender`); taps closer than 150 ms
-  cost one render (`tapsUnder150MsApartCostOneRender`).
+- pass: preview changes use `Crossfade` with `RostyMotion.appear`; switch and swatches use design-system controls
+  (transform/alpha press feedback only).
+- pass: render cancelled when the sheet closes (`closingTheSheetCancelsTheRunningRender`, `closingMidRenderShowsNoLateImage`),
+  taps closer than 150 ms cost one render, a rotation keeps the job (`aRotationKeepsTheJob`).
+- open: the animated preview decodes the GIF with `BitmapFactory` and shows frame 0; it does not play in the sheet. The
+  shared file is the real GIF.
 
-## D. Overlays
-- pass: the sheet and its share menu are `OverlayHost` entries; back closes the sheet before the page
-  (`backClosesTheSheetBeforeThePage`); the Share toast goes through `showToast`.
-- pass: `SheetEntry(title = ...)` gives the sheet a pane title ("Make a Card") for TalkBack; the page behind is cleared
-  from semantics by the host.
+## D. Sheet and menu
+- pass: sheet and share menu are `OverlayHost` entries; the menu (`ButtonMenuEntry`) opens upward from "...", right
+  aligned, inside the window, with the menu scrim behaviour instead of a full-sheet dim (R17-F2). Back closes the sheet
+  before the page (`backClosesTheSheetBeforeThePage`); the Share toast goes through `showToast`.
+- pass: `SheetEntry(title = ...)` gives the sheet a pane title; the page behind is cleared from semantics by the host.
 
 ## E. Glass
-- pass: glass only on the sheet and the buttons; the card preview itself is a flat picture.
+- pass: glass only on the sheet and buttons; the card preview is a flat picture.
+- deviation: no refraction in the animated card itself (see A).
 
-## F. Controls, haptics, a11y
-- pass: haptics through `LocalRostyHaptics` (`reject()` when Share is refused); swatches and buttons are
-  not measured against 48 dp in a test (not checked in this pass); templates are `Role.RadioButton` with `selected`.
-- deviation: the preview's description is "Card preview" (+ "Making the card" while it renders), not the planned
-  "Birthday card for <name>". It is announced, but without the person; a follow-up should add the template and name
-  (`card_studio_preview` takes the arguments) with its Turkish string.
-- not run on a device (no device): TalkBack order should follow the layout: title, template picker, preview, colours, Still/Animated, Save, Share, More (source order, unverified).
-- n/a: no text field in the sheet (no IME handling needed).
+## F. Controls, haptics, insets, a11y
+- pass: `LocalRostyHaptics` `reject()` on a refused Share, a failed Save and a card that cannot be staged
+  (`aFailedSaveToastsAndRejects`, `aCardThatCannotBeStagedToastsAndRejects`); a saved card does not reject
+  (`aSavedCardToastsWithoutTheRejectHaptic`).
+- pass: insets: the content sits in the sheet body above the navigation inset; there is no text field, so no IME handling
+  (`imeOverlapPadding` rule n/a).
+- pass: the preview is described by who it is for ("Birthday card for Ayse Yilmaz", Turkish "... icin dogum gunu karti",
+  `thePreviewIsDescribedByWhoItIsFor`, `thePreviewDescriptionIsTurkish`) plus "Making the card" while rendering; the
+  "..." button is labelled "Share as still image"; templates are `Role.RadioButton` with `selected`.
+- open: swatch and button sizes are not asserted against 48 dp in a test.
+- not run on a device: TalkBack order should follow source order: sheet title, template picker, Animated switch, preview,
+  colours, Save, Share, "...". Unverified.
 
 ## G. Performance
-- pass: one render per settled choice; the render job runs off Main in the view model; the preview bitmap is decoded in
-  `produceState` off Main and keyed on the path; no JNI on Main.
+- pass: one render per settled choice, off Main; the bitmap decodes in `produceState` off Main; no JNI on Main and every
+  call waits for `Rust.init` (`CardsWiringGuardTest`, `NativeRustCore.call`).
+- pass: Rust budgets (host, `RUN_BUDGETS=1`): static 720 x 900 41-44 ms (budget 150, asserted < 300); GIF 720 x 900,
+  39 frames 1.4-1.6 s (asserted < 3 s), without optics.
 
 ## H. Tests and evidence
-- pass: `CardStudioSheetTest` (8 tests), `CardStudioViewModelTest`, goldens `x2-*` light, dark, fs2 and tr, all opened.
-- pass (F40, this step): the `x1-wa-avatar-*` goldens use portraits drawn in code (`:testing` `portraitImage`), so the
-  WhatsApp pictures read as photos: Contacts list rows show faces next to initials-only people, the Phone incoming
-  backdrop is a blurred portrait (head, neck, shoulders, window light), not a tinted aura.
+- pass: `CardStudioSheetTest`, `CardStudioViewModelTest`, `CardTextsTest`, `CardsWiringGuardTest`, `CardsOpsNativeTest`
+  (real host `librosty_ffi`), goldens `x2-*` light, dark, fs2, tr (opened).
+- pass (kept from F40): the `x1-wa-avatar-*` goldens use portraits drawn in code (`:testing` `portraitImage`); opened in
+  round 16.

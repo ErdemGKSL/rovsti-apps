@@ -198,16 +198,16 @@ const LENS_SHIFT: f32 = 9.0;
 
 /// The optics maps of a card, drawn once per size.
 struct Optics {
-    field_png: Vec<u8>,
+    field_uri: String,
     /// Filter scale of the panel's edge band at rest.
     scale: f32,
-    rim_png: Vec<u8>,
+    rim_uri: String,
     lens: Option<LensOptics>,
 }
 
 /// The sweeping lens: its box (the title block, padded) and its map.
 struct LensOptics {
-    png: Vec<u8>,
+    uri: String,
     rect: Rect,
 }
 
@@ -318,9 +318,9 @@ impl Prepared {
             photo,
             qr,
             optics: Optics {
-                field_png: Vec::new(),
+                field_uri: String::new(),
                 scale: 0.0,
-                rim_png: Vec::new(),
+                rim_uri: String::new(),
                 lens: None,
             },
         };
@@ -355,7 +355,7 @@ impl Prepared {
                     let side = rect.h.min(rect.w);
                     let map = refraction::lens_map(shape, 0.5 * side, 0.4 * side);
                     Ok(LensOptics {
-                        png: map.png()?,
+                        uri: refraction::png_uri(&map.png()?),
                         rect,
                     })
                 }),
@@ -363,9 +363,9 @@ impl Prepared {
         }
         .transpose()?;
         Ok(Optics {
-            field_png: field.raster.png()?,
+            field_uri: refraction::png_uri(&field.raster.png()?),
             scale: field.scale,
-            rim_png: refraction::highlight_map(shape, RIM_PX).png()?,
+            rim_uri: refraction::png_uri(&refraction::highlight_map(shape, RIM_PX).png()?),
             lens,
         })
     }
@@ -482,7 +482,7 @@ impl Prepared {
         // drop), where Takumi clips the filtered box and the maps would no longer line up.
         let landed = panel.y + motion.panel_dy * u >= 0.0
             && panel.y + motion.panel_dy * u + panel.h <= g.h as f32;
-        let panel_fx = (landed && !self.optics.field_png.is_empty()).then(|| {
+        let panel_fx = (landed && !self.optics.field_uri.is_empty()).then(|| {
             let glint = motion.glint_x.map(|x| Glint {
                 x: x * panel.w,
                 y: panel.h * GLINT_Y,
@@ -490,9 +490,9 @@ impl Prepared {
                 strength: motion.glint_alpha,
             });
             refraction::panel_filter(
-                &self.optics.field_png,
+                &self.optics.field_uri,
                 self.optics.scale * motion.refract,
-                &self.optics.rim_png,
+                &self.optics.rim_uri,
                 glint,
             )
         });
@@ -664,7 +664,7 @@ impl Prepared {
                 dy = motion.panel_dy * u,
                 bw = 1.2 * u,
                 ba = 0.5 * lens.amount,
-                filter = refraction::lens_filter(&fx.png, scale),
+                filter = refraction::lens_filter(&fx.uri, scale),
             );
             bg_children.push(Node::container(vec![]).with_class_name("lens"));
         }

@@ -62,7 +62,49 @@ Step 1 decisions (compared with `git diff stash@{n}^1 stash@{n}`, `rovsti` mappe
 
 ## Measurements
 
-(filled in by Step 3)
+Checks profile, 4 cores, `RUN_BUDGETS=1 cargo test -p rosty_app_core --profile checks cards::tests:: -- budget --nocapture
+--test-threads=1` (Step 3, optics on):
+
+| What | Result | Target | Asserted |
+|---|---|---|---|
+| Static 720x900 PNG | 155 ms, 99,460 bytes | 150 ms | 300 ms, pass |
+| GIF 720x900, 39 frames (2.6 s timeline) | 1.71 s, 2,564,229 bytes (2.45 MiB) | 1.5 s | 3 s, pass |
+| GIF 540x675, 39 frames (shipped `ANIMATED` size) | 0.99 s, 1,786,384 bytes (1.70 MiB) | none | none |
+| Animated WebP q75 720x900 (size only, not shipped) | 683,748 bytes, encode 124 ms | none | none |
+| `librosty_ffi.so` arm64 release (`cargo build --release -p rosty_ffi --target aarch64-linux-android`, NDK 29) | 20,725,208 bytes (19.8 MiB) | none | none |
+
+The `.so` was 20,682,984 bytes before the optics landed, so they cost 42 KB. Both asserted budgets pass. Both targets
+are missed by a small margin (static +5 ms, GIF +0.2 s), which is inside the noise of this box (static ranged 155-198
+ms across runs). Fallbacks applied: the lens node was already skipped outside frames 8-20 (`lens.amount > 0.01`) and
+the panel filter was already left out in the first drop frames. The cache step was done: the maps' base64 `data:` URIs
+are now built once per card (`refraction::png_uri`, `Optics.field_uri/rim_uri/lens.uri`) instead of once per frame;
+GIF 1.80 s to 1.71 s, same bytes (goldens and determinism tests unchanged). 540 px stays the shipped size and is not
+needed as a fallback.
+
+## Step 3 result (r18-s3, frame proof)
+
+Frames written by `writes_720_px_optics_frames_for_review` (`WRITE_CARD_FRAMES=1`, 720x900, 2.6 s timeline) to
+`target/checks/cards/frames/{birthday-dawn-tr,contact-dawn-en}-NN.png`, all opened:
+
+- Birthday Dawn TR frame 0: panel above the card, partly out of frame, faint (alpha low), the text ghosted; no rim
+  line tearing. Frame 3: panel landed and tall (stretched, scale y > 1), full-contrast text, tint and rim intact.
+  Frame 6: panel squashed wider, flatter (jelly), a few confetti at the top; the rim stays one clean line, the
+  corners round, the content scales with it. Frame 9: the lens is a thin circle over "kutlu olsun" and bends
+  the glyphs at its rim (the "u" of "kutlu", the "s" and "u" of "olsun" shift), the middle of the lens is sharp, the
+  fringe is at most a pixel or two of cyan/orange on a few strokes; no glyph is torn or doubled. Frame 12: the lens
+  has moved to "gün"/"olsun", weaker; Frame 15: the lens is past the title at the right edge (one small yellow tick
+  on the panel's right edge, where the lens leaves the card; accepted). Frame 18: the lens is gone, a faint rim glint
+  runs along the left and bottom-right edge (about 25-70 levels brighter than the rest pose on the rim line, seen by
+  differencing against the last frame, subtle to the eye at 720 px but present). Frame 24: the glint has faded (rim
+  difference 0 except confetti), confetti drifts down in pastel. Last frame (38): clean still, identical to the rest
+  pose.
+- Contact Dawn EN frame 0: the panel drops in, name and number ghosted, no QR yet; frame 8: panel landed, QR fully
+  drawn, no lens circle anywhere, text sharp; last frame: clean still, QR crisp. The QR of the last 720 px frame
+  decodes back to the vCard (asserted in the test through `rosty_core::contact_scan::decode_luma`).
+- Constants kept as landed in Step 2, no retuning: band 30, thickness 12, lens shift 9 / scale 18, glint constant
+  `5 * strength`, exponent 12, surface scale 6, fringe <= 1.5 px. Rejected values stay rejected: shift 15 and 22 (too
+  strong, tears glyphs), glint constant 2 with exponent 22 (invisible).
+- Kotlin screenshots: no Kotlin or Compose files changed in this step, so none were regenerated.
 
 ## Step 2 result (r18-s2, glisse optics landed on HEAD)
 

@@ -324,6 +324,12 @@ fn data_uri(mime: &str, bytes: &[u8]) -> String {
     format!("data:{mime};base64,{}", STANDARD.encode(bytes))
 }
 
+/// A PNG as a `data:` URI. Encode a map once per card and hand the string to the filter builders on every frame: the
+/// base64 of a 640 px map is the costly part of a frame's markup.
+pub fn png_uri(png: &[u8]) -> String {
+    data_uri("image/png", png)
+}
+
 /// The three displacement passes and their sum, reading `SourceGraphic` through the map named `field`.
 fn rays(out: &mut String, scale: f32, field: &str) {
     let f = chroma(scale);
@@ -366,15 +372,15 @@ fn wrap(filter: &str) -> String {
 
 /// The panel's glass filter as a `url(...)` token for `backdrop-filter`: the edge-band displacement of `field` at
 /// `scale` pixels with its chromatic fringe, and, when `glint` is set, an `feSpecularLighting` rim glint lit
-/// from `rim`'s alpha. `field_png` and `rim_png` are stretched over the whole filtered box.
-pub fn panel_filter(field_png: &[u8], scale: f32, rim_png: &[u8], glint: Option<Glint>) -> String {
+/// from `rim`'s alpha. `field_uri` and `rim_uri` ([`png_uri`]) are stretched over the whole filtered box.
+pub fn panel_filter(field_uri: &str, scale: f32, rim_uri: &str, glint: Option<Glint>) -> String {
     let mut f = String::from(
         "<filter id=\"p\" x=\"0\" y=\"0\" width=\"100%\" height=\"100%\" filterUnits=\"userSpaceOnUse\" \
          primitiveUnits=\"userSpaceOnUse\" color-interpolation-filters=\"sRGB\">",
     );
     f.push_str(&format!(
         "<feImage href=\"{}\" x=\"0\" y=\"0\" width=\"100%\" height=\"100%\" preserveAspectRatio=\"none\" result=\"field\"/>",
-        data_uri("image/png", field_png)
+        field_uri
     ));
     rays(&mut f, scale, "field");
     match glint {
@@ -385,7 +391,7 @@ pub fn panel_filter(field_png: &[u8], scale: f32, rim_png: &[u8], glint: Option<
                  lighting-color=\"#ffffff\" result=\"spec\"><fePointLight x=\"{:.1}\" y=\"{:.1}\" z=\"{:.1}\"/></feSpecularLighting>\
                  <feComposite in=\"spec\" in2=\"rim\" operator=\"in\" result=\"glint\"/>\
                  <feComposite in=\"bent\" in2=\"glint\" operator=\"arithmetic\" k2=\"1\" k3=\"1\"/>",
-                data_uri("image/png", rim_png),
+                rim_uri,
                 g.strength * 5.0,
                 g.x,
                 g.y,
@@ -398,16 +404,16 @@ pub fn panel_filter(field_png: &[u8], scale: f32, rim_png: &[u8], glint: Option<
     wrap(&f)
 }
 
-/// The sweeping lens's filter as a `url(...)` token: the dome displacement of `field_png` at `scale` pixels with its
+/// The sweeping lens's filter as a `url(...)` token: the dome displacement of `field_uri` at `scale` pixels with its
 /// chromatic fringe.
-pub fn lens_filter(field_png: &[u8], scale: f32) -> String {
+pub fn lens_filter(field_uri: &str, scale: f32) -> String {
     let mut f = String::from(
         "<filter id=\"l\" x=\"0\" y=\"0\" width=\"100%\" height=\"100%\" filterUnits=\"userSpaceOnUse\" \
          primitiveUnits=\"userSpaceOnUse\" color-interpolation-filters=\"sRGB\">",
     );
     f.push_str(&format!(
         "<feImage href=\"{}\" x=\"0\" y=\"0\" width=\"100%\" height=\"100%\" preserveAspectRatio=\"none\" result=\"field\"/>",
-        data_uri("image/png", field_png)
+        field_uri
     ));
     rays(&mut f, scale, "field");
     f.push_str("<feOffset in=\"bent\" dx=\"0\" dy=\"0\"/></filter>");

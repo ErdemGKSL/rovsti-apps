@@ -453,6 +453,52 @@ fn writes_birthday_frames_for_review() {
     }
 }
 
+/// Frame proof of round 18 step 3: with `WRITE_CARD_FRAMES=1`, the 720 px optics frames of the Dawn Turkish Birthday
+/// card (0, 3, 6, 9, 12, 15, 18, 24, last) and of the English Contact card (0, 8, last) go to
+/// `target/checks/cards/frames/`. Opened by eye; without the variable the test does nothing.
+#[test]
+fn writes_720_px_optics_frames_for_review() {
+    if !std::env::var("WRITE_CARD_FRAMES").is_ok_and(|v| v == "1") {
+        return;
+    }
+    let dir = review_dir().join("frames");
+    std::fs::create_dir_all(&dir).unwrap();
+    let specs = golden_specs();
+    let pick = |name: &str| specs.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+    for (name, template, wanted) in [
+        (
+            "birthday-dawn-tr",
+            Template::Birthday,
+            &[0usize, 3, 6, 9, 12, 15, 18, 24][..],
+        ),
+        ("contact-dawn-en", Template::Contact, &[0, 8][..]),
+    ] {
+        let prepared = Prepared::new(&pick(name), 720, 900).unwrap();
+        let mut timeline = motion::Timeline::of(template, 600).unwrap();
+        timeline.moving_s = 2.6;
+        let frames = timeline.frames();
+        let last = frames.len() - 1;
+        for &i in wanted.iter().chain(std::iter::once(&last)) {
+            let bitmap = prepared.bitmap(&frames[i].motion).unwrap();
+            let mut png = Vec::new();
+            takumi::write_image(&bitmap, &mut png, OutputFormat::Png).unwrap();
+            std::fs::write(dir.join(format!("{name}-{i:02}.png")), png).unwrap();
+            if template == Template::Contact && i == last {
+                let luma = image::DynamicImage::ImageRgba8(
+                    image::RgbaImage::from_raw(720, 900, bitmap.as_raw().to_vec()).unwrap(),
+                )
+                .to_luma8();
+                let texts = rosty_core::contact_scan::decode_luma(
+                    luma.width(),
+                    luma.height(),
+                    luma.as_raw(),
+                );
+                assert_eq!(texts, vec![pick(name).qr.unwrap()], "QR of the last frame");
+            }
+        }
+    }
+}
+
 /// The cards the Contacts screenshots show (`StudioSamples` in the Contacts tests): their texts as `cardTexts` builds
 /// them in English and Turkish. Kept in `tests/cards/`; `UPDATE_CARD_GOLDENS=1` rewrites them.
 fn golden_specs() -> Vec<(&'static str, CardSpec)> {

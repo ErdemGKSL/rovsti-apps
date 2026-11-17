@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use rosty_app_core::wa_vault::wipe::{self, AppDirs, WipeReport};
-use rosty_app_core::wa_vault::{self, DailyFile, VaultFile};
+use rosty_app_core::wa_vault::{self, CachedPicture, DailyFile, VaultCache, VaultFile};
 use rosty_core::vault::{
     self, DailyKey, DailyRefusal, DailyStamp, DataKey, Kdf, Passphrase, PassphraseError, VaultBody,
     VaultError,
@@ -68,6 +68,20 @@ pub(super) const OPS: &[OpSpec] = &[
         wipe_plaintext,
         wipe_cases
     ),
+    op!(
+        "vault.pictures",
+        PicturesReq,
+        PicturesAns,
+        pictures,
+        pictures_cases
+    ),
+    op!(
+        "vault.picture_put",
+        PicturePutReq,
+        PicturePutAns,
+        picture_put,
+        picture_put_cases
+    ),
 ];
 
 /// Key blobs of new vaults and passphrase changes use this KDF (`vault-pbkdf2` builds: PBKDF2).
@@ -98,6 +112,8 @@ pub(crate) struct Session {
     daily: Option<PendingDaily>,
     /// `wa.open` handles that took the connect key from this session.
     gateways: Vec<i64>,
+    /// The identity and picture cache (`wa-vault-cache.bin`, plan 13.5) once read or written in this session.
+    cache: Option<VaultCache>,
 }
 
 impl Drop for Session {
@@ -448,6 +464,7 @@ fn create(req: CreateReq) -> Result<KeysAns, FfiError> {
         pending: Some(pending),
         daily: None,
         gateways: Vec::new(),
+        cache: None,
     });
     Ok(keys_answer(handle, &created))
 }
@@ -577,6 +594,7 @@ fn open_session(dir: PathBuf, key: DataKey, stamp: DailyStamp) -> Result<Unlocke
             stamp,
         }),
         gateways: Vec::new(),
+        cache: None,
     });
     set_current(handle);
     Ok(UnlockedAns {
@@ -971,6 +989,189 @@ fn wipe_cases() -> Vec<Case> {
             json!({"dir": "$DIR", "files_dir": "$DIR/files", "cache_dir": "$DIR/cache"}),
         )
         .seeded("wa"),
+    ]
+}
+
+// ---- the encrypted cache (plan 13.5): identity and profile pictures, sealed under DK
+
+/// What the cache keeps of profile pictures at most; the oldest go first.
+const MAX_PICTURE_BYTES: usize = 4 * 1024 * 1024;
+
+fn locked() -> FfiError {
+    coded(
+        ErrorKind::NotFound,
+        "the WhatsApp vault is locked",
+        "locked",
+    )
+}
+
+/// The instance id of the unlocked (committed) vault.
+pub(crate) fn unlocked_instance() -> Option<String> {
+    let handle = current()?;
+    handles::global()
+        .with(handle, |s: &mut Session| {
+            s.committed.then(|| s.body.instance_id.clone())
+        })
+        .flatten()
+}
+
+/// Runs `f` on the cache of the unlocked session (read from `wa-vault-cache.bin` the first time; a cache that
+/// does not open under DK is deleted and starts empty) and, with `save`, seals the result under DK and writes it.
+/// `locked` while no committed session is open: nothing about WhatsApp is read or written then.
+pub(crate) fn with_cache<R>(
+    save: bool,
+    f: impl FnOnce(&mut VaultCache) -> R,
+) -> Result<R, FfiError> {
+    let handle = current().ok_or_else(locked)?;
+    handles::global()
+        .with(handle, |s: &mut Session| -> Result<R, FfiError> {
+            if !s.committed {
+                return Err(locked());
+            }
+            let cache = match s.cache.take() {
+                Some(cache) => cache,
+                None => match VaultCache::load(&s.dir, &s.key) {
+                    Ok(cache) => cache.unwrap_or_default(),
+                    Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                        let _ = std::fs::remove_file(s.dir.join(wa_vault::CACHE_FILE));
+                        VaultCache::default()
+                    }
+                    Err(error) => return Err(error.into()),
+                },
+            };
+            let cache = s.cache.insert(cache);
+            let out = f(cache);
+            if save {
+                cache.save(&s.dir, &s.key, &mut os_entropy)?;
+            }
+            Ok(out)
+        })
+        .ok_or_else(locked)?
+}
+
+#[derive(Deserialize)]
+struct PicturesReq {
+    /// Only these people; left out: every cached picture.
+    #[serde(default)]
+    jids: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+struct PictureOut {
+    jid: String,
+    picture_id: String,
+    /// The JPEG, base64.
+    jpeg: String,
+}
+
+#[derive(Serialize)]
+struct PicturesAns {
+    pictures: Vec<PictureOut>,
+}
+
+fn pictures(req: PicturesReq) -> Result<PicturesAns, FfiError> {
+    with_cache(false, |cache| PicturesAns {
+        pictures: cache
+            .pictures
+            .iter()
+            .filter(|p| req.jids.as_ref().is_none_or(|jids| jids.contains(&p.jid)))
+            .map(|p| PictureOut {
+                jid: p.jid.clone(),
+                picture_id: p.picture_id.clone(),
+                jpeg: b64(&p.jpeg),
+            })
+            .collect(),
+    })
+}
+
+/// The seeded vault, unlocked, with one cached picture.
+fn with_picture(case: Case) -> Case {
+    case.seeded("wa_vault")
+        .after("vault.unlock", unlock_request(json!({})))
+        .after("vault.picture_put", picture_req())
+}
+
+fn picture_req() -> serde_json::Value {
+    json!({"jid": "100000000001@s.whatsapp.net", "picture_id": "p1", "jpeg": "/9j/4AAQ"})
+}
+
+fn pictures_cases() -> Vec<Case> {
+    vec![
+        with_picture(Case::new(json!({}))),
+        with_picture(Case::named(
+            "some",
+            json!({"jids": ["100000000002@s.whatsapp.net"]}),
+        )),
+        Case::named("locked", json!({})),
+    ]
+}
+
+#[derive(Deserialize)]
+struct PicturePutReq {
+    jid: String,
+    /// With `jpeg`: the picture to keep (it replaces the person's last one). Both left out: the person has no
+    /// picture any more.
+    #[serde(default)]
+    picture_id: Option<String>,
+    #[serde(default)]
+    jpeg: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PicturePutAns {
+    /// The vault session whose cache was written.
+    handle: i64,
+    /// Pictures in the cache now.
+    pictures: u32,
+}
+
+fn picture_put(req: PicturePutReq) -> Result<PicturePutAns, FfiError> {
+    let jid = req.jid.trim().to_owned();
+    if jid.is_empty() {
+        return Err(FfiError::invalid("jid is required"));
+    }
+    let picture = match (req.picture_id, req.jpeg) {
+        (Some(id), Some(jpeg)) if !id.trim().is_empty() => Some(CachedPicture {
+            jid: jid.clone(),
+            picture_id: id.trim().to_owned(),
+            jpeg: from_b64("jpeg", &jpeg)?,
+        }),
+        (None, None) => None,
+        _ => {
+            return Err(FfiError::invalid(
+                "picture_id and jpeg go together, or neither",
+            ));
+        }
+    };
+    let handle = current().ok_or_else(locked)?;
+    with_cache(true, |cache| {
+        cache.pictures.retain(|p| p.jid != jid);
+        cache.pictures.extend(picture);
+        let mut total: usize = cache.pictures.iter().map(|p| p.jpeg.len()).sum();
+        while total > MAX_PICTURE_BYTES && cache.pictures.len() > 1 {
+            total -= cache.pictures.remove(0).jpeg.len();
+        }
+        PicturePutAns {
+            handle,
+            pictures: cache.pictures.len() as u32,
+        }
+    })
+}
+
+fn picture_put_cases() -> Vec<Case> {
+    vec![
+        Case::new(picture_req())
+            .seeded("wa_vault")
+            .after("vault.unlock", unlock_request(json!({}))),
+        with_picture(Case::named(
+            "removed",
+            json!({"jid": "100000000001@s.whatsapp.net"}),
+        )),
+        Case::named("locked", picture_req()),
+        Case::named(
+            "half",
+            json!({"jid": "100000000001@s.whatsapp.net", "picture_id": "p1"}),
+        ),
     ]
 }
 

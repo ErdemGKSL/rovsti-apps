@@ -1013,6 +1013,13 @@ vault.daily_store.gone
 vault.lock
 vault.lock.handle
 vault.lock.nothing_open
+vault.picture_put
+vault.picture_put.half
+vault.picture_put.locked
+vault.picture_put.removed
+vault.pictures
+vault.pictures.locked
+vault.pictures.some
 vault.reset
 vault.reset.nothing
 vault.state
@@ -1243,6 +1250,8 @@ wa_sync.apply_events.own_ids
 wa_sync.apply_events.rejected
 wa_sync.apply_events.resync
 wa_sync.apply_events.stale
+wa_sync.cache_save
+wa_sync.cache_save.locked
 wa_sync.chat_media
 wa_sync.chat_media.empty
 wa_sync.chat_media.kinds
@@ -1255,6 +1264,8 @@ wa_sync.chats.empty
 wa_sync.chats.merged
 wa_sync.close
 wa_sync.close.not_open
+wa_sync.focus
+wa_sync.focus.none
 wa_sync.history
 wa_sync.history.done
 wa_sync.history.none
@@ -1341,7 +1352,12 @@ wa_sync.note_status.same
 wa_sync.older
 wa_sync.older.start
 wa_sync.open
+wa_sync.open.lazy
 wa_sync.open.no_instance
+wa_sync.open.vault_cache
+wa_sync.open_page
+wa_sync.open_page.eager
+wa_sync.open_page.paged
 wa_sync.outbox
 wa_sync.outbox_cancel
 wa_sync.outbox_cancel.in_flight

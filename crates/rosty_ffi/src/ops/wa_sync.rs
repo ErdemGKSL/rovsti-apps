@@ -37,10 +37,10 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
     self, Action, AppliedEvents, ChatRekeyed, ChatRow, Conditions, Decision, Due, Eviction, Fetch,
     FetchPage, Fetched, GalleryPage, HistoryProgress, HistoryReport, IdentityApplied,
-    IdentityCaughtUp, Kind, MediaDue, MediaEntry, MediaQueued, MediaSettled, MediaState,
-    MediaStats, MessageRow, Network, Observed, Opened, OutboxItem, Outcome, Played, Reconciled,
-    ResolvedId, Settled, StarredCursor, StarredPage, StatusNote, StatusNoted, Store, StoredChats,
-    StoredPage, SyncPlan, ThreadCursor, ThreadPage, Viewed, Wiped,
+    IdentityCaughtUp, IdentitySnapshot, Kind, MediaDue, MediaEntry, MediaQueued, MediaSettled,
+    MediaState, MediaStats, MessageRow, Network, Observed, Opened, OutboxItem, Outcome, Played,
+    Reconciled, ResolvedId, Settled, StarredCursor, StarredPage, StatusNote, StatusNoted, Store,
+    StoredChats, StoredPage, SyncPlan, ThreadCursor, ThreadPage, Viewed, Wiped,
 };
 use rosty_wa_proto::{
     EventEnvelope, GroupInfo, IdentityMappings, InstanceStatus, RichChat, RichMessage, WaProfile,
@@ -55,9 +55,24 @@ pub(super) const OPS: &[OpSpec] = &[
     op!(
         "wa_sync.open",
         OpenReq,
-        WithHandle<Opened>,
+        WithHandle<OpenAns>,
         open,
         open_cases
+    ),
+    op!(
+        "wa_sync.open_page",
+        OlderReq,
+        OlderAns,
+        open_page,
+        open_page_cases
+    ),
+    op!("wa_sync.focus", FocusReq, FocusAns, focus, focus_cases),
+    op!(
+        "wa_sync.cache_save",
+        HandleReq,
+        CacheSaved,
+        cache_save,
+        cache_save_cases
     ),
     op!("wa_sync.close", HandleReq, CloseAns, close, close_cases),
     op!("wa_sync.plan", PlanReq, SyncPlan, plan, plan_cases),
@@ -489,9 +504,39 @@ struct OpenReq {
     dir: Option<String>,
     /// The linked instance (from the connect key): one file per instance.
     instance_id: String,
-    /// A store in memory (tests, previews); `dir` is not used.
+    /// A store in memory (the product since the vault, tests, previews); `dir` is not used.
     #[serde(default)]
     memory: bool,
+    /// The lazy sync (`plans/wa-vault.md` 14): pages only for the chat on screen (`wa_sync.focus`), for a chat
+    /// that is opened (`wa_sync.open_page`) and for a scroll (`wa_sync.older`); a page never names the next one.
+    #[serde(default)]
+    lazy: bool,
+    /// Starts the identity map and its catch-up cursor from the encrypted vault cache (plan 13.5), when the
+    /// vault is unlocked for this instance; `wa_sync.cache_save` writes it back.
+    #[serde(default)]
+    vault_cache: bool,
+}
+
+/// What `wa_sync.open {vault_cache}` found in the vault cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CacheUse {
+    /// The map and the cursor were taken from the cache.
+    Loaded,
+    /// The vault is unlocked but its cache knows nobody yet (or this store already did).
+    Empty,
+    /// The vault is locked, or holds another instance: nothing was read.
+    Locked,
+}
+
+#[derive(Serialize)]
+struct OpenAns {
+    #[serde(flatten)]
+    opened: Opened,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lazy: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<CacheUse>,
 }
 
 /// The file stores open in this process: a second `wa_sync.open` of a file shares the first one's connection.
@@ -510,11 +555,14 @@ fn store_dir(dir: Option<&str>) -> Result<PathBuf, FfiError> {
     }
 }
 
-fn open(req: OpenReq) -> Result<WithHandle<Opened>, FfiError> {
+fn open(req: OpenReq) -> Result<WithHandle<OpenAns>, FfiError> {
+    let mut cache = None;
     let store: Shared = if req.memory {
-        Arc::new(Mutex::new(Some(
-            Store::open_in_memory(&req.instance_id).map_err(map_error)?,
-        )))
+        let mut store = Store::open_in_memory(&req.instance_id).map_err(map_error)?;
+        if req.vault_cache {
+            cache = Some(seed_from_vault(&mut store)?);
+        }
+        Arc::new(Mutex::new(Some(store)))
     } else {
         let dir = store_dir(req.dir.as_deref())?;
         let path = dir.join(wa_sync::file_name(&req.instance_id));
@@ -536,8 +584,14 @@ fn open(req: OpenReq) -> Result<WithHandle<Opened>, FfiError> {
             }
         }
     };
-    let opened = match lock(&store).as_ref() {
-        Some(store) => store.opened().map_err(map_error)?,
+    let (opened, lazy) = match lock(&store).as_mut() {
+        Some(store) => {
+            // A file store shared with another open keeps the lazy sync once one open asked for it.
+            if req.lazy {
+                store.set_lazy(true);
+            }
+            (store.opened().map_err(map_error)?, store.is_lazy())
+        }
         None => {
             return Err(FfiError::new(
                 ErrorKind::Io,
@@ -545,13 +599,166 @@ fn open(req: OpenReq) -> Result<WithHandle<Opened>, FfiError> {
             ));
         }
     };
-    Ok(handled(handles::global().insert(store), opened))
+    let answer = OpenAns {
+        opened,
+        lazy: lazy.then_some(true),
+        cache,
+    };
+    Ok(handled(handles::global().insert(store), answer))
+}
+
+/// Starts `store`'s identity from the vault cache when the vault is unlocked for its instance.
+fn seed_from_vault(store: &mut Store) -> Result<CacheUse, FfiError> {
+    if super::vault::unlocked_instance().as_deref() != Some(store.instance_id()) {
+        return Ok(CacheUse::Locked);
+    }
+    let snapshot = super::vault::with_cache(false, |cache| {
+        let mut snapshot: IdentitySnapshot =
+            serde_json::from_value(cache.identity.clone()).unwrap_or_default();
+        snapshot.since = cache.identity_cursor.clone();
+        snapshot
+    })?;
+    Ok(if store.seed_identity(&snapshot).map_err(map_error)? {
+        CacheUse::Loaded
+    } else {
+        CacheUse::Empty
+    })
 }
 
 fn open_cases() -> Vec<Case> {
     vec![
         Case::new(open_req()),
         Case::named("no_instance", json!({"instance_id": " ", "memory": true})),
+        Case::named("lazy", vault_req()),
+        // The vault of the fixtures is unlocked and its cache knows Ali's LID: the map starts from it.
+        Case::named("vault_cache", vault_req())
+            .seeded("wa_vault")
+            .after("vault.unlock", super::vault::seed_unlock_request())
+            .after("wa_sync.open", lazy_req())
+            .after(
+                "wa_sync.identity_catch_up",
+                json!({"handle": H, "items": [{"lid": ALI_LID, "pn": ALI, "source": "peer_message",
+                    "learned_ms": NOW}], "next": "c1"}),
+            )
+            .after("wa_sync.cache_save", json!({"handle": H})),
+    ]
+}
+
+fn lazy_req() -> Value {
+    json!({"instance_id": "inst1", "memory": true, "lazy": true})
+}
+
+fn vault_req() -> Value {
+    json!({"instance_id": "inst1", "memory": true, "lazy": true, "vault_cache": true})
+}
+
+/// A case on a fresh lazy store.
+fn on_lazy(case: Case) -> Case {
+    case.after("wa_sync.open", lazy_req())
+}
+
+// ---- wa_sync.open_page, wa_sync.focus (the lazy sync)
+
+fn open_page(req: OlderReq) -> Result<OlderAns, FfiError> {
+    with(req.handle, |store| store.open_page(&req.chat, req.limit)).map(|fetch| OlderAns { fetch })
+}
+
+fn open_page_cases() -> Vec<Case> {
+    vec![
+        // The chat list stored Ali's newest message only: opening the chat asks for its newest page.
+        on_lazy(Case::new(json!({"handle": H, "chat": ALI})))
+            .after("wa_sync.store_chats", chats_req(None)),
+        // Paged in this session: nothing more until a scroll.
+        on_lazy(Case::named("paged", json!({"handle": H, "chat": ALI})))
+            .after("wa_sync.store_chats", chats_req(None))
+            .after(
+                "wa_sync.store_page",
+                page_req(
+                    None,
+                    json!([text_msg(ALI, "A3", NOW - 3_000, false, "bunu sileceğim")]),
+                ),
+            ),
+        // A store that is not lazy pages its gaps from the plan: nothing here.
+        on_sample(Case::named("eager", json!({"handle": H, "chat": ALI}))),
+    ]
+}
+
+#[derive(Deserialize)]
+struct FocusReq {
+    handle: i64,
+    /// The chat on screen (any of its ids); left out: none.
+    #[serde(default)]
+    chat: Option<String>,
+}
+
+#[derive(Serialize)]
+struct FocusAns {
+    handle: i64,
+}
+
+fn focus(req: FocusReq) -> Result<FocusAns, FfiError> {
+    with(req.handle, |store| {
+        store.set_focus(req.chat.as_deref());
+        Ok(())
+    })?;
+    Ok(FocusAns { handle: req.handle })
+}
+
+fn focus_cases() -> Vec<Case> {
+    vec![
+        on_lazy(Case::new(json!({"handle": H, "chat": ALI}))),
+        on_lazy(Case::named("none", json!({"handle": H}))),
+    ]
+}
+
+// ---- wa_sync.cache_save
+
+#[derive(Serialize)]
+struct CacheSaved {
+    handle: i64,
+    /// People in the saved map.
+    persons: u32,
+}
+
+/// Writes the store's identity map and catch-up cursor into the encrypted vault cache (plan 13.5); its pictures
+/// stay. `locked` while the vault is locked or holds another instance.
+fn cache_save(req: HandleReq) -> Result<CacheSaved, FfiError> {
+    let (instance, snapshot) = with(req.handle, |store| {
+        let instance = store.instance_id().to_owned();
+        store
+            .identity_snapshot()
+            .map(|snapshot| (instance, snapshot))
+    })?;
+    if super::vault::unlocked_instance().as_deref() != Some(instance.as_str()) {
+        return Err(
+            FfiError::new(ErrorKind::NotFound, "the WhatsApp vault is locked")
+                .with_detail(json!({"code": "locked"})),
+        );
+    }
+    let persons = snapshot.persons.len() as u32;
+    let since = snapshot.since.clone();
+    let identity = serde_json::to_value(IdentitySnapshot {
+        since: None,
+        ..snapshot
+    })
+    .map_err(|e| FfiError::invalid(e.to_string()))?;
+    super::vault::with_cache(true, |cache| {
+        cache.identity = identity;
+        cache.identity_cursor = since;
+    })?;
+    Ok(CacheSaved {
+        handle: req.handle,
+        persons,
+    })
+}
+
+fn cache_save_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"handle": H}))
+            .seeded("wa_vault")
+            .after("vault.unlock", super::vault::seed_unlock_request())
+            .after("wa_sync.open", lazy_req()),
+        on_lazy(Case::named("locked", json!({"handle": H}))),
     ]
 }
 

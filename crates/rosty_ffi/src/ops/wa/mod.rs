@@ -74,6 +74,9 @@ pub(crate) struct Wa {
     pub url: GatewayUrl,
     pub key: Option<ConnectKey>,
     pub cache_dir: PathBuf,
+    /// Bytes answers above this go to a temp file in `cache_dir`. A gateway of the vault answers everything
+    /// inline: nothing it downloads touches the disk (`plans/wa-vault.md` 13.1).
+    pub inline_limit: usize,
 }
 
 /// A request that names a handle and carries the rest of its fields flat next to it.
@@ -108,6 +111,7 @@ pub(crate) struct Ctx {
     pub url: GatewayUrl,
     pub key: Option<ConnectKey>,
     pub cache_dir: PathBuf,
+    pub inline_limit: usize,
 }
 
 impl Deref for Ctx {
@@ -132,6 +136,7 @@ pub(crate) fn ctx(handle: i64) -> Result<Ctx, FfiError> {
             url: wa.url.clone(),
             key: wa.key.clone(),
             cache_dir: wa.cache_dir.clone(),
+            inline_limit: wa.inline_limit,
         })
         .ok_or_else(|| not_found("wa", handle))
 }
@@ -251,6 +256,7 @@ pub(super) fn open(req: OpenReq) -> Result<HandleAns, FfiError> {
             url,
             key: Some(key),
             cache_dir,
+            inline_limit: usize::MAX,
         });
         super::vault::adopt_gateway(link.session, handle);
         return Ok(HandleAns { handle });
@@ -270,6 +276,7 @@ pub(super) fn open(req: OpenReq) -> Result<HandleAns, FfiError> {
         url,
         key,
         cache_dir,
+        inline_limit: INLINE_LIMIT,
     });
     Ok(HandleAns { handle })
 }

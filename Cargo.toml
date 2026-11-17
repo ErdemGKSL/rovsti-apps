@@ -52,6 +52,10 @@ sha2 = "0.10"
 unicode-segmentation = "1.10"
 aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"] }
 pbkdf2 = { version = "0.12.2", features = ["hmac"] }
+# WhatsApp vault KDF (plans/wa-vault.md 3): pure Rust Argon2id. 0.5.3 shares the digest 0.10 stack with sha2 and
+# pbkdf2; the `alloc`/`password-hash` defaults are off (the vault passes its own memory blocks).
+argon2 = { version = "=0.5.3", default-features = false, features = ["zeroize"] }
+zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
 base64 = "0.22"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 futures = "0.3"

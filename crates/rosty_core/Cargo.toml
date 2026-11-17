@@ -7,7 +7,8 @@ publish.workspace = true
 description = "Platform-free domain types shared by every Rosty app."
 
 [dependencies]
-aes-gcm.workspace = true
+aes-gcm = { workspace = true, features = ["zeroize"] }
+argon2.workspace = true
 base64.workspace = true
 pbkdf2.workspace = true
 rqrr.workspace = true
@@ -16,6 +17,12 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 unicode-segmentation.workspace = true
+zeroize = { workspace = true, features = ["serde"] }
+
+[features]
+# The WhatsApp vault derives its key with PBKDF2-HMAC-SHA256 (600 000 rounds) instead of Argon2id. A compile-time
+# fallback only (plans/wa-vault.md 13.7); both are always readable, since the header names the KDF.
+vault-pbkdf2 = []
 
 [dev-dependencies]
 qrcode.workspace = true

@@ -1118,6 +1118,44 @@ authorization of the copyright holder.
 SPDX-License-Identifier: Unicode-3.0
 ```
 
+## RustCrypto argon2 (argon2 0.5.3)
+
+- Source: https://github.com/RustCrypto/password-hashes (crates.io `argon2`, pinned `=0.5.3`). Copyright (c) 2021-2024
+  The RustCrypto Project Developers.
+- Licence: MIT OR Apache-2.0; Rosty uses it under the MIT terms below (the Apache-2.0 text further up in this file is
+  the alternative). Used as a dependency only by `crates/rosty_core/src/vault/` (the WhatsApp vault passphrase KDF); no
+  argon2 source is copied into this repository.
+
+### argon2 MIT licence
+
+```text
+Copyright (c) 2021-2024 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ## Inter 4.1
 
 - Source: https://github.com/rsms/inter (release `Inter-4.1.zip`, `extras/ttf/Inter-{Regular,SemiBold,Bold}.ttf`).

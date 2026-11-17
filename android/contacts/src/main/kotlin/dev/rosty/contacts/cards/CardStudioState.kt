@@ -23,6 +23,7 @@ object CardStudioTags {
     const val Share = "card-studio-share"
     const val Save = "card-studio-save"
     const val ShareMore = "card-studio-share-more"
+    const val Replay = "card-studio-replay"
 
     fun swatch(palette: CardPalette) = "card-studio-swatch-${palette.name.lowercase()}"
 }

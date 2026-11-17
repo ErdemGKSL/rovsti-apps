@@ -521,6 +521,7 @@
     <string name="card_studio_preview_birthday">Birthday card for %1$s</string>
     <string name="card_studio_preview_contact">Contact card for %1$s</string>
     <string name="card_studio_preview_number">New number card for %1$s</string>
+    <string name="card_studio_replay">Replay</string>
     <string name="card_studio_rendering">Making the card</string>
     <string name="card_studio_failed">Couldn\'t make the card</string>
     <string name="card_studio_share_still">Share as still image</string>

@@ -15,6 +15,7 @@ import dev.rosty.contacts.card.CardRig
 import dev.rosty.contacts.card.CardTags
 import dev.rosty.contacts.card.HostedCard
 import dev.rosty.core.ops.CardPalette
+import dev.rosty.design.media.AnimatedImageSource
 import dev.rosty.testing.ShotTest
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
@@ -22,6 +23,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.robolectric.annotation.Config
+import java.io.File
 
 /** X.2 step 5 screenshots: Card Studio in its states and the Card chip on the birthday row, light and dark. */
 @Config(sdk = [35])
@@ -53,10 +55,13 @@ class X2ShotTest : ShotTest() {
         name: String,
         fontScale: Float = 1f,
         subject: CardStudioSubject = StudioSamples.birthday,
+        darks: List<Boolean> = listOf(false, true),
+        images: AnimatedImageSource? = null,
+        reduceMotion: Boolean = false,
         steps: (CardStudioRig) -> Unit = {},
     ) {
-        for (dark in listOf(false, true)) {
-            val r = CardStudioRig(this, subject = subject)
+        for (dark in darks) {
+            val r = CardStudioRig(this, subject = subject, images = images, reduceMotion = reduceMotion)
             r.show(dark, fontScale)
             r.open()
             steps(r)
@@ -76,7 +81,7 @@ class X2ShotTest : ShotTest() {
         }
 
     @Test fun gifRendering() =
-        studio("x2-card-preview-gif") { r ->
+        studio("x2-card-preview-gif-rendering", images = frozenOn12()) { r ->
             animatedReady(r)
             // A colour that has a golden (Dawn again after Dusk is not needed): hold the next render open so the ring
             // shows over the finished picture. The toggle has settled by now (animatedReady runs the clock).
@@ -84,6 +89,20 @@ class X2ShotTest : ShotTest() {
             compose.onNodeWithTag(CardStudioTags.swatch(CardPalette.Lagoon)).performClick()
             advance(300)
             r.settle(2)
+        }
+
+    /** The animated preview with the fake frozen on Rust frame 12 of the 720 px optics timeline (the bent name, the glint). */
+    private fun frozenOn12() =
+        FakeCardImages(
+            frame = File("src/test/resources/cards/birthday-dawn-en-frame12.png"),
+            still = File("../../crates/rosty_app_core/tests/cards/birthday-dawn-en.png"),
+        )
+
+    @Test fun gifPlaying() = studio("x2-card-preview-gif", images = frozenOn12()) { animatedReady(it) }
+
+    @Test fun gifReduceMotion() =
+        studio("x2-card-preview-gif-reduce-motion", darks = listOf(false), images = frozenOn12(), reduceMotion = true) {
+            animatedReady(it)
         }
 
     private fun animatedReady(r: CardStudioRig) {

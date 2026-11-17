@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -66,6 +67,7 @@ import dev.rosty.design.ios.component.IosButton
 import dev.rosty.design.ios.component.IosButtonSizing
 import dev.rosty.design.ios.component.IosButtonStyle
 import dev.rosty.design.ios.component.IosToggle
+import dev.rosty.design.media.OneShotAnimatedImage
 import dev.rosty.design.motion.RostyMotion
 import dev.rosty.design.overlay.ButtonMenuEntry
 import dev.rosty.design.overlay.Detent
@@ -74,6 +76,7 @@ import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.OverlayController
 import dev.rosty.design.overlay.SheetEntry
 import dev.rosty.design.overlay.showToast
+import dev.rosty.design.press.glassPress
 import dev.rosty.design.text.resolve
 import dev.rosty.design.theme.RostyShapes
 import dev.rosty.design.theme.RostyTheme
@@ -255,6 +258,7 @@ private fun Preview(
             state.subject.name,
         )
     val rendering = stringResource(R.string.card_studio_rendering)
+    val replay = stringResource(R.string.card_studio_replay)
     val colors = RostyTheme.colors
     Box(modifier, contentAlignment = Alignment.Center) {
         Box(
@@ -266,27 +270,32 @@ private fun Preview(
                 .testTag(CardStudioTags.Preview),
         ) {
             Crossfade(
-                targetState = state.preview?.path,
+                targetState = state.preview,
                 animationSpec = RostyMotion.appear(1f),
                 modifier = Modifier.fillMaxSize(),
                 label = "card-preview",
-            ) { path ->
-                val image by produceState<ImageBitmap?>(null, path) {
-                    value =
-                        path
-                            ?.let {
-                                withContext(
-                                    Dispatchers.IO,
-                                ) { runCatching { BitmapFactory.decodeFile(it) }.getOrNull() }
-                            }?.asImageBitmap()
-                }
-                image?.let {
-                    Image(
-                        it,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
+            ) { shown ->
+                if (shown?.animated == true) {
+                    ReplayableCard(shown.path, replay)
+                } else {
+                    val image by produceState<ImageBitmap?>(null, shown?.path) {
+                        value =
+                            shown
+                                ?.path
+                                ?.let {
+                                    withContext(
+                                        Dispatchers.IO,
+                                    ) { runCatching { BitmapFactory.decodeFile(it) }.getOrNull() }
+                                }?.asImageBitmap()
+                    }
+                    image?.let {
+                        Image(
+                            it,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
                 }
             }
             if (state.rendering) {
@@ -299,6 +308,33 @@ private fun Preview(
             }
         }
     }
+}
+
+/**
+ * The animated card: it plays once on arrival and rests on its last frame; a tap replays it with the glass press and a
+ * selection tick. TalkBack gets the same action as "Replay". A still preview never reaches this.
+ */
+@Composable
+private fun ReplayableCard(
+    path: String,
+    replayLabel: String,
+) {
+    val haptics = LocalRostyHaptics.current
+    var plays by remember(path) { mutableIntStateOf(0) }
+    OneShotAnimatedImage(
+        path = path,
+        contentDescription = null,
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .glassPress()
+                .clickable(onClickLabel = replayLabel, role = Role.Button) {
+                    haptics.selection()
+                    plays++
+                }.testTag(CardStudioTags.Replay),
+        playKey = path to plays,
+        contentScale = ContentScale.Crop,
+    )
 }
 
 /** A turning arc on a soft disc: the render is running. */

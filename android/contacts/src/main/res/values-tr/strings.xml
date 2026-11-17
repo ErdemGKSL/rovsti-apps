@@ -521,6 +521,7 @@
     <string name="card_studio_preview_birthday">%1$s için doğum günü kartı</string>
     <string name="card_studio_preview_contact">%1$s için kişi kartı</string>
     <string name="card_studio_preview_number">%1$s için yeni numara kartı</string>
+    <string name="card_studio_replay">Tekrar oynat</string>
     <string name="card_studio_rendering">Kart hazırlanıyor</string>
     <string name="card_studio_failed">Kart hazırlanamadı</string>
     <string name="card_studio_share_still">Sabit görsel olarak paylaş</string>

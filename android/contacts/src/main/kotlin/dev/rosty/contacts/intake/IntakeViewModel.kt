@@ -459,8 +459,14 @@ class IntakeViewModel(
         val next = current.with(column, role)
         mapping = next
         // A newer choice replaces an older read that is still running; the sheet shows the columns at once.
-        csvJob?.cancel()
-        csvJob = scope.launch { readCsv(next) }
+        // It is joined before the next one starts, so reads reach the core in the order of the choices.
+        val older = csvJob
+        older?.cancel()
+        csvJob =
+            scope.launch {
+                older?.join()
+                readCsv(next)
+            }
     }
 
     /** `contacts.csv_import` for the mapping as it stands; the sheet follows the answer. */

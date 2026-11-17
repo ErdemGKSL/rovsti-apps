@@ -237,6 +237,73 @@ class CardStudioSheetTest : ShotTest() {
         assertEquals(1, r.files.gallery.size)
     }
 
+    private fun animatedRig(images: FakeCardImages): CardStudioRig =
+        CardStudioRig(this, images = images).also {
+            it.show()
+            it.open()
+            compose
+                .onNodeWithTag(CardStudioTags.Animated)
+                .performTouchInput { click(centerRight.copy(x = right - 40f)) }
+            it.settle(4)
+        }
+
+    @Test fun anAnimatedPreviewPlaysOnceAndAFurtherTapReplaysItWithASelectionTick() {
+        val images = FakeCardImages()
+        val r = animatedRig(images)
+        compose.onNodeWithTag(CardStudioTags.Replay).assertIsDisplayed()
+        assertEquals(1, images.starts)
+        r.haptics.clear()
+        compose.onNodeWithTag(CardStudioTags.Replay).performClick()
+        r.settle(2)
+        assertEquals("one tap, one more play", 2, images.starts)
+        assertEquals(listOf(dev.rosty.design.haptics.HapticEvent.Selection), r.haptics)
+    }
+
+    @Test fun theReplayActionIsOfferedToTalkBack() {
+        animatedRig(FakeCardImages())
+        val label =
+            compose
+                .onNodeWithTag(CardStudioTags.Replay)
+                .fetchSemanticsNode()
+                .config[androidx.compose.ui.semantics.SemanticsActions.OnClick]
+                .label
+        assertEquals("Replay", label)
+    }
+
+    @Config(qualifiers = "+tr")
+    @Test
+    fun theReplayActionIsTurkish() {
+        animatedRig(FakeCardImages())
+        assertEquals(
+            "Tekrar oynat",
+            compose
+                .onNodeWithTag(CardStudioTags.Replay)
+                .fetchSemanticsNode()
+                .config[androidx.compose.ui.semantics.SemanticsActions.OnClick]
+                .label,
+        )
+    }
+
+    @Test fun aStillPreviewHasNoReplayAction() {
+        val images = FakeCardImages()
+        rig()
+        compose.onNodeWithTag(CardStudioTags.Replay).assertDoesNotExist()
+        assertEquals(0, images.starts)
+    }
+
+    @Test fun underReduceMotionTheAnimatedPreviewNeverStarts() {
+        val images = FakeCardImages()
+        val r = CardStudioRig(this, images = images, reduceMotion = true)
+        r.show(content = null)
+        r.open()
+        compose
+            .onNodeWithTag(CardStudioTags.Animated)
+            .performTouchInput { click(centerRight.copy(x = right - 40f)) }
+        r.settle(4)
+        assertEquals(0, images.starts)
+        assertTrue(images.opened.all { !it.second })
+    }
+
     @Test fun thePreviewIsDescribedByWhoItIsFor() {
         rig()
         compose

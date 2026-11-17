@@ -21,7 +21,12 @@ internal class CardStudioRig(
     val ops: FakeCardsOps = FakeCardsOps(),
     val subject: CardStudioSubject = StudioSamples.birthday,
     val ui: ContactCardUiState = ContactCardUiState(),
+    val images: dev.rosty.design.media.AnimatedImageSource? = null,
+    val reduceMotion: Boolean = false,
 ) {
+    /** The haptic events the sheet played. */
+    val haptics = mutableListOf<dev.rosty.design.haptics.HapticEvent>()
+
     val harness = CardHarness(ui)
     val files = FakeFilesRepository()
     private val dir = Files.createTempDirectory("studio").toFile().apply { deleteOnExit() }
@@ -36,7 +41,19 @@ internal class CardStudioRig(
     ) {
         test.composeFrame(dark = dark, fontScale = fontScale) {
             scope = rememberCoroutineScope()
-            content?.invoke() ?: HostedCard(harness)
+            androidx.compose.runtime.CompositionLocalProvider(
+                dev.rosty.design.motion.LocalReduceMotion provides reduceMotion,
+                dev.rosty.design.haptics.LocalRostyHaptics provides
+                    object : dev.rosty.design.haptics.RostyHaptics {
+                        override fun play(event: dev.rosty.design.haptics.HapticEvent) {
+                            haptics += event
+                        }
+                    },
+                dev.rosty.design.media.LocalAnimatedImageSource provides
+                    (images ?: dev.rosty.design.media.LocalAnimatedImageSource.current),
+            ) {
+                content?.invoke() ?: HostedCard(harness)
+            }
         }
         test.advance(600)
     }

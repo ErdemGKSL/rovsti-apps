@@ -471,6 +471,7 @@ fn writes_720_px_optics_frames_for_review() {
             Template::Birthday,
             &[0usize, 3, 6, 9, 12, 15, 18, 24][..],
         ),
+        ("birthday-dawn-en", Template::Birthday, &[0usize, 12][..]),
         ("contact-dawn-en", Template::Contact, &[0, 8][..]),
     ] {
         let prepared = Prepared::new(&pick(name), 720, 900).unwrap();

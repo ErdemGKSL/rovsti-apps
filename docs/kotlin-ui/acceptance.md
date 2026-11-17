@@ -25,6 +25,26 @@ birthday):
 
 Result (date, phone, Android version, pass or fail, what looked wrong): .
 
+### X.2b: GIF in the sheet and the shared GIF play once
+
+**Why.** The host proves the frames (Rust frame proof, `OneShotAnimatedImageTest`) and the release APK. It cannot prove
+that `AnimatedImageDrawable` plays smoothly under the real compositor, or that chat apps honour a one-shot GIF.
+
+**Steps** (Contacts release build, a birthday contact, Card Studio, Animated switched on):
+
+1. The preview plays the card once: the panel drops in and squashes, a lens ring sweeps across the headline bending the
+   letters at its rim, a faint glint runs along the card edge, confetti falls; then it holds the clean last frame. It
+   must not loop.
+2. Tap the preview: it replays once with a small press and a haptic tick.
+3. Settings, Accessibility, remove animations (or the system reduce-motion setting): the preview shows the final still
+   and never plays.
+4. Drag the sheet between the two detents: the preview keeps its 3:4 shape and nothing overlaps; at the large detent it
+   fills the width.
+5. Share the animated card to a chat app: the received GIF plays once (or, where the app turns GIFs into video, a short
+   clip) and ends on the clean card. Save puts the same GIF in Pictures/Rosty.
+
+Result (date, phone, Android version, pass or fail, what looked wrong): .
+
 ## Stops
 
 ### E7.13 AC2: the map at 120 Hz

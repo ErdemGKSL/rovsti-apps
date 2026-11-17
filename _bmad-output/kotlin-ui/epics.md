@@ -1397,7 +1397,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 |---|---|---|---|
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17: static and animated cards, sheet, share/save; optics and GIF playback split into X.2b) |
-| X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | in-progress |
+| X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | done (round 18 step 6, 2026-11-17; Evidence in the X.2b section) |
 | X.3 | Readable text on accent and photo backgrounds (owner, 2026-11-17: "white text on a light background is unreadable") | after X.2b, before E8 R1 | todo |
 
 ### X.1 WhatsApp photo fallback avatar
@@ -1568,6 +1568,36 @@ planning (no `cards/refraction.rs` in HEAD; the implemented attempt sits in `sta
 optics from `stash@{0}`, frame proof and budgets, one-shot GIF playback in the preview (`OneShotAnimatedImage` in `:design`),
 a bigger preview (Medium + Large detents), close. **Next planner after X.2b: X.3, then E8 R1** (E6 and E7 are done in their tables;
 E6-WA continues in its own session).
+
+**X.2b status: done (round 18 step 6, 2026-11-17). Next planner: E8 R1** (X.3 stays todo in the table above and is
+planned with, or just before, E8 R1; E6-WA continues in its own session).
+
+**X.2b Evidence.**
+- Commits: `76b98fa` (disk, stash triage), `70fa8db` (glisse optics landed from stash), `42e89a0` (frame proof and
+  budgets), `fb50750` (one-shot GIF playback in the preview), `d4da566` (Medium + Large detents, bigger preview), plus
+  the close commit of step 6 (checklist record and docs).
+- Frames opened (720 px, `target/checks/cards/frames`, step 3): Birthday Dawn TR frames 0-38 (panel drop, stretch,
+  squash, lens ring bending glyphs at its rim only, rim glint, confetti, clean last frame identical to rest) and Contact
+  Dawn EN (panel drop, QR drawn, no lens, QR decodes). Goldens opened: all 8 Rust card goldens (text un-bent, only the
+  background blobs bend inside the 30 px rim band), and Kotlin `x2-card-preview-*` (light, dark, fs2, tr, large),
+  `x2-card-preview-gif-light` (mid-frame lens ring over the headline, card centred, nothing overlapping),
+  `x2-card-preview-gif-reduce-motion-light` (clean final still), `x2-card-preview-gif-rendering-*`.
+- Budgets (checks profile, `RUN_BUDGETS=1`): static 720x900 155 ms (asserted < 300), GIF 720x900 39 frames 1.71 s
+  (asserted < 3 s), 2.45 MiB; shipped 540x675 GIF 0.99 s, 1.70 MiB; `librosty_ffi.so` arm64 release 19.8 MiB
+  (+42 KB for the optics). Targets 150 ms and 1.5 s missed by a few percent, inside the noise of this box.
+- Checklist: `docs/kotlin-ui/checklist-e4.md`, "X.2b checklist record" (closes the X.2 open items A, C, E).
+- Gate (round 18 step 6): `cargo fmt`, `cargo clippy --profile checks` and `cargo test --profile checks` on the
+  Kotlin-facing package set, `cargo check --release` rosty_android and rosty_ffi for aarch64-linux-android, and
+  `bash scripts/kotlin-ui-check.sh` all green (EXIT 0).
+- Release APK: `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk`, 25,957,147 bytes (24.8 MiB);
+  `scripts/check-catalog-apk.sh`: arm64-v8a `librosty_ffi.so` present, all 8 RustNative exports present.
+- dexdump (`-d`, names from `mapping.txt`): `RustNative` kept by name (consumer rule `-keep class
+  dev.rosty.core.RustNative { *; }`), its 8 native methods present (audioPull, audioPush, call, headless, init, release,
+  setEventSink, tile); `NativeCardsOps` -> `u13`, `OneShotAnimatedImageKt` -> `r73`, its Drawable callback -> `q73`,
+  `CardRequest` -> `qu` / `$$serializer` `ou`, `CardAnswer$$serializer` -> `ct`, `CardPhoto$$serializer` -> `tt`: all
+  present in `classes.dex`. None is reached by name (serializers through `serializer()` calls, the drawable through
+  normal code), so no keep rule was added.
+- Owner-device checks that remain: `docs/kotlin-ui/acceptance.md`, "X.2b: GIF in the sheet and the shared GIF play once".
 
 ### X.3 Readable text on accent and photo backgrounds (owner, 2026-11-17)
 The owner: in light theme, white text on a white or light background is unreadable; text on a light surface must be dark.

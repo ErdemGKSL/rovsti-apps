@@ -200,3 +200,55 @@ The pass of `references/checklist.md` over the Card Studio sheet (`android/conta
   (real host `librosty_ffi`), goldens `x2-*` light, dark, fs2, tr (opened).
 - pass (kept from F40): the `x1-wa-avatar-*` goldens use portraits drawn in code (`:testing` `portraitImage`); opened in
   round 16.
+
+# X.2b checklist record: optics and in-sheet playback (round 18 step 6)
+
+`references/checklist.md` run again over the animated card (Rust `crates/rosty_app_core/src/cards/`) and the Card
+Studio sheet with one-shot playback (`android/design/.../media/OneShotAnimatedImage.kt`,
+`android/contacts/.../cards/CardStudioSheet.kt`, detents 0.64 and Large). It closes the `open` and `deviation` items
+of the X.2 record above (A, C, E, G). No device: nothing here is TalkBack- or hand-tested on hardware.
+
+## A. Licence and provenance
+- pass: `crates/rosty_app_core/src/cards/refraction.rs` carries the glisse header; `android/THIRD_PARTY_NOTICES.md` lists
+  it and holds the full glisse MIT text. Closes the X.2 "open" item. `OneShotAnimatedImage` is Rosty code (no port).
+- pass: no GPUI, no Material, no `Popup`/`Dialog` added.
+
+## B. Layout
+- pass: at the first detent the preview is 61% of the sheet width (was 37%), at Large the full content width at 3:4;
+  no two of templates, toggle, preview, swatches, Save, Share overlap; swatches stay on one row also at fs2
+  (`CardStudioSheetTest`: medium and large preview tests). Opened `x2-card-preview-gif-light` this step: card centred,
+  Save/Share clear of the bottom edge, confetti inside the card, nothing under a floating bar.
+
+## C. Motion
+- pass: the GIF plays once and holds its last frame (`OneShotAnimatedImageTest.startIsCalledOncePerKey`, no NETSCAPE
+  loop block in the file); a tap replays with `glassPress` and a selection tick
+  (`anAnimatedPreviewPlaysOnceAndAFurtherTapReplaysItWithASelectionTick`). Closes the X.2 "open" item.
+- pass: reduce motion never starts the drawable and shows the final still
+  (`underReduceMotionTheAnimatedPreviewNeverStarts`, golden `x2-card-preview-gif-reduce-motion-light` opened: clean
+  still, no lens ring, no confetti).
+- pass: frame draw goes through a `Drawable.Callback` that invalidates only the draw phase (no recomposition per frame).
+
+## D. Sheet and menu
+- pass: unchanged from X.2 (OverlayHost entries, menu opens upward, back closes the sheet first).
+
+## E. Glass
+- pass: the optics live inside the rendered card: edge-band refraction of the panel following the squash, lens sweep over
+  the headline, rim glint, fringe at most 1.5 px (frame proof in `plans/round-18.md`, step 3, 720 px frames opened).
+  Closes the X.2 "deviation". Mid-frame in `x2-card-preview-gif-light` shows the lens ring over "birthday," and the
+  glyphs un-torn. The preview itself is still a flat picture (no live glass over it).
+
+## F. Controls, haptics, insets, a11y
+- pass: replay is an `onClickLabel` action for TalkBack, English and Turkish (`theReplayActionIsOfferedToTalkBack`,
+  `theReplayActionIsTurkish`); a still preview has none. 48 dp size of swatches is still not asserted (kept open).
+- pass: no text field, no IME handling.
+
+## G. Performance
+- pass: Rust budgets with optics, checks profile: static 720x900 155 ms (asserted < 300, target 150 missed by 5 ms),
+  GIF 720x900 39 frames 1.71 s (asserted < 3 s, target 1.5 s missed by 0.2 s), 2.45 MiB; shipped 540x675 GIF
+  0.99 s, 1.70 MiB. `librosty_ffi.so` arm64 release 19.8 MiB (optics cost 42 KB).
+- pass: decode off Main, drawable released on dispose (`theDrawableIsReleasedOnDispose`), no JNI on Main.
+- not measured on a device: playback smoothness in the sheet; see `acceptance.md`.
+
+## H. Tests and evidence
+- pass: Rust refraction, lens, glint, determinism, size and budget tests; `CardsOpsNativeTest` 5/5 on the real host
+  library; Compose tests above; goldens `x2-*` (light, dark, fs2, tr, large) opened in steps 2, 3, 5 and 6.

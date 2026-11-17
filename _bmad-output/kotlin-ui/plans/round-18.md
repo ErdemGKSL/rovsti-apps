@@ -154,3 +154,11 @@ Frames written by `writes_720_px_optics_frames_for_review` (`WRITE_CARD_FRAMES=1
   also at fs2; the "..." menu opens upward over the swatches and the card, the toggle stays readable; Save/Share sit
   clear of the bottom edge (about 35 dp) at fs1 and fs2; at Large the card is the full content width with free space
   above and below it (centred), buttons unchanged. Rendering ring in the gif-rendering shot sits inside the card corner.
+
+## Step 6 result (r18-s6, release path, checklist, close X.2b)
+
+Full gate green (fmt, clippy and test with `--profile checks` on the Kotlin-facing set, `cargo check --release` for
+rosty_android and rosty_ffi, `scripts/kotlin-ui-check.sh` EXIT 0). Contacts release APK 25,957,147 bytes; dexdump
+result and checklist record are in `epics.md` (X.2b Evidence) and `docs/kotlin-ui/checklist-e4.md`. No keep rule added.
+Disk fell to 1.6 GB free during the gate (6 GB target not reachable on this box); `target/release`, `target/checks/incremental`
+and the android cargo `incremental` dir were removed. Next planner: E8 R1.

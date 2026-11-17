@@ -1,5 +1,6 @@
 package dev.rosty.messages.wa
 
+import androidx.lifecycle.viewModelScope
 import dev.rosty.core.model.chat.SearchJumpRequest
 import dev.rosty.core.model.chat.SearchJumpStep
 import dev.rosty.core.model.wa.EditRecord
@@ -27,6 +28,7 @@ import dev.rosty.messages.wa.WaTestKit.Companion.MERT
 import dev.rosty.messages.wa.WaTestKit.Companion.NOW
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -102,14 +104,29 @@ class WaThreadViewModelTest {
 
     @Before fun main() = Dispatchers.setMain(dispatcher)
 
-    @After fun reset() = Dispatchers.resetMain()
+    // A view-model's scope lives on Dispatchers.Main: cancel it before the test Main goes away, or a
+    // late withContext(Default) resume of a finished test hits the missing Android Main.
+    private val made = mutableListOf<WaThreadViewModel>()
+
+    @After fun reset() {
+        made.forEach { it.viewModelScope.cancel() }
+        made.clear()
+        Dispatchers.resetMain()
+    }
 
     private fun model(
         kit: WaTestKit,
         jid: String = ADA,
     ): WaThreadViewModel {
         kit.offline.start()
-        return WaThreadViewModel(
+        return newModel(kit, jid).also(made::add)
+    }
+
+    private fun newModel(
+        kit: WaTestKit,
+        jid: String,
+    ): WaThreadViewModel =
+        WaThreadViewModel(
             WaThreadSources(
                 offline = kit.offline,
                 remote = kit.remote,
@@ -123,7 +140,6 @@ class WaThreadViewModelTest {
             EnglishInboxWords,
             days,
         )
-    }
 
     private fun bubbles(state: ConversationUi): List<BubbleUi> =
         state.items.mapNotNull { (it as? ConversationItem.Bubble)?.bubble }
@@ -555,7 +571,7 @@ class WaThreadViewModelTest {
                     EnglishWaWords,
                     EnglishInboxWords,
                     days,
-                )
+                ).also(made::add)
             val revealed = mutableListOf<String>()
             backgroundScope.launch { model.reveals.collect { revealed += it } }
             val effects = mutableListOf<ConversationEffect>()

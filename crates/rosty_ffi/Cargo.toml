@@ -16,6 +16,7 @@ test-ops = []
 [dependencies]
 base64.workspace = true
 futures.workspace = true
+getrandom.workspace = true
 jni.workspace = true
 log.workspace = true
 qrcode.workspace = true
@@ -27,6 +28,7 @@ rosty_wa_client.workspace = true
 rosty_wa_proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+zeroize = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 # A throwaway WebSocket server for the event and call-audio tests (the same features rosty_wa_client builds with).

@@ -59,8 +59,15 @@ pub extern "system" fn Java_dev_rosty_core_RustNative_call<'l>(
 ) -> jbyteArray {
     or_fallback(null_mut(), || {
         let op = read_string(&mut env, &op);
-        let request = read_bytes(&env, &request);
-        write_bytes(&env, &ops::call(&op, &request))
+        let mut request = read_bytes(&env, &request);
+        let mut answer = ops::call(&op, &request);
+        let written = write_bytes(&env, &answer);
+        // A vault request may carry the passphrase and an answer may show a new one: no copy stays behind here.
+        if op.starts_with("vault.") {
+            zeroize::Zeroize::zeroize(&mut request);
+            zeroize::Zeroize::zeroize(&mut answer);
+        }
+        written
     })
 }
 

@@ -65,7 +65,9 @@ data class HandleAnswer(
 /** `wa.open`: [key] is left out for `wa.create_instance` (no key yet); [cacheDir] holds large downloads. */
 @Serializable
 data class WaOpenRequest(
-    val url: String,
+    /** Required while the vault is locked; with an unlocked vault it defaults to the vault's gateway. */
+    @EncodeDefault(NEVER) val url: String? = null,
+    /** Only while the vault is locked: an unlocked vault supplies the key and refuses this one. */
     @EncodeDefault(NEVER) val key: String? = null,
     @SerialName("cache_dir") @EncodeDefault(NEVER) val cacheDir: String? = null,
 )

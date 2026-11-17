@@ -79,9 +79,43 @@ fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
-        fs::copy(entry.path(), to.join(entry.file_name()))?;
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &to.join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), to.join(entry.file_name()))?;
+        }
     }
     Ok(())
+}
+
+/// Writes the case's volatile answer fields as [`registry::VOLATILE`] (`Case::volatile`); a field the answer lacks
+/// stays absent.
+fn mask_volatile(answer: String, fields: &[&str]) -> String {
+    if fields.is_empty() {
+        return answer;
+    }
+    let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&answer) else {
+        return answer;
+    };
+    let mut masked = false;
+    if let Some(ok) = parsed
+        .get_mut("ok")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for field in fields {
+            if let Some(value) = ok.get_mut(*field)
+                && value.is_string()
+            {
+                *value = serde_json::Value::String(registry::VOLATILE.to_owned());
+                masked = true;
+            }
+        }
+    }
+    if masked {
+        serde_json::to_string(&parsed).expect("json")
+    } else {
+        answer
+    }
 }
 
 #[test]
@@ -165,6 +199,7 @@ fn contract_fixtures_match() {
                 answer = answer.replace(&handle.to_string(), &PLACEHOLDER_HANDLE.to_string());
                 handles::global().release(handle);
             }
+            answer = mask_volatile(answer, case.volatile);
             if let Some(stub) = &wa_stub {
                 problems.extend(stub.problems(&stem));
             }

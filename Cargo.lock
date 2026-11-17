@@ -156,6 +156,7 @@ dependencies = [
  "ctr 0.9.2",
  "ghash 0.5.1",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -316,6 +317,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "argon2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures 0.2.17",
+ "zeroize",
 ]
 
 [[package]]
@@ -842,6 +855,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7eff00be299a18769011411c9def0d827e8f2d7bf0c3dbf53633147a8867fd1f"
 dependencies = [
  "no_std_io2",
+]
+
+[[package]]
+name = "blake2"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
+dependencies = [
+ "digest 0.10.7",
 ]
 
 [[package]]
@@ -6376,6 +6398,7 @@ dependencies = [
  "serde_json",
  "takumi",
  "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]
@@ -6405,6 +6428,7 @@ name = "rosty_core"
 version = "0.1.0"
 dependencies = [
  "aes-gcm 0.10.3",
+ "argon2",
  "base64 0.22.1",
  "pbkdf2",
  "qrcode",
@@ -6414,6 +6438,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "unicode-segmentation",
+ "zeroize",
 ]
 
 [[package]]
@@ -6422,6 +6447,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "futures",
+ "getrandom 0.3.4",
  "jni",
  "log",
  "qrcode",
@@ -6434,6 +6460,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio-tungstenite 0.30.0",
+ "zeroize",
 ]
 
 [[package]]
@@ -10223,6 +10250,7 @@ version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

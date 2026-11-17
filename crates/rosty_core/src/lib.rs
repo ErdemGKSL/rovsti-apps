@@ -125,6 +125,7 @@ pub mod thread;
 /// Local pinned, archived and unread marks for SMS threads.
 pub mod thread_marks;
 pub mod unread_jump;
+pub mod vault;
 pub mod vcard;
 pub mod voice_player;
 /// WhatsApp identity: LID and phone-number ids of one person, the canonical key, the name rule.

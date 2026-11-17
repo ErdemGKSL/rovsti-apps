@@ -1,0 +1,1 @@
+{"ok":{"deleted":["$DIR/cache/wa-avatars","$DIR/cache/wa-status","$DIR/files/wa-media","$DIR/files/wa-stars.json","$DIR/wa-identity.json","$DIR/wa-live-names.json","$DIR/wa-rekeys.json","$DIR/wa-sync-gone.db-wal","$DIR/wa-sync-inst1.db","$DIR/whatsapp-link.json"],"scrubbed":["$DIR/wa-sync-inst1.db"],"drafts_removed":1,"failed":[]}}

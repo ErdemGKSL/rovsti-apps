@@ -13,6 +13,7 @@ mod search;
 mod shared;
 mod stops;
 mod tiles;
+mod vault;
 mod wa;
 mod wa_idbook;
 mod wa_identity;

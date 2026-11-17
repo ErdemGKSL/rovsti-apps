@@ -1,0 +1,1 @@
+{"err":{"kind":"not_found","message":"vault handle 42 is not open","detail":{"code":"locked"}}}

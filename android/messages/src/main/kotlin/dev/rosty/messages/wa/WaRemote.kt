@@ -28,6 +28,7 @@ import dev.rosty.core.model.wa.WaSyncOutcome
 import dev.rosty.core.ops.WaEvents
 import dev.rosty.core.ops.WaFeed
 import dev.rosty.core.ops.WaGateway
+import dev.rosty.wa.WaLinkState
 import dev.rosty.wa.WaRepository
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.channels.awaitClose
@@ -119,6 +120,11 @@ interface WaRemote {
 class GatewayWaRemote(
     private val repo: WaRepository,
     private val waEvents: WaEvents = WaEvents(),
+    /**
+     * The lazy sync (`plans/wa-vault.md` 14): one event socket, the repository's (live, no `after=` replay), and the
+     * status the repository fetched when it opened the gateway. Off: the sync opens its own socket after its `seq`.
+     */
+    private val shareRepository: Boolean = false,
 ) : WaRemote {
     private suspend fun <T> call(block: suspend (WaGateway) -> Outcome<T>): Outcome<T> {
         val gateway = repo.gateway() ?: return Outcome.Err(RustError.NotFound("WhatsApp is not linked"))
@@ -133,6 +139,16 @@ class GatewayWaRemote(
             val gateway = repo.gateway()
             if (gateway == null) {
                 send(WaRemoteEvent.Disconnected)
+                return@channelFlow
+            }
+            if (shareRepository) {
+                // The repository's socket (opened with its gateway): the sync only listens.
+                val feed =
+                    launch(start = CoroutineStart.UNDISPATCHED) {
+                        waEvents.feed(instance).collect { send(remoteEvent(it) ?: return@collect) }
+                    }
+                if (repo.linkState.value is WaLinkState.Connected) send(WaRemoteEvent.Connected)
+                awaitClose { feed.cancel() }
                 return@channelFlow
             }
             val label = syncLabel(instance)
@@ -178,7 +194,14 @@ class GatewayWaRemote(
     override suspend fun identityMappings(since: String?): Outcome<IdentityMappingsAnswer> =
         call { it.identityMappings(since) }
 
-    override suspend fun status(): Outcome<InstanceStatus> = call { it.status() }
+    override suspend fun status(): Outcome<InstanceStatus> {
+        if (shareRepository) {
+            // The repository asked for it when it opened the gateway: no second request.
+            repo.gateway() ?: return Outcome.Err(RustError.NotFound("WhatsApp is not linked"))
+            (repo.linkState.value as? WaLinkState.Connected)?.status?.let { return Outcome.Ok(it) }
+        }
+        return call { it.status() }
+    }
 
     override suspend fun page(fetch: WaSyncFetch): Outcome<List<RichMessage>> =
         call { it.messagesWithMeta(fetch.chat, fetch.before, fetch.limit) }

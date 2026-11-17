@@ -7,12 +7,16 @@ import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.StatusAuthor
 import dev.rosty.core.model.wa.StatusItem
 import dev.rosty.core.model.wa.StatusList
+import dev.rosty.messages.wa.WaDownloads
 import dev.rosty.messages.wa.WaOffline
+import dev.rosty.messages.wa.WaRamFiles
 import dev.rosty.messages.wa.WaRemote
+import dev.rosty.wa.sync.WaRequestGate
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,7 +46,18 @@ class StatusFeed(
     private val remote: WaRemote,
     private val dir: File,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Since the vault: the pictures live here in RAM and never under [dir] (`plans/wa-vault.md` 13.1). */
+    private val ram: WaRamFiles? = null,
+    /**
+     * The first list waits this long after the gateway is reachable: the cold start keeps to its four requests
+     * (`plans/wa-vault.md` 14) and Status comes with the steady budget.
+     */
+    private val firstDelayMs: Long = 0,
+    /** Every Status request goes through it; null: unlimited (tests of other things). */
+    private val gate: WaRequestGate? = null,
 ) {
+    /** The pictures in [ram] by file key. */
+    private val held = java.util.concurrent.ConcurrentHashMap<String, File>()
     private val state = MutableStateFlow(StatusList())
     val list: StateFlow<StatusList> = state.asStateFlow()
 
@@ -62,7 +77,15 @@ class StatusFeed(
                     clear()
                     return@collectLatest
                 }
-                launch { offline.online.collect { if (it) reloads.tryEmit(Unit) } }
+                launch {
+                    var first = true
+                    offline.online.collect {
+                        if (!it) return@collect
+                        if (first) delay(firstDelayMs)
+                        first = false
+                        reloads.tryEmit(Unit)
+                    }
+                }
                 launch { offline.live.filterIsInstance<GatewayEvent.StatusChanged>().collect { reloads.tryEmit(Unit) } }
                 reloads.collect { reload() }
             }
@@ -71,6 +94,8 @@ class StatusFeed(
 
     private fun clear() {
         state.value = StatusList()
+        ram?.let { memory -> held.values.forEach { memory.release(it.path) } }
+        held.clear()
         synchronized(seen) {
             seen.clear()
             queue.clear()
@@ -79,7 +104,7 @@ class StatusFeed(
 
     /** Fetches the list again; what was seen here stays seen. */
     suspend fun reload() {
-        val fetched = keyed(remote.statuses().getOrNull() ?: return)
+        val fetched = keyed(request { remote.statuses() }.getOrNull() ?: return)
         val known = synchronized(seen) { seen.toSet() }
         state.value = fetched.markViewed(known)
         flush()
@@ -122,7 +147,14 @@ class StatusFeed(
         sending.withLock {
             val ids = synchronized(seen) { queue.toList() }
             if (ids.isEmpty()) return
-            if (remote.markStatusViewed(ids) is Outcome.Ok) synchronized(seen) { queue.removeAll(ids.toSet()) }
+            if (request {
+                    remote.markStatusViewed(
+                        ids,
+                    )
+                } is Outcome.Ok
+            ) {
+                synchronized(seen) { queue.removeAll(ids.toSet()) }
+            }
         }
     }
 
@@ -134,14 +166,30 @@ class StatusFeed(
         item: StatusItem,
         thumbnail: Boolean,
     ): File? {
-        val file = File(dir, (if (thumbnail) "t-" else "m-") + item.id.filter { it.isLetterOrDigit() })
-        if (withContext(io) { file.length() > 0 }) return file
+        val name = (if (thumbnail) "t-" else "m-") + item.id.filter { it.isLetterOrDigit() }
+        val file = File(dir, name)
+        if (ram != null) {
+            held[name]?.let { return it }
+        } else if (withContext(io) { file.length() > 0 }) {
+            return file
+        }
         if (thumbnail && item.media?.thumbnail != true) return null
         val answer =
-            (if (thumbnail) remote.statusThumbnail(item.id) else remote.statusMedia(item.id)).getOrNull()
+            request { if (thumbnail) remote.statusThumbnail(item.id) else remote.statusMedia(item.id) }.getOrNull()
                 ?: return null
+        if (ram != null) {
+            val bytes = withContext(io) { with(WaDownloads) { answer.bytes() } } ?: return null
+            return ram.put(name, bytes)?.also { held[name] = it }
+        }
         return withContext(io) { answer.writeTo(file) }
     }
+
+    /** Frees the pictures in RAM and forgets the list (lock). */
+    fun drop() {
+        clear()
+    }
+
+    private suspend fun <T> request(block: suspend () -> Outcome<T>): Outcome<T> = gate?.call(block) ?: block()
 }
 
 /** Writes the bytes of a gateway answer (inline base64, or the temp file of a large one) to [file]. */

@@ -37,6 +37,8 @@ fun messagesLinkCleanup(container: MessagesContainer): WaLinkCleanup {
         container.scheduleIfMade?.forgetWhatsApp()
         container.liveWaNames.forget()
         container.waMediaIfMade?.forgetThumbs()
+        // The WhatsApp drafts in memory (`plans/wa-vault.md` 13.5).
+        container.waDrafts.clear()
     }
 }
 

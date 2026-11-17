@@ -67,10 +67,23 @@ class WaMedia(
     /** The thumbnail file of [row] when it is already known; [ensureThumb] finds the others. */
     fun thumb(row: WaSyncMessage): File? = thumbs[row.id]
 
-    /** Forgets the thumbnails in memory: their files went with the account they belonged to. */
+    /** Forgets the thumbnails in memory: their files went with the account they belonged to (or the lock). */
     fun forgetThumbs() {
+        downloads.ram?.let { memory -> thumbs.values.forEach { memory.release(it.path) } }
         thumbs.clear()
     }
+
+    /**
+     * A picked file to send, kept in RAM since the vault (the gateway reads it by its path, inside this process);
+     * null without the RAM (the disk staging of [outgoing]) or when memory refused it.
+     */
+    fun stageInRam(
+        name: String,
+        bytes: ByteArray,
+    ): File? = downloads.ram?.put(name, bytes)
+
+    /** True when files to send are kept in RAM ([stageInRam]). */
+    val inRam: Boolean get() = downloads.ram != null
 
     /**
      * Makes the thumbnail of [row] a file: from disk, from the store, else from the gateway (stored then). True when a
@@ -84,7 +97,7 @@ class WaMedia(
         }
         if (thumbs.containsKey(row.id)) return false
         val target = downloads.thumbFile(session.link.instanceId, row.id)
-        if (withContext(io) { target.isFile }) {
+        if (downloads.ram == null && withContext(io) { target.isFile }) {
             thumbs[row.id] = target
             return true
         }
@@ -105,6 +118,16 @@ class WaMedia(
             session.store.setMedia(row.chat, row.id, now(), thumbnailB64 = b64)
         }
         val data = b64
+        downloads.ram?.let { memory ->
+            val file =
+                try {
+                    memory.put(target.name, Base64.getDecoder().decode(data))
+                } catch (_: IllegalArgumentException) {
+                    null
+                } ?: return false
+            thumbs[row.id] = file
+            return true
+        }
         val written =
             withContext(io) {
                 try {
@@ -203,6 +226,10 @@ class WaMedia(
 
     /** Deletes a staged file that will not be sent after all (removed from the composer, a cancelled send). */
     suspend fun discard(path: String) {
+        downloads.ram?.takeIf { it.owns(path) }?.let { memory ->
+            memory.release(path)
+            return
+        }
         withContext(io) {
             val file = File(path)
             if (file.startsWith(dir)) {

@@ -163,6 +163,54 @@ class CardStudioSheetTest : ShotTest() {
         assertEquals(CardStudioMetrics.Aspect, during.width.value / during.height.value, 0.01f)
     }
 
+    private fun overlap(
+        a: androidx.compose.ui.geometry.Rect,
+        b: androidx.compose.ui.geometry.Rect,
+    ) = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+
+    /** R18-F1: at the first detent the card is at least 55% of the sheet width, and nothing in the sheet overlaps. */
+    @Test fun theMediumPreviewIsAtLeastHalfAndABitOfTheSheetWidthAndNothingOverlaps() {
+        rig()
+        val window = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        val preview = bounds(CardStudioTags.Preview)
+        assertTrue("preview ${preview.width} of ${window.width}", preview.width >= 0.55f * window.width)
+        assertEquals(CardStudioMetrics.Aspect, preview.width / preview.height, 0.01f)
+        val tags =
+            listOf(
+                CardStudioTags.Templates,
+                CardStudioTags.Animated,
+                CardStudioTags.Preview,
+                CardStudioTags.Swatches,
+                CardStudioTags.Save,
+                CardStudioTags.Share,
+            )
+        for (i in tags.indices) {
+            for (j in i + 1 until tags.size) {
+                assertFalse("${tags[i]} overlaps ${tags[j]}", overlap(bounds(tags[i]), bounds(tags[j])))
+            }
+        }
+        val swatches = CardPalette.entries.map { bounds(CardStudioTags.swatch(it)) }
+        assertTrue("one row", swatches.all { it.top == swatches.first().top })
+        assertTrue("buttons inside the window", bounds(CardStudioTags.Share).bottom <= window.bottom)
+    }
+
+    /** R18-F1: at Large the card grows to the content width at 3:4. */
+    @Test fun theLargePreviewFillsTheContentWidthAtThreeByFour() {
+        val r = rig()
+        compose.runOnUiThread { r.entry?.sheet?.animateToDetent(0) }
+        r.settle(10)
+        val window = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        val sheet = bounds(CardStudioTags.Sheet)
+        val preview = bounds(CardStudioTags.Preview)
+        assertEquals("content width", sheet.width, preview.width, 1f)
+        assertEquals(0.75f, preview.width / preview.height, 0.01f)
+        assertTrue(preview.width > 0.8f * window.width)
+        assertTrue(
+            "buttons clear of the bottom",
+            bounds(CardStudioTags.Share).bottom <= window.bottom,
+        )
+    }
+
     @Test fun theMoreButtonOnlyExistsForAnAnimatedCardAndSharesAStill() {
         val r = rig()
         r.files.staged = android.net.Uri.parse("content://x/card.gif")

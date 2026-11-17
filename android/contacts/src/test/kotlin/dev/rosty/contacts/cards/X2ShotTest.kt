@@ -136,6 +136,12 @@ class X2ShotTest : ShotTest() {
 
     @Test fun birthdayFs2() = studio("x2-card-preview-birthday-fs2", fontScale = 2f)
 
+    @Test fun birthdayLarge() =
+        studio("x2-card-preview-birthday-large", darks = listOf(false)) { r ->
+            compose.runOnUiThread { r.entry?.sheet?.animateToDetent(0) }
+            r.settle(10)
+        }
+
     @Test fun chipOnCard() {
         val r = CardRig(1).also { rig = it }
         val state = r.ready()

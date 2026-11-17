@@ -89,8 +89,11 @@ import kotlinx.coroutines.withContext
 
 /** Fixed numbers of the sheet; the preview's aspect is the same for every template, so nothing jumps on a switch. */
 internal object CardStudioMetrics {
-    /** Width over height of the preview box (a 4:5 card). */
-    const val Aspect = 0.8f
+    /** Width over height of the preview box (3:4); it takes the room the controls leave, so Large widens it to the content width. */
+    const val Aspect = 0.75f
+
+    /** The resting height of the first detent as a share of the window: Medium (0.5) leaves a card under 40% of the width. */
+    const val MediumShare = 0.64f
     val Swatch = Sizes.swatch
     val Ring = Sizes.ring
     val RingStroke = Sizes.ringStroke
@@ -98,7 +101,7 @@ internal object CardStudioMetrics {
 }
 
 /**
- * Opens Card Studio in a medium sheet over the page. Closing the sheet (drag, scrim, back) cancels the running render
+ * Opens Card Studio in a medium-and-large sheet over the page. Closing the sheet (drag, scrim, back) cancels the running render
  * through [CardStudioViewModel.close]; back closes the sheet before it reaches the page behind.
  */
 fun OverlayController.presentCardStudio(
@@ -110,7 +113,7 @@ fun OverlayController.presentCardStudio(
     val entry =
         SheetEntry(
             title = context.getString(R.string.card_studio_title),
-            detents = persistentListOf(Detent.Medium),
+            detents = persistentListOf(Detent.Fraction(CardStudioMetrics.MediumShare), Detent.Large),
             onDismissed = model::close,
         ) { _ ->
             val state by model.state.collectAsState()
@@ -143,9 +146,9 @@ internal fun ColumnScope.CardStudioContent(
             .fillMaxWidth()
             .weight(1f)
             .padding(horizontal = Spacing.gutter)
-            .padding(bottom = Spacing.m)
+            .padding(bottom = Spacing.s)
             .testTag(CardStudioTags.Sheet),
-        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         SegmentedControl(
             items = names,

@@ -138,3 +138,19 @@ Frames written by `writes_720_px_optics_frames_for_review` (`WRITE_CARD_FRAMES=1
   The step could not be committed from a shared, moving tree, so it was stashed as blocked; the Rust itself was
   complete. Not a technical failure of the optics (Takumi 2.18.2 applies the SVG backdrop filter).
 - `stash@{0}` dropped.
+
+## Step 5 result (r18-s5, bigger preview, R18-F1)
+
+- `CardStudioSheet`: detents are now `Fraction(0.64)` and `Large` (was `Medium` only). Deviation from the plan text: with
+  `Detent.Medium` (50% of a 891 dp window = 445 dp) the controls (grabber, segmented, toggle, swatches, buttons, gesture
+  inset, about 215 dp) leave a card of about 230 dp height, 38% of the sheet width at 3:4, so 55% is not reachable at
+  Medium without dropping a control. The first detent is therefore 0.64 of the window; the Large detent is as asked.
+- Preview aspect is now 3:4 (was 4:5); it still takes the leftover height (`weight(1f)`, `aspectRatio(matchHeightConstraintsFirst)`)
+  so at Large it widens to the content width. Header rows compacted (4 dp gaps, 8 dp bottom padding).
+- Tests (`CardStudioSheetTest`): preview >= 0.55 x sheet width at the first detent and no two of
+  templates/toggle/preview/swatches/save/share overlap, swatches on one row; at Large preview width == content width at 3:4.
+- x2 goldens re-recorded (light, dark, tr, fs2) plus new `x2-card-preview-birthday-large-light`. All opened:
+  preview is 61% of the sheet width at the first detent (was 37%); no text crosses the card; swatches stay on one row,
+  also at fs2; the "..." menu opens upward over the swatches and the card, the toggle stays readable; Save/Share sit
+  clear of the bottom edge (about 35 dp) at fs1 and fs2; at Large the card is the full content width with free space
+  above and below it (centred), buttons unchanged. Rendering ring in the gif-rendering shot sits inside the card corner.

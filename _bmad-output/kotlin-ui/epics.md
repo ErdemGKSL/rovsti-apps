@@ -1396,7 +1396,8 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | Story | Title | Round | Status |
 |---|---|---|---|
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
-| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17; glisse optics and in-sheet GIF playback deferred, see Evidence) |
+| X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17: static and animated cards, sheet, share/save; optics and GIF playback split into X.2b) |
+| X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | in-progress |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1559,8 +1560,13 @@ checklist, full gate, close X.2. **Round 17** -> `_bmad-output/kotlin-ui/plans/r
   budget (static card under ~300 ms, GIF under ~3 s on the phone), Kotlin flow tests; screenshots
   `x2-card-preview-birthday`, `x2-card-preview-contact`, `x2-card-preview-gif`.
 
-**X.2 status: done (round 17 step 8, 2026-11-17). Next planner: E8 R1** (E6 and E7 are done in their tables; E6-WA continues
-in its own session).
+**X.2 status: done (round 17 step 8, 2026-11-17), except the owner's optics requirement, re-verified missing in round 18
+planning (no `cards/refraction.rs` in HEAD; the implemented attempt sits in `stash@{0}`). That part is X.2b.**
+
+**X.2b -> `_bmad-output/kotlin-ui/plans/round-18.md`** (planned 2026-11-17 at `7ffcc39`): disk and stash triage, land the
+optics from `stash@{0}`, frame proof and budgets, one-shot GIF playback in the preview (`OneShotAnimatedImage` in `:design`),
+a bigger preview (Medium + Large detents), close. **Next planner after X.2b: E8 R1** (E6 and E7 are done in their tables;
+E6-WA continues in its own session).
 
 **Evidence (round 17):** commits `3a03c05` (carry-over), the "carry-over landed" fix commit, `7ece932` (Card Studio sheet
 fixes R17-F1..F4, re-recorded x2 goldens), `0c1b999` (budgets, sizes, cancellation), `8ace76e` (release-path proof, share/save

@@ -10,14 +10,19 @@
 //!
 //! # Glass
 //!
-//! The panel is `backdrop-filter: blur() saturate()` with a white (light palettes) or ink (Ink) tint, a 1.5 px light
-//! rim, an inner top highlight and a soft shadow. No shader: Takumi has none.
+//! The panel's frosting is `backdrop-filter: blur() saturate()` on the `.glass` layer and the bending is a sibling `.optic` layer with `backdrop-filter: url(...)` only (never both in one chain), with a white (light palettes) or ink (Ink) tint, a 1.5 px
+//! light rim, an inner top highlight and a soft shadow. Takumi has no shader, so the bending is an SVG filter it
+//! applies to the backdrop (`backdrop-filter: url(data:image/svg+xml...)`, takumi-raster `filter.rs`,
+//! `apply_svg_filter`): an edge-band `feDisplacementMap` with a chromatic fringe, and in the Birthday GIF an
+//! `feSpecularLighting` rim glint ([`super::refraction`]). Takumi 2.18.2 does apply it, so no clipped background copy
+//! is needed. The Birthday lens that sweeps the name is a second element after the panel with the same kind of
+//! filter, so its backdrop includes the panel's text.
 //!
 //! # Motion
 //!
 //! A moving card is a one-shot GIF at 15 fps without a NETSCAPE loop block (it plays once). Its last frame is the
-//! still render at the same size, held for [`HOLD_MS`]. Birthday: the panel drops in with a jelly squash, a glint
-//! crosses the panel once and confetti bursts and fades. Contact: the panel settles and the QR code fades in.
+//! still render at the same size, held for [`HOLD_MS`]. Birthday: the panel drops in with a jelly squash, a lens
+//! sweeps the name, a glint travels the panel's rim once and confetti bursts and fades. Contact: the panel settles and the QR code fades in.
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -31,6 +36,7 @@ use takumi::prelude::{
 use super::fit::{Fitted, TextRule, fit};
 use super::model::{CardSpec, Template};
 use super::motion::{Motion, Timeline};
+use super::refraction::{self, Band, Glint, Shape};
 use super::{CardError, fonts};
 
 /// Size of a still card.
@@ -177,6 +183,34 @@ struct Block {
     fitted: Vec<Fitted>,
 }
 
+/// Panel bezel: how wide the bending band is and how thick the glass under it is, in design pixels.
+const BEZEL: Band = Band {
+    bezel: 30.0,
+    thickness: 12.0,
+};
+/// Where the glint's light stands: this share of the panel height from its top, and this high above it (design px).
+const GLINT_Y: f32 = 0.0;
+const GLINT_Z: f32 = 20.0;
+/// Width in pixels of one glisse rim pixel when the rim map is drawn for the card.
+const RIM_PX: f32 = 4.0;
+/// Largest shift of the sweeping lens in design pixels (the filter scale is twice it).
+const LENS_SHIFT: f32 = 9.0;
+
+/// The optics maps of a card, drawn once per size.
+struct Optics {
+    field_png: Vec<u8>,
+    /// Filter scale of the panel's edge band at rest.
+    scale: f32,
+    rim_png: Vec<u8>,
+    lens: Option<LensOptics>,
+}
+
+/// The sweeping lens: its box (the title block, padded) and its map.
+struct LensOptics {
+    png: Vec<u8>,
+    rect: Rect,
+}
+
 /// A spec resolved for one size: fitted text, the photo bytes and the QR pixels. Built once per render, reused by
 /// every frame.
 pub struct Prepared {
@@ -185,6 +219,7 @@ pub struct Prepared {
     blocks: Vec<Block>,
     photo: Option<ImageSource>,
     qr: Option<(Vec<u8>, u32)>,
+    optics: Optics,
 }
 
 impl std::fmt::Debug for Prepared {
@@ -276,13 +311,97 @@ impl Prepared {
                 .and_then(|q| qr_pixels(q, (QR_ROOM * u) as u32)),
             _ => None,
         };
-        Ok(Self {
+        let mut prepared = Self {
             geometry,
             spec: spec.clone(),
             blocks: fitted_blocks,
             photo,
             qr,
+            optics: Optics {
+                field_png: Vec::new(),
+                scale: 0.0,
+                rim_png: Vec::new(),
+                lens: None,
+            },
+        };
+        prepared.optics = prepared.build_optics()?;
+        Ok(prepared)
+    }
+
+    /// Draws the panel's displacement and rim maps and, for Birthday, the lens map over the title block.
+    fn build_optics(&self) -> Result<Optics, CardError> {
+        let g = self.geometry;
+        let u = g.u;
+        let panel = g.panel();
+        let shape = Shape {
+            width: panel.w,
+            height: panel.h,
+            radius: g.radius(),
+        };
+        let band = Band {
+            bezel: BEZEL.bezel * u,
+            thickness: BEZEL.thickness * u,
+        };
+        let field = refraction::edge_band_map(shape, band);
+        let lens = match self.spec.template {
+            Template::Birthday => self
+                .title_box()?
+                .map(|rect| -> Result<LensOptics, CardError> {
+                    let shape = Shape {
+                        width: rect.w,
+                        height: rect.h,
+                        radius: rect.h / 2.0,
+                    };
+                    let side = rect.h.min(rect.w);
+                    let map = refraction::lens_map(shape, 0.5 * side, 0.4 * side);
+                    Ok(LensOptics {
+                        png: map.png()?,
+                        rect,
+                    })
+                }),
+            _ => None,
+        }
+        .transpose()?;
+        Ok(Optics {
+            field_png: field.raster.png()?,
+            scale: field.scale,
+            rim_png: refraction::highlight_map(shape, RIM_PX).png()?,
+            lens,
         })
+    }
+
+    /// The box of the first text block (the Birthday title), padded: where the lens sweeps. `None` without text.
+    fn title_box(&self) -> Result<Option<Rect>, CardError> {
+        let Some(title) = self.blocks.first().and_then(|b| b.fitted.first()) else {
+            return Ok(None);
+        };
+        let words: Vec<&str> = title.text.split_whitespace().collect();
+        let mut boxes = self
+            .text_boxes()?
+            .into_iter()
+            .filter(|(text, _)| text.split_whitespace().all(|w| words.contains(&w)))
+            .map(|(_, r)| r);
+        let Some(first) = boxes.next() else {
+            return Ok(None);
+        };
+        let (mut x0, mut y0, mut x1, mut y1) =
+            (first.x, first.y, first.x + first.w, first.y + first.h);
+        for r in boxes {
+            x0 = x0.min(r.x);
+            y0 = y0.min(r.y);
+            x1 = x1.max(r.x + r.w);
+            y1 = y1.max(r.y + r.h);
+        }
+        let pad = 10.0 * self.geometry.u;
+        let inner = self.geometry.inner();
+        // The lens is a third of the text column wide, and at least as wide as it is tall.
+        let w = (inner.w * 0.36).max(y1 - y0 + 2.0 * pad);
+        Ok(Some(Rect {
+            x: x0.min(inner.x),
+            y: y0 - pad,
+            w,
+            h: y1 - y0 + 2.0 * pad,
+        }))
     }
 
     /// The text boxes the layout gives each block line, in card pixels, for the layout tests.
@@ -357,6 +476,26 @@ impl Prepared {
             Template::Birthday => 176.0 * u,
             _ => 112.0 * u,
         };
+        // The panel's glass bends what is under it at the rim and, mid-flight, lights a glint on it. It is a layer of
+        // its own over the frosted one: a `backdrop-filter` chain that blurs pads the filtered box, which would
+        // shift the maps. The layer is left out while the panel is partly off the card (the first frames of the
+        // drop), where Takumi clips the filtered box and the maps would no longer line up.
+        let landed = panel.y + motion.panel_dy * u >= 0.0
+            && panel.y + motion.panel_dy * u + panel.h <= g.h as f32;
+        let panel_fx = (landed && !self.optics.field_png.is_empty()).then(|| {
+            let glint = motion.glint_x.map(|x| Glint {
+                x: x * panel.w,
+                y: panel.h * GLINT_Y,
+                z: GLINT_Z * u,
+                strength: motion.glint_alpha,
+            });
+            refraction::panel_filter(
+                &self.optics.field_png,
+                self.optics.scale * motion.refract,
+                &self.optics.rim_png,
+                glint,
+            )
+        });
         let mut css = String::new();
         let _ = write!(
             css,
@@ -375,6 +514,9 @@ impl Prepared {
              .glass {{ position: absolute; left: {px}px; top: {py}px; width: {pw}px; height: {ph}px; \
                 border-radius: {r}px; overflow: hidden; background: {tint}; \
                 backdrop-filter: blur({blur}px) saturate(1.6); \
+                transform: translate(0px, {dy}px) scale({sx}, {sy2}); opacity: {alpha}; }}
+             .optic {{ position: absolute; left: {px}px; top: {py}px; width: {pw}px; height: {ph}px; \
+                border-radius: {r}px; \
                 transform: translate(0px, {dy}px) scale({sx}, {sy2}); opacity: {alpha}; }}
              .shine {{ position: absolute; left: 0; top: 0; width: {pw}px; height: {shine_h}px; \
                 background: linear-gradient(180deg, {highlight} 0%, rgba(255, 255, 255, 0) 100%); }}
@@ -411,7 +553,7 @@ impl Prepared {
             pw = panel.w,
             ph = panel.h,
             r = g.radius(),
-            blur = 24.0 * u,
+            blur = 8.0 * u,
             rimw = 1.5 * u,
             sy = 24.0 * u,
             sb = 60.0 * u,
@@ -439,6 +581,9 @@ impl Prepared {
             qr_alpha = motion.qr_alpha,
         );
 
+        if let Some(fx) = &panel_fx {
+            let _ = write!(css, "\n.optic {{ backdrop-filter: {fx}; }}");
+        }
         let mut panel_children = vec![Node::container(vec![]).with_class_name("shine")];
         // The avatar.
         let face = match photo {
@@ -489,21 +634,6 @@ impl Prepared {
             panel_children.push(Node::container([code]).with_class_name("qr"));
         }
 
-        // The glint crosses the panel once.
-        if let Some(x) = motion.glint_x {
-            let _ = write!(
-                css,
-                "\n.glint {{ position: absolute; top: 0; left: {gx}px; width: {gw}px; height: {ph}px; \
-                   background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, \
-                   rgba(255, 255, 255, {ga}) 50%, rgba(255, 255, 255, 0) 100%); }}",
-                gx = x * panel.w,
-                gw = panel.w * 0.45,
-                ph = panel.h,
-                ga = motion.glint_alpha,
-            );
-            panel_children.push(Node::container(vec![]).with_class_name("glint"));
-        }
-
         let mut bg_children = vec![
             Node::container(vec![]).with_class_name("blob1"),
             Node::container(vec![]).with_class_name("blob2"),
@@ -511,8 +641,33 @@ impl Prepared {
             // own text. It carries the blur and the tint and is clipped to the panel's radius, so no blurred colour
             // leaks past the rounded corner.
             Node::container(vec![]).with_class_name("glass"),
+            Node::container(vec![]).with_class_name("optic"),
             Node::container(panel_children).with_class_name("panel"),
         ];
+        // The lens sweeps the name once, after the panel so its backdrop holds the panel's text.
+        if let (Some(lens), Some(fx)) = (motion.lens, self.optics.lens.as_ref())
+            && lens.amount > 0.01
+        {
+            let r = fx.rect;
+            let inner = g.inner();
+            let x = (inner.x - 0.3 * r.w) + lens.progress * (inner.w - 0.4 * r.w);
+            let scale = 2.0 * LENS_SHIFT * u * lens.amount;
+            let _ = write!(
+                css,
+                "\n.lens {{ position: absolute; left: {x}px; top: {y}px; width: {w}px; height: {h}px; \
+                   border-radius: {rad}px; transform: translate(0px, {dy}px); \
+                   border: {bw}px solid rgba(255, 255, 255, {ba}); backdrop-filter: {filter}; }}",
+                y = r.y,
+                w = r.w,
+                h = r.h,
+                rad = r.h / 2.0,
+                dy = motion.panel_dy * u,
+                bw = 1.2 * u,
+                ba = 0.5 * lens.amount,
+                filter = refraction::lens_filter(&fx.png, scale),
+            );
+            bg_children.push(Node::container(vec![]).with_class_name("lens"));
+        }
         for (i, piece) in motion.confetti.iter().enumerate() {
             let _ = write!(
                 css,

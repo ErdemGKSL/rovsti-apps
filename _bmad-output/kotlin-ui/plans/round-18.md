@@ -63,3 +63,36 @@ Step 1 decisions (compared with `git diff stash@{n}^1 stash@{n}`, `rovsti` mappe
 ## Measurements
 
 (filled in by Step 3)
+
+## Step 2 result (r18-s2, glisse optics landed on HEAD)
+
+- `cards/refraction.rs` restored from `stash@{0}^3` (glisse header kept, listed in `android/THIRD_PARTY_NOTICES.md`
+  with the full glisse MIT text already there). `Cargo.toml` (`image` dependency) and the notices line taken from the
+  stash; the diff was checked by hand (3 lines).
+- `card.rs`, `motion.rs`, `mod.rs` applied with `git apply -3`; `tests.rs` had one conflict (the budget tests of
+  round 17 against the optics tests): both kept. HEAD's `.glass` sibling blur layer, `fit.rs`, the scoped-thread frame
+  writer, the cancelled checks and the 264 px QR are untouched. The merge added a `.optic` sibling (`backdrop-filter:
+  url()` only, no `blur()` in the same chain; left out while the panel is partly off the card) and a `.lens` capsule
+  placed after the panel. The module doc in `card.rs` was corrected to say so.
+- Constants as in the stash's Step 4 result (band 30, thickness 12, `refract = clamp(1 + 5(sx-1), 0.5, 1.6)`, lens shift
+  9 / scale 18, `menuMorphOpen` 0.939/0.6 over 0.5-1.4 s, strength `sin(pi p)^0.8`, glint constant `5 * strength`,
+  exponent 12, surface scale 6 over 0.9-1.6 s, fringe <= 1.5 px). `.glass` blur is 8 px (the stash value, not HEAD's 24):
+  with 24 the bend is invisible on the blobs.
+- Tests: refraction map symmetry and neutral centre (in `refraction.rs`), lens bends frames 8-20, glint lights the
+  rim, no NETSCAPE block, GIF < 3 MB at 720 px, determinism, last frame = rest. New:
+  `the_still_frames_carry_no_lens_and_no_glint`. The budget test now expects `frames().len() == 39` (the timeline
+  counts the held still inside the 39).
+- Measured (checks profile, `RUN_BUDGETS=1`): static 720x900 198 ms; GIF 720x900 2.05 s, 2.56 MB; 540x675 1.09 s, 1.79 MB.
+- Goldens regenerated (8, `UPDATE_CARD_GOLDENS=1`) and all opened. Text inside the panel is sharp and un-bent in
+  all eight (Latin, Turkish, long name, QR, number-only); the only change from round 17 is a slight bend of the
+  background blobs and the tint within the 30 px rim band at the panel edge, the centre is flat; the rim line and the
+  shadow are intact; nothing overflows the panel.
+- Fixtures `cards.render.answer.json`, `.animated.` (39 frames, 1,835,715 bytes) and `.number_name.` regenerated with
+  `UPDATE_FIXTURES=1`. `CardsOpsNativeTest` 5/5 green through `:core-bridge:testRustBridge`.
+- Why r17-s4 was blocked (inferred; no log was written): the stash (17:37:36, 2026-11-16, base `c4a6df4 Merge people sync
+  v3 app side`) was taken while a parallel session's merge had landed on the branch. Besides the finished Rust work it
+  held Phone `KeypadViewModel` and Stops `NoticeViewModel` edits and re-recorded `e3.11` / `x2` Kotlin shots, which
+  belong to other sessions or became stale, and it conflicted with round-17 steps 3 and 6 on `card.rs` and `tests.rs`.
+  The step could not be committed from a shared, moving tree, so it was stashed as blocked; the Rust itself was
+  complete. Not a technical failure of the optics (Takumi 2.18.2 applies the SVG backdrop filter).
+- `stash@{0}` dropped.

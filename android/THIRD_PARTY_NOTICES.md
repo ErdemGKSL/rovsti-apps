@@ -9,6 +9,9 @@ following projects. Files with ported code carry a header naming the source.
 - Licence: MIT. Copyright (c) 2026 Kelvin Zhang (full text below).
 - Used for: spring solver and constants, press/hold behaviour, refraction lens and rim-light maths, menu morph,
   tab bar / segmented control / switch / slider / input geometry and gesture rules, glass tokens.
+- Rust port (share-card GIF optics): `crates/rosty_app_core/src/cards/refraction.rs` (from `src/internal/refraction.ts` `profile`,
+  `selectionMaps` and `src/internal/lens.ts` `distance`, `arc`, `slope`, `puller`: edge-band displacement and highlight maps, the
+  arc-profile slope with scale 0.5/mean). It carries the glisse header.
 - glisse credits, in its own comments, Aave's web liquid glass (lens shape) and kube.io's CSS/SVG liquid glass article
   (Snell's-law profile) as sources of its maths.
 

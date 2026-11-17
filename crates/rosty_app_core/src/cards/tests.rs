@@ -614,8 +614,8 @@ fn budget_birthday_gif_under_3_s() {
     let spec = birthday_tr("Ayşe");
     let mut timeline = motion::Timeline::of(Template::Birthday, 600).unwrap();
     timeline.moving_s = 2.6;
-    let frames = timeline.frames().len() - 1;
-    assert_eq!(frames, 39, "39 moving frames plus the held still");
+    let frames = timeline.frames().len();
+    assert_eq!(frames, 39, "38 moving frames, the 39th is the held still");
     let dir = std::env::temp_dir().join(format!("rosty-cards-budget-g-{}", std::process::id()));
     let gif = |w: u32, h: u32| {
         let prepared = Prepared::new(&spec, w, h).unwrap();
@@ -687,4 +687,101 @@ fn a_cancelled_job_leaves_no_partial_file() {
         let _ = std::fs::remove_file(&out);
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The Birthday timeline: 39 frames in 2.6 s at 15 fps, the last one the rest pose.
+fn birthday_frames() -> Vec<motion::Frame> {
+    motion::Timeline::of(Template::Birthday, HOLD_MS)
+        .unwrap()
+        .frames()
+}
+
+/// How many pixels differ clearly between two bitmaps of the same size.
+fn differing_pixels(a: &Bitmap, b: &Bitmap) -> usize {
+    a.as_raw()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_raw().as_chunks::<4>().0)
+        .filter(|(p, q)| p.iter().zip(q.iter()).any(|(m, n)| m.abs_diff(*n) > 6))
+        .count()
+}
+
+#[test]
+fn the_birthday_gif_has_39_frames_over_2_6_seconds() {
+    let frames = birthday_frames();
+    assert_eq!(frames.len(), 39);
+    let moving: u32 = frames[..38].iter().map(|f| f.duration_ms).sum();
+    assert!((2500..=2600).contains(&moving), "{moving} ms");
+    assert_eq!(frames[38].motion, motion::Motion::rest());
+    // The squash keeps the area, and the spring tokens drive it.
+    for f in &frames {
+        assert!((f.motion.sx * f.motion.sy - 1.0).abs() < 1e-4);
+    }
+}
+
+#[test]
+fn glass_optics_bend_the_card_in_frames_8_to_20() {
+    let s = birthday_tr("Ayşe Yılmaz");
+    let prepared = Prepared::new(&s, ANIMATED.0, ANIMATED.1).unwrap();
+    let frames = birthday_frames();
+    for (i, frame) in frames.iter().enumerate().take(21).skip(8) {
+        // The same frame with the panel flat (scale 0), no lens and no glint.
+        let mut flat = frame.motion.clone();
+        flat.refract = 0.0;
+        flat.lens = None;
+        flat.glint_x = None;
+        let bent = prepared.bitmap(&frame.motion).unwrap();
+        let plain = prepared.bitmap(&flat).unwrap();
+        let moved = differing_pixels(&bent, &plain);
+        assert!(moved > 200, "frame {i}: only {moved} pixels bend");
+    }
+    // The lens alone bends the name; the glint alone lights the rim.
+    let mid = frames[10].motion.clone();
+    assert!(mid.lens.is_some(), "the lens is out in frame 10");
+    let mut no_lens = mid.clone();
+    no_lens.lens = None;
+    let with = prepared.bitmap(&mid).unwrap();
+    let without = prepared.bitmap(&no_lens).unwrap();
+    assert!(differing_pixels(&with, &without) > 300);
+    let lit = frames[18].motion.clone();
+    assert!(lit.glint_x.is_some(), "the glint travels in frame 18");
+    let mut dark = lit.clone();
+    dark.glint_x = None;
+    assert!(
+        differing_pixels(
+            &prepared.bitmap(&lit).unwrap(),
+            &prepared.bitmap(&dark).unwrap()
+        ) > 100
+    );
+}
+
+#[test]
+fn the_birthday_gif_is_deterministic_and_small() {
+    let dir = std::env::temp_dir().join(format!("rosty-cards-gif-{}", std::process::id()));
+    let mut s = birthday_tr("Ayşe Yılmaz");
+    s.animated = true;
+    let a = render(&s, &dir.join("a.gif"), &|| false).unwrap();
+    let b = render(&s, &dir.join("b.gif"), &|| false).unwrap();
+    assert_eq!(a, b);
+    assert_eq!(a.frames, 39);
+    let (x, y) = (
+        std::fs::read(dir.join("a.gif")).unwrap(),
+        std::fs::read(dir.join("b.gif")).unwrap(),
+    );
+    assert_eq!(x, y, "the same spec renders the same bytes");
+    assert!(x.len() < 3 * 1024 * 1024, "{} bytes", x.len());
+    assert!(!x.windows(11).any(|w| w == b"NETSCAPE2.0"), "plays once");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_still_frames_carry_no_lens_and_no_glint() {
+    for f in birthday_frames().iter().skip(31) {
+        assert!(f.motion.lens.is_none(), "no lens after 1.4 s");
+        assert!(f.motion.glint_x.is_none(), "no glint after 1.6 s");
+    }
+    let last = birthday_frames().pop().unwrap();
+    assert_eq!(last.motion, motion::Motion::rest());
+    assert!(last.motion.lens.is_none() && last.motion.glint_x.is_none());
 }

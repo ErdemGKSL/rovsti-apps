@@ -3,7 +3,7 @@
 //!
 //! This module is the only code that names Takumi types. [`render`] is the entry the `cards.render` op calls:
 //! [`model`] holds the request, [`card`] the templates and the glass panel, [`fit`] keeps every line inside the panel
-//! and [`motion`] the springs and frame timelines. `render_probe` is the Step 1 spike, kept for its font tests.
+//! and [`motion`] the springs and frame timelines; [`refraction`] draws the glass optics maps (glisse port). `render_probe` is the Step 1 spike, kept for its font tests.
 //!
 //! # Takumi 2.18.2 call sites (read in `takumi-2.18.2/src/lib.rs`, `takumi-core-0.34.0` and `takumi-raster-0.5.11`)
 //!
@@ -30,6 +30,7 @@ pub mod fit;
 pub mod fonts;
 pub mod model;
 pub mod motion;
+pub mod refraction;
 
 use std::path::Path;
 

@@ -1,8 +1,12 @@
 //! One-shot card motion: a damped spring, the frame timeline and the per-frame changes each template makes.
 //!
 //! Springs use the app's motion tokens as (damping ratio, response in seconds): the panel drop is `sheetSettle`
-//! (0.86, 0.38), the jelly squash `glassPressUp` (0.373, 0.25), the Contact settle `morph` (1.0, 0.95) and fades
-//! `appear` (1.0, 0.45). Squash keeps the area (`sx * sy = 1`).
+//! (0.86, 0.38), the jelly squash `glassPressUp` (0.373, 0.25), the lens sweep `menuMorphOpen` (0.939, 0.6), the
+//! Contact settle `morph` (1.0, 0.95) and fades `appear` (1.0, 0.45). Squash keeps the area (`sx * sy = 1`).
+//!
+//! Birthday, 2.6 s (0.0-0.9 s drop and squash; 0.5-1.4 s the lens sweeps the name; 0.9-1.6 s a specular glint travels
+//! the rim; 0.3-1.8 s confetti). The glass optics ([`super::refraction`]) follow: the panel's displacement scale
+//! follows the squash ([`Motion::refract`]) and the lens bends what is under it by [`Lens::amount`].
 
 use super::model::Template;
 
@@ -35,6 +39,15 @@ pub fn wobble(t: f32, damping: f32, response: f32) -> f32 {
     (-damping * w0 * t).exp() * (wd * t).sin()
 }
 
+/// The lens that sweeps across the name once.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lens {
+    /// Where the lens is along its track, 0 (start) to 1 (end), from the `menuMorphOpen` spring.
+    pub progress: f32,
+    /// How strongly it bends, 0 to 1: nothing at either end of the track, most over the middle.
+    pub amount: f32,
+}
+
 /// One piece of confetti in design pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Piece {
@@ -55,9 +68,14 @@ pub struct Motion {
     pub sx: f32,
     pub sy: f32,
     pub panel_alpha: f32,
-    /// Left edge of the glint as a fraction of the panel width; `None` draws no glint.
+    /// Where the glint's light stands, as a fraction of the panel width; `None` draws no glint.
     pub glint_x: Option<f32>,
     pub glint_alpha: f32,
+    /// How strongly the panel's edge bends, 1 at rest; it grows with the squash (a wider, flatter panel is thinner
+    /// glass at the rim, so the displacement scale follows the squash).
+    pub refract: f32,
+    /// The sweeping lens, if one is out.
+    pub lens: Option<Lens>,
     pub qr_alpha: f32,
     pub confetti: Vec<Piece>,
 }
@@ -72,6 +90,8 @@ impl Motion {
             panel_alpha: 1.0,
             glint_x: None,
             glint_alpha: 0.0,
+            refract: 1.0,
+            lens: None,
             qr_alpha: 1.0,
             confetti: Vec::new(),
         }
@@ -98,7 +118,7 @@ impl Timeline {
     /// The timeline of `template`, or `None` for one that does not move.
     pub fn of(template: Template, hold_ms: u32) -> Option<Self> {
         let moving_s = match template {
-            Template::Birthday => 2.0,
+            Template::Birthday => 2.6,
             Template::Contact => 1.2,
             Template::NewNumber => return None,
         };
@@ -109,10 +129,11 @@ impl Timeline {
         })
     }
 
-    /// Frames at [`FPS`], then the still frame held for `hold_ms`. The last frame is exactly [`Motion::rest`].
+    /// `moving_s * FPS` frames in all (39 for Birthday): the moving ones at [`FPS`], then the still frame held for
+    /// `hold_ms` in place of the last step. The last frame is exactly [`Motion::rest`].
     pub fn frames(&self) -> Vec<Frame> {
         let step_ms = 1000 / FPS;
-        let count = (self.moving_s * FPS as f32).round() as u32;
+        let count = (self.moving_s * FPS as f32).round() as u32 - 1;
         let mut frames: Vec<Frame> = (0..count)
             .map(|i| Frame {
                 motion: self.at(i as f32 / FPS as f32),
@@ -144,13 +165,23 @@ fn birthday(t: f32) -> Motion {
     let p = spring(t, 0.86, 0.38);
     let squash = 0.06 * wobble(t - 0.18, 0.373, 0.25);
     let sx = 1.0 + squash;
-    // 0.9-1.6 s: a glint crosses the panel once.
+    // 0.5-1.4 s: the lens sweeps the name once (`menuMorphOpen`), strongest over the name.
+    let sweep = (t - LENS_START) / LENS_SECONDS;
+    let lens = (0.0..1.0).contains(&sweep).then(|| {
+        let progress = spring(t - LENS_START, 0.939, 0.6).min(1.0);
+        // Strongest while the lens is over the name (mid-track), gone at both ends of the track.
+        Lens {
+            progress,
+            amount: (std::f32::consts::PI * progress).sin().powf(0.8),
+        }
+    });
+    // 0.9-1.6 s: a specular glint travels the rim once.
     let glint = (t - 0.9) / 0.7;
     let (glint_x, glint_alpha) = if (0.0..1.0).contains(&glint) {
-        let eased = spring(glint * 0.6, 0.939, 0.6).min(1.0);
+        let eased = glint * glint * (3.0 - 2.0 * glint);
         (
-            Some(-0.4 + 1.5 * eased),
-            0.45 * (std::f32::consts::PI * glint).sin(),
+            Some(-0.2 + 1.4 * eased),
+            (std::f32::consts::PI * glint).sin(),
         )
     } else {
         (None, 0.0)
@@ -162,10 +193,16 @@ fn birthday(t: f32) -> Motion {
         panel_alpha: (0.35 + p).min(1.0),
         glint_x,
         glint_alpha,
+        refract: (1.0 + 5.0 * squash).clamp(0.5, 1.6),
+        lens,
         qr_alpha: 1.0,
         confetti: confetti(t),
     }
 }
+
+/// When the lens starts its sweep, in seconds, and how long it takes.
+pub const LENS_START: f32 = 0.5;
+pub const LENS_SECONDS: f32 = 0.9;
 
 fn contact(t: f32) -> Motion {
     let p = spring(t, 1.0, 0.95);
@@ -178,6 +215,8 @@ fn contact(t: f32) -> Motion {
         panel_alpha: (0.5 + p).min(1.0),
         glint_x: None,
         glint_alpha: 0.0,
+        refract: 1.0,
+        lens: None,
         qr_alpha: appear.clamp(0.0, 1.0),
         confetti: Vec::new(),
     }
@@ -266,7 +305,7 @@ mod tests {
             assert_eq!(last.motion, Motion::rest());
             assert_eq!(last.duration_ms, 600);
             let total: u32 = frames.iter().map(|f| f.duration_ms).sum();
-            assert!((1500..=3000).contains(&total), "{template:?}: {total} ms");
+            assert!((1500..=3600).contains(&total), "{template:?}: {total} ms");
         }
         assert!(Timeline::of(Template::NewNumber, 600).is_none());
     }

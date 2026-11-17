@@ -8,6 +8,7 @@ description = "App-level logic of the four Rosty apps without UI or JNI."
 
 [dependencies]
 base64.workspace = true
+image.workspace = true
 log.workspace = true
 qrcode.workspace = true
 rosty_core.workspace = true

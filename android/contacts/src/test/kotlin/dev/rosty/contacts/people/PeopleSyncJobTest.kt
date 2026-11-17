@@ -281,7 +281,8 @@ class PeopleSyncJobTest {
         assertEquals(SliceResult.Interrupted(SyncWire.SERVER_WORKING, 240_000), result)
         assertEquals(240_000L, PeopleSyncWorker.continueInMs(result, container.now))
         assertTrue("the job goes on without the phone", gw.peopleCancels.isEmpty())
-        val row = container.awaitStatus { it is PeopleSyncStatus.Preparing }
+        // The row is published asynchronously: wait for the settled one, not the in-slice (watched) one.
+        val row = container.awaitStatus { it is PeopleSyncStatus.Preparing && !it.watched }
         assertEquals(
             PeopleSyncStatus.Preparing(PeopleJobWire.PHASE_PROFILES, 1, 2, null, null, watched = false),
             row,

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +56,7 @@ import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.media.SizedImage
 import dev.rosty.design.text.GlassTextField
+import dev.rosty.design.text.imeOverlapPadding
 import dev.rosty.design.text.rtlSafe
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
@@ -135,7 +135,7 @@ fun WaBatchScreen(
             .pointerInput(Unit) { detectTapGestures {} }
             .statusBarsPadding()
             .navigationBarsPadding()
-            .imePadding()
+            .imeOverlapPadding(excludeNavigationBar = false)
             .testTag(WaBatchTags.Root),
     ) {
         TopRow(batch, item, actions)

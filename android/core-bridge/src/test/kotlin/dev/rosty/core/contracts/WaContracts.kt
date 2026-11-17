@@ -84,8 +84,8 @@ object WaContracts : ContractModels {
         buildMap {
             op<WaOpenRequest, HandleAnswer>(
                 "wa.open",
-                ok = listOf("no_key"),
-                err = listOf("bad_url", "insecure", "bad_key"),
+                ok = listOf("no_key", "vault", "vault_same_url"),
+                err = listOf("bad_url", "insecure", "bad_key", "no_url", "vault_key_refused", "vault_other_url"),
             )
             handleOp<CreateInstance, CreatedInstance>("wa.create_instance", err = listOf("limit"))
             handleOp<Empty, InstanceStatus>(

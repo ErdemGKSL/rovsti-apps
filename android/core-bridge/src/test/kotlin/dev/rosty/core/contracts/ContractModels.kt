@@ -27,6 +27,7 @@ object AllContracts {
             WaContracts,
             WaSyncContracts,
             WaIdBookContracts,
+            VaultContracts,
         )
 
     val models: Map<String, KSerializer<*>> =

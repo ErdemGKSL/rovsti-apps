@@ -117,6 +117,26 @@ class SegmentedTest : ShotTest() {
     }
 
     @Test
+    fun everySegmentIsAtLeast48DpTall() {
+        show()
+        val minPx = with(compose.density) { 48.dp.toPx() }
+        for (text in listOf("Calls", "Messages", "Contacts")) {
+            val h = segment(text).fetchSemanticsNode().size.height
+            assertTrue("segment $text is $h px, needs >= $minPx", h >= minPx - 1)
+        }
+    }
+
+    @Test
+    fun theLabelsStayCentredOnTheTrack() {
+        show()
+        val track = control().fetchSemanticsNode().boundsInRoot
+        for (text in listOf("Calls", "Messages", "Contacts")) {
+            val b = segment(text).fetchSemanticsNode().boundsInRoot
+            assertEquals("label $text centre", track.center.y, b.center.y, 1.5f)
+        }
+    }
+
+    @Test
     fun tapSelectsTheSegmentWithOneHaptic() {
         show()
         control().performTouchInput {

@@ -83,7 +83,7 @@ internal class KeypadRig(
         )
     private val simState = SimState(FakeSimRepository(accounts, defaultKey), ops, scope)
 
-    fun model(): KeypadViewModel =
+    fun model(compute: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default): KeypadViewModel =
         KeypadViewModel(
             ops = ops,
             people = people,
@@ -96,6 +96,7 @@ internal class KeypadRig(
             toneSetting = { null },
             systemTones = { true },
             e164 = { typed -> if (typed.startsWith("+")) typed else "+90" + typed.trimStart('0') },
+            compute = compute,
             debounceMs = 0,
         )
 

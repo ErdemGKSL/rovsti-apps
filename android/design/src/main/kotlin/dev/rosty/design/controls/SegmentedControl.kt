@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
@@ -263,7 +264,14 @@ fun SegmentedControl(
                         .drawBehind { drawRect(pillColor) },
                 )
             }
-            Row(modifier.fillMaxWidth().padding(horizontal = PuckInset).height(TrackHeight)) {
+            // The segment nodes are the full 48 dp touch height, (requiredHeight centres them on the 36 dp track), so every segment meets the
+            // minimum touch target (the pointer input already covers the same 48 dp).
+            Row(
+                modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = PuckInset)
+                    .requiredHeight(HitHeight),
+            ) {
                 items.forEachIndexed { index, text ->
                     val isSelected = index == selected
                     Box(

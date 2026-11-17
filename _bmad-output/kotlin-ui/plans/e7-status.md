@@ -81,3 +81,31 @@ Evidence is in `plans/e7-r1.md`.
 - Turkish phone: Turkish texts. Texts coming from Rust are still English (R2).
 
 **Next:** E7 R2 (E7.8–E7.14). The arriving-soon / WhatsApp parts go to a Fable subagent.
+
+## Hand-over from r18-s1 (Stops NoticeViewModel ordering fix, from stash@{0})
+
+Not applied by the UI session (E7 territory). In `NoticeViewModel` (load/apply of the saved notice), set the template field BEFORE publishing the new state, so a page or test that sees the new state finds the field settled. Original diff (paths mapped rovsti to rosty):
+
+```diff
+diff --git a/android/stops/src/main/kotlin/dev/rosty/stops/notice/NoticeViewModel.kt b/android/stops/src/main/kotlin/dev/rosty/stops/notice/NoticeViewModel.kt
+index 1ebe6b4..860ee6d 100644
+--- a/android/stops/src/main/kotlin/dev/rosty/stops/notice/NoticeViewModel.kt
++++ b/android/stops/src/main/kotlin/dev/rosty/stops/notice/NoticeViewModel.kt
+@@ -188,6 +188,8 @@ class NoticeViewModel(
+         // that is how a trip sends it.
+         val saved = notice?.template?.takeIf { it.trim() !in before.defaults } ?: before.defaultTemplate
+         val untouched = before.loading || templateField.text.toString() == before.saved
++        // The field first, then the state: whoever sees the new state (a page, a test) finds the field settled too.
++        if (untouched && templateField.text.toString() != saved) templateField.setTextAndPlaceCursorAtEnd(saved)
+         mutable.value =
+             before.copy(
+                 loading = false,
+@@ -197,7 +199,6 @@ class NoticeViewModel(
+                 sendWhen = notice?.sendWhen ?: NoticeWhen.WithAlarm,
+                 dirty = !untouched && templateField.text.toString() != saved,
+             )
+-        if (untouched && templateField.text.toString() != saved) templateField.setTextAndPlaceCursorAtEnd(saved)
+         if (untouched) templateChanged(saved)
+     }
+ 
+```

@@ -388,3 +388,5 @@ Kotlin-facing crates clean; `cargo check --release -p rosty_android --target aar
 M48 zip export, M27 clear chat, M29, M22; E6.7 M26 contact card sheet, M28 attachments, M4 header photo, attachment
 menu; WhatsApp media (thumbnails, downloads, `wa_sync` media LRU) with E6.4b; offline chat actions (archive/pin/mute
 need a `wa_sync` outbox action); Status updates are not stored offline.
+
+- r18-s1 note (E6 session): `android/messages/.../wa/WaBatchScreen.kt` now uses `imeOverlapPadding(excludeNavigationBar = false)` instead of `imePadding()` (owner rule c, commit 7ffcc39); `:messages:compilePlainReleaseKotlin` is green. No other change in `android/messages`.

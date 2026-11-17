@@ -550,10 +550,12 @@ class KeypadViewModel(
                 }
                 val digits = typed.filter { it.isDigit() }
                 val rows = withContext(compute) { people.t9(digits) }
-                ui.update { it.copy(t9 = rows.map(::item).toImmutableList()) }
+                // A cancelled job can still be mid-flight on another thread; `dialed` moves first, so a result for
+                // text that is no longer in the field is dropped instead of resurrecting the old list.
+                ui.update { if (it.dialed != typed) it else it.copy(t9 = rows.map(::item).toImmutableList()) }
                 val unknown = unknown(typed)
                 val hint = toneHint(typed)
-                ui.update { it.copy(unknown = unknown, toneHint = hint) }
+                ui.update { if (it.dialed != typed) it else it.copy(unknown = unknown, toneHint = hint) }
             }
     }
 

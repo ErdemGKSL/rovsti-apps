@@ -83,6 +83,52 @@ class KeypadViewModelTest {
             }
         }
 
+    /** A compute dispatcher that holds every task until the test releases them, to order the T9 results by hand. */
+    private class Held : kotlinx.coroutines.CoroutineDispatcher() {
+        val queue = java.util.concurrent.LinkedBlockingQueue<Pair<kotlin.coroutines.CoroutineContext, Runnable>>()
+
+        override fun dispatch(
+            context: kotlin.coroutines.CoroutineContext,
+            block: Runnable,
+        ) {
+            queue.add(context to block)
+        }
+
+        fun releaseAll() {
+            while (true) queue.poll()?.second?.run() ?: break
+        }
+    }
+
+    @Test fun aLateT9ResultForOldTextIsDropped() =
+        runBlocking {
+            val held = Held()
+            val model = rig().model(compute = held)
+            model.type("2973")
+            model.onAction(KeypadAction.Backspace)
+            model.onAction(KeypadAction.Backspace)
+            model.onAction(KeypadAction.Backspace)
+            model.onAction(KeypadAction.Backspace)
+            model.type("9")
+            // The lookups ("2973" first, "9" last) finish only when released, in the order they were started.
+            // Release again on every poll: a lookup is queued only once its debounce has run.
+            eventually("state follows the field") {
+                held.releaseAll()
+                model.state.value.dialed == "9"
+            }
+            // "9" itself matches Yilmaz (a word starting with Y), so compare with what a fresh lookup of "9" gives:
+            // a stale "2973" answer would carry the span of "Ayse" instead.
+            val fresh = rig().model()
+            fresh.type("9")
+            eventually("fresh lookup") {
+                fresh.state.value.t9
+                    .isNotEmpty()
+            }
+            eventually("late result applied or dropped, never stale") {
+                held.releaseAll()
+                model.state.value.t9 == fresh.state.value.t9
+            }
+        }
+
     @Test fun anUnknownNumberOffersToBeAdded() =
         runBlocking {
             val model = rig().model()

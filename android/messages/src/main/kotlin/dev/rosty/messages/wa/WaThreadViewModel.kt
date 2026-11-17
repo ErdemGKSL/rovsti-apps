@@ -843,7 +843,15 @@ class WaThreadViewModel(
     /** The page is on screen (or not): only then are incoming messages marked read. */
     fun setVisible(now: Boolean) {
         visible = now
-        if (now) viewModelScope.launch { markRead() }
+        if (now) {
+            viewModelScope.launch {
+                // The lazy sync: one page when the chat was not paged in this session (`plans/wa-vault.md` 14).
+                sources.offline.opened(jid)
+                markRead()
+            }
+        } else {
+            viewModelScope.launch { sources.offline.closed() }
+        }
     }
 
     /** Queues read receipts for the unread incoming messages on the page (by sender in a group). */

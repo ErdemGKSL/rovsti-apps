@@ -37,7 +37,16 @@ fun realWaOffline(
                 WaStoreLink(link.instanceId, socketKey = "${link.gatewayUrl}#${link.key.hashCode()}")
             }
         },
-        open = { instance -> WaSyncStore.open(instance, ops = NativeWaSyncOps(container.rust)) },
+        // Memory only, lazily filled, the identity map from the encrypted vault cache (`plans/wa-vault.md` 13, 14).
+        open = { instance ->
+            WaSyncStore.open(
+                instance,
+                memory = true,
+                ops = NativeWaSyncOps(container.rust),
+                lazy = true,
+                vaultCache = true,
+            )
+        },
         remote = remote,
         now = System::currentTimeMillis,
         wake = WaOutboxWork(container.context),
@@ -45,6 +54,9 @@ fun realWaOffline(
         downloads = container.waDownloads,
         cleanup = messagesLinkCleanup(container),
         wipe = { instance -> WaSyncStore.wipe(instance, ops = NativeWaSyncOps(container.rust)) },
+        gate = container.waGate,
+        onLock = { container.lockedWhatsApp() },
+        memoryOnly = true,
     )
 }
 
@@ -60,6 +72,8 @@ fun realWaDownloads(container: MessagesContainer): WaDownloads =
         now = System::currentTimeMillis,
         device = AndroidDeviceData(container.context),
         wake = WaOutboxWork(container.context),
+        ram = MemfdRamFiles(),
+        requests = container.waGate,
     )
 
 /**
@@ -104,6 +118,20 @@ suspend fun stageForWhatsApp(
                 withContext(Dispatchers.IO) {
                     val mime = read.mime?.takeIf { it.isNotBlank() } ?: mimeOfName(read.name) ?: OCTET_STREAM
                     val name = read.name?.takeIf { it.isNotBlank() } ?: defaultName(mime)
+                    if (container.waMedia.inRam) {
+                        // The copy the picker made is read into RAM and deleted at once (`plans/wa-vault.md` 13.1).
+                        val staged =
+                            try {
+                                container.waMedia.stageInRam(name, copy.readBytes())
+                            } catch (_: IOException) {
+                                null
+                            } finally {
+                                copy.delete()
+                            }
+                        return@withContext staged
+                            ?.let { WaStageResult.Staged(WaStagedFile(it, name, mime, it.length())) }
+                            ?: WaStageResult.Failed
+                    }
                     val target = container.waMedia.outgoing(UUID.randomUUID().toString(), name)
                     try {
                         if (target == null) {

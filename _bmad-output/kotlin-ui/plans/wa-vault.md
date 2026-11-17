@@ -147,3 +147,41 @@ Round 2, the Keystore boundary (`rosty_ffi` `vault.*`, `rosty_app_core::wa_vault
   Contacts people cache (`people.json`, `people-sync.json`).
 - Not done in round 2: connect-key rotation on the gateway at migration and passphrase change (needs a Rust-side
   mint/revoke so the new key never reaches Kotlin), the cache ops, and moving `wa_sync` to memory-only.
+
+Round 3, Messages memory-only and the lazy sync (`rosty_app_core::wa_sync`, `wa_sync.*`/`vault.*` ops, `:wa`, `:messages`):
+- Store: Messages opens `wa_sync.open {memory: true, lazy: true, vault_cache: true}`. The lazy sync is a flag of the
+  store (`Store::set_lazy`), not a property of memory stores, so the eager tests and fixtures keep their meaning. Lazy:
+  the plan and a refreshed chat list owe only the first page of the chat on screen (`wa_sync.focus`), a page never names
+  the next one, other gaps stay open and are paged when their chat is opened (`wa_sync.open_page`, pure
+  `plan::on_open`/`plan::lazy_pages`), a chat paged once is not paged again in the session, older history stays
+  `wa_sync.older` (one page per scroll).
+- Identity cache (13.5): the bytes stay in Rust. `wa_sync.open {vault_cache}` seeds the map and the catch-up cursor
+  from `wa-vault-cache.bin` when the vault is unlocked for the store's instance (`Store::seed_identity`, only into a
+  store that knows nobody); `wa_sync.cache_save` writes them back after a catch-up that learned pairs. Pictures:
+  `vault.pictures` / `vault.picture_put` (4 MiB, oldest out); `WaAvatars` takes an `AvatarPictures` (Messages:
+  `VaultAvatarPictures`, memory plus the encrypted cache) instead of `cacheDir/wa-avatars`. The session keeps the
+  decrypted cache in memory once read; the file is rewritten whole on each write.
+- Budget and back-off are pure Kotlin in `:wa` (`dev.rosty.wa.sync`: `WaRequestBudget`, `WaBackoff`, `WaRequestGate`),
+  not Rust: every request is issued by Kotlin (`WaSyncRunner`, `WaDownloads`, `StatusFeed`, `WaAvatars`), so the
+  gate sits where the calls are and needs no FFI hop per request. The lazy planner is Rust and tested there.
+- One socket: in Messages the sync listens to the repository's event socket (live, no `after=`), and takes the status
+  the repository fetched when it opened the gateway (`GatewayWaRemote(shareRepository = true)`). Cold start: socket,
+  status, one identity page, chat list = 4 requests (eager baseline with 10 chats that missed messages: 26).
+- Media: auto-download off; a tap downloads through the gate (concurrency 1) into RAM (`WaRamFiles`: `memfd_create`
+  files read through `/proc/self/fd/<n>`, so the image loader, the players and the gateway's send read them by path;
+  this is the "equivalent" of `MediaDataSource`). The store's LRU cap is set to 64 MiB. Thumbnails, Status pictures
+  and files to send live there too. A gateway opened from the unlocked vault answers every download inline (no temp
+  file in `cacheDir/wa-media`); while the vault is still locked and the old `{url, key}` path is used (until round 4
+  wires the unlock), downloads over 1 MiB still pass through a temp file that Kotlin deletes at once.
+- In memory: drafts (`MemoryWaDrafts`), live names (`MemoryLiveNameStore`), the rekey cursor (`MemoryRekeyCursor`), the
+  outbox (the store). The outbox wake job does nothing in a cold process (`memoryOnly`); WorkManager carries no input
+  data. Status loads 10 s after the gateway is reachable (out of the cold-start burst), through the gate.
+- Lock: `MessagesContainer.lockWhatsApp()` -> `WaOffline.lock()`: the budget closes first, then the socket and the
+  store, the RAM media; then the repository's gateway and event stream (`WaRepository.lock`, which also stops any
+  reopen until `unlock`), Status pictures, thumbnails, drafts, picture memory, live names and `vault.lock`. Messages
+  opens no call-audio handle (calls are Phone's).
+- Not done in round 3 (user-visible or open): the outgoing file name of a document being sent now reads from the RAM
+  path (`/proc/self/fd/<n>`), so the bubble may show a number until the echo arrives; the SMS/MMS export and the Share
+  copies in `cacheDir/{share,exports,cards}` stay explicit exports; a "Remind me" on a WhatsApp message no longer
+  stores the message preview in the alarm payload (`rosty_message_reminders`), only the chat title, so its
+  notification shows no text; the migration wipe is round 6.

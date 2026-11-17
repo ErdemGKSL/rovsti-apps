@@ -14,9 +14,11 @@ import dev.rosty.core.ops.NativeMessagesOps
 import dev.rosty.core.ops.NativeQrOps
 import dev.rosty.core.ops.NativeSearchOps
 import dev.rosty.core.ops.NativeSharedOps
+import dev.rosty.core.ops.NativeVaultOps
 import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
+import dev.rosty.core.ops.VaultOps
 import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.messages.data.ContactBook
 import dev.rosty.messages.data.MessagesStore
@@ -39,6 +41,8 @@ import dev.rosty.messages.spam.SpamActions
 import dev.rosty.messages.starred.StarCenter
 import dev.rosty.messages.starred.realStarCenter
 import dev.rosty.messages.wa.GatewayWaRemote
+import dev.rosty.messages.wa.MemoryLiveNameStore
+import dev.rosty.messages.wa.MemoryWaDrafts
 import dev.rosty.messages.wa.StoreWaChats
 import dev.rosty.messages.wa.WaChatStates
 import dev.rosty.messages.wa.WaChats
@@ -55,7 +59,6 @@ import dev.rosty.messages.wa.realWaRekeys
 import dev.rosty.messages.wa.realWaVoice
 import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.AvatarResolver
-import dev.rosty.people.FileLiveNameStore
 import dev.rosty.people.LiveWaNames
 import dev.rosty.people.PeopleIndex
 import dev.rosty.people.PeopleSources
@@ -76,6 +79,11 @@ import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.platform.telephony.AndroidSimRepository
 import dev.rosty.platform.telephony.SimRepository
 import dev.rosty.shell.ShellContainer
+import dev.rosty.wa.avatars.VaultAvatarPictures
+import dev.rosty.wa.avatars.WaAvatars
+import dev.rosty.wa.sync.WaBackoff
+import dev.rosty.wa.sync.WaRequestBudget
+import dev.rosty.wa.sync.WaRequestGate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
@@ -160,6 +168,44 @@ open class MessagesContainer(
     /** Every gateway call of the WhatsApp sync, outbox and Status (E6.4s); tests swap in a fake. */
     val waRemote: WaRemote by lazy { createWaRemote() }
 
+    /**
+     * The gateway budget of the lazy sync (`plans/wa-vault.md` 14): 6 requests in the first 10 s after an unlock, 30 a
+     * minute after, back-off with jitter, nothing while locked. Shared by the sync, media, Status and avatars.
+     */
+    val waGate: WaRequestGate by lazy {
+        WaRequestGate(WaRequestBudget(System::currentTimeMillis), WaBackoff(System::currentTimeMillis))
+    }
+
+    /** The WhatsApp vault of this app (`plans/wa-vault.md`); the Keystore half comes in round 4. */
+    val vaultOps: VaultOps by lazy { createVaultOps() }
+
+    protected open fun createVaultOps(): VaultOps = NativeVaultOps(rust)
+
+    /** WhatsApp drafts, in memory only since the vault (`plans/wa-vault.md` 13.5). */
+    val waDrafts: MemoryWaDrafts by lazy { MemoryWaDrafts() }
+
+    /**
+     * Locks WhatsApp (`plans/wa-vault.md` 6): the one teardown path of this app. Round 4 calls it from the lifecycle
+     * (screen off, background timer, manual lock). Nothing reaches the gateway after it starts.
+     */
+    suspend fun lockWhatsApp() {
+        waOffline.lock()
+    }
+
+    /** What [lockWhatsApp] tears down besides the store and its socket. */
+    internal suspend fun lockedWhatsApp() {
+        wa.lock()
+        if (statusFeedOnce.isInitialized()) statusFeed.drop()
+        waMediaIfMade?.forgetThumbs()
+        waDrafts.clear()
+        (avatars.pictures)?.clear()
+        liveNamesMemory.clear()
+        vaultOps.lock()
+    }
+
+    /** The WhatsApp names asked in this process (in memory since the vault). */
+    private val liveNamesMemory = MemoryLiveNameStore()
+
     /** The offline store of the linked WhatsApp instance with its sync and outbox (E6.4s), following the link. */
     val waOffline: WaOffline get() = waOfflineOnce.value
 
@@ -183,9 +229,20 @@ open class MessagesContainer(
         if (waOfflineOnce.isInitialized()) waOffline.keyOf(jid) else WaIds.bare(jid) ?: jid
 
     /** The WhatsApp Status updates, for the Status row and the viewer. */
-    val statusFeed: StatusFeed by lazy {
-        StatusFeed(scope, waOffline, waRemote, java.io.File(context.cacheDir, "wa-status")).also { it.start() }
-    }
+    val statusFeed: StatusFeed get() = statusFeedOnce.value
+
+    private val statusFeedOnce =
+        lazy {
+            StatusFeed(
+                scope,
+                waOffline,
+                waRemote,
+                java.io.File(context.cacheDir, "wa-status"),
+                ram = waDownloads.ram,
+                firstDelayMs = WaRequestBudget.BURST_WINDOW_MS,
+                gate = waGate,
+            ).also { it.start() }
+        }
 
     /** The system blocklist (shared with Phone); the default SMS app may write it. */
     val blocklist: BlocklistRepository by lazy { createBlocklist() }
@@ -300,8 +357,8 @@ open class MessagesContainer(
             gateway = { wa.gateway() },
             e164 = { PhoneNumbers.e164(it, homeRegion) },
             scope = scope,
-            // Kept between runs, so a restart does not ask WhatsApp for the same numbers again.
-            store = FileLiveNameStore(File(context.noBackupFilesDir, "wa-live-names.json")),
+            // In memory since the vault (`plans/wa-vault.md` 13.5): a restart asks again.
+            store = liveNamesMemory,
             onProfiles = { profiles -> if (waOfflineOnce.isInitialized()) waOffline.observe(profiles = profiles) },
         )
 
@@ -326,7 +383,17 @@ open class MessagesContainer(
         )
     }
 
-    protected open fun createWaRemote(): WaRemote = GatewayWaRemote(wa)
+    protected open fun createWaRemote(): WaRemote = GatewayWaRemote(wa, shareRepository = true)
+
+    override fun createAvatars(): WaAvatars =
+        WaAvatars(
+            repo = wa,
+            ops = waOps,
+            dir = File(context.cacheDir, WaAvatars.DIR_NAME),
+            scope = scope,
+            pictures = VaultAvatarPictures(vaultOps),
+            gate = waGate,
+        )
 
     protected open fun createWaOffline(): WaOffline = realWaOffline(this, waRemote)
 

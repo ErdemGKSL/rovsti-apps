@@ -10,6 +10,10 @@ import dev.rosty.core.model.wa.VaultDirRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLockRequest
+import dev.rosty.core.model.wa.VaultPicturePut
+import dev.rosty.core.model.wa.VaultPicturePutRequest
+import dev.rosty.core.model.wa.VaultPictures
+import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
@@ -48,6 +52,12 @@ object VaultContracts : ContractModels {
             op<VaultHandleRequest, VaultKeys>("vault.change", err = listOf("locked"))
             op<VaultDirRequest, VaultReset>("vault.reset", ok = listOf("nothing"))
             op<VaultWipeRequest, VaultWipeReport>("vault.wipe_plaintext", err = listOf("no_vault"))
+            op<VaultPicturesRequest, VaultPictures>("vault.pictures", ok = listOf("some"), err = listOf("locked"))
+            op<VaultPicturePutRequest, VaultPicturePut>(
+                "vault.picture_put",
+                ok = listOf("removed"),
+                err = listOf("locked", "half"),
+            )
         }
 
     private inline fun <reified Req, reified Ans> MutableMap<String, KSerializer<*>>.op(

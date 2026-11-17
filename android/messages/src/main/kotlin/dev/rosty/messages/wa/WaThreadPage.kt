@@ -134,7 +134,37 @@ fun plainSize(bytes: Long): String =
 
 private const val KILO = 1024L
 
-/** The thread drafts in `drafts.json`, next to the SMS ones. */
+/**
+ * The WhatsApp drafts since the vault (`plans/wa-vault.md` 13.5): in memory for the life of the process, never in
+ * `drafts.json`; a restart (or a lock) drops them.
+ */
+class MemoryWaDrafts : WaDrafts {
+    private val drafts = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    override suspend fun load(tag: String): String = drafts[tag].orEmpty()
+
+    override suspend fun put(
+        tag: String,
+        text: String,
+    ) {
+        if (text.isBlank()) drafts.remove(tag) else drafts[tag] = text
+    }
+
+    /** Forgets every draft (lock). */
+    fun clear() {
+        drafts.clear()
+    }
+
+    /** Two chats became one: the draft follows, unless the merged chat has its own. */
+    fun rekey(
+        from: String,
+        into: String,
+    ) {
+        drafts.remove(from)?.let { drafts.putIfAbsent(into, it) }
+    }
+}
+
+/** The thread drafts in `drafts.json`, next to the SMS ones (before the vault; tests). */
 class StoreWaDrafts(
     private val store: MessagesStore,
 ) : WaDrafts {
@@ -215,7 +245,7 @@ fun rememberWaThreadViewModel(
                         WaThreadSources(
                             offline = container.waOffline,
                             remote = container.waRemote,
-                            drafts = StoreWaDrafts(container.store),
+                            drafts = container.waDrafts,
                             names = container.names,
                             divider = { incoming, unread ->
                                 container.chat

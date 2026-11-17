@@ -192,3 +192,100 @@ pub fn gap_pages<'a>(gaps: impl IntoIterator<Item = (&'a str, Gap)>, limit: u32)
         })
         .collect()
 }
+
+/// Lazy sync (`plans/wa-vault.md` 14): of the pages a refreshed chat list opens, only the first page of the chat
+/// on screen (`focus`) is fetched now. The other gaps stay open in the store and are fetched one page at a time
+/// when their chat is opened ([`on_open`]); nothing is paged in advance.
+pub fn lazy_pages(fetch: Vec<FetchPage>, focus: Option<&str>) -> Vec<FetchPage> {
+    let Some(focus) = focus else {
+        return Vec::new();
+    };
+    fetch
+        .into_iter()
+        .find(|page| page.chat == focus)
+        .into_iter()
+        .collect()
+}
+
+/// Lazy sync: the one page to fetch when `chat` is opened, or `None` when what is stored is enough.
+///
+/// * An open gap (messages were missed while the chat was not on screen): its next page.
+/// * A chat not paged yet in this session (`paged` false; the chat list stored only its newest message): the
+///   newest page.
+/// * Otherwise nothing: the pages fetched in this session stay in memory, and older history comes one page per
+///   scroll ([`older`]).
+pub fn on_open(chat: &str, cursor: &ChatCursor, paged: bool, limit: u32) -> Option<FetchPage> {
+    if let Some(gap) = cursor.gap {
+        return Some(FetchPage {
+            chat: chat.to_owned(),
+            before: gap.before,
+            limit,
+        });
+    }
+    if paged || cursor.reached_start {
+        return None;
+    }
+    Some(FetchPage {
+        chat: chat.to_owned(),
+        before: None,
+        limit,
+    })
+}
+
+#[cfg(test)]
+mod lazy_tests {
+    use super::*;
+
+    fn page(chat: &str, before: Option<i64>) -> FetchPage {
+        FetchPage {
+            chat: chat.to_owned(),
+            before,
+            limit: DEFAULT_PAGE,
+        }
+    }
+
+    #[test]
+    fn a_resync_pages_only_the_chat_on_screen() {
+        let owed = vec![page("a", None), page("b", None), page("c", Some(9))];
+        assert_eq!(
+            lazy_pages(owed.clone(), Some("c")),
+            vec![page("c", Some(9))]
+        );
+        assert!(lazy_pages(owed.clone(), None).is_empty());
+        assert!(lazy_pages(owed, Some("z")).is_empty());
+    }
+
+    #[test]
+    fn opening_a_chat_asks_for_one_page_once() {
+        let fresh = ChatCursor {
+            newest_ts: Some(1_000),
+            newest_id: Some("m1".into()),
+            oldest_ts: Some(1_000),
+            ..ChatCursor::default()
+        };
+        assert_eq!(on_open("a", &fresh, false, 50), Some(page("a", None)));
+        // Paged in this session: read from memory, nothing is asked.
+        assert_eq!(on_open("a", &fresh, true, 50), None);
+        let started = ChatCursor {
+            reached_start: true,
+            ..fresh
+        };
+        assert_eq!(on_open("a", &started, false, 50), None);
+    }
+
+    #[test]
+    fn opening_a_chat_with_a_gap_continues_the_gap() {
+        let gapped = ChatCursor {
+            newest_ts: Some(1_000),
+            gap: Some(Gap {
+                floor_ts: 1_000,
+                before: Some(5_000),
+            }),
+            ..ChatCursor::default()
+        };
+        assert_eq!(
+            on_open("a", &gapped, true, 50),
+            Some(page("a", Some(5_000)))
+        );
+    }
+}

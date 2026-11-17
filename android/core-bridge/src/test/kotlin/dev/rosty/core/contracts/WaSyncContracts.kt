@@ -7,6 +7,7 @@ import dev.rosty.core.model.wa.WaIdParseRequest
 import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaSyncAccountChangedRequest
 import dev.rosty.core.model.wa.WaSyncApplied
+import dev.rosty.core.model.wa.WaSyncCacheSaved
 import dev.rosty.core.model.wa.WaSyncCancelled
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncCaughtUp
@@ -21,6 +22,7 @@ import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
@@ -90,7 +92,14 @@ import kotlinx.serialization.serializer
 object WaSyncContracts : ContractModels {
     override val models: Map<String, KSerializer<*>> =
         buildMap {
-            op<WaSyncOpenRequest, WaSyncOpened>("wa_sync.open", err = listOf("no_instance"))
+            op<WaSyncOpenRequest, WaSyncOpened>(
+                "wa_sync.open",
+                ok = listOf("lazy", "vault_cache"),
+                err = listOf("no_instance"),
+            )
+            op<WaSyncOlderRequest, WaSyncOlderAnswer>("wa_sync.open_page", ok = listOf("paged", "eager"))
+            op<WaSyncFocusRequest, HandleAnswer>("wa_sync.focus", ok = listOf("none"))
+            op<WaSyncHandleRequest, WaSyncCacheSaved>("wa_sync.cache_save", err = listOf("locked"))
             op<WaSyncHandleRequest, WaSyncClosed>("wa_sync.close", err = listOf("not_open"))
             op<WaSyncPlanRequest, WaSyncPlan>("wa_sync.plan", ok = listOf("gap"))
             op<WaSyncEventsRequest, WaSyncApplied>(

@@ -46,6 +46,8 @@ mod identity;
 mod identity_tests;
 #[cfg(test)]
 mod ingest_tests;
+#[cfg(test)]
+mod lazy_tests;
 mod link_state;
 #[cfg(test)]
 mod link_state_tests;
@@ -65,7 +67,7 @@ mod store;
 #[cfg(test)]
 mod tests;
 
-pub use identity::{IdentityApplied, IdentityCaughtUp, Observed, ResolvedId};
+pub use identity::{IdentityApplied, IdentityCaughtUp, IdentitySnapshot, Observed, ResolvedId};
 pub use link_state::{
     HistoryBatch, HistoryProgress, HistoryReport, HistoryState, StatusNote, StatusNoted, Wiped,
     delete_files,

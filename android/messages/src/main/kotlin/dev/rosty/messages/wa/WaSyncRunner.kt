@@ -11,6 +11,7 @@ import dev.rosty.core.model.wa.WaSyncEvent
 import dev.rosty.core.model.wa.WaSyncFetch
 import dev.rosty.core.model.wa.WaSyncRekeyed
 import dev.rosty.core.ops.WaSyncStore
+import dev.rosty.wa.sync.WaRequestGate
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -45,6 +46,12 @@ enum class OlderResult {
  * another account, with the media files to delete; it is the only reason anything kept for the link is dropped.
  * [onHistory] is told when the stored history progress may have moved, [onMedia] which media messages arrived.
  * Network fills run one at a time.
+ *
+ * **Lazy sync** (`plans/wa-vault.md` 14, a store opened `lazy`): a cold start costs at most four requests (status, the
+ * chat list, one identity page, the event socket) and no history; [opened] asks for one page when a chat is opened,
+ * [older] one page per scroll, a refresh pages the chat on screen only. Every request goes through [gate] (budget,
+ * back-off, nothing while locked), at most one cold sync per 30 s; a moved identity cursor is written to the encrypted
+ * vault cache.
  */
 class WaSyncRunner(
     private val store: WaSyncStore,
@@ -56,15 +63,26 @@ class WaSyncRunner(
     private val onAccountChanged: suspend (deleteFiles: List<String>) -> Unit = {},
     private val onHistory: suspend () -> Unit = {},
     private val onMedia: suspend (List<WaMediaRef>) -> Unit = {},
+    /** The gateway budget; null: unlimited (the eager sync and its tests). */
+    private val gate: WaRequestGate? = null,
 ) {
     private val fill = Mutex()
 
+    /** The lazy sync of `plans/wa-vault.md` 14. */
+    val lazy: Boolean get() = store.opened.lazy
+
+    private suspend fun <T> request(block: suspend () -> Outcome<T>): Outcome<T> = gate?.call(block) ?: block()
+
+    private suspend fun <T> history(block: suspend () -> Outcome<T>): Outcome<T> = gate?.page(block) ?: block()
+
     /** The `seq` the event socket resumes after; null on the first run or when the store cannot be read. */
-    suspend fun afterSeq(): Long? = store.plan(pageLimit).getOrNull()?.afterSeq
+    suspend fun afterSeq(): Long? = if (lazy) null else store.plan(pageLimit).getOrNull()?.afterSeq
 
     /** Does what the store's plan owes. False when the gateway could not be reached for part of it. */
     suspend fun catchUp(): Boolean =
         fill.withLock {
+            // At most one cold sync per 30 s: a reconnect storm does not refetch the chat list.
+            if (lazy && gate != null && !gate.budget.tryColdSync()) return@withLock false
             // The status first: a gap or another account must be known before anything is stored. Then identity:
             // the chat list and the pages that follow are stored under the merged keys.
             val stale = statusLocked()
@@ -79,7 +97,8 @@ class WaSyncRunner(
      */
     suspend fun refresh(recentMs: Long? = null): Boolean =
         fill.withLock {
-            identityLocked()
+            // The lazy resync is the chat list and one page of the chat on screen, nothing more.
+            if (!lazy) identityLocked()
             refreshLocked(recentMs)
         }
 
@@ -88,8 +107,13 @@ class WaSyncRunner(
      * store. True when a merge moved rows: the chat list is refreshed.
      */
     private suspend fun identityLocked(): Boolean {
-        val caught = store.identityCatchUp { since -> remote.identityMappings(since) }.getOrNull() ?: return false
+        val pages = if (lazy) 1 else Int.MAX_VALUE
+        val caught =
+            store.identityCatchUp(pages) { since -> request { remote.identityMappings(since) } }.getOrNull()
+                ?: return false
         caught.error?.let { RostyLog.w(TAG, "identity catch-up stopped: ${it.message}") }
+        // The map and its cursor survive the next unlock in the encrypted cache (plan 13.5).
+        if (lazy && caught.pairs > 0) store.saveCache()
         followed(caught.rekeyed)
         return caught.resync
     }
@@ -100,7 +124,7 @@ class WaSyncRunner(
      * list must be fetched again (a gap, a merge, another account).
      */
     private suspend fun statusLocked(): Boolean {
-        val status = remote.status().getOrNull() ?: return false
+        val status = request { remote.status() }.getOrNull() ?: return false
         val applied = store.observe(now(), status = status).getOrNull() ?: return false
         if (applied.accountChanged) onAccountChanged(applied.deleteFiles)
         followed(applied.rekeyed)
@@ -116,7 +140,7 @@ class WaSyncRunner(
     }
 
     private suspend fun refreshLocked(recentMs: Long?): Boolean {
-        val chats = remote.chats().getOrNull() ?: return false
+        val chats = request { remote.chats() }.getOrNull() ?: return false
         val stored =
             when (val out = store.storeChats(chats, now(), pageLimit, recentMs)) {
                 is Outcome.Ok -> {
@@ -141,7 +165,7 @@ class WaSyncRunner(
             var fetched = 0
             while (next != null && fetched < MAX_PAGES_PER_CHAT) {
                 val asked = next
-                val page = remote.page(asked).getOrNull()
+                val page = history { remote.page(asked) }.getOrNull()
                 if (page == null) {
                     whole = false
                     break
@@ -155,8 +179,8 @@ class WaSyncRunner(
                 followed(stored.rekeyed)
                 onChange(setOf(asked.chat))
                 onMedia(WaDownloads.refsOf(page, now()))
-                // A store that asks for the same page again would loop forever.
-                next = stored.next?.takeIf { it != asked }
+                // A store that asks for the same page again would loop forever; the lazy sync takes one per chat.
+                next = stored.next?.takeIf { it != asked && !lazy }
             }
         }
         return whole
@@ -195,12 +219,34 @@ class WaSyncRunner(
     suspend fun older(chat: String): OlderResult =
         fill.withLock {
             val fetch = store.older(chat, pageLimit).getOrNull() ?: return@withLock OlderResult.ReachedStart
-            val page = remote.page(fetch).getOrNull() ?: return@withLock OlderResult.Offline
+            val page = history { remote.page(fetch) }.getOrNull() ?: return@withLock OlderResult.Offline
             val stored = store.storePage(fetch, page, now()).getOrNull() ?: return@withLock OlderResult.Offline
             followed(stored.rekeyed)
             onChange(setOf(chat))
             if (stored.reachedStart && stored.new == 0) OlderResult.ReachedStart else OlderResult.Stored
         }
+
+    /**
+     * The lazy sync: [chat] was opened. One page when it was not paged in this session (or a gap is open), nothing
+     * otherwise; the chat becomes the one a refresh pages. Null: nothing was owed.
+     */
+    suspend fun opened(chat: String): OlderResult? {
+        if (!lazy) return null
+        store.focus(chat)
+        return fill.withLock {
+            val fetch = store.openPage(chat, pageLimit).getOrNull() ?: return@withLock null
+            val page = history { remote.page(fetch) }.getOrNull() ?: return@withLock OlderResult.Offline
+            val stored = store.storePage(fetch, page, now()).getOrNull() ?: return@withLock OlderResult.Offline
+            followed(stored.rekeyed)
+            onChange(setOf(chat))
+            OlderResult.Stored
+        }
+    }
+
+    /** The lazy sync: the chat left the screen. */
+    suspend fun closed() {
+        if (lazy) store.focus(null)
+    }
 
     /**
      * Hands in what the gateway answered outside the sync ([groups] of `wa.group(s)`, [profiles] of `wa.profiles`):

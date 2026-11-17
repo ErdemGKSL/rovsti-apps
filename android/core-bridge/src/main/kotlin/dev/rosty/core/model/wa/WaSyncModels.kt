@@ -23,9 +23,26 @@ data class WaSyncOpenRequest(
     @SerialName("instance_id") val instanceId: String,
     /** The directory of the store files; the core's data directory when left out. */
     @EncodeDefault(NEVER) val dir: String? = null,
-    /** A store in memory (tests, previews). */
+    /** A store in memory: the product since the vault (`plans/wa-vault.md` 13.1), tests, previews. */
     @EncodeDefault(NEVER) val memory: Boolean = false,
+    /** The lazy sync (`plans/wa-vault.md` 14): pages for the chat on screen, an opened chat and a scroll only. */
+    @EncodeDefault(NEVER) val lazy: Boolean = false,
+    /** Start the identity map from the encrypted vault cache when the vault is unlocked for this instance. */
+    @SerialName("vault_cache") @EncodeDefault(NEVER) val vaultCache: Boolean = false,
 )
+
+/** What `wa_sync.open {vault_cache}` found in the encrypted vault cache. */
+@Serializable
+enum class WaSyncCacheUse {
+    @SerialName("loaded")
+    Loaded,
+
+    @SerialName("empty")
+    Empty,
+
+    @SerialName("locked")
+    Locked,
+}
 
 @Serializable
 data class WaSyncOpened(
@@ -36,6 +53,24 @@ data class WaSyncOpened(
     @SerialName("last_seq") val lastSeq: Long?,
     /** The chat list must be refreshed (first run, or events were missed). */
     @SerialName("needs_resync") val needsResync: Boolean,
+    /** True for a store on the lazy sync. */
+    @EncodeDefault(NEVER) val lazy: Boolean = false,
+    /** Set when the open asked for the vault cache. */
+    @EncodeDefault(NEVER) val cache: WaSyncCacheUse? = null,
+)
+
+/** `wa_sync.focus`: the chat on screen (null: none); a refreshed chat list pages it and no other. */
+@Serializable
+data class WaSyncFocusRequest(
+    val handle: Long,
+    @EncodeDefault(NEVER) val chat: String? = null,
+)
+
+/** `wa_sync.cache_save`: the identity map written into the encrypted vault cache. */
+@Serializable
+data class WaSyncCacheSaved(
+    val handle: Long,
+    val persons: Int,
 )
 
 /** A request that names nothing but the store. */

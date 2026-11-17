@@ -363,3 +363,93 @@ fn write_seed(dir: &Path) {
         .save(dir)
         .unwrap();
 }
+
+#[test]
+fn pictures_and_identity_live_only_sealed_in_the_cache() {
+    let _guard = test_lock();
+    let dir = temp_dir("cache");
+    write_seed(&dir);
+    // The seed's K_hw "seal" is the identity.
+    let unlock_seed = || {
+        let file = VaultFile::load(&dir).unwrap().unwrap();
+        unlock(UnlockReq {
+            dir: text(&dir),
+            key_blob: b64(&file.hw_sealed),
+            passphrase: Zeroizing::new(seed::PASSPHRASE.to_owned()),
+            boot_count: seed::BOOT_COUNT,
+            now_ms: seed::UNLOCKED_MS,
+        })
+        .unwrap()
+    };
+    let lock_now = || {
+        lock(LockReq {
+            handle: None,
+            dir: text(&dir),
+        })
+        .unwrap()
+    };
+    lock_now();
+    // Locked: nothing is read or written.
+    let refused = pictures(PicturesReq { jids: None })
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(code(&refused), "locked");
+
+    let session = unlock_seed();
+    let jid = "100000000001@s.whatsapp.net";
+    let put = picture_put(PicturePutReq {
+        jid: jid.into(),
+        picture_id: Some("p1".into()),
+        jpeg: Some(b64(b"JPEG-BYTES-1000000000")),
+    })
+    .unwrap();
+    assert_eq!((put.handle, put.pictures), (session.handle, 1));
+    with_cache(true, |cache| {
+        cache.identity = json!({"persons": [], "aliases": []});
+        cache.identity_cursor = Some("cursor-77".into());
+    })
+    .unwrap();
+    let on_disk = fs::read(dir.join(wa_vault::CACHE_FILE)).unwrap();
+    let plain = String::from_utf8_lossy(&on_disk);
+    assert!(
+        !plain.contains("1000000000") && !plain.contains("cursor-77") && !plain.contains("JPEG")
+    );
+
+    // Another unlock reads the same cache back.
+    lock_now();
+    assert!(unlocked_instance().is_none());
+    unlock_seed();
+    assert_eq!(unlocked_instance().as_deref(), Some("inst1"));
+    let read = pictures(PicturesReq { jids: None }).unwrap();
+    assert_eq!(read.pictures.len(), 1);
+    assert_eq!(read.pictures[0].picture_id, "p1");
+    assert_eq!(
+        with_cache(false, |cache| cache.identity_cursor.clone()).unwrap(),
+        Some("cursor-77".into())
+    );
+    // Forgetting a picture; a damaged cache is deleted and starts over empty.
+    picture_put(PicturePutReq {
+        jid: jid.into(),
+        picture_id: None,
+        jpeg: None,
+    })
+    .unwrap();
+    assert!(
+        pictures(PicturesReq { jids: None })
+            .unwrap()
+            .pictures
+            .is_empty()
+    );
+    fs::write(dir.join(wa_vault::CACHE_FILE), b"RWVC broken").unwrap();
+    lock_now();
+    unlock_seed();
+    assert!(
+        pictures(PicturesReq { jids: None })
+            .unwrap()
+            .pictures
+            .is_empty()
+    );
+    assert!(!dir.join(wa_vault::CACHE_FILE).exists());
+    lock_now();
+    let _ = fs::remove_dir_all(&dir);
+}

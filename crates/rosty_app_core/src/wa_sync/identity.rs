@@ -13,7 +13,7 @@ use rosty_core::wa_identity::{
 };
 use rosty_wa_proto::{GroupInfo, IdentityMappings, InstanceStatus, WaProfile};
 use rusqlite::{Connection, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::Result;
 use super::authors::Moved;
@@ -83,6 +83,25 @@ pub struct IdentityCaughtUp {
     pub rejected: Vec<Rejected>,
     /// The chat list must be refreshed ([`Store::store_chats`]): a merge moved rows.
     pub resync: bool,
+}
+
+/// Who every id is, as the encrypted vault cache keeps it between unlocks (`plans/wa-vault.md` 13.5): the rows of
+/// the map and the cursor of the identity catch-up. Never message content.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdentitySnapshot {
+    #[serde(default)]
+    pub persons: Vec<PersonRow>,
+    #[serde(default)]
+    pub aliases: Vec<AliasRow>,
+    /// `since=` of the next `GET /v1/identity/mappings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+}
+
+impl IdentitySnapshot {
+    pub fn is_empty(&self) -> bool {
+        self.aliases.is_empty() && self.since.is_none()
+    }
 }
 
 /// What the calls of one transaction taught the map, beyond the rows they wrote.
@@ -553,6 +572,55 @@ impl Store {
             [],
             |row| row.get(0),
         )?)
+    }
+
+    /// The map and the catch-up cursor, for the encrypted vault cache.
+    pub fn identity_snapshot(&self) -> Result<IdentitySnapshot> {
+        let (persons, aliases) = self.identity.rows();
+        Ok(IdentitySnapshot {
+            persons,
+            aliases,
+            since: self.identity_since()?,
+        })
+    }
+
+    /// Starts a store that knows nobody yet from a snapshot of the vault cache: the persons, their aliases and
+    /// the catch-up cursor, so the next catch-up asks only for what is newer. A store that already knows someone
+    /// (or holds a cursor) keeps what it has and answers `false`: the cache never overwrites what was learned.
+    pub fn seed_identity(&mut self, snapshot: &IdentitySnapshot) -> Result<bool> {
+        if !self.identity.is_empty() || self.identity_since()?.is_some() || snapshot.is_empty() {
+            return Ok(false);
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut person =
+                tx.prepare("INSERT OR REPLACE INTO person (person_id, key) VALUES (?1, ?2)")?;
+            for row in &snapshot.persons {
+                person.execute(params![row.person_id.0, row.key.as_str()])?;
+            }
+            let mut alias = tx.prepare(
+                "INSERT OR REPLACE INTO alias (kind, user, person_id, state, source, learned_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            for row in &snapshot.aliases {
+                alias.execute(params![
+                    row.kind.as_str(),
+                    row.user,
+                    row.person_id.0,
+                    row.state.as_str(),
+                    row.source.as_str(),
+                    row.learned_ms,
+                ])?;
+            }
+            tx.execute(
+                "UPDATE sync_state SET identity_cursor = ?1 WHERE id = 1",
+                [&snapshot.since],
+            )?;
+        }
+        tx.commit()?;
+        // The map repairs what it refuses; the own ids of the store stay as they were.
+        self.identity = load(&self.conn)?;
+        Ok(true)
     }
 
     /// Takes in one page of `GET /v1/identity/mappings?since=<cursor>`: learns every pair and keeps the page's

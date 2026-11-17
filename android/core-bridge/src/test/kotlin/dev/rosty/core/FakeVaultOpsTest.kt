@@ -108,7 +108,14 @@ class FakeVaultOpsTest {
             val changed = vault.change(VaultHandleRequest(keys.handle)).ok()
             assertNotEquals(keys.passphrase, changed.passphrase)
             vault.commit(VaultCommitRequest(keys.handle, "rosty.wa.k2", seal(changed.seal)))
-            assertEquals("rosty.wa.k2", vault.state().ok().vault?.hwAlias)
+            assertEquals(
+                "rosty.wa.k2",
+                vault
+                    .state()
+                    .ok()
+                    .vault
+                    ?.hwAlias,
+            )
             vault.lock()
             assertEquals(fixtureCode("vault.change.locked"), vault.change(VaultHandleRequest(keys.handle)).code())
             assertEquals("wrong_passphrase", vault.unlock(unlockRequest(keys.passphrase, boot = 1)).code())
@@ -118,7 +125,13 @@ class FakeVaultOpsTest {
             val idle = vault.state(late).ok()
             assertEquals(VaultDailyRefusal.Idle, idle.dailyDropped)
             assertNull(idle.daily)
-            assertNotNull(vault.reset().ok().deleted.singleOrNull())
+            assertNotNull(
+                vault
+                    .reset()
+                    .ok()
+                    .deleted
+                    .singleOrNull(),
+            )
             assertNull(vault.state().ok().vault)
         }
 }

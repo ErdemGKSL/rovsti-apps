@@ -158,7 +158,9 @@ fun OneShotAnimatedImage(
             frame++
             onDispose {
                 handler.removeCallbacksAndMessages(null)
-                current.drawable.callback = null
+                // Drawable keeps its callback by weak reference; naming it here keeps it alive until disposal,
+                // otherwise a GC would silently stop the frame invalidation mid-animation.
+                if (current.drawable.callback === callback) current.drawable.callback = null
             }
         }
         LaunchedEffect(current, playKey, reduceMotion) {

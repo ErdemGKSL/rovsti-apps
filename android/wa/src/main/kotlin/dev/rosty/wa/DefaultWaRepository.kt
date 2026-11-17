@@ -90,6 +90,9 @@ class DefaultWaRepository(
 
     /** The gateway process [lastSeq] counts in (`hello`); null until one said. */
     private var epoch: String? = null
+
+    /** The vault is locked: nothing opens the gateway. */
+    private var locked = false
     private val started = AtomicBoolean(false)
 
     private val state = MutableStateFlow<WaLinkState>(WaLinkState.None)
@@ -148,6 +151,20 @@ class DefaultWaRepository(
             }
         }
 
+    override suspend fun lock() {
+        lock.withLock {
+            locked = true
+            closeSession()
+            // The next socket is live: no `after=` replay of what was missed while locked.
+            lastSeq = null
+            epoch = null
+        }
+    }
+
+    override suspend fun unlock() {
+        lock.withLock { locked = false }
+    }
+
     override suspend fun forget(): Outcome<Unit> =
         lock.withLock {
             closeSession()
@@ -164,6 +181,7 @@ class DefaultWaRepository(
     /** Reads the link and opens everything. Call under [lock]. Returns the gateway, or null (and sets [state]). */
     private suspend fun open(): WaGateway? {
         session?.let { return it.gateway }
+        if (locked) return null
         val link =
             when (val read = store.read()) {
                 is Outcome.Err -> return failed(read.error)

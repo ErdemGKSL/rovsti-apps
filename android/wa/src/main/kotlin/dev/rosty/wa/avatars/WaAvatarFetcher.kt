@@ -9,6 +9,7 @@ import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.key.Keyer
 import coil3.request.Options
+import okio.Buffer
 import okio.Path.Companion.toOkioPath
 
 /**
@@ -34,6 +35,15 @@ class WaAvatarFetcher(
     private val options: Options,
 ) : Fetcher {
     override suspend fun fetch(): FetchResult? {
+        if (avatars.pictures != null) {
+            // In memory since the vault: nothing of it is on disk.
+            val bytes = avatars.bytes(avatar.jid) ?: return null
+            return SourceFetchResult(
+                source = ImageSource(Buffer().write(bytes), options.fileSystem),
+                mimeType = "image/jpeg",
+                dataSource = DataSource.MEMORY,
+            )
+        }
         val file = avatars.file(avatar.jid) ?: return null
         return SourceFetchResult(
             source = ImageSource(file.toOkioPath(), options.fileSystem),

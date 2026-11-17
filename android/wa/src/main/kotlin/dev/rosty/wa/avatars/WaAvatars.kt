@@ -13,6 +13,7 @@ import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.ops.WaOps
 import dev.rosty.wa.WaLinkState
 import dev.rosty.wa.WaRepository
+import dev.rosty.wa.sync.WaRequestGate
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,10 @@ class WaAvatars(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Called with the jid when its stored picture changed, so Coil can drop its memory-cache entry. */
     private val invalidate: (String) -> Unit = {},
+    /** Since the vault (Messages): pictures live here and never in [dir] (`plans/wa-vault.md` 13.5). */
+    val pictures: AvatarPictures? = null,
+    /** The gateway budget every picture and profile request takes from (`plans/wa-vault.md` 14); null: none. */
+    private val gate: WaRequestGate? = null,
 ) {
     private val lock = Any()
 
@@ -120,6 +125,16 @@ class WaAvatars(
 
     /** The stored picture of [jid] (the newest file of that jid), or null when none is stored. */
     suspend fun file(jid: String): File? =
+        if (pictures != null) {
+            null
+        } else {
+            diskFile(jid)
+        }
+
+    /** The stored picture of [jid] as bytes, from [pictures]; null without them or when none is stored. */
+    suspend fun bytes(jid: String): ByteArray? = pictures?.get(jid)?.jpeg
+
+    private suspend fun diskFile(jid: String): File? =
         withContext(io) {
             val files = listFiles()
             val prefix = plan(files, jid, "x")?.fileName?.substringBefore(NAME_SEP, "") ?: return@withContext null
@@ -179,7 +194,10 @@ class WaAvatars(
                 continue
             }
             val gateway = repo.gateway()
-            val result = withContext(io) { gateway?.profiles(batch) }
+            val result =
+                withContext(io) {
+                    gateway?.let { open -> gate?.call { open.profiles(batch) } ?: open.profiles(batch) }
+                }
             (result as? Outcome.Ok)?.value?.takeIf { it.isNotEmpty() }?.let { onProfiles?.invoke(it) }
             synchronized(lock) {
                 when (result) {
@@ -276,10 +294,15 @@ class WaAvatars(
 
     /** Returns what was found and whether a file was written. Runs on [io]. */
     private suspend fun fetch(job: AvatarBook.Job): Pair<AvatarBook.Found, Boolean> {
-        val files = listFiles()
+        val files = if (pictures != null) emptyList() else listFiles()
         var fromDisk: Held? = null
         if (job.held == null) {
-            fromDisk = findOnDisk(files, job.jid, job.wanted)
+            fromDisk =
+                if (pictures != null) {
+                    pictures.get(job.jid)?.let { Held(it.id, File(it.id)) }
+                } else {
+                    findOnDisk(files, job.jid, job.wanted)
+                }
             if (fromDisk != null && job.wanted == fromDisk.id) {
                 // The caller named this very picture: no need to ask.
                 return AvatarBook.Found.Image(fromDisk.id, verified = true) to false
@@ -291,7 +314,8 @@ class WaAvatars(
             fromDisk?.let { AvatarBook.Found.Image(it.id, verified = false) } ?: fallback
 
         val gateway = repo.gateway() ?: return unverified(AvatarBook.Found.Failed) to false
-        return when (val answer = gateway.picture(PictureBody(job.jid, knownId = known))) {
+        val asked = PictureBody(job.jid, knownId = known)
+        return when (val answer = gate?.call { gateway.picture(asked) } ?: gateway.picture(asked)) {
             is Outcome.Err -> {
                 val found = if (answer.error.isRateLimited()) AvatarBook.Found.RateLimited else AvatarBook.Found.Failed
                 unverified(found) to false
@@ -390,6 +414,10 @@ class WaAvatars(
         id: String,
         bytes: ByteArray,
     ): Boolean {
+        pictures?.let {
+            it.put(jid, AvatarPicture(id, bytes))
+            return true
+        }
         val name = plan(emptyList(), jid, id)?.fileName ?: return false
         return try {
             dir.mkdirs()
@@ -407,12 +435,17 @@ class WaAvatars(
     }
 
     private suspend fun removeAllOf(jid: String) {
+        pictures?.let {
+            it.remove(jid)
+            return
+        }
         val prefix = plan(emptyList(), jid, "x")?.fileName?.substringBefore(NAME_SEP) ?: return
         listFiles().filter { it.name.startsWith(prefix + NAME_SEP) }.forEach { it.delete() }
     }
 
     /** Deletes the oldest files over [DISK_BYTES], as the plan lists them. */
     suspend fun prune() {
+        if (pictures != null) return
         withContext(io) {
             val remove = plan(listFiles(), null, null)?.remove.orEmpty()
             remove.forEach { File(it).delete() }

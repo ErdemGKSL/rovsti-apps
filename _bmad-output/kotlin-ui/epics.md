@@ -1398,6 +1398,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17: static and animated cards, sheet, share/save; optics and GIF playback split into X.2b) |
 | X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | in-progress |
+| X.3 | Readable text on accent and photo backgrounds (owner, 2026-11-17: "white text on a light background is unreadable") | after X.2b, before E8 R1 | todo |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1565,8 +1566,25 @@ planning (no `cards/refraction.rs` in HEAD; the implemented attempt sits in `sta
 
 **X.2b -> `_bmad-output/kotlin-ui/plans/round-18.md`** (planned 2026-11-17 at `7ffcc39`): disk and stash triage, land the
 optics from `stash@{0}`, frame proof and budgets, one-shot GIF playback in the preview (`OneShotAnimatedImage` in `:design`),
-a bigger preview (Medium + Large detents), close. **Next planner after X.2b: E8 R1** (E6 and E7 are done in their tables;
+a bigger preview (Medium + Large detents), close. **Next planner after X.2b: X.3, then E8 R1** (E6 and E7 are done in their tables;
 E6-WA continues in its own session).
+
+### X.3 Readable text on accent and photo backgrounds (owner, 2026-11-17)
+The owner: in light theme, white text on a white or light background is unreadable; text on a light surface must be dark.
+Avatar initials are fine (owner: do not touch them). A contrast audit of all light and dark goldens found:
+1. **Filled capsule buttons, white on the light-blue dark accent (#FFFFFF on #5AB0FF, about 2.3:1).** `IosColors.kt:68`
+   hardcodes `onAccent = Color.White`; `IosButton.kt:162` uses it for BorderedProminent/GlassProminent, and
+   `controls/Buttons.kt:104` routes Filled capsules there. `IosColorsBridge.kt` (`iosColorsFrom`) does not map onAccent.
+   Fix: make `onAccent` theme-aware (take `RostyTheme.colors.onAccent`: white in light, #001A3A in dark), as `ChipRow.kt`,
+   `InboxScreen.kt` and `AlphabetScrollBar.kt` already do. Seen in `contacts/e4.4-crop-light` ("Choose", the crop forces dark)
+   and every filled capsule in dark goldens (e.g. `phone/e5.1-setup-sheet-dark`).
+2. **Photo viewer title over a light photo (about 1.9:1):** `phone/e5.13-viewer*-light`. The token is right (viewer is dark on
+   purpose); the top fade (`PhotoViewer.kt` `TopFadeBlur`) must darken a bright photo enough for the title.
+3. **Call screen captions over a light contact photo (about 2.1-2.4:1):** `phone/e5.6-incoming-photo-light`,
+   `e5.8-wa-incoming-photo-light`, `e5.7-incall-photo-light`. `IncomingScreen.kt` `OnAuraSecondary` (white 78%); add a dark
+   scrim over photos so white captions reach at least 4.5:1 (3:1 for large text).
+Done when: a contrast check (WCAG ratio, 4.5:1 body / 3:1 large) runs over the touched goldens in both themes and passes;
+goldens re-recorded; no other screen regresses.
 
 **Evidence (round 17):** commits `3a03c05` (carry-over), the "carry-over landed" fix commit, `7ece932` (Card Studio sheet
 fixes R17-F1..F4, re-recorded x2 goldens), `0c1b999` (budgets, sizes, cancellation), `8ace76e` (release-path proof, share/save

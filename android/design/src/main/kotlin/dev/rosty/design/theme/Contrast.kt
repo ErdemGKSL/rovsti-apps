@@ -40,5 +40,50 @@ fun glassOver(
     backdrop: Color,
 ): Color = fill.compositeOver(scrim.compositeOver(backdrop))
 
+/** Near-black ink for text and icons on light or saturated fills where white falls under 4.5:1. */
+val InkOnFill: Color = Color(0xFF0B0B0F)
+
+/**
+ * The content colour for a filled surface: [preferred] (white) when it reaches [minRatio] on [fill], otherwise
+ * whichever of [preferred] and [ink] has the higher ratio. [fill] is expected to be opaque.
+ */
+fun readableOn(
+    fill: Color,
+    preferred: Color = Color.White,
+    ink: Color = InkOnFill,
+    minRatio: Double = 4.5,
+): Color {
+    val preferredRatio = contrastRatio(preferred, fill)
+    if (preferredRatio >= minRatio) return preferred
+    return if (contrastRatio(ink, fill) > preferredRatio) ink else preferred
+}
+
+/** The text colour for [fill]: the theme's [RostyColors.onAccent] on the accent itself, else [readableOn]. */
+fun RostyColors.onColorFor(fill: Color): Color = if (fill == accent) onAccent else readableOn(fill)
+
+/**
+ * The smallest alpha of a black scrim over a band of mean linear luminance [bandLuminance] at which
+ * [foreground] reaches the contrast [target]. The scrim scales the band to L' = L * (1 - a), so for a lighter
+ * foreground the closed form is a = 1 - ((Lf + 0.05) / target - 0.05) / L. The result is clamped to
+ * [[floor], [max]]; a foreground darker than the band cannot be helped by a black scrim and gets [floor].
+ */
+fun scrimAlphaFor(
+    bandLuminance: Double,
+    foreground: Color,
+    target: Double,
+    floor: Float,
+    max: Float = 0.8f,
+): Float {
+    val fg = relativeLuminance(foreground)
+    val band = bandLuminance.coerceIn(0.0, 1.0)
+    val needed =
+        if (fg < band || band <= 0.0) {
+            0.0
+        } else {
+            1.0 - ((fg + 0.05) / target - 0.05) / band
+        }
+    return needed.toFloat().coerceIn(floor, max)
+}
+
 private const val LINEAR_CUTOFF = 0.04045
 private const val LINEAR_SLOPE = 12.92

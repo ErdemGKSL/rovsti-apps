@@ -13,6 +13,10 @@ import dev.rosty.core.model.wa.VaultDirRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLockRequest
+import dev.rosty.core.model.wa.VaultPicturePut
+import dev.rosty.core.model.wa.VaultPicturePutRequest
+import dev.rosty.core.model.wa.VaultPictures
+import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
@@ -68,6 +72,12 @@ interface VaultOps {
     /** The migration's wipe of every plaintext WhatsApp file. */
     suspend fun wipePlaintext(req: VaultWipeRequest): Outcome<VaultWipeReport>
 
+    /** The profile pictures of the encrypted cache (plan 13.5); `locked` while the vault is. */
+    suspend fun pictures(req: VaultPicturesRequest = VaultPicturesRequest()): Outcome<VaultPictures>
+
+    /** Keeps (or forgets) one profile picture in the encrypted cache. */
+    suspend fun picturePut(req: VaultPicturePutRequest): Outcome<VaultPicturePut>
+
     companion object {
         /** The Rust op behind each method. */
         val ops: List<String> =
@@ -83,6 +93,8 @@ interface VaultOps {
                 "vault.change",
                 "vault.reset",
                 "vault.wipe_plaintext",
+                "vault.pictures",
+                "vault.picture_put",
             )
     }
 }
@@ -132,4 +144,10 @@ class NativeVaultOps(
 
     override suspend fun wipePlaintext(req: VaultWipeRequest) =
         core.call("vault.wipe_plaintext", req, VaultWipeRequest.serializer(), VaultWipeReport.serializer())
+
+    override suspend fun pictures(req: VaultPicturesRequest) =
+        core.call("vault.pictures", req, VaultPicturesRequest.serializer(), VaultPictures.serializer())
+
+    override suspend fun picturePut(req: VaultPicturePutRequest) =
+        core.call("vault.picture_put", req, VaultPicturePutRequest.serializer(), VaultPicturePut.serializer())
 }

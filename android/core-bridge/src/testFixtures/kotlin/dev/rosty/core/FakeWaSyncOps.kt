@@ -15,6 +15,7 @@ import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncAccountChangedRequest
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncApplied
+import dev.rosty.core.model.wa.WaSyncCacheSaved
 import dev.rosty.core.model.wa.WaSyncCancelled
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncCaughtUp
@@ -32,7 +33,9 @@ import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEvicted
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncFetch
 import dev.rosty.core.model.wa.WaSyncFetched
+import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistory
@@ -187,6 +190,22 @@ class FakeWaSyncOps(
     private var sweepPending = false
     private var rekeySeq = 0L
     private var seq: Long? = null
+
+    /** The lazy sync, as the last `open` asked for it; [paged] are the chats paged this session. */
+    var lazy = false
+        private set
+    val paged = mutableSetOf<String>()
+
+    /** The chat on screen (`focus`). */
+    var focused: String? = null
+        private set
+
+    /** What `wa_sync.open` was asked, in order. */
+    val opens = mutableListOf<WaSyncOpenRequest>()
+
+    /** Identity map saves into the vault cache (`cacheSave`). */
+    var cacheSaves = 0
+        private set
 
     /** The key the rows of [id] live under: the id without device, followed through [aliases]. */
     fun keyOf(id: String): String {
@@ -506,8 +525,31 @@ class FakeWaSyncOps(
         return gone
     }
 
-    override suspend fun open(req: WaSyncOpenRequest) =
-        ok(WaSyncOpened(HANDLE, instanceId, SCHEMA_VERSION, seq, owed.refreshChats))
+    override suspend fun open(req: WaSyncOpenRequest): Outcome<WaSyncOpened> =
+        synchronized(lock) {
+            opens += req
+            lazy = req.lazy
+            ok(WaSyncOpened(HANDLE, instanceId, SCHEMA_VERSION, seq, owed.refreshChats, lazy = req.lazy))
+        }
+
+    override suspend fun openPage(req: WaSyncOlderRequest): Outcome<WaSyncOlderAnswer> =
+        synchronized(lock) {
+            val chat = keyOf(req.chat)
+            val fetch = if (lazy && chat !in paged) WaSyncFetch(chat, null, req.limit ?: PAGE) else null
+            ok(WaSyncOlderAnswer(fetch))
+        }
+
+    override suspend fun focus(req: WaSyncFocusRequest): Outcome<HandleAnswer> =
+        synchronized(lock) {
+            focused = req.chat?.let(::keyOf)
+            ok(HandleAnswer(HANDLE))
+        }
+
+    override suspend fun cacheSave(req: WaSyncHandleRequest): Outcome<WaSyncCacheSaved> =
+        synchronized(lock) {
+            cacheSaves++
+            ok(WaSyncCacheSaved(HANDLE, 0))
+        }
 
     override suspend fun close(req: WaSyncHandleRequest) = ok(WaSyncClosed(true))
 
@@ -611,6 +653,9 @@ class FakeWaSyncOps(
         synchronized(lock) {
             writes += req
             req.messages.forEach { store(stored(it)) }
+            val short = req.messages.size < req.limit
+            if (lazy && req.before == null) paged += keyOf(req.chat)
+            if (short) started += keyOf(req.chat)
             ok(
                 WaSyncStoredPage(
                     HANDLE,
@@ -623,7 +668,20 @@ class FakeWaSyncOps(
             )
         }
 
-    override suspend fun older(req: WaSyncOlderRequest) = ok(WaSyncOlderAnswer(null))
+    /** Chats whose history reached its start (a short page). */
+    private val started = mutableSetOf<String>()
+
+    /**
+     * A lazy store answers the page before the oldest stored message of a paged chat; the eager fake has no older
+     * history (tests script it).
+     */
+    override suspend fun older(req: WaSyncOlderRequest): Outcome<WaSyncOlderAnswer> =
+        synchronized(lock) {
+            val chat = keyOf(req.chat)
+            if (!lazy || chat !in paged || chat in started) return@synchronized ok(WaSyncOlderAnswer(null))
+            val oldest = messages[chat].orEmpty().minOfOrNull { it.timestampMs }
+            ok(WaSyncOlderAnswer(WaSyncFetch(chat, oldest?.plus(1), req.limit ?: PAGE)))
+        }
 
     override suspend fun chats(req: WaSyncChatsRequest): Outcome<WaSyncChatsAnswer> =
         synchronized(lock) { ok(WaSyncChatsAnswer(chats.filter { req.includeArchived || !it.archived })) }
@@ -1519,6 +1577,9 @@ class FakeWaSyncOps(
     companion object {
         /** The handle every answer carries. */
         const val HANDLE = 1L
+
+        /** The gateway's default page. */
+        const val PAGE = 50
 
         /** The schema version the real store writes. */
         const val SCHEMA_VERSION = 6

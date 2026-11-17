@@ -3,12 +3,14 @@ package dev.rosty.core.ops
 import dev.rosty.core.NativeRustCore
 import dev.rosty.core.Outcome
 import dev.rosty.core.RustCore
+import dev.rosty.core.RustError
 import dev.rosty.core.call
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.WaIdParseRequest
 import dev.rosty.core.model.wa.WaIdParsed
 import dev.rosty.core.model.wa.WaSyncAccountChangedRequest
 import dev.rosty.core.model.wa.WaSyncApplied
+import dev.rosty.core.model.wa.WaSyncCacheSaved
 import dev.rosty.core.model.wa.WaSyncCancelled
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncCaughtUp
@@ -23,6 +25,7 @@ import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
@@ -109,6 +112,16 @@ interface WaSyncOps {
 
     /** The page before the oldest stored message (scrolling up past it). */
     suspend fun older(req: WaSyncOlderRequest): Outcome<WaSyncOlderAnswer>
+
+    /** The lazy sync: the one page owed now that a chat was opened; null fetch: nothing. */
+    suspend fun openPage(req: WaSyncOlderRequest): Outcome<WaSyncOlderAnswer> = Outcome.Ok(WaSyncOlderAnswer(null))
+
+    /** The lazy sync: the chat on screen, the only one a refreshed chat list pages. */
+    suspend fun focus(req: WaSyncFocusRequest): Outcome<HandleAnswer> = Outcome.Ok(HandleAnswer(req.handle))
+
+    /** Writes the identity map and its cursor into the encrypted vault cache (`locked` without an open vault). */
+    suspend fun cacheSave(req: WaSyncHandleRequest): Outcome<WaSyncCacheSaved> =
+        Outcome.Err(RustError.Unsupported("wa_sync.cache_save"))
 
     /** The chat list, newest first. */
     suspend fun chats(req: WaSyncChatsRequest): Outcome<WaSyncChatsAnswer>
@@ -216,6 +229,9 @@ interface WaSyncOps {
         val ops: List<String> =
             listOf(
                 "wa_sync.open",
+                "wa_sync.open_page",
+                "wa_sync.focus",
+                "wa_sync.cache_save",
                 "wa_sync.close",
                 "wa_sync.plan",
                 "wa_sync.apply_events",
@@ -285,6 +301,15 @@ class NativeWaSyncOps(
 
     override suspend fun older(req: WaSyncOlderRequest) =
         core.call("wa_sync.older", req, WaSyncOlderRequest.serializer(), WaSyncOlderAnswer.serializer())
+
+    override suspend fun openPage(req: WaSyncOlderRequest) =
+        core.call("wa_sync.open_page", req, WaSyncOlderRequest.serializer(), WaSyncOlderAnswer.serializer())
+
+    override suspend fun focus(req: WaSyncFocusRequest) =
+        core.call("wa_sync.focus", req, WaSyncFocusRequest.serializer(), HandleAnswer.serializer())
+
+    override suspend fun cacheSave(req: WaSyncHandleRequest) =
+        core.call("wa_sync.cache_save", req, WaSyncHandleRequest.serializer(), WaSyncCacheSaved.serializer())
 
     override suspend fun chats(req: WaSyncChatsRequest) =
         core.call("wa_sync.chats", req, WaSyncChatsRequest.serializer(), WaSyncChatsAnswer.serializer())

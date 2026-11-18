@@ -4,11 +4,14 @@ import android.content.Context
 import androidx.compose.runtime.Immutable
 import dev.rosty.core.Outcome
 import dev.rosty.core.RustError
+import dev.rosty.core.model.wa.StoredLink
 import dev.rosty.core.model.wa.VaultCommitRequest
+import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyRefusal
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
+import dev.rosty.core.model.wa.VaultLink
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
@@ -40,7 +43,10 @@ sealed interface WaVaultState {
     /** No link and no vault: the link flow comes first, then the setup. */
     data object NoLink : WaVaultState
 
-    /** A plaintext link waits for its vault (an upgrade, or a link just made): the setup. */
+    /**
+     * A link waits for its vault: a link just made or handed over by a sibling app (held by Rust in memory only,
+     * [WaVault.adopt]), or a plaintext `whatsapp-link.json` of an earlier build (the migration). The setup.
+     */
     data object NeedsSetup : WaVaultState
 
     /**
@@ -230,6 +236,12 @@ class WaVault(
     /** K_hw would not open: only a reset helps, whatever the files say. */
     @Volatile private var broken = false
 
+    /**
+     * A link waiting for its vault ([adopt]): Rust holds it in the uncommitted session of this offer, in memory only.
+     * Nothing about it is on disk until [confirm] commits the vault; a process death loses it (link again).
+     */
+    @Volatile private var pending: PassphraseOffer? = null
+
     val unlocked: Boolean get() = stateFlow.value == WaVaultState.Unlocked
 
     var autoLockMs: Long
@@ -278,7 +290,7 @@ class WaVault(
                 st.unlocked != null -> WaVaultState.Unlocked
                 st.vault != null && broken -> WaVaultState.Broken
                 st.vault != null -> WaVaultState.Locked(biometric = st.daily != null, reason = reason)
-                st.legacyLink -> WaVaultState.NeedsSetup
+                pending != null || st.legacyLink -> WaVaultState.NeedsSetup
                 else -> WaVaultState.NoLink
             }
     }
@@ -460,14 +472,71 @@ class WaVault(
 
     // ---- setup and change
 
-    /** A new vault for the plaintext link: the passphrase to show. Nothing is on disk until [confirm]. */
+    /**
+     * A new vault for the link waiting for one ([adopt]), else for the plaintext link of an earlier build: the
+     * passphrase to show. Nothing is on disk until [confirm].
+     */
     suspend fun startSetup(): Outcome<PassphraseOffer> =
         mutex.withLock {
+            pending?.let { return@withLock Outcome.Ok(it) }
             when (val created = ops.create()) {
                 is Outcome.Err -> created
                 is Outcome.Ok -> Outcome.Ok(created.value.let { offerOf(it.handle, it.passphrase, it.seal) })
             }
         }
+
+    /**
+     * Takes [link] (pasted, made by the link flow, or handed over by a sibling Rosty app) for a new vault: Rust
+     * checks it and keeps it in an uncommitted session, the state turns [WaVaultState.NeedsSetup] and the setup
+     * screens follow. The link is never written in plaintext (`whatsapp-link.json` stays untouched); only the
+     * committed vault holds it. Refused while a vault exists (reset it first).
+     */
+    suspend fun adopt(link: StoredLink): Outcome<Unit> =
+        mutex.withLock {
+            val request = VaultCreateRequest(link = VaultLink(link.gatewayUrl, link.instanceId, link.key))
+            when (val created = ops.create(request)) {
+                is Outcome.Err -> {
+                    created
+                }
+
+                is Outcome.Ok -> {
+                    pending?.let { old -> ops.lock(VaultLockRequest(handle = old.handle)) }
+                    pending = created.value.let { offerOf(it.handle, it.passphrase, it.seal) }
+                    refreshLocked()
+                    Outcome.Ok(Unit)
+                }
+            }
+        }
+
+    /**
+     * The link of the open vault, for the hand-over to a sibling Rosty app that is setting up its own vault
+     * (`WaLinkProvider`). Null unless this process has the vault unlocked. In memory only: never log or store it.
+     */
+    suspend fun exportLink(): StoredLink? =
+        mutex.withLock {
+            if (stateFlow.value != WaVaultState.Unlocked) return@withLock null
+            val handle = (stateNow() as? Outcome.Ok)?.value?.unlocked?.handle ?: return@withLock null
+            when (val out = ops.exportLink(VaultHandleRequest(handle))) {
+                is Outcome.Ok -> out.value.let { StoredLink(it.gatewayUrl, it.instanceId, it.key) }
+                is Outcome.Err -> null
+            }
+        }
+
+    /**
+     * A Stops trip with an arriving-soon message starts (plan 13.3): Rust copies the link of the open vault into the
+     * trip's RAM, where it stays until the trip ends ([releaseTrip], or Rust's own end of the trip). False while
+     * locked: the trip then carries no message.
+     */
+    suspend fun holdForTrip(): Boolean =
+        mutex.withLock {
+            val handle = refreshLocked()?.unlocked?.handle ?: return@withLock false
+            (ops.tripHold(VaultHandleRequest(handle)) as? Outcome.Ok)?.value?.held == true
+        }
+
+    /** The trip ended: its copy of the link goes. */
+    suspend fun releaseTrip() {
+        ops.tripRelease()
+    }
 
     /** A new passphrase for the open vault (plan 3: a new K_hw alias, the old one deleted). */
     suspend fun startChange(): Outcome<PassphraseOffer> =
@@ -519,6 +588,7 @@ class WaVault(
                 keystore.delete(alias)
                 return@withLock refused(VaultProblem.Failed)
             }
+            if (pending === offer) pending = null
             before
                 ?.vault
                 ?.hwAlias
@@ -548,11 +618,18 @@ class WaVault(
             VaultOutcome.Done
         }
 
-    /** A setup the person left: the pending session is released (a change keeps its open session). */
+    /**
+     * A setup the person left: the pending session is released (a change keeps its open session). A link that was
+     * waiting for its vault ([adopt]) goes with it: the person links again.
+     */
     suspend fun abandon(offer: PassphraseOffer) {
         mutex.withLock {
             val open = (stateNow() as? Outcome.Ok)?.value?.unlocked?.handle
             if (open != offer.handle) ops.lock(VaultLockRequest(handle = offer.handle))
+            if (pending === offer) {
+                pending = null
+                refreshLocked()
+            }
         }
     }
 
@@ -577,6 +654,8 @@ class WaVault(
         onLock()
         return mutex.withLock {
             ops.lock()
+            pending?.let { ops.lock(VaultLockRequest(handle = it.handle)) }
+            pending = null
             val done = ops.reset() is Outcome.Ok
             for (alias in keystore.aliases()) keystore.delete(alias)
             prefs.failedDaily = 0

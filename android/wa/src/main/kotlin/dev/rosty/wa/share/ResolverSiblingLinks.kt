@@ -9,7 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * [SiblingLinks] over the content resolver: reads `content://<package>.walink/link` of a sibling ([WaLinkShare]).
+ * [SiblingLinks] over the content resolver: reads `content://<package>.walink/link` (and `/offer`) of a sibling
+ * ([WaLinkShare]).
  *
  * A package is only asked when its provider exists, belongs to that package and the package is signed with the same
  * key as this app (`PackageManager.checkSignatures`). The signature permission already keeps strangers from reading
@@ -25,20 +26,38 @@ class ResolverSiblingLinks(
 ) : SiblingLinks {
     private val app = context.applicationContext
 
+    /** [SiblingAnswer.NotInstalled] or [SiblingAnswer.Untrusted] when [packageName] must not be read, else null. */
     @SuppressLint("QueryPermissionsNeeded")
+    private fun refusal(packageName: String): SiblingAnswer? {
+        val packages = app.packageManager
+        val provider =
+            try {
+                packages.resolveContentProvider(WaLinkShare.authority(packageName), 0)
+            } catch (_: RuntimeException) {
+                null
+            } ?: return SiblingAnswer.NotInstalled
+        val trusted =
+            provider.packageName == packageName &&
+                packages.checkSignatures(app.packageName, packageName) == PackageManager.SIGNATURE_MATCH
+        return if (trusted) null else SiblingAnswer.Untrusted
+    }
+
+    override suspend fun offers(packageName: String): Boolean =
+        withContext(io) {
+            if (refusal(packageName) != null) return@withContext false
+            try {
+                app.contentResolver.query(WaLinkShare.offerUri(packageName), null, null, null, null)?.use {
+                    it.moveToFirst()
+                } == true
+            } catch (_: RuntimeException) {
+                // A sibling of an older build has no offer row, or its process died.
+                false
+            }
+        }
+
     override suspend fun ask(packageName: String): SiblingAnswer =
         withContext(io) {
-            val packages = app.packageManager
-            val provider =
-                try {
-                    packages.resolveContentProvider(WaLinkShare.authority(packageName), 0)
-                } catch (_: RuntimeException) {
-                    null
-                } ?: return@withContext SiblingAnswer.NotInstalled
-            val trusted =
-                provider.packageName == packageName &&
-                    packages.checkSignatures(app.packageName, packageName) == PackageManager.SIGNATURE_MATCH
-            if (!trusted) return@withContext SiblingAnswer.Untrusted
+            refusal(packageName)?.let { return@withContext it }
             try {
                 val cursor =
                     app.contentResolver.query(WaLinkShare.linkUri(packageName), null, null, null, null)
@@ -58,7 +77,7 @@ class ResolverSiblingLinks(
         }
 }
 
-/** [WaLinkMarks] in the app's private preferences (`wa-link-share`). No key is stored, only a one-way mark of it. */
+/** [WaLinkMarks] in the app's private preferences (`wa-link-share`): where the link came from, never the key. */
 class PrefsWaLinkMarks(
     context: Context,
 ) : WaLinkMarks {
@@ -75,18 +94,14 @@ class PrefsWaLinkMarks(
             prefs
                 .edit()
                 .apply {
+                    // The one-way mark of a removed link of earlier builds is not kept any more.
+                    remove(DECLINED)
                     if (value == null) {
                         remove(ADOPTED_INSTANCE).remove(ADOPTED_FROM)
                     } else {
                         putString(ADOPTED_INSTANCE, value.instanceId).putString(ADOPTED_FROM, value.fromPackage)
                     }
                 }.apply()
-        }
-
-    override var declined: String?
-        get() = prefs.getString(DECLINED, null)
-        set(value) {
-            prefs.edit().apply { if (value == null) remove(DECLINED) else putString(DECLINED, value) }.apply()
         }
 
     private companion object {

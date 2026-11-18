@@ -28,19 +28,28 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowBinder
 
-/** The application of the provider tests: hands out [link] like `:shell`'s `HasContainer` does. */
+/**
+ * The application of the provider tests: hands out [link] like `:shell`'s `HasContainer` does with an unlocked vault
+ * (null stands for a locked vault, a cold process or no link).
+ */
 class LinkTestApp :
     Application(),
     WaLinkShareHost {
     @Volatile var link: StoredLink? = null
 
-    /** How long the read takes (a cold process building its core). */
+    /** How long the read takes. */
     @Volatile var readMs: Long = 0
+
+    /** The links read for a sibling. */
+    @Volatile var reads = 0
 
     override suspend fun waLinkToShare(): StoredLink? {
         if (readMs > 0) delay(readMs)
+        reads += 1
         return link
     }
+
+    override suspend fun waLinkOffered(): Boolean = link != null
 }
 
 /** Stands in for the provider of a sibling app: answers whatever cursor the test scripted. */
@@ -160,6 +169,20 @@ class WaLinkProviderTest {
         assertEquals("content://${app.packageName}.walink/link", WaLinkShare.linkUri(app.packageName).toString())
     }
 
+    @Test fun theOfferSaysWhetherALinkWouldBeHandedOverWithoutTheKey() {
+        val offer = WaLinkShare.offerUri(app.packageName)
+        query(offer).use { cursor ->
+            assertEquals(listOf(WaLinkShare.Columns.AVAILABLE), cursor.columnNames.toList())
+            assertEquals("locked: nothing to offer", 0, cursor.count)
+        }
+        app.link = link
+        query(offer).use { cursor ->
+            assertEquals(1, cursor.count)
+            assertTrue(cursor.columnNames.none { it == WaLinkShare.Columns.KEY })
+        }
+        assertEquals("the offer reads no link", 0, app.reads)
+    }
+
     @Test fun aStoredLinkThatIsNotUsableIsNotHandedOut() {
         app.link = StoredLink("", "inst1", "key")
         query().use { assertEquals(0, it.count) }
@@ -238,6 +261,20 @@ class WaLinkProviderTest {
             assertEquals(SiblingAnswer.Link(link), siblings.ask(messages))
         }
 
+    @Test fun aSiblingOffersOnlyWhatItsOfferRowSays() =
+        runTest {
+            assertEquals(false, siblings.offers(messages))
+            install(messages, OURS)
+            val provider = stub(messages)
+            provider.answer = { WaLinkShare.offerCursorOf(false) }
+            assertEquals(false, siblings.offers(messages))
+            provider.answer = { WaLinkShare.offerCursorOf(true) }
+            assertEquals(true, siblings.offers(messages))
+            // An older sibling without the offer row, or one that throws.
+            provider.answer = { error("boom") }
+            assertEquals(false, siblings.offers(messages))
+        }
+
     @Test fun aSiblingWithoutALinkAnswersNoLink() =
         runTest {
             install(messages, OURS)
@@ -308,24 +345,22 @@ class WaLinkProviderTest {
         }
 
     @Test fun theMarksSurviveANewInstanceAndHoldNoKey() {
+        // A one-way mark of a removed link of an earlier build goes with the next write.
+        app
+            .getSharedPreferences("wa-link-share", 0)
+            .edit()
+            .putString("declined", "f00")
+            .commit()
         val marks = PrefsWaLinkMarks(app)
         assertNull(marks.adopted)
-        assertNull(marks.declined)
         marks.adopted = AdoptedLink("inst1", messages)
-        marks.declined = WaLinkHandover.fingerprint(link)
         val again = PrefsWaLinkMarks(app)
         assertEquals(AdoptedLink("inst1", messages), again.adopted)
-        assertEquals(WaLinkHandover.fingerprint(link), again.declined)
-        val stored =
-            app
-                .getSharedPreferences("wa-link-share", 0)
-                .all.values
-                .joinToString()
-        assertTrue("the key is not in the preferences", link.key !in stored)
+        val stored = app.getSharedPreferences("wa-link-share", 0).all
+        assertTrue("the key is not in the preferences", link.key !in stored.values.joinToString())
+        assertTrue("declined" !in stored.keys)
         again.adopted = null
-        again.declined = null
         assertNull(PrefsWaLinkMarks(app).adopted)
-        assertNull(PrefsWaLinkMarks(app).declined)
     }
 
     private companion object {

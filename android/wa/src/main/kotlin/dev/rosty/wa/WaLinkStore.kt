@@ -17,9 +17,9 @@ import dev.rosty.core.ops.WaOps
 class WaLinkStore(
     private val ops: WaOps,
     private val dir: String? = null,
-) {
+) : WaLinkSource {
     /** The stored link, or null when this app has none. A damaged file is an error, not "no link". */
-    suspend fun read(): Outcome<StoredLink?> = ops.linkRead(LinkReadRequest(dir)).map { it.link }
+    override suspend fun read(): Outcome<StoredLink?> = ops.linkRead(LinkReadRequest(dir)).map { it.link }
 
     /** Saves [link]; a bad URL or key is `RustError.Invalid` and nothing is written. */
     suspend fun write(link: StoredLink): Outcome<Unit> = ops.linkWrite(LinkWriteRequest(dir, link)).map { }

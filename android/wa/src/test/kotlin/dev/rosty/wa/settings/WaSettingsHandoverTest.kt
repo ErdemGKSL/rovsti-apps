@@ -19,9 +19,11 @@ import dev.rosty.wa.DemoSettingsMachine
 import dev.rosty.wa.FakeQr
 import dev.rosty.wa.FakeWaGateway
 import dev.rosty.wa.FakeWaRepository
-import dev.rosty.wa.WaLinkStore
+import dev.rosty.wa.WaLinkSource
 import dev.rosty.wa.WaRepository
+import dev.rosty.wa.share.HeldLink
 import dev.rosty.wa.share.SiblingAnswer
+import dev.rosty.wa.share.SiblingLinks
 import dev.rosty.wa.share.WaLinkHandover
 import dev.rosty.wa.share.WaLinkMarks
 import kotlinx.coroutines.Dispatchers
@@ -43,8 +45,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * WA-R2: the link screen and the hand-over between Rosty apps. The screen opens without a link, a sibling has one:
- * the page is the linked one and says where the link came from. Unlinking keeps the sibling's link and offers it.
+ * WA-R2 with the vault (`plans/wa-vault.md` 13.3): the link screen offers the link of an unlocked sibling, takes it
+ * only on the person's tap, hands it to this app's vault (never to a link file), and shows the linked page once the
+ * vault's setup has opened it. Unlinking keeps the sibling's link and offers it again.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -59,31 +62,44 @@ class WaSettingsHandoverTest {
     private val dispatcher = UnconfinedTestDispatcher()
     private val gw = FakeWaGateway()
     private val fake = FakeWaRepository()
-    private val link = StoredLink("https://wa.example.com", "inst1", "rwk_" + "A".repeat(43))
+    private val link = StoredLink("https://rosty.erdemdev.tr", "inst1", "rwk_" + "A".repeat(43))
     private val marks = WaLinkMarks.InMemory()
     private var sibling: SiblingAnswer = SiblingAnswer.Link(link)
 
-    /** [FakeWaRepository] that also keeps the link in the fake link file, like the real repository. */
+    /** The link waiting for this app's vault (its setup), and the vault's link once it is open (no key). */
+    private var waiting: StoredLink? = null
+    private var vaultLink: StoredLink? = null
+    private val source = WaLinkSource { Outcome.Ok(vaultLink) }
+
     private val repo: WaRepository =
         object : WaRepository by fake {
-            override suspend fun relinkTo(link: StoredLink): Outcome<Unit> {
-                gw.link = link
-                return fake.relinkTo(link)
-            }
-
             override suspend fun forget(): Outcome<Unit> {
-                gw.link = null
+                vaultLink = null
                 return fake.forget()
             }
         }
 
     private val handover =
         WaLinkHandover(
-            store = WaLinkStore(gw.ops),
+            held = {
+                when {
+                    vaultLink != null -> HeldLink.Held(vaultLink?.instanceId)
+                    waiting != null -> HeldLink.Held(null)
+                    else -> HeldLink.None
+                }
+            },
             siblings = listOf(MESSAGES),
-            source = { sibling },
+            source =
+                object : SiblingLinks {
+                    override suspend fun offers(packageName: String): Boolean = sibling is SiblingAnswer.Link
+
+                    override suspend fun ask(packageName: String): SiblingAnswer = sibling
+                },
             marks = marks,
-            adopt = repo::relinkTo,
+            adopt = { taken ->
+                waiting = taken
+                Outcome.Ok(Unit)
+            },
         )
 
     @Before
@@ -102,7 +118,7 @@ class WaSettingsHandoverTest {
             app = AppId.Phone,
             machine = DemoSettingsMachine(),
             opener = gw.urlOpener,
-            store = WaLinkStore(gw.ops),
+            store = source,
             repo = repo,
             qr = NativeQrOps(gw.core),
             clipboard = FakeClipboardRepository(),
@@ -114,20 +130,47 @@ class WaSettingsHandoverTest {
             handover = share,
         )
 
+    /** The vault's setup ran for the waiting link and the vault is open. */
+    private fun vaultOpens() {
+        vaultLink = waiting?.copy(key = "")
+        waiting = null
+    }
+
     @Test
-    fun theScreenOpensLinkedWhenASiblingHasTheLink() =
+    fun theScreenOffersAnUnlockedSiblingsLinkAndTakesNothingByItself() =
         runTest {
             val vm = viewModel()
-            assertEquals("the link was stored as a pasted key would be", link, fake.linked)
+            assertEquals("choose", vm.state.value.view.kind)
+            assertEquals(MESSAGES, vm.state.value.siblingOffer)
+            assertNull("nothing was taken", waiting)
+            assertNull(fake.linked)
+            assertTrue("no link file was written", gw.core.calls.none { it.op == "wa.link_write" })
+        }
+
+    @Test
+    fun theTapHandsTheLinkToTheVaultAndThePageFollowsOnceItIsOpen() =
+        runTest {
+            val vm = viewModel()
+            vm.onAction(WaSettingsAction.UseSiblingLink)
+            assertEquals("the link waits for this app's vault", link, waiting)
+            assertNull("not stored like a pasted key", fake.linked)
+            assertTrue("no link file was written", gw.core.calls.none { it.op == "wa.link_write" })
+            assertNull(vm.state.value.siblingOffer)
+
+            vaultOpens()
+            vm.vaultOpened()
             assertEquals("connected", vm.state.value.view.kind)
             assertEquals(MESSAGES, vm.state.value.sharedFrom)
-            assertNull(vm.state.value.siblingOffer)
+            // A page that knows its link carries on at the next unlock.
+            val before = gw.core.calls.size
+            vm.vaultOpened()
+            assertEquals(before, gw.core.calls.size)
         }
 
     @Test
     fun withoutASiblingTheScreenStillOffersPaste() =
         runTest {
-            sibling = SiblingAnswer.NotInstalled
+            sibling = SiblingAnswer.NoLink
             val vm = viewModel()
             assertEquals("choose", vm.state.value.view.kind)
             assertTrue(
@@ -136,7 +179,8 @@ class WaSettingsHandoverTest {
             )
             assertNull(vm.state.value.sharedFrom)
             assertNull(vm.state.value.siblingOffer)
-            assertNull(fake.linked)
+            vm.onAction(WaSettingsAction.UseSiblingLink)
+            assertNull(waiting)
         }
 
     @Test
@@ -144,33 +188,25 @@ class WaSettingsHandoverTest {
         runTest {
             val vm = viewModel(share = null)
             assertEquals("choose", vm.state.value.view.kind)
-            assertNull(fake.linked)
+            assertNull(vm.state.value.siblingOffer)
+            assertNull(waiting)
         }
 
     @Test
     fun unlinkingHereLeavesTheSiblingLinkedAndOffersItsLink() =
         runTest {
             val vm = viewModel()
+            vm.onAction(WaSettingsAction.UseSiblingLink)
+            vaultOpens()
+            vm.vaultOpened()
             vm.onAction(WaSettingsAction.Press(SettingsInput.unit("unlink")))
             assertEquals("choose", vm.state.value.view.kind)
             assertTrue("forget" in fake.log)
-            assertNull(gw.link)
+            assertNull(vaultLink)
             assertEquals("the sibling was not asked to do anything", SiblingAnswer.Link(link), sibling)
             assertNull(vm.state.value.sharedFrom)
             assertEquals(MESSAGES, vm.state.value.siblingOffer)
-
-            // Opening the screen again does not take the link back behind the user's back.
-            val again = viewModel()
-            assertEquals("choose", again.state.value.view.kind)
-            assertNull(gw.link)
-            assertEquals(MESSAGES, again.state.value.siblingOffer)
-
-            // The user's own tap does.
-            again.onAction(WaSettingsAction.UseSiblingLink)
-            assertEquals(link, gw.link)
-            assertEquals("connected", again.state.value.view.kind)
-            assertEquals(MESSAGES, again.state.value.sharedFrom)
-            assertNull(again.state.value.siblingOffer)
+            assertNull(waiting)
         }
 
     @Test

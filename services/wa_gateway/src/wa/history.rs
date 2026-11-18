@@ -174,6 +174,39 @@ fn history_message(
                 extras,
             })
         }
+        // A change of the chat's timer is a line of the conversation; the
+        // timer itself comes with the conversation's settings.
+        Converted::Disappearing {
+            chat: line_chat,
+            id,
+            seconds,
+            at_ms,
+            by,
+        } => Some(HistoryMessage {
+            reactions: Vec::new(),
+            message: rosty_wa_proto::WaMessage {
+                id,
+                chat: line_chat,
+                sender: author.sender.clone().filter(|_| !from_me),
+                from_me,
+                timestamp_ms: at_ms,
+                body: MessageBody::Unsupported,
+                reactions: Vec::new(),
+                chat_alt: None,
+                sender_alt: None,
+            },
+            extras: crate::store::MessageExtras {
+                meta: rosty_wa_proto::MessageMeta {
+                    system: Some(rosty_wa_proto::SystemNote::Disappearing {
+                        seconds,
+                        by: Some(by),
+                    }),
+                    ..Default::default()
+                },
+                wire_chat: Some(wire_chat.to_owned()),
+                ..crate::store::MessageExtras::default()
+            },
+        }),
         // History holds each message as it is now; reactions come with their
         // message, edits and deletes are already applied.
         Converted::Reaction { .. }
@@ -316,6 +349,15 @@ pub fn conversation(conv: &wa::Conversation, now_ms: i64, map: &LidMap) -> Optio
             pinned: conv.pinned.unwrap_or(0) > 0,
             muted_until_ms: mute_end(conv.mute_end_time, now_ms),
             marked_unread: conv.marked_as_unread.unwrap_or(false),
+            // The chat's disappearing timer, as of when it was set (0 when
+            // the sync does not say: any live setting wins).
+            ephemeral_s: conv.ephemeral_expiration,
+            ephemeral_ms: conv.ephemeral_expiration.map(|_| {
+                conv.ephemeral_setting_timestamp
+                    .unwrap_or(0)
+                    .saturating_mul(1000)
+                    .max(0)
+            }),
         },
     })
 }
@@ -849,6 +891,7 @@ mod tests {
                 pinned: true,
                 muted_until_ms: Some(MUTED_FOREVER),
                 marked_unread: false,
+                ..ChatSettings::default()
             }
         );
         let m = &chat.messages[0];

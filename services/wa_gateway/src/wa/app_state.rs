@@ -40,6 +40,22 @@ pub async fn apply_converted(sink: &EventSink, converted: Converted) {
             sink.change_message(&chat, &target_id, MessageChange::Revoke { by, at_ms })
                 .await;
         }
+        Converted::Disappearing {
+            chat,
+            id,
+            seconds,
+            at_ms,
+            by,
+        } => {
+            sink.chat_timer_changed(crate::driver::TimerChange {
+                chat,
+                seconds,
+                at_ms,
+                by: Some(by),
+                note_id: id,
+            })
+            .await;
+        }
         Converted::Ignore => {}
     }
 }

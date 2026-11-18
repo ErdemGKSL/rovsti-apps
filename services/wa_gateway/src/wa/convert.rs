@@ -4,8 +4,8 @@
 
 use rosty_wa_proto::meta::body_preview;
 use rosty_wa_proto::{
-    DeliveryStatus, Location, MediaKind, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction,
-    SharedContact, Unavailable, WaMessage, WaUser,
+    DeliveryStatus, LinkPreview, Location, MediaKind, MediaMeta, MessageBody, MessageMeta, Quoted,
+    Reaction, SharedContact, Unavailable, WaMessage, WaUser,
 };
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::types::events::{UnavailableType, UndecryptableMessage};
@@ -130,6 +130,16 @@ pub enum Converted {
         by: String,
         at_ms: i64,
     },
+    /// The chat's disappearing timer was set to `seconds` (0: off) at
+    /// `at_ms` by `by` ([`rosty_wa_proto::DELETED_BY_ME`] or the JID): the
+    /// `EPHEMERAL_SETTING` protocol message `id`.
+    Disappearing {
+        chat: String,
+        id: String,
+        seconds: u32,
+        at_ms: i64,
+        by: String,
+    },
     /// Protocol plumbing that is not a message the user sees.
     Ignore,
 }
@@ -211,6 +221,10 @@ fn content(message: &wa::Message) -> Content {
             .filter(|id| !id.is_empty());
         return match (pm.r#type, target_id) {
             (Some(ProtocolType::REVOKE), Some(target_id)) => Content::Revoke { target_id },
+            (Some(ProtocolType::EPHEMERAL_SETTING), _) => Content::Disappearing {
+                seconds: pm.ephemeral_expiration.unwrap_or(0),
+                at_s: pm.ephemeral_setting_timestamp,
+            },
             (Some(ProtocolType::MESSAGE_EDIT), Some(target_id)) => {
                 match pm.edited_message.as_option().map(content) {
                     Some(Content::Body(body)) if body != MessageBody::Unsupported => {
@@ -245,6 +259,10 @@ enum Content {
     },
     Revoke {
         target_id: String,
+    },
+    Disappearing {
+        seconds: u32,
+        at_s: Option<i64>,
     },
     Ignore,
 }
@@ -382,6 +400,10 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
 
     if let Some(context) = context_of(base) {
         meta.forwarded = context.is_forwarded.unwrap_or(false);
+        meta.forwarding_score = context
+            .forwarding_score
+            .filter(|score| meta.forwarded && *score > 0);
+        meta.expires_s = context.expiration.filter(|s| *s > 0);
         meta.mentions = context
             .mentioned_jid
             .iter()
@@ -434,6 +456,10 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
             live: true,
         });
     }
+    if let Some((preview, picture)) = link_preview(base) {
+        meta.link_preview = Some(preview);
+        thumbnail = thumbnail.or(picture);
+    }
     let card = base.contact_message.as_option().or_else(|| {
         base.contacts_array_message
             .as_option()
@@ -459,6 +485,46 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
         wire_chat: None,
         wire_sender: None,
     }
+}
+
+/// The preview card of the link a text carries, and its picture. `None` when
+/// the text has no card (no title, no description).
+fn link_preview(base: &wa::Message) -> Option<(LinkPreview, Option<Vec<u8>>)> {
+    let m = base.extended_text_message.as_option()?;
+    let title = non_empty(&m.title);
+    let description = non_empty(&m.description);
+    if title.is_none() && description.is_none() {
+        return None;
+    }
+    let url = non_empty(&m.matched_text)
+        .or_else(|| {
+            m.text
+                .as_deref()
+                .and_then(rosty_core::wa_actions::first_url)
+                .map(|found| found.url)
+        })
+        .unwrap_or_default();
+    let picture = thumb(&m.jpeg_thumbnail);
+    Some((
+        LinkPreview {
+            url,
+            title,
+            description,
+            thumbnail: picture.is_some(),
+        },
+        picture,
+    ))
+}
+
+/// The disappearing timer an incoming message states for its chat, with
+/// when it was set (`contextInfo.expiration` and
+/// `ephemeralSettingTimestamp`). `None` unless both are there: a message
+/// alone does not prove when the timer was set.
+pub fn timer_hint(message: &wa::Message) -> Option<(u32, i64)> {
+    let context = context_of(message.get_base_message())?;
+    let seconds = context.expiration.filter(|s| *s > 0)?;
+    let at_s = context.ephemeral_setting_timestamp.filter(|t| *t > 0)?;
+    Some((seconds, at_s.saturating_mul(1000)))
 }
 
 /// Who deleted a message for everyone: me, the group member (sender or
@@ -520,6 +586,15 @@ pub fn convert(origin: Origin<'_>, message: &wa::Message) -> Converted {
             target_id,
             by: revoked_by(&origin).to_owned(),
             at_ms: origin.timestamp_ms,
+        },
+        Content::Disappearing { seconds, at_s } => Converted::Disappearing {
+            chat: origin.chat.to_owned(),
+            id: origin.id.to_owned(),
+            seconds,
+            at_ms: at_s
+                .filter(|t| *t > 0)
+                .map_or(origin.timestamp_ms, |t| t.saturating_mul(1000)),
+            by: revoked_by(&origin).to_owned(),
         },
         Content::Reaction { target_id, emoji } => Converted::Reaction {
             chat: origin.chat.to_owned(),
@@ -761,6 +836,99 @@ pub fn placeholder(info: &MessageInfo, reason: Unavailable, map: &LidMap) -> Con
     )
 }
 
+/// The WhatsApp message to forward for a stored one: media from its stored
+/// protobuf (the copy relays the same CDN blob), a text rebuilt from its body
+/// with the forwarded mark and score it arrived with, so the copy's score
+/// goes up from there. Anything else cannot be forwarded.
+pub fn forwardable(
+    body: &MessageBody,
+    raw: Option<&[u8]>,
+    meta: &MessageMeta,
+) -> Result<wa::Message, DriverError> {
+    match body {
+        MessageBody::Media { .. } => {
+            let raw = raw.ok_or_else(|| {
+                DriverError::BadRequest("the media of this message is not stored".into())
+            })?;
+            super::media::decode(raw)
+        }
+        MessageBody::Text(text) => {
+            let context =
+                (meta.forwarded || meta.forwarding_score.is_some()).then(|| wa::ContextInfo {
+                    is_forwarded: Some(meta.forwarded),
+                    forwarding_score: meta.forwarding_score,
+                    ..Default::default()
+                });
+            Ok(match context {
+                Some(context) => wa::Message {
+                    extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
+                        text: Some(text.clone()),
+                        context_info: MessageField::some(context),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                None => wa::Message {
+                    conversation: Some(text.clone()),
+                    ..Default::default()
+                },
+            })
+        }
+        MessageBody::Unsupported => Err(DriverError::BadRequest(
+            "this message cannot be forwarded".into(),
+        )),
+    }
+}
+
+/// A text's mentions as a group that names its members by LID wants them:
+/// each mentioned phone-number JID with a known LID (`pairs`: `(pn, lid)`,
+/// bare) becomes that LID, in `mentioned_jid` and in its `@<digits>` token.
+/// Mentions without a known LID stay as they are.
+pub fn mentions_by_lid(
+    text: &str,
+    mentions: &[String],
+    pairs: &[(String, String)],
+) -> (String, Vec<String>) {
+    use rosty_core::wa_actions::mention_token;
+    let mut text = text.to_owned();
+    let mut out = Vec::with_capacity(mentions.len());
+    for mention in mentions {
+        let lid = pairs.iter().find(|(pn, _)| pn == mention).map(|(_, l)| l);
+        let (Some(lid), Some(from), Some(to)) = (
+            lid,
+            mention_token(mention),
+            lid.and_then(|l| mention_token(l)),
+        ) else {
+            out.push(mention.clone());
+            continue;
+        };
+        text = replace_token(&text, &from, &to);
+        out.push(lid.clone());
+    }
+    (text, out)
+}
+
+/// Replaces each `@<from>` token of `text` (not followed by another digit)
+/// with `@<to>`.
+fn replace_token(text: &str, from: &str, to: &str) -> String {
+    let needle = format!("@{from}");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(&needle) {
+        let after = &rest[at + needle.len()..];
+        out.push_str(&rest[..at]);
+        if after.starts_with(|c: char| c.is_ascii_digit()) {
+            out.push_str(&needle);
+        } else {
+            out.push('@');
+            out.push_str(to);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -980,6 +1148,102 @@ mod tests {
         assert_eq!(contact.display_name, "Bob");
     }
 
+    #[test]
+    fn link_previews_forwarding_and_timers_are_read() {
+        let jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2];
+        let message = wa::Message {
+            extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
+                text: Some("look https://example.com/a".into()),
+                matched_text: Some("https://example.com/a".into()),
+                title: Some("Example".into()),
+                description: Some(String::new()),
+                jpeg_thumbnail: Some(jpeg.clone()),
+                context_info: MessageField::some(wa::ContextInfo {
+                    is_forwarded: Some(true),
+                    forwarding_score: Some(127),
+                    expiration: Some(604_800),
+                    ephemeral_setting_timestamp: Some(1_700_000_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let extras = extras_of(convert(origin(false, None, CHAT), &message));
+        let preview = extras.meta.link_preview.expect("preview");
+        assert_eq!(preview.url, "https://example.com/a");
+        assert_eq!(preview.title.as_deref(), Some("Example"));
+        assert_eq!(preview.description, None);
+        assert!(preview.thumbnail);
+        assert_eq!(extras.thumbnail, Some(jpeg));
+        assert!(extras.meta.forwarded);
+        assert_eq!(extras.meta.forwarding_score, Some(127));
+        assert_eq!(extras.meta.expires_s, Some(604_800));
+        assert_eq!(timer_hint(&message), Some((604_800, 1_700_000_000_000)));
+        // A plain text has none of it.
+        let plain = wa::Message {
+            conversation: Some("hi".into()),
+            ..Default::default()
+        };
+        let extras = extras_of(convert(origin(false, None, CHAT), &plain));
+        assert!(extras.meta.link_preview.is_none() && extras.meta.expires_s.is_none());
+        assert_eq!(timer_hint(&plain), None);
+    }
+
+    #[test]
+    fn mentions_follow_a_lid_group() {
+        let pn = "100000000011@s.whatsapp.net".to_owned();
+        let other = "100000000012@s.whatsapp.net".to_owned();
+        let lid = "123456789012345@lid".to_owned();
+        let (text, jids) = mentions_by_lid(
+            "hi @100000000011 and @100000000012, not @1000000000111",
+            &[pn.clone(), other.clone()],
+            &[(pn, lid.clone())],
+        );
+        assert_eq!(
+            text,
+            "hi @123456789012345 and @100000000012, not @1000000000111"
+        );
+        assert_eq!(jids, vec![lid, other]);
+    }
+
+    #[test]
+    fn forwardable_texts_keep_their_score_and_media_needs_its_proto() {
+        let meta = MessageMeta {
+            forwarded: true,
+            forwarding_score: Some(3),
+            ..Default::default()
+        };
+        let text = forwardable(&MessageBody::Text("hi".into()), None, &meta).unwrap();
+        let context = text
+            .extended_text_message
+            .as_option()
+            .and_then(|m| m.context_info.as_option())
+            .expect("context");
+        assert_eq!(context.forwarding_score, Some(3));
+        let plain = forwardable(
+            &MessageBody::Text("hi".into()),
+            None,
+            &MessageMeta::default(),
+        )
+        .unwrap();
+        assert_eq!(plain.conversation.as_deref(), Some("hi"));
+        let photo = MessageBody::Media {
+            kind: MediaKind::Image,
+            caption: None,
+            mime: "image/jpeg".into(),
+            size: 1,
+        };
+        assert!(forwardable(&photo, None, &meta).is_err());
+        let raw = wa::Message {
+            image_message: MessageField::some(wa::message::ImageMessage::default()),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        assert!(forwardable(&photo, Some(&raw), &meta).is_ok());
+        assert!(forwardable(&MessageBody::Unsupported, None, &meta).is_err());
+    }
+
     fn protocol(kind: ProtocolType, edited: Option<wa::Message>) -> wa::Message {
         wa::Message {
             protocol_message: MessageField::some(wa::message::ProtocolMessage {
@@ -1056,13 +1320,14 @@ mod tests {
             ),
             Converted::Ignore
         );
-        assert_eq!(
+        // The disappearing timer: a line in the chat (E6-WA R4).
+        assert!(matches!(
             convert(
                 origin(true, None, CHAT),
                 &protocol(ProtocolType::EPHEMERAL_SETTING, None)
             ),
-            Converted::Ignore
-        );
+            Converted::Disappearing { seconds: 0, ref by, .. } if by == rosty_wa_proto::DELETED_BY_ME
+        ));
     }
 
     #[test]

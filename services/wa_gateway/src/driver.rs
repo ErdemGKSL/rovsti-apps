@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use rosty_wa_proto::{
-    ChatAction, ChatState, DELETED_BY_ME, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
-    HistorySyncType, IdentitySource, LinkRequest, MarkRead, MediaKind, MessageMeta, Reaction,
-    RevokeMessage, SendReaction, SendText, Sent, WaMessage, WaProfile, WaUser, event::ReceiptKind,
-    is_status_chat,
+    ChatAction, ChatState, DELETED_BY_ME, DeliveryStatus, EditMessage, ForwardMessage,
+    GatewayEvent, GroupInfo, HistorySyncType, IdentitySource, LinkRequest, MarkRead, MediaKind,
+    MessageMeta, Reaction, RevokeMessage, SendReaction, SendText, Sent, WaMessage, WaProfile,
+    WaUser, event::ReceiptKind, is_status_chat,
 };
 
 use crate::hub::Hub;
@@ -647,7 +647,8 @@ impl EventSink {
             .await
         {
             Ok(true) => {
-                if should_push(&message, now_ms()) {
+                // A system line (the disappearing timer changed) is not news.
+                if meta.system.is_none() && should_push(&message, now_ms()) {
                     self.pusher.notify(
                         &self.instance,
                         PushKind::Message {
@@ -670,12 +671,128 @@ impl EventSink {
         self.publish(GatewayEvent::Message(message));
         if announce {
             self.publish(GatewayEvent::MessageMeta {
-                chat,
-                id,
+                chat: chat.clone(),
+                id: id.clone(),
                 body: None,
                 meta: Box::new(meta),
             });
         }
+        // An edit or delete for everyone that came before the message.
+        let pending = self
+            .store
+            .take_pending(self.instance.clone(), chat.clone(), id.clone())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading early changes failed: {e}", self.instance);
+                Vec::new()
+            });
+        for change in pending {
+            self.change_message(&chat, &id, change).await;
+        }
+    }
+
+    /// A stored message to forward: as apps see it, its stored protobuf
+    /// (media only) and its meta. `None` when unknown.
+    pub async fn forward_source(
+        &self,
+        chat: &str,
+        id: &str,
+    ) -> Option<(WaMessage, Option<Vec<u8>>, MessageMeta)> {
+        let rich = self
+            .store
+            .message_rich(self.instance.clone(), chat.to_owned(), id.to_owned())
+            .await
+            .ok()
+            .flatten()?;
+        let raw = match rich.message.body {
+            rosty_wa_proto::MessageBody::Media { .. } => self
+                .store
+                .media_source(self.instance.clone(), id.to_owned())
+                .await
+                .ok()
+                .flatten()
+                .and_then(|(_, raw)| raw),
+            _ => None,
+        };
+        Some((rich.message, raw, rich.meta))
+    }
+
+    /// The disappearing timer of `chat` in seconds; `None` when off.
+    pub async fn chat_timer(&self, chat: &str) -> Option<u32> {
+        self.store
+            .chat_timer(self.instance.clone(), chat.to_owned())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading a chat timer failed: {e}", self.instance);
+                None
+            })
+    }
+
+    /// Records the chat's disappearing timer as of `at_ms` without a line in
+    /// the conversation (a message or the group's metadata named it). The
+    /// apps hear the new chat meta when it changed.
+    pub async fn learn_chat_timer(&self, chat: &str, seconds: u32, at_ms: i64) -> bool {
+        match self
+            .store
+            .set_chat_timer(self.instance.clone(), chat.to_owned(), seconds, at_ms)
+            .await
+        {
+            Ok(Some(meta)) => {
+                self.publish(GatewayEvent::ChatMeta {
+                    jid: chat.to_owned(),
+                    meta,
+                });
+                true
+            }
+            Ok(None) => false,
+            Err(e) => {
+                log::warn!("{}: saving a chat timer failed: {e}", self.instance);
+                false
+            }
+        }
+    }
+
+    /// Someone set the chat's disappearing timer (a protocol message, a group
+    /// notification, or me through the gateway): records it and, when it
+    /// changed, stores and announces the line "turned on / off" as message
+    /// `note_id` from `by` ([`DELETED_BY_ME`] for me).
+    pub async fn chat_timer_changed(&self, change: TimerChange) {
+        if !self
+            .learn_chat_timer(&change.chat, change.seconds, change.at_ms)
+            .await
+        {
+            return;
+        }
+        let from_me = change.by.as_deref() == Some(DELETED_BY_ME);
+        let sender = change
+            .by
+            .clone()
+            .filter(|_| !from_me && change.chat.ends_with("@g.us"));
+        let meta = MessageMeta {
+            system: Some(rosty_wa_proto::SystemNote::Disappearing {
+                seconds: change.seconds,
+                by: change.by.clone(),
+            }),
+            ..MessageMeta::default()
+        };
+        self.emit_full(
+            WaMessage {
+                id: change.note_id,
+                chat: change.chat,
+                sender,
+                from_me,
+                timestamp_ms: change.at_ms,
+                body: rosty_wa_proto::MessageBody::Unsupported,
+                reactions: Vec::new(),
+                chat_alt: None,
+                sender_alt: None,
+            },
+            MessageExtras {
+                meta,
+                ..MessageExtras::default()
+            },
+        )
+        .await;
     }
 
     /// Applies an edit, delete for everyone or star to a stored message and
@@ -705,9 +822,21 @@ impl EventSink {
     /// Stores the ticks a one-to-one receipt puts on my messages and tells
     /// the apps about the ones that moved.
     pub async fn set_status(&self, chat: &str, ids: Vec<String>, status: DeliveryStatus) {
+        self.set_status_at(chat, ids, status, now_ms()).await;
+    }
+
+    /// [`Self::set_status`] for a receipt that came at `at_ms` (kept for
+    /// message info).
+    pub async fn set_status_at(
+        &self,
+        chat: &str,
+        ids: Vec<String>,
+        status: DeliveryStatus,
+        at_ms: i64,
+    ) {
         match self
             .store
-            .set_status(self.instance.clone(), chat.to_owned(), ids, status)
+            .set_status_at(self.instance.clone(), chat.to_owned(), ids, status, at_ms)
             .await
         {
             Ok(moved) => self.publish_ticks(chat, moved),
@@ -719,9 +848,14 @@ impl EventSink {
     /// about the messages whose group-wide ticks moved (see
     /// [`crate::store::group_status`]).
     pub async fn group_receipt(&self, chat: &str, receipt: GroupReceipt) {
+        self.group_receipt_at(chat, receipt, now_ms()).await;
+    }
+
+    /// [`Self::group_receipt`] for a receipt that came at `at_ms`.
+    pub async fn group_receipt_at(&self, chat: &str, receipt: GroupReceipt, at_ms: i64) {
         match self
             .store
-            .record_group_receipt(self.instance.clone(), chat.to_owned(), receipt)
+            .record_group_receipt_at(self.instance.clone(), chat.to_owned(), receipt, at_ms)
             .await
         {
             Ok(moved) => self.publish_ticks(chat, moved),
@@ -852,6 +986,19 @@ impl EventSink {
                 None
             })
     }
+}
+
+/// A change of a chat's disappearing timer ([`EventSink::chat_timer_changed`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimerChange {
+    pub chat: String,
+    pub seconds: u32,
+    /// When it was set (unix ms).
+    pub at_ms: i64,
+    /// Who set it: [`DELETED_BY_ME`], a JID, or `None` when unknown.
+    pub by: Option<String>,
+    /// The id of the line stored for it.
+    pub note_id: String,
 }
 
 /// Whether a new message's meta deserves its own `MessageMeta` event after
@@ -1018,6 +1165,16 @@ pub trait WaDriver: Send + Sync + 'static {
         _instance: &InstanceId,
         _req: MarkRead,
     ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Sends a copy of a stored message to another chat, marked forwarded
+    /// (media relayed from its stored protobuf), and stores the copy.
+    fn forward_message(
+        &self,
+        _instance: &InstanceId,
+        _req: ForwardMessage,
+    ) -> BoxFuture<'_, Result<Sent, DriverError>> {
         Box::pin(async { Err(DriverError::NotConnected) })
     }
 
@@ -1483,6 +1640,17 @@ mod fake {
                 let meta = MessageMeta {
                     quoted: quoted(req.quoted_id.as_deref()),
                     status: Some(DeliveryStatus::Sent),
+                    mentions: req.mentions.clone(),
+                    link_preview: req
+                        .link_preview
+                        .as_ref()
+                        .map(|p| rosty_wa_proto::LinkPreview {
+                            url: p.url.clone(),
+                            title: p.title.clone(),
+                            description: p.description.clone(),
+                            thumbnail: p.thumbnail_b64.is_some(),
+                        }),
+                    expires_s: sink.chat_timer(&req.chat).await,
                     ..Default::default()
                 };
                 sink.emit_full(
@@ -1794,6 +1962,55 @@ mod fake {
                 format!("played {} {}", req.chat, req.ids.join(",")),
             );
             Box::pin(async move { result })
+        }
+
+        fn forward_message(
+            &self,
+            instance: &InstanceId,
+            req: ForwardMessage,
+        ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+            let instance = instance.clone();
+            Box::pin(async move {
+                self.record(
+                    &instance,
+                    format!("forward {} {} {}", req.chat, req.message_id, req.to),
+                )?;
+                let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
+                let source = sink
+                    .find_message(&req.chat, &req.message_id)
+                    .await
+                    .ok_or_else(|| DriverError::BadRequest("no such message".into()))?;
+                let timestamp_ms = now_ms();
+                let message_id = self.next_id();
+                let expires_s = sink.chat_timer(&req.to).await;
+                sink.emit_full(
+                    WaMessage {
+                        id: message_id.clone(),
+                        chat: req.to,
+                        sender: Some(own_jid(&instance)),
+                        from_me: true,
+                        timestamp_ms,
+                        body: source.body,
+                        reactions: vec![],
+                        chat_alt: None,
+                        sender_alt: None,
+                    },
+                    MessageExtras {
+                        meta: MessageMeta {
+                            forwarded: true,
+                            status: Some(DeliveryStatus::Sent),
+                            expires_s,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                )
+                .await;
+                Ok(Sent {
+                    message_id,
+                    timestamp_ms,
+                })
+            })
         }
 
         fn profiles(

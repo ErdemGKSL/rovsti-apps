@@ -1399,7 +1399,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17: static and animated cards, sheet, share/save; optics and GIF playback split into X.2b) |
 | X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | done (round 18 step 6, 2026-11-17; Evidence in the X.2b section) |
 | X.3 | Readable text on accent and photo backgrounds (owner, 2026-11-17: "white text on a light background is unreadable") | round 19 (`plans/round-19.md`) | in-progress (planned 2026-11-17 at `bc22e17`; 7 steps; next planner after X.3 is E8 R1) |
-| X.4 | Open owner follow-ups (share sheet leftovers, glass "Delete" contrast, owner questions) | after X.3, before E8 R1 | todo (see the X.4 section) |
+| X.4 | Open owner follow-ups (share sheet leftovers, glass "Delete" contrast, owner decisions on short codes and "Ara") | after X.3, before E8 R1 | todo (see the X.4 section) |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1695,10 +1695,14 @@ Plan these right after X.3 closes, before E8 R1.
    iOS capsule thumb used by `IosToggle`.
 2. **Catalog "Over a backdrop", glass "Delete".** Red text on the purple-blue glass has low contrast. If the X.3 step 6
    sweep did not fix it, fix it here (destructive label over glass must reach 3:1 as bold text, like other glass labels).
-3. **Owner questions still open** (do not build until answered; ask in the round report):
-   - Emergency and short codes (for example 112): show no contact name, only the number?
-   - Contacts card "Ara": call at once instead of opening the call-source sheet?
-   - WhatsApp notification preview default: keep "name and preview", or start with "name only"?
+3. **Owner decisions (2026-11-18; the owner left them to us, chosen for the best everyday UX):**
+   - Emergency and short codes (112, 155, 156, 110, 177, 911 and other numbers of 3 to 5 digits): no contact-name
+     lookup. Show the number as dialled with the subtitle "Emergency" for emergency numbers (Android
+     `PhoneNumberUtils.isEmergencyNumber` behind `rosty_android`, a pure rule in `rosty_core` for tests); other short
+     codes show just the number.
+   - Contacts card "Ara": a tap calls at once over the cellular line (WhatsApp only when the contact has no cellular
+     number); a long press, or the chevron, opens the call-source sheet.
+   - WhatsApp notification preview default: keep "name and preview" (already the 7b default; no change).
 
 ## E6. Messages including WhatsApp (`:messages`)
 

@@ -5,8 +5,13 @@
 //! In the app's data directory (`noBackupFilesDir`), each written atomically and owner-only ([`storage::save_json`]):
 //!
 //! * [`VAULT_FILE`]: the K_hw-sealed key blob, the Keystore alias Kotlin sealed it with, and the body blob (DK).
-//! * [`DAILY_FILE`]: the daily unlock (13.2): the K_daily-sealed daily blob, its alias, DDK and a plain copy of the
-//!   stamp. DDK opens nothing without the K_daily layer, which needs a Class 3 biometric.
+//! * [`DAILY_FILE`]: the biometric unlock (13.2): the K_daily-sealed daily blob, its alias, DDK and a plain copy of
+//!   the stamp. DDK opens nothing without the K_daily layer, which needs a Class 3 biometric.
+//! * [`STAY_FILE`]: the vault that stays unlocked (round 7c): the K_stay-sealed stay blob, its alias, SK and a plain
+//!   copy of its creation time. SK opens nothing without the K_stay layer, which works only while the phone is
+//!   unlocked.
+//! * [`USE_FILE`]: the last use of the vault (round 7c), sealed under DK, and its plain copy: 90 days without a use
+//!   and the passphrase is needed again.
 //! * [`CACHE_FILE`]: the identity and picture cache (13.5), sealed under DK.
 //! * [`HISTORY_FILE`]: the recent chats and messages shown at once after an unlock (round 7a), sealed under DK.
 //!   Its own file, so a lock writes it without rewriting the pictures.
@@ -20,7 +25,7 @@ use std::path::Path;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use rosty_core::vault::{self, DailyStamp, DataKey, Entropy};
+use rosty_core::vault::{self, DailyStamp, DataKey, Entropy, UseClock};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -28,6 +33,8 @@ use crate::storage;
 
 pub const VAULT_FILE: &str = "wa-vault.json";
 pub const DAILY_FILE: &str = "wa-vault-daily.json";
+pub const STAY_FILE: &str = "wa-vault-stay.json";
+pub const USE_FILE: &str = "wa-vault-use.json";
 pub const CACHE_FILE: &str = "wa-vault-cache.bin";
 pub const HISTORY_FILE: &str = "wa-vault-history.bin";
 /// The `version` of the JSON files this build writes.
@@ -186,19 +193,8 @@ pub struct DailyFile {
     /// A plain copy of the stamp sealed inside, so the state can be judged without the biometric. The sealed one is
     /// authoritative.
     pub stamp: DailyStamp,
-    /// The last unlock of this passphrase epoch (`rosty_core::vault::seal_seen`, sealed under DK, round 7a): the
-    /// daily unlock moves the idle clock on with it.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "b64::serialize_opt",
-        deserialize_with = "b64::deserialize_opt"
-    )]
-    pub seen: Option<Vec<u8>>,
-    /// A plain copy of the last unlock time sealed in [`Self::seen`], for the state without the biometric. The
-    /// sealed one is authoritative.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_unlock_ms: Option<i64>,
+    // Round 7a's `seen` record and its plain `last_unlock_ms` are no longer read: an older file keeps them and they
+    // are ignored (the use clock of round 7c replaces them).
 }
 
 impl std::fmt::Debug for DailyFile {
@@ -230,42 +226,12 @@ impl DailyFile {
             sealed,
             daily_key: Zeroizing::new(daily_key.as_bytes().to_vec()),
             stamp,
-            seen: None,
-            last_unlock_ms: None,
         }
     }
 
-    /// The clock of the plain copies: what [`Self::stamp`] and [`Self::last_unlock_ms`] say, for the state and the
-    /// boot path. The daily unlock checks the sealed ones instead.
-    pub fn plain_clock(&self) -> vault::DailyClock {
-        let seen = self.last_unlock_ms.map(|last| vault::Seen {
-            epoch: self.stamp,
-            last_unlock_ms: last,
-        });
-        vault::DailyClock::new(self.stamp, seen)
-    }
-
-    /// The sealed clock: [`Self::seen`] opened under DK when it belongs to `stamp` (the stamp sealed inside the
-    /// daily blob); otherwise the stamp alone, which is the stricter rule.
-    pub fn sealed_clock(&self, key: &DataKey, stamp: DailyStamp) -> vault::DailyClock {
-        let seen = self
-            .seen
-            .as_deref()
-            .and_then(|blob| vault::open_seen(key, blob).ok());
-        vault::DailyClock::new(stamp, seen)
-    }
-
-    /// Records an unlock at `now_ms` of the epoch of `clock` (sealed under DK, with its plain copy).
-    pub fn record_unlock(
-        &mut self,
-        key: &DataKey,
-        clock: vault::DailyClock,
-        now_ms: i64,
-        entropy: &mut impl Entropy,
-    ) {
-        let seen = clock.seen_at(now_ms);
-        self.seen = Some(vault::seal_seen(key, seen, vault::nonce(entropy)));
-        self.last_unlock_ms = Some(seen.last_unlock_ms);
+    /// The use clock of the plain copy of the stamp (the sealed stamp is authoritative).
+    pub fn plain_clock(&self) -> UseClock {
+        UseClock::new(self.stamp.unlocked_ms, None)
     }
 
     pub fn load(dir: &Path) -> io::Result<Option<Self>> {
@@ -281,10 +247,160 @@ impl DailyFile {
         vault::DailyKey::from_slice(&self.daily_key)
     }
 
-    /// Ends the daily unlock (reboot, 72 h idle, biometric change, five failures, lock by the user).
+    /// Ends the biometric unlock (90 days without a use, biometric change, five failures, a new passphrase).
     pub fn remove(dir: &Path) -> io::Result<Vec<String>> {
         remove(dir, DAILY_FILE)
     }
+}
+
+/// `wa-vault-stay.json` (round 7c).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StayFile {
+    pub version: u32,
+    /// The Android Keystore alias of K_stay.
+    pub alias: String,
+    /// The stay blob (`rosty_core::vault::seal_stay`) as Kotlin sealed it with K_stay.
+    #[serde(with = "b64")]
+    pub sealed: Vec<u8>,
+    /// SK, the key of the stay blob.
+    #[serde(
+        serialize_with = "b64::serialize",
+        deserialize_with = "b64::deserialize_secret"
+    )]
+    pub stay_key: Zeroizing<Vec<u8>>,
+    /// A plain copy of the creation time sealed inside, for the state without the Keystore. The sealed one is
+    /// authoritative.
+    pub created_ms: i64,
+}
+
+impl std::fmt::Debug for StayFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StayFile")
+            .field("alias", &self.alias)
+            .field("sealed", &self.sealed.len())
+            .field("created_ms", &self.created_ms)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Versioned for StayFile {
+    fn version(&self) -> u32 {
+        self.version
+    }
+}
+
+impl StayFile {
+    pub fn new(alias: &str, sealed: Vec<u8>, stay_key: &vault::StayKey, created_ms: i64) -> Self {
+        Self {
+            version: FILE_VERSION,
+            alias: alias.to_owned(),
+            sealed,
+            stay_key: Zeroizing::new(stay_key.as_bytes().to_vec()),
+            created_ms,
+        }
+    }
+
+    /// The use clock of the plain copy of the creation time.
+    pub fn plain_clock(&self) -> UseClock {
+        UseClock::new(self.created_ms, None)
+    }
+
+    pub fn load(dir: &Path) -> io::Result<Option<Self>> {
+        load(dir, STAY_FILE)
+    }
+
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        storage::save_json(dir, STAY_FILE, self)
+    }
+
+    /// SK; `None` for a damaged file.
+    pub fn key(&self) -> Option<vault::StayKey> {
+        vault::StayKey::from_slice(&self.stay_key)
+    }
+
+    /// Ends the silent unlock (a lock by the person, 90 days without a use, a dead Keystore key).
+    pub fn remove(dir: &Path) -> io::Result<Vec<String>> {
+        remove(dir, STAY_FILE)
+    }
+}
+
+/// `wa-vault-use.json` (round 7c): the last use, sealed under DK, and a plain copy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UseFile {
+    pub version: u32,
+    /// `rosty_core::vault::seal_use`, under DK.
+    #[serde(with = "b64")]
+    pub sealed: Vec<u8>,
+    /// A plain copy of the time sealed inside, for the state without DK. The sealed one is authoritative.
+    pub used_ms: i64,
+}
+
+impl Versioned for UseFile {
+    fn version(&self) -> u32 {
+        self.version
+    }
+}
+
+impl UseFile {
+    /// A use at `used_ms`, sealed under DK.
+    pub fn new(key: &DataKey, used_ms: i64, entropy: &mut impl Entropy) -> Self {
+        Self {
+            version: FILE_VERSION,
+            sealed: vault::seal_use(key, used_ms, vault::nonce(entropy)),
+            used_ms,
+        }
+    }
+
+    /// The sealed time, when the record opens under DK; `None` otherwise (the stricter rule).
+    pub fn sealed_ms(&self, key: &DataKey) -> Option<i64> {
+        vault::open_use(key, &self.sealed).ok()
+    }
+
+    pub fn load(dir: &Path) -> io::Result<Option<Self>> {
+        load(dir, USE_FILE)
+    }
+
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        storage::save_json(dir, USE_FILE, self)
+    }
+
+    pub fn remove(dir: &Path) -> io::Result<Vec<String>> {
+        remove(dir, USE_FILE)
+    }
+}
+
+/// The last use of the vault in `dir` as the plain copies tell it (the stay wrap, the biometric unlock and the use
+/// record); `None` when no wrap opens the vault without the passphrase. For the state only: an unlock checks the
+/// sealed copies.
+pub fn plain_clock(dir: &Path) -> Option<UseClock> {
+    let stay = StayFile::load(dir).ok().flatten();
+    let daily = DailyFile::load(dir).ok().flatten();
+    let used = UseFile::load(dir).ok().flatten().map(|file| file.used_ms);
+    UseClock::latest(
+        stay.map(|file| file.plain_clock())
+            .into_iter()
+            .chain(daily.map(|file| file.plain_clock()))
+            .map(|clock| UseClock::new(clock.last_use_ms, used)),
+    )
+}
+
+/// The sealed use clock of a wrap stamped at `since_ms`: the use record of `dir`, when it opens under DK, moves it on.
+pub fn sealed_clock(dir: &Path, key: &DataKey, since_ms: i64) -> UseClock {
+    let used = UseFile::load(dir)
+        .ok()
+        .flatten()
+        .and_then(|file| file.sealed_ms(key));
+    UseClock::new(since_ms, used)
+}
+
+/// Every wrap that opens the vault without the passphrase goes, with the use record (90 days without a use, or a
+/// clock set back): the passphrase is needed again. Answers what was deleted.
+pub fn expire(dir: &Path) -> io::Result<Vec<String>> {
+    let mut deleted = Vec::new();
+    for name in [STAY_FILE, DAILY_FILE, USE_FILE] {
+        deleted.extend(remove(dir, name)?);
+    }
+    Ok(deleted)
 }
 
 /// What the encrypted cache keeps between unlocks (plan 13.5): who every id is, the cursor of the identity catch-up
@@ -368,11 +484,18 @@ pub fn remove_file(dir: &Path, name: &str) -> io::Result<Vec<String>> {
     remove(dir, name)
 }
 
-/// Removes the vault, the daily unlock and the caches (reset, forgotten passphrase, unlink). Answers what was
-/// deleted.
+/// Removes the vault, the biometric and silent unlocks, the use record and the caches (reset, forgotten passphrase,
+/// unlink). Answers what was deleted.
 pub fn remove_all(dir: &Path) -> io::Result<Vec<String>> {
     let mut deleted = Vec::new();
-    for name in [VAULT_FILE, DAILY_FILE, CACHE_FILE, HISTORY_FILE] {
+    for name in [
+        VAULT_FILE,
+        DAILY_FILE,
+        STAY_FILE,
+        USE_FILE,
+        CACHE_FILE,
+        HISTORY_FILE,
+    ] {
         deleted.extend(remove(dir, name)?);
     }
     Ok(deleted)

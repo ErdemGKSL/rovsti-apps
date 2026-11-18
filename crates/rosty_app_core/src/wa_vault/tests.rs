@@ -145,13 +145,29 @@ fn remove_all_deletes_the_vault_files_and_the_caches() {
         .save(&dir, &key(), &mut counter())
         .unwrap();
     save_sealed(&dir, HISTORY_FILE, &key(), b"[]", &mut counter()).unwrap();
+    StayFile::new(
+        "s",
+        vec![1],
+        &vault::StayKey::from_slice(&[2; 32]).unwrap(),
+        1,
+    )
+    .save(&dir)
+    .unwrap();
+    UseFile::new(&key(), 1, &mut counter()).save(&dir).unwrap();
     fs::write(dir.join("other.json"), "{}").unwrap();
     let mut deleted = remove_all(&dir).unwrap();
     deleted.sort();
-    let mut wanted: Vec<String> = [CACHE_FILE, DAILY_FILE, HISTORY_FILE, VAULT_FILE]
-        .iter()
-        .map(|n| dir.join(n).to_string_lossy().into_owned())
-        .collect();
+    let mut wanted: Vec<String> = [
+        CACHE_FILE,
+        DAILY_FILE,
+        HISTORY_FILE,
+        STAY_FILE,
+        USE_FILE,
+        VAULT_FILE,
+    ]
+    .iter()
+    .map(|n| dir.join(n).to_string_lossy().into_owned())
+    .collect();
     wanted.sort();
     assert_eq!(deleted, wanted);
     assert!(dir.join("other.json").exists());
@@ -355,42 +371,111 @@ fn files_of_an_earlier_build_read_without_the_round_7a_fields() {
 }
 
 #[test]
-fn the_daily_file_keeps_the_last_unlock_sealed_and_in_plain() {
-    use rosty_core::vault::{DAILY_MAX_IDLE_MS, DailyRefusal};
-    let dir = temp_dir("seen");
+fn a_daily_file_of_round_7b_reads_with_its_old_clock_fields_ignored() {
+    let dir = temp_dir("old-daily");
+    fs::write(
+        dir.join(DAILY_FILE),
+        r#"{"version":1,"alias":"rosty.wa.d.b.1","sealed":"AQ==","daily_key":"AQ==","stamp":{"boot_count":3,"unlocked_ms":1000},"seen":"UldWQQ==","last_unlock_ms":5000}"#,
+    )
+    .unwrap();
+    let daily = DailyFile::load(&dir).unwrap().unwrap();
+    assert_eq!(daily.stamp.unlocked_ms, 1000);
+    assert_eq!(daily.plain_clock().last_use_ms, 1000);
+    // Written back, the old fields are gone.
+    daily.save(&dir).unwrap();
+    let text = fs::read_to_string(dir.join(DAILY_FILE)).unwrap();
+    assert!(
+        !text.contains("seen") && !text.contains("last_unlock_ms"),
+        "{text}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_stay_file_round_trips_owner_only_and_hides_its_key() {
+    let dir = temp_dir("stay");
+    assert!(StayFile::load(&dir).unwrap().is_none());
+    let stay_key = vault::StayKey::from_slice(&[7; 32]).unwrap();
+    let file = StayFile::new("rosty.wa.s.1", vec![1, 2], &stay_key, 1_000);
+    file.save(&dir).unwrap();
+    let read = StayFile::load(&dir).unwrap().unwrap();
+    assert_eq!(read, file);
+    assert_eq!(read.key(), Some(stay_key));
+    assert!(!format!("{read:?}").contains("BwcH"), "Debug hides SK");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(dir.join(STAY_FILE))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    assert_eq!(StayFile::remove(&dir).unwrap().len(), 1);
+    assert!(StayFile::load(&dir).unwrap().is_none());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_use_record_moves_the_clock_only_under_its_key() {
+    let dir = temp_dir("use");
+    let day = 24 * 3_600_000;
+    let made = 1_000_000;
+    assert_eq!(sealed_clock(&dir, &key(), made).last_use_ms, made);
+    UseFile::new(&key(), made + 50 * day, &mut counter())
+        .save(&dir)
+        .unwrap();
+    assert_eq!(
+        sealed_clock(&dir, &key(), made).last_use_ms,
+        made + 50 * day
+    );
+    // Under another DK the record does not count: the stamp's 90 days apply.
+    let other = DataKey::from_slice(&[9; 32]).unwrap();
+    assert_eq!(sealed_clock(&dir, &other, made).last_use_ms, made);
+    // The plain copy alone, with a forged later time, cannot open anything: unlocks read the sealed one.
+    let mut forged = UseFile::load(&dir).unwrap().unwrap();
+    forged.used_ms = made + 80 * day;
+    forged.save(&dir).unwrap();
+    assert_eq!(
+        sealed_clock(&dir, &key(), made).last_use_ms,
+        made + 50 * day
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_plain_clock_is_the_latest_wrap_or_use_and_expiry_drops_every_wrap() {
+    let dir = temp_dir("plain-clock");
+    let day = 24 * 3_600_000;
+    assert_eq!(plain_clock(&dir), None);
+    // A use record alone is no way in.
+    UseFile::new(&key(), 9 * day, &mut counter())
+        .save(&dir)
+        .unwrap();
+    assert_eq!(plain_clock(&dir), None);
     let stamp = DailyStamp {
         boot_count: 3,
-        unlocked_ms: 1_000_000,
+        unlocked_ms: day,
     };
-    let mut file = DailyFile::new(
+    DailyFile::new(
         "d",
         vec![1],
         &DailyKey::from_slice(&[1; 32]).unwrap(),
         stamp,
-    );
-    let hour = 3_600_000;
-    let clock = file.sealed_clock(&key(), stamp);
-    file.record_unlock(&key(), clock, stamp.unlocked_ms + 60 * hour, &mut counter());
-    file.save(&dir).unwrap();
-    let read = DailyFile::load(&dir).unwrap().unwrap();
-    assert_eq!(read.last_unlock_ms, Some(stamp.unlocked_ms + 60 * hour));
-    let later = stamp.unlocked_ms + 60 * hour + DAILY_MAX_IDLE_MS;
-    assert_eq!(read.sealed_clock(&key(), stamp).check(3, later), Ok(()));
-    assert_eq!(read.plain_clock().check(3, later), Ok(()));
-    // Under another DK, or for another epoch, the record does not count: the stamp's 72 h apply.
-    let other = DataKey::from_slice(&[9; 32]).unwrap();
-    assert_eq!(
-        read.sealed_clock(&other, stamp).check(3, later),
-        Err(DailyRefusal::Idle)
-    );
-    let next_epoch = DailyStamp {
-        boot_count: 3,
-        unlocked_ms: stamp.unlocked_ms + hour,
-    };
-    assert_eq!(
-        read.sealed_clock(&key(), next_epoch).last_unlock_ms,
-        next_epoch.unlocked_ms
-    );
+    )
+    .save(&dir)
+    .unwrap();
+    assert_eq!(plain_clock(&dir).unwrap().last_use_ms, 9 * day);
+    let stay_key = vault::StayKey::from_slice(&[7; 32]).unwrap();
+    StayFile::new("s", vec![1], &stay_key, 20 * day)
+        .save(&dir)
+        .unwrap();
+    assert_eq!(plain_clock(&dir).unwrap().last_use_ms, 20 * day);
+    let mut deleted = expire(&dir).unwrap();
+    deleted.sort();
+    assert_eq!(deleted.len(), 3, "{deleted:?}");
+    assert_eq!(plain_clock(&dir), None);
+    assert!(UseFile::load(&dir).unwrap().is_none());
     let _ = fs::remove_dir_all(&dir);
 }
 

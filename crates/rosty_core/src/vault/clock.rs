@@ -1,111 +1,107 @@
-//! The passphrase clock of the daily unlock (plan 13.2, round 7a): the 72 h rule counts *idle* time.
+//! The use clock of the vault (round 7c): the vault stays unlocked and locks itself only after
+//! [`MAX_IDLE_MS`] (90 days) with no use. It replaces round 7a's passphrase clock (72 h idle, 30-day cap, reboot).
 //!
-//! The daily blob ([`super::seal_daily`]) is sealed once, at the passphrase unlock: its stamp is the boot and the
-//! time of the passphrase. A daily (Class 3 biometric) unlock cannot re-seal it without a second prompt, so the time
-//! of the last unlock is kept in a small *seen* record sealed under DK, which the daily unlock opens anyway:
+//! The time of the last use is kept in a *use* record sealed under DK, which every unlock opens anyway:
 //!
-//! | blob | header                                                                                  | ciphertext |
-//! |------|-----------------------------------------------------------------------------------------|------------|
-//! | seen | `RWVA` · version · boot count u64 · passphrase ms i64 · last unlock ms i64 · nonce (12)  | tag (16)   |
+//! | blob | header                                                 | ciphertext |
+//! |------|--------------------------------------------------------|------------|
+//! | use  | `RWVU` · version · last use ms i64 · nonce (12)         | tag (16)   |
 //!
-//! The record names the passphrase epoch it belongs to (boot count and passphrase time, as in the daily stamp); a
-//! record of another epoch, a damaged one or none at all leaves the clock where the stamp put it. Deleting or
-//! rolling back the record can therefore only make the rule stricter, and a new one needs DK.
+//! The rule ([`UseClock::check`]): the last use is the later of the record and the authenticated stamp of the wrap
+//! being opened (the stay-unlocked or the daily blob); the clock may not be behind it by more than
+//! [`CLOCK_SKEW_MS`] (a clock set back), and at most [`MAX_IDLE_MS`] may have passed since. A missing, damaged or
+//! rolled-back record only moves the last use back to the stamp, so tampering with it can only make the rule
+//! stricter, and a newer record needs DK.
 //!
-//! The rules ([`DailyClock::check`]): the boot count must be the stamp's; the clock may not be behind the last
-//! unlock (more than [`DAILY_CLOCK_SKEW_MS`]); at most [`DAILY_MAX_AGE_MS`] since the passphrase, whatever the use;
-//! at most [`DAILY_MAX_IDLE_MS`] since the last unlock.
+//! Writes are throttled ([`UseClock::record_due`]): a use is written at most once per [`USE_WRITE_INTERVAL_MS`].
 
-use super::{
-    DAILY_CLOCK_SKEW_MS, DAILY_MAX_IDLE_MS, DailyRefusal, DailyStamp, DataKey, NONCE_LEN, TAG_LEN,
-    VERSION, VaultError, be_8, check_frame, open, seal,
-};
+use super::{DataKey, NONCE_LEN, TAG_LEN, VERSION, VaultError, be_8, check_frame, open, seal};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-/// The hard cap: the passphrase is asked at least this often, however often the biometric unlocks.
-pub const DAILY_MAX_AGE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+/// The vault locks itself after this long with no use (owner decision, round 7c).
+pub const MAX_IDLE_MS: i64 = 90 * DAY_MS;
+/// A clock this far behind the last use is a clock set back, not drift.
+pub const CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
+/// A use is written at most this often (not on every frame or activity start).
+pub const USE_WRITE_INTERVAL_MS: i64 = 60 * 60 * 1000;
 
-const MAGIC_SEEN: &[u8; 4] = b"RWVA";
-const SEEN_HEADER_LEN: usize = 4 + 1 + 8 + 8 + 8 + NONCE_LEN;
-/// The length of a seen blob.
-pub const SEEN_BLOB_LEN: usize = SEEN_HEADER_LEN + TAG_LEN;
+const MAGIC_USE: &[u8; 4] = b"RWVU";
+const USE_HEADER_LEN: usize = 4 + 1 + 8 + NONCE_LEN;
+/// The length of a use record.
+pub const USE_BLOB_LEN: usize = USE_HEADER_LEN + TAG_LEN;
 
-/// The last unlock of a passphrase epoch: the epoch's stamp and the time of its latest unlock.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Seen {
-    pub epoch: DailyStamp,
-    pub last_unlock_ms: i64,
+/// Why the vault no longer opens without the passphrase.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Error)]
+#[serde(rename_all = "snake_case")]
+pub enum IdleRefusal {
+    #[error("90 days passed without a use")]
+    Idle,
+    #[error("the clock is behind the last use")]
+    ClockBack,
 }
 
-/// Seals `seen` under DK (no secret inside: the record is all authenticated header).
-pub fn seal_seen(key: &DataKey, seen: Seen, nonce: [u8; NONCE_LEN]) -> Vec<u8> {
-    let mut header = Vec::with_capacity(SEEN_BLOB_LEN);
-    header.extend_from_slice(MAGIC_SEEN);
+/// Seals the time of a use under DK (no secret inside: the record is all authenticated header).
+pub fn seal_use(key: &DataKey, used_ms: i64, nonce: [u8; NONCE_LEN]) -> Vec<u8> {
+    let mut header = Vec::with_capacity(USE_BLOB_LEN);
+    header.extend_from_slice(MAGIC_USE);
     header.push(VERSION);
-    header.extend_from_slice(&seen.epoch.boot_count.to_be_bytes());
-    header.extend_from_slice(&seen.epoch.unlocked_ms.to_be_bytes());
-    header.extend_from_slice(&seen.last_unlock_ms.to_be_bytes());
+    header.extend_from_slice(&used_ms.to_be_bytes());
     header.extend_from_slice(&nonce);
     seal(&key.cipher(), header, &nonce, &[])
 }
 
-/// Opens a seen blob under DK.
-pub fn open_seen(key: &DataKey, blob: &[u8]) -> Result<Seen, VaultError> {
-    check_frame(blob, MAGIC_SEEN, SEEN_HEADER_LEN)?;
-    if blob.len() != SEEN_BLOB_LEN {
+/// Opens a use record under DK: the time of the use.
+pub fn open_use(key: &DataKey, blob: &[u8]) -> Result<i64, VaultError> {
+    check_frame(blob, MAGIC_USE, USE_HEADER_LEN)?;
+    if blob.len() != USE_BLOB_LEN {
         return Err(VaultError::Corrupt);
     }
-    open(&key.cipher(), blob, SEEN_HEADER_LEN, VaultError::Tampered)?;
-    Ok(Seen {
-        epoch: DailyStamp {
-            boot_count: u64::from_be_bytes(be_8(blob, 5)),
-            unlocked_ms: i64::from_be_bytes(be_8(blob, 13)),
-        },
-        last_unlock_ms: i64::from_be_bytes(be_8(blob, 21)),
-    })
+    open(&key.cipher(), blob, USE_HEADER_LEN, VaultError::Tampered)?;
+    Ok(i64::from_be_bytes(be_8(blob, 5)))
 }
 
-/// The clock of one passphrase epoch: the stamp of its daily blob and the last unlock known for it.
+/// The last known use of the vault.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DailyClock {
-    pub stamp: DailyStamp,
-    pub last_unlock_ms: i64,
+pub struct UseClock {
+    pub last_use_ms: i64,
 }
 
-impl DailyClock {
-    /// The clock of `stamp`, moved on by `seen` when it belongs to the same epoch. A later unlock only counts
-    /// forward: a record older than the stamp changes nothing.
-    pub fn new(stamp: DailyStamp, seen: Option<Seen>) -> Self {
-        let last = seen
-            .filter(|seen| seen.epoch == stamp)
-            .map_or(stamp.unlocked_ms, |seen| {
-                seen.last_unlock_ms.max(stamp.unlocked_ms)
-            });
+impl UseClock {
+    /// The clock of a wrap stamped at `since_ms`, moved on by a use record when it is later. A record from before
+    /// the stamp changes nothing.
+    pub fn new(since_ms: i64, used_ms: Option<i64>) -> Self {
         Self {
-            stamp,
-            last_unlock_ms: last,
+            last_use_ms: used_ms.map_or(since_ms, |used| used.max(since_ms)),
         }
     }
 
-    /// Whether the daily unlock may open now, on boot `boot_count`.
-    pub fn check(self, boot_count: u64, now_ms: i64) -> Result<(), DailyRefusal> {
-        if boot_count != self.stamp.boot_count {
-            Err(DailyRefusal::Rebooted)
-        } else if now_ms < self.last_unlock_ms.saturating_sub(DAILY_CLOCK_SKEW_MS) {
-            Err(DailyRefusal::ClockBack)
-        } else if now_ms.saturating_sub(self.stamp.unlocked_ms) > DAILY_MAX_AGE_MS {
-            Err(DailyRefusal::Expired)
-        } else if now_ms.saturating_sub(self.last_unlock_ms) > DAILY_MAX_IDLE_MS {
-            Err(DailyRefusal::Idle)
+    /// The latest of several clocks (the plain copies of every wrap); `None` when there is none.
+    pub fn latest(clocks: impl IntoIterator<Item = Self>) -> Option<Self> {
+        clocks.into_iter().max_by_key(|clock| clock.last_use_ms)
+    }
+
+    /// Whether the vault may open now without the passphrase.
+    pub fn check(self, now_ms: i64) -> Result<(), IdleRefusal> {
+        if now_ms < self.last_use_ms.saturating_sub(CLOCK_SKEW_MS) {
+            Err(IdleRefusal::ClockBack)
+        } else if now_ms.saturating_sub(self.last_use_ms) > MAX_IDLE_MS {
+            Err(IdleRefusal::Idle)
         } else {
             Ok(())
         }
     }
 
-    /// The record of an unlock at `now_ms` (never earlier than what the clock knows).
-    pub fn seen_at(self, now_ms: i64) -> Seen {
-        Seen {
-            epoch: self.stamp,
-            last_unlock_ms: now_ms.max(self.last_unlock_ms),
+    /// A use at `now_ms` (never earlier than what the clock knows).
+    pub fn used_at(self, now_ms: i64) -> Self {
+        Self {
+            last_use_ms: now_ms.max(self.last_use_ms),
         }
+    }
+
+    /// Whether a use at `now_ms` must be written, given the last time one was (`None`: never in this session).
+    pub fn record_due(recorded_ms: Option<i64>, now_ms: i64) -> bool {
+        recorded_ms.is_none_or(|at| now_ms.saturating_sub(at) >= USE_WRITE_INTERVAL_MS)
     }
 }

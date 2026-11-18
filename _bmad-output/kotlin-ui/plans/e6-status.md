@@ -390,3 +390,5 @@ menu; WhatsApp media (thumbnails, downloads, `wa_sync` media LRU) with E6.4b; of
 need a `wa_sync` outbox action); Status updates are not stored offline.
 
 - r18-s1 note (E6 session): `android/messages/.../wa/WaBatchScreen.kt` now uses `imeOverlapPadding(excludeNavigationBar = false)` instead of `imePadding()` (owner rule c, commit 7ffcc39); `:messages:compilePlainReleaseKotlin` is green. No other change in `android/messages`.
+
+- Round 19 step 3: goldens changed because of the `:design` `onAccent` fix (filled controls now read navy on the dark accent, ink on red/green fills); re-record Messages shots (`:messages:recordRoborazziPlainRelease`) after merging.

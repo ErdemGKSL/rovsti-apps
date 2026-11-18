@@ -13,6 +13,7 @@ import dev.rosty.core.model.contacts.PhotoSize
 import dev.rosty.design.media.crop.CropTags
 import dev.rosty.platform.files.FileResult
 import dev.rosty.testing.ShotTest
+import dev.rosty.testing.assertTagTextReadable
 import org.junit.After
 import org.junit.Test
 import org.robolectric.annotation.Config
@@ -21,6 +22,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class E44PhotoShotTest : ShotTest() {
     private var session: EditorSession? = null
+    private var darkNow = false
 
     override val imageProducer get() = ::pictureProducer
 
@@ -42,6 +44,7 @@ class E44PhotoShotTest : ShotTest() {
     ) {
         for (dark in listOf(false, true)) {
             val s = EditorSession(this, rig()).also { session = it }
+            darkNow = dark
             s.open(dark = dark)
             script(s)
             advance(500)
@@ -66,5 +69,6 @@ class E44PhotoShotTest : ShotTest() {
                 .picked(FileResult.Ok(path = PICTURE_PATH, mime = "image/jpeg"))
             s.until("the crop page") { s.exists(CropTags.Root) }
             advance(900)
+            assertTagTextReadable(CropTags.Choose, 4.5, "crop Choose dark=dark=$darkNow")
         }
 }

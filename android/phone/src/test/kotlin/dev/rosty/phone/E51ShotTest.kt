@@ -1,5 +1,7 @@
 package dev.rosty.phone
 
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -9,6 +11,7 @@ import dev.rosty.design.overlay.SheetEntry
 import dev.rosty.phone.setup.SetupSheetScreen
 import dev.rosty.phone.setup.SetupUiState
 import dev.rosty.testing.ShotTest
+import dev.rosty.testing.assertNodeReadable
 import kotlinx.collections.immutable.persistentListOf
 import org.junit.Test
 import org.robolectric.annotation.Config
@@ -53,6 +56,10 @@ class E51ShotTest : ShotTest() {
                 )
             }
             advance(1_400)
+            for (label in listOf("Set as default", "Allow access", "Open settings")) {
+                if (compose.onAllNodesWithText(label, useUnmergedTree = true).fetchSemanticsNodes().isEmpty()) continue
+                assertNodeReadable(hasText(label), 4.5, "setup sheet '$label'")
+            }
         })
     }
 

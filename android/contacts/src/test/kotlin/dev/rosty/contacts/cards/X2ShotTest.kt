@@ -17,6 +17,7 @@ import dev.rosty.contacts.card.HostedCard
 import dev.rosty.core.ops.CardPalette
 import dev.rosty.design.media.AnimatedImageSource
 import dev.rosty.testing.ShotTest
+import dev.rosty.testing.assertTagTextReadable
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -58,6 +59,8 @@ class X2ShotTest : ShotTest() {
         darks: List<Boolean> = listOf(false, true),
         images: AnimatedImageSource? = null,
         reduceMotion: Boolean = false,
+        // Off while a menu scrim or the render ring dims Share: the button is deliberately not at full strength then.
+        shareLive: Boolean = true,
         steps: (CardStudioRig) -> Unit = {},
     ) {
         for (dark in darks) {
@@ -68,6 +71,7 @@ class X2ShotTest : ShotTest() {
             assertTrue("$name: the Rust golden answered every render", r.ops.renders.isNotEmpty())
             assertEquals("$name: no placeholder card", emptyList<Any>(), r.ops.placeholders.toList())
             capture(name, dark)
+            if (shareLive) assertTagTextReadable(CardStudioTags.Share, 4.5, "$name Share dark=$dark")
         }
     }
 
@@ -81,7 +85,7 @@ class X2ShotTest : ShotTest() {
         }
 
     @Test fun gifRendering() =
-        studio("x2-card-preview-gif-rendering", images = frozenOn12()) { r ->
+        studio("x2-card-preview-gif-rendering", images = frozenOn12(), shareLive = false) { r ->
             animatedReady(r)
             // A colour that has a golden (Dawn again after Dusk is not needed): hold the next render open so the ring
             // shows over the finished picture. The toggle has settled by now (animatedReady runs the clock).
@@ -122,11 +126,11 @@ class X2ShotTest : ShotTest() {
     /** The finished animated card: Save, Share and the "..." button that holds "Share as still image". */
     @Test fun animatedReady() = studio("x2-share-animated") { animatedReady(it) }
 
-    @Test fun shareStillMenu() = studio("x2-share-still-menu") { openMore(it) }
+    @Test fun shareStillMenu() = studio("x2-share-still-menu", shareLive = false) { openMore(it) }
 
     @Config(qualifiers = "+tr")
     @Test
-    fun shareStillMenuTurkish() = studio("x2-share-still-menu-tr") { openMore(it) }
+    fun shareStillMenuTurkish() = studio("x2-share-still-menu-tr", shareLive = false) { openMore(it) }
 
     @Test fun animatedReadyFs2() = studio("x2-share-animated-fs2", fontScale = 2f) { animatedReady(it) }
 

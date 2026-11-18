@@ -16,6 +16,7 @@ import dev.rosty.core.model.phone.CallUpdate
 import dev.rosty.phone.incoming.HostedIncoming
 import dev.rosty.phone.incoming.IncomingHarness
 import dev.rosty.phone.incoming.IncomingShotHarness
+import dev.rosty.phone.incoming.IncomingTags
 import dev.rosty.phone.incoming.IncomingUi
 import dev.rosty.phone.incoming.WaCallMeta
 import dev.rosty.phone.incoming.hostDisplay
@@ -23,6 +24,7 @@ import dev.rosty.phone.incoming.ringing
 import dev.rosty.phone.incoming.ringingSnapshot
 import dev.rosty.phone.incoming.waitingSnapshot
 import dev.rosty.testing.ShotTest
+import dev.rosty.testing.assertTagTextReadable
 import org.junit.Test
 import org.robolectric.annotation.Config
 
@@ -137,6 +139,9 @@ class E58ShotTest : ShotTest() {
         for (dark in listOf(false, true)) {
             val h = IncomingShotHarness(waitingUi())
             shoot("e5.8-wa-waiting-during-cellular", dark) { HostedIncoming(h, inCall = true) }
+            for (tag in listOf(IncomingTags.WaitingEnd, IncomingTags.WaitingDecline)) {
+                assertTagTextReadable(tag, 4.5, "waiting card $tag dark=$dark")
+            }
         }
     }
 }

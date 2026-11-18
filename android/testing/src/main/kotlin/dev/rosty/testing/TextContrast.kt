@@ -5,6 +5,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.onRoot
 import dev.rosty.design.theme.contrastRatio
 import dev.rosty.design.theme.relativeLuminance
 import kotlin.math.abs
@@ -95,3 +98,45 @@ private fun hex(color: Color): String = "#%08X".format(color.toArgb())
 private const val FLAT = 0.002
 private const val MAX_ITERATIONS = 8
 private const val DROPPED_MIDDLE = 0.2
+
+/**
+ * Captures the root of this test now and asserts that every node [matcher] finds (in the unmerged tree, at least one)
+ * reads at [min] in the rendered pixels. Use it in a shot test after the frame has settled.
+ */
+fun ShotTest.assertNodeReadable(
+    matcher: androidx.compose.ui.test.SemanticsMatcher,
+    min: Double,
+    what: String,
+) {
+    val density = compose.activity.resources.displayMetrics.density
+    val nodes = compose.onAllNodes(matcher, useUnmergedTree = true)
+    val count = nodes.fetchSemanticsNodes().size
+    check(count > 0) { "$what: no node found to measure" }
+    val image = compose.onRoot().captureToImage()
+    for (i in 0 until count) {
+        val b = nodes[i].getBoundsInRoot()
+        val rect =
+            Rect(b.left.value * density, b.top.value * density, b.right.value * density, b.bottom.value * density)
+        assertReadable(image, rect, min, "$what #$i")
+    }
+}
+
+/**
+ * Asserts that every text inside the node tagged [tag] (a button, say) reads at [min] in the rendered pixels. Only the
+ * text bounds are measured, so the rounded corners of the button (the page behind them) do not join the clusters.
+ */
+fun ShotTest.assertTagTextReadable(
+    tag: String,
+    min: Double,
+    what: String,
+) = assertNodeReadable(
+    androidx.compose.ui.test
+        .hasAnyAncestor(
+            androidx.compose.ui.test
+                .hasTestTag(tag),
+        ) and
+        androidx.compose.ui.test
+            .hasText("", substring = true),
+    min,
+    what,
+)

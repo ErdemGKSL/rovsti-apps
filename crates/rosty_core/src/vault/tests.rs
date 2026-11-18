@@ -411,3 +411,166 @@ fn the_approved_parameters_derive() {
     assert_eq!(key_blob_kdf(&blob), Ok(ARGON2ID));
     assert_eq!(unwrap_key(&blob, &pass()), Ok(key()));
 }
+
+// ---- round 7a: the idle clock and the link wrap
+
+const PASS_AT: i64 = 1_000_000_000;
+const HOUR: i64 = 60 * 60 * 1000;
+
+fn epoch() -> DailyStamp {
+    DailyStamp {
+        boot_count: 7,
+        unlocked_ms: PASS_AT,
+    }
+}
+
+fn seen_at(last: i64) -> Seen {
+    Seen {
+        epoch: epoch(),
+        last_unlock_ms: last,
+    }
+}
+
+#[test]
+fn a_daily_unlock_resets_the_idle_clock() {
+    let fresh = DailyClock::new(epoch(), None);
+    assert_eq!(
+        fresh.check(7, PASS_AT + DAILY_MAX_IDLE_MS + 1),
+        Err(DailyRefusal::Idle)
+    );
+    // An unlock 70 h after the passphrase moves the 72 h on from there.
+    let used = DailyClock::new(epoch(), Some(seen_at(PASS_AT + 70 * HOUR)));
+    assert_eq!(used.check(7, PASS_AT + 100 * HOUR), Ok(()));
+    assert_eq!(
+        used.check(7, PASS_AT + 70 * HOUR + DAILY_MAX_IDLE_MS),
+        Ok(())
+    );
+    assert_eq!(
+        used.check(7, PASS_AT + 70 * HOUR + DAILY_MAX_IDLE_MS + 1),
+        Err(DailyRefusal::Idle)
+    );
+    // The record of the next unlock never goes back in time.
+    assert_eq!(
+        used.seen_at(PASS_AT + 80 * HOUR),
+        seen_at(PASS_AT + 80 * HOUR)
+    );
+    assert_eq!(used.seen_at(PASS_AT), seen_at(PASS_AT + 70 * HOUR));
+}
+
+#[test]
+fn the_passphrase_is_asked_after_30_days_however_often_the_biometric_unlocks() {
+    let every_day = DailyClock::new(epoch(), Some(seen_at(PASS_AT + DAILY_MAX_AGE_MS - HOUR)));
+    assert_eq!(every_day.check(7, PASS_AT + DAILY_MAX_AGE_MS), Ok(()));
+    assert_eq!(
+        every_day.check(7, PASS_AT + DAILY_MAX_AGE_MS + 1),
+        Err(DailyRefusal::Expired)
+    );
+    assert_eq!(DAILY_MAX_AGE_MS, 30 * 24 * HOUR);
+}
+
+#[test]
+fn a_reboot_and_a_clock_set_back_still_end_the_daily_unlock() {
+    let used = DailyClock::new(epoch(), Some(seen_at(PASS_AT + 50 * HOUR)));
+    assert_eq!(
+        used.check(8, PASS_AT + 51 * HOUR),
+        Err(DailyRefusal::Rebooted)
+    );
+    // Behind the last unlock, not only behind the passphrase.
+    assert_eq!(
+        used.check(7, PASS_AT + 50 * HOUR - DAILY_CLOCK_SKEW_MS - 1),
+        Err(DailyRefusal::ClockBack)
+    );
+    assert_eq!(
+        used.check(7, PASS_AT + 50 * HOUR - DAILY_CLOCK_SKEW_MS),
+        Ok(())
+    );
+}
+
+#[test]
+fn a_seen_record_of_another_epoch_or_from_the_past_changes_nothing() {
+    let other_boot = Seen {
+        epoch: DailyStamp {
+            boot_count: 6,
+            unlocked_ms: PASS_AT,
+        },
+        last_unlock_ms: PASS_AT + 70 * HOUR,
+    };
+    let other_passphrase = Seen {
+        epoch: DailyStamp {
+            boot_count: 7,
+            unlocked_ms: PASS_AT - HOUR,
+        },
+        last_unlock_ms: PASS_AT + 70 * HOUR,
+    };
+    for seen in [other_boot, other_passphrase, seen_at(PASS_AT - HOUR)] {
+        assert_eq!(
+            DailyClock::new(epoch(), Some(seen)).last_unlock_ms,
+            PASS_AT,
+            "{seen:?}"
+        );
+    }
+    // The plain stamp rule is the clock with no later unlock.
+    assert_eq!(
+        epoch().check(7, PASS_AT + DAILY_MAX_IDLE_MS + 1),
+        Err(DailyRefusal::Idle)
+    );
+}
+
+#[test]
+fn the_seen_record_round_trips_under_dk_only() {
+    let seen = seen_at(PASS_AT + 5 * HOUR);
+    let blob = seal_seen(&key(), seen, [3; NONCE_LEN]);
+    assert_eq!(blob.len(), SEEN_BLOB_LEN);
+    assert_eq!(&blob[..5], b"RWVA\x01");
+    assert_eq!(open_seen(&key(), &blob), Ok(seen));
+    let other = DataKey::from_slice(&[1; KEY_LEN]).expect("key");
+    assert_eq!(open_seen(&other, &blob), Err(VaultError::Tampered));
+    // Moving the last unlock forward breaks the tag.
+    let mut moved = blob.clone();
+    moved[28] ^= 1;
+    assert_eq!(open_seen(&key(), &moved), Err(VaultError::Tampered));
+    assert_eq!(
+        open_seen(&key(), &blob[..SEEN_BLOB_LEN - 1]),
+        Err(VaultError::Corrupt)
+    );
+    // A daily blob is not a seen record.
+    let daily = DailyKey::from_slice(&[9; KEY_LEN]).expect("key");
+    let daily_blob = seal_daily(&daily, &key(), epoch(), [4; NONCE_LEN]);
+    assert_eq!(open_seen(&key(), &daily_blob), Err(VaultError::NotAVault));
+}
+
+#[test]
+fn the_link_wrap_opens_with_the_vaults_connect_key_only() {
+    let connect = body().connect_key().to_owned();
+    let blob = wrap_for_link(&key(), &connect, [5; SALT_LEN], [6; NONCE_LEN]);
+    assert_eq!(blob.len(), LINK_BLOB_LEN);
+    assert_eq!(&blob[..5], b"RWVL\x01");
+    assert_eq!(unwrap_for_link(&blob, &connect), Ok(key()));
+    // Surrounding white space is not part of the key.
+    assert_eq!(unwrap_for_link(&blob, &format!(" {connect}\n")), Ok(key()));
+    assert_eq!(
+        unwrap_for_link(&blob, "rwk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+        Err(VaultError::Tampered)
+    );
+    let mut salted = blob.clone();
+    salted[7] ^= 1;
+    assert_eq!(
+        unwrap_for_link(&salted, &connect),
+        Err(VaultError::Tampered)
+    );
+    assert_eq!(
+        unwrap_for_link(&blob[..LINK_BLOB_LEN - 1], &connect),
+        Err(VaultError::Corrupt)
+    );
+    // A key blob is not a link wrap.
+    let key_blob = wrap_key(&key(), &pass(), FAST, [1; SALT_LEN], [2; NONCE_LEN]).expect("wrap");
+    assert_eq!(
+        unwrap_for_link(&key_blob, &connect),
+        Err(VaultError::NotAVault)
+    );
+    // Another salt, another blob for the same DK.
+    assert_ne!(
+        wrap_for_link(&key(), &connect, [7; SALT_LEN], [6; NONCE_LEN]),
+        blob
+    );
+}

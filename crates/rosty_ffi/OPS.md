@@ -220,6 +220,10 @@ chat not paged in this session, else `null`); older history stays `wa_sync.older
 identity map and its catch-up cursor from the DK-encrypted `wa-vault-cache.bin` when the vault is unlocked for this instance; the
 answer adds `lazy: true` and `cache` (`loaded`, `empty`, `locked`). `wa_sync.cache_save {handle}` writes the map and the cursor
 back (pictures stay) and answers `{handle, persons}`; `locked` (`not_found`) while the vault is locked or holds another instance.
+Round 7a: `vault_cache` also seeds the recent chats and messages from the DK-sealed `wa-vault-history.bin` into a store that holds
+no chat yet (the answer adds `history: {chats, messages}`), so the inbox and threads show at once; the lazy sync then catches up
+with no extra request. `wa_sync.history_save {handle}` writes that file (at most 40 chats x 30 messages, thumbnails up to 2 MiB,
+other columns up to 4 MiB; never the outbox or a media file) and answers `{handle, chats, messages}`; `locked` like `cache_save`.
 WhatsApp offline store (E6.4s, `rosty_app_core::wa_sync`): `wa_sync.open {instance_id, dir?, memory?}` opens the SQLite store of
 one linked instance (`wa-sync-<instance>.db` in the data directory; another instance is another file) and answers `{handle,
 instance_id, schema_version, last_seq, needs_resync}`; a second open of the same file in one process shares the store, and
@@ -396,7 +400,13 @@ unlock and the cache, makes the session current and answers the state. `vault.un
 (`key_blob` = K_hw-decrypted `hw_sealed`) answers `{handle, daily_seal}`; `vault.daily_store {handle, alias, sealed}` stores the
 K_daily-sealed `daily_seal` (`wa-vault-daily.json`) and answers the state; `vault.unlock_daily {dir?, daily_blob, boot_count, now_ms}`
 (`daily_blob` = K_daily-decrypted `daily.sealed`) answers `{handle, daily_seal}`, or `auth` `daily_expired` with `detail.reason`
-(and deletes the daily file) after a reboot, 72 h without an unlock or a clock set back. `vault.daily_forget {dir?}` ends the daily
+(and deletes the daily file) after a reboot, 72 h without an unlock, 30 days since the passphrase (`expired`) or a clock set
+back. With `biometric: true` (K_daily is the Class 3 biometric key) the unlock resets the 72 h idle clock: the time is kept in a
+DK-sealed `seen` record in the daily file (`rosty_core::vault::DailyClock`); the daily state then also names `last_unlock_ms`.
+`vault.unlock_link {dir?, link: {gateway_url, instance_id, key}, boot_count, now_ms}` (round 7a) opens this app's own vault with
+the link a sibling app handed over from its unlocked vault, through the link wrap (DK under the connect key, written at the commit
+and at the first unlock of an older vault) and answers `{handle}`; `no_link_wrap` (`not_found`) before that, `other_link` (`auth`)
+for a link that is not this vault's. It also moves the idle clock of a still valid daily unlock on. `vault.daily_forget {dir?}` ends the daily
 unlock (BootReceiver, biometric change, five failures). `vault.lock {handle?, dir?}` answers the state. `vault.change {handle}`
 answers `{handle, passphrase, seal}` for a new passphrase and DK (rotation), committed with `vault.commit` under a new alias.
 `vault.reset {dir?}` deletes the vault files and answers `{deleted}` (Kotlin deletes the Keystore keys). `vault.wipe_plaintext {dir?,
@@ -411,7 +421,7 @@ of a trip (`stops::store::end_trip`) drop it.
 `vault.picture_put {jid, picture_id?, jpeg?}` keeps one (both left out: the person has no picture; at most 4 MiB, oldest first out)
 and answers `{handle, pictures}`; both are `locked` while the vault is. Errors carry
 `detail.code`: `typo`, `length`, `character` (`invalid`), `wrong_passphrase` (`auth`), `damaged` (`parse`), `no_vault`, `no_daily`,
-`no_link`, `locked` (`not_found`), `vault_exists`, `nothing_to_commit`, `nothing_to_store`, `not_committed`, `bad_url`, `bad_key`
+`no_link`, `no_link_wrap`, `locked` (`not_found`), `other_link` (`auth`), `vault_exists`, `nothing_to_commit`, `nothing_to_store`, `not_committed`, `bad_url`, `bad_key`
 (`invalid`). Answers with fresh random values (`passphrase`, `seal`, `daily_seal`) read `$RANDOM` in the fixtures (`Case::volatile`).
 Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
 
@@ -497,10 +507,10 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
-| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.history_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
 | `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
-| `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.daily_store, vault.daily_forget, vault.lock, vault.change, vault.export_link, vault.reset, vault.trip_hold, vault.trip_release, vault.wipe_plaintext, vault.pictures, vault.picture_put |
+| `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.unlock_link, vault.daily_store, vault.daily_forget, vault.lock, vault.change, vault.export_link, vault.reset, vault.trip_hold, vault.trip_release, vault.wipe_plaintext, vault.pictures, vault.picture_put |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

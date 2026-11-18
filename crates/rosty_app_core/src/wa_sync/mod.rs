@@ -41,6 +41,9 @@ mod backfill;
 mod contact_match_tests;
 #[cfg(test)]
 mod gateway_wire_tests;
+mod history;
+#[cfg(test)]
+mod history_tests;
 mod identity;
 #[cfg(test)]
 mod identity_tests;
@@ -67,6 +70,10 @@ mod store;
 #[cfg(test)]
 mod tests;
 
+pub use history::{
+    Cell, HISTORY_CHATS, HISTORY_MESSAGES, HISTORY_ROW_BYTES, HISTORY_THUMB_BYTES, HistoryCount,
+    HistorySnapshot,
+};
 pub use identity::{IdentityApplied, IdentityCaughtUp, IdentitySnapshot, Observed, ResolvedId};
 pub use link_state::{
     HistoryBatch, HistoryProgress, HistoryReport, HistoryState, StatusNote, StatusNoted, Wiped,

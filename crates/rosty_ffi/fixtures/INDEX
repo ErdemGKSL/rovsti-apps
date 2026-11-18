@@ -1040,9 +1040,15 @@ vault.unlock.typo
 vault.unlock.wrong_passphrase
 vault.unlock_daily
 vault.unlock_daily.damaged
+vault.unlock_daily.expired
 vault.unlock_daily.idle
+vault.unlock_daily.idle_reset
 vault.unlock_daily.no_daily
 vault.unlock_daily.rebooted
+vault.unlock_link
+vault.unlock_link.no_vault
+vault.unlock_link.other_instance
+vault.unlock_link.other_key
 vault.wipe_plaintext
 vault.wipe_plaintext.no_vault
 view.follow
@@ -1278,6 +1284,8 @@ wa_sync.focus.none
 wa_sync.history
 wa_sync.history.done
 wa_sync.history.none
+wa_sync.history_save
+wa_sync.history_save.locked
 wa_sync.identity_catch_up
 wa_sync.identity_catch_up.done
 wa_sync.identity_catch_up.rejected
@@ -1364,6 +1372,7 @@ wa_sync.open
 wa_sync.open.lazy
 wa_sync.open.no_instance
 wa_sync.open.vault_cache
+wa_sync.open.vault_history
 wa_sync.open_page
 wa_sync.open_page.eager
 wa_sync.open_page.paged

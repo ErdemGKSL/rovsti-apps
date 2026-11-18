@@ -45,6 +45,13 @@ pub(super) const OPS: &[OpSpec] = &[
         unlock_daily_cases
     ),
     op!(
+        "vault.unlock_link",
+        LinkUnlockReq,
+        HandleAns,
+        unlock_link,
+        unlock_link_cases
+    ),
+    op!(
         "vault.daily_store",
         DailyStoreReq,
         StateAns,
@@ -288,6 +295,9 @@ struct DailyInfo {
     sealed: String,
     boot_count: u64,
     unlocked_ms: i64,
+    /// The last daily unlock of this passphrase epoch (round 7a: the 72 h count from it), from the plain copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_unlock_ms: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -321,7 +331,7 @@ fn state_of(dir: &Path, check: Option<(u64, i64)>) -> Result<StateAns, FfiError>
         daily = None;
     }
     if let (Some(file), Some((boot_count, now_ms))) = (&daily, check)
-        && let Err(refusal) = file.stamp.check(boot_count, now_ms)
+        && let Err(refusal) = file.plain_clock().check(boot_count, now_ms)
     {
         DailyFile::remove(dir)?;
         daily = None;
@@ -348,6 +358,7 @@ fn state_of(dir: &Path, check: Option<(u64, i64)>) -> Result<StateAns, FfiError>
             sealed: b64(&d.sealed),
             boot_count: d.stamp.boot_count,
             unlocked_ms: d.stamp.unlocked_ms,
+            last_unlock_ms: d.last_unlock_ms,
         }),
         daily_dropped,
         legacy_link: wipe::legacy_link(dir).is_some(),
@@ -543,16 +554,18 @@ fn commit(req: CommitReq) -> Result<StateAns, FfiError> {
                 "nothing_to_commit",
             )
         })?;
-        let file = VaultFile::new(req.hw_alias.trim(), hw_sealed, pending.body_blob.clone());
+        let mut file = VaultFile::new(req.hw_alias.trim(), hw_sealed, pending.body_blob.clone());
+        file.link_sealed = Some(link_wrap(&pending.key, &s.body));
         if let Err(error) = file.save(&s.dir) {
             s.pending = Some(pending);
             return Err(error.into());
         }
         s.key = pending.key;
         s.committed = true;
-        // A daily blob seals the old DK, and a cache sealed under it no longer opens.
+        // A daily blob seals the old DK, and the caches sealed under it no longer open.
         let _ = DailyFile::remove(&s.dir);
         let _ = std::fs::remove_file(s.dir.join(wa_vault::CACHE_FILE));
+        let _ = wa_vault::remove_file(&s.dir, wa_vault::HISTORY_FILE);
         s.daily = None;
         Ok(s.dir.clone())
     })??;
@@ -598,10 +611,22 @@ struct UnlockedAns {
     daily_seal: String,
 }
 
-/// Opens the body of the vault in `dir` with DK and makes the session; a daily blob is prepared.
+/// DK wrapped under the connect key of `body` (round 7a): the hand-over of the link by a sibling app opens it.
+fn link_wrap(key: &DataKey, body: &VaultBody) -> Vec<u8> {
+    let mut salt = [0u8; vault::SALT_LEN];
+    os_entropy(&mut salt);
+    vault::wrap_for_link(key, body.connect_key(), salt, vault::nonce(&mut os_entropy))
+}
+
+/// Opens the body of the vault in `dir` with DK and makes the session; a daily blob is prepared. A vault of an
+/// earlier build gets its link wrap now (best effort: the unlock does not depend on it).
 fn open_session(dir: PathBuf, key: DataKey, stamp: DailyStamp) -> Result<UnlockedAns, FfiError> {
-    let file = vault_file(&dir)?;
+    let mut file = vault_file(&dir)?;
     let body = vault::open_body(&key, &file.body).map_err(vault_error)?;
+    if file.link_sealed.is_none() {
+        file.link_sealed = Some(link_wrap(&key, &body));
+        let _ = file.save(&dir);
+    }
     let daily_key = DailyKey::generate(&mut os_entropy);
     let daily_blob = vault::seal_daily(&daily_key, &key, stamp, vault::nonce(&mut os_entropy));
     let handle = handles::global().insert(Session {
@@ -714,12 +739,16 @@ struct DailyUnlockReq {
     daily_blob: String,
     boot_count: u64,
     now_ms: i64,
+    /// K_daily is the Class 3 biometric key: this unlock resets the 72 h idle clock (round 7a). A screen-lock key
+    /// (a phone with no Class 3 biometric) does not: its 72 h count from the passphrase.
+    #[serde(default)]
+    biometric: bool,
 }
 
 fn unlock_daily(req: DailyUnlockReq) -> Result<UnlockedAns, FfiError> {
     let dir = dir_of(&req.dir)?;
     let blob = from_b64("daily_blob", &req.daily_blob)?;
-    let file = DailyFile::load(&dir)
+    let mut file = DailyFile::load(&dir)
         .map_err(file_error)?
         .ok_or_else(|| coded(ErrorKind::NotFound, "there is no daily unlock", "no_daily"))?;
     let daily_key = file
@@ -729,10 +758,16 @@ fn unlock_daily(req: DailyUnlockReq) -> Result<UnlockedAns, FfiError> {
         let _ = DailyFile::remove(&dir);
         coded(ErrorKind::Parse, "the daily unlock is damaged", "damaged")
     })?;
-    if let Err(refusal) = stamp.check(req.boot_count, req.now_ms) {
+    // The sealed stamp is the passphrase epoch; the seen record (under DK) moves the idle clock on.
+    let clock = file.sealed_clock(&key, stamp);
+    if let Err(refusal) = clock.check(req.boot_count, req.now_ms) {
         DailyFile::remove(&dir)?;
-        return Err(FfiError::new(ErrorKind::Auth, refusal.to_string())
-            .with_detail(json!({"code": "daily_expired", "reason": refusal})));
+        return Err(daily_refused(refusal));
+    }
+    if req.biometric {
+        file.record_unlock(&key, clock, req.now_ms, &mut os_entropy);
+        // Best effort: a failed write only means the 72 h count from the last recorded unlock.
+        let _ = file.save(&dir);
     }
     open_session(
         dir,
@@ -742,6 +777,11 @@ fn unlock_daily(req: DailyUnlockReq) -> Result<UnlockedAns, FfiError> {
             unlocked_ms: req.now_ms,
         },
     )
+}
+
+fn daily_refused(refusal: DailyRefusal) -> FfiError {
+    FfiError::new(ErrorKind::Auth, refusal.to_string())
+        .with_detail(json!({"code": "daily_expired", "reason": refusal}))
 }
 
 fn daily_request(extra: serde_json::Value) -> serde_json::Value {
@@ -770,6 +810,21 @@ fn unlock_daily_cases() -> Vec<Case> {
             daily_request(json!({"now_ms": seed::UNLOCKED_MS + vault::DAILY_MAX_IDLE_MS + 1})),
         )
         .seeded("wa_vault"),
+        Case::named(
+            "expired",
+            daily_request(json!({"now_ms": seed::UNLOCKED_MS + vault::DAILY_MAX_AGE_MS + 1})),
+        )
+        .seeded("wa_vault"),
+        // A biometric unlock 70 h after the passphrase moves the 72 h on: 100 h after it, the next one opens.
+        Case::named(
+            "idle_reset",
+            daily_request(json!({"now_ms": seed::UNLOCKED_MS + 100 * HOUR_MS, "biometric": true})),
+        )
+        .seeded("wa_vault")
+        .after(
+            "vault.unlock_daily",
+            daily_request(json!({"now_ms": seed::UNLOCKED_MS + 70 * HOUR_MS, "biometric": true})),
+        ),
         Case::named("damaged", daily_request(json!({"daily_blob": "AAAA"}))).seeded("wa_vault"),
         Case::named(
             "no_daily",
@@ -780,6 +835,118 @@ fn unlock_daily_cases() -> Vec<Case> {
     .into_iter()
     .map(|case| case.volatile(&["daily_seal"]))
     .collect()
+}
+
+const HOUR_MS: i64 = 60 * 60 * 1000;
+
+// ---- vault.unlock_link
+
+#[derive(Deserialize)]
+struct LinkUnlockReq {
+    #[serde(default)]
+    dir: Option<String>,
+    /// The link a sibling Rosty app handed over from its unlocked vault (`WaLinkProvider`, memory only).
+    link: LinkIn,
+    boot_count: u64,
+    now_ms: i64,
+}
+
+#[derive(Serialize)]
+struct HandleAns {
+    handle: i64,
+}
+
+/// The one prompt for the four apps (round 7a): a sibling Rosty app whose vault is unlocked hands its link over, and
+/// this app opens its *own* vault with it, without a prompt. The link wrap (DK under this vault's connect key) opens
+/// DK only for the very key the vault holds; the body must then name the same gateway and instance. Nothing is
+/// written in plaintext and no other app's key is used: each app keeps its own DK.
+///
+/// The hand-over also counts as an unlock for the idle clock of this app's daily unlock while that is still valid
+/// (the same boot, within 72 h and 30 days); one that lapsed is dropped, as `vault.state` would.
+fn unlock_link(req: LinkUnlockReq) -> Result<HandleAns, FfiError> {
+    let dir = dir_of(&req.dir)?;
+    let file = vault_file(&dir)?;
+    let wrap = file.link_sealed.as_deref().ok_or_else(|| {
+        coded(
+            ErrorKind::NotFound,
+            "this vault cannot be opened by a hand-over yet; unlock it once",
+            "no_link_wrap",
+        )
+    })?;
+    let other = || {
+        coded(
+            ErrorKind::Auth,
+            "the link handed over is not this vault's",
+            "other_link",
+        )
+    };
+    let key = match vault::unwrap_for_link(wrap, &req.link.key) {
+        Ok(key) => key,
+        Err(VaultError::Tampered) => return Err(other()),
+        Err(error) => return Err(vault_error(error)),
+    };
+    let body = vault::open_body(&key, &file.body).map_err(vault_error)?;
+    let same_url =
+        GatewayUrl::parse(&req.link.gateway_url).is_ok_and(|url| url.as_str() == body.gateway_url);
+    if !same_url || req.link.instance_id.trim() != body.instance_id {
+        return Err(other());
+    }
+    drop(body);
+    if let Ok(Some(mut daily)) = DailyFile::load(&dir) {
+        let clock = daily.plain_clock();
+        if clock.check(req.boot_count, req.now_ms).is_ok() {
+            daily.record_unlock(&key, clock, req.now_ms, &mut os_entropy);
+            let _ = daily.save(&dir);
+        } else {
+            let _ = DailyFile::remove(&dir);
+        }
+    }
+    let stamp = DailyStamp {
+        boot_count: req.boot_count,
+        unlocked_ms: req.now_ms,
+    };
+    let unlocked = open_session(dir, key, stamp)?;
+    // No daily blob from a hand-over: sealing one would need a prompt here.
+    let _ = session(unlocked.handle, |s: &mut Session| s.daily = None);
+    Ok(HandleAns {
+        handle: unlocked.handle,
+    })
+}
+
+fn link_request(key: &str, extra: serde_json::Value) -> serde_json::Value {
+    let mut req = json!({
+        "dir": "$DIR",
+        "link": {"gateway_url": "https://rosty.erdemdev.tr", "instance_id": "inst1", "key": key},
+        "boot_count": seed::BOOT_COUNT,
+        "now_ms": seed::UNLOCKED_MS + 3_600_000,
+    });
+    if let (Some(req), Some(extra)) = (req.as_object_mut(), extra.as_object()) {
+        req.extend(extra.clone());
+    }
+    req
+}
+
+fn unlock_link_cases() -> Vec<Case> {
+    // The seeded vault holds its link wrap; a vault of an earlier build (`no_link_wrap`) is a unit test.
+    let other_key = "rwk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    vec![
+        Case::new(link_request(super::wa::fixture::KEY, json!({}))).seeded("wa_vault"),
+        Case::named("other_key", link_request(other_key, json!({}))).seeded("wa_vault"),
+        Case::named(
+            "other_instance",
+            link_request(
+                super::wa::fixture::KEY,
+                json!({"link": {"gateway_url": "https://rosty.erdemdev.tr", "instance_id": "inst2",
+                    "key": super::wa::fixture::KEY}}),
+            ),
+        )
+        .seeded("wa_vault"),
+        Case::named(
+            "no_vault",
+            link_request(super::wa::fixture::KEY, json!({"dir": "$DIR/nothing-here"})),
+        )
+        .seeded("wa_vault"),
+    ]
 }
 
 // ---- vault.daily_store
@@ -1145,6 +1312,48 @@ pub(crate) fn with_cache<R>(
                 cache.save(&s.dir, &s.key, &mut os_entropy)?;
             }
             Ok(out)
+        })
+        .ok_or_else(locked)?
+}
+
+/// The history file (round 7a) of the unlocked session for `instance`, opened under DK: `Ok(None)` when there is
+/// none, or when it does not open (another key, damage; it is deleted then). `locked` while no committed session for
+/// that instance is open.
+pub(crate) fn history_load(instance: &str) -> Result<Option<Zeroizing<Vec<u8>>>, FfiError> {
+    let handle = current().ok_or_else(locked)?;
+    handles::global()
+        .with(handle, |s: &mut Session| {
+            if !s.committed || s.body.instance_id != instance {
+                return Err(locked());
+            }
+            match wa_vault::load_sealed(&s.dir, wa_vault::HISTORY_FILE, &s.key) {
+                Ok(plain) => Ok(plain),
+                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                    let _ = wa_vault::remove_file(&s.dir, wa_vault::HISTORY_FILE);
+                    Ok(None)
+                }
+                Err(error) => Err(error.into()),
+            }
+        })
+        .ok_or_else(locked)?
+}
+
+/// Seals `plain` (a history snapshot) under DK of the unlocked session for `instance` into the history file.
+pub(crate) fn history_store(instance: &str, plain: &[u8]) -> Result<(), FfiError> {
+    let handle = current().ok_or_else(locked)?;
+    handles::global()
+        .with(handle, |s: &mut Session| {
+            if !s.committed || s.body.instance_id != instance {
+                return Err(locked());
+            }
+            wa_vault::save_sealed(
+                &s.dir,
+                wa_vault::HISTORY_FILE,
+                &s.key,
+                plain,
+                &mut os_entropy,
+            )
+            .map_err(FfiError::from)
         })
         .ok_or_else(locked)?
 }

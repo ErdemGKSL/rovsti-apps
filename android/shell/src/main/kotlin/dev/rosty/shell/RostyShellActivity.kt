@@ -2,7 +2,6 @@ package dev.rosty.shell
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,6 +12,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.SaverScope
+import androidx.fragment.app.FragmentActivity
 import dev.rosty.core.model.phone.HapticsLevel
 import dev.rosty.design.haptics.LocalRostyHaptics
 import dev.rosty.design.media.LocalRostyImageLoader
@@ -48,9 +48,11 @@ class NavSpec<R : Any>(
  * - the highest refresh rate at the current resolution ([preferHighestRefreshRate]);
  * - `onResume` is the only place that calls `permissions.refresh`;
  * - `onCreate` (first start only; a restart restores the saved stacks) and `onNewIntent` turn the intent extras into
- *   routes with [routeFor] and call `navigator.resetTo` (the replacement of the old `Mailbox`, ARCH 7.3).
+ *   routes with [routeFor] and call `navigator.resetTo` (the replacement of the old `Mailbox`, ARCH 7.3);
+ * - the WhatsApp vault: the activity is the window of its system prompts (a `FragmentActivity`, as `BiometricPrompt`
+ *   needs) and reports its starts and stops to the container's lock timer (`plans/wa-vault.md` 6).
  */
-abstract class RostyShellActivity<R : Any> : ComponentActivity() {
+abstract class RostyShellActivity<R : Any> : FragmentActivity() {
     /** The app's container; by default the one of the `Application` (see [HasContainer]). */
     protected open val container: ShellContainer get() = shellContainer()
 
@@ -81,6 +83,7 @@ abstract class RostyShellActivity<R : Any> : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.preferHighestRefreshRate(display)
         container.haptics.attach(window.decorView)
+        container.vaultPromptHost.attach(this)
         navigator = restoreNavigator(savedInstanceState)
         if (savedInstanceState == null) route(intent)
         setContent {
@@ -117,9 +120,20 @@ abstract class RostyShellActivity<R : Any> : ComponentActivity() {
         route(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        container.vaultLock?.onActivityStarted()
+    }
+
     override fun onResume() {
         super.onResume()
+        container.vaultPromptHost.attach(this)
         container.permissions.refresh(this)
+    }
+
+    override fun onStop() {
+        container.vaultLock?.onActivityStopped(isChangingConfigurations)
+        super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -130,6 +144,7 @@ abstract class RostyShellActivity<R : Any> : ComponentActivity() {
 
     override fun onDestroy() {
         container.haptics.detach()
+        container.vaultPromptHost.detach(this)
         super.onDestroy()
     }
 

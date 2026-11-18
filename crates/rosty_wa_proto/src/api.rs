@@ -47,6 +47,12 @@ pub mod routes {
     pub const DELETE_FOR_ME: &str = "/v1/messages/delete";
     pub const STAR: &str = "/v1/messages/star";
     pub const MARK_PLAYED: &str = "/v1/played";
+    /// Forward a stored message to another chat (E6-WA R4). Older gateways
+    /// answer 404.
+    pub const FORWARD: &str = "/v1/messages/forward";
+    /// Who got, read or played one of my messages, with times, `?chat=`
+    /// (E6-WA R4). Older gateways answer 404.
+    pub const MESSAGE_RECEIPTS: &str = "/v1/messages/{message_id}/receipts";
     pub const CHAT_ACTION: &str = "/v1/chats/action";
     pub const PROFILES: &str = "/v1/contacts/profiles";
     pub const PICTURE: &str = "/v1/pictures/{jid}";
@@ -291,6 +297,56 @@ pub struct SendText {
     pub chat: String,
     pub text: String,
     pub quoted_id: Option<String>,
+    /// JIDs the text mentions with `@<user>` tokens (`contextInfo.mentioned_jid`).
+    /// An older gateway ignores it and sends the plain text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<String>,
+    /// The preview card of the link in the text, made on the phone. An older
+    /// gateway ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_preview: Option<LinkPreviewOut>,
+}
+
+impl SendText {
+    /// A plain text, or a reply when `quoted_id` is set.
+    pub fn new(chat: impl Into<String>, text: impl Into<String>, quoted_id: Option<String>) -> Self {
+        Self {
+            chat: chat.into(),
+            text: text.into(),
+            quoted_id,
+            mentions: Vec::new(),
+            link_preview: None,
+        }
+    }
+}
+
+/// The preview card of a link a text sends ([`SendText::link_preview`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkPreviewOut {
+    /// The link as it is written in the text (`matchedText`).
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// A small JPEG, base64, at most
+    /// [`MAX_SEND_THUMBNAIL_BYTES`](crate::MAX_SEND_THUMBNAIL_BYTES) decoded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_b64: Option<String>,
+}
+
+impl LinkPreviewOut {
+    /// The thumbnail bytes, checked like a media preview (a JPEG within the
+    /// size limit); `Ok(None)` without one.
+    pub fn thumbnail(&self) -> Result<Option<Vec<u8>>, crate::MediaOptionError> {
+        let Some(b64) = self.thumbnail_b64.as_deref() else {
+            return Ok(None);
+        };
+        let bytes =
+            crate::decode_b64(b64).ok_or(crate::MediaOptionError::ThumbnailNotBase64)?;
+        crate::check_thumbnail(&bytes)?;
+        Ok(Some(bytes))
+    }
 }
 
 /// Asks the gateway to send a text at `send_at_ms` (unix milliseconds).
@@ -1157,5 +1213,31 @@ mod tests {
                 admin: false,
             }
         );
+    }
+
+    #[test]
+    fn send_text_keeps_its_old_shape_without_the_r4_fields() {
+        let plain = SendText::new("100000000011@s.whatsapp.net", "Hi", None);
+        assert_eq!(
+            serde_json::to_value(&plain).expect("json"),
+            serde_json::json!({"chat": "100000000011@s.whatsapp.net", "text": "Hi", "quoted_id": null})
+        );
+        let old: SendText = serde_json::from_str(r#"{"chat":"c","text":"t","quoted_id":null}"#).expect("old");
+        assert!(old.mentions.is_empty() && old.link_preview.is_none());
+    }
+
+    #[test]
+    fn link_preview_thumbnail_is_checked() {
+        let mut preview = LinkPreviewOut {
+            url: "https://example.com".into(),
+            ..LinkPreviewOut::default()
+        };
+        assert_eq!(preview.thumbnail(), Ok(None));
+        preview.thumbnail_b64 = Some(crate::encode_b64(&[0xFF, 0xD8, 0xFF, 0xE0, 1]));
+        assert_eq!(preview.thumbnail().expect("jpeg").map(|b| b.len()), Some(5));
+        preview.thumbnail_b64 = Some(crate::encode_b64(b"not a jpeg"));
+        assert!(preview.thumbnail().is_err());
+        preview.thumbnail_b64 = Some("%%%".into());
+        assert!(preview.thumbnail().is_err());
     }
 }

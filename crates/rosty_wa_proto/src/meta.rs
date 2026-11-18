@@ -209,6 +209,61 @@ pub struct MessageMeta {
     /// "open it on your phone"; there is nothing to download.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unavailable: Option<Unavailable>,
+    /// How often the message was forwarded before it reached this chat
+    /// (WhatsApp's `forwardingScore`); from
+    /// [`FREQUENTLY_FORWARDED_SCORE`](crate::FREQUENTLY_FORWARDED_SCORE) on
+    /// it shows "Forwarded many times". Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarding_score: Option<u32>,
+    /// The preview card of the link in the text. Its picture is served by
+    /// `GET /v1/messages/{id}/thumbnail` when [`LinkPreview::thumbnail`] says
+    /// so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_preview: Option<LinkPreview>,
+    /// The disappearing timer the message carries, in seconds
+    /// (`contextInfo.expiration`): it disappears that long after it was
+    /// sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_s: Option<u32>,
+    /// A line of the conversation rather than a message (the body reads as
+    /// `unsupported`, so an older client shows an unsupported message).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<SystemNote>,
+}
+
+/// From this forwarding score on WhatsApp shows "Forwarded many times".
+pub const FREQUENTLY_FORWARDED_SCORE: u32 = 5;
+
+/// The preview card of a link, as WhatsApp carries it in
+/// `extendedTextMessage` (`matchedText`, `title`, `description`,
+/// `jpegThumbnail`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkPreview {
+    /// The link the card is for.
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// `GET /v1/messages/{id}/thumbnail` has the card's picture.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub thumbnail: bool,
+}
+
+/// A line of the conversation ([`MessageMeta::system`]).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SystemNote {
+    /// The chat's disappearing timer changed: `seconds` (0 is off), set by
+    /// `by` ([`DELETED_BY_ME`] for me, else the JID; `None` when unknown).
+    Disappearing {
+        seconds: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
+    },
+    /// A kind a newer gateway names that this build does not know.
+    #[serde(other)]
+    Other,
 }
 
 /// [`MessageMeta::deleted_by`] of a message this account deleted.
@@ -279,6 +334,10 @@ pub struct ChatMeta {
     /// Marked as unread by hand on another device.
     #[serde(default, skip_serializing_if = "is_false")]
     pub marked_unread: bool,
+    /// The chat's disappearing timer in seconds; `None` when off. Every
+    /// message sent into the chat carries it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral_s: Option<u32>,
 }
 
 impl ChatMeta {
@@ -412,6 +471,59 @@ pub enum ChatActionKind {
     MarkRead {
         read: bool,
     },
+    /// Set the chat's disappearing timer: one of
+    /// [`DISAPPEARING_CHOICES`] seconds (0 turns it off). An older gateway
+    /// refuses the unknown type.
+    Disappearing {
+        seconds: u32,
+    },
+}
+
+/// The disappearing timers a chat can be set to, in seconds: off, 24 hours,
+/// 7 days, 90 days.
+pub const DISAPPEARING_CHOICES: [u32; 4] = [0, 86_400, 604_800, 7_776_000];
+
+/// Body of `POST /v1/messages/forward`: send a copy of the message
+/// `message_id` of `chat` to the chat `to`, marked forwarded.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ForwardMessage {
+    pub chat: String,
+    pub message_id: String,
+    pub to: String,
+}
+
+/// One person's receipts of a message of mine
+/// (`GET /v1/messages/{id}/receipts`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReceiptMember {
+    /// Their JID as chats and authors are named (the number when known).
+    pub jid: String,
+    /// Their other id, when the gateway knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jid_alt: Option<String>,
+    /// Their WhatsApp push name, when the gateway has seen it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub played_ms: Option<i64>,
+    /// Not a member of the group any more.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub left: bool,
+}
+
+/// Answer of `GET /v1/messages/{message_id}/receipts?chat=`: who got, read
+/// or played one of my messages, and when. In a group: every member with a
+/// receipt, the members of today with none yet, and those who left marked.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MessageReceipts {
+    pub chat: String,
+    pub id: String,
+    #[serde(default)]
+    pub members: Vec<ReceiptMember>,
 }
 
 /// Body of `POST /v1/chats/action`.
@@ -956,5 +1068,70 @@ mod tests {
     fn etags_are_quoted() {
         assert_eq!(picture_etag("12345"), "\"12345\"");
         assert_eq!(picture_etag("a\"b"), "\"ab\"");
+    }
+
+    #[test]
+    fn r4_fields_are_additive() {
+        // An old meta reads with the new fields empty, and an empty new field is never written.
+        let old: MessageMeta = serde_json::from_str(r#"{"forwarded":true}"#).expect("old meta");
+        assert_eq!(old.forwarding_score, None);
+        assert_eq!(old.link_preview, None);
+        assert_eq!(serde_json::to_string(&old).expect("json"), r#"{"forwarded":true}"#);
+        let meta = MessageMeta {
+            forwarding_score: Some(5),
+            link_preview: Some(LinkPreview {
+                url: "https://example.com".into(),
+                title: Some("Example".into()),
+                description: None,
+                thumbnail: true,
+            }),
+            expires_s: Some(86_400),
+            system: Some(SystemNote::Disappearing {
+                seconds: 604_800,
+                by: Some(DELETED_BY_ME.into()),
+            }),
+            ..MessageMeta::default()
+        };
+        let json = serde_json::to_value(&meta).expect("json");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "forwarding_score": 5,
+                "link_preview": {"url": "https://example.com", "title": "Example", "thumbnail": true},
+                "expires_s": 86400,
+                "system": {"type": "disappearing", "seconds": 604800, "by": "me"}
+            })
+        );
+        assert_eq!(serde_json::from_value::<MessageMeta>(json).expect("back"), meta);
+        // A system line a newer gateway adds reads as `other`.
+        let newer: SystemNote = serde_json::from_str(r#"{"type":"pinned","by":"x"}"#).expect("other");
+        assert_eq!(newer, SystemNote::Other);
+    }
+
+    #[test]
+    fn chat_timer_and_disappearing_action() {
+        let meta: ChatMeta = serde_json::from_str(r#"{"ephemeral_s":604800}"#).expect("chat meta");
+        assert_eq!(meta.ephemeral_s, Some(604_800));
+        assert_eq!(serde_json::to_string(&ChatMeta::default()).expect("json"), "{}");
+        let action = ChatAction {
+            chat: "100000000011@s.whatsapp.net".into(),
+            action: ChatActionKind::Disappearing { seconds: 86_400 },
+        };
+        assert_eq!(
+            serde_json::to_value(&action).expect("json"),
+            serde_json::json!({"chat": "100000000011@s.whatsapp.net",
+                "action": {"type": "disappearing", "seconds": 86400}})
+        );
+    }
+
+    #[test]
+    fn receipts_answer_reads_without_optional_fields() {
+        let answer: MessageReceipts = serde_json::from_str(
+            r#"{"chat":"g@g.us","id":"3EB0","members":[{"jid":"100000000011@s.whatsapp.net","read_ms":5},
+                {"jid":"100000000012@s.whatsapp.net","left":true}]}"#,
+        )
+        .expect("receipts");
+        assert_eq!(answer.members[0].read_ms, Some(5));
+        assert!(answer.members[1].left);
     }
 }

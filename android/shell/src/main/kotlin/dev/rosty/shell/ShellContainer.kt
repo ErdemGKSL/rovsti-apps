@@ -50,9 +50,11 @@ import dev.rosty.wa.avatars.waAvatars
 import dev.rosty.wa.share.HeldLink
 import dev.rosty.wa.share.PrefsWaLinkMarks
 import dev.rosty.wa.share.ResolverSiblingLinks
+import dev.rosty.wa.share.SiblingAnswer
 import dev.rosty.wa.share.SiblingLinks
 import dev.rosty.wa.share.WaLinkHandover
 import dev.rosty.wa.share.WaLinkShare
+import dev.rosty.wa.share.WaLockAll
 import dev.rosty.wa.vault.SharedWaMigrationMark
 import dev.rosty.wa.vault.SharedWaVaultPrefs
 import dev.rosty.wa.vault.VaultFlow
@@ -176,7 +178,24 @@ abstract class ShellContainer(
                 migratePlaintextSoon()
             },
             onReset = { forgetWhatsApp() },
+            siblingLink = ::unlockedSiblingLink,
         )
+
+    /**
+     * The link of the first sibling Rosty app whose vault is unlocked now (round 7a, the one prompt for the four
+     * apps): its `WaLinkProvider` answers only then, in memory; this app opens its own vault with it
+     * (`vault.unlock_link`). Asked only from the locked page the person opened. Never logged.
+     */
+    private suspend fun unlockedSiblingLink(): StoredLink? {
+        for (sibling in WaLinkShare.siblingsOf(context.packageName)) {
+            val link = (siblingLinks.ask(sibling) as? SiblingAnswer.Link)?.link ?: continue
+            if (WaLinkShare.usable(link)) return link
+        }
+        return null
+    }
+
+    /** How this app asks its siblings (their `WaLinkProvider`). */
+    private val siblingLinks: SiblingLinks by lazy { createSiblingLinks() }
 
     /**
      * The upgrade migration (`plans/wa-vault.md` 8, round 6): the plaintext WhatsApp data of an earlier build goes, once
@@ -242,7 +261,21 @@ abstract class ShellContainer(
             unlocked = { waVaultIfMade?.unlocked == true },
             prompting = { waVaultIfMade?.prompting?.value == true },
             lock = { waVaultIfMade?.lock() },
-        ).also { it.watchScreen(context) }
+            background = { wentToBackground() },
+        ).also { lifecycle ->
+            lifecycle.watchScreen(context)
+            // "Lock now" in a sibling locks this app too (round 7a, [lockWhatsAppEverywhere]).
+            WaLockAll.register(context) { lifecycle.onScreenOff() }
+        }
+    }
+
+    /**
+     * "Lock now" (round 7a): locks WhatsApp here and in every sibling Rosty app that has it unlocked, so no sibling can
+     * open this app's vault again by a hand-over right after. The background delay and screen off stay per app.
+     */
+    fun lockWhatsAppEverywhere() {
+        scope.launch { waVaultIfMade?.lock() }
+        WaLockAll.send(context)
     }
 
     /**
@@ -256,6 +289,9 @@ abstract class ShellContainer(
         if (avatarsOnce.isInitialized()) avatars.pictures?.clear()
         vaultOps.lock()
     }
+
+    /** The app went to the background with WhatsApp unlocked; the lock follows after the auto-lock delay. */
+    protected open suspend fun wentToBackground() {}
 
     /** The vault was opened: the repository may reach the gateway again (through the vault's key). */
     protected open suspend fun unlockedWhatsApp() {
@@ -380,7 +416,7 @@ abstract class ShellContainer(
         WaLinkHandover(
             held = ::heldLink,
             siblings = WaLinkShare.siblingsOf(context.packageName),
-            source = createSiblingLinks(),
+            source = siblingLinks,
             marks = PrefsWaLinkMarks(context),
             adopt = { link -> waVault.adopt(link) },
         )

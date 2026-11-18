@@ -25,6 +25,7 @@ class VaultLockLifecycleTest {
     private var timeout = 60_000L
     private var clock = 0L
     private var locks = 0
+    private var backgrounds = 0
     private val lifecycle =
         VaultLockLifecycle(
             scope = scope,
@@ -36,6 +37,7 @@ class VaultLockLifecycleTest {
                 locks++
                 unlocked = false
             },
+            background = { backgrounds++ },
         )
 
     private fun away(ms: Long) {
@@ -131,5 +133,21 @@ class VaultLockLifecycleTest {
         lifecycle.lockNow()
         scope.runCurrent()
         assertEquals(1, locks)
+    }
+
+    /** Round 7a: going to the background while unlocked is reported once (Messages writes its history file then). */
+    @Test fun goingToTheBackgroundUnlockedIsReported() {
+        lifecycle.onActivityStarted()
+        lifecycle.onActivityStopped(changingConfigurations = false)
+        scope.runCurrent()
+        assertEquals(1, backgrounds)
+        lifecycle.onActivityStarted()
+        lifecycle.onActivityStopped(changingConfigurations = true)
+        scope.runCurrent()
+        assertEquals("a rotation is no background", 1, backgrounds)
+        timeout = 0
+        lifecycle.onActivityStopped(changingConfigurations = false)
+        scope.runCurrent()
+        assertEquals("locking at once writes it in the lock instead", 1, backgrounds)
     }
 }

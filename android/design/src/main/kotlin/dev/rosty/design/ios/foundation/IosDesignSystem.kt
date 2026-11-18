@@ -129,5 +129,7 @@ fun rememberDesignText(): Color = IosTheme.colors.label
 @ReadOnlyComposable
 fun chromeContent(emphasize: Boolean = false): Color = if (emphasize) IosTheme.colors.accent else IosTheme.colors.label
 
-/** Label color on a prominent (accent-filled) chrome control — always white. */
-val chromeOnProminent: Color get() = Color.White
+/** Label color on a prominent (accent-filled) chrome control: the theme's on-accent colour. */
+val chromeOnProminent: Color
+    @Composable @ReadOnlyComposable
+    get() = IosTheme.colors.onAccent

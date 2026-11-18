@@ -3,7 +3,8 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/foundation/IosColors.kt
- * Changes for Rosty: package dev.rosty.design.ios.foundation; imports.
+ * Changes for Rosty: package dev.rosty.design.ios.foundation; imports; onAccent is a constructor property
+ * (default White) so a theme whose accent is light (dark theme) can supply a dark label for filled controls.
  */
 package dev.rosty.design.ios.foundation
 
@@ -63,10 +64,9 @@ data class IosColors(
     val tertiarySystemGroupedBackground: Color,
     /** The default accent applied to controls that do not carry an explicit tint. */
     val accent: Color,
-) {
     /** The colour a filled control should draw its label in, over [accent]. */
-    val onAccent: Color get() = Color.White
-}
+    val onAccent: Color = Color.White,
+)
 
 fun lightIosColors(accent: Color = Color(0xFF007AFF)): IosColors =
     IosColors(

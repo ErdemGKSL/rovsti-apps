@@ -249,7 +249,10 @@ private fun TabBarItem(
     }
 }
 
-/** The red count bubble SwiftUI's .badge(_:) draws. An empty label draws a dot. */
+/**
+ * The red count bubble SwiftUI's .badge(_:) draws. An empty label draws a dot. Its count stays white on the red
+ * bubble (iOS convention, white is the system badge ink; deliberately not run through readableOn).
+ */
 @Composable
 fun IosBadge(
     label: String,

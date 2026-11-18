@@ -1,6 +1,7 @@
 package dev.rosty.core.contracts
 
 import dev.rosty.core.model.core.Empty
+import dev.rosty.core.model.core.ErrEnvelope
 import dev.rosty.core.model.core.OkEnvelope
 import dev.rosty.core.model.wa.WaIdBookAccount
 import dev.rosty.core.model.wa.WaIdBookAccountRequest
@@ -20,12 +21,13 @@ object WaIdBookContracts : ContractModels {
         buildMap {
             op<WaIdBookSnapshotRequest, WaIdBookSnapshot>(
                 "wa_idbook.snapshot",
-                ok = listOf("other_instance", "missing"),
+                ok = listOf("other_instance", "missing", "vault"),
+                err = listOf("vault_locked"),
             )
             op<WaIdBookCatchUpRequest, WaIdBookCaughtUp>("wa_idbook.catch_up", ok = listOf("done", "odd_pairs"))
             op<WaIdBookLearnRequest, WaIdBookLearned>(
                 "wa_idbook.learn",
-                ok = listOf("known", "number_change", "not_a_pair"),
+                ok = listOf("known", "number_change", "not_a_pair", "vault"),
             )
             op<WaIdBookAccountRequest, WaIdBookAccount>(
                 "wa_idbook.account",
@@ -37,6 +39,7 @@ object WaIdBookContracts : ContractModels {
     private inline fun <reified Req, reified Ans> MutableMap<String, KSerializer<*>>.op(
         op: String,
         ok: List<String> = emptyList(),
+        err: List<String> = emptyList(),
     ) {
         val okAnswer = OkEnvelope.serializer(serializer<Ans>())
         put("$op.request", serializer<Req>())
@@ -44,6 +47,10 @@ object WaIdBookContracts : ContractModels {
         for (label in ok) {
             put("$op.$label.request", serializer<Req>())
             put("$op.$label.answer", okAnswer)
+        }
+        for (label in err) {
+            put("$op.$label.request", serializer<Req>())
+            put("$op.$label.answer", ErrEnvelope.serializer())
         }
     }
 }

@@ -1,5 +1,6 @@
 package dev.rosty.core.contracts
 
+import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.core.ErrEnvelope
 import dev.rosty.core.model.core.OkEnvelope
 import dev.rosty.core.model.wa.VaultCommitRequest
@@ -9,6 +10,7 @@ import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
+import dev.rosty.core.model.wa.VaultLink
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultPicturePut
 import dev.rosty.core.model.wa.VaultPicturePutRequest
@@ -17,6 +19,7 @@ import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultTripLink
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultUnlocked
 import dev.rosty.core.model.wa.VaultWipeReport
@@ -50,7 +53,10 @@ object VaultContracts : ContractModels {
             op<VaultDirRequest, VaultState>("vault.daily_forget")
             op<VaultLockRequest, VaultState>("vault.lock", ok = listOf("handle", "nothing_open"))
             op<VaultHandleRequest, VaultKeys>("vault.change", err = listOf("locked"))
+            op<VaultHandleRequest, VaultLink>("vault.export_link", err = listOf("locked", "not_committed"))
             op<VaultDirRequest, VaultReset>("vault.reset", ok = listOf("nothing"))
+            op<VaultHandleRequest, VaultTripLink>("vault.trip_hold", err = listOf("locked"))
+            op<Empty, VaultTripLink>("vault.trip_release")
             op<VaultWipeRequest, VaultWipeReport>("vault.wipe_plaintext", err = listOf("no_vault"))
             op<VaultPicturesRequest, VaultPictures>("vault.pictures", ok = listOf("some"), err = listOf("locked"))
             op<VaultPicturePutRequest, VaultPicturePut>(

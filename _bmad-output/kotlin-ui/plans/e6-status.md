@@ -390,3 +390,8 @@ menu; WhatsApp media (thumbnails, downloads, `wa_sync` media LRU) with E6.4b; of
 need a `wa_sync` outbox action); Status updates are not stored offline.
 
 - r18-s1 note (E6 session): `android/messages/.../wa/WaBatchScreen.kt` now uses `imeOverlapPadding(excludeNavigationBar = false)` instead of `imePadding()` (owner rule c, commit 7ffcc39); `:messages:compilePlainReleaseKotlin` is green. No other change in `android/messages`.
+
+- wa-vault note (2026-11-18): since the WhatsApp vault (`plans/wa-vault.md`, rounds 1 to 6) the offline store above
+  (E6.4s), its media, drafts, live names and the plaintext `whatsapp-link.json` are gone from disk: Messages opens
+  `wa_sync` memory-only and lazy, media live in RAM, and the first start after the update deletes the old files once
+  (`WaPlaintextMigration`). The offline outbox and offline reading listed above no longer survive a restart or a lock.

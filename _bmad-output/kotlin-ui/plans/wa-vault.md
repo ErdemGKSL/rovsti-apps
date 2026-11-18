@@ -96,7 +96,7 @@ Rule: cost the gateway less than today's eager sync, never more.
 - Server-side work added: none.
 To verify during implementation: merges stay correct with lazy identity catch-up; real request count of today's WaSyncRunner as the baseline for a regression test.
 
-## 15. Implementation notes (rounds 1 to 5)
+## 15. Implementation notes (rounds 1 to 6)
 
 Round 1, `rosty_core::vault` (pure; the caller passes `Entropy`):
 - Blobs, all AES-256-GCM with the header as associated data: key blob `RWVK | ver | kdf id | 3 x u32 kdf words | salt 16 |
@@ -331,3 +331,58 @@ Round 5, the vault in Phone, Contacts and Stops, and the in-memory hand-over (`r
 - Not verified on a device: the BiometricPrompt over each app, the Answer path from the lock screen to the vault page,
   the CallStyle notice without a full-screen intent on HyperOS, the trip message after a lock and the people sync's
   deferral across a real WorkManager period.
+
+Round 6, the migration that deletes the plaintext leftovers, the docs and the device test plan (`:wa`
+`WaPlaintextMigration`, `:shell`, `:platform`, `:messages`, `:contacts`; Kotlin only, no Rust change):
+- One migration for all four apps (`:wa` `WaPlaintextMigration`, wired in `ShellContainer.migratePlaintext`): it runs
+  at every activity start (`RostyShellActivity.onStart`, off the main thread) and after every unlock (after the app's
+  own `unlockedWhatsApp`, off the vault's lock) until it has finished once; the mark is `plaintext_wiped` in the
+  `rosty_wa_migration` preferences, read before anything else, so a finished migration starts no core and reads no
+  file. A run with any failure (a file Rust could not delete, the core not answering, a `messages-prefs.json` the
+  store cannot read, which it never overwrites) leaves the mark unset and the next start tries again.
+- When: the vault unlocked, no link, or a broken vault: at once. Locked: at once too, unless Phone's
+  `wa-identity.json` is still there (the first unlock moves it into the vault cache, round 5): then at the next
+  unlock. Never while a link waits for its vault (`NeedsSetup`) or the state is not read yet; Rust also refuses
+  (`no_vault`) while `whatsapp-link.json` has no vault. So the link's content is always in a committed vault before
+  the file goes, and with no vault the person sets one up from it (plan 8) or links again.
+- What goes, Rust (`vault.wipe_plaintext`, the unchanged inventory of round 2): `wa-sync-*.db` with `-wal`, `-shm`,
+  `-journal` (erased in place first), `whatsapp-link.json`, `wa-live-names.json`, `wa-rekeys.json`,
+  `wa-identity.json` (each with `.tmp`), the `wa:` entries of `drafts.json`, `files/wa-media/`, `files/wa-stars.json`,
+  `cache/wa-status/`, `cache/wa-avatars/`, `cache/wa-media/`. Kotlin, before the Rust wipe (`WaLegacyLeftovers` and
+  the app's `dropPlaintextLeftovers`): the `declined` mark in `wa-link-share` (a SHA-256 of a connect key; the
+  `adopted_*` entries stay: an instance id and a package name, still read by the hand-over), the message text of
+  WhatsApp reminders in `rosty_message_reminders` (`preview` emptied, `notif_body` set to Rust's "Open the message",
+  as for a reminder made now; the reminder, its chat title, time and alarm stay; SMS reminders keep their text),
+  `cacheDir/wa-full` (full-size WhatsApp pictures), and in Messages the `wa:` drafts and the `wa:` mutes of
+  `messages-prefs.json` (`MessagesStore.forgetThreads("wa:")`, flushed before Rust's wipe so no later write of the
+  store brings them back; the notifier's copy of the mutes is refreshed).
+- Kept: `people.json`, `people-sync.json` and the people pictures (round 5 decision), `recent-reactions.json`,
+  `wa_calls_forgotten`, call-back reminders, `rosty_wa_locked` (a count), `rosty_wa_vault` (failed attempts and the
+  auto-lock delay), the Stops notice chat choice, SMS data and every setting.
+- WhatsApp mutes are no longer written to `messages-prefs.json` (`InboxViewModel` mutes and unmutes the SMS threads of
+  a row there, the WhatsApp chat on the gateway only; the plan names no vault-cache home for them, so they are
+  dropped). The inbox row and the notifications already followed the chat's `muted_until`, so a WhatsApp chat muted
+  in WhatsApp stays muted. User-visible: Settings, Notifications, "Muted conversations" lists SMS conversations only
+  (open question for the owner: list the WhatsApp chats muted in WhatsApp there while unlocked, from the store).
+- Fixed on the way (safer): "Remind me in 1 hour" on a WhatsApp notification sent the message text to Rust, which put
+  it into the alarm payload (`rosty_message_reminders`); `ReplyActions.remindRequest` now sends no body for a `wa:`
+  tag, like round 3's "Remind me" on a message. Contacts now empties `cacheDir/wa-full` on lock, as Phone does.
+- Deviation (safer than "on the first unlocked start"): a locked vault migrates at once when nothing waits to move
+  into it, so the plaintext connect key and the old store do not wait for the person's next unlock.
+- Known limit: an app whose vault is never set up after the update (for example Stops left alone) keeps its
+  `whatsapp-link.json` until its setup, "Forgot passphrase" or Unlink. Deleting it without a vault would lose the
+  link the plan migrates; the device plan checks it.
+- Not done (unchanged from rounds 2 and 4): connect-key rotation at migration and passphrase change (needs a Rust-side
+  mint/revoke), and the UI's advice to rotate the key and that only a factory reset guarantees erasure (plan 8).
+- Tests: `:wa` `WaPlaintextMigrationTest` (every vault state, the key never wiped before a vault holds it, once, a
+  failure retried, the leftovers gone and other preferences and files untouched), `:shell` `WaMigrationWiringTest`
+  (the setup's commit then the wipe, a locked vault waiting for `wa-identity.json`, a finished migration touching
+  neither the vault nor the core), `:platform` `WhatsAppReminderTextTest`, `:messages` `WaPlaintextLeftoversTest`.
+  Rust's inventory stays covered by `rosty_app_core::wa_vault` `the_wipe_removes_every_listed_plaintext_file`.
+- Docs: `docs/architecture.md` (Storage, AD-MSG5, AD-WA2 and the new "WhatsApp vault (AD-WA12)"),
+  `docs/whatsapp-gateway.md` (how the apps keep the key, push while locked), `docs/android.md` ("WhatsApp vault
+  (Kotlin apps)"). Device test plan: `wa-vault-device-tests.md`.
+- Not verified on a device: everything in `wa-vault-device-tests.md`, in particular the migration from an old
+  install, BiometricPrompt in every app, the enrolment change, the reboot, the lock lifecycle, the locked call notice
+  on HyperOS, the trip message after a lock, the people sync deferral, the hand-over between two installed apps,
+  memfd under SELinux and FLAG_SECURE.

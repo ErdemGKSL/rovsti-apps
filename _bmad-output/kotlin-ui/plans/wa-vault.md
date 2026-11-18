@@ -96,7 +96,7 @@ Rule: cost the gateway less than today's eager sync, never more.
 - Server-side work added: none.
 To verify during implementation: merges stay correct with lazy identity catch-up; real request count of today's WaSyncRunner as the baseline for a regression test.
 
-## 15. Implementation notes (rounds 1 to 4)
+## 15. Implementation notes (rounds 1 to 5)
 
 Round 1, `rosty_core::vault` (pure; the caller passes `Entropy`):
 - Blobs, all AES-256-GCM with the header as associated data: key blob `RWVK | ver | kdf id | 3 x u32 kdf words | salt 16 |
@@ -263,3 +263,71 @@ Round 4, the Keystore, the vault screens, the lock lifecycle and Messages (`:pla
   the sibling hand-over still read it); a reset is followed by the automatic sibling hand-over when Phone, Contacts or
   Stops still hold a plaintext link (round 5); the clipboard is not cleared when the process dies within the minute;
   the connect-key rotation at setup and change still needs the Rust mint/revoke (round 2 note).
+
+Round 5, the vault in Phone, Contacts and Stops, and the in-memory hand-over (`rosty_ffi` `vault.export_link`,
+`vault.trip_hold`/`vault.trip_release`, `wa_idbook.* {vault}`; `:core-bridge`, `:platform`, `:wa`, `:shell`, `:people`,
+`:phone`, `:contacts`, `:stops`, `:messages`):
+- One wiring for all four apps (`:shell` `ShellContainer`): `vaultOps`, `vaultKeystore`, `waVault`, `vaultFlow`,
+  `vaultLock` (now never null), `waLinkSource` and the vault-following `newWaRepository()` moved there from Messages.
+  An app adds its own teardown by overriding `lockWhatsApp`, `unlockedWhatsApp` and `forgetWhatsApp`. Each app keeps
+  its own vault files and Keystore aliases (its own data directory and Keystore). Shared pages: `:shell`
+  `WhatsAppVaultSettings` (the link screen behind `WaVaultGate`, the vault group, "Change passphrase") and
+  `WaVaultGated`; `VaultSettingsRepository` and `MemoryLiveNameStore` moved to `:wa` and `:people`; `VaultBoot` drops the
+  daily unlock from the boot receivers of Messages, Phone and Stops (Contacts has none: Rust's boot-count check at the
+  next refresh does the same). Profile pictures of every app go to the vault cache (`VaultAvatarPictures`).
+  `USE_BIOMETRIC` is back in Phone, Contacts and Stops (`USE_FINGERPRINT` stays removed).
+- No Kotlin path reads or writes `whatsapp-link.json` any more. A link made, pasted or handed over goes to
+  `WaVault.adopt` (`vault.create {link}`): Rust keeps it in the uncommitted session of the setup, the state turns
+  `NeedsSetup` and the setup screens follow; only the committed vault holds it. `waLinkSource` answers the open vault's
+  link with no key, else nothing. A plaintext file of an earlier build is still read by Rust alone (`vault.create`
+  without a link, the migration); deleting it stays round 6.
+- Hand-over (`WaLinkProvider`, `dev.rosty.permission.WA_LINK`): `/link` answers only while this process has its vault
+  unlocked, from `vault.export_link {handle}` (current, committed session only; the JNI buffers of `vault.*` are
+  zeroized); `/offer` says whether it would, without the key. A locked vault or a cold process answers no row; no link
+  file is read. The receiver asks only on the person's tap ("Use the link from …" on its link screen, which starts its
+  vault setup) and passes the link straight to `vault.create {link}`; the key crosses Kotlin memory in the cursor and a
+  `StoredLink` only (no zeroizing on the JVM). The automatic ask at container start, the offer of a removed link and
+  its one-way mark (`declined`, a SHA-256 of the key in `wa-link-share`) are gone. Stops has no WA_LINK permission and
+  still takes no part (link by paste or QR).
+- Phone: the LID table (`wa_idbook.* {vault: true}`) lives only in the vault cache (`VaultCache.id_book`); the first
+  unlock moves a `wa-identity.json` in and deletes it; locked, every op answers `locked`. The lock forgets the table in
+  memory, the asked names (`wa-live-names.json` is deleted, names are in memory only) and the full-size pictures
+  (`cacheDir/wa-full`, emptied on lock). A push while locked (`WaPush.locked`, true in a cold process) shows the call
+  content-free: "WhatsApp call", no name, no number, no lookup, no wake of the stream, no full-screen intent, public
+  on the lock screen. Answer opens Phone (the screen unlock, then `PhoneRoute.WhatsAppUnlock`, which closes once the
+  vault is open); the answer goes out then, if the gateway still rings (most such calls are missed, 13.3). Decline only
+  stops the ring here: the caller hears it ring until the gateway's 60 s timeout, then it is a missed call. The missed
+  notice is content-free too. The whole Phone window is FLAG_SECURE while the vault is open (WhatsApp calls and peers
+  show in Recents, the call screens and a person).
+- Phone call history found: the native call log is system data and stays; WhatsApp calls are not stored by the app
+  (the list is the gateway's, in memory); `wa_calls_forgotten` (SharedPreferences) holds only the opaque gateway ids
+  of deleted calls (no peer, no time), kept; a call-back reminder holds the number and name the person chose to be
+  reminded of, kept as an explicit action (like round 3's reminders); CSV exports are explicit.
+- Contacts: a people sync run that finds the vault locked (the 12-hourly work, its continuation, a start from the app,
+  the foreground trigger) gets no host (`peopleSyncWhenUnlocked`), makes no request and ends; the unlock runs the
+  foreground trigger, which syncs only when the last run is older than the period, so the deferred run costs the
+  gateway nothing extra. Same for Phone without Contacts (`standaloneSync`, `StandalonePeople.syncIfStale`). The sync's
+  gateway address comes from `waLinkSource`.
+- Contacts storage decision: `people.json`, `people-sync.json` and the people pictures stay Contacts' (and Phone's
+  standalone) own data on disk. They are identity data (names and pictures of numbers already in the address book or
+  the call log), no message, no key and no LID pairs; they are what Contacts' people provider hands Phone and Messages.
+  Under the vault they would be unreadable whenever Contacts is locked, so every surface would lose names and pictures
+  or each app would run its own gateway people sync (more gateway load, against 14). 13.5's DK-only rule is kept for
+  the WhatsApp identity map and the avatar cache.
+- Stops: the arriving-soon message is sent through a link the trip keeps in RAM (`vault.trip_hold`,
+  `wa_link::send::hold_trip_link`; `trip_fix` uses `send_text_held`, never a link file). It is copied when a trip with a
+  message starts while the vault is open and dropped at every end of the trip (`stops::store::end_trip`, the user's
+  stop, the service's stopped/ended status, `vault.trip_release`); it survives the vault's lock. A trip started while
+  locked carries no message (the row under Start is hidden then). A process death loses the copy: a trip resumed
+  after it sends no message. The chat picker of the message is behind the vault.
+- Deviation (safer): the content-free locked call names nobody, not even a saved contact (no lookup while locked).
+- Deviation (safer): no sibling link is taken in the background; the link screen offers it and the tap takes it.
+- User-visible differences: Phone, Contacts and Stops ask for a passphrase setup and an unlock before their WhatsApp
+  pages; Phone's window cannot be screenshotted while WhatsApp is unlocked; locked WhatsApp calls show as "WhatsApp
+  call" with no full-screen ring, and Answer asks for the screen unlock and the vault first; a sibling's link is used
+  only on the tap and only while that app is unlocked; Contacts' and Phone's people sync waits for the next unlock;
+  Stops sends the arriving-soon message only for trips started while unlocked; each app's WhatsApp names asked on
+  demand are forgotten on lock and restart.
+- Not verified on a device: the BiometricPrompt over each app, the Answer path from the lock screen to the vault page,
+  the CallStyle notice without a full-screen intent on HyperOS, the trip message after a lock and the people sync's
+  deferral across a real WorkManager period.

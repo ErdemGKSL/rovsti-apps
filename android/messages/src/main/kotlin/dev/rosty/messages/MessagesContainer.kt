@@ -3,6 +3,7 @@ package dev.rosty.messages
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
 import dev.rosty.core.model.wa.MessageMeta
 import dev.rosty.core.model.wa.WaIds
@@ -30,6 +31,7 @@ import dev.rosty.messages.notify.AnnouncerSources
 import dev.rosty.messages.notify.LockedWhatsAppNotice
 import dev.rosty.messages.notify.MessageAnnouncer
 import dev.rosty.messages.notify.MessagesNotifier
+import dev.rosty.messages.notify.NotifyPolicy
 import dev.rosty.messages.notify.ReplyRouter
 import dev.rosty.messages.remind.RemindCenter
 import dev.rosty.messages.schedule.FileQueueStore
@@ -207,6 +209,21 @@ open class MessagesContainer(
     override suspend fun forgetWhatsApp() {
         UnlinkingWaRepository(wa) { waOffline }.forget()
         waLinkHandover.onForget()
+    }
+
+    /**
+     * The migration's part of Messages (`plans/wa-vault.md` round 6): the `wa:` drafts an earlier build kept in
+     * `drafts.json` and the WhatsApp mutes in `messages-prefs.json` go, in memory and on disk, before Rust's wipe (so
+     * no later write of the store puts them back). A WhatsApp mute itself lives in WhatsApp (the gateway's chat), which
+     * the notifications follow; SMS drafts and mutes stay.
+     */
+    override suspend fun dropPlaintextLeftovers(): Boolean {
+        // An unreadable `messages-prefs.json` is never overwritten: the migration tries again at the next start.
+        if (store.load() !is Outcome.Ok || store.prefs.value == null) return false
+        store.forgetThreads(WaRekeys.tagOf(""))
+        val written = store.flush()
+        store.prefs.value?.let { NotifyPolicy.current = NotifyPolicy.of(it) }
+        return written
     }
 
     /** What [lockWhatsApp] tears down besides the store and its socket. */

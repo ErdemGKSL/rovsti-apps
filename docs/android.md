@@ -258,11 +258,50 @@ calls `WaPush.onMessage(message.data)`:
 - `kind=call_end`: the ringing notification goes away; a missed call posts the
   `wa_missed` notification.
 - `kind=message`: the `wa_push` event; no message text is in the push, the app fetches it from
-  the gateway. Phone stops there. Messages also builds the notification with
-  `nativeHeadless("wa_digest")` while its UI is not attached (see [Messages host](#messages-host)).
+  the gateway. Phone stops there. (In the GPUI host Messages also built the notification with
+  `nativeHeadless("wa_digest")`; the Kotlin apps do not, see [WhatsApp vault](#whatsapp-vault-kotlin-apps).)
 
 The token is registered once per launch and link; a rotated token is picked up on the
 next launch.
+
+## WhatsApp vault (Kotlin apps)
+
+Messages, Phone, Contacts and Stops each keep their WhatsApp link in a vault
+([architecture.md](architecture.md#whatsapp-vault-ad-wa12) has the key hierarchy and the files). The Android
+pieces:
+
+- **Keystore and prompts** (`:platform` `vault/`): `AndroidVaultKeystore` makes the AES-256-GCM keys in
+  AndroidKeyStore (StrongBox when present, falling back to the TEE; `setUnlockedDeviceRequired(true)`;
+  `setUserAuthenticationParameters(0, …)`, so each seal and open is its own `BiometricPrompt` with a
+  `CryptoObject`). `androidx.biometric` 1.1.0 needs a `FragmentActivity`: `RostyShellActivity` is one. Every app
+  declares `USE_BIOMETRIC` (not `USE_FINGERPRINT`). K_hw (`rosty.wa.k.<id>`) takes a Class 3 biometric or the
+  screen lock and survives a new enrolment; K_daily (`rosty.wa.d.b.<id>` biometric, `rosty.wa.d.c.<id>` screen
+  lock on a phone with no Class 3 biometric) is invalidated by one. Removing the screen lock deletes both: the
+  vault is then broken and only "Forgot passphrase" (reset and link again) helps.
+- **State and screens** (`:wa` `vault/`): `WaVault` (no link, needs setup, locked, unlocked, broken) and the setup,
+  unlock, change and forgot pages behind `WaVaultGate`. The passphrase field is a platform `EditText`
+  (`IME_FLAG_NO_PERSONALIZED_LEARNING`, visible-password input, no suggestions); "Copy passphrase" uses the
+  sensitive clipboard and clears it after 60 s. `SecureWindow` holds `FLAG_SECURE` per window.
+- **Lock** (`:shell` `VaultLockLifecycle`): a runtime `ACTION_SCREEN_OFF` receiver, the background timer with a
+  check at the next activity start (a cached process may be frozen), and "Lock WhatsApp now". `VaultBoot` drops the
+  daily unlock from the `BOOT_COMPLETED` receivers of Messages, Phone and Stops, only when
+  `wa-vault-daily.json` exists, so a phone without a vault starts no core.
+- **Media in RAM** (Messages): `MemfdRamFiles` (`memfd_create`, read through `/proc/self/fd/<n>`) so the image
+  loader, the players and the gateway's send read RAM files by path.
+- **Notifications while locked**: Messages' `LockedWhatsAppNotice` (one notice with the count, no action, public on
+  the lock screen); Phone's `WaPush.locked` path (true in a cold process) posts the content-free CallStyle notice
+  without a full-screen intent. Neither makes a gateway request.
+- **Hand-over**: `WaLinkProvider` (`<package>.walink`, signature permission `dev.rosty.permission.WA_LINK`) answers
+  only while its process has the vault unlocked; the receiving app asks only when the person taps "Use the link from
+  …" on its link screen. Stops does not take part.
+- **Migration** (`:wa` `WaPlaintextMigration`, wired in `ShellContainer`): at an activity start, and after each
+  unlock, until it has finished once (`rosty_wa_migration` preferences, `plaintext_wiped`). It runs when the vault is
+  unlocked, when there is no link, or when the vault is broken; while locked too, unless Phone's
+  `wa-identity.json` still waits to move into the vault cache at the next unlock; never while a link waits for its
+  vault (Rust also refuses with `no_vault` while `whatsapp-link.json` has no vault). Kotlin drops the `declined`
+  mark in `wa-link-share`, the message text of WhatsApp reminders in `rosty_message_reminders`, `cacheDir/wa-full`
+  and (Messages) the `wa:` drafts and mutes; then `vault.wipe_plaintext` deletes the files Rust owns. A run with a
+  failure is retried at the next start. Device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
 
 ## Checks without a device
 

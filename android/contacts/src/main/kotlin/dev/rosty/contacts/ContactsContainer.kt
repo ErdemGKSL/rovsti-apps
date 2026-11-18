@@ -191,6 +191,15 @@ open class ContactsContainer(
         return null
     }
 
+    /**
+     * Locks WhatsApp: besides the base teardown, the full-size WhatsApp pictures of the photo viewer go, as in Phone
+     * (plaintext copies that live only while the vault is open, `plans/wa-vault.md` 13.5).
+     */
+    override suspend fun lockWhatsApp() {
+        super.lockWhatsApp()
+        waFullPictures.clear()
+    }
+
     /** The vault opened: a people sync the lock held back runs now when it is due (the foreground trigger). */
     override suspend fun unlockedWhatsApp() {
         super.unlockedWhatsApp()

@@ -9,7 +9,9 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
 import dev.rosty.core.RustCore
 import dev.rosty.core.log.DevLog
+import dev.rosty.core.log.RostyLog
 import dev.rosty.core.model.wa.StoredLink
+import dev.rosty.core.model.wa.VaultWipeRequest
 import dev.rosty.core.ops.NativeVaultOps
 import dev.rosty.core.ops.NativeWaOps
 import dev.rosty.core.ops.VaultOps
@@ -51,8 +53,13 @@ import dev.rosty.wa.share.ResolverSiblingLinks
 import dev.rosty.wa.share.SiblingLinks
 import dev.rosty.wa.share.WaLinkHandover
 import dev.rosty.wa.share.WaLinkShare
+import dev.rosty.wa.vault.SharedWaMigrationMark
 import dev.rosty.wa.vault.SharedWaVaultPrefs
 import dev.rosty.wa.vault.VaultFlow
+import dev.rosty.wa.vault.WaLegacyLeftovers
+import dev.rosty.wa.vault.WaMigrationMark
+import dev.rosty.wa.vault.WaMigrationResult
+import dev.rosty.wa.vault.WaPlaintextMigration
 import dev.rosty.wa.vault.WaVault
 import dev.rosty.wa.vault.WaVaultEnv
 import dev.rosty.wa.vault.WaVaultState
@@ -61,6 +68,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -161,9 +169,63 @@ abstract class ShellContainer(
                 ),
             prompts = vaultPrompts(context.resources),
             onLock = { lockWhatsApp() },
-            onUnlocked = { unlockedWhatsApp() },
+            onUnlocked = {
+                unlockedWhatsApp()
+                // After the app's own unlock work (Phone moves `wa-identity.json` into the vault cache there); off the
+                // vault's lock, since erasing an old store in place can take a moment.
+                migratePlaintextSoon()
+            },
             onReset = { forgetWhatsApp() },
         )
+
+    /**
+     * The upgrade migration (`plans/wa-vault.md` 8, round 6): the plaintext WhatsApp data of an earlier build goes, once
+     * per app, at the first start that allows it (see [WaPlaintextMigration]).
+     */
+    val waMigration: WaPlaintextMigration by lazy { createWaMigration() }
+
+    protected open fun createWaMigration(): WaPlaintextMigration =
+        WaPlaintextMigration(
+            ops = vaultOps,
+            request = { VaultWipeRequest(filesDir = context.filesDir.absolutePath) },
+            mark = waMigrationMark,
+            leftovers = {
+                val common = withContext(Dispatchers.IO) { WaLegacyLeftovers.drop(context) }
+                dropPlaintextLeftovers() && common
+            },
+            movesAtUnlock = { File(context.noBackupFilesDir, WaPlaintextMigration.IDENTITY_FILE).exists() },
+        )
+
+    /**
+     * What this app kept of WhatsApp in plaintext outside the files Rust deletes, dropped by the migration before the
+     * wipe; false when something could not be dropped (the migration then runs again at the next start). Messages
+     * drops the `wa:` drafts and mutes it holds in memory and in `messages-prefs.json`.
+     */
+    protected open suspend fun dropPlaintextLeftovers(): Boolean = true
+
+    /** Whether the migration finished; read before anything else, so a finished one never starts the core for it. */
+    private val waMigrationMark: WaMigrationMark by lazy { createWaMigrationMark() }
+
+    protected open fun createWaMigrationMark(): WaMigrationMark = SharedWaMigrationMark(context)
+
+    /** Runs the migration when it is due and the vault's state allows it; one prefs read once it is done. */
+    suspend fun migratePlaintext(): WaMigrationResult {
+        if (waMigrationMark.done) return WaMigrationResult.NotDue
+        waVault.refresh()
+        return waMigration.run(waVault.state.value)
+    }
+
+    /** The activity started: the migration runs off the main thread when it is still due. */
+    fun migratePlaintextSoon() {
+        scope.launch {
+            try {
+                migratePlaintext()
+            } catch (e: RuntimeException) {
+                // Never take the app down for it: the next start tries again.
+                RostyLog.w(WaPlaintextMigration.TAG, "plaintext migration failed", e)
+            }
+        }
+    }
 
     /** What the vault screens show and do; one per process, so a commit survives the page that started it. */
     val vaultFlow: VaultFlow by lazy { VaultFlow(waVault, scope) { secret -> clipboard.copySecret(scope, secret) } }

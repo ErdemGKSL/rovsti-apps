@@ -661,4 +661,36 @@
         <item quantity="one">%d new message</item>
         <item quantity="other">%d new messages</item>
     </plurals>
+    <!-- E6-WA R4: message actions -->
+    <string name="wa_editing">Edit Message</string>
+    <string name="wa_forwarded_many">Forwarded many times</string>
+    <string name="wa_link_loading">Loading preview…</string>
+    <string name="wa_link_remove">Remove Preview</string>
+    <string name="wa_delete_for_me">Delete for Me</string>
+    <string name="wa_info_title">Message Info</string>
+    <string name="wa_info_played">Played by</string>
+    <string name="wa_info_read">Read by</string>
+    <string name="wa_info_delivered">Delivered to</string>
+    <string name="wa_info_waiting">Waiting</string>
+    <string name="wa_info_left">Left the group</string>
+    <string name="wa_info_unavailable">Message info is not available on this gateway yet.</string>
+    <string name="wa_info_failed">Message info could not be loaded.</string>
+    <string name="wa_disappearing">Disappearing Messages</string>
+    <string name="wa_disappearing_current">Disappearing Messages: %1$s</string>
+    <string name="wa_timer_off">Off</string>
+    <string name="wa_timer_day">24 Hours</string>
+    <string name="wa_timer_week">7 Days</string>
+    <string name="wa_timer_90">90 Days</string>
+    <string name="wa_timer_other">%1$d Seconds</string>
+    <string name="wa_timer_failed">The timer could not be changed.</string>
+    <string name="wa_notice_on_you">You turned on disappearing messages: %1$s</string>
+    <string name="wa_notice_on_by">%1$s turned on disappearing messages: %2$s</string>
+    <string name="wa_notice_on">Disappearing messages turned on: %1$s</string>
+    <string name="wa_notice_off_you">You turned off disappearing messages</string>
+    <string name="wa_notice_off_by">%1$s turned off disappearing messages</string>
+    <string name="wa_notice_off">Disappearing messages turned off</string>
+    <string name="wa_forward_failed">This message cannot be forwarded.</string>
+    <string name="wa_chats_title">Chats</string>
+    <string name="wa_link_previews">Link Previews</string>
+    <string name="wa_link_previews_note">When you type a link, this phone opens the page to show its preview card. The gateway never does. Off: nothing is fetched.</string>
 </resources>

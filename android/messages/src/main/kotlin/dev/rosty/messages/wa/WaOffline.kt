@@ -185,6 +185,9 @@ class WaOffline(
     private val drainQueued = AtomicBoolean(false)
     private var socket: Job? = null
 
+    /** E6-WA R4: drops disappearing messages when they expire, while a store is open. */
+    private var expiry: Job? = null
+
     /** One link change at a time: opening, closing and wiping a store never interleave. */
     private val linking = Mutex()
 
@@ -208,6 +211,8 @@ class WaOffline(
         // Joined: what the old socket still held is dropped, not applied after the next one started.
         socket?.cancelAndJoin()
         socket = null
+        expiry?.cancelAndJoin()
+        expiry = null
         onlineState.value = false
         val current = sessionState.value ?: return
         sessionState.value = null
@@ -260,6 +265,7 @@ class WaOffline(
             sessionState.value = session
             changeBus.tryEmit(null)
             socket = scope.launch { run(session) }
+            expiry = scope.launch { expireLoop(store) }
             kickMedia(session)
         } else {
             // Same instance, another gateway handle (a new key, another URL): only the socket is reopened.
@@ -268,6 +274,31 @@ class WaOffline(
             onlineState.value = false
             sessionState.value = session
             socket = scope.launch { run(session) }
+        }
+    }
+
+    /**
+     * E6-WA R4: disappearing messages go when their timer runs out. The store drops what expired while the app was
+     * closed as soon as it opens; after that one wait runs until the next expiry the store names, cut short when rows
+     * change (a new message may expire sooner). Each expiry time is waited for once, so a clock that does not move
+     * (tests) never spins. The media files of a dropped row are deleted with it.
+     */
+    private suspend fun expireLoop(store: WaSyncStore) {
+        var fired: Long? = null
+        while (true) {
+            val out = store.expire(now()).getOrNull()
+            if (out != null) {
+                downloads?.expired(out.files)
+                if (out.removed > 0 || out.chats.isNotEmpty()) changeBus.tryEmit(out.chats.toSet())
+            }
+            val next = out?.nextMs
+            if (next == null || next == fired) {
+                changes.first()
+                continue
+            }
+            val wait = (next - now()).coerceAtLeast(0L)
+            val changed = withTimeoutOrNull(wait) { changes.first().let { true } }
+            if (changed == null) fired = next
         }
     }
 

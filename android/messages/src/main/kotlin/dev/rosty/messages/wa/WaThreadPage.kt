@@ -17,12 +17,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider
@@ -40,6 +42,7 @@ import dev.rosty.design.transition.TabNavigator
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.MessagesRoute
 import dev.rosty.messages.R
+import dev.rosty.messages.compose.presentForward
 import dev.rosty.messages.conversation.BubbleState
 import dev.rosty.messages.conversation.BubbleUi
 import dev.rosty.messages.conversation.ConversationActions
@@ -55,6 +58,7 @@ import dev.rosty.messages.conversation.rememberToolHost
 import dev.rosty.messages.conversation.rememberToolLabels
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.inbox.ResourceInboxWords
+import dev.rosty.messages.inbox.rememberInboxViewModel
 import dev.rosty.messages.notify.ThreadOpens
 import dev.rosty.messages.notify.TrackOpenConversation
 import dev.rosty.messages.schedule.ScheduledStrip
@@ -72,6 +76,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** [WaWords] from the app's resources. */
@@ -122,6 +127,22 @@ class ResourceWaWords(
         }
 
     override val unavailableOpenPhone = res.getString(R.string.wa_unavailable_open_phone)
+
+    override fun timer(seconds: Long): String = timerLabel(res, seconds)
+
+    override fun timerNotice(
+        seconds: Long,
+        by: String?,
+        mine: Boolean,
+    ): String =
+        when {
+            seconds == 0L && mine -> res.getString(R.string.wa_notice_off_you)
+            seconds == 0L && by != null -> res.getString(R.string.wa_notice_off_by, by)
+            seconds == 0L -> res.getString(R.string.wa_notice_off)
+            mine -> res.getString(R.string.wa_notice_on_you, timer(seconds))
+            by != null -> res.getString(R.string.wa_notice_on_by, by, timer(seconds))
+            else -> res.getString(R.string.wa_notice_on, timer(seconds))
+        }
 }
 
 /** "512 B", "340 KB", "1.2 MB": a file size without a context (1024-based, one decimal from a megabyte up). */
@@ -191,6 +212,9 @@ fun waBubbleMenu(
     model: WaThreadViewModel,
     /** E6.13: "Star" or "Unstar" and "Remind me" for a message that can be marked. */
     marks: (BubbleUi) -> List<MenuItem> = { emptyList() },
+    /** E6-WA R4: "Forward" (the chooser) and "Info" (the sheet) of a bubble; null: not offered. */
+    onForward: ((BubbleUi) -> Unit)? = null,
+    onInfo: ((BubbleUi) -> Unit)? = null,
 ): ImmutableList<MenuItem> {
     val items = ArrayList<MenuItem>()
     val queued =
@@ -205,6 +229,16 @@ fun waBubbleMenu(
         items += MenuItem.Action(res.getString(R.string.conversation_copy), RostyIcons.Copy) { model.copy(bubble.key) }
     }
     items += waMediaMenu(bubble, res, queued) { model.mediaAction(bubble.key, it) }
+    // E6-WA R4: edit my sent message while WhatsApp allows it, forward it for real, see who read it.
+    if (!queued && model.canEdit(bubble.key)) {
+        items += MenuItem.Action(res.getString(R.string.wa_thread_edit), RostyIcons.Pencil) { model.startEdit(bubble.key) }
+    }
+    if (onForward != null && !queued && model.canForward(bubble.key)) {
+        items += MenuItem.Action(res.getString(R.string.conversation_forward), RostyIcons.Forward) { onForward(bubble) }
+    }
+    if (onInfo != null && model.canInfo(bubble.key)) {
+        items += MenuItem.Action(res.getString(R.string.menu_info), RostyIcons.Info) { onInfo(bubble) }
+    }
     items += marks(bubble)
     if (queued && bubble.state != BubbleState.Sending) {
         items +=
@@ -216,12 +250,22 @@ fun waBubbleMenu(
             MenuItem.Action(res.getString(R.string.wa_thread_cancel_send), RostyIcons.Trash, destructive = true) {
                 model.cancel(bubble.key)
             }
-    } else if (bubble.outgoing && !bubble.deleted && !queued) {
+    } else if (!queued) {
         items += MenuItem.Separator
         items +=
-            MenuItem.Action(res.getString(R.string.wa_thread_delete_everyone), RostyIcons.Trash, destructive = true) {
-                model.revoke(bubble.key)
+            MenuItem.Action(res.getString(R.string.wa_delete_for_me), RostyIcons.Trash, destructive = true) {
+                model.deleteForMe(bubble.key)
             }
+        if (bubble.outgoing && !bubble.deleted) {
+            items +=
+                MenuItem.Action(
+                    res.getString(R.string.wa_thread_delete_everyone),
+                    RostyIcons.Trash,
+                    destructive = true,
+                ) {
+                    model.revoke(bubble.key)
+                }
+        }
     }
     return items.toImmutableList()
 }
@@ -273,6 +317,8 @@ fun rememberWaThreadViewModel(
                             recorder = AndroidVoiceRecorder(context.applicationContext),
                             preview = MediaVoiceEngine(),
                             probe = AndroidMediaProbe(),
+                            rules = container.waActionRules,
+                            links = container.waLinks,
                         ),
                         jid,
                         ResourceWaWords(res) { bytes -> Formatter.formatShortFileSize(context, bytes) },
@@ -311,6 +357,14 @@ fun WaThreadPage(
         @OptIn(FlowPreview::class)
         snapshotFlow { composer.text.toString() }.drop(1).debounce(DRAFT_DEBOUNCE_MS).collect(model::onDraft)
     }
+    // E6-WA R4: the `@` list follows the caret; a link gets its card (the model waits for the typing to stop).
+    LaunchedEffect(model) {
+        snapshotFlow { composer.text.toString() to composer.selection.end }
+            .drop(1)
+            .collect { (text, caret) -> model.onComposer(text, caret) }
+    }
+    val inbox = rememberInboxViewModel(container)
+    val scope = rememberCoroutineScope()
     DisposableEffect(model) { onDispose { model.onDraft(composer.text.toString()) } }
     WhileResumed(model)
     OlderOnReachingTheEnd(listState, state.items.size, state.hasOlder && !state.loadingOlder, model::loadOlder)
@@ -359,7 +413,7 @@ fun WaThreadPage(
     val schedule = rememberWaScheduleHost(container, overlays, jid, composer)
     val marks = rememberMarkHost(container, overlays, tag, rememberDayLabels()) { model.state.value.title }
     val actions =
-        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks, number, recordActions) {
+        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks, number, recordActions, model.timer) {
             ConversationActions(
                 onBack = onBack,
                 onMenuOpened = marks::menuOpened,
@@ -378,7 +432,31 @@ fun WaThreadPage(
                         else -> model.tap(bubble.key)
                     }
                 },
-                menuFor = { waBubbleMenu(it, res, model, marks::menu) },
+                menuFor = {
+                    waBubbleMenu(
+                        it,
+                        res,
+                        model,
+                        marks::menu,
+                        onForward = { bubble ->
+                            overlays.presentForward(
+                                context,
+                                inbox.state.value.rows,
+                                exclude = "wa:${model.jid}",
+                                text = model.forwardText(bubble.key),
+                                onOpen = { route -> navigator.push(route) },
+                                onWhatsApp = { target ->
+                                    scope.launch {
+                                        if (model.forwardTo(bubble.key, target)) {
+                                            navigator.push(MessagesRoute.WaThread(target))
+                                        }
+                                    }
+                                },
+                            )
+                        },
+                        onInfo = { bubble -> overlays.presentWaInfo(res, model, bubble.key) },
+                    )
+                },
                 // E6.5: the reaction row of the menu (recent emoji first, M49) and the detection pills.
                 reactionsFor = { b ->
                     if (b.deleted) {
@@ -408,6 +486,16 @@ fun WaThreadPage(
                                 },
                                 number?.let { res.getString(R.string.tools_copy_number) to it },
                             ),
+                        extra =
+                            listOf(
+                                MenuItem.Action(
+                                    res.getString(
+                                        R.string.wa_disappearing_current,
+                                        timerLabel(res, model.timer ?: 0L),
+                                    ),
+                                    RostyIcons.Clock,
+                                ) { overlays.presentWaTimer(res, model) },
+                            ),
                     ),
                 onFindQuery = host.tools::setQuery,
                 onFindOlder = host.tools::older,
@@ -416,6 +504,19 @@ fun WaThreadPage(
                 onScrolled = host.tools::scrolled,
                 onSwipeReply = { model.startReply(it.key) },
                 onCancelReply = model::cancelReply,
+                onCancelEdit = model::cancelEdit,
+                onRemoveLink = model::removeLink,
+                onPickMention = { option ->
+                    model
+                        .pickMention(composer.text.toString(), composer.selection.end, option)
+                        ?.let { (text, caret) ->
+                            composer.edit {
+                                replace(0, length, text)
+                                selection = TextRange(caret)
+                            }
+                        }
+                },
+                onOpenLink = { url -> openLink(context, url) },
                 onRemoveAttachment = model::removeAttachment,
                 attachMenu = attachMenu,
                 onMediaAction = { bubble, action -> model.mediaAction(bubble.key, action) },
@@ -458,6 +559,21 @@ fun WaThreadPage(
             )
         }
         batch?.let { WaBatchScreen(it, batchActions) { bytes -> Formatter.formatShortFileSize(context, bytes) } }
+    }
+}
+
+/** Opens a link of a card in the app that shows it. */
+private fun openLink(
+    context: android.content.Context,
+    url: String,
+) {
+    try {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (_: android.content.ActivityNotFoundException) {
+        // Nothing opens web links on this phone.
     }
 }
 

@@ -109,3 +109,5 @@ index 1ebe6b4..860ee6d 100644
      }
  
 ```
+
+- Round 19 step 3: goldens changed because of the `:design` `onAccent` fix (filled controls now read navy on the dark accent, ink on red/green fills); re-record Stops shots (`:stops:recordRoborazziRelease`) after merging.

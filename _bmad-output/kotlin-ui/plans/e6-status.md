@@ -395,3 +395,4 @@ need a `wa_sync` outbox action); Status updates are not stored offline.
   (E6.4s), its media, drafts, live names and the plaintext `whatsapp-link.json` are gone from disk: Messages opens
   `wa_sync` memory-only and lazy, media live in RAM, and the first start after the update deletes the old files once
   (`WaPlaintextMigration`). The offline outbox and offline reading listed above no longer survive a restart or a lock.
+- Round 19 step 3: goldens changed because of the `:design` `onAccent` fix (filled controls now read navy on the dark accent, ink on red/green fills); re-record Messages shots (`:messages:recordRoborazziPlainRelease`) after merging.

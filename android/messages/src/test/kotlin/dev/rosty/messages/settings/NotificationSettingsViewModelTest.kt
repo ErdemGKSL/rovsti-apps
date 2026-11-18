@@ -4,6 +4,8 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.model.messages.PrefsEditAnswer
 import dev.rosty.core.model.messages.PrefsEditRequest
 import dev.rosty.messages.data.MessagesStore
+import dev.rosty.messages.notify.WaPreviewMode
+import dev.rosty.messages.notify.WaPreviewStore
 import dev.rosty.messages.settings.notify.MutedRow
 import dev.rosty.messages.settings.notify.NotificationSettingsAction
 import dev.rosty.messages.settings.notify.NotificationSettingsViewModel
@@ -68,9 +70,26 @@ class NotificationSettingsViewModelTest {
                     true
                 },
                 unlockWa = { unlocks++ },
+                waPreview = preview,
             )
         return model to core
     }
+
+    private val preview = WaPreviewStore.InMemory()
+
+    @Test fun thePreviewChoiceShowsWithWhatsAppAndIsSaved() =
+        scope.runTest {
+            val (model, _) = rig()
+            advanceUntilIdle()
+            assertEquals("hidden without WhatsApp", null, model.state.value.waPreview)
+            waMutes.value = WaMutes.Locked
+            advanceUntilIdle()
+            assertEquals(WaPreviewMode.NameAndPreview, model.state.value.waPreview)
+            model.onAction(NotificationSettingsAction.SetWaPreview(WaPreviewMode.NoContent))
+            advanceUntilIdle()
+            assertEquals(WaPreviewMode.NoContent, preview.mode.value)
+            assertEquals(WaPreviewMode.NoContent, model.state.value.waPreview)
+        }
 
     @Test fun expiredMutesAreNotListedAndNamesAreLookedUp() =
         scope.runTest {

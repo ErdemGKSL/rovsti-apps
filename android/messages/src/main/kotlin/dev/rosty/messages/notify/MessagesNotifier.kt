@@ -219,15 +219,56 @@ object MessagesNotifier {
             ?: WaIds.number(NotificationSpec.waChat(spec.tag))
             ?: context.getString(R.string.launcher_name)
 
-    internal fun build(
+    /**
+     * Pure but for the strings: a WhatsApp conversation's digest under the preview setting (round 7b; [WaPreviewMode]).
+     * "Name only" keeps the title and blanks every line (their number stays, the text goes, and the replies typed
+     * into it); "No content" also replaces the title with "WhatsApp" and drops the reply. This is also what the
+     * notification's extras keep, so an app with notification access reads no more than the screen shows. Applying it
+     * twice changes nothing. SMS conversations are never changed.
+     */
+    internal fun forPreview(
         context: Context,
         digest: Digest,
+        mode: WaPreviewMode,
+    ): Digest {
+        if (!hidesText(digest.spec.tag, mode)) return digest
+        val spec = digest.spec.copy(lines = digest.spec.lines.map { "" }, otp = null)
+        return when (mode) {
+            WaPreviewMode.NameOnly -> Digest(spec)
+            else -> Digest(spec.copy(title = context.getString(R.string.wa_locked_notice_title), reply = false))
+        }
+    }
+
+    private fun hidesText(
+        tag: String,
+        mode: WaPreviewMode,
+    ) = NotificationSpec.waChat(tag) != null && mode != WaPreviewMode.NameAndPreview
+
+    /** The lines a notification shows: the digest's, or "N new messages" when the preview setting hides the text. */
+    private fun shownLines(
+        context: Context,
+        spec: NotificationSpec,
+        mode: WaPreviewMode,
+    ): List<String> {
+        if (!hidesText(spec.tag, mode)) return spec.lines
+        val count = spec.lines.size.coerceAtLeast(1)
+        return listOf(context.resources.getQuantityString(R.plurals.wa_locked_notice, count, count))
+    }
+
+    internal fun build(
+        context: Context,
+        stored: Digest,
         now: Long,
+        mode: WaPreviewMode = WaPreviews.mode(context),
     ): Notification {
+        // What shows follows the preview setting, and so does what the extras keep.
+        val digest = forPreview(context, stored, mode)
         val spec = digest.spec
+        val lines = shownLines(context, spec, mode)
         val title = titleOf(context, spec)
-        val group = isGroup(spec.tag)
-        val photo = avatars.load(context, spec.tag)?.let(Icon::createWithBitmap)
+        val group = isGroup(spec.tag) && mode != WaPreviewMode.NoContent
+        val nameless = mode == WaPreviewMode.NoContent && kindOf(spec.tag) == NotificationKind.WA_MESSAGE
+        val photo = if (nameless) null else avatars.load(context, spec.tag)?.let(Icon::createWithBitmap)
         val me = Person.Builder().setName(context.getString(R.string.notify_you)).build()
         val them =
             Person
@@ -239,8 +280,8 @@ object MessagesNotifier {
         val style = Notification.MessagingStyle(me)
         if (group) style.setConversationTitle(title).setGroupConversation(true)
         // The spec has no per-line times: keep the order with one second between lines.
-        val count = spec.lines.size + digest.sent.size
-        spec.lines.forEachIndexed { i, line ->
+        val count = lines.size + digest.sent.size
+        lines.forEachIndexed { i, line ->
             val (sender, text) = if (group) senderOf(line, spec.tag) ?: (them to line) else them to line
             style.addMessage(text, now - (count - 1 - i) * LINE_GAP_MS, sender)
         }
@@ -264,6 +305,20 @@ object MessagesNotifier {
                 .setGroupAlertBehavior(
                     if (spec.silent) Notification.GROUP_ALERT_SUMMARY else Notification.GROUP_ALERT_CHILDREN,
                 )
+        if (kindOf(spec.tag) == NotificationKind.WA_MESSAGE) {
+            // Round 7b: no WhatsApp name or text on the lock screen until the phone itself is unlocked.
+            val count = spec.lines.size.coerceAtLeast(1)
+            builder
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(
+                    Notification
+                        .Builder(context, PlatformChannels.MESSAGES)
+                        .let { NotificationIcon.apply(it, context, NotificationKind.WA_MESSAGE) }
+                        .setContentTitle(context.getString(R.string.wa_locked_notice_title))
+                        .setContentText(context.resources.getQuantityString(R.plurals.wa_locked_notice, count, count))
+                        .build(),
+                )
+        }
         builder.addExtras(Bundle().apply { putString(EXTRA_DIGEST, digest.toJson()) })
         if (spec.reply) builder.addAction(replyAction(context, spec.tag))
         spec.otp?.let { code ->
@@ -336,10 +391,11 @@ object MessagesNotifier {
                         .getString(EXTRA_DIGEST)
                         ?.let(Digest::parse)
                 }
-        val all = listOf(newest) + others
+        val mode = WaPreviews.mode(context)
+        val all = (listOf(newest) + others).map { forPreview(context, it, mode) }
         val style = Notification.InboxStyle()
         for (digest in all.take(SUMMARY_LINES)) {
-            val last = digest.sent.lastOrNull() ?: digest.spec.lines.last()
+            val last = digest.sent.lastOrNull() ?: shownLines(context, digest.spec, mode).last()
             style.addLine(context.getString(R.string.notify_summary_line, titleOf(context, digest.spec), last))
         }
         val text = context.resources.getQuantityString(R.plurals.notify_summary_chats, all.size, all.size)

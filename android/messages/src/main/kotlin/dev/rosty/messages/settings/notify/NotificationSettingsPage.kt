@@ -20,15 +20,18 @@ import dev.rosty.design.ios.foundation.IosTheme
 import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
+import dev.rosty.messages.notify.PrefsWaPreviewStore
+import dev.rosty.messages.notify.WaPreviewMode
 import dev.rosty.messages.settings.Footnote
 import dev.rosty.messages.settings.findComponentActivity
+import dev.rosty.messages.settings.radioItem
 import dev.rosty.messages.settings.switchItem
 import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.shell.permissions.permissionSettingsItem
 import dev.rosty.shell.settings.IosSettingsGroup
 import dev.rosty.shell.settings.IosSettingsItem
 import dev.rosty.shell.settings.SettingsPage
-import dev.rosty.wa.vault.VaultOutcome
+import dev.rosty.wa.vault.InlineUnlock
 import dev.rosty.wa.vault.WaVaultState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -46,6 +49,8 @@ object NotificationSettingsTags {
     const val WaLocked = "messages-muted-wa-locked"
 
     fun muted(tag: String) = "messages-muted-$tag"
+
+    fun waPreview(mode: WaPreviewMode) = "messages-wa-preview-${mode.key}"
 }
 
 /**
@@ -91,6 +96,27 @@ fun NotificationSettingsPage(
                 title = stringResource(R.string.notify_settings_system),
                 items = listOf(permissionSettingsItem(PermissionGroup.NOTIFICATIONS)),
             )
+        }
+        ui.waPreview?.let { chosen ->
+            // Round 7b: what WhatsApp notifications show, locked or not; the lock screen never shows more than the count.
+            val choices =
+                listOf(
+                    WaPreviewMode.NameAndPreview to R.string.notify_settings_wa_preview_full,
+                    WaPreviewMode.NameOnly to R.string.notify_settings_wa_preview_name,
+                    WaPreviewMode.NoContent to R.string.notify_settings_wa_preview_none,
+                )
+            IosSettingsGroup(
+                title = stringResource(R.string.notify_settings_wa_preview),
+                items =
+                    choices.map { (mode, label) ->
+                        radioItem(
+                            title = stringResource(label),
+                            chosen = mode == chosen,
+                            tag = NotificationSettingsTags.waPreview(mode),
+                        ) { onAction(NotificationSettingsAction.SetWaPreview(mode)) }
+                    },
+            )
+            Footnote(stringResource(R.string.notify_settings_wa_preview_footer))
         }
         val waLockedRow =
             if (ui.waLocked) {
@@ -188,6 +214,7 @@ fun NotificationSettingsEntry(
                                     if (!container.unlockWhatsAppHere()) openWhatsAppUnlock()
                                 }
                             },
+                            waPreview = PrefsWaPreviewStore(context),
                         )
                     }
                 }
@@ -235,15 +262,6 @@ internal fun MessagesContainer.waMutes(): Flow<WaMutes> =
  * prompt, else the biometric prompt opens over this page. False when the passphrase is needed (the caller opens the
  * WhatsApp page, whose unlock page asks for it).
  */
-internal suspend fun MessagesContainer.unlockWhatsAppHere(): Boolean {
-    val vault = waVault
-    if (vault.unlockFromSibling()) return true
-    val state = vault.state.value as? WaVaultState.Locked ?: return vault.unlocked
-    if (!state.biometric) return false
-    return when (vault.unlockWithBiometric()) {
-        VaultOutcome.Done, VaultOutcome.Cancelled -> true
-        is VaultOutcome.Refused -> false
-    }
-}
+internal suspend fun MessagesContainer.unlockWhatsAppHere(): Boolean = waVault.unlockInline() != InlineUnlock.NeedsPage
 
 private const val LOOKUP_MS = 2_000L

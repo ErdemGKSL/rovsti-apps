@@ -9,6 +9,8 @@ import dev.rosty.core.model.messages.PrefsEditRequest
 import dev.rosty.core.ops.MessagesOps
 import dev.rosty.messages.data.MessagesStore
 import dev.rosty.messages.notify.NotifyPolicy
+import dev.rosty.messages.notify.WaPreviewMode
+import dev.rosty.messages.notify.WaPreviewStore
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -39,6 +41,8 @@ data class NotificationSettingsUi(
     val muted: ImmutableList<MutedRow> = persistentListOf(),
     /** WhatsApp is linked but its vault is locked: one row, "Unlock to see WhatsApp chats", stands for its mutes. */
     val waLocked: Boolean = false,
+    /** What WhatsApp notifications show (round 7b); null without WhatsApp (the group is hidden). */
+    val waPreview: WaPreviewMode? = null,
 )
 
 /** A WhatsApp chat and its mute as WhatsApp keeps it (`muted_until_ms`: -1 for ever, else until then). */
@@ -78,6 +82,11 @@ sealed interface NotificationSettingsAction {
 
     /** "Unlock to see WhatsApp chats": the vault's unlock (round 7a). */
     data object UnlockWhatsApp : NotificationSettingsAction
+
+    /** "WhatsApp previews" (round 7b). */
+    data class SetWaPreview(
+        val mode: WaPreviewMode,
+    ) : NotificationSettingsAction
 }
 
 /**
@@ -102,10 +111,17 @@ class NotificationSettingsViewModel(
     private val unmuteWa: suspend (jid: String) -> Boolean = { false },
     /** Opens the vault (the system prompt, or the unlock page). */
     private val unlockWa: () -> Unit = {},
+    /** "WhatsApp previews" (round 7b): kept in the app's own preferences, read by the notifiers. */
+    private val waPreview: WaPreviewStore = WaPreviewStore.InMemory(),
 ) : ViewModel() {
     val state: StateFlow<NotificationSettingsUi> =
-        combine(store.prefs, nameChanges, waMutes) { prefs, _, wa -> prefs to wa }
-            .mapLatest { (prefs, wa) -> prefs?.let { build(it, wa) } ?: NotificationSettingsUi() }
+        combine(
+            store.prefs,
+            nameChanges,
+            waMutes,
+            waPreview.mode,
+        ) { prefs, _, wa, preview -> Triple(prefs, wa, preview) }
+            .mapLatest { (prefs, wa, preview) -> prefs?.let { build(it, wa, preview) } ?: NotificationSettingsUi() }
             .stateIn(viewModelScope, SharingStarted.Eagerly, NotificationSettingsUi())
 
     init {
@@ -115,6 +131,7 @@ class NotificationSettingsViewModel(
     private suspend fun build(
         prefs: MessagesPrefs,
         wa: WaMutes,
+        preview: WaPreviewMode,
     ): NotificationSettingsUi {
         val policy = NotifyPolicy.of(prefs)
         val at = now()
@@ -137,6 +154,7 @@ class NotificationSettingsViewModel(
             otpCopy = prefs.otpCopy,
             muted = (sms + whatsApp).toImmutableList(),
             waLocked = wa == WaMutes.Locked,
+            waPreview = preview.takeIf { wa != WaMutes.Hidden },
         )
     }
 
@@ -164,6 +182,10 @@ class NotificationSettingsViewModel(
 
                 NotificationSettingsAction.UnlockWhatsApp -> {
                     unlockWa()
+                }
+
+                is NotificationSettingsAction.SetWaPreview -> {
+                    waPreview.set(action.mode)
                 }
             }
         }

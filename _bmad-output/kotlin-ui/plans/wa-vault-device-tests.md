@@ -105,12 +105,61 @@ For Messages, Phone, Contacts and Stops each:
 
 ## 8. Hand-over between two installed apps
 
-- [ ] Messages unlocked, Phone without a link: Phone's link screen offers "Use the link from Messages"; the tap starts
-      Phone's setup and links without a QR.
+- [ ] Messages unlocked, Phone without a link (never linked before): opening Phone's WhatsApp link screen goes
+      straight to Phone's setup with Messages' link, no tap (round 7a), and links without a QR.
+- [ ] Unlink in Phone, open its link screen again: it now offers "Use the link from Messages" and takes it only on the
+      tap.
 - [ ] Messages locked: Phone offers nothing; Messages killed: Phone offers nothing.
-- [ ] A third-party app (different signature) querying `content://dev.rosty.messages.walink/link` gets a
-      SecurityException.
-- [ ] Stops offers no hand-over (paste or QR only).
+- [ ] A third-party app (different signature) querying `content://dev.rosty.messages.walink/link` (and
+      `dev.rosty.stops.walink`) gets a SecurityException.
+- [ ] Stops takes part since round 7a: Stops without a link takes Messages' link the same way.
+
+## 8a. One prompt for the four apps (round 7a)
+
+- [ ] All four apps set up, all locked. Unlock Phone with the fingerprint, then open Messages' WhatsApp tab within the
+      auto-lock delay: it opens with no prompt. Same for Contacts and Stops. No two prompts ever follow each other.
+- [ ] The same right after a reboot: type Phone's passphrase, then open Messages: no passphrase and no prompt in
+      Messages. Later, with Phone locked, Messages alone asks for its own passphrase once (its daily unlock was dropped
+      by the reboot).
+- [ ] Phone unlocked but left in the background longer than its auto-lock delay (or the screen turned off): Messages
+      prompts as before (the window is the source's own lock rules).
+- [ ] "Lock WhatsApp now" in Phone: Messages, Contacts and Stops lock too (their WhatsApp pages show the unlock page),
+      and none of them reopens another one silently.
+- [ ] A vault set up before round 7a: the first hand-over needs one normal unlock of that app (it then writes its link
+      wrap); after that the hand-over works.
+- [ ] A sibling that is cold (killed) answers nothing and is not kept alive; note the delay before the prompt when
+      three siblings are cold (each provider starts its process).
+- [ ] `wa-vault.json` holds a `link_sealed` field; no file of any app holds the connect key or a message in plaintext
+      (grep the data dirs for `rwk_` and a known message text after an unlock by hand-over).
+
+## 8b. Passphrase only every 30 days with daily use (round 7a)
+
+- [ ] Unlock with the fingerprint, set the clock forward 70 h (or wait), unlock again with the fingerprint, then another
+      70 h: no passphrase is asked (the 72 h count from the last biometric unlock).
+- [ ] Leave the phone 73 h without any unlock: the passphrase is asked ("WhatsApp wasn't unlocked for three days").
+- [ ] Keep unlocking daily with the fingerprint: 30 days after the last passphrase the passphrase is asked ("The
+      passphrase was last typed 30 days ago").
+- [ ] A phone with only a screen lock: the screen-lock unlock does not move the 72 h on (they count from the
+      passphrase).
+- [ ] Reboot, a new fingerprint and five wrong fingers still ask for the passphrase at once.
+
+## 8c. History after unlock (Messages, round 7a)
+
+- [ ] Use WhatsApp in Messages, lock (screen off), unlock: the chat list and the recent messages of the last chats show
+      at once (no empty screen), then the list and the open chat catch up; the gateway log shows no more requests than
+      before (at most 4 at the cold start, 1 page per opened chat).
+- [ ] Kill Messages after sending it to the background (swipe away): the next unlock still shows the history.
+- [ ] `wa-vault-history.bin` exists and holds no readable text (`strings` shows no message text); full media is not
+      in it (tapping a photo downloads it again); thumbnails show where they fit.
+- [ ] "Forgot passphrase" and Unlink delete `wa-vault-history.bin`; a passphrase change deletes it too.
+
+## 8d. Muted conversations (Messages, round 7a)
+
+- [ ] Mute a WhatsApp chat in WhatsApp (or from the inbox menu). With the vault open, Settings, Notifications, "Muted
+      conversations" lists it next to the muted SMS conversations; Unmute there unmutes it in WhatsApp (the inbox bell
+      goes).
+- [ ] With the vault locked: one row "Unlock to see WhatsApp chats"; the tap shows the biometric prompt (or opens
+      the WhatsApp page for the passphrase) and the list follows once it is open.
 
 ## 9. Trip message after a lock (Stops)
 

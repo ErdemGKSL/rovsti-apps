@@ -11,9 +11,11 @@ import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
+import dev.rosty.core.model.wa.VaultHandle
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLink
+import dev.rosty.core.model.wa.VaultLinkUnlockRequest
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultPicturePut
 import dev.rosty.core.model.wa.VaultPicturePutRequest
@@ -39,6 +41,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * - passphrase unlock: [state] -> decrypt [dev.rosty.core.model.wa.VaultInfo.hwSealed] with K_hw -> [unlock] ->
  *   seal [VaultUnlocked.dailySeal] with K_daily -> [dailyStore];
  * - daily unlock: decrypt [dev.rosty.core.model.wa.VaultDailyInfo.sealed] with K_daily -> [unlockDaily];
+ * - hand-over unlock (round 7a): a sibling's [exportLink] -> [unlockLink], no prompt;
  * - [change] -> seal under a new K_hw alias -> [commit] -> delete the old alias; [reset] -> delete both aliases.
  */
 interface VaultOps {
@@ -56,6 +59,13 @@ interface VaultOps {
 
     /** Biometric unlock with the K_daily-decrypted daily blob. */
     suspend fun unlockDaily(req: VaultDailyUnlockRequest): Outcome<VaultUnlocked>
+
+    /**
+     * Opens this app's own vault with the link a sibling Rosty app handed over from its unlocked vault (round 7a, the
+     * one prompt for the four apps): `no_link_wrap` until the vault was unlocked once in this build, `other_link` for
+     * a link that is not this vault's.
+     */
+    suspend fun unlockLink(req: VaultLinkUnlockRequest): Outcome<VaultHandle>
 
     /** Stores the K_daily-sealed daily blob. */
     suspend fun dailyStore(req: VaultDailyStoreRequest): Outcome<VaultState>
@@ -107,6 +117,7 @@ interface VaultOps {
                 "vault.commit",
                 "vault.unlock",
                 "vault.unlock_daily",
+                "vault.unlock_link",
                 "vault.daily_store",
                 "vault.daily_forget",
                 "vault.lock",
@@ -125,7 +136,7 @@ interface VaultOps {
 /**
  * The stable code of a vault failure (`detail.code`): `typo`, `length`, `character`, `wrong_passphrase`, `damaged`,
  * `no_vault`, `no_daily`, `no_link`, `locked`, `daily_expired` (with `detail.reason`), `vault_exists`,
- * `nothing_to_commit`, `nothing_to_store`, `not_committed`, `bad_url`, `bad_key`; also `vault_unlocked` and
+ * `nothing_to_commit`, `nothing_to_store`, `not_committed`, `bad_url`, `bad_key`, `no_link_wrap`, `other_link`; also `vault_unlocked` and
  * `other_gateway` from `wa.open`. Null when Rust sent none.
  */
 val RustError.vaultCode: String?
@@ -149,6 +160,9 @@ class NativeVaultOps(
 
     override suspend fun unlockDaily(req: VaultDailyUnlockRequest) =
         core.call("vault.unlock_daily", req, VaultDailyUnlockRequest.serializer(), VaultUnlocked.serializer())
+
+    override suspend fun unlockLink(req: VaultLinkUnlockRequest) =
+        core.call("vault.unlock_link", req, VaultLinkUnlockRequest.serializer(), VaultHandle.serializer())
 
     override suspend fun dailyStore(req: VaultDailyStoreRequest) =
         core.call("vault.daily_store", req, VaultDailyStoreRequest.serializer(), VaultState.serializer())

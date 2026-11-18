@@ -14,3 +14,5 @@ uses-permission android.permission.USE_EXACT_ALARM
 uses-permission android.permission.USE_FULL_SCREEN_INTENT
 uses-permission android.permission.VIBRATE
 uses-permission android.permission.WAKE_LOCK
+uses-permission dev.rosty.permission.WA_LINK
+declares dev.rosty.permission.WA_LINK signature

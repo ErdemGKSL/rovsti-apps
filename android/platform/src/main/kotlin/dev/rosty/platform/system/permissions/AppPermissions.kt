@@ -197,6 +197,8 @@ class AppPermissions(
                         PermissionGroup.NOTIFICATIONS,
                     ),
                 special = setOf(SpecialKind.FullScreenIntent, SpecialKind.BatteryOptimisation),
+                // Round 7a: the link hand-over and the one unlock prompt of the four apps.
+                waLinkUses = true,
                 installTime =
                     setOf(
                         Manifest.permission.FOREGROUND_SERVICE,

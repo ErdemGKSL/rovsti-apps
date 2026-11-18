@@ -57,6 +57,23 @@ data class WaSyncOpened(
     @EncodeDefault(NEVER) val lazy: Boolean = false,
     /** Set when the open asked for the vault cache. */
     @EncodeDefault(NEVER) val cache: WaSyncCacheUse? = null,
+    /** What the vault's history file seeded (round 7a): shown at once, the lazy sync catches up. */
+    @EncodeDefault(NEVER) val history: WaSyncHistoryCount? = null,
+)
+
+/** Chats and messages of a history snapshot (`wa_sync.open {vault_cache}`, `wa_sync.history_save`). */
+@Serializable
+data class WaSyncHistoryCount(
+    val chats: Int,
+    val messages: Int,
+)
+
+/** `wa_sync.history_save`: the recent chats and messages written into the vault's history file. */
+@Serializable
+data class WaSyncHistorySaved(
+    val handle: Long,
+    val chats: Int,
+    val messages: Int,
 )
 
 /** `wa_sync.focus`: the chat on screen (null: none); a refreshed chat list pages it and no other. */

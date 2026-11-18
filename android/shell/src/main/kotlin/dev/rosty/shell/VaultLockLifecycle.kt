@@ -34,6 +34,8 @@ class VaultLockLifecycle(
     private val unlocked: () -> Boolean,
     private val prompting: () -> Boolean,
     private val lock: suspend () -> Unit,
+    /** The app went to the background with WhatsApp unlocked (round 7a: Messages writes its history file then). */
+    private val background: suspend () -> Unit = {},
 ) {
     private var started = 0
     private var backgroundAt: Long? = null
@@ -81,6 +83,7 @@ class VaultLockLifecycle(
         val at = now()
         backgroundAt = at
         val wait = timeoutMs().coerceAtLeast(0)
+        if (wait > 0) scope.launch { background() }
         timer?.cancel()
         timer =
             scope.launch {

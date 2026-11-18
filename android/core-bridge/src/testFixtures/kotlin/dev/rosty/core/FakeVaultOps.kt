@@ -8,10 +8,12 @@ import dev.rosty.core.model.wa.VaultDailyRefusal
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
+import dev.rosty.core.model.wa.VaultHandle
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultInfo
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLink
+import dev.rosty.core.model.wa.VaultLinkUnlockRequest
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultPicture
 import dev.rosty.core.model.wa.VaultPicturePut
@@ -36,7 +38,9 @@ import kotlinx.serialization.json.buildJsonObject
  * create answers is `seal-<n>`; a test's Keystore stand-in seals and unseals it however it likes, and [unlock] only
  * checks the passphrase (the real core also authenticates the blob). Passphrases are 28 characters in groups of four;
  * [unlock] reads them like the core (case, spaces and dashes do not matter) and calls anything else a `typo`. The
- * daily unlock follows the core's rules: same boot, at most 72 hours since the last unlock.
+ * daily unlock follows the core's rules: same boot, at most 72 hours since the last unlock (a biometric one, or a
+ * hand-over, moves it on) and 30 days since the passphrase. [unlockLink] opens the vault with its own link, as the
+ * core's link wrap does once the vault was committed or unlocked ([linkWrapped]).
  */
 class FakeVaultOps(
     /** A plaintext link the migration would read (`whatsapp-link.json`). */
@@ -47,6 +51,7 @@ class FakeVaultOps(
         val sealed: String,
         val bootCount: Long,
         val unlockedMs: Long,
+        var lastUnlockMs: Long? = null,
     )
 
     private class Session(
@@ -71,6 +76,9 @@ class FakeVaultOps(
 
     /** What [wipePlaintext] answers as deleted. */
     var plaintextFiles: List<String> = listOf("whatsapp-link.json")
+
+    /** Whether the vault holds its link wrap (`vault.unlock_link`); a vault of an earlier build does not. */
+    @Volatile var linkWrapped: Boolean = true
 
     /** Fails every call with this error while set. */
     @Volatile var failure: RustError? = null
@@ -108,7 +116,7 @@ class FakeVaultOps(
     private fun stateNow(): VaultState =
         VaultState(
             vault = vault,
-            daily = daily?.let { VaultDailyInfo(it.alias, it.sealed, it.bootCount, it.unlockedMs) },
+            daily = daily?.let { VaultDailyInfo(it.alias, it.sealed, it.bootCount, it.unlockedMs, it.lastUnlockMs) },
             legacyLink = legacyLink != null,
             unlocked =
                 session?.takeIf { it.committed }?.let {
@@ -177,13 +185,16 @@ class FakeVaultOps(
         daily: Daily,
         bootCount: Long,
         nowMs: Long,
-    ): VaultDailyRefusal? =
-        when {
+    ): VaultDailyRefusal? {
+        val last = maxOf(daily.unlockedMs, daily.lastUnlockMs ?: daily.unlockedMs)
+        return when {
             bootCount != daily.bootCount -> VaultDailyRefusal.Rebooted
-            nowMs < daily.unlockedMs - 5 * 60_000 -> VaultDailyRefusal.ClockBack
-            nowMs - daily.unlockedMs > 72 * 3_600_000L -> VaultDailyRefusal.Idle
+            nowMs < last - 5 * 60_000 -> VaultDailyRefusal.ClockBack
+            nowMs - daily.unlockedMs > 30 * 24 * 3_600_000L -> VaultDailyRefusal.Expired
+            nowMs - last > 72 * 3_600_000L -> VaultDailyRefusal.Idle
             else -> null
         }
+    }
 
     override suspend fun create(req: VaultCreateRequest) =
         answer("vault.create") {
@@ -230,11 +241,29 @@ class FakeVaultOps(
             val current = daily ?: return@answer coded(RustError::NotFound, "no daily unlock", "no_daily")
             refusal(current, req.bootCount, req.nowMs)?.let { refused ->
                 daily = null
-                return@answer coded(RustError::Auth, "daily expired", "daily_expired", refused.name.lowercase())
+                val reason = if (refused == VaultDailyRefusal.ClockBack) "clock_back" else refused.name.lowercase()
+                return@answer coded(RustError::Auth, "daily expired", "daily_expired", reason)
             }
+            if (req.biometric) current.lastUnlockMs = req.nowMs
             val handle = open(checkNotNull(link))
             session?.pendingDaily = req.bootCount to req.nowMs
             Outcome.Ok(VaultUnlocked(handle, "daily-$handle"))
+        }
+
+    override suspend fun unlockLink(req: VaultLinkUnlockRequest) =
+        answer("vault.unlock_link") {
+            val own = link ?: return@answer coded(RustError::NotFound, "no vault", "no_vault")
+            if (vault == null) return@answer coded(RustError::NotFound, "no vault", "no_vault")
+            if (!linkWrapped) return@answer coded(RustError::NotFound, "no link wrap", "no_link_wrap")
+            if (req.link != own) return@answer coded(RustError::Auth, "not this vault's link", "other_link")
+            daily?.let { current ->
+                if (refusal(current, req.bootCount, req.nowMs) == null) {
+                    current.lastUnlockMs = req.nowMs
+                } else {
+                    daily = null
+                }
+            }
+            Outcome.Ok(VaultHandle(open(own)))
         }
 
     override suspend fun dailyStore(req: VaultDailyStoreRequest) =

@@ -39,6 +39,9 @@ import dev.rosty.messages.conversation.ConversationActions
 import dev.rosty.messages.conversation.ConversationSample
 import dev.rosty.messages.conversation.ConversationScreen
 import dev.rosty.messages.messagesTabItems
+import dev.rosty.messages.settings.notify.MutedRow
+import dev.rosty.messages.settings.notify.NotificationSettingsPage
+import dev.rosty.messages.settings.notify.NotificationSettingsUi
 import dev.rosty.messages.settings.replies.QuickRepliesPage
 import dev.rosty.messages.settings.replies.QuickRepliesUi
 import dev.rosty.messages.settings.replies.ReplyChip
@@ -57,7 +60,8 @@ import org.robolectric.annotation.Config
 
 /**
  * E6.12 screenshots: the Settings root, Quick replies (and their chips above a composer), Text size (and bubbles at
- * Larger), the backup passphrase sheet and the restore preview; light and dark, Turkish where the words matter.
+ * Larger), the backup passphrase sheet and the restore preview; light and dark, Turkish where the words matter. Round
+ * 7a: Notifications with the WhatsApp chats muted in WhatsApp (vault open) and with the unlock row (vault locked).
  */
 @Config(sdk = [35], application = TestMessagesApp::class)
 class E612ShotTest : ShotTest() {
@@ -122,6 +126,7 @@ class E612ShotTest : ShotTest() {
                 entry<MessagesRoute.QuickReplies> { body() }
                 entry<MessagesRoute.TextSize> { body() }
                 entry<MessagesRoute.Backup> { body() }
+                entry<MessagesRoute.NotificationSettings> { body() }
             }
         }
     }
@@ -147,6 +152,39 @@ class E612ShotTest : ShotTest() {
     fun settingsTurkish() = page("e6.12-settings-tr") { Root(it) }
 
     @Test fun settingsFontScale2() = page("e6.12-settings-fs2", fontScale = 2f) { Root(it) }
+
+    // ---- Notifications (round 7a: WhatsApp mutes)
+
+    private val sms = MutedRow("sms:7", "Ayşe Yılmaz")
+
+    private val waOpen =
+        NotificationSettingsUi(
+            loaded = true,
+            muted =
+                persistentListOf(
+                    sms,
+                    MutedRow("wa:100000000001@s.whatsapp.net", "Ada"),
+                    MutedRow("wa:100000000002@g.us", "Family group with a long name that does not fit on one line"),
+                ),
+        )
+
+    private val waLocked = NotificationSettingsUi(loaded = true, muted = persistentListOf(sms), waLocked = true)
+
+    @Composable
+    private fun Notifications(
+        overlays: OverlayController,
+        ui: NotificationSettingsUi,
+    ) = Host(overlays, MessagesRoute.NotificationSettings) {
+        NotificationSettingsPage(ui, {}, onBack = {}, showPermission = false)
+    }
+
+    @Test fun notificationsWhatsAppUnlocked() = page("e6.12-notifications-wa-unlocked") { Notifications(it, waOpen) }
+
+    @Test fun notificationsWhatsAppLocked() = page("e6.12-notifications-wa-locked") { Notifications(it, waLocked) }
+
+    @Config(qualifiers = "+tr-rTR")
+    @Test
+    fun notificationsWhatsAppLockedTurkish() = page("e6.12-notifications-wa-locked-tr") { Notifications(it, waLocked) }
 
     // ---- Quick replies
 

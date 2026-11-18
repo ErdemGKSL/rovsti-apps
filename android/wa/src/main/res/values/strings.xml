@@ -56,7 +56,8 @@
     <string name="vault_passphrase_note">Your screen lock or fingerprint confirms each try.</string>
     <string name="vault_reason_none">Type your passphrase to unlock.</string>
     <string name="vault_reason_rebooted">Your phone restarted, so the passphrase is needed once.</string>
-    <string name="vault_reason_idle">Three days have passed since the passphrase was last typed, so it’s needed once.</string>
+    <string name="vault_reason_idle">WhatsApp wasn’t unlocked for three days, so the passphrase is needed once.</string>
+    <string name="vault_reason_expired">The passphrase was last typed 30 days ago, so it’s needed once.</string>
     <string name="vault_reason_clock">The phone’s clock was set back, so the passphrase is needed once.</string>
     <string name="vault_reason_biometric">Your fingerprints or face changed, so the passphrase is needed once.</string>
     <string name="vault_reason_attempts">Too many failed tries, so the passphrase is needed once.</string>

@@ -190,6 +190,7 @@ fn the_vault_life_cycle() {
         daily_blob: keystore(&daily.sealed),
         boot_count: 3,
         now_ms: T0 + 3_600_000,
+        biometric: true,
     })
     .unwrap();
     assert!(unlocked().is_some());
@@ -198,6 +199,7 @@ fn the_vault_life_cycle() {
         daily_blob: keystore(&daily.sealed),
         boot_count: 4,
         now_ms: T0 + 3_600_000,
+        biometric: true,
     })
     .map(|_| ())
     .unwrap_err();
@@ -350,9 +352,7 @@ fn write_seed(dir: &Path) {
     )
     .unwrap();
     let body_blob = vault::seal_body(&key, &body, vault::nonce(&mut entropy));
-    VaultFile::new("rosty.wa.k1", key_blob, body_blob)
-        .save(dir)
-        .unwrap();
+    let mut file = VaultFile::new("rosty.wa.k1", key_blob, body_blob);
     let daily_key = DailyKey::generate(&mut entropy);
     let stamp = DailyStamp {
         boot_count: seed::BOOT_COUNT,
@@ -362,6 +362,14 @@ fn write_seed(dir: &Path) {
     DailyFile::new("rosty.wa.d1", daily_blob, &daily_key, stamp)
         .save(dir)
         .unwrap();
+    // The link wrap of round 7a: a sibling's hand-over of the seed's link opens it.
+    file.link_sealed = Some(vault::wrap_for_link(
+        &key,
+        KEY,
+        [2; vault::SALT_LEN],
+        vault::nonce(&mut entropy),
+    ));
+    file.save(dir).unwrap();
 }
 
 #[test]
@@ -595,5 +603,184 @@ fn phones_identity_table_moves_into_the_vault_cache() {
         dir: text(&dir),
     })
     .unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+fn link_in(key: &str, instance: &str) -> LinkIn {
+    LinkIn {
+        gateway_url: "https://rosty.erdemdev.tr".into(),
+        instance_id: instance.into(),
+        key: Zeroizing::new(key.to_owned()),
+    }
+}
+
+fn hand_over(dir: &Path, link: LinkIn, now_ms: i64) -> Result<HandleAns, FfiError> {
+    unlock_link(LinkUnlockReq {
+        dir: text(dir),
+        link,
+        boot_count: 3,
+        now_ms,
+    })
+}
+
+/// A committed vault for [`LINK`] in `dir`, locked, with its daily unlock stored at [`T0`] on boot 3.
+fn vault_with_daily(dir: &Path) -> (String, DailyInfo) {
+    let created = create(CreateReq {
+        dir: text(dir),
+        link: Some(link_in(KEY, "inst1")),
+    })
+    .unwrap();
+    commit(CommitReq {
+        handle: created.handle,
+        hw_alias: "rosty.wa.k1".into(),
+        hw_sealed: keystore(&created.seal),
+    })
+    .unwrap();
+    let opened = unlock_with(dir, &created.passphrase, 3, T0).unwrap();
+    let daily = daily_store(DailyStoreReq {
+        handle: opened.handle,
+        alias: "rosty.wa.d1".into(),
+        sealed: keystore(&opened.daily_seal),
+    })
+    .unwrap()
+    .daily
+    .unwrap();
+    lock(LockReq {
+        handle: None,
+        dir: text(dir),
+    })
+    .unwrap();
+    (created.passphrase, daily)
+}
+
+#[test]
+fn a_sibling_hand_over_opens_this_apps_own_vault_without_a_prompt() {
+    let _guard = test_lock();
+    let dir = temp_dir("hand-over");
+    let _ = vault_with_daily(&dir);
+    let on_disk = fs::read_to_string(dir.join(wa_vault::VAULT_FILE)).unwrap();
+    assert!(on_disk.contains("link_sealed") && !on_disk.contains("rwk_"));
+
+    // Another key, or the same key for another instance or gateway: refused, nothing opens.
+    let other = "rwk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    for link in [link_in(other, "inst1"), link_in(KEY, "inst2")] {
+        let refused = hand_over(&dir, link, T0 + 1_000).map(|_| ()).unwrap_err();
+        assert_eq!(
+            (refused.kind, code(&refused)),
+            (ErrorKind::Auth, "other_link")
+        );
+    }
+    let mut elsewhere = link_in(KEY, "inst1");
+    elsewhere.gateway_url = "https://wa.example.com".into();
+    assert_eq!(
+        code(&hand_over(&dir, elsewhere, T0).map(|_| ()).unwrap_err()),
+        "other_link"
+    );
+    assert!(unlocked().is_none());
+
+    // The vault's own link opens the vault's own session: `wa.open` takes the key from it.
+    let opened = hand_over(&dir, link_in(KEY, "inst1"), T0 + 70 * HOUR_MS).unwrap();
+    assert_eq!(unlocked().unwrap().session, opened.handle);
+    assert!(
+        session(opened.handle, |s: &mut Session| s.daily.is_none()).unwrap(),
+        "a hand-over prepares no daily blob: sealing one would need a prompt"
+    );
+    // It also counts as an unlock for the idle clock of the daily unlock.
+    let daily = DailyFile::load(&dir).unwrap().unwrap();
+    assert_eq!(daily.last_unlock_ms, Some(T0 + 70 * HOUR_MS));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_vault_of_an_earlier_build_gets_its_link_wrap_at_the_next_unlock() {
+    let _guard = test_lock();
+    let dir = temp_dir("wrap-later");
+    let (passphrase, _) = vault_with_daily(&dir);
+    let mut file = VaultFile::load(&dir).unwrap().unwrap();
+    file.link_sealed = None;
+    file.save(&dir).unwrap();
+    let missing = hand_over(&dir, link_in(KEY, "inst1"), T0)
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(code(&missing), "no_link_wrap");
+    unlock_with(&dir, &passphrase, 3, T0).unwrap();
+    assert!(
+        VaultFile::load(&dir)
+            .unwrap()
+            .unwrap()
+            .link_sealed
+            .is_some()
+    );
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
+    hand_over(&dir, link_in(KEY, "inst1"), T0).unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_biometric_daily_unlock_resets_the_idle_clock_up_to_30_days() {
+    let _guard = test_lock();
+    let dir = temp_dir("idle");
+    let (_, daily) = vault_with_daily(&dir);
+    let daily_at = |now_ms: i64, biometric: bool| {
+        unlock_daily(DailyUnlockReq {
+            dir: text(&dir),
+            daily_blob: keystore(&daily.sealed),
+            boot_count: 3,
+            now_ms,
+            biometric,
+        })
+        .map(|_| ())
+    };
+    // A biometric unlock every 70 h keeps the daily unlock alive past 72 h since the passphrase.
+    let mut at = T0;
+    while at + 70 * HOUR_MS <= T0 + vault::DAILY_MAX_AGE_MS {
+        at += 70 * HOUR_MS;
+        daily_at(at, true).unwrap();
+    }
+    assert!(at > T0 + vault::DAILY_MAX_IDLE_MS);
+    // The state's plain copy agrees.
+    let state = vault_state(StateReq {
+        dir: text(&dir),
+        boot_count: Some(3),
+        now_ms: Some(at + HOUR_MS),
+    })
+    .unwrap();
+    assert_eq!(state.daily.unwrap().last_unlock_ms, Some(at));
+    // Then the 30 days since the passphrase end it, however recent the last unlock.
+    let expired = daily_at(T0 + vault::DAILY_MAX_AGE_MS + 1, true).unwrap_err();
+    assert_eq!(code(&expired), "daily_expired");
+    assert_eq!(
+        expired.detail.as_ref().unwrap()["reason"].as_str(),
+        Some("expired")
+    );
+    assert!(DailyFile::load(&dir).unwrap().is_none());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_screen_lock_daily_unlock_does_not_reset_the_idle_clock() {
+    let _guard = test_lock();
+    let dir = temp_dir("idle-pin");
+    let (_, daily) = vault_with_daily(&dir);
+    let daily_at = |now_ms: i64| {
+        unlock_daily(DailyUnlockReq {
+            dir: text(&dir),
+            daily_blob: keystore(&daily.sealed),
+            boot_count: 3,
+            now_ms,
+            biometric: false,
+        })
+        .map(|_| ())
+    };
+    daily_at(T0 + 70 * HOUR_MS).unwrap();
+    let idle = daily_at(T0 + vault::DAILY_MAX_IDLE_MS + 1).unwrap_err();
+    assert_eq!(
+        idle.detail.as_ref().unwrap()["reason"].as_str(),
+        Some("idle")
+    );
     let _ = fs::remove_dir_all(&dir);
 }

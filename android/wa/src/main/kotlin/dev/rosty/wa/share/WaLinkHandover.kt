@@ -48,9 +48,16 @@ interface WaLinkMarks {
     /** The link in use was taken from a sibling. */
     var adopted: AdoptedLink?
 
+    /**
+     * The person removed this app's link (unlink, a reset): the link screen then offers a sibling's link instead of
+     * taking it by itself ([WaLinkHandover.takeAutomatically]). No key, no instance: one flag.
+     */
+    var autoOff: Boolean
+
     /** Marks kept in memory, for tests and previews. */
     class InMemory(
         override var adopted: AdoptedLink? = null,
+        override var autoOff: Boolean = false,
     ) : WaLinkMarks
 }
 
@@ -74,8 +81,9 @@ sealed interface HeldLink {
  * nothing is written in plaintext).
  *
  * Rules:
- * - only the person's own tap takes a link ([take], "Use the link of ..." on the link screen, which starts this
- *   app's vault setup); nothing is taken in the background;
+ * - a link is taken only on the link screen the person opened: by itself when a sibling is unlocked and this app
+ *   never had its link removed ([takeAutomatically], round 7a: no extra tap), else on the person's tap ([take], "Use
+ *   the link of ..."); either starts this app's vault setup. Nothing is taken in the background;
  * - an app that holds a link or a vault never asks;
  * - only a sibling whose vault is unlocked gives its link (its provider answers nothing while locked, and never
  *   reads a link file); siblings are asked in the order of [siblings], and the first usable link this app's vault
@@ -122,6 +130,15 @@ class WaLinkHandover(
         }
 
     /**
+     * The link screen opened with no link here (round 7a): an unlocked sibling's link is taken with no tap, unless the
+     * person removed this app's link before ([WaLinkMarks.autoOff]; then the screen offers it and a tap takes it).
+     */
+    suspend fun takeAutomatically(): Result {
+        if (marks.autoOff) return Result.Nothing
+        return take()
+    }
+
+    /**
      * The first sibling that would hand its link over now, without taking it (no key crosses): what the link screen
      * offers ("use the link of ...") while this app has none.
      */
@@ -137,8 +154,12 @@ class WaLinkHandover(
         return adopted.fromPackage.takeIf { now.instanceId == null || now.instanceId == adopted.instanceId }
     }
 
-    /** The person removed the link from this app. The siblings keep theirs. */
+    /**
+     * The person removed the link from this app. The siblings keep theirs, and the link screen no longer takes one by
+     * itself: it offers it.
+     */
     fun onForget() {
         marks.adopted = null
+        marks.autoOff = true
     }
 }

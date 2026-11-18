@@ -74,6 +74,8 @@ class HandoffPermissionsTest {
                 listOf(
                     "uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                     "uses-permission android.permission.USE_BIOMETRIC",
+                    // WA vault round 7a: the link hand-over and the one unlock prompt of the four apps.
+                    "uses-permission dev.rosty.permission.WA_LINK",
                 ),
         )
 
@@ -105,7 +107,8 @@ class HandoffPermissionsTest {
                     ) {
                         listOf("declares $READ_PEOPLE signature", "declares $WA_LINK signature")
                     } else {
-                        emptyList()
+                        // WA vault round 7a: Stops declares the link permission too (not READ_PEOPLE).
+                        listOf("declares $WA_LINK signature")
                     },
                 ).sorted()
         val protects =

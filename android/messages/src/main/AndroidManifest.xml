@@ -50,6 +50,7 @@
         <!-- WA-R2: the link providers of the sibling Rosty apps (package visibility). -->
         <provider android:authorities="dev.rosty.phone.walink" />
         <provider android:authorities="dev.rosty.contacts.walink" />
+        <provider android:authorities="dev.rosty.stops.walink" />
     </queries>
 
     <!-- :platform mirrors the permissions of all four apps so lint can check its calls; Messages uses no location and no

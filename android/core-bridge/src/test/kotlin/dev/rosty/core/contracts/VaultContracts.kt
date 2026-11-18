@@ -8,9 +8,11 @@ import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
+import dev.rosty.core.model.wa.VaultHandle
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLink
+import dev.rosty.core.model.wa.VaultLinkUnlockRequest
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultPicturePut
 import dev.rosty.core.model.wa.VaultPicturePutRequest
@@ -47,7 +49,12 @@ object VaultContracts : ContractModels {
             )
             op<VaultDailyUnlockRequest, VaultUnlocked>(
                 "vault.unlock_daily",
-                err = listOf("rebooted", "idle", "damaged", "no_daily"),
+                ok = listOf("idle_reset"),
+                err = listOf("rebooted", "idle", "expired", "damaged", "no_daily"),
+            )
+            op<VaultLinkUnlockRequest, VaultHandle>(
+                "vault.unlock_link",
+                err = listOf("other_key", "other_instance", "no_vault"),
             )
             op<VaultDailyStoreRequest, VaultState>("vault.daily_store", err = listOf("gone"))
             op<VaultDirRequest, VaultState>("vault.daily_forget")

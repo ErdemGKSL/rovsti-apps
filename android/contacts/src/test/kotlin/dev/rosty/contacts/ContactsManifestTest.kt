@@ -66,7 +66,11 @@ class ContactsManifestTest {
         assertEquals(null, provider.attributes["grantUriPermissions"])
         assertEquals("signature", manifest.declaredPermissions[permission])
         assertTrue("this app asks its siblings too", permission in manifest.usesPermissions)
-        assertTrue(manifest.queriedProviders.containsAll(setOf("dev.rosty.messages.walink", "dev.rosty.phone.walink")))
+        assertTrue(
+            manifest.queriedProviders.containsAll(
+                setOf("dev.rosty.messages.walink", "dev.rosty.phone.walink", "dev.rosty.stops.walink"),
+            ),
+        )
     }
 
     @Test fun workManagerHasItsComponentsAndTheSyncWorkerNeedsNoneOfItsOwn() {

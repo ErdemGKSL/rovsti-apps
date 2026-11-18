@@ -127,7 +127,7 @@ fn the_cache_opens_only_under_its_key() {
 }
 
 #[test]
-fn remove_all_deletes_the_three_files() {
+fn remove_all_deletes_the_vault_files_and_the_caches() {
     let dir = temp_dir("remove");
     VaultFile::new("a", vec![1], vec![2]).save(&dir).unwrap();
     DailyFile::new(
@@ -144,10 +144,11 @@ fn remove_all_deletes_the_three_files() {
     VaultCache::default()
         .save(&dir, &key(), &mut counter())
         .unwrap();
+    save_sealed(&dir, HISTORY_FILE, &key(), b"[]", &mut counter()).unwrap();
     fs::write(dir.join("other.json"), "{}").unwrap();
     let mut deleted = remove_all(&dir).unwrap();
     deleted.sort();
-    let mut wanted: Vec<String> = [CACHE_FILE, DAILY_FILE, VAULT_FILE]
+    let mut wanted: Vec<String> = [CACHE_FILE, DAILY_FILE, HISTORY_FILE, VAULT_FILE]
         .iter()
         .map(|n| dir.join(n).to_string_lossy().into_owned())
         .collect();
@@ -330,5 +331,87 @@ fn the_legacy_link_is_read_for_the_migration() {
     let link = legacy_link(&dir).unwrap();
     assert_eq!(link.instance_id, "inst1");
     assert_eq!(link.key, "rwk_x");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn files_of_an_earlier_build_read_without_the_round_7a_fields() {
+    let dir = temp_dir("old-files");
+    fs::write(
+        dir.join(VAULT_FILE),
+        r#"{"version":1,"hw_alias":"a","hw_sealed":"AQ==","body":"Ag=="}"#,
+    )
+    .unwrap();
+    let vault = VaultFile::load(&dir).unwrap().unwrap();
+    assert_eq!(vault.link_sealed, None);
+    // Written back, the new field round-trips.
+    let wrapped = VaultFile {
+        link_sealed: Some(vec![3, 4]),
+        ..vault
+    };
+    wrapped.save(&dir).unwrap();
+    assert_eq!(VaultFile::load(&dir).unwrap().unwrap(), wrapped);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_daily_file_keeps_the_last_unlock_sealed_and_in_plain() {
+    use rosty_core::vault::{DAILY_MAX_IDLE_MS, DailyRefusal};
+    let dir = temp_dir("seen");
+    let stamp = DailyStamp {
+        boot_count: 3,
+        unlocked_ms: 1_000_000,
+    };
+    let mut file = DailyFile::new(
+        "d",
+        vec![1],
+        &DailyKey::from_slice(&[1; 32]).unwrap(),
+        stamp,
+    );
+    let hour = 3_600_000;
+    let clock = file.sealed_clock(&key(), stamp);
+    file.record_unlock(&key(), clock, stamp.unlocked_ms + 60 * hour, &mut counter());
+    file.save(&dir).unwrap();
+    let read = DailyFile::load(&dir).unwrap().unwrap();
+    assert_eq!(read.last_unlock_ms, Some(stamp.unlocked_ms + 60 * hour));
+    let later = stamp.unlocked_ms + 60 * hour + DAILY_MAX_IDLE_MS;
+    assert_eq!(read.sealed_clock(&key(), stamp).check(3, later), Ok(()));
+    assert_eq!(read.plain_clock().check(3, later), Ok(()));
+    // Under another DK, or for another epoch, the record does not count: the stamp's 72 h apply.
+    let other = DataKey::from_slice(&[9; 32]).unwrap();
+    assert_eq!(
+        read.sealed_clock(&other, stamp).check(3, later),
+        Err(DailyRefusal::Idle)
+    );
+    let next_epoch = DailyStamp {
+        boot_count: 3,
+        unlocked_ms: stamp.unlocked_ms + hour,
+    };
+    assert_eq!(
+        read.sealed_clock(&key(), next_epoch).last_unlock_ms,
+        next_epoch.unlocked_ms
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_history_file_opens_only_under_its_key() {
+    let dir = temp_dir("history");
+    assert!(load_sealed(&dir, HISTORY_FILE, &key()).unwrap().is_none());
+    save_sealed(&dir, HISTORY_FILE, &key(), b"chats", &mut counter()).unwrap();
+    assert_eq!(
+        load_sealed(&dir, HISTORY_FILE, &key())
+            .unwrap()
+            .unwrap()
+            .as_slice(),
+        b"chats"
+    );
+    let raw = fs::read(dir.join(HISTORY_FILE)).unwrap();
+    assert!(!raw.windows(5).any(|w| w == b"chats"));
+    let other = DataKey::from_slice(&[9; 32]).unwrap();
+    assert_eq!(
+        load_sealed(&dir, HISTORY_FILE, &other).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
     let _ = fs::remove_dir_all(&dir);
 }

@@ -96,7 +96,7 @@ Rule: cost the gateway less than today's eager sync, never more.
 - Server-side work added: none.
 To verify during implementation: merges stay correct with lazy identity catch-up; real request count of today's WaSyncRunner as the baseline for a regression test.
 
-## 15. Implementation notes (rounds 1 to 6)
+## 15. Implementation notes (rounds 1 to 7a)
 
 Round 1, `rosty_core::vault` (pure; the caller passes `Entropy`):
 - Blobs, all AES-256-GCM with the header as associated data: key blob `RWVK | ver | kdf id | 3 x u32 kdf words | salt 16 |
@@ -386,3 +386,109 @@ Round 6, the migration that deletes the plaintext leftovers, the docs and the de
   install, BiometricPrompt in every app, the enrolment change, the reboot, the lock lifecycle, the locked call notice
   on HyperOS, the trip message after a lock, the people sync deferral, the hand-over between two installed apps,
   memfd under SELinux and FLAG_SECURE.
+
+Round 7a, the passphrase clock, one prompt for the four apps, the history after an unlock and the WhatsApp mutes
+(`rosty_core::vault` `clock`/`link`, `rosty_app_core::wa_vault`, `wa_sync::history`, `rosty_ffi` `vault.unlock_link`,
+`vault.unlock_daily {biometric}`, `wa_sync.history_save`; `:core-bridge`, `:wa`, `:shell`, `:messages`, `:stops`, the
+other manifests). Owner direction: keep the threat model (seized or cloned device, other apps, backups) and make the UX
+as good as possible; a safer option only where its UX cost is invisible.
+- Passphrase clock (replaces round 4's deviation "the 72 h count from the last passphrase unlock"). The daily blob stays
+  sealed once, at the passphrase unlock: its authenticated stamp is the passphrase epoch (boot count, passphrase time).
+  The time of the last unlock lives in a *seen* record, `RWVA | ver | boot u64 | passphrase ms i64 | last unlock ms
+  i64 | nonce | tag` sealed under DK (no plaintext, the header is the associated data), stored as `seen` in
+  `wa-vault-daily.json` next to a plain copy `last_unlock_ms` for `vault.state`. The daily unlock opens DK anyway, so
+  Rust reads the record, checks it, and writes the next one: one prompt. Rules (`DailyClock::check`, pure, tested):
+  the stamp's boot count; the clock not more than 5 min behind the last unlock; at most 30 days
+  (`DAILY_MAX_AGE_MS`, refusal `expired`) since the passphrase; at most 72 h since the last unlock (`idle`). A record
+  of another epoch (other boot or passphrase time), a damaged one, one under another DK or none at all leaves the clock
+  at the passphrase time, so deleting or rolling back the file only makes the rule stricter, and forging one needs DK.
+  Only a Class 3 biometric K_daily moves the clock (`vault.unlock_daily {biometric: true}`, Kotlin sets it from the
+  alias kind); a screen-lock K_daily (a phone with no Class 3 biometric) keeps the 72 h from the passphrase (task
+  text; see the open questions). Reboot, a new enrolment, five failed attempts and a lockout still drop the daily
+  unlock at once. New UI reasons: `Idle` now reads "WhatsApp wasn't unlocked for three days", `Expired` "The
+  passphrase was last typed 30 days ago" (en, tr).
+- One prompt for the four apps. Design: each vault also stores a *link wrap*, `RWVL | ver | salt 16 | nonce 12 |
+  DK+tag` with KL = PBKDF2-HMAC-SHA256(connect key, salt ‖ "rosty-wa-link", 1 round) (`vault::wrap_for_link`; one
+  round, since the connect key is 32 random bytes, not a password). It is written in `wa-vault.json` (`link_sealed`)
+  at every commit (setup, passphrase change: the new DK) and, for a vault of an earlier build, at its next normal unlock
+  (best effort; until then the hand-over answers `no_link_wrap` and the normal prompt shows). When a locked app's unlock
+  page shows (`VaultFlow.autoUnlock`, once per lock, also from Settings' unlock row), `WaVault.unlockFromSibling` first
+  asks the siblings' `WaLinkProvider` `/link` in order (Messages, Phone, Contacts, Stops); a sibling answers only while
+  its own vault is unlocked (`vault.export_link`, memory only, round 5). The link goes straight to `vault.unlock_link
+  {link, boot_count, now_ms}`: Rust unwraps DK with the handed key, opens the body and requires the same gateway URL
+  and instance (`other_link` otherwise), and opens this app's own session; no daily blob is prepared (that would need a
+  prompt). Only if no sibling answers does the biometric prompt (or the passphrase page) show, so the person never sees
+  two prompts for one unlock. The hand-over also moves the idle clock of a still valid daily unlock (same boot, within
+  72 h and 30 days); a lapsed one is dropped as `vault.state` would. The window is the source's own lock rules: a
+  sibling answers only while it is unlocked, that is in the foreground or within its auto-lock delay in the background
+  (at most 5 min, default 1 min); screen off locks every app. So "about 5 min, or while any of them is in the
+  foreground" holds with the delay set to 5 min; with the default it is 1 min (a shorter window, no new rule).
+- Why it does not weaken the threat model: (1) seized, imaged or cloned device: the wrap is under a key derived from the
+  connect key, which is on disk only inside the body, under DK; a disk image holds no way in that it did not have
+  before. Whoever holds the connect key already reads and sends everything through the gateway, so DK (which only adds
+  the caches) is no new secret for them. (2) Other apps: the provider is `exported` only behind the signature
+  permission `WA_LINK` (read and write), checks the caller's signing certificates itself, and the receiver checks the
+  sibling's signature before it asks (`ResolverSiblingLinks`); a foreign app that claims a sibling's authority can only
+  hand over a wrong key, which fails the GCM tag. (3) Backups: `allowBackup=false`, `noBackupFilesDir`. No plaintext
+  is written, DK never leaves its app (each app opens its own DK with its own wrap), the key crosses Kotlin memory only
+  in the cursor and the request (as in round 5). After a reboot a sibling still needs its own passphrase first, and an
+  enrolment change invalidates every app's K_daily, so the hand-over adds no path around those rules: it only spares the
+  second prompt.
+- Lock semantics stay per app (screen off, background delay), with one change: "Lock WhatsApp now" locks every Rosty
+  app (`ShellContainer.lockWhatsAppEverywhere`, `:wa` `WaLockAll`). Otherwise a sibling left unlocked would open the
+  app again with no prompt right after its "Lock now". The broadcast carries nothing, is sent per sibling package with
+  `WA_LINK` as receiver permission and heard only by runtime receivers registered with `WA_LINK` as broadcast
+  permission: a cold process is not started (it has nothing unlocked) and no other signature can send or receive it.
+  The UX cost is invisible: the other apps simply show their unlock page next time, which the hand-over then opens if
+  one app is unlocked again.
+- Setup without a tap: the link screen (`WhatsAppSettingsViewModel.start`) takes an unlocked sibling's link by itself
+  (`WaLinkHandover.takeAutomatically`) and the setup follows, unless the person removed this app's link before (unlink
+  or reset set `auto_off` in `wa-link-share`; then it offers the link and the tap takes it, as in round 5). With no
+  sibling unlocked, the screen offers paste and QR as before. Stops now takes part: `WaLinkProvider`, the `WA_LINK`
+  permission and the provider queries in all four manifests (`WaLinkShare.PACKAGES` ends with Stops).
+- History after an unlock (Messages). `Store::history_snapshot` keeps the 40 chats listed first (pinned, then by newest
+  message; hidden chats left out) with their 30 newest messages each (messages a clear left out are not kept),
+  thumbnails up to 2 MiB in all (newest first; a message over the budget keeps no thumbnail), every other column up to
+  4 MiB in all, and the chats' `chat_sync` cursors (oldest kept message as `oldest_ts`, `reached_start` only when every
+  message was kept, an open gap kept open and started over from the top). Never the outbox (lost on restart as before),
+  never a media row or file (full media stays fetch-on-tap). The JSON is sealed under DK in the RWVC format into its
+  own file `wa-vault-history.bin` (so a save does not rewrite the pictures), written by `wa_sync.history_save` when
+  WhatsApp locks (`WaOffline.closeLocked`, before `vault.lock`) and when the app goes to the background
+  (`VaultLockLifecycle` -> `ShellContainer.wentToBackground`, Messages only, skipped when the delay is "at once").
+  `wa_sync.open {vault_cache}` seeds it into the new memory store (`Store::seed_history`, only into a store with no
+  chat, only for the same instance and schema version) and re-runs the identity backfill over the seeded rows. Nothing
+  the lazy sync owes changes: the cold start is still status, chat list, one identity page and the socket (4); a chat
+  whose newest message moved on gets a gap from the kept newest up, and opening any chat still costs its one page
+  (tested against an empty store: same pages). The file is deleted by a reset, an unlink (both `vault.reset`) and a
+  passphrase change (`vault.commit`); a file that does not open under DK is deleted.
+- Muted conversations: Settings, Notifications lists the SMS mutes (a `wa:` entry left in the preferences by an
+  earlier build is no longer listed) and, while the vault is open, the WhatsApp chats muted in WhatsApp
+  (`muted_until_ms` -1 or in the future, from the chats in memory, named by the name rules); Unmute on one goes through
+  the chat action (`WaChats.act(Unmute)`). While the vault is locked, one row "Unlock to see WhatsApp chats" (en, tr)
+  runs the unlock: a sibling hand-over, else the biometric prompt over the page, else (passphrase needed) it opens the
+  WhatsApp settings page, whose gate shows the passphrase page. Goldens: `e6.12-notifications-wa-unlocked`,
+  `e6.12-notifications-wa-locked` (light and dark) and `-tr` of the locked page.
+- Unchanged as decided: no process kill on lock (SMS/MMS), FLAG_SECURE, no gateway change.
+- Tests: Rust `rosty_core::vault` (idle reset, 30-day cap, boot and clock back after a later unlock, a seen record of
+  another epoch or from the past, the seen blob under DK only, the link wrap with the vault's key only),
+  `rosty_app_core::wa_vault` (older files without the new fields, the daily file's sealed and plain clock, the history
+  file under DK only, `remove_all` deletes it), `wa_sync::history_tests` (same inbox and threads after a seed, the
+  40 x 30 bound and the pinned order, the thumbnail budget, hidden and cleared rows, refused seeds, no request more
+  than an empty store), `rosty_ffi` vault unit tests (hand-over with the vault's own key only, the wrap written at the
+  first unlock of an older vault, the biometric idle reset up to 30 days, no reset for a screen-lock key) and fixtures
+  (`vault.unlock_link` 4 cases, `vault.unlock_daily.idle_reset`/`expired`, `wa_sync.history_save` 2 cases,
+  `wa_sync.open.vault_history`; the seeded fixture vault now carries a link wrap). Kotlin: `:wa` `WaVaultTest` (idle
+  reset, 30 days, hand-over with no prompt, hand-over after a reboot, no sibling or another link), `WaLinkHandoverTest`,
+  `WaSettingsHandoverTest` (taken with no tap, offered after an unlink), `:messages` `WaVaultSyncTest` (history written
+  at the lock and in the background, nothing while locked, the budget), `NotificationSettingsViewModelTest`,
+  `E612ShotTest`, the manifest tests of the four apps and `AppPermissionsTest`.
+- Open questions for the owner: (1) a phone with only a screen lock keeps "72 h since the passphrase" (the task names
+  the Class 3 biometric); moving the clock on a screen-lock unlock too would be a one-line change (`biometric` flag) but
+  lets a PIN holder keep access for 30 days instead of 72 h. (2) After a reboot each app's daily unlock is gone; an app
+  unlocked only through hand-overs asks for its own passphrase the next time it is unlocked alone. Offering "Turn on
+  quick unlock" after a hand-over would need a prompt right after the silent unlock, so it is not done. (3) The window
+  is each source app's auto-lock delay (default 1 min, at most 5 min), not a fixed 5 min: a fixed 5 min would keep a
+  sibling's vault unlocked in the background longer than its owner chose.
+- Not verified on a device: everything in `wa-vault-device-tests.md` 8 to 8d, in particular the provider queries
+  between four installed apps (and the start-up cost of a cold sibling), the lock-all broadcast to runtime receivers,
+  the history file across a real lock and process death, and the unlock row's prompt over the Settings page.

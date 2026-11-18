@@ -529,6 +529,7 @@
     <string name="notify_settings_muted">Sessize alınan sohbetler</string>
     <string name="notify_settings_unknown">Sohbet</string>
     <string name="notify_settings_unmute">Sesi aç</string>
+    <string name="notify_settings_wa_locked">WhatsApp sohbetlerini görmek için kilidi açın</string>
     <string name="notify_settings_none_muted">Sessize alınan sohbet yok</string>
     <string name="notify_settings_muted_footer">Bir sohbeti Sohbetler\'deki menüsünden sessize alın. Sessizdeki sohbetler yine gelir, sessizce.</string>
     <string name="quick_replies_title">Hazır yanıtlar</string>

@@ -8,6 +8,8 @@
 //! * [`DAILY_FILE`]: the daily unlock (13.2): the K_daily-sealed daily blob, its alias, DDK and a plain copy of the
 //!   stamp. DDK opens nothing without the K_daily layer, which needs a Class 3 biometric.
 //! * [`CACHE_FILE`]: the identity and picture cache (13.5), sealed under DK.
+//! * [`HISTORY_FILE`]: the recent chats and messages shown at once after an unlock (round 7a), sealed under DK.
+//!   Its own file, so a lock writes it without rewriting the pictures.
 
 #[cfg(test)]
 mod tests;
@@ -27,6 +29,7 @@ use crate::storage;
 pub const VAULT_FILE: &str = "wa-vault.json";
 pub const DAILY_FILE: &str = "wa-vault-daily.json";
 pub const CACHE_FILE: &str = "wa-vault-cache.bin";
+pub const HISTORY_FILE: &str = "wa-vault-history.bin";
 /// The `version` of the JSON files this build writes.
 pub const FILE_VERSION: u32 = 1;
 
@@ -42,6 +45,24 @@ mod b64 {
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
         let text = String::deserialize(deserializer)?;
         STANDARD.decode(text).map_err(D::Error::custom)
+    }
+
+    pub fn serialize_opt<S: Serializer>(
+        bytes: &Option<Vec<u8>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match bytes {
+            Some(bytes) => serializer.serialize_some(&STANDARD.encode(bytes)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize_opt<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<u8>>, D::Error> {
+        Option::<String>::deserialize(deserializer)?
+            .map(|text| STANDARD.decode(text).map_err(D::Error::custom))
+            .transpose()
     }
 
     pub fn deserialize_secret<'de, D: Deserializer<'de>>(
@@ -105,6 +126,16 @@ pub struct VaultFile {
     /// The body blob, sealed under DK.
     #[serde(with = "b64")]
     pub body: Vec<u8>,
+    /// DK wrapped under the connect key (`rosty_core::vault::wrap_for_link`, round 7a): a sibling Rosty app that
+    /// hands this link over opens the vault without a prompt here. Written at the commit and, for a vault of an
+    /// earlier build, at its next unlock.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "b64::serialize_opt",
+        deserialize_with = "b64::deserialize_opt"
+    )]
+    pub link_sealed: Option<Vec<u8>>,
 }
 
 impl Versioned for VaultFile {
@@ -120,6 +151,7 @@ impl VaultFile {
             hw_alias: hw_alias.to_owned(),
             hw_sealed,
             body,
+            link_sealed: None,
         }
     }
 
@@ -154,6 +186,19 @@ pub struct DailyFile {
     /// A plain copy of the stamp sealed inside, so the state can be judged without the biometric. The sealed one is
     /// authoritative.
     pub stamp: DailyStamp,
+    /// The last unlock of this passphrase epoch (`rosty_core::vault::seal_seen`, sealed under DK, round 7a): the
+    /// daily unlock moves the idle clock on with it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "b64::serialize_opt",
+        deserialize_with = "b64::deserialize_opt"
+    )]
+    pub seen: Option<Vec<u8>>,
+    /// A plain copy of the last unlock time sealed in [`Self::seen`], for the state without the biometric. The
+    /// sealed one is authoritative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_unlock_ms: Option<i64>,
 }
 
 impl std::fmt::Debug for DailyFile {
@@ -185,7 +230,42 @@ impl DailyFile {
             sealed,
             daily_key: Zeroizing::new(daily_key.as_bytes().to_vec()),
             stamp,
+            seen: None,
+            last_unlock_ms: None,
         }
+    }
+
+    /// The clock of the plain copies: what [`Self::stamp`] and [`Self::last_unlock_ms`] say, for the state and the
+    /// boot path. The daily unlock checks the sealed ones instead.
+    pub fn plain_clock(&self) -> vault::DailyClock {
+        let seen = self.last_unlock_ms.map(|last| vault::Seen {
+            epoch: self.stamp,
+            last_unlock_ms: last,
+        });
+        vault::DailyClock::new(self.stamp, seen)
+    }
+
+    /// The sealed clock: [`Self::seen`] opened under DK when it belongs to `stamp` (the stamp sealed inside the
+    /// daily blob); otherwise the stamp alone, which is the stricter rule.
+    pub fn sealed_clock(&self, key: &DataKey, stamp: DailyStamp) -> vault::DailyClock {
+        let seen = self
+            .seen
+            .as_deref()
+            .and_then(|blob| vault::open_seen(key, blob).ok());
+        vault::DailyClock::new(stamp, seen)
+    }
+
+    /// Records an unlock at `now_ms` of the epoch of `clock` (sealed under DK, with its plain copy).
+    pub fn record_unlock(
+        &mut self,
+        key: &DataKey,
+        clock: vault::DailyClock,
+        now_ms: i64,
+        entropy: &mut impl Entropy,
+    ) {
+        let seen = clock.seen_at(now_ms);
+        self.seen = Some(vault::seal_seen(key, seen, vault::nonce(entropy)));
+        self.last_unlock_ms = Some(seen.last_unlock_ms);
     }
 
     pub fn load(dir: &Path) -> io::Result<Option<Self>> {
@@ -255,10 +335,44 @@ impl VaultCache {
     }
 }
 
-/// Removes the vault, the daily unlock and the cache (reset, forgotten passphrase). Answers what was deleted.
+/// Seals `plain` under DK into `dir/name` (the [`HISTORY_FILE`]).
+pub fn save_sealed(
+    dir: &Path,
+    name: &str,
+    key: &DataKey,
+    plain: &[u8],
+    entropy: &mut impl Entropy,
+) -> io::Result<()> {
+    let blob = vault::seal_cache(key, plain, vault::nonce(entropy));
+    storage::save_bytes(dir, name, &blob)
+}
+
+/// The plain bytes of `dir/name` sealed under DK; `None` when missing, `InvalidData` when it does not open.
+pub fn load_sealed(
+    dir: &Path,
+    name: &str,
+    key: &DataKey,
+) -> io::Result<Option<Zeroizing<Vec<u8>>>> {
+    let blob = match std::fs::read(dir.join(name)) {
+        Ok(blob) => blob,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    vault::open_cache(key, &blob)
+        .map(Some)
+        .map_err(|_| invalid(name))
+}
+
+/// Deletes `dir/name` (and its temp file); answers the paths that existed.
+pub fn remove_file(dir: &Path, name: &str) -> io::Result<Vec<String>> {
+    remove(dir, name)
+}
+
+/// Removes the vault, the daily unlock and the caches (reset, forgotten passphrase, unlink). Answers what was
+/// deleted.
 pub fn remove_all(dir: &Path) -> io::Result<Vec<String>> {
     let mut deleted = Vec::new();
-    for name in [VAULT_FILE, DAILY_FILE, CACHE_FILE] {
+    for name in [VAULT_FILE, DAILY_FILE, CACHE_FILE, HISTORY_FILE] {
         deleted.extend(remove(dir, name)?);
     }
     Ok(deleted)

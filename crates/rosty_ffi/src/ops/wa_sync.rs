@@ -36,11 +36,11 @@ use crate::state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
     self, Action, AppliedEvents, ChatRekeyed, ChatRow, Conditions, Decision, Due, Eviction, Fetch,
-    FetchPage, Fetched, GalleryPage, HistoryProgress, HistoryReport, IdentityApplied,
-    IdentityCaughtUp, IdentitySnapshot, Kind, MediaDue, MediaEntry, MediaQueued, MediaSettled,
-    MediaState, MediaStats, MessageRow, Network, Observed, Opened, OutboxItem, Outcome, Played,
-    Reconciled, ResolvedId, Settled, StarredCursor, StarredPage, StatusNote, StatusNoted, Store,
-    StoredChats, StoredPage, SyncPlan, ThreadCursor, ThreadPage, Viewed, Wiped,
+    FetchPage, Fetched, GalleryPage, HistoryCount, HistoryProgress, HistoryReport, HistorySnapshot,
+    IdentityApplied, IdentityCaughtUp, IdentitySnapshot, Kind, MediaDue, MediaEntry, MediaQueued,
+    MediaSettled, MediaState, MediaStats, MessageRow, Network, Observed, Opened, OutboxItem,
+    Outcome, Played, Reconciled, ResolvedId, Settled, StarredCursor, StarredPage, StatusNote,
+    StatusNoted, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor, ThreadPage, Viewed, Wiped,
 };
 use rosty_wa_proto::{
     EventEnvelope, GroupInfo, IdentityMappings, InstanceStatus, RichChat, RichMessage, WaProfile,
@@ -73,6 +73,13 @@ pub(super) const OPS: &[OpSpec] = &[
         CacheSaved,
         cache_save,
         cache_save_cases
+    ),
+    op!(
+        "wa_sync.history_save",
+        HandleReq,
+        HistorySaved,
+        history_save,
+        history_save_cases
     ),
     op!("wa_sync.close", HandleReq, CloseAns, close, close_cases),
     op!("wa_sync.plan", PlanReq, SyncPlan, plan, plan_cases),
@@ -512,7 +519,8 @@ struct OpenReq {
     #[serde(default)]
     lazy: bool,
     /// Starts the identity map and its catch-up cursor from the encrypted vault cache (plan 13.5), when the
-    /// vault is unlocked for this instance; `wa_sync.cache_save` writes it back.
+    /// vault is unlocked for this instance; `wa_sync.cache_save` writes it back. Also seeds the recent chats and
+    /// messages from the vault's history file (round 7a); `wa_sync.history_save` writes it.
     #[serde(default)]
     vault_cache: bool,
 }
@@ -537,6 +545,9 @@ struct OpenAns {
     lazy: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cache: Option<CacheUse>,
+    /// What the history file put into the store (round 7a): shown at once, the sync then catches up lazily.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    history: Option<HistoryCount>,
 }
 
 /// The file stores open in this process: a second `wa_sync.open` of a file shares the first one's connection.
@@ -557,10 +568,13 @@ fn store_dir(dir: Option<&str>) -> Result<PathBuf, FfiError> {
 
 fn open(req: OpenReq) -> Result<WithHandle<OpenAns>, FfiError> {
     let mut cache = None;
+    let mut history = None;
     let store: Shared = if req.memory {
         let mut store = Store::open_in_memory(&req.instance_id).map_err(map_error)?;
         if req.vault_cache {
             cache = Some(seed_from_vault(&mut store)?);
+            // After the identity: the backfill of the seeded rows resolves their ids against the cached map.
+            history = seed_history_from_vault(&mut store)?;
         }
         Arc::new(Mutex::new(Some(store)))
     } else {
@@ -603,6 +617,7 @@ fn open(req: OpenReq) -> Result<WithHandle<OpenAns>, FfiError> {
         opened,
         lazy: lazy.then_some(true),
         cache,
+        history,
     };
     Ok(handled(handles::global().insert(store), answer))
 }
@@ -625,12 +640,35 @@ fn seed_from_vault(store: &mut Store) -> Result<CacheUse, FfiError> {
     })
 }
 
+/// Seeds `store` with the recent chats and messages of the vault's history file, when the vault is unlocked for its
+/// instance. A file that does not read as a snapshot is ignored (the next save replaces it).
+fn seed_history_from_vault(store: &mut Store) -> Result<Option<HistoryCount>, FfiError> {
+    if super::vault::unlocked_instance().as_deref() != Some(store.instance_id()) {
+        return Ok(None);
+    }
+    let Some(plain) = super::vault::history_load(store.instance_id())? else {
+        return Ok(None);
+    };
+    let Ok(snapshot) = serde_json::from_slice::<HistorySnapshot>(&plain) else {
+        return Ok(None);
+    };
+    store.seed_history(&snapshot).map_err(map_error)
+}
+
 fn open_cases() -> Vec<Case> {
     vec![
         Case::new(open_req()),
         Case::named("no_instance", json!({"instance_id": " ", "memory": true})),
         Case::named("lazy", vault_req()),
         // The vault of the fixtures is unlocked and its cache knows Ali's LID: the map starts from it.
+        // The history file of a session before: the chats and messages show at once.
+        Case::named("vault_history", vault_req())
+            .seeded("wa_vault")
+            .after("vault.unlock", super::vault::seed_unlock_request())
+            .after("wa_sync.open", lazy_req())
+            .after("wa_sync.apply_events", sample_events())
+            .after("wa_sync.store_chats", chats_req(None))
+            .after("wa_sync.history_save", json!({"handle": H})),
         Case::named("vault_cache", vault_req())
             .seeded("wa_vault")
             .after("vault.unlock", super::vault::seed_unlock_request())
@@ -758,6 +796,58 @@ fn cache_save_cases() -> Vec<Case> {
             .seeded("wa_vault")
             .after("vault.unlock", super::vault::seed_unlock_request())
             .after("wa_sync.open", lazy_req()),
+        on_lazy(Case::named("locked", json!({"handle": H}))),
+    ]
+}
+
+// ---- wa_sync.history_save
+
+#[derive(Serialize)]
+struct HistorySaved {
+    handle: i64,
+    #[serde(flatten)]
+    kept: HistoryCount,
+}
+
+/// Writes the store's recent chats and messages into the vault's history file, sealed under DK (round 7a; bounds in
+/// `rosty_app_core::wa_sync::history`). Called when WhatsApp locks and when the app goes to the background, so the
+/// next unlock shows them at once. `locked` while the vault is locked or holds another instance.
+fn history_save(req: HandleReq) -> Result<HistorySaved, FfiError> {
+    let (instance, snapshot) = with(req.handle, |store| {
+        let instance = store.instance_id().to_owned();
+        store
+            .history_snapshot()
+            .map(|snapshot| (instance, snapshot))
+    })?;
+    if super::vault::unlocked_instance().as_deref() != Some(instance.as_str()) {
+        return Err(
+            FfiError::new(ErrorKind::NotFound, "the WhatsApp vault is locked")
+                .with_detail(json!({"code": "locked"})),
+        );
+    }
+    let kept = HistoryCount {
+        chats: snapshot.chats.len() as u32,
+        messages: snapshot.messages.len() as u32,
+    };
+    let plain = zeroize::Zeroizing::new(
+        serde_json::to_vec(&snapshot).map_err(|e| FfiError::invalid(e.to_string()))?,
+    );
+    drop(snapshot);
+    super::vault::history_store(&instance, &plain)?;
+    Ok(HistorySaved {
+        handle: req.handle,
+        kept,
+    })
+}
+
+fn history_save_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"handle": H}))
+            .seeded("wa_vault")
+            .after("vault.unlock", super::vault::seed_unlock_request())
+            .after("wa_sync.open", lazy_req())
+            .after("wa_sync.apply_events", sample_events())
+            .after("wa_sync.store_chats", chats_req(None)),
         on_lazy(Case::named("locked", json!({"handle": H}))),
     ]
 }

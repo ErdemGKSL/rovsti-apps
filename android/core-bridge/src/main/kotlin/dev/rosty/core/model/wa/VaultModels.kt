@@ -25,6 +25,10 @@ enum class VaultDailyRefusal {
 
     @SerialName("clock_back")
     ClockBack,
+
+    /** 30 days since the passphrase, however often the biometric unlocked (round 7a). */
+    @SerialName("expired")
+    Expired,
 }
 
 /** `vault.state`. With [bootCount] and [nowMs] a lapsed daily unlock is deleted and named in `dailyDropped`. */
@@ -49,6 +53,8 @@ data class VaultDailyInfo(
     val sealed: String,
     @SerialName("boot_count") val bootCount: Long,
     @SerialName("unlocked_ms") val unlockedMs: Long,
+    /** The last daily unlock of this passphrase epoch (round 7a: the 72 h count from it). */
+    @SerialName("last_unlock_ms") @EncodeDefault(NEVER) val lastUnlockMs: Long? = null,
 )
 
 /** The open session: its handle and the link it serves (no key). */
@@ -122,13 +128,37 @@ data class VaultUnlockRequest(
     override fun toString(): String = "VaultUnlockRequest(dir=$dir, passphrase=…, bootCount=$bootCount, nowMs=$nowMs)"
 }
 
-/** `vault.unlock_daily`: [dailyBlob] is [VaultDailyInfo.sealed] decrypted with K_daily. */
+/**
+ * `vault.unlock_daily`: [dailyBlob] is [VaultDailyInfo.sealed] decrypted with K_daily. [biometric]: K_daily is the
+ * Class 3 biometric key, so the unlock resets the 72 h idle clock (round 7a; a screen-lock key does not).
+ */
 @Serializable
 data class VaultDailyUnlockRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
     @SerialName("daily_blob") val dailyBlob: String,
     @SerialName("boot_count") val bootCount: Long,
     @SerialName("now_ms") val nowMs: Long,
+    @EncodeDefault(NEVER) val biometric: Boolean = false,
+)
+
+/**
+ * `vault.unlock_link` (round 7a): opens this app's own vault with the [link] a sibling Rosty app handed over from its
+ * unlocked vault (`WaLinkProvider`), without a prompt. Carries the connect key: memory only, never logged.
+ */
+@Serializable
+data class VaultLinkUnlockRequest(
+    @EncodeDefault(NEVER) val dir: String? = null,
+    val link: VaultLink,
+    @SerialName("boot_count") val bootCount: Long,
+    @SerialName("now_ms") val nowMs: Long,
+) {
+    override fun toString(): String = "VaultLinkUnlockRequest(dir=$dir, link=…, bootCount=$bootCount, nowMs=$nowMs)"
+}
+
+/** The session `vault.unlock_link` opened. */
+@Serializable
+data class VaultHandle(
+    val handle: Long,
 )
 
 /** An unlocked session; [dailySeal] is sealed with K_daily and handed to `vault.daily_store` (optional). */

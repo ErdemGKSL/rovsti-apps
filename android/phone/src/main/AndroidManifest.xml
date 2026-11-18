@@ -77,6 +77,7 @@
         <!-- WA-R2: the link providers of the sibling Rosty apps (package visibility). -->
         <provider android:authorities="dev.rosty.messages.walink" />
         <provider android:authorities="dev.rosty.contacts.walink" />
+        <provider android:authorities="dev.rosty.stops.walink" />
     </queries>
 
     <application

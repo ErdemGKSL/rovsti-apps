@@ -104,9 +104,16 @@ class PrefsWaLinkMarks(
                 }.apply()
         }
 
+    override var autoOff: Boolean
+        get() = prefs.getBoolean(AUTO_OFF, false)
+        set(value) {
+            prefs.edit().putBoolean(AUTO_OFF, value).apply()
+        }
+
     private companion object {
         const val ADOPTED_INSTANCE = "adopted_instance"
         const val ADOPTED_FROM = "adopted_from"
         const val DECLINED = "declined"
+        const val AUTO_OFF = "auto_off"
     }
 }

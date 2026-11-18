@@ -15,11 +15,18 @@
 //! | body  | `RWVB` · version · nonce (12)                                         (17 bytes)  | body JSON + tag  |
 //! | cache | `RWVC` · version · nonce (12)                                         (17 bytes)  | cache + tag      |
 //! | daily | `RWVD` · version · boot count u64 · last unlock ms i64 · nonce (12)   (33 bytes)  | DK + tag (48)    |
+//! | seen  | `RWVA` · version · boot · passphrase ms · last unlock ms · nonce (41 bytes)        | tag (16)         |
+//! | link  | `RWVL` · version · salt (16) · nonce (12)                             (33 bytes)  | DK + tag (48)    |
+//!
+//! The daily blob's time is the passphrase unlock; the *seen* record ([`DailyClock`]) moves the idle clock on at each
+//! daily unlock. The *link* wrap ([`wrap_for_link`]) lets a sibling app's hand-over of the connect key open DK.
 //!
 //! KDF ids: 1 = Argon2id (words: memory KiB, passes, lanes), 2 = PBKDF2-HMAC-SHA256 (words: iterations, 0, 0).
 //! Distinct magics keep a blob of one kind from being accepted as another.
 
+mod clock;
 mod kdf;
+mod link;
 mod passphrase;
 #[cfg(test)]
 mod tests;
@@ -32,7 +39,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
+pub use clock::{DAILY_MAX_AGE_MS, DailyClock, SEEN_BLOB_LEN, Seen, open_seen, seal_seen};
 pub use kdf::{ARGON2ID, Kdf, PBKDF2, calibrate};
+pub use link::{LINK_BLOB_LEN, unwrap_for_link, wrap_for_link};
 pub use passphrase::{BITS, ENTROPY_BYTES, Passphrase, PassphraseError};
 
 /// The version byte of every blob this build writes and reads.
@@ -54,7 +63,8 @@ const DAILY_HEADER_LEN: usize = 4 + 1 + 8 + 8 + NONCE_LEN;
 pub const KEY_BLOB_LEN: usize = KEY_HEADER_LEN + KEY_LEN + TAG_LEN;
 pub const DAILY_BLOB_LEN: usize = DAILY_HEADER_LEN + KEY_LEN + TAG_LEN;
 
-/// The daily unlock lapses after this long without an unlock (plan 13.2).
+/// The daily unlock lapses after this long without an unlock (plan 13.2; idle time since round 7a, see
+/// [`DailyClock`]).
 pub const DAILY_MAX_IDLE_MS: i64 = 72 * 60 * 60 * 1000;
 /// A clock this far behind the last unlock is a clock set back, not drift.
 pub const DAILY_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
@@ -194,22 +204,18 @@ pub enum DailyRefusal {
     Rebooted,
     #[error("72 hours passed without an unlock")]
     Idle,
+    /// [`DAILY_MAX_AGE_MS`] since the passphrase, however often the biometric unlocked.
+    #[error("30 days passed since the passphrase")]
+    Expired,
     #[error("the clock is behind the last unlock")]
     ClockBack,
 }
 
 impl DailyStamp {
-    /// Whether a blob sealed at `self` may unlock now, on boot `boot_count`.
+    /// Whether a blob sealed at `self` may unlock now, on boot `boot_count`, when no later unlock is known (the
+    /// plain rules of [`DailyClock`]).
     pub fn check(self, boot_count: u64, now_ms: i64) -> Result<(), DailyRefusal> {
-        if boot_count != self.boot_count {
-            Err(DailyRefusal::Rebooted)
-        } else if now_ms < self.unlocked_ms.saturating_sub(DAILY_CLOCK_SKEW_MS) {
-            Err(DailyRefusal::ClockBack)
-        } else if now_ms.saturating_sub(self.unlocked_ms) > DAILY_MAX_IDLE_MS {
-            Err(DailyRefusal::Idle)
-        } else {
-            Ok(())
-        }
+        DailyClock::new(self, None).check(boot_count, now_ms)
     }
 }
 

@@ -10,7 +10,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.SavedStateHandle
@@ -29,7 +28,6 @@ import dev.rosty.wa.vault.VaultSettingsRepository
 import dev.rosty.wa.vault.WaVaultGate
 import dev.rosty.wa.vault.WaVaultState
 import dev.rosty.wa.vault.vaultSettingsItems
-import kotlinx.coroutines.launch
 
 /**
  * [content] behind the WhatsApp vault of the app (`plans/wa-vault.md` 13.3): the link flow while nothing is linked, the
@@ -124,13 +122,13 @@ private fun rememberVaultSettingsBlock(
     unlocked: Boolean,
 ): LazyListScope.() -> Unit {
     val vault = container.waVault
-    val scope = rememberCoroutineScope()
     var autoLock by remember { mutableLongStateOf(vault.autoLockMs) }
     return {
         if (unlocked) {
             vaultSettingsItems(
                 autoLockMs = autoLock,
-                onLockNow = { scope.launch { vault.lock() } },
+                // Every Rosty app locks: a sibling left open would unlock this one again with no prompt.
+                onLockNow = container::lockWhatsAppEverywhere,
                 onAutoLock = { ms ->
                     vault.autoLockMs = ms
                     autoLock = ms

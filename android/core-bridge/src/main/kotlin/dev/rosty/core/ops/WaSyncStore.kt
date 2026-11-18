@@ -37,6 +37,7 @@ import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistory
 import dev.rosty.core.model.wa.WaSyncHistoryReport
+import dev.rosty.core.model.wa.WaSyncHistorySaved
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncIdentityCatchUp
 import dev.rosty.core.model.wa.WaSyncKind
@@ -165,6 +166,9 @@ class WaSyncStore internal constructor(
 
     /** Writes the identity map and its cursor into the encrypted vault cache; `locked` while the vault is. */
     suspend fun saveCache(): Outcome<WaSyncCacheSaved> = live { ops.cacheSave(WaSyncHandleRequest(id)) }
+
+    /** Writes the recent chats and messages into the vault's history file (round 7a); `locked` while the vault is. */
+    suspend fun saveHistory(): Outcome<WaSyncHistorySaved> = live { ops.historySave(WaSyncHandleRequest(id)) }
 
     /** The chat list, newest first. */
     suspend fun chats(includeArchived: Boolean = false): Outcome<List<WaSyncChat>> =

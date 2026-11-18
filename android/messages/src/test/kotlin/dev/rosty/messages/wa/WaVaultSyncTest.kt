@@ -307,6 +307,25 @@ class WaVaultSyncTest {
             assertTrue(kit.remote.requests.size <= 4)
         }
 
+    /** Round 7a: the history file is written at the lock (before the store closes) and when the app goes away. */
+    @Test fun theLockAndTheBackgroundWriteTheHistoryFile() =
+        runTest {
+            val kit = Kit(backgroundScope, true, { testScheduler.currentTime })
+            kit.offline.start()
+            settle()
+            kit.offline.saveHistory()
+            assertEquals(1, kit.fake.historySaves)
+            kit.offline.lock()
+            settle()
+            assertEquals(2, kit.fake.historySaves)
+            kit.offline.saveHistory()
+            assertEquals("nothing is written while locked", 2, kit.fake.historySaves)
+            val requests = kit.remote.requests.size
+            kit.offline.unlock()
+            settle()
+            assertTrue("the cold start stays within its budget", kit.remote.requests.size - requests <= 4)
+        }
+
     @Test fun afterLockNoRequestGoesOutAndEverythingIsClosed() =
         runTest {
             val ram = HeapRamFiles(folder.newFolder("ram"))

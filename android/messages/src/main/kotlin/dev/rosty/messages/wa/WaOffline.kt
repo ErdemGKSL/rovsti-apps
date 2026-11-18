@@ -212,6 +212,9 @@ class WaOffline(
         val current = sessionState.value ?: return
         sessionState.value = null
         historyState.value = null
+        // Round 7a: the recent chats and messages go into the DK-sealed history file while the vault is still open
+        // (a lock closes the store before `vault.lock`), so the next unlock shows them at once. Refused while locked.
+        if (memoryOnly) current.store.saveHistory()
         current.store.close()
         changeBus.tryEmit(null)
     }
@@ -637,6 +640,15 @@ class WaOffline(
             }
         }
         onLock()
+    }
+
+    /**
+     * The app went to the background (round 7a): the recent chats and messages are written into the DK-sealed history
+     * file now too, so a process the system ends before the lock still shows them at the next unlock.
+     */
+    suspend fun saveHistory() {
+        if (!memoryOnly || lockedState.value) return
+        linking.withLock { sessionState.value?.store?.saveHistory() }
     }
 
     /** The vault was unlocked: a fresh budget, and the store opens again (lazily filled). */

@@ -41,6 +41,7 @@ import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistory
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
 import dev.rosty.core.model.wa.WaSyncHistoryReport
+import dev.rosty.core.model.wa.WaSyncHistorySaved
 import dev.rosty.core.model.wa.WaSyncHistoryState
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
@@ -549,6 +550,15 @@ class FakeWaSyncOps(
         synchronized(lock) {
             cacheSaves++
             ok(WaSyncCacheSaved(HANDLE, 0))
+        }
+
+    /** History snapshots written into the vault's history file (`historySave`). */
+    var historySaves = 0
+
+    override suspend fun historySave(req: WaSyncHandleRequest): Outcome<WaSyncHistorySaved> =
+        synchronized(lock) {
+            historySaves++
+            ok(WaSyncHistorySaved(HANDLE, 0, 0))
         }
 
     override suspend fun close(req: WaSyncHandleRequest) = ok(WaSyncClosed(true))

@@ -54,7 +54,8 @@
     <string name="vault_passphrase_note">Her denemeyi ekran kilidiniz veya parmak iziniz onaylar.</string>
     <string name="vault_reason_none">Kilidi açmak için parolanızı yazın.</string>
     <string name="vault_reason_rebooted">Telefonunuz yeniden başladı, bu yüzden parola bir kez gerekiyor.</string>
-    <string name="vault_reason_idle">Parola en son üç gün önce yazıldı, bu yüzden bir kez gerekiyor.</string>
+    <string name="vault_reason_idle">WhatsApp üç gündür açılmadı, bu yüzden parola bir kez gerekiyor.</string>
+    <string name="vault_reason_expired">Parola en son 30 gün önce yazıldı, bu yüzden bir kez gerekiyor.</string>
     <string name="vault_reason_clock">Telefonun saati geri alındı, bu yüzden parola bir kez gerekiyor.</string>
     <string name="vault_reason_biometric">Parmak izleriniz veya yüzünüz değişti, bu yüzden parola bir kez gerekiyor.</string>
     <string name="vault_reason_attempts">Çok fazla başarısız deneme oldu, bu yüzden parola bir kez gerekiyor.</string>

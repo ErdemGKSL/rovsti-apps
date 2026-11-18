@@ -295,6 +295,7 @@ fun reasonText(reason: PassphraseReason?): Int =
         null -> R.string.vault_reason_none
         PassphraseReason.Rebooted -> R.string.vault_reason_rebooted
         PassphraseReason.Idle -> R.string.vault_reason_idle
+        PassphraseReason.Expired -> R.string.vault_reason_expired
         PassphraseReason.ClockBack -> R.string.vault_reason_clock
         PassphraseReason.BiometricChanged -> R.string.vault_reason_biometric
         PassphraseReason.TooManyAttempts -> R.string.vault_reason_attempts

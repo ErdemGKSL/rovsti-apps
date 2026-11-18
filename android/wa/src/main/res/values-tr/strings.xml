@@ -74,7 +74,7 @@
     <string name="vault_reset_confirm">WhatsApp kasası sıfırlansın mı?</string>
     <string name="vault_reset_confirm_detail">Kasa ve bu uygulamanın bağlantısı silinir. Yeniden bağladıktan sonra sohbetleriniz geri gelir.</string>
     <string name="vault_broken_title">Kasa Açılamıyor</string>
-    <string name="vault_broken_body">Bu telefonun güvenlik ayarları değişti (bir parmak izi veya yüz eklendi ya da ekran kilidi kaldırıldı), bu yüzden kasayı koruyan anahtar artık yok. Kasayı sıfırlayıp WhatsApp’ı yeniden bağlayın; sohbetleriniz ağ geçidinizden geri gelir.</string>
+    <string name="vault_broken_body">Bu telefonun ekran kilidi kaldırıldı ya da kasa dosyası bozuldu, bu yüzden kasayı koruyan anahtar artık yok. Kasayı sıfırlayıp WhatsApp’ı yeniden bağlayın; sohbetleriniz ağ geçidinizden geri gelir.</string>
     <string name="vault_prompt_protect">WhatsApp’ı Koru</string>
     <string name="vault_prompt_unlock">WhatsApp Kilidini Aç</string>
     <string name="vault_prompt_confirm">Siz olduğunuzu doğrulayın</string>

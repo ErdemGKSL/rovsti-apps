@@ -26,7 +26,8 @@ class VaultKeystoreTest {
             KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
             spec.userAuthenticationType,
         )
-        assertTrue(spec.isInvalidatedByBiometricEnrollment)
+        // A new enrolment must not make the vault unreadable: it only drops the daily key.
+        assertFalse(spec.isInvalidatedByBiometricEnrollment)
         assertTrue(spec.isUnlockedDeviceRequired)
         assertTrue(spec.isStrongBoxBacked)
         assertEquals(256, spec.keySize)
@@ -41,6 +42,7 @@ class VaultKeystoreTest {
         assertFalse(spec.isStrongBoxBacked)
         val pin = AndroidVaultKeystore.spec("rosty.wa.d.c.a", VaultKeyAuth.Credential, strongBox = false)
         assertEquals(KeyProperties.AUTH_DEVICE_CREDENTIAL, pin.userAuthenticationType)
+        assertFalse(pin.isInvalidatedByBiometricEnrollment)
         assertTrue(pin.isUnlockedDeviceRequired)
     }
 

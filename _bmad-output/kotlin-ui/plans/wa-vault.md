@@ -192,7 +192,7 @@ Round 4, the Keystore, the vault screens, the lock lifecycle and Messages (`:pla
   JVM tests): AES-256-GCM keys generated in AndroidKeyStore, non-exportable, StrongBox when the phone has it (a
   `StrongBoxUnavailableException` falls back to the TEE), `setUnlockedDeviceRequired(true)`,
   `setUserAuthenticationParameters(0, …)` (every seal and open is its own `BiometricPrompt` with a `CryptoObject`).
-  K_hw `rosty.wa.k.<id>`: Class 3 biometric or screen lock, `setInvalidatedByBiometricEnrollment(true)`. K_daily
+  K_hw `rosty.wa.k.<id>`: Class 3 biometric or screen lock, not invalidated by enrolment (see the owner change below). K_daily
   `rosty.wa.d.b.<id>` (Class 3 biometric only) or `rosty.wa.d.c.<id>` (screen lock only, on a phone with no Class 3
   biometric enrolled; dropped as soon as one is). Sealed blobs are `0x01 | GCM nonce 12 | ciphertext+tag`, base64; only
   the opaque blobs of round 2 cross (Kotlin never holds DK, DDK or the connect key). A new K_hw alias per passphrase,
@@ -216,8 +216,10 @@ Round 4, the Keystore, the vault screens, the lock lifecycle and Messages (`:pla
 - Deviation (safer): after a passphrase change the daily unlock is not offered at once (a fresh `vault.unlock` would
   replace the session and release the gateway in use); the next unlock asks for the new passphrase once
   (`PassphraseReason.NewPassphrase`).
-- Deviation (as planned, but harsh): K_hw is invalidated by a biometric enrolment (plan 3). The vault then cannot be
-  opened (`Broken`): the page says why and offers only the reset and a new link.
+- Owner change (2026-11-18, replaces the harsh deviation): a biometric enrolment invalidates only the biometric
+  K_daily. K_hw no longer uses `setInvalidatedByBiometricEnrollment`, so the vault asks for the passphrase once and
+  seals a new daily key, as plan 6 and 13.2 list. `Broken` is left for a removed screen lock or a damaged file. This
+  overrides the `setInvalidatedByBiometricEnrollment(true)` on K_hw in section 3.
 - The drop rules (13.2): Rust drops the daily blob on another boot count, after 72 h and on a clock set back (read
   with `vault.state {boot_count, now_ms}` at every refresh and unlock); `BootReceiver` drops it on
   `BOOT_COMPLETED` (only when `wa-vault-daily.json` exists, so a phone without a vault starts no core); five failed

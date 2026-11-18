@@ -179,7 +179,11 @@ class AndroidVaultKeystore(
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val KEY_BITS = 256
 
-        /** The key spec of plan 3 and 13.2: per-use authentication, unlocked phone, invalidated by enrolment. */
+        /**
+         * The key spec of plan 3 and 13.2: per-use authentication and an unlocked phone. Only the biometric daily key is
+         * invalidated by a new enrolment (the vault then asks for the passphrase once and seals a new daily key); K_hw
+         * survives it, so an enrolment never makes the vault unreadable.
+         */
         fun spec(
             alias: String,
             auth: VaultKeyAuth,
@@ -207,8 +211,8 @@ class AndroidVaultKeystore(
                 .setUserAuthenticationRequired(true)
                 // 0: every single operation needs its own authentication (a CryptoObject prompt).
                 .setUserAuthenticationParameters(0, types)
-                // Enrolling a biometric destroys a key a biometric can open (a credential-only key has none to change).
-                .setInvalidatedByBiometricEnrollment(auth != VaultKeyAuth.Credential)
+                // Enrolling a biometric destroys only the biometric daily key; K_hw and a screen-lock key stay.
+                .setInvalidatedByBiometricEnrollment(auth == VaultKeyAuth.Biometric)
                 .setUnlockedDeviceRequired(true)
                 .setIsStrongBoxBacked(strongBox)
                 .build()

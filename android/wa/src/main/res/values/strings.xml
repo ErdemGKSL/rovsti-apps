@@ -74,7 +74,7 @@
     <string name="vault_reset_confirm">Reset the WhatsApp vault?</string>
     <string name="vault_reset_confirm_detail">The vault and this app’s link are deleted. Your chats come back after you link again.</string>
     <string name="vault_broken_title">Vault Can’t Be Opened</string>
-    <string name="vault_broken_body">This phone’s security changed (a fingerprint or face was added, or the screen lock was removed), so the key that protects the vault is gone. Reset the vault and link WhatsApp again; your chats come back from your gateway.</string>
+    <string name="vault_broken_body">This phone’s screen lock was removed or the vault file is damaged, so the key that protects the vault is gone. Reset the vault and link WhatsApp again; your chats come back from your gateway.</string>
     <string name="vault_prompt_protect">Protect WhatsApp</string>
     <string name="vault_prompt_unlock">Unlock WhatsApp</string>
     <string name="vault_prompt_confirm">Confirm it’s you</string>

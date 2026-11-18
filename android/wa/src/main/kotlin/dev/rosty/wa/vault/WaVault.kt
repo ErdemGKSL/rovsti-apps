@@ -55,8 +55,8 @@ sealed interface WaVaultState {
     data object Unlocked : WaVaultState
 
     /**
-     * The vault cannot be opened on this phone any more: its Keystore key is gone (a biometric was enrolled, the screen
-     * lock was removed) or the file is damaged. Only a reset and a new link help.
+     * The vault cannot be opened on this phone any more: its Keystore key is gone (the screen lock was removed; a new
+     * biometric enrolment only drops the daily key) or the file is damaged. Only a reset and a new link help.
      */
     data object Broken : WaVaultState
 }

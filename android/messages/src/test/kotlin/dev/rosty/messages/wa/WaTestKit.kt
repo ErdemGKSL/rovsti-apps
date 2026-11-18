@@ -36,7 +36,6 @@ import dev.rosty.core.model.wa.WaSyncWipeRequest
 import dev.rosty.core.ops.WaSyncOps
 import dev.rosty.core.ops.WaSyncStore
 import dev.rosty.platform.system.FakeDeviceData
-import java.io.File
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +47,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
+import java.io.File
 
 /** A scripted gateway for the sync, outbox and view-model tests: no network, every call logged. */
 class FakeWaRemote : WaRemote {

@@ -432,7 +432,8 @@ class FakeWaSyncOps(
             mentions = sendText?.mentions.orEmpty(),
             linkPreview =
                 sendText?.linkPreview?.let {
-                    dev.rosty.core.model.wa.LinkPreview(it.url, it.title, it.description, it.thumbnailB64 != null)
+                    dev.rosty.core.model.wa
+                        .LinkPreview(it.url, it.title, it.description, it.thumbnailB64 != null)
                 },
             reactions = emptyList(),
             state =
@@ -1378,12 +1379,24 @@ class FakeWaSyncOps(
                 val gone = rows.filter { row -> row.expiresAt?.let { it <= req.nowMs } == true }
                 if (gone.isEmpty()) continue
                 rows.removeAll(gone.toSet())
-                gone.forEach { row -> this.files.remove(chat to row.id)?.path?.let(files::add) }
+                gone.forEach { row ->
+                    this.files
+                        .remove(chat to row.id)
+                        ?.path
+                        ?.let(files::add)
+                }
                 removed += gone.size
                 chats += chat
             }
-            val next = messages.values.flatten().mapNotNull { it.expiresAt }.minOrNull()
-            ok(dev.rosty.core.model.wa.WaSyncExpired(HANDLE, removed, files, chats, next))
+            val next =
+                messages.values
+                    .flatten()
+                    .mapNotNull { it.expiresAt }
+                    .minOrNull()
+            ok(
+                dev.rosty.core.model.wa
+                    .WaSyncExpired(HANDLE, removed, files, chats, next),
+            )
         }
 
     override suspend fun markPlayed(req: WaSyncMarkPlayedRequest): Outcome<WaSyncPlayed> =

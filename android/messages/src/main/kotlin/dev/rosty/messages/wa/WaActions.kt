@@ -77,7 +77,12 @@ class NativeWaActionRules(
     override suspend fun sections(
         members: List<ReceiptMember>,
         voice: Boolean,
-    ): List<SectionRows> = ops.receiptSections(ReceiptSectionsRequest(members, voice)).getOrNull()?.sections.orEmpty()
+    ): List<SectionRows> =
+        ops
+            .receiptSections(ReceiptSectionsRequest(members, voice))
+            .getOrNull()
+            ?.sections
+            .orEmpty()
 
     override suspend fun parse(
         html: String,

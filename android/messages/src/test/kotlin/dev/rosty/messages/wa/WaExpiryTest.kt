@@ -25,12 +25,22 @@ class WaExpiryTest {
             kit.offline.start()
             settle()
 
-            assertEquals(listOf("m2", "m3"), kit.ops.messages.getValue(ADA).map { it.id })
+            assertEquals(
+                listOf("m2", "m3"),
+                kit.ops.messages
+                    .getValue(ADA)
+                    .map { it.id },
+            )
 
             kit.now = NOW + 6 * minute
             advanceTimeBy(6 * minute)
             runCurrent()
-            assertEquals(listOf("m3"), kit.ops.messages.getValue(ADA).map { it.id })
+            assertEquals(
+                listOf("m3"),
+                kit.ops.messages
+                    .getValue(ADA)
+                    .map { it.id },
+            )
 
             // Nothing left to wait for: the loop sleeps until rows change, it does not spin.
             val asked = kit.ops.writes.count { it is WaSyncExpireRequest }

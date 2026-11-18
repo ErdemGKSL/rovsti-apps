@@ -49,7 +49,6 @@ import dev.rosty.messages.wa.WaTestKit.Companion.MERT
 import dev.rosty.messages.wa.WaTestKit.Companion.NOW
 import dev.rosty.shell.RostyShell
 import dev.rosty.testing.ShotTest
-import java.time.ZoneId
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +60,7 @@ import org.junit.Test
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.time.ZoneId
 
 /**
  * Screenshots of E6-WA R4, light and dark: a group thread with a mention, a link card, "Forwarded many times" and a
@@ -203,7 +203,10 @@ class WaR4ShotTest : ShotTest() {
                 linkChip = LinkChipUi("https://www.example.org/trail", "Coastal trail, 12 km", "example.org"),
             )
         snap("wa-r4-link-chip", content = { Thread(it, chip, "Look: https://www.example.org/trail") })
-        val loading = stateOf(GROUP).copy(linkChip = LinkChipUi("https://example.org", null, "example.org", loading = true))
+        val loading =
+            stateOf(
+                GROUP,
+            ).copy(linkChip = LinkChipUi("https://example.org", null, "example.org", loading = true))
         snap("wa-r4-link-loading", content = { Thread(it, loading, "https://example.org") })
     }
 

@@ -149,10 +149,12 @@ open class MessagesContainer(
     }
 
     protected open fun createLinkPreviewSetting(): dev.rosty.messages.wa.LinkPreviewSetting =
-        dev.rosty.messages.wa.PrefsLinkPreviewSetting(context)
+        dev.rosty.messages.wa
+            .PrefsLinkPreviewSetting(context)
 
     protected open fun createWaActionRules(): dev.rosty.messages.wa.WaActionRules =
-        dev.rosty.messages.wa.NativeWaActionRules(waOps)
+        dev.rosty.messages.wa
+            .NativeWaActionRules(waOps)
 
     /** The home region (SIM, network, locale, else TR) that national numbers are normalized in. */
     val homeRegion: String by lazy { PhoneNumbers.homeRegion(context) }

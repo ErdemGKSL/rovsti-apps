@@ -54,8 +54,6 @@ import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.platform.audio.VoiceRecorder
 import dev.rosty.platform.media.MediaProbe
-import java.io.File
-import java.util.UUID
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
@@ -76,6 +74,8 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import java.io.File
+import java.util.UUID
 
 /** The words of a WhatsApp thread, from `strings.xml` (English and Turkish). */
 interface WaWords {
@@ -1264,11 +1264,14 @@ class WaThreadViewModel(
         val rules = sources.rules ?: return null to WaInfoProblem.Failed
         val answer =
             when (val got = sources.remote.messageReceipts(jid, row.id)) {
-                is Outcome.Ok -> got.value
+                is Outcome.Ok -> {
+                    got.value
+                }
 
                 is Outcome.Err -> {
-                    return null to
-                        if (got.error is dev.rosty.core.RustError.NotFound) WaInfoProblem.OldGateway else WaInfoProblem.Failed
+                    // An older gateway has no receipts route.
+                    val old = got.error is dev.rosty.core.RustError.NotFound
+                    return null to if (old) WaInfoProblem.OldGateway else WaInfoProblem.Failed
                 }
             }
         val voice = row.media?.voiceNote == true
@@ -1401,7 +1404,12 @@ class WaThreadViewModel(
         linkDraft = draft
         linkChip =
             draft?.let {
-                LinkChipUi(found.url, it.wire.title ?: it.wire.description, it.host ?: WaLinkHosts.of(found.url), it.picture)
+                LinkChipUi(
+                    found.url,
+                    it.wire.title ?: it.wire.description,
+                    it.host ?: WaLinkHosts.of(found.url),
+                    it.picture,
+                )
             }
         publish()
     }

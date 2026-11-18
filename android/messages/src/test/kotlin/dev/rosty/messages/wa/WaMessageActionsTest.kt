@@ -184,7 +184,9 @@ class WaMessageActionsTest {
         state.items.mapNotNull { (it as? ConversationItem.Bubble)?.bubble }
 
     private fun queued(kit: WaTestKit): List<Pair<String, WaSyncAction>> =
-        kit.ops.writes.filterIsInstance<WaSyncEnqueueRequest>().map { it.chat to it.action }
+        kit.ops.writes
+            .filterIsInstance<WaSyncEnqueueRequest>()
+            .map { it.chat to it.action }
 
     private fun mine(
         id: String,
@@ -212,8 +214,16 @@ class WaMessageActionsTest {
 
             model.startEdit("m1")
             settle()
-            assertEquals("m1", model.state.value.editing?.key)
-            assertEquals("See you at 5", model.state.value.editing?.text)
+            assertEquals(
+                "m1",
+                model.state.value.editing
+                    ?.key,
+            )
+            assertEquals(
+                "See you at 5",
+                model.state.value.editing
+                    ?.text,
+            )
 
             model.send("See you at 6")
             settle()
@@ -371,7 +381,10 @@ class WaMessageActionsTest {
             assertEquals("hi @Lale ", text)
             assertEquals(text.length, caret)
             settle()
-            assertTrue(model.state.value.mentionOptions.isEmpty())
+            assertTrue(
+                model.state.value.mentionOptions
+                    .isEmpty(),
+            )
 
             model.onComposer("hi @Lale see you", 16)
             settle()
@@ -393,7 +406,13 @@ class WaMessageActionsTest {
 
             model.onComposer("@", 1)
             settle()
-            val (text, _) = model.pickMention("@", 1, model.state.value.mentionOptions.single())!!
+            val (text, _) =
+                model.pickMention(
+                    "@",
+                    1,
+                    model.state.value.mentionOptions
+                        .single(),
+                )!!
             assertEquals("@Anna ", text)
             model.onComposer("@An ", 3)
             settle()

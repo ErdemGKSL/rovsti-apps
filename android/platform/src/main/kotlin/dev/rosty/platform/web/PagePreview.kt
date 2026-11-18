@@ -131,7 +131,9 @@ class HttpPagePreviewFetcher(
     ): FetchedPage? =
         withContext(io) {
             fetch(url, maxBytes) { type -> type.startsWith("text/html") || type.startsWith("application/xhtml") }
-                ?.let { (finalUrl, type, bytes) -> FetchedPage(finalUrl, String(bytes, PagePreviewRules.charsetOf(type))) }
+                ?.let { (finalUrl, type, bytes) ->
+                    FetchedPage(finalUrl, String(bytes, PagePreviewRules.charsetOf(type)))
+                }
         }
 
     override suspend fun image(
@@ -209,7 +211,14 @@ object LinkThumbnails {
             }
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
         val (w, h) = MediaRules.preview(decoded.width, decoded.height, LONGEST_SIDE)
-        val scaled = if (w == decoded.width && h == decoded.height) decoded else Bitmap.createScaledBitmap(decoded, w, h, true)
+        val scaled =
+            if (w == decoded.width &&
+                h == decoded.height
+            ) {
+                decoded
+            } else {
+                Bitmap.createScaledBitmap(decoded, w, h, true)
+            }
         return try {
             MediaRules.jpeg { quality ->
                 ByteArrayOutputStream()

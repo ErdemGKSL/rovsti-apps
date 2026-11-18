@@ -204,8 +204,11 @@ internal fun LinkChip(
             Modifier
                 .size(MediaMetrics.FileAction)
                 .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
-                .clickable(role = Role.Button, onClickLabel = stringResource(R.string.wa_link_remove), onClick = onRemove)
-                .testTag(ActionTags.LinkChipRemove),
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = stringResource(R.string.wa_link_remove),
+                    onClick = onRemove,
+                ).testTag(ActionTags.LinkChipRemove),
             contentAlignment = Alignment.Center,
         ) {
             RostyIcon(

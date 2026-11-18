@@ -231,7 +231,8 @@ fun waBubbleMenu(
     items += waMediaMenu(bubble, res, queued) { model.mediaAction(bubble.key, it) }
     // E6-WA R4: edit my sent message while WhatsApp allows it, forward it for real, see who read it.
     if (!queued && model.canEdit(bubble.key)) {
-        items += MenuItem.Action(res.getString(R.string.wa_thread_edit), RostyIcons.Pencil) { model.startEdit(bubble.key) }
+        items +=
+            MenuItem.Action(res.getString(R.string.wa_thread_edit), RostyIcons.Pencil) { model.startEdit(bubble.key) }
     }
     if (onForward != null && !queued && model.canForward(bubble.key)) {
         items += MenuItem.Action(res.getString(R.string.conversation_forward), RostyIcons.Forward) { onForward(bubble) }
@@ -413,7 +414,19 @@ fun WaThreadPage(
     val schedule = rememberWaScheduleHost(container, overlays, jid, composer)
     val marks = rememberMarkHost(container, overlays, tag, rememberDayLabels()) { model.state.value.title }
     val actions =
-        remember(model, res, onBack, host, state.title, attachMenu, navigator, marks, number, recordActions, model.timer) {
+        remember(
+            model,
+            res,
+            onBack,
+            host,
+            state.title,
+            attachMenu,
+            navigator,
+            marks,
+            number,
+            recordActions,
+            model.timer,
+        ) {
             ConversationActions(
                 onBack = onBack,
                 onMenuOpened = marks::menuOpened,
@@ -569,7 +582,8 @@ private fun openLink(
 ) {
     try {
         context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+            android.content
+                .Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     } catch (_: android.content.ActivityNotFoundException) {

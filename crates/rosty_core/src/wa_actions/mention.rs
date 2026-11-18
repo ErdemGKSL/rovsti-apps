@@ -11,7 +11,7 @@ use crate::wa_identity::{WaIdKind, parse};
 const MAX_QUERY_CHARS: usize = 40;
 
 /// The `@` the caret is in: where it is and what was typed after it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MentionQuery {
     /// UTF-16 offset of the `@`.
     pub start: usize,

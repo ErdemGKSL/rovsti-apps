@@ -35,12 +35,13 @@ use crate::ops::registry::{Case, OpSpec, PLACEHOLDER_HANDLE as H};
 use crate::state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_app_core::wa_sync::{
-    self, Action, AppliedEvents, ChatRekeyed, ChatRow, Conditions, Decision, Due, Eviction, Fetch,
-    FetchPage, Fetched, GalleryPage, HistoryCount, HistoryProgress, HistoryReport, HistorySnapshot,
-    IdentityApplied, IdentityCaughtUp, IdentitySnapshot, Kind, MediaDue, MediaEntry, MediaQueued,
-    MediaSettled, MediaState, MediaStats, MessageRow, Network, Observed, Opened, OutboxItem,
-    Outcome, Played, Reconciled, ResolvedId, Settled, StarredCursor, StarredPage, StatusNote,
-    StatusNoted, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor, ThreadPage, Viewed, Wiped,
+    self, Action, AppliedEvents, ChatRekeyed, ChatRow, Conditions, Decision, Due, Eviction,
+    Expired, Fetch, FetchPage, Fetched, GalleryPage, HistoryCount, HistoryProgress, HistoryReport,
+    HistorySnapshot, IdentityApplied, IdentityCaughtUp, IdentitySnapshot, Kind, MediaDue,
+    MediaEntry, MediaQueued, MediaSettled, MediaState, MediaStats, MessageRow, Network, Observed,
+    Opened, OutboxItem, Outcome, Played, Reconciled, ResolvedId, Settled, StarredCursor,
+    StarredPage, StatusNote, StatusNoted, Store, StoredChats, StoredPage, SyncPlan, ThreadCursor,
+    ThreadPage, Viewed, Wiped,
 };
 use rosty_wa_proto::{
     EventEnvelope, GroupInfo, IdentityMappings, InstanceStatus, RichChat, RichMessage, WaProfile,
@@ -254,6 +255,13 @@ pub(super) const OPS: &[OpSpec] = &[
         WithHandle<Viewed>,
         media_viewed,
         media_viewed_cases
+    ),
+    op!(
+        "wa_sync.expire",
+        ExpireReq,
+        WithHandle<Expired>,
+        expire,
+        expire_cases
     ),
     op!(
         "wa_sync.mark_played",
@@ -1395,6 +1403,28 @@ fn outbox_enqueue_cases() -> Vec<Case> {
             "star",
             json!({"kind": "star", "message_id": "A1", "starred": true}),
         ),
+        // E6-WA R4: a text with mentions and a link card; a forward to another chat (the store fills the
+        // snapshot); a delete for me (hidden at once).
+        queue(
+            "mentions_preview",
+            json!({"kind": "send_text", "text": "@100000000002 https://example.com",
+                "mentions": ["100000000002@s.whatsapp.net"],
+                "link_preview": {"url": "https://example.com", "title": "Example", "thumbnail_b64": "/9j/4A=="}}),
+        ),
+        on_sample(Case::named(
+            "forward",
+            json!({"handle": H, "now_ms": NOW, "client_id": "f1", "chat": GROUP,
+                "action": {"kind": "forward", "source_chat": ALI, "message_id": "A1"}}),
+        )),
+        on_sample(Case::named(
+            "forward_deleted",
+            json!({"handle": H, "now_ms": NOW, "client_id": "f2", "chat": GROUP,
+                "action": {"kind": "forward", "source_chat": ALI, "message_id": "A3"}}),
+        )),
+        queue(
+            "delete_for_me",
+            json!({"kind": "delete_for_me", "message_id": "A1"}),
+        ),
         on_sample(Case::named(
             "no_chat",
             json!({"handle": H, "now_ms": NOW, "client_id": "c9", "chat": "", "action": {"kind": "send_text", "text": "x"}}),
@@ -2178,6 +2208,43 @@ fn media_viewed(req: MediaViewedReq) -> Result<WithHandle<Viewed>, FfiError> {
         store.media_viewed(&req.chat, &req.id, req.now_ms)
     })
     .map(|out| handled(req.handle, out))
+}
+
+// ---- wa_sync.expire
+
+#[derive(Deserialize)]
+struct ExpireReq {
+    handle: i64,
+    now_ms: i64,
+}
+
+fn expire(req: ExpireReq) -> Result<WithHandle<Expired>, FfiError> {
+    with(req.handle, |store| store.expire(req.now_ms)).map(|out| handled(req.handle, out))
+}
+
+/// A disappearing message (one minute) of Ali, sent two minutes ago, and one sent just now.
+fn timed_events() -> Value {
+    let timed = |seq, id: &str, ts: i64| {
+        [
+            event(seq, text_msg(ALI, id, ts, false, "kaybolacak"), "message"),
+            event(
+                seq + 1,
+                json!({"chat": ALI, "id": id, "meta": {"expires_s": 60}}),
+                "message_meta",
+            ),
+        ]
+    };
+    let mut events: Vec<Value> = timed(20, "T1", NOW - 120_000).into();
+    events.extend(timed(22, "T2", NOW - 1_000));
+    json!({"handle": H, "events": events})
+}
+
+fn expire_cases() -> Vec<Case> {
+    vec![
+        on_store(Case::new(json!({"handle": H, "now_ms": NOW})))
+            .after("wa_sync.apply_events", timed_events()),
+        on_store(Case::named("nothing", json!({"handle": H, "now_ms": NOW}))),
+    ]
 }
 
 fn media_viewed_cases() -> Vec<Case> {

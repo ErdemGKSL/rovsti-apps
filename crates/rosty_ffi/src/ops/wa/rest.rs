@@ -9,7 +9,7 @@ use rosty_wa_client::Picture;
 use rosty_wa_proto::{
     CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, CreateInstance, CreatedInstance,
     DeleteForMe, EditMessage, GroupInfo, IdentityMappings, InstanceStatus, IssuedKey, KeyInfo,
-    LinkRequest, MarkRead, MediaKind, MediaOptions, PushRegistration, RevokeMessage, RichChat,
+    LinkRequest, MarkRead, MediaKind, MediaOptions, PushKeyedRegistration, RevokeMessage, RichChat,
     RichMessage, ScheduleText, ScheduledText, SendReaction, SendText, Sent, StarMessage,
     StatusList, WaMessage, WaProfile, WaUser,
 };
@@ -68,10 +68,24 @@ pub(super) const OPS: &[OpSpec] = &[
     ]),
     wa_op!(
         "wa.register_push",
-        Call<PushRegistration>,
+        Call<PushKeyedRegistration>,
         Empty,
         register_push,
-        || vec![case(json!({"app": "phone", "token": "fcm-token-1"}))]
+        || vec![
+            case(json!({"app": "phone", "token": "fcm-token-1"})),
+            named(
+                "keyed",
+                json!({
+                    "app": "messages",
+                    "token": "fcm-token-2",
+                    "push_key": {
+                        "key_id": "k1",
+                        "version": 1,
+                        "public_key": "TEST-ONLY-NOT-A-KEY"
+                    }
+                })
+            ),
+        ]
     ),
     wa_op!("wa.chats", Call<Nothing>, Vec<ChatSummary>, chats, || vec![
         case(json!({}))
@@ -619,7 +633,7 @@ gateway_fn!(delete_instance, Nothing => Empty, |g, _b| done(g.delete_instance())
 gateway_fn!(mint_key, Label => IssuedKey, |g, b| g.mint_key(&b.label));
 gateway_fn!(keys, Nothing => Vec<KeyInfo>, |g, _b| g.keys());
 gateway_fn!(revoke_key, KeyRef => Empty, |g, b| done(g.revoke_key(&b.key_id)));
-gateway_fn!(register_push, PushRegistration => Empty, |g, b| done(g.register_push(&b)));
+gateway_fn!(register_push, PushKeyedRegistration => Empty, |g, b| done(g.register_push_keyed(&b)));
 gateway_fn!(chats, Nothing => Vec<ChatSummary>, |g, _b| g.chats());
 gateway_fn!(chats_with_meta, Nothing => Vec<RichChat>, |g, _b| g.chats_with_meta());
 gateway_fn!(messages, Page => Vec<WaMessage>, |g, b| g.messages(&b.chat, b.before_ms, b.limit));

@@ -602,14 +602,39 @@ async fn instance_cap_and_delete() {
 async fn push_registration_and_healthz() {
     let server = start(4).await;
     let (gateway, _) = create(&server).await;
+    let g = gateway.clone();
     blocking(move || {
-        gateway.register_push(&rosty_wa_proto::PushRegistration {
+        g.register_push(&rosty_wa_proto::PushRegistration {
             app: AppId::Phone,
             token: "fcm-token".into(),
         })
     })
     .await
     .unwrap();
+
+    // Round 7b: a push key rides on the same request; a bad one is refused.
+    // A test-only P-256 public key, made for the app's fixture.
+    const TEST_SPKI: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/aS1gz5BOKDYva15xzLa5cvfAeV3UiSlANGUJtjIlvKuzc3lYuIo/Jf8UI8O+rX8PAhEPm70e2tn98fKNjiKmg==";
+    let keyed = |public_key: &str| rosty_wa_proto::PushKeyedRegistration {
+        app: AppId::Messages,
+        token: "fcm-token-2".into(),
+        push_key: Some(rosty_wa_proto::PushKey {
+            key_id: "k1".into(),
+            version: rosty_wa_proto::PUSH_KEY_VERSION,
+            public_key: public_key.into(),
+        }),
+    };
+    let g = gateway.clone();
+    let good = keyed(TEST_SPKI);
+    blocking(move || g.register_push_keyed(&good))
+        .await
+        .unwrap();
+    let g = gateway.clone();
+    let bad = keyed("AAAA");
+    assert!(matches!(
+        blocking(move || g.register_push_keyed(&bad)).await,
+        Err(ClientError::Api(_))
+    ));
 
     let authority = server.url.as_str().replace("http://", "");
     let mut stream = tokio::net::TcpStream::connect(&authority).await.unwrap();

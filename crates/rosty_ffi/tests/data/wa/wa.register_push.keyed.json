@@ -1,0 +1,16 @@
+{
+ "expect": {
+  "method": "PUT",
+  "path": "/v1/push",
+  "body": {
+   "app": "messages",
+   "token": "fcm-token-2",
+   "push_key": {
+    "key_id": "k1",
+    "version": 1,
+    "public_key": "TEST-ONLY-NOT-A-KEY"
+   }
+  }
+ },
+ "status": 204
+}

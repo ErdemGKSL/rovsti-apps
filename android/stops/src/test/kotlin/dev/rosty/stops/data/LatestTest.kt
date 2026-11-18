@@ -25,13 +25,19 @@ class LatestTest {
             val shown = mutableListOf<String>()
             val oldGate = CompletableDeferred<Unit>()
             val oldDone = CompletableDeferred<Unit>()
+            val oldStarted = CompletableDeferred<Unit>()
             val newDone = CompletableDeferred<Unit>()
             latest.launch {
                 // Like a core call already running: cancelling the job does not stop it.
-                withContext(NonCancellable) { oldGate.await() }
+                withContext(NonCancellable) {
+                    oldStarted.complete(Unit)
+                    oldGate.await()
+                }
                 publish { shown += "old" }
                 oldDone.complete(Unit)
             }
+            // The old work must be running before it is superseded; a job cancelled before it starts never runs.
+            withTimeout(TIMEOUT) { oldStarted.await() }
             latest.launch {
                 publish { shown += "new" }
                 newDone.complete(Unit)

@@ -832,3 +832,12 @@ fn the_still_frames_carry_no_lens_and_no_glint() {
     assert_eq!(last.motion, motion::Motion::rest());
     assert!(last.motion.lens.is_none() && last.motion.glint_x.is_none());
 }
+
+/// r19-s6: the secondary line ("36 yaşına giriyorsun") reads at WCAG AA on every palette, on every colour behind it.
+#[test]
+fn every_palette_secondary_ink_reads_at_4_5() {
+    for palette in Palette::ALL {
+        let ratio = palette.worst_secondary_contrast();
+        assert!(ratio >= 4.5, "{palette:?}: secondary ink is {ratio:.2}:1");
+    }
+}

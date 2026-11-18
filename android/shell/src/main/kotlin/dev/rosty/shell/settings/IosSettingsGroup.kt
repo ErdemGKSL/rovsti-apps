@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -48,6 +49,7 @@ import dev.rosty.design.ios.foundation.LocalIosTextStyle
 import dev.rosty.design.ios.foundation.iosRowPress
 import dev.rosty.design.list.StackingTrailingRow
 import dev.rosty.design.shapes.ContinuousRoundedRectangle
+import dev.rosty.design.theme.readableOn
 
 /**
  * An iOS inset-grouped settings section: a sentence-case header over one rounded card
@@ -193,6 +195,12 @@ private fun IosSettingsIconTile(
     item: IosSettingsItem,
 ) {
     val colors = IosTheme.colors
+    val tile =
+        when {
+            !item.enabled -> colors.systemGray3
+            item.isHighlighted -> IosTheme.tint
+            else -> IosTheme.tint.copy(alpha = 0.9f)
+        }
 
     Box(contentAlignment = Alignment.TopEnd) {
         if (item.tintIcon) {
@@ -201,20 +209,14 @@ private fun IosSettingsIconTile(
                     Modifier
                         .size(IosMetrics.IconTileSize)
                         .clip(item.iconShape ?: ContinuousRoundedRectangle(IosMetrics.IconTileRadius))
-                        .background(
-                            when {
-                                !item.enabled -> colors.systemGray3
-                                item.isHighlighted -> IosTheme.tint
-                                else -> IosTheme.tint.copy(alpha = 0.9f)
-                            },
-                        ),
+                        .background(tile),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
                     painter = icon,
                     contentDescription = null,
                     modifier = Modifier.size(SettingsMetrics.S18),
-                    colorFilter = ColorFilter.tint(Color.White),
+                    colorFilter = ColorFilter.tint(settingsGlyphColor(tile, colors.secondarySystemGroupedBackground)),
                 )
             }
         } else {
@@ -253,3 +255,9 @@ data class IosSettingsItem(
 ) {
     internal val hasLeading: Boolean get() = icon != null || leadingContent != null
 }
+
+/** The glyph colour on an icon tile: white while it keeps 3:1 (a glyph, not text) on the tile over its row, else ink. */
+internal fun settingsGlyphColor(
+    tile: Color,
+    row: Color,
+): Color = readableOn(tile.compositeOver(row), minRatio = 3.0)

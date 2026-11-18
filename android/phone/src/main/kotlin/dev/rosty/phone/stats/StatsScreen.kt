@@ -394,6 +394,8 @@ private fun BarCell(
     ) {
         Canvas(Modifier.weight(1f).fillMaxWidth().graphicsLayer { alpha = dim * press }) {
             val fill = grow.value
+            // The count appears as the bar grows (0 to 1 over the growth), never dimmed by a short bar's fraction.
+            val countAlpha = statsCountAlpha(fill, bar.fraction)
             val countHeight =
                 measurer
                     .measure(countText, countStyle)
@@ -416,7 +418,7 @@ private fun BarCell(
                 val measured =
                     measurer.measure(
                         countText,
-                        countStyle.copy(color = countColor.copy(alpha = fill.coerceIn(0f, 1f))),
+                        countStyle.copy(color = countColor.copy(alpha = countAlpha)),
                     )
                 drawText(
                     measured,
@@ -655,3 +657,12 @@ fun StatsPage(
     }
     StatsScreen(state, viewModel::onAction, onBack = onBack, onBackLongClick = onBackLongClick)
 }
+
+/**
+ * The opacity of a bar's count while the bar grows: 0 to 1 over the growth, so a short bar (fraction 0.2) still
+ * ends with a fully opaque, readable count instead of one dimmed to 20 %.
+ */
+internal fun statsCountAlpha(
+    fill: Float,
+    fraction: Float,
+): Float = if (fraction > 0f) (fill / fraction).coerceIn(0f, 1f) else 1f

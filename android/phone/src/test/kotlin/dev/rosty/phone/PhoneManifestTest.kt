@@ -115,7 +115,9 @@ class PhoneManifestTest {
         assertEquals("signature", manifest.declaredPermissions[permission])
         assertTrue("this app asks its siblings too", permission in manifest.usesPermissions)
         assertTrue(
-            manifest.queriedProviders.containsAll(setOf("dev.rosty.messages.walink", "dev.rosty.contacts.walink")),
+            manifest.queriedProviders.containsAll(
+                setOf("dev.rosty.messages.walink", "dev.rosty.contacts.walink", "dev.rosty.stops.walink"),
+            ),
         )
     }
 

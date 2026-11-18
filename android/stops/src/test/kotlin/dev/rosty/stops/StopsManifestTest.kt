@@ -120,6 +120,24 @@ class StopsManifestTest {
         assertEquals(setOf("android.intent.action.BOOT_COMPLETED"), boot.filters.single().actions)
     }
 
+    /** Round 7a: the link hand-over. Exported, but unreachable without the signature permission, in both directions. */
+    @Test fun theWhatsAppLinkProviderIsExportedBehindTheSignaturePermission() {
+        val permission = "dev.rosty.permission.WA_LINK"
+        val provider = manifest.component("dev.rosty.wa.share.WaLinkProvider")
+        assertEquals("provider", provider.kind)
+        assertEquals(true, provider.exported)
+        assertEquals("dev.rosty.stops.walink", provider.attributes["authorities"])
+        assertEquals(permission, provider.attributes["readPermission"])
+        assertEquals(permission, provider.attributes["writePermission"])
+        assertEquals("signature", manifest.declaredPermissions[permission])
+        assertTrue("this app asks its siblings too", permission in manifest.usesPermissions)
+        assertTrue(
+            manifest.queriedProviders.containsAll(
+                setOf("dev.rosty.messages.walink", "dev.rosty.phone.walink", "dev.rosty.contacts.walink"),
+            ),
+        )
+    }
+
     @Test fun theShareProviderKeepsItsBridgeName() {
         val provider = manifest.component("dev.rosty.bridge.RostyShareProvider")
         assertEquals("provider", provider.kind)
@@ -151,6 +169,8 @@ class StopsManifestTest {
                 "dev.rosty.bridge.RostyShareProvider",
                 // E7.10 (S10): the offline download notification's Cancel.
                 "dev.rosty.stops.offline.OfflineCancelReceiver",
+                // Round 7a: the WhatsApp link hand-over (the one unlock prompt of the four apps).
+                "dev.rosty.wa.share.WaLinkProvider",
             ),
             ours,
         )

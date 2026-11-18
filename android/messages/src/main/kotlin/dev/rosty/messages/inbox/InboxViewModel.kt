@@ -539,7 +539,7 @@ class InboxViewModel(
         val until = duration.ms?.let { sources.now() + it }
         for (row in rows) {
             row.waChat?.let { sources.wa.act(it, ChatActionKind.Mute(until)) }
-            for (tag in row.threads.map(InboxBuilder::tagOf)) editPrefs("mute", tag, until)
+            for (tag in smsTags(row)) editPrefs("mute", tag, until)
         }
         val text = UiText.Res(R.string.inbox_muted)
         if (undoable) {
@@ -555,13 +555,21 @@ class InboxViewModel(
     ) {
         for (row in rows) {
             row.waChat?.let { sources.wa.act(it, ChatActionKind.Unmute) }
-            for (tag in row.threads.map(InboxBuilder::tagOf)) editPrefs("unmute", tag, null)
+            for (tag in smsTags(row)) editPrefs("unmute", tag, null)
         }
         val text = UiText.Res(R.string.inbox_unmuted)
         if (undoable) {
             effectChannel.trySend(InboxEffect.Undo(text) { launch { mute(rows, MuteFor.Always, undoable = false) } })
         }
     }
+
+    /**
+     * The tags whose mute this app keeps (`messages-prefs.json`): SMS threads only. A WhatsApp mute lives in WhatsApp
+     * (the chat's `muted_until`, which the row and the notifications follow); no WhatsApp tag is written to a plaintext
+     * file (`plans/wa-vault.md` 13.1, round 6).
+     */
+    private fun smsTags(row: InboxRowUi): List<String> =
+        row.threads.filterIsInstance<ThreadId.Sms>().map(InboxBuilder::tagOf)
 
     private suspend fun editPrefs(
         edit: String,

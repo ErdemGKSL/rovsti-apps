@@ -8,7 +8,6 @@ import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
-import dev.rosty.core.model.wa.VaultHandle
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLink
@@ -21,6 +20,9 @@ import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultStayUnlockRequest
+import dev.rosty.core.model.wa.VaultTouchRequest
+import dev.rosty.core.model.wa.VaultTouched
 import dev.rosty.core.model.wa.VaultTripLink
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultUnlocked
@@ -35,7 +37,7 @@ object VaultContracts : ContractModels {
         buildMap {
             op<VaultStateRequest, VaultState>(
                 "vault.state",
-                ok = listOf("empty", "legacy", "rebooted", "daily_ok"),
+                ok = listOf("empty", "legacy", "rebooted", "within_90_days", "expired", "clock_back"),
             )
             op<VaultCreateRequest, VaultKeys>(
                 "vault.create",
@@ -49,15 +51,24 @@ object VaultContracts : ContractModels {
             )
             op<VaultDailyUnlockRequest, VaultUnlocked>(
                 "vault.unlock_daily",
-                ok = listOf("idle_reset"),
-                err = listOf("rebooted", "idle", "expired", "damaged", "no_daily"),
+                ok = listOf("rebooted", "use_reset"),
+                err = listOf("idle", "clock_back", "damaged", "no_daily"),
             )
-            op<VaultLinkUnlockRequest, VaultHandle>(
+            op<VaultStayUnlockRequest, VaultUnlocked>(
+                "vault.unlock_stay",
+                ok = listOf("use_reset"),
+                err = listOf("idle", "clock_back", "damaged", "no_stay"),
+            )
+            op<VaultLinkUnlockRequest, VaultUnlocked>(
                 "vault.unlock_link",
                 err = listOf("other_key", "other_instance", "no_vault"),
             )
             op<VaultDailyStoreRequest, VaultState>("vault.daily_store", err = listOf("gone"))
             op<VaultDirRequest, VaultState>("vault.daily_forget")
+            op<VaultDailyStoreRequest, VaultState>("vault.stay_store", err = listOf("nothing", "gone"))
+            op<VaultDirRequest, VaultState>("vault.stay_forget")
+            op<VaultTouchRequest, VaultUnlocked>("vault.stay_prepare", err = listOf("locked"))
+            op<VaultTouchRequest, VaultTouched>("vault.touch", ok = listOf("hour"), err = listOf("idle", "locked"))
             op<VaultLockRequest, VaultState>("vault.lock", ok = listOf("handle", "nothing_open"))
             op<VaultHandleRequest, VaultKeys>("vault.change", err = listOf("locked"))
             op<VaultHandleRequest, VaultLink>("vault.export_link", err = listOf("locked", "not_committed"))

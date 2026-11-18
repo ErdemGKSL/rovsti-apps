@@ -11,7 +11,6 @@ import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
-import dev.rosty.core.model.wa.VaultHandle
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLink
@@ -24,6 +23,9 @@ import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultStayUnlockRequest
+import dev.rosty.core.model.wa.VaultTouchRequest
+import dev.rosty.core.model.wa.VaultTouched
 import dev.rosty.core.model.wa.VaultTripLink
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultUnlocked
@@ -39,9 +41,13 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * - setup and migration: [create] -> seal [VaultKeys.seal] with a new K_hw key -> [commit] -> [wipePlaintext];
  * - passphrase unlock: [state] -> decrypt [dev.rosty.core.model.wa.VaultInfo.hwSealed] with K_hw -> [unlock] ->
- *   seal [VaultUnlocked.dailySeal] with K_daily -> [dailyStore];
- * - daily unlock: decrypt [dev.rosty.core.model.wa.VaultDailyInfo.sealed] with K_daily -> [unlockDaily];
- * - hand-over unlock (round 7a): a sibling's [exportLink] -> [unlockLink], no prompt;
+ *   seal [VaultUnlocked.dailySeal] with K_daily -> [dailyStore], and [VaultUnlocked.staySeal] with K_stay ->
+ *   [stayStore];
+ * - biometric unlock: decrypt [dev.rosty.core.model.wa.VaultDailyInfo.sealed] with K_daily -> [unlockDaily] -> the
+ *   stay seal as above;
+ * - silent unlock (round 7c): decrypt [dev.rosty.core.model.wa.VaultStayInfo.sealed] with K_stay (no prompt) ->
+ *   [unlockStay]; while open, [touch] keeps the 90-day use clock moving;
+ * - hand-over unlock (round 7a): a sibling's [exportLink] -> [unlockLink], no prompt, then the stay seal as above;
  * - [change] -> seal under a new K_hw alias -> [commit] -> delete the old alias; [reset] -> delete both aliases.
  */
 interface VaultOps {
@@ -57,21 +63,42 @@ interface VaultOps {
     /** Passphrase unlock. */
     suspend fun unlock(req: VaultUnlockRequest): Outcome<VaultUnlocked>
 
-    /** Biometric unlock with the K_daily-decrypted daily blob. */
+    /** Biometric unlock with the K_daily-decrypted daily blob; `expired` after 90 days without a use. */
     suspend fun unlockDaily(req: VaultDailyUnlockRequest): Outcome<VaultUnlocked>
+
+    /** Silent unlock with the K_stay-decrypted stay blob (round 7c); `expired` after 90 days without a use. */
+    suspend fun unlockStay(req: VaultStayUnlockRequest): Outcome<VaultUnlocked>
 
     /**
      * Opens this app's own vault with the link a sibling Rosty app handed over from its unlocked vault (round 7a, the
      * one prompt for the four apps): `no_link_wrap` until the vault was unlocked once in this build, `other_link` for
      * a link that is not this vault's.
      */
-    suspend fun unlockLink(req: VaultLinkUnlockRequest): Outcome<VaultHandle>
+    suspend fun unlockLink(req: VaultLinkUnlockRequest): Outcome<VaultUnlocked>
 
     /** Stores the K_daily-sealed daily blob. */
     suspend fun dailyStore(req: VaultDailyStoreRequest): Outcome<VaultState>
 
-    /** Ends the daily unlock (reboot, biometric change, five failures). */
+    /** Ends the biometric unlock (biometric change, five failures). */
     suspend fun dailyForget(req: VaultDirRequest = VaultDirRequest()): Outcome<VaultState>
+
+    /** Stores the K_stay-sealed stay blob (round 7c). */
+    suspend fun stayStore(req: VaultDailyStoreRequest): Outcome<VaultState>
+
+    /** Ends the silent unlock ("Lock now", a dead K_stay). */
+    suspend fun stayForget(req: VaultDirRequest = VaultDirRequest()): Outcome<VaultState>
+
+    /**
+     * A fresh stay blob for the open vault (round 7c), for [stayStore]: after a passphrase change, whose commit dropped
+     * the wrap of the old data key. `locked` without an open vault.
+     */
+    suspend fun stayPrepare(req: VaultTouchRequest): Outcome<VaultUnlocked>
+
+    /**
+     * The open vault is in use (round 7c): the use clock moves on, written at most once an hour. `expired` after 90
+     * days without a use (every wrap is gone then: lock), `locked` without an open vault.
+     */
+    suspend fun touch(req: VaultTouchRequest): Outcome<VaultTouched>
 
     /** Ends the session: the keys are zeroized and the gateways opened from it released. */
     suspend fun lock(req: VaultLockRequest = VaultLockRequest()): Outcome<VaultState>
@@ -118,8 +145,13 @@ interface VaultOps {
                 "vault.unlock",
                 "vault.unlock_daily",
                 "vault.unlock_link",
+                "vault.unlock_stay",
                 "vault.daily_store",
                 "vault.daily_forget",
+                "vault.stay_store",
+                "vault.stay_forget",
+                "vault.stay_prepare",
+                "vault.touch",
                 "vault.lock",
                 "vault.change",
                 "vault.export_link",
@@ -135,9 +167,9 @@ interface VaultOps {
 
 /**
  * The stable code of a vault failure (`detail.code`): `typo`, `length`, `character`, `wrong_passphrase`, `damaged`,
- * `no_vault`, `no_daily`, `no_link`, `locked`, `daily_expired` (with `detail.reason`), `vault_exists`,
- * `nothing_to_commit`, `nothing_to_store`, `not_committed`, `bad_url`, `bad_key`, `no_link_wrap`, `other_link`; also `vault_unlocked` and
- * `other_gateway` from `wa.open`. Null when Rust sent none.
+ * `no_vault`, `no_daily`, `no_stay`, `no_link`, `locked`, `expired` (with `detail.reason`, round 7c), `vault_exists`,
+ * `nothing_to_commit`, `nothing_to_store`, `not_committed`, `bad_url`, `bad_key`, `no_link_wrap`, `other_link`; also
+ * `vault_unlocked` and `other_gateway` from `wa.open`. Null when Rust sent none.
  */
 val RustError.vaultCode: String?
     get() = ((detail as? JsonObject)?.get("code") as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -162,7 +194,22 @@ class NativeVaultOps(
         core.call("vault.unlock_daily", req, VaultDailyUnlockRequest.serializer(), VaultUnlocked.serializer())
 
     override suspend fun unlockLink(req: VaultLinkUnlockRequest) =
-        core.call("vault.unlock_link", req, VaultLinkUnlockRequest.serializer(), VaultHandle.serializer())
+        core.call("vault.unlock_link", req, VaultLinkUnlockRequest.serializer(), VaultUnlocked.serializer())
+
+    override suspend fun unlockStay(req: VaultStayUnlockRequest) =
+        core.call("vault.unlock_stay", req, VaultStayUnlockRequest.serializer(), VaultUnlocked.serializer())
+
+    override suspend fun stayStore(req: VaultDailyStoreRequest) =
+        core.call("vault.stay_store", req, VaultDailyStoreRequest.serializer(), VaultState.serializer())
+
+    override suspend fun stayForget(req: VaultDirRequest) =
+        core.call("vault.stay_forget", req, VaultDirRequest.serializer(), VaultState.serializer())
+
+    override suspend fun stayPrepare(req: VaultTouchRequest) =
+        core.call("vault.stay_prepare", req, VaultTouchRequest.serializer(), VaultUnlocked.serializer())
+
+    override suspend fun touch(req: VaultTouchRequest) =
+        core.call("vault.touch", req, VaultTouchRequest.serializer(), VaultTouched.serializer())
 
     override suspend fun dailyStore(req: VaultDailyStoreRequest) =
         core.call("vault.daily_store", req, VaultDailyStoreRequest.serializer(), VaultState.serializer())

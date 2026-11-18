@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -14,12 +15,18 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -41,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -57,6 +65,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -67,15 +76,19 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import coil3.toBitmap
 import dev.rosty.design.R
 import dev.rosty.design.chrome.FrostedTopBar
 import dev.rosty.design.chrome.ToolbarButton
 import dev.rosty.design.chrome.ToolbarCapsule
+import dev.rosty.design.chrome.TopBarContentHeight
 import dev.rosty.design.chrome.rememberGlassScreenChrome
+import dev.rosty.design.chrome.topBarHeight
 import dev.rosty.design.glass.LocalAppBackdrop
 import dev.rosty.design.glass.TopFadeBlur
 import dev.rosty.design.ios.foundation.LocalIosBackdrop
@@ -90,8 +103,10 @@ import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.transition.Motion
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -198,6 +213,9 @@ object PhotoViewerSemantics {
     val ChromeShown = SemanticsPropertyKey<Boolean>("PhotoViewerChromeShown")
     val Page = SemanticsPropertyKey<Int>("PhotoViewerPage")
     val Settled = SemanticsPropertyKey<Boolean>("PhotoViewerSettled")
+
+    /** The alpha of the black shade at the top edge, 0.35 to 0.6. */
+    val Shade = SemanticsPropertyKey<Float>("PhotoViewerShade")
 }
 
 private var SemanticsPropertyReceiver.viewerZoom by PhotoViewerSemantics.Zoom
@@ -205,6 +223,20 @@ private var SemanticsPropertyReceiver.viewerDim by PhotoViewerSemantics.Dim
 private var SemanticsPropertyReceiver.viewerChrome by PhotoViewerSemantics.ChromeShown
 private var SemanticsPropertyReceiver.viewerPage by PhotoViewerSemantics.Page
 private var SemanticsPropertyReceiver.viewerSettled by PhotoViewerSemantics.Settled
+private var SemanticsPropertyReceiver.viewerShade by PhotoViewerSemantics.Shade
+
+/** The height of the shade behind the bottom actions: the navigation bar, the toolbar and the room above it. */
+@Composable
+private fun bottomBandHeight(): Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 120.dp
+
+/** The 16 x 32 luminance grid of a decoded picture, or null when it cannot be drawn into a bitmap. */
+private fun lumaGridOf(image: coil3.Image): FloatArray? =
+    runCatching {
+        val small = image.toBitmap(ViewerScrim.COLS, ViewerScrim.ROWS)
+        val pixels = IntArray(ViewerScrim.COLS * ViewerScrim.ROWS)
+        small.getPixels(pixels, 0, ViewerScrim.COLS, 0, 0, ViewerScrim.COLS, ViewerScrim.ROWS)
+        ViewerScrim.lumaGrid(pixels)
+    }.getOrNull()
 
 /** Test tags of the viewer. */
 object PhotoViewerTags {
@@ -216,6 +248,10 @@ object PhotoViewerTags {
 
     /** The photo of the current page, at the rectangle it flies through (before the zoom of the finger). */
     const val Photo = "photo-viewer-photo"
+
+    /** The black shades behind the top bar and the bottom actions (their alpha is [PhotoViewerSemantics.Shade]). */
+    const val TopShade = "photo-viewer-top-shade"
+    const val BottomShade = "photo-viewer-bottom-shade"
 
     fun action(id: String) = "viewer-action-$id"
 }
@@ -312,6 +348,8 @@ class PhotoViewerEntry(
             label = "photo-viewer-chrome",
         )
         val chromeLive by remember { derivedStateOf { viewer.chromeOn || chromeAlpha > 0.01f } }
+        // The 16 x 32 luminance grids of the decoded pages, by page counted from the first one the viewer opened with.
+        val grids = remember { mutableStateMapOf<Int, FloatArray>() }
 
         // The photo is on show against black, in light and dark: the chrome is always the dark one.
         RostyTheme(darkTheme = true) {
@@ -383,6 +421,7 @@ class PhotoViewerEntry(
                                     anchorFor,
                                     appear = { appear },
                                     extras.pageOverlay,
+                                    onLuma = { page, grid -> grids[page - pages.prepended] = grid },
                                 )
                             }
                         }
@@ -393,11 +432,67 @@ class PhotoViewerEntry(
                     LocalIosBackdrop provides chrome.backdrop,
                 ) {
                     if (chromeLive) {
+                        val grid = grids[viewer.page - pages.prepended]
+                        val topBand = with(LocalDensity.current) { (topBarHeight() + ViewerScrim.RUN_DP.dp).toPx() }
+                        val bottomBand = with(LocalDensity.current) { (bottomBandHeight()).toPx() }
+                        val fitted = viewer.fitted(viewer.page)
+                        val photoTop = (viewer.viewport.height - fitted.height) / 2f
+                        val topLuma =
+                            grid?.let { g ->
+                                ViewerScrim.picturePart(0f, topBand, photoTop, fitted.height)?.let {
+                                    ViewerScrim.bandLuminance(g, it.first, it.second)
+                                }
+                            }
+                        val bottomLuma =
+                            grid?.let { g ->
+                                ViewerScrim
+                                    .picturePart(
+                                        viewer.viewport.height - bottomBand,
+                                        viewer.viewport.height,
+                                        photoTop,
+                                        fitted.height,
+                                    )?.let { ViewerScrim.bandLuminance(g, it.first, it.second) }
+                            }
+                        // A page change moves the shade over 200 ms; with reduced motion it snaps.
+                        val shadeSpec = if (reduce) snap<Float>() else tween(ChromeFadeMs)
+                        val topShade by animateFloatAsState(
+                            ViewerScrim.alphaFor(topLuma),
+                            shadeSpec,
+                            label = "viewer-top-shade",
+                        )
+                        val bottomShade by animateFloatAsState(
+                            ViewerScrim.alphaFor(bottomLuma),
+                            shadeSpec,
+                            label = "viewer-bottom-shade",
+                        )
                         Box(
                             Modifier.fillMaxSize().graphicsLayer {
                                 alpha = chromeAlpha * (1f - viewer.dimProgress) * appear.coerceIn(0f, 1f)
                             },
                         ) {
+                            val topShadeH = topBarHeight() + ViewerScrim.RUN_DP.dp
+                            // Full strength through the middle of the bar (the title), then eased out below it.
+                            val holdPx =
+                                with(LocalDensity.current) { (topBarHeight() - TopBarContentHeight / 2).toPx() }
+                            Box(
+                                Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .height(topShadeH)
+                                    .testTag(PhotoViewerTags.TopShade)
+                                    .semantics { viewerShade = topShade }
+                                    .drawBehind {
+                                        drawRect(ViewerScrim.topBrush(topShade, holdPx / size.height))
+                                    },
+                            )
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .height(bottomBandHeight())
+                                    .testTag(PhotoViewerTags.BottomShade)
+                                    .drawBehind { drawRect(ViewerScrim.bottomBrush(bottomShade)) },
+                            )
                             TopFadeBlur(
                                 hazeState = chrome.hazeState,
                                 pageColor = Color.Black,
@@ -408,6 +503,8 @@ class PhotoViewerEntry(
                                 backLabel = closeLabel,
                                 title = extras.titleFor?.invoke(viewer.page) ?: pageOf,
                                 titleAlpha = 1f,
+                                titleColor = ViewerChromeColors.Title,
+                                backUnderlay = ViewerChromeColors.BackDisc,
                                 modifier = Modifier.align(Alignment.TopCenter),
                             )
                             val shown = extras.actionsFor?.invoke(viewer.page) ?: actions
@@ -424,8 +521,23 @@ class PhotoViewerEntry(
                                 bottom?.invoke(this, viewer.page)
                                 if (shown.isNotEmpty()) {
                                     ToolbarCapsule(Modifier.testTag(PhotoViewerTags.Toolbar)) {
-                                        for (action in shown) {
-                                            ViewerActionButton(action, host.controller) { viewer.page }
+                                        // A dark capsule over the glass, so white glyphs read over a light photo.
+                                        Row(
+                                            Modifier.drawBehind {
+                                                val pad = 4.dp.toPx()
+                                                val h = 44.dp.toPx()
+                                                drawRoundRect(
+                                                    ViewerChromeColors.ActionsDisc,
+                                                    topLeft = Offset(-pad, (size.height - h) / 2f),
+                                                    size = Size(size.width + 2 * pad, h),
+                                                    cornerRadius = CornerRadius(h / 2f),
+                                                )
+                                            },
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        ) {
+                                            for (action in shown) {
+                                                ViewerActionButton(action, host.controller) { viewer.page }
+                                            }
                                         }
                                     }
                                 }
@@ -469,6 +581,7 @@ private fun ViewerPage(
     anchorFor: (Int) -> Rect?,
     appear: () -> Float,
     overlay: (@Composable BoxScope.(index: Int, current: Boolean) -> Unit)? = null,
+    onLuma: (index: Int, grid: FloatArray) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val loader = currentRostyImageLoader()
@@ -480,6 +593,7 @@ private fun ViewerPage(
         viewer.viewport.height
             .roundToInt()
             .coerceAtLeast(1)
+    val scope = rememberCoroutineScope()
     val upgrade = (model as? ViewerPhoto)?.upgrade
     val upgraded by produceState<Any?>(null, upgrade) { value = upgrade?.invoke() }
     val full = upgraded ?: (model as? ViewerPhoto)?.full ?: model
@@ -583,6 +697,11 @@ private fun ViewerPage(
                 onSuccess = { success ->
                     val size = success.painter.intrinsicSize
                     if (size.isSpecified && size.width > 0f && size.height > 0f) viewer.setNatural(index, size)
+                    // The chrome's shade follows the picture: its luminance is read once, off the main thread.
+                    scope.launch {
+                        val grid = withContext(Dispatchers.Default) { lumaGridOf(success.result.image) }
+                        if (grid != null) onLuma(index, grid)
+                    }
                 },
                 modifier = Modifier.fillMaxSize(),
             )

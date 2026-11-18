@@ -130,6 +130,7 @@ class WaThreadViewModelTest {
             WaThreadSources(
                 offline = kit.offline,
                 remote = kit.remote,
+                emoji = WaRecentEmoji(null, Dispatchers.Unconfined),
                 drafts = drafts,
                 names = PersonNames({ book.value[it] }, book, live),
                 divider = { incoming, unread -> incoming.size - unread },
@@ -559,6 +560,7 @@ class WaThreadViewModelTest {
                     WaThreadSources(
                         offline = kit.offline,
                         remote = kit.remote,
+                        emoji = WaRecentEmoji(null, Dispatchers.Unconfined),
                         drafts = drafts,
                         names = PersonNames({ null }, book),
                         searchJump = { request ->

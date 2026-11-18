@@ -3,9 +3,14 @@
 package dev.rosty.design.chrome
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -31,6 +36,8 @@ fun BackButton(
     modifier: Modifier = Modifier,
     label: String = stringResource(R.string.design_back),
     onLongClick: (() -> Unit)? = null,
+    // A dark disc drawn under the glass circle, for a bar over light photos; Unspecified draws none.
+    underlay: Color = Color.Unspecified,
 ) {
     val mirrored = LocalLayoutDirection.current == LayoutDirection.Rtl
     Box(modifier.graphicsLayer { scaleX = if (mirrored) -1f else 1f }) {
@@ -39,10 +46,26 @@ fun BackButton(
             onLongClick = onLongClick,
             size = Sizes.button,
             touchTarget = Sizes.touch,
+            // The dark glass of the viewer is drawn normally: additive chrome would add nothing for black.
+            applyAdditiveChrome = !underlay.isSpecified,
             debugTag = "button.icon",
             modifier = Modifier.semantics { contentDescription = label }.testTag("back-button"),
         ) {
-            RostyIcon(RostyIcons.Back, null, tint = LocalIosContentColor.current, size = BackIconSize)
+            // The dark disc is drawn over the glass (inside its content), under the chevron: behind it, a light photo
+            // seen through the glass would still make the circle light.
+            Box(
+                Modifier.size(Sizes.button).drawBehind {
+                    if (underlay.isSpecified) drawCircle(underlay, radius = size.minDimension / 2f)
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                RostyIcon(
+                    RostyIcons.Back,
+                    null,
+                    tint = if (underlay.isSpecified) Color.White else LocalIosContentColor.current,
+                    size = BackIconSize,
+                )
+            }
         }
     }
 }

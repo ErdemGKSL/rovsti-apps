@@ -70,6 +70,12 @@ class CleanupViewModel(
 
     private val filter = MutableStateFlow(CleanupId.NoNumber)
 
+    /**
+     * The filter the current picks were made under. The state combines the picks and the filter from two flows, so
+     * for a moment it can pair the new filter with the old picks; picks stamped with another filter are not shown.
+     */
+    @Volatile private var picksFilter = CleanupId.NoNumber
+
     /** The answer of the core for one book and one filter, with the rows already built. */
     private class Computed(
         val filter: CleanupId,
@@ -118,7 +124,10 @@ class CleanupViewModel(
                 filter = c.filter.name,
                 emptyText = c.emptyText,
                 rows = rows.toImmutableList(),
-                select = s.picked?.let { selectOf(it - s.hidden, rows) },
+                select =
+                    s.picked?.let { picked ->
+                        selectOf(if (c.filter == picksFilter) picked - s.hidden else emptySet(), rows)
+                    },
             )
         }.stateIn(scope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), CleanupUiState())
 
@@ -153,6 +162,7 @@ class CleanupViewModel(
             }
 
             is CleanupAction.EnterSelect -> {
+                picksFilter = filter.value
                 select.enter(action.first)
             }
 
@@ -161,10 +171,12 @@ class CleanupViewModel(
             }
 
             is CleanupAction.Toggle -> {
+                picksFilter = filter.value
                 select.toggle(action.id)
             }
 
             CleanupAction.ToggleAll -> {
+                picksFilter = filter.value
                 select.toggleAll(state.value.rows.map { it.id })
             }
 

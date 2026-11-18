@@ -113,6 +113,8 @@ fun FrostedTopBar(
     // deltas never recompose callers. Prefer this over [titleAlpha] for any scroll-driven title.
     titleAlphaProvider: (() -> Float)? = null,
     titleColor: Color = Color.Unspecified,
+    // A dark disc under the back button's glass (the photo viewer, over light photos); Unspecified draws none.
+    backUnderlay: Color = Color.Unspecified,
     // Optional content shown at the leading edge when no back button is present.
     leading: @Composable () -> Unit = {},
     leadingInset: Dp = Spacing.gutter,
@@ -208,6 +210,7 @@ fun FrostedTopBar(
                     onClick = onBack,
                     onLongClick = onBackLongClick,
                     label = backLabel,
+                    underlay = backUnderlay,
                     modifier =
                         Modifier
                             .align(Alignment.CenterStart)

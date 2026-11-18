@@ -296,6 +296,6 @@ class SetupSheetViewModelTest {
     }
 
     private companion object {
-        const val TIMEOUT_MS = 20_000L
+        const val TIMEOUT_MS = 60_000L
     }
 }

@@ -37,6 +37,8 @@ class HandoffPermissionsTest {
                     // WA-R2: the WhatsApp link shared between Rosty apps, and "Message" handed to Rosty Messages.
                     "uses-permission dev.rosty.permission.WA_LINK",
                     "uses-permission dev.rosty.permission.HANDOFF",
+                    // WA vault round 5: androidx.biometric's prompt (plans/wa-vault.md 13.3).
+                    "uses-permission android.permission.USE_BIOMETRIC",
                 ),
             // E6.1: :design's haptics, Contacts' people provider (X.1) and WorkManager (the WhatsApp outbox, E6.4s).
             "messages" to
@@ -63,9 +65,16 @@ class HandoffPermissionsTest {
                     "uses-permission android.permission.WAKE_LOCK",
                     // WA-R2: the WhatsApp link shared between Rosty apps.
                     "uses-permission dev.rosty.permission.WA_LINK",
+                    // WA vault round 5: androidx.biometric's prompt (plans/wa-vault.md 13.3).
+                    "uses-permission android.permission.USE_BIOMETRIC",
                 ),
             // E7.10 (S10): the offline map area download runs as a dataSync foreground worker.
-            "stops" to listOf("uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC"),
+            // WA vault round 5: androidx.biometric's prompt (plans/wa-vault.md 13.3).
+            "stops" to
+                listOf(
+                    "uses-permission android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                    "uses-permission android.permission.USE_BIOMETRIC",
+                ),
         )
 
     private fun fromManifest(app: String): List<String> {

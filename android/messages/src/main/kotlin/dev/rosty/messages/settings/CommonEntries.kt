@@ -25,6 +25,7 @@ import dev.rosty.design.ios.component.IosText
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
 import dev.rosty.messages.wa.UnlinkingWaRepository
+import dev.rosty.messages.wa.VaultSettingsRepository
 import dev.rosty.messages.wa.rememberWaSettingsBlocks
 import dev.rosty.shell.settings.AboutPage
 import dev.rosty.shell.settings.AppearancePage
@@ -44,10 +45,29 @@ import dev.rosty.shell.settings.rememberLicenceData
 import dev.rosty.wa.WaLinkStore
 import dev.rosty.wa.settings.WhatsAppSettingsRoute
 import dev.rosty.wa.settings.WhatsAppSettingsViewModel
+import dev.rosty.wa.vault.SetupFlow
+import dev.rosty.wa.vault.WaVaultGate
 
-/** The WhatsApp settings of the shared connect key, on a view model that lives as long as the activity. */
+/**
+ * The WhatsApp settings of the shared connect key, on a view model that lives as long as the activity, behind the
+ * vault (`plans/wa-vault.md`): the link flow while nothing is linked, then the setup; the unlock page while locked;
+ * "Change passphrase" in place of the page while it runs.
+ */
 @Composable
 fun WhatsAppSettingsEntry(container: MessagesContainer) {
+    val state by container.waVault.state.collectAsState()
+    val flow = container.vaultFlow
+    WaVaultGate(state, flow, stringResource(R.string.tab_whatsapp)) {
+        if (flow.changing) {
+            SetupFlow(flow, change = true)
+        } else {
+            WhatsAppSettingsBody(container)
+        }
+    }
+}
+
+@Composable
+private fun WhatsAppSettingsBody(container: MessagesContainer) {
     val context = LocalContext.current
     val owner = remember(context) { context.findComponentActivity() }
     val viewModel =
@@ -60,8 +80,13 @@ fun WhatsAppSettingsEntry(container: MessagesContainer) {
                             machine = NativeWaSettingsOps(container.rust),
                             ops = container.waOps,
                             store = WaLinkStore(container.waOps),
-                            // Unlink also deletes the offline store, its media and what is kept per chat.
-                            repo = UnlinkingWaRepository(container.wa) { container.waOffline },
+                            // Unlink also deletes the offline store, its media and what is kept per chat; with a
+                            // vault, unlinking or linking another key resets the vault first.
+                            repo =
+                                VaultSettingsRepository(
+                                    UnlinkingWaRepository(container.wa) { container.waOffline },
+                                    container.waVault,
+                                ),
                             qr = container.qr,
                             clipboard = container.clipboard,
                             files = container.files,

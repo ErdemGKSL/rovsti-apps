@@ -56,6 +56,10 @@
 
     <!-- :platform mirrors the permissions of all four apps so lint can check its calls; this app does not use
          location, so the merge drops them. -->
+    <!-- :platform's androidx.biometric is for the WhatsApp vault of Messages (plans/wa-vault.md); this app adopts the
+         vault in round 5 and asks for nothing until then. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" tools:node="remove" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
 

@@ -34,6 +34,8 @@ import dev.rosty.design.theme.Sizes
 import dev.rosty.design.theme.Spacing
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
+import dev.rosty.wa.vault.WaVaultState
+import dev.rosty.wa.vault.vaultSettingsItems
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
@@ -213,10 +215,26 @@ fun rememberWaSettingsBlocks(container: MessagesContainer): (LazyListScope.() ->
     val scope = rememberCoroutineScope()
     LaunchedEffect(offline) { offline.changes.conflate().collect { revision++ } }
     LaunchedEffect(session, revision) { storage = offline.mediaStats()?.let(WaStorageUi::of) }
+    val vault = container.waVault
+    val vaultState by vault.state.collectAsState()
+    var autoLock by remember { mutableStateOf(vault.autoLockMs) }
     if (session == null) return null
     val progress = WaHistoryUi.of(history)
     val shown = storage
     return {
+        // The vault group (`plans/wa-vault.md` 6): lock now, how long WhatsApp stays open in the background, a new
+        // passphrase.
+        if (vaultState == WaVaultState.Unlocked) {
+            vaultSettingsItems(
+                autoLockMs = autoLock,
+                onLockNow = { scope.launch { vault.lock() } },
+                onAutoLock = { ms ->
+                    vault.autoLockMs = ms
+                    autoLock = ms
+                },
+                onChange = container.vaultFlow::beginChange,
+            )
+        }
         if (progress != null) {
             item(key = "wa-history") { WaHistoryRow(progress, Modifier.padding(top = Spacing.m)) }
         }

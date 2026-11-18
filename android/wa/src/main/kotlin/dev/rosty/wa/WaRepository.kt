@@ -50,4 +50,13 @@ interface WaRepository {
 
     /** Closes the gateway and the event stream and removes the stored link. */
     suspend fun forget(): Outcome<Unit>
+
+    /**
+     * The WhatsApp vault was locked (`plans/wa-vault.md` 6): the gateway and the event stream close, the link stays,
+     * and nothing reopens them (no request at all) until [unlock].
+     */
+    suspend fun lock() {}
+
+    /** The vault was unlocked: the gateway may be opened again. */
+    suspend fun unlock() {}
 }

@@ -12,6 +12,11 @@ import dev.rosty.core.model.wa.VaultInfo
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLink
 import dev.rosty.core.model.wa.VaultLockRequest
+import dev.rosty.core.model.wa.VaultPicture
+import dev.rosty.core.model.wa.VaultPicturePut
+import dev.rosty.core.model.wa.VaultPicturePutRequest
+import dev.rosty.core.model.wa.VaultPictures
+import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
@@ -262,4 +267,26 @@ class FakeVaultOps(
             legacyLink = null
             Outcome.Ok(VaultWipeReport(plaintextFiles, emptyList(), 0, emptyList()))
         }
+
+    /** The encrypted picture cache by jid; it outlives a lock, as the file does. */
+    val pictureCache = linkedMapOf<String, VaultPicture>()
+
+    override suspend fun pictures(req: VaultPicturesRequest) =
+        answer("vault.pictures") {
+            if (sessionHandle() == null) return@answer coded(RustError::NotFound, "the vault is locked", "locked")
+            Outcome.Ok(VaultPictures(pictureCache.values.filter { req.jids == null || it.jid in req.jids }))
+        }
+
+    override suspend fun picturePut(req: VaultPicturePutRequest) =
+        answer("vault.picture_put") {
+            val handle =
+                sessionHandle() ?: return@answer coded(RustError::NotFound, "the vault is locked", "locked")
+            pictureCache.remove(req.jid)
+            val id = req.pictureId
+            val jpeg = req.jpeg
+            if (id != null && jpeg != null) pictureCache[req.jid] = VaultPicture(req.jid, id, jpeg)
+            Outcome.Ok(VaultPicturePut(handle, pictureCache.size))
+        }
+
+    private fun sessionHandle(): Long? = session?.takeIf { it.committed }?.handle
 }

@@ -1,5 +1,6 @@
 //! Opening the store, the instance row and the sync writes (events, the chat list, pages).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use rosty_core::wa_identity::{IdentityMap, Source};
@@ -23,6 +24,17 @@ pub struct Store {
     pub(super) identity: IdentityMap,
     /// The database file; `None` for a store in memory.
     pub(super) path: Option<PathBuf>,
+    /// Lazy sync (`plans/wa-vault.md` 14); `None` for the eager sync of a file store.
+    lazy: Option<Lazy>,
+}
+
+/// What the lazy sync remembers for the session (a store in memory lives exactly as long).
+#[derive(Debug, Default)]
+struct Lazy {
+    /// Chats (by key) whose newest page was fetched in this session: opening them again asks nothing.
+    paged: HashSet<String>,
+    /// The chat on screen: a refreshed chat list pages it, and no other.
+    focus: Option<String>,
 }
 
 /// What [`Store::opened`] reports.
@@ -102,6 +114,7 @@ impl Store {
             instance_id: instance_id.to_owned(),
             identity,
             path: None,
+            lazy: None,
         };
         // Key changes logged before the store was closed or killed.
         store.apply_pending_merges()?;
@@ -151,9 +164,55 @@ impl Store {
         Ok(SyncPlan {
             after_seq: state.last_seq,
             refresh_chats: state.needs_resync,
-            fetch: open_gaps(&self.conn, plan::clamp_limit(limit))?,
+            fetch: self.lazy_filter(open_gaps(&self.conn, plan::clamp_limit(limit))?),
             identity_since: self.identity_since()?,
         })
+    }
+
+    /// Turns the lazy sync on (`plans/wa-vault.md` 14): the plan and a refreshed chat list owe only the first page
+    /// of the chat on screen ([`Self::set_focus`]), a page never names the next one, and a chat is paged when it is
+    /// opened ([`Self::open_page`]) and scrolled ([`Self::older`]). Off: the eager sync of a file store.
+    pub fn set_lazy(&mut self, on: bool) {
+        match (on, self.lazy.is_some()) {
+            (true, false) => self.lazy = Some(Lazy::default()),
+            (false, true) => self.lazy = None,
+            _ => {}
+        }
+    }
+
+    pub fn is_lazy(&self) -> bool {
+        self.lazy.is_some()
+    }
+
+    /// The chat on screen (any of its ids), or `None`; only matters for the lazy sync.
+    pub fn set_focus(&mut self, chat: Option<&str>) {
+        let key = chat.map(|chat| self.stored_key(chat));
+        if let Some(lazy) = &mut self.lazy {
+            lazy.focus = key;
+        }
+    }
+
+    /// The one page to fetch now that `chat` was opened (lazy sync, [`plan::on_open`]); `None` when nothing is
+    /// owed. A store that is not lazy owes nothing here: its plan pages every gap.
+    pub fn open_page(&self, chat: &str, limit: Option<u32>) -> Result<Option<FetchPage>> {
+        let Some(lazy) = &self.lazy else {
+            return Ok(None);
+        };
+        let key = self.stored_key(chat);
+        Ok(plan::on_open(
+            &key,
+            &cursor(&self.conn, &key)?,
+            lazy.paged.contains(&key),
+            plan::clamp_limit(limit),
+        ))
+    }
+
+    /// The pages a lazy store fetches now out of `fetch`: the chat on screen only.
+    fn lazy_filter(&self, fetch: Vec<FetchPage>) -> Vec<FetchPage> {
+        match &self.lazy {
+            Some(lazy) => plan::lazy_pages(fetch, lazy.focus.as_deref()),
+            None => fetch,
+        }
     }
 
     /// Applies gateway events in the order given. An event at or before the stored `seq` was applied already and
@@ -247,7 +306,9 @@ impl Store {
             plan::clamp_limit(limit),
             refresh_recent_ms,
         );
-        self.healed(stored)
+        let mut stored = self.healed(stored)?;
+        stored.fetch = self.lazy_filter(std::mem::take(&mut stored.fetch));
+        Ok(stored)
     }
 
     /// Stores one page of `GET /v1/chats/{chat}/messages?before=&limit=` (newest first). `before` and `limit` are
@@ -269,7 +330,16 @@ impl Store {
             now_ms,
         };
         let stored = store_page(&mut self.conn, &mut self.identity, &page);
-        self.healed(stored)
+        let mut stored = self.healed(stored)?;
+        let key = self.stored_key(chat);
+        if let Some(lazy) = &mut self.lazy {
+            // One page per open or scroll: the gap stays open for the next one.
+            stored.next = None;
+            if before.is_none() {
+                lazy.paged.insert(key);
+            }
+        }
+        Ok(stored)
     }
 
     /// The page to fetch when the thread is scrolled past the oldest stored message; `None` when the gateway has

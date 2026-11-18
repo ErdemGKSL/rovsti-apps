@@ -27,4 +27,14 @@ class FakeClipboardRepository(
     override fun primaryText(): String? = text
 
     override fun changes(): Flow<Unit> = changed
+
+    /** How many times [clear] ran. */
+    var clears = 0
+
+    override fun clear(): Boolean {
+        clears += 1
+        text = null
+        changed.tryEmit(Unit)
+        return true
+    }
 }

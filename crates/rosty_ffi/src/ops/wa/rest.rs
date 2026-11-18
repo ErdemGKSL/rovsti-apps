@@ -1,7 +1,7 @@
 //! One op per `Gateway` method. Requests are flat: `{handle, ...the fields of the proto request}`.
 
 use super::fixture::{CHAT, case, named};
-use super::{Call, Empty, INLINE_LIMIT, Nothing, done, open, open_cases};
+use super::{Call, Empty, Nothing, done, open, open_cases};
 use crate::envelope::FfiError;
 use crate::ops::registry::{Case, OpSpec};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -403,7 +403,7 @@ pub(super) const MEDIA_OPS: &[OpSpec] = &[
     ),
 ];
 
-/// A download over [`INLINE_LIMIT`] ends up as a file in the handle's cache directory.
+/// A download over [`super::INLINE_LIMIT`] ends up as a file in the handle's cache directory.
 fn large_case() -> Case {
     Case::named(
         "large",
@@ -537,7 +537,7 @@ pub(super) struct PictureReq {
 
 // ---- answers that carry bytes
 
-/// Bytes as the Kotlin side receives them: `data_b64`, or `path` of a temp file when over [`INLINE_LIMIT`].
+/// Bytes as the Kotlin side receives them: `data_b64`, or `path` of a temp file when over [`super::INLINE_LIMIT`].
 #[derive(Debug, Serialize)]
 pub(super) struct BytesAns {
     size: usize,
@@ -701,7 +701,7 @@ fn media(req: Call<MessageRef>) -> Result<BytesAns, FfiError> {
         &g.cache_dir,
         "media",
         &req.body.message_id,
-        INLINE_LIMIT,
+        g.inline_limit,
     )
 }
 
@@ -715,14 +715,14 @@ fn thumbnail(req: Call<MessageRef>) -> Result<BytesAns, FfiError> {
         &g.cache_dir,
         "thumb",
         &req.body.message_id,
-        INLINE_LIMIT,
+        g.inline_limit,
     )
 }
 
 fn status_media(req: Call<IdRef>) -> Result<BytesAns, FfiError> {
     let g = super::ctx(req.handle)?;
     let bytes = g.status_media(&req.body.id).map_err(super::map_error)?;
-    bytes_ans(&bytes, &g.cache_dir, "status", &req.body.id, INLINE_LIMIT)
+    bytes_ans(&bytes, &g.cache_dir, "status", &req.body.id, g.inline_limit)
 }
 
 fn status_thumbnail(req: Call<IdRef>) -> Result<BytesAns, FfiError> {
@@ -733,7 +733,7 @@ fn status_thumbnail(req: Call<IdRef>) -> Result<BytesAns, FfiError> {
         &g.cache_dir,
         "status-thumb",
         &req.body.id,
-        INLINE_LIMIT,
+        g.inline_limit,
     )
 }
 
@@ -753,7 +753,7 @@ fn picture(req: Call<PictureReq>) -> Result<PictureAns, FfiError> {
                     &g.cache_dir,
                     "picture",
                     &name,
-                    INLINE_LIMIT,
+                    g.inline_limit,
                 )?),
                 id: Some(id),
             })

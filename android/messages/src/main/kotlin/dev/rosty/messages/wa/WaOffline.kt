@@ -12,6 +12,7 @@ import dev.rosty.core.model.wa.WaSyncHistory
 import dev.rosty.core.model.wa.WaSyncMediaStats
 import dev.rosty.core.model.wa.WaSyncWiped
 import dev.rosty.core.ops.WaSyncStore
+import dev.rosty.wa.sync.WaRequestGate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.produceIn
@@ -114,6 +116,20 @@ class WaOffline(
     private val wipe: suspend (instanceId: String) -> Outcome<WaSyncWiped> = {
         Outcome.Ok(WaSyncWiped(emptyList(), emptyList()))
     },
+    /** The gateway budget of the lazy sync (`plans/wa-vault.md` 14); null: unlimited. */
+    private val gate: WaRequestGate? = null,
+    /**
+     * What else [lock] tears down: the repository's gateway and event socket (and the event streams and call-audio
+     * handles opened from it), the Status pictures, the thumbnails in memory, and `vault.lock`.
+     */
+    private val onLock: suspend () -> Unit = {},
+    /**
+     * The store lives in memory only (`plans/wa-vault.md` 13.1): a cold process (the wake job) has no outbox to drain
+     * and starts no sync of its own.
+     */
+    private val memoryOnly: Boolean = false,
+    /** Start locked (the vault is not open yet): no store opens and no request goes out until [unlock]. */
+    startLocked: Boolean = false,
 ) {
     private val sessionState = MutableStateFlow<WaSession?>(null)
 
@@ -161,6 +177,10 @@ class WaOffline(
     val history: StateFlow<WaSyncHistory?> = historyState.asStateFlow()
 
     private val started = AtomicBoolean(false)
+
+    /** True between [lock] and [unlock]: no store is open and no request goes out. */
+    private val lockedState = MutableStateFlow(startLocked)
+    val locked: StateFlow<Boolean> = lockedState.asStateFlow()
     private val refreshQueued = AtomicBoolean(false)
     private val drainQueued = AtomicBoolean(false)
     private var socket: Job? = null
@@ -171,9 +191,10 @@ class WaOffline(
     /** Follows the link from now on. Idempotent. */
     fun start() {
         if (!started.compareAndSet(false, true)) return
+        gate?.budget?.let { if (it.locked && !lockedState.value) it.unlocked() }
         scope.launch {
-            linkChanges.collectLatest {
-                follow(link())
+            combine(linkChanges, lockedState) { _, locked -> locked }.collectLatest { locked ->
+                follow(if (locked) null else link())
                 settledState.value = true
             }
         }
@@ -215,6 +236,8 @@ class WaOffline(
             val changed: (Set<String>?) -> Unit = { changeBus.tryEmit(it) }
             // Merges logged while nothing followed them (at the store's open, in another run): before anyone reads.
             rekeys.replay(store)
+            // Media lives in RAM: the store's LRU keeps it near 64 MiB (`plans/wa-vault.md` 7).
+            if (store.opened.lazy) store.setMediaCap(RAM_CAP_BYTES)
             // Rows and files agree again, and the cache is under its cap, before anyone reads a path.
             downloads?.opened(store)
             val runner =
@@ -227,6 +250,7 @@ class WaOffline(
                     onAccountChanged = { files -> accountChanged(store, files) },
                     onHistory = { readHistory(store) },
                     onMedia = { refs -> wantMedia(store, refs) },
+                    gate = gate,
                 )
             val session = WaSession(next, store, runner, WaOutbox(store, remote, now, changed))
             readHistory(store)
@@ -307,6 +331,8 @@ class WaOffline(
         store: WaSyncStore,
         refs: List<WaMediaRef>,
     ) {
+        // The lazy sync has no auto-download: media is fetched on a tap only.
+        if (store.opened.lazy) return
         val files = downloads ?: return
         if (files.auto(store, refs)) files.kick(store, ::noteChanged)
     }
@@ -336,6 +362,8 @@ class WaOffline(
     /** The sync of one session: the socket after the store's `seq`, events in batches, the owed fetches. */
     private suspend fun run(session: WaSession) =
         coroutineScope {
+            // The event socket is one request of the cold start; none while locked.
+            if (gate != null && gate.call { Outcome.Ok(Unit) } is Outcome.Err) return@coroutineScope
             val after = session.runner.afterSeq()
             // What a first run owes (the chat list) does not wait for the socket.
             launchCatchUp(session, this)
@@ -565,6 +593,12 @@ class WaOffline(
      * drain the outbox. Schedules the next wake itself when a row waits for its retry.
      */
     suspend fun runFromWork() {
+        // A memory-only store: a cold process has nothing queued, and a running one drains on its own socket.
+        if (memoryOnly) {
+            if (!started.get() || lockedState.value) return
+            sessionState.value?.let { drainNow(it, networkBack = true) }
+            return
+        }
         start()
         val session = withTimeoutOrNull(OPEN_TIMEOUT_MS) { sessionState.filterNotNull().first() } ?: return
         // The socket replays what was missed (the echoes of sends that did go out) before anything is sent again.
@@ -576,8 +610,46 @@ class WaOffline(
         kickMedia(session)?.let { pass -> withTimeoutOrNull(MEDIA_WORK_MS) { pass.join() } }
     }
 
+    /**
+     * The chat [chat] is on screen (lazy sync): one page when it was not paged in this session, and it becomes the
+     * chat a refresh pages. Null: nothing was owed (or the store is not lazy).
+     */
+    suspend fun opened(chat: String): OlderResult? = sessionState.value?.runner?.opened(chat)
+
+    /** The chat on screen left it. */
+    suspend fun closed() {
+        sessionState.value?.runner?.closed()
+    }
+
+    /**
+     * Locks WhatsApp (`plans/wa-vault.md` 6, 13.2; wired to the lifecycle in round 4): the one teardown path. The
+     * budget closes first (no request leaves after this call starts), then the event socket and the in-memory store
+     * close, the media in RAM is freed, and [onLock] closes the gateway, its streams and the vault session. Unsent
+     * messages and everything read are gone (`plans/wa-vault.md` 7).
+     */
+    suspend fun lock() {
+        gate?.budget?.lock()
+        lockedState.value = true
+        linking.withLock {
+            withContext(NonCancellable) {
+                closeLocked()
+                downloads?.dropRam()
+            }
+        }
+        onLock()
+    }
+
+    /** The vault was unlocked: a fresh budget, and the store opens again (lazily filled). */
+    fun unlock() {
+        gate?.budget?.unlocked()
+        lockedState.value = false
+    }
+
     companion object {
         private const val TAG = "wa-offline"
+
+        /** The media cache in RAM (`plans/wa-vault.md` 7). */
+        const val RAM_CAP_BYTES = 64L * 1024 * 1024
         private const val CHANGE_BUFFER = 256
         private const val MAX_BATCH = 200
         private const val OPEN_TIMEOUT_MS = 20_000L

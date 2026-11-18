@@ -4,7 +4,6 @@ import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.notify.MessagesNotifier
 import dev.rosty.messages.notify.NotifyPolicy
 import dev.rosty.messages.notify.OpenConversation
-import java.io.File
 
 /**
  * What Rosty Messages keeps per WhatsApp chat outside the offline store, and how each piece follows a merge
@@ -45,12 +44,14 @@ fun messagesRekeyMovers(container: MessagesContainer): List<RekeyMover> {
         },
         RekeyMover { step -> container.reminders.rekey(WaRekeys.tagOf(step.from), WaRekeys.tagOf(step.into)) },
         RekeyMover { step -> container.scheduleIfMade?.rekey(step.from, step.into) },
+        RekeyMover { step -> container.waDrafts.rekey(WaRekeys.tagOf(step.from), WaRekeys.tagOf(step.into)) },
     )
 }
 
 /** The [WaRekeys] of the app: its cursor in `wa-rekeys.json`, its movers those of [messagesRekeyMovers]. */
 fun realWaRekeys(container: MessagesContainer): WaRekeys =
     WaRekeys(
-        cursor = FileRekeyCursor(File(container.context.noBackupFilesDir, WaRekeys.FILE)),
+        // In memory since the vault (`plans/wa-vault.md` 13.1): the store it follows lives in memory too.
+        cursor = MemoryRekeyCursor(),
         movers = messagesRekeyMovers(container),
     )

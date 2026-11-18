@@ -193,3 +193,37 @@ data class VaultWipeReport(
     @SerialName("drafts_removed") val draftsRemoved: Int,
     val failed: List<VaultWipeFailure>,
 )
+
+/** `vault.pictures`: the profile pictures of the encrypted cache ([jids] null: every one). */
+@Serializable
+data class VaultPicturesRequest(
+    @EncodeDefault(NEVER) val jids: List<String>? = null,
+)
+
+@Serializable
+data class VaultPicture(
+    val jid: String,
+    @SerialName("picture_id") val pictureId: String,
+    /** The JPEG, base64. */
+    val jpeg: String,
+)
+
+@Serializable
+data class VaultPictures(
+    val pictures: List<VaultPicture>,
+)
+
+/** `vault.picture_put`: keeps [jpeg] as [jid]'s picture [pictureId]; both null: the person has no picture. */
+@Serializable
+data class VaultPicturePutRequest(
+    val jid: String,
+    @SerialName("picture_id") @EncodeDefault(NEVER) val pictureId: String? = null,
+    @EncodeDefault(NEVER) val jpeg: String? = null,
+)
+
+@Serializable
+data class VaultPicturePut(
+    /** The vault session whose cache was written. */
+    val handle: Long,
+    val pictures: Int,
+)

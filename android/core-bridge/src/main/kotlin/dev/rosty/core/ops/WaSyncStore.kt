@@ -16,6 +16,7 @@ import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.model.wa.WaSyncAccountChangedRequest
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncApplied
+import dev.rosty.core.model.wa.WaSyncCacheSaved
 import dev.rosty.core.model.wa.WaSyncCatchUpRequest
 import dev.rosty.core.model.wa.WaSyncChat
 import dev.rosty.core.model.wa.WaSyncChatMediaRequest
@@ -31,6 +32,7 @@ import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
 import dev.rosty.core.model.wa.WaSyncFetch
 import dev.rosty.core.model.wa.WaSyncFetched
+import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistory
@@ -151,6 +153,18 @@ class WaSyncStore internal constructor(
         chat: String,
         limit: Int? = null,
     ): Outcome<WaSyncFetch?> = live { ops.older(WaSyncOlderRequest(id, chat, limit)).map { it.fetch } }
+
+    /** The lazy sync: the one page owed now that [chat] was opened; null: what is in memory is enough. */
+    suspend fun openPage(
+        chat: String,
+        limit: Int? = null,
+    ): Outcome<WaSyncFetch?> = live { ops.openPage(WaSyncOlderRequest(id, chat, limit)).map { it.fetch } }
+
+    /** The lazy sync: the chat on screen (null: none), the only one a refreshed chat list pages. */
+    suspend fun focus(chat: String?): Outcome<Unit> = live { ops.focus(WaSyncFocusRequest(id, chat)).map { } }
+
+    /** Writes the identity map and its cursor into the encrypted vault cache; `locked` while the vault is. */
+    suspend fun saveCache(): Outcome<WaSyncCacheSaved> = live { ops.cacheSave(WaSyncHandleRequest(id)) }
 
     /** The chat list, newest first. */
     suspend fun chats(includeArchived: Boolean = false): Outcome<List<WaSyncChat>> =
@@ -491,6 +505,12 @@ class WaSyncStore internal constructor(
      */
     suspend fun identityCatchUp(
         fetch: suspend (since: String?) -> Outcome<IdentityMappingsAnswer>,
+    ): Outcome<WaSyncIdentityCatchUp> = identityCatchUp(MAX_IDENTITY_PAGES, fetch)
+
+    /** [identityCatchUp] with at most [maxPages] pages in this run; the lazy sync asks one (`plans/wa-vault.md` 14). */
+    suspend fun identityCatchUp(
+        maxPages: Int,
+        fetch: suspend (since: String?) -> Outcome<IdentityMappingsAnswer>,
     ): Outcome<WaSyncIdentityCatchUp> {
         if (released) return Outcome.Err(RustError.NotFound("wa_sync store $id is closed"))
         if (identityUnsupported) return Outcome.Ok(WaSyncIdentityCatchUp(supported = false, complete = true))
@@ -500,7 +520,7 @@ class WaSyncStore internal constructor(
                 is Outcome.Ok -> plan.value.identitySince
             }
         var done = WaSyncIdentityCatchUp(supported = true, complete = false)
-        repeat(MAX_IDENTITY_PAGES) {
+        repeat(maxPages.coerceIn(1, MAX_IDENTITY_PAGES)) {
             val page =
                 when (val got = fetch(since)) {
                     is Outcome.Err -> return Outcome.Ok(done.copy(error = got.error))
@@ -554,8 +574,10 @@ class WaSyncStore internal constructor(
             memory: Boolean = false,
             ops: WaSyncOps = NativeWaSyncOps(),
             release: (Long) -> Unit = RustNative::release,
+            lazy: Boolean = false,
+            vaultCache: Boolean = false,
         ): Outcome<WaSyncStore> =
-            when (val opened = ops.open(WaSyncOpenRequest(instanceId, dir, memory))) {
+            when (val opened = ops.open(WaSyncOpenRequest(instanceId, dir, memory, lazy, vaultCache))) {
                 is Outcome.Err -> opened
                 is Outcome.Ok -> Outcome.Ok(WaSyncStore(opened.value, ops, release))
             }

@@ -60,6 +60,9 @@ class WaRepositoryShapeTest {
                 "messages",
                 "relinkTo",
                 "forget",
+                // The vault lock (`plans/wa-vault.md` 6): the gateway closes and stays closed until unlock.
+                "lock",
+                "unlock",
             ),
             names,
         )

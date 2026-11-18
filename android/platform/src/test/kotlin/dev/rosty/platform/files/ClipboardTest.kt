@@ -62,4 +62,27 @@ class ClipboardTest {
         assertEquals("a", fake.primaryText())
         assertEquals(listOf("a" to true), fake.copies)
     }
+
+    /** The vault passphrase (plan 4): sensitive, and gone after 60 s unless something else was copied since. */
+    @Test fun aSecretIsClearedAfterAMinute() =
+        runTest {
+            assertTrue(repo.copySecret(this, "AAAA-BBBB"))
+            assertTrue(
+                manager.primaryClip!!
+                    .description.extras!!
+                    .getBoolean(ClipDescription.EXTRA_IS_SENSITIVE),
+            )
+            testScheduler.advanceTimeBy(SECRET_CLIP_MS - 1)
+            assertEquals("AAAA-BBBB", repo.primaryText())
+            testScheduler.advanceTimeBy(2)
+            assertNull(repo.primaryText())
+        }
+
+    @Test fun aSecretLeavesALaterCopyAlone() =
+        runTest {
+            repo.copySecret(this, "AAAA-BBBB")
+            repo.copy("mine")
+            testScheduler.advanceTimeBy(SECRET_CLIP_MS + 1)
+            assertEquals("mine", repo.primaryText())
+        }
 }

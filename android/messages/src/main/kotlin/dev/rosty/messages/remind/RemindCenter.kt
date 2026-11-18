@@ -101,7 +101,9 @@ class RemindCenter(
                 messageId = target.id,
                 messageAtMs = target.atMs,
                 title = target.title,
-                preview = target.preview,
+                // The alarm payload is kept by the system: a WhatsApp message's text never goes there
+                // (`plans/wa-vault.md` 13.1); the notification names the chat only.
+                preview = if (target.tag.startsWith("wa:")) "" else target.preview,
                 slot = slot,
                 nowMs = at,
                 tzOffsetS = tzOffsetS(at),

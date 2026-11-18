@@ -43,6 +43,15 @@ fun interface WaGatewayOpener {
 }
 
 /**
+ * Where the repository reads its link. The default is the plaintext `whatsapp-link.json` ([WaLinkStore.read]); an app
+ * with a WhatsApp vault answers the vault's link while it is unlocked, with an empty key: `wa.open` then takes the key
+ * from the vault (`plans/wa-vault.md` 15).
+ */
+fun interface WaLinkSource {
+    suspend fun read(): Outcome<StoredLink?>
+}
+
+/**
  * The real [WaRepository]. [scope] owns the event collectors; [waEvents] is the `wa.event` feed of the process and
  * [platformEvents] the bus on which the app's `FirebaseMessagingService` reports `wa_push`.
  *
@@ -58,6 +67,9 @@ class DefaultWaRepository(
     private val opener: WaGatewayOpener,
     private val waEvents: WaEvents = WaEvents(),
     private val platformEvents: Flow<PlatformEvent> = PlatformEvents.events,
+    private val source: WaLinkSource = WaLinkSource { store.read() },
+    /** Start locked: nothing opens the gateway until [unlock] (an app whose vault is not open yet). */
+    startLocked: Boolean = false,
 ) : WaRepository {
     constructor(
         store: WaLinkStore,
@@ -90,6 +102,9 @@ class DefaultWaRepository(
 
     /** The gateway process [lastSeq] counts in (`hello`); null until one said. */
     private var epoch: String? = null
+
+    /** The vault is locked: nothing opens the gateway. */
+    private var locked = startLocked
     private val started = AtomicBoolean(false)
 
     private val state = MutableStateFlow<WaLinkState>(WaLinkState.None)
@@ -148,6 +163,20 @@ class DefaultWaRepository(
             }
         }
 
+    override suspend fun lock() {
+        lock.withLock {
+            locked = true
+            closeSession()
+            // The next socket is live: no `after=` replay of what was missed while locked.
+            lastSeq = null
+            epoch = null
+        }
+    }
+
+    override suspend fun unlock() {
+        lock.withLock { locked = false }
+    }
+
     override suspend fun forget(): Outcome<Unit> =
         lock.withLock {
             closeSession()
@@ -164,8 +193,9 @@ class DefaultWaRepository(
     /** Reads the link and opens everything. Call under [lock]. Returns the gateway, or null (and sets [state]). */
     private suspend fun open(): WaGateway? {
         session?.let { return it.gateway }
+        if (locked) return null
         val link =
-            when (val read = store.read()) {
+            when (val read = source.read()) {
                 is Outcome.Err -> return failed(read.error)
                 is Outcome.Ok -> read.value
             }

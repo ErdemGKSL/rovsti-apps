@@ -99,6 +99,14 @@ SOFTWARE.
 - Source: https://developer.android.com/jetpack/androidx/releases/work. Licence: Apache-2.0. Copyright The Android Open Source Project.
 - Used for: the Contacts people-sync worker (X.1b). Pinned in `gradle/libs.versions.toml` (`work`); no module depends on it before X.1b.
 
+## AndroidX Biometric (biometric 1.1.0) and Fragment (fragment 1.9.1)
+
+- Source: https://developer.android.com/jetpack/androidx/releases/biometric and
+  https://developer.android.com/jetpack/androidx/releases/fragment. Licence: Apache-2.0. Copyright The Android Open Source
+  Project.
+- Used for: the WhatsApp vault's system prompt (`BiometricPrompt` with a `CryptoObject`, `:platform` `vault/`); the
+  prompt needs a `FragmentActivity`, which every app's activity now is. Pinned in `gradle/libs.versions.toml`.
+
 ## Apache License 2.0
 
 The Apache-licensed files above keep their own copyright and licence notices in their headers.

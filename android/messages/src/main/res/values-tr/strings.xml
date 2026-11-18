@@ -633,4 +633,10 @@
         <item quantity="one">%1$d dosya %2$d MB\'tan büyük, eklenmedi</item>
         <item quantity="other">%1$d dosya %2$d MB\'tan büyük, eklenmedi</item>
     </plurals>
+    <!-- The WhatsApp notice while the vault is locked (plans/wa-vault.md 13.6): the count, nothing else. -->
+    <string name="wa_locked_notice_title">WhatsApp</string>
+    <plurals name="wa_locked_notice">
+        <item quantity="one">%d yeni mesaj</item>
+        <item quantity="other">%d yeni mesaj</item>
+    </plurals>
 </resources>

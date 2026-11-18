@@ -19,6 +19,10 @@ firebaseMessaging = "24.1.0"
 # WorkManager 2.11.0 (2025): the Contacts sync worker of X.1b; the version is more than two weeks old.
 work = "2.11.0"
 googleServices = "4.5.0"
+# AndroidX Biometric 1.1.0 (2021), the newest stable: BiometricPrompt with a CryptoObject for the WhatsApp vault keys
+# (plans/wa-vault.md 3, 13.2). It needs a FragmentActivity; Fragment 1.9.1 replaces the 1.2.5 it would pull in.
+biometric = "1.1.0"
+fragment = "1.9.1"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -33,6 +37,8 @@ compose-foundation = { module = "androidx.compose.foundation:foundation" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-activity = { module = "androidx.activity:activity", version.ref = "activityCompose" }
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
+androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }

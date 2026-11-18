@@ -16,6 +16,7 @@ import dev.rosty.core.model.wa.WaSyncNetwork
 import dev.rosty.core.ops.WaSyncStore
 import dev.rosty.platform.system.DataNetwork
 import dev.rosty.platform.system.DeviceData
+import dev.rosty.wa.sync.WaRequestGate
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +68,13 @@ class WaDownloads(
     /** Asks for the wake job when a download waits for its next attempt or for a network. */
     private val wake: WaWake = WaWake { },
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * Since the vault (`plans/wa-vault.md` 7, 14): the files live here in RAM, never under [dir], nothing downloads
+     * without a tap, and the downloads go through [requests] one at a time. Null: the files of [dir] (tests of the disk
+     * cache).
+     */
+    val ram: WaRamFiles? = null,
+    private val requests: WaRequestGate? = null,
 ) {
     private val worker = Mutex()
     private val gate = Any()
@@ -113,6 +121,8 @@ class WaDownloads(
      * Answers the chats whose rows changed.
      */
     suspend fun opened(store: WaSyncStore): Set<String> {
+        // A store in memory starts empty, and so does the RAM: nothing to reconcile.
+        if (ram != null) return evict(store)
         val root = root(store.instanceId)
         val listed = withContext(io) { listing(root) }
         val changed = HashSet<String>()
@@ -158,7 +168,8 @@ class WaDownloads(
         store: WaSyncStore,
         rows: Collection<WaMediaRef>,
     ): Boolean {
-        if (rows.isEmpty()) return false
+        // Auto-download is off since the vault: media is fetched on a tap only.
+        if (rows.isEmpty() || ram != null) return false
         val network = network()
         if (network == WaSyncNetwork.None) return false
         val free = freeBytes()
@@ -253,7 +264,7 @@ class WaDownloads(
                     ?.fileName
             val target = target(store.instanceId, item, name)
             val outcome =
-                when (val got = remote.media(item.id)) {
+                when (val got = requests?.download { remote.media(item.id) } ?: remote.media(item.id)) {
                     is Outcome.Err -> {
                         RostyLog.w(TAG, "download failed: ${got.error.message}")
                         if (got.error is RustError.NotFound) {
@@ -309,6 +320,7 @@ class WaDownloads(
         answer: BytesAnswer,
         target: File,
     ): File? {
+        ram?.let { memory -> return answer.bytes()?.let { memory.put(target.name, it) } }
         val part = File(target.path + PART)
         return try {
             target.parentFile?.mkdirs()
@@ -369,6 +381,10 @@ class WaDownloads(
         if (paths.isEmpty()) return
         withContext(io) {
             for (path in paths) {
+                if (ram?.owns(path) == true) {
+                    ram?.release(path)
+                    continue
+                }
                 val file = File(path)
                 if (!file.startsWith(dir)) continue
                 file.delete()
@@ -386,11 +402,35 @@ class WaDownloads(
         files: List<String>,
     ) {
         delete(files)
+        ram?.clear()
         withContext(io) { root(instance).deleteRecursively() }
+    }
+
+    /** Frees every file in RAM (lock): the store that named them is closed. */
+    fun dropRam() {
+        ram?.clear()
     }
 
     companion object {
         private const val TAG = "wa-downloads"
+
+        /** The bytes of a gateway answer: inline, or the temp file of a large one (read, then deleted at once). */
+        internal fun BytesAnswer.bytes(): ByteArray? =
+            try {
+                dataB64?.let { Base64.getDecoder().decode(it) }
+                    ?: path?.let(::File)?.takeIf { it.isFile }?.let { file ->
+                        try {
+                            file.readBytes()
+                        } finally {
+                            file.delete()
+                        }
+                    }
+            } catch (_: IOException) {
+                null
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+
         private const val FILES = "files"
         private const val OUT = "out"
         private const val THUMBS = "thumbs"

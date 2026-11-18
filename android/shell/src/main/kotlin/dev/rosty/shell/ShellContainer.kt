@@ -10,6 +10,7 @@ import dev.rosty.core.Rust
 import dev.rosty.core.RustCore
 import dev.rosty.core.log.DevLog
 import dev.rosty.core.log.RostyLog
+import dev.rosty.core.model.wa.PushKey
 import dev.rosty.core.model.wa.StoredLink
 import dev.rosty.core.model.wa.VaultWipeRequest
 import dev.rosty.core.ops.NativeVaultOps
@@ -36,6 +37,7 @@ import dev.rosty.platform.vault.BiometricVaultAuthenticator
 import dev.rosty.platform.vault.VaultKeystore
 import dev.rosty.platform.vault.VaultPromptHost
 import dev.rosty.platform.wa.WaPush
+import dev.rosty.platform.wa.push.PushKeys
 import dev.rosty.shell.settings.CommonSettings
 import dev.rosty.shell.settings.NoCommonSettings
 import dev.rosty.wa.DefaultWaRepository
@@ -299,11 +301,24 @@ abstract class ShellContainer(
         scope.launch { wa.gateway() }
     }
 
-    /** "Forgot passphrase" or a new link: the link and everything kept for it go, as an unlink does (plan 5). */
+    /**
+     * "Forgot passphrase" or a new link: the link and everything kept for it go, as an unlink does (plan 5). The push
+     * key is rotated too (round 7b): a push sealed for the old link no longer opens, and the next link registers a
+     * new key.
+     */
     protected open suspend fun forgetWhatsApp() {
         wa.forget()
         waLinkHandover.onForget()
+        rotatePushKey()
     }
+
+    /** Drops this install's push key (`AndroidPushKeyStore`); a test container keeps the Keystore out. */
+    protected open fun rotatePushKey() {
+        if (WaPushRegistrar.appOf(context.packageName) != null) PushKeys.store.rotate()
+    }
+
+    /** The public half of this install's push key for the registration; a test container gives none. */
+    protected open fun pushKey(): PushKey? = PushKeys.store.ensure()
 
     /**
      * Where this app reads its WhatsApp link: the vault's URL and instance with an empty key while it is unlocked
@@ -400,7 +415,13 @@ abstract class ShellContainer(
             // Where the gateway wakes this app: its FCM token, once the link is up (nothing in the plain flavor).
             waPush =
                 WaPushRegistrar.appOf(context.packageName)?.let { app ->
-                    WaPushRegistrar(wa = repo, app = app, scope = scope, token = WaPush::token).also { it.start() }
+                    WaPushRegistrar(
+                        wa = repo,
+                        app = app,
+                        scope = scope,
+                        token = WaPush::token,
+                        pushKey = ::pushKey,
+                    ).also { it.start() }
                 }
         }
 

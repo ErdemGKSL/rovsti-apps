@@ -247,6 +247,45 @@ pub struct PushRegistration {
     pub token: String,
 }
 
+/// The public half of an app install's push key (round 7b). The gateway seals
+/// what a push says to it, so FCM carries only ciphertext. The private half
+/// never leaves the phone's Keystore.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PushKey {
+    /// Chosen by the app; names the Keystore key a sealed push was made for.
+    pub key_id: String,
+    /// The sealing scheme; [`PUSH_KEY_VERSION`] is the only one today.
+    pub version: u32,
+    /// The X.509 `SubjectPublicKeyInfo` of a P-256 key, standard base64.
+    pub public_key: String,
+}
+
+/// The one push sealing scheme: ephemeral-static ECDH on P-256, HKDF-SHA256,
+/// AES-256-GCM (`docs/whatsapp-gateway.md`, "Sealed push").
+pub const PUSH_KEY_VERSION: u32 = 1;
+
+/// What `POST /v1/push` takes: the token and, from an app that has one, its
+/// push key. Without a key the gateway forgets any key it held for the app
+/// and sends that app content-free pushes. A separate struct, so
+/// [`PushRegistration`] keeps its shape for older callers.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PushKeyedRegistration {
+    pub app: AppId,
+    pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_key: Option<PushKey>,
+}
+
+impl From<PushRegistration> for PushKeyedRegistration {
+    fn from(reg: PushRegistration) -> Self {
+        Self {
+            app: reg.app,
+            token: reg.token,
+            push_key: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SendText {
     pub chat: String,

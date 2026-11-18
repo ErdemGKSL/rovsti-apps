@@ -13,7 +13,7 @@ use rosty_wa_proto::{
 
 use crate::hub::Hub;
 use crate::now_ms;
-use crate::push::{PushKind, Pusher, should_push};
+use crate::push::{MessagePreview, PushKind, Pusher, should_push};
 use crate::store::{
     ChatChange, FetchedProfile, GroupReceipt, InstanceId, LearnedPair, MessageChange,
     MessageExtras, NewPair, ProfileChange, Store, StoredStatus, WireIds,
@@ -653,6 +653,11 @@ impl EventSink {
                         PushKind::Message {
                             chat: message.chat.clone(),
                             count: 1,
+                            // Sealed to an app's push key, else never sent.
+                            preview: Some(Box::new(MessagePreview::of(
+                                &message,
+                                meta.sender_name.clone(),
+                            ))),
                         },
                     );
                 }

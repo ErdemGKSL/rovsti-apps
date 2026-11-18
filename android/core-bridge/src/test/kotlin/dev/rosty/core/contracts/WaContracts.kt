@@ -97,7 +97,7 @@ object WaContracts : ContractModels {
             handleOp<LabelBody, IssuedKey>("wa.mint_key")
             handleOp<Empty, List<KeyInfo>>("wa.keys")
             handleOp<KeyIdBody, Empty>("wa.revoke_key")
-            handleOp<PushRegistration, Empty>("wa.register_push")
+            handleOp<PushRegistration, Empty>("wa.register_push", ok = listOf("keyed"))
             handleOp<Empty, List<ChatSummary>>("wa.chats")
             handleOp<Empty, List<RichChat>>("wa.chats_with_meta")
             handleOp<MessagesBody, List<WaMessage>>("wa.messages")

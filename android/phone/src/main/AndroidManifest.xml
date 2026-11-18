@@ -116,6 +116,16 @@
             </intent-filter>
         </activity>
 
+        <!-- A WhatsApp call ringing while the vault is locked (round 7b): the caller and Answer and Decline only, over the
+             lock screen (the flags are set in code). Its own task, so it never brings the app's pages along. -->
+        <activity
+            android:name=".wa.WaLockedCallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="dev.rosty.phone.wa.lockedcall"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|fontScale|density|keyboardHidden|uiMode" />
+
         <!-- WhatsApp hand-off from a sibling Rosty app: only same-signed apps hold the permission. -->
         <activity-alias
             android:name=".WaHandoff"

@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.random.Random
@@ -103,6 +104,18 @@ sealed interface VaultOutcome {
     data class Refused(
         val problem: VaultProblem,
     ) : VaultOutcome
+}
+
+/** What [WaVault.unlockInline] did. */
+enum class InlineUnlock {
+    /** The vault is open. */
+    Opened,
+
+    /** The person cancelled the prompt. */
+    Cancelled,
+
+    /** Only the unlock page can open it (the passphrase is needed, or no prompt could show). */
+    NeedsPage,
 }
 
 /** Why an operation was refused; the UI words each one (en, tr). */
@@ -410,12 +423,15 @@ class WaVault(
      * this app's own vault with it. No prompt. False when no sibling gives a link, when the link is not this vault's,
      * or when this vault has no link wrap yet (it was not unlocked since the update): the caller then prompts.
      */
-    suspend fun unlockFromSibling(): Boolean {
+    suspend fun unlockFromSibling(askBudgetMs: Long? = null): Boolean {
         val st = mutex.withLock { refreshLocked() } ?: return false
         if (st.unlocked != null) return true
         if (st.vault == null || broken) return false
         // Asked outside the lock: a sibling's provider may take a moment, and nothing here waits on it.
-        val link = siblingLink() ?: return false
+        // Only the asking is bounded: the unlock itself, once a link is in hand, always completes.
+        val link =
+            (if (askBudgetMs == null) siblingLink() else withTimeoutOrNull(askBudgetMs) { siblingLink() })
+                ?: return false
         return mutex.withLock {
             if (stateFlow.value == WaVaultState.Unlocked) return@withLock true
             val request =
@@ -435,6 +451,23 @@ class WaVault(
                     true
                 }
             }
+        }
+    }
+
+    /**
+     * The unlock without a page (round 7a's Settings row, round 7b's locked call): an unlocked sibling opens this vault
+     * with no prompt, else the biometric prompt opens over whatever the app shows. [siblingBudgetMs] bounds the wait for
+     * the siblings (a cold sibling process takes a moment to say no; a ringing call should not wait for it), null for
+     * no bound. [InlineUnlock.NeedsPage] when only the passphrase page can open it.
+     */
+    suspend fun unlockInline(siblingBudgetMs: Long? = null): InlineUnlock {
+        if (unlockFromSibling(siblingBudgetMs) || unlocked) return InlineUnlock.Opened
+        val state = stateFlow.value as? WaVaultState.Locked ?: return InlineUnlock.NeedsPage
+        if (!state.biometric) return InlineUnlock.NeedsPage
+        return when (unlockWithBiometric()) {
+            VaultOutcome.Done -> InlineUnlock.Opened
+            VaultOutcome.Cancelled -> InlineUnlock.Cancelled
+            is VaultOutcome.Refused -> InlineUnlock.NeedsPage
         }
     }
 

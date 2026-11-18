@@ -81,7 +81,7 @@ Passphrase plus hardware key with NO reset path and a wipe after N failed tries:
    - What the passphrase still protects: powered-off, rebooted or forensically imaged phone; 72 h untouched; restored or cloned install; a newly enrolled biometric. Limit: root plus PIN plus a running phone can bypass the app rules, but still needs hardware authentication for K_daily.
    - Gateway cost: none.
 3. Vault in all four apps. One plaintext whatsapp-link.json anywhere voids everything. Each app has its own vault and Keystore key; WaLinkProvider hands the key over only between unlocked apps, in memory. Locked Phone shows the incoming call from the push payload (no gateway request) and needs unlock to answer, so most such calls will be missed. Stops keeps the key only in the RAM of its foreground TripService for a trip started while unlocked; drops it at trip end.
-4. No gateway changes: no scoped keys, no new endpoints, no server-side crypto. Connect-key rotation only at migration and on passphrase change (one call each, existing revoke path, manual if no endpoint), never on a timer.
+4. No gateway changes (until round 7b, which seals push previews; section 15): no scoped keys, no new endpoints, no server-side crypto. Connect-key rotation only at migration and on passphrase change (one call each, existing revoke path, manual if no endpoint), never on a timer.
 5. Drafts and live names dropped on restart. Exception for gateway load: identity map with its cursor and profile pictures kept on disk encrypted under DK. No message content; unreadable without passphrase and hardware; saves the full identity catch-up and avatar downloads on each unlock. A forgotten passphrase also discards this cache.
 6. Content-free notifications while locked: yes. One notification with the count; zero gateway requests while locked.
 7. Argon2id approved: m = 64 MiB, t = 3, p = 1, at most about 1 s on a mid-range phone. PBKDF2 only as a compile-time fallback.
@@ -96,7 +96,7 @@ Rule: cost the gateway less than today's eager sync, never more.
 - Server-side work added: none.
 To verify during implementation: merges stay correct with lazy identity catch-up; real request count of today's WaSyncRunner as the baseline for a regression test.
 
-## 15. Implementation notes (rounds 1 to 7a)
+## 15. Implementation notes (rounds 1 to 7b)
 
 Round 1, `rosty_core::vault` (pure; the caller passes `Entropy`):
 - Blobs, all AES-256-GCM with the header as associated data: key blob `RWVK | ver | kdf id | 3 x u32 kdf words | salt 16 |
@@ -492,3 +492,93 @@ as good as possible; a safer option only where its UX cost is invisible.
 - Not verified on a device: everything in `wa-vault-device-tests.md` 8 to 8d, in particular the provider queries
   between four installed apps (and the start-up cost of a cold sibling), the lock-all broadcast to runtime receivers,
   the history file across a real lock and process death, and the unlock row's prompt over the Settings page.
+
+Round 7b, end-to-end sealed push previews, the preview setting and the locked WhatsApp call (`services/wa_gateway`
+`push::seal`, store migration v10; `rosty_wa_proto` `PushKey`/`PushKeyedRegistration`; `rosty_wa_client`,
+`rosty_ffi` `wa.register_push`; `:core-bridge`, `:platform` `wa/push`, `:wa`, `:shell`, `:messages`, `:phone`). Owner
+direction: do not hurt the UX, keep the threat model (seized or cloned device, other apps, backups). This round
+changes the gateway (13.4 said no gateway change; the owner allowed this one).
+- Push key: each install that has Firebase makes one EC P-256 key in Android Keystore for key agreement
+  (`PURPOSE_AGREE_KEY`, minSdk 34), alias `rosty.wa.push.<16 hex id>` (the id is the alias, nothing else is stored),
+  non-exportable, no user authentication and no unlocked-device requirement (it must open a push while the phone and
+  the vault are locked), TEE (StrongBox key agreement is not on every phone). Made on the first registration that has
+  an FCM token (`AndroidPushKeyStore.ensure`); deleted by `ShellContainer.forgetWhatsApp` (a reset, an unlink, the
+  reset before a new link), so the next link registers a new key and a push sealed to the old one falls back to the
+  content-free notice. Choice: ECDH rather than RSA-OAEP, because minSdk 34 has Keystore key agreement everywhere, the
+  wrapped key is 65 bytes instead of 256 (more room for the preview under FCM's 4 KB) and the gateway already has
+  `ring` (P-256 ECDH, HKDF, AES-GCM): no new crate anywhere.
+- Registration: `wa.register_push` now takes `PushKeyedRegistration {app, token, push_key?: {key_id, version: 1,
+  public_key: base64 SPKI}}` on the same `PUT /v1/push` (one request, as before; 14 holds). The gateway checks the key
+  (id `[A-Za-z0-9_-]{1,64}`, version 1, a P-256 SPKI whose point is on the curve) and refuses a bad one with 400; a
+  registration without a key clears a stored one. `PushRegistration` keeps its shape for older callers.
+- Gateway DB: schema v10 adds `push_tokens.key_id TEXT`, `key_version INTEGER`, `public_key BLOB` (65-byte point), all
+  nullable. Migration: `ALTER TABLE ... ADD COLUMN` in one transaction at start (`PRAGMA user_version` 9 -> 10); every
+  row stays, existing tokens get content-free pushes until the app registers again with a key (its next link-up). No
+  data is rewritten; a v10 database is refused by an older gateway binary ("newer than this gateway"), so a rollback
+  needs the DB backup.
+- Sealing (`push::seal`, scheme 1): per push a fresh P-256 key pair; z = ECDH(ephemeral, device); k =
+  HKDF-SHA256(salt = ephemeral point, ikm = z, info = "rosty-wa-push/1" | device point); AES-256-GCM with a random
+  12-byte nonce and AAD "rosty-wa-push/1|" kid. FCM data: `kind` (and `call_id`, plus `missed` for a call end) in
+  clear, `v`, `kid`, `epk` (base64 point), `ct` (base64 nonce | ciphertext | tag). Sealed JSON: a message has `chat`,
+  `chat_alt`, `chat_name` (the stored chat name: one local read, only when some token has a key), `group`, `sender`,
+  `sender_alt`, `name` (push name), `text` (whole text, else caption, else media label; at most 1024 bytes, then halved
+  until the data map is at most 3800 bytes), `id`, `ts`, `count`; a call or call end has `sender` and `name`. A token
+  without a key gets today's payload. Nothing is logged but the app and the error. In clear by design: the kind and the
+  opaque call id (so a push that cannot be opened still rings and ends the ring) and whether a call was missed; timing
+  and size were visible to Google before too. Chat ids, numbers and names, which the old payload carried in clear,
+  are now sealed for apps with a key.
+- App side: `WaPush.onMessage` opens a sealed push with the Keystore key (`SealedPush.open`, pure JCA but the ECDH)
+  and returns an `OpenedPush` whose `data` reads like the old payload, so every reader stays; `routing` (clear keys
+  only) is what goes on the `wa_push` event. Nothing decrypted is written: it goes into the notification only; with
+  the vault open the event socket brings the message as before (the push content is not put into the RAM store).
+  A push that does not open (rotated key, other key id, tampered) gives the content-free notice.
+- Messages while locked (`WaPushNotices`, `LockedWhatsAppNotice.addChat`): one notice per chat, title = device contact
+  of the number (contacts are not vault secrets), else the chat name, else the push name, else the number; a group by
+  its subject with "Author: text" lines; up to 6 lines and the chat's count kept only in the notification's extras.
+  `VISIBILITY_PRIVATE` with the public version "WhatsApp, N new messages" (the total kept as a number in
+  `rosty_wa_locked`). No action. A push without a key names the chat only when a device contact owns its number (name
+  and count, no text, private); otherwise the content-free notice (public, as round 4). The unlock clears them all.
+- Preview setting (Settings, Notifications, "WhatsApp previews": "Name and preview" default, "Name only", "No content",
+  hint "Apps with notification access, and Android's notification history if it is on, can see what is shown"; en,
+  tr; in the `rosty_wa_preview` preferences, a setting only, so a cold process reads it without the core). It applies
+  to the locked notices and to the unlocked ones (`MessagesNotifier.forPreview`): "Name only" blanks the lines (their
+  count stays) and shows "N new messages", "No content" also titles "WhatsApp", drops the picture and the inline reply.
+  What the notification's extras keep follows the setting too (a listener reads no more than the screen). Unlocked
+  WhatsApp notifications are now `VISIBILITY_PRIVATE` with the same public version. The group shows only when WhatsApp
+  is linked. Goldens `e6.12-notifications-wa-preview` (light, dark) and `-tr`.
+- Phone, locked call: the ring is titled by `waLockedCallerTitle` (device contact, else the sealed name, else the
+  number, else "WhatsApp call"; an unsealed push is named by a device contact only, never by its clear name), public
+  on the lock screen like any call. The full-screen intent is back: it, the tap and Answer open `WaLockedCallActivity`
+  (own task, excluded from recents, `setShowWhenLocked`/`setTurnScreenOn` in code), which shows only the caller with
+  Answer and Decline (the native fallback layout) and closes when the ring is over. Answer stops the ring,
+  `requestDismissKeyguard` (the vault keys need an unlocked phone: `setUnlockedDeviceRequired`), then hands the answer
+  to `MainActivity` as a notification answer; `PhoneApp` now opens the vault inline (`WaVault.unlockInline`: a sibling
+  hand-over, asked for at most 600 ms, else the biometric prompt over the page) and only falls back to the unlock page
+  when the passphrase is needed or the prompt was cancelled; then `WaCallActions` accepts. `WaAnswerTiming` logs each
+  step as "<step> after N ms" under `wa-answer` (no id, number or name). Decline still only stops the ring here.
+- Threat-model notes (accepted, mitigated by the setting): (a) apps the person granted notification access receive
+  the decrypted sender and text of every WhatsApp notification, locked or not; (b) Android's notification history, when
+  the person turned it on, keeps them in a CE-encrypted system store (readable only after the first unlock since boot).
+  Otherwise unchanged: a seized or cloned device holds the push key only inside the Keystore (non-exportable; a clone
+  gets no key and pushes stop opening), nothing decrypted is on disk in the app, the key and no content are in backups
+  (`allowBackup=false`; Keystore keys are never backed up). A running phone in someone else's hands shows the previews
+  the person chose, like any messenger; "No content" restores round 4's behaviour. The lock screen never shows message
+  content; a caller's name for a ringing call is shown, as for a phone call.
+- Unchanged as decided: no process kill on lock, FLAG_SECURE, the other vault rules, 14 (no extra request: the key
+  rides on the existing registration; the gateway adds one local DB read per push with a keyed token).
+- Tests: Rust `push::seal` (round trip with a test device key, fresh ephemeral and nonce, the kid bound as AAD, key
+  checks), `push::tests` (clear keys only, nothing readable in the map, group and call content, the 4 KB fit, char
+  boundaries, preview text, no FCM-reserved key, the app fixture), `store` (push keys follow their token, v9 -> v10
+  keeps tokens), `tests/api.rs` (keyed registration, a bad key refused), FFI fixture `wa.register_push.keyed`. Kotlin:
+  `:platform` `SealedPushTest` (opens `sealed-push-fixture.json`, a push the Rust gateway sealed to a test-only key
+  pair in test resources; tampering, other keys and versions do not open; `OpenedPush`), `WaLockedPushTest` (sealed
+  locked call named and ringing over the lock screen through the locked-call page, a device contact for an unsealed
+  push, a push that does not open, the title rules), `:messages` `LockedWhatsAppPreviewTest`, `LockedWhatsAppNoticeTest`,
+  `NotificationSettingsViewModelTest`, `E612ShotTest`; core-bridge contract for the keyed fixture.
+- Deviations: the preview choice lives in its own preferences, not in `messages-prefs.json` (no Rust prefs change,
+  readable by a cold process; "Reset settings" does not reset it). The push content is not inserted into the RAM store
+  (the socket brings the message once the vault is open, which is what 14 already pays for). Messages also receives
+  call pushes as before; it has no locked-call page (Phone only).
+- Not verified on a device: everything in `wa-vault-device-tests.md` 8e and 8f, in particular Keystore ECDH on the
+  owner's phones, `requestDismissKeyguard` plus the vault prompt order on HyperOS, the measured answer time, and that
+  the full-screen intent opens the locked-call page on HyperOS.

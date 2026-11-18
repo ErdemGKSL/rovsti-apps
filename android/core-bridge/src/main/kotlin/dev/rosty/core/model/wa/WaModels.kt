@@ -143,10 +143,26 @@ data class KeyInfo(
     val current: Boolean = false,
 )
 
+/**
+ * `wa.register_push` (Rust `PushKeyedRegistration`): the FCM token and, from an app that has one, its push key (round
+ * 7b). Without a key the gateway sends this app content-free pushes.
+ */
 @Serializable
 data class PushRegistration(
     val app: AppId,
     val token: String,
+    @SerialName("push_key") @EncodeDefault(NEVER) val pushKey: PushKey? = null,
+)
+
+/**
+ * The public half of this install's push key: [publicKey] is the base64 X.509 `SubjectPublicKeyInfo` of a P-256
+ * Keystore key, [version] the sealing scheme (1). The private half never leaves the Keystore.
+ */
+@Serializable
+data class PushKey(
+    @SerialName("key_id") val keyId: String,
+    val version: Int,
+    @SerialName("public_key") val publicKey: String,
 )
 
 // ---- messages

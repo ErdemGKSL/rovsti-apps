@@ -6,9 +6,10 @@ import com.google.firebase.messaging.RemoteMessage
 import dev.rosty.platform.wa.WaPush
 
 /**
- * FCM wake for WhatsApp (AD-WA6). The push carries no message text: [WaPush.onMessage] posts the incoming-call
- * notification for `kind=call` (so a cold process still rings) and then wakes `:wa` with the `wa_push` event. Compiled
- * into the `firebase` flavor only.
+ * FCM wake for WhatsApp (AD-WA6). The push carries no readable text: to an install with a push key it is sealed
+ * (round 7b) and [WaPush.onMessage] opens it in memory with the Keystore key. It posts the incoming-call notification
+ * for `kind=call` (so a cold process still rings; while the vault is locked over the lock screen through
+ * `WaLockedCallActivity`) and then wakes `:wa` with the `wa_push` event. Compiled into the `firebase` flavor only.
  */
 class RostyMessagingService : FirebaseMessagingService() {
     /** A new FCM token: the gateway must learn it, or pushes go to the old one. */

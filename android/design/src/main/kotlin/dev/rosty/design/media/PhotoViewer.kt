@@ -230,7 +230,7 @@ private var SemanticsPropertyReceiver.viewerShade by PhotoViewerSemantics.Shade
 private fun bottomBandHeight(): Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 120.dp
 
 /** The 16 x 32 luminance grid of a decoded picture, or null when it cannot be drawn into a bitmap. */
-private fun lumaGridOf(image: coil3.Image): FloatArray? =
+internal fun lumaGridOf(image: coil3.Image): FloatArray? =
     runCatching {
         val small = image.toBitmap(ViewerScrim.COLS, ViewerScrim.ROWS)
         val pixels = IntArray(ViewerScrim.COLS * ViewerScrim.ROWS)

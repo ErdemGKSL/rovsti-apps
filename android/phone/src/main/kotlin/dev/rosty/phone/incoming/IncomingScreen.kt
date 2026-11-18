@@ -67,6 +67,8 @@ import dev.rosty.phone.ANSWER_GREEN
 import dev.rosty.phone.AURA_SHOT_PHASE
 import dev.rosty.phone.DECLINE_RED
 import dev.rosty.phone.IncomingMetrics
+import dev.rosty.phone.call.OnAura
+import dev.rosty.phone.call.OnAuraSecondary
 import dev.rosty.phone.wa.WaAudioLabel
 
 /** The nodes the tests and the accessibility checks find. */
@@ -460,8 +462,6 @@ private fun CallAvatar(
 /** The key of the avatar that flies to the In-Call screen (S3). */
 const val AvatarKey = "call-avatar"
 
-private val OnAura = Color.White
-private val OnAuraSecondary = Color.White.copy(alpha = 0.78f)
 private const val INDIGO = 0xFF5E5CE6
 private const val MESH_ALPHA = 0.28f
 private const val LOCK_CHIP_ALPHA = 0.18f

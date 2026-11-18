@@ -75,6 +75,8 @@ import dev.rosty.design.transition.isTransitionActive
 import dev.rosty.design.transition.rostySharedBounds
 import dev.rosty.phone.DECLINE_RED
 import dev.rosty.phone.InCallMetrics
+import dev.rosty.phone.call.OnAura
+import dev.rosty.phone.call.OnAuraSecondary
 import dev.rosty.phone.incoming.AuraMode
 import dev.rosty.phone.incoming.AvatarKey
 import dev.rosty.phone.incoming.CallNameText
@@ -710,6 +712,3 @@ private const val HANG_UP = 135f
 private const val INDIGO = 0xFF5E5CE6
 private const val MESH_ALPHA = 0.28f
 private const val CHIP_ALPHA = 0.18f
-
-internal val OnAura = Color.White
-internal val OnAuraSecondary = Color.White.copy(alpha = 0.78f)

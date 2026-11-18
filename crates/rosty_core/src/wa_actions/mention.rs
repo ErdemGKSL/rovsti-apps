@@ -30,7 +30,11 @@ pub fn query_at(text: &str, caret: usize) -> Option<MentionQuery> {
     if query.chars().any(char::is_whitespace) || query.chars().count() > MAX_QUERY_CHARS {
         return None;
     }
-    if head[..at].chars().next_back().is_some_and(|c| !c.is_whitespace()) {
+    if head[..at]
+        .chars()
+        .next_back()
+        .is_some_and(|c| !c.is_whitespace())
+    {
         return None;
     }
     Some(MentionQuery {

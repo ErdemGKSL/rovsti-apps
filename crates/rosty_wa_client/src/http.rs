@@ -10,13 +10,12 @@ use rosty_wa_proto::api::routes;
 use rosty_wa_proto::{
     ApiError, CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey,
     CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, ForwardMessage,
-    GatewayUrl, GroupInfo, MessageReceipts,
-    IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead,
-    MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions, MintKey, PeopleJobStatus,
-    PeopleRecord, PeopleSyncStart, PlaceCall, ProfilesRequest, PushKeyedRegistration,
-    PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText, ScheduledText,
-    SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage, StatusList,
-    SubscribePresence, WaMessage, WaProfile, WaUser,
+    GatewayUrl, GroupInfo, IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest,
+    LookupUsers, MarkRead, MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions,
+    MessageReceipts, MintKey, PeopleJobStatus, PeopleRecord, PeopleSyncStart, PlaceCall,
+    ProfilesRequest, PushKeyedRegistration, PushRegistration, RevokeMessage, RichChat, RichMessage,
+    ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage,
+    StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;

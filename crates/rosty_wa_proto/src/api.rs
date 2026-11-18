@@ -309,7 +309,11 @@ pub struct SendText {
 
 impl SendText {
     /// A plain text, or a reply when `quoted_id` is set.
-    pub fn new(chat: impl Into<String>, text: impl Into<String>, quoted_id: Option<String>) -> Self {
+    pub fn new(
+        chat: impl Into<String>,
+        text: impl Into<String>,
+        quoted_id: Option<String>,
+    ) -> Self {
         Self {
             chat: chat.into(),
             text: text.into(),
@@ -342,8 +346,7 @@ impl LinkPreviewOut {
         let Some(b64) = self.thumbnail_b64.as_deref() else {
             return Ok(None);
         };
-        let bytes =
-            crate::decode_b64(b64).ok_or(crate::MediaOptionError::ThumbnailNotBase64)?;
+        let bytes = crate::decode_b64(b64).ok_or(crate::MediaOptionError::ThumbnailNotBase64)?;
         crate::check_thumbnail(&bytes)?;
         Ok(Some(bytes))
     }
@@ -1222,7 +1225,8 @@ mod tests {
             serde_json::to_value(&plain).expect("json"),
             serde_json::json!({"chat": "100000000011@s.whatsapp.net", "text": "Hi", "quoted_id": null})
         );
-        let old: SendText = serde_json::from_str(r#"{"chat":"c","text":"t","quoted_id":null}"#).expect("old");
+        let old: SendText =
+            serde_json::from_str(r#"{"chat":"c","text":"t","quoted_id":null}"#).expect("old");
         assert!(old.mentions.is_empty() && old.link_preview.is_none());
     }
 

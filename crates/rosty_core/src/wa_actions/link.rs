@@ -351,7 +351,9 @@ pub fn parse_html(html: &str, page_url: &str) -> LinkMeta {
             } else {
                 "</style"
             };
-            at = lower[tag..].find(close).map_or(stop, |e| tag + e + close.len());
+            at = lower[tag..]
+                .find(close)
+                .map_or(stop, |e| tag + e + close.len());
             continue;
         }
         if lower[tag..].starts_with("<title") {
@@ -426,7 +428,10 @@ mod tests {
         let found = first_url("(www.example.com/x).").expect("link");
         assert_eq!(found.url, "https://www.example.com/x");
         assert_eq!((found.start, found.end), (1, 18));
-        assert_eq!(first_url("HTTPS://Example.com").map(|f| f.url).as_deref(), Some("HTTPS://Example.com"));
+        assert_eq!(
+            first_url("HTTPS://Example.com").map(|f| f.url).as_deref(),
+            Some("HTTPS://Example.com")
+        );
     }
 
     #[test]
@@ -443,20 +448,38 @@ mod tests {
 
     #[test]
     fn host_for_the_card() {
-        assert_eq!(host_of("https://WWW.Example.com:8443/a").as_deref(), Some("example.com"));
+        assert_eq!(
+            host_of("https://WWW.Example.com:8443/a").as_deref(),
+            Some("example.com")
+        );
         assert_eq!(host_of("ftp://example.com"), None);
     }
 
     #[test]
     fn resolves_relative_urls() {
         let base = "https://example.com/news/item?id=3";
-        assert_eq!(resolve_url(base, "/img/a.jpg").as_deref(), Some("https://example.com/img/a.jpg"));
-        assert_eq!(resolve_url(base, "b.jpg").as_deref(), Some("https://example.com/news/b.jpg"));
-        assert_eq!(resolve_url(base, "//cdn.example.com/c.jpg").as_deref(), Some("https://cdn.example.com/c.jpg"));
-        assert_eq!(resolve_url(base, "http://other.org/d.png").as_deref(), Some("http://other.org/d.png"));
+        assert_eq!(
+            resolve_url(base, "/img/a.jpg").as_deref(),
+            Some("https://example.com/img/a.jpg")
+        );
+        assert_eq!(
+            resolve_url(base, "b.jpg").as_deref(),
+            Some("https://example.com/news/b.jpg")
+        );
+        assert_eq!(
+            resolve_url(base, "//cdn.example.com/c.jpg").as_deref(),
+            Some("https://cdn.example.com/c.jpg")
+        );
+        assert_eq!(
+            resolve_url(base, "http://other.org/d.png").as_deref(),
+            Some("http://other.org/d.png")
+        );
         assert_eq!(resolve_url(base, "data:image/png;base64,AAA"), None);
         assert_eq!(resolve_url(base, "javascript:alert(1)"), None);
-        assert_eq!(resolve_url("https://example.com", "e.jpg").as_deref(), Some("https://example.com/e.jpg"));
+        assert_eq!(
+            resolve_url("https://example.com", "e.jpg").as_deref(),
+            Some("https://example.com/e.jpg")
+        );
     }
 
     #[test]
@@ -472,7 +495,10 @@ mod tests {
         let meta = parse_html(html, "https://example.com/page");
         assert_eq!(meta.title.as_deref(), Some("Rich \"title\""));
         assert_eq!(meta.description.as_deref(), Some("Rich été"));
-        assert_eq!(meta.image.as_deref(), Some("https://example.com/img/card.jpg"));
+        assert_eq!(
+            meta.image.as_deref(),
+            Some("https://example.com/img/card.jpg")
+        );
         assert_eq!(meta.url.as_deref(), Some("https://example.com/canonical"));
     }
 
@@ -492,7 +518,9 @@ mod tests {
     #[test]
     fn cuts_long_text_and_survives_broken_html() {
         let long = "x".repeat(500);
-        let html = format!("<meta property=\"og:title\" content=\"{long}\"><meta property=\"og:description");
+        let html = format!(
+            "<meta property=\"og:title\" content=\"{long}\"><meta property=\"og:description"
+        );
         let meta = parse_html(&html, "https://e.com/");
         let title = meta.title.expect("title");
         assert_eq!(title.chars().count(), MAX_TITLE_CHARS);
@@ -501,8 +529,14 @@ mod tests {
         // A cut in the middle of a character.
         let mut big = "<title>é</title>".to_owned();
         big.push_str(&"é".repeat(MAX_HTML_BYTES));
-        assert_eq!(parse_html(&big, "https://e.com/").title.as_deref(), Some("é"));
+        assert_eq!(
+            parse_html(&big, "https://e.com/").title.as_deref(),
+            Some("é")
+        );
         // Unknown and broken entities stay as they are.
-        assert_eq!(decode_entities("a &bogus; &#xZZ; & b"), "a &bogus; &#xZZ; & b");
+        assert_eq!(
+            decode_entities("a &bogus; &#xZZ; & b"),
+            "a &bogus; &#xZZ; & b"
+        );
     }
 }

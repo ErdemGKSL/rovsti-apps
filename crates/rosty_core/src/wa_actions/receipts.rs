@@ -16,7 +16,9 @@ pub struct MemberReceipt {
 }
 
 /// A section of the sheet, in the order shown.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiptSection {
     /// A voice or video note was played.
@@ -90,7 +92,13 @@ pub fn sections(members: &[MemberReceipt], voice: bool) -> Vec<SectionRows> {
 mod tests {
     use super::*;
 
-    fn member(jid: &str, d: Option<i64>, r: Option<i64>, p: Option<i64>, left: bool) -> MemberReceipt {
+    fn member(
+        jid: &str,
+        d: Option<i64>,
+        r: Option<i64>,
+        p: Option<i64>,
+        left: bool,
+    ) -> MemberReceipt {
         MemberReceipt {
             jid: jid.to_owned(),
             delivered_ms: d,
@@ -137,7 +145,14 @@ mod tests {
         ];
         let got = sections(&members, true);
         assert_eq!(got[0].section, ReceiptSection::Played);
-        assert_eq!(got[0].rows.iter().map(|r| r.jid.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert_eq!(
+            got[0]
+                .rows
+                .iter()
+                .map(|r| r.jid.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "a"]
+        );
         assert_eq!(got[1].section, ReceiptSection::Read);
         assert!(sections(&[], true).is_empty());
     }

@@ -99,7 +99,10 @@ mod tests {
             Err(ForwardRefusal::Placeholder)
         );
         assert_eq!(
-            can_forward(&ForwardSource { is_media: true, ..ok }),
+            can_forward(&ForwardSource {
+                is_media: true,
+                ..ok
+            }),
             Err(ForwardRefusal::MediaMissing)
         );
         assert_eq!(

@@ -19,8 +19,8 @@ pub use forward::{
     FREQUENTLY_FORWARDED_SCORE, ForwardRefusal, ForwardSource, can_forward, forwarded_many,
 };
 pub use link::{
-    FoundUrl, LinkMeta, MAX_DESCRIPTION_CHARS, MAX_HTML_BYTES, MAX_TITLE_CHARS, first_url,
-    host_of, is_fetchable, parse_html, resolve_url,
+    FoundUrl, LinkMeta, MAX_DESCRIPTION_CHARS, MAX_HTML_BYTES, MAX_TITLE_CHARS, first_url, host_of,
+    is_fetchable, parse_html, resolve_url,
 };
 pub use mention::{
     Encoded, MentionQuery, MentionSpan, MentionTarget, Pick, addresses_me, encode, mention_token,

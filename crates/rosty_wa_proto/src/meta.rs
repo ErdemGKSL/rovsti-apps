@@ -1076,7 +1076,10 @@ mod tests {
         let old: MessageMeta = serde_json::from_str(r#"{"forwarded":true}"#).expect("old meta");
         assert_eq!(old.forwarding_score, None);
         assert_eq!(old.link_preview, None);
-        assert_eq!(serde_json::to_string(&old).expect("json"), r#"{"forwarded":true}"#);
+        assert_eq!(
+            serde_json::to_string(&old).expect("json"),
+            r#"{"forwarded":true}"#
+        );
         let meta = MessageMeta {
             forwarding_score: Some(5),
             link_preview: Some(LinkPreview {
@@ -1102,9 +1105,13 @@ mod tests {
                 "system": {"type": "disappearing", "seconds": 604800, "by": "me"}
             })
         );
-        assert_eq!(serde_json::from_value::<MessageMeta>(json).expect("back"), meta);
+        assert_eq!(
+            serde_json::from_value::<MessageMeta>(json).expect("back"),
+            meta
+        );
         // A system line a newer gateway adds reads as `other`.
-        let newer: SystemNote = serde_json::from_str(r#"{"type":"pinned","by":"x"}"#).expect("other");
+        let newer: SystemNote =
+            serde_json::from_str(r#"{"type":"pinned","by":"x"}"#).expect("other");
         assert_eq!(newer, SystemNote::Other);
     }
 
@@ -1112,7 +1119,10 @@ mod tests {
     fn chat_timer_and_disappearing_action() {
         let meta: ChatMeta = serde_json::from_str(r#"{"ephemeral_s":604800}"#).expect("chat meta");
         assert_eq!(meta.ephemeral_s, Some(604_800));
-        assert_eq!(serde_json::to_string(&ChatMeta::default()).expect("json"), "{}");
+        assert_eq!(
+            serde_json::to_string(&ChatMeta::default()).expect("json"),
+            "{}"
+        );
         let action = ChatAction {
             chat: "100000000011@s.whatsapp.net".into(),
             action: ChatActionKind::Disappearing { seconds: 86_400 },

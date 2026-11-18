@@ -122,7 +122,7 @@ abstract class RostyShellActivity<R : Any> : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
-        container.vaultLock?.onActivityStarted()
+        container.vaultLock.onActivityStarted()
     }
 
     override fun onResume() {
@@ -132,7 +132,7 @@ abstract class RostyShellActivity<R : Any> : FragmentActivity() {
     }
 
     override fun onStop() {
-        container.vaultLock?.onActivityStopped(isChangingConfigurations)
+        container.vaultLock.onActivityStopped(isChangingConfigurations)
         super.onStop()
     }
 

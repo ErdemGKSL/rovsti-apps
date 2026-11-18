@@ -11,8 +11,10 @@ import dev.rosty.wa.share.WaLinkShareHost
 interface HasContainer<C : ShellContainer> : WaLinkShareHost {
     val container: C
 
-    /** What `:wa`'s `WaLinkProvider` hands to a sibling Rosty app: the link this app stored, if any. */
+    /** What `:wa`'s `WaLinkProvider` hands to a sibling Rosty app: the link of this app's unlocked vault, if any. */
     override suspend fun waLinkToShare(): StoredLink? = container.sharedWaLink()
+
+    override suspend fun waLinkOffered(): Boolean = container.waLinkOffered()
 }
 
 /** The container of the app this context belongs to; the application must implement [HasContainer]. */

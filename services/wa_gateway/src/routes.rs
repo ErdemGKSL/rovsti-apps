@@ -15,9 +15,9 @@ use rosty_wa_proto::{
     ChatState, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope, GatewayEvent, GroupInfo,
     IdentityMappings, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest,
     LookupUsers, MAX_LOOKUP, MAX_SEND_THUMBNAIL_BYTES, MarkRead, MediaKind, MediaOptionError,
-    MessageBody, MintKey, PushRegistration, RichChat, RichMessage, ScheduleText, ScheduledState,
-    ScheduledText, SendReaction, SendText, Sent, SetPresence, SubscribePresence, WaUser,
-    check_thumbnail, check_view_once, check_waveform, decode_b64,
+    MessageBody, MintKey, PushKeyedRegistration, RichChat, RichMessage, ScheduleText,
+    ScheduledState, ScheduledText, SendReaction, SendText, Sent, SetPresence, SubscribePresence,
+    WaUser, check_thumbnail, check_view_once, check_waveform, decode_b64,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -305,15 +305,23 @@ async fn revoke_key(
 async fn register_push(
     State(state): State<AppState>,
     auth: Authed,
-    Json(reg): Json<PushRegistration>,
+    Json(reg): Json<PushKeyedRegistration>,
 ) -> ApiResult<StatusCode> {
     let token = reg.token.trim();
     if token.is_empty() || token.len() > MAX_PUSH_TOKEN_BYTES {
         return Err(HttpError::bad_request("invalid push token"));
     }
+    // An app with a push key gets sealed previews (round 7b); a bad key is
+    // refused rather than dropped, so the app does not believe it is in use.
+    let key = reg
+        .push_key
+        .as_ref()
+        .map(crate::push::seal::parse_push_key)
+        .transpose()
+        .map_err(|e| HttpError::bad_request(format!("invalid push key: {e}")))?;
     state
         .store()
-        .set_push_token(auth.instance, reg.app, token.to_owned())
+        .set_push_target(auth.instance, reg.app, token.to_owned(), key)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

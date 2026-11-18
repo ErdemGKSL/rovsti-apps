@@ -12,9 +12,10 @@ use rosty_wa_proto::{
     CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, GatewayUrl, GroupInfo,
     IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead,
     MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions, MintKey, PeopleJobStatus,
-    PeopleRecord, PeopleSyncStart, PlaceCall, ProfilesRequest, PushRegistration, RevokeMessage,
-    RichChat, RichMessage, ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted,
-    SetPresence, StarMessage, StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
+    PeopleRecord, PeopleSyncStart, PlaceCall, ProfilesRequest, PushKeyedRegistration,
+    PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText, ScheduledText,
+    SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage, StatusList,
+    SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -452,6 +453,13 @@ impl Gateway {
     }
 
     pub fn register_push(&self, reg: &PushRegistration) -> Result<(), ClientError> {
+        self.exec(Method::PUT, routes::PUSH, true, Payload::json(reg)?)
+            .map(drop)
+    }
+
+    /// [`Self::register_push`] with the app's push key (round 7b): one request
+    /// all the same. A gateway before the sealed push ignores the key.
+    pub fn register_push_keyed(&self, reg: &PushKeyedRegistration) -> Result<(), ClientError> {
         self.exec(Method::PUT, routes::PUSH, true, Payload::json(reg)?)
             .map(drop)
     }

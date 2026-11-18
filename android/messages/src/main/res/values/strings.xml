@@ -547,6 +547,11 @@
     <string name="notify_settings_unmute">Unmute</string>
     <string name="notify_settings_wa_locked">Unlock to see WhatsApp chats</string>
     <string name="notify_settings_none_muted">No muted conversations</string>
+    <string name="notify_settings_wa_preview">WhatsApp previews</string>
+    <string name="notify_settings_wa_preview_full">Name and preview</string>
+    <string name="notify_settings_wa_preview_name">Name only</string>
+    <string name="notify_settings_wa_preview_none">No content</string>
+    <string name="notify_settings_wa_preview_footer">Apps with notification access, and Android\'s notification history if it is on, can see what is shown.</string>
     <string name="notify_settings_muted_footer">Mute a conversation from its menu in Chats. Muted conversations still arrive, quietly.</string>
     <string name="quick_replies_title">Quick replies</string>
     <string name="quick_replies_empty">No quick replies yet. Add one below.</string>

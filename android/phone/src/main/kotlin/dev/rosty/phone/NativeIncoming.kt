@@ -33,6 +33,19 @@ object NativeIncoming {
         locked: Boolean,
         onAnswer: () -> Unit,
         onDecline: () -> Unit,
+    ): View = build(context, call.title, call.subtitle, locked, onAnswer, onDecline)
+
+    /**
+     * The same screen for a caller that is not a telephony call: the WhatsApp ring while the vault is locked
+     * (round 7b, `WaLockedCallActivity`), where [title] is the caller and [subtitle] says it is WhatsApp.
+     */
+    fun build(
+        context: Context,
+        title: String,
+        subtitle: String?,
+        locked: Boolean,
+        onAnswer: () -> Unit,
+        onDecline: () -> Unit,
     ): View {
         val dp = context.resources.displayMetrics.density
 
@@ -64,7 +77,7 @@ object NativeIncoming {
                         intArrayOf(0xFF0C3A33.toInt(), 0xFF05100E.toInt(), Color.BLACK),
                     )
                 // The whole screen is one live region: TalkBack announces the caller (focus order: caller, Answer, Decline).
-                contentDescription = context.getString(R.string.native_incoming_from, call.title)
+                contentDescription = context.getString(R.string.native_incoming_from, title)
                 accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 isClickable = true // swallows touches so nothing underneath reacts
@@ -78,11 +91,11 @@ object NativeIncoming {
             ),
         )
         column.addView(
-            text(call.title, 28f, true, 1f).apply {
+            text(title, 28f, true, 1f).apply {
                 setPadding(0, px(24), 0, 0)
             },
         )
-        call.subtitle?.let { column.addView(text(it, 15f, false, 0.7f).apply { setPadding(0, px(4), 0, 0) }) }
+        subtitle?.let { column.addView(text(it, 15f, false, 0.7f).apply { setPadding(0, px(4), 0, 0) }) }
         column.addView(View(context), LinearLayout.LayoutParams(0, 0, 1f))
 
         fun button(

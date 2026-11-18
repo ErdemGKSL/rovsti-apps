@@ -2,6 +2,7 @@ package dev.rosty.wa.calls
 
 import dev.rosty.core.model.phone.CallDirection
 import dev.rosty.core.model.phone.CallPhase
+import dev.rosty.platform.wa.WaAnswerTiming
 import dev.rosty.platform.wa.WaIncoming
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -70,9 +71,13 @@ class WaCallActions(
                     val call = list.firstOrNull { it.callId == id }
                     call != null && (call.isRinging() || call.phase is CallPhase.Ended)
                 }
-            } ?: return
+            } ?: return WaAnswerTiming.finish(id, "the call never showed")
         val call = due.firstOrNull { it.callId == id } ?: return
-        if (call.isRinging()) calls.accept(id)
+        if (!call.isRinging()) return WaAnswerTiming.finish(id, "the call was over")
+        // A locked answer (round 7b) is timed from the tap; any other call logs nothing here.
+        WaAnswerTiming.mark(id, "call ringing in the app")
+        val result = calls.accept(id)
+        WaAnswerTiming.finish(id, if (result is CallResult.Started) "connected" else "answer failed")
     }
 
     private fun dev.rosty.core.model.wa.CallSummary.isRinging() =

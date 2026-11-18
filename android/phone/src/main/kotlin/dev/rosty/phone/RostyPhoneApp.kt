@@ -7,6 +7,7 @@ import androidx.work.Configuration
 import dev.rosty.core.log.RostyLog
 import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.phone.wa.WaCallActionReceiver
+import dev.rosty.phone.wa.WaLockedCallActivity
 import dev.rosty.platform.PlatformComponents
 import dev.rosty.platform.contacts.ContactPhotos
 import dev.rosty.platform.identity.CallerLookup
@@ -40,6 +41,7 @@ class RostyPhoneApp :
                     mainActivity = MainActivity::class.java,
                     callAction = CallActionReceiver::class.java,
                     waCallAction = WaCallActionReceiver::class.java,
+                    waLockedCall = WaLockedCallActivity::class.java,
                 ),
             )
         }
@@ -54,7 +56,8 @@ class RostyPhoneApp :
             // A WhatsApp push whose caller is a LID gets its number from Phone's identity table (WA-R2).
             WaPush.lidNumber = { jid -> container.waNumberBlocking(jid) }
             // While Phone's WhatsApp vault is locked (always in a cold process: the keys only live in memory) a call
-            // shows from the push alone, content-free, and nothing reaches the gateway (`plans/wa-vault.md` 13.3).
+            // shows from the push alone, named by a device contact or the sealed push (round 7b), over the lock
+            // screen in WaLockedCallActivity, and nothing reaches the gateway (`plans/wa-vault.md` 13.3, 15).
             WaPush.locked = { container.waVaultIfMade?.unlocked != true }
         }
         // The people cache (names and WhatsApp pictures) follows its source from the start, so the incoming screen

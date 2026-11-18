@@ -39,6 +39,7 @@ import dev.rosty.messages.conversation.ConversationActions
 import dev.rosty.messages.conversation.ConversationSample
 import dev.rosty.messages.conversation.ConversationScreen
 import dev.rosty.messages.messagesTabItems
+import dev.rosty.messages.notify.WaPreviewMode
 import dev.rosty.messages.settings.notify.MutedRow
 import dev.rosty.messages.settings.notify.NotificationSettingsPage
 import dev.rosty.messages.settings.notify.NotificationSettingsUi
@@ -62,6 +63,7 @@ import org.robolectric.annotation.Config
  * E6.12 screenshots: the Settings root, Quick replies (and their chips above a composer), Text size (and bubbles at
  * Larger), the backup passphrase sheet and the restore preview; light and dark, Turkish where the words matter. Round
  * 7a: Notifications with the WhatsApp chats muted in WhatsApp (vault open) and with the unlock row (vault locked).
+ * Round 7b: the "WhatsApp previews" choice and its hint.
  */
 @Config(sdk = [35], application = TestMessagesApp::class)
 class E612ShotTest : ShotTest() {
@@ -185,6 +187,17 @@ class E612ShotTest : ShotTest() {
     @Config(qualifiers = "+tr-rTR")
     @Test
     fun notificationsWhatsAppLockedTurkish() = page("e6.12-notifications-wa-locked-tr") { Notifications(it, waLocked) }
+
+    // ---- Notifications, WhatsApp previews (round 7b)
+
+    private val waPreview = waLocked.copy(waPreview = WaPreviewMode.NameOnly)
+
+    @Test fun notificationsWhatsAppPreviews() = page("e6.12-notifications-wa-preview") { Notifications(it, waPreview) }
+
+    @Config(qualifiers = "+tr-rTR")
+    @Test
+    fun notificationsWhatsAppPreviewsTurkish() =
+        page("e6.12-notifications-wa-preview-tr") { Notifications(it, waPreview) }
 
     // ---- Quick replies
 

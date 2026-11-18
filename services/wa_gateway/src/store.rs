@@ -471,7 +471,34 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (instance_id, jid)
     );
     ",
+    // v10: sealed push previews (round 7b). The public half of each app
+    // install's push key next to its token: `key_id` names it on the phone,
+    // `key_version` is the sealing scheme, `public_key` the raw P-256 point
+    // (65 bytes). NULL for a token registered without a key, which keeps the
+    // content-free push. Only new nullable columns: every row stays.
+    "
+    ALTER TABLE push_tokens ADD COLUMN key_id TEXT;
+    ALTER TABLE push_tokens ADD COLUMN key_version INTEGER;
+    ALTER TABLE push_tokens ADD COLUMN public_key BLOB;
+    ",
 ];
+
+/// The public half of an app install's push key, as stored (round 7b).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DevicePushKey {
+    pub key_id: String,
+    pub version: u32,
+    /// The uncompressed P-256 point (`0x04 | x | y`).
+    pub point: [u8; 65],
+}
+
+/// Where a push goes: an app's FCM token and, when it registered one, its key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PushTarget {
+    pub app: AppId,
+    pub token: String,
+    pub key: Option<DevicePushKey>,
+}
 
 /// Brings `conn` to the latest schema using `PRAGMA user_version`.
 pub fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
@@ -927,19 +954,108 @@ impl Store {
         .await
     }
 
+    /// Registers `token` for `app` without a push key: the app gets
+    /// content-free pushes, and a key it registered before is forgotten.
     pub async fn set_push_token(
         &self,
         instance: InstanceId,
         app: AppId,
         token: String,
     ) -> Result<(), StoreError> {
+        self.set_push_target(instance, app, token, None).await
+    }
+
+    /// Registers `token` for `app` with its push key (or none). One row per
+    /// instance and app; a new registration replaces token and key together.
+    pub async fn set_push_target(
+        &self,
+        instance: InstanceId,
+        app: AppId,
+        token: String,
+        key: Option<DevicePushKey>,
+    ) -> Result<(), StoreError> {
         self.run(move |conn| {
+            let (key_id, version, point) = match key {
+                Some(k) => (Some(k.key_id), Some(k.version), Some(k.point.to_vec())),
+                None => (None, None, None),
+            };
             conn.execute(
-                "INSERT INTO push_tokens (instance_id, app, token) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(instance_id, app) DO UPDATE SET token = excluded.token",
-                params![instance.as_str(), to_tag(&app), token],
+                "INSERT INTO push_tokens (instance_id, app, token, key_id, key_version, public_key)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(instance_id, app) DO UPDATE SET token = excluded.token,
+                    key_id = excluded.key_id, key_version = excluded.key_version,
+                    public_key = excluded.public_key",
+                params![
+                    instance.as_str(),
+                    to_tag(&app),
+                    token,
+                    key_id,
+                    version,
+                    point
+                ],
             )?;
             Ok(())
+        })
+        .await
+    }
+
+    /// Every token of the instance with its push key, if the app gave one. A
+    /// key that does not read back as a P-256 point counts as no key.
+    pub async fn push_targets(&self, instance: InstanceId) -> Result<Vec<PushTarget>, StoreError> {
+        self.run(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT app, token, key_id, key_version, public_key FROM push_tokens
+                 WHERE instance_id = ?1 ORDER BY app",
+            )?;
+            let rows = stmt.query_map([instance.as_str()], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<u32>>(3)?,
+                    r.get::<_, Option<Vec<u8>>>(4)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (app, token, key_id, version, point) = row?;
+                let key = match (key_id, version, point) {
+                    (Some(key_id), Some(version), Some(point)) => {
+                        <[u8; 65]>::try_from(point).ok().map(|point| DevicePushKey {
+                            key_id,
+                            version,
+                            point,
+                        })
+                    }
+                    _ => None,
+                };
+                out.push(PushTarget {
+                    app: from_tag(&app)?,
+                    token,
+                    key,
+                });
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    /// The stored name of a chat (`None` when it has none or is unknown).
+    pub async fn chat_name(
+        &self,
+        instance: InstanceId,
+        jid: String,
+    ) -> Result<Option<String>, StoreError> {
+        self.run(move |conn| {
+            let name = conn
+                .query_row(
+                    "SELECT name FROM chats WHERE instance_id = ?1 AND jid = ?2",
+                    params![instance.as_str(), jid],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
+            Ok(name)
         })
         .await
     }
@@ -1717,7 +1833,7 @@ mod tests {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, MIGRATIONS.len() as u32);
     }
 
     fn history_chat(jid: &str, ids: std::ops::Range<i64>) -> HistoryChat {
@@ -2220,6 +2336,90 @@ mod tests {
                 (AppId::Messages, "t2".to_owned()),
                 (AppId::Phone, "t3".to_owned())
             ]
+        );
+    }
+
+    fn push_key(n: u8) -> DevicePushKey {
+        let mut point = [n; 65];
+        point[0] = 4;
+        DevicePushKey {
+            key_id: format!("k{n}"),
+            version: 1,
+            point,
+        }
+    }
+
+    #[tokio::test]
+    async fn push_keys_follow_their_token() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        store
+            .set_push_target(id(1), AppId::Messages, "t1".into(), Some(push_key(1)))
+            .await
+            .unwrap();
+        store
+            .set_push_token(id(1), AppId::Phone, "t2".into())
+            .await
+            .unwrap();
+        let targets = store.push_targets(id(1)).await.unwrap();
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].app, AppId::Messages);
+        assert_eq!(targets[0].key, Some(push_key(1)));
+        assert_eq!(targets[1].key, None);
+        // A new key replaces the old one (rotation on a reset or a relink).
+        store
+            .set_push_target(id(1), AppId::Messages, "t1".into(), Some(push_key(2)))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.push_targets(id(1)).await.unwrap()[0].key,
+            Some(push_key(2))
+        );
+        // A registration without a key forgets it: content-free pushes again.
+        store
+            .set_push_token(id(1), AppId::Messages, "t3".into())
+            .await
+            .unwrap();
+        let first = &store.push_targets(id(1)).await.unwrap()[0];
+        assert_eq!((first.token.as_str(), &first.key), ("t3", &None));
+    }
+
+    #[tokio::test]
+    async fn v9_database_upgrades_to_push_keys_and_keeps_its_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+            let tx = conn.transaction().unwrap();
+            for sql in &MIGRATIONS[..9] {
+                tx.execute_batch(sql).unwrap();
+            }
+            tx.execute_batch("PRAGMA user_version = 9").unwrap();
+            tx.execute(
+                "INSERT INTO instances (id, created_ms, state) VALUES ('old', 1, 'connected')",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO push_tokens (instance_id, app, token) VALUES ('old', 'phone', 'tok')",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let targets = store.push_targets(InstanceId::new("old")).await.unwrap();
+        assert_eq!(
+            targets,
+            vec![PushTarget {
+                app: AppId::Phone,
+                token: "tok".into(),
+                key: None,
+            }]
         );
     }
 

@@ -3,6 +3,10 @@ package dev.rosty.platform.wa
 import android.content.Context
 import dev.rosty.platform.PlatformEvents
 import dev.rosty.platform.identity.CallerLookup
+import dev.rosty.platform.wa.push.PushContent
+import dev.rosty.platform.wa.push.PushKeyAgreement
+import dev.rosty.platform.wa.push.PushKeys
+import dev.rosty.platform.wa.push.SealedPush
 import org.json.JSONObject
 import java.util.concurrent.locks.LockSupport
 
@@ -11,7 +15,8 @@ import java.util.concurrent.locks.LockSupport
  * `google-services.json` still compiles and gets an empty token (the gateway then sends no push to this app).
  *
  * The app's `FirebaseMessagingService` calls [onMessage]; `:wa` collects the [EVENT] on `PlatformEvents` and calls
- * `WaEventStream.reconnectNow()` so the stream skips its backoff.
+ * `WaEventStream.reconnectNow()` so the stream skips its backoff. A push sealed to this install's push key (round 7b,
+ * `wa/push`) is opened first, in memory; the event carries only its clear routing keys.
  *
  * Ported from crates/rosty_android/kotlin/dev/rosty/bridge/WaPush.kt
  */
@@ -72,19 +77,18 @@ object WaPush {
     fun onMessage(
         context: Context,
         data: Map<String, String>,
-    ) {
+    ): OpenedPush {
         val app = context.applicationContext
+        // A sealed push (round 7b) opens with this install's Keystore key, locked or not; in memory only.
+        val opened = OpenedPush.open(data, PushKeys.store)
         val vaultLocked =
             try {
                 locked()
             } catch (_: RuntimeException) {
                 true
             }
-        if (vaultLocked) {
-            onLockedMessage(app, data)
-            return
-        }
         // The app's caller-ID when it installed one, else (a cold process) Android's own PhoneLookup (F28, F39).
+        // Device contacts are not vault secrets: a locked ring is named by them too.
         val lookup = CallerLookup.of(app)
         val contactName = { number: String ->
             try {
@@ -93,6 +97,10 @@ object WaPush {
                 null
             }
         }
+        if (vaultLocked) {
+            onLockedMessage(app, opened, contactName)
+            return opened
+        }
         val lidNumber = { jid: String ->
             try {
                 this.lidNumber(jid)
@@ -100,26 +108,92 @@ object WaPush {
                 null
             }
         }
-        WaIncomingNotice.of(data, contactName, lidNumber)?.let { WaIncoming.show(app, it) }
-        if (data["kind"] == "call_end") {
-            data["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }
-            WaMissedNotice.of(data, contactName, lidNumber)?.let { WaIncoming.showMissed(app, it) }
+        val plain = opened.data
+        WaIncomingNotice.of(plain, contactName, lidNumber)?.let { WaIncoming.show(app, it) }
+        if (plain["kind"] == "call_end") {
+            plain["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }
+            WaMissedNotice.of(plain, contactName, lidNumber)?.let { WaIncoming.showMissed(app, it) }
         }
-        PlatformEvents.emit(EVENT, payload(data))
+        PlatformEvents.emit(EVENT, payload(opened.routing))
+        return opened
     }
 
     /**
-     * [onMessage] while the vault is locked: the ring and the missed call show content-free, and nothing else happens
-     * (the push's `sender` and `name` are not read; no event wakes the stream, which is closed anyway).
+     * [onMessage] while the vault is locked: no lookup in the vault (the LID table is in it), no gateway request and
+     * no wake of the stream (it is closed anyway). The ring and the missed call name the caller from what the push
+     * could tell ([waLockedCallerTitle]): a device contact, else the decrypted name or number, else "WhatsApp call".
      */
     private fun onLockedMessage(
         app: Context,
-        data: Map<String, String>,
+        opened: OpenedPush,
+        contactName: (String) -> String?,
     ) {
-        WaIncomingNotice.contentFree(data)?.let { WaIncoming.show(app, it, locked = true) }
-        if (data["kind"] == "call_end") {
-            data["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }
-            WaMissedNotice.contentFree(data)?.let { WaIncoming.showMissed(app, it) }
+        val plain = opened.data
+        WaIncomingNotice.contentFree(plain)?.let {
+            WaIncoming.show(app, it.copy(title = waLockedCallerTitle(opened, contactName)), locked = true)
+        }
+        if (plain["kind"] == "call_end") {
+            plain["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }
+            WaMissedNotice.contentFree(plain)?.let {
+                WaIncoming.showMissed(app, it.copy(title = waLockedCallerTitle(opened, contactName)))
+            }
         }
     }
+}
+
+/**
+ * A push as the app reads it (round 7b). [data] has the keys of the content-free push (`kind`, `call_id`, `missed`,
+ * and from an opened sealed push `chat`, `count`, `sender`, `name`), so every existing reader keeps working; [content]
+ * is everything the sealed push said, or null (not sealed, or it did not open: the content-free notice then). [routing]
+ * is what may be logged or broadcast: the keys that were in clear anyway.
+ */
+class OpenedPush(
+    val data: Map<String, String>,
+    val content: PushContent?,
+    val sealed: Boolean,
+) {
+    val routing: Map<String, String>
+        get() = if (sealed) data.filterKeys { it in ROUTING_KEYS } else data
+
+    override fun toString(): String = "OpenedPush(kind=${data["kind"]}, sealed=$sealed, opened=${content != null})"
+
+    companion object {
+        private val ROUTING_KEYS = setOf("kind", "call_id", "missed")
+
+        /** Pure but for [keys]: opens [data] when it is sealed. */
+        fun open(
+            data: Map<String, String>,
+            keys: PushKeyAgreement,
+        ): OpenedPush {
+            if (!SealedPush.isSealed(data)) return OpenedPush(data, null, sealed = false)
+            val content = SealedPush.open(data, keys)
+            val plain = data.filterKeys { it in ROUTING_KEYS }.toMutableMap()
+            if (content != null) {
+                content.chat?.let { plain["chat"] = it }
+                content.count?.let { plain["count"] = it.toString() }
+                content.sender?.let { plain["sender"] = it }
+                content.name?.let { plain["name"] = it }
+            }
+            return OpenedPush(plain, content, sealed = true)
+        }
+    }
+}
+
+/**
+ * Pure: the caller's title on a ring while the vault is locked. A device contact that owns the number (device
+ * contacts are not vault secrets), else the WhatsApp name or the number the sealed push carried, else
+ * [WaIncomingNotice.FALLBACK_TITLE]. A push that is not sealed is in clear on FCM, but its name is still not shown,
+ * as before round 7b: only a device contact names it.
+ */
+fun waLockedCallerTitle(
+    opened: OpenedPush,
+    contactName: (String) -> String?,
+): String {
+    if (opened.content != null) return waCallerTitle(opened.data, contactName)
+    if (opened.sealed) return WaIncomingNotice.FALLBACK_TITLE
+    return waCallerNumber(opened.data)
+        ?.let(contactName)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: WaIncomingNotice.FALLBACK_TITLE
 }

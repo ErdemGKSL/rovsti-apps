@@ -102,10 +102,12 @@ import dev.rosty.platform.files.FileResult
 import dev.rosty.platform.files.ShareIntents
 import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.platform.telephony.KeypadTone
+import dev.rosty.platform.wa.WaAnswerTiming
 import dev.rosty.shell.RostyShell
 import dev.rosty.shell.settings.CommonSettingsPage
 import dev.rosty.shell.settings.aboutInfo
 import dev.rosty.shell.wa.WaVaultGated
+import dev.rosty.wa.vault.InlineUnlock
 import dev.rosty.wa.vault.SecureWindow
 import dev.rosty.wa.vault.WaVaultState
 import kotlinx.collections.immutable.persistentListOf
@@ -461,19 +463,42 @@ fun PhoneApp(
         if (number != null) container.waLauncher.place(number) else overlays.showToast(whatsAppToast)
     }
     // Answer or Decline tapped on a WhatsApp call notification: taken once, after the core is ready (waActions waits).
-    // An Answer on the notice of a call that rang while the vault was locked waits for the vault: the unlock page
-    // opens, and the answer goes out once the vault is open (`plans/wa-vault.md` 13.3).
+    // An Answer on the notice of a call that rang while the vault was locked waits for the vault (`plans/wa-vault.md`
+    // 13.3). Round 7b: the vault opens inline first, with no page in between (an unlocked sibling with no prompt, else
+    // the biometric prompt over what is on screen), and the answer goes out at once; the unlock page opens only when
+    // the passphrase is needed or the prompt was cancelled.
     val waAction by container.pendingWaCallAction.collectAsState()
     val vault by container.waVault.state.collectAsState()
+    val inlineScope = rememberCoroutineScope()
+    var inlineFor by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(waAction, vault) {
         val payload = waAction ?: return@LaunchedEffect
+        val callId = waCallIdOf(payload)
         when (vault) {
             WaVaultState.Unlocked -> {
                 container.pendingWaCallAction.value = null
+                callId?.let { WaAnswerTiming.mark(it, "vault open") }
                 container.waActions.offer(payload)
             }
 
-            is WaVaultState.Locked, WaVaultState.Broken -> {
+            is WaVaultState.Locked -> {
+                if (inlineFor != payload) {
+                    inlineFor = payload
+                    // Not this effect's scope: a state change while the prompt shows must not cancel it.
+                    inlineScope.launch {
+                        val result = container.waVault.unlockInline(siblingBudgetMs = WA_SIBLING_BUDGET_MS)
+                        if (result != InlineUnlock.Opened) {
+                            callId?.let { WaAnswerTiming.mark(it, "vault page (${result.name})") }
+                            val waiting = container.pendingWaCallAction.value == payload
+                            if (waiting && navigator.current != PhoneRoute.WhatsAppUnlock) {
+                                navigator.push(PhoneRoute.WhatsAppUnlock)
+                            }
+                        }
+                    }
+                }
+            }
+
+            WaVaultState.Broken -> {
                 if (navigator.current != PhoneRoute.WhatsAppUnlock) navigator.push(PhoneRoute.WhatsAppUnlock)
             }
 
@@ -877,6 +902,23 @@ private class AndroidInCallHost(
 }
 
 private const val NO_CALL = -1
+
+/**
+ * How long a locked answer waits for a sibling app to hand its link over before the biometric prompt shows (round 7b):
+ * an unlocked sibling answers at once, a cold one takes a moment to say no, and a ringing caller should not wait for it.
+ */
+private const val WA_SIBLING_BUDGET_MS = 600L
+
+/** Pure: the call id of a `wa_call_action` payload, or null. */
+internal fun waCallIdOf(payload: String): String? =
+    try {
+        org.json
+            .JSONObject(payload)
+            .optString("call_id")
+            .takeIf { it.isNotEmpty() }
+    } catch (_: org.json.JSONException) {
+        null
+    }
 
 /** Presents the Setup sheet, one at a time. */
 class SetupSheetPresenter(

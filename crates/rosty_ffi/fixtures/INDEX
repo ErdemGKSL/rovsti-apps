@@ -1165,6 +1165,7 @@ wa.push_parse.unknown
 wa.react
 wa.refresh_profiles
 wa.register_push
+wa.register_push.keyed
 wa.reject_call
 wa.relink
 wa.relink.qr

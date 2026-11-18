@@ -253,6 +253,8 @@ class PhoneManifestTest {
             setOf(
                 "$pkg.MainActivity",
                 "$pkg.WaHandoff",
+                // Round 7b: a WhatsApp call ringing while the vault is locked, over the lock screen.
+                "$pkg.wa.WaLockedCallActivity",
                 "$pkg.RostyInCallService",
                 "dev.rosty.platform.wa.WaCallService",
                 "$pkg.CallActionReceiver",

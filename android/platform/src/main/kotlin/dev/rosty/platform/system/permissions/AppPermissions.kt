@@ -135,8 +135,14 @@ class AppPermissions(
                 // Names and WhatsApp pictures from Contacts' people provider (X.1).
                 peopleUses = true,
                 waLinkUses = true,
-                // work-runtime (the WhatsApp outbox and sync jobs, E6.4s) merges these two.
-                libraryPermissions = setOf(Manifest.permission.WAKE_LOCK, Manifest.permission.FOREGROUND_SERVICE),
+                // work-runtime (the WhatsApp outbox and sync jobs, E6.4s) merges these two; androidx.biometric the
+                // prompt's USE_BIOMETRIC (the WhatsApp vault, plans/wa-vault.md 13.2; its USE_FINGERPRINT is removed).
+                libraryPermissions =
+                    setOf(
+                        Manifest.permission.WAKE_LOCK,
+                        Manifest.permission.FOREGROUND_SERVICE,
+                        Manifest.permission.USE_BIOMETRIC,
+                    ),
             )
 
         /** Camera capture goes through the system camera app, so there is no `CAMERA` permission. */

@@ -9,9 +9,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.os.PersistableBundle
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 
 /** The system clipboard. */
 interface ClipboardRepository {
@@ -26,6 +29,31 @@ interface ClipboardRepository {
 
     /** Emits each time the primary clip changes. */
     fun changes(): Flow<Unit>
+
+    /** Empties the clipboard. False when refused (or not supported). */
+    fun clear(): Boolean = false
+}
+
+/** How long a copied secret (the WhatsApp vault passphrase, plan 4) stays on the clipboard. */
+const val SECRET_CLIP_MS = 60_000L
+
+/**
+ * Copies a secret through the sensitive path (hidden from the paste preview) and clears it after [clearAfterMs] while
+ * the clipboard still holds it. A clip the app can no longer read (it went to the background, Android 10+) is cleared
+ * too: the secret may still be on it. A process that dies first leaves it there.
+ */
+fun ClipboardRepository.copySecret(
+    scope: CoroutineScope,
+    text: String,
+    clearAfterMs: Long = SECRET_CLIP_MS,
+): Boolean {
+    if (!copy(text, sensitive = true)) return false
+    scope.launch {
+        delay(clearAfterMs)
+        val now = primaryText()
+        if (now == null || now == text) clear()
+    }
+    return true
 }
 
 class SystemClipboardRepository(
@@ -61,6 +89,14 @@ class SystemClipboardRepository(
                 ?.toString()
         } catch (_: RuntimeException) {
             null
+        }
+
+    override fun clear(): Boolean =
+        try {
+            manager?.clearPrimaryClip()
+            manager != null
+        } catch (_: RuntimeException) {
+            false
         }
 
     override fun changes(): Flow<Unit> =

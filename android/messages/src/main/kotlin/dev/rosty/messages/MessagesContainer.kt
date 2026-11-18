@@ -3,8 +3,10 @@ package dev.rosty.messages
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
 import dev.rosty.core.model.wa.MessageMeta
+import dev.rosty.core.model.wa.StoredLink
 import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.ops.ChatOps
@@ -19,6 +21,7 @@ import dev.rosty.core.ops.QrOps
 import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
 import dev.rosty.core.ops.VaultOps
+import dev.rosty.core.ops.WaGateway
 import dev.rosty.design.time.SystemRostyClock
 import dev.rosty.messages.data.ContactBook
 import dev.rosty.messages.data.MessagesStore
@@ -29,7 +32,9 @@ import dev.rosty.messages.names.PacedAsks
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.messages.names.StoredWaNames
 import dev.rosty.messages.notify.AnnouncerSources
+import dev.rosty.messages.notify.LockedWhatsAppNotice
 import dev.rosty.messages.notify.MessageAnnouncer
+import dev.rosty.messages.notify.MessagesNotifier
 import dev.rosty.messages.notify.ReplyRouter
 import dev.rosty.messages.remind.RemindCenter
 import dev.rosty.messages.schedule.FileQueueStore
@@ -44,6 +49,7 @@ import dev.rosty.messages.wa.GatewayWaRemote
 import dev.rosty.messages.wa.MemoryLiveNameStore
 import dev.rosty.messages.wa.MemoryWaDrafts
 import dev.rosty.messages.wa.StoreWaChats
+import dev.rosty.messages.wa.UnlinkingWaRepository
 import dev.rosty.messages.wa.WaChatStates
 import dev.rosty.messages.wa.WaChats
 import dev.rosty.messages.wa.WaDownloads
@@ -67,6 +73,7 @@ import dev.rosty.platform.calllog.AndroidBlocklistRepository
 import dev.rosty.platform.calllog.BlocklistRepository
 import dev.rosty.platform.contacts.AndroidContactsRepository
 import dev.rosty.platform.contacts.ContactsRepository
+import dev.rosty.platform.files.copySecret
 import dev.rosty.platform.identity.PhoneNumbers
 import dev.rosty.platform.notify.ReminderRepositories
 import dev.rosty.platform.sms.AndroidScheduledSmsRepository
@@ -78,12 +85,27 @@ import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.platform.telephony.AndroidSimRepository
 import dev.rosty.platform.telephony.SimRepository
+import dev.rosty.platform.vault.AndroidVaultKeystore
+import dev.rosty.platform.vault.BiometricVaultAuthenticator
+import dev.rosty.platform.vault.VaultKeystore
 import dev.rosty.shell.ShellContainer
+import dev.rosty.shell.VaultLockLifecycle
+import dev.rosty.wa.DefaultWaRepository
+import dev.rosty.wa.WaGatewayOpener
+import dev.rosty.wa.WaLinkSource
+import dev.rosty.wa.WaLinkStore
+import dev.rosty.wa.WaRepository
 import dev.rosty.wa.avatars.VaultAvatarPictures
 import dev.rosty.wa.avatars.WaAvatars
 import dev.rosty.wa.sync.WaBackoff
 import dev.rosty.wa.sync.WaRequestBudget
 import dev.rosty.wa.sync.WaRequestGate
+import dev.rosty.wa.vault.SharedWaVaultPrefs
+import dev.rosty.wa.vault.VaultFlow
+import dev.rosty.wa.vault.WaVault
+import dev.rosty.wa.vault.WaVaultEnv
+import dev.rosty.wa.vault.WaVaultState
+import dev.rosty.wa.vault.vaultPrompts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
@@ -176,20 +198,150 @@ open class MessagesContainer(
         WaRequestGate(WaRequestBudget(System::currentTimeMillis), WaBackoff(System::currentTimeMillis))
     }
 
-    /** The WhatsApp vault of this app (`plans/wa-vault.md`); the Keystore half comes in round 4. */
+    /** The Rust half of the WhatsApp vault of this app (`plans/wa-vault.md`): every key lives there. */
     val vaultOps: VaultOps by lazy { createVaultOps() }
 
     protected open fun createVaultOps(): VaultOps = NativeVaultOps(rust)
+
+    /** The Keystore half: K_hw and K_daily, prompted over the activity ([vaultPromptHost]). */
+    val vaultKeystore: VaultKeystore by lazy { createVaultKeystore() }
+
+    protected open fun createVaultKeystore(): VaultKeystore =
+        AndroidVaultKeystore(context, BiometricVaultAuthenticator(vaultPromptHost))
+
+    private val waVaultOnce = lazy { createWaVault().also { vault -> scope.launch { vault.refresh() } } }
+
+    /**
+     * The WhatsApp vault (`plans/wa-vault.md` 3-6, 13): setup, unlock, change, reset and lock. Its state decides what
+     * the WhatsApp screens show and whether anything may reach the gateway; it reads the vault on first use.
+     */
+    val waVault: WaVault get() = waVaultOnce.value
+
+    /** [waVault] when something already made it: a push in a cold process must not start the core to learn "locked". */
+    val waVaultIfMade: WaVault? get() = if (waVaultOnce.isInitialized()) waVault else null
+
+    protected open fun createWaVault(): WaVault =
+        WaVault(
+            ops = vaultOps,
+            keystore = vaultKeystore,
+            prefs = SharedWaVaultPrefs(context),
+            env =
+                WaVaultEnv(
+                    bootCount = { AndroidVaultKeystore.bootCount(context) ?: 0L },
+                    now = System::currentTimeMillis,
+                ),
+            prompts = vaultPrompts(context.resources),
+            onLock = { lockWhatsApp() },
+            onUnlocked = { unlockedWhatsApp() },
+            onReset = { forgetWhatsApp() },
+        )
+
+    /** What the vault screens show and do; one per process, so a commit survives the page that started it. */
+    val vaultFlow: VaultFlow by lazy { VaultFlow(waVault, scope) { secret -> clipboard.copySecret(scope, secret) } }
+
+    /** Screen off, time in the background and "Lock now" lock WhatsApp (`plans/wa-vault.md` 6). */
+    override val vaultLock: VaultLockLifecycle by lazy {
+        VaultLockLifecycle(
+            scope = scope,
+            now = System::currentTimeMillis,
+            timeoutMs = { waVault.autoLockMs },
+            unlocked = { waVaultIfMade?.unlocked == true },
+            prompting = { waVaultIfMade?.prompting?.value == true },
+            lock = { waVaultIfMade?.lock() },
+        ).also { it.watchScreen(context) }
+    }
 
     /** WhatsApp drafts, in memory only since the vault (`plans/wa-vault.md` 13.5). */
     val waDrafts: MemoryWaDrafts by lazy { MemoryWaDrafts() }
 
     /**
-     * Locks WhatsApp (`plans/wa-vault.md` 6): the one teardown path of this app. Round 4 calls it from the lifecycle
-     * (screen off, background timer, manual lock). Nothing reaches the gateway after it starts.
+     * Locks WhatsApp (`plans/wa-vault.md` 6): the one teardown path of this app, called by [waVault] (screen off, the
+     * background timer, "Lock now", a reset). Nothing reaches the gateway after it starts, and the notifications that
+     * show WhatsApp text go: from now on only the content-free notice counts new messages.
+     *
+     * The process is not ended (plan 6 asks for it "for a clean wipe"): Messages is the SMS app, and the same process
+     * receives SMS and MMS, sends scheduled texts and plays a voice note; killing it could drop an MMS download or a
+     * send in flight. The keys are zeroized by Rust (`vault.lock`), and the store, the RAM media and every cache of
+     * WhatsApp text in Kotlin are dropped.
      */
     suspend fun lockWhatsApp() {
-        waOffline.lock()
+        if (waOfflineOnce.isInitialized()) waOffline.lock() else lockedWhatsApp()
+        MessagesNotifier.dismissAll(context, WaRekeys.tagOf(""))
+    }
+
+    /** The vault was opened: the repository and the store may reach the gateway again (through the vault's key). */
+    private suspend fun unlockedWhatsApp() {
+        LockedWhatsAppNotice.clear(context)
+        wa.unlock()
+        waOffline.unlock()
+        scope.launch { wa.gateway() }
+    }
+
+    /** "Forgot passphrase": the link and everything kept for it go, as an unlink does (`plans/wa-vault.md` 5). */
+    private suspend fun forgetWhatsApp() {
+        UnlinkingWaRepository(wa) { waOffline }.forget()
+    }
+
+    /**
+     * The repository reads its link from the vault: nothing while locked, the vault's link (no key: `wa.open` takes it
+     * from the vault) once it is open, and the plaintext link only while there is no vault yet (the link flow). It
+     * starts locked and follows [waVault]: open for the link flow and an open vault, closed otherwise.
+     */
+    override fun newWaRepository(): WaRepository {
+        val store = WaLinkStore(waOps)
+        val cacheDir = context.cacheDir.absolutePath
+        return DefaultWaRepository(
+            store = store,
+            scope = scope,
+            opener =
+                WaGatewayOpener { link ->
+                    WaGateway.open(link.gatewayUrl, link.key.ifEmpty { null }, cacheDir, waOps)
+                },
+            source =
+                WaLinkSource {
+                    when (val read = vaultOps.state()) {
+                        is Outcome.Err -> {
+                            read
+                        }
+
+                        is Outcome.Ok -> {
+                            val open = read.value.unlocked
+                            when {
+                                open != null -> Outcome.Ok(StoredLink(open.gatewayUrl, open.instanceId, key = ""))
+                                read.value.vault != null -> Outcome.Ok(null)
+                                else -> store.read()
+                            }
+                        }
+                    }
+                },
+            startLocked = true,
+        ).also { repo -> scope.launch { followVault(repo) } }
+    }
+
+    /** Opens and closes [repo] with the vault; a new plaintext link (the link flow) asks for the setup. */
+    private suspend fun followVault(repo: WaRepository) {
+        scope.launch {
+            repo.linkState.collect {
+                val now = waVault.state.value
+                if (now == WaVaultState.NoLink || now == WaVaultState.NeedsSetup) waVault.refresh()
+            }
+        }
+        waVault.state.collect { state ->
+            when (state) {
+                WaVaultState.NoLink, WaVaultState.Unlocked -> {
+                    repo.unlock()
+                    repo.gateway()
+                }
+
+                WaVaultState.Checking -> {
+                    Unit
+                }
+
+                else -> {
+                    repo.lock()
+                }
+            }
+        }
     }
 
     /** What [lockWhatsApp] tears down besides the store and its socket. */

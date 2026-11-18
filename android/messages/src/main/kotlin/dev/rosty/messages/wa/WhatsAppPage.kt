@@ -69,6 +69,7 @@ import dev.rosty.messages.wa.status.ago
 import dev.rosty.messages.wa.status.showStatusViewer
 import dev.rosty.messages.wa.status.statusRowOf
 import dev.rosty.platform.sms.SmsRepository
+import dev.rosty.wa.vault.WaVaultGate
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -179,10 +180,29 @@ fun rememberStatusViewerWords(
 
 /**
  * The WhatsApp tab root: the Status row, then the WhatsApp chats in the inbox's own list (E6.2), all read from the
- * offline store, so it is the same with and without a connection. Not linked: a way into the WhatsApp settings.
+ * offline store, so it is the same with and without a connection. Not linked: a way into the WhatsApp settings. Behind
+ * the vault (`plans/wa-vault.md`): the setup, the unlock page, or the reset come first.
  */
 @Composable
 fun WhatsAppPage(
+    container: MessagesContainer,
+    navigator: TabNavigator<MessagesRoute>,
+) {
+    WaVaultGated(container) { WhatsAppTabPage(container, navigator) }
+}
+
+/** [content] behind the WhatsApp vault of the app ([WaVaultGate]). */
+@Composable
+fun WaVaultGated(
+    container: MessagesContainer,
+    content: @Composable () -> Unit,
+) {
+    val state by container.waVault.state.collectAsState()
+    WaVaultGate(state, container.vaultFlow, stringResource(R.string.tab_whatsapp), content)
+}
+
+@Composable
+private fun WhatsAppTabPage(
     container: MessagesContainer,
     navigator: TabNavigator<MessagesRoute>,
 ) {

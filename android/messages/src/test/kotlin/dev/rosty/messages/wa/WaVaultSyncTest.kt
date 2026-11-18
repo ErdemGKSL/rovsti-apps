@@ -131,6 +131,7 @@ class WaVaultSyncTest {
         chats: Int = CHATS,
         val ram: HeapRamFiles? = null,
         mediaDir: File? = null,
+        startLocked: Boolean = false,
     ) {
         val fake = FakeWaSyncOps(INSTANCE)
         val names = (1..chats).map { "1000000000%02d@s.whatsapp.net".format(it) }
@@ -175,6 +176,7 @@ class WaVaultSyncTest {
                 gate = gate,
                 onLock = { locks += "vault.lock" },
                 memoryOnly = lazy,
+                startLocked = startLocked,
             )
 
         init {
@@ -281,6 +283,27 @@ class WaVaultSyncTest {
             assertNotNull(path)
             assertTrue(ram.owns(path!!))
             assertEquals(3L, ram.bytes)
+        }
+
+    /** Round 4: a process whose vault is not open yet starts locked; nothing (socket, sync, outbox) goes out. */
+    @Test fun aLockedStartSendsNothingUntilTheUnlock() =
+        runTest {
+            val kit = Kit(backgroundScope, true, { testScheduler.currentTime }, startLocked = true)
+            kit.offline.start()
+            settle()
+            assertTrue(kit.offline.locked.value)
+            assertEquals(null, kit.offline.session.value)
+            kit.remote.inner.emit(WaRemoteEvent.Connected)
+            assertFalse(kit.offline.enqueue(ADA, WaSyncAction.SendText("selam")))
+            // The outbox job: no retry while locked.
+            kit.offline.runFromWork()
+            advanceTimeBy(300_000)
+            settle()
+            assertEquals(emptyList<String>(), kit.remote.requests)
+            kit.offline.unlock()
+            settle()
+            assertTrue(kit.remote.requests.isNotEmpty())
+            assertTrue(kit.remote.requests.size <= 4)
         }
 
     @Test fun afterLockNoRequestGoesOutAndEverythingIsClosed() =

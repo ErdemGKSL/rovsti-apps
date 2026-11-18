@@ -9,7 +9,6 @@ import dev.rosty.core.ops.WaSyncStore
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.platform.files.FileResult
 import dev.rosty.platform.system.AndroidDeviceData
-import dev.rosty.wa.WaLinkStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,22 +19,24 @@ import java.io.IOException
 import java.util.UUID
 
 /**
- * The real [WaOffline] of the app: the store of the instance in `whatsapp-link.json` (read again whenever the link
+ * The real [WaOffline] of the app: the store of the instance the unlocked vault serves (read again whenever the link
  * state changes, so it also opens offline, where the link state is an error), filled through [remote] and woken by the
- * WorkManager outbox job.
+ * WorkManager outbox job. Nothing opens while the vault is locked, and the plaintext link is never read here
+ * (`plans/wa-vault.md` 15, round 4).
  */
 fun realWaOffline(
     container: MessagesContainer,
     remote: WaRemote,
-): WaOffline {
-    val links = WaLinkStore(container.waOps)
-    return WaOffline(
+): WaOffline =
+    WaOffline(
         scope = container.scope,
         linkChanges = combine(container.wa.linkState, container.wa.settled) { state, settled -> state to settled },
         link = {
-            links.read().getOrNull()?.let { link ->
-                WaStoreLink(link.instanceId, socketKey = "${link.gatewayUrl}#${link.key.hashCode()}")
-            }
+            container.vaultOps
+                .state()
+                .getOrNull()
+                ?.unlocked
+                ?.let { open -> WaStoreLink(open.instanceId, socketKey = "${open.gatewayUrl}#${open.handle}") }
         },
         // Memory only, lazily filled, the identity map from the encrypted vault cache (`plans/wa-vault.md` 13, 14).
         open = { instance ->
@@ -57,8 +58,8 @@ fun realWaOffline(
         gate = container.waGate,
         onLock = { container.lockedWhatsApp() },
         memoryOnly = true,
+        startLocked = !container.waVault.unlocked,
     )
-}
 
 /**
  * The real [WaDownloads]: files under `files/wa-media`, the network kind and the free space from `:platform`, woken

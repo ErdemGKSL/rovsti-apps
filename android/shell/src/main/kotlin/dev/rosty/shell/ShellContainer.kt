@@ -25,6 +25,7 @@ import dev.rosty.platform.system.permissions.AndroidSpecialAccess
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionController
 import dev.rosty.platform.system.permissions.SpecialAccess
+import dev.rosty.platform.vault.VaultPromptHost
 import dev.rosty.platform.wa.WaPush
 import dev.rosty.shell.settings.CommonSettings
 import dev.rosty.shell.settings.NoCommonSettings
@@ -100,6 +101,15 @@ abstract class ShellContainer(
 
     val files: FilesRepository by lazy { AndroidFilesRepository(context, Dispatchers.IO) }
 
+    /** The window the WhatsApp vault's system prompts open over; the activity attaches itself (plan 13.2). */
+    val vaultPromptHost: VaultPromptHost by lazy { VaultPromptHost() }
+
+    /**
+     * When WhatsApp locks (screen off, time in the background, process death; plan 6), for an app with a WhatsApp
+     * vault; null for the others. The activity reports its starts and stops to it.
+     */
+    open val vaultLock: VaultLockLifecycle? get() = null
+
     /**
      * Developer mode and the log behind the Logs page. Started off the main thread when the container is created, so
      * a background start (the people-sync worker) writes the log file too while developer mode is on.
@@ -131,8 +141,12 @@ abstract class ShellContainer(
         return Rust.core()
     }
 
+    /** The repository [createWa] starts; an app with a WhatsApp vault reads its link from the vault. */
+    protected open fun newWaRepository(): WaRepository =
+        DefaultWaRepository(WaLinkStore(waOps), waOps, scope, context.cacheDir.absolutePath)
+
     protected open fun createWa(): WaRepository =
-        DefaultWaRepository(WaLinkStore(waOps), waOps, scope, context.cacheDir.absolutePath).also { repo ->
+        newWaRepository().also { repo ->
             repo.start()
             // No link here: ask the sibling Rosty apps for theirs (a link of this app's own always wins). The one
             // hand-over of the process, so this ask and the link screen's never run side by side; it reads [wa],

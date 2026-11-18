@@ -1,1 +1,1 @@
-{"err":{"kind":"auth","message":"72 hours passed without an unlock","detail":{"code":"daily_expired","reason":"idle"}}}
+{"err":{"kind":"auth","message":"90 days passed without a use","detail":{"code":"expired","reason":"idle"}}}

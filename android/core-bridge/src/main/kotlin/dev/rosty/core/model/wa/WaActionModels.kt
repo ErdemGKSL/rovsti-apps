@@ -39,7 +39,7 @@ data class MentionPick(
 @Serializable
 data class MentionEncodeRequest(
     val text: String,
-    val picks: List<MentionPick> = emptyList(),
+    @EncodeDefault(NEVER) val picks: List<MentionPick> = emptyList(),
 )
 
 @Serializable
@@ -94,7 +94,7 @@ data class LinkMeta(
 @Serializable
 data class ReceiptSectionsRequest(
     val members: List<ReceiptMember>,
-    val voice: Boolean = false,
+    @EncodeDefault(NEVER) val voice: Boolean = false,
 )
 
 @Serializable

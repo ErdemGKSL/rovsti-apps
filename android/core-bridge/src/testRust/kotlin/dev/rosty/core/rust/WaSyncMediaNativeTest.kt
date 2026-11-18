@@ -101,7 +101,7 @@ class WaSyncMediaNativeTest {
     @Test
     fun aStoreOpensAtTheSchemaThisBuildWrites() =
         runBlocking {
-            open(dir()).use { assertEquals(6, it.opened.schemaVersion) }
+            open(dir()).use { assertEquals(7, it.opened.schemaVersion) }
         }
 
     @Test

@@ -6,101 +6,43 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.model.phone.HapticsLevel
 import dev.rosty.core.model.stops.Appearance
 import dev.rosty.core.model.wa.AppId
-import dev.rosty.core.ops.NativeWaSettingsOps
-import dev.rosty.design.icons.RostyIcons
-import dev.rosty.design.ios.component.IosText
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.R
 import dev.rosty.messages.wa.UnlinkingWaRepository
-import dev.rosty.messages.wa.VaultSettingsRepository
 import dev.rosty.messages.wa.rememberWaSettingsBlocks
 import dev.rosty.shell.settings.AboutPage
 import dev.rosty.shell.settings.AppearancePage
 import dev.rosty.shell.settings.CommonSettings
-import dev.rosty.shell.settings.CommonSettingsGroup
-import dev.rosty.shell.settings.CommonSettingsPage
 import dev.rosty.shell.settings.HapticsPage
-import dev.rosty.shell.settings.IosSettingsGroup
-import dev.rosty.shell.settings.IosSettingsItem
 import dev.rosty.shell.settings.LicenceDetailPage
 import dev.rosty.shell.settings.LicencesPage
-import dev.rosty.shell.settings.SettingsPage
 import dev.rosty.shell.settings.aboutInfo
 import dev.rosty.shell.settings.dev.LogsPage
 import dev.rosty.shell.settings.rememberCoreVersion
 import dev.rosty.shell.settings.rememberLicenceData
-import dev.rosty.wa.WaLinkStore
-import dev.rosty.wa.settings.WhatsAppSettingsRoute
-import dev.rosty.wa.settings.WhatsAppSettingsViewModel
-import dev.rosty.wa.vault.SetupFlow
-import dev.rosty.wa.vault.WaVaultGate
+import dev.rosty.shell.wa.WhatsAppVaultSettings
 
 /**
- * The WhatsApp settings of the shared connect key, on a view model that lives as long as the activity, behind the
- * vault (`plans/wa-vault.md`): the link flow while nothing is linked, then the setup; the unlock page while locked;
- * "Change passphrase" in place of the page while it runs.
+ * The WhatsApp settings behind the vault (`plans/wa-vault.md`), the page every Rosty app shares (`:shell`): the link
+ * flow while nothing is linked, then the setup; the unlock page while locked; "Change passphrase" in place of the page
+ * while it runs. Unlink also deletes the offline store, its media and what is kept per chat; Messages adds its history,
+ * storage and data blocks.
  */
 @Composable
 fun WhatsAppSettingsEntry(container: MessagesContainer) {
-    val state by container.waVault.state.collectAsState()
-    val flow = container.vaultFlow
-    WaVaultGate(state, flow, stringResource(R.string.tab_whatsapp)) {
-        if (flow.changing) {
-            SetupFlow(flow, change = true)
-        } else {
-            WhatsAppSettingsBody(container)
-        }
-    }
-}
-
-@Composable
-private fun WhatsAppSettingsBody(container: MessagesContainer) {
-    val context = LocalContext.current
-    val owner = remember(context) { context.findComponentActivity() }
-    val viewModel =
-        remember(owner, container) {
-            val factory =
-                viewModelFactory {
-                    initializer {
-                        WhatsAppSettingsViewModel(
-                            app = AppId.Messages,
-                            machine = NativeWaSettingsOps(container.rust),
-                            ops = container.waOps,
-                            store = WaLinkStore(container.waOps),
-                            // Unlink also deletes the offline store, its media and what is kept per chat; with a
-                            // vault, unlinking or linking another key resets the vault first.
-                            repo =
-                                VaultSettingsRepository(
-                                    UnlinkingWaRepository(container.wa) { container.waOffline },
-                                    container.waVault,
-                                ),
-                            qr = container.qr,
-                            clipboard = container.clipboard,
-                            files = container.files,
-                            stagingDir = container.context.cacheDir,
-                            clock = System::currentTimeMillis,
-                            saved = SavedStateHandle(),
-                            // A sibling Rosty app's link is taken when this app has none (WA-R2).
-                            handover = container.waLinkHandover,
-                        )
-                    }
-                }
-            ViewModelProvider(owner, factory)[WhatsAppSettingsViewModel::class.java]
-        }
-    WhatsAppSettingsRoute(viewModel, linked = rememberWaSettingsBlocks(container))
+    WhatsAppVaultSettings(
+        container = container,
+        app = AppId.Messages,
+        title = stringResource(R.string.tab_whatsapp),
+        repo = UnlinkingWaRepository(container.wa) { container.waOffline },
+        linked = rememberWaSettingsBlocks(container),
+    )
 }
 
 @Composable

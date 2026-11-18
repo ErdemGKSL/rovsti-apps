@@ -1,14 +1,10 @@
 package dev.rosty.messages.wa
 
 import dev.rosty.core.Outcome
-import dev.rosty.core.model.wa.StoredLink
 import dev.rosty.messages.MessagesContainer
 import dev.rosty.messages.notify.MessagesNotifier
 import dev.rosty.messages.notify.NotifyPolicy
 import dev.rosty.wa.WaRepository
-import dev.rosty.wa.vault.VaultOutcome
-import dev.rosty.wa.vault.WaVault
-import dev.rosty.wa.vault.WaVaultState
 
 /**
  * What Rosty Messages keeps for a WhatsApp link outside the offline store, and how each piece is dropped when the
@@ -55,27 +51,4 @@ class UnlinkingWaRepository(
     private val offline: () -> WaOffline,
 ) : WaRepository by real {
     override suspend fun forget(): Outcome<Unit> = offline().unlink { real.forget() }
-}
-
-/**
- * The WhatsApp settings' repository once a vault exists (`plans/wa-vault.md` 5): a new link (another key, another
- * gateway) and "Unlink" both reset the vault first, because the vault holds the old key. A new link then asks for a new
- * passphrase (the setup), as a first link does.
- */
-class VaultSettingsRepository(
-    private val real: WaRepository,
-    private val vault: WaVault,
-) : WaRepository by real {
-    private fun hasVault(): Boolean =
-        vault.state.value.let { it != WaVaultState.NoLink && it != WaVaultState.NeedsSetup }
-
-    override suspend fun relinkTo(link: StoredLink): Outcome<Unit> {
-        if (hasVault()) vault.reset()
-        return real.relinkTo(link)
-    }
-
-    override suspend fun forget(): Outcome<Unit> {
-        if (!hasVault()) return real.forget()
-        return if (vault.reset() == VaultOutcome.Done) Outcome.Ok(Unit) else real.forget()
-    }
 }

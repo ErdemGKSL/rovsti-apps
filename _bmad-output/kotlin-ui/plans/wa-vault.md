@@ -96,7 +96,7 @@ Rule: cost the gateway less than today's eager sync, never more.
 - Server-side work added: none.
 To verify during implementation: merges stay correct with lazy identity catch-up; real request count of today's WaSyncRunner as the baseline for a regression test.
 
-## 15. Implementation notes (rounds 1 and 2)
+## 15. Implementation notes (rounds 1 to 4)
 
 Round 1, `rosty_core::vault` (pure; the caller passes `Entropy`):
 - Blobs, all AES-256-GCM with the header as associated data: key blob `RWVK | ver | kdf id | 3 x u32 kdf words | salt 16 |
@@ -185,3 +185,79 @@ Round 3, Messages memory-only and the lazy sync (`rosty_app_core::wa_sync`, `wa_
   copies in `cacheDir/{share,exports,cards}` stay explicit exports; a "Remind me" on a WhatsApp message no longer
   stores the message preview in the alarm payload (`rosty_message_reminders`), only the chat title, so its
   notification shows no text; the migration wipe is round 6.
+
+Round 4, the Keystore, the vault screens, the lock lifecycle and Messages (`:platform` `vault/`, `:wa` `vault/`,
+`:shell`, `:messages`; Kotlin only, no Rust change):
+- Keystore (`:platform` `VaultKeystore`, `AndroidVaultKeystore`, `BiometricVaultAuthenticator`; `FakeVaultKeystore` for
+  JVM tests): AES-256-GCM keys generated in AndroidKeyStore, non-exportable, StrongBox when the phone has it (a
+  `StrongBoxUnavailableException` falls back to the TEE), `setUnlockedDeviceRequired(true)`,
+  `setUserAuthenticationParameters(0, …)` (every seal and open is its own `BiometricPrompt` with a `CryptoObject`).
+  K_hw `rosty.wa.k.<id>`: Class 3 biometric or screen lock, `setInvalidatedByBiometricEnrollment(true)`. K_daily
+  `rosty.wa.d.b.<id>` (Class 3 biometric only) or `rosty.wa.d.c.<id>` (screen lock only, on a phone with no Class 3
+  biometric enrolled; dropped as soon as one is). Sealed blobs are `0x01 | GCM nonce 12 | ciphertext+tag`, base64; only
+  the opaque blobs of round 2 cross (Kotlin never holds DK, DDK or the connect key). A new K_hw alias per passphrase,
+  the old key deleted after the commit; keys the vault no longer names are deleted on every read of the vault.
+  `androidx.biometric` 1.1.0 (newest stable; nothing was cached) and `androidx.fragment` 1.9.1: `RostyShellActivity` is
+  a `FragmentActivity` now (all four apps). The library's `USE_BIOMETRIC` stays in Messages (its `USE_FINGERPRINT` is
+  removed); Phone, Contacts and Stops remove both until round 5.
+- `WaVault` (`:wa`): the state (`NoLink`, `NeedsSetup`, `Locked(biometric, reason)`, `Unlocked`, `Broken`) and every
+  operation, one at a time. Setup: `vault.create` (from `whatsapp-link.json`), the passphrase shown once, two random
+  groups typed back, K_hw seal, `vault.commit`; then a second `vault.unlock` with the key blob still in hand gives the
+  daily blob, sealed under a new K_daily (a second prompt, "Turn on quick unlock"; cancelling it only means the
+  passphrase next time). Daily unlock: K_daily opens the daily blob, `vault.unlock_daily`. Passphrase unlock: the
+  well-formedness is checked first (no prompt for a short or impossible passphrase), then K_hw opens the key blob for
+  each try (one hardware authentication per guess), `vault.unlock`, and the daily unlock is offered again. Change:
+  `vault.change`, the same two groups, a new K_hw, the old one deleted. Reset ("Forgot passphrase"): lock,
+  `vault.reset`, every vault key deleted, then the app forgets its link like an unlink.
+- Deviation (safer): a daily unlock does not re-seal a fresh daily blob. K_daily needs an authentication per use and
+  one prompt authorizes one operation, so re-sealing would mean a second prompt on every unlock. The 72 h therefore
+  count from the last passphrase unlock (the stamp of the blob), not from the last biometric unlock: the passphrase is
+  asked at least every three days.
+- Deviation (safer): after a passphrase change the daily unlock is not offered at once (a fresh `vault.unlock` would
+  replace the session and release the gateway in use); the next unlock asks for the new passphrase once
+  (`PassphraseReason.NewPassphrase`).
+- Deviation (as planned, but harsh): K_hw is invalidated by a biometric enrolment (plan 3). The vault then cannot be
+  opened (`Broken`): the page says why and offers only the reset and a new link.
+- The drop rules (13.2): Rust drops the daily blob on another boot count, after 72 h and on a clock set back (read
+  with `vault.state {boot_count, now_ms}` at every refresh and unlock); `BootReceiver` drops it on
+  `BOOT_COMPLETED` (only when `wa-vault-daily.json` exists, so a phone without a vault starts no core); five failed
+  biometric attempts (each `onAuthenticationFailed`, counted in the `rosty_wa_vault` preferences across processes, reset
+  by a success) or a system lockout drop it; an invalidated K_daily drops it. Each drop deletes the K_daily key and
+  names the reason on the unlock page.
+- Lock lifecycle (`:shell` `VaultLockLifecycle`, `VaultLockRules`): screen off (a runtime `ACTION_SCREEN_OFF`
+  receiver), the auto-lock delay in the background (default 60 s; 0, 30 s, 1 min, 5 min in the WhatsApp settings)
+  with a timer and a check when an activity starts again (a cached process is frozen, its timer may not fire), "Lock
+  WhatsApp now", and process death (nothing to do: the keys only live in memory). A system prompt over the app (the
+  screen-lock activity) does not start the timer. Locking runs `lockWhatsApp()` (round 3's teardown, then `vault.lock`
+  zeroizes DK and the connect key) and takes away every WhatsApp notification that shows text.
+- The process is not ended on lock (plan 6 asks for it "for a clean wipe"): Messages is the SMS app and the same
+  process receives SMS and MMS, sends scheduled texts, and plays voice notes; ending it could drop an MMS download or a
+  send in flight. Not safe, so not done.
+- `wa.open`: Messages' repository reads its link from the vault (`WaLinkSource`): the vault's URL and instance with
+  an empty key while unlocked (so `wa.open` takes the key from the vault, every download is inline and the >1 MiB temp
+  file of round 3 is gone), nothing while a vault is locked, and the plaintext link only while there is no vault yet
+  (the link flow). The repository and the store start locked and follow the vault (`DefaultWaRepository(startLocked)`,
+  `WaOffline(startLocked)`): no request before the unlock. The store follows the vault's instance, never the plaintext
+  link.
+- Notifications while locked (13.6): the push carries `kind`, `chat`, `count` (gateway `push/mod.rs`); `chat` is a JID
+  with the number and is never shown. `RostyMessagingService` no longer calls `headless("wa_digest")`: with the vault
+  open in the process the event socket brings the message; otherwise `WaPushNotices`/`LockedWhatsAppNotice` post one
+  notice, "WhatsApp", "N new messages", no action (so no inline reply), public on the lock screen, the count kept in
+  the `rosty_wa_locked` preferences until the unlock or a reboot. No outbox retry while locked (the store is closed
+  and the wake job does nothing in a memory-only process).
+- Screens (`:wa` `VaultScreens`, `VaultGate`, `PassphraseField`): setup and change (passphrase in groups of four,
+  monospace; "Copy passphrase" through the sensitive clipboard, cleared after 60 s while the clip is still ours or
+  unreadable), unlock (biometric button and an automatic prompt once per lock; the passphrase field with the reason),
+  "Forgot passphrase" and the broken vault (reset with a confirmation). The passphrase field is a platform `EditText`
+  (Compose cannot set `IME_FLAG_NO_PERSONALIZED_LEARNING`): visible-password input, no suggestions, autofill hint
+  `password`, paste from the long-press menu. `SecureWindow` holds `FLAG_SECURE` per window: every vault page, the
+  WhatsApp pages while unlocked, and the whole Messages window while the vault is open (the merged inbox, search and
+  stars can show WhatsApp text). Compose overlays are drawn in the same window; the system prompt is the system's.
+- Messages entry: the WhatsApp tab, a WhatsApp chat and the WhatsApp settings sit behind `WaVaultGate`: no link -> the
+  link flow, then the setup as soon as a plaintext link exists (migration from `whatsapp-link.json`; deleting it is
+  round 6); locked -> the unlock page; broken -> the reset. In the settings, a new link (another key or gateway) and
+  "Unlink" reset the vault first (it holds the old key).
+- Still open: `whatsapp-link.json` stays on disk next to the vault until round 6 (the settings' "Show connect key" and
+  the sibling hand-over still read it); a reset is followed by the automatic sibling hand-over when Phone, Contacts or
+  Stops still hold a plaintext link (round 5); the clipboard is not cleared when the process dies within the minute;
+  the connect-key rotation at setup and change still needs the Rust mint/revoke (round 2 note).

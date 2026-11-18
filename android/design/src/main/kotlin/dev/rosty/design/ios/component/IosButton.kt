@@ -47,6 +47,7 @@ import dev.rosty.design.ios.foundation.LocalIosContentColor
 import dev.rosty.design.ios.foundation.LocalIosTextStyle
 import dev.rosty.design.ios.foundation.iosGlass
 import dev.rosty.design.shapes.ContinuousRoundedRectangle
+import dev.rosty.design.theme.readableOn
 
 /**
  * SwiftUI's ButtonStyle. [Glass] and [GlassProminent] are the iOS 26 materials; the
@@ -159,7 +160,7 @@ fun IosButton(
             }
 
             IosButtonStyle.BorderedProminent, IosButtonStyle.GlassProminent -> {
-                colors.onAccent
+                if (resolvedTint == colors.accent) colors.onAccent else readableOn(resolvedTint)
             }
 
             IosButtonStyle.Glass -> {

@@ -92,6 +92,14 @@ class ContrastTest {
         for (t in themes) {
             val ratio = contrastRatio(t.colors.onAccent, t.colors.accent)
             assertTrue("${t.name} onAccent on accent is %.2f".format(ratio), ratio >= 4.5)
+            val iosRatio =
+                contrastRatio(
+                    dev.rosty.design.ios.foundation
+                        .iosColorsFrom(t.colors)
+                        .onAccent,
+                    t.colors.accent,
+                )
+            assertTrue("${t.name} IosColors.onAccent on accent is %.2f".format(iosRatio), iosRatio >= 4.5)
             val pageRatio = contrastRatio(t.colors.accent, t.colors.page)
             assertTrue("${t.name} the filled pill reads against the page: %.2f".format(pageRatio), pageRatio >= 3.0)
         }

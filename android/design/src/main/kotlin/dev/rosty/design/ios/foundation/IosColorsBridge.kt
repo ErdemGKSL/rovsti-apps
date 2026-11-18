@@ -31,5 +31,6 @@ fun iosColorsFrom(colors: RostyColors): IosColors {
         systemGroupedBackground = colors.groupedBackground,
         secondarySystemGroupedBackground = colors.groupedSurface,
         accent = colors.accent,
+        onAccent = colors.onAccent,
     )
 }

@@ -51,6 +51,7 @@ import dev.rosty.design.ios.foundation.LocalIosContentColor
 import dev.rosty.design.ios.foundation.LocalIosTextStyle
 import dev.rosty.design.ios.foundation.TopRoundedShape
 import dev.rosty.design.shapes.ContinuousRoundedRectangle
+import dev.rosty.design.theme.readableOn
 
 /** SwiftUI's ListStyle. */
 enum class IosListStyle { Plain, Inset, Grouped, InsetGrouped, Sidebar }
@@ -393,15 +394,17 @@ fun IosNavigationRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (icon != null) {
+            val tile = if (iconBackground.isSpecified) iconBackground else IosTheme.tint
             Box(
                 modifier =
                     Modifier
                         .size(IosMetrics.IconTileSize)
                         .clip(ContinuousRoundedRectangle(IosMetrics.IconTileRadius))
-                        .background(if (iconBackground.isSpecified) iconBackground else IosTheme.tint),
+                        .background(tile),
                 contentAlignment = Alignment.Center,
             ) {
-                CompositionLocalProvider(LocalIosContentColor provides Color.White) { icon() }
+                // A glyph needs 3:1 (not text's 4.5:1), so white stays on mid-tone tiles.
+                CompositionLocalProvider(LocalIosContentColor provides readableOn(tile, minRatio = 3.0)) { icon() }
             }
         }
 

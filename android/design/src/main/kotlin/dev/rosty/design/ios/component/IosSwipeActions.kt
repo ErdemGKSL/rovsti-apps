@@ -54,6 +54,7 @@ import dev.rosty.design.ios.foundation.LocalIosContentColor
 import dev.rosty.design.ios.foundation.nearestProjectedSnap
 import dev.rosty.design.ios.foundation.projectedEndpoint
 import dev.rosty.design.list.SwipeRowGroup
+import dev.rosty.design.theme.readableOn
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
@@ -256,8 +257,9 @@ private fun ActionButton(
                 }.padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
+        val onAction = readableOn(action.tint)
         androidx.compose.runtime.CompositionLocalProvider(
-            LocalIosContentColor provides Color.White,
+            LocalIosContentColor provides onAction,
         ) {
             if (action.icon != null) {
                 action.icon.invoke()
@@ -265,7 +267,7 @@ private fun ActionButton(
                 IosText(
                     text = action.label,
                     style = IosTheme.typography.footnote,
-                    color = Color.White,
+                    color = onAction,
                 )
             }
         }

@@ -24,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /** Phone on fakes with its WhatsApp vault in memory. */
@@ -54,8 +55,8 @@ private class VaultPhoneContainer : PhoneContainer(RuntimeEnvironment.getApplica
 }
 
 /**
- * Phone's WhatsApp vault (`plans/wa-vault.md` 13.3): a call that rings while it is locked shows from the push alone and
- * content-free; nothing reaches the gateway while locked; the LID table lives in the vault cache only.
+ * Phone's WhatsApp vault (`plans/wa-vault.md` 13.3, round 7b): a call that rings while it is locked shows from the push
+ * alone, named only as the push allows, on the locked-call page; nothing reaches the gateway while locked; the LID table lives in the vault cache only.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -84,8 +85,19 @@ class PhoneVaultTest {
         assertEquals("WhatsApp call", person?.name.toString())
         val words = shown.extras.toString()
         assertFalse(words, "Ayse" in words || "100000000001" in words)
-        assertNull("nothing can be answered over the lock screen", shown.fullScreenIntent)
+        // Round 7b: the ring opens the locked-call page over the lock screen (caller, Answer, Decline only), never the
+        // app's pages; an unsealed push is named by a device contact only, so here by nobody.
+        val full = shadowOf(shown.fullScreenIntent)
+        assertEquals(WaLockedCallActivity::class.java.name, full.savedIntent.component?.className)
+        assertEquals("WhatsApp call", full.savedIntent.getStringExtra(WaIncoming.EXTRA_TITLE))
         WaIncoming.cancel(app, "phone-locked-1")
+    }
+
+    @Test
+    fun aCallActionNamesItsCallForTheAnswerTiming() {
+        assertEquals("c1", dev.rosty.phone.waCallIdOf("""{"call_id":"c1","action":"answer"}"""))
+        assertNull(dev.rosty.phone.waCallIdOf("not json"))
+        assertNull(dev.rosty.phone.waCallIdOf("""{"action":"answer"}"""))
     }
 
     @Test

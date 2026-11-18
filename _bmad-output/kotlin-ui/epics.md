@@ -1399,6 +1399,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17: static and animated cards, sheet, share/save; optics and GIF playback split into X.2b) |
 | X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | done (round 18 step 6, 2026-11-17; Evidence in the X.2b section) |
 | X.3 | Readable text on accent and photo backgrounds (owner, 2026-11-17: "white text on a light background is unreadable") | round 19 (`plans/round-19.md`) | in-progress (planned 2026-11-17 at `bc22e17`; 7 steps; next planner after X.3 is E8 R1) |
+| X.4 | Open owner follow-ups (share sheet leftovers, glass "Delete" contrast, owner questions) | after X.3, before E8 R1 | todo (see the X.4 section) |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1686,6 +1687,18 @@ of `3a03c05`/`6d8f44b`):** the e04 root cause is fixed and the carry-over is lan
   aarch64-linux-android, Gradle spotless, lint, unit tests, shot verification, APK JNI export check, stability, orphans).
 - Size: `librosty_ffi.so` (arm64-v8a, release) 12,519,024 bytes vs 10,030,336 before Takumi (+2,488,688, +24.8 %).
   Contacts release APK `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk` 17,624,083 bytes.
+
+### X.4 Open owner follow-ups (noted 2026-11-18)
+Plan these right after X.3 closes, before E8 R1.
+1. **Share sheet (X.2 leftovers).** Opening the menu in the Card Studio share sheet dims the page behind it, which it
+   should not (a menu over a sheet does not dim). The toggle thumb in the sheet renders as a wide oval instead of the
+   iOS capsule thumb used by `IosToggle`.
+2. **Catalog "Over a backdrop", glass "Delete".** Red text on the purple-blue glass has low contrast. If the X.3 step 6
+   sweep did not fix it, fix it here (destructive label over glass must reach 3:1 as bold text, like other glass labels).
+3. **Owner questions still open** (do not build until answered; ask in the round report):
+   - Emergency and short codes (for example 112): show no contact name, only the number?
+   - Contacts card "Ara": call at once instead of opening the call-source sheet?
+   - WhatsApp notification preview default: keep "name and preview", or start with "name only"?
 
 ## E6. Messages including WhatsApp (`:messages`)
 

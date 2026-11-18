@@ -6,11 +6,13 @@ import dev.rosty.core.RustError
 import dev.rosty.core.model.wa.BytesAnswer
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MessageBody
+import dev.rosty.core.model.wa.MessageReceipts
 import dev.rosty.core.model.wa.Quoted
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
@@ -34,6 +36,7 @@ import dev.rosty.core.model.wa.WaSyncWipeRequest
 import dev.rosty.core.ops.WaSyncOps
 import dev.rosty.core.ops.WaSyncStore
 import dev.rosty.platform.system.FakeDeviceData
+import java.io.File
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +48,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
-import java.io.File
 
 /** A scripted gateway for the sync, outbox and view-model tests: no network, every call logged. */
 class FakeWaRemote : WaRemote {
@@ -152,6 +154,23 @@ class FakeWaRemote : WaRemote {
         chat: String,
         state: TypingState,
     ): Outcome<Unit> = gate { typed += chat to state }
+
+    /** What message info answers, by message id; a missing one is an older gateway (not found). */
+    val receipts = mutableMapOf<String, MessageReceipts>()
+
+    override suspend fun messageReceipts(
+        chat: String,
+        messageId: String,
+    ): Outcome<MessageReceipts> {
+        if (down) return Outcome.Err(LOST)
+        return receipts[messageId]?.let { Outcome.Ok(it) } ?: Outcome.Err(RustError.NotFound("receipts"))
+    }
+
+    /** The groups the gateway describes, by JID. */
+    val groups = mutableMapOf<String, GroupInfo>()
+
+    override suspend fun group(jid: String): Outcome<GroupInfo> =
+        groups[jid]?.takeIf { !down }?.let { Outcome.Ok(it) } ?: Outcome.Err(LOST)
 
     /** The thumbnails and files the gateway has, by message id; anything else is a lost connection. */
     val thumbnails = mutableMapOf<String, BytesAnswer>()

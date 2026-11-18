@@ -71,6 +71,7 @@ class WaThreadRekeyTest {
             WaThreadSources(
                 offline = kit.offline,
                 remote = kit.remote,
+                emoji = WaRecentEmoji(null, Dispatchers.Unconfined),
                 drafts = drafts,
                 names =
                     PersonNames(

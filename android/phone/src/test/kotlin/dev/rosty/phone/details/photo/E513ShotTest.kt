@@ -29,7 +29,18 @@ class E513ShotTest : ShotTest() {
     private val options =
         RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = CHANGE_THRESHOLD))
 
-    override val imageProducer: (Any, Int, Int) -> Bitmap? = { _, w, h -> portrait(w, h) }
+    private var white = false
+
+    override val imageProducer: (Any, Int, Int) -> Bitmap? = { _, w, h ->
+        if (white) {
+            nearWhite(
+                w,
+                h,
+            )
+        } else {
+            portrait(w, h)
+        }
+    }
 
     private val recentsStrings get() = RecentsStrings(compose.activity.resources)
 
@@ -76,6 +87,12 @@ class E513ShotTest : ShotTest() {
         }
 
     @Test fun viewer() = snap("e5.13-viewer") { h, _ -> openViewer(h) }
+
+    /** A near-white photo: the chrome stays readable under its shade. */
+    @Test fun viewerWhite() {
+        white = true
+        snap("e5.13-viewer-white") { h, _ -> openViewer(h) }
+    }
 
     @Test fun editMenu() =
         snap("e5.13-photo-edit-menu") { h, _ ->

@@ -314,6 +314,7 @@ class WaVoiceRecordShotTest : ShotTest() {
                 WaThreadSources(
                     offline = kit.offline,
                     remote = kit.remote,
+                    emoji = WaRecentEmoji(null, Dispatchers.Unconfined),
                     drafts = MemoryDrafts(),
                     names = PersonNames({ null }, MutableStateFlow(Unit)),
                     now = { kit.now },

@@ -25,8 +25,11 @@ class RostyContactsApp :
         PlatformChannels.followLocale(this)
         // The periodic WhatsApp names and photos sync (X.1b); the work finishes at once while WhatsApp is not linked.
         // Off the main thread: WorkManager opens its database on first use.
-        Thread({ PeopleSyncWorker.schedule(this) }, "people-sync-schedule").start()
+        Thread({ runCatching { PeopleSyncWorker.schedule(this) } }, "people-sync-schedule").start()
         // The people index is warmed after Rust.init, so the first list already draws the cached WhatsApp pictures (X.1c).
-        Thread({ container.scope.launch { runCatching { container.warmPeopleIndex() } } }, "people-index-warm").start()
+        Thread(
+            { runCatching { container.scope.launch { runCatching { container.warmPeopleIndex() } } } },
+            "people-index-warm",
+        ).start()
     }
 }

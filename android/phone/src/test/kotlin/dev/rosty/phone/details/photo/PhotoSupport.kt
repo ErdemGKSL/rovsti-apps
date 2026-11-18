@@ -53,6 +53,37 @@ internal fun portrait(
     return bmp
 }
 
+/** A near-white photo (a bright studio shot): the worst case for the viewer's white chrome. */
+internal fun nearWhite(
+    w: Int,
+    h: Int,
+): Bitmap {
+    val bmp = Bitmap.createBitmap(w.coerceAtLeast(1), h.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.shader =
+        LinearGradient(
+            0f,
+            0f,
+            0f,
+            h.toFloat(),
+            Color.rgb(254, 253, 250),
+            Color.rgb(236, 234, 230),
+            Shader.TileMode.CLAMP,
+        )
+    c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+    p.shader = null
+    p.color = Color.rgb(246, 238, 228)
+    c.drawCircle(w * 0.5f, h * 0.36f, w * 0.2f, p)
+    p.color = Color.rgb(226, 222, 216)
+    val body = Path()
+    body.moveTo(w * 0.1f, h.toFloat())
+    body.cubicTo(w * 0.15f, h * 0.62f, w * 0.85f, h * 0.62f, w * 0.9f, h.toFloat())
+    body.close()
+    c.drawPath(body, p)
+    return bmp
+}
+
 /**
  * The opener the Person and Call details sheets use in tests: the real [PersonPhotoActions] toolbar and Edit menu over a
  * fake files repository, opened out of the avatar through the same `showPhotoViewer` the app calls.

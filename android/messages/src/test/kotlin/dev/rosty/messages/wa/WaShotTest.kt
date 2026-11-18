@@ -121,6 +121,7 @@ class WaShotTest : ShotTest() {
                 WaThreadSources(
                     offline = kit.offline,
                     remote = kit.remote,
+                    emoji = WaRecentEmoji(null, Dispatchers.Unconfined),
                     drafts = MemoryDrafts(),
                     names = PersonNames({ book[it] }, MutableStateFlow(Unit)),
                     now = { kit.now },

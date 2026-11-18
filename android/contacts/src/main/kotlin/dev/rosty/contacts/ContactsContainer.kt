@@ -21,6 +21,7 @@ import dev.rosty.contacts.trash.ContactDeletion
 import dev.rosty.contacts.trash.ContactTrash
 import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
+import dev.rosty.core.log.RostyLog
 import dev.rosty.core.model.shared.InferHomeCcRequest
 import dev.rosty.core.ops.CardsOps
 import dev.rosty.core.ops.ContactsOps
@@ -57,7 +58,6 @@ import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionGroup
 import dev.rosty.shell.ShellContainer
 import dev.rosty.shell.settings.CommonSettings
-import dev.rosty.wa.WaLinkStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -178,6 +178,26 @@ open class ContactsContainer(
     val peopleSync: PeopleSync by lazy { createPeopleSync().also { it.start() } }
 
     /**
+     * [peopleSync] while Contacts' WhatsApp vault is open, else null (`plans/wa-vault.md` 13.3): a run of the worker
+     * (the 12-hourly one, its continuation, a start from the app) that finds the vault locked makes no gateway request
+     * and ends at once. It is not lost: the next unlock runs the foreground trigger ([unlockedWhatsApp]), which syncs
+     * when the last run is older than the period, so the deferred run costs the gateway nothing extra.
+     */
+    suspend fun peopleSyncWhenUnlocked(): PeopleSync? {
+        val vault = waVault
+        vault.refresh()
+        if (vault.unlocked) return peopleSync
+        RostyLog.event(PeopleSyncRunner.TAG, "worker_skipped", "reason" to "vault_locked")
+        return null
+    }
+
+    /** The vault opened: a people sync the lock held back runs now when it is due (the foreground trigger). */
+    override suspend fun unlockedWhatsApp() {
+        super.unlockedWhatsApp()
+        peopleSync.syncIfStale()
+    }
+
+    /**
      * True once `Rust.init` has finished, waiting for it as long as the caller allows (the provider bounds the wait).
      * The first call starts the init when nothing did before (rule b: nothing calls `RustNative` earlier).
      */
@@ -237,7 +257,8 @@ open class ContactsContainer(
             numbers = ::peopleNumbers,
             scope = scope,
             legacy = context.getSharedPreferences(PEOPLE_PREFS, Context.MODE_PRIVATE),
-            gatewayUrl = { (WaLinkStore(waOps).read() as? Outcome.Ok)?.value?.gatewayUrl.orEmpty() },
+            // The vault's link: never `whatsapp-link.json` (`plans/wa-vault.md` 13.3).
+            gatewayUrl = { (waLinkSource.read() as? Outcome.Ok)?.value?.gatewayUrl.orEmpty() },
             lockFile = File(context.noBackupFilesDir, PEOPLE_LOCK),
             onChanged = {
                 peopleStore.notifyChanged(context.contentResolver)

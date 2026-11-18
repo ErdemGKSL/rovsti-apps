@@ -72,6 +72,16 @@ data class WaIncomingNotice(
             val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
             return WaIncomingNotice(id, waCallerTitle(data, contactName, lidNumber))
         }
+
+        /**
+         * Pure: the notice of a call while the app's WhatsApp vault is locked (`plans/wa-vault.md` 13.3): the push's
+         * `call_id` only, titled [FALLBACK_TITLE] ("WhatsApp call"); the caller's name and number are not shown.
+         */
+        fun contentFree(data: Map<String, String>): WaIncomingNotice? {
+            if (data["kind"] != "call") return null
+            val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
+            return WaIncomingNotice(id, FALLBACK_TITLE)
+        }
     }
 }
 
@@ -91,6 +101,10 @@ data class WaMissedNotice(
             val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
             return WaMissedNotice(id, waCallerTitle(data, contactName, lidNumber))
         }
+
+        /** Pure: [of] while the vault is locked: "WhatsApp call", "Missed call", nobody named. */
+        fun contentFree(data: Map<String, String>): WaMissedNotice? =
+            of(data)?.copy(title = WaIncomingNotice.FALLBACK_TITLE)
     }
 }
 
@@ -192,9 +206,17 @@ object WaIncoming {
         title: String,
     ): Boolean = show(context, WaIncomingNotice(callId, title))
 
+    /**
+     * Posts the ringing notification of [notice] and starts the ring. [locked]: the app's WhatsApp vault is locked
+     * (`plans/wa-vault.md` 13.3): the notice names nobody, Answer opens the app (Android asks for the screen unlock
+     * first, then the app asks for its vault; the answer goes out once both are open, if the caller still waits),
+     * Decline only stops the ring here (no gateway request while locked: the caller hears it ring until the gateway's
+     * 60 s timeout), and there is no full-screen intent: nothing can be shown or answered over the lock screen.
+     */
     fun show(
         context: Context,
         notice: WaIncomingNotice,
+        locked: Boolean = false,
     ): Boolean {
         if (isOver(notice.callId)) return false
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
@@ -209,7 +231,12 @@ object WaIncoming {
             }
             PlatformChannels.ensure(context, CHANNEL)
             val open = pending(context, notice.callId, null, 0)
-            val answer = actionPending(context, notice.callId, ANSWER)
+            val answer =
+                if (locked) {
+                    pending(context, notice.callId, ANSWER, 1)
+                } else {
+                    actionPending(context, notice.callId, ANSWER)
+                }
             val decline = actionPending(context, notice.callId, DECLINE)
             val caller =
                 Person
@@ -227,14 +254,19 @@ object WaIncoming {
                     .setTimeoutAfter(RING_TIMEOUT_MS)
                     .setOnlyAlertOnce(true)
                     .setContentIntent(open)
-                    .setFullScreenIntent(open, true)
                     .setStyle(Notification.CallStyle.forIncomingCall(caller, decline, answer))
+            if (locked) {
+                // It names nobody: it may show in full on the lock screen.
+                builder.setVisibility(Notification.VISIBILITY_PUBLIC)
+            } else {
+                builder.setFullScreenIntent(open, true)
+            }
             // The FCM push and the live event both post it: the call screen opens for the first one only.
             val already = manager.activeNotifications.any { it.id == notificationId(notice.callId) }
             manager.notify(notificationId(notice.callId), builder.build())
             // The channel is silent: the ring is ours, so every way the ring ends can stop it. Once per call.
             WaRinger.start(context, notice.callId)
-            if (!already) openWhileInUse(context, notice.callId)
+            if (!already && !locked) openWhileInUse(context, notice.callId)
             true
         } catch (_: RuntimeException) {
             false

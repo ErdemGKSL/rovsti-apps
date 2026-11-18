@@ -15,6 +15,7 @@ import dev.rosty.design.list.ListRowSwitch
 import dev.rosty.stops.R
 import dev.rosty.stops.trip.ArrivingSoonHook
 import dev.rosty.wa.WaLinkState
+import dev.rosty.wa.vault.WaVaultState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -55,12 +56,19 @@ fun noticeLine(
  * The arriving-soon message of a trip (AD-ST7): the message of the settings goes with every trip unless the user
  * switches it off for the next one with the row under Start (GPUI's "Text <chat> when arriving" toggle). The
  * message itself is sent by the trip service through the gateway; this only decides whether a trip carries one.
+ *
+ * Since the vault (`plans/wa-vault.md` 13.3) only a trip started while Stops' WhatsApp vault is open carries the
+ * message: [hold] copies the link into the trip's RAM (Rust), where it stays until the trip ends. While the vault is
+ * locked the row under Start is hidden and the trip goes without the message.
  */
 class TripNotice(
     private val prefs: StateFlow<StopsPrefs>,
     private val load: suspend () -> StopsPrefs,
     private val link: StateFlow<WaLinkState>,
     private val settled: StateFlow<Boolean>,
+    private val vault: StateFlow<WaVaultState> = MutableStateFlow(WaVaultState.Unlocked),
+    /** Gives the starting trip its copy of the link; false when the vault is locked. */
+    private val hold: suspend () -> Boolean = { true },
 ) : ArrivingSoonHook {
     private val switchedOn = MutableStateFlow(true)
 
@@ -76,7 +84,10 @@ class TripNotice(
         b: Destination,
     ): NoticePrefs? {
         val notice = load().notice
-        return notice?.takeIf { switchedOn.value && noticeAvailable(it, link.value, settled.value) }
+        val open = vault.value == WaVaultState.Unlocked
+        val wanted =
+            notice?.takeIf { switchedOn.value && open && noticeAvailable(it, link.value, settled.value) } ?: return null
+        return wanted.takeIf { hold() }
     }
 
     @Composable
@@ -85,8 +96,9 @@ class TripNotice(
         val linked by link.collectAsState()
         val ready by settled.collectAsState()
         val isOn by switchedOn.collectAsState()
+        val open by vault.collectAsState()
         val notice = held.notice
-        if (notice == null || !noticeAvailable(notice, linked, ready)) return
+        if (notice == null || open != WaVaultState.Unlocked || !noticeAvailable(notice, linked, ready)) return
         NoticeToggleRow(notice.chatName, isOn, ::toggle)
     }
 }

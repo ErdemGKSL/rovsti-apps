@@ -54,6 +54,13 @@ sealed interface PhoneRoute {
     @Serializable
     data object WhatsAppSettings : PhoneRoute
 
+    /**
+     * Phone's WhatsApp vault asks to be opened for an answer tapped on a locked call's notice (`plans/wa-vault.md`
+     * 13.3); it closes itself once the vault is open.
+     */
+    @Serializable
+    data object WhatsAppUnlock : PhoneRoute
+
     // The common settings pages (shell CommonSettingsPage + the licence detail).
     @Serializable
     data object Appearance : PhoneRoute
@@ -149,6 +156,7 @@ fun chromeFor(route: PhoneRoute): ChromeSpec =
         PhoneRoute.Diagnostics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Diagnostics")
         PhoneRoute.Stats -> ChromeSpec(TabBarMode.Visible, largeTitle = "Call statistics")
         PhoneRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Visible, largeTitle = "WhatsApp")
+        PhoneRoute.WhatsAppUnlock -> ChromeSpec(TabBarMode.Hidden)
         PhoneRoute.Appearance -> ChromeSpec(TabBarMode.Visible, largeTitle = "Appearance")
         PhoneRoute.Haptics -> ChromeSpec(TabBarMode.Visible, largeTitle = "Haptics")
         PhoneRoute.About -> ChromeSpec(TabBarMode.Visible, largeTitle = "About")

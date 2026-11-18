@@ -24,6 +24,8 @@ data class WaIdBookPair(
 data class WaIdBookSnapshotRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
     @SerialName("instance_id") val instanceId: String,
+    /** The table is in the vault cache (Phone since its vault, `plans/wa-vault.md` 13.5), not in `wa-identity.json`. */
+    @EncodeDefault(NEVER) val vault: Boolean = false,
 )
 
 @Serializable
@@ -43,6 +45,8 @@ data class WaIdBookCatchUpRequest(
     @SerialName("instance_id") val instanceId: String,
     val items: List<IdentityMapping> = emptyList(),
     @EncodeDefault(NEVER) val next: String? = null,
+    /** The table is in the vault cache (Phone since its vault, `plans/wa-vault.md` 13.5), not in `wa-identity.json`. */
+    @EncodeDefault(NEVER) val vault: Boolean = false,
 )
 
 @Serializable
@@ -83,6 +87,8 @@ data class WaIdBookLearnRequest(
     @SerialName("now_ms") val nowMs: Long,
     @EncodeDefault(NEVER) val pairs: List<WaIdBookLearnPair> = emptyList(),
     @SerialName("number_changes") @EncodeDefault(NEVER) val numberChanges: List<WaIdBookNumberChange> = emptyList(),
+    /** The table is in the vault cache (Phone since its vault, `plans/wa-vault.md` 13.5), not in `wa-identity.json`. */
+    @EncodeDefault(NEVER) val vault: Boolean = false,
 )
 
 @Serializable
@@ -103,6 +109,8 @@ data class WaIdBookAccountRequest(
     @SerialName("own_lid") @EncodeDefault(NEVER) val ownLid: String? = null,
     @SerialName("account_epoch") @EncodeDefault(NEVER) val accountEpoch: Int? = null,
     @EncodeDefault(NEVER) val changed: Boolean = false,
+    /** The table is in the vault cache (Phone since its vault, `plans/wa-vault.md` 13.5), not in `wa-identity.json`. */
+    @EncodeDefault(NEVER) val vault: Boolean = false,
 )
 
 @Serializable
@@ -115,4 +123,6 @@ data class WaIdBookAccount(
 @Serializable
 data class WaIdBookWipeRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
+    /** The table is in the vault cache (Phone since its vault, `plans/wa-vault.md` 13.5), not in `wa-identity.json`. */
+    @EncodeDefault(NEVER) val vault: Boolean = false,
 )

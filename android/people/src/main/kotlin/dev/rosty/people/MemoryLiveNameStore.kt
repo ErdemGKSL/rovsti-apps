@@ -1,7 +1,4 @@
-package dev.rosty.messages.wa
-
-import dev.rosty.people.LiveName
-import dev.rosty.people.LiveNameStore
+package dev.rosty.people
 
 /**
  * The WhatsApp names asked for numbers, in memory for the life of the process since the vault (`plans/wa-vault.md`

@@ -35,6 +35,11 @@ class WaIdentityBook(
     private val ops: WaIdBookOps,
     private val dir: String? = null,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * The table lives in the DK-encrypted vault cache, not in `wa-identity.json` (Phone, `plans/wa-vault.md` 13.5):
+     * every call fails with `locked` while the vault is.
+     */
+    private val vault: Boolean = false,
 ) {
     private val lock = Mutex()
     private var instance: String? = null
@@ -101,7 +106,7 @@ class WaIdentityBook(
             if (id == null || !page.supported) {
                 return@withLock Outcome.Ok(WaIdBookCaughtUp(pairs = 0, since = cursor, more = false, changed = false))
             }
-            val done = ops.catchUp(WaIdBookCatchUpRequest(dir, id, page.items, page.next))
+            val done = ops.catchUp(WaIdBookCatchUpRequest(dir, id, page.items, page.next, vault = vault))
             if (done is Outcome.Ok && done.value.changed) reload(id)
             done
         }
@@ -136,7 +141,7 @@ class WaIdentityBook(
     ): Outcome<Boolean> =
         lock.withLock {
             val id = instance ?: return@withLock Outcome.Ok(false)
-            val learned = ops.learn(WaIdBookLearnRequest(dir, id, clock(), pairs, numberChanges))
+            val learned = ops.learn(WaIdBookLearnRequest(dir, id, clock(), pairs, numberChanges, vault = vault))
             if (learned is Outcome.Ok && learned.value.changed) reload(id)
             learned.map { it.changed }
         }
@@ -146,7 +151,9 @@ class WaIdentityBook(
      * than the table was learned under: the table was emptied, catch up from the start.
      */
     suspend fun noteAccount(status: InstanceStatus): Outcome<Boolean> =
-        account { id -> WaIdBookAccountRequest(dir, id, status.ownJid, status.ownLid, status.accountEpoch) }
+        account { id ->
+            WaIdBookAccountRequest(dir, id, status.ownJid, status.ownLid, status.accountEpoch, vault = vault)
+        }
 
     /**
      * Takes in one gateway event: `identity_mapped`, `identity_number_changed`, a call that names both ids, a state
@@ -174,7 +181,7 @@ class WaIdentityBook(
             }
 
             is GatewayEvent.AccountChanged -> {
-                account { id -> WaIdBookAccountRequest(dir, id, ownPn = event.newPn, changed = true) }
+                account { id -> WaIdBookAccountRequest(dir, id, ownPn = event.newPn, changed = true, vault = vault) }
                 true
             }
 
@@ -193,7 +200,7 @@ class WaIdentityBook(
             instance = null
             cursor = null
             table.value = emptyMap()
-            ops.wipe(WaIdBookWipeRequest(dir)).map { }
+            ops.wipe(WaIdBookWipeRequest(dir, vault = vault)).map { }
         }
 
     private suspend fun account(request: (String) -> WaIdBookAccountRequest): Outcome<Boolean> =
@@ -206,7 +213,7 @@ class WaIdentityBook(
 
     /** Reads the pairs and the cursor of [id] again. Called under [lock]. */
     private suspend fun reload(id: String): Outcome<Unit> =
-        ops.snapshot(WaIdBookSnapshotRequest(dir, id)).map { snapshot ->
+        ops.snapshot(WaIdBookSnapshotRequest(dir, id, vault = vault)).map { snapshot ->
             cursor = snapshot.since
             table.value =
                 buildMap {

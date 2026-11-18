@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import dev.rosty.contacts.ContactsContainer
 import dev.rosty.core.FakeRustCore
+import dev.rosty.core.FakeVaultOps
 import dev.rosty.core.Outcome
 import dev.rosty.core.RustCore
 import dev.rosty.core.RustError
@@ -23,8 +24,11 @@ import dev.rosty.core.model.wa.PictureAnswer
 import dev.rosty.core.model.wa.PictureBody
 import dev.rosty.core.model.wa.WaProfile
 import dev.rosty.core.model.wa.WaUser
+import dev.rosty.core.ops.VaultOps
 import dev.rosty.core.ops.WaGateway
 import dev.rosty.people.sync.PeopleStore
+import dev.rosty.platform.vault.FakeVaultKeystore
+import dev.rosty.platform.vault.VaultKeystore
 import dev.rosty.shell.HasContainer
 import dev.rosty.wa.FakeWaGateway
 import dev.rosty.wa.FakeWaRepository
@@ -349,6 +353,13 @@ class PeopleTestContainer(
         }
 
     override fun createWa(): WaRepository = link
+
+    /** Contacts' WhatsApp vault, open: the worker gets its sync (a locked vault defers the run, `PeopleSyncVaultTest`). */
+    val fakeVault = FakeVaultOps().also { it.openVault() }
+
+    override fun createVaultOps(): VaultOps = fakeVault
+
+    override fun createVaultKeystore(): VaultKeystore = FakeVaultKeystore()
 
     override fun createPeopleStore() =
         PeopleStore(

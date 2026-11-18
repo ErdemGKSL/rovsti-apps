@@ -31,7 +31,7 @@ import dev.rosty.design.text.UiText
 import dev.rosty.platform.files.ClipboardRepository
 import dev.rosty.platform.files.FilesRepository
 import dev.rosty.wa.R
-import dev.rosty.wa.WaLinkStore
+import dev.rosty.wa.WaLinkSource
 import dev.rosty.wa.WaRepository
 import dev.rosty.wa.share.WaLinkHandover
 import kotlinx.coroutines.CoroutineDispatcher
@@ -69,7 +69,8 @@ class WhatsAppSettingsViewModel(
     private val app: AppId,
     private val machine: WaSettingsOps,
     private val opener: WaUrlOpener,
-    private val store: WaLinkStore,
+    /** Where the page reads the app's link: the vault's (no key: the gateway takes it from the vault) in the apps. */
+    private val store: WaLinkSource,
     private val repo: WaRepository,
     private val qr: QrOps,
     private val clipboard: ClipboardRepository,
@@ -85,7 +86,7 @@ class WhatsAppSettingsViewModel(
         app: AppId,
         machine: WaSettingsOps,
         ops: WaOps,
-        store: WaLinkStore,
+        store: WaLinkSource,
         repo: WaRepository,
         qr: QrOps,
         clipboard: ClipboardRepository,
@@ -97,7 +98,8 @@ class WhatsAppSettingsViewModel(
     ) : this(
         app = app,
         machine = machine,
-        opener = WaUrlOpener { url, key -> WaGateway.open(url, key, null, ops) },
+        // An empty key is the vault's link: `wa.open` takes the key from the open vault.
+        opener = WaUrlOpener { url, key -> WaGateway.open(url, key?.ifEmpty { null }, null, ops) },
         store = store,
         repo = repo,
         qr = qr,
@@ -117,6 +119,8 @@ class WhatsAppSettingsViewModel(
         ) : Work
 
         data object UseSibling : Work
+
+        data object Restart : Work
     }
 
     private val inbox = Channel<Work>(Channel.UNLIMITED)
@@ -125,6 +129,9 @@ class WhatsAppSettingsViewModel(
     private var model: JsonElement? = null
     private var qrPayload: String? = null
     private var pasteCounter = 0
+
+    /** The machine knows a link (read at the start, or saved by the link flow). */
+    private var linkedModel = false
 
     /** The page to draw. */
     val state: StateFlow<WaSettingsUiState> = mutableState.asStateFlow()
@@ -139,6 +146,7 @@ class WhatsAppSettingsViewModel(
                     Work.Start -> start()
                     is Work.Send -> step(work.input)
                     Work.UseSibling -> useSibling()
+                    Work.Restart -> restart()
                 }
             }
         }
@@ -187,6 +195,15 @@ class WhatsAppSettingsViewModel(
         }
     }
 
+    /**
+     * The app's vault opened. A page that started without a link (the link was then made, pasted or handed over,
+     * and the vault's setup ran) starts over with the vault's link; a page that knows its link carries on.
+     */
+    fun vaultOpened() {
+        if (linkedModel) return
+        inbox.trySend(Work.Restart)
+    }
+
     // ---- the queue
 
     private suspend fun start() {
@@ -204,23 +221,28 @@ class WhatsAppSettingsViewModel(
                 return
             }
         }
-        // The link screen opens without a link: a sibling Rosty app may have one (WA-R2). Adopting it stores it and
-        // connects, so the read below finds it as if the key had been pasted.
-        handover?.adoptIfUnlinked()
+        // Nothing is taken from a sibling here: only the person's tap does that (`useSibling`), and the vault's
+        // setup follows (`plans/wa-vault.md` 13.3).
         val stored = store.read()
         val link = (stored as? Outcome.Ok)?.value?.let { SettingsLink(it.gatewayUrl, it.instanceId, it.key) }
+        linkedModel = link != null
         apply(SettingsApplyRequest(link = link, app = app, nowMs = clock()))?.let { accept(it, runEffects = true) }
         refreshShare()
     }
 
-    /** "Use the link of ...": the user takes back the link a sibling holds, and the page starts over with it. */
+    /**
+     * "Use the link of ...": the person takes the link an unlocked sibling holds. It waits in memory for this app's
+     * vault (the setup screens follow); once the vault is open the page starts over with it ([vaultOpened]).
+     */
     private suspend fun useSibling() {
         val share = handover ?: return
-        if (share.adoptIfUnlinked(explicit = true) !is WaLinkHandover.Result.Adopted) {
+        if (share.take() !is WaLinkHandover.Result.Adopted) {
             mutableEvents.tryEmit(WaSettingsEvent.Toast(UiText.Res(R.string.wa_error_generic)))
-            refreshShare()
-            return
         }
+        refreshShare()
+    }
+
+    private suspend fun restart() {
         saved.remove<String>(MODEL_KEY)
         model = null
         start()
@@ -332,15 +354,16 @@ class WhatsAppSettingsViewModel(
             "save" -> {
                 val link = json.decodeFromJsonElement(StoredLink.serializer(), value!!)
                 val failed = repo.relinkTo(link) as? Outcome.Err
+                if (failed == null) linkedModel = true
                 refreshShare()
                 failed?.let { SettingsInput.error(it.error.message.orEmpty()) }
             }
 
             "forget" -> {
                 // Unlinking is per app: the siblings keep their link, and this one is not taken back unasked.
-                val removed = (store.read() as? Outcome.Ok)?.value
                 repo.forget()
-                handover?.onForget(removed)
+                linkedModel = false
+                handover?.onForget()
                 refreshShare()
                 null
             }

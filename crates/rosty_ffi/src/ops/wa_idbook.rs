@@ -5,6 +5,10 @@
 //! it keeps to name a caller that arrives under a LID. A request may name `dir` (tests, fixtures), else
 //! `core.init`'s data dir is used. Every op names the `instance_id` of the link: a file of another instance reads
 //! empty. No op touches the network: Kotlin makes the `wa.identity_mappings` call and hands the page in.
+//!
+//! With `vault: true` (Phone since its WhatsApp vault, `plans/wa-vault.md` 13.5) the table lives only in the
+//! DK-encrypted vault cache (`wa-vault-cache.bin`) of the unlocked session: every op answers `locked` while the vault
+//! is, and the first read moves a plaintext `wa-identity.json` of an earlier build into the cache and deletes it.
 
 use crate::envelope::FfiError;
 use crate::op;
@@ -15,7 +19,7 @@ use rosty_core::wa_identity::Source;
 use rosty_wa_proto::{IdentityMapping, IdentityMappings};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(super) const OPS: &[OpSpec] = &[
     op!(
@@ -66,12 +70,40 @@ fn data_dir(dir: &Option<String>) -> Result<PathBuf, FfiError> {
 #[derive(Serialize)]
 struct Empty {}
 
+/// The table of `instance`: from the file, or (`vault`) from the vault cache, moving a plaintext file in first.
+fn load_book(dir: &Path, vault: bool, instance: &str) -> Result<Book, FfiError> {
+    if !vault {
+        return Ok(Book::load(dir, instance));
+    }
+    if let Some(value) = super::vault::with_cache(false, |cache| cache.id_book.clone())? {
+        return Ok(Book::from_value(value, instance));
+    }
+    let book = Book::load(dir, instance);
+    if dir.join(rosty_app_core::phone::wa_idbook::FILE).exists() {
+        save_book(dir, true, &book)?;
+        Book::wipe(dir)?;
+    }
+    Ok(book)
+}
+
+/// Writes the table back where [`load_book`] read it.
+fn save_book(dir: &Path, vault: bool, book: &Book) -> Result<(), FfiError> {
+    if vault {
+        super::vault::with_cache(true, |cache| cache.id_book = Some(book.to_value()))
+    } else {
+        book.save(dir).map_err(FfiError::from)
+    }
+}
+
 // ---- wa_idbook.snapshot
 
 #[derive(Deserialize)]
 struct SnapshotReq {
     #[serde(default)]
     dir: Option<String>,
+    /// The table is in the vault cache, not in `wa-identity.json`.
+    #[serde(default)]
+    vault: bool,
     instance_id: String,
 }
 
@@ -91,7 +123,7 @@ struct SnapshotAns {
 fn snapshot(req: SnapshotReq) -> Result<SnapshotAns, FfiError> {
     let dir = data_dir(&req.dir)?;
     let _reading = book_lock();
-    let book = Book::load(&dir, &req.instance_id);
+    let book = load_book(&dir, req.vault, &req.instance_id)?;
     let (own_pn, own_lid) = book.own();
     Ok(SnapshotAns {
         since: book.since().map(str::to_owned),
@@ -115,6 +147,19 @@ fn snapshot_cases() -> Vec<Case> {
             json!({"dir": "$DIR/none", "instance_id": INSTANCE}),
         )
         .seeded("wa_idbook"),
+        // The vault is locked: nothing is read, not even the plaintext file.
+        Case::named(
+            "vault_locked",
+            json!({"dir": "$DIR", "instance_id": INSTANCE, "vault": true}),
+        )
+        .seeded("wa_idbook"),
+        // The unlocked vault has no table yet; the seeded vault's instance has none on disk either.
+        Case::named(
+            "vault",
+            json!({"dir": "$DIR", "instance_id": "inst1", "vault": true}),
+        )
+        .seeded("wa_vault")
+        .after("vault.unlock", super::vault::seed_unlock_request()),
     ]
 }
 
@@ -124,6 +169,9 @@ fn snapshot_cases() -> Vec<Case> {
 struct CatchUpReq {
     #[serde(default)]
     dir: Option<String>,
+    /// The table is in the vault cache, not in `wa-identity.json`.
+    #[serde(default)]
+    vault: bool,
     instance_id: String,
     /// One page of `wa.identity_mappings`, as it came.
     #[serde(default)]
@@ -135,13 +183,13 @@ struct CatchUpReq {
 fn catch_up(req: CatchUpReq) -> Result<CaughtUp, FfiError> {
     let dir = data_dir(&req.dir)?;
     let _writing = book_lock();
-    let mut book = Book::load(&dir, &req.instance_id);
+    let mut book = load_book(&dir, req.vault, &req.instance_id)?;
     let done = book.catch_up(&IdentityMappings {
         items: req.items,
         next: req.next,
     });
     if done.changed {
-        book.save(&dir)?;
+        save_book(&dir, req.vault, &book)?;
     }
     Ok(done)
 }
@@ -181,6 +229,9 @@ fn catch_up_cases() -> Vec<Case> {
 struct LearnReq {
     #[serde(default)]
     dir: Option<String>,
+    /// The table is in the vault cache, not in `wa-identity.json`.
+    #[serde(default)]
+    vault: bool,
     instance_id: String,
     now_ms: i64,
     /// Two ids of one person, in either order: an `identity_mapped` event, a call's `peer` and `peer_alt`.
@@ -222,7 +273,7 @@ struct LearnAns {
 fn learn(req: LearnReq) -> Result<LearnAns, FfiError> {
     let dir = data_dir(&req.dir)?;
     let _writing = book_lock();
-    let mut book = Book::load(&dir, &req.instance_id);
+    let mut book = load_book(&dir, req.vault, &req.instance_id)?;
     let mut changed = false;
     for pair in &req.pairs {
         let source = pair
@@ -246,7 +297,7 @@ fn learn(req: LearnReq) -> Result<LearnAns, FfiError> {
         );
     }
     if changed {
-        book.save(&dir)?;
+        save_book(&dir, req.vault, &book)?;
     }
     Ok(LearnAns { changed })
 }
@@ -276,6 +327,15 @@ fn learn_cases() -> Vec<Case> {
             ]}),
         )
         .seeded("wa_idbook"),
+        // Into the vault cache of the unlocked session.
+        Case::named(
+            "vault",
+            json!({"dir": "$DIR", "instance_id": "inst1", "vault": true, "now_ms": NOW, "pairs": [
+                {"id": "777000000000002:3@lid", "alt": "100000000002@s.whatsapp.net"},
+            ]}),
+        )
+        .seeded("wa_vault")
+        .after("vault.unlock", super::vault::seed_unlock_request()),
         // Two numbers, a group: nothing to learn.
         Case::named(
             "not_a_pair",
@@ -294,6 +354,9 @@ fn learn_cases() -> Vec<Case> {
 struct AccountReq {
     #[serde(default)]
     dir: Option<String>,
+    /// The table is in the vault cache, not in `wa-identity.json`.
+    #[serde(default)]
+    vault: bool,
     instance_id: String,
     /// The account's own number (`wa.status`'s `own_jid`, the event's `new_pn`).
     #[serde(default)]
@@ -316,7 +379,7 @@ struct AccountAns {
 fn account(req: AccountReq) -> Result<AccountAns, FfiError> {
     let dir = data_dir(&req.dir)?;
     let _writing = book_lock();
-    let mut book = Book::load(&dir, &req.instance_id);
+    let mut book = load_book(&dir, req.vault, &req.instance_id)?;
     let before = book.clone();
     let reset = if req.changed {
         book.account_changed(req.own_pn.as_deref());
@@ -329,7 +392,7 @@ fn account(req: AccountReq) -> Result<AccountAns, FfiError> {
         )
     };
     if book != before {
-        book.save(&dir)?;
+        save_book(&dir, req.vault, &book)?;
     }
     Ok(AccountAns { reset })
 }
@@ -371,6 +434,9 @@ fn account_cases() -> Vec<Case> {
 struct WipeReq {
     #[serde(default)]
     dir: Option<String>,
+    /// The table is in the vault cache, not in `wa-identity.json`.
+    #[serde(default)]
+    vault: bool,
 }
 
 /// Removes the table (the link was removed). A missing file is fine.
@@ -378,6 +444,12 @@ fn wipe(req: WipeReq) -> Result<Empty, FfiError> {
     let dir = data_dir(&req.dir)?;
     let _writing = book_lock();
     Book::wipe(&dir)?;
+    if req.vault {
+        // A locked vault keeps its cache until the reset that follows an unlink deletes it.
+        if super::vault::unlocked_instance().is_some() {
+            super::vault::with_cache(true, |cache| cache.id_book = None)?;
+        }
+    }
     Ok(Empty {})
 }
 
@@ -422,6 +494,7 @@ mod tests {
         snapshot(SnapshotReq {
             dir: dir_of(tmp),
             instance_id: INSTANCE.into(),
+            vault: false,
         })
         .expect("snapshot")
     }
@@ -438,6 +511,7 @@ mod tests {
                 learned_ms: None,
             }],
             number_changes: Vec::new(),
+            vault: false,
         })
         .expect("learn")
         .changed
@@ -471,6 +545,7 @@ mod tests {
                 learned_ms: 1,
             }],
             next: Some("c1".into()),
+            vault: false,
         })
         .expect("catch up");
         assert_eq!((done.since.as_deref(), done.more), (Some("c1"), true));
@@ -483,6 +558,7 @@ mod tests {
             own_lid: None,
             account_epoch: None,
             changed: true,
+            vault: false,
         })
         .expect("account");
         assert!(answer.reset);
@@ -495,7 +571,11 @@ mod tests {
     fn wipe_removes_the_table() {
         let tmp = TempDir::new("wipe");
         learn_call(&tmp, LID, PN);
-        wipe(WipeReq { dir: dir_of(&tmp) }).expect("wipe");
+        wipe(WipeReq {
+            dir: dir_of(&tmp),
+            vault: false,
+        })
+        .expect("wipe");
         assert!(read(&tmp).pairs.is_empty());
     }
 }

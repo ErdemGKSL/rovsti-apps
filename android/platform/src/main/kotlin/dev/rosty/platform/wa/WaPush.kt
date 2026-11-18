@@ -29,6 +29,14 @@ object WaPush {
      */
     @Volatile var lidNumber: (String) -> String? = { null }
 
+    /**
+     * Whether the app's WhatsApp vault is locked now (`plans/wa-vault.md` 13.3); the app with a vault installs it (a
+     * cold process is locked: the keys only live in memory). While locked a call shows from the push alone and
+     * content-free ([WaIncomingNotice.contentFree]): no name, no number, no lookup, no gateway request, and no wake of
+     * the event stream. False (the default) for an app without a vault.
+     */
+    @Volatile var locked: () -> Boolean = { false }
+
     /** The FCM token, or "" when Firebase is not packaged or the token is not ready. Blocks up to 3 s: not the main thread. */
     fun token(): String =
         try {
@@ -66,6 +74,16 @@ object WaPush {
         data: Map<String, String>,
     ) {
         val app = context.applicationContext
+        val vaultLocked =
+            try {
+                locked()
+            } catch (_: RuntimeException) {
+                true
+            }
+        if (vaultLocked) {
+            onLockedMessage(app, data)
+            return
+        }
         // The app's caller-ID when it installed one, else (a cold process) Android's own PhoneLookup (F28, F39).
         val lookup = CallerLookup.of(app)
         val contactName = { number: String ->
@@ -88,5 +106,20 @@ object WaPush {
             WaMissedNotice.of(data, contactName, lidNumber)?.let { WaIncoming.showMissed(app, it) }
         }
         PlatformEvents.emit(EVENT, payload(data))
+    }
+
+    /**
+     * [onMessage] while the vault is locked: the ring and the missed call show content-free, and nothing else happens
+     * (the push's `sender` and `name` are not read; no event wakes the stream, which is closed anyway).
+     */
+    private fun onLockedMessage(
+        app: Context,
+        data: Map<String, String>,
+    ) {
+        WaIncomingNotice.contentFree(data)?.let { WaIncoming.show(app, it, locked = true) }
+        if (data["kind"] == "call_end") {
+            data["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(app, it) }
+            WaMissedNotice.contentFree(data)?.let { WaIncoming.showMissed(app, it) }
+        }
     }
 }

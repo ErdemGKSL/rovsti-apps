@@ -1,5 +1,6 @@
 package dev.rosty.core
 
+import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.wa.VaultCommitRequest
 import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyInfo
@@ -20,6 +21,7 @@ import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultTripLink
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultUnlocked
 import dev.rosty.core.model.wa.VaultUnlockedInfo
@@ -135,6 +137,24 @@ class FakeVaultOps(
         return kept.takeIf { it.length == 28 }
     }
 
+    /**
+     * A committed vault for [link], open: what a test of an app whose WhatsApp vault is unlocked starts from (its
+     * passphrase is all zeros).
+     */
+    fun openVault(link: VaultLink = VaultLink("https://rosty.erdemdev.tr", "inst1", "rwk_" + "A".repeat(43))) {
+        synchronized(lock) {
+            vault = VaultInfo("rosty.wa.k.test", "AQ==")
+            this.link = link
+            passphrase = List(7) { "0000" }.joinToString("-")
+            open(link)
+        }
+    }
+
+    /** Locks the open vault, as `vault.lock` does. */
+    fun lockVault() {
+        synchronized(lock) { session = null }
+    }
+
     private fun open(link: VaultLink): Long {
         session = null
         val handle = nextHandle++
@@ -246,6 +266,29 @@ class FakeVaultOps(
             val pass = newPassphrase()
             s.pendingPassphrase = pass
             Outcome.Ok(VaultKeys(s.handle, pass, "seal-$issued"))
+        }
+
+    override suspend fun exportLink(req: VaultHandleRequest) =
+        answer("vault.export_link") {
+            val s = session?.takeIf { it.handle == req.handle && it.committed } ?: return@answer locked(req.handle)
+            Outcome.Ok(s.link)
+        }
+
+    /** The link a Stops trip keeps in RAM (`vault.trip_hold`), or null. */
+    @Volatile var tripLink: VaultLink? = null
+        private set
+
+    override suspend fun tripHold(req: VaultHandleRequest) =
+        answer("vault.trip_hold") {
+            val s = session?.takeIf { it.handle == req.handle && it.committed } ?: return@answer locked(req.handle)
+            tripLink = s.link
+            Outcome.Ok(VaultTripLink(held = true))
+        }
+
+    override suspend fun tripRelease(req: Empty) =
+        answer("vault.trip_release") {
+            tripLink = null
+            Outcome.Ok(VaultTripLink(held = false))
         }
 
     override suspend fun reset(req: VaultDirRequest) =

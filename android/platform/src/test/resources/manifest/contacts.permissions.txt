@@ -6,6 +6,7 @@ uses-permission android.permission.POST_NOTIFICATIONS
 uses-permission android.permission.READ_CALL_LOG
 uses-permission android.permission.READ_CONTACTS
 uses-permission android.permission.RECEIVE_BOOT_COMPLETED
+uses-permission android.permission.USE_BIOMETRIC
 uses-permission android.permission.VIBRATE
 uses-permission android.permission.WAKE_LOCK
 uses-permission android.permission.WRITE_CONTACTS

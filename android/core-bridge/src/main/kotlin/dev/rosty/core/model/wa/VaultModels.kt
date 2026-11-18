@@ -165,6 +165,15 @@ data class VaultHandleRequest(
     val handle: Long,
 )
 
+/**
+ * `vault.trip_hold` and `vault.trip_release`: whether the running Stops trip keeps a copy of the link in RAM (plan
+ * 13.3) for its arriving-soon message. Nothing is written; the trip's end drops it.
+ */
+@Serializable
+data class VaultTripLink(
+    val held: Boolean,
+)
+
 /** `vault.reset`: the vault files deleted; the Keystore keys are Kotlin's to delete. */
 @Serializable
 data class VaultReset(

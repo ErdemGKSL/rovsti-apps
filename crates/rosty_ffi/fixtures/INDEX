@@ -1010,6 +1010,9 @@ vault.create.no_link
 vault.daily_forget
 vault.daily_store
 vault.daily_store.gone
+vault.export_link
+vault.export_link.locked
+vault.export_link.not_committed
 vault.lock
 vault.lock.handle
 vault.lock.nothing_open
@@ -1027,6 +1030,9 @@ vault.state.daily_ok
 vault.state.empty
 vault.state.legacy
 vault.state.rebooted
+vault.trip_hold
+vault.trip_hold.locked
+vault.trip_release
 vault.unlock
 vault.unlock.damaged
 vault.unlock.no_vault
@@ -1223,9 +1229,12 @@ wa_idbook.learn
 wa_idbook.learn.known
 wa_idbook.learn.not_a_pair
 wa_idbook.learn.number_change
+wa_idbook.learn.vault
 wa_idbook.snapshot
 wa_idbook.snapshot.missing
 wa_idbook.snapshot.other_instance
+wa_idbook.snapshot.vault
+wa_idbook.snapshot.vault_locked
 wa_idbook.wipe
 wa_idbook.wipe.missing
 wa_identity.parse

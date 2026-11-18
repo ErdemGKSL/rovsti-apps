@@ -5,12 +5,15 @@ import android.os.Build
 import android.os.Vibrator
 import android.view.View
 import coil3.ImageLoader
+import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
 import dev.rosty.core.RustCore
-import dev.rosty.core.getOrNull
 import dev.rosty.core.log.DevLog
 import dev.rosty.core.model.wa.StoredLink
+import dev.rosty.core.ops.NativeVaultOps
 import dev.rosty.core.ops.NativeWaOps
+import dev.rosty.core.ops.VaultOps
+import dev.rosty.core.ops.WaGateway
 import dev.rosty.core.ops.WaOps
 import dev.rosty.design.haptics.HapticEvent
 import dev.rosty.design.haptics.HapticMode
@@ -21,28 +24,42 @@ import dev.rosty.platform.files.AndroidFilesRepository
 import dev.rosty.platform.files.ClipboardRepository
 import dev.rosty.platform.files.FilesRepository
 import dev.rosty.platform.files.SystemClipboardRepository
+import dev.rosty.platform.files.copySecret
 import dev.rosty.platform.system.permissions.AndroidSpecialAccess
 import dev.rosty.platform.system.permissions.AppPermissions
 import dev.rosty.platform.system.permissions.PermissionController
 import dev.rosty.platform.system.permissions.SpecialAccess
+import dev.rosty.platform.vault.AndroidVaultKeystore
+import dev.rosty.platform.vault.BiometricVaultAuthenticator
+import dev.rosty.platform.vault.VaultKeystore
 import dev.rosty.platform.vault.VaultPromptHost
 import dev.rosty.platform.wa.WaPush
 import dev.rosty.shell.settings.CommonSettings
 import dev.rosty.shell.settings.NoCommonSettings
 import dev.rosty.wa.DefaultWaRepository
+import dev.rosty.wa.WaGatewayOpener
+import dev.rosty.wa.WaLinkSource
 import dev.rosty.wa.WaLinkStore
 import dev.rosty.wa.WaRepository
+import dev.rosty.wa.avatars.VaultAvatarPictures
 import dev.rosty.wa.avatars.WaAvatar
 import dev.rosty.wa.avatars.WaAvatars
 import dev.rosty.wa.avatars.waAvatars
+import dev.rosty.wa.share.HeldLink
 import dev.rosty.wa.share.PrefsWaLinkMarks
 import dev.rosty.wa.share.ResolverSiblingLinks
+import dev.rosty.wa.share.SiblingLinks
 import dev.rosty.wa.share.WaLinkHandover
 import dev.rosty.wa.share.WaLinkShare
+import dev.rosty.wa.vault.SharedWaVaultPrefs
+import dev.rosty.wa.vault.VaultFlow
+import dev.rosty.wa.vault.WaVault
+import dev.rosty.wa.vault.WaVaultEnv
+import dev.rosty.wa.vault.WaVaultState
+import dev.rosty.wa.vault.vaultPrompts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -72,16 +89,21 @@ abstract class ShellContainer(
     val waOps: WaOps by lazy { NativeWaOps(rust) }
 
     /** The one WhatsApp repository of the process, already started. */
-    val wa: WaRepository by lazy { createWa() }
+    val wa: WaRepository get() = waOnce.value
+
+    private val waOnce = lazy { createWa() }
 
     /**
-     * The link hand-over between Rosty apps signed with the same key (WA-R2): this app, when it has no WhatsApp
-     * link, takes the link of an installed sibling. Asked once when [wa] is created and again by the link screen.
+     * The link hand-over between Rosty apps signed with the same key (WA-R2, `plans/wa-vault.md` 13.3): this app,
+     * while it has no link, takes the link of a sibling whose vault is unlocked when the person asks on the link
+     * screen; the link goes into this app's vault setup, in memory only.
      */
     val waLinkHandover: WaLinkHandover by lazy { createWaLinkHandover() }
 
     /** Profile pictures of WhatsApp contacts; started by the screens that show them. */
-    val avatars: WaAvatars by lazy { createAvatars() }
+    val avatars: WaAvatars get() = avatarsOnce.value
+
+    private val avatarsOnce = lazy { createAvatars() }
 
     /** The app's one Coil loader, with the [WaAvatar] fetcher. */
     private val imageLoaderLazy = lazy { createImageLoader() }
@@ -104,11 +126,100 @@ abstract class ShellContainer(
     /** The window the WhatsApp vault's system prompts open over; the activity attaches itself (plan 13.2). */
     val vaultPromptHost: VaultPromptHost by lazy { VaultPromptHost() }
 
+    /** The Rust half of this app's WhatsApp vault (`plans/wa-vault.md`): every key lives there. */
+    val vaultOps: VaultOps by lazy { createVaultOps() }
+
+    protected open fun createVaultOps(): VaultOps = NativeVaultOps(rust)
+
+    /** The Keystore half: K_hw and K_daily of this app, prompted over the activity ([vaultPromptHost]). */
+    val vaultKeystore: VaultKeystore by lazy { createVaultKeystore() }
+
+    protected open fun createVaultKeystore(): VaultKeystore =
+        AndroidVaultKeystore(context, BiometricVaultAuthenticator(vaultPromptHost))
+
+    private val waVaultOnce = lazy { createWaVault().also { vault -> scope.launch { vault.refresh() } } }
+
     /**
-     * When WhatsApp locks (screen off, time in the background, process death; plan 6), for an app with a WhatsApp
-     * vault; null for the others. The activity reports its starts and stops to it.
+     * The WhatsApp vault of this app (`plans/wa-vault.md` 3-6, 13): each Rosty app has its own vault and Keystore
+     * keys, with the shared setup, unlock, change and forgot screens. Its state decides what the WhatsApp screens show
+     * and whether anything may reach the gateway; it reads the vault on first use.
      */
-    open val vaultLock: VaultLockLifecycle? get() = null
+    val waVault: WaVault get() = waVaultOnce.value
+
+    /** [waVault] when something already made it: a push or a provider in a cold process must not start the core. */
+    val waVaultIfMade: WaVault? get() = if (waVaultOnce.isInitialized()) waVault else null
+
+    protected open fun createWaVault(): WaVault =
+        WaVault(
+            ops = vaultOps,
+            keystore = vaultKeystore,
+            prefs = SharedWaVaultPrefs(context),
+            env =
+                WaVaultEnv(
+                    bootCount = { AndroidVaultKeystore.bootCount(context) ?: 0L },
+                    now = System::currentTimeMillis,
+                ),
+            prompts = vaultPrompts(context.resources),
+            onLock = { lockWhatsApp() },
+            onUnlocked = { unlockedWhatsApp() },
+            onReset = { forgetWhatsApp() },
+        )
+
+    /** What the vault screens show and do; one per process, so a commit survives the page that started it. */
+    val vaultFlow: VaultFlow by lazy { VaultFlow(waVault, scope) { secret -> clipboard.copySecret(scope, secret) } }
+
+    /**
+     * When WhatsApp locks (screen off, time in the background, "Lock now", process death; plan 6). The activity
+     * reports its starts and stops to it.
+     */
+    open val vaultLock: VaultLockLifecycle by lazy {
+        VaultLockLifecycle(
+            scope = scope,
+            now = System::currentTimeMillis,
+            timeoutMs = { waVault.autoLockMs },
+            unlocked = { waVaultIfMade?.unlocked == true },
+            prompting = { waVaultIfMade?.prompting?.value == true },
+            lock = { waVaultIfMade?.lock() },
+        ).also { it.watchScreen(context) }
+    }
+
+    /**
+     * Locks WhatsApp (`plans/wa-vault.md` 6): the one teardown path of the app, called by [waVault] (screen off, the
+     * background timer, "Lock now", a reset). Nothing reaches the gateway after it starts. The base closes the
+     * repository (its gateway and event socket), forgets the profile pictures in memory and zeroizes the keys
+     * (`vault.lock`); an app adds what it keeps of WhatsApp in memory.
+     */
+    open suspend fun lockWhatsApp() {
+        if (waOnce.isInitialized()) wa.lock()
+        if (avatarsOnce.isInitialized()) avatars.pictures?.clear()
+        vaultOps.lock()
+    }
+
+    /** The vault was opened: the repository may reach the gateway again (through the vault's key). */
+    protected open suspend fun unlockedWhatsApp() {
+        wa.unlock()
+        scope.launch { wa.gateway() }
+    }
+
+    /** "Forgot passphrase" or a new link: the link and everything kept for it go, as an unlink does (plan 5). */
+    protected open suspend fun forgetWhatsApp() {
+        wa.forget()
+        waLinkHandover.onForget()
+    }
+
+    /**
+     * Where this app reads its WhatsApp link: the vault's URL and instance with an empty key while it is unlocked
+     * (`wa.open` then takes the key from the vault), nothing otherwise. No Kotlin path reads `whatsapp-link.json` any
+     * more: a plaintext link of an earlier build is read by Rust alone, for the vault's setup (`vault.create`).
+     */
+    val waLinkSource: WaLinkSource by lazy {
+        WaLinkSource {
+            when (val read = vaultOps.state()) {
+                is Outcome.Err -> read
+                is Outcome.Ok -> Outcome.Ok(read.value.unlocked?.let { StoredLink(it.gatewayUrl, it.instanceId, "") })
+            }
+        }
+    }
 
     /**
      * Developer mode and the log behind the Logs page. Started off the main thread when the container is created, so
@@ -141,17 +252,53 @@ abstract class ShellContainer(
         return Rust.core()
     }
 
-    /** The repository [createWa] starts; an app with a WhatsApp vault reads its link from the vault. */
-    protected open fun newWaRepository(): WaRepository =
-        DefaultWaRepository(WaLinkStore(waOps), waOps, scope, context.cacheDir.absolutePath)
+    /**
+     * The repository [createWa] starts. It reads its link from the vault ([waLinkSource]), starts locked and follows
+     * [waVault]: open for an open vault, closed otherwise. No request reaches the gateway before the unlock.
+     */
+    protected open fun newWaRepository(): WaRepository {
+        val cacheDir = context.cacheDir.absolutePath
+        return DefaultWaRepository(
+            store = WaLinkStore(waOps),
+            scope = scope,
+            opener =
+                WaGatewayOpener { link ->
+                    WaGateway.open(link.gatewayUrl, link.key.ifEmpty { null }, cacheDir, waOps)
+                },
+            source = waLinkSource,
+            startLocked = true,
+        ).also { repo -> scope.launch { followVault(repo) } }
+    }
+
+    /** Opens and closes [repo] with the vault. */
+    private suspend fun followVault(repo: WaRepository) {
+        waVault.state.collect { state ->
+            when (state) {
+                WaVaultState.Unlocked -> {
+                    repo.unlock()
+                    repo.gateway()
+                }
+
+                WaVaultState.NoLink -> {
+                    // The link flow: nothing to open until a link waits for its vault (no plaintext link is written).
+                    repo.unlock()
+                    repo.gateway()
+                }
+
+                WaVaultState.Checking -> {
+                    Unit
+                }
+
+                else -> {
+                    repo.lock()
+                }
+            }
+        }
+    }
 
     protected open fun createWa(): WaRepository =
         newWaRepository().also { repo ->
             repo.start()
-            // No link here: ask the sibling Rosty apps for theirs (a link of this app's own always wins). The one
-            // hand-over of the process, so this ask and the link screen's never run side by side; it reads [wa],
-            // which is this repository once the lazy has it.
-            scope.launch { waLinkHandover.adoptIfUnlinked() }
             // Where the gateway wakes this app: its FCM token, once the link is up (nothing in the plain flavor).
             waPush =
                 WaPushRegistrar.appOf(context.packageName)?.let { app ->
@@ -169,33 +316,58 @@ abstract class ShellContainer(
 
     protected open fun createWaLinkHandover(): WaLinkHandover =
         WaLinkHandover(
-            store = WaLinkStore(waOps),
+            held = ::heldLink,
             siblings = WaLinkShare.siblingsOf(context.packageName),
-            source = ResolverSiblingLinks(context),
+            source = createSiblingLinks(),
             marks = PrefsWaLinkMarks(context),
-            adopt = { link -> wa.relinkTo(link) },
+            adopt = { link -> waVault.adopt(link) },
         )
 
-    /**
-     * The link `WaLinkProvider` answers a sibling app with: what this app stored, or null. A cold process (the
-     * provider started it) builds the Rust core first; the provider bounds the wait.
-     */
-    open suspend fun sharedWaLink(): StoredLink? {
-        // An app that never linked answers without loading the native library: the link file is just not there
-        // (`whatsapp-link.json`, removed again when the link is).
-        if (!File(context.noBackupFilesDir, WA_LINK_FILE).exists()) return null
-        rust
-        Rust.ready.first { it }
-        return WaLinkStore(waOps).read().getOrNull()
+    /** How this app asks its siblings (their `WaLinkProvider`); tests answer for them. */
+    protected open fun createSiblingLinks(): SiblingLinks = ResolverSiblingLinks(context)
+
+    /** What this app holds, for the hand-over: no link, a link or vault (its instance while open), or unreadable. */
+    private suspend fun heldLink(): HeldLink {
+        waVault.refresh()
+        return when (waVault.state.value) {
+            WaVaultState.NoLink -> {
+                HeldLink.None
+            }
+
+            WaVaultState.Checking -> {
+                HeldLink.Unreadable
+            }
+
+            WaVaultState.Unlocked -> {
+                HeldLink.Held((vaultOps.state() as? Outcome.Ok)?.value?.unlocked?.instanceId)
+            }
+
+            else -> {
+                HeldLink.Held(null)
+            }
+        }
     }
 
+    /**
+     * The link `WaLinkProvider` hands a sibling app that is setting up its own vault: the link of this app's vault
+     * while this process has it unlocked (`vault.export_link`, memory only), else null. A locked vault, a cold
+     * process (the provider started it: nothing is unlocked there) and an app without a vault answer nothing, and no
+     * link file is read.
+     */
+    open suspend fun sharedWaLink(): StoredLink? = waVaultIfMade?.exportLink()
+
+    /** Whether [sharedWaLink] would answer now, without reading the link. */
+    open fun waLinkOffered(): Boolean = waVaultIfMade?.unlocked == true
+
+    /** Profile pictures live in memory and in the DK-encrypted vault cache only (`plans/wa-vault.md` 13.5). */
     protected open fun createAvatars(): WaAvatars =
         WaAvatars(
             repo = wa,
             ops = waOps,
-            dir = File(context.cacheDir, "wa-avatars"),
+            dir = File(context.cacheDir, WaAvatars.DIR_NAME),
             scope = scope,
             invalidate = ::dropCachedAvatar,
+            pictures = VaultAvatarPictures(vaultOps),
         )
 
     protected open fun createImageLoader(): ImageLoader =
@@ -230,9 +402,6 @@ abstract class ShellContainer(
         // ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW and TRIM_MEMORY_MODERATE (deprecated names, stable values).
         const val TRIM_RUNNING_LOW = 10
         const val TRIM_MODERATE = 60
-
-        /** `rosty_app_core::wa_link::LINK_FILE`, in the data directory given to `Rust.init`. */
-        const val WA_LINK_FILE = "whatsapp-link.json"
     }
 }
 

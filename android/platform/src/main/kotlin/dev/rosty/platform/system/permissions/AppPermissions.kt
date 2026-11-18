@@ -100,8 +100,10 @@ class AppPermissions(
                 waLinkUses = true,
                 // "Message" on a person opens the chat in Rosty Messages (WA-R2).
                 handoffUses = true,
-                // work-runtime (the people sync, S11) merges this one; the other three it adds are listed above.
-                libraryPermissions = setOf("android.permission.ACCESS_NETWORK_STATE"),
+                // work-runtime (the people sync, S11) merges this one, the other three it adds are listed above;
+                // androidx.biometric the prompt's USE_BIOMETRIC (the WhatsApp vault, plans/wa-vault.md 13.3).
+                libraryPermissions =
+                    setOf("android.permission.ACCESS_NETWORK_STATE", Manifest.permission.USE_BIOMETRIC),
             )
 
         val messages =
@@ -164,13 +166,15 @@ class AppPermissions(
                 specialPermissions = emptySet(),
                 handoffUses = true,
                 waLinkUses = true,
-                // work-runtime (the people sync, X.1b) merges these four.
+                // work-runtime (the people sync, X.1b) merges these four; androidx.biometric the prompt's USE_BIOMETRIC
+                // (the WhatsApp vault, plans/wa-vault.md 13.3).
                 libraryPermissions =
                     setOf(
                         "android.permission.ACCESS_NETWORK_STATE",
                         Manifest.permission.FOREGROUND_SERVICE,
                         Manifest.permission.RECEIVE_BOOT_COMPLETED,
                         Manifest.permission.WAKE_LOCK,
+                        Manifest.permission.USE_BIOMETRIC,
                     ),
             )
 
@@ -206,6 +210,8 @@ class AppPermissions(
                         Manifest.permission.INTERNET,
                     ),
                 specialPermissions = setOf(FSI, BATTERY, "android.permission.USE_EXACT_ALARM"),
+                // androidx.biometric: the prompt's USE_BIOMETRIC (the WhatsApp vault, plans/wa-vault.md 13.3).
+                libraryPermissions = setOf(Manifest.permission.USE_BIOMETRIC),
             )
 
         val all: List<AppPermissions> = listOf(phone, messages, contacts, stops)

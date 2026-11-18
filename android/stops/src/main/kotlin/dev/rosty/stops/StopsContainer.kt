@@ -37,6 +37,7 @@ import dev.rosty.stops.settings.AlarmDevice
 import dev.rosty.stops.settings.AndroidAlarmDevice
 import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AndroidAlarmControl
+import dev.rosty.stops.trip.TripLinkRelease
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +61,8 @@ open class StopsContainer(
             load = { (store.load() as? Outcome.Ok)?.value ?: store.prefs.value },
             link = wa.linkState,
             settled = wa.settled,
+            vault = waVault.state,
+            hold = { waVault.holdForTrip() },
         )
     }
 
@@ -105,7 +108,7 @@ open class StopsContainer(
     val location: LocationRepository by lazy { createLocation() }
 
     /** Starts and stops `TripService` and reports its status. */
-    val trips: TripRepository by lazy { createTrips() }
+    val trips: TripRepository by lazy { tripsWithLink() }
 
     /** What the first screen reads (prefs, trip, saved stops, history, GTFS). */
     val homeData: HomeData by lazy { createHomeData() }
@@ -170,6 +173,9 @@ open class StopsContainer(
     protected open fun createLocation(): LocationRepository = AndroidLocationRepository(context)
 
     protected open fun createTrips(): TripRepository = AndroidTripRepository(context)
+
+    /** [createTrips], the trip's copy of the WhatsApp link dropped when the trip ends (`plans/wa-vault.md` 13.3). */
+    private fun tripsWithLink(): TripRepository = TripLinkRelease(createTrips(), scope) { waVault.releaseTrip() }
 
     protected open fun createHomeData(): HomeData = CoreHomeData(ops, store)
 

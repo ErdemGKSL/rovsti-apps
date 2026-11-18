@@ -29,7 +29,7 @@ use std::path::Path;
 
 use crate::headless::{self, Handler};
 use crate::storage;
-use crate::wa_link::send::{SendFailure, send_text_in};
+use crate::wa_link::send::{SendFailure, send_text_held};
 use rosty_geo::{FixIn, Lang, NoticeDelivery, Outcome, StopsPrefs};
 use serde::Deserialize;
 use serde_json::json;
@@ -89,11 +89,12 @@ fn trip_fix(_: &str, json: &str) -> String {
     let Ok(request) = serde_json::from_str::<FixRequest>(json) else {
         return String::new();
     };
+    // The notice goes through the link the trip keeps in RAM, never through a link file (plan 13.3).
     fix_in(
         Path::new(&request.dir),
         request.fix,
         request.locale,
-        &send_text_in,
+        &send_text_held,
     )
 }
 
@@ -575,6 +576,20 @@ mod tests {
     }
 
     #[test]
+    fn trip_end_drops_the_trips_whatsapp_link() {
+        let _one = crate::wa_link::send::trip_link_test_lock();
+        let dir = tmp("hl-end-link");
+        arrived_trip(&dir);
+        assert!(crate::wa_link::send::hold_trip_link(
+            "https://rosty.erdemdev.tr",
+            "rwk_BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"
+        ));
+        let request = json!({"dir": dir.to_string_lossy(), "reason": "cancelled"}).to_string();
+        assert_eq!(trip_end("trip_end", &request), ENDED);
+        assert!(!crate::wa_link::send::trip_link_held());
+    }
+
+    #[test]
     fn trip_end_records_the_reason() {
         let dir = tmp("hl-end");
         store::save_trip(&dir, &trip(5)).unwrap();
@@ -633,12 +648,14 @@ mod tests {
 
     #[test]
     fn a_notice_with_no_link_gives_up_and_never_retries() {
+        let _one = crate::wa_link::send::trip_link_test_lock();
+        crate::wa_link::send::release_trip_link();
         let dir = tmp("hl-nolink");
         with_notice(&dir, "chat@s.whatsapp.net", before_circle());
 
         // The real sender: no whatsapp-link.json in the directory.
         let first: FixOut =
-            serde_json::from_str(&fix_in(&dir, fix(900.0, 1), None, &send_text_in)).unwrap();
+            serde_json::from_str(&fix_in(&dir, fix(900.0, 1), None, &send_text_held)).unwrap();
         assert!(!first.notice_sent);
         let notice = store::load_trip(&dir).unwrap().notice.unwrap();
         assert!(!notice.sent);

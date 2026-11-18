@@ -3,6 +3,7 @@ package dev.rosty.stops
 import android.app.Application
 import android.content.Context
 import dev.rosty.core.FakeRustCore
+import dev.rosty.core.FakeVaultOps
 import dev.rosty.core.Outcome
 import dev.rosty.core.RustCore
 import dev.rosty.core.model.contacts.PinShortcut
@@ -27,6 +28,7 @@ import dev.rosty.core.model.stops.StoreWriteRequest
 import dev.rosty.core.model.stops.TilesOpenRequest
 import dev.rosty.core.model.stops.TripRecord
 import dev.rosty.core.ops.TileHandle
+import dev.rosty.core.ops.VaultOps
 import dev.rosty.platform.contacts.ShortcutsRepository
 import dev.rosty.platform.location.FakeLocationRepository
 import dev.rosty.platform.location.FakeTripRepository
@@ -35,6 +37,8 @@ import dev.rosty.platform.location.LocationRepository
 import dev.rosty.platform.location.TripRepository
 import dev.rosty.platform.system.FakeSpecialAccess
 import dev.rosty.platform.system.permissions.SpecialAccess
+import dev.rosty.platform.vault.FakeVaultKeystore
+import dev.rosty.platform.vault.VaultKeystore
 import dev.rosty.shell.HasContainer
 import dev.rosty.stops.map.FakeTileSource
 import dev.rosty.stops.map.MapFixtures
@@ -46,11 +50,13 @@ import dev.rosty.stops.trip.AlarmControl
 import dev.rosty.stops.trip.AlarmEvent
 import dev.rosty.wa.FakeWaRepository
 import dev.rosty.wa.WaRepository
+import dev.rosty.wa.vault.WaVault
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -220,6 +226,20 @@ open class TestStopsContainer(
     val fakeWa = FakeWaRepository()
 
     override fun createWa(): WaRepository = fakeWa
+
+    /**
+     * Stops' WhatsApp vault (`plans/wa-vault.md` 13.3) in memory, open unless a test locks it ([FakeVaultOps.lockVault]
+     * before the first use of [waVault]): the trips of the notice tests carry their message.
+     */
+    val fakeVault = FakeVaultOps().also { it.openVault() }
+    val fakeKeystore = FakeVaultKeystore()
+
+    override fun createVaultOps(): VaultOps = fakeVault
+
+    override fun createVaultKeystore(): VaultKeystore = fakeKeystore
+
+    /** Read at once, so a screen sees the vault's state from its first frame. */
+    override fun createWaVault(): WaVault = super.createWaVault().also { runBlocking { it.refresh() } }
 
     override fun createSpecialAccess(): SpecialAccess = fakeSpecial
 

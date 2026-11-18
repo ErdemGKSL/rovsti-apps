@@ -5,6 +5,7 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.RustCore
 import dev.rosty.core.RustError
 import dev.rosty.core.call
+import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.wa.VaultCommitRequest
 import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
@@ -12,6 +13,7 @@ import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultKeys
+import dev.rosty.core.model.wa.VaultLink
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultPicturePut
 import dev.rosty.core.model.wa.VaultPicturePutRequest
@@ -20,6 +22,7 @@ import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultTripLink
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultUnlocked
 import dev.rosty.core.model.wa.VaultWipeReport
@@ -66,6 +69,23 @@ interface VaultOps {
     /** A new passphrase and data key for the open session, committed like [create]. */
     suspend fun change(req: VaultHandleRequest): Outcome<VaultKeys>
 
+    /**
+     * The link of the open session, for the hand-over to a sibling Rosty app that is setting up its own vault
+     * (`WaLinkProvider`, plan 13.3): only the current, committed session answers, a locked vault is `locked`. The
+     * answer carries the connect key: keep it in memory only and never log it.
+     */
+    suspend fun exportLink(req: VaultHandleRequest): Outcome<VaultLink>
+
+    /**
+     * A Stops trip with an arriving-soon message starts while the vault is open: the trip keeps a copy of the link in
+     * RAM (Rust, never on disk) so the message can go out after the vault locks again (plan 13.3). `locked` while
+     * the vault is.
+     */
+    suspend fun tripHold(req: VaultHandleRequest): Outcome<VaultTripLink>
+
+    /** The trip ended: its copy of the link is dropped (also done by Rust when the trip ends). */
+    suspend fun tripRelease(req: Empty = Empty): Outcome<VaultTripLink>
+
     /** Deletes the vault files (a forgotten passphrase); the Keystore keys are the caller's to delete. */
     suspend fun reset(req: VaultDirRequest = VaultDirRequest()): Outcome<VaultReset>
 
@@ -91,7 +111,10 @@ interface VaultOps {
                 "vault.daily_forget",
                 "vault.lock",
                 "vault.change",
+                "vault.export_link",
                 "vault.reset",
+                "vault.trip_hold",
+                "vault.trip_release",
                 "vault.wipe_plaintext",
                 "vault.pictures",
                 "vault.picture_put",
@@ -138,6 +161,15 @@ class NativeVaultOps(
 
     override suspend fun change(req: VaultHandleRequest) =
         core.call("vault.change", req, VaultHandleRequest.serializer(), VaultKeys.serializer())
+
+    override suspend fun exportLink(req: VaultHandleRequest) =
+        core.call("vault.export_link", req, VaultHandleRequest.serializer(), VaultLink.serializer())
+
+    override suspend fun tripHold(req: VaultHandleRequest) =
+        core.call("vault.trip_hold", req, VaultHandleRequest.serializer(), VaultTripLink.serializer())
+
+    override suspend fun tripRelease(req: Empty) =
+        core.call("vault.trip_release", req, Empty.serializer(), VaultTripLink.serializer())
 
     override suspend fun reset(req: VaultDirRequest) =
         core.call("vault.reset", req, VaultDirRequest.serializer(), VaultReset.serializer())

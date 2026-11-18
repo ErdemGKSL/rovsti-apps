@@ -6,6 +6,7 @@ import android.telephony.TelephonyManager
 import dev.rosty.core.Outcome
 import dev.rosty.core.Rust
 import dev.rosty.core.getOrNull
+import dev.rosty.core.log.RostyLog
 import dev.rosty.core.map
 import dev.rosty.core.model.chat.CallReminderRequest
 import dev.rosty.core.model.chat.ReminderSlot
@@ -33,8 +34,8 @@ import dev.rosty.core.ops.SearchOps
 import dev.rosty.core.ops.SharedOps
 import dev.rosty.core.ops.WaIdentityBook
 import dev.rosty.people.AvatarResolver
-import dev.rosty.people.FileLiveNameStore
 import dev.rosty.people.LiveWaNames
+import dev.rosty.people.MemoryLiveNameStore
 import dev.rosty.people.PeopleIdentitySource
 import dev.rosty.people.PeopleSource
 import dev.rosty.people.PeopleSources
@@ -122,7 +123,6 @@ import dev.rosty.platform.wa.WaIncoming
 import dev.rosty.platform.wa.WaProximity
 import dev.rosty.platform.wa.communicationOnEarpiece
 import dev.rosty.shell.ShellContainer
-import dev.rosty.wa.WaLinkStore
 import dev.rosty.wa.avatars.WaAvatar
 import dev.rosty.wa.calls.AndroidCallAudioPump
 import dev.rosty.wa.calls.CallAudioPump
@@ -277,8 +277,10 @@ open class PhoneContainer(
     val waCalls: WaCalls by lazy { createWaCalls() }
 
     /**
-     * Phone's own identity table (WA-R2, `wa-identity.json`): the number behind a LID, for a WhatsApp caller the
-     * gateway names by a LID alone. Phone shows no messages, so it never opens the offline store of Messages.
+     * Phone's own identity table (WA-R2): the number behind a LID, for a WhatsApp caller the gateway names by a LID
+     * alone. Phone shows no messages, so it never opens the offline store of Messages. Since the vault the table lives
+     * only in the DK-encrypted vault cache (`plans/wa-vault.md` 13.5; a `wa-identity.json` of an earlier build is moved
+     * in and deleted at the first unlock), and in memory while the vault is open.
      */
     val waIdentity: WaIdentityBook by lazy { createWaIdentity() }
 
@@ -287,7 +289,7 @@ open class PhoneContainer(
         WaIdentitySync(
             wa = wa,
             book = waIdentity,
-            instanceId = { WaLinkStore(waOps).read().map { it?.instanceId } },
+            instanceId = { waLinkSource.read().map { it?.instanceId } },
             fetch = { since -> wa.gateway()?.identityMappings(since) },
             calls = waCalls.calls,
             scope = scope,
@@ -369,7 +371,7 @@ open class PhoneContainer(
                     listOf(PEOPLE_BOOK, PEOPLE_CHECKPOINT).forEach { File(context.noBackupFilesDir, it).delete() }
                 }
             },
-            gatewayUrl = { (WaLinkStore(waOps).read() as? Outcome.Ok)?.value?.gatewayUrl.orEmpty() },
+            gatewayUrl = { (waLinkSource.read() as? Outcome.Ok)?.value?.gatewayUrl.orEmpty() },
             lockFile = File(context.noBackupFilesDir, PEOPLE_LOCK),
             // Runs go to the foreground worker (people sync v2 S11), so a long first sync outlives the app's screens.
             request = { start -> PhonePeopleSyncWorker.startNow(context, start) },
@@ -386,6 +388,13 @@ open class PhoneContainer(
         val source = peopleSource
         if (source == null || source is ProviderSource) return null
         awaitRustReady()
+        // While the WhatsApp vault is locked a run makes no gateway request; the next unlock runs the due one.
+        val vault = waVault
+        vault.refresh()
+        if (!vault.unlocked) {
+            RostyLog.event(PeopleSyncRunner.TAG, "worker_skipped", "reason" to "vault_locked")
+            return null
+        }
         return standalonePeople
     }
 
@@ -476,9 +485,38 @@ open class PhoneContainer(
             gateway = { wa.gateway() },
             e164 = { PhoneNumbers.e164(it, homeRegion) },
             scope = scope,
-            // Kept between runs, so a restart does not ask WhatsApp for the same numbers again.
-            store = FileLiveNameStore(File(context.noBackupFilesDir, "wa-live-names.json")),
+            // In memory since the vault (`plans/wa-vault.md` 13.5): a restart or a lock asks again. The file of an
+            // earlier build goes.
+            store = liveNamesMemory.also { File(context.noBackupFilesDir, LEGACY_LIVE_NAMES).delete() },
         )
+    }
+
+    /** The WhatsApp names asked in this process (in memory since the vault). */
+    private val liveNamesMemory = MemoryLiveNameStore()
+
+    /**
+     * Locks WhatsApp (`plans/wa-vault.md` 6, 13.3): besides the repository and the keys, what Phone holds of WhatsApp
+     * in memory or as plaintext copies goes: the identity table in memory (it stays sealed in the vault cache), the
+     * names asked, the full-size pictures. Calls that ring while locked show content-free from the push alone.
+     */
+    override suspend fun lockWhatsApp() {
+        super.lockWhatsApp()
+        waIdentity.open(null)
+        liveNamesMemory.clear()
+        liveWaNames.forget()
+        waFullPictures.clear()
+    }
+
+    /**
+     * The vault opened: the identity table is read from the vault cache first, so the first catch-up of the new
+     * socket resumes from its cursor; then the repository connects. People sync runs the due run held back by the
+     * lock.
+     */
+    override suspend fun unlockedWhatsApp() {
+        waIdentitySync.ensureOpen()
+        super.unlockedWhatsApp()
+        val source = peopleSource
+        if (source != null && source !is ProviderSource) standalonePeople.syncIfStale()
     }
 
     /** Changes whenever [callerIds] may answer differently (the contacts changed). */
@@ -803,7 +841,8 @@ open class PhoneContainer(
         return (sharedOps.render(RenderRequest(typed, NumberForm.E164, home)) as? Outcome.Ok)?.value?.text
     }
 
-    protected open fun createWaIdentity(): WaIdentityBook = WaIdentityBook(NativeWaIdBookOps(rust), clock = clock)
+    protected open fun createWaIdentity(): WaIdentityBook =
+        WaIdentityBook(NativeWaIdBookOps(rust), clock = clock, vault = true)
 
     protected open fun createCallPump(): CallAudioPump = AndroidCallAudioPump(context)
 
@@ -910,6 +949,9 @@ private const val WA_IDENTITY_WAIT_MS = 1_500L
 
 /** How many recent calls the people sync reads numbers from. */
 private const val PEOPLE_RECENT_CALLS = 300
+
+/** The WhatsApp names file of builds before the vault, deleted. */
+private const val LEGACY_LIVE_NAMES = "wa-live-names.json"
 
 /** The people cache files in the Rust data directory (`people::FILE`, `people_sync::FILE`), deleted on unlink. */
 private const val PEOPLE_BOOK = "people.json"

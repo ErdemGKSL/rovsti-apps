@@ -18,10 +18,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 interface WaLinkShareHost {
     /**
-     * The link this app stored, or null when it has none or cannot read it. May wait for the Rust core of a cold
-     * process; the provider bounds the wait.
+     * The link of this app's WhatsApp vault while this process has it unlocked, else null (a locked vault, a cold
+     * process, no link). Never read from a file; the provider bounds the wait.
      */
     suspend fun waLinkToShare(): StoredLink?
+
+    /** Whether [waLinkToShare] would answer now, without reading the link. */
+    suspend fun waLinkOffered(): Boolean
 }
 
 /**
@@ -35,9 +38,9 @@ interface WaLinkShareHost {
  *   (`PackageManager.checkSignatures` for every package of the calling uid). So a wrong manifest merge, or the permission defined by another app first,
  *   cannot open it.
  *
- * It only reads. Nothing is logged: the row is a bearer secret. [onCreate] does no work (a provider is created
- * before `Application.onCreate` returns); a query of a cold process waits for the core for at most [READ_WAIT_MS]
- * and answers "no link" when it is not ready by then (the reader asks again when its link screen opens).
+ * It only reads, and only from this app's unlocked vault in memory (`plans/wa-vault.md` 13.3): a locked vault or a
+ * cold process answers no row, and no link file is read. Nothing is logged: the row is a bearer secret. [onCreate]
+ * does no work (a provider is created before `Application.onCreate` returns); a query waits at most [READ_WAIT_MS].
  */
 class WaLinkProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
@@ -52,19 +55,24 @@ class WaLinkProvider : ContentProvider() {
         val context = context ?: throw IllegalStateException("No context")
         if (!callerIsSibling()) throw SecurityException("Not a Rosty app")
         val own = WaLinkShare.linkUri(context.packageName)
-        if (uri.authority != own.authority || uri.pathSegments != own.pathSegments) {
+        val offer = WaLinkShare.offerUri(context.packageName)
+        val asksOffer = uri.authority == offer.authority && uri.pathSegments == offer.pathSegments
+        if (!asksOffer && (uri.authority != own.authority || uri.pathSegments != own.pathSegments)) {
             throw IllegalArgumentException("Unknown URI")
         }
         val host = context.applicationContext as? WaLinkShareHost
         // The binder identity is cleared so the read runs as this app, whatever the caller may do.
         val token = Binder.clearCallingIdentity()
-        val link =
-            try {
-                runBlocking { withTimeoutOrNull(READ_WAIT_MS) { host?.waLinkToShare() } }
-            } finally {
-                Binder.restoreCallingIdentity(token)
+        try {
+            if (asksOffer) {
+                val available = runBlocking { withTimeoutOrNull(READ_WAIT_MS) { host?.waLinkOffered() } } == true
+                return WaLinkShare.offerCursorOf(available)
             }
-        return WaLinkShare.cursorOf(link?.takeIf { WaLinkShare.usable(it) })
+            val link = runBlocking { withTimeoutOrNull(READ_WAIT_MS) { host?.waLinkToShare() } }
+            return WaLinkShare.cursorOf(link?.takeIf { WaLinkShare.usable(it) })
+        } finally {
+            Binder.restoreCallingIdentity(token)
+        }
     }
 
     override fun query(
@@ -108,7 +116,7 @@ class WaLinkProvider : ContentProvider() {
     ): Int = throw UnsupportedOperationException("Read-only")
 
     private companion object {
-        /** How long a query waits for the core of a cold process and the read of the link file. */
+        /** How long a query waits for the vault's answer. */
         const val READ_WAIT_MS = 3_000L
     }
 }

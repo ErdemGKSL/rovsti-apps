@@ -11,7 +11,9 @@ import dev.rosty.core.model.wa.StoredLink
  * under its own authority ([authority]) and both sides agree on this object: the signature permission that guards
  * the provider, the one path and the columns of its one row.
  *
- * - `content://<package>.walink/link`: no row when that app has no link, else one row with the link it stored.
+ * - `content://<package>.walink/link`: no row unless that app has its WhatsApp vault unlocked right now, else one
+ *   row with the vault's link (`vault.export_link`, memory only: no app reads or writes a link file for it);
+ * - `content://<package>.walink/offer`: one row ([Columns.AVAILABLE]) when `link` would answer now; no key crosses.
  *
  * The row carries the connect key, a bearer secret. Three things keep it among Rosty apps: the provider is exported
  * only behind [PERMISSION] (`protectionLevel="signature"`, read and write), the provider checks the caller's
@@ -25,6 +27,9 @@ object WaLinkShare {
     const val AUTHORITY_SUFFIX = ".walink"
 
     const val LINK_PATH = "link"
+
+    /** Whether the app would hand its link over now, without the link. */
+    const val OFFER_PATH = "offer"
 
     /**
      * The application ids of the Rosty apps that can hold a WhatsApp link, in the order a reader asks them
@@ -40,6 +45,9 @@ object WaLinkShare {
         const val KEY = "key"
 
         val all: Array<String> = arrayOf(GATEWAY_URL, INSTANCE_ID, KEY)
+
+        /** The one column of the `offer` row. */
+        const val AVAILABLE = "available"
     }
 
     /** The authority of the provider of [packageName]. */
@@ -47,6 +55,15 @@ object WaLinkShare {
 
     /** The URI of the link row of [packageName]. */
     fun linkUri(packageName: String): Uri = Uri.parse("content://${authority(packageName)}/$LINK_PATH")
+
+    /** The URI of the offer row of [packageName]. */
+    fun offerUri(packageName: String): Uri = Uri.parse("content://${authority(packageName)}/$OFFER_PATH")
+
+    /** A cursor with the offer column and, when [available], its one row. */
+    fun offerCursorOf(available: Boolean): MatrixCursor =
+        MatrixCursor(arrayOf(Columns.AVAILABLE), 1).apply {
+            if (available) addRow(arrayOf<Any?>(1))
+        }
 
     /** The apps [own] asks: every Rosty app but itself. */
     fun siblingsOf(own: String): List<String> = PACKAGES.filter { it != own }

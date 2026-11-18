@@ -69,12 +69,12 @@ import dev.rosty.messages.wa.status.ago
 import dev.rosty.messages.wa.status.showStatusViewer
 import dev.rosty.messages.wa.status.statusRowOf
 import dev.rosty.platform.sms.SmsRepository
-import dev.rosty.wa.vault.WaVaultGate
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import java.time.ZoneId
+import dev.rosty.shell.wa.WaVaultGated as ShellWaVaultGated
 
 /** Test tags of the WhatsApp tab. */
 object WhatsAppTags {
@@ -191,14 +191,13 @@ fun WhatsAppPage(
     WaVaultGated(container) { WhatsAppTabPage(container, navigator) }
 }
 
-/** [content] behind the WhatsApp vault of the app ([WaVaultGate]). */
+/** [content] behind the WhatsApp vault of the app (the gate every Rosty app shares, `:shell`). */
 @Composable
 fun WaVaultGated(
     container: MessagesContainer,
     content: @Composable () -> Unit,
 ) {
-    val state by container.waVault.state.collectAsState()
-    WaVaultGate(state, container.vaultFlow, stringResource(R.string.tab_whatsapp), content)
+    ShellWaVaultGated(container, stringResource(R.string.tab_whatsapp), content)
 }
 
 @Composable

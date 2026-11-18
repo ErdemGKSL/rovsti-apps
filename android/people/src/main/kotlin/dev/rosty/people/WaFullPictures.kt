@@ -28,6 +28,14 @@ class WaFullPictures(
 ) {
     private val lock = Mutex()
 
+    /**
+     * Deletes every kept picture. An app with a WhatsApp vault calls it when the vault locks: these plaintext copies
+     * live only while it is open (`plans/wa-vault.md` 13.5).
+     */
+    suspend fun clear() {
+        lock.withLock { withContext(io) { dir.listFiles()?.forEach { it.delete() } } }
+    }
+
     /** The full picture of [jid] (picture [pictureId]) as a file, or null to keep the cached one. */
     suspend fun load(
         jid: String,

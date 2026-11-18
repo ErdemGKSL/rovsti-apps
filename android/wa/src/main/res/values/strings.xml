@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- The product name, the title of the WhatsApp pages of every app. -->
+    <string name="wa_title" translatable="false">WhatsApp</string>
     <!-- Settings page: actions, menus and the cancel of a confirmation. -->
     <string name="wa_share_key">Share key…</string>
     <string name="wa_show_qr">Show as QR code</string>

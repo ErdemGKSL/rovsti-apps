@@ -45,7 +45,8 @@ class MainActivity : RostyShellActivity<ContactsRoute>() {
     override fun onResume() {
         super.onResume()
         // Coming to the foreground with names and photos older than the sync period: sync (X.1b). Built off the main thread.
-        container.scope.launch { container.peopleSync.syncIfStale() }
+        // While the WhatsApp vault is locked nothing reaches the gateway: the unlock runs the same trigger.
+        container.scope.launch { container.peopleSyncWhenUnlocked()?.syncIfStale() }
     }
 
     @Composable

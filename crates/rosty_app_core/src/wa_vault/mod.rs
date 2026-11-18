@@ -218,6 +218,10 @@ pub struct VaultCache {
     pub identity_cursor: Option<String>,
     #[serde(default)]
     pub pictures: Vec<CachedPicture>,
+    /// Phone's own LID-to-number table (`phone::wa_idbook`), as [`crate::phone::wa_idbook::Book::to_value`] gives
+    /// it: Phone keeps no `wa-identity.json` once it has a vault.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_book: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

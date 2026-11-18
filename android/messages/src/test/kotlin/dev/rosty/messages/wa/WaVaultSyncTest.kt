@@ -30,6 +30,7 @@ import dev.rosty.messages.wa.WaTestKit.Companion.INSTANCE
 import dev.rosty.messages.wa.WaTestKit.Companion.NOW
 import dev.rosty.messages.wa.status.StatusFeed
 import dev.rosty.people.LiveName
+import dev.rosty.people.MemoryLiveNameStore
 import dev.rosty.platform.system.FakeDeviceData
 import dev.rosty.wa.sync.WaBackoff
 import dev.rosty.wa.sync.WaRequestBudget

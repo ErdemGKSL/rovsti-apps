@@ -6,14 +6,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.model.phone.HapticsLevel
 import dev.rosty.core.model.stops.Appearance
 import dev.rosty.core.model.wa.AppId
-import dev.rosty.core.ops.NativeWaSettingsOps
 import dev.rosty.shell.settings.AboutPage
 import dev.rosty.shell.settings.AppearancePage
 import dev.rosty.shell.settings.CommonSettings
@@ -24,39 +19,13 @@ import dev.rosty.shell.settings.aboutInfo
 import dev.rosty.shell.settings.dev.LogsPage
 import dev.rosty.shell.settings.rememberCoreVersion
 import dev.rosty.shell.settings.rememberLicenceData
-import dev.rosty.wa.WaLinkStore
-import dev.rosty.wa.settings.WhatsAppSettingsRoute
-import dev.rosty.wa.settings.WhatsAppSettingsViewModel
+import dev.rosty.shell.wa.WhatsAppVaultSettings
+import dev.rosty.wa.R as WaR
 
-/** The WhatsApp settings of the shared connect key, on a view model that lives as long as the activity. */
+/** The WhatsApp settings behind Phone's own vault (`plans/wa-vault.md` 13.3), the page every Rosty app shares. */
 @Composable
 fun PhoneWhatsAppSettings(container: PhoneContainer) {
-    val owner = LocalContext.current.findComponentActivity()
-    val viewModel =
-        remember(owner, container) {
-            val factory =
-                viewModelFactory {
-                    initializer {
-                        WhatsAppSettingsViewModel(
-                            app = AppId.Phone,
-                            machine = NativeWaSettingsOps(container.rust),
-                            ops = container.waOps,
-                            store = WaLinkStore(container.waOps),
-                            repo = container.wa,
-                            qr = container.qr,
-                            clipboard = container.clipboard,
-                            files = container.files,
-                            stagingDir = container.context.cacheDir,
-                            clock = System::currentTimeMillis,
-                            saved = SavedStateHandle(),
-                            // A sibling Rosty app's link is taken when this app has none (WA-R2).
-                            handover = container.waLinkHandover,
-                        )
-                    }
-                }
-            ViewModelProvider(owner, factory)[WhatsAppSettingsViewModel::class.java]
-        }
-    WhatsAppSettingsRoute(viewModel)
+    WhatsAppVaultSettings(container, AppId.Phone, stringResource(WaR.string.wa_title))
 }
 
 @Composable

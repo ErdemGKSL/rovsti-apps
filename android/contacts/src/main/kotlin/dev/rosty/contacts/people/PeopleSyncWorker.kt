@@ -33,8 +33,9 @@ class PeopleSyncWorker(
     context: Context,
     params: WorkerParameters,
 ) : ForegroundPeopleSyncWorker(context, params) {
+    /** Null while the WhatsApp vault is locked: no gateway request, the run waits for the next unlock. */
     override suspend fun host(): PeopleSyncHost? =
-        ((applicationContext as? HasContainer<*>)?.container as? ContactsContainer)?.peopleSync
+        ((applicationContext as? HasContainer<*>)?.container as? ContactsContainer)?.peopleSyncWhenUnlocked()
 
     /** The notification opens the Settings tab, where the sync rows are. */
     override fun openIntent(): Intent =

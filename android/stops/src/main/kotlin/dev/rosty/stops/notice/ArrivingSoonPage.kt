@@ -18,13 +18,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.model.stops.NoticeWhen
 import dev.rosty.core.model.wa.AppId
-import dev.rosty.core.ops.NativeWaSettingsOps
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.ios.component.IosText
@@ -37,6 +35,8 @@ import dev.rosty.design.text.resolve
 import dev.rosty.shell.settings.IosSettingsGroup
 import dev.rosty.shell.settings.IosSettingsItem
 import dev.rosty.shell.settings.SettingsPage
+import dev.rosty.shell.wa.WaVaultGated
+import dev.rosty.shell.wa.WhatsAppVaultSettings
 import dev.rosty.stops.R
 import dev.rosty.stops.StopsContainer
 import dev.rosty.stops.StopsRoute
@@ -44,14 +44,11 @@ import dev.rosty.stops.home.findComponentActivity
 import dev.rosty.stops.settings.Footnote
 import dev.rosty.stops.settings.NoChevron
 import dev.rosty.stops.settings.SettingsMetrics
-import dev.rosty.stops.settings.Value
 import dev.rosty.stops.settings.ValueChevron
 import dev.rosty.stops.settings.choiceItem
 import dev.rosty.stops.settings.tile
 import dev.rosty.wa.WaLinkState
-import dev.rosty.wa.WaLinkStore
-import dev.rosty.wa.settings.WhatsAppSettingsRoute
-import dev.rosty.wa.settings.WhatsAppSettingsViewModel
+import dev.rosty.wa.R as WaR
 
 /** Test tags of the arriving-soon pages. */
 object NoticeTags {
@@ -166,9 +163,23 @@ fun ArrivingSoonEntry(
     )
 }
 
-/** The chat picker of the arriving-soon message, pushed over its page; choosing a chat goes back. */
+/**
+ * The chat picker of the arriving-soon message, pushed over its page; choosing a chat goes back. It lists WhatsApp
+ * chats, so it sits behind Stops' vault (`plans/wa-vault.md` 13.3): the unlock page while locked, secure while open.
+ */
 @Composable
 fun ArrivingSoonChatEntry(
+    container: StopsContainer,
+    onBack: () -> Unit,
+    onBackLongClick: () -> Unit,
+) {
+    WaVaultGated(container, stringResource(WaR.string.wa_title)) {
+        ArrivingSoonChats(container, onBack, onBackLongClick)
+    }
+}
+
+@Composable
+private fun ArrivingSoonChats(
     container: StopsContainer,
     onBack: () -> Unit,
     onBackLongClick: () -> Unit,
@@ -191,34 +202,13 @@ fun ArrivingSoonChatEntry(
     )
 }
 
-/** Settings > WhatsApp: the shared screen of `:wa` (link, connect key, keys, relink, delete), for the Stops app. */
+/**
+ * Settings > WhatsApp: the shared screen (link, keys, relink, delete) behind Stops' own vault (`plans/wa-vault.md`
+ * 13.3).
+ */
 @Composable
 fun StopsWhatsAppEntry(container: StopsContainer) {
-    val context = LocalContext.current
-    val owner = remember(context) { context.findComponentActivity() }
-    val viewModel =
-        remember(owner, container) {
-            val factory =
-                viewModelFactory {
-                    initializer {
-                        WhatsAppSettingsViewModel(
-                            app = AppId.Stops,
-                            machine = NativeWaSettingsOps(container.rust),
-                            ops = container.waOps,
-                            store = WaLinkStore(container.waOps),
-                            repo = container.wa,
-                            qr = container.qr,
-                            clipboard = container.clipboard,
-                            files = container.files,
-                            stagingDir = container.context.cacheDir,
-                            clock = System::currentTimeMillis,
-                            saved = SavedStateHandle(),
-                        )
-                    }
-                }
-            ViewModelProvider(owner, factory)[WhatsAppSettingsViewModel::class.java]
-        }
-    WhatsAppSettingsRoute(viewModel)
+    WhatsAppVaultSettings(container, AppId.Stops, stringResource(WaR.string.wa_title))
 }
 
 /** "Connected", "Not connected", ...: the link in a word, for a row. */

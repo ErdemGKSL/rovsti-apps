@@ -380,7 +380,9 @@ either order (an `identity_mapped` event, a call's `peer` and `peer_alt`; `sourc
 a number teach nothing), `number_changes` are `identity_number_changed` events. `wa_idbook.account {dir?, instance_id, own_pn?,
 own_lid?, account_epoch?, changed?}` answers `{reset}`: another own number or another `account_epoch` than the stored one empties the
 table and its cursor (a value left out never does), `changed: true` is the `account_changed` event and always empties it.
-`wa_idbook.wipe {dir?}` removes the file (unlink). After `changed` or `reset`, read `wa_idbook.snapshot` again.
+`wa_idbook.wipe {dir?}` removes the file (unlink). After `changed` or `reset`, read `wa_idbook.snapshot` again. Every op takes
+`vault: true` (Phone since its vault): the table then lives only in the DK-encrypted vault cache of the unlocked session (`locked`
+while the vault is), and the first read moves a plaintext `wa-identity.json` into the cache and deletes it.
 WhatsApp vault (`_bmad-output/kotlin-ui/plans/wa-vault.md`, `rosty_core::vault`, `rosty_app_core::wa_vault`): every request may name
 `dir` (the data directory; tests); blobs travel as standard base64. Kotlin never gets DK, DDK or the connect key: it seals and
 unseals ciphertext with its Keystore keys (K_hw, K_daily) and gets a session `handle`. One session per process; releasing it
@@ -400,6 +402,11 @@ answers `{handle, passphrase, seal}` for a new passphrase and DK (rotation), com
 `vault.reset {dir?}` deletes the vault files and answers `{deleted}` (Kotlin deletes the Keystore keys). `vault.wipe_plaintext {dir?,
 files_dir, cache_dir?}` deletes every plaintext WhatsApp file (`rosty_app_core::wa_vault::wipe`; databases erased in place first) and
 answers `{deleted, scrubbed, drafts_removed, failed}`; it refuses (`no_vault`) while a plaintext link has no vault yet.
+`vault.export_link {handle}` answers `{gateway_url, instance_id, key}` of the current, committed session only (`locked`
+otherwise): the hand-over to a sibling app that sets up its own vault with `vault.create {link}` (`WaLinkProvider`, memory only).
+`vault.trip_hold {handle}` copies that link into the RAM of the running Stops trip (`wa_link::send::hold_trip_link`; the
+`trip_fix` notice sends through it, never through a link file) and answers `{held}`; `vault.trip_release {}` and every end
+of a trip (`stops::store::end_trip`) drop it.
 `vault.pictures {jids?}` answers `{pictures: [{jid, picture_id, jpeg}]}` (base64 JPEG) from the encrypted cache, and
 `vault.picture_put {jid, picture_id?, jpeg?}` keeps one (both left out: the person has no picture; at most 4 MiB, oldest first out)
 and answers `{handle, pictures}`; both are `locked` while the vault is. Errors carry
@@ -493,7 +500,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
 | `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
-| `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.daily_store, vault.daily_forget, vault.lock, vault.change, vault.reset, vault.wipe_plaintext, vault.pictures, vault.picture_put |
+| `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.daily_store, vault.daily_forget, vault.lock, vault.change, vault.export_link, vault.reset, vault.trip_hold, vault.trip_release, vault.wipe_plaintext, vault.pictures, vault.picture_put |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

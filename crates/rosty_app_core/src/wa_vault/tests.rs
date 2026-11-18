@@ -111,6 +111,7 @@ fn the_cache_opens_only_under_its_key() {
             picture_id: "p1".into(),
             jpeg: vec![0xff, 0xd8, 0xff],
         }],
+        id_book: Some(serde_json::json!({"version": 1, "instance": "inst-1"})),
     };
     cache.save(&dir, &key(), &mut counter()).unwrap();
     let raw = fs::read(dir.join(CACHE_FILE)).unwrap();

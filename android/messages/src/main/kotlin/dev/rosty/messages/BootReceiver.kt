@@ -7,10 +7,7 @@ import dev.rosty.core.log.RostyLog
 import dev.rosty.messages.notify.LockedWhatsAppNotice
 import dev.rosty.platform.notify.MessageReminders
 import dev.rosty.platform.sms.ScheduledSms
-import dev.rosty.shell.HasContainer
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
-import java.io.File
+import dev.rosty.shell.VaultBoot
 
 /**
  * A reboot or an app update clears AlarmManager. Re-arms every stored scheduled SMS (AD-MSG6) and message reminder (M33); items already due fire
@@ -52,16 +49,10 @@ class BootReceiver : BroadcastReceiver() {
      */
     private fun dropDailyUnlock(app: Context) {
         LockedWhatsAppNotice.clear(app)
-        if (!File(app.noBackupFilesDir, VAULT_DAILY_FILE).exists()) return
-        val container = (app as? HasContainer<*>)?.container as? MessagesContainer ?: return
-        runBlocking { withTimeoutOrNull(BOOT_WORK_MS) { container.waVault.onBoot() } }
+        VaultBoot.dropDailyUnlock(app)
     }
 
     private companion object {
         const val TAG = "messages"
-
-        /** `rosty_app_core::wa_vault`'s daily file, in the data directory given to `Rust.init`. */
-        const val VAULT_DAILY_FILE = "wa-vault-daily.json"
-        const val BOOT_WORK_MS = 8_000L
     }
 }

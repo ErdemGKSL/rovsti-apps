@@ -6,71 +6,29 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rosty.core.model.phone.HapticsLevel
 import dev.rosty.core.model.stops.Appearance
 import dev.rosty.core.model.wa.AppId
-import dev.rosty.core.ops.NativeWaSettingsOps
-import dev.rosty.design.icons.RostyIcons
-import dev.rosty.design.ios.component.IosText
 import dev.rosty.shell.settings.AboutPage
 import dev.rosty.shell.settings.AppearancePage
 import dev.rosty.shell.settings.CommonSettings
-import dev.rosty.shell.settings.CommonSettingsGroup
-import dev.rosty.shell.settings.CommonSettingsPage
 import dev.rosty.shell.settings.HapticsPage
-import dev.rosty.shell.settings.IosSettingsGroup
-import dev.rosty.shell.settings.IosSettingsItem
 import dev.rosty.shell.settings.LicenceDetailPage
 import dev.rosty.shell.settings.LicencesPage
-import dev.rosty.shell.settings.SettingsPage
 import dev.rosty.shell.settings.aboutInfo
 import dev.rosty.shell.settings.dev.LogsPage
 import dev.rosty.shell.settings.rememberCoreVersion
 import dev.rosty.shell.settings.rememberLicenceData
-import dev.rosty.wa.WaLinkStore
-import dev.rosty.wa.settings.WhatsAppSettingsRoute
-import dev.rosty.wa.settings.WhatsAppSettingsViewModel
+import dev.rosty.shell.wa.WhatsAppVaultSettings
+import dev.rosty.wa.R as WaR
 
-/** The WhatsApp settings of the shared connect key, on a view model that lives as long as the activity. */
+/** The WhatsApp settings behind Contacts' own vault (`plans/wa-vault.md` 13.3), the page every Rosty app shares. */
 @Composable
 fun WhatsAppSettingsEntry(container: ContactsContainer) {
-    val context = LocalContext.current
-    val owner = remember(context) { context.findComponentActivity() }
-    val viewModel =
-        remember(owner, container) {
-            val factory =
-                viewModelFactory {
-                    initializer {
-                        WhatsAppSettingsViewModel(
-                            app = AppId.Contacts,
-                            machine = NativeWaSettingsOps(container.rust),
-                            ops = container.waOps,
-                            store = WaLinkStore(container.waOps),
-                            repo = container.wa,
-                            qr = container.qr,
-                            clipboard = container.clipboard,
-                            files = container.files,
-                            stagingDir = container.context.cacheDir,
-                            clock = System::currentTimeMillis,
-                            saved = SavedStateHandle(),
-                            // A sibling Rosty app's link is taken when this app has none (WA-R2).
-                            handover = container.waLinkHandover,
-                        )
-                    }
-                }
-            ViewModelProvider(owner, factory)[WhatsAppSettingsViewModel::class.java]
-        }
-    WhatsAppSettingsRoute(viewModel)
+    WhatsAppVaultSettings(container, AppId.Contacts, stringResource(WaR.string.wa_title))
 }
 
 @Composable

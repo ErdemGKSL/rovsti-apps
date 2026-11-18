@@ -114,6 +114,18 @@ Then enter `https://wa.example.com` as the gateway address in an app. The connec
 is a bearer secret: anyone with it can read and send as the account, so keep the
 gateway on HTTPS and revoke keys you no longer use.
 
+### How the apps keep the key
+
+The Rosty Kotlin apps never store the connect key in plaintext. Each app seals it in its own
+WhatsApp vault (`wa-vault.json`): encrypted with a data key that opens only with the app's
+passphrase and this phone's Keystore key, kept in memory only while WhatsApp is unlocked, and
+dropped on lock (screen off, the auto-lock delay, "Lock WhatsApp now"). Messages keeps no
+message, thumbnail or media on disk; it refetches from the gateway after each unlock, within a
+fixed budget (at most 4 requests per unlock, 1 page per opened chat, media only on a tap, no
+request while locked). Nothing changes on the gateway for this: no new route and no server-side
+crypto. The gateway itself still stores chats and messages in `gateway.db` (it is the user's own
+server). Details: [architecture.md](architecture.md#whatsapp-vault-ad-wa12).
+
 ## Push (FCM)
 
 Push wakes the phone for incoming calls and messages. It is off unless
@@ -128,7 +140,10 @@ with 400 "Invalid data payload key: from". The apps still read `from` from older
 The apps must be built with Firebase for this; see
 [android.md](android.md#whatsapp-push-and-call-audio). An app registers its token
 with the gateway on connect (`POST /v1/push`); apps built without Firebase register
-nothing and rely on their open event socket.
+nothing and rely on their open event socket. A push makes no request by itself while an
+app's WhatsApp vault is locked: Messages shows one content-free notice with the count, Phone
+shows a ringing call as "WhatsApp call" without the name or number, and both fetch only after
+the unlock.
 
 ## Calls
 

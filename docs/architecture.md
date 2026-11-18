@@ -94,8 +94,11 @@ crates/rosty_core, rosty_geo     pure Rust, no I/O, unit-tested
   to the user's own gateway, map tile requests to the chosen tile server, and what the
   user chooses to share. Stops caches tiles in `tiles/<server key>/`, one directory per
   server, capped at 128 MiB with least-recently-used eviction. `rosty_tiles::disk_usage` and
-  `clear_all` back the downloaded size and the Clear button in Settings > Map tiles. An app keeps its
-  WhatsApp link (`whatsapp-link.json`: gateway URL, instance id, connect key) there.
+  `clear_all` back the downloaded size and the Clear button in Settings > Map tiles. WhatsApp data is
+  never on disk in plaintext: the link (gateway URL, instance id, connect key) is in each app's
+  encrypted vault, messages live in memory only, and the identity map and profile pictures are in an
+  encrypted cache (see [WhatsApp vault](#whatsapp-vault-ad-wa12)). An update from a build before the vault
+  deletes the old plaintext files once (`vault.wipe_plaintext`).
 
 - **QR scanning.** Contacts decodes a picked picture with `rqrr` (pure Rust, no
   native code; licence `(MIT OR Apache-2.0) AND ISC`) in `rosty_core::contact_scan`.
@@ -386,12 +389,12 @@ notification came from.
   if the library cannot be loaded, the symbol is missing, Rust panics or the answer is empty,
   Kotlin gets no decision and posts a plain notification (no passcode chip, no spam filter,
   no MMS decode). The message itself is always stored first.
-- **AD-MSG5 WhatsApp notifications.** The FCM payload carries no text (AD-WA6). On a
-  `kind=message` push `RostyMessagingService` calls `WaPush.onMessage`, and when the UI is not
-  attached it asks `nativeHeadless("wa_digest", {dir, chat})`; Rust reads `whatsapp-link.json`,
-  fetches the last messages from the gateway and answers a `NotificationSpec`. Inline reply is
-  `nativeHeadless("wa_reply", {dir, chat, text})`. While the UI is attached the app posts
-  notifications itself from the event stream and Kotlin posts nothing.
+- **AD-MSG5 WhatsApp notifications.** The FCM payload carries no text (AD-WA6). Since the vault the
+  push makes no gateway request: with the vault open in the process the event socket brings the
+  message and the app posts the per-chat notification itself; otherwise (locked, or a cold process)
+  one content-free notice counts the new messages ("WhatsApp", "N new messages", no action, public on
+  the lock screen; the count lives in the `rosty_wa_locked` preferences until the unlock or a reboot).
+  The old `nativeHeadless("wa_digest")` path, which read `whatsapp-link.json`, is gone.
 
 ### Phone: incoming calls
 
@@ -432,7 +435,8 @@ thin clients of it through `rosty_wa_client`. Setup and operation:
   `rwk_` plus 32 random bytes in base64url. It is a bearer secret: the server stores
   only its SHA-256, compares in constant time, and can revoke it. "Show connect
   key" in any connected app mints a fresh key for that share, so each can be revoked
-  alone. Apps keep `{gateway_url, instance_id, key}` in their own data directory.
+  alone. Each app keeps `{gateway_url, instance_id, key}` in its own encrypted vault
+  (AD-WA12), never in a plaintext file.
 - **Transport (AD-WA3).** The gateway speaks plain HTTP behind a TLS-terminating
   reverse proxy. `Authorization: Bearer <key>` goes on every request and on the
   WebSocket upgrade. An app accepts `https://` anywhere and `http://` only for
@@ -550,6 +554,76 @@ thin clients of it through `rosty_wa_client`. Setup and operation:
 - **Conversation view (AD-WA11).** Messages opens a chat from `GET /v1/chats` and the
   stored history, sends text, media and reactions through the client, and applies live
   events from the resumable stream.
+
+### WhatsApp vault (AD-WA12)
+
+The Kotlin apps (Messages, Phone, Contacts, Stops) protect what they hold of WhatsApp with a vault per
+app. Decision record and implementation notes: `_bmad-output/kotlin-ui/plans/wa-vault.md` (sections 13
+to 15); device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
+
+- **Key hierarchy.** The passphrase is app-generated: 26 Crockford base32 data characters (130 bits)
+  plus 2 Reed-Solomon check characters, shown once as `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`
+  (`rosty_core::vault::passphrase`; a single wrong character or a swap of two is caught before any
+  prompt). KEK_p = Argon2id(passphrase, 16-byte salt; 64 MiB, t = 3, p = 1, calibrated down to at
+  most (46 MiB, 1) or (19 MiB, 2); `argon2 =0.5.3`; PBKDF2-HMAC-SHA256 600 000 only with the
+  `vault-pbkdf2` feature). A random 256-bit data key DK is wrapped by KEK_p (AES-256-GCM) and that
+  blob is sealed again by K_hw, an AES-256-GCM key in Android Keystore (`rosty.wa.k.<id>`,
+  non-exportable, StrongBox when present, `setUnlockedDeviceRequired`, one user authentication per
+  use, Class 3 biometric or screen lock). Both layers are needed: a disk image is useless, and each
+  passphrase guess costs one hardware-authenticated Keystore operation. DK encrypts the vault body
+  (`{gateway_url, instance_id, connect_key}`) and the cache. A passphrase change makes a new passphrase,
+  salt, DK and K_hw alias and deletes the old key, so an older copy of the vault never opens.
+- **Daily unlock.** After a passphrase unlock DK is also wrapped by a random daily key DDK and that
+  blob sealed by K_daily (`rosty.wa.d.b.<id>`, Class 3 biometric only, invalidated by a new
+  enrolment; `rosty.wa.d.c.<id>`, screen lock, only on a phone with no Class 3 biometric). The blob
+  carries the boot count and the passphrase-unlock time as authenticated data: Rust refuses it and
+  deletes it after a reboot (the boot receivers also drop it), 72 h after the last passphrase unlock,
+  or with the clock set back more than 5 minutes; five failed biometric attempts, a lockout or an
+  invalidated key drop it too. The passphrase is then asked once.
+- **On disk** (data dir, owner-only, atomic temp + rename): `wa-vault.json` {version, `hw_alias`,
+  `hw_sealed` = K_hw(KEK_p(DK)), body = DK(link)}; `wa-vault-daily.json` {alias, sealed =
+  K_daily(DDK(DK)), `daily_key` = DDK, stamp}; `wa-vault-cache.bin` = DK(identity map with its cursor,
+  Phone's LID table, profile pictures up to 4 MiB). Blobs are AES-256-GCM with the header as
+  associated data and distinct magics (`RWVK`, `RWVB`, `RWVC`, `RWVD`). Not WhatsApp data and kept
+  plaintext: Contacts' people cache (`people.json`, `people-sync.json`, the people pictures), which the
+  people provider hands every app; `wa_calls_forgotten` (opaque gateway ids); reminders and exports the
+  person makes (a WhatsApp reminder names the chat only).
+- **In memory only.** DK, KEK_p and the connect key live in Rust (`Zeroizing`) inside one `vault`
+  session handle per process; Kotlin holds opaque blobs and a handle, and the passphrase only while it
+  is typed or shown (the JNI buffers of `vault.*` are zeroized). Messages' store is memory-only and
+  lazy (`wa_sync.open {memory, lazy, vault_cache}`); media, thumbnails, Status pictures and files to
+  send are `memfd_create` files read through `/proc/self/fd/<n>` (64 MiB LRU); drafts, live names and
+  the rekey cursor are in memory. Phone's full-size pictures (`cacheDir/wa-full`, also Contacts') are
+  emptied on lock.
+- **Lock lifecycle** (`:shell` `VaultLockLifecycle`): screen off, the auto-lock delay in the background
+  (default 60 s; at once, 30 s, 1 min, 5 min), "Lock WhatsApp now", and process death. Locking closes the
+  request budget first, then the event socket, the store and the RAM media, the repository's gateway,
+  every WhatsApp notification with text, and `vault.lock` zeroizes DK and the connect key. The process
+  is not ended (Messages is also the SMS app). FLAG_SECURE covers every vault page, the WhatsApp pages
+  while unlocked, and the whole Messages and Phone windows while their vault is open.
+- **While locked.** No request reaches the gateway (`WaRequestGate` refuses at once, the repository and
+  the store start locked). Messages posts the content-free count notice (AD-MSG5); Phone shows a
+  ringing call as "WhatsApp call" with no name, no number, no full-screen intent, and Answer asks for
+  the screen unlock and the vault first; Contacts' and Phone's people sync defers to the next unlock;
+  a Stops trip started while unlocked keeps a RAM copy of the link for its arriving-soon message
+  (`vault.trip_hold`) until the trip ends.
+- **Hand-over between apps.** Each app has its own vault and Keystore keys. `WaLinkProvider`
+  (`dev.rosty.permission.WA_LINK`, signature-level) answers `/link` only while the sender's process has
+  its vault unlocked (`vault.export_link`); the receiver asks only on the person's tap and passes the
+  link straight to `vault.create {link}`, so it is never written in plaintext. Stops takes no part.
+- **Request budget** (`:wa` `WaRequestBudget`, `WaBackoff`, `WaRequestGate`): a cold start or unlock
+  costs at most 4 requests (event socket live without replay, status, one identity page, chat list);
+  an opened chat 1 page of 50, older history 1 page per scroll; media only on a tap; history and media
+  one at a time; 6 requests in the first 10 s after an unlock, 30 per sliding minute, one cold sync per
+  30 s; back-off 2 s to 5 min with jitter honouring `Retry-After`/`retry_after_ms`; nothing while locked.
+- **Recovery and migration.** No key recovery: "Forgot passphrase" deletes the vault and its keys and the
+  person links again (history comes back from the gateway). The first start after an update from a build
+  before the vault sets the vault up from `whatsapp-link.json` (`vault.create` without a link) and, once
+  the vault exists and the state allows it, deletes every plaintext leftover once
+  (`WaPlaintextMigration`: `vault.wipe_plaintext` erases the old store in place with `secure_delete` and
+  `VACUUM`, then deletes it, `whatsapp-link.json`, the names, rekeys and identity files, the `wa:`
+  drafts, the media, Status and avatar folders; Kotlin drops the `wa:` mutes, the `declined` hand-over
+  mark, the text of WhatsApp reminders and `cacheDir/wa-full`). Flash deletion is not provable erasure.
 
 WhatsApp does not endorse third-party clients; see the warning in
 [whatsapp-gateway.md](whatsapp-gateway.md#terms-of-service).

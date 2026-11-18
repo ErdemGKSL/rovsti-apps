@@ -63,8 +63,13 @@ class VaultPromptHost {
 fun promptAuthenticators(auth: VaultKeyAuth): Int =
     when (auth) {
         VaultKeyAuth.BiometricOrCredential -> Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL
+
         VaultKeyAuth.Biometric -> Authenticators.BIOMETRIC_STRONG
+
         VaultKeyAuth.Credential -> Authenticators.DEVICE_CREDENTIAL
+
+        // K_stay is never prompted for (round 7c).
+        VaultKeyAuth.UnlockedDevice -> 0
     }
 
 /** A `BiometricPrompt` error code as a [VaultAuthResult]. */

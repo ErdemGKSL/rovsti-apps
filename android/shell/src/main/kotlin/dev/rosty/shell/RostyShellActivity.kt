@@ -122,7 +122,7 @@ abstract class RostyShellActivity<R : Any> : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
-        container.vaultLock.onActivityStarted()
+        container.vaultUse.onActivityStarted()
         container.migratePlaintextSoon()
     }
 
@@ -133,7 +133,7 @@ abstract class RostyShellActivity<R : Any> : FragmentActivity() {
     }
 
     override fun onStop() {
-        container.vaultLock.onActivityStopped(isChangingConfigurations)
+        container.vaultUse.onActivityStopped(isChangingConfigurations)
         super.onStop()
     }
 

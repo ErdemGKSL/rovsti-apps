@@ -252,37 +252,50 @@ abstract class ShellContainer(
     val vaultFlow: VaultFlow by lazy { VaultFlow(waVault, scope) { secret -> clipboard.copySecret(scope, secret) } }
 
     /**
-     * When WhatsApp locks (screen off, time in the background, "Lock now", process death; plan 6). The activity
-     * reports its starts and stops to it.
+     * What the activities tell the vault (round 7c: it stays unlocked): each start is a use (the 90-day clock moves
+     * on, or a locked vault reopens with its stay wrap); the last stop with WhatsApp open is the background. No
+     * auto-lock, no screen-off lock.
      */
-    open val vaultLock: VaultLockLifecycle by lazy {
-        VaultLockLifecycle(
+    open val vaultUse: VaultUseLifecycle by lazy {
+        VaultUseLifecycle(
             scope = scope,
-            now = System::currentTimeMillis,
-            timeoutMs = { waVault.autoLockMs },
+            hasVault = { File(context.noBackupFilesDir, WaLockAll.VAULT_FILE).exists() },
             unlocked = { waVaultIfMade?.unlocked == true },
             prompting = { waVaultIfMade?.prompting?.value == true },
-            lock = { waVaultIfMade?.lock() },
+            use = { waVault.used() },
             background = { wentToBackground() },
-        ).also { lifecycle ->
-            lifecycle.watchScreen(context)
-            // "Lock now" in a sibling locks this app too (round 7a, [lockWhatsAppEverywhere]).
-            WaLockAll.register(context) { lifecycle.onScreenOff() }
-        }
+        )
     }
 
     /**
-     * "Lock now" (round 7a): locks WhatsApp here and in every sibling Rosty app that has it unlocked, so no sibling can
-     * open this app's vault again by a hand-over right after. The background delay and screen off stay per app.
+     * "Lock now" (round 7a, kept in 7c): locks WhatsApp here and in every sibling Rosty app, and each one deletes its
+     * stay wrap, so none reopens by itself or opens another by a hand-over right after. A sibling whose process is not
+     * running is reached too: its manifest receiver deletes the stay wrap without starting the core
+     * ([lockWhatsAppForSibling]).
      */
     fun lockWhatsAppEverywhere() {
-        scope.launch { waVaultIfMade?.lock() }
+        lockWhatsAppForSibling()
         WaLockAll.send(context)
     }
 
     /**
-     * Locks WhatsApp (`plans/wa-vault.md` 6): the one teardown path of the app, called by [waVault] (screen off, the
-     * background timer, "Lock now", a reset). Nothing reaches the gateway after it starts. The base closes the
+     * A sibling's "Lock now" reached this app ([WaLockAll], round 7c): an open vault in this process locks (and drops
+     * its stay wrap); otherwise only the stay wrap goes, file and Keystore key, without starting the core.
+     */
+    fun lockWhatsAppForSibling() {
+        // A cold process: delete at once (a receiver's process may go right after); a running one tears down.
+        val vault = waVaultIfMade ?: return forgetStayUnlock()
+        scope.launch { vault.lock() }
+    }
+
+    /** The stay wrap of this app, file and K_stay, with no core: the next unlock needs the biometric or a passphrase. */
+    private fun forgetStayUnlock() {
+        WaLockAll.forgetStay(context.noBackupFilesDir, vaultKeystore)
+    }
+
+    /**
+     * Locks WhatsApp (`plans/wa-vault.md` 6): the one teardown path of the app, called by [waVault] ("Lock now" here or
+     * in a sibling, 90 days without a use, a reset). Nothing reaches the gateway after it starts. The base closes the
      * repository (its gateway and event socket), forgets the profile pictures in memory and zeroizes the keys
      * (`vault.lock`); an app adds what it keeps of WhatsApp in memory.
      */
@@ -292,7 +305,7 @@ abstract class ShellContainer(
         vaultOps.lock()
     }
 
-    /** The app went to the background with WhatsApp unlocked; the lock follows after the auto-lock delay. */
+    /** The app went to the background with WhatsApp unlocked (it stays unlocked, round 7c). */
     protected open suspend fun wentToBackground() {}
 
     /** The vault was opened: the repository may reach the gateway again (through the vault's key). */

@@ -8,9 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelProvider
@@ -115,29 +113,24 @@ private fun WhatsAppSettingsBody(
     })
 }
 
-/** The vault group of a linked account's page while the vault is open: lock now, the auto-lock delay, a passphrase. */
+/**
+ * The vault group of a linked account's page while the vault is open: lock now and a new passphrase (round 7c: the
+ * auto-lock delay is gone, the vault stays unlocked).
+ */
 @Composable
 private fun rememberVaultSettingsBlock(
     container: ShellContainer,
     unlocked: Boolean,
-): LazyListScope.() -> Unit {
-    val vault = container.waVault
-    var autoLock by remember { mutableLongStateOf(vault.autoLockMs) }
-    return {
+): LazyListScope.() -> Unit =
+    {
         if (unlocked) {
             vaultSettingsItems(
-                autoLockMs = autoLock,
                 // Every Rosty app locks: a sibling left open would unlock this one again with no prompt.
                 onLockNow = container::lockWhatsAppEverywhere,
-                onAutoLock = { ms ->
-                    vault.autoLockMs = ms
-                    autoLock = ms
-                },
                 onChange = container.vaultFlow::beginChange,
             )
         }
     }
-}
 
 private tailrec fun Context.componentActivity(): ComponentActivity =
     when (this) {

@@ -60,7 +60,28 @@ pub(super) const OPS: &[OpSpec] = &[
     ),
     op!("vault.lock", LockReq, StateAns, lock, lock_cases),
     op!("vault.change", HandleReq, KeysAns, change, change_cases),
+    op!(
+        "vault.export_link",
+        HandleReq,
+        LinkOut,
+        export_link,
+        export_link_cases
+    ),
     op!("vault.reset", DirReq, ResetAns, reset, reset_cases),
+    op!(
+        "vault.trip_hold",
+        HandleReq,
+        TripAns,
+        trip_hold,
+        trip_hold_cases
+    ),
+    op!(
+        "vault.trip_release",
+        NoReq,
+        TripAns,
+        trip_release,
+        trip_release_cases
+    ),
     op!(
         "vault.wipe_plaintext",
         WipeReq,
@@ -905,6 +926,85 @@ fn change_cases() -> Vec<Case> {
     .into_iter()
     .map(|case| case.volatile(&["passphrase", "seal"]))
     .collect()
+}
+
+// ---- vault.export_link
+
+/// The link of the unlocked vault, for the hand-over to a sibling Rosty app that is setting up its own vault
+/// (`WaLinkProvider`, plan 13.3). The JNI buffers of every `vault.*` call are zeroized; Kotlin keeps the answer in
+/// memory only and the receiver hands it straight to its own `vault.create {link}`.
+#[derive(Serialize)]
+struct LinkOut {
+    gateway_url: String,
+    instance_id: String,
+    key: Zeroizing<String>,
+}
+
+/// Only the process's current, committed session answers: a locked vault (no session) or a setup that is not
+/// committed yet hands nothing over.
+fn export_link(req: HandleReq) -> Result<LinkOut, FfiError> {
+    if current() != Some(req.handle) {
+        return Err(locked());
+    }
+    session(req.handle, |s: &mut Session| {
+        s.committed.then(|| LinkOut {
+            gateway_url: s.body.gateway_url.clone(),
+            instance_id: s.body.instance_id.clone(),
+            key: Zeroizing::new(s.body.connect_key().to_owned()),
+        })
+    })?
+    .ok_or_else(locked)
+}
+
+fn export_link_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"handle": PLACEHOLDER_HANDLE}))
+            .seeded("wa_vault")
+            .after("vault.unlock", unlock_request(json!({}))),
+        Case::named("locked", json!({"handle": 42})),
+        // A setup that is not committed hands nothing over.
+        Case::named("not_committed", json!({"handle": PLACEHOLDER_HANDLE}))
+            .seeded("wa")
+            .after("vault.create", json!({"dir": "$DIR"})),
+    ]
+}
+
+// ---- vault.trip_hold, vault.trip_release
+
+/// Whether the running Stops trip keeps a WhatsApp link in RAM.
+#[derive(Serialize)]
+struct TripAns {
+    held: bool,
+}
+
+#[derive(Deserialize)]
+struct NoReq {}
+
+/// A Stops trip with an arriving-soon message starts while the vault is unlocked (plan 13.3): the trip keeps a
+/// copy of the link in RAM (`wa_link::send::hold_trip_link`), so the message can go out after the vault locks
+/// again. Only the current, committed session gives one; the trip's end drops it (`trip_end`, `vault.trip_release`).
+fn trip_hold(req: HandleReq) -> Result<TripAns, FfiError> {
+    let link = export_link(req)?;
+    let held = rosty_app_core::wa_link::send::hold_trip_link(&link.gateway_url, &link.key);
+    Ok(TripAns { held })
+}
+
+fn trip_release(_: NoReq) -> Result<TripAns, FfiError> {
+    rosty_app_core::wa_link::send::release_trip_link();
+    Ok(TripAns { held: false })
+}
+
+fn trip_hold_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"handle": PLACEHOLDER_HANDLE}))
+            .seeded("wa_vault")
+            .after("vault.unlock", unlock_request(json!({}))),
+        Case::named("locked", json!({"handle": 42})),
+    ]
+}
+
+fn trip_release_cases() -> Vec<Case> {
+    vec![Case::new(json!({}))]
 }
 
 // ---- vault.reset

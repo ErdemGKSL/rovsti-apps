@@ -6,6 +6,7 @@
 //! `whatsapp-link.json` the settings screen writes.
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use rosty_core::{
     notify::{self, Incoming, NotificationSpec},
@@ -16,6 +17,7 @@ use rosty_wa_proto::{
     ChatSummary, ConnectKey, GatewayUrl, MessageBody, SendText, WaMessage, jid_user, to_rosty,
 };
 use serde::Deserialize;
+use zeroize::Zeroizing;
 
 use super::link::{LINK_FILE, StoredLink};
 
@@ -168,6 +170,71 @@ impl From<ClientError> for SendFailure {
     }
 }
 
+/// The link a Stops trip carries in RAM (`plans/wa-vault.md` 13.3): copied from the unlocked vault when a trip
+/// with an arriving-soon message starts, dropped when the trip ends. Never written anywhere; a new process starts
+/// without it.
+struct TripLink {
+    url: String,
+    key: Zeroizing<String>,
+}
+
+static TRIP_LINK: Mutex<Option<TripLink>> = Mutex::new(None);
+
+fn trip_link() -> std::sync::MutexGuard<'static, Option<TripLink>> {
+    TRIP_LINK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Keeps `url` and `key` for the running trip's notice, replacing what was kept. A link that does not parse is
+/// refused and nothing is kept.
+pub fn hold_trip_link(url: &str, key: &str) -> bool {
+    let usable = GatewayUrl::parse(url).is_ok() && ConnectKey::parse(key).is_ok();
+    *trip_link() = usable.then(|| TripLink {
+        url: url.to_owned(),
+        key: Zeroizing::new(key.to_owned()),
+    });
+    usable
+}
+
+/// Drops the trip's link (the trip ended). The key zeroizes itself.
+pub fn release_trip_link() {
+    trip_link().take();
+}
+
+/// Whether a trip link is kept.
+pub fn trip_link_held() -> bool {
+    trip_link().is_some()
+}
+
+/// Tests that hold a trip link, or that need none held, take this lock: the link is one per process.
+#[cfg(test)]
+pub(crate) fn trip_link_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Sends `text` to `chat` through the link the running trip keeps in RAM ([`hold_trip_link`]); `NoLink` without
+/// one. `dir` is not read: no plaintext link file is used since the vault. Blocks.
+pub fn send_text_held(_dir: &str, chat: &str, text: &str) -> Result<(), SendFailure> {
+    let gateway = {
+        let held = trip_link();
+        let link = held.as_ref().ok_or(SendFailure::NoLink)?;
+        let url = GatewayUrl::parse(&link.url).map_err(|e| SendFailure::Fatal(e.to_string()))?;
+        let key = ConnectKey::parse(&link.key).map_err(|e| SendFailure::Fatal(e.to_string()))?;
+        Gateway::new(url, Some(key))
+    };
+    gateway
+        .send_text(&SendText {
+            chat: chat.to_owned(),
+            text: text.to_owned(),
+            quoted_id: None,
+        })
+        .map(drop)
+        .map_err(SendFailure::from)
+}
+
 /// Sends `text` to `chat` through the gateway linked in `dir`. Blocks.
 pub fn send_text_in(dir: &str, chat: &str, text: &str) -> Result<(), SendFailure> {
     let gateway = gateway_in(dir).ok_or(SendFailure::NoLink)?;
@@ -185,6 +252,30 @@ pub fn send_text_in(dir: &str, chat: &str, text: &str) -> Result<(), SendFailure
 mod tests {
     use super::*;
     use std::fs;
+
+    const TRIP_KEY: &str = "rwk_BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU";
+
+    #[test]
+    fn a_trip_keeps_its_link_in_ram_until_it_is_released() {
+        let _one = trip_link_test_lock();
+        release_trip_link();
+        assert_eq!(
+            send_text_held("/nowhere", "chat", "hi"),
+            Err(SendFailure::NoLink)
+        );
+        // A link that does not parse is not kept.
+        assert!(!hold_trip_link("ftp://rosty.erdemdev.tr", TRIP_KEY));
+        assert!(!hold_trip_link("https://rosty.erdemdev.tr", "rwk_short"));
+        assert!(!trip_link_held());
+        assert!(hold_trip_link("https://rosty.erdemdev.tr", TRIP_KEY));
+        assert!(trip_link_held());
+        release_trip_link();
+        assert!(!trip_link_held());
+        assert_eq!(
+            send_text_held("/nowhere", "chat", "hi"),
+            Err(SendFailure::NoLink)
+        );
+    }
 
     fn text(id: &str, from_me: bool, at: i64, body: &str, sender: Option<&str>) -> WaMessage {
         WaMessage {

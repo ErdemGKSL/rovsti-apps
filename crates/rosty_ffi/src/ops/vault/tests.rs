@@ -453,3 +453,147 @@ fn pictures_and_identity_live_only_sealed_in_the_cache() {
     lock_now();
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn only_the_open_vault_hands_its_link_over_and_a_trip_keeps_it_in_ram() {
+    let _guard = test_lock();
+    let dir = temp_dir("export");
+    write_seed(&dir);
+    let file = VaultFile::load(&dir).unwrap().unwrap();
+    let unlocked = unlock(UnlockReq {
+        dir: text(&dir),
+        key_blob: b64(&file.hw_sealed),
+        passphrase: Zeroizing::new(seed::PASSPHRASE.to_owned()),
+        boot_count: seed::BOOT_COUNT,
+        now_ms: seed::UNLOCKED_MS,
+    })
+    .unwrap();
+    let link = export_link(HandleReq {
+        handle: unlocked.handle,
+    })
+    .unwrap();
+    assert_eq!(link.instance_id, "inst1");
+    assert!(link.gateway_url.starts_with("https://rosty.erdemdev.tr"));
+    assert_eq!(link.key.as_str(), KEY);
+    // Another handle is not the open vault.
+    let other = export_link(HandleReq { handle: 42 })
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(code(&other), "locked");
+
+    // A trip keeps a copy that outlives the lock and goes with the trip's end; nothing is written for it.
+    let names = || {
+        let mut names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        names.sort();
+        names
+    };
+    let before = names();
+    assert!(
+        trip_hold(HandleReq {
+            handle: unlocked.handle
+        })
+        .unwrap()
+        .held
+    );
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
+    assert!(rosty_app_core::wa_link::send::trip_link_held());
+    assert_eq!(before, names());
+    assert!(!trip_release(NoReq {}).unwrap().held);
+    assert!(!rosty_app_core::wa_link::send::trip_link_held());
+
+    // Locked: nothing is handed over and no trip can take the link.
+    let locked = export_link(HandleReq {
+        handle: unlocked.handle,
+    })
+    .map(|_| ())
+    .unwrap_err();
+    assert_eq!(code(&locked), "locked");
+    assert!(
+        trip_hold(HandleReq {
+            handle: unlocked.handle
+        })
+        .is_err()
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn phones_identity_table_moves_into_the_vault_cache() {
+    let _guard = test_lock();
+    let dir = temp_dir("idbook");
+    write_seed(&dir);
+    let seeded = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rosty_app_core/tests/fixtures/dirs/wa_idbook/wa-identity.json");
+    let plain = fs::read_to_string(&seeded)
+        .unwrap()
+        .replace("\"inst-1\"", "\"inst1\"");
+    fs::write(dir.join("wa-identity.json"), &plain).unwrap();
+    let call = |op: &str, body: serde_json::Value| -> Result<serde_json::Value, FfiError> {
+        match decode(&crate::ops::call(op, body.to_string().as_bytes())).unwrap() {
+            Answer::Ok(value) => Ok(value),
+            Answer::Err(error) => Err(error),
+        }
+    };
+    let where_ = text(&dir);
+    let snapshot = || {
+        call(
+            "wa_idbook.snapshot",
+            json!({"dir": where_, "instance_id": "inst1", "vault": true}),
+        )
+    };
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
+    // Locked: the table is not read, not even from the plaintext file.
+    assert_eq!(code(&snapshot().unwrap_err()), "locked");
+    assert!(dir.join("wa-identity.json").exists());
+
+    let file = VaultFile::load(&dir).unwrap().unwrap();
+    unlock(UnlockReq {
+        dir: text(&dir),
+        key_blob: b64(&file.hw_sealed),
+        passphrase: Zeroizing::new(seed::PASSPHRASE.to_owned()),
+        boot_count: seed::BOOT_COUNT,
+        now_ms: seed::UNLOCKED_MS,
+    })
+    .unwrap();
+    let first = snapshot().unwrap();
+    assert!(!first["pairs"].as_array().unwrap().is_empty(), "{first}");
+    // Moved: the file is gone and the cache holds the table, sealed.
+    assert!(!dir.join("wa-identity.json").exists());
+    let sealed = fs::read(dir.join(wa_vault::CACHE_FILE)).unwrap();
+    assert!(!String::from_utf8_lossy(&sealed).contains("777000000000001"));
+    call(
+        "wa_idbook.learn",
+        json!({"dir": where_, "instance_id": "inst1", "vault": true, "now_ms": seed::UNLOCKED_MS,
+            "pairs": [{"id": "777000000000042@lid", "alt": "100000000042@s.whatsapp.net"}]}),
+    )
+    .unwrap();
+    assert!(!dir.join("wa-identity.json").exists());
+    let again = snapshot().unwrap();
+    assert!(
+        again["pairs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["lid"] == "777000000000042@lid"),
+        "{again}"
+    );
+    call("wa_idbook.wipe", json!({"dir": where_, "vault": true})).unwrap();
+    assert!(snapshot().unwrap()["pairs"].as_array().unwrap().is_empty());
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}

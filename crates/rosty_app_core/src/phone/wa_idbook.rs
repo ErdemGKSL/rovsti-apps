@@ -117,8 +117,25 @@ impl Book {
     /// version, or when it belongs to another instance.
     #[must_use]
     pub fn load(dir: &Path, instance: &str) -> Self {
-        let Some(stored) = load_json::<Stored>(dir, FILE)
-            .filter(|stored| stored.version == VERSION && stored.instance == instance)
+        Self::from_stored(load_json::<Stored>(dir, FILE), instance)
+    }
+
+    /// The table of `instance` from `value`, the form [`Book::to_value`] gives (the WhatsApp vault keeps it in its
+    /// DK-encrypted cache, plan 13.5); empty on the same terms as [`Book::load`].
+    #[must_use]
+    pub fn from_value(value: serde_json::Value, instance: &str) -> Self {
+        Self::from_stored(serde_json::from_value::<Stored>(value).ok(), instance)
+    }
+
+    /// The table as one JSON value, for a store other than [`FILE`].
+    #[must_use]
+    pub fn to_value(&self) -> serde_json::Value {
+        serde_json::to_value(self.stored()).unwrap_or_default()
+    }
+
+    fn from_stored(stored: Option<Stored>, instance: &str) -> Self {
+        let Some(stored) =
+            stored.filter(|stored| stored.version == VERSION && stored.instance == instance)
         else {
             return Self::new(instance);
         };
@@ -134,23 +151,23 @@ impl Book {
         }
     }
 
+    fn stored(&self) -> Stored {
+        let (persons, aliases) = self.map.rows();
+        Stored {
+            version: VERSION,
+            instance: self.instance.clone(),
+            own_pn: self.own_pn.clone(),
+            own_lid: self.own_lid.clone(),
+            account_epoch: self.account_epoch,
+            cursor: self.cursor.clone(),
+            persons,
+            aliases,
+        }
+    }
+
     /// Writes the table to `dir` (atomically, readable by the owner only).
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
-        let (persons, aliases) = self.map.rows();
-        save_json(
-            dir,
-            FILE,
-            &Stored {
-                version: VERSION,
-                instance: self.instance.clone(),
-                own_pn: self.own_pn.clone(),
-                own_lid: self.own_lid.clone(),
-                account_epoch: self.account_epoch,
-                cursor: self.cursor.clone(),
-                persons,
-                aliases,
-            },
-        )
+        save_json(dir, FILE, &self.stored())
     }
 
     /// Removes the stored table of `dir` (the link was removed). A missing file is fine.
@@ -383,6 +400,20 @@ mod tests {
                 .collect(),
             next: next.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn the_table_survives_a_trip_through_one_json_value() {
+        let mut book = Book::new(INSTANCE);
+        assert!(book.learn(LID_A, PN_A, Source::Call, 1));
+        book.catch_up(&page(&[(LID_B, PN_B)], Some("c2")));
+        let value = book.to_value();
+        let back = Book::from_value(value.clone(), INSTANCE);
+        assert_eq!(back, book);
+        assert_eq!(back.since(), Some("c2"));
+        // Another instance, or something that is not a table, reads empty.
+        assert!(Book::from_value(value, "inst-2").is_empty());
+        assert!(Book::from_value(serde_json::json!({"x": 1}), INSTANCE).is_empty());
     }
 
     #[test]

@@ -77,6 +77,8 @@ pub fn save_trip(dir: &Path, trip: &ActiveTrip) -> io::Result<()> {
 /// The history is written first: a crash in between leaves a trip file whose
 /// id is already recorded, which is skipped here, never a lost trip.
 pub fn end_trip(dir: &Path, outcome: Outcome, now_ms: i64) -> io::Result<Option<TripRecord>> {
+    // The trip's WhatsApp link lives as long as the trip, whichever path ends it (`plans/wa-vault.md` 13.3).
+    crate::wa_link::send::release_trip_link();
     let Some(trip) = load_trip(dir) else {
         return Ok(None);
     };

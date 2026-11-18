@@ -1,9 +1,7 @@
 package dev.rosty.wa.vault
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.text.input.TextFieldState
@@ -13,7 +11,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,15 +24,12 @@ import dev.rosty.design.list.InsetGroupedSection
 import dev.rosty.design.list.ListRow
 import dev.rosty.design.list.ListRowChevron
 import dev.rosty.design.overlay.LocalOverlayOrNull
-import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.confirmDestructive
-import dev.rosty.design.overlay.menuTrigger
 import dev.rosty.design.overlay.showToast
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
 import dev.rosty.wa.R
-import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -164,15 +158,15 @@ class VaultFlow(
     }
 
     /**
-     * Once per lock, as soon as the locked page shows: a sibling Rosty app that is unlocked opens this vault with no
-     * prompt (round 7a); otherwise the biometric prompt opens when the daily unlock is there. The person never sees
-     * two prompts in a row for one unlock.
+     * Once per lock, as soon as the locked page shows: the app's own stay wrap (round 7c) or a sibling Rosty app that
+     * is unlocked (round 7a) opens this vault with no prompt; otherwise the biometric prompt opens when the biometric
+     * unlock is there. The person never sees two prompts in a row for one unlock.
      */
     fun autoUnlock(biometric: Boolean) {
         if (autoTried) return
         autoTried = true
         run {
-            if (vault.unlockFromSibling()) return@run
+            if (vault.unlockWithoutPrompt()) return@run
             if (biometric && !biometricAsked && !usePassphrase) {
                 biometricAsked = true
                 outcome(vault.unlockWithBiometric())
@@ -249,7 +243,12 @@ fun WaVaultGate(
         }
 
         is WaVaultState.Locked -> {
-            if (flow.forgot) {
+            if (state.silent) {
+                // The stay wrap reopens it with no prompt (round 7c): an empty page for that moment, no unlock page.
+                LaunchedEffect(Unit) { flow.autoUnlock(state.biometric) }
+                SecureWindow()
+                ScreenPage(title = title, showBack = false) {}
+            } else if (flow.forgot) {
                 BackHandler { flow.showForgot(false) }
                 ForgotFlow(flow, broken = false)
             } else {
@@ -348,44 +347,25 @@ private fun ForgotFlow(
     )
 }
 
-/** The words of an auto-lock delay. */
-@Composable
-fun autoLockLabel(ms: Long): String =
-    when {
-        ms <= 0L -> stringResource(R.string.vault_auto_lock_now)
-        ms < MINUTE_MS -> stringResource(R.string.vault_auto_lock_seconds, (ms / SECOND_MS).toInt())
-        else -> stringResource(R.string.vault_auto_lock_minutes, (ms / MINUTE_MS).toInt())
-    }
-
-/** The vault group of the WhatsApp settings of a linked account: lock now, the auto-lock delay, a new passphrase. */
+/**
+ * The vault group of the WhatsApp settings of a linked account: lock now and a new passphrase. Round 7c removed the
+ * auto-lock delay: the vault stays unlocked and locks only by "Lock now" or after 90 days without a use.
+ */
 fun LazyListScope.vaultSettingsItems(
-    autoLockMs: Long,
     onLockNow: () -> Unit,
-    onAutoLock: (Long) -> Unit,
     onChange: () -> Unit,
 ) {
     item(key = "vault") {
-        VaultSettingsSection(autoLockMs, onLockNow, onAutoLock, onChange)
+        VaultSettingsSection(onLockNow, onChange)
     }
 }
 
 @Composable
 fun VaultSettingsSection(
-    autoLockMs: Long,
     onLockNow: () -> Unit,
-    onAutoLock: (Long) -> Unit,
     onChange: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val overlay = LocalOverlayOrNull.current
-    val labels = WaVault.AUTO_LOCK_CHOICES_MS.map { it to autoLockLabel(it) }
-    val items =
-        remember(labels, autoLockMs) {
-            labels
-                .map { (ms, label) -> MenuItem.Action(label, checked = ms == autoLockMs, onClick = { onAutoLock(ms) }) }
-                .toPersistentList()
-        }
-    val current = autoLockLabel(autoLockMs)
     InsetGroupedSection(
         modifier.padding(top = Spacing.sectionGap - Spacing.s).testTag("vault-settings"),
         header = stringResource(R.string.vault_settings_section),
@@ -400,27 +380,6 @@ fun VaultSettingsSection(
             )
         }
         row {
-            val trigger =
-                if (overlay != null) {
-                    Modifier.menuTrigger(overlay, items, label = stringResource(R.string.vault_auto_lock))
-                } else {
-                    Modifier
-                }
-            ListRow(
-                title = stringResource(R.string.vault_auto_lock),
-                modifier = trigger.testTag("vault-auto-lock"),
-                trailing = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-                    ) {
-                        RostyText(current, color = RostyTheme.colors.labelSecondary, maxLines = 1)
-                        ListRowChevron()
-                    }
-                },
-            )
-        }
-        row {
             ListRow(
                 title = stringResource(R.string.vault_change),
                 modifier = Modifier.testTag("vault-change"),
@@ -430,6 +389,3 @@ fun VaultSettingsSection(
         }
     }
 }
-
-private const val SECOND_MS = 1_000L
-private const val MINUTE_MS = 60_000L

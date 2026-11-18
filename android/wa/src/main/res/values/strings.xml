@@ -32,8 +32,8 @@
     <!-- The WhatsApp vault (plans/wa-vault.md 4, 5, 13.2). -->
     <string name="vault_setup_title">Protect WhatsApp</string>
     <string name="vault_change_title">New Passphrase</string>
-    <string name="vault_setup_intro">Your WhatsApp link is kept in a vault on this phone. This passphrase opens it after a restart, or when your fingerprint or face can’t.</string>
-    <string name="vault_change_intro">Your old passphrase stops working. The next time you unlock, type this one once; after that your fingerprint or face works again.</string>
+    <string name="vault_setup_intro">Your WhatsApp link is kept in a vault on this phone. It stays open while you use it. This passphrase is needed on a new phone, after 90 days without use, or if your screen lock is removed.</string>
+    <string name="vault_change_intro">Your old passphrase stops working. WhatsApp stays open; the next time the passphrase is needed, type this one.</string>
     <string name="vault_setup_save_note">Write it down or keep it in a password manager. Rosty shows it only once and can’t recover it.</string>
     <string name="vault_passphrase_label">Passphrase</string>
     <string name="vault_copy">Copy Passphrase</string>
@@ -55,9 +55,7 @@
     <string name="vault_passphrase_hint">XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX</string>
     <string name="vault_passphrase_note">Your screen lock or fingerprint confirms each try.</string>
     <string name="vault_reason_none">Type your passphrase to unlock.</string>
-    <string name="vault_reason_rebooted">Your phone restarted, so the passphrase is needed once.</string>
-    <string name="vault_reason_idle">WhatsApp wasn’t unlocked for three days, so the passphrase is needed once.</string>
-    <string name="vault_reason_expired">The passphrase was last typed 30 days ago, so it’s needed once.</string>
+    <string name="vault_reason_idle">WhatsApp wasn’t used for 90 days, so the passphrase is needed once.</string>
     <string name="vault_reason_clock">The phone’s clock was set back, so the passphrase is needed once.</string>
     <string name="vault_reason_biometric">Your fingerprints or face changed, so the passphrase is needed once.</string>
     <string name="vault_reason_attempts">Too many failed tries, so the passphrase is needed once.</string>
@@ -87,10 +85,6 @@
     <string name="vault_prompt_not_now">Not Now</string>
     <string name="vault_settings_section">Vault</string>
     <string name="vault_lock_now">Lock WhatsApp Now</string>
-    <string name="vault_auto_lock">Auto-Lock</string>
-    <string name="vault_auto_lock_now">Immediately</string>
-    <string name="vault_auto_lock_seconds">After %1$d seconds</string>
-    <string name="vault_auto_lock_minutes">After %1$d min</string>
     <string name="vault_change">Change Passphrase</string>
-    <string name="vault_settings_footer">WhatsApp also locks when the screen turns off. Unlocking takes your fingerprint or face; the passphrase after a restart.</string>
+    <string name="vault_settings_footer">WhatsApp stays unlocked while you use it, also after a restart once you unlock your phone, and locks after 90 days without use. Lock Now locks every Rosty app; your fingerprint or face opens it again.</string>
 </resources>

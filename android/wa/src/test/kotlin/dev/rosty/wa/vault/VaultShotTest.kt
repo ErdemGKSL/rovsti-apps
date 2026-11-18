@@ -109,7 +109,7 @@ class VaultShotTest : ShotTest() {
 
     @Test fun unlockWithThePassphrase() =
         snap("vault-unlock-passphrase") {
-            Unlock(WaVaultState.Locked(false, PassphraseReason.Rebooted), problem = VaultProblem.WrongPassphrase)
+            Unlock(WaVaultState.Locked(false, PassphraseReason.Idle), problem = VaultProblem.WrongPassphrase)
         }
 
     @Test fun aNewPassphrase() = snap("vault-change") { Setup(SetupStep.Show, change = true) }
@@ -143,11 +143,10 @@ class VaultShotTest : ShotTest() {
     @Config(sdk = [35], qualifiers = "+tr")
     fun settingsTurkish() =
         snap("vault-settings-tr", modes = listOf(false)) {
-            VaultSettingsSection(60_000L, onLockNow = {}, onAutoLock = {}, onChange = {})
+            VaultSettingsSection(onLockNow = {}, onChange = {})
         }
 
-    @Test fun settingsSection() =
-        snap("vault-settings") { VaultSettingsSection(60_000L, onLockNow = {}, onAutoLock = {}, onChange = {}) }
+    @Test fun settingsSection() = snap("vault-settings") { VaultSettingsSection(onLockNow = {}, onChange = {}) }
 
     // ---- FLAG_SECURE (plan 6): every vault page, and the gate's content while the vault is open
 

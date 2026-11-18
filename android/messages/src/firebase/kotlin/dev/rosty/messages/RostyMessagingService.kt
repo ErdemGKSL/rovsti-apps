@@ -3,6 +3,7 @@ package dev.rosty.messages
 import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import dev.rosty.messages.notify.WaCallPushes
 import dev.rosty.messages.notify.WaPushNotices
 import dev.rosty.platform.wa.WaPush
 
@@ -31,6 +32,8 @@ class RostyMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         // Runs in a process that may have no UI at all: a throw here is a "keeps stopping" dialog on every push.
         try {
+            // Phone owns WhatsApp calls: with Phone installed, a call push rings there only.
+            if (WaCallPushes.leftToPhone(message.data["kind"], WaCallPushes.phoneInstalled(this))) return
             val opened = WaPush.onMessage(applicationContext, message.data)
             val container = (application as? dev.rosty.shell.HasContainer<*>)?.container as? MessagesContainer
             WaPushNotices.onPush(this, opened, unlocked = container?.waVaultIfMade?.unlocked == true)

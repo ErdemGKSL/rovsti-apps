@@ -266,8 +266,19 @@ class PhoneManifestTest {
                 "dev.rosty.people.sync.PeopleSyncStopReceiver",
                 // WA-R2: the link hand-over between Rosty apps.
                 "dev.rosty.wa.share.WaLinkProvider",
+                // Round 7c: a sibling's "Lock now" reaches this app when it is not running too.
+                "dev.rosty.wa.share.WaLockAllReceiver",
             )
         assertEquals(if (flavor == "firebase") expected + "$pkg.RostyMessagingService" else expected, ours)
         assertTrue(manifest.component("$pkg.MainActivity").filters.isNotEmpty())
+    }
+
+    /** Round 7c: "Lock now" in a sibling reaches this app even when it is not running, and only from a sibling. */
+    @Test fun theLockAllReceiverIsExportedBehindTheSignaturePermission() {
+        val receiver = manifest.component("dev.rosty.wa.share.WaLockAllReceiver")
+        assertEquals("receiver", receiver.kind)
+        assertEquals(true, receiver.exported)
+        assertEquals("dev.rosty.permission.WA_LINK", receiver.attributes["permission"])
+        assertEquals(setOf("dev.rosty.action.WA_LOCK_ALL"), receiver.filters.single().actions)
     }
 }

@@ -7,12 +7,11 @@ import dev.rosty.core.log.RostyLog
 import dev.rosty.messages.notify.LockedWhatsAppNotice
 import dev.rosty.platform.notify.MessageReminders
 import dev.rosty.platform.sms.ScheduledSms
-import dev.rosty.shell.VaultBoot
 
 /**
  * A reboot or an app update clears AlarmManager. Re-arms every stored scheduled SMS (AD-MSG6) and message reminder (M33); items already due fire
- * at once. The payloads live in SharedPreferences, so no native library is needed. A reboot also ends the WhatsApp
- * vault's daily unlock (`plans/wa-vault.md` 13.2).
+ * at once. The payloads live in SharedPreferences, so no native library is needed. A reboot also clears the
+ * content-free WhatsApp count (round 7c: the vault itself reopens by itself once the phone is unlocked).
  *
  * Ported from apps/messages/platforms/android/app/src/main/kotlin/dev/rosty/messages/BootReceiver.kt
  */
@@ -33,23 +32,13 @@ class BootReceiver : BroadcastReceiver() {
                 RostyLog.e(TAG, "Re-arming the scheduled messages failed", e)
             }
             try {
-                if (intent.action == Intent.ACTION_BOOT_COMPLETED) dropDailyUnlock(app)
+                if (intent.action == Intent.ACTION_BOOT_COMPLETED) LockedWhatsAppNotice.clear(app)
             } catch (e: RuntimeException) {
-                RostyLog.e(TAG, "Dropping the WhatsApp daily unlock failed", e)
+                RostyLog.e(TAG, "Clearing the locked WhatsApp notice failed", e)
             } finally {
                 result.finish()
             }
         }.start()
-    }
-
-    /**
-     * After a reboot the WhatsApp vault needs its passphrase again (`plans/wa-vault.md` 13.2): the daily blob and its
-     * K_daily key go. The vault's own boot count check does the same at the next unlock; this does not wait for it.
-     * Nothing to do (and no core started) when the app never made a vault.
-     */
-    private fun dropDailyUnlock(app: Context) {
-        LockedWhatsAppNotice.clear(app)
-        VaultBoot.dropDailyUnlock(app)
     }
 
     private companion object {

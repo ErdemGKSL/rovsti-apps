@@ -2,6 +2,7 @@ package dev.rosty.wa.vault
 
 import dev.rosty.core.FakeVaultOps
 import dev.rosty.core.getOrNull
+import dev.rosty.core.model.wa.StoredLink
 import dev.rosty.core.model.wa.VaultLink
 import dev.rosty.platform.vault.FakeVaultKeystore
 import dev.rosty.platform.vault.VaultAlias
@@ -20,8 +21,8 @@ import kotlin.random.Random
 
 /**
  * The vault's rules on the JVM (plan 3, 4, 5, 13.2): setup with two groups typed back, the daily (biometric) unlock and
- * when it is dropped (reboot, 72 h, a boot broadcast, five failed attempts, an enrolment change), the passphrase unlock,
- * a change, a key that is gone, and the reset.
+ * when it is dropped (reboot, 72 h idle, 30 days, a boot broadcast, five failed attempts, an enrolment change), the
+ * passphrase unlock, a change, a key that is gone, the reset, and the hand-over unlock from a sibling app (round 7a).
  */
 class WaVaultTest {
     private val link = VaultLink("https://gw.example", "inst1", "rwk_" + "a".repeat(40))
@@ -33,6 +34,9 @@ class WaVaultTest {
     private var locks = 0
     private var unlocks = 0
     private var resets = 0
+
+    /** What an unlocked sibling app would hand over (`WaLinkProvider`); null: no sibling is unlocked. */
+    private var sibling: StoredLink? = null
     private val prompt = { title: String -> VaultPrompt(title, negative = "no") }
     private val vault =
         WaVault(
@@ -48,6 +52,7 @@ class WaVaultTest {
                 ops.legacyLink = null
             },
             random = Random(1),
+            siblingLink = { sibling },
         )
 
     private suspend fun setUp(): PassphraseOffer {
@@ -293,6 +298,77 @@ class WaVaultTest {
             assertNotNull(ops.openHandle)
         }
 
+    @Test fun aBiometricUnlockResetsTheThreeDays() =
+        runTest {
+            setUp()
+            vault.lock()
+            now += 70 * HOUR
+            assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
+            vault.lock()
+            now += 70 * HOUR
+            vault.refresh()
+            assertEquals(
+                "140 h after the passphrase, 70 h idle",
+                WaVaultState.Locked(biometric = true),
+                vault.state.value,
+            )
+            assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
+        }
+
+    @Test fun thirtyDaysAskForThePassphraseHoweverOftenTheBiometricUnlocks() =
+        runTest {
+            setUp()
+            vault.lock()
+            repeat(14) {
+                now += 48 * HOUR
+                assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
+                vault.lock()
+            }
+            now += 48 * HOUR + 1
+            vault.refresh()
+            assertEquals(WaVaultState.Locked(false, PassphraseReason.Expired), vault.state.value)
+            assertTrue(dailyAliases().isEmpty())
+        }
+
+    @Test fun anUnlockedSiblingOpensTheVaultWithoutAPrompt() =
+        runTest {
+            setUp()
+            vault.lock()
+            val before = keystore.prompts.size
+            sibling = StoredLink(link.gatewayUrl, link.instanceId, link.key)
+            assertTrue(vault.unlockFromSibling())
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
+            assertEquals("no prompt", before, keystore.prompts.size)
+            assertEquals(2, unlocks)
+            assertNotNull(ops.openHandle)
+        }
+
+    @Test fun aSiblingHandOverAlsoWorksWhenThePassphraseWouldBeAsked() =
+        runTest {
+            setUp()
+            vault.lock()
+            boot += 1
+            vault.refresh()
+            assertEquals(WaVaultState.Locked(false, PassphraseReason.Rebooted), vault.state.value)
+            sibling = StoredLink(link.gatewayUrl, link.instanceId, link.key)
+            assertTrue(vault.unlockFromSibling())
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
+        }
+
+    @Test fun noSiblingOrAnotherLinkLeavesTheVaultLocked() =
+        runTest {
+            setUp()
+            vault.lock()
+            assertFalse(vault.unlockFromSibling())
+            sibling = StoredLink(link.gatewayUrl, "inst2", link.key)
+            assertFalse(vault.unlockFromSibling())
+            sibling = StoredLink(link.gatewayUrl, link.instanceId, link.key)
+            ops.linkWrapped = false
+            assertFalse("a vault not unlocked since the update has no link wrap", vault.unlockFromSibling())
+            assertEquals(WaVaultState.Locked(biometric = true), vault.state.value)
+            assertNull(ops.openHandle)
+        }
+
     @Test fun passphraseRules() {
         assertTrue(PassphraseText.wellFormed("abcd-efgh-jkmn-pqrs-tvwx-yz01-2345"))
         assertTrue(PassphraseText.wellFormed("ABCD EFGH JKMN PQRS TVWX YZ01 2345"))
@@ -305,5 +381,9 @@ class WaVaultTest {
             assertTrue(picked.all { it in 0 until 7 })
             assertEquals(picked.sorted(), picked)
         }
+    }
+
+    private companion object {
+        const val HOUR = 3_600_000L
     }
 }

@@ -12,6 +12,7 @@ import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
 import dev.rosty.core.model.wa.VaultLink
+import dev.rosty.core.model.wa.VaultLinkUnlockRequest
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
@@ -72,8 +73,11 @@ enum class PassphraseReason {
     /** The phone restarted. */
     Rebooted,
 
-    /** 72 hours went by without a passphrase unlock. */
+    /** 72 hours went by without an unlock (round 7a: a biometric unlock resets the count). */
     Idle,
+
+    /** 30 days since the passphrase, however often the biometric unlocked (round 7a). */
+    Expired,
 
     /** The clock was set back. */
     ClockBack,
@@ -204,9 +208,16 @@ class SharedWaVaultPrefs(
  * reset, and the lock. Rust holds every key ([ops]); [keystore] seals and opens the opaque blobs; the app tears its
  * WhatsApp down in [onLock] and brings it up in [onUnlocked]. One operation at a time.
  *
- * Rules kept here (plan 13.2): the daily unlock is dropped after a reboot or 72 h (Rust checks the stamp in
- * [refresh]), after a biometric enrolment change (the Keystore invalidates K_daily), after [MAX_FAILED_DAILY] failed
- * attempts, and on [onBoot]; a screen-lock daily key is dropped once a Class 3 biometric is enrolled.
+ * Rules kept here (plan 13.2): the daily unlock is dropped after a reboot, 72 h without an unlock or 30 days since the
+ * passphrase (Rust checks the stamp and the DK-sealed last unlock in [refresh] and at each unlock; a Class 3
+ * biometric unlock resets the 72 h), after a biometric enrolment change (the Keystore invalidates K_daily), after
+ * [MAX_FAILED_DAILY] failed attempts, and on [onBoot]; a screen-lock daily key is dropped once a Class 3 biometric is
+ * enrolled.
+ *
+ * One prompt for the four apps (round 7a, [unlockFromSibling]): while a sibling Rosty app has its vault unlocked, it
+ * hands its link over in memory ([siblingLink], `WaLinkProvider`) and this app opens its *own* vault with it (Rust's
+ * link wrap), with no prompt. The sibling answers only while it is unlocked, so the window is its own lock rules
+ * (foreground, or its auto-lock delay of at most 5 minutes in the background; screen off locks every app).
  */
 class WaVault(
     private val ops: VaultOps,
@@ -219,6 +230,11 @@ class WaVault(
     /** After [reset]: the app forgets its link and everything kept for it. */
     private val onReset: suspend () -> Unit = {},
     private val random: Random = Random.Default,
+    /**
+     * The link of a sibling Rosty app whose vault is unlocked now, or null (`WaLinkProvider`, memory only; never
+     * logged). Asked only by [unlockFromSibling], on the locked page the person opened.
+     */
+    private val siblingLink: suspend () -> StoredLink? = { null },
 ) {
     private val stateFlow = MutableStateFlow<WaVaultState>(WaVaultState.Checking)
     val state: StateFlow<WaVaultState> = stateFlow.asStateFlow()
@@ -344,8 +360,15 @@ class WaVault(
                 prompt { keystore.open(daily.alias, daily.sealed, prompts.daily) { prefs.failedDaily += 1 } }
             when (opened) {
                 is VaultCrypto.Done -> {
+                    // A Class 3 biometric resets the 72 h idle clock; a screen-lock key does not (round 7a).
+                    val biometric = VaultAlias.authOf(daily.alias) == VaultKeyAuth.Biometric
                     val request =
-                        VaultDailyUnlockRequest(dailyBlob = opened.b64, bootCount = env.bootCount(), nowMs = env.now())
+                        VaultDailyUnlockRequest(
+                            dailyBlob = opened.b64,
+                            bootCount = env.bootCount(),
+                            nowMs = env.now(),
+                            biometric = biometric,
+                        )
                     val unlocked = ops.unlockDaily(request)
                     when (unlocked) {
                         is Outcome.Ok -> {
@@ -381,6 +404,39 @@ class WaVault(
                 }
             }
         }
+
+    /**
+     * The hand-over unlock (round 7a): a sibling Rosty app whose vault is unlocked hands its link over and Rust opens
+     * this app's own vault with it. No prompt. False when no sibling gives a link, when the link is not this vault's,
+     * or when this vault has no link wrap yet (it was not unlocked since the update): the caller then prompts.
+     */
+    suspend fun unlockFromSibling(): Boolean {
+        val st = mutex.withLock { refreshLocked() } ?: return false
+        if (st.unlocked != null) return true
+        if (st.vault == null || broken) return false
+        // Asked outside the lock: a sibling's provider may take a moment, and nothing here waits on it.
+        val link = siblingLink() ?: return false
+        return mutex.withLock {
+            if (stateFlow.value == WaVaultState.Unlocked) return@withLock true
+            val request =
+                VaultLinkUnlockRequest(
+                    link = VaultLink(link.gatewayUrl, link.instanceId, link.key),
+                    bootCount = env.bootCount(),
+                    nowMs = env.now(),
+                )
+            when (ops.unlockLink(request)) {
+                is Outcome.Err -> {
+                    false
+                }
+
+                is Outcome.Ok -> {
+                    reason = null
+                    becameUnlocked()
+                    true
+                }
+            }
+        }
+    }
 
     /** Five wrong fingers end the daily unlock even when the prompt is then cancelled. */
     private suspend fun afterFailures() {
@@ -683,6 +739,7 @@ class WaVault(
                 VaultDailyRefusal.Rebooted -> PassphraseReason.Rebooted
                 VaultDailyRefusal.Idle -> PassphraseReason.Idle
                 VaultDailyRefusal.ClockBack -> PassphraseReason.ClockBack
+                VaultDailyRefusal.Expired -> PassphraseReason.Expired
             }
 
         private fun dailyReason(error: RustError): PassphraseReason {
@@ -690,6 +747,7 @@ class WaVault(
             return when (why) {
                 "rebooted" -> PassphraseReason.Rebooted
                 "clock_back" -> PassphraseReason.ClockBack
+                "expired" -> PassphraseReason.Expired
                 else -> PassphraseReason.Idle
             }
         }

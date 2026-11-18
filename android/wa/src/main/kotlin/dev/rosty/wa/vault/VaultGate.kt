@@ -72,6 +72,9 @@ class VaultFlow(
     val entry = PassphraseEntry()
     private var biometricAsked = false
 
+    /** The hand-over and the automatic prompt were tried for this lock. */
+    private var autoTried = false
+
     private fun run(block: suspend () -> Unit) {
         if (busy) return
         busy = true
@@ -160,9 +163,21 @@ class VaultFlow(
         run { outcome(vault.unlockWithBiometric()) }
     }
 
-    /** Opens the biometric prompt once per lock, as soon as the locked page shows. */
-    fun autoBiometric() {
-        if (!biometricAsked && !usePassphrase) unlockWithBiometric()
+    /**
+     * Once per lock, as soon as the locked page shows: a sibling Rosty app that is unlocked opens this vault with no
+     * prompt (round 7a); otherwise the biometric prompt opens when the daily unlock is there. The person never sees
+     * two prompts in a row for one unlock.
+     */
+    fun autoUnlock(biometric: Boolean) {
+        if (autoTried) return
+        autoTried = true
+        run {
+            if (vault.unlockFromSibling()) return@run
+            if (biometric && !biometricAsked && !usePassphrase) {
+                biometricAsked = true
+                outcome(vault.unlockWithBiometric())
+            }
+        }
     }
 
     fun choosePassphrase() {
@@ -193,6 +208,7 @@ class VaultFlow(
     /** The vault locked again: the next locked page asks for the biometric again. */
     fun relocked() {
         biometricAsked = false
+        autoTried = false
         usePassphrase = false
         problem = null
         forgot = false
@@ -237,7 +253,7 @@ fun WaVaultGate(
                 BackHandler { flow.showForgot(false) }
                 ForgotFlow(flow, broken = false)
             } else {
-                LaunchedEffect(state.biometric) { if (state.biometric) flow.autoBiometric() }
+                LaunchedEffect(state.biometric) { flow.autoUnlock(state.biometric) }
                 VaultUnlockScreen(
                     title = title,
                     state = state,

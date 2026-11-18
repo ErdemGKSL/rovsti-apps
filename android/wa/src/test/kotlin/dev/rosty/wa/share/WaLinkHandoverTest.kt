@@ -177,8 +177,28 @@ class WaLinkHandoverTest {
 
     @Test
     fun siblingsAreEveryRostyAppButTheAppItself() {
-        assertEquals(listOf(phone, contacts), WaLinkShare.siblingsOf(messages))
-        assertEquals(listOf(messages, contacts), WaLinkShare.siblingsOf(phone))
-        assertEquals(WaLinkShare.PACKAGES, WaLinkShare.siblingsOf("dev.rosty.stops"))
+        val stops = "dev.rosty.stops"
+        assertEquals(listOf(phone, contacts, stops), WaLinkShare.siblingsOf(messages))
+        assertEquals(listOf(messages, contacts, stops), WaLinkShare.siblingsOf(phone))
+        // Round 7a: Stops takes part too.
+        assertEquals(listOf(messages, phone, contacts), WaLinkShare.siblingsOf(stops))
+        assertEquals(WaLinkShare.PACKAGES, WaLinkShare.siblingsOf("dev.rosty.other"))
     }
+
+    @Test
+    fun theLinkScreenTakesALinkByItselfUntilThePersonRemovesOne() =
+        runTest {
+            answers[messages] = SiblingAnswer.Link(link)
+            val share = handover()
+            assertEquals(WaLinkHandover.Result.Adopted(messages), share.takeAutomatically())
+            held = HeldLink.None
+            share.onForget()
+            assertTrue(marks.autoOff)
+            assertEquals(
+                "after an unlink only the tap takes it",
+                WaLinkHandover.Result.Nothing,
+                share.takeAutomatically(),
+            )
+            assertEquals(WaLinkHandover.Result.Adopted(messages), share.take())
+        }
 }

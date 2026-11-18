@@ -45,9 +45,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * WA-R2 with the vault (`plans/wa-vault.md` 13.3): the link screen offers the link of an unlocked sibling, takes it
- * only on the person's tap, hands it to this app's vault (never to a link file), and shows the linked page once the
- * vault's setup has opened it. Unlinking keeps the sibling's link and offers it again.
+ * WA-R2 with the vault (`plans/wa-vault.md` 13.3, round 7a): the link screen takes the link of an unlocked sibling
+ * with no tap (or, after the person removed this app's link, offers it and takes it on the tap), hands it to this app's
+ * vault (never to a link file), and shows the linked page once the vault's setup has opened it. Unlinking keeps the
+ * sibling's link and offers it again.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -137,8 +138,18 @@ class WaSettingsHandoverTest {
     }
 
     @Test
-    fun theScreenOffersAnUnlockedSiblingsLinkAndTakesNothingByItself() =
+    fun theScreenTakesAnUnlockedSiblingsLinkWithNoTap() =
         runTest {
+            viewModel()
+            assertEquals("round 7a: the link waits for this app's vault with no tap", link, waiting)
+            assertNull("not stored like a pasted key", fake.linked)
+            assertTrue("no link file was written", gw.core.calls.none { it.op == "wa.link_write" })
+        }
+
+    @Test
+    fun afterAnUnlinkHereTheScreenOffersTheSiblingsLinkAndTakesNothingByItself() =
+        runTest {
+            marks.autoOff = true
             val vm = viewModel()
             assertEquals("choose", vm.state.value.view.kind)
             assertEquals(MESSAGES, vm.state.value.siblingOffer)
@@ -150,6 +161,7 @@ class WaSettingsHandoverTest {
     @Test
     fun theTapHandsTheLinkToTheVaultAndThePageFollowsOnceItIsOpen() =
         runTest {
+            marks.autoOff = true
             val vm = viewModel()
             vm.onAction(WaSettingsAction.UseSiblingLink)
             assertEquals("the link waits for this app's vault", link, waiting)
@@ -196,7 +208,7 @@ class WaSettingsHandoverTest {
     fun unlinkingHereLeavesTheSiblingLinkedAndOffersItsLink() =
         runTest {
             val vm = viewModel()
-            vm.onAction(WaSettingsAction.UseSiblingLink)
+            assertEquals("taken with no tap", link, waiting)
             vaultOpens()
             vm.vaultOpened()
             vm.onAction(WaSettingsAction.Press(SettingsInput.unit("unlink")))

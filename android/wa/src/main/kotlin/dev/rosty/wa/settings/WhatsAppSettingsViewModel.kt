@@ -221,10 +221,14 @@ class WhatsAppSettingsViewModel(
                 return
             }
         }
-        // Nothing is taken from a sibling here: only the person's tap does that (`useSibling`), and the vault's
-        // setup follows (`plans/wa-vault.md` 13.3).
+        // With no link here, an unlocked sibling's link is taken with no tap (round 7a) unless the person removed this
+        // app's link before; then only the tap takes it (`useSibling`). The vault's setup follows (plan 13.3).
         val stored = store.read()
         val link = (stored as? Outcome.Ok)?.value?.let { SettingsLink(it.gatewayUrl, it.instanceId, it.key) }
+        if (link == null && stored is Outcome.Ok && handover?.takeAutomatically() is WaLinkHandover.Result.Adopted) {
+            refreshShare()
+            return
+        }
         linkedModel = link != null
         apply(SettingsApplyRequest(link = link, app = app, nowMs = clock()))?.let { accept(it, runEffects = true) }
         refreshShare()

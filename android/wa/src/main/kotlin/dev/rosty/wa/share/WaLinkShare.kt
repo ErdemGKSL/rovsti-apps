@@ -34,9 +34,10 @@ object WaLinkShare {
     /**
      * The application ids of the Rosty apps that can hold a WhatsApp link, in the order a reader asks them
      * (`applicationId` of `android/<app>/build.gradle.kts`; the `plain` and `firebase` flavors share the id).
-     * Messages first: it is the app people link in.
+     * Messages first: it is the app people link in. Stops since round 7a (the one unlock prompt of the four apps).
      */
-    val PACKAGES: List<String> = listOf("dev.rosty.messages", "dev.rosty.phone", "dev.rosty.contacts")
+    val PACKAGES: List<String> =
+        listOf("dev.rosty.messages", "dev.rosty.phone", "dev.rosty.contacts", "dev.rosty.stops")
 
     /** The column names of the link row. */
     object Columns {

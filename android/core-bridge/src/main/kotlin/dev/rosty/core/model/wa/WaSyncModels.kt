@@ -601,6 +601,27 @@ data class WaSyncMessage(
      * "open it on your phone"; there is nothing to download.
      */
     @EncodeDefault(NEVER) val unavailable: Unavailable? = null,
+    /** Until when (unix ms) my sent message can be edited; null: never. */
+    @SerialName("editable_until_ms") @EncodeDefault(NEVER) val editableUntilMs: Long? = null,
+    @SerialName("forwarding_score") @EncodeDefault(NEVER) val forwardingScore: Int? = null,
+    /** Show "Forwarded many times" instead of "Forwarded". */
+    @SerialName("forwarded_many") @EncodeDefault(NEVER) val forwardedMany: Boolean = false,
+    /** Where [text] names the people in [mentions]: UTF-16 ranges of each `@<token>`. */
+    @SerialName("mention_spans") @EncodeDefault(NEVER) val mentionSpans: List<WaMentionSpan> = emptyList(),
+    /** The card of the link in the text; its picture is the message's thumbnail ([hasThumbnail]). */
+    @SerialName("link_preview") @EncodeDefault(NEVER) val linkPreview: LinkPreview? = null,
+    /** A line of the conversation (the disappearing timer changed), not a message. */
+    @EncodeDefault(NEVER) val system: SystemNote? = null,
+    /** When the message disappears (unix ms). */
+    @SerialName("expires_at") @EncodeDefault(NEVER) val expiresAt: Long? = null,
+)
+
+/** One `@<token>` of a text: its UTF-16 range (the `@` included) and the person it names. */
+@Serializable
+data class WaMentionSpan(
+    val start: Int,
+    val end: Int,
+    val jid: String,
 )
 
 @Serializable
@@ -624,6 +645,8 @@ data class WaSyncChat(
     val waiting: Int,
     /** The id the gateway last used for this chat, when it is not [jid] (the key): the LID of a number chat. */
     @SerialName("wire_jid") @EncodeDefault(NEVER) val wireJid: String? = null,
+    /** The chat's disappearing timer in seconds; null when off. */
+    @SerialName("ephemeral_s") @EncodeDefault(NEVER) val ephemeralS: Long? = null,
 )
 
 @Serializable
@@ -777,6 +800,29 @@ sealed interface WaSyncAction {
     data class SendText(
         val text: String,
         @SerialName("quoted_id") @EncodeDefault(NEVER) val quotedId: String? = null,
+        /** The JIDs [text] mentions with `@<token>`s (`wa.mention_encode`). */
+        @EncodeDefault(NEVER) val mentions: List<String> = emptyList(),
+        /** The link card made on the phone. */
+        @SerialName("link_preview") @EncodeDefault(NEVER) val linkPreview: LinkPreviewOut? = null,
+    ) : WaSyncAction
+
+    /**
+     * Forward [messageId] of [sourceChat] into the row's chat. The store fills [snapshot] when it is queued (the copy
+     * shows at once, marked forwarded); a message that cannot be forwarded is refused.
+     */
+    @Serializable
+    @SerialName("forward")
+    data class Forward(
+        @SerialName("source_chat") val sourceChat: String,
+        @SerialName("message_id") val messageId: String,
+        @EncodeDefault(NEVER) val snapshot: WaSyncForwardSnapshot? = null,
+    ) : WaSyncAction
+
+    /** Delete on this account's devices only; the thread hides it at once, a refusal shows it again. */
+    @Serializable
+    @SerialName("delete_for_me")
+    data class DeleteForMe(
+        @SerialName("message_id") val messageId: String,
     ) : WaSyncAction
 
     /** [file] is already copied into app storage. */
@@ -874,6 +920,33 @@ sealed interface WaSyncAction {
         @EncodeDefault(NEVER) val sender: String? = null,
     ) : WaSyncAction
 }
+
+/** What a forward sends, copied from its source when it is queued. */
+@Serializable
+data class WaSyncForwardSnapshot(
+    val kind: WaSyncKind,
+    @EncodeDefault(NEVER) val text: String? = null,
+    @EncodeDefault(NEVER) val mime: String? = null,
+    @EncodeDefault(NEVER) val size: Long? = null,
+    @EncodeDefault(NEVER) val media: MediaMeta? = null,
+)
+
+/** `wa_sync.expire`. */
+@Serializable
+data class WaSyncExpireRequest(
+    val handle: Long,
+    @SerialName("now_ms") val nowMs: Long,
+)
+
+/** What `wa_sync.expire` removed: delete [files]; run it again at [nextMs]. */
+@Serializable
+data class WaSyncExpired(
+    val handle: Long,
+    val removed: Int,
+    val files: List<String> = emptyList(),
+    val chats: List<String> = emptyList(),
+    @SerialName("next_ms") @EncodeDefault(NEVER) val nextMs: Long? = null,
+)
 
 @Serializable
 data class WaSyncOutboxItem(

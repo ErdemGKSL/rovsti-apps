@@ -171,6 +171,9 @@ class FakeWaSyncOps(
     /** Stored thumbnails (base64) by chat and message id. */
     private val thumbs = mutableMapOf<Pair<String, String>, String>()
 
+    /** Messages deleted for me (E6-WA R4): left out of the thread until a refusal brings them back. */
+    private val hidden = mutableMapOf<Pair<String, String>, WaSyncMessage>()
+
     /** Media rows by chat and message id; a message without one reads as [WaSyncMediaState.None]. */
     private val files = mutableMapOf<Pair<String, String>, WaSyncMediaEntry>()
 
@@ -408,20 +411,29 @@ class FakeWaSyncOps(
             when (action) {
                 is WaSyncAction.SendText -> action.text
                 is WaSyncAction.SendMedia -> action.caption
+                is WaSyncAction.Forward -> action.snapshot?.text
                 else -> return null
             }
         val media = action as? WaSyncAction.SendMedia
+        val forward = (action as? WaSyncAction.Forward)?.snapshot
+        val sendText = action as? WaSyncAction.SendText
         return WaSyncMessage(
             id = item.clientId,
             chat = item.chat,
             fromMe = true,
             timestampMs = item.createdMs,
-            kind = media?.let { kindOf(it.media) } ?: WaSyncKind.Text,
+            kind = media?.let { kindOf(it.media) } ?: forward?.kind ?: WaSyncKind.Text,
             text = text,
-            mime = media?.mime,
-            size = media?.size,
-            media = media?.let(::mediaOf),
+            mime = media?.mime ?: forward?.mime,
+            size = media?.size ?: forward?.size,
+            media = media?.let(::mediaOf) ?: forward?.media,
             mediaPath = media?.file,
+            forwarded = forward != null,
+            mentions = sendText?.mentions.orEmpty(),
+            linkPreview =
+                sendText?.linkPreview?.let {
+                    dev.rosty.core.model.wa.LinkPreview(it.url, it.title, it.description, it.thumbnailB64 != null)
+                },
             reactions = emptyList(),
             state =
                 when (item.state) {
@@ -767,6 +779,41 @@ class FakeWaSyncOps(
             (req.action as? WaSyncAction.SendMedia)?.let(::refusal)?.let {
                 return@synchronized Outcome.Err(RustError.Invalid(it))
             }
+            val action =
+                when (val asked = req.action) {
+                    // The store copies what a forward sends; a deleted or unknown message is refused.
+                    is WaSyncAction.Forward -> {
+                        val source =
+                            messages[keyOf(asked.sourceChat)]?.firstOrNull { it.id == asked.messageId }
+                                ?: return@synchronized Outcome.Err(RustError.NotFound("message ${asked.messageId}"))
+                        if (source.deleted || source.media?.viewOnce == true || source.system != null) {
+                            return@synchronized Outcome.Err(RustError.Invalid("this message cannot be forwarded"))
+                        }
+                        asked.copy(
+                            snapshot =
+                                dev.rosty.core.model.wa.WaSyncForwardSnapshot(
+                                    source.kind,
+                                    source.text,
+                                    source.mime,
+                                    source.size,
+                                    source.media,
+                                ),
+                        )
+                    }
+
+                    is WaSyncAction.DeleteForMe -> {
+                        val rows = messages[req.chat]
+                        rows?.firstOrNull { it.id == asked.messageId }?.let { row ->
+                            hidden[req.chat to row.id] = row
+                            rows.remove(row)
+                        }
+                        asked
+                    }
+
+                    else -> {
+                        asked
+                    }
+                }
             val star = req.action as? WaSyncAction.Star
             if (star != null && queue.none { it.clientId == req.clientId }) {
                 queue.removeAll {
@@ -780,7 +827,7 @@ class FakeWaSyncOps(
                     ?: WaSyncOutboxItem(
                         req.clientId,
                         req.chat,
-                        req.action,
+                        action,
                         req.nowMs,
                         0,
                         0,
@@ -838,6 +885,13 @@ class FakeWaSyncOps(
                     if (failed && item.action is WaSyncAction.MarkPlayed) {
                         // Dropped: nothing to retry or edit, and the message stays played.
                         queue.remove(item)
+                        return@synchronized ok(WaSyncSettled(HANDLE, WaSyncSettled.FAILED))
+                    }
+                    val deleteForMe = item.action as? WaSyncAction.DeleteForMe
+                    if (failed && deleteForMe != null) {
+                        // Refused: the message shows again.
+                        queue.remove(item)
+                        hidden.remove(item.chat to deleteForMe.messageId)?.let(::store)
                         return@synchronized ok(WaSyncSettled(HANDLE, WaSyncSettled.FAILED))
                     }
                     val star = item.action as? WaSyncAction.Star
@@ -1312,6 +1366,24 @@ class FakeWaSyncOps(
             attemptedMs.remove(key)
             store(row.copy(viewed = true, hasThumbnail = false, mediaPath = null, mediaState = null))
             ok(WaSyncViewed(HANDLE, gone, delete = entry.path, first = !row.viewed))
+        }
+
+    override suspend fun expire(req: dev.rosty.core.model.wa.WaSyncExpireRequest) =
+        synchronized(lock) {
+            writes += req
+            var removed = 0
+            val files = mutableListOf<String>()
+            val chats = mutableListOf<String>()
+            for ((chat, rows) in messages) {
+                val gone = rows.filter { row -> row.expiresAt?.let { it <= req.nowMs } == true }
+                if (gone.isEmpty()) continue
+                rows.removeAll(gone.toSet())
+                gone.forEach { row -> this.files.remove(chat to row.id)?.path?.let(files::add) }
+                removed += gone.size
+                chats += chat
+            }
+            val next = messages.values.flatten().mapNotNull { it.expiresAt }.minOrNull()
+            ok(dev.rosty.core.model.wa.WaSyncExpired(HANDLE, removed, files, chats, next))
         }
 
     override suspend fun markPlayed(req: WaSyncMarkPlayedRequest): Outcome<WaSyncPlayed> =

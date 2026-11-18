@@ -22,6 +22,8 @@ import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncExpireRequest
+import dev.rosty.core.model.wa.WaSyncExpired
 import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
@@ -160,8 +162,21 @@ object WaSyncContracts : ContractModels {
             op<WaSyncStarredRequest, WaSyncStarredPage>("wa_sync.starred", ok = listOf("older", "unstarred", "empty"))
             op<WaSyncEnqueueRequest, WaSyncItemAnswer>(
                 "wa_sync.outbox_enqueue",
-                ok = listOf("media", "media_options", "voice_note", "edit", "revoke", "react", "mark_read", "star"),
-                err = listOf("no_chat", "bad_waveform", "mark_played"),
+                ok =
+                    listOf(
+                        "media",
+                        "media_options",
+                        "voice_note",
+                        "edit",
+                        "revoke",
+                        "react",
+                        "mark_read",
+                        "star",
+                        "mentions_preview",
+                        "forward",
+                        "delete_for_me",
+                    ),
+                err = listOf("no_chat", "bad_waveform", "mark_played", "forward_deleted"),
             )
             op<WaSyncDueRequest, WaSyncDue>(
                 "wa_sync.outbox_due",
@@ -205,6 +220,7 @@ object WaSyncContracts : ContractModels {
                 ok = listOf("again"),
                 err = listOf("not_view_once", "unknown"),
             )
+            op<WaSyncExpireRequest, WaSyncExpired>("wa_sync.expire", ok = listOf("nothing"))
             op<WaSyncMarkPlayedRequest, WaSyncPlayed>(
                 "wa_sync.mark_played",
                 ok = listOf("again"),

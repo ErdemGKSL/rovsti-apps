@@ -172,6 +172,82 @@ data class SendText(
     val chat: String,
     val text: String,
     @SerialName("quoted_id") val quotedId: String? = null,
+    /** JIDs the text mentions with `@<digits>` tokens (`wa.mention_encode`); an older gateway ignores them. */
+    @EncodeDefault(NEVER) val mentions: List<String> = emptyList(),
+    /** The link card made on the phone; an older gateway ignores it. */
+    @SerialName("link_preview") @EncodeDefault(NEVER) val linkPreview: LinkPreviewOut? = null,
+)
+
+/** The card of a link a text sends (`rosty_wa_proto::LinkPreviewOut`). */
+@Serializable
+data class LinkPreviewOut(
+    /** The link as written in the text. */
+    val url: String,
+    @EncodeDefault(NEVER) val title: String? = null,
+    @EncodeDefault(NEVER) val description: String? = null,
+    /** A small JPEG, base64, at most [MediaOptions.MAX_THUMBNAIL_BYTES] decoded. */
+    @SerialName("thumbnail_b64") @EncodeDefault(NEVER) val thumbnailB64: String? = null,
+)
+
+/** The card of the link a message carries (`rosty_wa_proto::LinkPreview`); [thumbnail]: the message has a picture. */
+@Serializable
+data class LinkPreview(
+    val url: String,
+    @EncodeDefault(NEVER) val title: String? = null,
+    @EncodeDefault(NEVER) val description: String? = null,
+    @EncodeDefault(NEVER) val thumbnail: Boolean = false,
+)
+
+/**
+ * A line of the conversation, not a message (`rosty_wa_proto::SystemNote`): [type] `disappearing` (the chat's timer
+ * became [seconds], 0 is off, set by [by]: [DELETED_BY_ME] or a JID); another type is one a newer gateway names.
+ */
+@Serializable
+data class SystemNote(
+    val type: String,
+    @EncodeDefault(NEVER) val seconds: Long? = null,
+    @EncodeDefault(NEVER) val by: String? = null,
+) {
+    val isDisappearing: Boolean get() = type == DISAPPEARING
+
+    companion object {
+        const val DISAPPEARING = "disappearing"
+    }
+}
+
+/** `POST /v1/messages/forward`: send a copy of [messageId] of [chat] to [to], marked forwarded. */
+@Serializable
+data class ForwardMessage(
+    val chat: String,
+    @SerialName("message_id") val messageId: String,
+    val to: String,
+)
+
+/** One person's receipts of a message of mine; a time of 0 is a state reached before the gateway kept times. */
+@Serializable
+data class ReceiptMember(
+    val jid: String,
+    @SerialName("jid_alt") @EncodeDefault(NEVER) val jidAlt: String? = null,
+    @EncodeDefault(NEVER) val name: String? = null,
+    @SerialName("delivered_ms") @EncodeDefault(NEVER) val deliveredMs: Long? = null,
+    @SerialName("read_ms") @EncodeDefault(NEVER) val readMs: Long? = null,
+    @SerialName("played_ms") @EncodeDefault(NEVER) val playedMs: Long? = null,
+    /** No longer in the group. */
+    @EncodeDefault(NEVER) val left: Boolean = false,
+)
+
+/** `wa.message_receipts`: who got, read or played one of my messages, and when. */
+@Serializable
+data class MessageReceipts(
+    val chat: String,
+    val id: String,
+    @EncodeDefault(NEVER) val members: List<ReceiptMember> = emptyList(),
+)
+
+@Serializable
+data class MessageReceiptsRequest(
+    val chat: String,
+    @SerialName("message_id") val messageId: String,
 )
 
 @Serializable
@@ -519,6 +595,13 @@ data class MessageMeta(
     @SerialName("edit_history") @EncodeDefault(NEVER) val editHistory: List<EditRecord> = emptyList(),
     /** A placeholder only (a view-once message someone sent): the body is `unsupported`, nothing to download. */
     @EncodeDefault(NEVER) val unavailable: Unavailable? = null,
+    /** How often it was forwarded before; from 5 on show "Forwarded many times". */
+    @SerialName("forwarding_score") @EncodeDefault(NEVER) val forwardingScore: Int? = null,
+    @SerialName("link_preview") @EncodeDefault(NEVER) val linkPreview: LinkPreview? = null,
+    /** The disappearing timer it carries, in seconds. */
+    @SerialName("expires_s") @EncodeDefault(NEVER) val expiresS: Long? = null,
+    /** A line of the conversation, not a message. */
+    @EncodeDefault(NEVER) val system: SystemNote? = null,
 )
 
 /** `rosty_wa_proto::DELETED_BY_ME`. */
@@ -564,6 +647,8 @@ data class ChatMeta(
     /** `-1` is muted forever. */
     @SerialName("muted_until_ms") @EncodeDefault(NEVER) val mutedUntilMs: Long? = null,
     @SerialName("marked_unread") @EncodeDefault(NEVER) val markedUnread: Boolean = false,
+    /** The disappearing timer in seconds; null when off. */
+    @SerialName("ephemeral_s") @EncodeDefault(NEVER) val ephemeralS: Long? = null,
 )
 
 /** A chat with its meta (`rosty_wa_proto::RichChat`, whose summary fields are flat). */
@@ -658,6 +743,18 @@ sealed interface ChatActionKind {
     data class MarkRead(
         val read: Boolean,
     ) : ChatActionKind
+
+    /** The chat's disappearing timer: one of [CHOICES] seconds (0 turns it off). An older gateway refuses it. */
+    @Serializable
+    @SerialName("disappearing")
+    data class Disappearing(
+        val seconds: Long,
+    ) : ChatActionKind {
+        companion object {
+            /** Off, 24 hours, 7 days, 90 days. */
+            val CHOICES: List<Long> = listOf(0L, 86_400L, 604_800L, 7_776_000L)
+        }
+    }
 }
 
 @Serializable

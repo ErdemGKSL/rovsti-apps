@@ -67,6 +67,10 @@ object MessageReminders {
     const val EVENT_FIRED = "message_reminder_fired"
     const val EVENT_CHANGED = "message_reminders_changed"
     private const val NOTIFICATION_TAG = "message-reminder"
+    private const val WA_TAG = "wa:"
+
+    /** Rust's text for a reminder without a preview (`rosty_core::message_reminder::arm_json`). */
+    const val NO_PREVIEW_BODY = "Open the message"
 
     private fun store(context: Context): ReminderStore<MessageReminderItem> {
         val prefs = context.getSharedPreferences(PlatformPrefs.MESSAGE_REMINDERS, Context.MODE_PRIVATE)
@@ -113,6 +117,37 @@ object MessageReminders {
 
     /** The armed payloads as a JSON array. */
     fun armedJson(context: Context): String = JSONArray(armed(context).map { it.raw }).toString()
+
+    /**
+     * Takes the message text out of every armed WhatsApp reminder (`wa:` tag) that an earlier build stored with it
+     * (`plans/wa-vault.md` round 6): the preview goes and the notification says [NO_PREVIEW_BODY], as a reminder made
+     * now does. The chat title, the time and the alarm stay. SMS reminders are not touched. Answers how many changed;
+     * writes nothing when none did.
+     */
+    fun scrubWhatsAppText(context: Context): Int {
+        val store = store(context)
+        var changed = 0
+        for (item in store.all()) {
+            if (!item.tag.startsWith(WA_TAG)) continue
+            val raw = item.raw
+            val hasText =
+                raw.optString("preview").isNotEmpty() ||
+                    raw.has("body") ||
+                    raw.optString("notif_body", NO_PREVIEW_BODY) != NO_PREVIEW_BODY
+            if (!hasText) continue
+            val clean =
+                JSONObject(raw.toString()).apply {
+                    remove("body")
+                    put("preview", "")
+                    put("notif_body", NO_PREVIEW_BODY)
+                }
+            MessageReminderItem.from(clean)?.let {
+                store.arm(it)
+                changed++
+            }
+        }
+        return changed
+    }
 
     /** Re-sets every stored alarm (a reboot or update clears them); due items fire at once. */
     fun rearmAll(context: Context): Boolean {

@@ -112,7 +112,9 @@ object ReplyActions {
         JSONObject()
             .put("tag", tag)
             .put("title", title)
-            .put("body", body)
+            // The alarm payload is kept on disk: a WhatsApp message's text never goes there (`plans/wa-vault.md`
+            // 13.1), the reminder names the chat only.
+            .put("body", if (tag.startsWith("wa:")) "" else body)
             .put("minutes", 60)
             .put("now_ms", nowMs)
             .put("tz_offset_s", tzOffsetS)

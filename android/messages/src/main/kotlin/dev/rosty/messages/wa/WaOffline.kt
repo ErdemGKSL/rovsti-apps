@@ -128,6 +128,8 @@ class WaOffline(
      * and starts no sync of its own.
      */
     private val memoryOnly: Boolean = false,
+    /** Start locked (the vault is not open yet): no store opens and no request goes out until [unlock]. */
+    startLocked: Boolean = false,
 ) {
     private val sessionState = MutableStateFlow<WaSession?>(null)
 
@@ -177,7 +179,7 @@ class WaOffline(
     private val started = AtomicBoolean(false)
 
     /** True between [lock] and [unlock]: no store is open and no request goes out. */
-    private val lockedState = MutableStateFlow(false)
+    private val lockedState = MutableStateFlow(startLocked)
     val locked: StateFlow<Boolean> = lockedState.asStateFlow()
     private val refreshQueued = AtomicBoolean(false)
     private val drainQueued = AtomicBoolean(false)

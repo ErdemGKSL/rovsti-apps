@@ -57,6 +57,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" tools:node="remove" />
+    <!-- androidx.biometric (the WhatsApp vault's prompt, plans/wa-vault.md 13.2) also asks for the deprecated
+         fingerprint permission; the prompt on API 34 needs only USE_BIOMETRIC, which stays. -->
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" tools:node="remove" />
 
     <application
         android:name=".RostyMessagesApp"

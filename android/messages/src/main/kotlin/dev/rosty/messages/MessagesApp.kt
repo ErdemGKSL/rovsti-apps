@@ -36,10 +36,13 @@ import dev.rosty.messages.settings.textsize.TextSizeEntry
 import dev.rosty.messages.spam.SpamSettingsEntry
 import dev.rosty.messages.starred.StarredEntry
 import dev.rosty.messages.wa.WaThreadPage
+import dev.rosty.messages.wa.WaVaultGated
 import dev.rosty.messages.wa.WhatsAppPage
 import dev.rosty.messages.wa.rememberWaInboxViewModel
 import dev.rosty.shell.RostyShell
 import dev.rosty.shell.settings.CommonSettingsPage
+import dev.rosty.wa.vault.SecureWindow
+import dev.rosty.wa.vault.WaVaultState
 
 /** The screens of Rosty Messages: one [RostyShell] over the activity's navigator. */
 @Composable
@@ -74,6 +77,10 @@ fun MessagesApp(
     val select = if (onWhatsApp) waInboxState.select else inboxState.select
     val selecting = if (onWhatsApp) waInbox else inbox
     val strings = rememberInboxStrings()
+    // WhatsApp text can show on any page while the vault is open (the merged inbox, search, stars): the whole window
+    // is secure then; the vault's own pages secure it themselves (`plans/wa-vault.md` 6).
+    val vault by container.waVault.state.collectAsState()
+    SecureWindow(vault == WaVaultState.Unlocked)
     RostyShell(
         navigator = navigator,
         tabs = tabs,
@@ -113,7 +120,9 @@ fun MessagesApp(
             )
         }
         entry<MessagesRoute.SmsThread> { route -> SmsThreadPage(container, route, pop) { navigator.push(it) } }
-        entry<MessagesRoute.WaThread> { route -> WaThreadPage(container, route, navigator, pop) }
+        entry<MessagesRoute.WaThread> { route ->
+            WaVaultGated(container) { WaThreadPage(container, route, navigator, pop) }
+        }
         entry<MessagesRoute.NewConversation> { route -> NewConversationPage(container, route, navigator, pop) }
         entry<MessagesRoute.Starred> { StarredEntry(container, navigator) }
         entry<MessagesRoute.WhatsAppSettings> { WhatsAppSettingsEntry(container) }

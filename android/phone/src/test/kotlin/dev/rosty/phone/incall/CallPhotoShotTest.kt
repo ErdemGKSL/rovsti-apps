@@ -29,7 +29,18 @@ class CallPhotoShotTest : ShotTest() {
     private val options =
         RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0.01f))
 
-    override val imageProducer: (Any, Int, Int) -> Bitmap? = { _, w, h -> brightScene(w, h) }
+    override val imageProducer: (Any, Int, Int) -> Bitmap? = { data, w, h ->
+        if (data.toString().contains("white")) flatWhite(w, h) else brightScene(w, h)
+    }
+
+    /** A near-white photo (#F2F2F2 all over): the hardest case for white captions. */
+    private fun flatWhite(
+        w: Int,
+        h: Int,
+    ): Bitmap =
+        Bitmap.createBitmap(w.coerceAtLeast(1), h.coerceAtLeast(1), Bitmap.Config.ARGB_8888).also {
+            it.eraseColor(Color.rgb(0xF2, 0xF2, 0xF2))
+        }
 
     private fun brightScene(
         w: Int,
@@ -90,6 +101,13 @@ class CallPhotoShotTest : ShotTest() {
             val h = IncomingShotHarness(ui)
             shoot("e5.6-incoming-photo", dark) { HostedIncoming(h, photo = "content://contacts/1/photo") }
         }
+    }
+
+    @Test fun incomingPhotoWhite() {
+        val snap = ringingSnapshot(ringing(account = "tel/svc#2"))
+        val ui = IncomingHarness(snap, display = hostDisplay(snap)).ui
+        val h = IncomingShotHarness(ui)
+        shoot("e5.6-incoming-photo-white", dark = false) { HostedIncoming(h, photo = "content://contacts/1/white") }
     }
 
     @Test fun inCallPhoto() {

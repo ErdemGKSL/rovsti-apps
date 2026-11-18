@@ -13,7 +13,9 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.BlurEffect
@@ -35,6 +37,9 @@ import coil3.request.crossfade
 import coil3.size.Scale
 import dev.rosty.design.backdrop.isRenderEffectSupported
 import dev.rosty.design.motion.LocalReduceMotion
+import dev.rosty.design.theme.scrimAlphaFor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Test tags of the photo background. */
 object CallBackdropTags {
@@ -43,13 +48,67 @@ object CallBackdropTags {
     const val Scrim = "call-backdrop-scrim"
 }
 
-/** The darkening laid over a caller photo so white text stays readable (WCAG 4.5:1 for the name on a bright photo). */
+/**
+ * The darkening laid over a caller photo so the captions stay readable. TopAlpha and BottomAlpha are the floors (what a
+ * dark photo gets); over a bright band of the photo the scrim rises until [SecondaryInk] (the faintest caption) reaches
+ * 4.5:1, via [scrimAlphaFor]. The two ends are solved separately: the top carries "Incoming call" and the number, the
+ * bottom the buttons and their labels.
+ */
 object CallScrim {
     const val TopAlpha = 0.25f
     const val BottomAlpha = 0.55f
 
-    /** Opacity of the black scrim at [fraction] (0 = top, 1 = bottom) of the screen: linear between the two ends. */
+    /** The faint caption colour of the call screens (white 85 %); phone's `OnAuraSecondary` is this value. */
+    val SecondaryInk: Color = Color.White.copy(alpha = 0.85f)
+
+    /** Share of the photo height measured for the top caption band, and for the bottom one. */
+    const val TopBand = 0.40f
+    const val BottomBand = 0.35f
+
+    /** Opacity of the black scrim at [fraction] (0 = top, 1 = bottom) of the screen: linear between the two floors. */
     fun alphaAt(fraction: Float): Float = TopAlpha + (BottomAlpha - TopAlpha) * fraction.coerceIn(0f, 1f)
+
+    /** The top scrim alpha for a band of mean luminance [luminance] (null: not measured yet, the floor). */
+    fun topAlphaFor(luminance: Double?): Float = alphaFor(luminance, TopAlpha)
+
+    /** The bottom scrim alpha for a band of mean luminance [luminance] (null: not measured yet, the floor). */
+    fun bottomAlphaFor(luminance: Double?): Float = alphaFor(luminance, BottomAlpha)
+
+    private fun alphaFor(
+        luminance: Double?,
+        floor: Float,
+    ): Float = if (luminance == null) floor else scrimAlphaFor(luminance, SecondaryInk, 4.5, floor)
+
+    /**
+     * The vertical gradient stops: [top] held behind the top captions, [bottom] behind the buttons, and the plain
+     * linear floor between them, so the photo shows through the middle. Every join is eased (smoothstep), so no band
+     * edge is visible even when the two ends are far apart.
+     */
+    fun stops(
+        top: Float,
+        bottom: Float,
+    ): List<Pair<Float, Float>> {
+        val holdTop = 0.18f
+        val holdBottom = 0.82f
+        val easeTop = 0.55f
+        val easeBottom = 0.55f
+
+        fun smooth(t: Float) = t * t * (3f - 2f * t)
+        return List(STOPS) { i ->
+            val x = i / (STOPS - 1f)
+            val base = alphaAt(x)
+            val fromTop = 1f - smooth(((x - holdTop) / (easeTop - holdTop)).coerceIn(0f, 1f))
+            val fromBottom = smooth(((x - easeBottom) / (holdBottom - easeBottom)).coerceIn(0f, 1f))
+            val a =
+                maxOf(
+                    base + (top - base) * fromTop,
+                    base + (bottom - base) * fromBottom,
+                )
+            x to a.coerceIn(0f, 1f)
+        }
+    }
+
+    private const val STOPS = 12
 }
 
 /** Blur of the photo; the glass discs then blur the already soft photo again. */
@@ -66,6 +125,13 @@ private const val PreBlurDivisor = 16
 @Stable
 class CallPhotoState {
     val alpha = Animatable(0f)
+
+    /** Mean luminance of the photo behind the top / bottom captions; null until the photo has been measured. */
+    var topLuminance: Double? by mutableStateOf(null)
+        internal set
+    var bottomLuminance: Double? by mutableStateOf(null)
+        internal set
+
     val avatarGone: State<Boolean> = derivedStateOf { alpha.value >= 0.999f }
 }
 
@@ -74,7 +140,7 @@ fun rememberCallPhotoState(): CallPhotoState = remember { CallPhotoState() }
 
 /**
  * The photo of the caller as the call background: full-bleed centre-crop, decoded by Coil at the screen's own pixel size,
- * blurred 36 dp, with a black scrim (25 % at the top, 55 % at the bottom), fading in over 300 ms once it has loaded.
+ * blurred 36 dp, with a black scrim ([CallScrim]: 25 % at the top and 55 % at the bottom, more over a bright band of the photo), fading in over 300 ms once it has loaded.
  *
  * The screen never waits for it: [CallAura] is drawn from the first frame and this draws nothing until the request
  * succeeds (a failed or missing photo leaves the aura). Blur is a `RenderEffect` where the platform has one; below that
@@ -122,8 +188,21 @@ fun CallBackdrop(
     LaunchedEffect(loaded, reduce) {
         if (loaded) state.alpha.animateTo(1f, tween(if (reduce) 0 else FadeMillis)) else state.alpha.snapTo(0f)
     }
+    val loadedImage = (painter.state.collectAsState().value as? AsyncImagePainter.State.Success)?.result?.image
+    LaunchedEffect(loadedImage) {
+        if (loadedImage == null) {
+            state.topLuminance = null
+            state.bottomLuminance = null
+        } else {
+            val grid = withContext(Dispatchers.Default) { lumaGridOf(loadedImage) }
+            state.topLuminance = grid?.let { ViewerScrim.bandLuminance(it, 0f, CallScrim.TopBand) }
+            state.bottomLuminance = grid?.let { ViewerScrim.bandLuminance(it, 1f - CallScrim.BottomBand, 1f) }
+        }
+    }
     if (!loaded) return
     val blurPx = with(density) { CallPhotoBlur.toPx() }
+    val top = CallScrim.topAlphaFor(state.topLuminance)
+    val bottom = CallScrim.bottomAlphaFor(state.bottomLuminance)
     Box(modifier.fillMaxSize().graphicsLayer { alpha = state.alpha.value }) {
         Image(
             painter = painter,
@@ -147,11 +226,14 @@ fun CallBackdrop(
                 .fillMaxSize()
                 .testTag(CallBackdropTags.Scrim)
                 .drawWithCache {
+                    val stops = CallScrim.stops(top, bottom)
                     val brush =
                         Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = CallScrim.TopAlpha),
-                            0.5f to Color.Black.copy(alpha = CallScrim.alphaAt(0.5f)),
-                            1f to Color.Black.copy(alpha = CallScrim.BottomAlpha),
+                            colorStops =
+                                Array(stops.size) { i ->
+                                    stops[i].first to
+                                        Color.Black.copy(alpha = stops[i].second)
+                                },
                         )
                     onDrawBehind { drawRect(brush) }
                 },

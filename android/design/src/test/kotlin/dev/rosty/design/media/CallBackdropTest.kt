@@ -10,6 +10,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.IntSize
+import dev.rosty.design.theme.contrastRatio
+import dev.rosty.design.theme.relativeLuminance
 import dev.rosty.testing.ShotTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -115,5 +117,58 @@ class CallBackdropTest : ShotTest() {
     @Test fun theScrimRunsFromAQuarterToAboutAHalf() {
         assertEquals(0.25f, CallScrim.alphaAt(0f), 0f)
         assertEquals(0.55f, CallScrim.alphaAt(1f), 0f)
+    }
+
+    // ---- The scrim follows the photo -----------------------------------------------------------------------------
+
+    /** What the faint caption really reads at over a photo of grey [photo] under a black scrim of [alpha] (gamma blend). */
+    private fun secondaryCaptionRatio(
+        photo: Float,
+        alpha: Float,
+    ): Double {
+        val behind = Color(photo * (1f - alpha), photo * (1f - alpha), photo * (1f - alpha))
+        return contrastRatio(CallScrim.SecondaryInk, behind)
+    }
+
+    @Test fun aWhitePhotoGetsAScrimThatLetsTheSecondaryCaptionRead() {
+        val white = relativeLuminance(Color.White)
+        val top = CallScrim.topAlphaFor(white)
+        val bottom = CallScrim.bottomAlphaFor(white)
+        assertTrue("top $top", top > CallScrim.TopAlpha)
+        assertTrue("bottom $bottom", bottom >= CallScrim.BottomAlpha)
+        assertTrue("ratio ${secondaryCaptionRatio(1f, top)}", secondaryCaptionRatio(1f, top) >= 4.5)
+        assertTrue(top <= 0.8f)
+    }
+
+    @Test fun aDarkPhotoKeepsTheFloors() {
+        val dark = relativeLuminance(Color(0.1f, 0.1f, 0.1f))
+        assertEquals(0.25f, CallScrim.topAlphaFor(dark), 0f)
+        assertEquals(0.55f, CallScrim.bottomAlphaFor(dark), 0f)
+        assertEquals(0.25f, CallScrim.topAlphaFor(null), 0f)
+        assertEquals(0.55f, CallScrim.bottomAlphaFor(null), 0f)
+    }
+
+    @Test fun aMidGreyPhotoIsInBetween() {
+        val white = relativeLuminance(Color.White)
+        val mid = relativeLuminance(Color(0.75f, 0.75f, 0.75f))
+        val midTop = CallScrim.topAlphaFor(mid)
+        assertTrue("mid $midTop", midTop in CallScrim.TopAlpha..CallScrim.topAlphaFor(white))
+        assertTrue(secondaryCaptionRatio(0.75f, midTop) >= 4.5)
+    }
+
+    @Test fun theGradientHasNoEdgeAndKeepsTheMiddleOnTheFloor() {
+        val stops = CallScrim.stops(0.8f, 0.8f)
+        assertEquals(0.8f, stops.first().second, 0.001f)
+        assertEquals(0.8f, stops.last().second, 0.001f)
+        val maxStep = stops.zipWithNext { a, b -> kotlin.math.abs(b.second - a.second) }.max()
+        assertTrue("largest step $maxStep", maxStep < 0.2f)
+        val middle = stops.minBy { kotlin.math.abs(it.first - 0.5f) }
+        assertTrue("middle ${middle.second}", middle.second < 0.55f)
+    }
+
+    @Test fun theMeasuredBandsReachTheState() {
+        show("content://contacts/7/photo")
+        advance(900)
+        assertTrue(state.topLuminance != null && state.bottomLuminance != null)
     }
 }

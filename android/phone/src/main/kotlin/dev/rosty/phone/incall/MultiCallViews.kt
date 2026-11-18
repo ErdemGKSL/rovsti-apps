@@ -41,6 +41,8 @@ import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
 import dev.rosty.phone.InCallMetrics
+import dev.rosty.phone.call.OnAura
+import dev.rosty.phone.call.OnAuraSecondary
 import kotlin.math.roundToInt
 
 private val CardShape = ContinuousRoundedRectangle(percent = 50)

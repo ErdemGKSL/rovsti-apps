@@ -128,6 +128,8 @@ pub(super) fn full(store: &mut Store) {
             &Action::SendText {
                 text: "unsent".into(),
                 quoted_id: None,
+                mentions: Vec::new(),
+                link_preview: None,
             },
             7_300,
         )
@@ -561,6 +563,8 @@ fn events_of_the_old_account_that_arrive_after_a_status_wipe_are_swept_at_the_an
             &Action::SendText {
                 text: "to the new account".into(),
                 quoted_id: None,
+                mentions: Vec::new(),
+                link_preview: None,
             },
             9_100,
         )

@@ -130,7 +130,10 @@ fn a_version_five_file_gains_the_marks_and_the_gallery_index_and_keeps_its_rows(
         .unwrap();
     }
     let mut store = Store::open(&dir, "inst1").unwrap();
-    assert_eq!(store.opened().unwrap().schema_version, 6);
+    assert_eq!(
+        store.opened().unwrap().schema_version,
+        super::schema::SCHEMA_VERSION
+    );
     for column in ["viewed_ms", "played_ms"] {
         assert!(columns(&store.conn, "messages").contains(&column.to_owned()));
     }

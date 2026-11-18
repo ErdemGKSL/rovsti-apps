@@ -83,6 +83,8 @@ fn send(text: &str) -> Action {
     Action::SendText {
         text: text.into(),
         quoted_id: None,
+        mentions: Vec::new(),
+        link_preview: None,
     }
 }
 
@@ -1893,6 +1895,7 @@ fn a_new_file_gets_the_whole_schema() {
             "merge_log",
             "messages",
             "outbox",
+            "pending_meta",
             "person",
             "sync_state"
         ]

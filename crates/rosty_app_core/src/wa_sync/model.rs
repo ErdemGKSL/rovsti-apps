@@ -1,9 +1,10 @@
 //! What the store answers: chat rows, message rows and the results of its writes.
 
+use rosty_core::wa_actions::MentionSpan;
 use rosty_core::wa_identity::Rejected;
 use rosty_wa_proto::{
-    DeliveryStatus, EditRecord, Location, MediaKind, MediaMeta, MessageBody, Quoted, Reaction,
-    SharedContact, Unavailable,
+    DeliveryStatus, EditRecord, LinkPreview, Location, MediaKind, MediaMeta, MessageBody, Quoted,
+    Reaction, SharedContact, SystemNote, Unavailable,
 };
 use serde::{Deserialize, Serialize};
 
@@ -256,6 +257,29 @@ pub struct MessageRow {
     /// A received voice note whose played receipt was queued ([`super::Store::mark_played`]).
     #[serde(skip_serializing_if = "is_false")]
     pub played: bool,
+    /// Until when (unix ms) my sent message can be edited (`rosty_core::wa_actions::editable_until`); `None`:
+    /// never. Compare with the clock when the menu opens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editable_until_ms: Option<i64>,
+    /// How often it was forwarded before it reached this chat.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarding_score: Option<u32>,
+    /// Show "Forwarded many times" instead of "Forwarded".
+    #[serde(skip_serializing_if = "is_false")]
+    pub forwarded_many: bool,
+    /// Where the text names the people in `mentions` (UTF-16 ranges of each `@<token>`), resolved through every
+    /// id the identity layer knows for them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub mention_spans: Vec<MentionSpan>,
+    /// The card of the link in the text; its picture is the message's thumbnail (`has_thumbnail`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_preview: Option<LinkPreview>,
+    /// A line of the conversation (the disappearing timer changed), not a message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<SystemNote>,
+    /// When the message disappears (unix ms).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
 }
 
 /// One row of the chat list.
@@ -281,6 +305,9 @@ pub struct ChatRow {
     pub marked_unread: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture_id: Option<String>,
+    /// The chat's disappearing timer in seconds; `None` when off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ephemeral_s: Option<u32>,
     /// The time of the newest row (0 for an empty chat); the list is sorted by it, newest first.
     pub last_ms: i64,
     /// The newest row: a stored message or a send waiting in the outbox.
@@ -288,6 +315,20 @@ pub struct ChatRow {
     pub last: Option<MessageRow>,
     /// Sends of this chat waiting in the outbox.
     pub waiting: u32,
+}
+
+/// What [`super::Store::expire`] removed.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Expired {
+    /// Messages deleted.
+    pub removed: u32,
+    /// Their media files: delete them.
+    pub files: Vec<String>,
+    /// The chats that lost messages.
+    pub chats: Vec<String>,
+    /// When the next stored message disappears; `None`: none will.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_ms: Option<i64>,
 }
 
 /// Where a thread page ended: pass it back as `before` for the next (older) page.

@@ -29,6 +29,7 @@ import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
+import dev.rosty.core.model.wa.WaSyncHistorySaved
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncMarkPlayedRequest
@@ -122,6 +123,13 @@ interface WaSyncOps {
     /** Writes the identity map and its cursor into the encrypted vault cache (`locked` without an open vault). */
     suspend fun cacheSave(req: WaSyncHandleRequest): Outcome<WaSyncCacheSaved> =
         Outcome.Err(RustError.Unsupported("wa_sync.cache_save"))
+
+    /**
+     * Writes the recent chats and messages into the vault's history file, sealed under DK (round 7a), so the next
+     * unlock shows them at once (`locked` without an open vault).
+     */
+    suspend fun historySave(req: WaSyncHandleRequest): Outcome<WaSyncHistorySaved> =
+        Outcome.Err(RustError.Unsupported("wa_sync.history_save"))
 
     /** The chat list, newest first. */
     suspend fun chats(req: WaSyncChatsRequest): Outcome<WaSyncChatsAnswer>
@@ -232,6 +240,7 @@ interface WaSyncOps {
                 "wa_sync.open_page",
                 "wa_sync.focus",
                 "wa_sync.cache_save",
+                "wa_sync.history_save",
                 "wa_sync.close",
                 "wa_sync.plan",
                 "wa_sync.apply_events",
@@ -310,6 +319,9 @@ class NativeWaSyncOps(
 
     override suspend fun cacheSave(req: WaSyncHandleRequest) =
         core.call("wa_sync.cache_save", req, WaSyncHandleRequest.serializer(), WaSyncCacheSaved.serializer())
+
+    override suspend fun historySave(req: WaSyncHandleRequest) =
+        core.call("wa_sync.history_save", req, WaSyncHandleRequest.serializer(), WaSyncHistorySaved.serializer())
 
     override suspend fun chats(req: WaSyncChatsRequest) =
         core.call("wa_sync.chats", req, WaSyncChatsRequest.serializer(), WaSyncChatsAnswer.serializer())

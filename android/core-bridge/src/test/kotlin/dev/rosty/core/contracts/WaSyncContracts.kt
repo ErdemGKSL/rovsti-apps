@@ -26,6 +26,7 @@ import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
 import dev.rosty.core.model.wa.WaSyncHistoryAnswer
+import dev.rosty.core.model.wa.WaSyncHistorySaved
 import dev.rosty.core.model.wa.WaSyncIdentityApplied
 import dev.rosty.core.model.wa.WaSyncItemAnswer
 import dev.rosty.core.model.wa.WaSyncMarkPlayedRequest
@@ -94,12 +95,13 @@ object WaSyncContracts : ContractModels {
         buildMap {
             op<WaSyncOpenRequest, WaSyncOpened>(
                 "wa_sync.open",
-                ok = listOf("lazy", "vault_cache"),
+                ok = listOf("lazy", "vault_cache", "vault_history"),
                 err = listOf("no_instance"),
             )
             op<WaSyncOlderRequest, WaSyncOlderAnswer>("wa_sync.open_page", ok = listOf("paged", "eager"))
             op<WaSyncFocusRequest, HandleAnswer>("wa_sync.focus", ok = listOf("none"))
             op<WaSyncHandleRequest, WaSyncCacheSaved>("wa_sync.cache_save", err = listOf("locked"))
+            op<WaSyncHandleRequest, WaSyncHistorySaved>("wa_sync.history_save", err = listOf("locked"))
             op<WaSyncHandleRequest, WaSyncClosed>("wa_sync.close", err = listOf("not_open"))
             op<WaSyncPlanRequest, WaSyncPlan>("wa_sync.plan", ok = listOf("gap"))
             op<WaSyncEventsRequest, WaSyncApplied>(

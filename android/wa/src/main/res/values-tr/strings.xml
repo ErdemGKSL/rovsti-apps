@@ -30,8 +30,8 @@
     <!-- The WhatsApp vault (plans/wa-vault.md 4, 5, 13.2). -->
     <string name="vault_setup_title">WhatsApp’ı Koru</string>
     <string name="vault_change_title">Yeni Parola</string>
-    <string name="vault_setup_intro">WhatsApp bağlantınız bu telefondaki bir kasada tutulur. Bu parola, yeniden başlatmadan sonra ya da parmak iziniz veya yüzünüz işe yaramadığında kasayı açar.</string>
-    <string name="vault_change_intro">Eski parolanız artık çalışmaz. Bir sonraki kilit açışta bunu bir kez yazın; sonra parmak iziniz veya yüzünüz yine çalışır.</string>
+    <string name="vault_setup_intro">WhatsApp bağlantınız bu telefondaki bir kasada tutulur. Kullandığınız sürece açık kalır. Bu parola yeni bir telefonda, 90 gün kullanılmadığında ya da ekran kilidi kaldırılırsa gerekir.</string>
+    <string name="vault_change_intro">Eski parolanız artık çalışmaz. WhatsApp açık kalır; parola bir dahaki sefer gerektiğinde bunu yazın.</string>
     <string name="vault_setup_save_note">Bir yere yazın ya da bir parola yöneticisinde saklayın. Rosty onu yalnızca bir kez gösterir ve kurtaramaz.</string>
     <string name="vault_passphrase_label">Parola</string>
     <string name="vault_copy">Parolayı Kopyala</string>
@@ -53,9 +53,7 @@
     <string name="vault_passphrase_hint">XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX</string>
     <string name="vault_passphrase_note">Her denemeyi ekran kilidiniz veya parmak iziniz onaylar.</string>
     <string name="vault_reason_none">Kilidi açmak için parolanızı yazın.</string>
-    <string name="vault_reason_rebooted">Telefonunuz yeniden başladı, bu yüzden parola bir kez gerekiyor.</string>
-    <string name="vault_reason_idle">WhatsApp üç gündür açılmadı, bu yüzden parola bir kez gerekiyor.</string>
-    <string name="vault_reason_expired">Parola en son 30 gün önce yazıldı, bu yüzden bir kez gerekiyor.</string>
+    <string name="vault_reason_idle">WhatsApp 90 gündür kullanılmadı, bu yüzden parola bir kez gerekiyor.</string>
     <string name="vault_reason_clock">Telefonun saati geri alındı, bu yüzden parola bir kez gerekiyor.</string>
     <string name="vault_reason_biometric">Parmak izleriniz veya yüzünüz değişti, bu yüzden parola bir kez gerekiyor.</string>
     <string name="vault_reason_attempts">Çok fazla başarısız deneme oldu, bu yüzden parola bir kez gerekiyor.</string>
@@ -85,10 +83,6 @@
     <string name="vault_prompt_not_now">Şimdi Değil</string>
     <string name="vault_settings_section">Kasa</string>
     <string name="vault_lock_now">WhatsApp’ı Şimdi Kilitle</string>
-    <string name="vault_auto_lock">Otomatik Kilit</string>
-    <string name="vault_auto_lock_now">Hemen</string>
-    <string name="vault_auto_lock_seconds">%1$d saniye sonra</string>
-    <string name="vault_auto_lock_minutes">%1$d dk sonra</string>
     <string name="vault_change">Parolayı Değiştir</string>
-    <string name="vault_settings_footer">WhatsApp ekran kapandığında da kilitlenir. Kilidi parmak iziniz veya yüzünüz açar; yeniden başlatmadan sonra parola.</string>
+    <string name="vault_settings_footer">WhatsApp kullandığınız sürece, yeniden başlatmadan sonra da telefonun kilidini açtığınızda açık kalır ve 90 gün kullanılmazsa kilitlenir. Şimdi Kilitle tüm Rosty uygulamalarını kilitler; parmak iziniz veya yüzünüz yeniden açar.</string>
 </resources>

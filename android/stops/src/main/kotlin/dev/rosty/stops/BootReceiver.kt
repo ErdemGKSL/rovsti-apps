@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import dev.rosty.core.log.RostyLog
 import dev.rosty.platform.Headless
-import dev.rosty.shell.VaultBoot
 import dev.rosty.shell.shellContainer
 import org.json.JSONObject
 
@@ -29,12 +28,6 @@ class BootReceiver : BroadcastReceiver() {
                 Headless.call(KIND, endRequest(Headless.dataDir(app)))
             } catch (e: RuntimeException) {
                 RostyLog.e("trip", "ending the stale trip after a reboot failed", e)
-            }
-            try {
-                // The WhatsApp vault's daily unlock ends with the reboot (`plans/wa-vault.md` 13.2).
-                VaultBoot.dropDailyUnlock(app)
-            } catch (e: RuntimeException) {
-                RostyLog.e("trip", "dropping the WhatsApp daily unlock failed", e)
             } finally {
                 // Null only when the receiver is called directly (tests), outside a broadcast.
                 pending?.finish()

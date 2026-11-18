@@ -308,28 +308,6 @@ fn daily_blob_round_trips_and_binds_its_stamp() {
 }
 
 #[test]
-fn daily_stamp_rules() {
-    let stamp = DailyStamp {
-        boot_count: 7,
-        unlocked_ms: 1_000_000_000,
-    };
-    let at = stamp.unlocked_ms;
-    assert_eq!(stamp.check(7, at), Ok(()));
-    assert_eq!(stamp.check(7, at + DAILY_MAX_IDLE_MS), Ok(()));
-    assert_eq!(
-        stamp.check(7, at + DAILY_MAX_IDLE_MS + 1),
-        Err(DailyRefusal::Idle)
-    );
-    assert_eq!(stamp.check(8, at), Err(DailyRefusal::Rebooted));
-    assert_eq!(stamp.check(6, at), Err(DailyRefusal::Rebooted));
-    assert_eq!(stamp.check(7, at - DAILY_CLOCK_SKEW_MS), Ok(()));
-    assert_eq!(
-        stamp.check(7, at - DAILY_CLOCK_SKEW_MS - 1),
-        Err(DailyRefusal::ClockBack)
-    );
-}
-
-#[test]
 fn kdf_bounds() {
     for bad in [
         Kdf::Argon2id {
@@ -412,131 +390,132 @@ fn the_approved_parameters_derive() {
     assert_eq!(unwrap_key(&blob, &pass()), Ok(key()));
 }
 
-// ---- round 7a: the idle clock and the link wrap
+// ---- round 7c: the use clock and the stay wrap; round 7a: the link wrap
 
-const PASS_AT: i64 = 1_000_000_000;
+const MADE_AT: i64 = 1_000_000_000;
 const HOUR: i64 = 60 * 60 * 1000;
+const DAY: i64 = 24 * HOUR;
 
-fn epoch() -> DailyStamp {
-    DailyStamp {
-        boot_count: 7,
-        unlocked_ms: PASS_AT,
+#[test]
+fn the_vault_locks_after_90_days_without_a_use() {
+    assert_eq!(MAX_IDLE_MS, 90 * DAY);
+    let fresh = UseClock::new(MADE_AT, None);
+    assert_eq!(fresh.check(MADE_AT), Ok(()));
+    assert_eq!(fresh.check(MADE_AT + MAX_IDLE_MS), Ok(()));
+    assert_eq!(
+        fresh.check(MADE_AT + MAX_IDLE_MS + 1),
+        Err(IdleRefusal::Idle)
+    );
+}
+
+#[test]
+fn any_use_moves_the_90_days_on_with_no_cap() {
+    // A use every 80 days keeps the vault open for years: no 72 h, no 30 days, no other cap.
+    let mut clock = UseClock::new(MADE_AT, None);
+    let mut at = MADE_AT;
+    for _ in 0..20 {
+        at += 80 * DAY;
+        assert_eq!(clock.check(at), Ok(()), "{at}");
+        clock = clock.used_at(at);
     }
-}
-
-fn seen_at(last: i64) -> Seen {
-    Seen {
-        epoch: epoch(),
-        last_unlock_ms: last,
-    }
+    assert!(at - MADE_AT > 4 * 365 * DAY);
+    // A use never moves the clock back.
+    assert_eq!(clock.used_at(MADE_AT).last_use_ms, at);
 }
 
 #[test]
-fn a_daily_unlock_resets_the_idle_clock() {
-    let fresh = DailyClock::new(epoch(), None);
+fn a_clock_set_back_before_the_last_use_is_refused() {
+    let used = UseClock::new(MADE_AT, Some(MADE_AT + 50 * DAY));
+    assert_eq!(used.check(MADE_AT + 50 * DAY - CLOCK_SKEW_MS), Ok(()));
     assert_eq!(
-        fresh.check(7, PASS_AT + DAILY_MAX_IDLE_MS + 1),
-        Err(DailyRefusal::Idle)
-    );
-    // An unlock 70 h after the passphrase moves the 72 h on from there.
-    let used = DailyClock::new(epoch(), Some(seen_at(PASS_AT + 70 * HOUR)));
-    assert_eq!(used.check(7, PASS_AT + 100 * HOUR), Ok(()));
-    assert_eq!(
-        used.check(7, PASS_AT + 70 * HOUR + DAILY_MAX_IDLE_MS),
-        Ok(())
-    );
-    assert_eq!(
-        used.check(7, PASS_AT + 70 * HOUR + DAILY_MAX_IDLE_MS + 1),
-        Err(DailyRefusal::Idle)
-    );
-    // The record of the next unlock never goes back in time.
-    assert_eq!(
-        used.seen_at(PASS_AT + 80 * HOUR),
-        seen_at(PASS_AT + 80 * HOUR)
-    );
-    assert_eq!(used.seen_at(PASS_AT), seen_at(PASS_AT + 70 * HOUR));
-}
-
-#[test]
-fn the_passphrase_is_asked_after_30_days_however_often_the_biometric_unlocks() {
-    let every_day = DailyClock::new(epoch(), Some(seen_at(PASS_AT + DAILY_MAX_AGE_MS - HOUR)));
-    assert_eq!(every_day.check(7, PASS_AT + DAILY_MAX_AGE_MS), Ok(()));
-    assert_eq!(
-        every_day.check(7, PASS_AT + DAILY_MAX_AGE_MS + 1),
-        Err(DailyRefusal::Expired)
-    );
-    assert_eq!(DAILY_MAX_AGE_MS, 30 * 24 * HOUR);
-}
-
-#[test]
-fn a_reboot_and_a_clock_set_back_still_end_the_daily_unlock() {
-    let used = DailyClock::new(epoch(), Some(seen_at(PASS_AT + 50 * HOUR)));
-    assert_eq!(
-        used.check(8, PASS_AT + 51 * HOUR),
-        Err(DailyRefusal::Rebooted)
-    );
-    // Behind the last unlock, not only behind the passphrase.
-    assert_eq!(
-        used.check(7, PASS_AT + 50 * HOUR - DAILY_CLOCK_SKEW_MS - 1),
-        Err(DailyRefusal::ClockBack)
-    );
-    assert_eq!(
-        used.check(7, PASS_AT + 50 * HOUR - DAILY_CLOCK_SKEW_MS),
-        Ok(())
+        used.check(MADE_AT + 50 * DAY - CLOCK_SKEW_MS - 1),
+        Err(IdleRefusal::ClockBack)
     );
 }
 
 #[test]
-fn a_seen_record_of_another_epoch_or_from_the_past_changes_nothing() {
-    let other_boot = Seen {
-        epoch: DailyStamp {
-            boot_count: 6,
-            unlocked_ms: PASS_AT,
-        },
-        last_unlock_ms: PASS_AT + 70 * HOUR,
-    };
-    let other_passphrase = Seen {
-        epoch: DailyStamp {
-            boot_count: 7,
-            unlocked_ms: PASS_AT - HOUR,
-        },
-        last_unlock_ms: PASS_AT + 70 * HOUR,
-    };
-    for seen in [other_boot, other_passphrase, seen_at(PASS_AT - HOUR)] {
-        assert_eq!(
-            DailyClock::new(epoch(), Some(seen)).last_unlock_ms,
-            PASS_AT,
-            "{seen:?}"
-        );
-    }
-    // The plain stamp rule is the clock with no later unlock.
+fn a_use_record_from_before_the_stamp_changes_nothing() {
     assert_eq!(
-        epoch().check(7, PASS_AT + DAILY_MAX_IDLE_MS + 1),
-        Err(DailyRefusal::Idle)
+        UseClock::new(MADE_AT, Some(MADE_AT - HOUR)).last_use_ms,
+        MADE_AT
     );
+    assert_eq!(UseClock::new(MADE_AT, None).last_use_ms, MADE_AT);
+    assert_eq!(
+        UseClock::latest([
+            UseClock::new(MADE_AT, None),
+            UseClock::new(MADE_AT + DAY, None)
+        ]),
+        Some(UseClock::new(MADE_AT + DAY, None))
+    );
+    assert_eq!(UseClock::latest([]), None);
 }
 
 #[test]
-fn the_seen_record_round_trips_under_dk_only() {
-    let seen = seen_at(PASS_AT + 5 * HOUR);
-    let blob = seal_seen(&key(), seen, [3; NONCE_LEN]);
-    assert_eq!(blob.len(), SEEN_BLOB_LEN);
-    assert_eq!(&blob[..5], b"RWVA\x01");
-    assert_eq!(open_seen(&key(), &blob), Ok(seen));
+fn use_writes_are_throttled_to_one_an_hour() {
+    assert!(UseClock::record_due(None, MADE_AT));
+    assert!(!UseClock::record_due(
+        Some(MADE_AT),
+        MADE_AT + 59 * 60 * 1000
+    ));
+    assert!(UseClock::record_due(
+        Some(MADE_AT),
+        MADE_AT + USE_WRITE_INTERVAL_MS
+    ));
+    assert_eq!(USE_WRITE_INTERVAL_MS, HOUR);
+}
+
+#[test]
+fn the_use_record_round_trips_under_dk_only() {
+    let blob = seal_use(&key(), MADE_AT + 5 * HOUR, [3; NONCE_LEN]);
+    assert_eq!(blob.len(), USE_BLOB_LEN);
+    assert_eq!(&blob[..5], b"RWVU\x01");
+    assert_eq!(open_use(&key(), &blob), Ok(MADE_AT + 5 * HOUR));
     let other = DataKey::from_slice(&[1; KEY_LEN]).expect("key");
-    assert_eq!(open_seen(&other, &blob), Err(VaultError::Tampered));
-    // Moving the last unlock forward breaks the tag.
+    assert_eq!(open_use(&other, &blob), Err(VaultError::Tampered));
+    // Moving the time forward breaks the tag.
     let mut moved = blob.clone();
-    moved[28] ^= 1;
-    assert_eq!(open_seen(&key(), &moved), Err(VaultError::Tampered));
+    moved[12] ^= 1;
+    assert_eq!(open_use(&key(), &moved), Err(VaultError::Tampered));
     assert_eq!(
-        open_seen(&key(), &blob[..SEEN_BLOB_LEN - 1]),
+        open_use(&key(), &blob[..USE_BLOB_LEN - 1]),
         Err(VaultError::Corrupt)
     );
-    // A daily blob is not a seen record.
+    // A daily blob is not a use record.
     let daily = DailyKey::from_slice(&[9; KEY_LEN]).expect("key");
-    let daily_blob = seal_daily(&daily, &key(), epoch(), [4; NONCE_LEN]);
-    assert_eq!(open_seen(&key(), &daily_blob), Err(VaultError::NotAVault));
+    let stamp = DailyStamp {
+        boot_count: 7,
+        unlocked_ms: MADE_AT,
+    };
+    let daily_blob = seal_daily(&daily, &key(), stamp, [4; NONCE_LEN]);
+    assert_eq!(open_use(&key(), &daily_blob), Err(VaultError::NotAVault));
+}
+
+#[test]
+fn the_stay_wrap_round_trips_and_binds_its_time() {
+    let stay = StayKey::from_slice(&[9; KEY_LEN]).expect("key");
+    let blob = seal_stay(&stay, &key(), MADE_AT, [4; NONCE_LEN]);
+    assert_eq!(blob.len(), STAY_BLOB_LEN);
+    assert_eq!(&blob[..5], b"RWVS\x01");
+    assert_eq!(&blob[5..13], &MADE_AT.to_be_bytes());
+    assert_eq!(open_stay(&stay, &blob), Ok((key(), MADE_AT)));
+    // Moving the creation time forward breaks the tag.
+    let mut moved = blob.clone();
+    moved[12] ^= 1;
+    assert_eq!(open_stay(&stay, &moved), Err(VaultError::Tampered));
+    let other = StayKey::from_slice(&[8; KEY_LEN]).expect("key");
+    assert_eq!(open_stay(&other, &blob), Err(VaultError::Tampered));
+    assert_eq!(
+        open_stay(&stay, &blob[..STAY_BLOB_LEN - 1]),
+        Err(VaultError::Corrupt)
+    );
+    // A daily blob is not a stay wrap, even under the same key bytes.
+    let daily = DailyKey::from_slice(&[9; KEY_LEN]).expect("key");
+    let stamp = DailyStamp {
+        boot_count: 7,
+        unlocked_ms: MADE_AT,
+    };
+    let daily_blob = seal_daily(&daily, &key(), stamp, [4; NONCE_LEN]);
+    assert_eq!(open_stay(&stay, &daily_blob), Err(VaultError::NotAVault));
 }
 
 #[test]

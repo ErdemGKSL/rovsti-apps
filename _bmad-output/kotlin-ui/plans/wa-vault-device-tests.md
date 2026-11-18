@@ -69,23 +69,27 @@ For Messages, Phone, Contacts and Stops each:
 - [ ] Remove the screen lock entirely: each app shows the broken vault page ("Forgot passphrase" path); a reset and a
       new link work.
 
-## 4. Reboot
+## 4. Reboot (round 7c; supersedes the reboot checks of rounds 4 to 7a)
 
-- [ ] Reboot with all four apps set up. Without opening an app: `wa-vault-daily.json` is gone from each (the boot
-      receivers of Messages, Phone and Stops; Contacts at its next refresh).
-- [ ] Each app asks for the passphrase after the reboot ("The phone restarted"), then quick unlock works again.
-- [ ] A WhatsApp message pushed before the first unlock after the reboot shows the content-free notice (section 6).
+- [ ] Reboot with all four apps set up and unlocked. Before unlocking the phone (Direct Boot): nothing opens; a
+      WhatsApp push shows the locked notice (sealed preview or content-free, section 6, 8e).
+- [ ] Unlock the phone, open each app: WhatsApp is open with no prompt and no passphrase (stay wrap). Each app's
+      `wa-vault-stay.json` and `wa-vault-daily.json` are still there after the reboot.
+- [ ] An app that had no stay wrap before the reboot (vault set up before round 7c and not unlocked since the update):
+      one biometric prompt (or a sibling hand-over), then it holds its own stay wrap.
 
-## 5. Lock lifecycle
+## 5. Lock lifecycle (round 7c; supersedes the screen-off and background-delay checks)
 
-- [ ] Screen off locks at once in every app (WhatsApp pages show the unlock page when the screen comes back).
-- [ ] Background delay: set 30 s, leave the app 20 s, come back: still open; leave it 40 s: locked. Repeat with
-      "At once" and 5 min. A cached (frozen) process locks when it comes back after the delay.
-- [ ] "Lock WhatsApp now" in the WhatsApp settings locks and takes away every notification that shows WhatsApp text.
-- [ ] The system prompt itself (biometric, screen lock) does not start the background timer.
+- [ ] Screen off and on: WhatsApp stays open in every app. Leave an app in the background for an hour: still open.
+- [ ] The WhatsApp settings show "Lock WhatsApp Now" and "Change Passphrase" only (no Auto-Lock row); the footer reads
+      the 90-day rule.
+- [ ] "Lock WhatsApp now" locks and takes away every notification that shows WhatsApp text, in all four apps,
+      including one whose process was not running (kill Stops first, lock in Messages, then open Stops: it shows the
+      unlock page with the biometric, not an open vault). `wa-vault-stay.json` is gone from all four.
+- [ ] After "Lock now", the fingerprint opens it again (one prompt) and the next app start is silent again.
 - [ ] After a lock: no request reaches the gateway (gateway log shows no requests from the device until the unlock).
-- [ ] Kill the process while unlocked: the next start is locked; the memfd media files are gone with the process
-      (`ls /proc/<pid>/fd` of the new process shows none).
+- [ ] Kill the process while unlocked: the next start opens with no prompt; the memfd media files are gone with the
+      process (`ls /proc/<pid>/fd` of the new process shows none).
 
 ## 6. Notifications while locked
 
@@ -114,7 +118,7 @@ For Messages, Phone, Contacts and Stops each:
       `dev.rosty.stops.walink`) gets a SecurityException.
 - [ ] Stops takes part since round 7a: Stops without a link takes Messages' link the same way.
 
-## 8a. One prompt for the four apps (round 7a)
+## 8a. One prompt for the four apps (round 7a; the reboot and auto-lock items are superseded by 4, 5 and 8g)
 
 - [ ] All four apps set up, all locked. Unlock Phone with the fingerprint, then open Messages' WhatsApp tab within the
       auto-lock delay: it opens with no prompt. Same for Contacts and Stops. No two prompts ever follow each other.
@@ -132,7 +136,7 @@ For Messages, Phone, Contacts and Stops each:
 - [ ] `wa-vault.json` holds a `link_sealed` field; no file of any app holds the connect key or a message in plaintext
       (grep the data dirs for `rwk_` and a known message text after an unlock by hand-over).
 
-## 8b. Passphrase only every 30 days with daily use (round 7a)
+## 8b. Passphrase only every 30 days with daily use (round 7a; superseded by round 7c, see 8g)
 
 - [ ] Unlock with the fingerprint, set the clock forward 70 h (or wait), unlock again with the fingerprint, then another
       70 h: no passphrase is asked (the 72 h count from the last biometric unlock).
@@ -184,6 +188,10 @@ Needs the gateway with migration v10 deployed and FCM configured. Logs: `adb log
 
 ## 8f. Locked WhatsApp call (Phone, round 7b)
 
+Round 7c: with the vault normally open, Answer goes from the keyguard straight to the call (the stay wrap opens the
+vault with no prompt). Run the items below also after "Lock now" (the vault genuinely locked): then the biometric
+prompt follows the keyguard as described.
+
 - [ ] Vault locked, screen off: a WhatsApp call turns the screen on and shows the locked call page over the lock
       screen with the caller (device contact, else the WhatsApp name, else the number) and Answer and Decline only;
       nothing else of the app is reachable from it.
@@ -197,6 +205,21 @@ Needs the gateway with migration v10 deployed and FCM configured. Logs: `adb log
 - [ ] Decline: the ring stops here; the caller hears it ring until the gateway's timeout (unchanged).
 - [ ] The caller hangs up: the page closes, a missed-call notice names the caller the same way.
 - [ ] HyperOS: "Show on lock screen" and full-screen notifications are allowed for Phone; check the page still opens.
+
+## 8g. Stays unlocked, 90 days without use (round 7c)
+
+- [ ] Each app: `wa-vault-stay.json` exists after the first unlock since the update; its Keystore key
+      `rosty.wa.s.<id>` has no user authentication (no prompt on any start) and is unusable while the phone is locked
+      (open the app over the lock screen through the locked-call page before unlocking: it does not open).
+- [ ] `wa-vault-use.json` is written at an unlock and then at most once an hour of use (watch its mtime).
+- [ ] Set the clock 89 days forward: the vault still opens with no prompt. Set it 91 days after the last use: the
+      passphrase is asked ("WhatsApp wasn't used for 90 days"), the stay and daily files are gone.
+- [ ] Set the clock back more than 5 minutes before the last use: the passphrase is asked ("The phone's clock was set
+      back").
+- [ ] Remove the screen lock: the vault is broken (K_hw is gone) and no stay wrap is used; a reset and a new link
+      work.
+- [ ] The push key survives all of this: sealed previews still open after an unlock, a lock and a restart (the vault
+      no longer lists or deletes `rosty.wa.push.*`).
 
 ## 9. Trip message after a lock (Stops)
 

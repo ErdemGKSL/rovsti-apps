@@ -8,12 +8,14 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
+import android.security.keystore.UserNotAuthenticatedException
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.ProviderException
 import java.util.Base64
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
@@ -24,7 +26,8 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * [VaultKeystore] over the AndroidKeyStore. Keys are generated inside the secure hardware (StrongBox when the phone
  * has it, else the TEE) and never leave it; this class only initializes a [Cipher] with one, has [authenticator] show
- * the prompt that authorizes that one operation, and runs it.
+ * the prompt that authorizes that one operation, and runs it. K_stay (round 7c) needs no prompt: it runs at once, and
+ * the hardware itself refuses it while the phone is locked.
  */
 class AndroidVaultKeystore(
     private val context: Context,
@@ -41,6 +44,7 @@ class AndroidVaultKeystore(
             secureLockScreen = keyguard?.isDeviceSecure == true,
             strongBiometric = strong,
             strongBox = context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE),
+            locked = keyguard?.isDeviceLocked == true,
         )
     }
 
@@ -48,6 +52,7 @@ class AndroidVaultKeystore(
         when (kind) {
             VaultKeyKind.Hardware -> VaultAlias.hardware()
             VaultKeyKind.Daily -> VaultAlias.daily(VaultAlias.dailyAuth(device()))
+            VaultKeyKind.Stay -> VaultAlias.stay()
         }
 
     override suspend fun seal(
@@ -57,6 +62,7 @@ class AndroidVaultKeystore(
         onFailedAttempt: () -> Unit,
     ): VaultCrypto {
         val auth = VaultAlias.authOf(alias)
+        if (auth == VaultKeyAuth.UnlockedDevice) return sealStay(alias, plainB64)
         val plain =
             try {
                 Base64.getDecoder().decode(plainB64.trim())
@@ -97,6 +103,7 @@ class AndroidVaultKeystore(
         prompt: VaultPrompt,
         onFailedAttempt: () -> Unit,
     ): VaultCrypto {
+        if (VaultAlias.authOf(alias) == VaultKeyAuth.UnlockedDevice) return openStay(alias, sealedB64)
         val (iv, sealed) = VaultSealed.unframe(sealedB64) ?: return VaultCrypto.Failed("not a sealed blob")
         try {
             val cipher =
@@ -130,6 +137,77 @@ class AndroidVaultKeystore(
         }
     }
 
+    /**
+     * K_stay seals with no prompt. Only on a phone with a screen lock: without one, "only while the phone is unlocked"
+     * would mean always, so no stay wrap is made ([VaultCrypto.NoCredential]).
+     */
+    private suspend fun sealStay(
+        alias: String,
+        plainB64: String,
+    ): VaultCrypto {
+        if (!device().secureLockScreen) return VaultCrypto.NoCredential
+        val plain =
+            try {
+                Base64.getDecoder().decode(plainB64.trim())
+            } catch (_: IllegalArgumentException) {
+                return VaultCrypto.Failed("not base64")
+            }
+        return try {
+            withContext(Dispatchers.IO) {
+                val key = existing(alias) ?: create(alias, VaultKeyAuth.UnlockedDevice)
+                val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
+                VaultCrypto.Done(VaultSealed.frame(cipher.iv, cipher.doFinal(plain)))
+            }
+        } catch (e: GeneralSecurityException) {
+            stayFailure(e)
+        } catch (e: ProviderException) {
+            stayFailure(e)
+        } finally {
+            plain.fill(0)
+        }
+    }
+
+    /**
+     * K_stay opens with no prompt. A removed screen lock, a key the Keystore dropped or refuses on an unlocked phone is
+     * [VaultCrypto.Invalidated] (the caller deletes the dead wrap and falls back); a locked phone is
+     * [VaultCrypto.DeviceLocked] (the wrap stays).
+     */
+    private suspend fun openStay(
+        alias: String,
+        sealedB64: String,
+    ): VaultCrypto {
+        if (!device().secureLockScreen) return VaultCrypto.Invalidated
+        val (iv, sealed) = VaultSealed.unframe(sealedB64) ?: return VaultCrypto.Failed("not a sealed blob")
+        return try {
+            withContext(Dispatchers.IO) {
+                val key = existing(alias) ?: return@withContext VaultCrypto.Invalidated
+                val cipher =
+                    Cipher.getInstance(TRANSFORMATION).apply {
+                        init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(VaultSealed.TAG_BITS, iv))
+                    }
+                val plain = cipher.doFinal(sealed)
+                try {
+                    VaultCrypto.Done(Base64.getEncoder().encodeToString(plain))
+                } finally {
+                    plain.fill(0)
+                }
+            }
+        } catch (_: AEADBadTagException) {
+            VaultCrypto.Failed("damaged")
+        } catch (e: GeneralSecurityException) {
+            stayFailure(e)
+        } catch (e: ProviderException) {
+            stayFailure(e)
+        }
+    }
+
+    private fun stayFailure(e: Exception): VaultCrypto =
+        when {
+            device().locked -> VaultCrypto.DeviceLocked
+            e is KeyPermanentlyInvalidatedException || e is UserNotAuthenticatedException -> VaultCrypto.Invalidated
+            else -> failed(e)
+        }
+
     override fun delete(alias: String) {
         try {
             keyStore().deleteEntry(alias)
@@ -141,7 +219,8 @@ class AndroidVaultKeystore(
 
     override fun aliases(): List<String> =
         try {
-            keyStore().aliases().toList().filter { it.startsWith(VaultAlias.PREFIX) }
+            // Only the vault's own kinds: the push key (`rosty.wa.push.*`, round 7b) shares the prefix and is not ours.
+            keyStore().aliases().toList().filter { VaultAlias.kindOf(it) != null }
         } catch (_: GeneralSecurityException) {
             emptyList()
         } catch (_: java.io.IOException) {
@@ -182,13 +261,27 @@ class AndroidVaultKeystore(
         /**
          * The key spec of plan 3 and 13.2: per-use authentication and an unlocked phone. Only the biometric daily key is
          * invalidated by a new enrolment (the vault then asks for the passphrase once and seals a new daily key); K_hw
-         * survives it, so an enrolment never makes the vault unreadable.
+         * survives it, so an enrolment never makes the vault unreadable. K_stay (round 7c) needs no authentication, only
+         * an unlocked phone.
          */
         fun spec(
             alias: String,
             auth: VaultKeyAuth,
             strongBox: Boolean,
         ): KeyGenParameterSpec {
+            if (auth == VaultKeyAuth.UnlockedDevice) {
+                return KeyGenParameterSpec
+                    .Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(KEY_BITS)
+                    .setUserAuthenticationRequired(false)
+                    // No authentication, so no enrolment can invalidate it (said explicitly: the default is true).
+                    .setInvalidatedByBiometricEnrollment(false)
+                    .setUnlockedDeviceRequired(true)
+                    .setIsStrongBoxBacked(strongBox)
+                    .build()
+            }
             val types =
                 when (auth) {
                     VaultKeyAuth.BiometricOrCredential -> {
@@ -199,7 +292,7 @@ class AndroidVaultKeystore(
                         KeyProperties.AUTH_BIOMETRIC_STRONG
                     }
 
-                    VaultKeyAuth.Credential -> {
+                    VaultKeyAuth.Credential, VaultKeyAuth.UnlockedDevice -> {
                         KeyProperties.AUTH_DEVICE_CREDENTIAL
                     }
                 }
@@ -219,8 +312,8 @@ class AndroidVaultKeystore(
         }
 
         /**
-         * `Settings.Global.BOOT_COUNT`, the number of boots of the phone (the daily blob carries it, plan 13.2); null
-         * when the setting is not readable.
+         * `Settings.Global.BOOT_COUNT`, the number of boots of the phone (the daily blob's format carries it; not checked
+         * since round 7c); null when the setting is not readable.
          */
         fun bootCount(context: Context): Long? =
             try {

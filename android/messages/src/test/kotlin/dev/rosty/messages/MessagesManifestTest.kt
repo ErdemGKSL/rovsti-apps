@@ -148,4 +148,13 @@ class MessagesManifestTest {
     /** The SEND_MULTIPLE filters of [component], which the GPUI app did not have. */
     private fun sharesOf(component: MergedManifest.Component) =
         component.filters.filter { "android.intent.action.SEND_MULTIPLE" in it.actions }.toSet()
+
+    /** Round 7c: "Lock now" in a sibling reaches this app even when it is not running, and only from a sibling. */
+    @Test fun theLockAllReceiverIsExportedBehindTheSignaturePermission() {
+        val receiver = manifest.component("dev.rosty.wa.share.WaLockAllReceiver")
+        assertEquals("receiver", receiver.kind)
+        assertEquals(true, receiver.exported)
+        assertEquals("dev.rosty.permission.WA_LINK", receiver.attributes["permission"])
+        assertEquals(setOf("dev.rosty.action.WA_LOCK_ALL"), receiver.filters.single().actions)
+    }
 }

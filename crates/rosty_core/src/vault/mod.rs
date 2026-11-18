@@ -4,8 +4,10 @@
 //!
 //! Key hierarchy: KEK_p = KDF(passphrase, salt) ([`Kdf`], Argon2id by default) wraps DK; Kotlin seals that *key
 //! blob* again with the Android Keystore key K_hw, which this module never sees. DK seals the *body* (gateway URL,
-//! instance id, connect key) and the optional *cache* (identity map and pictures, plan 13.5). For the daily
-//! biometric unlock (13.2) a daily key DDK seals DK in a *daily blob* that Kotlin seals with K_daily.
+//! instance id, connect key) and the optional *cache* (identity map and pictures, plan 13.5). For the biometric
+//! unlock (13.2) a daily key DDK seals DK in a *daily blob* that Kotlin seals with K_daily. For the vault that stays
+//! unlocked (round 7c) a stay key SK seals DK in a *stay blob* that Kotlin seals with K_stay (no prompt, usable only
+//! while the phone is unlocked).
 //!
 //! Layouts (integers big-endian, AES-256-GCM, every header is the associated data of its ciphertext):
 //!
@@ -15,11 +17,14 @@
 //! | body  | `RWVB` · version · nonce (12)                                         (17 bytes)  | body JSON + tag  |
 //! | cache | `RWVC` · version · nonce (12)                                         (17 bytes)  | cache + tag      |
 //! | daily | `RWVD` · version · boot count u64 · last unlock ms i64 · nonce (12)   (33 bytes)  | DK + tag (48)    |
-//! | seen  | `RWVA` · version · boot · passphrase ms · last unlock ms · nonce (41 bytes)        | tag (16)         |
 //! | link  | `RWVL` · version · salt (16) · nonce (12)                             (33 bytes)  | DK + tag (48)    |
+//! | stay  | `RWVS` · version · created ms i64 · nonce (12)                        (25 bytes)  | DK + tag (48)    |
+//! | use   | `RWVU` · version · last use ms i64 · nonce (12)                       (25 bytes)  | tag (16)         |
 //!
-//! The daily blob's time is the passphrase unlock; the *seen* record ([`DailyClock`]) moves the idle clock on at each
-//! daily unlock. The *link* wrap ([`wrap_for_link`]) lets a sibling app's hand-over of the connect key open DK.
+//! The daily blob's time is the passphrase unlock (its boot count is no longer checked since round 7c). The *use*
+//! record ([`UseClock`]) holds the last use: 90 days without one and the vault needs its passphrase again. The *link*
+//! wrap ([`wrap_for_link`]) lets a sibling app's hand-over of the connect key open DK; the *stay* wrap
+//! ([`seal_stay`]) reopens it silently. Round 7a's `RWVA` *seen* record is no longer written or read.
 //!
 //! KDF ids: 1 = Argon2id (words: memory KiB, passes, lanes), 2 = PBKDF2-HMAC-SHA256 (words: iterations, 0, 0).
 //! Distinct magics keep a blob of one kind from being accepted as another.
@@ -28,6 +33,7 @@ mod clock;
 mod kdf;
 mod link;
 mod passphrase;
+mod stay;
 #[cfg(test)]
 mod tests;
 
@@ -39,10 +45,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
-pub use clock::{DAILY_MAX_AGE_MS, DailyClock, SEEN_BLOB_LEN, Seen, open_seen, seal_seen};
+pub use clock::{
+    CLOCK_SKEW_MS, IdleRefusal, MAX_IDLE_MS, USE_BLOB_LEN, USE_WRITE_INTERVAL_MS, UseClock,
+    open_use, seal_use,
+};
 pub use kdf::{ARGON2ID, Kdf, PBKDF2, calibrate};
 pub use link::{LINK_BLOB_LEN, unwrap_for_link, wrap_for_link};
 pub use passphrase::{BITS, ENTROPY_BYTES, Passphrase, PassphraseError};
+pub use stay::{STAY_BLOB_LEN, open_stay, seal_stay};
 
 /// The version byte of every blob this build writes and reads.
 pub const VERSION: u8 = 1;
@@ -62,12 +72,6 @@ const DAILY_HEADER_LEN: usize = 4 + 1 + 8 + 8 + NONCE_LEN;
 /// The length of a key blob and of a daily blob's ciphertext part.
 pub const KEY_BLOB_LEN: usize = KEY_HEADER_LEN + KEY_LEN + TAG_LEN;
 pub const DAILY_BLOB_LEN: usize = DAILY_HEADER_LEN + KEY_LEN + TAG_LEN;
-
-/// The daily unlock lapses after this long without an unlock (plan 13.2; idle time since round 7a, see
-/// [`DailyClock`]).
-pub const DAILY_MAX_IDLE_MS: i64 = 72 * 60 * 60 * 1000;
-/// A clock this far behind the last unlock is a clock set back, not drift.
-pub const DAILY_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 
 /// Cryptographically random bytes, supplied by the caller (`getrandom` in the FFI, a counter in tests).
 pub trait Entropy {
@@ -149,6 +153,11 @@ secret_key!(
     /// DDK: seals DK for the daily unlock. Stored next to the K_daily-sealed blob, which is useless without it.
     DailyKey
 );
+secret_key!(
+    /// SK: seals DK for the vault that stays unlocked (round 7c). Stored next to the K_stay-sealed blob, which is
+    /// useless without it.
+    StayKey
+);
 
 /// What the vault holds (plan 3.5). The connect key is zeroized on drop and hidden from `Debug`.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,34 +198,12 @@ impl fmt::Debug for VaultBody {
     }
 }
 
-/// When the daily blob was sealed: its boot count and the time of the unlock.
+/// When the daily blob was sealed: its boot count and the time of the unlock. Since round 7c only the time counts (as
+/// the start of the use clock); the boot count stays in the format and is ignored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DailyStamp {
     pub boot_count: u64,
     pub unlocked_ms: i64,
-}
-
-/// Why a daily blob is no longer honoured; the passphrase is needed again (plan 13.2).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Error)]
-#[serde(rename_all = "snake_case")]
-pub enum DailyRefusal {
-    #[error("the phone restarted since the last unlock")]
-    Rebooted,
-    #[error("72 hours passed without an unlock")]
-    Idle,
-    /// [`DAILY_MAX_AGE_MS`] since the passphrase, however often the biometric unlocked.
-    #[error("30 days passed since the passphrase")]
-    Expired,
-    #[error("the clock is behind the last unlock")]
-    ClockBack,
-}
-
-impl DailyStamp {
-    /// Whether a blob sealed at `self` may unlock now, on boot `boot_count`, when no later unlock is known (the
-    /// plain rules of [`DailyClock`]).
-    pub fn check(self, boot_count: u64, now_ms: i64) -> Result<(), DailyRefusal> {
-        DailyClock::new(self, None).check(boot_count, now_ms)
-    }
 }
 
 /// A new or re-keyed vault: what Kotlin shows (the passphrase), seals with K_hw (the key blob) and what is stored
@@ -417,7 +404,7 @@ pub fn seal_daily(
     seal(&daily.cipher(), header, &nonce, key.as_bytes())
 }
 
-/// Opens a daily blob: DK and the stamp it was sealed with. The caller then applies [`DailyStamp::check`].
+/// Opens a daily blob: DK and the stamp it was sealed with. The caller then applies the use clock ([`UseClock`]).
 pub fn open_daily(daily: &DailyKey, blob: &[u8]) -> Result<(DataKey, DailyStamp), VaultError> {
     check_frame(blob, MAGIC_DAILY, DAILY_HEADER_LEN)?;
     if blob.len() != DAILY_BLOB_LEN {

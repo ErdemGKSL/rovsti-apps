@@ -3,23 +3,31 @@ package dev.rosty.wa.share
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
+import dev.rosty.platform.vault.VaultAlias
+import dev.rosty.platform.vault.VaultKeyKind
+import dev.rosty.platform.vault.VaultKeystore
+import java.io.File
 
 /**
  * "Lock now" in one Rosty app locks WhatsApp in all of them (round 7a). Since a sibling whose vault is unlocked opens
- * this app's vault with no prompt ([WaLinkShare], `vault.unlock_link`), a "Lock now" that left the siblings open would
- * be undone at the next start. So the app that locks tells the others, in memory only:
+ * this app's vault with no prompt ([WaLinkShare], `vault.unlock_link`), and since round 7c every app reopens its own
+ * vault with its stay wrap, a "Lock now" that left the siblings alone would be undone at the next start. So the app
+ * that locks tells the others:
  *
  * - [send] broadcasts [ACTION] to each sibling package, receivable only by apps that hold [WaLinkShare.PERMISSION]
  *   (signature);
- * - [register] listens with a receiver registered at run time, so a cold process is never started for it (it has
- *   nothing unlocked), and only a sender that holds the same signature permission is heard.
+ * - each app declares [WaLockAllReceiver] in its manifest with that permission (round 7c; before, a receiver
+ *   registered at run time heard it, so an app whose process was not running kept what it had). A running app locks
+ *   ([WaLockAllHost]); an app that is not running deletes its stay wrap ([forgetStay]) without starting the core.
  *
- * The intent carries nothing: no key, no instance. The other lock rules (screen off, the background delay) stay per
- * app: screen off already reaches every app, and the delay is each app's own choice.
+ * The intent carries nothing: no key, no instance.
  */
 object WaLockAll {
     const val ACTION = "dev.rosty.action.WA_LOCK_ALL"
+
+    /** `rosty_app_core::wa_vault`'s files, in the data directory given to `Rust.init` (`noBackupFilesDir`). */
+    const val VAULT_FILE = "wa-vault.json"
+    const val STAY_FILE = "wa-vault-stay.json"
 
     /** Tells every sibling of [own] to lock WhatsApp now. */
     fun send(
@@ -35,27 +43,37 @@ object WaLockAll {
         }
     }
 
-    /** Runs [onLock] when a sibling signed like this app asks every Rosty app to lock. */
-    fun register(
+    /**
+     * Ends the silent unlock of the vault in [dataDir] with no core: the stay file (and its temp file) and every K_stay
+     * key go. The next unlock needs the biometric, a sibling or the passphrase, and seals a new stay wrap.
+     */
+    fun forgetStay(
+        dataDir: File,
+        keystore: VaultKeystore,
+    ) {
+        File(dataDir, STAY_FILE).delete()
+        File(dataDir, "$STAY_FILE.tmp").delete()
+        for (alias in keystore.aliases()) if (VaultAlias.kindOf(alias) == VaultKeyKind.Stay) keystore.delete(alias)
+    }
+}
+
+/** The app whose `Application` hears a sibling's "Lock now". `:shell`'s `HasContainer` implements it. */
+interface WaLockAllHost {
+    /** Locks WhatsApp in this app (a running vault) or drops its stay wrap (no core started). Must not block. */
+    fun lockWhatsAppForSibling()
+}
+
+/**
+ * Hears [WaLockAll.ACTION] from a sibling Rosty app. Each app declares it with `android:exported="true"` and
+ * `android:permission="dev.rosty.permission.WA_LINK"` (signature), so only a Rosty app signed like this one can send it;
+ * `:wa`'s library manifest declares nothing (ARCH 7.2).
+ */
+class WaLockAllReceiver : BroadcastReceiver() {
+    override fun onReceive(
         context: Context,
-        onLock: () -> Unit,
-    ): BroadcastReceiver {
-        val receiver =
-            object : BroadcastReceiver() {
-                override fun onReceive(
-                    context: Context,
-                    intent: Intent,
-                ) {
-                    if (intent.action == ACTION) onLock()
-                }
-            }
-        context.applicationContext.registerReceiver(
-            receiver,
-            IntentFilter(ACTION),
-            WaLinkShare.PERMISSION,
-            null,
-            Context.RECEIVER_EXPORTED,
-        )
-        return receiver
+        intent: Intent,
+    ) {
+        if (intent.action != WaLockAll.ACTION) return
+        (context.applicationContext as? WaLockAllHost)?.lockWhatsAppForSibling()
     }
 }

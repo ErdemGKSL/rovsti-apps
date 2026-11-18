@@ -167,6 +167,16 @@
             android:exported="true"
             android:readPermission="dev.rosty.permission.WA_LINK"
             android:writePermission="dev.rosty.permission.WA_LINK" />
+        <!-- Round 7c: a sibling's "Lock now" reaches this app even when it is not running (WaLockAll). Only an app
+             signed like this one holds WA_LINK, so only a sibling can send it; the intent carries nothing. -->
+        <receiver
+            android:name="dev.rosty.wa.share.WaLockAllReceiver"
+            android:exported="true"
+            android:permission="dev.rosty.permission.WA_LINK">
+            <intent-filter>
+                <action android:name="dev.rosty.action.WA_LOCK_ALL" />
+            </intent-filter>
+        </receiver>
 
         <!-- Images handed to the share sheet (cache/share only, read-only). -->
         <provider

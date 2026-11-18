@@ -20,9 +20,10 @@ import org.junit.Test
 import kotlin.random.Random
 
 /**
- * The vault's rules on the JVM (plan 3, 4, 5, 13.2): setup with two groups typed back, the daily (biometric) unlock and
- * when it is dropped (reboot, 72 h idle, 30 days, a boot broadcast, five failed attempts, an enrolment change), the
- * passphrase unlock, a change, a key that is gone, the reset, and the hand-over unlock from a sibling app (round 7a).
+ * The vault's rules on the JVM (plan 3, 4, 5, 13.2, round 7c): setup with two groups typed back, the silent (stay)
+ * unlock after a restart or a reboot, the 90 days without a use, "Lock now", the biometric unlock and when it is
+ * dropped (five failed attempts, an enrolment change), the passphrase unlock, a change, a key that is gone, the reset,
+ * and the hand-over unlock from a sibling app (round 7a).
  */
 class WaVaultTest {
     private val link = VaultLink("https://gw.example", "inst1", "rwk_" + "a".repeat(40))
@@ -38,7 +39,9 @@ class WaVaultTest {
     /** What an unlocked sibling app would hand over (`WaLinkProvider`); null: no sibling is unlocked. */
     private var sibling: StoredLink? = null
     private val prompt = { title: String -> VaultPrompt(title, negative = "no") }
-    private val vault =
+    private var vault = newVault()
+
+    private fun newVault() =
         WaVault(
             ops = ops,
             keystore = keystore,
@@ -64,6 +67,15 @@ class WaVaultTest {
     }
 
     private fun dailyAliases() = keystore.keys.filter { VaultAlias.kindOf(it) == VaultKeyKind.Daily }
+
+    private fun stayAliases() = keystore.keys.filter { VaultAlias.kindOf(it) == VaultKeyKind.Stay }
+
+    /** The process dies (the keys only lived in its memory) and starts again, as after a reboot. */
+    private suspend fun restart() {
+        ops.lockVault()
+        vault = newVault()
+        vault.refresh()
+    }
 
     private fun hardwareAliases() = keystore.keys.filter { VaultAlias.kindOf(it) == VaultKeyKind.Hardware }
 
@@ -94,6 +106,10 @@ class WaVaultTest {
             assertEquals(1, hardwareAliases().size)
             assertEquals(1, dailyAliases().size)
             assertEquals(VaultKeyAuth.Biometric, VaultAlias.authOf(dailyAliases().single()))
+            // Round 7c: the stay wrap is sealed too, with no prompt.
+            assertEquals(1, stayAliases().size)
+            assertEquals(VaultKeyAuth.UnlockedDevice, VaultAlias.authOf(stayAliases().single()))
+            assertEquals(listOf("seal"), keystore.stayOps)
         }
 
     @Test fun aCancelledSetupPromptLeavesNothingBehind() =
@@ -131,37 +147,128 @@ class WaVaultTest {
             assertNotNull(ops.openHandle)
         }
 
-    @Test fun aRebootDropsTheDailyUnlock() =
+    @Test fun aRebootOrARestartReopensTheVaultWithNoPrompt() =
         runTest {
             setUp()
-            vault.lock()
             boot += 1
-            vault.refresh()
-            assertEquals(WaVaultState.Locked(false, PassphraseReason.Rebooted), vault.state.value)
-            assertTrue("the K_daily key is deleted", dailyAliases().isEmpty())
-            assertEquals(VaultOutcome.Refused(VaultProblem.NeedsPassphrase), vault.unlockWithBiometric())
+            restart()
+            assertEquals(WaVaultState.Locked(biometric = true, silent = true), vault.state.value)
+            keystore.prompts.clear()
+            vault.used()
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
+            assertTrue("no prompt", keystore.prompts.isEmpty())
+            assertEquals(listOf("seal", "open"), keystore.stayOps)
+            assertNotNull(ops.openHandle)
+            assertEquals("the wrap stays", 1, stayAliases().size)
         }
 
-    @Test fun seventyTwoHoursDropTheDailyUnlock() =
+    @Test fun ninetyDaysWithoutAUseNeedThePassphrase() =
         runTest {
             setUp()
-            vault.lock()
-            now += 72 * 3_600_000L - 1
+            restart()
+            now += 90 * DAY - 1
             vault.refresh()
-            assertEquals(WaVaultState.Locked(biometric = true), vault.state.value)
+            assertEquals(WaVaultState.Locked(biometric = true, silent = true), vault.state.value)
             now += 2
             vault.refresh()
             assertEquals(WaVaultState.Locked(false, PassphraseReason.Idle), vault.state.value)
-            assertTrue(dailyAliases().isEmpty())
+            assertTrue(stayAliases().isEmpty() && dailyAliases().isEmpty())
+            assertFalse(vault.unlockSilently())
+            assertEquals(VaultOutcome.Refused(VaultProblem.NeedsPassphrase), vault.unlockWithBiometric())
         }
 
-    @Test fun theBootBroadcastDropsTheDailyUnlock() =
+    @Test fun anyUseMovesTheNinetyDaysOnWithNoCap() =
+        runTest {
+            setUp()
+            // A year and more, opened once every 80 days, after a restart each time: never the passphrase.
+            repeat(6) {
+                restart()
+                now += 80 * DAY
+                vault.used()
+                assertEquals(WaVaultState.Unlocked, vault.state.value)
+            }
+            // While open, each activity start is a use too.
+            now += 80 * DAY
+            vault.used()
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
+            restart()
+            now += 80 * DAY
+            vault.used()
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
+        }
+
+    @Test fun ninetyIdleDaysInARunningProcessLockAtTheNextUse() =
+        runTest {
+            setUp()
+            now += 90 * DAY + 1
+            vault.used()
+            assertEquals(1, locks)
+            assertEquals(WaVaultState.Locked(false, PassphraseReason.Idle), vault.state.value)
+            assertNull(ops.openHandle)
+            assertTrue(stayAliases().isEmpty() && dailyAliases().isEmpty())
+        }
+
+    @Test fun lockNowDropsTheStayWrapAndTheBiometricBringsItBack() =
         runTest {
             setUp()
             vault.lock()
-            vault.onBoot()
-            assertEquals(WaVaultState.Locked(false, PassphraseReason.Rebooted), vault.state.value)
-            assertTrue(dailyAliases().isEmpty())
+            assertTrue(stayAliases().isEmpty())
+            assertEquals(WaVaultState.Locked(biometric = true), vault.state.value)
+            restart()
+            assertFalse("no silent unlock after Lock now", vault.unlockSilently())
+            assertEquals(WaVaultState.Locked(biometric = true), vault.state.value)
+            assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
+            assertEquals(1, stayAliases().size)
+            restart()
+            vault.used()
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
+        }
+
+    @Test fun aLockedPhoneKeepsTheStayWrapForLater() =
+        runTest {
+            setUp()
+            restart()
+            keystore.device = keystore.device.copy(locked = true)
+            vault.used()
+            assertEquals("the unlock page, not a wait", WaVaultState.Locked(biometric = true), vault.state.value)
+            assertEquals(1, stayAliases().size)
+            keystore.device = keystore.device.copy(locked = false)
+            vault.used()
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
+        }
+
+    @Test fun aDeadStayKeyFallsBackToTheBiometricAndIsDeleted() =
+        runTest {
+            setUp()
+            restart()
+            keystore.stayNext = VaultCrypto.Invalidated
+            assertFalse(vault.unlockSilently())
+            assertEquals(WaVaultState.Locked(biometric = true), vault.state.value)
+            assertTrue(stayAliases().isEmpty())
+            assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
+            assertEquals("a new stay wrap", 1, stayAliases().size)
+        }
+
+    @Test fun aRemovedScreenLockMakesNoStayWrap() =
+        runTest {
+            setUp()
+            restart()
+            keystore.device = keystore.device.copy(secureLockScreen = false)
+            assertFalse(vault.unlockSilently())
+            assertTrue(stayAliases().isEmpty())
+        }
+
+    @Test fun theUnlockWithoutAPageOpensSilentlyFirst() =
+        runTest {
+            setUp()
+            restart()
+            keystore.prompts.clear()
+            assertEquals(InlineUnlock.Opened, vault.unlockInline(siblingBudgetMs = 600))
+            assertTrue(keystore.prompts.isEmpty())
+            // Genuinely locked ("Lock now"): the biometric prompt over the page, as in round 7b.
+            vault.lock()
+            assertEquals(InlineUnlock.Opened, vault.unlockInline(siblingBudgetMs = 600))
+            assertEquals(listOf("daily"), keystore.prompts)
         }
 
     @Test fun fiveFailedAttemptsDropTheDailyUnlock() =
@@ -233,7 +340,7 @@ class WaVaultTest {
         runTest {
             val offer = setUp()
             vault.lock()
-            vault.onBoot()
+            restart()
             keystore.prompts.clear()
             assertEquals(VaultOutcome.Refused(VaultProblem.Malformed), vault.unlockWithPassphrase("AAAA"))
             assertTrue("a malformed passphrase costs no prompt", keystore.prompts.isEmpty())
@@ -243,6 +350,7 @@ class WaVaultTest {
             assertEquals(VaultOutcome.Done, vault.unlockWithPassphrase(offer.groups.joinToString(" ")))
             assertEquals(WaVaultState.Unlocked, vault.state.value)
             assertEquals(listOf("unlock", "unlock", "enable"), keystore.prompts)
+            assertEquals(1, stayAliases().size)
             vault.lock()
             assertEquals(WaVaultState.Locked(biometric = true), vault.state.value)
         }
@@ -285,8 +393,13 @@ class WaVaultTest {
             val after = hardwareAliases().single()
             assertFalse(before == after)
             assertTrue("the old daily blob sealed the old data key", dailyAliases().isEmpty())
+            // The open session sealed a stay wrap under the new data key: a restart still opens with no prompt.
+            assertEquals(1, stayAliases().size)
+            restart()
+            vault.used()
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
             vault.lock()
-            assertEquals(WaVaultState.Locked(false, PassphraseReason.NewPassphrase), vault.state.value)
+            assertEquals(WaVaultState.Locked(false), vault.state.value)
             assertEquals(VaultOutcome.Done, vault.unlockWithPassphrase(offer.groups.joinToString("-")))
         }
 
@@ -296,38 +409,6 @@ class WaVaultTest {
             val offer = vault.startChange().getOrNull()!!
             vault.abandon(offer)
             assertNotNull(ops.openHandle)
-        }
-
-    @Test fun aBiometricUnlockResetsTheThreeDays() =
-        runTest {
-            setUp()
-            vault.lock()
-            now += 70 * HOUR
-            assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
-            vault.lock()
-            now += 70 * HOUR
-            vault.refresh()
-            assertEquals(
-                "140 h after the passphrase, 70 h idle",
-                WaVaultState.Locked(biometric = true),
-                vault.state.value,
-            )
-            assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
-        }
-
-    @Test fun thirtyDaysAskForThePassphraseHoweverOftenTheBiometricUnlocks() =
-        runTest {
-            setUp()
-            vault.lock()
-            repeat(14) {
-                now += 48 * HOUR
-                assertEquals(VaultOutcome.Done, vault.unlockWithBiometric())
-                vault.lock()
-            }
-            now += 48 * HOUR + 1
-            vault.refresh()
-            assertEquals(WaVaultState.Locked(false, PassphraseReason.Expired), vault.state.value)
-            assertTrue(dailyAliases().isEmpty())
         }
 
     @Test fun anUnlockedSiblingOpensTheVaultWithoutAPrompt() =
@@ -341,15 +422,21 @@ class WaVaultTest {
             assertEquals("no prompt", before, keystore.prompts.size)
             assertEquals(2, unlocks)
             assertNotNull(ops.openHandle)
+            // This app now holds its own stay wrap: after a restart it needs no sibling.
+            assertEquals(1, stayAliases().size)
+            sibling = null
+            restart()
+            vault.used()
+            assertEquals(WaVaultState.Unlocked, vault.state.value)
         }
 
     @Test fun aSiblingHandOverAlsoWorksWhenThePassphraseWouldBeAsked() =
         runTest {
             setUp()
             vault.lock()
-            boot += 1
+            now += 90 * DAY + 1
             vault.refresh()
-            assertEquals(WaVaultState.Locked(false, PassphraseReason.Rebooted), vault.state.value)
+            assertEquals(WaVaultState.Locked(false, PassphraseReason.Idle), vault.state.value)
             sibling = StoredLink(link.gatewayUrl, link.instanceId, link.key)
             assertTrue(vault.unlockFromSibling())
             assertEquals(WaVaultState.Unlocked, vault.state.value)
@@ -384,6 +471,6 @@ class WaVaultTest {
     }
 
     private companion object {
-        const val HOUR = 3_600_000L
+        const val DAY = 24 * 3_600_000L
     }
 }

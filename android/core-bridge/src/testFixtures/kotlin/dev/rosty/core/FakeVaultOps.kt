@@ -4,12 +4,11 @@ import dev.rosty.core.model.core.Empty
 import dev.rosty.core.model.wa.VaultCommitRequest
 import dev.rosty.core.model.wa.VaultCreateRequest
 import dev.rosty.core.model.wa.VaultDailyInfo
-import dev.rosty.core.model.wa.VaultDailyRefusal
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultDirRequest
-import dev.rosty.core.model.wa.VaultHandle
 import dev.rosty.core.model.wa.VaultHandleRequest
+import dev.rosty.core.model.wa.VaultIdleRefusal
 import dev.rosty.core.model.wa.VaultInfo
 import dev.rosty.core.model.wa.VaultKeys
 import dev.rosty.core.model.wa.VaultLink
@@ -23,6 +22,10 @@ import dev.rosty.core.model.wa.VaultPicturesRequest
 import dev.rosty.core.model.wa.VaultReset
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultStayInfo
+import dev.rosty.core.model.wa.VaultStayUnlockRequest
+import dev.rosty.core.model.wa.VaultTouchRequest
+import dev.rosty.core.model.wa.VaultTouched
 import dev.rosty.core.model.wa.VaultTripLink
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultUnlocked
@@ -38,9 +41,9 @@ import kotlinx.serialization.json.buildJsonObject
  * create answers is `seal-<n>`; a test's Keystore stand-in seals and unseals it however it likes, and [unlock] only
  * checks the passphrase (the real core also authenticates the blob). Passphrases are 28 characters in groups of four;
  * [unlock] reads them like the core (case, spaces and dashes do not matter) and calls anything else a `typo`. The
- * daily unlock follows the core's rules: same boot, at most 72 hours since the last unlock (a biometric one, or a
- * hand-over, moves it on) and 30 days since the passphrase. [unlockLink] opens the vault with its own link, as the
- * core's link wrap does once the vault was committed or unlocked ([linkWrapped]).
+ * biometric and the silent (stay) unlock follow the core's use clock (round 7c): at most 90 days since the last use
+ * (every unlock and [touch] is one), and the clock not set back; a reboot ends nothing. [unlockLink] opens the vault
+ * with its own link, as the core's link wrap does once the vault was committed or unlocked ([linkWrapped]).
  */
 class FakeVaultOps(
     /** A plaintext link the migration would read (`whatsapp-link.json`). */
@@ -51,7 +54,6 @@ class FakeVaultOps(
         val sealed: String,
         val bootCount: Long,
         val unlockedMs: Long,
-        var lastUnlockMs: Long? = null,
     )
 
     private class Session(
@@ -60,6 +62,8 @@ class FakeVaultOps(
         var committed: Boolean,
         var pendingPassphrase: String?,
         var pendingDaily: Pair<Long, Long>? = null,
+        var pendingStay: Long? = null,
+        var recordedMs: Long? = null,
     )
 
     private val lock = Any()
@@ -69,6 +73,11 @@ class FakeVaultOps(
     private var link: VaultLink? = null
     private var passphrase: String? = null
     private var daily: Daily? = null
+    private var stay: VaultStayInfo? = null
+
+    /** The last use the core knows (round 7c), or null. */
+    @Volatile var lastUseMs: Long? = null
+        private set
     private var session: Session? = null
 
     /** The ops called, in order (`vault.create`, ...). */
@@ -116,7 +125,8 @@ class FakeVaultOps(
     private fun stateNow(): VaultState =
         VaultState(
             vault = vault,
-            daily = daily?.let { VaultDailyInfo(it.alias, it.sealed, it.bootCount, it.unlockedMs, it.lastUnlockMs) },
+            daily = daily?.let { VaultDailyInfo(it.alias, it.sealed, it.bootCount, it.unlockedMs) },
+            stay = stay,
             legacyLink = legacyLink != null,
             unlocked =
                 session?.takeIf { it.committed }?.let {
@@ -163,38 +173,54 @@ class FakeVaultOps(
         synchronized(lock) { session = null }
     }
 
-    private fun open(link: VaultLink): Long {
+    private fun open(
+        link: VaultLink,
+        nowMs: Long? = null,
+    ): Long {
         session = null
         val handle = nextHandle++
         session = Session(handle, link, committed = true, pendingPassphrase = null)
+        if (nowMs != null) used(nowMs)
         return handle
+    }
+
+    private fun used(nowMs: Long) {
+        lastUseMs = maxOf(nowMs, lastUseMs ?: nowMs)
+    }
+
+    /** The use clock of the stay and daily wraps (round 7c), null while it holds. */
+    private fun refusal(nowMs: Long): VaultIdleRefusal? {
+        val last =
+            listOfNotNull(lastUseMs, stay?.createdMs, daily?.unlockedMs).maxOrNull() ?: return null
+        return when {
+            nowMs < last - CLOCK_SKEW_MS -> VaultIdleRefusal.ClockBack
+            nowMs - last > MAX_IDLE_MS -> VaultIdleRefusal.Idle
+            else -> null
+        }
+    }
+
+    /** Every wrap that opens without the passphrase goes, with the use record. */
+    private fun expire() {
+        stay = null
+        daily = null
+        lastUseMs = null
+    }
+
+    private fun expired(refused: VaultIdleRefusal): Outcome.Err {
+        expire()
+        val reason = if (refused == VaultIdleRefusal.ClockBack) "clock_back" else "idle"
+        return coded(RustError::Auth, "expired", "expired", reason)
     }
 
     override suspend fun state(req: VaultStateRequest) =
         answer("vault.state") {
-            var dropped: VaultDailyRefusal? = null
-            val current = daily
-            if (current != null && req.bootCount != null && req.nowMs != null) {
-                dropped = refusal(current, req.bootCount, req.nowMs)
-                if (dropped != null) daily = null
+            var dropped: VaultIdleRefusal? = null
+            if ((daily != null || stay != null) && req.nowMs != null) {
+                dropped = refusal(req.nowMs)
+                if (dropped != null) expire()
             }
-            Outcome.Ok(stateNow().copy(dailyDropped = dropped))
+            Outcome.Ok(stateNow().copy(expired = dropped))
         }
-
-    private fun refusal(
-        daily: Daily,
-        bootCount: Long,
-        nowMs: Long,
-    ): VaultDailyRefusal? {
-        val last = maxOf(daily.unlockedMs, daily.lastUnlockMs ?: daily.unlockedMs)
-        return when {
-            bootCount != daily.bootCount -> VaultDailyRefusal.Rebooted
-            nowMs < last - 5 * 60_000 -> VaultDailyRefusal.ClockBack
-            nowMs - daily.unlockedMs > 30 * 24 * 3_600_000L -> VaultDailyRefusal.Expired
-            nowMs - last > 72 * 3_600_000L -> VaultDailyRefusal.Idle
-            else -> null
-        }
-    }
 
     override suspend fun create(req: VaultCreateRequest) =
         answer("vault.create") {
@@ -218,7 +244,7 @@ class FakeVaultOps(
             vault = VaultInfo(req.hwAlias, req.hwSealed)
             link = s.link
             passphrase = pass
-            daily = null
+            expire()
             s.pendingPassphrase = null
             s.committed = true
             Outcome.Ok(stateNow())
@@ -231,23 +257,27 @@ class FakeVaultOps(
             if (typed != canonical(stored)) {
                 return@answer coded(RustError::Auth, "wrong passphrase", "wrong_passphrase")
             }
-            val handle = open(checkNotNull(link))
+            lastUseMs = null
+            val handle = open(checkNotNull(link), req.nowMs)
             session?.pendingDaily = req.bootCount to req.nowMs
-            Outcome.Ok(VaultUnlocked(handle, "daily-$handle"))
+            session?.pendingStay = req.nowMs
+            Outcome.Ok(VaultUnlocked(handle, "daily-$handle", "stay-$handle"))
         }
 
     override suspend fun unlockDaily(req: VaultDailyUnlockRequest) =
         answer("vault.unlock_daily") {
-            val current = daily ?: return@answer coded(RustError::NotFound, "no daily unlock", "no_daily")
-            refusal(current, req.bootCount, req.nowMs)?.let { refused ->
-                daily = null
-                val reason = if (refused == VaultDailyRefusal.ClockBack) "clock_back" else refused.name.lowercase()
-                return@answer coded(RustError::Auth, "daily expired", "daily_expired", reason)
-            }
-            if (req.biometric) current.lastUnlockMs = req.nowMs
-            val handle = open(checkNotNull(link))
-            session?.pendingDaily = req.bootCount to req.nowMs
-            Outcome.Ok(VaultUnlocked(handle, "daily-$handle"))
+            if (daily == null) return@answer coded(RustError::NotFound, "no daily unlock", "no_daily")
+            refusal(req.nowMs)?.let { return@answer expired(it) }
+            val handle = open(checkNotNull(link), req.nowMs)
+            session?.pendingStay = req.nowMs
+            Outcome.Ok(VaultUnlocked(handle, staySeal = "stay-$handle"))
+        }
+
+    override suspend fun unlockStay(req: VaultStayUnlockRequest) =
+        answer("vault.unlock_stay") {
+            if (stay == null) return@answer coded(RustError::NotFound, "no stay wrap", "no_stay")
+            refusal(req.nowMs)?.let { return@answer expired(it) }
+            Outcome.Ok(VaultUnlocked(open(checkNotNull(link), req.nowMs)))
         }
 
     override suspend fun unlockLink(req: VaultLinkUnlockRequest) =
@@ -256,14 +286,9 @@ class FakeVaultOps(
             if (vault == null) return@answer coded(RustError::NotFound, "no vault", "no_vault")
             if (!linkWrapped) return@answer coded(RustError::NotFound, "no link wrap", "no_link_wrap")
             if (req.link != own) return@answer coded(RustError::Auth, "not this vault's link", "other_link")
-            daily?.let { current ->
-                if (refusal(current, req.bootCount, req.nowMs) == null) {
-                    current.lastUnlockMs = req.nowMs
-                } else {
-                    daily = null
-                }
-            }
-            Outcome.Ok(VaultHandle(open(own)))
+            val handle = open(own, req.nowMs)
+            session?.pendingStay = req.nowMs
+            Outcome.Ok(VaultUnlocked(handle, staySeal = "stay-$handle"))
         }
 
     override suspend fun dailyStore(req: VaultDailyStoreRequest) =
@@ -281,6 +306,44 @@ class FakeVaultOps(
         answer("vault.daily_forget") {
             daily = null
             Outcome.Ok(stateNow())
+        }
+
+    override suspend fun stayStore(req: VaultDailyStoreRequest) =
+        answer("vault.stay_store") {
+            val s = session?.takeIf { it.handle == req.handle } ?: return@answer locked(req.handle)
+            val at = s.pendingStay ?: return@answer coded(RustError::Invalid, "nothing to store", "nothing_to_store")
+            stay = VaultStayInfo(req.alias, req.sealed, at)
+            s.pendingStay = null
+            Outcome.Ok(stateNow())
+        }
+
+    override suspend fun stayForget(req: VaultDirRequest) =
+        answer("vault.stay_forget") {
+            stay = null
+            Outcome.Ok(stateNow())
+        }
+
+    override suspend fun stayPrepare(req: VaultTouchRequest) =
+        answer("vault.stay_prepare") {
+            val s = session?.takeIf { it.committed } ?: return@answer locked(0)
+            s.pendingStay = req.nowMs
+            Outcome.Ok(VaultUnlocked(s.handle, staySeal = "stay-${s.handle}"))
+        }
+
+    override suspend fun touch(req: VaultTouchRequest) =
+        answer("vault.touch") {
+            val s = session?.takeIf { it.committed } ?: return@answer locked(0)
+            val last = lastUseMs
+            if (last != null) {
+                when {
+                    req.nowMs < last - CLOCK_SKEW_MS -> return@answer expired(VaultIdleRefusal.ClockBack)
+                    req.nowMs - last > MAX_IDLE_MS -> return@answer expired(VaultIdleRefusal.Idle)
+                }
+            }
+            used(req.nowMs)
+            val due = s.recordedMs.let { it == null || req.nowMs - it >= HOUR_MS }
+            if (due) s.recordedMs = req.nowMs
+            Outcome.Ok(VaultTouched(recorded = due))
         }
 
     override suspend fun lock(req: VaultLockRequest) =
@@ -326,7 +389,7 @@ class FakeVaultOps(
             vault = null
             link = null
             passphrase = null
-            daily = null
+            expire()
             session = null
             Outcome.Ok(VaultReset(deleted))
         }
@@ -361,4 +424,11 @@ class FakeVaultOps(
         }
 
     private fun sessionHandle(): Long? = session?.takeIf { it.committed }?.handle
+
+    companion object {
+        /** The core's use clock (`rosty_core::vault::UseClock`): 90 days, 5 min of skew, a write an hour. */
+        const val MAX_IDLE_MS = 90 * 24 * 3_600_000L
+        const val CLOCK_SKEW_MS = 5 * 60_000L
+        const val HOUR_MS = 3_600_000L
+    }
 }

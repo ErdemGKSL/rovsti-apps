@@ -276,16 +276,20 @@ pieces:
   `CryptoObject`). `androidx.biometric` 1.1.0 needs a `FragmentActivity`: `RostyShellActivity` is one. Every app
   declares `USE_BIOMETRIC` (not `USE_FINGERPRINT`). K_hw (`rosty.wa.k.<id>`) takes a Class 3 biometric or the
   screen lock and survives a new enrolment; K_daily (`rosty.wa.d.b.<id>` biometric, `rosty.wa.d.c.<id>` screen
-  lock on a phone with no Class 3 biometric) is invalidated by one. Removing the screen lock deletes both: the
-  vault is then broken and only "Forgot passphrase" (reset and link again) helps.
+  lock on a phone with no Class 3 biometric) is invalidated by one. Round 7c adds K_stay (`rosty.wa.s.<id>`): no
+  user authentication, only `setUnlockedDeviceRequired(true)`, used with no prompt to reopen the vault (a locked
+  phone answers `DeviceLocked` and the wrap is kept; a dead key is deleted). Removing the screen lock deletes K_hw
+  and K_daily: the vault is then broken and only "Forgot passphrase" (reset and link again) helps; K_stay is never
+  used without a screen lock. `aliases()` lists only the vault's kinds, never the push key (`rosty.wa.push.*`).
 - **State and screens** (`:wa` `vault/`): `WaVault` (no link, needs setup, locked, unlocked, broken) and the setup,
   unlock, change and forgot pages behind `WaVaultGate`. The passphrase field is a platform `EditText`
   (`IME_FLAG_NO_PERSONALIZED_LEARNING`, visible-password input, no suggestions); "Copy passphrase" uses the
   sensitive clipboard and clears it after 60 s. `SecureWindow` holds `FLAG_SECURE` per window.
-- **Lock** (`:shell` `VaultLockLifecycle`): a runtime `ACTION_SCREEN_OFF` receiver, the background timer with a
-  check at the next activity start (a cached process may be frozen), and "Lock WhatsApp now". `VaultBoot` drops the
-  daily unlock from the `BOOT_COMPLETED` receivers of Messages, Phone and Stops, only when
-  `wa-vault-daily.json` exists, so a phone without a vault starts no core.
+- **Stays unlocked** (round 7c, `:shell` `VaultUseLifecycle`): no screen-off receiver, no background timer, no
+  boot drop. Each activity start of an app with a `wa-vault.json` is a use: an open vault moves its 90-day clock
+  (`vault.touch`, written at most once an hour), a locked one reopens with its stay wrap. "Lock WhatsApp now" locks
+  every Rosty app through `WaLockAllReceiver` (manifest, `WA_LINK`), which also reaches an app that is not running
+  and deletes its stay wrap without starting the core. The settings have no auto-lock row any more.
 - **Media in RAM** (Messages): `MemfdRamFiles` (`memfd_create`, read through `/proc/self/fd/<n>`) so the image
   loader, the players and the gateway's send read RAM files by path.
 - **Notifications while locked**: Messages' `LockedWhatsAppNotice` (one notice with the count, no action, public on
@@ -293,7 +297,8 @@ pieces:
   without a full-screen intent. Neither makes a gateway request.
 - **Hand-over**: `WaLinkProvider` (`<package>.walink`, signature permission `dev.rosty.permission.WA_LINK`) answers
   only while its process has the vault unlocked; the receiving app asks only when the person taps "Use the link from
-  …" on its link screen. Stops does not take part.
+  …" on its link screen (round 7a: also by itself on the link screen and on the locked page; Stops takes part).
+  Since round 7c the receiver then holds its own stay wrap.
 - **Migration** (`:wa` `WaPlaintextMigration`, wired in `ShellContainer`): at an activity start, and after each
   unlock, until it has finished once (`rosty_wa_migration` preferences, `plaintext_wiped`). It runs when the vault is
   unlocked, when there is no link, or when the vault is broken; while locked too, unless Phone's

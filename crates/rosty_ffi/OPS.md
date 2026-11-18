@@ -388,26 +388,35 @@ table and its cursor (a value left out never does), `changed: true` is the `acco
 `vault: true` (Phone since its vault): the table then lives only in the DK-encrypted vault cache of the unlocked session (`locked`
 while the vault is), and the first read moves a plaintext `wa-identity.json` into the cache and deletes it.
 WhatsApp vault (`_bmad-output/kotlin-ui/plans/wa-vault.md`, `rosty_core::vault`, `rosty_app_core::wa_vault`): every request may name
-`dir` (the data directory; tests); blobs travel as standard base64. Kotlin never gets DK, DDK or the connect key: it seals and
-unseals ciphertext with its Keystore keys (K_hw, K_daily) and gets a session `handle`. One session per process; releasing it
-(`vault.lock`, `RustNative.release`) zeroizes DK and the connect key and releases the gateways opened from it.
+`dir` (the data directory; tests); blobs travel as standard base64. Kotlin never gets DK, DDK, SK or the connect key: it seals
+and unseals ciphertext with its Keystore keys (K_hw, K_daily, K_stay) and gets a session `handle`. One session per process; releasing
+it (`vault.lock`, `RustNative.release`) zeroizes DK and the connect key and releases the gateways opened from it.
+Round 7c: the vault stays unlocked; the only time rule is the use clock (`rosty_core::vault::UseClock`): 90 days without a use, or
+the clock set back more than 5 min before the last use, and every wrap that opens without the passphrase (stay, daily) and the use
+record are deleted. A use is recorded (DK-sealed `wa-vault-use.json`, with a plain copy) at every unlock and by `vault.touch`, at
+most once an hour. The boot count is read and ignored everywhere.
 `vault.state {dir?, boot_count?, now_ms?}` answers `{vault?: {hw_alias, hw_sealed}, daily?: {alias, sealed, boot_count, unlocked_ms},
-daily_dropped?: rebooted|idle|clock_back, legacy_link, unlocked?: {handle, gateway_url, instance_id}}` (with `boot_count` and `now_ms`
-a lapsed daily unlock is deleted and named). `vault.create {dir?, link?: {gateway_url, instance_id, key}}` (no `link`: the plaintext
+stay?: {alias, sealed, created_ms}, expired?: idle|clock_back, legacy_link, unlocked?: {handle, gateway_url, instance_id}}` (with
+`now_ms`, wraps whose plain clock lapsed are deleted and `expired` names why). `vault.create {dir?, link?: {gateway_url, instance_id, key}}` (no `link`: the plaintext
 `whatsapp-link.json`, the migration) answers `{handle, passphrase, seal}`: the passphrase to show once, and the key blob for Kotlin to
 seal with K_hw; nothing is written until `vault.commit {handle, hw_alias, hw_sealed}`, which writes `wa-vault.json`, drops the daily
-unlock and the cache, makes the session current and answers the state. `vault.unlock {dir?, key_blob, passphrase, boot_count, now_ms}`
-(`key_blob` = K_hw-decrypted `hw_sealed`) answers `{handle, daily_seal}`; `vault.daily_store {handle, alias, sealed}` stores the
-K_daily-sealed `daily_seal` (`wa-vault-daily.json`) and answers the state; `vault.unlock_daily {dir?, daily_blob, boot_count, now_ms}`
-(`daily_blob` = K_daily-decrypted `daily.sealed`) answers `{handle, daily_seal}`, or `auth` `daily_expired` with `detail.reason`
-(and deletes the daily file) after a reboot, 72 h without an unlock, 30 days since the passphrase (`expired`) or a clock set
-back. With `biometric: true` (K_daily is the Class 3 biometric key) the unlock resets the 72 h idle clock: the time is kept in a
-DK-sealed `seen` record in the daily file (`rosty_core::vault::DailyClock`); the daily state then also names `last_unlock_ms`.
-`vault.unlock_link {dir?, link: {gateway_url, instance_id, key}, boot_count, now_ms}` (round 7a) opens this app's own vault with
+and stay unlocks, the use record and the caches, makes the session current and answers the state. `vault.unlock {dir?, key_blob,
+passphrase, boot_count?, now_ms}` (`key_blob` = K_hw-decrypted `hw_sealed`) answers `{handle, daily_seal, stay_seal}`;
+`vault.daily_store {handle, alias, sealed}` stores the K_daily-sealed `daily_seal` (`wa-vault-daily.json`) and
+`vault.stay_store {handle, alias, sealed}` the K_stay-sealed `stay_seal` (`wa-vault-stay.json`; `nothing_to_store` when the unlock
+prepared none); both answer the state. `vault.unlock_daily {dir?, daily_blob, now_ms}` (`daily_blob` = K_daily-decrypted
+`daily.sealed`; `boot_count` and `biometric` are read and ignored) answers `{handle, stay_seal}`, or `auth` `expired` with
+`detail.reason` (`idle`, `clock_back`; every wrap and the use record are deleted). `vault.unlock_stay {dir?, stay_blob, now_ms}`
+(round 7c; `stay_blob` = K_stay-decrypted `stay.sealed`, no prompt) answers `{handle}` with the same `expired` refusal;
+`no_stay` (`not_found`) without a stay file, `damaged` (and the stay file deleted) when the blob does not open. `vault.touch {now_ms}`
+records a use of the open vault (`{recorded}`: false within the hour), `locked` without a committed session, `expired` after 90
+days without a use. `vault.stay_prepare {now_ms}` answers `{handle, stay_seal}`: a fresh stay blob for the open vault
+(after a passphrase change, whose commit dropped the old one). `vault.unlock_link {dir?, link: {gateway_url, instance_id, key}, now_ms}` (round 7a) opens this app's own vault with
 the link a sibling app handed over from its unlocked vault, through the link wrap (DK under the connect key, written at the commit
-and at the first unlock of an older vault) and answers `{handle}`; `no_link_wrap` (`not_found`) before that, `other_link` (`auth`)
-for a link that is not this vault's. It also moves the idle clock of a still valid daily unlock on. `vault.daily_forget {dir?}` ends the daily
-unlock (BootReceiver, biometric change, five failures). `vault.lock {handle?, dir?}` answers the state. `vault.change {handle}`
+and at the first unlock of an older vault) and answers `{handle, stay_seal}` (no daily blob: it would need a prompt); `no_link_wrap`
+(`not_found`) before that, `other_link` (`auth`) for a link that is not this vault's. `vault.daily_forget {dir?}` ends the biometric
+unlock (biometric change, five failures); `vault.stay_forget {dir?}` ends the silent one ("Lock now", a dead K_stay). `vault.lock
+{handle?, dir?}` answers the state. `vault.change {handle}`
 answers `{handle, passphrase, seal}` for a new passphrase and DK (rotation), committed with `vault.commit` under a new alias.
 `vault.reset {dir?}` deletes the vault files and answers `{deleted}` (Kotlin deletes the Keystore keys). `vault.wipe_plaintext {dir?,
 files_dir, cache_dir?}` deletes every plaintext WhatsApp file (`rosty_app_core::wa_vault::wipe`; databases erased in place first) and
@@ -510,7 +519,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.history_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
 | `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
-| `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.unlock_link, vault.daily_store, vault.daily_forget, vault.lock, vault.change, vault.export_link, vault.reset, vault.trip_hold, vault.trip_release, vault.wipe_plaintext, vault.pictures, vault.picture_put |
+| `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.unlock_link, vault.unlock_stay, vault.daily_store, vault.daily_forget, vault.stay_store, vault.stay_forget, vault.stay_prepare, vault.touch, vault.lock, vault.change, vault.export_link, vault.reset, vault.trip_hold, vault.trip_release, vault.wipe_plaintext, vault.pictures, vault.picture_put |
 | `rosty_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rosty_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed, phone.wa_arbitrate, phone.wa_screen, phone.wa_handoff_number |
 | `rosty_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

@@ -8,6 +8,7 @@ use std::fs;
 const KEY: &str = super::super::wa::fixture::KEY;
 const LINK: &str = r#"{"gateway_url":"https://rosty.erdemdev.tr","instance_id":"inst1","key":"rwk_BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"}"#;
 const T0: i64 = 1_800_000_000_000;
+const HOUR_MS: i64 = 60 * 60 * 1000;
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("rosty-ffi-vault-{name}-{}", std::process::id()));
@@ -20,7 +21,7 @@ fn text(dir: &Path) -> Option<String> {
     Some(dir.to_string_lossy().into_owned())
 }
 
-/// What Kotlin's `Cipher` does with K_hw or K_daily, as far as Rust can tell: some reversible transformation.
+/// What Kotlin's `Cipher` does with K_hw, K_daily or K_stay, as far as Rust can tell: some reversible transformation.
 fn keystore(b64_in: &str) -> String {
     let bytes = STANDARD.decode(b64_in).unwrap();
     b64(&bytes.iter().map(|b| b ^ 0x5a).collect::<Vec<_>>())
@@ -171,46 +172,56 @@ fn the_vault_life_cycle() {
     let opened = unlock_with(&dir, &created.passphrase.to_lowercase(), 3, T0).unwrap();
     assert_eq!(unlocked().unwrap().session, opened.handle);
 
-    // Daily unlock: stored after the passphrase unlock, honoured within 72 h on the same boot.
+    // Daily unlock: stored after the passphrase unlock; a reboot no longer ends it (round 7c).
     let state = daily_store(DailyStoreReq {
         handle: opened.handle,
         alias: "rosty.wa.d1".into(),
-        sealed: keystore(&opened.daily_seal),
+        sealed: keystore(opened.daily_seal.as_deref().unwrap()),
     })
     .unwrap();
     let daily = state.daily.unwrap();
     assert_eq!((daily.boot_count, daily.unlocked_ms), (3, T0));
+    // The stay wrap of the same unlock (no prompt in Kotlin).
+    let state = stay_store(DailyStoreReq {
+        handle: opened.handle,
+        alias: "rosty.wa.s1".into(),
+        sealed: keystore(opened.stay_seal.as_deref().unwrap()),
+    })
+    .unwrap();
+    let stay = state.stay.unwrap();
+    assert_eq!(stay.created_ms, T0);
     lock(LockReq {
         handle: Some(opened.handle),
         dir: text(&dir),
     })
     .unwrap();
+    // After a reboot the stay wrap opens silently; it prepares no new wrap.
+    let silent = unlock_stay(StayUnlockReq {
+        dir: text(&dir),
+        stay_blob: keystore(&stay.sealed),
+        now_ms: T0 + 3_600_000,
+    })
+    .unwrap();
+    assert!(silent.stay_seal.is_none() && silent.daily_seal.is_none());
+    assert_eq!(unlocked().unwrap().session, silent.handle);
+    // "Lock now": the stay wrap goes, the biometric unlock stays and makes a new stay wrap.
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
+    let state = stay_forget(DirReq { dir: text(&dir) }).unwrap();
+    assert!(state.stay.is_none() && state.daily.is_some());
     let again = unlock_daily(DailyUnlockReq {
         dir: text(&dir),
         daily_blob: keystore(&daily.sealed),
-        boot_count: 3,
-        now_ms: T0 + 3_600_000,
+        boot_count: 4,
+        now_ms: T0 + 2 * 3_600_000,
         biometric: true,
     })
     .unwrap();
     assert!(unlocked().is_some());
-    let rebooted = unlock_daily(DailyUnlockReq {
-        dir: text(&dir),
-        daily_blob: keystore(&daily.sealed),
-        boot_count: 4,
-        now_ms: T0 + 3_600_000,
-        biometric: true,
-    })
-    .map(|_| ())
-    .unwrap_err();
-    assert_eq!(
-        (rebooted.kind, code(&rebooted)),
-        (ErrorKind::Auth, "daily_expired")
-    );
-    assert!(
-        DailyFile::load(&dir).unwrap().is_none(),
-        "a lapsed daily unlock is deleted"
-    );
+    assert!(again.stay_seal.is_some() && again.daily_seal.is_none());
 
     // Change: a new passphrase and DK; the old key blob no longer opens with it, the old passphrase is useless.
     let old_file = VaultFile::load(&dir).unwrap().unwrap();
@@ -244,9 +255,10 @@ fn the_vault_life_cycle() {
     assert_eq!(
         reset.deleted,
         vec![
+            dir.join(wa_vault::USE_FILE).to_string_lossy().into_owned(),
             dir.join(wa_vault::VAULT_FILE)
                 .to_string_lossy()
-                .into_owned()
+                .into_owned(),
         ]
     );
     assert!(unlocked().is_none());
@@ -316,7 +328,11 @@ fn the_seeded_fixture_vault_is_what_the_seed_constants_say() {
     }
     let expected = temp_dir("seed");
     write_seed(&expected);
-    for name in [wa_vault::VAULT_FILE, wa_vault::DAILY_FILE] {
+    for name in [
+        wa_vault::VAULT_FILE,
+        wa_vault::DAILY_FILE,
+        wa_vault::STAY_FILE,
+    ] {
         assert_eq!(
             fs::read_to_string(seed_dir.join(name)).ok(),
             fs::read_to_string(expected.join(name)).ok(),
@@ -326,7 +342,8 @@ fn the_seeded_fixture_vault_is_what_the_seed_constants_say() {
     let _ = fs::remove_dir_all(&expected);
 }
 
-/// The seeded vault: passphrase all zeros, small Argon2id parameters, the K_hw and K_daily "seals" are the identity.
+/// The seeded vault: passphrase all zeros, small Argon2id parameters, the K_hw, K_daily and K_stay "seals" are the
+/// identity.
 fn write_seed(dir: &Path) {
     let mut next = 0u8;
     let mut entropy = move |out: &mut [u8]| {
@@ -370,6 +387,17 @@ fn write_seed(dir: &Path) {
         vault::nonce(&mut entropy),
     ));
     file.save(dir).unwrap();
+    // The stay wrap of round 7c, made at the same time as the daily blob.
+    let stay_key = StayKey::generate(&mut entropy);
+    let stay_blob = vault::seal_stay(
+        &stay_key,
+        &key,
+        seed::UNLOCKED_MS,
+        vault::nonce(&mut entropy),
+    );
+    StayFile::new("rosty.wa.s1", stay_blob, &stay_key, seed::UNLOCKED_MS)
+        .save(dir)
+        .unwrap();
 }
 
 #[test]
@@ -614,7 +642,7 @@ fn link_in(key: &str, instance: &str) -> LinkIn {
     }
 }
 
-fn hand_over(dir: &Path, link: LinkIn, now_ms: i64) -> Result<HandleAns, FfiError> {
+fn hand_over(dir: &Path, link: LinkIn, now_ms: i64) -> Result<UnlockedAns, FfiError> {
     unlock_link(LinkUnlockReq {
         dir: text(dir),
         link,
@@ -640,7 +668,7 @@ fn vault_with_daily(dir: &Path) -> (String, DailyInfo) {
     let daily = daily_store(DailyStoreReq {
         handle: opened.handle,
         alias: "rosty.wa.d1".into(),
-        sealed: keystore(&opened.daily_seal),
+        sealed: keystore(opened.daily_seal.as_deref().unwrap()),
     })
     .unwrap()
     .daily
@@ -685,9 +713,10 @@ fn a_sibling_hand_over_opens_this_apps_own_vault_without_a_prompt() {
         session(opened.handle, |s: &mut Session| s.daily.is_none()).unwrap(),
         "a hand-over prepares no daily blob: sealing one would need a prompt"
     );
-    // It also counts as an unlock for the idle clock of the daily unlock.
-    let daily = DailyFile::load(&dir).unwrap().unwrap();
-    assert_eq!(daily.last_unlock_ms, Some(T0 + 70 * HOUR_MS));
+    // It prepares this app's own stay wrap (no prompt), and counts as a use.
+    assert!(opened.stay_seal.is_some());
+    let used = UseFile::load(&dir).unwrap().unwrap();
+    assert_eq!(used.used_ms, T0 + 70 * HOUR_MS);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -721,66 +750,188 @@ fn a_vault_of_an_earlier_build_gets_its_link_wrap_at_the_next_unlock() {
 }
 
 #[test]
-fn a_biometric_daily_unlock_resets_the_idle_clock_up_to_30_days() {
+fn any_use_moves_the_90_days_on_and_90_idle_days_need_the_passphrase() {
     let _guard = test_lock();
     let dir = temp_dir("idle");
-    let (_, daily) = vault_with_daily(&dir);
-    let daily_at = |now_ms: i64, biometric: bool| {
-        unlock_daily(DailyUnlockReq {
-            dir: text(&dir),
-            daily_blob: keystore(&daily.sealed),
-            boot_count: 3,
-            now_ms,
-            biometric,
-        })
-        .map(|_| ())
-    };
-    // A biometric unlock every 70 h keeps the daily unlock alive past 72 h since the passphrase.
-    let mut at = T0;
-    while at + 70 * HOUR_MS <= T0 + vault::DAILY_MAX_AGE_MS {
-        at += 70 * HOUR_MS;
-        daily_at(at, true).unwrap();
-    }
-    assert!(at > T0 + vault::DAILY_MAX_IDLE_MS);
-    // The state's plain copy agrees.
-    let state = vault_state(StateReq {
-        dir: text(&dir),
-        boot_count: Some(3),
-        now_ms: Some(at + HOUR_MS),
-    })
-    .unwrap();
-    assert_eq!(state.daily.unwrap().last_unlock_ms, Some(at));
-    // Then the 30 days since the passphrase end it, however recent the last unlock.
-    let expired = daily_at(T0 + vault::DAILY_MAX_AGE_MS + 1, true).unwrap_err();
-    assert_eq!(code(&expired), "daily_expired");
-    assert_eq!(
-        expired.detail.as_ref().unwrap()["reason"].as_str(),
-        Some("expired")
-    );
-    assert!(DailyFile::load(&dir).unwrap().is_none());
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn a_screen_lock_daily_unlock_does_not_reset_the_idle_clock() {
-    let _guard = test_lock();
-    let dir = temp_dir("idle-pin");
     let (_, daily) = vault_with_daily(&dir);
     let daily_at = |now_ms: i64| {
         unlock_daily(DailyUnlockReq {
             dir: text(&dir),
             daily_blob: keystore(&daily.sealed),
-            boot_count: 3,
+            boot_count: 99,
             now_ms,
             biometric: false,
         })
-        .map(|_| ())
     };
-    daily_at(T0 + 70 * HOUR_MS).unwrap();
-    let idle = daily_at(T0 + vault::DAILY_MAX_IDLE_MS + 1).unwrap_err();
+    // A use every 80 days keeps the vault opening for a year and more: no 72 h, no 30 days, no reboot rule.
+    let mut at = T0;
+    let mut stay = None;
+    for _ in 0..6 {
+        at += 80 * DAY_MS;
+        let opened = daily_at(at).unwrap();
+        stay = opened.stay_seal;
+    }
+    assert!(at - T0 > 365 * DAY_MS);
+    // The stay wrap of the last unlock opens too, and a touch moves the clock while the app is in use.
+    stay_store(DailyStoreReq {
+        handle: unlocked().unwrap().session,
+        alias: "rosty.wa.s1".into(),
+        sealed: keystore(stay.as_deref().unwrap()),
+    })
+    .unwrap();
+    assert!(
+        !touch(TouchReq { now_ms: at + 1_000 }).unwrap().recorded,
+        "throttled"
+    );
+    assert!(
+        touch(TouchReq {
+            now_ms: at + HOUR_MS
+        })
+        .unwrap()
+        .recorded
+    );
+    assert_eq!(UseFile::load(&dir).unwrap().unwrap().used_ms, at + HOUR_MS);
+    let in_use = at + 89 * DAY_MS;
+    assert!(touch(TouchReq { now_ms: in_use }).unwrap().recorded);
+    // The state's plain copies agree: nothing expires 89 days after the last use.
+    let state = vault_state(StateReq {
+        dir: text(&dir),
+        boot_count: None,
+        now_ms: Some(in_use + 89 * DAY_MS),
+    })
+    .unwrap();
+    assert!(state.expired.is_none() && state.stay.is_some() && state.daily.is_some());
+    // 90 days with no use: a touch refuses, and every wrap that opens without the passphrase goes.
+    let idle = touch(TouchReq {
+        now_ms: in_use + vault::MAX_IDLE_MS + 1,
+    })
+    .map(|_| ())
+    .unwrap_err();
+    assert_eq!(code(&idle), "expired");
     assert_eq!(
         idle.detail.as_ref().unwrap()["reason"].as_str(),
         Some("idle")
     );
+    assert!(StayFile::load(&dir).unwrap().is_none());
+    assert!(DailyFile::load(&dir).unwrap().is_none());
+    assert!(UseFile::load(&dir).unwrap().is_none());
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_state_drops_the_wraps_after_90_idle_days_and_a_stay_unlock_checks_the_sealed_clock() {
+    let _guard = test_lock();
+    let dir = temp_dir("stay-idle");
+    write_seed(&dir);
+    let stay = StayFile::load(&dir).unwrap().unwrap();
+    let stay_at = |now_ms: i64| {
+        unlock_stay(StayUnlockReq {
+            dir: text(&dir),
+            stay_blob: b64(&stay.sealed),
+            now_ms,
+        })
+    };
+    // A forged later plain copy of the use opens nothing: the sealed clock decides.
+    UseFile {
+        version: wa_vault::FILE_VERSION,
+        sealed: vec![1, 2, 3],
+        used_ms: seed::UNLOCKED_MS + 80 * DAY_MS,
+    }
+    .save(&dir)
+    .unwrap();
+    let idle = stay_at(seed::UNLOCKED_MS + vault::MAX_IDLE_MS + 1)
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(code(&idle), "expired");
+    assert!(StayFile::load(&dir).unwrap().is_none());
+    assert!(DailyFile::load(&dir).unwrap().is_none());
+    // The state with the plain copies drops them too.
+    write_seed(&dir);
+    let state = vault_state(StateReq {
+        dir: text(&dir),
+        boot_count: None,
+        now_ms: Some(seed::UNLOCKED_MS + vault::MAX_IDLE_MS + 1),
+    })
+    .unwrap();
+    assert_eq!(state.expired, Some(IdleRefusal::Idle));
+    assert!(state.stay.is_none() && state.daily.is_none() && state.vault.is_some());
+    // A stay blob that does not open deletes the dead wrap.
+    write_seed(&dir);
+    let damaged = unlock_stay(StayUnlockReq {
+        dir: text(&dir),
+        stay_blob: b64(&[0; 70]),
+        now_ms: seed::UNLOCKED_MS,
+    })
+    .map(|_| ())
+    .unwrap_err();
+    assert_eq!(code(&damaged), "damaged");
+    assert!(StayFile::load(&dir).unwrap().is_none());
+    assert!(
+        DailyFile::load(&dir).unwrap().is_some(),
+        "the biometric unlock stays"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_passphrase_change_drops_every_wrap_of_the_old_key() {
+    let _guard = test_lock();
+    let dir = temp_dir("change-wraps");
+    write_seed(&dir);
+    let file = VaultFile::load(&dir).unwrap().unwrap();
+    let opened = unlock(UnlockReq {
+        dir: text(&dir),
+        key_blob: b64(&file.hw_sealed),
+        passphrase: Zeroizing::new(seed::PASSPHRASE.to_owned()),
+        boot_count: seed::BOOT_COUNT,
+        now_ms: seed::UNLOCKED_MS,
+    })
+    .unwrap();
+    assert!(UseFile::load(&dir).unwrap().is_some());
+    let changed = change(HandleReq {
+        handle: opened.handle,
+    })
+    .unwrap();
+    let state = commit(CommitReq {
+        handle: opened.handle,
+        hw_alias: "rosty.wa.k2".into(),
+        hw_sealed: keystore(&changed.seal),
+    })
+    .unwrap();
+    assert!(state.stay.is_none() && state.daily.is_none());
+    assert!(UseFile::load(&dir).unwrap().is_none());
+    // The open session prepares a stay wrap under the new DK, with no new unlock.
+    let prepared = stay_prepare(TouchReq {
+        now_ms: seed::UNLOCKED_MS + 1,
+    })
+    .unwrap();
+    let state = stay_store(DailyStoreReq {
+        handle: prepared.handle,
+        alias: "rosty.wa.s2".into(),
+        sealed: keystore(prepared.stay_seal.as_deref().unwrap()),
+    })
+    .unwrap();
+    let stay = state.stay.unwrap();
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
+    unlock_stay(StayUnlockReq {
+        dir: text(&dir),
+        stay_blob: keystore(&stay.sealed),
+        now_ms: seed::UNLOCKED_MS + 2,
+    })
+    .unwrap();
+    lock(LockReq {
+        handle: None,
+        dir: text(&dir),
+    })
+    .unwrap();
     let _ = fs::remove_dir_all(&dir);
 }

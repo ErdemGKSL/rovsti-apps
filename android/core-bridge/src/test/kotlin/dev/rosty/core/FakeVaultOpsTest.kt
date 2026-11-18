@@ -2,13 +2,15 @@ package dev.rosty.core
 
 import dev.rosty.core.model.wa.VaultCommitRequest
 import dev.rosty.core.model.wa.VaultCreateRequest
-import dev.rosty.core.model.wa.VaultDailyRefusal
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
+import dev.rosty.core.model.wa.VaultIdleRefusal
 import dev.rosty.core.model.wa.VaultLink
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultStayUnlockRequest
+import dev.rosty.core.model.wa.VaultTouchRequest
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultWipeRequest
 import dev.rosty.core.ops.vaultCode
@@ -57,9 +59,10 @@ class FakeVaultOpsTest {
 
     private fun dailyRequest(
         blob: String,
-        boot: Long,
         now: Long = t0 + 1,
-    ) = VaultDailyUnlockRequest(dailyBlob = blob, bootCount = boot, nowMs = now)
+    ) = VaultDailyUnlockRequest(dailyBlob = blob, nowMs = now)
+
+    private val day = 24 * 3_600_000L
 
     @Test
     fun migrationUnlockAndDailyUnlock() =
@@ -84,20 +87,56 @@ class FakeVaultOpsTest {
             val opened = vault.unlock(unlockRequest(keys.passphrase.lowercase().replace('-', ' '))).ok()
             assertEquals(opened.handle, vault.openHandle)
 
-            val store = VaultDailyStoreRequest(opened.handle, "rosty.wa.d1", seal(opened.dailySeal))
+            val store = VaultDailyStoreRequest(opened.handle, "rosty.wa.d1", seal(opened.dailySeal!!))
             val daily = vault.dailyStore(store).ok().daily!!
+            val stay =
+                vault
+                    .stayStore(
+                        VaultDailyStoreRequest(opened.handle, "rosty.wa.s1", seal(opened.staySeal!!)),
+                    ).ok()
+                    .stay!!
             vault.lock(VaultLockRequest(opened.handle))
-            val again = vault.unlockDaily(dailyRequest(seal(daily.sealed), boot = 3)).ok()
+            // After a reboot the stay wrap opens with no prompt; it makes no new wrap.
+            val silent = vault.unlockStay(VaultStayUnlockRequest(stayBlob = seal(stay.sealed), nowMs = t0 + 1)).ok()
+            assertEquals(silent.handle, vault.openHandle)
+            assertNull(silent.staySeal)
+            // "Lock now": the stay wrap goes; the biometric unlock makes a new one.
+            vault.lock()
+            vault.stayForget()
+            assertEquals(
+                fixtureCode("vault.unlock_stay.no_stay"),
+                vault.unlockStay(VaultStayUnlockRequest(stayBlob = "x", nowMs = t0)).code(),
+            )
+            val again = vault.unlockDaily(dailyRequest(seal(daily.sealed))).ok()
             assertEquals(again.handle, vault.openHandle)
-            val rebooted = vault.unlockDaily(dailyRequest(seal(daily.sealed), boot = 4))
-            assertEquals(fixtureCode("vault.unlock_daily.rebooted"), rebooted.code())
-            assertEquals("rebooted", (rebooted as Outcome.Err).error.reason)
-            val gone = vault.unlockDaily(dailyRequest("x", boot = 3))
+            assertNotNull(again.staySeal)
+            vault.lock()
+            val idle = vault.unlockDaily(dailyRequest(seal(daily.sealed), now = t0 + 91 * day))
+            assertEquals(fixtureCode("vault.unlock_daily.idle"), idle.code())
+            assertEquals("idle", (idle as Outcome.Err).error.reason)
+            val gone = vault.unlockDaily(dailyRequest("x"))
             assertEquals(fixtureCode("vault.unlock_daily.no_daily"), gone.code())
         }
 
     @Test
-    fun changeNeedsTheNewPassphraseAndStateDropsALapsedDailyUnlock() =
+    fun anyUseMovesThe90DaysOnAndTouchIsThrottled() =
+        runTest {
+            val vault = FakeVaultOps()
+            vault.openVault(link)
+            val opened = vault.unlock(unlockRequest(List(7) { "0000" }.joinToString("-"))).ok()
+            vault.stayStore(VaultDailyStoreRequest(opened.handle, "rosty.wa.s1", "s"))
+            assertEquals(true, vault.touch(VaultTouchRequest(t0 + 80 * day)).ok().recorded)
+            assertEquals(false, vault.touch(VaultTouchRequest(t0 + 80 * day + 1_000)).ok().recorded)
+            assertNull(vault.state(VaultStateRequest(nowMs = t0 + 160 * day)).ok().expired)
+            val idle = vault.touch(VaultTouchRequest(t0 + 171 * day))
+            assertEquals(fixtureCode("vault.touch.idle"), idle.code())
+            assertNull(vault.state().ok().stay)
+            vault.lock()
+            assertEquals(fixtureCode("vault.touch.locked"), vault.touch(VaultTouchRequest(t0)).code())
+        }
+
+    @Test
+    fun changeNeedsTheNewPassphraseAndStateDropsTheWrapsAfter90IdleDays() =
         runTest {
             val vault = FakeVaultOps()
             assertEquals(fixtureCode("vault.create.no_link"), vault.create().code())
@@ -121,10 +160,13 @@ class FakeVaultOpsTest {
             assertEquals("wrong_passphrase", vault.unlock(unlockRequest(keys.passphrase, boot = 1)).code())
             val opened = vault.unlock(unlockRequest(changed.passphrase, boot = 1)).ok()
             vault.dailyStore(VaultDailyStoreRequest(opened.handle, "rosty.wa.d1", "s"))
-            val late = VaultStateRequest(bootCount = 1, nowMs = t0 + 72 * 3_600_000L + 1)
-            val idle = vault.state(late).ok()
-            assertEquals(VaultDailyRefusal.Idle, idle.dailyDropped)
+            vault.stayStore(VaultDailyStoreRequest(opened.handle, "rosty.wa.s1", "s"))
+            // A reboot and 72 h end nothing any more; 90 days without a use do.
+            assertNull(vault.state(VaultStateRequest(bootCount = 9, nowMs = t0 + 89 * day)).ok().expired)
+            val idle = vault.state(VaultStateRequest(nowMs = t0 + 90 * day + 1)).ok()
+            assertEquals(VaultIdleRefusal.Idle, idle.expired)
             assertNull(idle.daily)
+            assertNull(idle.stay)
             assertNotNull(
                 vault
                     .reset()

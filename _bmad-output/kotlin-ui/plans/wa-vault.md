@@ -37,7 +37,7 @@ No key recovery; recovery is re-linking. A forgotten passphrase deletes the vaul
 - Question + recovery code: only as strong as the code.
 - One-time recovery code: no benefit here, since re-linking recovers everything.
 
-## 6. Lock and unlock (superseded for daily use by section 13.2)
+## 6. Lock and unlock (superseded for daily use by section 13.2, and the lock timings by round 7c in section 15)
 - Lock on: screen off, 60 s in background (configurable down to immediately), manual Lock, process death.
 - Lock closes the in-memory store, the event socket, zeroizes DK; lock also ends the process for a clean wipe.
 - While locked: FCM pushes carry no text ({"kind":"message","chat","count"}). Locked, show only a content-free notification. No inline reply, no outbox retry.
@@ -72,7 +72,9 @@ Passphrase plus hardware key with NO reset path and a wipe after N failed tries:
 
 ## 13. Decisions (made for the owner: security first, no added gateway load)
 1. Memory-only: yes. Nothing readable or decryptable about messages stays on disk. Refetch made cheap by lazy sync (section 14).
-2. Passphrase rarely, biometric daily (owner constraint; supersedes "passphrase on every unlock").
+2. Passphrase rarely, biometric daily (owner constraint; supersedes "passphrase on every unlock"). **Timings
+   superseded by round 7c (section 15):** no reboot rule, no 72 h, no 30 days, no auto-lock, no screen-off lock; the
+   vault stays unlocked and needs the passphrase again only after 90 days without a use.
    - Passphrase typed at setup and again only after a reboot, on a new device or reinstall, after 72 h without an unlock, after a biometric enrolment change, or after 5 failed daily unlocks.
    - After a passphrase unlock, DK is also sealed under K_daily (AES-256-GCM, non-exportable, StrongBox when present, auth required per use, setInvalidatedByBiometricEnrollment(true)). Only the sealed blob is on disk.
    - Daily unlock: BiometricPrompt with a CryptoObject on K_daily, Class 3 biometric. Lock-screen PIN accepted only on phones with no Class 3 biometric enrolled.
@@ -96,7 +98,7 @@ Rule: cost the gateway less than today's eager sync, never more.
 - Server-side work added: none.
 To verify during implementation: merges stay correct with lazy identity catch-up; real request count of today's WaSyncRunner as the baseline for a regression test.
 
-## 15. Implementation notes (rounds 1 to 7b)
+## 15. Implementation notes (rounds 1 to 7c)
 
 Round 1, `rosty_core::vault` (pure; the caller passes `Entropy`):
 - Blobs, all AES-256-GCM with the header as associated data: key blob `RWVK | ver | kdf id | 3 x u32 kdf words | salt 16 |
@@ -392,7 +394,8 @@ Round 7a, the passphrase clock, one prompt for the four apps, the history after 
 `vault.unlock_daily {biometric}`, `wa_sync.history_save`; `:core-bridge`, `:wa`, `:shell`, `:messages`, `:stops`, the
 other manifests). Owner direction: keep the threat model (seized or cloned device, other apps, backups) and make the UX
 as good as possible; a safer option only where its UX cost is invisible.
-- Passphrase clock (replaces round 4's deviation "the 72 h count from the last passphrase unlock"). The daily blob stays
+- Passphrase clock (replaces round 4's deviation "the 72 h count from the last passphrase unlock"; **superseded by
+  round 7c**: the 72 h, the 30 days, the reboot rule and the `RWVA` seen record are gone). The daily blob stays
   sealed once, at the passphrase unlock: its authenticated stamp is the passphrase epoch (boot count, passphrase time).
   The time of the last unlock lives in a *seen* record, `RWVA | ver | boot u64 | passphrase ms i64 | last unlock ms
   i64 | nonce | tag` sealed under DK (no plaintext, the header is the associated data), stored as `seen` in
@@ -582,3 +585,88 @@ changes the gateway (13.4 said no gateway change; the owner allowed this one).
 - Not verified on a device: everything in `wa-vault-device-tests.md` 8e and 8f, in particular Keystore ECDH on the
   owner's phones, `requestDismissKeyguard` plus the vault prompt order on HyperOS, the measured answer time, and that
   the full-screen intent opens the locked-call page on HyperOS.
+
+Round 7c, the vault stays unlocked (`rosty_core::vault` `clock`/`stay`, `rosty_app_core::wa_vault`, `rosty_ffi`
+`vault.unlock_stay`/`stay_store`/`stay_forget`/`stay_prepare`/`touch`; `:core-bridge`, `:platform`, `:wa`, `:shell`,
+the four app manifests and boot receivers). Owner decision (2026-11-18), overriding the lock timings of section 6,
+13.2 and rounds 4 to 7a:
+- The vault stays unlocked all the time and locks only after 90 days with no use, or by "Lock now". Removed: the
+  auto-lock delay (setting and timer), the screen-off lock, the reboot rule (boot receivers and the boot count
+  check), the 72 h idle rule, the 30-day cap. Kept: "Lock now" (all four apps), FLAG_SECURE, encryption at rest (every
+  `RWV*` blob and the history file stay sealed under DK), the biometric unlock, the hand-over.
+- Reboot: **silent**, as designed. Every unlock (passphrase, biometric, hand-over, and the open session after a
+  passphrase change) also wraps DK under a random stay key SK: `RWVS | ver | created ms i64 | nonce | DK+tag`
+  (`vault::seal_stay`), stored in `wa-vault-stay.json` {version, alias, sealed, stay_key, created_ms} after Kotlin
+  seals it with K_stay (`rosty.wa.s.<id>`: AES-256-GCM, non-exportable, StrongBox when present else TEE, no user
+  authentication, `setUnlockedDeviceRequired(true)`; minSdk 34 >= 28, so no fallback). At each activity start of an
+  app with a vault (`VaultUseLifecycle`, a file check first so no core starts without one) and on the locked page,
+  `WaVault.unlockSilently` opens it with no prompt (`vault.unlock_stay`). The Keystore refuses K_stay while the phone
+  is locked, also before the first unlock after a boot, so a seized locked phone cannot open it. No single biometric
+  prompt is needed after a reboot; the biometric prompt is left for after "Lock now".
+- Use clock (`vault::UseClock`, pure, tested): the last use is the later of the use record and the authenticated
+  stamp of the wrap being opened (stay creation time, daily stamp time). Refused (`expired`, reason `idle` or
+  `clock_back`) after 90 days (`MAX_IDLE_MS`) or with the clock more than 5 min (`CLOCK_SKEW_MS`) behind the last
+  use; Rust then deletes the stay and daily files and the use record (`wa_vault::expire`), Kotlin their keys, and
+  the passphrase is needed ("WhatsApp wasn't used for 90 days"). The use record is `RWVU | ver | last use ms i64 |
+  nonce | tag` under DK in `wa-vault-use.json` {version, sealed, used_ms} (plain copy for `vault.state`; the sealed one
+  decides at every unlock). It is written at every unlock and by `vault.touch` at each activity start while open, at
+  most once an hour (`UseClock::record_due`, `USE_WRITE_INTERVAL_MS`); a touch in a running process past 90 days
+  locks. A missing, damaged, foreign or rolled-back record only moves the clock back to the stamp (stricter); a
+  forged plain copy is ignored by unlocks.
+- Lock: "Lock now" (here or a sibling's) runs the teardown, `vault.lock`, then `vault.stay_forget` and deletes
+  K_stay. The biometric unlock (or a hand-over, or the passphrase) opens it again and seals a new stay wrap. The
+  lock-all broadcast now goes to a manifest receiver in each app (`WaLockAllReceiver`, exported behind `WA_LINK`):
+  a running app locks; an app that is not running deletes its stay file and K_stay keys with no core
+  (`WaLockAll.forgetStay`). Before, a runtime receiver let a cold sibling keep its unlock; with silent reopening
+  that would have undone "Lock now".
+- Dead wrap: K_stay that is invalidated (`KeyPermanentlyInvalidatedException`), refused on an unlocked phone
+  (`UserNotAuthenticatedException`), gone, or that opens a blob Rust refuses: the wrap is deleted and the biometric,
+  a sibling or the passphrase takes over. A phone that is locked (`KeyguardManager.isDeviceLocked`, or the key says
+  so) keeps the wrap (`VaultCrypto.DeviceLocked`) and the unlock page shows; the next activity start tries again.
+  No stay wrap is made or used without a secure screen lock.
+- Sibling hand-over: unchanged for apps with no stay wrap yet (a vault of 7b until its first unlock in 7c, or after
+  "Lock now"); after a hand-over the app seals its own stay wrap, so a reboot needs no sibling hop.
+- Locked call (7b): `unlockInline` tries the stay wrap first, then the sibling, then the biometric prompt. With the
+  vault normally open the call passes straight from the keyguard; after "Lock now" the 7b order holds.
+- Removed prompts and settings: the "Auto-Lock" row and its choices (the `auto_lock_ms` preference is deleted at the
+  next start), the screen-off receiver, the `BOOT_COMPLETED` daily drop (`VaultBoot`, Messages still clears its
+  content-free count at boot), the passphrase reasons "phone restarted" and "30 days" (and their strings). The
+  "quick unlock after a hand-over" prompt asked for in the task never existed (7a open question 2 left it unbuilt);
+  "Turn On Quick Unlock" after a passphrase unlock stays (it is the biometric unlock used after "Lock now").
+- Compatibility: a 7b `wa-vault.json` is unchanged and opens. A 7b `wa-vault-daily.json` opens (its boot count is
+  ignored; its `seen` and `last_unlock_ms` are read and ignored, dropped at the next write); its stamp time starts
+  the use clock, so a 7b daily unlock at most 30 days old is well within 90 days. A 7b vault has no stay wrap: its
+  first unlock in 7c is the biometric prompt (or a hand-over, or the passphrase), then it is silent. `vault.state`,
+  `vault.unlock`, `vault.unlock_daily`, `vault.unlock_link` still accept `boot_count`/`biometric` and ignore them;
+  `vault.state`'s `daily_dropped` became `expired`, `vault.unlock_link` answers `{handle, stay_seal}`,
+  `vault.unlock`'s `daily_seal` is optional and `daily_expired` is now `expired`. A commit (setup, passphrase change)
+  deletes the stay, daily and use files (they hold the old DK); the open session then prepares a new stay wrap
+  (`vault.stay_prepare`). `vault.reset` and an unlink delete them all. No DB or gateway change.
+- Fixed on the way: `AndroidVaultKeystore.aliases()` listed every `rosty.wa.*` alias, so `WaVault`'s key tidy-up
+  deleted the 7b push key (`rosty.wa.push.*`) at each refresh and sealed pushes stopped opening; it now lists only
+  the vault's own kinds.
+- Trade-offs (accepted by the owner's decision): anyone who knows or watches the device PIN (or passes the phone's
+  biometric) gets WhatsApp, as for any app on the unlocked phone; the passphrase no longer protects a running or
+  rebooted phone once its screen lock is passed. Data stays readable (decrypted in RAM, the gateway reachable) the
+  whole time the vault is open, also with the screen off. Removing the screen lock invalidates K_hw and K_daily (the
+  vault is broken, reset and link again); K_stay is never used without one. `setUnlockedDeviceRequired` exists on
+  every supported device (minSdk 34). The 90-day clock is the wall clock: setting it back by more than 5 min before
+  the last recorded use is refused, but a clock set back less than that, or set back on a phone that sat unused (the
+  last recorded use is old), can stretch the 90 days; whoever can do that already passes the screen lock, so the
+  90 days are hygiene against a forgotten phone, not a barrier against its owner's PIN.
+- Tests: Rust `rosty_core::vault` (90 days, any use moves it with no cap, clock back, a record older than the stamp,
+  the hourly throttle, the use record and the stay wrap under their keys only, magics), `rosty_app_core::wa_vault`
+  (a 7b daily file with its old clock fields, the stay file owner-only with SK hidden, the use record under DK only,
+  the plain clock and `expire`, `remove_all`), `rosty_ffi` unit tests (the life cycle with the stay wrap and "Lock
+  now", 90 days and the touch throttle, the sealed clock against a forged plain copy, a damaged stay blob, a
+  passphrase change and `stay_prepare`) and fixtures (`vault.unlock_stay` 6, `vault.stay_store` 3, `stay_forget`,
+  `stay_prepare` 2, `vault.touch` 4, `vault.state` 7, `vault.unlock_daily` 7; the seeded fixture vault now carries a
+  stay wrap). Kotlin: `:core-bridge` `FakeVaultOpsTest` and the contracts, `:platform` `VaultKeystoreTest` (K_stay
+  spec, aliases, the push alias not listed, the fake's no-prompt key), `:wa` `WaVaultTest` (silent reopen after a
+  restart or reboot, 90 days, no cap, a running process past 90 days, "Lock now" then the biometric, a locked phone, a
+  dead K_stay, no screen lock, `unlockInline` silent first, the hand-over seals its own stay wrap, a change keeps it
+  silent), `WaLockAllTest`, `VaultShotTest` goldens whose copy changed, `:shell` `VaultUseLifecycleTest`, the four
+  manifest tests (`WaLockAllReceiver`).
+- Not verified on a device: everything in `wa-vault-device-tests.md` 4, 5 and 8g, in particular K_stay's behaviour
+  before the first unlock after a boot and while locked on HyperOS (the exception the Keystore throws), the manifest
+  lock-all receiver reaching a stopped app, and the hourly use write.

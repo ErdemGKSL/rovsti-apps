@@ -46,6 +46,18 @@ class VaultKeystoreTest {
         assertTrue(pin.isUnlockedDeviceRequired)
     }
 
+    @Test fun theStayKeyNeedsNoPromptButAnUnlockedPhone() {
+        val spec = AndroidVaultKeystore.spec("rosty.wa.s.a", VaultKeyAuth.UnlockedDevice, strongBox = true)
+        assertFalse(spec.isUserAuthenticationRequired)
+        assertTrue(spec.isUnlockedDeviceRequired)
+        assertFalse(spec.isInvalidatedByBiometricEnrollment)
+        assertTrue(spec.isStrongBoxBacked)
+        assertEquals(256, spec.keySize)
+        assertArrayEquals(arrayOf(KeyProperties.BLOCK_MODE_GCM), spec.blockModes)
+        assertTrue(spec.isRandomizedEncryptionRequired)
+        assertFalse(AndroidVaultKeystore.spec("rosty.wa.s.b", VaultKeyAuth.UnlockedDevice, false).isStrongBoxBacked)
+    }
+
     @Test fun aliasesNameTheirKindAndAuth() {
         val strong = VaultDevice(secureLockScreen = true, strongBiometric = true, strongBox = false)
         val pinOnly = strong.copy(strongBiometric = false)
@@ -62,6 +74,12 @@ class VaultKeystoreTest {
         assertEquals(VaultKeyKind.Daily, VaultAlias.kindOf("rosty.wa.d1"))
         assertNull(VaultAlias.kindOf("other"))
         assertTrue(VaultAlias.hardware() != VaultAlias.hardware())
+        // Round 7c: the stay key, no prompt.
+        assertEquals(VaultKeyKind.Stay, VaultAlias.kindOf(VaultAlias.stay()))
+        assertEquals(VaultKeyAuth.UnlockedDevice, VaultAlias.authOf(VaultAlias.stay("x")))
+        assertEquals(VaultKeyKind.Stay, VaultAlias.kindOf("rosty.wa.s1"))
+        // The push key (round 7b) shares the prefix but is no vault key: the vault never lists or deletes it.
+        assertNull(VaultAlias.kindOf("rosty.wa.push.0123456789abcdef"))
     }
 
     @Test fun aSealedBlobIsVersionNonceAndCiphertext() {
@@ -130,5 +148,20 @@ class VaultKeystoreTest {
             keystore.failedAttempts = 2
             keystore.open(other, y, prompt) { failures++ }
             assertEquals(2, failures)
+        }
+
+    @Test fun theFakeStayKeyShowsNoPromptAndWaitsForAnUnlockedPhone() =
+        runTest {
+            val keystore = FakeVaultKeystore()
+            val prompt = VaultPrompt("Unlock", negative = "Cancel")
+            val alias = keystore.newAlias(VaultKeyKind.Stay)
+            val sealed = (keystore.seal(alias, "abc", prompt) as VaultCrypto.Done).b64
+            assertEquals(VaultCrypto.Done("abc"), keystore.open(alias, sealed, prompt))
+            assertTrue("no prompt", keystore.prompts.isEmpty())
+            keystore.device = keystore.device.copy(locked = true)
+            assertEquals(VaultCrypto.DeviceLocked, keystore.open(alias, sealed, prompt))
+            keystore.device = keystore.device.copy(locked = false, secureLockScreen = false)
+            assertEquals(VaultCrypto.Invalidated, keystore.open(alias, sealed, prompt))
+            assertEquals(listOf("seal", "open", "open"), keystore.stayOps)
         }
 }

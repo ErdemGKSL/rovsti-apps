@@ -6,16 +6,19 @@ import java.util.Base64
 
 /**
  * The Keystore half of the WhatsApp vault (`_bmad-output/kotlin-ui/plans/wa-vault.md` 3, 13.2, 15). Kotlin never holds
- * the data key, the daily key or the connect key: it only seals and opens the opaque blobs Rust hands it (the key blob
- * with K_hw, the daily blob with K_daily) and gives the result back. Every operation needs the user: each seal and each
- * open shows the system prompt (biometric, or the screen lock where the key allows it), because both keys require
- * authentication per use.
+ * the data key, the daily or stay key or the connect key: it only seals and opens the opaque blobs Rust hands it (the
+ * key blob with K_hw, the daily blob with K_daily, the stay blob with K_stay) and gives the result back. K_hw and
+ * K_daily need the user: each seal and each open shows the system prompt (biometric, or the screen lock where the key
+ * allows it). K_stay (round 7c) shows none: it only needs the phone to be unlocked.
  *
  * - K_hw ([VaultKeyKind.Hardware]): AES-256-GCM, non-exportable, StrongBox when the phone has it (else the TEE),
  *   usable only while the phone is unlocked, a Class 3 biometric or the screen lock per use, gone when a biometric is
  *   enrolled. One alias per passphrase: a passphrase change makes a new one and deletes the old.
  * - K_daily ([VaultKeyKind.Daily]): the same, but a Class 3 biometric only; the screen lock only on a phone with no
  *   Class 3 biometric enrolled. Its alias says which ([VaultKeyAuth]).
+ * - K_stay ([VaultKeyKind.Stay], round 7c): AES-256-GCM, non-exportable, StrongBox or the TEE, no user authentication,
+ *   but `setUnlockedDeviceRequired(true)`: the hardware refuses it while the phone is locked (also before the first
+ *   unlock after a reboot), so the vault reopens with no prompt only once the person has unlocked the phone.
  *
  * The real one is [AndroidVaultKeystore]; JVM tests use `FakeVaultKeystore`.
  */
@@ -49,8 +52,8 @@ interface VaultKeystore {
     fun aliases(): List<String>
 }
 
-/** Which key: K_hw (the passphrase vault) or K_daily (the biometric unlock). */
-enum class VaultKeyKind { Hardware, Daily }
+/** Which key: K_hw (the passphrase vault), K_daily (the biometric unlock) or K_stay (the silent unlock, round 7c). */
+enum class VaultKeyKind { Hardware, Daily, Stay }
 
 /** How a key is unlocked for one operation. */
 enum class VaultKeyAuth {
@@ -62,6 +65,9 @@ enum class VaultKeyAuth {
 
     /** The screen lock only (K_daily on a phone without a Class 3 biometric). */
     Credential,
+
+    /** No prompt; the phone must be unlocked (K_stay, round 7c). */
+    UnlockedDevice,
 }
 
 /** What the phone offers for the vault keys. */
@@ -72,6 +78,8 @@ data class VaultDevice(
     val strongBiometric: Boolean,
     /** The phone has a StrongBox Keymaster. */
     val strongBox: Boolean,
+    /** The phone is locked right now (`KeyguardManager.isDeviceLocked`): K_stay cannot work until it is unlocked. */
+    val locked: Boolean = false,
 )
 
 /** The words of the system prompt. [negative] is the button of a biometric-only prompt (the screen lock has its own). */
@@ -102,6 +110,9 @@ sealed interface VaultCrypto {
     /** Too many failed attempts: the system locked the biometric out for a while. */
     data object LockedOut : VaultCrypto
 
+    /** The phone is locked: K_stay works again once it is unlocked (the key is fine, round 7c). */
+    data object DeviceLocked : VaultCrypto
+
     /** The sealed bytes do not open (damaged), or the Keystore failed. [reason] is for the log only. */
     data class Failed(
         val reason: String,
@@ -110,7 +121,8 @@ sealed interface VaultCrypto {
 
 /**
  * The alias naming: `rosty.wa.k.<id>` for K_hw; `rosty.wa.d.b.<id>` (biometric) and `rosty.wa.d.c.<id>` (screen lock)
- * for K_daily. Older or test aliases (`rosty.wa.k1`, `rosty.wa.d1`) read by their kind's prefix.
+ * for K_daily; `rosty.wa.s.<id>` for K_stay (round 7c). Older or test aliases (`rosty.wa.k1`, `rosty.wa.d1`,
+ * `rosty.wa.s1`) read by their kind's prefix.
  */
 object VaultAlias {
     const val PREFIX = "rosty.wa."
@@ -118,9 +130,12 @@ object VaultAlias {
     private const val DAILY = "rosty.wa.d"
     private const val DAILY_BIOMETRIC = "rosty.wa.d.b."
     private const val DAILY_CREDENTIAL = "rosty.wa.d.c."
+    const val STAY = "rosty.wa.s"
     private const val ID_BYTES = 8
 
     fun hardware(id: String = randomId()): String = "$HARDWARE.$id"
+
+    fun stay(id: String = randomId()): String = "$STAY.$id"
 
     fun daily(
         auth: VaultKeyAuth,
@@ -131,11 +146,13 @@ object VaultAlias {
         when {
             alias.startsWith(DAILY) -> VaultKeyKind.Daily
             alias.startsWith(HARDWARE) -> VaultKeyKind.Hardware
+            alias.startsWith(STAY) -> VaultKeyKind.Stay
             else -> null
         }
 
     fun authOf(alias: String): VaultKeyAuth =
         when {
+            alias.startsWith(STAY) -> VaultKeyAuth.UnlockedDevice
             alias.startsWith(DAILY_CREDENTIAL) -> VaultKeyAuth.Credential
             alias.startsWith(DAILY) -> VaultKeyAuth.Biometric
             else -> VaultKeyAuth.BiometricOrCredential

@@ -11,27 +11,27 @@ import kotlinx.serialization.Serializable
 // Models of `vault.*` (the WhatsApp vault, `_bmad-output/kotlin-ui/plans/wa-vault.md`), mirroring
 // `crates/rosty_ffi/fixtures/vault.*`. Every request may name `dir` (fixtures, tests); apps leave it out and the core
 // uses its data directory. Byte fields are standard base64 and hold ciphertext only: Kotlin seals and unseals them
-// with its Keystore keys (K_hw for `seal`/`hwSealed`, K_daily for `dailySeal`/`sealed`) and never sees DK, the
-// daily key or the connect key. The passphrase is the one secret that crosses, because the user reads and types it.
+// with its Keystore keys (K_hw for `seal`/`hwSealed`, K_daily for `dailySeal`/`daily.sealed`, K_stay for
+// `staySeal`/`stay.sealed`) and never sees DK, the daily or stay key, or the connect key. The passphrase is the one
+// secret that crosses, because the user reads and types it.
 
-/** Why a daily (biometric) unlock is no longer honoured; the passphrase is needed again. */
+/**
+ * Why the vault no longer opens without the passphrase (round 7c): 90 days without a use, or the clock set back before
+ * the last use. Every wrap that opened it without the passphrase (stay, daily) was deleted.
+ */
 @Serializable
-enum class VaultDailyRefusal {
-    @SerialName("rebooted")
-    Rebooted,
-
+enum class VaultIdleRefusal {
     @SerialName("idle")
     Idle,
 
     @SerialName("clock_back")
     ClockBack,
-
-    /** 30 days since the passphrase, however often the biometric unlocked (round 7a). */
-    @SerialName("expired")
-    Expired,
 }
 
-/** `vault.state`. With [bootCount] and [nowMs] a lapsed daily unlock is deleted and named in `dailyDropped`. */
+/**
+ * `vault.state`. With [nowMs], wraps whose use clock lapsed are deleted and named in [VaultState.expired]. [bootCount]
+ * is read and ignored by the core since round 7c (a reboot ends nothing); apps leave it out.
+ */
 @Serializable
 data class VaultStateRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
@@ -46,15 +46,24 @@ data class VaultInfo(
     @SerialName("hw_sealed") val hwSealed: String,
 )
 
-/** The daily unlock: the K_daily alias and the K_daily-sealed daily blob to decrypt before `vault.unlock_daily`. */
+/** The biometric unlock: the K_daily alias and the K_daily-sealed daily blob to decrypt before `vault.unlock_daily`. */
 @Serializable
 data class VaultDailyInfo(
     val alias: String,
     val sealed: String,
     @SerialName("boot_count") val bootCount: Long,
     @SerialName("unlocked_ms") val unlockedMs: Long,
-    /** The last daily unlock of this passphrase epoch (round 7a: the 72 h count from it). */
-    @SerialName("last_unlock_ms") @EncodeDefault(NEVER) val lastUnlockMs: Long? = null,
+)
+
+/**
+ * The silent unlock (round 7c): the K_stay alias and the K_stay-sealed stay blob to decrypt (no prompt, the phone must
+ * be unlocked) before `vault.unlock_stay`.
+ */
+@Serializable
+data class VaultStayInfo(
+    val alias: String,
+    val sealed: String,
+    @SerialName("created_ms") val createdMs: Long,
 )
 
 /** The open session: its handle and the link it serves (no key). */
@@ -69,7 +78,9 @@ data class VaultUnlockedInfo(
 data class VaultState(
     @EncodeDefault(NEVER) val vault: VaultInfo? = null,
     @EncodeDefault(NEVER) val daily: VaultDailyInfo? = null,
-    @SerialName("daily_dropped") @EncodeDefault(NEVER) val dailyDropped: VaultDailyRefusal? = null,
+    @EncodeDefault(NEVER) val stay: VaultStayInfo? = null,
+    /** The wraps were dropped by this read: 90 days without a use, or the clock set back. */
+    @EncodeDefault(NEVER) val expired: VaultIdleRefusal? = null,
     /** A plaintext `whatsapp-link.json` is still there: run the migration (create, commit, wipe). */
     @SerialName("legacy_link") val legacyLink: Boolean,
     @EncodeDefault(NEVER) val unlocked: VaultUnlockedInfo? = null,
@@ -114,8 +125,8 @@ data class VaultCommitRequest(
 )
 
 /**
- * `vault.unlock`: [keyBlob] is [VaultInfo.hwSealed] decrypted with K_hw; [bootCount] (`Settings.Global.BOOT_COUNT`)
- * and [nowMs] go into the daily blob.
+ * `vault.unlock`: [keyBlob] is [VaultInfo.hwSealed] decrypted with K_hw; [bootCount] (`Settings.Global.BOOT_COUNT`,
+ * kept in the daily blob's format, not checked) and [nowMs] go into the daily and stay blobs and the use clock.
  */
 @Serializable
 data class VaultUnlockRequest(
@@ -129,16 +140,35 @@ data class VaultUnlockRequest(
 }
 
 /**
- * `vault.unlock_daily`: [dailyBlob] is [VaultDailyInfo.sealed] decrypted with K_daily. [biometric]: K_daily is the
- * Class 3 biometric key, so the unlock resets the 72 h idle clock (round 7a; a screen-lock key does not).
+ * `vault.unlock_daily`: [dailyBlob] is [VaultDailyInfo.sealed] decrypted with K_daily. [bootCount] is read and ignored
+ * by the core since round 7c; apps leave it out.
  */
 @Serializable
 data class VaultDailyUnlockRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
     @SerialName("daily_blob") val dailyBlob: String,
-    @SerialName("boot_count") val bootCount: Long,
+    @SerialName("boot_count") @EncodeDefault(NEVER) val bootCount: Long? = null,
     @SerialName("now_ms") val nowMs: Long,
-    @EncodeDefault(NEVER) val biometric: Boolean = false,
+)
+
+/** `vault.unlock_stay` (round 7c): [stayBlob] is [VaultStayInfo.sealed] decrypted with K_stay (no prompt). */
+@Serializable
+data class VaultStayUnlockRequest(
+    @EncodeDefault(NEVER) val dir: String? = null,
+    @SerialName("stay_blob") val stayBlob: String,
+    @SerialName("now_ms") val nowMs: Long,
+)
+
+/** `vault.touch` (round 7c): the app is in use at [nowMs]; the core writes it at most once an hour. */
+@Serializable
+data class VaultTouchRequest(
+    @SerialName("now_ms") val nowMs: Long,
+)
+
+/** Whether `vault.touch` wrote the use now. */
+@Serializable
+data class VaultTouched(
+    val recorded: Boolean,
 )
 
 /**
@@ -149,26 +179,24 @@ data class VaultDailyUnlockRequest(
 data class VaultLinkUnlockRequest(
     @EncodeDefault(NEVER) val dir: String? = null,
     val link: VaultLink,
-    @SerialName("boot_count") val bootCount: Long,
     @SerialName("now_ms") val nowMs: Long,
 ) {
-    override fun toString(): String = "VaultLinkUnlockRequest(dir=$dir, link=…, bootCount=$bootCount, nowMs=$nowMs)"
+    override fun toString(): String = "VaultLinkUnlockRequest(dir=$dir, link=…, nowMs=$nowMs)"
 }
 
-/** The session `vault.unlock_link` opened. */
-@Serializable
-data class VaultHandle(
-    val handle: Long,
-)
-
-/** An unlocked session; [dailySeal] is sealed with K_daily and handed to `vault.daily_store` (optional). */
+/**
+ * An unlocked session. [dailySeal] (a passphrase unlock only) is sealed with K_daily and handed to `vault.daily_store`;
+ * [staySeal] (every unlock but the silent one, round 7c) is sealed with K_stay and handed to `vault.stay_store`. Both
+ * optional: without them the next unlock needs the biometric or the passphrase.
+ */
 @Serializable
 data class VaultUnlocked(
     val handle: Long,
-    @SerialName("daily_seal") val dailySeal: String,
+    @SerialName("daily_seal") @EncodeDefault(NEVER) val dailySeal: String? = null,
+    @SerialName("stay_seal") @EncodeDefault(NEVER) val staySeal: String? = null,
 )
 
-/** `vault.daily_store`: the K_daily-sealed [VaultUnlocked.dailySeal]. */
+/** `vault.daily_store` and `vault.stay_store`: the Keystore-sealed blob of the unlock and the key's alias. */
 @Serializable
 data class VaultDailyStoreRequest(
     val handle: Long,
@@ -176,7 +204,7 @@ data class VaultDailyStoreRequest(
     val sealed: String,
 )
 
-/** `vault.daily_forget` and `vault.reset`. */
+/** `vault.daily_forget`, `vault.stay_forget` and `vault.reset`. */
 @Serializable
 data class VaultDirRequest(
     @EncodeDefault(NEVER) val dir: String? = null,

@@ -5,9 +5,15 @@
 //! releases every `wa.open` gateway opened from the session. One session per process: an unlock replaces the last.
 //!
 //! The Keystore layers are Kotlin's. What crosses the boundary is ciphertext only: the key blob (DK under KEK_p)
-//! that Kotlin seals with K_hw, and the daily blob (DK under DDK) that it seals with K_daily. The one secret Kotlin
-//! holds is the passphrase, which it shows once and the user types; Rust zeroizes its copies (the request and
-//! answer buffers of every `vault.*` call, see `jni_exports`).
+//! that Kotlin seals with K_hw, the daily blob (DK under DDK) that it seals with K_daily, and the stay blob (DK under
+//! SK, round 7c) that it seals with K_stay. The one secret Kotlin holds is the passphrase, which it shows once and
+//! the user types; Rust zeroizes its copies (the request and answer buffers of every `vault.*` call, see
+//! `jni_exports`).
+//!
+//! Round 7c: the vault stays unlocked. Every unlock prepares a stay blob; with it (`vault.unlock_stay`) the app
+//! reopens its vault without a prompt, also after a reboot. The only time rule left is the use clock: 90 days
+//! without a use (`vault.touch` and every unlock record one, at most once an hour) and every wrap that opens without
+//! the passphrase is deleted.
 //!
 //! Randomness comes from the OS (`getrandom`); `rosty_core::vault` stays pure.
 
@@ -17,10 +23,12 @@ use std::sync::Mutex;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use rosty_app_core::wa_vault::wipe::{self, AppDirs, WipeReport};
-use rosty_app_core::wa_vault::{self, CachedPicture, DailyFile, VaultCache, VaultFile};
+use rosty_app_core::wa_vault::{
+    self, CachedPicture, DailyFile, StayFile, UseFile, VaultCache, VaultFile,
+};
 use rosty_core::vault::{
-    self, DailyKey, DailyRefusal, DailyStamp, DataKey, Kdf, Passphrase, PassphraseError, VaultBody,
-    VaultError,
+    self, DailyKey, DailyStamp, DataKey, IdleRefusal, Kdf, Passphrase, PassphraseError, StayKey,
+    UseClock, VaultBody, VaultError,
 };
 use rosty_wa_proto::{ConnectKey, GatewayUrl};
 use serde::{Deserialize, Serialize};
@@ -47,10 +55,39 @@ pub(super) const OPS: &[OpSpec] = &[
     op!(
         "vault.unlock_link",
         LinkUnlockReq,
-        HandleAns,
+        UnlockedAns,
         unlock_link,
         unlock_link_cases
     ),
+    op!(
+        "vault.unlock_stay",
+        StayUnlockReq,
+        UnlockedAns,
+        unlock_stay,
+        unlock_stay_cases
+    ),
+    op!(
+        "vault.stay_store",
+        DailyStoreReq,
+        StateAns,
+        stay_store,
+        stay_store_cases
+    ),
+    op!(
+        "vault.stay_forget",
+        DirReq,
+        StateAns,
+        stay_forget,
+        stay_forget_cases
+    ),
+    op!(
+        "vault.stay_prepare",
+        TouchReq,
+        UnlockedAns,
+        stay_prepare,
+        stay_prepare_cases
+    ),
+    op!("vault.touch", TouchReq, TouchAns, touch, touch_cases),
     op!(
         "vault.daily_store",
         DailyStoreReq,
@@ -129,6 +166,12 @@ struct PendingDaily {
     stamp: DailyStamp,
 }
 
+/// A stay blob waiting for Kotlin's K_stay seal (`vault.stay_store`, round 7c).
+struct PendingStay {
+    key: StayKey,
+    created_ms: i64,
+}
+
 /// What an unlocked (or newly created) vault holds in memory.
 pub(crate) struct Session {
     dir: PathBuf,
@@ -138,6 +181,11 @@ pub(crate) struct Session {
     committed: bool,
     pending: Option<Pending>,
     daily: Option<PendingDaily>,
+    stay: Option<PendingStay>,
+    /// The last use known (round 7c): 90 days past it and `vault.touch` refuses.
+    clock: UseClock,
+    /// When this session last wrote the use record (the writes are throttled to one an hour).
+    recorded_ms: Option<i64>,
     /// `wa.open` handles that took the connect key from this session.
     gateways: Vec<i64>,
     /// The identity and picture cache (`wa-vault-cache.bin`, plan 13.5) once read or written in this session.
@@ -274,9 +322,12 @@ fn vault_file(dir: &Path) -> Result<VaultFile, FfiError> {
 struct StateReq {
     #[serde(default)]
     dir: Option<String>,
-    /// With `now_ms`: a daily unlock that lapsed (reboot, 72 h) is deleted and named in `daily_dropped`.
+    /// Read and ignored since round 7c (a reboot no longer ends any unlock).
     #[serde(default)]
+    #[allow(dead_code)]
     boot_count: Option<u64>,
+    /// With it: when the plain copies show 90 days without a use (or a clock set back), every wrap that opens the
+    /// vault without the passphrase is deleted and the reason named in `expired`.
     #[serde(default)]
     now_ms: Option<i64>,
 }
@@ -295,9 +346,15 @@ struct DailyInfo {
     sealed: String,
     boot_count: u64,
     unlocked_ms: i64,
-    /// The last daily unlock of this passphrase epoch (round 7a: the 72 h count from it), from the plain copy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_unlock_ms: Option<i64>,
+}
+
+/// The stay-unlocked wrap (round 7c).
+#[derive(Serialize)]
+struct StayInfo {
+    alias: String,
+    /// The K_stay-sealed stay blob: Kotlin decrypts it (no prompt) and passes the result to `vault.unlock_stay`.
+    sealed: String,
+    created_ms: i64,
 }
 
 #[derive(Serialize)]
@@ -314,29 +371,30 @@ struct StateAns {
     #[serde(skip_serializing_if = "Option::is_none")]
     daily: Option<DailyInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    daily_dropped: Option<DailyRefusal>,
+    stay: Option<StayInfo>,
+    /// The wraps were dropped just now: 90 days without a use, or the clock set back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expired: Option<IdleRefusal>,
     /// A plaintext `whatsapp-link.json` is still there: the migration (plan 8) has not run.
     legacy_link: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     unlocked: Option<UnlockedInfo>,
 }
 
-fn state_of(dir: &Path, check: Option<(u64, i64)>) -> Result<StateAns, FfiError> {
+fn state_of(dir: &Path, now_ms: Option<i64>) -> Result<StateAns, FfiError> {
     let vault = VaultFile::load(dir).map_err(file_error)?;
-    let mut daily = DailyFile::load(dir).ok().flatten();
-    let mut daily_dropped = None;
-    if vault.is_none() && daily.is_some() {
-        // A daily blob of a vault that is gone opens nothing.
-        DailyFile::remove(dir)?;
-        daily = None;
-    }
-    if let (Some(file), Some((boot_count, now_ms))) = (&daily, check)
-        && let Err(refusal) = file.plain_clock().check(boot_count, now_ms)
+    let mut expired = None;
+    if vault.is_none() {
+        // A daily or stay blob of a vault that is gone opens nothing.
+        wa_vault::expire(dir)?;
+    } else if let Some(now_ms) = now_ms
+        && let Some(Err(refusal)) = wa_vault::plain_clock(dir).map(|clock| clock.check(now_ms))
     {
-        DailyFile::remove(dir)?;
-        daily = None;
-        daily_dropped = Some(refusal);
+        wa_vault::expire(dir)?;
+        expired = Some(refusal);
     }
+    let daily = DailyFile::load(dir).ok().flatten();
+    let stay = StayFile::load(dir).ok().flatten();
     let unlocked = current().and_then(|handle| {
         handles::global()
             .with(handle, |s: &mut Session| {
@@ -358,17 +416,20 @@ fn state_of(dir: &Path, check: Option<(u64, i64)>) -> Result<StateAns, FfiError>
             sealed: b64(&d.sealed),
             boot_count: d.stamp.boot_count,
             unlocked_ms: d.stamp.unlocked_ms,
-            last_unlock_ms: d.last_unlock_ms,
         }),
-        daily_dropped,
+        stay: stay.map(|s| StayInfo {
+            alias: s.alias.clone(),
+            sealed: b64(&s.sealed),
+            created_ms: s.created_ms,
+        }),
+        expired,
         legacy_link: wipe::legacy_link(dir).is_some(),
         unlocked,
     })
 }
 
 fn vault_state(req: StateReq) -> Result<StateAns, FfiError> {
-    let check = req.boot_count.zip(req.now_ms);
-    state_of(&dir_of(&req.dir)?, check)
+    state_of(&dir_of(&req.dir)?, req.now_ms)
 }
 
 /// The seeded vault of the fixtures (`rosty_app_core/tests/fixtures/dirs/wa_vault`): its passphrase, the key blob
@@ -376,6 +437,7 @@ fn vault_state(req: StateReq) -> Result<StateAns, FfiError> {
 pub(crate) mod seed {
     pub const PASSPHRASE: &str = "0000-0000-0000-0000-0000-0000-0000";
     pub const BOOT_COUNT: u64 = 7;
+    /// The stamp of the seeded daily blob and the creation time of the seeded stay blob.
     pub const UNLOCKED_MS: i64 = 1_800_000_000_000;
 
     /// A well-formed passphrase that is not the seed's.
@@ -391,14 +453,25 @@ fn state_cases() -> Vec<Case> {
         Case::new(json!({"dir": "$DIR"})).seeded("wa_vault"),
         Case::named("empty", json!({"dir": "$DIR/nothing-here"})).seeded("wa_vault"),
         Case::named("legacy", json!({"dir": "$DIR"})).seeded("wa"),
+        // A reboot ends nothing since round 7c: the boot count is read and ignored.
         Case::named(
             "rebooted",
             json!({"dir": "$DIR", "boot_count": seed::BOOT_COUNT + 1, "now_ms": seed::UNLOCKED_MS}),
         )
         .seeded("wa_vault"),
         Case::named(
-            "daily_ok",
-            json!({"dir": "$DIR", "boot_count": seed::BOOT_COUNT, "now_ms": seed::UNLOCKED_MS + 60_000}),
+            "within_90_days",
+            json!({"dir": "$DIR", "now_ms": seed::UNLOCKED_MS + vault::MAX_IDLE_MS}),
+        )
+        .seeded("wa_vault"),
+        Case::named(
+            "expired",
+            json!({"dir": "$DIR", "now_ms": seed::UNLOCKED_MS + vault::MAX_IDLE_MS + 1}),
+        )
+        .seeded("wa_vault"),
+        Case::named(
+            "clock_back",
+            json!({"dir": "$DIR", "now_ms": seed::UNLOCKED_MS - vault::CLOCK_SKEW_MS - 1}),
         )
         .seeded("wa_vault"),
     ]
@@ -495,6 +568,9 @@ fn create(req: CreateReq) -> Result<KeysAns, FfiError> {
         committed: false,
         pending: Some(pending),
         daily: None,
+        stay: None,
+        clock: UseClock::new(0, None),
+        recorded_ms: None,
         gateways: Vec::new(),
         cache: None,
     });
@@ -562,11 +638,12 @@ fn commit(req: CommitReq) -> Result<StateAns, FfiError> {
         }
         s.key = pending.key;
         s.committed = true;
-        // A daily blob seals the old DK, and the caches sealed under it no longer open.
-        let _ = DailyFile::remove(&s.dir);
+        // The daily and stay blobs seal the old DK, the use record and the caches sealed under it no longer open.
+        let _ = wa_vault::expire(&s.dir);
         let _ = std::fs::remove_file(s.dir.join(wa_vault::CACHE_FILE));
         let _ = wa_vault::remove_file(&s.dir, wa_vault::HISTORY_FILE);
         s.daily = None;
+        s.stay = None;
         Ok(s.dir.clone())
     })??;
     set_current(req.handle);
@@ -598,8 +675,10 @@ struct UnlockReq {
     /// The key blob, as K_hw decrypted `hw_sealed`, base64.
     key_blob: String,
     passphrase: Zeroizing<String>,
-    /// `Settings.Global.BOOT_COUNT` and the wall clock, sealed into the daily blob.
+    /// `Settings.Global.BOOT_COUNT`: stamped into the daily blob (its format), not checked since round 7c.
+    #[serde(default)]
     boot_count: u64,
+    /// The wall clock: the stamp of the daily and stay blobs and the use recorded.
     now_ms: i64,
 }
 
@@ -607,8 +686,13 @@ struct UnlockReq {
 struct UnlockedAns {
     handle: i64,
     /// A fresh daily blob for Kotlin to seal with K_daily and hand to `vault.daily_store` (optional: without it,
-    /// the next cold start needs the passphrase).
-    daily_seal: String,
+    /// unlocking after a "Lock now" needs the passphrase). Only a passphrase unlock prepares one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    daily_seal: Option<String>,
+    /// A fresh stay blob for Kotlin to seal with K_stay and hand to `vault.stay_store` (round 7c; no prompt). Left
+    /// out when the vault was opened with its stay blob, which stays.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stay_seal: Option<String>,
 }
 
 /// DK wrapped under the connect key of `body` (round 7a): the hand-over of the link by a sibling app opens it.
@@ -618,34 +702,96 @@ fn link_wrap(key: &DataKey, body: &VaultBody) -> Vec<u8> {
     vault::wrap_for_link(key, body.connect_key(), salt, vault::nonce(&mut os_entropy))
 }
 
-/// Opens the body of the vault in `dir` with DK and makes the session; a daily blob is prepared. A vault of an
-/// earlier build gets its link wrap now (best effort: the unlock does not depend on it).
-fn open_session(dir: PathBuf, key: DataKey, stamp: DailyStamp) -> Result<UnlockedAns, FfiError> {
+/// What an unlock prepares besides the session.
+struct Opening {
+    /// The use clock the unlock starts from (a fresh authentication starts it now).
+    clock: UseClock,
+    /// Prepare a daily blob (a passphrase unlock).
+    daily: Option<DailyStamp>,
+    /// Prepare a stay blob (every unlock but the one by the stay blob itself).
+    stay: bool,
+}
+
+/// Records a use at `now_ms` in `s` when the throttle allows (best effort: a failed write only means the 90 days
+/// count from the last recorded use). Answers whether it wrote.
+fn note_use(s: &mut Session, now_ms: i64) -> bool {
+    s.clock = s.clock.used_at(now_ms);
+    if !UseClock::record_due(s.recorded_ms, now_ms) {
+        return false;
+    }
+    let written = UseFile::new(&s.key, s.clock.last_use_ms, &mut os_entropy)
+        .save(&s.dir)
+        .is_ok();
+    if written {
+        s.recorded_ms = Some(now_ms);
+    }
+    written
+}
+
+/// Opens the body of the vault in `dir` with DK and makes the session; the blobs of `opening` are prepared and a
+/// use at `now_ms` is recorded. A vault of an earlier build gets its link wrap now (best effort: the unlock does
+/// not depend on it).
+fn open_session(
+    dir: PathBuf,
+    key: DataKey,
+    now_ms: i64,
+    opening: Opening,
+) -> Result<UnlockedAns, FfiError> {
     let mut file = vault_file(&dir)?;
     let body = vault::open_body(&key, &file.body).map_err(vault_error)?;
     if file.link_sealed.is_none() {
         file.link_sealed = Some(link_wrap(&key, &body));
         let _ = file.save(&dir);
     }
-    let daily_key = DailyKey::generate(&mut os_entropy);
-    let daily_blob = vault::seal_daily(&daily_key, &key, stamp, vault::nonce(&mut os_entropy));
-    let handle = handles::global().insert(Session {
+    let daily = opening.daily.map(|stamp| {
+        let daily_key = DailyKey::generate(&mut os_entropy);
+        let blob = vault::seal_daily(&daily_key, &key, stamp, vault::nonce(&mut os_entropy));
+        (
+            PendingDaily {
+                key: daily_key,
+                stamp,
+            },
+            blob,
+        )
+    });
+    let stay = opening.stay.then(|| {
+        let stay_key = StayKey::generate(&mut os_entropy);
+        let blob = vault::seal_stay(&stay_key, &key, now_ms, vault::nonce(&mut os_entropy));
+        (
+            PendingStay {
+                key: stay_key,
+                created_ms: now_ms,
+            },
+            blob,
+        )
+    });
+    // The last use already on disk counts as recorded: the throttle starts from it.
+    let recorded_ms = UseFile::load(&dir)
+        .ok()
+        .flatten()
+        .and_then(|used| used.sealed_ms(&key));
+    let daily_seal = daily.as_ref().map(|(_, blob)| b64(blob));
+    let stay_seal = stay.as_ref().map(|(_, blob)| b64(blob));
+    let mut session = Session {
         dir,
         key,
         body,
         committed: true,
         pending: None,
-        daily: Some(PendingDaily {
-            key: daily_key,
-            stamp,
-        }),
+        daily: daily.map(|(pending, _)| pending),
+        stay: stay.map(|(pending, _)| pending),
+        clock: opening.clock,
+        recorded_ms,
         gateways: Vec::new(),
         cache: None,
-    });
+    };
+    note_use(&mut session, now_ms);
+    let handle = handles::global().insert(session);
     set_current(handle);
     Ok(UnlockedAns {
         handle,
-        daily_seal: b64(&daily_blob),
+        daily_seal,
+        stay_seal,
     })
 }
 
@@ -659,9 +805,14 @@ fn unlock(req: UnlockReq) -> Result<UnlockedAns, FfiError> {
     open_session(
         dir,
         key,
-        DailyStamp {
-            boot_count: req.boot_count,
-            unlocked_ms: req.now_ms,
+        req.now_ms,
+        Opening {
+            clock: UseClock::new(req.now_ms, None),
+            daily: Some(DailyStamp {
+                boot_count: req.boot_count,
+                unlocked_ms: req.now_ms,
+            }),
+            stay: true,
         },
     )
 }
@@ -725,8 +876,15 @@ fn unlock_cases() -> Vec<Case> {
         Case::named("damaged", unlock_request(json!({"key_blob": "UldWSwE="}))).seeded("wa_vault"),
     ]
     .into_iter()
-    .map(|case| case.volatile(&["daily_seal"]))
+    .map(|case| case.volatile(&["daily_seal", "stay_seal"]))
     .collect()
+}
+
+/// The vault no longer opens without the passphrase: every such wrap and the use record are deleted.
+fn expired(dir: &Path, refusal: IdleRefusal) -> FfiError {
+    let _ = wa_vault::expire(dir);
+    FfiError::new(ErrorKind::Auth, refusal.to_string())
+        .with_detail(json!({"code": "expired", "reason": refusal}))
 }
 
 // ---- vault.unlock_daily
@@ -737,18 +895,23 @@ struct DailyUnlockReq {
     dir: Option<String>,
     /// The daily blob, as K_daily decrypted `daily.sealed`, base64.
     daily_blob: String,
+    /// Read and ignored since round 7c.
+    #[serde(default)]
+    #[allow(dead_code)]
     boot_count: u64,
     now_ms: i64,
-    /// K_daily is the Class 3 biometric key: this unlock resets the 72 h idle clock (round 7a). A screen-lock key
-    /// (a phone with no Class 3 biometric) does not: its 72 h count from the passphrase.
+    /// Read and ignored since round 7c: every unlock is a use.
     #[serde(default)]
+    #[allow(dead_code)]
     biometric: bool,
 }
 
+/// The biometric unlock (after a "Lock now", or for a vault with no stay wrap yet): the 90-day use clock from the
+/// sealed stamp and the use record; a stay blob is prepared, so the next start is silent again.
 fn unlock_daily(req: DailyUnlockReq) -> Result<UnlockedAns, FfiError> {
     let dir = dir_of(&req.dir)?;
     let blob = from_b64("daily_blob", &req.daily_blob)?;
-    let mut file = DailyFile::load(&dir)
+    let file = DailyFile::load(&dir)
         .map_err(file_error)?
         .ok_or_else(|| coded(ErrorKind::NotFound, "there is no daily unlock", "no_daily"))?;
     let daily_key = file
@@ -758,37 +921,26 @@ fn unlock_daily(req: DailyUnlockReq) -> Result<UnlockedAns, FfiError> {
         let _ = DailyFile::remove(&dir);
         coded(ErrorKind::Parse, "the daily unlock is damaged", "damaged")
     })?;
-    // The sealed stamp is the passphrase epoch; the seen record (under DK) moves the idle clock on.
-    let clock = file.sealed_clock(&key, stamp);
-    if let Err(refusal) = clock.check(req.boot_count, req.now_ms) {
-        DailyFile::remove(&dir)?;
-        return Err(daily_refused(refusal));
-    }
-    if req.biometric {
-        file.record_unlock(&key, clock, req.now_ms, &mut os_entropy);
-        // Best effort: a failed write only means the 72 h count from the last recorded unlock.
-        let _ = file.save(&dir);
+    let clock = wa_vault::sealed_clock(&dir, &key, stamp.unlocked_ms);
+    if let Err(refusal) = clock.check(req.now_ms) {
+        return Err(expired(&dir, refusal));
     }
     open_session(
         dir,
         key,
-        DailyStamp {
-            boot_count: req.boot_count,
-            unlocked_ms: req.now_ms,
+        req.now_ms,
+        Opening {
+            clock,
+            daily: None,
+            stay: true,
         },
     )
-}
-
-fn daily_refused(refusal: DailyRefusal) -> FfiError {
-    FfiError::new(ErrorKind::Auth, refusal.to_string())
-        .with_detail(json!({"code": "daily_expired", "reason": refusal}))
 }
 
 fn daily_request(extra: serde_json::Value) -> serde_json::Value {
     let mut req = json!({
         "dir": "$DIR",
         "daily_blob": seed_file("wa-vault-daily.json")["sealed"],
-        "boot_count": seed::BOOT_COUNT,
         "now_ms": seed::UNLOCKED_MS + 3_600_000,
     });
     if let (Some(req), Some(extra)) = (req.as_object_mut(), extra.as_object()) {
@@ -800,6 +952,7 @@ fn daily_request(extra: serde_json::Value) -> serde_json::Value {
 fn unlock_daily_cases() -> Vec<Case> {
     vec![
         Case::new(daily_request(json!({}))).seeded("wa_vault"),
+        // A reboot ends nothing since round 7c.
         Case::named(
             "rebooted",
             daily_request(json!({"boot_count": seed::BOOT_COUNT + 1})),
@@ -807,23 +960,23 @@ fn unlock_daily_cases() -> Vec<Case> {
         .seeded("wa_vault"),
         Case::named(
             "idle",
-            daily_request(json!({"now_ms": seed::UNLOCKED_MS + vault::DAILY_MAX_IDLE_MS + 1})),
+            daily_request(json!({"now_ms": seed::UNLOCKED_MS + vault::MAX_IDLE_MS + 1})),
         )
         .seeded("wa_vault"),
         Case::named(
-            "expired",
-            daily_request(json!({"now_ms": seed::UNLOCKED_MS + vault::DAILY_MAX_AGE_MS + 1})),
+            "clock_back",
+            daily_request(json!({"now_ms": seed::UNLOCKED_MS - vault::CLOCK_SKEW_MS - 1})),
         )
         .seeded("wa_vault"),
-        // A biometric unlock 70 h after the passphrase moves the 72 h on: 100 h after it, the next one opens.
+        // A use 80 days after the stamp moves the 90 days on: 160 days after it, the vault still opens.
         Case::named(
-            "idle_reset",
-            daily_request(json!({"now_ms": seed::UNLOCKED_MS + 100 * HOUR_MS, "biometric": true})),
+            "use_reset",
+            daily_request(json!({"now_ms": seed::UNLOCKED_MS + 160 * DAY_MS})),
         )
         .seeded("wa_vault")
         .after(
             "vault.unlock_daily",
-            daily_request(json!({"now_ms": seed::UNLOCKED_MS + 70 * HOUR_MS, "biometric": true})),
+            daily_request(json!({"now_ms": seed::UNLOCKED_MS + 80 * DAY_MS})),
         ),
         Case::named("damaged", daily_request(json!({"daily_blob": "AAAA"}))).seeded("wa_vault"),
         Case::named(
@@ -833,11 +986,95 @@ fn unlock_daily_cases() -> Vec<Case> {
         .seeded("wa_vault"),
     ]
     .into_iter()
-    .map(|case| case.volatile(&["daily_seal"]))
+    .map(|case| case.volatile(&["stay_seal"]))
     .collect()
 }
 
-const HOUR_MS: i64 = 60 * 60 * 1000;
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+// ---- vault.unlock_stay
+
+#[derive(Deserialize)]
+struct StayUnlockReq {
+    #[serde(default)]
+    dir: Option<String>,
+    /// The stay blob, as K_stay decrypted `stay.sealed`, base64.
+    stay_blob: String,
+    now_ms: i64,
+}
+
+/// The silent unlock (round 7c): Kotlin opened the stay blob with K_stay, which needs no prompt but works only while
+/// the phone is unlocked; Rust opens DK with SK, checks the 90-day use clock and opens the session. Nothing new is
+/// prepared: the stay wrap stays. A blob that does not open deletes the wrap (the caller falls back to the biometric
+/// or the passphrase).
+fn unlock_stay(req: StayUnlockReq) -> Result<UnlockedAns, FfiError> {
+    let dir = dir_of(&req.dir)?;
+    let blob = from_b64("stay_blob", &req.stay_blob)?;
+    let file = StayFile::load(&dir)
+        .map_err(file_error)?
+        .ok_or_else(|| coded(ErrorKind::NotFound, "there is no stay wrap", "no_stay"))?;
+    let damaged = || {
+        let _ = StayFile::remove(&dir);
+        coded(ErrorKind::Parse, "the stay wrap is damaged", "damaged")
+    };
+    let stay_key = file.key().ok_or_else(damaged)?;
+    let (key, created_ms) = vault::open_stay(&stay_key, &blob).map_err(|_| damaged())?;
+    let clock = wa_vault::sealed_clock(&dir, &key, created_ms);
+    if let Err(refusal) = clock.check(req.now_ms) {
+        return Err(expired(&dir, refusal));
+    }
+    open_session(
+        dir,
+        key,
+        req.now_ms,
+        Opening {
+            clock,
+            daily: None,
+            stay: false,
+        },
+    )
+}
+
+fn stay_request(extra: serde_json::Value) -> serde_json::Value {
+    let mut req = json!({
+        "dir": "$DIR",
+        "stay_blob": seed_file("wa-vault-stay.json")["sealed"],
+        "now_ms": seed::UNLOCKED_MS + 3_600_000,
+    });
+    if let (Some(req), Some(extra)) = (req.as_object_mut(), extra.as_object()) {
+        req.extend(extra.clone());
+    }
+    req
+}
+
+fn unlock_stay_cases() -> Vec<Case> {
+    vec![
+        Case::new(stay_request(json!({}))).seeded("wa_vault"),
+        Case::named(
+            "idle",
+            stay_request(json!({"now_ms": seed::UNLOCKED_MS + vault::MAX_IDLE_MS + 1})),
+        )
+        .seeded("wa_vault"),
+        Case::named(
+            "clock_back",
+            stay_request(json!({"now_ms": seed::UNLOCKED_MS - vault::CLOCK_SKEW_MS - 1})),
+        )
+        .seeded("wa_vault"),
+        // A year of use, once every 80 days: no cap.
+        Case::named(
+            "use_reset",
+            stay_request(json!({"now_ms": seed::UNLOCKED_MS + 160 * DAY_MS})),
+        )
+        .seeded("wa_vault")
+        .after(
+            "vault.unlock_stay",
+            stay_request(json!({"now_ms": seed::UNLOCKED_MS + 80 * DAY_MS})),
+        ),
+        Case::named("damaged", stay_request(json!({"stay_blob": "AAAA"}))).seeded("wa_vault"),
+        Case::named("no_stay", stay_request(json!({"dir": "$DIR/nothing-here"})))
+            .seeded("wa_vault"),
+    ]
+}
 
 // ---- vault.unlock_link
 
@@ -847,13 +1084,11 @@ struct LinkUnlockReq {
     dir: Option<String>,
     /// The link a sibling Rosty app handed over from its unlocked vault (`WaLinkProvider`, memory only).
     link: LinkIn,
+    /// Read and ignored since round 7c.
+    #[serde(default)]
+    #[allow(dead_code)]
     boot_count: u64,
     now_ms: i64,
-}
-
-#[derive(Serialize)]
-struct HandleAns {
-    handle: i64,
 }
 
 /// The one prompt for the four apps (round 7a): a sibling Rosty app whose vault is unlocked hands its link over, and
@@ -861,9 +1096,9 @@ struct HandleAns {
 /// DK only for the very key the vault holds; the body must then name the same gateway and instance. Nothing is
 /// written in plaintext and no other app's key is used: each app keeps its own DK.
 ///
-/// The hand-over also counts as an unlock for the idle clock of this app's daily unlock while that is still valid
-/// (the same boot, within 72 h and 30 days); one that lapsed is dropped, as `vault.state` would.
-fn unlock_link(req: LinkUnlockReq) -> Result<HandleAns, FfiError> {
+/// Round 7c: the hand-over is a use, and it prepares this app's own stay blob (no prompt), so after it this app
+/// reopens by itself, also after a reboot.
+fn unlock_link(req: LinkUnlockReq) -> Result<UnlockedAns, FfiError> {
     let dir = dir_of(&req.dir)?;
     let file = vault_file(&dir)?;
     let wrap = file.link_sealed.as_deref().ok_or_else(|| {
@@ -892,32 +1127,22 @@ fn unlock_link(req: LinkUnlockReq) -> Result<HandleAns, FfiError> {
         return Err(other());
     }
     drop(body);
-    if let Ok(Some(mut daily)) = DailyFile::load(&dir) {
-        let clock = daily.plain_clock();
-        if clock.check(req.boot_count, req.now_ms).is_ok() {
-            daily.record_unlock(&key, clock, req.now_ms, &mut os_entropy);
-            let _ = daily.save(&dir);
-        } else {
-            let _ = DailyFile::remove(&dir);
-        }
-    }
-    let stamp = DailyStamp {
-        boot_count: req.boot_count,
-        unlocked_ms: req.now_ms,
-    };
-    let unlocked = open_session(dir, key, stamp)?;
-    // No daily blob from a hand-over: sealing one would need a prompt here.
-    let _ = session(unlocked.handle, |s: &mut Session| s.daily = None);
-    Ok(HandleAns {
-        handle: unlocked.handle,
-    })
+    open_session(
+        dir,
+        key,
+        req.now_ms,
+        Opening {
+            clock: UseClock::new(req.now_ms, None),
+            daily: None,
+            stay: true,
+        },
+    )
 }
 
 fn link_request(key: &str, extra: serde_json::Value) -> serde_json::Value {
     let mut req = json!({
         "dir": "$DIR",
         "link": {"gateway_url": "https://rosty.erdemdev.tr", "instance_id": "inst1", "key": key},
-        "boot_count": seed::BOOT_COUNT,
         "now_ms": seed::UNLOCKED_MS + 3_600_000,
     });
     if let (Some(req), Some(extra)) = (req.as_object_mut(), extra.as_object()) {
@@ -947,6 +1172,9 @@ fn unlock_link_cases() -> Vec<Case> {
         )
         .seeded("wa_vault"),
     ]
+    .into_iter()
+    .map(|case| case.volatile(&["stay_seal"]))
+    .collect()
 }
 
 // ---- vault.daily_store
@@ -1007,6 +1235,145 @@ fn daily_forget(req: DirReq) -> Result<StateAns, FfiError> {
 
 fn daily_forget_cases() -> Vec<Case> {
     vec![Case::new(json!({"dir": "$DIR"})).seeded("wa_vault")]
+}
+
+// ---- vault.stay_store, vault.stay_forget
+
+/// Stores the stay blob of the unlock, as Kotlin sealed it with K_stay (same request shape as `vault.daily_store`).
+fn stay_store(req: DailyStoreReq) -> Result<StateAns, FfiError> {
+    let sealed = from_b64("sealed", &req.sealed)?;
+    if req.alias.trim().is_empty() || sealed.is_empty() {
+        return Err(FfiError::invalid("alias and sealed are required"));
+    }
+    let dir = session(req.handle, |s: &mut Session| -> Result<PathBuf, FfiError> {
+        let stay = s.stay.take().ok_or_else(|| {
+            coded(
+                ErrorKind::Invalid,
+                "there is no stay wrap to store",
+                "nothing_to_store",
+            )
+        })?;
+        StayFile::new(req.alias.trim(), sealed, &stay.key, stay.created_ms).save(&s.dir)?;
+        Ok(s.dir.clone())
+    })??;
+    state_of(&dir, None)
+}
+
+fn stay_store_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"handle": PLACEHOLDER_HANDLE, "alias": "rosty.wa.s.1", "sealed": "BQYH"}))
+            .seeded("wa_vault")
+            .after("vault.unlock", unlock_request(json!({}))),
+        // The stay unlock prepares no new wrap: the one it opened stays.
+        Case::named(
+            "nothing",
+            json!({"handle": PLACEHOLDER_HANDLE, "alias": "rosty.wa.s.1", "sealed": "BQYH"}),
+        )
+        .seeded("wa_vault")
+        .after("vault.unlock_stay", stay_request(json!({}))),
+        Case::named(
+            "gone",
+            json!({"handle": 42, "alias": "rosty.wa.s.1", "sealed": "BQYH"}),
+        ),
+    ]
+}
+
+/// The silent unlock ends ("Lock now", a dead K_stay): the stay wrap is deleted. The biometric unlock stays.
+fn stay_forget(req: DirReq) -> Result<StateAns, FfiError> {
+    let dir = dir_of(&req.dir)?;
+    StayFile::remove(&dir)?;
+    state_of(&dir, None)
+}
+
+fn stay_forget_cases() -> Vec<Case> {
+    vec![Case::new(json!({"dir": "$DIR"})).seeded("wa_vault")]
+}
+
+// ---- vault.stay_prepare
+
+/// A fresh stay blob for the open vault, when it has none (round 7c): after a passphrase change (the commit dropped
+/// the wrap of the old DK) the app keeps reopening silently without a new unlock. Answers `{handle, stay_seal}` for
+/// `vault.stay_store`; `locked` without a committed session.
+fn stay_prepare(req: TouchReq) -> Result<UnlockedAns, FfiError> {
+    let handle = current().ok_or_else(locked)?;
+    session(handle, |s: &mut Session| {
+        if !s.committed {
+            return Err(locked());
+        }
+        let stay_key = StayKey::generate(&mut os_entropy);
+        let blob = vault::seal_stay(&stay_key, &s.key, req.now_ms, vault::nonce(&mut os_entropy));
+        s.stay = Some(PendingStay {
+            key: stay_key,
+            created_ms: req.now_ms,
+        });
+        Ok(UnlockedAns {
+            handle,
+            daily_seal: None,
+            stay_seal: Some(b64(&blob)),
+        })
+    })?
+}
+
+fn stay_prepare_cases() -> Vec<Case> {
+    vec![
+        Case::new(json!({"now_ms": seed::UNLOCKED_MS + 60_000}))
+            .seeded("wa_vault")
+            .after("vault.unlock", unlock_request(json!({}))),
+        Case::named("locked", json!({"now_ms": seed::UNLOCKED_MS})),
+    ]
+    .into_iter()
+    .map(|case| case.volatile(&["stay_seal"]))
+    .collect()
+}
+
+// ---- vault.touch
+
+#[derive(Deserialize)]
+struct TouchReq {
+    now_ms: i64,
+}
+
+#[derive(Serialize)]
+struct TouchAns {
+    /// Whether the use was written now (at most once an hour).
+    recorded: bool,
+}
+
+/// The app is in use while the vault is open (an activity started): the use clock moves on, written at most once an
+/// hour. After 90 days without a use (or with the clock set back) it refuses with `expired`, every wrap that opens
+/// without the passphrase is deleted, and Kotlin locks.
+fn touch(req: TouchReq) -> Result<TouchAns, FfiError> {
+    let handle = current().ok_or_else(locked)?;
+    session(handle, |s: &mut Session| {
+        if !s.committed {
+            return Err(locked());
+        }
+        if let Err(refusal) = s.clock.check(req.now_ms) {
+            return Err(expired(&s.dir, refusal));
+        }
+        Ok(TouchAns {
+            recorded: note_use(s, req.now_ms),
+        })
+    })?
+}
+
+fn touch_cases() -> Vec<Case> {
+    vec![
+        // The unlock just wrote the use: within the hour, nothing more is written.
+        Case::new(json!({"now_ms": seed::UNLOCKED_MS + 60_000}))
+            .seeded("wa_vault")
+            .after("vault.unlock", unlock_request(json!({}))),
+        Case::named("hour", json!({"now_ms": seed::UNLOCKED_MS + 3_600_000}))
+            .seeded("wa_vault")
+            .after("vault.unlock", unlock_request(json!({}))),
+        Case::named(
+            "idle",
+            json!({"now_ms": seed::UNLOCKED_MS + vault::MAX_IDLE_MS + 1}),
+        )
+        .seeded("wa_vault")
+        .after("vault.unlock", unlock_request(json!({}))),
+        Case::named("locked", json!({"now_ms": seed::UNLOCKED_MS})),
+    ]
 }
 
 // ---- vault.lock

@@ -7,15 +7,17 @@ import dev.rosty.core.RustError
 import dev.rosty.core.model.wa.StoredLink
 import dev.rosty.core.model.wa.VaultCommitRequest
 import dev.rosty.core.model.wa.VaultCreateRequest
-import dev.rosty.core.model.wa.VaultDailyRefusal
 import dev.rosty.core.model.wa.VaultDailyStoreRequest
 import dev.rosty.core.model.wa.VaultDailyUnlockRequest
 import dev.rosty.core.model.wa.VaultHandleRequest
+import dev.rosty.core.model.wa.VaultIdleRefusal
 import dev.rosty.core.model.wa.VaultLink
 import dev.rosty.core.model.wa.VaultLinkUnlockRequest
 import dev.rosty.core.model.wa.VaultLockRequest
 import dev.rosty.core.model.wa.VaultState
 import dev.rosty.core.model.wa.VaultStateRequest
+import dev.rosty.core.model.wa.VaultStayUnlockRequest
+import dev.rosty.core.model.wa.VaultTouchRequest
 import dev.rosty.core.model.wa.VaultUnlockRequest
 import dev.rosty.core.model.wa.VaultUnlocked
 import dev.rosty.core.ops.VaultOps
@@ -52,12 +54,14 @@ sealed interface WaVaultState {
     data object NeedsSetup : WaVaultState
 
     /**
-     * Locked. [biometric]: the daily unlock is there (plan 13.2); otherwise the passphrase is needed, and [reason]
-     * says why when the app knows.
+     * Locked. [silent]: the stay wrap is there and the phone is unlocked, so the vault reopens with no prompt (round
+     * 7c; the page waits for it). [biometric]: the biometric unlock is there (plan 13.2); otherwise the passphrase is
+     * needed, and [reason] says why when the app knows.
      */
     data class Locked(
         val biometric: Boolean,
         val reason: PassphraseReason? = null,
+        val silent: Boolean = false,
     ) : WaVaultState
 
     data object Unlocked : WaVaultState
@@ -69,18 +73,12 @@ sealed interface WaVaultState {
     data object Broken : WaVaultState
 }
 
-/** Why the passphrase is asked for instead of the biometric (plan 13.2). */
+/** Why the passphrase is asked for instead of the biometric (plan 13.2, round 7c). */
 enum class PassphraseReason {
-    /** The phone restarted. */
-    Rebooted,
-
-    /** 72 hours went by without an unlock (round 7a: a biometric unlock resets the count). */
+    /** 90 days went by without a use (round 7c: any use while unlocked resets the count). */
     Idle,
 
-    /** 30 days since the passphrase, however often the biometric unlocked (round 7a). */
-    Expired,
-
-    /** The clock was set back. */
+    /** The clock was set back before the last use. */
     ClockBack,
 
     /** A fingerprint or face was added, or the biometric was removed. */
@@ -171,24 +169,20 @@ data class VaultPrompts(
     val enableDaily: VaultPrompt,
 )
 
-/** The device facts the vault stamps into the daily blob. */
+/** The device facts the vault needs: the clock of the use rule, and the boot count the daily blob's format keeps. */
 class WaVaultEnv(
-    /** `Settings.Global.BOOT_COUNT` (0 when unreadable). */
+    /** `Settings.Global.BOOT_COUNT` (0 when unreadable); stamped, not checked since round 7c. */
     val bootCount: () -> Long,
     val now: () -> Long,
 )
 
-/** What the vault keeps outside Rust: the failed biometric attempts and the auto-lock delay. No secret. */
+/** What the vault keeps outside Rust: the failed biometric attempts. No secret. */
 interface WaVaultPrefs {
     var failedDaily: Int
-
-    /** How long WhatsApp stays unlocked in the background; 0 locks at once. */
-    var autoLockMs: Long
 }
 
 class MemoryWaVaultPrefs(
     override var failedDaily: Int = 0,
-    override var autoLockMs: Long = WaVault.DEFAULT_AUTO_LOCK_MS,
 ) : WaVaultPrefs
 
 /** [WaVaultPrefs] in the app's `rosty_wa_vault` preferences (not backed up: `allowBackup=false`). */
@@ -197,40 +191,43 @@ class SharedWaVaultPrefs(
 ) : WaVaultPrefs {
     private val prefs = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
+    init {
+        // Round 7c removed the auto-lock delay: an earlier build's choice is dropped.
+        if (prefs.contains(KEY_AUTO_LOCK_REMOVED)) prefs.edit().remove(KEY_AUTO_LOCK_REMOVED).apply()
+    }
+
     override var failedDaily: Int
         get() = prefs.getInt(KEY_FAILED, 0)
         set(value) {
             prefs.edit().putInt(KEY_FAILED, value).apply()
         }
 
-    override var autoLockMs: Long
-        get() = prefs.getLong(KEY_AUTO_LOCK, WaVault.DEFAULT_AUTO_LOCK_MS)
-        set(value) {
-            prefs.edit().putLong(KEY_AUTO_LOCK, value).apply()
-        }
-
     private companion object {
         const val NAME = "rosty_wa_vault"
         const val KEY_FAILED = "failed_daily"
-        const val KEY_AUTO_LOCK = "auto_lock_ms"
+        const val KEY_AUTO_LOCK_REMOVED = "auto_lock_ms"
     }
 }
 
 /**
- * The WhatsApp vault of one app: setup, the daily (biometric) and the passphrase unlock, the passphrase change, the
+ * The WhatsApp vault of one app: setup, the silent, biometric and passphrase unlocks, the passphrase change, the
  * reset, and the lock. Rust holds every key ([ops]); [keystore] seals and opens the opaque blobs; the app tears its
  * WhatsApp down in [onLock] and brings it up in [onUnlocked]. One operation at a time.
  *
- * Rules kept here (plan 13.2): the daily unlock is dropped after a reboot, 72 h without an unlock or 30 days since the
- * passphrase (Rust checks the stamp and the DK-sealed last unlock in [refresh] and at each unlock; a Class 3
- * biometric unlock resets the 72 h), after a biometric enrolment change (the Keystore invalidates K_daily), after
- * [MAX_FAILED_DAILY] failed attempts, and on [onBoot]; a screen-lock daily key is dropped once a Class 3 biometric is
- * enrolled.
+ * The vault stays unlocked (round 7c). Every unlock also seals a stay wrap under K_stay, a Keystore key with no
+ * prompt that works only while the phone is unlocked: [unlockSilently] reopens the vault with it, also after a
+ * reboot once the person has unlocked the phone. There is no auto-lock and no screen-off lock. The only time rule is
+ * the use clock: [used] (an activity start) and every unlock move it on; after 90 days without a use Rust deletes the
+ * stay and biometric wraps and the passphrase is needed ([PassphraseReason.Idle]). [lock] ("Lock now") deletes the
+ * stay wrap; the biometric unlock then reopens it (and seals a new stay wrap).
+ *
+ * The biometric unlock (plan 13.2) is dropped after a biometric enrolment change (the Keystore invalidates K_daily),
+ * after [MAX_FAILED_DAILY] failed attempts, and with the stay wrap after 90 days without a use; a screen-lock daily
+ * key is dropped once a Class 3 biometric is enrolled. A reboot ends nothing any more.
  *
  * One prompt for the four apps (round 7a, [unlockFromSibling]): while a sibling Rosty app has its vault unlocked, it
  * hands its link over in memory ([siblingLink], `WaLinkProvider`) and this app opens its *own* vault with it (Rust's
- * link wrap), with no prompt. The sibling answers only while it is unlocked, so the window is its own lock rules
- * (foreground, or its auto-lock delay of at most 5 minutes in the background; screen off locks every app).
+ * link wrap), with no prompt; this app then seals its own stay wrap, so it needs no sibling after a reboot.
  */
 class WaVault(
     private val ops: VaultOps,
@@ -265,6 +262,9 @@ class WaVault(
     /** K_hw would not open: only a reset helps, whatever the files say. */
     @Volatile private var broken = false
 
+    /** The stay wrap could not open because the phone was locked; it is kept and tried again at the next use. */
+    @Volatile private var stayWaits = false
+
     /**
      * A link waiting for its vault ([adopt]): Rust holds it in the uncommitted session of this offer, in memory only.
      * Nothing about it is on disk until [confirm] commits the vault; a process death loses it (link again).
@@ -273,17 +273,10 @@ class WaVault(
 
     val unlocked: Boolean get() = stateFlow.value == WaVaultState.Unlocked
 
-    var autoLockMs: Long
-        get() = prefs.autoLockMs
-        set(value) {
-            prefs.autoLockMs = value.coerceAtLeast(0)
-        }
-
-    /** Reads the vault (and drops a lapsed daily unlock). */
+    /** Reads the vault (and drops the wraps after 90 days without a use). */
     suspend fun refresh() = mutex.withLock { refreshLocked() }
 
-    private suspend fun stateNow(): Outcome<VaultState> =
-        ops.state(VaultStateRequest(bootCount = env.bootCount(), nowMs = env.now()))
+    private suspend fun stateNow(): Outcome<VaultState> = ops.state(VaultStateRequest(nowMs = env.now()))
 
     private suspend fun refreshLocked(): VaultState? {
         val st =
@@ -297,7 +290,7 @@ class WaVault(
                     read.value
                 }
             }
-        st.dailyDropped?.let { reason = it.reason() }
+        st.expired?.let { reason = it.reason() }
         tidyKeys(st)
         val daily = st.daily
         // A screen-lock daily key on a phone that has a Class 3 biometric now: the biometric is required (13.2).
@@ -316,21 +309,39 @@ class WaVault(
     private fun publish(st: VaultState) {
         stateFlow.value =
             when {
-                st.unlocked != null -> WaVaultState.Unlocked
-                st.vault != null && broken -> WaVaultState.Broken
-                st.vault != null -> WaVaultState.Locked(biometric = st.daily != null, reason = reason)
-                pending != null || st.legacyLink -> WaVaultState.NeedsSetup
-                else -> WaVaultState.NoLink
+                st.unlocked != null -> {
+                    WaVaultState.Unlocked
+                }
+
+                st.vault != null && broken -> {
+                    WaVaultState.Broken
+                }
+
+                st.vault != null -> {
+                    WaVaultState.Locked(
+                        biometric = st.daily != null,
+                        reason = reason,
+                        silent = st.stay != null && !stayWaits,
+                    )
+                }
+
+                pending != null || st.legacyLink -> {
+                    WaVaultState.NeedsSetup
+                }
+
+                else -> {
+                    WaVaultState.NoLink
+                }
             }
     }
 
-    /** Keystore keys the vault no longer names (an old passphrase, a dropped daily unlock) are deleted. */
+    /** Keystore keys the vault no longer names (an old passphrase, a dropped daily or stay unlock) are deleted. */
     private fun tidyKeys(st: VaultState) {
-        val keep = setOfNotNull(st.vault?.hwAlias, st.daily?.alias)
+        val keep = setOfNotNull(st.vault?.hwAlias, st.daily?.alias, st.stay?.alias)
         for (alias in keystore.aliases()) if (alias !in keep) keystore.delete(alias)
     }
 
-    private suspend fun forgetDailyLocked(why: PassphraseReason): VaultState? {
+    private suspend fun forgetDailyLocked(why: PassphraseReason?): VaultState? {
         reason = why
         prefs.failedDaily = 0
         ops.dailyForget()
@@ -340,16 +351,6 @@ class WaVault(
 
     private fun deleteKeys(kind: VaultKeyKind) {
         for (alias in keystore.aliases()) if (VaultAlias.kindOf(alias) == kind) keystore.delete(alias)
-    }
-
-    /** The phone booted (`BootReceiver`): the daily unlock ends (plan 13.2). */
-    suspend fun onBoot() {
-        mutex.withLock {
-            reason = PassphraseReason.Rebooted
-            ops.dailyForget()
-            deleteKeys(VaultKeyKind.Daily)
-            refreshLocked()
-        }
     }
 
     private suspend fun <T> prompt(block: suspend () -> T): T {
@@ -363,7 +364,119 @@ class WaVault(
 
     // ---- unlock
 
-    /** The daily unlock: the biometric opens K_daily, Rust opens the vault with what it decrypts. */
+    /**
+     * The silent unlock (round 7c): K_stay opens the stay wrap with no prompt and Rust opens the vault with it, after
+     * checking the 90-day use clock. False when there is no stay wrap, the phone is locked (the wrap is kept and
+     * tried again at the next use), the clock lapsed (the wraps are gone: the passphrase is needed) or the key is dead
+     * (a removed screen lock, a Keystore that dropped it: the wrap is deleted and the biometric or the passphrase
+     * takes over).
+     */
+    suspend fun unlockSilently(): Boolean = mutex.withLock { silentLocked() }
+
+    private suspend fun silentLocked(): Boolean {
+        val st = refreshLocked() ?: return false
+        if (st.unlocked != null) return true
+        val stay = st.stay ?: return false
+        if (broken) return false
+        if (keystore.device().locked) return waitForUnlockedPhone(st)
+        // K_stay needs no prompt: the words are never shown.
+        return when (val opened = keystore.open(stay.alias, stay.sealed, prompts.unlock)) {
+            is VaultCrypto.Done -> {
+                when (val unlocked = ops.unlockStay(VaultStayUnlockRequest(stayBlob = opened.b64, nowMs = env.now()))) {
+                    is Outcome.Ok -> {
+                        reason = null
+                        stayWaits = false
+                        becameUnlocked()
+                        true
+                    }
+
+                    is Outcome.Err -> {
+                        if (unlocked.error.vaultCode == EXPIRED) {
+                            expiredLocked(unlocked.error)
+                        } else {
+                            forgetStayLocked()
+                        }
+                        false
+                    }
+                }
+            }
+
+            VaultCrypto.DeviceLocked -> {
+                waitForUnlockedPhone(st)
+            }
+
+            else -> {
+                forgetStayLocked()
+                false
+            }
+        }
+    }
+
+    private fun waitForUnlockedPhone(st: VaultState): Boolean {
+        stayWaits = true
+        publish(st)
+        return false
+    }
+
+    private suspend fun forgetStayLocked() {
+        stayWaits = false
+        ops.stayForget()
+        deleteKeys(VaultKeyKind.Stay)
+        refreshLocked()
+    }
+
+    /** Rust found 90 days without a use (or the clock set back) and deleted every wrap: the passphrase is next. */
+    private suspend fun expiredLocked(error: RustError) {
+        reason = idleReason(error)
+        stayWaits = false
+        prefs.failedDaily = 0
+        deleteKeys(VaultKeyKind.Stay)
+        deleteKeys(VaultKeyKind.Daily)
+        refreshLocked()
+    }
+
+    /**
+     * Seals the stay wrap of the unlock that just happened ([seal], or a fresh one for the open session), with no
+     * prompt. Without a screen lock no stay wrap is made; a failure only means the next start asks for the biometric
+     * or the passphrase.
+     */
+    private suspend fun offerStay(
+        handle: Long,
+        seal: String?,
+    ) {
+        if (!keystore.device().secureLockScreen) return
+        val blob =
+            seal ?: when (val prepared = ops.stayPrepare(VaultTouchRequest(env.now()))) {
+                is Outcome.Ok -> prepared.value.staySeal
+                is Outcome.Err -> null
+            } ?: return
+        deleteKeys(VaultKeyKind.Stay)
+        val alias = keystore.newAlias(VaultKeyKind.Stay)
+        val sealed = keystore.seal(alias, blob, prompts.unlock)
+        val stored =
+            sealed is VaultCrypto.Done &&
+                ops.stayStore(VaultDailyStoreRequest(handle, alias, sealed.b64)) is Outcome.Ok
+        if (!stored) keystore.delete(alias)
+    }
+
+    /**
+     * The app is in use (round 7c: an activity started). An open vault moves its use clock on (Rust writes it at most
+     * once an hour; after 90 days without a use it refuses and the vault locks); a locked one with its stay wrap
+     * reopens with no prompt.
+     */
+    suspend fun used() {
+        if (!unlocked) {
+            unlockSilently()
+            return
+        }
+        val touched = ops.touch(VaultTouchRequest(env.now()))
+        if (touched is Outcome.Err && touched.error.vaultCode == EXPIRED) {
+            lock()
+            mutex.withLock { expiredLocked(touched.error) }
+        }
+    }
+
+    /** The biometric unlock: the biometric opens K_daily, Rust opens the vault with what it decrypts. */
     suspend fun unlockWithBiometric(): VaultOutcome =
         mutex.withLock {
             val st = refreshLocked() ?: return@withLock refused(VaultProblem.Failed)
@@ -373,24 +486,20 @@ class WaVault(
                 prompt { keystore.open(daily.alias, daily.sealed, prompts.daily) { prefs.failedDaily += 1 } }
             when (opened) {
                 is VaultCrypto.Done -> {
-                    // A Class 3 biometric resets the 72 h idle clock; a screen-lock key does not (round 7a).
-                    val biometric = VaultAlias.authOf(daily.alias) == VaultKeyAuth.Biometric
-                    val request =
-                        VaultDailyUnlockRequest(
-                            dailyBlob = opened.b64,
-                            bootCount = env.bootCount(),
-                            nowMs = env.now(),
-                            biometric = biometric,
-                        )
-                    val unlocked = ops.unlockDaily(request)
+                    val unlocked = ops.unlockDaily(VaultDailyUnlockRequest(dailyBlob = opened.b64, nowMs = env.now()))
                     when (unlocked) {
                         is Outcome.Ok -> {
+                            offerStay(unlocked.value.handle, unlocked.value.staySeal)
                             becameUnlocked()
                             VaultOutcome.Done
                         }
 
                         is Outcome.Err -> {
-                            forgetDailyLocked(dailyReason(unlocked.error))
+                            if (unlocked.error.vaultCode == EXPIRED) {
+                                expiredLocked(unlocked.error)
+                            } else {
+                                forgetDailyLocked(null)
+                            }
                             refused(VaultProblem.NeedsPassphrase)
                         }
                     }
@@ -411,7 +520,7 @@ class WaVault(
                     refused(VaultProblem.NeedsPassphrase)
                 }
 
-                is VaultCrypto.Failed -> {
+                is VaultCrypto.Failed, VaultCrypto.DeviceLocked -> {
                     afterFailures()
                     refused(VaultProblem.Failed)
                 }
@@ -421,7 +530,8 @@ class WaVault(
     /**
      * The hand-over unlock (round 7a): a sibling Rosty app whose vault is unlocked hands its link over and Rust opens
      * this app's own vault with it. No prompt. False when no sibling gives a link, when the link is not this vault's,
-     * or when this vault has no link wrap yet (it was not unlocked since the update): the caller then prompts.
+     * or when this vault has no link wrap yet (it was not unlocked since the update): the caller then prompts. This
+     * app then seals its own stay wrap (round 7c), so it reopens by itself next time.
      */
     suspend fun unlockFromSibling(askBudgetMs: Long? = null): Boolean {
         val st = mutex.withLock { refreshLocked() } ?: return false
@@ -437,16 +547,16 @@ class WaVault(
             val request =
                 VaultLinkUnlockRequest(
                     link = VaultLink(link.gatewayUrl, link.instanceId, link.key),
-                    bootCount = env.bootCount(),
                     nowMs = env.now(),
                 )
-            when (ops.unlockLink(request)) {
+            when (val unlocked = ops.unlockLink(request)) {
                 is Outcome.Err -> {
                     false
                 }
 
                 is Outcome.Ok -> {
                     reason = null
+                    offerStay(unlocked.value.handle, unlocked.value.staySeal)
                     becameUnlocked()
                     true
                 }
@@ -455,13 +565,20 @@ class WaVault(
     }
 
     /**
-     * The unlock without a page (round 7a's Settings row, round 7b's locked call): an unlocked sibling opens this vault
-     * with no prompt, else the biometric prompt opens over whatever the app shows. [siblingBudgetMs] bounds the wait for
-     * the siblings (a cold sibling process takes a moment to say no; a ringing call should not wait for it), null for
-     * no bound. [InlineUnlock.NeedsPage] when only the passphrase page can open it.
+     * Every unlock with no prompt, in order: the app's own stay wrap (round 7c), then an unlocked sibling (round 7a).
+     * [siblingBudgetMs] bounds the wait for the siblings.
+     */
+    suspend fun unlockWithoutPrompt(siblingBudgetMs: Long? = null): Boolean =
+        unlockSilently() || unlockFromSibling(siblingBudgetMs)
+
+    /**
+     * The unlock without a page (round 7a's Settings row, round 7b's locked call): the stay wrap or an unlocked sibling
+     * opens this vault with no prompt, else the biometric prompt opens over whatever the app shows. [siblingBudgetMs]
+     * bounds the wait for the siblings (a cold sibling process takes a moment to say no; a ringing call should not wait
+     * for it), null for no bound. [InlineUnlock.NeedsPage] when only the passphrase page can open it.
      */
     suspend fun unlockInline(siblingBudgetMs: Long? = null): InlineUnlock {
-        if (unlockFromSibling(siblingBudgetMs) || unlocked) return InlineUnlock.Opened
+        if (unlockWithoutPrompt(siblingBudgetMs) || unlocked) return InlineUnlock.Opened
         val state = stateFlow.value as? WaVaultState.Locked ?: return InlineUnlock.NeedsPage
         if (!state.biometric) return InlineUnlock.NeedsPage
         return when (unlockWithBiometric()) {
@@ -478,7 +595,8 @@ class WaVault(
 
     /**
      * The passphrase unlock: K_hw (biometric or screen lock) decrypts the key blob, Rust unwraps it with [passphrase].
-     * Each try needs its own hardware authentication. Then the daily unlock is offered (a second prompt).
+     * Each try needs its own hardware authentication. Then the stay wrap is sealed (no prompt) and the biometric
+     * unlock is offered (a second prompt).
      */
     suspend fun unlockWithPassphrase(passphrase: String): VaultOutcome =
         mutex.withLock {
@@ -509,6 +627,8 @@ class WaVault(
                 is Outcome.Ok -> {
                     prefs.failedDaily = 0
                     reason = null
+                    stayWaits = false
+                    offerStay(unlocked.value.handle, unlocked.value.staySeal)
                     offerDaily(unlocked.value)
                     becameUnlocked()
                     VaultOutcome.Done
@@ -530,6 +650,10 @@ class WaVault(
                 refused(VaultProblem.NoScreenLock)
             }
 
+            VaultCrypto.DeviceLocked -> {
+                refused(VaultProblem.Failed)
+            }
+
             VaultCrypto.Invalidated -> {
                 broken = true
                 stateFlow.value = WaVaultState.Broken
@@ -543,10 +667,11 @@ class WaVault(
 
     /** Seals the fresh daily blob with a new K_daily; a cancelled prompt just leaves the daily unlock off. */
     private suspend fun offerDaily(unlocked: VaultUnlocked) {
+        val seal = unlocked.dailySeal ?: return
         deleteKeys(VaultKeyKind.Daily)
         if (!keystore.device().secureLockScreen) return
         val alias = keystore.newAlias(VaultKeyKind.Daily)
-        val sealed = prompt { keystore.seal(alias, unlocked.dailySeal, prompts.enableDaily) }
+        val sealed = prompt { keystore.seal(alias, seal, prompts.enableDaily) }
         val stored =
             sealed is VaultCrypto.Done &&
                 ops.dailyStore(VaultDailyStoreRequest(unlocked.handle, alias, sealed.b64)) is Outcome.Ok
@@ -683,10 +808,14 @@ class WaVault(
                 ?.hwAlias
                 ?.takeIf { it != alias }
                 ?.let(keystore::delete)
-            // The daily blob sealed the old data key: it is gone with the commit.
+            // The daily and stay blobs sealed the old data key: they are gone with the commit.
             deleteKeys(VaultKeyKind.Daily)
+            deleteKeys(VaultKeyKind.Stay)
             prefs.failedDaily = 0
             if (change) {
+                // The open session seals a new stay wrap (no prompt), so the vault keeps reopening by itself; the
+                // biometric unlock waits for the next passphrase unlock.
+                offerStay(offer.handle, seal = null)
                 reason = PassphraseReason.NewPassphrase
                 refreshLocked()
                 return@withLock VaultOutcome.Done
@@ -701,7 +830,10 @@ class WaVault(
                         nowMs = env.now(),
                     ),
                 )
-            if (unlocked is Outcome.Ok) offerDaily(unlocked.value)
+            if (unlocked is Outcome.Ok) {
+                offerStay(unlocked.value.handle, unlocked.value.staySeal)
+                offerDaily(unlocked.value)
+            }
             reason = null
             becameUnlocked()
             VaultOutcome.Done
@@ -724,13 +856,20 @@ class WaVault(
 
     // ---- lock and reset
 
-    /** Locks WhatsApp now: the state turns at once, then the app tears down and Rust zeroizes the keys. */
+    /**
+     * Locks WhatsApp now ("Lock now" here or in a sibling, or 90 days without a use): the state turns at once, then
+     * the app tears down, Rust zeroizes the keys and the stay wrap goes, so the vault does not reopen by itself. The
+     * biometric unlock stays (it reopens the vault and seals a new stay wrap).
+     */
     suspend fun lock() {
         val was = stateFlow.value
         if (was == WaVaultState.Unlocked) stateFlow.value = WaVaultState.Locked(biometric = true)
         onLock()
         mutex.withLock {
             ops.lock()
+            stayWaits = false
+            ops.stayForget()
+            deleteKeys(VaultKeyKind.Stay)
             refreshLocked()
         }
     }
@@ -750,6 +889,7 @@ class WaVault(
             prefs.failedDaily = 0
             reason = null
             broken = false
+            stayWaits = false
             onReset()
             refreshLocked()
             if (done) VaultOutcome.Done else refused(VaultProblem.Failed)
@@ -760,29 +900,20 @@ class WaVault(
 
     companion object {
         const val MAX_FAILED_DAILY = 5
-        const val DEFAULT_AUTO_LOCK_MS = 60_000L
-
-        /** The auto-lock choices of the WhatsApp settings: at once, 30 s, 1 min, 5 min. */
-        val AUTO_LOCK_CHOICES_MS = listOf(0L, 30_000L, 60_000L, 300_000L)
 
         private const val DAMAGED = "damaged"
+        private const val EXPIRED = "expired"
 
-        private fun VaultDailyRefusal.reason(): PassphraseReason =
+        private fun VaultIdleRefusal.reason(): PassphraseReason =
             when (this) {
-                VaultDailyRefusal.Rebooted -> PassphraseReason.Rebooted
-                VaultDailyRefusal.Idle -> PassphraseReason.Idle
-                VaultDailyRefusal.ClockBack -> PassphraseReason.ClockBack
-                VaultDailyRefusal.Expired -> PassphraseReason.Expired
+                VaultIdleRefusal.Idle -> PassphraseReason.Idle
+                VaultIdleRefusal.ClockBack -> PassphraseReason.ClockBack
             }
 
-        private fun dailyReason(error: RustError): PassphraseReason {
+        /** The reason of an `expired` refusal (`detail.reason`). */
+        private fun idleReason(error: RustError): PassphraseReason {
             val why = ((error.detail as? JsonObject)?.get("reason") as? JsonPrimitive)?.content
-            return when (why) {
-                "rebooted" -> PassphraseReason.Rebooted
-                "clock_back" -> PassphraseReason.ClockBack
-                "expired" -> PassphraseReason.Expired
-                else -> PassphraseReason.Idle
-            }
+            return if (why == "clock_back") PassphraseReason.ClockBack else PassphraseReason.Idle
         }
 
         private fun passphraseProblem(error: RustError): VaultProblem =

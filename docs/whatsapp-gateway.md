@@ -119,7 +119,8 @@ gateway on HTTPS and revoke keys you no longer use.
 The Rosty Kotlin apps never store the connect key in plaintext. Each app seals it in its own
 WhatsApp vault (`wa-vault.json`): encrypted with a data key that opens only with the app's
 passphrase and this phone's Keystore key, kept in memory only while WhatsApp is unlocked, and
-dropped on lock (screen off, the auto-lock delay, "Lock WhatsApp now"). Messages keeps no
+dropped on lock ("Lock WhatsApp now", or 90 days without a use; since round 7c the vault stays
+unlocked and reopens with no prompt once the phone is unlocked, also after a reboot). Messages keeps no
 message, thumbnail or media on disk; it refetches from the gateway after each unlock, within a
 fixed budget (at most 4 requests per unlock, 1 page per opened chat, media only on a tap, no
 request while locked). The vault itself needs no gateway change; the one server-side crypto is

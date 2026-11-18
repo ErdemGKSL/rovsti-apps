@@ -122,8 +122,8 @@ passphrase and this phone's Keystore key, kept in memory only while WhatsApp is 
 dropped on lock (screen off, the auto-lock delay, "Lock WhatsApp now"). Messages keeps no
 message, thumbnail or media on disk; it refetches from the gateway after each unlock, within a
 fixed budget (at most 4 requests per unlock, 1 page per opened chat, media only on a tap, no
-request while locked). Nothing changes on the gateway for this: no new route and no server-side
-crypto. The gateway itself still stores chats and messages in `gateway.db` (it is the user's own
+request while locked). The vault itself needs no gateway change; the one server-side crypto is
+the sealed push below (round 7b), which encrypts *to* the phone. The gateway itself still stores chats and messages in `gateway.db` (it is the user's own
 server). Details: [architecture.md](architecture.md#whatsapp-vault-ad-wa12).
 
 ## Push (FCM)
@@ -141,9 +141,53 @@ The apps must be built with Firebase for this; see
 [android.md](android.md#whatsapp-push-and-call-audio). An app registers its token
 with the gateway on connect (`POST /v1/push`); apps built without Firebase register
 nothing and rely on their open event socket. A push makes no request by itself while an
-app's WhatsApp vault is locked: Messages shows one content-free notice with the count, Phone
-shows a ringing call as "WhatsApp call" without the name or number, and both fetch only after
-the unlock.
+app's WhatsApp vault is locked; the apps fetch only after the unlock.
+
+### Sealed push (round 7b)
+
+An app install that has a push key registers its public half with the token, on the same
+request (`PUT /v1/push`, `PushKeyedRegistration`):
+
+```json
+{"app":"messages","token":"<fcm token>",
+ "push_key":{"key_id":"<[A-Za-z0-9_-]{1,64}>","version":1,"public_key":"<base64 X.509 SPKI, P-256>"}}
+```
+
+The private half is an EC P-256 Keystore key on the phone (non-exportable, usable while the
+phone is locked); the app deletes it on a vault reset or unlink and registers a new one at its
+next link. The gateway refuses a malformed key or another version with 400 `invalid push key`;
+a registration without `push_key` forgets any stored key. Keys are stored per instance and app
+in `push_tokens` (`key_id`, `key_version`, `public_key` = the 65-byte point; schema v10).
+
+To a token with a key, every push is sealed (scheme 1): a fresh P-256 key pair per push,
+z = ECDH(ephemeral, device), k = HKDF-SHA256(salt = ephemeral point, ikm = z,
+info = `rosty-wa-push/1` | device point), AES-256-GCM with a random 12-byte nonce and AAD
+`rosty-wa-push/1|<kid>`. The FCM data map is:
+
+| key | value |
+| --- | --- |
+| `kind` | `message`, `call` or `call_end` (clear: routes the push) |
+| `call_id` | the opaque call id (calls only, clear: a push that cannot be opened still rings) |
+| `missed` | `1`/`0` (call ends only, clear) |
+| `v` | `1` |
+| `kid` | the key id it was sealed to |
+| `epk` | the ephemeral public point, base64 (65 bytes) |
+| `ct` | base64 of nonce (12) \| ciphertext \| tag (16) |
+
+The sealed JSON of a message is `{chat, chat_alt?, chat_name?, group?, sender?, sender_alt?,
+name?, text?, id, ts, count}` (`text`: the whole text, else the caption, else a media label, cut
+to 1024 bytes and further until the map is at most 3800 bytes; `chat_name` is the stored chat
+name, one local read per push and only when a keyed token exists); a call or call end seals
+`{sender, name?}`. Google sees no chat id, number, name or text. Tokens without a key get the
+content-free payload above. The apps open it in memory: Messages shows the sender and the
+preview while its vault is locked (as the "WhatsApp previews" setting allows; the lock screen
+shows only "WhatsApp, N new messages"), Phone names a locked ring and opens a locked-call page
+over the lock screen. A push that does not open (an old key, tampering) gives the content-free
+notice. The gateway never logs the content or a key.
+
+Upgrade: start the new gateway on a backed-up `gateway.db`; migration v10 only adds nullable
+columns. Existing tokens keep the content-free push until each app links up again and
+registers its key. An older gateway binary refuses a v10 database, so roll back with the backup.
 
 ## Calls
 

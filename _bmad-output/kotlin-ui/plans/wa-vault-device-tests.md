@@ -161,6 +161,43 @@ For Messages, Phone, Contacts and Stops each:
 - [ ] With the vault locked: one row "Unlock to see WhatsApp chats"; the tap shows the biometric prompt (or opens
       the WhatsApp page for the passphrase) and the list follows once it is open.
 
+## 8e. Sealed push previews (Messages and Phone, firebase flavor, round 7b)
+
+Needs the gateway with migration v10 deployed and FCM configured. Logs: `adb logcat -s wa-push wa-answer`.
+
+- [ ] After the update, open WhatsApp once in Messages and in Phone (vault unlocked): the log says "push token
+      registered for messages with its push key" (and for phone). `sqlite3 gateway.db "SELECT app, key_id, key_version,
+      length(public_key) FROM push_tokens"` shows a key id, 1 and 65 for each app.
+- [ ] Lock the vault (screen off) and send a WhatsApp message from another phone: the notification shows the sender
+      and the text, the lock screen shows only "WhatsApp, 1 new message" until the phone is unlocked (with "Show
+      sensitive content" on in Android's lock-screen settings). No inline reply. A group shows its subject and
+      "Author: text".
+- [ ] A sender saved in the phone's contacts is titled by the contact's name.
+- [ ] Settings, Notifications, WhatsApp previews: "Name only" shows the sender and "N new messages"; "No content"
+      shows "WhatsApp, N new messages"; both apply to the notifications while unlocked too.
+- [ ] The FCM payload holds no text: on the gateway, log the data keys only (never the values) or capture with a test
+      FCM project: the keys are `kind`, `v`, `kid`, `epk`, `ct` (and `call_id`, `missed` for calls).
+- [ ] "Forgot passphrase" (or Unlink, then link again): a push sent between the reset and the next link shows the
+      content-free notice; after the new link a new key id is registered and previews come back.
+- [ ] Uninstall and reinstall without unlocking: pushes are content-free (no key) until the first unlock registers one.
+- [ ] Nothing new on disk: `strings` over the app's data dir after a few locked pushes finds no message text.
+
+## 8f. Locked WhatsApp call (Phone, round 7b)
+
+- [ ] Vault locked, screen off: a WhatsApp call turns the screen on and shows the locked call page over the lock
+      screen with the caller (device contact, else the WhatsApp name, else the number) and Answer and Decline only;
+      nothing else of the app is reachable from it.
+- [ ] Answer: the lock screen asks for the fingerprint, face or PIN, then (no sibling unlocked) the biometric prompt
+      for the vault shows over Phone, and the call connects. `wa-answer` logs each step; note the "connected after N
+      ms" value (target about 2 s from the tap, not counting the time spent on the prompts).
+- [ ] With Messages unlocked in the foreground and Phone locked (background delay): Answer connects with no vault
+      prompt (sibling hand-over).
+- [ ] Cancel the screen unlock: the page stays and Answer can be tapped again. Cancel the vault prompt: the unlock
+      page opens; unlocking there still answers if the caller waits.
+- [ ] Decline: the ring stops here; the caller hears it ring until the gateway's timeout (unchanged).
+- [ ] The caller hangs up: the page closes, a missed-call notice names the caller the same way.
+- [ ] HyperOS: "Show on lock screen" and full-screen notifications are allowed for Phone; check the page still opens.
+
 ## 9. Trip message after a lock (Stops)
 
 - [ ] Start a trip with an arriving-soon message while unlocked, lock WhatsApp (screen off), wait for the trigger:

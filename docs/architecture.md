@@ -478,10 +478,14 @@ thin clients of it through `rosty_wa_client`. Setup and operation:
   interrupts it.
 - **Push (AD-WA6).** FCM is on only when the gateway has `fcm_project_id` and
   `fcm_service_account`; otherwise push is a no-op. Phone and Messages register their
-  FCM token per instance (`POST /v1/push`). The gateway sends data-only,
-  high-priority messages that carry no message text, only
-  `{"kind":"call","call_id","from","name"}` or `{"kind":"message","chat","count"}`.
-  The app wakes, opens the event socket and fetches. Firebase is optional in the app;
+  FCM token per instance (`PUT /v1/push`). The gateway sends data-only,
+  high-priority messages. To an install without a push key they carry no message text, only
+  `{"kind":"call","call_id","sender","name"}` or `{"kind":"message","chat","count"}`.
+  Since round 7b an install registers a P-256 Keystore push key with its token, and every push
+  to it is sealed (ECDH P-256, HKDF-SHA256, AES-256-GCM): FCM sees `kind`, a call's opaque
+  `call_id` and `missed`, and ciphertext (`v`, `kid`, `epk`, `ct`); the app opens the sender, chat
+  and preview in memory (see [whatsapp-gateway.md](whatsapp-gateway.md#sealed-push-round-7b)).
+  The app wakes, opens the event socket when unlocked and fetches. Firebase is optional in the app;
   see [android.md](android.md#whatsapp-push-and-call-audio).
 - **People sync (people sync v3).** The names and photos of the people the apps meet
   on WhatsApp live in `people.json` (`rosty_app_core::people`), filled by a resumable
@@ -616,9 +620,17 @@ to 15); device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
   per app. FLAG_SECURE covers every vault page, the WhatsApp pages
   while unlocked, and the whole Messages and Phone windows while their vault is open.
 - **While locked.** No request reaches the gateway (`WaRequestGate` refuses at once, the repository and
-  the store start locked). Messages posts the content-free count notice (AD-MSG5); Phone shows a
-  ringing call as "WhatsApp call" with no name, no number, no full-screen intent, and Answer asks for
-  the screen unlock and the vault first; Contacts' and Phone's people sync defers to the next unlock;
+  the store start locked). Round 7b: a sealed push opens with the install's push key (EC P-256 in
+  Keystore, no user authentication, rotated by a reset or unlink); Messages posts one notice per chat
+  with the sender and the preview as the "WhatsApp previews" setting allows ("Name and preview",
+  "Name only", "No content"; it also applies while unlocked), `VISIBILITY_PRIVATE` with the public
+  version "WhatsApp, N new messages", and the content-free count notice for a push it cannot open or
+  that has no key (named by a device contact when one owns the number). Nothing decrypted is written
+  to disk. Accepted: apps with notification access and Android's notification history (if on) see what
+  is shown. Phone names a ringing call by a device contact or the sealed name or number and opens
+  `WaLockedCallActivity` over the lock screen (caller, Answer, Decline only); Answer dismisses the
+  keyguard, then opens the vault inline (a sibling hand-over, else the biometric prompt) and answers
+  (`wa-answer` timing log); Contacts' and Phone's people sync defers to the next unlock;
   a Stops trip started while unlocked keeps a RAM copy of the link for its arriving-soon message
   (`vault.trip_hold`) until the trip ends.
 - **Hand-over between apps.** Each app has its own vault and Keystore keys. `WaLinkProvider`

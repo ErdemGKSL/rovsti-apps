@@ -577,28 +577,39 @@ to 15); device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
   passphrase guess costs one hardware-authenticated Keystore operation. DK encrypts the vault body
   (`{gateway_url, instance_id, connect_key}`) and the cache. A passphrase change makes a new passphrase,
   salt, DK and K_hw alias and deletes the old key, so an older copy of the vault never opens.
-- **Daily unlock.** After a passphrase unlock DK is also wrapped by a random daily key DDK and that
+- **Stays unlocked** (round 7c, owner decision; replaces the 72 h, 30-day, reboot and screen-off rules
+  of rounds 4 to 7a). Every unlock (passphrase, biometric, hand-over) also wraps DK under a random stay key
+  SK (`RWVS`, its creation time authenticated) and seals that blob with K_stay (`rosty.wa.s.<id>`,
+  AES-256-GCM, non-exportable, StrongBox or TEE, **no user authentication**,
+  `setUnlockedDeviceRequired(true)`; minSdk 34, so no fallback is needed). The app reopens its vault
+  with it at every activity start and on the locked page, with no prompt (`vault.unlock_stay`); the
+  Keystore refuses K_stay while the phone is locked, also before the first unlock after a reboot, so a
+  seized locked phone cannot open the vault. The only time rule is the use clock
+  (`rosty_core::vault::UseClock`): every unlock and every activity start while open (`vault.touch`,
+  written at most once an hour) records a use in `wa-vault-use.json` (`RWVU`, sealed under DK, with a
+  plain copy); 90 days with no use, or the clock set back more than 5 minutes before the last use, and
+  Rust deletes the stay and biometric wraps and the use record: the passphrase is needed. A missing or
+  older use record only makes the rule stricter. "Lock now" deletes the stay wrap (in every Rosty app);
+  the biometric unlock or the passphrase opens it again and seals a new one. A dead K_stay (screen lock
+  removed, key dropped) is deleted and the biometric or the passphrase takes over.
+- **Biometric unlock.** After a passphrase unlock DK is also wrapped by a random daily key DDK and that
   blob sealed by K_daily (`rosty.wa.d.b.<id>`, Class 3 biometric only, invalidated by a new
-  enrolment; `rosty.wa.d.c.<id>`, screen lock, only on a phone with no Class 3 biometric). The blob
-  carries the boot count and the passphrase-unlock time as authenticated data. The 72 h rule counts idle
-  time (round 7a): each Class 3 biometric unlock (and each hand-over unlock, below) writes the time of the
-  unlock into a *seen* record sealed under DK (`RWVA`, bound to the blob's boot count and passphrase
-  time; `rosty_core::vault::DailyClock`), which the daily unlock opens anyway, so no second prompt.
-  Rust refuses the daily blob and deletes it after a reboot (the boot receivers also drop it), 72 h
-  after the last unlock, 30 days after the passphrase however often the biometric unlocked, or with the
-  clock set back more than 5 minutes behind the last unlock; five failed biometric attempts, a lockout
-  or an invalidated key drop it too. A missing, older or foreign seen record only makes the rule
-  stricter. A screen-lock K_daily does not move the 72 h. The passphrase is then asked once.
+  enrolment; `rosty.wa.d.c.<id>`, screen lock, only on a phone with no Class 3 biometric). It opens the
+  vault after "Lock now". Since round 7c it lapses only with the use clock (90 days); its stamp's boot
+  count is kept in the format and ignored. Five failed biometric attempts, a lockout or an invalidated
+  key drop it.
 - **On disk** (data dir, owner-only, atomic temp + rename): `wa-vault.json` {version, `hw_alias`,
   `hw_sealed` = K_hw(KEK_p(DK)), body = DK(link), `link_sealed` = KL(DK)}; `wa-vault-daily.json`
-  {alias, sealed = K_daily(DDK(DK)), `daily_key` = DDK, stamp, `seen` = DK(last unlock),
-  `last_unlock_ms`}; `wa-vault-cache.bin` = DK(identity map with its cursor, Phone's LID table, profile
+  {alias, sealed = K_daily(DDK(DK)), `daily_key` = DDK, stamp} (round 7a's `seen` and `last_unlock_ms`
+  are ignored when an older file has them); `wa-vault-stay.json` {alias, sealed = K_stay(SK(DK)),
+  `stay_key` = SK, `created_ms`}; `wa-vault-use.json` {sealed = DK(last use), `used_ms`};
+  `wa-vault-cache.bin` = DK(identity map with its cursor, Phone's LID table, profile
   pictures up to 4 MiB); `wa-vault-history.bin` (Messages, round 7a) = DK(the 40 chats listed first
   with their 30 newest messages, thumbnails up to 2 MiB, the other columns up to 4 MiB; never the
   outbox or a media file), written when WhatsApp locks and when the app goes to the background, seeded
   into the memory store at the next unlock and deleted by a reset, an unlink and a passphrase change.
   Blobs are AES-256-GCM with the header as associated data and distinct magics (`RWVK`, `RWVB`,
-  `RWVC`, `RWVD`, `RWVA`, `RWVL`). Not WhatsApp data and kept
+  `RWVC`, `RWVD`, `RWVL`, `RWVS`, `RWVU`; `RWVA` of round 7a is no longer written or read). Not WhatsApp data and kept
   plaintext: Contacts' people cache (`people.json`, `people-sync.json`, the people pictures), which the
   people provider hands every app; `wa_calls_forgotten` (opaque gateway ids); reminders and exports the
   person makes (a WhatsApp reminder names the chat only). Settings, Notifications lists the WhatsApp
@@ -610,15 +621,16 @@ to 15); device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
   send are `memfd_create` files read through `/proc/self/fd/<n>` (64 MiB LRU); drafts, live names and
   the rekey cursor are in memory. Phone's full-size pictures (`cacheDir/wa-full`, also Contacts') are
   emptied on lock.
-- **Lock lifecycle** (`:shell` `VaultLockLifecycle`): screen off, the auto-lock delay in the background
-  (default 60 s; at once, 30 s, 1 min, 5 min), "Lock WhatsApp now", and process death. Locking closes the
+- **Lock lifecycle** (round 7c, `:shell` `VaultUseLifecycle`): no auto-lock delay and no screen-off
+  lock. The vault locks on "Lock WhatsApp now" and after 90 days without a use; process death needs
+  nothing (the keys only lived in memory; the stay wrap reopens it at the next start). Locking closes the
   request budget first, then the event socket, the store and the RAM media, the repository's gateway,
   every WhatsApp notification with text, and `vault.lock` zeroizes DK and the connect key. The process
-  is not ended (Messages is also the SMS app). "Lock now" locks every Rosty app (round 7a: a
-  `WA_LINK`-protected broadcast to runtime receivers, so no cold process starts), because an unlocked
-  sibling would otherwise open the vault again with no prompt; screen off and the background delay stay
-  per app. FLAG_SECURE covers every vault page, the WhatsApp pages
-  while unlocked, and the whole Messages and Phone windows while their vault is open.
+  is not ended (Messages is also the SMS app). "Lock now" locks every Rosty app and deletes each one's
+  stay wrap: a `WA_LINK`-protected broadcast to each sibling's manifest receiver (`WaLockAllReceiver`);
+  a running app locks, an app that is not running deletes its stay file and K_stay without starting the
+  core. FLAG_SECURE covers every vault page, the WhatsApp pages while unlocked, and the whole Messages
+  and Phone windows while their vault is open.
 - **While locked.** No request reaches the gateway (`WaRequestGate` refuses at once, the repository and
   the store start locked). Round 7b: a sealed push opens with the install's push key (EC P-256 in
   Keystore, no user authentication, rotated by a reset or unlink); Messages posts one notice per chat
@@ -629,7 +641,8 @@ to 15); device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
   to disk. Accepted: apps with notification access and Android's notification history (if on) see what
   is shown. Phone names a ringing call by a device contact or the sealed name or number and opens
   `WaLockedCallActivity` over the lock screen (caller, Answer, Decline only); Answer dismisses the
-  keyguard, then opens the vault inline (a sibling hand-over, else the biometric prompt) and answers
+  keyguard, then opens the vault inline (its stay wrap, else a sibling hand-over, else the biometric
+  prompt; with the vault normally open it just passes through) and answers
   (`wa-answer` timing log); Contacts' and Phone's people sync defers to the next unlock;
   a Stops trip started while unlocked keeps a RAM copy of the link for its arriving-soon message
   (`vault.trip_hold`) until the trip ends.
@@ -642,9 +655,9 @@ to 15); device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
   KL = PBKDF2-HMAC-SHA256(connect key, salt, 1 round), written at the commit and at the first unlock of
   an older vault. When a locked app's unlock page shows, it first asks its siblings' providers; an
   unlocked sibling hands its link over in memory and `vault.unlock_link` opens this app's *own* DK and
-  body with it (the gateway and instance must match), with no prompt. The window is the source's own
-  lock rules (foreground, or its auto-lock delay of at most 5 min in the background; screen off locks
-  all). Nothing new is on disk in plaintext, no DK crosses apps, and other signatures get nothing: the
+  body with it (the gateway and instance must match), with no prompt. Since round 7c the receiver then
+  seals its own stay wrap, so it needs no sibling after a reboot; the hand-over stays for an app that has
+  no stay wrap yet (a vault of an earlier build, or after "Lock now"). Nothing new is on disk in plaintext, no DK crosses apps, and other signatures get nothing: the
   connect key already gives the whole account through the gateway, and it is on disk only under DK.
 - **Request budget** (`:wa` `WaRequestBudget`, `WaBackoff`, `WaRequestGate`): a cold start or unlock
   costs at most 4 requests (event socket live without replay, status, one identity page, chat list);

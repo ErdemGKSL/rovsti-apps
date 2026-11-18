@@ -41,9 +41,8 @@
     <!-- :platform mirrors the permissions of all four apps so lint can check its calls; this app does not use
          location or full-screen intents, so the merge drops them. VIBRATE stays: :design's haptics (tab bar, switches,
          long presses, sheets) call the vibrator, and without it a tab switch crashed with a SecurityException. -->
-    <!-- :platform's androidx.biometric is for the WhatsApp vault of Messages (plans/wa-vault.md); this app adopts the
-         vault in round 5 and asks for nothing until then. -->
-    <uses-permission android:name="android.permission.USE_BIOMETRIC" tools:node="remove" />
+    <!-- The WhatsApp vault of this app (plans/wa-vault.md 13.3): androidx.biometric's prompt needs USE_BIOMETRIC on
+         API 34; its legacy fingerprint permission goes. -->
     <uses-permission android:name="android.permission.USE_FINGERPRINT" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />

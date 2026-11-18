@@ -49,6 +49,8 @@ class HandoffPermissionsTest {
                     "uses-permission dev.rosty.permission.WA_LINK",
                     // E6-WA R3: WhatsApp voice notes recorded in the composer.
                     "uses-permission android.permission.RECORD_AUDIO",
+                    // WA vault round 4: androidx.biometric's prompt (plans/wa-vault.md 13.2).
+                    "uses-permission android.permission.USE_BIOMETRIC",
                 ),
             // X.1b: the people sync's WorkManager merges these.
             "contacts" to

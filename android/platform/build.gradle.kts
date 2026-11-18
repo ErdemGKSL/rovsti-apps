@@ -37,6 +37,9 @@ dependencies {
     api(project(":core-bridge"))
     implementation(project(":design"))
     api(libs.androidx.activity)
+    // The WhatsApp vault keys (plans/wa-vault.md 3, 13.2): BiometricPrompt with a CryptoObject over a FragmentActivity.
+    api(libs.androidx.biometric)
+    api(libs.androidx.fragment)
     testFixturesApi(project(":core-bridge"))
     testFixturesApi(libs.coroutines.core)
     testFixturesImplementation(libs.robolectric)

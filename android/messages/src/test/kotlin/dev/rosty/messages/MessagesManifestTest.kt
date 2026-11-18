@@ -105,7 +105,11 @@ class MessagesManifestTest {
         assertEquals(null, provider.attributes["grantUriPermissions"])
         assertEquals("signature", manifest.declaredPermissions[permission])
         assertTrue("this app asks its siblings too", permission in manifest.usesPermissions)
-        assertTrue(manifest.queriedProviders.containsAll(setOf("dev.rosty.phone.walink", "dev.rosty.contacts.walink")))
+        assertTrue(
+            manifest.queriedProviders.containsAll(
+                setOf("dev.rosty.phone.walink", "dev.rosty.contacts.walink", "dev.rosty.stops.walink"),
+            ),
+        )
     }
 
     @Test fun everyComponentOfTheGpuiManifestSurvives() {

@@ -197,6 +197,11 @@ open class MessagesContainer(
         MessagesNotifier.dismissAll(context, WaRekeys.tagOf(""))
     }
 
+    /** Round 7a: the history file is written when the app leaves the foreground too (see [WaOffline.saveHistory]). */
+    override suspend fun wentToBackground() {
+        if (waOfflineOnce.isInitialized()) waOffline.saveHistory()
+    }
+
     /** The vault was opened: the repository and the store may reach the gateway again (through the vault's key). */
     override suspend fun unlockedWhatsApp() {
         LockedWhatsAppNotice.clear(context)

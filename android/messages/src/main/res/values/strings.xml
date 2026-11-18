@@ -545,6 +545,7 @@
     <string name="notify_settings_muted">Muted conversations</string>
     <string name="notify_settings_unknown">Conversation</string>
     <string name="notify_settings_unmute">Unmute</string>
+    <string name="notify_settings_wa_locked">Unlock to see WhatsApp chats</string>
     <string name="notify_settings_none_muted">No muted conversations</string>
     <string name="notify_settings_muted_footer">Mute a conversation from its menu in Chats. Muted conversations still arrive, quietly.</string>
     <string name="quick_replies_title">Quick replies</string>

@@ -35,8 +35,33 @@ data class NotificationSettingsUi(
     val notifications: Boolean = true,
     /** "Copy code" on passcode notifications and bubbles. */
     val otpCopy: Boolean = true,
+    /** The muted SMS conversations, then (round 7a) the WhatsApp chats muted in WhatsApp while the vault is open. */
     val muted: ImmutableList<MutedRow> = persistentListOf(),
+    /** WhatsApp is linked but its vault is locked: one row, "Unlock to see WhatsApp chats", stands for its mutes. */
+    val waLocked: Boolean = false,
 )
+
+/** A WhatsApp chat and its mute as WhatsApp keeps it (`muted_until_ms`: -1 for ever, else until then). */
+@Immutable
+data class WaChatMute(
+    val jid: String,
+    val mutedUntilMs: Long?,
+)
+
+/** What the page may know of WhatsApp's mutes (round 7a). Nothing of it is kept on disk by this page. */
+@Immutable
+sealed interface WaMutes {
+    /** No WhatsApp in this app (not linked): nothing to list. */
+    data object Hidden : WaMutes
+
+    /** Linked, vault locked: the chats are not readable now. */
+    data object Locked : WaMutes
+
+    /** The vault is open: the chats in memory, muted or not. */
+    data class Open(
+        val chats: List<WaChatMute>,
+    ) : WaMutes
+}
 
 sealed interface NotificationSettingsAction {
     data class SetNotifications(
@@ -50,12 +75,18 @@ sealed interface NotificationSettingsAction {
     data class Unmute(
         val tag: String,
     ) : NotificationSettingsAction
+
+    /** "Unlock to see WhatsApp chats": the vault's unlock (round 7a). */
+    data object UnlockWhatsApp : NotificationSettingsAction
 }
 
 /**
  * Settings, Notifications (GPUI `settings_ui::notifications`): the switches the notifier follows (E6.9) and the
- * conversations that are muted now, each with Unmute (`messages.prefs_edit` "unmute"). A timed mute that has run out is
- * not listed ([NotifyPolicy.isMuted]). [nameOf] names a tag (the contact or chat), null when it cannot.
+ * conversations that are muted now, each with Unmute. SMS mutes live in the app's preferences (`messages.prefs_edit`
+ * "unmute"); a timed mute that has run out is not listed ([NotifyPolicy.isMuted]). WhatsApp mutes live in WhatsApp
+ * (round 6): while the vault is open the chats muted there are listed from memory ([waMutes]) and Unmute goes through
+ * the chat action ([unmuteWa]); while it is locked one row offers the unlock ([unlockWa]). [nameOf] names a tag (the
+ * contact or chat), null when it cannot.
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class NotificationSettingsViewModel(
@@ -65,22 +96,48 @@ class NotificationSettingsViewModel(
     private val now: () -> Long,
     /** Moves when a name may read differently (a contact saved, a WhatsApp name arrived): the list is named again. */
     nameChanges: Flow<*> = flowOf(Unit),
+    /** WhatsApp's chats and their mutes while the vault is open (round 7a). */
+    waMutes: Flow<WaMutes> = flowOf(WaMutes.Hidden),
+    /** Unmutes a WhatsApp chat in WhatsApp (the chat action); false when it could not. */
+    private val unmuteWa: suspend (jid: String) -> Boolean = { false },
+    /** Opens the vault (the system prompt, or the unlock page). */
+    private val unlockWa: () -> Unit = {},
 ) : ViewModel() {
     val state: StateFlow<NotificationSettingsUi> =
-        store.prefs
-            .combine(nameChanges) { prefs, _ -> prefs }
-            .mapLatest { prefs -> prefs?.let { build(it) } ?: NotificationSettingsUi() }
+        combine(store.prefs, nameChanges, waMutes) { prefs, _, wa -> prefs to wa }
+            .mapLatest { (prefs, wa) -> prefs?.let { build(it, wa) } ?: NotificationSettingsUi() }
             .stateIn(viewModelScope, SharingStarted.Eagerly, NotificationSettingsUi())
 
     init {
         viewModelScope.launch { store.load() }
     }
 
-    private suspend fun build(prefs: MessagesPrefs): NotificationSettingsUi {
+    private suspend fun build(
+        prefs: MessagesPrefs,
+        wa: WaMutes,
+    ): NotificationSettingsUi {
         val policy = NotifyPolicy.of(prefs)
         val at = now()
-        val muted = prefs.muted.filter { policy.isMuted(it, at) }.map { MutedRow(it, nameOf(it)) }
-        return NotificationSettingsUi(true, prefs.notifications, prefs.otpCopy, muted.toImmutableList())
+        // A `wa:` entry of an earlier build is no WhatsApp mute any more (round 6): WhatsApp keeps those.
+        val sms =
+            prefs.muted
+                .filter { !it.startsWith(WA_PREFIX) && policy.isMuted(it, at) }
+                .map { MutedRow(it, nameOf(it)) }
+        val whatsApp =
+            (wa as? WaMutes.Open)
+                ?.chats
+                .orEmpty()
+                .filter { it.mutedUntilMs == FOREVER || (it.mutedUntilMs ?: 0L) > at }
+                .map { WA_PREFIX + it.jid }
+                .distinct()
+                .map { MutedRow(it, nameOf(it)) }
+        return NotificationSettingsUi(
+            loaded = true,
+            notifications = prefs.notifications,
+            otpCopy = prefs.otpCopy,
+            muted = (sms + whatsApp).toImmutableList(),
+            waLocked = wa == WaMutes.Locked,
+        )
     }
 
     fun onAction(action: NotificationSettingsAction) {
@@ -95,12 +152,27 @@ class NotificationSettingsViewModel(
                 }
 
                 is NotificationSettingsAction.Unmute -> {
+                    if (action.tag.startsWith(WA_PREFIX)) {
+                        unmuteWa(action.tag.removePrefix(WA_PREFIX))
+                        return@launch
+                    }
                     store.load()
                     val prefs = store.prefs.value ?: return@launch
                     val answer = ops.prefsEdit(PrefsEditRequest(prefs, "unmute", tag = action.tag)) as? Outcome.Ok
                     answer?.value?.takeIf { it.changed }?.let { edited -> store.updatePrefs { edited.prefs } }
                 }
+
+                NotificationSettingsAction.UnlockWhatsApp -> {
+                    unlockWa()
+                }
             }
         }
+    }
+
+    private companion object {
+        const val WA_PREFIX = "wa:"
+
+        /** WhatsApp's "muted for ever". */
+        const val FOREVER = -1L
     }
 }

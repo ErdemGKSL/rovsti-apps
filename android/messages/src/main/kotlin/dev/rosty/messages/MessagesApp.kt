@@ -127,7 +127,9 @@ fun MessagesApp(
         entry<MessagesRoute.Starred> { StarredEntry(container, navigator) }
         entry<MessagesRoute.WhatsAppSettings> { WhatsAppSettingsEntry(container) }
         entry<MessagesRoute.SpamSettings> { SpamSettingsEntry(container, pop, popToRoot) }
-        entry<MessagesRoute.NotificationSettings> { NotificationSettingsEntry(container, pop, popToRoot) }
+        entry<MessagesRoute.NotificationSettings> {
+            NotificationSettingsEntry(container, pop, popToRoot) { navigator.push(MessagesRoute.WhatsAppSettings) }
+        }
         entry<MessagesRoute.QuickReplies> { QuickRepliesEntry(container, pop, popToRoot) }
         entry<MessagesRoute.TextSize> { TextSizeEntry(container, pop, popToRoot) }
         entry<MessagesRoute.Backup> { BackupEntry(container, pop, popToRoot) }

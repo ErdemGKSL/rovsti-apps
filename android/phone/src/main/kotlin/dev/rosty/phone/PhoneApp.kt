@@ -105,11 +105,15 @@ import dev.rosty.platform.telephony.KeypadTone
 import dev.rosty.shell.RostyShell
 import dev.rosty.shell.settings.CommonSettingsPage
 import dev.rosty.shell.settings.aboutInfo
+import dev.rosty.shell.wa.WaVaultGated
+import dev.rosty.wa.vault.SecureWindow
+import dev.rosty.wa.vault.WaVaultState
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import dev.rosty.wa.R as WaR
 
 /** The setup sheet's view model, on the activity so the sheet, the notice line and Settings read one checklist. */
 @Composable
@@ -397,6 +401,10 @@ fun PhoneApp(
     overlays: OverlayController = remember { OverlayController() },
 ) {
     val recentsModel = rememberRecentsViewModel(container)
+    // WhatsApp calls, their peers and pictures show on many pages while the vault is open (Recents, the call screens,
+    // a person): the whole window is secure then; the vault's own pages secure it themselves (`plans/wa-vault.md` 6).
+    val vaultOpen by container.waVault.state.collectAsState()
+    SecureWindow(vaultOpen == WaVaultState.Unlocked)
     // Back in front on another day (or with another time format): the day labels and times are rebuilt.
     OnResume { container.recents.refreshIfStale() }
     val missed by recentsModel.missedCount.collectAsState()
@@ -453,11 +461,31 @@ fun PhoneApp(
         if (number != null) container.waLauncher.place(number) else overlays.showToast(whatsAppToast)
     }
     // Answer or Decline tapped on a WhatsApp call notification: taken once, after the core is ready (waActions waits).
+    // An Answer on the notice of a call that rang while the vault was locked waits for the vault: the unlock page
+    // opens, and the answer goes out once the vault is open (`plans/wa-vault.md` 13.3).
     val waAction by container.pendingWaCallAction.collectAsState()
-    LaunchedEffect(waAction) {
+    val vault by container.waVault.state.collectAsState()
+    LaunchedEffect(waAction, vault) {
         val payload = waAction ?: return@LaunchedEffect
-        container.pendingWaCallAction.value = null
-        container.waActions.offer(payload)
+        when (vault) {
+            WaVaultState.Unlocked -> {
+                container.pendingWaCallAction.value = null
+                container.waActions.offer(payload)
+            }
+
+            is WaVaultState.Locked, WaVaultState.Broken -> {
+                if (navigator.current != PhoneRoute.WhatsAppUnlock) navigator.push(PhoneRoute.WhatsAppUnlock)
+            }
+
+            WaVaultState.Checking -> {
+                Unit
+            }
+
+            WaVaultState.NoLink, WaVaultState.NeedsSetup -> {
+                // No vault to open: nothing can answer it.
+                container.pendingWaCallAction.value = null
+            }
+        }
     }
     val waMissing = stringResource(R.string.wa_notice_microphone)
     val waFailed = stringResource(R.string.wa_notice_failed)
@@ -802,6 +830,9 @@ fun PhoneApp(
                 }
             }
             entry<PhoneRoute.WhatsAppSettings> { PhoneWhatsAppSettings(container) }
+            entry<PhoneRoute.WhatsAppUnlock> {
+                WaVaultGated(container, stringResource(WaR.string.wa_title)) { LaunchedEffect(Unit) { pop() } }
+            }
             entry<PhoneRoute.QuickReplies> {
                 QuickRepliesEntry(rememberQuickRepliesModel(container), pop, popToRoot)
             }

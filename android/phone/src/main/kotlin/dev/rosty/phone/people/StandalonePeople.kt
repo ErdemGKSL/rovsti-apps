@@ -164,6 +164,14 @@ class StandalonePeople(
         }
     }
 
+    /**
+     * The foreground trigger: a run when the last one is older than the period. Phone calls it when its WhatsApp vault
+     * opens, for a run the lock held back (`plans/wa-vault.md` 13.3).
+     */
+    fun syncIfStale() {
+        scope.launch { trigger(PeopleSyncTriggers.Kind.FOREGROUND) }
+    }
+
     /** A link event: starts a run when [PeopleSyncTriggers] says so for [kind]. */
     private suspend fun trigger(kind: PeopleSyncTriggers.Kind) {
         val stored = runner.refresh()

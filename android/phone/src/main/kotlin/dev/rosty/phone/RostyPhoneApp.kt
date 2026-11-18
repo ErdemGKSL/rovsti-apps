@@ -53,6 +53,9 @@ class RostyPhoneApp :
             CallerLookup.install { number -> container.identifyBlocking(number) }
             // A WhatsApp push whose caller is a LID gets its number from Phone's identity table (WA-R2).
             WaPush.lidNumber = { jid -> container.waNumberBlocking(jid) }
+            // While Phone's WhatsApp vault is locked (always in a cold process: the keys only live in memory) a call
+            // shows from the push alone, content-free, and nothing reaches the gateway (`plans/wa-vault.md` 13.3).
+            WaPush.locked = { container.waVaultIfMade?.unlocked != true }
         }
         // The people cache (names and WhatsApp pictures) follows its source from the start, so the incoming screen
         // and the notifications find a known caller's picture in memory (X.1d). Off the main thread.

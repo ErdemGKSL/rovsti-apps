@@ -17,6 +17,12 @@ data class PlatformComponents(
      * fall back to activity intents, which the system runs only after the phone is unlocked.
      */
     val waCallAction: Class<out BroadcastReceiver>? = null,
+    /**
+     * The activity that shows a WhatsApp call ringing while the app's vault is locked, over the lock screen (round 7b;
+     * Phone only). It shows the caller and Answer and Decline, nothing else. Without it a locked ring has no
+     * full-screen intent and Answer opens the app.
+     */
+    val waLockedCall: Class<out Activity>? = null,
 ) {
     companion object {
         @Volatile private var current: PlatformComponents? = null

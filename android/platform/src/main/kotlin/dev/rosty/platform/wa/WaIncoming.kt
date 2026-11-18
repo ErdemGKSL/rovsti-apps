@@ -134,6 +134,9 @@ object WaIncoming {
     /** On the activity intent [openAnswered] starts: the call was answered on the notification, show it over the keyguard. */
     const val EXTRA_ANSWERED = "wa_call_answered"
 
+    /** On the locked-call activity's intent: the caller's title as the ringing notice shows it (round 7b). */
+    const val EXTRA_TITLE = "wa_call_title"
+
     /** How long the "Answering…" notice of [openAnswered] stays at most. */
     private const val ANSWERING_TIMEOUT_MS = 15_000L
     private const val ANSWERING_ID_MASK = 0x3C3C3C3C
@@ -155,6 +158,23 @@ object WaIncoming {
             over.add(callId)
             if (over.size > OVER_MEMORY) over.remove(over.first())
         }
+        overListeners.forEach { listener ->
+            try {
+                listener(callId)
+            } catch (_: RuntimeException) {
+            }
+        }
+    }
+
+    /** Told when a ring is over here (the locked-call activity closes then). */
+    private val overListeners = java.util.concurrent.CopyOnWriteArraySet<(String) -> Unit>()
+
+    fun addOverListener(listener: (String) -> Unit) {
+        overListeners.add(listener)
+    }
+
+    fun removeOverListener(listener: (String) -> Unit) {
+        overListeners.remove(listener)
     }
 
     /** How long a ring notice stays: the gateway gives up on an unanswered call after 60 s (`wa::calls::RING_TIMEOUT`). */
@@ -208,10 +228,13 @@ object WaIncoming {
 
     /**
      * Posts the ringing notification of [notice] and starts the ring. [locked]: the app's WhatsApp vault is locked
-     * (`plans/wa-vault.md` 13.3): the notice names nobody, Answer opens the app (Android asks for the screen unlock
-     * first, then the app asks for its vault; the answer goes out once both are open, if the caller still waits),
-     * Decline only stops the ring here (no gateway request while locked: the caller hears it ring until the gateway's
-     * 60 s timeout), and there is no full-screen intent: nothing can be shown or answered over the lock screen.
+     * (`plans/wa-vault.md` 13.3, round 7b): the notice names the caller only as [waLockedCallerTitle] allows (a device
+     * contact or what the sealed push said, never a lookup in the vault), Decline only stops the ring here (no gateway
+     * request while locked: the caller hears it ring until the gateway's 60 s timeout). With the app's locked-call
+     * activity (`PlatformComponents.waLockedCall`, Phone) the full-screen intent, the tap and Answer open it over the
+     * lock screen: it shows the caller and Answer and Decline only, and Answer asks for the screen unlock, then the
+     * app opens its vault (no prompt from an unlocked sibling, else the biometric) and answers. Without it Answer opens
+     * the app and there is no full-screen intent.
      */
     fun show(
         context: Context,
@@ -230,12 +253,18 @@ object WaIncoming {
                 )
             }
             PlatformChannels.ensure(context, CHANNEL)
-            val open = pending(context, notice.callId, null, 0)
-            val answer =
-                if (locked) {
-                    pending(context, notice.callId, ANSWER, 1)
+            val lockedScreen = if (locked) PlatformComponents.getOrNull()?.waLockedCall else null
+            val open =
+                if (lockedScreen != null) {
+                    lockedPending(context, lockedScreen, notice, null, 0)
                 } else {
-                    actionPending(context, notice.callId, ANSWER)
+                    pending(context, notice.callId, null, 0)
+                }
+            val answer =
+                when {
+                    lockedScreen != null -> lockedPending(context, lockedScreen, notice, ANSWER, 1)
+                    locked -> pending(context, notice.callId, ANSWER, 1)
+                    else -> actionPending(context, notice.callId, ANSWER)
                 }
             val decline = actionPending(context, notice.callId, DECLINE)
             val caller =
@@ -256,8 +285,9 @@ object WaIncoming {
                     .setContentIntent(open)
                     .setStyle(Notification.CallStyle.forIncomingCall(caller, decline, answer))
             if (locked) {
-                // It names nobody: it may show in full on the lock screen.
+                // At most the caller's name, as any phone call shows it: it may show in full on the lock screen.
                 builder.setVisibility(Notification.VISIBILITY_PUBLIC)
+                if (lockedScreen != null) builder.setFullScreenIntent(open, true)
             } else {
                 builder.setFullScreenIntent(open, true)
             }
@@ -429,6 +459,45 @@ object WaIncoming {
         } catch (_: RuntimeException) {
         }
     }
+
+    /**
+     * The intent of the locked-call activity [screen] for [notice] (round 7b): the call id, the caller's title as the
+     * notice shows it, and Answer when it was tapped on the notice.
+     */
+    fun lockedCallIntent(
+        context: Context,
+        screen: Class<*>,
+        notice: WaIncomingNotice,
+        action: String?,
+    ): Intent {
+        val intent =
+            Intent(context, screen)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(EXTRA_CALL_ID, notice.callId)
+                .putExtra(EXTRA_TITLE, displayTitle(context, notice.title))
+        action?.let { intent.putExtra(EXTRA_ACTION, it) }
+        return intent
+    }
+
+    private fun lockedPending(
+        context: Context,
+        screen: Class<*>,
+        notice: WaIncomingNotice,
+        action: String?,
+        slot: Int,
+    ): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            requestCode(notice.callId, slot),
+            lockedCallIntent(context, screen, notice, action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    /** The launch activity with [callId] and [action]: the locked-call activity hands Answer over with it. */
+    fun answerIntent(
+        context: Context,
+        callId: String,
+    ): Intent = launchIntent(context, callId, ANSWER).putExtra(EXTRA_ANSWERED, true)
 
     private fun launchIntent(
         context: Context,

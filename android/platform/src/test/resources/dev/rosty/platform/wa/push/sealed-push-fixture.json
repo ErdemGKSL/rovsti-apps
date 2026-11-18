@@ -1,0 +1,21 @@
+{
+  "data": {
+    "ct": "N+YyNzP0N7yESyutYmyevFmWVFEKQVlVDnzlXquD8FNBh9dqVjg3DvafaHqUUSsEr1UcyOH7USoAxioPRLyO4SIaahcaDKoFy26rksWljNrG5NCUJQDVTQdT9FQKEtzV6ObjylenqCTHnQ8ibryJSyNZeW+brtgyBEgAn6pOWgwXTiwZ2qvtFb4AfC1SKyIxs/jDF/k6+EZOeQLtrcuyp3Nw1S9sun07b3id3lcnR0p3K7vVZhsx4gpt/Q==",
+    "epk": "BMX3VsVKUulJQG78A50rinnDDtRRZzVINWzZg8DyrcwWT3B35GBUxfRL9JO7f2+L+GyH21y9e7sKYDmpsB8Vp0c=",
+    "kid": "testkey01",
+    "kind": "message",
+    "v": "1"
+  },
+  "key_id": "testkey01",
+  "note": "TEST ONLY. A P-256 key pair generated for this fixture and used nowhere else; data is a push the gateway sealed to it (services/wa_gateway push::tests, UPDATE_PUSH_FIXTURE=1).",
+  "preview": {
+    "chat": "100000000042@s.whatsapp.net",
+    "chat_name": "Ada Test",
+    "id": "3EB0FIXTURE",
+    "name": "Ada",
+    "text": "Merhaba! Çay saat 5'te mi?",
+    "ts": 1700000000000
+  },
+  "private_key_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgp7m57tlUUwQbPHEoYV5yWCMQX1kIn4UY1eVNzA361bahRANCAAT9pLWDPkE4oNi9rXnHMtrly98B5XdSJKUA0ZQm2MiW8q7NzeVi4ij8l/xQjw76tfw8CEQ+bvR7a2f3x8o2OIqa",
+  "public_key_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/aS1gz5BOKDYva15xzLa5cvfAeV3UiSlANGUJtjIlvKuzc3lYuIo/Jf8UI8O+rX8PAhEPm70e2tn98fKNjiKmg=="
+}

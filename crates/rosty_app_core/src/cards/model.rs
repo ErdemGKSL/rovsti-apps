@@ -104,6 +104,60 @@ impl Palette {
     }
 }
 
+/// The secondary-line ink alpha over the glass panel (`card.rs` paints `.line` and `.number` with it).
+pub(crate) const SOFT_INK_ALPHA_LIGHT: f32 = 0.86;
+pub(crate) const SOFT_INK_ALPHA_DARK: f32 = 0.78;
+
+fn hex(c: &str) -> [f32; 3] {
+    let v = |i: usize| f32::from(u8::from_str_radix(&c[i..i + 2], 16).unwrap_or(0));
+    [v(1), v(3), v(5)]
+}
+
+fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [0, 1, 2].map(|i| a[i] * (1.0 - t) + b[i] * t)
+}
+
+fn luminance(c: [f32; 3]) -> f32 {
+    let f = |v: f32| {
+        let v = v / 255.0;
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+}
+
+impl Palette {
+    /// The lowest WCAG contrast of the secondary ink over the glass panel, over every background stop and blob the
+    /// panel can sit on (the panel tint and ink values mirror `card.rs`).
+    pub(crate) fn worst_secondary_contrast(self) -> f32 {
+        let colors = self.colors();
+        let (tint, tint_alpha, ink, ink_alpha) = if self.dark() {
+            (
+                [24.0, 26.0, 34.0],
+                0.46,
+                [245.0, 246.0, 250.0],
+                SOFT_INK_ALPHA_DARK,
+            )
+        } else {
+            ([255.0; 3], 0.34, [20.0, 22.0, 28.0], SOFT_INK_ALPHA_LIGHT)
+        };
+        colors
+            .stops
+            .iter()
+            .chain(colors.blobs.iter())
+            .map(|c| {
+                let panel = mix(hex(c), tint, tint_alpha);
+                let text = mix(panel, ink, ink_alpha);
+                let (a, b) = (luminance(text), luminance(panel));
+                (a.max(b) + 0.05) / (a.min(b) + 0.05)
+            })
+            .fold(f32::MAX, f32::min)
+    }
+}
+
 /// The CSS colours one palette paints with.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PaletteColors {

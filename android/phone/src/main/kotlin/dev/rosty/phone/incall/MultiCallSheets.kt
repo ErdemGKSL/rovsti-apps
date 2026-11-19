@@ -25,7 +25,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
@@ -46,7 +45,6 @@ import dev.rosty.design.overlay.sheetScrollConnection
 import dev.rosty.design.theme.RostyText
 import dev.rosty.design.theme.RostyTheme
 import dev.rosty.design.theme.Spacing
-import dev.rosty.phone.DECLINE_RED
 import dev.rosty.phone.InCallMetrics
 import dev.rosty.phone.favorites.FavPerson
 import dev.rosty.phone.favorites.FavoritesUi
@@ -302,7 +300,7 @@ fun ColumnScope.ConferenceSheetBody(
                                             strings.confDrop,
                                             onClick = { onAction(InCallAction.Drop(p.id)) },
                                             modifier = Modifier.testTag(MultiCallTags.drop(p.id)),
-                                            tint = Color(DECLINE_RED),
+                                            tint = RostyTheme.colors.destructive,
                                         )
                                     }
                                 }
@@ -316,7 +314,7 @@ fun ColumnScope.ConferenceSheetBody(
                 row {
                     ListRow(
                         title = strings.endAll,
-                        titleColor = Color(DECLINE_RED),
+                        titleColor = RostyTheme.colors.destructive,
                         onClick = { onAction(InCallAction.EndAll) },
                         modifier = Modifier.testTag(MultiCallTags.EndAll),
                     )

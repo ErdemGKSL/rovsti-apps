@@ -455,9 +455,9 @@ impl Prepared {
         let inner_w = g.inner().w;
         let ink = if dark { "#f5f6fa" } else { "#14161c" };
         let soft_ink = if dark {
-            "rgba(245, 246, 250, 0.78)"
+            format!("rgba(245, 246, 250, {})", super::model::SOFT_INK_ALPHA_DARK)
         } else {
-            "rgba(20, 22, 28, 0.72)"
+            format!("rgba(20, 22, 28, {})", super::model::SOFT_INK_ALPHA_LIGHT)
         };
         let (tint, rim, highlight) = if dark {
             (

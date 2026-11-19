@@ -252,3 +252,34 @@ of the X.2 record above (A, C, E, G). No device: nothing here is TalkBack- or ha
 ## H. Tests and evidence
 - pass: Rust refraction, lens, glint, determinism, size and budget tests; `CardsOpsNativeTest` 5/5 on the real host
   library; Compose tests above; goldens `x2-*` (light, dark, fs2, tr, large) opened in steps 2, 3, 5 and 6.
+
+# X.3 checklist record: readable text on accent and photo backgrounds (round 19 step 7)
+
+The pass of the contrast section of `.claude/skills/convx-motion-compose/references/checklist.md` ("E. Glass": label
+contrast >= 4.5:1 in light and dark) over the Contacts screens the X.3 fixes touch: filled capsules (crop "Choose",
+Card Studio Share/Save), the Contacts photo viewer, settings icon tiles and swipe actions. Method: the JVM and Compose
+tests below, the contrast audit of every light and dark golden (scratch script, not committed) and the opened PNGs.
+Targets: 4.5:1 body text (the 17 sp semibold capsule label counts as body), 3:1 for large text and glyph-only controls.
+No device: nothing here is hand-tested on hardware.
+
+- pass (filled controls): `IosColors.onAccent` is a theme-aware property mapped by `IosColorsBridge`; `IosButton`
+  (BorderedProminent, GlassProminent) uses `colors.onAccent` on the theme accent and `readableOn(tint)` on any other tint.
+  White stays on the light accent #0051D5; navy #001A3A on the dark accent #5AB0FF; ink on green/orange fills.
+  Tests: `ContrastHelpersTest`, `ContrastTest`, `FilledButtonContrastTest`, `SwipeActionContrastTest`,
+  `TextContrastTest` (the golden text-contrast measure), and `assertTagTextReadable`/`assertNodeReadable` calls in `E44PhotoShotTest` ("Choose" on the
+  dark crop page) and `X2ShotTest` (Share on the Card Studio sheet).
+- pass (viewer chrome over a light photo): `ViewerScrim` raises the top scrim with the photo luminance; the glass back
+  button gets a readable glyph (`BackButton`). Tests: `ViewerScrimTest`, `ViewerChromeContrastTest`.
+- pass (icon tiles and swipe actions): the tile glyph and the swipe label use `readableOn` (glyph tiles at 3:1).
+  Tests: `SettingsGlyphColorTest`, `SwipeActionContrastTest`.
+- pass (Rust card art): every palette's secondary ink reads at 4.5:1 on the colour behind it
+  (`every_palette_secondary_ink_reads_at_4_5`, `crates/rosty_app_core/src/cards/tests.rs`); Rust and x2 goldens re-recorded.
+- exception (notification badges): the white numerals on systemRed (`IosTabBar` badge, about 3.5:1) stay white. It is an
+  iOS convention, the numerals are bold and short, and a badge is not the "white text on a light surface" case the owner
+  reported. Recorded as a deliberate deviation; not a defect.
+- exception (avatar initials and glyphs): untouched on the owner's instruction.
+- pass (contrast audit): the scratch audit over 1,222 light and dark goldens (text-like components with a 2-cluster ratio
+  below 3.0) went from 1,555 hits in 575 files (before round 19) to 1,529 hits in 564 files. The remainder was triaged:
+  avatar initials, map tiles, glass blur and anti-aliasing noise; every real hit found was fixed in step 6 and has an
+  `assertReadable` or unit test.
+- open: no TalkBack or on-device check of the new colours.

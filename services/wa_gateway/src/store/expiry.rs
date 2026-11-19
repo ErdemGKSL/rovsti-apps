@@ -170,12 +170,10 @@ mod tests {
             .map(|m| m.id)
             .collect();
         assert_eq!(left, vec!["later".to_owned(), "plain".to_owned()]);
-        let conn = super::super::lock(&store.conn);
-        let reactions: i64 = conn
+        let reactions: i64 = super::super::lock(&store.conn)
             .query_row("SELECT COUNT(*) FROM reactions", [], |r| r.get(0))
             .unwrap();
         assert_eq!(reactions, 0, "the reaction went with its message");
-        drop(conn);
         // Nothing is due twice.
         assert_eq!(store.purge_expired_messages(61_000).await.unwrap(), vec![]);
     }

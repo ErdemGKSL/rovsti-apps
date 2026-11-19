@@ -506,7 +506,7 @@ mod tests {
         // The gateway names my vote `me`.
         let mine = vec![OptionTally {
             name: "A".into(),
-            voters: names(&[ME]),
+            voters: vec![super::ME.to_owned()],
         }];
         assert!(poll_view("Q", 1, &mine, &[], &[]).options[0].mine);
     }

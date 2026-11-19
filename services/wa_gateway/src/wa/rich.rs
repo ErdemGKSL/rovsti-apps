@@ -74,7 +74,6 @@ pub fn rich_message(
                         display_name: Some(format!("{} contacts", many.len())),
                         contacts: many.iter().map(|c| card(c, None)).collect(),
                         context_info: context_field(context),
-                        ..Default::default()
                     }),
                     ..Default::default()
                 },

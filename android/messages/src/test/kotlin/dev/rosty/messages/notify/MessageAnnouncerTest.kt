@@ -92,6 +92,7 @@ class MessageAnnouncerTest {
         scope: CoroutineScope,
         pushWake: Boolean = false,
         own: List<String> = emptyList(),
+        policy: () -> NotifyPolicy = { NotifyPolicy.current },
     ) = MessageAnnouncer(
         context,
         scope,
@@ -106,6 +107,7 @@ class MessageAnnouncerTest {
             pushWake = pushWake,
             now = { now },
             ownIds = { own },
+            policy = policy,
         ),
         post = { _, digest -> posted.add(digest) },
         shown = { _, tag -> posted.lastOrNull { it.spec.tag == tag } },
@@ -251,6 +253,34 @@ class MessageAnnouncerTest {
             assertTrue(announcer.onMeta(GatewayEvent.MessageMetaChanged(club, "g3", meta = reply)))
             assertFalse("announced once", announcer.onMeta(GatewayEvent.MessageMetaChanged(club, "g3", meta = reply)))
             assertEquals(2, posted.size)
+        }
+
+    @Test fun aMentionOfMeOrAReplyToMeGetsThroughRostysOwnMute() =
+        runTest(UnconfinedTestDispatcher()) {
+            // E6-WA R5 (owner): Rosty's per-conversation mute lets the same messages through as WhatsApp's.
+            scriptRust()
+            val me = "100000000001@s.whatsapp.net"
+            val sender = "100000000012@s.whatsapp.net"
+            val policy = NotifyPolicy(muted = setOf("wa:$club"))
+            val announcer = announcer(this, own = listOf(me), policy = { policy })
+
+            assertFalse(announcer.onWhatsApp(message("r1", chat = club, text = "Hi all", sender = sender)))
+            assertFalse(announcer.onMeta(GatewayEvent.MessageMetaChanged(club, "r1", meta = MessageMeta())))
+            assertTrue(posted.isEmpty())
+
+            assertFalse(announcer.onWhatsApp(message("r2", chat = club, text = "@me look", sender = sender)))
+            assertTrue(
+                announcer.onMeta(
+                    GatewayEvent.MessageMetaChanged(club, "r2", meta = MessageMeta(mentions = listOf(me))),
+                ),
+            )
+            assertTrue("posted past the mute", posted.single().pastMute)
+
+            // A mute that ended holds nothing back.
+            val ended = NotifyPolicy(muted = setOf("wa:$ada"), muteUntil = mapOf("wa:$ada" to now - 1))
+            val open = announcer(this, own = listOf(me), policy = { ended })
+            assertTrue(open.onWhatsApp(message("r3")))
+            assertFalse(posted.last().pastMute)
         }
 
     @Test fun withNoUiAttachedThePushServicePostsWhenThereIsOne() =

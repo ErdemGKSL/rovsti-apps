@@ -191,6 +191,16 @@ class MessagesNotifierTest {
         assertTrue(MessagesNotifier.show(context, spec()))
     }
 
+    @Test fun aDigestThatAddressesMePassesRostysMuteButNotTheMasterSwitch() {
+        // E6-WA R5 (owner): a mention of me or a reply to me gets through the conversation's mute.
+        NotifyPolicy.current = NotifyPolicy(muted = setOf(sms))
+        val digest = Digest.parse(spec())!!.copy(pastMute = true)
+        assertTrue(MessagesNotifier.show(context, digest))
+        assertTrue("kept for a reply", MessagesNotifier.shown(context, sms)!!.pastMute)
+        NotifyPolicy.current = NotifyPolicy(enabled = false, muted = setOf(sms))
+        assertFalse(MessagesNotifier.show(context, digest))
+    }
+
     @Test fun withCopyCodeSwitchedOffAPasscodeHasNeitherChipNorReply() {
         NotifyPolicy.current = NotifyPolicy(otpCopy = false)
         MessagesNotifier.show(context, spec(lines = listOf("Your code is 482913"), otp = "482913"))

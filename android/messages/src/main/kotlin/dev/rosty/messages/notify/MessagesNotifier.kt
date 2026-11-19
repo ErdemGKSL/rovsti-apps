@@ -29,6 +29,11 @@ import org.json.JSONObject
 data class Digest(
     val spec: NotificationSpec,
     val sent: List<String> = emptyList(),
+    /**
+     * E6-WA R5 (owner): the newest message mentions me or replies to me, so it is posted through Rosty's own mute of
+     * the conversation (WhatsApp's mute was passed already).
+     */
+    val pastMute: Boolean = false,
 ) {
     fun toJson(): String =
         JSONObject()
@@ -39,6 +44,7 @@ data class Digest(
             .put("reply", spec.reply)
             .put("silent", spec.silent)
             .put("sent", JSONArray(sent))
+            .put("past_mute", pastMute)
             .toString()
 
     companion object {
@@ -51,7 +57,13 @@ data class Digest(
                 } catch (_: org.json.JSONException) {
                     null
                 }
-            return Digest(spec, sent.orEmpty())
+            val pastMute =
+                try {
+                    JSONObject(json).optBoolean("past_mute", false)
+                } catch (_: org.json.JSONException) {
+                    false
+                }
+            return Digest(spec, sent.orEmpty(), pastMute)
         }
     }
 }
@@ -102,7 +114,8 @@ object MessagesNotifier {
         val policy = NotifyPolicy.current
         val now = SmsClock.nowMillis()
         val tag = digest.spec.tag
-        if (!policy.enabled || policy.isMuted(tag, now) || OpenConversation.isShowing(tag)) return false
+        val muted = policy.isMuted(tag, now) && !digest.pastMute
+        if (!policy.enabled || muted || OpenConversation.isShowing(tag)) return false
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         if (!manager.areNotificationsEnabled()) return false
         // The passcode chip is a setting; a passcode is still not answered, so reply stays off (GPUI `plan`).

@@ -7,6 +7,8 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Shader
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -125,6 +127,32 @@ class E58ShotTest : ShotTest() {
         for (dark in listOf(false, true)) {
             val h = IncomingShotHarness(incomingUi())
             shoot("e5.8-wa-incoming-photo", dark) { HostedIncoming(h, photo = "wa-avatar:$jid") }
+        }
+    }
+
+    /** E6-WA R5: an outgoing WhatsApp call rings and the person is online. */
+    @Test fun callingShowsPresence() {
+        val call =
+            liveCall(
+                state = dev.rosty.core.model.phone.WireCallState.Dialing,
+                name = "Ada Lovelace",
+                number = "+100000000053",
+                contactId = null,
+                canHold = false,
+                connectedAgoS = -1,
+            )
+        val rig = InCallHarness(liveSnapshot(call, endpoints = emptyList()))
+        rig.source.setWhatsApp(mapOf(call.id to meta(CallDirection.Out, CallPhase.Ringing)))
+        val ui =
+            rig.ui.copy(
+                waPresence =
+                    dev.rosty.core.model.wa
+                        .HeaderPresence(dev.rosty.core.model.wa.HeaderPresenceKind.Online),
+            )
+        for (dark in listOf(false, true)) {
+            val h = InCallShotHarness(ui)
+            shoot("e6wa-r5-wa-calling-presence", dark) { HostedInCall(h) }
+            compose.onNodeWithTag(InCallTags.WaPresence).assertIsDisplayed()
         }
     }
 

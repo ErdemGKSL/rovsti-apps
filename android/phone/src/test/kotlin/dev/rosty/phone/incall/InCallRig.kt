@@ -317,8 +317,16 @@ internal class InCallHarness(
         dev.rosty.phone.incoming
             .hostDisplay(first),
     placer: dev.rosty.phone.data.CallPlacer? = null,
+    /** E6-WA R5: the presence ports of a ringing WhatsApp call; null builds the model without a presence watch. */
+    presencePorts: dev.rosty.wa.presence.WaPresencePorts? = null,
 ) {
     val testScope = TestScope(UnconfinedTestDispatcher())
+
+    /** The gateway's events the presence watch reads. */
+    val waEvents =
+        kotlinx.coroutines.flow.MutableSharedFlow<dev.rosty.core.model.wa.GatewayEvent>(
+            extraBufferCapacity = 8,
+        )
     val source = FakeSource(first)
     val calls = InCallCalls()
     val notes = FakeNotes()
@@ -342,6 +350,12 @@ internal class InCallHarness(
             scope = testScope.backgroundScope,
             clock = { NOW },
             placer = placer,
+            presence =
+                presencePorts?.let {
+                    dev.rosty.wa.presence
+                        .WaPresenceWatch(it, testScope.backgroundScope, now = { NOW })
+                },
+            presenceEvents = waEvents,
         )
 
     init {

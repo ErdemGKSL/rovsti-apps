@@ -93,6 +93,7 @@ object InCallTags {
     const val Number = "incall-number"
     const val Status = "incall-status"
     const val WaAudio = "incall-wa-audio"
+    const val WaPresence = "incall-wa-presence"
     const val Timer = "incall-timer"
     const val Sim = "incall-sim"
     const val Collapse = "incall-collapse"
@@ -393,6 +394,17 @@ private fun Identity(
         if (call.whatsapp) {
             Spacer(Modifier.height(InCallMetrics.NameGap))
             WaAudioLabel(strings.waAudio, OnAuraSecondary, Modifier.testTag(InCallTags.WaAudio))
+            strings.waPresence(ui.waPresence, System.currentTimeMillis())?.let {
+                Spacer(Modifier.height(InCallMetrics.NameGap))
+                RostyText(
+                    it,
+                    modifier = Modifier.testTag(InCallTags.WaPresence),
+                    style = RostyTheme.type.footnote,
+                    color = OnAuraSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

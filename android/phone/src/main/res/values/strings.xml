@@ -388,6 +388,8 @@
     <string name="mini_call_title">%1$s, %2$s</string>
     <string name="wa_audio">WhatsApp audio</string>
     <string name="incall_notice_wa_unavailable">Not available on WhatsApp calls</string>
+    <string name="incall_wa_online">Online</string>
+    <string name="incall_wa_last_seen">Last seen %1$s</string>
     <string name="wa_notice_microphone">Allow the microphone to make WhatsApp calls</string>
     <string name="wa_notice_failed">The WhatsApp call could not be started</string>
     <string name="wa_refused_no_number">There is no number to call on WhatsApp</string>

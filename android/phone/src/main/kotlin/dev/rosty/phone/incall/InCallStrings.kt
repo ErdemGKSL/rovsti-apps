@@ -1,12 +1,15 @@
 package dev.rosty.phone.incall
 
 import android.content.res.Resources
+import android.text.format.DateUtils
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import dev.rosty.core.model.phone.RowKind
+import dev.rosty.core.model.wa.HeaderPresence
+import dev.rosty.core.model.wa.HeaderPresenceKind
 import dev.rosty.phone.R
 
 /** Every word of the In-Call screen, the route list, the mini pill and the post-call pills, read once per configuration. */
@@ -67,6 +70,31 @@ class InCallStrings(
     val postCallAddNote: String = res.getString(R.string.postcall_add_note)
 
     fun people(count: Int): String = res.getString(R.string.incall_people, count)
+
+    /**
+     * E6-WA R5: the presence line under a ringing WhatsApp call. Typing or recording counts as online here; a last
+     * seen reads relative to [nowMs] ("5 minutes ago"); nothing known or a hidden last seen shows nothing.
+     */
+    fun waPresence(
+        line: HeaderPresence,
+        nowMs: Long,
+    ): String? =
+        when (line.kind) {
+            HeaderPresenceKind.None -> {
+                null
+            }
+
+            HeaderPresenceKind.LastSeen -> {
+                line.atMs?.let {
+                    val ago = DateUtils.getRelativeTimeSpanString(it, nowMs, DateUtils.MINUTE_IN_MILLIS).toString()
+                    res.getString(R.string.incall_wa_last_seen, ago)
+                }
+            }
+
+            else -> {
+                res.getString(R.string.incall_wa_online)
+            }
+        }
 
     fun heldCard(who: String): String = res.getString(R.string.incall_held_card_desc, who)
 

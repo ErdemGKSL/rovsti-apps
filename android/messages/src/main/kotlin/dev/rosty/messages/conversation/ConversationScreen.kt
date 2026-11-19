@@ -164,6 +164,8 @@ class ConversationActions(
     val onVoiceSpeed: () -> Unit = {},
     /** M50: the card a tap on a group sender's name opens; null: names are plain text. */
     val senderCard: (@Composable (BubbleUi) -> Unit)? = null,
+    /** E6-WA R5: draws [BubbleUi.rich] (a poll, a place, contact cards) with the bubble's ink and secondary colour. */
+    val richCard: (@Composable (BubbleUi, Color, Color) -> Unit)? = null,
     /** E6.13: the menu of a bubble opened at this rect (the "Remind me" popover grows out of the same place). */
     val onMenuOpened: (BubbleUi, androidx.compose.ui.geometry.Rect) -> Unit = { _, _ -> },
     /** E6-WA R3: the microphone beside the empty composer (voice notes); null: no microphone. */
@@ -906,6 +908,7 @@ private fun BubbleBody(
             )
         }
         bubble.link?.takeIf { !bubble.deleted }?.let { LinkCard(it, ink, secondary, actions.onOpenLink) }
+        if (bubble.rich != null && !bubble.deleted) actions.richCard?.invoke(bubble, ink, secondary)
         Row(
             Modifier.align(Alignment.End).padding(top = Spacing.textGap),
             verticalAlignment = Alignment.CenterVertically,

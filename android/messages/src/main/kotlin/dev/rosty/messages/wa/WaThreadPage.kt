@@ -67,6 +67,8 @@ import dev.rosty.messages.settings.findComponentActivity
 import dev.rosty.messages.settings.replies.rememberComposerExtras
 import dev.rosty.messages.starred.rememberMarkHost
 import dev.rosty.messages.ui.LocalWantAvatar
+import dev.rosty.messages.wa.rich.RichCard
+import dev.rosty.messages.wa.rich.rememberRichActions
 import dev.rosty.platform.audio.AndroidVoiceRecorder
 import dev.rosty.platform.identity.PhoneNumbers
 import dev.rosty.platform.media.AndroidMediaProbe
@@ -107,6 +109,32 @@ class ResourceWaWords(
         }
 
     override fun edited(clock: String) = res.getString(R.string.wa_thread_edited, clock)
+
+    override val online: String get() = res.getString(R.string.wa_presence_online)
+
+    override fun lastSeen(
+        day: String?,
+        yesterday: Boolean,
+        clock: String,
+    ): String =
+        when {
+            day == null -> res.getString(R.string.wa_presence_last_seen_today, clock)
+            yesterday -> res.getString(R.string.wa_presence_last_seen_yesterday, clock)
+            else -> res.getString(R.string.wa_presence_last_seen_day, day, clock)
+        }
+
+    override val pollSingle: String get() = res.getString(R.string.wa_poll_single)
+    override val pollMultiple: String get() = res.getString(R.string.wa_poll_multiple_hint)
+
+    override fun pollVotes(count: Int): String =
+        if (count == 0) {
+            res.getString(R.string.wa_poll_no_votes)
+        } else {
+            res.getQuantityString(R.plurals.wa_poll_votes, count, count)
+        }
+
+    override val sharedLocation: String get() = res.getString(R.string.wa_place_shared)
+    override val liveLocation: String get() = res.getString(R.string.wa_place_live)
 
     override fun unread(count: Int) = res.getQuantityString(R.plurals.conversation_unread, count, count)
 
@@ -320,6 +348,12 @@ fun rememberWaThreadViewModel(
                             probe = AndroidMediaProbe(),
                             rules = container.waActionRules,
                             links = container.waLinks,
+                            ownIds = {
+                                (container.wa.linkState.value as? dev.rosty.wa.WaLinkState.Connected)
+                                    ?.status
+                                    ?.let { listOfNotNull(it.ownJid, it.ownLid) }
+                                    .orEmpty()
+                            },
                         ),
                         jid,
                         ResourceWaWords(res) { bytes -> Formatter.formatShortFileSize(context, bytes) },
@@ -376,7 +410,8 @@ fun WaThreadPage(
     val record by model.record.collectAsState()
     val recordActions = rememberRecordActions(model, container.permissions, container.specialAccess, overlays)
     DisposableEffect(model) { onDispose { model.stopVoice() } }
-    val attachMenu = rememberWaAttachMenu(model, overlays)
+    val rich = rememberRichActions(model, container, navigator, overlays)
+    val attachMenu = rememberWaAttachMenu(model, overlays, rich)
     val host =
         rememberToolHost(
             container,
@@ -537,6 +572,7 @@ fun WaThreadPage(
                 onVoiceSeek = { bubble, fraction -> model.seekVoice(bubble.key, fraction) },
                 onVoiceSpeed = model::nextVoiceSpeed,
                 senderCard = { bubble -> WaSenderCard(bubble, model, container, navigator, overlays) },
+                richCard = { bubble, ink, secondary -> RichCard(bubble, ink, secondary, rich.cards) },
                 record = recordActions,
                 mediaAnchors = anchors,
             )

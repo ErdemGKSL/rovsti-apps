@@ -53,10 +53,11 @@
         <provider android:authorities="dev.rosty.stops.walink" />
     </queries>
 
-    <!-- :platform mirrors the permissions of all four apps so lint can check its calls; Messages uses no location and no
-         full-screen intents, so the merge drops them. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+    <!-- E6-WA R5: "Send my location" asks for location at first use (one fix, never in the background). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- :platform mirrors the permissions of all four apps so lint can check its calls; Messages uses no full-screen
+         intents, so the merge drops it. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" tools:node="remove" />
     <!-- androidx.biometric (the WhatsApp vault's prompt, plans/wa-vault.md 13.2) also asks for the deprecated
          fingerprint permission; the prompt on API 34 needs only USE_BIOMETRIC, which stays. -->

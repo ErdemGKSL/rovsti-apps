@@ -205,6 +205,68 @@ data class BubbleUi(
     val link: LinkCardUi? = null,
     /** E6-WA R4: a line of the conversation ("Disappearing messages turned on"): drawn centred, no bubble, no menu. */
     val notice: Boolean = false,
+    /** E6-WA R5: a poll, a place or contact cards, drawn by the page's [ConversationActions.richCard]. */
+    val rich: RichCardUi? = null,
+)
+
+/** What a rich bubble shows (E6-WA R5); every string is ready to draw. */
+@Immutable
+sealed interface RichCardUi {
+    /** A poll: tap an option to vote ([single]: one answer, a tap moves the vote; else a tap toggles it). */
+    @Immutable
+    data class Poll(
+        val messageId: String,
+        val question: String,
+        /** "Select one" or "Select one or more". */
+        val hint: String,
+        val single: Boolean,
+        val options: ImmutableList<PollOptionUi>,
+        /** "3 votes", or "No votes yet". */
+        val total: String,
+        /** Votes can be sent (a stored poll, not one of mine still in the outbox). */
+        val canVote: Boolean,
+    ) : RichCardUi
+
+    /** A place: its map is painted from tiles by the page ([latitude], [longitude]). */
+    @Immutable
+    data class Place(
+        val title: String,
+        val subtitle: String?,
+        /** "Live location · last update shown", or null for a place. */
+        val live: String?,
+        val latitude: Double,
+        val longitude: Double,
+        val geoUri: String,
+    ) : RichCardUi
+
+    /** One or several contact cards. */
+    @Immutable
+    data class Contacts(
+        val cards: ImmutableList<ContactCardUi>,
+    ) : RichCardUi
+}
+
+/** One option of a poll bubble: its share of the voters as a bar, its count and who picked it. */
+@Immutable
+data class PollOptionUi(
+    val name: String,
+    val count: Int,
+    /** 0 to 1. */
+    val share: Float,
+    val mine: Boolean,
+    val leading: Boolean,
+    /** "Ali, You", short; empty with no votes. */
+    val voters: String,
+)
+
+/** One contact card: the name, its numbers as lines, the chat a "Message" opens and the vCard to add. */
+@Immutable
+data class ContactCardUi(
+    val name: String,
+    val numbers: ImmutableList<String>,
+    /** The WhatsApp chat of its first number; null: no "Message". */
+    val messageJid: String?,
+    val vcard: String,
 )
 
 /** A range of a bubble's text drawn as a name (a mention). */

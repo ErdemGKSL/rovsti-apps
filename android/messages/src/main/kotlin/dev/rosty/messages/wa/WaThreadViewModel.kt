@@ -6,15 +6,24 @@ import dev.rosty.core.Outcome
 import dev.rosty.core.getOrNull
 import dev.rosty.core.model.chat.SearchJumpRequest
 import dev.rosty.core.model.chat.SearchJumpStep
+import dev.rosty.core.model.wa.CardNumber
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.DELETED_BY_ME
 import dev.rosty.core.model.wa.GatewayEvent
+import dev.rosty.core.model.wa.HeaderPresence
+import dev.rosty.core.model.wa.HeaderPresenceKind
+import dev.rosty.core.model.wa.MY_VOTE
 import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MediaWaveform
 import dev.rosty.core.model.wa.MentionPick
 import dev.rosty.core.model.wa.MentionQuery
 import dev.rosty.core.model.wa.MessageBody
+import dev.rosty.core.model.wa.PlaceViewRequest
+import dev.rosty.core.model.wa.Poll
+import dev.rosty.core.model.wa.PollCheckRequest
+import dev.rosty.core.model.wa.RichContent
+import dev.rosty.core.model.wa.SharedContact
 import dev.rosty.core.model.wa.TypingState
 import dev.rosty.core.model.wa.Unavailable
 import dev.rosty.core.model.wa.WaIds
@@ -34,6 +43,7 @@ import dev.rosty.messages.conversation.BubbleQuote
 import dev.rosty.messages.conversation.BubbleState
 import dev.rosty.messages.conversation.BubbleUi
 import dev.rosty.messages.conversation.ComposerMode
+import dev.rosty.messages.conversation.ContactCardUi
 import dev.rosty.messages.conversation.ConversationEffect
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.conversation.DayLabels
@@ -42,8 +52,10 @@ import dev.rosty.messages.conversation.LinkCardUi
 import dev.rosty.messages.conversation.LinkChipUi
 import dev.rosty.messages.conversation.MediaAction
 import dev.rosty.messages.conversation.MentionOptionUi
+import dev.rosty.messages.conversation.PollOptionUi
 import dev.rosty.messages.conversation.RecordUi
 import dev.rosty.messages.conversation.ReplyUi
+import dev.rosty.messages.conversation.RichCardUi
 import dev.rosty.messages.conversation.TextMark
 import dev.rosty.messages.conversation.VoiceUi
 import dev.rosty.messages.conversation.withDays
@@ -54,6 +66,7 @@ import dev.rosty.messages.inbox.waPreview
 import dev.rosty.messages.names.PersonNames
 import dev.rosty.platform.audio.VoiceRecorder
 import dev.rosty.platform.media.MediaProbe
+import dev.rosty.wa.presence.WaPresenceWatch
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
@@ -99,6 +112,30 @@ interface WaWords {
         name: String?,
         recording: Boolean,
     ): String
+
+    /** E6-WA R5: the header's presence line. */
+    val online: String get() = "online"
+
+    /** "last seen today at 14:05": [day] is the day label, null for today ([yesterday] for the day before). */
+    fun lastSeen(
+        day: String?,
+        yesterday: Boolean,
+        clock: String,
+    ): String =
+        when {
+            day == null -> "last seen today at $clock"
+            yesterday -> "last seen yesterday at $clock"
+            else -> "last seen $day at $clock"
+        }
+
+    /** E6-WA R5: a poll's hint, its total and a place's words. */
+    val pollSingle: String get() = "Select one"
+    val pollMultiple: String get() = "Select one or more"
+
+    fun pollVotes(count: Int): String = if (count == 0) "No votes yet" else "$count votes"
+
+    val sharedLocation: String get() = "Shared location"
+    val liveLocation: String get() = "Live location"
 
     /** "Edited 14:05". */
     fun edited(clock: String): String
@@ -287,6 +324,8 @@ class WaThreadSources(
     val rules: WaActionRules? = null,
     /** Link cards made on the phone (E6-WA R4); null: none. */
     val links: WaLinkPreviews? = null,
+    /** E6-WA R5: my ids (number and LID) as the gateway last named them, for "mine" in polls. */
+    val ownIds: () -> List<String> = { emptyList() },
 )
 
 private const val NANOS_PER_MS = 1_000_000L
@@ -398,6 +437,16 @@ class WaThreadViewModel(
     private var lastTypingSentMs = 0L
     private var visible = false
 
+    /**
+     * E6-WA R5: the presence line of this chat while it is on screen (online, last seen, typing, recording), shared
+     * with Phone through `:wa`; null without the rules (tests of older features), which keeps the R3 typing line.
+     */
+    private val presence: WaPresenceWatch? =
+        sources.rules?.let { rules ->
+            WaPresenceWatch(ThreadPresencePorts(sources.remote, rules), viewModelScope, sources.now)
+        }
+    private var presenceLine: String? = null
+
     private val batchState = MutableStateFlow<WaSendBatch?>(null)
 
     /**
@@ -496,6 +545,14 @@ class WaThreadViewModel(
             }
         }
         viewModelScope.launch { sources.offline.live.collect(::onLive) }
+        presence?.let { watch ->
+            viewModelScope.launch {
+                watch.state.collect { line ->
+                    presenceLine = presenceText(line)
+                    publish()
+                }
+            }
+        }
         viewModelScope.launch {
             sources.rekeys.collect { step ->
                 // Two ids became one person: whoever was named by one of them is named again.
@@ -620,7 +677,8 @@ class WaThreadViewModel(
             ui.value.copy(
                 title = title,
                 // The number as people read it (`+90 555 000 00 01`), as on the SMS header.
-                subtitle = typing ?: number?.let { sources.readable(it) }?.takeIf { !group && it != title },
+                subtitle =
+                    typing ?: presenceLine ?: number?.let { sources.readable(it) }?.takeIf { !group && it != title },
                 avatar =
                     RowAvatar(
                         numbers = (if (group) emptyList() else numbers).toImmutableList(),
@@ -711,9 +769,12 @@ class WaThreadViewModel(
         }
         val isMedia = row.kind in MEDIA_KINDS
         val placeholder = if (row.deleted) null else placeholderOf(row)
+        val rich = if (row.deleted) null else richOf(row)
         val text =
             when {
                 row.deleted -> if (row.deletedByMe()) words.youDeleted else words.deleted
+
+                rich != null -> ""
 
                 // A placeholder says what it is in its row; a view-once send of mine keeps its caption.
                 placeholder != null -> if (isMedia) row.text.orEmpty() else ""
@@ -765,7 +826,167 @@ class WaThreadViewModel(
                         picture = sources.media?.thumb(row),
                     )
                 },
+            rich = rich,
         )
+    }
+
+    // ---- rich content (E6-WA R5)
+
+    /** The card of a poll, a place or contact cards; null for anything else, or without the rules. */
+    private suspend fun richOf(row: WaSyncMessage): RichCardUi? {
+        val rules = sources.rules ?: return null
+        row.poll?.let { return pollOf(row, it, rules) }
+        row.location?.let { place ->
+            val view =
+                rules.placeView(
+                    PlaceViewRequest(place.latitude, place.longitude, place.name, place.address, place.live),
+                ) ?: return null
+            return RichCardUi.Place(
+                title = view.title ?: words.sharedLocation,
+                subtitle = view.subtitle ?: view.coords.takeIf { view.title == null },
+                live = words.liveLocation.takeIf { view.live },
+                latitude = place.latitude,
+                longitude = place.longitude,
+                geoUri = view.geoUri,
+            )
+        }
+        val shared = row.contacts.ifEmpty { listOfNotNull(row.contact) }
+        if (shared.isEmpty()) return null
+        val cards =
+            shared.map { contact ->
+                val card = rules.cards(contact.vcard).firstOrNull()
+                ContactCardUi(
+                    name = card?.name ?: contact.displayName,
+                    numbers =
+                        card
+                            ?.numbers
+                            .orEmpty()
+                            .map { n -> listOfNotNull(n.number, n.label).joinToString(" · ") }
+                            .toImmutableList(),
+                    messageJid = card?.numbers?.firstNotNullOfOrNull { it.waJid },
+                    vcard = contact.vcard,
+                )
+            }
+        return RichCardUi.Contacts(cards.toImmutableList())
+    }
+
+    private suspend fun pollOf(
+        row: WaSyncMessage,
+        poll: Poll,
+        rules: WaActionRules,
+    ): RichCardUi.Poll? {
+        val view = rules.pollView(poll, ownIds()) ?: return null
+        val options =
+            view.options.map { option ->
+                PollOptionUi(
+                    name = option.name,
+                    count = option.count,
+                    share = option.percent / PERCENT,
+                    mine = option.mine,
+                    leading = option.leading,
+                    voters =
+                        option.voters
+                            .take(VOTERS_SHOWN)
+                            .map { voterName(it) }
+                            .joinToString(", ") +
+                            (if (option.voters.size > VOTERS_SHOWN) " +${option.voters.size - VOTERS_SHOWN}" else ""),
+                )
+            }
+        return RichCardUi.Poll(
+            messageId = row.id,
+            question = view.question,
+            hint = if (view.multiple) words.pollMultiple else words.pollSingle,
+            single = !view.multiple,
+            options = options.toImmutableList(),
+            total = words.pollVotes(view.voters),
+            canVote = row.state !in OUTBOX_STATES,
+        )
+    }
+
+    private suspend fun voterName(jid: String): String = if (jid == MY_VOTE) words.you else senderOf(jid, null)
+
+    /** My ids as the gateway last named them (number and LID); empty when not known. */
+    private fun ownIds(): List<String> = sources.ownIds()
+
+    /** My new choice in the poll [messageId] (empty: my vote taken back); it shows at once and goes out. */
+    fun vote(
+        messageId: String,
+        options: List<String>,
+    ) {
+        viewModelScope.launch {
+            if (!sources.offline.enqueue(jid, WaSyncAction.PollVote(messageId, options))) {
+                effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
+            }
+        }
+    }
+
+    /** Checks a poll from the create sheet (Rust's rules) and sends it. False when it cannot go as it is. */
+    suspend fun sendPoll(draft: PollCheckRequest): Boolean {
+        val checked = sources.rules?.pollCheck(draft)?.draft ?: return false
+        return sendRich(RichContent.PollDraft(checked.question, checked.options, checked.multiple))
+    }
+
+    /** Sends my place (a one-shot fix; never a live location). */
+    suspend fun sendPlace(
+        latitude: Double,
+        longitude: Double,
+    ): Boolean = sendRich(RichContent.Place(latitude, longitude))
+
+    /** Sends a contact picked from the phone's contacts as a vCard. */
+    suspend fun sendContact(
+        name: String,
+        numbers: List<String>,
+    ): Boolean {
+        val vcard = sources.rules?.vcard(name, numbers.map { CardNumber(it) }) ?: return false
+        return sendRich(RichContent.Contacts(listOf(SharedContact(name, vcard))))
+    }
+
+    private suspend fun sendRich(content: RichContent): Boolean {
+        val quoted = replyTo
+        replyTo = null
+        val sent = sources.offline.enqueue(jid, WaSyncAction.SendRich(content, quoted))
+        if (!sent) {
+            replyTo = quoted
+            effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_thread_not_linked)))
+        }
+        publish()
+        return sent
+    }
+
+    /** The header line of what the watch sees. */
+    private suspend fun presenceText(line: HeaderPresence): String? {
+        val group = chat?.isGroup ?: WaIds.isGroup(jid)
+
+        suspend fun nameOf(who: List<String>) = if (group) who.firstOrNull()?.let { senderOf(it, null) } else null
+        return when (line.kind) {
+            HeaderPresenceKind.None -> {
+                null
+            }
+
+            HeaderPresenceKind.Online -> {
+                words.online
+            }
+
+            HeaderPresenceKind.Typing -> {
+                words.typing(nameOf(line.who), recording = false)
+            }
+
+            HeaderPresenceKind.Recording -> {
+                words.typing(nameOf(line.who), recording = true)
+            }
+
+            HeaderPresenceKind.Busy -> {
+                words.typing(nameOf(line.typing), recording = false)
+            }
+
+            HeaderPresenceKind.LastSeen -> {
+                val at = line.atMs ?: return null
+                val now = sources.now()
+                val today = days.day(at) == days.day(now)
+                val yesterday = days.day(at) == days.day(now).minusDays(1)
+                words.lastSeen(if (today) null else days.label(at, now), yesterday, days.clock(at))
+            }
+        }
     }
 
     /** [text] with each mention of [row] as `@Name`, and where the names are. */
@@ -1001,8 +1222,11 @@ class WaThreadViewModel(
                 sources.offline.opened(jid)
                 markRead()
             }
+            // E6-WA R5: presence of the chat on screen only.
+            presence?.let { watch -> viewModelScope.launch { watch.watch(jid, chat?.isGroup ?: WaIds.isGroup(jid)) } }
         } else {
             viewModelScope.launch { sources.offline.closed() }
+            presence?.let { watch -> viewModelScope.launch { watch.leave() } }
         }
     }
 
@@ -1871,6 +2095,11 @@ class WaThreadViewModel(
 
     /** The events of [WaOffline.live] name their chat and people by the store's keys, as [jid] is. */
     private suspend fun onLive(event: GatewayEvent) {
+        // E6-WA R5: typing, recording and presence go to the watch (Rust's rules).
+        presence?.let { watch ->
+            watch.onEvent(event)
+            return
+        }
         when (event) {
             is GatewayEvent.Typing -> {
                 if (event.chat != jid) return
@@ -1915,6 +2144,10 @@ class WaThreadViewModel(
         private const val NOW_MS = 60_000L
         private const val TYPING_EVERY_MS = 5_000L
         const val TYPING_SHOWN_MS = 12_000L
+
+        /** A poll option names this many voters, then "+N". */
+        private const val VOTERS_SHOWN = 3
+        private const val PERCENT = 100f
 
         /** The quiet before a link in the composer gets its card (owner decision: 500 to 800 ms). */
         const val LINK_DEBOUNCE_MS = 600L

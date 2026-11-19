@@ -976,6 +976,7 @@ tiles.offline_start.no_area
 tiles.open
 tiles.open.bad_url
 tiles.open.custom
+tiles.open.memory
 tiles.open.no_scheme
 tiles.set_cap
 tiles.stand_in
@@ -1187,6 +1188,18 @@ wa.picture.rate_limited
 wa.picture.unchanged
 wa.place_call
 wa.place_call.offline
+wa.place_view
+wa.place_view.no_name
+wa.place_view.nowhere
+wa.poll_check
+wa.poll_check.problems
+wa.poll_view
+wa.poll_vote
+wa.poll_vote.take_back
+wa.presence_view
+wa.presence_view.group
+wa.presence_view.hidden
+wa.presence_view.typing
 wa.profiles
 wa.push_parse
 wa.push_parse.call_end
@@ -1215,6 +1228,9 @@ wa.send_media_with.bad_waveform
 wa.send_media_with.options
 wa.send_media_with.view_once_document
 wa.send_media_with.waveform
+wa.send_rich
+wa.send_rich.location
+wa.send_rich.old_gateway
 wa.send_text
 wa.send_text.reply
 wa.set_muted
@@ -1242,6 +1258,8 @@ wa.settings_apply.share_key
 wa.settings_apply.show_code
 wa.settings_apply.show_qr
 wa.star_message
+wa.static_map
+wa.static_map.empty
 wa.status
 wa.status.api_error
 wa.status.forbidden
@@ -1257,6 +1275,11 @@ wa.target.local_only
 wa.target.no_number
 wa.target.number
 wa.thumbnail
+wa.unsubscribe_presence
+wa.vcard_build
+wa.vcard_build.no_name
+wa.vcard_parse
+wa.vcard_parse.no_number
 wa_idbook.account
 wa_idbook.account.event
 wa_idbook.account.nothing_known

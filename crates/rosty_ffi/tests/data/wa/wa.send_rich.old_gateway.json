@@ -1,0 +1,12 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/rich",
+  "body": {
+   "chat": "100000000011@s.whatsapp.net",
+   "content": {"type": "contacts", "contacts": [{"display_name": "Ada", "vcard": "BEGIN:VCARD\nFN:Ada\nEND:VCARD"}]}
+  }
+ },
+ "status": 404,
+ "body_text": "<html>404 Not Found</html>"
+}

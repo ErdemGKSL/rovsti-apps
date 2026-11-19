@@ -1,0 +1,8 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/polls/vote",
+  "body": {"chat": "120363000000000011@g.us", "message_id": "3EB0P1", "options": ["Soup"]}
+ },
+ "status": 204
+}

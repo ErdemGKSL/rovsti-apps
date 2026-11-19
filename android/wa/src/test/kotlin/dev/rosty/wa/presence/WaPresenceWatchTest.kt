@@ -99,6 +99,19 @@ class WaPresenceWatchTest {
             assertEquals(HeaderPresence.NONE, watch.state.value)
         }
 
+    @Test fun typingEndsEvenWhenTheClockDoesNotMoveWithTheWait() =
+        runTest {
+            // A clock that stands still (set back on the device): the wait alone ends the typing state, once.
+            val ports = Ports { 0L }
+            val watch = WaPresenceWatch(ports, backgroundScope) { 0L }
+            watch.watch(peer, isGroup = false)
+            watch.onEvent(GatewayEvent.Typing(peer, peer, TypingState.Typing))
+            assertEquals(HeaderPresenceKind.Typing, watch.state.value.kind)
+            advanceTimeBy(WaPresenceWatch.TYPING_TTL_MS + 5)
+            runCurrent()
+            assertEquals(HeaderPresence.NONE, watch.state.value)
+        }
+
     @Test fun aGroupIsNeverSubscribedAndShowsOnlyWhoTypes() =
         runTest {
             val (watch, ports) = watch()

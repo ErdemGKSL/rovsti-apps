@@ -352,16 +352,20 @@ private fun ContactRow(
                 }
             }
         }
-        Row(
+        // One button per line: "Add to Contacts" (and its Turkish) does not fit beside "Message" in a bubble.
+        Column(
             Modifier.padding(top = Spacing.xs).fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
             contact.messageJid?.let { jid ->
-                CardButton(stringResource(R.string.wa_contact_message), RostyIcons.Message, ink, Modifier.weight(1f)) {
-                    actions.onMessage(jid)
-                }
+                CardButton(
+                    stringResource(R.string.wa_contact_message),
+                    RostyIcons.Message,
+                    ink,
+                    Modifier.fillMaxWidth(),
+                ) { actions.onMessage(jid) }
             }
-            CardButton(stringResource(R.string.wa_contact_add), RostyIcons.PersonAdd, ink, Modifier.weight(1f)) {
+            CardButton(stringResource(R.string.wa_contact_add), RostyIcons.PersonAdd, ink, Modifier.fillMaxWidth()) {
                 actions.onAddContact(contact)
             }
         }

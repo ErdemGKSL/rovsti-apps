@@ -1,21 +1,35 @@
 package dev.rosty.messages.wa
 
 import androidx.lifecycle.viewModelScope
+import dev.rosty.core.Outcome
+import dev.rosty.core.model.wa.Card
+import dev.rosty.core.model.wa.CardNumber
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.FoundUrl
 import dev.rosty.core.model.wa.GroupInfo
+import dev.rosty.core.model.wa.HeaderPresence
+import dev.rosty.core.model.wa.HeaderPresenceKind
 import dev.rosty.core.model.wa.LinkMeta
 import dev.rosty.core.model.wa.LinkPreview
+import dev.rosty.core.model.wa.MY_VOTE
 import dev.rosty.core.model.wa.MentionEncoded
 import dev.rosty.core.model.wa.MentionPick
 import dev.rosty.core.model.wa.MentionQuery
 import dev.rosty.core.model.wa.MessageReceipts
 import dev.rosty.core.model.wa.Participant
+import dev.rosty.core.model.wa.PlaceView
+import dev.rosty.core.model.wa.PlaceViewRequest
+import dev.rosty.core.model.wa.Poll
+import dev.rosty.core.model.wa.PollOptionView
+import dev.rosty.core.model.wa.PollView
+import dev.rosty.core.model.wa.PresenceViewRequest
 import dev.rosty.core.model.wa.ReceiptMember
 import dev.rosty.core.model.wa.ReceiptRow
 import dev.rosty.core.model.wa.ReceiptSection
 import dev.rosty.core.model.wa.SectionRows
 import dev.rosty.core.model.wa.SystemNote
+import dev.rosty.core.model.wa.TypingKind
+import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.model.wa.WaMentionSpan
 import dev.rosty.core.model.wa.WaSyncAction
 import dev.rosty.core.model.wa.WaSyncEnqueueRequest
@@ -34,6 +48,7 @@ import dev.rosty.messages.wa.WaTestKit.Companion.MERT
 import dev.rosty.messages.wa.WaTestKit.Companion.NOW
 import dev.rosty.platform.web.FetchedPage
 import dev.rosty.platform.web.PagePreviewFetcher
+import dev.rosty.wa.presence.WaPresenceWatch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -115,6 +130,82 @@ class FakeWaActionRules(
         html: String,
         url: String,
     ): LinkMeta? = meta
+
+    // ---- E6-WA R5: Kotlin copies of `rosty_core::wa_rich` for the cases the JVM tests use.
+
+    override suspend fun pollView(
+        poll: Poll,
+        own: List<String>,
+    ): PollView {
+        fun isMe(jid: String) = jid == MY_VOTE || own.any { WaIds.same(it, jid) }
+        val voters = poll.options.flatMap { it.voters }.distinct()
+        val top = poll.options.maxOfOrNull { it.voters.size } ?: 0
+        return PollView(
+            question = poll.question,
+            multiple = poll.multiple,
+            voters = voters.size,
+            options =
+                poll.options.map { option ->
+                    PollOptionView(
+                        name = option.name,
+                        count = option.voters.size,
+                        percent =
+                            if (voters.isEmpty()) {
+                                0
+                            } else {
+                                (option.voters.size * 100 + voters.size / 2) /
+                                    voters.size
+                            },
+                        mine = option.name in poll.myVotes || option.voters.any(::isMe),
+                        leading = top > 0 && option.voters.size == top,
+                        voters = option.voters,
+                    )
+                },
+            voted = poll.myVotes.isNotEmpty() || poll.options.any { o -> o.voters.any(::isMe) },
+        )
+    }
+
+    override suspend fun placeView(req: PlaceViewRequest): PlaceView {
+        val coords = "%.5f, %.5f".format(Locale.ROOT, req.latitude, req.longitude)
+        return PlaceView(
+            title = req.name?.takeIf { it.isNotBlank() },
+            subtitle = req.address?.takeIf { it.isNotBlank() },
+            coords = coords,
+            geoUri = "geo:${req.latitude},${req.longitude}",
+            live = req.live,
+        )
+    }
+
+    /** `FN:` names the card; each `TEL` line is a number, its `waid=` its WhatsApp id. */
+    override suspend fun cards(vcard: String): List<Card> =
+        vcard.split("END:VCARD").filter { it.contains("BEGIN:VCARD") }.map { card ->
+            val lines = card.lines().map { it.trim() }
+            Card(
+                name = lines.firstOrNull { it.startsWith("FN:") }?.removePrefix("FN:"),
+                numbers =
+                    lines.filter { it.startsWith("TEL") }.map { line ->
+                        val waid = Regex("waid=(\\d+)").find(line)?.groupValues?.get(1)
+                        CardNumber(line.substringAfterLast(':'), waJid = waid?.let { "$it@s.whatsapp.net" })
+                    },
+            )
+        }
+
+    override suspend fun presenceView(req: PresenceViewRequest): Outcome<HeaderPresence> {
+        val live = req.typing.filter { req.nowMs - it.atMs < WaPresenceWatch.TYPING_TTL_MS }
+        val typing = live.filter { it.kind == TypingKind.Typing }.map { it.jid }
+        val recording = live.filter { it.kind == TypingKind.Recording }.map { it.jid }
+        val seen = req.presence
+        return Outcome.Ok(
+            when {
+                typing.isNotEmpty() -> HeaderPresence(HeaderPresenceKind.Typing, who = typing)
+                recording.isNotEmpty() -> HeaderPresence(HeaderPresenceKind.Recording, who = recording)
+                req.group -> HeaderPresence.NONE
+                seen?.available == true -> HeaderPresence(HeaderPresenceKind.Online)
+                seen?.lastSeenMs != null -> HeaderPresence(HeaderPresenceKind.LastSeen, atMs = seen.lastSeenMs)
+                else -> HeaderPresence.NONE
+            },
+        )
+    }
 }
 
 /** A page fetcher that answers one page and counts what it was asked. */

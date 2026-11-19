@@ -156,7 +156,9 @@ class WaPresenceWatch(
             expiry =
                 scope.launch {
                     delay(wait)
-                    mutex.withLock { typing.removeAll { now() - it.atMs >= TYPING_TTL_MS } }
+                    // The states waited for are over even when the clock did not move with the wait (it was set
+                    // back): without that the watch would wait again and again.
+                    mutex.withLock { typing.removeAll { it.atMs <= oldest || now() - it.atMs >= TYPING_TTL_MS } }
                     recompute()
                 }
         }

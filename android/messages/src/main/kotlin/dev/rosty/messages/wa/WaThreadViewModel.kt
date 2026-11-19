@@ -903,7 +903,8 @@ class WaThreadViewModel(
         )
     }
 
-    private suspend fun voterName(jid: String): String = if (jid == MY_VOTE) words.you else senderOf(jid, null)
+    private suspend fun voterName(jid: String): String =
+        if (jid == MY_VOTE || ownIds().any { WaIds.same(it, jid) }) words.you else senderOf(jid, null)
 
     /** My ids as the gateway last named them (number and LID); empty when not known. */
     private fun ownIds(): List<String> = sources.ownIds()

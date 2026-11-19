@@ -3,8 +3,8 @@
 use rosty_wa_proto::event::ReceiptKind;
 use rosty_wa_proto::{
     ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, EventEnvelope, GatewayEvent,
-    HistorySyncType, LinkPreview, Location, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction,
-    RichChat, SharedContact, SystemNote, Unavailable, WaMessage, is_status_chat,
+    HistorySyncType, LinkPreview, Location, MediaMeta, MessageBody, MessageMeta, Poll, Quoted,
+    Reaction, RichChat, SharedContact, SystemNote, Unavailable, WaMessage, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -39,6 +39,15 @@ pub(super) struct Extra {
     /// A line of the conversation, not a message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemNote>,
+    /// A poll with its votes (E6-WA R5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<Poll>,
+    /// Every card of a contacts message (E6-WA R5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<SharedContact>,
+    /// Kept in a disappearing chat: it does not disappear (E6-WA R5).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept: bool,
 }
 
 /// The gateway-owned columns of a message row.
@@ -192,6 +201,10 @@ pub(super) fn write(conn: &Connection, chat: &str, id: &str, row: &Stored) -> Re
 impl Stored {
     /// When the message disappears (unix ms), from its send time and its timer.
     pub(super) fn expires_at(&self) -> Option<i64> {
+        // A message kept in the chat never disappears (E6-WA R5).
+        if self.extra.kept {
+            return None;
+        }
         rosty_core::wa_actions::expires_at(self.ts, self.extra.expires_s)
     }
 }
@@ -276,6 +289,10 @@ pub(super) fn merge(existing: Option<Stored>, incoming: &Incoming<'_>) -> Option
             row.extra.mentions.clone_from(&meta.mentions);
         }
         row.extra.link_preview = meta.link_preview.clone().or(row.extra.link_preview.take());
+        row.extra.poll = meta.poll.clone().or(row.extra.poll.take());
+        if !meta.contacts.is_empty() {
+            row.extra.contacts.clone_from(&meta.contacts);
+        }
         if !row.content.is_known() {
             row.extra.unavailable = meta.unavailable.or(row.extra.unavailable);
         }
@@ -298,10 +315,13 @@ pub(super) fn merge(existing: Option<Stored>, incoming: &Incoming<'_>) -> Option
             row.deleted_by = meta.deleted_by.clone().or(row.deleted_by);
         } else {
             row.starred = meta.starred;
+            row.extra.kept = meta.kept;
         }
     }
     if !row.content.is_known() {
-        if row.extra.location.is_some() {
+        if row.extra.poll.is_some() {
+            row.content.kind = Kind::Poll;
+        } else if row.extra.location.is_some() {
             row.content.kind = Kind::Location;
         } else if row.extra.contact.is_some() {
             row.content.kind = Kind::Contact;

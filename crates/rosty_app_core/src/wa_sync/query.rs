@@ -104,6 +104,9 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         link_preview: stored.extra.link_preview,
         system: stored.extra.system,
         expires_at: row.get(tail + 7)?,
+        poll: stored.extra.poll,
+        contacts: stored.extra.contacts,
+        kept: stored.extra.kept,
     })
     .map(|mut found| {
         found.editable_until_ms = rosty_core::wa_actions::editable_until(&edit_target(&found));

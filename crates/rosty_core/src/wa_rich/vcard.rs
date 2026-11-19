@@ -86,8 +86,11 @@ fn unfold(text: &str) -> Vec<String> {
     lines
 }
 
-/// A content line split into its property name (group dropped, upper case), its parameters and its value.
-fn split_line(line: &str) -> Option<(String, Vec<(String, String)>, String)> {
+/// A content line: its property name (group dropped, upper case), its parameters and its value.
+type ContentLine = (String, Vec<(String, String)>, String);
+
+/// A content line split into its property name, its parameters and its value.
+fn split_line(line: &str) -> Option<ContentLine> {
     let (head, value) = line.split_once(':')?;
     let mut parts = head.split(';');
     let name = parts.next()?.trim();
@@ -303,6 +306,8 @@ pub fn cards_title(cards: &[Card]) -> Option<(String, usize)> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     const WHATSAPP: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Yılmaz;Ayşe;;;\r\nFN:Ayşe Yılmaz\r\n\

@@ -11,7 +11,7 @@ pub use place::{
     is_valid_coord, place_view, static_map,
 };
 pub use poll::{
-    ChoiceProblem, MAX_OPTION_CHARS, MAX_OPTIONS, MAX_QUESTION_CHARS, MIN_OPTIONS, OptionTally,
+    ChoiceProblem, MAX_OPTION_CHARS, MAX_OPTIONS, MAX_QUESTION_CHARS, ME, MIN_OPTIONS, OptionTally,
     OptionView, PollDraft, PollProblem, PollView, Vote, check_choice, check_draft, latest_votes,
     poll_view, same_voter, selectable_count, tally,
 };

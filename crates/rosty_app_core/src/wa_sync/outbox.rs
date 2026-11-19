@@ -11,8 +11,8 @@
 //!   later star of the same message replaces one that has not gone out; a refused one is undone and dropped.
 
 use rosty_wa_proto::{
-    LinkPreview, LinkPreviewOut, MediaKind, MediaMeta, MediaOptions, MessageBody, Reaction,
-    WaMessage,
+    LinkPreview, LinkPreviewOut, MediaKind, MediaMeta, MediaOptions, MessageBody, Poll, Reaction,
+    RichContent, WaMessage,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
@@ -158,6 +158,20 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sender: Option<String>,
     },
+    /// Send a poll, a place or contact cards (E6-WA R5). The thread shows it at once.
+    SendRich {
+        content: RichContent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quoted_id: Option<String>,
+    },
+    /// My vote in the poll `message_id` (empty: taken back). My choice shows at once; a refused vote puts back
+    /// `previous`, the choice stored when it was queued (filled then).
+    PollVote {
+        message_id: String,
+        options: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous: Option<Vec<String>>,
+    },
 }
 
 impl Action {
@@ -173,6 +187,8 @@ impl Action {
             Action::MarkRead { .. } => "mark_read",
             Action::Star { .. } => "star",
             Action::MarkPlayed { .. } => "mark_played",
+            Action::SendRich { .. } => "send_rich",
+            Action::PollVote { .. } => "poll_vote",
         }
     }
 
@@ -233,7 +249,10 @@ impl Action {
     pub fn is_send(&self) -> bool {
         matches!(
             self,
-            Action::SendText { .. } | Action::SendMedia { .. } | Action::Forward { .. }
+            Action::SendText { .. }
+                | Action::SendMedia { .. }
+                | Action::Forward { .. }
+                | Action::SendRich { .. }
         )
     }
 
@@ -245,10 +264,12 @@ impl Action {
             | Action::React { message_id, .. }
             | Action::Star { message_id, .. }
             | Action::DeleteForMe { message_id }
-            | Action::MarkPlayed { message_id, .. } => Some(message_id),
+            | Action::MarkPlayed { message_id, .. }
+            | Action::PollVote { message_id, .. } => Some(message_id),
             Action::SendText { .. }
             | Action::SendMedia { .. }
             | Action::Forward { .. }
+            | Action::SendRich { .. }
             | Action::MarkRead { .. } => None,
         }
     }
@@ -283,6 +304,22 @@ impl Action {
                 mime: snapshot.mime.clone(),
                 size: snapshot.size,
             }),
+            Action::SendRich { content, .. } => Some(Content {
+                kind: match content {
+                    RichContent::Poll { .. } => Kind::Poll,
+                    RichContent::Location { .. } => Kind::Location,
+                    RichContent::Contacts { .. } => Kind::Contact,
+                },
+                ..Content::default()
+            }),
+            _ => None,
+        }
+    }
+
+    /// The poll, place or cards a rich send shows (E6-WA R5).
+    fn rich_meta(&self) -> Option<rosty_wa_proto::MessageMeta> {
+        match self {
+            Action::SendRich { content, .. } => Some(content.preview_meta()),
             _ => None,
         }
     }
@@ -342,9 +379,9 @@ impl Action {
 
     fn quoted_id(&self) -> Option<&str> {
         match self {
-            Action::SendText { quoted_id, .. } | Action::SendMedia { quoted_id, .. } => {
-                quoted_id.as_deref()
-            }
+            Action::SendText { quoted_id, .. }
+            | Action::SendMedia { quoted_id, .. }
+            | Action::SendRich { quoted_id, .. } => quoted_id.as_deref(),
             _ => None,
         }
     }
@@ -611,7 +648,7 @@ fn set_starred(conn: &Connection, chat: &str, id: &str, starred: bool) -> Result
 pub(super) fn pending_rows(conn: &Connection, chat: &str) -> Result<Vec<MessageRow>> {
     let mut rows: Vec<MessageRow> = items_where(
         conn,
-        "chat = ?1 AND kind IN ('send_text', 'send_media', 'forward')",
+        "chat = ?1 AND kind IN ('send_text', 'send_media', 'forward', 'send_rich')",
         Some(chat),
     )?
     .into_iter()
@@ -641,6 +678,7 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
     });
     let forwarded = matches!(item.action, Action::Forward { .. });
     let (mentions, link_preview) = item.action.text_extras();
+    let rich = item.action.rich_meta().unwrap_or_default();
     Some(MessageRow {
         id: item.client_id.clone(),
         chat: item.chat,
@@ -663,8 +701,8 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         forwarded,
         starred: false,
         media,
-        location: None,
-        contact: None,
+        location: rich.location,
+        contact: rich.contact,
         mentions,
         unavailable: None,
         has_thumbnail: false,
@@ -683,6 +721,9 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         link_preview,
         system: None,
         expires_at: None,
+        poll: rich.poll,
+        contacts: rich.contacts,
+        kept: false,
     })
 }
 
@@ -821,13 +862,44 @@ fn apply_optimistic(conn: &Connection, chat: &str, action: &Action, now_ms: i64)
             message_id,
             starred,
         } => set_starred(conn, chat, message_id, *starred)?,
+        Action::PollVote {
+            message_id,
+            options,
+            ..
+        } => set_my_votes(conn, chat, message_id, options)?,
         Action::SendText { .. }
         | Action::SendMedia { .. }
         | Action::Forward { .. }
+        | Action::SendRich { .. }
         | Action::Edit { .. }
         | Action::Revoke { .. }
         | Action::MarkPlayed { .. } => {}
     }
+    Ok(())
+}
+
+/// The stored poll of `message_id` (E6-WA R5), or `None` when it is no poll.
+fn stored_poll(conn: &Connection, chat: &str, message_id: &str) -> Result<Option<Poll>> {
+    Ok(apply::load(conn, chat, message_id)?.and_then(|row| row.extra.poll))
+}
+
+/// Shows `options` as my choice in a stored poll: my vote (`me`) moves to them. Nothing for a message that is no
+/// poll.
+fn set_my_votes(conn: &Connection, chat: &str, message_id: &str, options: &[String]) -> Result<()> {
+    let Some(mut row) = apply::load(conn, chat, message_id)? else {
+        return Ok(());
+    };
+    let Some(poll) = row.extra.poll.as_mut() else {
+        return Ok(());
+    };
+    for option in &mut poll.options {
+        option.voters.retain(|v| v != rosty_core::wa_rich::ME);
+        if options.contains(&option.name) {
+            option.voters.push(rosty_core::wa_rich::ME.to_owned());
+        }
+    }
+    poll.my_votes = options.to_vec();
+    apply::write(conn, chat, message_id, &row)?;
     Ok(())
 }
 
@@ -1006,6 +1078,8 @@ impl Store {
         if let Action::Star { message_id, .. } = action {
             supersede_stars(&tx, chat, message_id)?;
         }
+        // A vote is checked against its stored poll and remembers the choice it replaces (E6-WA R5).
+        let voted;
         // A forward keeps what it sends: the source may change or go before the row goes out.
         let filled;
         let action = match action {
@@ -1022,6 +1096,35 @@ impl Store {
                     source_chat: source_key.clone(),
                     message_id: message_id.clone(),
                     snapshot: Some(forward_snapshot(&tx, &source_key, message_id)?),
+                };
+                &filled
+            }
+            Action::PollVote {
+                message_id,
+                options,
+                ..
+            } => {
+                let poll = stored_poll(&tx, chat, message_id)?
+                    .ok_or_else(|| Error::NotFound(format!("poll {message_id}")))?;
+                let checked = rosty_core::wa_rich::check_choice(
+                    &poll.option_names(),
+                    poll.selectable,
+                    options,
+                )
+                .map_err(|e| Error::Invalid(format!("{e:?}")))?;
+                voted = Action::PollVote {
+                    message_id: message_id.clone(),
+                    options: checked,
+                    previous: Some(poll.my_votes),
+                };
+                &voted
+            }
+            Action::SendRich { content, quoted_id } => {
+                filled = Action::SendRich {
+                    content: content
+                        .checked()
+                        .map_err(|e| Error::Invalid(e.to_string()))?,
+                    quoted_id: quoted_id.clone(),
                 };
                 &filled
             }
@@ -1175,6 +1278,22 @@ impl Store {
                 }
                 Settled::Failed
             }
+            // A refused vote is undone: the choice before it shows again (E6-WA R5).
+            Outcome::Error {
+                error: ErrorKind::Rejected,
+                ..
+            } if matches!(row.action, Action::PollVote { .. }) => {
+                tx.execute("DELETE FROM outbox WHERE client_id = ?1", [client_id])?;
+                if let Action::PollVote {
+                    message_id,
+                    previous: Some(previous),
+                    ..
+                } = &row.action
+                {
+                    set_my_votes(&tx, &row.chat, message_id, previous)?;
+                }
+                Settled::Failed
+            }
             // A refused delete for me is undone: the message shows again.
             Outcome::Error {
                 error: ErrorKind::Rejected,
@@ -1253,6 +1372,8 @@ impl Store {
             | Action::Star { .. }
             | Action::Forward { .. }
             | Action::DeleteForMe { .. }
+            | Action::SendRich { .. }
+            | Action::PollVote { .. }
             | Action::MarkPlayed { .. } => {
                 return Err(Error::Invalid("only a message text can be edited".into()));
             }
@@ -1333,6 +1454,8 @@ fn apply_sent(conn: &Connection, row: &OutboxItem, now_ms: i64) -> Result<()> {
         Action::SendText { .. }
         | Action::SendMedia { .. }
         | Action::Forward { .. }
+        | Action::SendRich { .. }
+        | Action::PollVote { .. }
         | Action::DeleteForMe { .. }
         | Action::React { .. }
         | Action::MarkRead { .. }
@@ -1390,7 +1513,8 @@ fn confirm_send(
         forwarded: matches!(row.action, Action::Forward { .. }),
         mentions,
         link_preview,
-        ..Default::default()
+        // A poll, a place or cards (E6-WA R5).
+        ..row.action.rich_meta().unwrap_or_default()
     };
     apply::upsert(
         conn,

@@ -17,6 +17,9 @@ pub const MAX_QUESTION_CHARS: usize = 255;
 /// Longest option, in characters (as above).
 pub const MAX_OPTION_CHARS: usize = 100;
 
+/// How the gateway names my own vote (from any of my devices): the account's id, whatever it is.
+pub const ME: &str = "me";
+
 /// A poll as the composer's sheet fills it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PollDraft {
@@ -245,16 +248,17 @@ pub fn poll_view(
         at_ms: 0,
     };
     let is_me = |voter: &String| {
-        !own.is_empty()
-            && same_voter(
-                &me,
-                &Vote {
-                    voter: voter.clone(),
-                    voter_alt: None,
-                    options: Vec::new(),
-                    at_ms: 0,
-                },
-            )
+        voter == ME
+            || !own.is_empty()
+                && same_voter(
+                    &me,
+                    &Vote {
+                        voter: voter.clone(),
+                        voter_alt: None,
+                        options: Vec::new(),
+                        at_ms: 0,
+                    },
+                )
     };
     let mut people: Vec<&String> = Vec::new();
     for voter in options.iter().flat_map(|o| &o.voters) {
@@ -271,11 +275,7 @@ pub fn poll_view(
             OptionView {
                 name: option.name.clone(),
                 count,
-                percent: if total == 0 {
-                    0
-                } else {
-                    (count * 100 + total / 2) / total
-                },
+                percent: (count * 100 + total / 2).checked_div(total).unwrap_or(0),
                 mine: mine.contains(&option.name) || option.voters.iter().any(is_me),
                 leading: top > 0 && option.voters.len() == top,
                 voters: option.voters.clone(),
@@ -294,6 +294,8 @@ pub fn poll_view(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     const ALI: &str = "100000000001@s.whatsapp.net";
@@ -500,5 +502,12 @@ mod tests {
         assert!(!view.multiple);
         assert_eq!(view.voters, 0);
         assert!(view.options[0].mine && !view.options[0].leading);
+
+        // The gateway names my vote `me`.
+        let mine = vec![OptionTally {
+            name: "A".into(),
+            voters: names(&[ME]),
+        }];
+        assert!(poll_view("Q", 1, &mine, &[], &[]).options[0].mine);
     }
 }

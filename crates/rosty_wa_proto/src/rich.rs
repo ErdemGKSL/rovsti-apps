@@ -69,6 +69,10 @@ pub enum RichContent {
     Contacts { contacts: Vec<SharedContact> },
 }
 
+// Coordinates are never NaN once checked (`is_valid_coord`), so equality is total for every content that can be
+// sent; the outbox rows that carry one compare as `Eq`.
+impl Eq for RichContent {}
+
 /// Why a [`RichContent`] cannot be sent.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RichError {
@@ -136,6 +140,58 @@ impl RichContent {
                 }
                 Ok(self.clone())
             }
+        }
+    }
+}
+
+impl RichContent {
+    /// The meta the sent message will have, as the gateway describes it (a poll with no votes yet): what a phone
+    /// shows while the send waits, and stores when the gateway's own description has not arrived.
+    pub fn preview_meta(&self) -> crate::MessageMeta {
+        match self {
+            RichContent::Poll {
+                question,
+                options,
+                multiple,
+            } => crate::MessageMeta {
+                poll: Some(Poll {
+                    question: question.clone(),
+                    options: options
+                        .iter()
+                        .map(|name| PollOption {
+                            name: name.clone(),
+                            voters: Vec::new(),
+                        })
+                        .collect(),
+                    selectable: wa_rich::selectable_count(*multiple, options.len()),
+                    my_votes: Vec::new(),
+                }),
+                ..Default::default()
+            },
+            RichContent::Location {
+                latitude,
+                longitude,
+                name,
+                address,
+            } => crate::MessageMeta {
+                location: Some(crate::Location {
+                    latitude: *latitude,
+                    longitude: *longitude,
+                    name: name.clone(),
+                    address: address.clone(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            RichContent::Contacts { contacts } => crate::MessageMeta {
+                contact: contacts.first().cloned(),
+                contacts: if contacts.len() > 1 {
+                    contacts.clone()
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            },
         }
     }
 }

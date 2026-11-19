@@ -3,8 +3,8 @@
 use rosty_core::wa_actions::MentionSpan;
 use rosty_core::wa_identity::Rejected;
 use rosty_wa_proto::{
-    DeliveryStatus, EditRecord, LinkPreview, Location, MediaKind, MediaMeta, MessageBody, Quoted,
-    Reaction, SharedContact, SystemNote, Unavailable,
+    DeliveryStatus, EditRecord, LinkPreview, Location, MediaKind, MediaMeta, MessageBody, Poll,
+    Quoted, Reaction, SharedContact, SystemNote, Unavailable,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,13 +29,15 @@ pub enum Kind {
     Sticker,
     Location,
     Contact,
+    /// A poll (E6-WA R5).
+    Poll,
     /// Nothing the gateway could describe (also a deleted message whose content was never seen).
     #[default]
     Unsupported,
 }
 
 impl Kind {
-    const ALL: [Kind; 9] = [
+    const ALL: [Kind; 10] = [
         Kind::Text,
         Kind::Image,
         Kind::Video,
@@ -44,6 +46,7 @@ impl Kind {
         Kind::Sticker,
         Kind::Location,
         Kind::Contact,
+        Kind::Poll,
         Kind::Unsupported,
     ];
 
@@ -57,6 +60,7 @@ impl Kind {
             Kind::Sticker => "sticker",
             Kind::Location => "location",
             Kind::Contact => "contact",
+            Kind::Poll => "poll",
             Kind::Unsupported => "unsupported",
         }
     }
@@ -277,9 +281,18 @@ pub struct MessageRow {
     /// A line of the conversation (the disappearing timer changed), not a message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemNote>,
-    /// When the message disappears (unix ms).
+    /// When the message disappears (unix ms). `None` for a message kept in the chat.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
+    /// A poll with its votes and my choice (E6-WA R5; `kind` is `poll`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll: Option<Poll>,
+    /// Every card of a contacts message; `contact` is the first (E6-WA R5).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<SharedContact>,
+    /// Kept in a disappearing chat ("keep in chat"): it does not disappear (E6-WA R5).
+    #[serde(skip_serializing_if = "is_false")]
+    pub kept: bool,
 }
 
 /// One row of the chat list.

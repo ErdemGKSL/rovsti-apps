@@ -111,6 +111,8 @@ pub fn header_presence(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     const NOW: i64 = 1_800_000_000_000;

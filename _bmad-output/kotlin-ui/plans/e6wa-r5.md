@@ -101,8 +101,8 @@ Library facts (whatsapp-rust 0.7.0 from crates.io, the version `Cargo.lock` pins
 - `POST /v1/polls/vote` `{chat, message_id, options: [name]}` -> 204; an empty list takes the vote back. 404 unknown
   poll, 400 a name that is not an option or more names than the poll allows.
 - `POST /v1/presence/unsubscribe` `{jid}` -> 204 (the library's `unsubscribe`).
-- Gateway store **schema v12**: table `poll_votes (instance_id, chat, poll_id, voter, voter_alt, ts_ms, enc_payload,
-  enc_iv, options_json)` and `messages.kept`. Only a new table and a new nullable column.
+- Gateway store **schema v12**: table `poll_votes (instance_id, chat, id, voter, voter_alt, ts_ms, enc_payload,
+  enc_iv, options_json)`. Only a new table (`kept` lives in the stored meta; keeping clears `messages.expires_ms`).
 
 ## Steps (one story each)
 

@@ -22,6 +22,7 @@ const BESIDE: &[&str] = &[
     "receipts",
     "message_edits",
     "pending_changes",
+    "poll_votes",
 ];
 
 impl Store {
@@ -52,7 +53,9 @@ impl Store {
                 let key = params![gone.instance.as_str(), gone.chat, gone.id];
                 for table in BESIDE {
                     tx.execute(
-                        &format!("DELETE FROM {table} WHERE instance_id = ?1 AND chat = ?2 AND id = ?3"),
+                        &format!(
+                            "DELETE FROM {table} WHERE instance_id = ?1 AND chat = ?2 AND id = ?3"
+                        ),
                         key,
                     )?;
                 }
@@ -132,10 +135,7 @@ mod tests {
             (message("later", 2_000_000), timed(Some(60))),
             (message("plain", 1_000), timed(None)),
         ] {
-            store
-                .insert_message_full(id(), msg, extras)
-                .await
-                .unwrap();
+            store.insert_message_full(id(), msg, extras).await.unwrap();
         }
         store
             .set_reaction(

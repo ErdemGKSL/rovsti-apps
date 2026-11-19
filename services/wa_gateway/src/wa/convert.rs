@@ -140,6 +140,25 @@ pub enum Converted {
         at_ms: i64,
         by: String,
     },
+    /// A vote in the poll `poll_id` (E6-WA R5), still encrypted. `voter` is
+    /// [`rosty_wa_proto::DELETED_BY_ME`] for a vote of mine (another device).
+    PollVote {
+        chat: String,
+        poll_id: String,
+        voter: String,
+        voter_alt: Option<String>,
+        payload: Vec<u8>,
+        iv: Vec<u8>,
+        at_ms: i64,
+    },
+    /// The message `target_id` was kept in the chat, or no longer
+    /// ("keep in chat", E6-WA R5).
+    Keep {
+        chat: String,
+        target_id: String,
+        kept: bool,
+        at_ms: i64,
+    },
     /// Protocol plumbing that is not a message the user sees.
     Ignore,
 }
@@ -240,6 +259,48 @@ fn content(message: &wa::Message) -> Content {
             _ => Content::Ignore,
         };
     }
+    if let Some(update) = base.poll_update_message.as_option() {
+        let poll_id = update
+            .poll_creation_message_key
+            .as_option()
+            .and_then(|k| k.id.clone())
+            .filter(|id| !id.is_empty());
+        let vote = update.vote.as_option().and_then(|v| {
+            Some((
+                v.enc_payload.clone().filter(|p| !p.is_empty())?,
+                v.enc_iv.clone().filter(|i| !i.is_empty())?,
+            ))
+        });
+        return match (poll_id, vote) {
+            (Some(poll_id), Some((payload, iv))) => Content::PollVote {
+                poll_id,
+                payload,
+                iv,
+                at_ms: update.sender_timestamp_ms,
+            },
+            _ => Content::Ignore,
+        };
+    }
+    if let Some(keep) = base.keep_in_chat_message.as_option() {
+        let target_id = keep
+            .key
+            .as_option()
+            .and_then(|k| k.id.clone())
+            .filter(|id| !id.is_empty());
+        let kept = match keep.keep_type {
+            Some(wa::KeepType::KEEP_FOR_ALL) => Some(true),
+            Some(wa::KeepType::UNDO_KEEP_FOR_ALL) => Some(false),
+            _ => None,
+        };
+        return match (target_id, kept) {
+            (Some(target_id), Some(kept)) => Content::Keep {
+                target_id,
+                kept,
+                at_ms: keep.timestamp_ms,
+            },
+            _ => Content::Ignore,
+        };
+    }
     if base.sender_key_distribution_message.as_option().is_some() {
         return Content::Ignore;
     }
@@ -263,6 +324,17 @@ enum Content {
     Disappearing {
         seconds: u32,
         at_s: Option<i64>,
+    },
+    PollVote {
+        poll_id: String,
+        payload: Vec<u8>,
+        iv: Vec<u8>,
+        at_ms: Option<i64>,
+    },
+    Keep {
+        target_id: String,
+        kept: bool,
+        at_ms: Option<i64>,
     },
     Ignore,
 }
@@ -294,6 +366,22 @@ fn context_of(base: &wa::Message) -> Option<&wa::ContextInfo> {
         base.contact_message
             .as_option()
             .and_then(|m| m.context_info.as_option()),
+        base.contacts_array_message
+            .as_option()
+            .and_then(|m| m.context_info.as_option()),
+        base.live_location_message
+            .as_option()
+            .and_then(|m| m.context_info.as_option()),
+        [
+            &base.poll_creation_message,
+            &base.poll_creation_message_v2,
+            &base.poll_creation_message_v3,
+            &base.poll_creation_message_v5,
+            &base.poll_creation_message_v6,
+        ]
+        .into_iter()
+        .find_map(|m| m.as_option())
+        .and_then(|m| m.context_info.as_option()),
     ];
     contexts.into_iter().flatten().next()
 }
@@ -444,7 +532,9 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
             longitude: m.degrees_longitude.unwrap_or(0.0),
             name: m.name.clone().filter(|n| !n.is_empty()),
             address: m.address.clone().filter(|a| !a.is_empty()),
-            live: false,
+            live: m.is_live.unwrap_or(false),
+            url: m.url.clone().filter(|u| !u.is_empty()),
+            comment: m.comment.clone().filter(|c| !c.is_empty()),
         });
         thumbnail = thumb(&m.jpeg_thumbnail);
     } else if let Some(m) = base.live_location_message.as_option() {
@@ -454,23 +544,31 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
             name: m.caption.clone().filter(|n| !n.is_empty()),
             address: None,
             live: true,
+            ..Location::default()
         });
+        thumbnail = thumb(&m.jpeg_thumbnail);
     }
     if let Some((preview, picture)) = link_preview(base) {
         meta.link_preview = Some(preview);
         thumbnail = thumbnail.or(picture);
     }
-    let card = base.contact_message.as_option().or_else(|| {
-        base.contacts_array_message
-            .as_option()
-            .and_then(|a| a.contacts.first())
-    });
-    if let Some(card) = card {
-        meta.contact = Some(SharedContact {
-            display_name: card.display_name.clone().unwrap_or_default(),
-            vcard: card.vcard.clone().unwrap_or_default(),
-        });
+    let shared = |card: &wa::message::ContactMessage| SharedContact {
+        display_name: card.display_name.clone().unwrap_or_default(),
+        vcard: card.vcard.clone().unwrap_or_default(),
+    };
+    if let Some(card) = base.contact_message.as_option() {
+        meta.contact = Some(shared(card));
+    } else if let Some(array) = base.contacts_array_message.as_option() {
+        // Every card (E6-WA R5); the first stays in `contact` for older apps.
+        meta.contacts = array
+            .contacts
+            .iter()
+            .take(rosty_wa_proto::MAX_SHARED_CONTACTS)
+            .map(shared)
+            .collect();
+        meta.contact = meta.contacts.first().cloned();
     }
+    meta.poll = super::poll::poll_of(base);
     let secret = message
         .message_context_info
         .as_option()
@@ -484,6 +582,7 @@ pub fn extras(message: &wa::Message) -> MessageExtras {
         thumbnail,
         wire_chat: None,
         wire_sender: None,
+        votes: Vec::new(),
     }
 }
 
@@ -605,6 +704,36 @@ pub fn convert(origin: Origin<'_>, message: &wa::Message) -> Converted {
                 emoji,
                 sender_alt: origin.sender_alt.map(str::to_owned),
             },
+        },
+        Content::PollVote {
+            poll_id,
+            payload,
+            iv,
+            at_ms,
+        } => Converted::PollVote {
+            chat: origin.chat.to_owned(),
+            poll_id,
+            voter: revoked_by(&origin).to_owned(),
+            voter_alt: if origin.from_me {
+                None
+            } else if origin.sender.is_some() {
+                origin.sender_alt.map(str::to_owned)
+            } else {
+                origin.chat_alt.map(str::to_owned)
+            },
+            payload,
+            iv,
+            at_ms: at_ms.filter(|t| *t > 0).unwrap_or(origin.timestamp_ms),
+        },
+        Content::Keep {
+            target_id,
+            kept,
+            at_ms,
+        } => Converted::Keep {
+            chat: origin.chat.to_owned(),
+            target_id,
+            kept,
+            at_ms: at_ms.filter(|t| *t > 0).unwrap_or(origin.timestamp_ms),
         },
         Content::Ignore => Converted::Ignore,
     }
@@ -832,6 +961,7 @@ pub fn placeholder(info: &MessageInfo, reason: Unavailable, map: &LidMap) -> Con
             thumbnail: None,
             wire_chat: Some(to.wire_chat),
             wire_sender: to.wire_sender,
+            votes: Vec::new(),
         }),
     )
 }
@@ -1113,6 +1243,119 @@ mod tests {
         assert_eq!(extras.thumbnail, None);
         assert!(!extras.meta.media.as_ref().unwrap().thumbnail);
         assert_eq!(extras.meta.media.unwrap().width, Some(640));
+    }
+
+    #[test]
+    fn poll_votes_and_keeps_are_not_messages() {
+        let key = |id: &str| {
+            MessageField::some(wa::MessageKey {
+                id: Some(id.into()),
+                from_me: Some(false),
+                ..Default::default()
+            })
+        };
+        let vote = wa::Message {
+            poll_update_message: MessageField::some(wa::message::PollUpdateMessage {
+                poll_creation_message_key: key("P1"),
+                vote: MessageField::some(wa::message::PollEncValue {
+                    enc_payload: Some(vec![1, 2, 3]),
+                    enc_iv: Some(vec![4; 12]),
+                }),
+                sender_timestamp_ms: Some(1_700_000_000_500),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let group = "120363000000000071@g.us";
+        let member = "100000000071@s.whatsapp.net";
+        match convert(origin(false, Some(member), group), &vote) {
+            Converted::PollVote {
+                chat,
+                poll_id,
+                voter,
+                payload,
+                at_ms,
+                ..
+            } => {
+                assert_eq!((chat.as_str(), poll_id.as_str()), (group, "P1"));
+                assert_eq!(voter, member);
+                assert_eq!(payload, vec![1, 2, 3]);
+                assert_eq!(at_ms, 1_700_000_000_500);
+            }
+            other => panic!("not a vote: {other:?}"),
+        }
+        // My vote from another device; a one-to-one vote is the other person's.
+        assert!(matches!(
+            convert(origin(true, None, CHAT), &vote),
+            Converted::PollVote { voter, .. } if voter == rosty_wa_proto::DELETED_BY_ME
+        ));
+        assert!(matches!(
+            convert(origin(false, None, CHAT), &vote),
+            Converted::PollVote { voter, .. } if voter == CHAT
+        ));
+
+        let keep = |kind| wa::Message {
+            keep_in_chat_message: MessageField::some(wa::message::KeepInChatMessage {
+                key: key("M1"),
+                keep_type: Some(kind),
+                timestamp_ms: Some(5),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            convert(origin(false, None, CHAT), &keep(wa::KeepType::KEEP_FOR_ALL)),
+            Converted::Keep {
+                chat: CHAT.into(),
+                target_id: "M1".into(),
+                kept: true,
+                at_ms: 5
+            }
+        );
+        assert!(matches!(
+            convert(
+                origin(false, None, CHAT),
+                &keep(wa::KeepType::UNDO_KEEP_FOR_ALL)
+            ),
+            Converted::Keep { kept: false, .. }
+        ));
+    }
+
+    #[test]
+    fn every_card_of_a_contacts_array_and_a_live_place() {
+        let card = |name: &str| wa::message::ContactMessage {
+            display_name: Some(name.into()),
+            vcard: Some(format!("BEGIN:VCARD\nFN:{name}\nEND:VCARD")),
+            ..Default::default()
+        };
+        let array = wa::Message {
+            contacts_array_message: MessageField::some(wa::message::ContactsArrayMessage {
+                display_name: Some("2 contacts".into()),
+                contacts: vec![card("Ada"), card("Ben")],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let meta = extras_of(convert(origin(false, None, CHAT), &array)).meta;
+        assert_eq!(meta.contacts.len(), 2);
+        assert_eq!(
+            meta.contact.as_ref().map(|c| c.display_name.as_str()),
+            Some("Ada")
+        );
+
+        let live = wa::Message {
+            live_location_message: MessageField::some(wa::message::LiveLocationMessage {
+                degrees_latitude: Some(41.0),
+                degrees_longitude: Some(29.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let place = extras_of(convert(origin(false, None, CHAT), &live))
+            .meta
+            .location
+            .unwrap();
+        assert!(place.live);
+        assert_eq!(place.name, None);
     }
 
     #[test]

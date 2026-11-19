@@ -17,6 +17,8 @@ pub const ACCOUNT_TABLES: &[&str] = &[
     "receipts",
     "message_edits",
     "pending_changes",
+    // E6-WA R5: the votes of its polls.
+    "poll_votes",
     "chat_settings",
     "profiles",
     "statuses",
@@ -501,6 +503,12 @@ mod tests {
         conn.execute(
             "INSERT INTO pending_changes (instance_id, chat, id, kind, change_json, at_ms)
              VALUES (?1, ?2, 'M9', 'edit', '{}', 30)",
+            params![instance.as_str(), chat],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO poll_votes (instance_id, chat, id, voter, ts_ms, options_json)
+             VALUES (?1, ?2, 'M1', ?2, 30, '[]')",
             params![instance.as_str(), chat],
         )
         .unwrap();

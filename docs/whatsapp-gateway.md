@@ -409,13 +409,16 @@ A message's `meta` (`MessageMeta`) can hold:
 | `status` | ticks of my messages: `sent`, `delivered`, `read`, `played` (only forward) |
 | `sender_name` | the author's push name when it arrived (groups) |
 | `media` | `file_name`, `seconds`, `width`, `height`, `pages`, `voice_note`, `animated`, `view_once`, `thumbnail`, `waveform_b64` |
-| `location` | `{latitude, longitude, name, address, live}` (the body stays `unsupported`) |
+| `location` | `{latitude, longitude, name, address, live, url, comment}` (the body stays `unsupported`; a live location is its first point only, R5 adds `url` and `comment`) |
 | `contact` | a shared contact card `{display_name, vcard}` (body `unsupported`) |
 | `starred` | starred on any device |
 | `forwarding_score` | how often it was forwarded before; from 5 on show "Forwarded many times" (R4) |
 | `link_preview` | `{url, title?, description?, thumbnail}`: the card of the link in the text; `thumbnail` true when `GET /v1/messages/{id}/thumbnail` has its picture (R4) |
 | `expires_s` | the disappearing timer it carries: it disappears that long after it was sent (R4) |
 | `system` | a line of the conversation, not a message: `{"type":"disappearing","seconds":N,"by":"me"\|jid}`; the body is `unsupported` (R4) |
+| `poll` | a poll `{question, options: [{name, voters}], selectable, my_votes}`: `selectable` 1 is one answer, more is "multiple answers"; `voters` by the id people are shown under, `me` for my vote from any of my devices; `my_votes` my current choice; the body is `unsupported` (R5) |
+| `contacts` | every card of a contacts message; `contact` keeps the first (R5) |
+| `kept` | kept in a disappearing chat ("keep in chat"): it does not disappear (R5) |
 | `unavailable` | `view_once`, `hosted` or `bot`: a placeholder only, the body is `unsupported` (below) |
 
 A chat's `meta` (`ChatMeta`) holds `picture_id`, the other person's `push_name`,
@@ -669,6 +672,42 @@ message, as before. A reason a newer gateway adds reads as `other` in
 `GET /v1/messages/{id}/thumbnail` answers the small preview image that came inside
 a photo, video, document, sticker or location (`meta.media.thumbnail`), up to 64 KiB,
 or 404. Client: `thumbnail(id)`.
+
+### Rich content and presence (E6-WA R5)
+
+| Request | Body | Notes |
+| --- | --- | --- |
+| `POST /v1/messages/rich` | `{chat, quoted_id?, content}` | Answers `Sent`. `content` is `{"type":"poll","question","options":[..],"multiple":bool}` (2 to 12 distinct options, trimmed), `{"type":"location","latitude","longitude","name"?,"address"?}` or `{"type":"contacts","contacts":[{display_name, vcard}]}` (1 to 20 cards of at most 64 KiB; one goes as a contact message, several as one contacts array). The chat's timer applies. 400 for an invalid poll, coordinates out of range, no or empty cards |
+| `POST /v1/polls/vote` | `{chat, message_id, options}` | 204. My choice (names of the poll's options; empty takes my vote back). 404 unknown poll; 400 a name that is no option, more names than the poll allows, a poll whose secret is not kept |
+| `POST /v1/presence/unsubscribe` | `{jid}` | 204. Stops presence updates of a contact (the app calls it when the chat leaves the screen) |
+
+- **Polls**: a poll arrives as any creation form (`pollCreationMessage`, V2, V3, V5, V6)
+  with its message secret, which the gateway keeps. Votes (`pollUpdateMessage`) arrive
+  encrypted under a key made from the secret, the poll id, the poll's author and the
+  voter; the gateway opens them with whatsapp-rust's `wacore::poll` (trying the number
+  pair, the LID pair, then mixed, with the pairs it learned) and keeps each voter's
+  newest vote in `poll_votes`. A vote that arrives before its poll is kept encrypted
+  and counted when the poll is stored. History syncs bring votes already opened
+  (`pollUpdates`). Each new count is a `message_meta` with the whole `poll`. My vote
+  is counted as `me` once it went out; the library itself keeps no record of it.
+- **Polls are sent** as whatsapp-rust 0.7.0's `polls().create` builds them (single
+  choice `pollCreationMessageV3`, multiple `pollCreationMessage`, a 32-byte secret),
+  built by the gateway so the chat's disappearing timer goes along (`create` takes no
+  send options).
+- **Keep in chat**: a `keepInChatMessage` (live) or `keepInChat` (history) of
+  `KEEP_FOR_ALL` sets `meta.kept` and clears `expires_ms`; `UNDO_KEEP_FOR_ALL` clears
+  `kept` and sets `expires_ms` again from the send time. One that comes before its
+  message waits in `pending_changes`. Rosty does not send one yet.
+- **Presence**: `POST /v1/presence/subscribe` and `/unsubscribe` follow the chat on
+  screen; WhatsApp sends presence only while the account is available (`POST
+  /v1/presence {available}`). A hidden last seen arrives without a time:
+  `last_seen_ms` is left out.
+
+Store schema **v12** adds the table `poll_votes` (one row per poll and voter: the
+newest vote, encrypted until its poll is known, then the picked option names). Only a
+new table. An older gateway refuses a v12 file, so back it up before the deploy
+(`sqlite3 gateway.db ".backup gateway-v11.db"`). A chat merge moves its votes, a
+person merge rewrites their voter id, and another account on the instance wipes them.
 
 ## Profiles and profile pictures
 

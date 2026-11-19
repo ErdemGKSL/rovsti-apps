@@ -18,24 +18,26 @@ mod expiry;
 mod identity;
 mod merge;
 mod people;
+mod polls;
 mod rich;
 mod status;
 pub use account::{
     ACCOUNT_TABLES, AccountChange, AccountCheck, HISTORY_STALE_MS, HistoryMark, account_check,
     advance, history_view, is_history_chunk,
 };
+pub use expiry::{ExpiredMessage, PURGE_BATCH};
 pub use identity::{IdentityPage, LearnedPair, MAX_IDENTITY_PAGE, NewPair};
 pub use merge::MergeReport;
 pub use people::{
     BeginOutcome, CancelOutcome, JobChange, JobRow, LookupRow, NewJob, NumberMarks, NumberRow,
     PICTURED_FAILED, PICTURED_OK, PICTURED_TODO,
 };
+pub use polls::{NewVote, PollSource, StoredVote};
 pub use rich::{
     ChatChange, ChatSettings, FetchedProfile, GroupReceipt, MAX_THUMBNAIL_BYTES, MessageChange,
     MessageExtras, ProfileChange, ReceiptCounts, WireIds, apply_change, group_status, merge_edit,
     present,
 };
-pub use expiry::{ExpiredMessage, PURGE_BATCH};
 pub use status::{StatusTarget, StoredStatus};
 
 /// Active (not revoked) keys one instance may hold.
@@ -508,6 +510,27 @@ const MIGRATIONS: &[&str] = &[
         change_json TEXT NOT NULL,
         at_ms INTEGER NOT NULL,
         PRIMARY KEY (instance_id, chat, id, kind)
+    );
+    ",
+    // v12: polls (E6-WA R5). One row per poll (`id`, the poll's message id)
+    // and voter: their newest vote. `voter` names them as chats and authors
+    // do (the number first), `voter_alt` their other id; `enc_payload` and
+    // `enc_iv` hold a vote that could not be opened yet (it came before its
+    // poll), `options_json` the picked option names once it is open (NULL
+    // while encrypted; `[]` is a vote taken back). Only a new table: every
+    // row stays.
+    "
+    CREATE TABLE poll_votes (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        id TEXT NOT NULL,
+        voter TEXT NOT NULL,
+        voter_alt TEXT,
+        ts_ms INTEGER NOT NULL,
+        enc_payload BLOB,
+        enc_iv BLOB,
+        options_json TEXT,
+        PRIMARY KEY (instance_id, chat, id, voter)
     );
     ",
 ];
@@ -2742,6 +2765,7 @@ mod tests {
             thumbnail: Some(vec![0xFF, 0xD8, 1]),
             wire_chat: None,
             wire_sender: None,
+            votes: Vec::new(),
         };
         assert!(
             store

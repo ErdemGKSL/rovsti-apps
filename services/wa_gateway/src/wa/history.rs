@@ -168,6 +168,28 @@ fn history_message(
             if extras.secret.is_none() {
                 extras.secret = info.message_secret.clone().filter(|s| !s.is_empty());
             }
+            // Kept in a disappearing chat (E6-WA R5).
+            extras.meta.kept = info
+                .keep_in_chat
+                .as_option()
+                .is_some_and(|k| k.keep_type == Some(wa::KeepType::KEEP_FOR_ALL));
+            // A poll comes with its votes, already opened (E6-WA R5).
+            if let Some(poll) = extras.meta.poll.as_mut() {
+                extras.votes = history_votes(chat, &poll.option_names(), info, map);
+                let counted: Vec<rosty_core::wa_rich::Vote> = extras
+                    .votes
+                    .iter()
+                    .filter_map(|v| {
+                        Some(rosty_core::wa_rich::Vote {
+                            voter: v.voter.clone(),
+                            voter_alt: v.voter_alt.clone(),
+                            options: v.options.clone()?,
+                            at_ms: v.at_ms,
+                        })
+                    })
+                    .collect();
+                *poll = crate::wa::poll::counted(poll, &counted);
+            }
             Some(HistoryMessage {
                 reactions: reactions(chat, info, map),
                 message,
@@ -209,11 +231,47 @@ fn history_message(
         }),
         // History holds each message as it is now; reactions come with their
         // message, edits and deletes are already applied.
+        // Votes and keeps come with the message they are about.
         Converted::Reaction { .. }
         | Converted::Edit { .. }
         | Converted::Revoke { .. }
+        | Converted::PollVote { .. }
+        | Converted::Keep { .. }
         | Converted::Ignore => None,
     }
+}
+
+/// The votes a history poll carries (`WebMessageInfo.pollUpdates`), opened: each voter as chats and authors name
+/// people, mine as [`rosty_wa_proto::DELETED_BY_ME`].
+fn history_votes(
+    chat: &str,
+    options: &[String],
+    info: &wa::WebMessageInfo,
+    map: &LidMap,
+) -> Vec<crate::store::NewVote> {
+    info.poll_updates
+        .iter()
+        .filter_map(|update| {
+            let key = update.poll_update_message_key.as_option()?;
+            let voter = if key.from_me == Some(true) {
+                rosty_wa_proto::DELETED_BY_ME.to_owned()
+            } else if chat.ends_with("@g.us") {
+                author(chat, key.participant.as_deref(), map).sender?
+            } else {
+                chat.to_owned()
+            };
+            Some(crate::store::NewVote {
+                voter,
+                voter_alt: None,
+                at_ms: update
+                    .sender_timestamp_ms
+                    .or(update.server_timestamp_ms)
+                    .unwrap_or(0),
+                options: Some(crate::wa::poll::history_vote_names(options, update)?),
+                encrypted: None,
+            })
+        })
+        .collect()
 }
 
 /// A conversation's mute end as the apps see it. WhatsApp has sent it in
@@ -712,6 +770,66 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_history_poll_comes_counted_and_a_kept_message_kept() {
+        use whatsapp_rust::wacore::poll::compute_option_hash;
+        let group = "120363000000000081@g.us";
+        let member = "100000000081@s.whatsapp.net";
+        let poll = super::super::poll::creation_message(
+            "Lunch?",
+            &["A".to_owned(), "B".to_owned()],
+            false,
+            vec![1; 32],
+            None,
+        );
+        let update = |from_me: bool, picked: &str, ts: i64| wa::PollUpdate {
+            poll_update_message_key: MessageField::some(wa::MessageKey {
+                from_me: Some(from_me),
+                participant: (!from_me).then(|| member.to_owned()),
+                ..Default::default()
+            }),
+            vote: MessageField::some(wa::message::PollVoteMessage {
+                selected_options: vec![compute_option_hash(picked).to_vec()],
+            }),
+            sender_timestamp_ms: Some(ts),
+            ..Default::default()
+        };
+        let info = wa::WebMessageInfo {
+            key: MessageField::some(wa::MessageKey {
+                from_me: Some(false),
+                id: Some("P1".into()),
+                participant: Some(member.into()),
+                ..Default::default()
+            }),
+            message: MessageField::some(poll),
+            message_timestamp: Some(1_700_000_000),
+            poll_updates: vec![
+                update(false, "A", 10),
+                update(true, "B", 20),
+                update(false, "B", 30),
+            ],
+            keep_in_chat: MessageField::some(wa::KeepInChat {
+                keep_type: Some(wa::KeepType::KEEP_FOR_ALL),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let row = history_message(group, group, &info, &LidMap::default()).unwrap();
+        let counted = row.extras.meta.poll.unwrap();
+        assert!(
+            counted.options[0].voters.is_empty(),
+            "the member changed to B"
+        );
+        assert_eq!(
+            counted.options[1].voters,
+            // In the order people first voted.
+            vec![member.to_owned(), rosty_wa_proto::DELETED_BY_ME.to_owned()]
+        );
+        assert_eq!(counted.my_votes, vec!["B".to_owned()]);
+        assert_eq!(row.extras.votes.len(), 3);
+        assert!(row.extras.meta.kept);
     }
 
     fn sync() -> wa::HistorySync {

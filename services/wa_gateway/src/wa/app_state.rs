@@ -56,6 +56,37 @@ pub async fn apply_converted(sink: &EventSink, converted: Converted) {
             })
             .await;
         }
+        Converted::PollVote {
+            chat,
+            poll_id,
+            voter,
+            voter_alt,
+            payload,
+            iv,
+            at_ms,
+        } => {
+            sink.poll_vote(
+                &chat,
+                &poll_id,
+                crate::store::NewVote {
+                    voter,
+                    voter_alt,
+                    at_ms,
+                    options: None,
+                    encrypted: Some((payload, iv)),
+                },
+            )
+            .await;
+        }
+        Converted::Keep {
+            chat,
+            target_id,
+            kept,
+            at_ms,
+        } => {
+            sink.change_message(&chat, &target_id, MessageChange::Keep { kept, at_ms })
+                .await;
+        }
         Converted::Ignore => {}
     }
 }

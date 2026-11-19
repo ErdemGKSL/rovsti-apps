@@ -44,6 +44,9 @@ pub fn routes() -> Router<AppState> {
         .route(r::MARK_PLAYED, post(mark_played))
         .route(r::CHAT_ACTION, post(chat_action))
         .route(r::FORWARD, post(forward))
+        .route(r::RICH, post(send_rich))
+        .route(r::POLL_VOTE, post(poll_vote))
+        .route(r::PRESENCE_UNSUBSCRIBE, post(unsubscribe_presence))
         .route(r::MESSAGE_RECEIPTS, get(receipts))
         .route(r::PROFILES, post(profiles))
         .route(r::PICTURE, get(picture))
@@ -302,6 +305,86 @@ async fn forward(
         )
         .await?;
     Ok(Json(sent))
+}
+
+/// Sends a poll, a place or contact cards (E6-WA R5).
+async fn send_rich(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<rosty_wa_proto::SendRich>,
+) -> ApiResult<Json<Sent>> {
+    check_jid(&req.chat)?;
+    if let Some(quoted) = req.quoted_id.as_deref().filter(|q| !q.is_empty()) {
+        check_id(quoted)?;
+    }
+    let content = req
+        .content
+        .checked()
+        .map_err(|e| HttpError::bad_request(e.to_string()))?;
+    let sent = state
+        .driver()
+        .send_rich(
+            &auth.instance,
+            rosty_wa_proto::SendRich {
+                chat: req.chat.trim().to_owned(),
+                quoted_id: req.quoted_id.filter(|q| !q.trim().is_empty()),
+                content,
+            },
+        )
+        .await?;
+    Ok(Json(sent))
+}
+
+/// My vote in a stored poll, or my vote taken back (E6-WA R5).
+async fn poll_vote(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<rosty_wa_proto::PollVote>,
+) -> ApiResult<StatusCode> {
+    let message = stored(&state, &auth.instance, &req.chat, &req.message_id).await?;
+    let source = state
+        .store()
+        .poll_source(
+            auth.instance.clone(),
+            message.chat.clone(),
+            message.id.clone(),
+        )
+        .await?
+        .ok_or_else(|| HttpError::not_found("no such poll"))?;
+    let options = req
+        .checked(&source.poll)
+        .map_err(|e| HttpError::bad_request(format!("this choice cannot be sent ({e:?})")))?;
+    if source.secret.is_none() {
+        return Err(HttpError::bad_request(
+            "the poll's secret is not kept: vote on the phone",
+        ));
+    }
+    state
+        .driver()
+        .poll_vote(
+            &auth.instance,
+            rosty_wa_proto::PollVote {
+                chat: message.chat,
+                message_id: message.id,
+                options,
+            },
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Stops the presence updates of a contact (E6-WA R5).
+async fn unsubscribe_presence(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<rosty_wa_proto::UnsubscribePresence>,
+) -> ApiResult<StatusCode> {
+    check_jid(&req.jid)?;
+    state
+        .driver()
+        .unsubscribe_presence(&auth.instance, req.jid)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

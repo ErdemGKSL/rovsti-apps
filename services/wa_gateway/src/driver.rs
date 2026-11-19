@@ -667,6 +667,7 @@ impl EventSink {
             Err(e) => log::warn!("{}: saving message failed: {e}", self.instance),
         }
         let (chat, id) = (message.chat.clone(), message.id.clone());
+        let is_poll = meta.poll.is_some();
         let announce = worth_announcing(&chat, &meta);
         self.publish(GatewayEvent::Message(message));
         if announce {
@@ -688,6 +689,10 @@ impl EventSink {
             });
         for change in pending {
             self.change_message(&chat, &id, change).await;
+        }
+        // Votes that came before their poll (E6-WA R5).
+        if is_poll {
+            self.refresh_poll(&chat, &id).await;
         }
     }
 
@@ -986,6 +991,169 @@ impl EventSink {
                 None
             })
     }
+
+    /// The poll `poll_id` of `chat` with what voting in it needs; `None` when unknown.
+    pub async fn poll_source(&self, chat: &str, poll_id: &str) -> Option<crate::store::PollSource> {
+        self.store
+            .poll_source(self.instance.clone(), chat.to_owned(), poll_id.to_owned())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading a poll failed: {e}", self.instance);
+                None
+            })
+    }
+
+    /// A vote arrived, still encrypted (E6-WA R5): it is kept (the voter's newest only) and the poll counted again
+    /// when it is stored; a vote that came before its poll waits for it ([`Self::emit_full`]).
+    pub async fn poll_vote(&self, chat: &str, poll_id: &str, vote: crate::store::NewVote) {
+        match self
+            .store
+            .record_vote(
+                self.instance.clone(),
+                chat.to_owned(),
+                poll_id.to_owned(),
+                vote,
+            )
+            .await
+        {
+            Ok(true) => self.refresh_poll(chat, poll_id).await,
+            Ok(false) => {}
+            Err(e) => log::warn!("{}: saving a poll vote failed: {e}", self.instance),
+        }
+    }
+
+    /// My vote went out (E6-WA R5): it is counted at once, as [`DELETED_BY_ME`].
+    pub async fn my_poll_vote(&self, chat: &str, poll_id: &str, options: Vec<String>) {
+        self.poll_vote(
+            chat,
+            poll_id,
+            crate::store::NewVote {
+                voter: DELETED_BY_ME.to_owned(),
+                voter_alt: None,
+                at_ms: now_ms(),
+                options: Some(options),
+                encrypted: None,
+            },
+        )
+        .await;
+    }
+
+    /// Every id of `ids` with its other form where a pair is known.
+    async fn with_alts(&self, ids: Vec<String>) -> Vec<String> {
+        let mut out = Vec::new();
+        for id in ids {
+            let alt = if id.ends_with("@lid") {
+                self.pn_of_lid(&id).await
+            } else {
+                self.lid_of_pn(&id).await
+            };
+            out.push(id);
+            out.extend(alt);
+        }
+        out
+    }
+
+    /// Opens the poll's encrypted votes with its secret, counts them and publishes the new tally (`message_meta`)
+    /// when it changed. Nothing happens while the poll is unknown. A vote that does not open (an id the gateway never
+    /// learned) stays encrypted and is tried again with the next vote.
+    pub async fn refresh_poll(&self, chat: &str, poll_id: &str) {
+        let (instance, chat_s, id_s) = (self.instance.clone(), chat.to_owned(), poll_id.to_owned());
+        let source = match self
+            .store
+            .poll_source(instance.clone(), chat_s.clone(), id_s.clone())
+            .await
+        {
+            Ok(Some(source)) => source,
+            Ok(None) => return,
+            Err(e) => {
+                log::warn!("{}: reading a poll failed: {e}", self.instance);
+                return;
+            }
+        };
+        let stored = match self
+            .store
+            .poll_votes(instance.clone(), chat_s.clone(), id_s.clone())
+            .await
+        {
+            Ok(votes) => votes,
+            Err(e) => {
+                log::warn!("{}: reading poll votes failed: {e}", self.instance);
+                return;
+            }
+        };
+        let own: Vec<String> = source
+            .own_jid
+            .iter()
+            .chain(source.own_lid.iter())
+            .cloned()
+            .collect();
+        let creator = if source.from_me {
+            own.clone()
+        } else if crate::wa::convert::is_group(chat) {
+            let ids: Vec<String> = source
+                .sender
+                .iter()
+                .chain(source.wire_sender.iter())
+                .cloned()
+                .collect();
+            self.with_alts(ids).await
+        } else {
+            let ids: Vec<String> = std::iter::once(chat.to_owned())
+                .chain(source.wire_chat.iter().cloned())
+                .collect();
+            self.with_alts(ids).await
+        };
+        let creator = crate::wa::poll::Ids::of(creator.iter().map(String::as_str));
+        let names = source.poll.option_names();
+        let mut votes = Vec::new();
+        for vote in stored {
+            if let Some(open) = vote.vote() {
+                votes.push(open);
+                continue;
+            }
+            let (Some((payload, iv)), Some(secret)) = (&vote.encrypted, &source.secret) else {
+                continue;
+            };
+            let voter_ids = if vote.voter == DELETED_BY_ME {
+                own.clone()
+            } else {
+                let ids: Vec<String> = std::iter::once(vote.voter.clone())
+                    .chain(vote.voter_alt.clone())
+                    .collect();
+                self.with_alts(ids).await
+            };
+            let voter = crate::wa::poll::Ids::of(voter_ids.iter().map(String::as_str));
+            let Some(picked) =
+                crate::wa::poll::open_vote(secret, poll_id, &creator, &voter, payload, iv, &names)
+            else {
+                log::debug!("{}: a vote of poll {poll_id} did not open", self.instance);
+                continue;
+            };
+            if let Err(e) = self
+                .store
+                .open_vote(
+                    instance.clone(),
+                    chat_s.clone(),
+                    id_s.clone(),
+                    vote.voter.clone(),
+                    vote.at_ms,
+                    picked.clone(),
+                )
+                .await
+            {
+                log::warn!("{}: saving an opened vote failed: {e}", self.instance);
+            }
+            votes.push(rosty_core::wa_rich::Vote {
+                voter: vote.voter,
+                voter_alt: vote.voter_alt,
+                options: picked,
+                at_ms: vote.at_ms,
+            });
+        }
+        let counted = crate::wa::poll::counted(&source.poll, &votes);
+        self.change_message(chat, poll_id, MessageChange::Poll(counted))
+            .await;
+    }
 }
 
 /// A change of a chat's disappearing timer ([`EventSink::chat_timer_changed`]).
@@ -1175,6 +1343,35 @@ pub trait WaDriver: Send + Sync + 'static {
         _instance: &InstanceId,
         _req: ForwardMessage,
     ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Sends a poll, a place or contact cards with the chat's timer, and
+    /// stores it (E6-WA R5). `req.content` was checked.
+    fn send_rich(
+        &self,
+        _instance: &InstanceId,
+        _req: rosty_wa_proto::SendRich,
+    ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Votes in a stored poll (an empty choice takes my vote back) and counts
+    /// my vote (E6-WA R5).
+    fn poll_vote(
+        &self,
+        _instance: &InstanceId,
+        _req: rosty_wa_proto::PollVote,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Stops presence updates of a contact (E6-WA R5).
+    fn unsubscribe_presence(
+        &self,
+        _instance: &InstanceId,
+        _jid: String,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
         Box::pin(async { Err(DriverError::NotConnected) })
     }
 
@@ -1498,6 +1695,17 @@ mod fake {
         ) {
             if let Some(sink) = self.sink(instance) {
                 sink.emit_full(message, extras).await;
+            }
+        }
+
+        /// Hands a converted live item (a vote, a keep) to the instance as the real driver would.
+        pub async fn deliver_converted(
+            &self,
+            instance: &InstanceId,
+            converted: crate::wa::convert::Converted,
+        ) {
+            if let Some(sink) = self.sink(instance) {
+                crate::wa::app_state::apply_converted(&sink, converted).await;
             }
         }
 
@@ -2011,6 +2219,92 @@ mod fake {
                     timestamp_ms,
                 })
             })
+        }
+
+        /// Builds the message the real driver would send and stores it as sent, with the chat's timer.
+        fn send_rich(
+            &self,
+            instance: &InstanceId,
+            req: rosty_wa_proto::SendRich,
+        ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+            let instance = instance.clone();
+            Box::pin(async move {
+                let kind = match &req.content {
+                    rosty_wa_proto::RichContent::Poll { .. } => "poll",
+                    rosty_wa_proto::RichContent::Location { .. } => "location",
+                    rosty_wa_proto::RichContent::Contacts { .. } => "contacts",
+                };
+                self.record(&instance, format!("rich {} {kind}", req.chat))?;
+                self.scripted_failure("rich")?;
+                let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
+                let (message, secret) = crate::wa::rich::rich_message(&req.content, None)?;
+                let mut extras = crate::wa::convert::extras(&message);
+                extras.secret = secret.or(extras.secret);
+                extras.meta.status = Some(DeliveryStatus::Sent);
+                extras.meta.expires_s = sink.chat_timer(&req.chat).await;
+                if let Some(quoted) = req.quoted_id.clone() {
+                    extras.meta.quoted = Some(rosty_wa_proto::Quoted {
+                        id: quoted,
+                        sender: None,
+                        preview: None,
+                    });
+                }
+                let timestamp_ms = now_ms();
+                let message_id = self.next_id();
+                sink.emit_full(
+                    WaMessage {
+                        id: message_id.clone(),
+                        chat: req.chat.clone(),
+                        sender: crate::wa::convert::is_group(&req.chat).then(|| own_jid(&instance)),
+                        from_me: true,
+                        timestamp_ms,
+                        body: rosty_wa_proto::MessageBody::Unsupported,
+                        reactions: vec![],
+                        chat_alt: None,
+                        sender_alt: None,
+                    },
+                    extras,
+                )
+                .await;
+                Ok(Sent {
+                    message_id,
+                    timestamp_ms,
+                })
+            })
+        }
+
+        /// Records the vote as sent and counts it as mine.
+        fn poll_vote(
+            &self,
+            instance: &InstanceId,
+            req: rosty_wa_proto::PollVote,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let instance = instance.clone();
+            Box::pin(async move {
+                self.record(
+                    &instance,
+                    format!(
+                        "vote {} {} {}",
+                        req.chat,
+                        req.message_id,
+                        req.options.join(",")
+                    ),
+                )?;
+                self.scripted_failure("vote")?;
+                let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
+                sink.my_poll_vote(&req.chat, &req.message_id, req.options)
+                    .await;
+                Ok(())
+            })
+        }
+
+        fn unsubscribe_presence(
+            &self,
+            instance: &InstanceId,
+            jid: String,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(instance, format!("unsubscribe {jid}"));
+            Box::pin(async move { result })
         }
 
         fn profiles(

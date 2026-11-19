@@ -66,7 +66,11 @@ async fn a_due_message_and_its_cached_media_are_purged() {
     // Sent two days ago with a 24 hour timer: due. Sent now with the same timer: not yet.
     state
         .store()
-        .insert_message_full(instance.clone(), photo("OLD", now - 2 * 86_400_000), timed(86_400))
+        .insert_message_full(
+            instance.clone(),
+            photo("OLD", now - 2 * 86_400_000),
+            timed(86_400),
+        )
         .await
         .unwrap();
     state

@@ -32,6 +32,8 @@ pub struct MessageExtras {
     /// The author id the message arrived under, bare. `None` for one-to-one
     /// chats and when it was not recorded.
     pub wire_sender: Option<String>,
+    /// Votes of a poll that came with it, opened (history sync, E6-WA R5).
+    pub votes: Vec<super::polls::NewVote>,
 }
 
 /// The ids a stored message arrived under: what WhatsApp expects back in a
@@ -59,6 +61,14 @@ pub enum MessageChange {
     Star(bool),
     /// A receipt for a message I sent.
     Status(DeliveryStatus),
+    /// Kept in a disappearing chat, or no longer ("keep in chat", E6-WA R5): a kept message does not expire, an
+    /// undone keep expires again from its send time.
+    Keep {
+        kept: bool,
+        at_ms: i64,
+    },
+    /// The votes of a poll were counted again (E6-WA R5).
+    Poll(rosty_wa_proto::Poll),
 }
 
 /// An edit or delete for everyone that arrived before its message
@@ -68,6 +78,7 @@ pub enum MessageChange {
 enum PendingChange {
     Edit { body: MessageBody, edited_ms: i64 },
     Revoke { by: String, at_ms: i64 },
+    Keep { kept: bool, at_ms: i64 },
 }
 
 impl PendingChange {
@@ -81,7 +92,11 @@ impl PendingChange {
                 by: by.clone(),
                 at_ms: *at_ms,
             }),
-            MessageChange::Star(_) | MessageChange::Status(_) => None,
+            MessageChange::Keep { kept, at_ms } => Some(Self::Keep {
+                kept: *kept,
+                at_ms: *at_ms,
+            }),
+            MessageChange::Star(_) | MessageChange::Status(_) | MessageChange::Poll(_) => None,
         }
     }
 
@@ -89,13 +104,14 @@ impl PendingChange {
         match self {
             Self::Edit { .. } => "edit",
             Self::Revoke { .. } => "revoke",
+            Self::Keep { .. } => "keep",
         }
     }
 
     fn at_ms(&self) -> i64 {
         match self {
             Self::Edit { edited_ms, .. } => *edited_ms,
-            Self::Revoke { at_ms, .. } => *at_ms,
+            Self::Revoke { at_ms, .. } | Self::Keep { at_ms, .. } => *at_ms,
         }
     }
 
@@ -103,6 +119,7 @@ impl PendingChange {
         match self {
             Self::Edit { body, edited_ms } => MessageChange::Edit { body, edited_ms },
             Self::Revoke { by, at_ms } => MessageChange::Revoke { by, at_ms },
+            Self::Keep { kept, at_ms } => MessageChange::Keep { kept, at_ms },
         }
     }
 }
@@ -236,6 +253,21 @@ pub fn apply_change(
             meta.status = Some(merged);
             (false, changed)
         }
+        MessageChange::Keep { kept, .. } => {
+            let changed = meta.kept != kept;
+            meta.kept = kept;
+            (false, changed)
+        }
+        MessageChange::Poll(poll) => {
+            // Only a poll is counted; the question and options stay as they came.
+            let Some(stored) = meta.poll.as_mut() else {
+                return (false, false);
+            };
+            let changed = stored.options != poll.options || stored.my_votes != poll.my_votes;
+            stored.options = poll.options;
+            stored.my_votes = poll.my_votes;
+            (false, changed)
+        }
     }
 }
 
@@ -331,7 +363,7 @@ fn receipt_rank(status: DeliveryStatus) -> i64 {
     }
 }
 
-fn meta_from(json: Option<String>) -> Result<MessageMeta, StoreError> {
+pub(super) fn meta_from(json: Option<String>) -> Result<MessageMeta, StoreError> {
     match json {
         Some(text) => Ok(serde_json::from_str(&text)?),
         None => Ok(MessageMeta::default()),
@@ -538,8 +570,12 @@ pub(super) fn insert_row(
         .thumbnail
         .as_ref()
         .filter(|t| !t.is_empty() && t.len() <= MAX_THUMBNAIL_BYTES);
-    let expires_ms =
-        rosty_core::wa_actions::expires_at(message.timestamp_ms, extras.meta.expires_s);
+    // A message kept in the chat never disappears (E6-WA R5).
+    let expires_ms = if extras.meta.kept {
+        None
+    } else {
+        rosty_core::wa_actions::expires_at(message.timestamp_ms, extras.meta.expires_s)
+    };
     let n = tx.execute(
         "INSERT OR IGNORE INTO messages
          (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto, meta_json, secret,
@@ -573,6 +609,12 @@ pub(super) fn insert_row(
             && !author.ends_with("@g.us")
         {
             set_push_name(tx, instance, &author, &name)?;
+        }
+    }
+    if n > 0 {
+        // Votes that came with the poll (history sync opens them already).
+        for vote in &extras.votes {
+            super::polls::upsert_vote(tx, instance, chat, &message.id, vote)?;
         }
     }
     Ok(n > 0)
@@ -925,6 +967,10 @@ impl Store {
                 MessageChange::Revoke { by, at_ms } => Some((*at_ms, by.clone())),
                 _ => None,
             };
+            let keep = match &change {
+                MessageChange::Keep { kept, .. } => Some(*kept),
+                _ => None,
+            };
             let (body_changed, changed) = apply_change(&mut body, &mut meta, from_me, change);
             if !changed {
                 return Ok(None);
@@ -940,6 +986,20 @@ impl Store {
                     meta_json(&meta)?
                 ],
             )?;
+            if let Some(kept) = keep {
+                // A kept message never disappears; an undone keep disappears its timer after it was sent
+                // (`rosty_core::wa_actions::expires_at`).
+                let expires = (!kept)
+                    .then_some(meta.expires_s)
+                    .flatten()
+                    .filter(|s| *s > 0)
+                    .map(i64::from);
+                tx.execute(
+                    "UPDATE messages SET expires_ms = CASE WHEN ?4 IS NULL THEN NULL ELSE ts_ms + ?4 * 1000 END
+                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                    params![instance.as_str(), chat, id, expires],
+                )?;
+            }
             if let Some(edited_at) = edited_at.filter(|_| body_changed) {
                 tx.execute(
                     "INSERT OR IGNORE INTO message_edits

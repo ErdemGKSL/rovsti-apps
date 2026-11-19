@@ -170,6 +170,40 @@ object WaContracts : ContractModels {
             op<LinkFindRequest, LinkFindAnswer>("wa.link_find", ok = listOf("none"))
             op<LinkParseRequest, LinkMeta>("wa.link_parse", ok = listOf("bare"), err = listOf("not_http"))
             op<ReceiptSectionsRequest, ReceiptSectionsAnswer>("wa.receipt_sections", ok = listOf("voice"))
+            // E6-WA R5: rich content and presence.
+            handleOp<dev.rosty.core.model.wa.SendRich, Sent>(
+                "wa.send_rich",
+                ok = listOf("location"),
+                err = listOf("old_gateway"),
+            )
+            handleOp<dev.rosty.core.model.wa.PollVote, Empty>("wa.poll_vote", ok = listOf("take_back"))
+            handleOp<JidBody, Empty>("wa.unsubscribe_presence")
+            op<dev.rosty.core.model.wa.PollCheckRequest, dev.rosty.core.model.wa.PollCheckAnswer>(
+                "wa.poll_check",
+                ok = listOf("problems"),
+            )
+            op<dev.rosty.core.model.wa.PollViewRequest, dev.rosty.core.model.wa.PollView>("wa.poll_view")
+            op<dev.rosty.core.model.wa.VcardParseRequest, dev.rosty.core.model.wa.VcardParseAnswer>(
+                "wa.vcard_parse",
+                ok = listOf("no_number"),
+            )
+            op<dev.rosty.core.model.wa.VcardBuildRequest, dev.rosty.core.model.wa.VcardBuildAnswer>(
+                "wa.vcard_build",
+                err = listOf("no_name"),
+            )
+            op<dev.rosty.core.model.wa.PlaceViewRequest, dev.rosty.core.model.wa.PlaceView>(
+                "wa.place_view",
+                ok = listOf("no_name"),
+                err = listOf("nowhere"),
+            )
+            op<dev.rosty.core.model.wa.StaticMapRequest, dev.rosty.core.model.wa.StaticMap>(
+                "wa.static_map",
+                err = listOf("empty"),
+            )
+            op<dev.rosty.core.model.wa.PresenceViewRequest, dev.rosty.core.model.wa.HeaderPresence>(
+                "wa.presence_view",
+                ok = listOf("typing", "group", "hidden"),
+            )
             handleOp<StarMessage, Empty>("wa.star_message")
             handleOp<ChatAction, Empty>("wa.chat_action", ok = listOf("mute"))
             handleOp<PlaceCallBody, CallStarted>("wa.place_call", err = listOf("offline"))

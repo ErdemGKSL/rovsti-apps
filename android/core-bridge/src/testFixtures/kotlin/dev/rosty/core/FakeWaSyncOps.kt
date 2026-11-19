@@ -412,17 +412,41 @@ class FakeWaSyncOps(
                 is WaSyncAction.SendText -> action.text
                 is WaSyncAction.SendMedia -> action.caption
                 is WaSyncAction.Forward -> action.snapshot?.text
+                is WaSyncAction.SendRich -> null
                 else -> return null
             }
         val media = action as? WaSyncAction.SendMedia
         val forward = (action as? WaSyncAction.Forward)?.snapshot
         val sendText = action as? WaSyncAction.SendText
+        val rich = (action as? WaSyncAction.SendRich)?.content
         return WaSyncMessage(
             id = item.clientId,
             chat = item.chat,
             fromMe = true,
             timestampMs = item.createdMs,
-            kind = media?.let { kindOf(it.media) } ?: forward?.kind ?: WaSyncKind.Text,
+            kind = media?.let { kindOf(it.media) } ?: forward?.kind ?: rich?.let(::richKind) ?: WaSyncKind.Text,
+            poll =
+                (rich as? dev.rosty.core.model.wa.RichContent.PollDraft)?.let { draft ->
+                    dev.rosty.core.model.wa.Poll(
+                        draft.question,
+                        draft.options.map {
+                            dev.rosty.core.model.wa
+                                .PollOption(it)
+                        },
+                        if (draft.multiple) draft.options.size else 1,
+                    )
+                },
+            location =
+                (rich as? dev.rosty.core.model.wa.RichContent.Place)?.let {
+                    dev.rosty.core.model.wa
+                        .Location(it.latitude, it.longitude, it.name, it.address)
+                },
+            contact = (rich as? dev.rosty.core.model.wa.RichContent.Contacts)?.contacts?.firstOrNull(),
+            contacts =
+                (rich as? dev.rosty.core.model.wa.RichContent.Contacts)
+                    ?.contacts
+                    ?.takeIf { it.size > 1 }
+                    .orEmpty(),
             text = text,
             mime = media?.mime ?: forward?.mime,
             size = media?.size ?: forward?.size,
@@ -453,6 +477,43 @@ class FakeWaSyncOps(
         starred: Boolean,
     ) {
         messages[chat]?.replaceAll { if (it.id == id) it.copy(starred = starred) else it }
+    }
+
+    private fun richKind(content: dev.rosty.core.model.wa.RichContent): WaSyncKind =
+        when (content) {
+            is dev.rosty.core.model.wa.RichContent.PollDraft -> WaSyncKind.Poll
+            is dev.rosty.core.model.wa.RichContent.Place -> WaSyncKind.Location
+            is dev.rosty.core.model.wa.RichContent.Contacts -> WaSyncKind.Contact
+        }
+
+    /** Shows [options] as my choice in a stored poll, as `wa_sync`'s optimistic vote does (E6-WA R5). */
+    private fun setMyVotes(
+        chat: String,
+        id: String,
+        options: List<String>,
+    ) {
+        messages[chat]?.replaceAll { row ->
+            val poll = row.poll
+            if (row.id != id || poll == null) return@replaceAll row
+            row.copy(
+                poll =
+                    poll.copy(
+                        myVotes = options,
+                        options =
+                            poll.options.map { option ->
+                                val others = option.voters.filter { it != dev.rosty.core.model.wa.MY_VOTE }
+                                option.copy(
+                                    voters =
+                                        if (option.name in options) {
+                                            others + dev.rosty.core.model.wa.MY_VOTE
+                                        } else {
+                                            others
+                                        },
+                                )
+                            },
+                    ),
+            )
+        }
     }
 
     private fun <T> ok(value: T): Outcome<T> = Outcome.Ok(value)
@@ -802,6 +863,19 @@ class FakeWaSyncOps(
                         )
                     }
 
+                    // A vote needs its stored poll and a choice the poll allows; it shows at once (E6-WA R5).
+                    is WaSyncAction.PollVote -> {
+                        val poll =
+                            messages[keyOf(req.chat)]?.firstOrNull { it.id == asked.messageId }?.poll
+                                ?: return@synchronized Outcome.Err(RustError.NotFound("poll ${asked.messageId}"))
+                        val names = poll.options.map { it.name }
+                        if (asked.options.any { it !in names } || (poll.selectable == 1 && asked.options.size > 1)) {
+                            return@synchronized Outcome.Err(RustError.Invalid("this choice cannot be sent"))
+                        }
+                        setMyVotes(keyOf(req.chat), asked.messageId, asked.options)
+                        asked.copy(previous = poll.myVotes)
+                    }
+
                     is WaSyncAction.DeleteForMe -> {
                         val rows = messages[req.chat]
                         rows?.firstOrNull { it.id == asked.messageId }?.let { row ->
@@ -886,6 +960,13 @@ class FakeWaSyncOps(
                     if (failed && item.action is WaSyncAction.MarkPlayed) {
                         // Dropped: nothing to retry or edit, and the message stays played.
                         queue.remove(item)
+                        return@synchronized ok(WaSyncSettled(HANDLE, WaSyncSettled.FAILED))
+                    }
+                    val vote = item.action as? WaSyncAction.PollVote
+                    if (failed && vote != null) {
+                        // Refused: the choice before it shows again.
+                        queue.remove(item)
+                        setMyVotes(item.chat, vote.messageId, vote.previous.orEmpty())
                         return@synchronized ok(WaSyncSettled(HANDLE, WaSyncSettled.FAILED))
                     }
                     val deleteForMe = item.action as? WaSyncAction.DeleteForMe

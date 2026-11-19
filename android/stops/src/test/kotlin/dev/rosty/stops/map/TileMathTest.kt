@@ -1,5 +1,6 @@
 package dev.rosty.stops.map
 
+import dev.rosty.map.TileRasterizer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

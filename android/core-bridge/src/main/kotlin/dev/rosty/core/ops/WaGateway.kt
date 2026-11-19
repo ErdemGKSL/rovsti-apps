@@ -155,6 +155,9 @@ class WaGateway internal constructor(
     /** Starts presence updates for a contact. */
     suspend fun subscribePresence(jid: String): Outcome<Empty> = guarded { ops.subscribePresence(id, jid) }
 
+    /** Stops presence updates for a contact (E6-WA R5; an older gateway: not found). */
+    suspend fun unsubscribePresence(jid: String): Outcome<Empty> = guarded { ops.unsubscribePresence(id, jid) }
+
     /** Typing and recording indicators. */
     suspend fun chatState(req: ChatState): Outcome<Empty> = guarded { ops.chatState(id, req) }
 
@@ -242,6 +245,12 @@ class WaGateway internal constructor(
 
     /** Forwards a stored message to another chat (E6-WA R4). */
     suspend fun forward(req: ForwardMessage): Outcome<Sent> = guarded { ops.forward(id, req) }
+
+    /** A poll, a place or contact cards (E6-WA R5; an older gateway: not found). */
+    suspend fun sendRich(req: dev.rosty.core.model.wa.SendRich): Outcome<Sent> = guarded { ops.sendRich(id, req) }
+
+    /** My vote in a poll, or my vote taken back with no options (E6-WA R5). */
+    suspend fun pollVote(req: dev.rosty.core.model.wa.PollVote): Outcome<Empty> = guarded { ops.pollVote(id, req) }
 
     /** Who got, read or played one of my messages, and when (E6-WA R4). */
     suspend fun messageReceipts(

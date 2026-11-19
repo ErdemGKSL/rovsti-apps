@@ -3,6 +3,8 @@ package dev.rosty.stops.map
 import android.graphics.Bitmap
 import android.graphics.Color
 import dev.rosty.core.model.stops.TileBuffer
+import dev.rosty.map.PreparedTile
+import dev.rosty.map.TileRasterizer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue

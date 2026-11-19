@@ -561,7 +561,12 @@ data class Location(
     val longitude: Double,
     @EncodeDefault(NEVER) val name: String? = null,
     @EncodeDefault(NEVER) val address: String? = null,
+    /** A live location: only its first point is known. */
     @EncodeDefault(NEVER) val live: Boolean = false,
+    /** A link the sender attached (E6-WA R5). */
+    @EncodeDefault(NEVER) val url: String? = null,
+    /** A note the sender wrote with it (E6-WA R5). */
+    @EncodeDefault(NEVER) val comment: String? = null,
 )
 
 @Serializable
@@ -602,6 +607,12 @@ data class MessageMeta(
     @SerialName("expires_s") @EncodeDefault(NEVER) val expiresS: Long? = null,
     /** A line of the conversation, not a message. */
     @EncodeDefault(NEVER) val system: SystemNote? = null,
+    /** A poll with its votes and my choice (E6-WA R5); the body is `unsupported`. */
+    @EncodeDefault(NEVER) val poll: Poll? = null,
+    /** Every card of a contacts message; [contact] is the first (E6-WA R5). */
+    @EncodeDefault(NEVER) val contacts: List<SharedContact> = emptyList(),
+    /** Kept in a disappearing chat: it does not disappear (E6-WA R5). */
+    @EncodeDefault(NEVER) val kept: Boolean = false,
 )
 
 /** `rosty_wa_proto::DELETED_BY_ME`. */

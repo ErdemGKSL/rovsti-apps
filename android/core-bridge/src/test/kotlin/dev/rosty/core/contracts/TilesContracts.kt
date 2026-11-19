@@ -31,7 +31,7 @@ object TilesContracts : ContractModels {
         buildMap {
             op<TilesOpenRequest, TilesOpenAnswer>(
                 "tiles.open",
-                ok = listOf("custom"),
+                ok = listOf("custom", "memory"),
                 err = listOf("bad_url", "no_scheme"),
             )
             op<TilesHandleRequest, TilesUsageAnswer>("tiles.usage")

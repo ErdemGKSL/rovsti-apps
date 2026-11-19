@@ -1,5 +1,6 @@
 package dev.rosty.stops.map
 
+import dev.rosty.map.TileRasterizer
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope

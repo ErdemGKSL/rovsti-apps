@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import dev.rosty.core.Outcome
 import dev.rosty.core.RustError
 import dev.rosty.core.model.stops.TileBuffer
+import dev.rosty.map.PreparedTile
+import dev.rosty.map.TileRasterizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope

@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import dev.rosty.map.TileRasterizer
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max

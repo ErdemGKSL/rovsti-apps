@@ -32,7 +32,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import dev.rosty.design.icons.RostyIcon
 import dev.rosty.design.icons.RostyIcons
 import dev.rosty.design.media.SizedImage
@@ -122,7 +121,7 @@ internal fun LinkCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         card.picture?.let { LinkPicture(it) }
-        Column(Modifier.widthIn(max = CARD_TEXT_MAX)) {
+        Column(Modifier.widthIn(max = MessagesMetrics.LinkCardTextMax)) {
             card.title?.let {
                 RostyText(
                     it,
@@ -150,13 +149,16 @@ internal fun LinkCard(
 
 @Composable
 private fun LinkPicture(model: Any) {
-    val px = with(LocalDensity.current) { LINK_PICTURE.roundToPx() }
+    val px = with(LocalDensity.current) { MessagesMetrics.LinkPicture.roundToPx() }
     SizedImage(
         model = model,
         widthPx = px,
         heightPx = px,
         contentScale = ContentScale.Crop,
-        modifier = Modifier.size(LINK_PICTURE).clip(RoundedCornerShape(MessagesMetrics.FolderTileCorner)),
+        modifier =
+            Modifier
+                .size(MessagesMetrics.LinkPicture)
+                .clip(RoundedCornerShape(MessagesMetrics.FolderTileCorner)),
     )
 }
 
@@ -235,7 +237,7 @@ internal fun MentionList(
             .padding(top = Spacing.s)
             .clip(RoundedCornerShape(MessagesMetrics.BubbleCorner))
             .background(colors.fillSecondary)
-            .heightIn(max = MENTION_LIST_MAX)
+            .heightIn(max = MessagesMetrics.MentionListMax)
             .verticalScroll(rememberScrollState())
             .testTag(ActionTags.Mentions),
     ) {
@@ -257,6 +259,3 @@ internal fun MentionList(
 }
 
 private const val CARD_ALPHA = 0.12f
-private val CARD_TEXT_MAX = 220.dp
-private val LINK_PICTURE = 48.dp
-private val MENTION_LIST_MAX = 220.dp

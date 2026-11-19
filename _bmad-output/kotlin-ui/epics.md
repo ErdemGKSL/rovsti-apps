@@ -1399,7 +1399,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17: static and animated cards, sheet, share/save; optics and GIF playback split into X.2b) |
 | X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | done (round 18 step 6, 2026-11-17; Evidence in the X.2b section) |
 | X.3 | Readable text on accent and photo backgrounds (owner, 2026-11-17: "white text on a light background is unreadable") | round 19 (`plans/round-19.md`) | done (round 19). Next planner: E8 R1 |
-| X.4 | Open owner follow-ups (share sheet leftovers, glass "Delete" contrast, owner decisions on short codes and "Ara") | after X.3, before E8 R1 | todo (see the X.4 section) |
+| X.4 | Open owner follow-ups (share sheet leftovers, glass "Delete" contrast, owner decisions on short codes and "Ara") | round 20 (`plans/round-20.md`) | in-progress (planned 2026-11-19 at `fedbd29`). Next planner after X.4: E8 R1 |
 
 ### X.1 WhatsApp photo fallback avatar
 - **X.1a (round 15, step 5) done:** `rosty_app_core::people` (`people.json`, ops `people.upsert|lookup|plan|snapshot`, fixtures
@@ -1725,6 +1725,11 @@ of `3a03c05`/`6d8f44b`):** the e04 root cause is fixed and the carry-over is lan
 
 ### X.4 Open owner follow-ups (noted 2026-11-18)
 Plan these right after X.3 closes, before E8 R1.
+**Round 20** -> `_bmad-output/kotlin-ui/plans/round-20.md` (planned 2026-11-19 at base `fedbd29`). Verified at planning:
+X.3 done in code (`TextContrast.kt`, `FilledButtonContrastTest`, `ViewerScrimTest`, `CallPhotoContrastTest`, checklist
+record); owner fix (a) holds (`contacts/e4.15-name-format-light`: back button and full tab bar). Item 1 confirmed in
+`x2-share-still-menu-light` (the button menu scrim greys the whole sheet); item 2 not fixed by X.3 (`catalog/e1.6-buttons-dark`:
+salmon "Delete" on blue-violet glass).
 1. **Share sheet (X.2 leftovers).** Opening the menu in the Card Studio share sheet dims the page behind it, which it
    should not (a menu over a sheet does not dim). The toggle thumb in the sheet renders as a wide oval instead of the
    iOS capsule thumb used by `IosToggle`.

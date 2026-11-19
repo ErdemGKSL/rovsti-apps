@@ -35,9 +35,13 @@ pub enum PollProblem {
     QuestionTooLong,
     TooFewOptions,
     TooManyOptions,
-    OptionTooLong { index: usize },
+    OptionTooLong {
+        index: usize,
+    },
     /// The same text as an earlier option: its votes could not be told apart.
-    Duplicate { index: usize },
+    Duplicate {
+        index: usize,
+    },
 }
 
 /// The draft as it is sent (trimmed, empty options dropped), or what is wrong with it.
@@ -382,7 +386,10 @@ mod tests {
             check_choice(&options, 3, &names(&["C", "A", "A"])).unwrap(),
             names(&["A", "C"])
         );
-        assert_eq!(check_choice(&options, 1, &[]).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            check_choice(&options, 1, &[]).unwrap(),
+            Vec::<String>::new()
+        );
         assert_eq!(
             check_choice(&options, 1, &names(&["A", "B"])),
             Err(ChoiceProblem::TooMany { allowed: 1 })
@@ -442,7 +449,13 @@ mod tests {
     #[test]
     fn names_that_are_not_options_are_ignored() {
         let result = tally(&names(&["A"]), &[vote(ALI, None, &["A", "Gone"], 1)]);
-        assert_eq!(result, vec![OptionTally { name: "A".into(), voters: names(&[ALI]) }]);
+        assert_eq!(
+            result,
+            vec![OptionTally {
+                name: "A".into(),
+                voters: names(&[ALI])
+            }]
+        );
     }
 
     #[test]
@@ -466,9 +479,15 @@ mod tests {
         assert_eq!(view.voters, 2);
         assert!(view.voted);
         let a = &view.options[0];
-        assert_eq!((a.count, a.percent, a.mine, a.leading), (2, 100, true, true));
+        assert_eq!(
+            (a.count, a.percent, a.mine, a.leading),
+            (2, 100, true, true)
+        );
         let b = &view.options[1];
-        assert_eq!((b.count, b.percent, b.mine, b.leading), (1, 50, false, false));
+        assert_eq!(
+            (b.count, b.percent, b.mine, b.leading),
+            (1, 50, false, false)
+        );
         let c = &view.options[2];
         assert_eq!((c.count, c.percent, c.leading), (0, 0, false));
 

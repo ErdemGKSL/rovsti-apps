@@ -25,7 +25,11 @@ pub fn is_valid_coord(latitude: f64, longitude: f64) -> bool {
 fn fixed(value: f64) -> String {
     let text = format!("{value:.COORD_DECIMALS$}");
     // "-0.00000" reads as 0.
-    if text.trim_start_matches('-').chars().all(|c| c == '0' || c == '.') {
+    if text
+        .trim_start_matches('-')
+        .chars()
+        .all(|c| c == '0' || c == '.')
+    {
         format!("{:.COORD_DECIMALS$}", 0.0)
     } else {
         text
@@ -41,7 +45,9 @@ fn percent_encode(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for b in text.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -83,7 +89,11 @@ pub fn place_view(
     if !is_valid_coord(latitude, longitude) {
         return None;
     }
-    let clean = |t: Option<&str>| t.map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
+    let clean = |t: Option<&str>| {
+        t.map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+    };
     let title = clean(name);
     let address = clean(address);
     let coords = coords_text(latitude, longitude);
@@ -140,7 +150,9 @@ pub fn static_map(
     let zoom = zoom.min(MAX_ZOOM);
     let n = f64::from(1u32 << zoom);
     let size = f64::from(tile_px);
-    let lat = latitude.clamp(-MAX_MERCATOR_LAT, MAX_MERCATOR_LAT).to_radians();
+    let lat = latitude
+        .clamp(-MAX_MERCATOR_LAT, MAX_MERCATOR_LAT)
+        .to_radians();
     let world_x = (longitude + 180.0) / 360.0 * n * size;
     let world_y = (1.0 - (lat.tan() + 1.0 / lat.cos()).ln() / PI) / 2.0 * n * size;
     let left = (world_x - f64::from(width) / 2.0).floor() as i64;
@@ -148,8 +160,14 @@ pub fn static_map(
     let ts = i64::from(tile_px);
     let count = 1i64 << zoom;
     let mut tiles = Vec::new();
-    let (first_col, last_col) = (left.div_euclid(ts), (left + i64::from(width) - 1).div_euclid(ts));
-    let (first_row, last_row) = (top.div_euclid(ts), (top + i64::from(height) - 1).div_euclid(ts));
+    let (first_col, last_col) = (
+        left.div_euclid(ts),
+        (left + i64::from(width) - 1).div_euclid(ts),
+    );
+    let (first_row, last_row) = (
+        top.div_euclid(ts),
+        (top + i64::from(height) - 1).div_euclid(ts),
+    );
     for row in first_row..=last_row {
         if !(0..count).contains(&row) {
             continue;
@@ -193,7 +211,10 @@ mod tests {
             geo_uri(41.0258, 28.9744, Some("Galata Kulesi & Cafe")),
             "geo:41.02580,28.97440?q=41.02580,28.97440(Galata%20Kulesi%20%26%20Cafe)"
         );
-        assert_eq!(geo_uri(1.0, 2.0, Some("  ")), "geo:1.00000,2.00000?q=1.00000,2.00000");
+        assert_eq!(
+            geo_uri(1.0, 2.0, Some("  ")),
+            "geo:1.00000,2.00000?q=1.00000,2.00000"
+        );
     }
 
     #[test]
@@ -216,12 +237,20 @@ mod tests {
         let map = static_map(0.0, 0.0, 1, 256, 256, 256).unwrap();
         // At zoom 1 the point (0, 0) is the corner of the four tiles.
         assert_eq!((map.pin_x, map.pin_y), (128, 128));
-        let mut keys: Vec<(u32, u32, i32, i32)> =
-            map.tiles.iter().map(|t| (t.x, t.y, t.left, t.top)).collect();
+        let mut keys: Vec<(u32, u32, i32, i32)> = map
+            .tiles
+            .iter()
+            .map(|t| (t.x, t.y, t.left, t.top))
+            .collect();
         keys.sort_unstable();
         assert_eq!(
             keys,
-            vec![(0, 0, -128, -128), (0, 1, -128, 128), (1, 0, 128, -128), (1, 1, 128, 128)]
+            vec![
+                (0, 0, -128, -128),
+                (0, 1, -128, 128),
+                (1, 0, 128, -128),
+                (1, 1, 128, 128)
+            ]
         );
     }
 
@@ -229,7 +258,10 @@ mod tests {
     fn a_static_map_wraps_at_the_date_line_and_stops_at_the_poles() {
         let map = static_map(85.0, 179.99, 2, 300, 200, 256).unwrap();
         assert!(map.tiles.iter().all(|t| t.x < 4 && t.y < 4));
-        assert!(map.tiles.iter().any(|t| t.x == 0), "wrapped to the first column");
+        assert!(
+            map.tiles.iter().any(|t| t.x == 0),
+            "wrapped to the first column"
+        );
         assert!(map.tiles.iter().all(|t| t.y == 0), "no row above the top");
         // Every pixel is covered: the tiles span at least the picture.
         let near = static_map(41.0258, 28.9744, STATIC_MAP_ZOOM, 600, 300, 256).unwrap();

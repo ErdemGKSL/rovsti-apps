@@ -91,7 +91,10 @@ fn split_line(line: &str) -> Option<(String, Vec<(String, String)>, String)> {
     let (head, value) = line.split_once(':')?;
     let mut parts = head.split(';');
     let name = parts.next()?.trim();
-    let name = name.rsplit_once('.').map_or(name, |(_, n)| n).to_ascii_uppercase();
+    let name = name
+        .rsplit_once('.')
+        .map_or(name, |(_, n)| n)
+        .to_ascii_uppercase();
     let params = parts
         .map(|p| match p.split_once('=') {
             Some((k, v)) => (k.trim().to_ascii_uppercase(), v.trim().to_owned()),
@@ -108,7 +111,11 @@ pub fn wa_number(text: &str) -> Option<String> {
     (6..=15).contains(&digits.len()).then_some(digits)
 }
 
-fn label_of(params: &[(String, String)], group_labels: &[(String, String)], group: &str) -> Option<String> {
+fn label_of(
+    params: &[(String, String)],
+    group_labels: &[(String, String)],
+    group: &str,
+) -> Option<String> {
     if !group.is_empty()
         && let Some((_, label)) = group_labels.iter().find(|(g, _)| g == group)
     {
@@ -268,12 +275,19 @@ pub fn build_vcard(name: &str, numbers: &[CardNumber]) -> String {
         let item = i + 1;
         let international = number.starts_with('+');
         let waid = if international {
-            wa_number(number).map(|d| format!(";waid={d}")).unwrap_or_default()
+            wa_number(number)
+                .map(|d| format!(";waid={d}"))
+                .unwrap_or_default()
         } else {
             String::new()
         };
         out.push_str(&format!("item{item}.TEL{waid}:{}\n", escape(number)));
-        let label = n.label.as_deref().map(str::trim).filter(|l| !l.is_empty()).unwrap_or("Mobile");
+        let label = n
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .unwrap_or("Mobile");
         out.push_str(&format!("item{item}.X-ABLabel:{}\n", escape(label)));
     }
     out.push_str("END:VCARD");
@@ -320,7 +334,9 @@ mod tests {
 
     #[test]
     fn a_card_with_no_number_keeps_its_name_and_falls_back_to_n_or_org() {
-        let cards = parse_vcards("BEGIN:VCARD\nVERSION:3.0\nN:Doe;John;;Dr.;\nEMAIL:j@example.com\nEND:VCARD");
+        let cards = parse_vcards(
+            "BEGIN:VCARD\nVERSION:3.0\nN:Doe;John;;Dr.;\nEMAIL:j@example.com\nEND:VCARD",
+        );
         assert_eq!(cards[0].name.as_deref(), Some("Dr. John Doe"));
         assert!(cards[0].numbers.is_empty());
         assert_eq!(cards[0].emails, vec!["j@example.com".to_owned()]);
@@ -373,7 +389,10 @@ mod tests {
         assert!(text.contains("item2.TEL:0555 000 0032"));
         let card = &parse_vcards(&text)[0];
         assert_eq!(card.name.as_deref(), Some("Ayşe; Yılmaz"));
-        assert_eq!(card.numbers[0].wa_jid.as_deref(), Some("10000000031@s.whatsapp.net"));
+        assert_eq!(
+            card.numbers[0].wa_jid.as_deref(),
+            Some("10000000031@s.whatsapp.net")
+        );
         assert_eq!(card.numbers[0].label.as_deref(), Some("Mobile"));
         assert_eq!(card.numbers[1].label.as_deref(), Some("Home"));
         // No numbers at all is still a card.

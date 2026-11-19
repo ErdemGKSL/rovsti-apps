@@ -21,6 +21,7 @@ pub mod meta;
 pub mod people;
 pub mod presence;
 pub mod push;
+pub mod rich;
 pub mod status;
 pub mod timeline;
 pub mod url;
@@ -55,6 +56,10 @@ pub use people::{
 };
 pub use presence::{PresenceBook, presence_label};
 pub use push::{Wake, parse_wake};
+pub use rich::{
+    MAX_SHARED_CONTACTS, Poll, PollOption, PollVote, RichContent, RichError, SendRich,
+    UnsubscribePresence,
+};
 pub use status::{
     MarkStatusViewed, STATUS_BROADCAST, STATUS_TTL_MS, StatusAuthor, StatusItem, StatusKind,
     StatusList, StatusMedia, StatusPlayer, group_statuses, is_status_chat,

@@ -41,12 +41,21 @@ pub enum HeaderPresence {
     /// Nothing to show (unknown, hidden, or a group with nobody typing).
     None,
     Online,
-    LastSeen { at_ms: i64 },
+    LastSeen {
+        at_ms: i64,
+    },
     /// Who is typing (one in a one-to-one chat), oldest first.
-    Typing { who: Vec<String> },
-    Recording { who: Vec<String> },
+    Typing {
+        who: Vec<String>,
+    },
+    Recording {
+        who: Vec<String>,
+    },
     /// Some type and some record (groups).
-    Busy { typing: Vec<String>, recording: Vec<String> },
+    Busy {
+        typing: Vec<String>,
+        recording: Vec<String>,
+    },
 }
 
 /// The header line of a chat at `now_ms`. Typing beats recording beats online beats last seen; in a group only
@@ -124,15 +133,24 @@ mod tests {
         });
         assert_eq!(
             header_presence(false, online, &[seen(ALI, TypingKind::Typing, 1_000)], NOW),
-            HeaderPresence::Typing { who: vec![ALI.into()] }
+            HeaderPresence::Typing {
+                who: vec![ALI.into()]
+            }
         );
         assert_eq!(
-            header_presence(false, online, &[seen(ALI, TypingKind::Typing, TYPING_TTL_MS)], NOW),
+            header_presence(
+                false,
+                online,
+                &[seen(ALI, TypingKind::Typing, TYPING_TTL_MS)],
+                NOW
+            ),
             HeaderPresence::Online
         );
         assert_eq!(
             header_presence(false, None, &[seen(ALI, TypingKind::Recording, 0)], NOW),
-            HeaderPresence::Recording { who: vec![ALI.into()] }
+            HeaderPresence::Recording {
+                who: vec![ALI.into()]
+            }
         );
     }
 
@@ -156,7 +174,10 @@ mod tests {
             available: false,
             last_seen_ms: None,
         });
-        assert_eq!(header_presence(false, hidden, &[], NOW), HeaderPresence::None);
+        assert_eq!(
+            header_presence(false, hidden, &[], NOW),
+            HeaderPresence::None
+        );
         assert_eq!(header_presence(false, None, &[], NOW), HeaderPresence::None);
         // A time ahead of the phone's clock reads as now.
         let ahead = Some(PresenceSeen {
@@ -175,7 +196,10 @@ mod tests {
             available: true,
             last_seen_ms: None,
         });
-        assert_eq!(header_presence(true, online, &[], NOW), HeaderPresence::None);
+        assert_eq!(
+            header_presence(true, online, &[], NOW),
+            HeaderPresence::None
+        );
         let states = [
             seen(ALI, TypingKind::Typing, 3_000),
             seen(BEN, TypingKind::Recording, 1_000),
@@ -190,7 +214,9 @@ mod tests {
         );
         assert_eq!(
             header_presence(true, None, &states[..1], NOW),
-            HeaderPresence::Typing { who: vec![ALI.into()] }
+            HeaderPresence::Typing {
+                who: vec![ALI.into()]
+            }
         );
     }
 }

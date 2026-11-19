@@ -81,8 +81,8 @@ internal object ViewerScrim {
         if (luminance == null) FLOOR else scrimAlphaFor(luminance, Color.White, 4.5, FLOOR, MAX)
 
     /**
-     * The top gradient: [alpha] held through the bar (where the title sits, up to [holdFraction] of the height) and eased
-     * height plus the run below, so there is no edge to see. [barFraction] is bar / (bar + run).
+     * The top gradient: [alpha] held from the top edge down to [holdFraction] of the height (through the bar, where the
+     * title sits), then eased to nothing over the run below the bar, so there is no edge to see.
      */
     fun topBrush(
         alpha: Float,

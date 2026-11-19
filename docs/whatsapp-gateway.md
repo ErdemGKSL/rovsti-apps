@@ -569,8 +569,12 @@ Each one is sent to WhatsApp first, then stored and announced (`message_meta`,
   an older setting never overrides a newer one. Every send (text, media, forward)
   carries the timer, and the stored copy its `expires_s`. A change makes a line in the
   chat (`meta.system`), stored once per change, never counted as unread and never
-  pushed; `chat_meta` follows. Messages keep `expires_ms`; the gateway does not purge
-  them (open owner question, `plans/e6wa-r4.md`).
+  pushed; `chat_meta` follows. Messages keep `expires_ms`. **R5 (owner decision)**: the
+  gateway purges a message once `expires_ms` passed, at start and every 5 minutes
+  (`wa_gateway::expiry`), with its reactions, receipts, edits, waiting changes, poll
+  votes and its cached media file. Nothing is announced: the apps expire the same
+  messages on their own clock. A message kept in the chat ("keep in chat") has no
+  `expires_ms` and stays.
 - **Receipt times**: each receipt's time is kept per member (and, from now on, for
   one-to-one chats with the chat as participant) for the receipts route.
 - **Early changes**: an edit or delete for everyone of a message the gateway does not

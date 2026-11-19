@@ -14,6 +14,7 @@ use rosty_wa_proto::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 mod account;
+mod expiry;
 mod identity;
 mod merge;
 mod people;
@@ -34,6 +35,7 @@ pub use rich::{
     MessageExtras, ProfileChange, ReceiptCounts, WireIds, apply_change, group_status, merge_edit,
     present,
 };
+pub use expiry::{ExpiredMessage, PURGE_BATCH};
 pub use status::{StatusTarget, StoredStatus};
 
 /// Active (not revoked) keys one instance may hold.

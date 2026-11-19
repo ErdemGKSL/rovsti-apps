@@ -123,4 +123,35 @@ Edge cases and the tests that cover them:
 
 ## Evidence
 
-(filled in as the steps land)
+Branch `worktree-agent-a6f974094db30ae02` on `messages-kotlin` (`866062a1`).
+
+| Step | Commits | Checks |
+|---|---|---|
+| 1, 2 | `64e97708` | `rosty_core::wa_actions` unit tests; proto and client wire tests |
+| 3 | `696e0460`, `8f43ae7a` (Cargo.lock) | gateway store, convert and `tests/api.rs` tests; schema **v11**; **not deployed** |
+| 4 | `e57e35eb` | `wa_sync` v7, `actions_tests.rs` (11 tests: early edit and revoke, LID-keyed edit after a merge, expiry at open and a page that would bring a row back, forward snapshot, delete for me and its undo on refusal, mentions of a LID-only member) |
+| 5 | `82e88cb7`, `601b2335`, `7959619d`, `7b8c8f5b` | FFI fixtures and `OPS.md`; core-bridge contracts, `testRustBridge` 118 passed (schema 7) |
+| 9 (fetcher) | `aaaf81c5` | `:platform` `PagePreviewTest` |
+| 6 to 10 | `d3384888`, `86a33f54`, `dbec004e` | Messages `WaMessageActionsTest` (15), `WaExpiryTest`, `MessageAnnouncerTest` muted mention; goldens `wa-r4-*` light and dark; `e6wa-r3-media-menu` re-recorded ("Delete for Me") |
+
+Gates: `cargo fmt`, clippy `-D warnings` and 3396 tests on the package set (`--profile checks`); `cargo check --release
+-p rosty_android --target aarch64-linux-android`; Messages `testPlainReleaseUnitTest` and `testFirebaseReleaseUnitTest`
+668 each, `verifyRoborazziPlainRelease`, `lintPlainRelease`; core-bridge and platform `testReleaseUnitTest` and
+`lintRelease`; `spotlessCheck`; no orphan Messages goldens.
+
+Deviations from the steps above:
+- `wa_sync.delete_for_me` is not an op of its own: delete for me is the outbox action `DeleteForMe` of `wa_sync.enqueue`
+  (hidden at once, shown again when the gateway refuses it).
+- The timer shows in the thread menu ("Disappearing messages: 7 Days") and as the system line, not as a mark in the
+  header.
+- "Mentions or replies to me" for the muted-chat notification compares ids in Kotlin (`WaIds.same` against the linked
+  account's number and LID from the link status), mirroring `rosty_core::wa_actions::addresses_me`; there is no
+  `wa.addresses_me` op yet. The announcer holds a muted chat's message until its `message_meta` arrives.
+- Expiry while the app runs: `WaOffline` runs `expire` when the store opens, then waits for the next expiry the store
+  names (cut short when rows change) and deletes the media files of what expired.
+
+Needs a device: edit within and after 15 minutes against a real phone; forward of a media message (same CDN blob);
+played receipts on my voice notes; message info in a group with a member who left; a mention from another phone in a
+WhatsApp-muted group (notification); a link card made on the phone and seen on WhatsApp (thumbnail size); the timer set
+from Rosty and from the phone in a group and in a one-to-one chat (system line both ways); expiry after the app was
+closed.

@@ -205,3 +205,27 @@ with `rtlSafe()`; `LtrIsolateTest`). Evidence: `e5.14-settings-fs2`, `e5.14-sett
   `RecentsScrollRecompositionTest`, `PillFeedbackTest`, `ThemeMeltTest`, `TabBarCellsTest` (LargeTitleScaffold case).
 - RTL: `e5.14-settings-rtl`, `e5.14-stats-rtl` mirror correctly (back chevron and title at the right, row chevrons at the left,
   tab order reversed). Numbers and durations keep their glyph order ("+49 30 123456", "1 h 52 min"): F36 fixed in step 4.
+
+# X.3 checklist record: readable text on accent and photo backgrounds (round 19 step 7)
+
+The pass of the contrast section of `.claude/skills/convx-motion-compose/references/checklist.md` over the Phone screens
+the X.3 fixes touch: the setup sheet (filled capsules on the dark accent), the photo viewer, the incoming, in-call and
+WhatsApp incoming screens over a contact photo, and the Statistics bar counts. Method: the tests below, the audit of every
+light and dark golden and the opened PNGs. Targets: 4.5:1 body, 3:1 large text and glyph-only controls. No device run.
+
+- pass (filled capsules): `phone/e5.1-setup-sheet-dark` ("Set as default", "Allow access", "Open settings") reads navy on
+  the light-blue accent (`E51ShotTest` asserts it with `assertNodeReadable`); `E58ShotTest` asserts the waiting-call buttons. Tests as in the E4 record
+  (`FilledButtonContrastTest`, `ContrastHelpersTest`).
+- pass (photo viewer): `phone/e5.13-viewer*-light` title and back button read on a light photo (`ViewerScrimTest`,
+  `ViewerChromeContrastTest`, `E513ShotTest`).
+- pass (call screens over a light photo): `CallBackdrop` measures the photo's top and bottom band luminance and raises the
+  scrim alpha only as far as white captions need (floor 0.25 top, 0.55 bottom, max 0.8); `CallInk.kt` is the one source of
+  `OnAura`/`OnAuraSecondary` for Incoming, In-call, MultiCall and ToneKeypad. Tests: `CallBackdropTest`,
+  `CallPhotoContrastTest` (flat #F2F2F2 photo, both themes), `CallPhotoShotTest` (`e5.6-incoming-photo-white-light` added).
+- pass (Statistics): the bar count no longer fades with a short bar's fraction (`StatsCountReadableTest`).
+- exception (notification badges): the missed-call tab badge keeps white bold numerals on systemRed (about 3.5:1): an iOS
+  convention, short bold numerals, and not the white-on-light surface case from the owner's report. Deliberate.
+- exception (avatar initials): untouched, owner rule.
+- pass (platform): no Rust before `Rust.init`, no new class reached by name (no keep rule); `RustNative` confirmed kept in the
+  Phone release APK with `dexdump`.
+- open: nothing verified on hardware.

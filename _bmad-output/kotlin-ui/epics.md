@@ -1398,7 +1398,7 @@ drives the redraw. Not harness-caused (the first composition was always fine and
 | X.1 | WhatsApp profile photo as the fallback avatar (Contacts and Phone) | round 15 (steps 5-8) | done (X.1a-d; evidence below) |
 | X.2 | Share cards rendered with Takumi (birthday card first), Contacts | round 16, round 17 | done (round 17: static and animated cards, sheet, share/save; optics and GIF playback split into X.2b) |
 | X.2b | Glass optics of the animated card (owner's "light bending as the GIFs' signature": lens sweep, rim glint, refraction following the squash) and one-shot GIF playback in the Card Studio preview; bigger preview (R18-F1) | round 18 | done (round 18 step 6, 2026-11-17; Evidence in the X.2b section) |
-| X.3 | Readable text on accent and photo backgrounds (owner, 2026-11-17: "white text on a light background is unreadable") | round 19 (`plans/round-19.md`) | in-progress (planned 2026-11-17 at `bc22e17`; 7 steps; next planner after X.3 is E8 R1) |
+| X.3 | Readable text on accent and photo backgrounds (owner, 2026-11-17: "white text on a light background is unreadable") | round 19 (`plans/round-19.md`) | done (round 19). Next planner: E8 R1 |
 | X.4 | Open owner follow-ups (share sheet leftovers, glass "Delete" contrast, owner decisions on short codes and "Ara") | after X.3, before E8 R1 | todo (see the X.4 section) |
 
 ### X.1 WhatsApp photo fallback avatar
@@ -1616,6 +1616,41 @@ Avatar initials are fine (owner: do not touch them). A contrast audit of all lig
    scrim over photos so white captions reach at least 4.5:1 (3:1 for large text).
 Done when: a contrast check (WCAG ratio, 4.5:1 body / 3:1 large) runs over the touched goldens in both themes and passes;
 goldens re-recorded; no other screen regresses.
+
+
+**X.3 status: done (round 19, 2026-11-18). Next planner: E8 R1.**
+
+**Evidence (round 19):** commits `00741db` (contrast helpers, `TextContrast`), `5c3b121` (filled controls read on every fill),
+`e62c287` (app goldens with contrast proof), `335b705` (photo viewer chrome), `fa753ab` (call screens over light photos),
+`6eba4ee` (sweep, Rust card ink) and the step-7 close (checklist records, this block).
+- Tests: `ContrastHelpersTest`, `ContrastTest`, `TextContrastTest`, `FilledButtonContrastTest`, `SwipeActionContrastTest`,
+  `ViewerScrimTest`, `ViewerChromeContrastTest`, `CallBackdropTest`, `CallPhotoContrastTest`, `StatsCountReadableTest`,
+  `SettingsGlyphColorTest`, shot-test assertions (`assertNodeReadable`/`assertTagTextReadable` in `E44PhotoShotTest`,
+  `E51ShotTest`, `E58ShotTest`, `X2ShotTest`), Rust `every_palette_secondary_ink_reads_at_4_5`.
+- Audit (scratch script over 1,222 light/dark goldens, text-like components below 3.0:1): 1,555 hits in 575 files before,
+  1,529 hits in 564 files after. Most of the rest are known false positives (avatar initials, map tiles, glass blur); real
+  hits were fixed in step 6.
+- PNGs opened in step 7: `phone/e5.6-incoming-photo-white-light` (white photo: "Incoming call", name and number read on the
+  scrim, labels and Decline/Answer read, grey mid band shows through, no band edge), `phone/e5.1-setup-sheet-dark` (navy
+  labels on the light-blue capsules), `phone/e5.13-viewer-light` (title and back chevron read on the beige photo, back
+  button tinted dark), `contacts/e4.4-crop-light` ("Choose" navy on light blue).
+- Exceptions recorded in the checklists: notification badges stay white on systemRed (iOS convention, bold numerals), avatar
+  initials untouched (owner).
+- Checklist: `docs/kotlin-ui/checklist-e4.md` and `checklist-e5.md`, "X.3 checklist record".
+- Gate: `cargo fmt --all --check`, `cargo test --profile checks` (gate package set), `cargo check --release` of `rosty_android`
+  and `rosty_ffi` for aarch64-linux-android, then `scripts/kotlin-ui-check.sh` EXIT 0 (the first full run failed on one
+  flaky golden, `catalog/e1.7-tabbar-drag-mid-light`, which passed on re-run; the Gradle part was then re-run with
+  `SKIP_RUST=1` and was green).
+- Release APKs (bytes): `android/catalog/build/outputs/apk/release/catalog-release-unsigned.apk` 245,715,530;
+  `android/phone/build/outputs/apk/plain/release/phone-plain-release-unsigned.apk` 27,584,517 (firebase 27,979,745);
+  `android/messages/build/outputs/apk/plain/release/messages-plain-release-unsigned.apk` 27,613,684 (firebase 28,058,172);
+  `android/contacts/build/outputs/apk/release/contacts-release-unsigned.apk` 27,200,685;
+  `android/stops/build/outputs/apk/release/stops-release-unsigned.apk` 26,457,309. Only the catalog APK was kept on disk
+  afterwards. No new class reached by name, no keep rule; `dexdump` of the Phone plain release APK shows
+  `Ldev/rosty/core/RustNative;` kept.
+- Disk: 4.1 GB free before the gate (after removing app build dirs and the stale Gradle 8.14.3 cache), 7.4 GB free after
+  removing the build dirs, `target/checks`, `target/aarch64-linux-android` and the Gradle transforms cache.
+- Not verified: no device run.
 
 **Evidence (round 17):** commits `3a03c05` (carry-over), the "carry-over landed" fix commit, `7ece932` (Card Studio sheet
 fixes R17-F1..F4, re-recorded x2 goldens), `0c1b999` (budgets, sizes, cancellation), `8ace76e` (release-path proof, share/save

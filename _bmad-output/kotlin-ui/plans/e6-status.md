@@ -2,6 +2,22 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## E6-WA R4 (2026-11-19): message actions
+
+Plan and evidence: `_bmad-output/kotlin-ui/plans/e6wa-r4.md`. Edit, forward ("Forwarded many times"), delete for me,
+played receipts, message info, mentions, link previews (received; sent ones made on the phone behind the new "Link
+previews" switch), disappearing messages.
+
+**Gateway commits to deploy**: `696e0460` (routes, receipt times, timers, early edits, schema **v11**) and `8f43ae7a`
+(Cargo.lock). Back up the gateway database before deploying: v11 adds columns and the `pending_changes` table. The
+wire is additive; an older gateway answers message info with "not available" and ignores mentions and link cards.
+
+Try on a device: edit a message, forward a photo, delete for me, open Info on a group message, `@` someone in a group,
+send a link, set a 24 h timer from the thread menu and watch the system line on both phones.
+
+Open owner questions: in `e6wa-r4.md` (gateway purge of expired messages, Rosty's own mute vs mentions, starred
+messages in a disappearing chat).
+
 ## People sync v3 (2026-11-16): the gateway prepares, the phone downloads once
 
 Plan and evidence: `_bmad-output/kotlin-ui/plans/people-sync-v3.md`. Steps 1 to 6 (wire, gateway, planner, FFI,

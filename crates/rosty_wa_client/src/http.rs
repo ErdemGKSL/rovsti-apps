@@ -9,13 +9,13 @@ use std::time::Duration;
 use rosty_wa_proto::api::routes;
 use rosty_wa_proto::{
     ApiError, CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey,
-    CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, GatewayUrl, GroupInfo,
-    IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead,
-    MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions, MintKey, PeopleJobStatus,
-    PeopleRecord, PeopleSyncStart, PlaceCall, ProfilesRequest, PushKeyedRegistration,
-    PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText, ScheduledText,
-    SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage, StatusList,
-    SubscribePresence, WaMessage, WaProfile, WaUser,
+    CreateInstance, CreatedInstance, DeleteForMe, EditMessage, ErrorCode, ForwardMessage,
+    GatewayUrl, GroupInfo, IdentityMappings, InstanceStatus, IssuedKey, KeyInfo, LinkRequest,
+    LookupUsers, MarkRead, MarkStatusViewed, MediaKind, MediaOptionError, MediaOptions,
+    MessageReceipts, MintKey, PeopleJobStatus, PeopleRecord, PeopleSyncStart, PlaceCall,
+    ProfilesRequest, PushKeyedRegistration, PushRegistration, RevokeMessage, RichChat, RichMessage,
+    ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage,
+    StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -91,6 +91,15 @@ pub(crate) fn messages_path(chat: &str, before_ms: Option<i64>, limit: u32) -> S
         path.push_str(&format!("&before={before}"));
     }
     path
+}
+
+/// `GET /v1/messages/{id}/receipts?chat=`.
+pub(crate) fn receipts_path(chat: &str, message_id: &str) -> String {
+    format!(
+        "{}?chat={}",
+        routes::fill(routes::MESSAGE_RECEIPTS, "message_id", message_id),
+        enc(chat)
+    )
 }
 
 pub(crate) fn send_media_path(
@@ -479,7 +488,15 @@ impl Gateway {
         self.get(&messages_path(chat, before_ms, limit))
     }
 
+    /// Sends a text, with mentions and a link preview when set. A preview
+    /// picture the gateway would refuse comes back as a `bad_request` API
+    /// error without a request.
     pub fn send_text(&self, req: &SendText) -> Result<Sent, ClientError> {
+        if let Some(preview) = &req.link_preview {
+            preview.thumbnail().map_err(|e| {
+                ClientError::Api(ApiError::new(ErrorCode::BadRequest, e.to_string()))
+            })?;
+        }
         self.post(routes::SEND_TEXT, req)
     }
 
@@ -741,6 +758,23 @@ impl Gateway {
     /// Played receipts for voice and video notes (blue microphone).
     pub fn mark_played(&self, req: &MarkRead) -> Result<(), ClientError> {
         self.post_unit(routes::MARK_PLAYED, req)
+    }
+
+    /// Forwards a stored message to another chat, marked forwarded (media is
+    /// relayed, not uploaded again). The copy arrives as a `message` event in
+    /// `req.to`. A gateway before E6-WA R4 answers `not_found`.
+    pub fn forward(&self, req: &ForwardMessage) -> Result<Sent, ClientError> {
+        self.post(routes::FORWARD, req)
+    }
+
+    /// Who got, read or played one of my messages, and when. A gateway before
+    /// E6-WA R4 answers `not_found`.
+    pub fn message_receipts(
+        &self,
+        chat: &str,
+        message_id: &str,
+    ) -> Result<MessageReceipts, ClientError> {
+        self.get(&receipts_path(chat, message_id))
     }
 
     /// Archives, pins, mutes or marks a chat on every device. A `chat_meta`
@@ -1007,6 +1041,14 @@ mod tests {
         let local = GatewayUrl::parse("http://10.0.2.2:8787").unwrap();
         let req = request(Method::GET, &local, "/v1/chats?x=1", None, ()).unwrap();
         assert_eq!(req.uri().to_string(), "http://10.0.2.2:8787/v1/chats?x=1");
+    }
+
+    #[test]
+    fn receipts_path_encodes_id_and_chat() {
+        assert_eq!(
+            receipts_path("120363000000000001@g.us", "3EB0/1"),
+            "/v1/messages/3EB0%2F1/receipts?chat=120363000000000001%40g.us"
+        );
     }
 
     #[test]

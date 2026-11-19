@@ -71,11 +71,7 @@ async fn sweep(state: &AppState, retries: &mut HashMap<String, i64>, retry: Dura
         if retries.get(&item.id).is_some_and(|at| *at > now) {
             continue;
         }
-        let req = SendText {
-            chat: item.chat.clone(),
-            text: item.text.clone(),
-            quoted_id: None,
-        };
+        let req = SendText::new(item.chat.clone(), item.text.clone(), None);
         match state.driver().send_text(&instance, req).await {
             Ok(sent) => {
                 retries.remove(&item.id);

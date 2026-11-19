@@ -12,6 +12,8 @@ import dev.rosty.core.model.messages.OtpRequest
 import dev.rosty.core.model.wa.ChatMeta
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MessageBody
+import dev.rosty.core.model.wa.MessageMeta
+import dev.rosty.core.model.wa.Quoted
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.ops.NativeMessagesOps
 import dev.rosty.messages.names.FakeLiveNames
@@ -89,6 +91,7 @@ class MessageAnnouncerTest {
     private fun announcer(
         scope: CoroutineScope,
         pushWake: Boolean = false,
+        own: List<String> = emptyList(),
     ) = MessageAnnouncer(
         context,
         scope,
@@ -102,6 +105,7 @@ class MessageAnnouncerTest {
             preview = { (it as? MessageBody.Text)?.text ?: "Photo" },
             pushWake = pushWake,
             now = { now },
+            ownIds = { own },
         ),
         post = { _, digest -> posted.add(digest) },
         shown = { _, tag -> posted.lastOrNull { it.spec.tag == tag } },
@@ -219,6 +223,34 @@ class MessageAnnouncerTest {
             assertTrue("a mute that ended no longer silences", announcer.onWhatsApp(message("m3")))
             // The open chat's message never entered the digest; the muted one did not either.
             assertEquals(listOf("Are you coming?"), posted.single().spec.lines)
+        }
+
+    @Test fun aMentionOfMeOrAReplyToMeGetsThroughAWhatsAppMute() =
+        runTest(UnconfinedTestDispatcher()) {
+            scriptRust()
+            val me = "100000000001@s.whatsapp.net"
+            val myLid = "123456789012001@lid"
+            val sender = "100000000012@s.whatsapp.net"
+            val announcer = announcer(this, own = listOf(me, myLid))
+            chats[club] = RichChat(club, "Club", null, 0, true, ChatMeta(mutedUntilMs = -1))
+
+            // Held while its details are on their way; details that do not name me keep it quiet.
+            assertFalse(announcer.onWhatsApp(message("g1", chat = club, text = "Hi all", sender = sender)))
+            assertFalse(announcer.onMeta(GatewayEvent.MessageMetaChanged(club, "g1", meta = MessageMeta())))
+
+            // A mention of my LID (a group that addresses by LID) is a mention of me.
+            assertFalse(announcer.onWhatsApp(message("g2", chat = club, text = "@you look", sender = sender)))
+            assertTrue(
+                announcer.onMeta(
+                    GatewayEvent.MessageMetaChanged(club, "g2", meta = MessageMeta(mentions = listOf(myLid))),
+                ),
+            )
+            // A reply to a message of mine too, once.
+            assertFalse(announcer.onWhatsApp(message("g3", chat = club, text = "Agreed", sender = sender)))
+            val reply = MessageMeta(quoted = Quoted("x1", sender = "100000000001:3@s.whatsapp.net"))
+            assertTrue(announcer.onMeta(GatewayEvent.MessageMetaChanged(club, "g3", meta = reply)))
+            assertFalse("announced once", announcer.onMeta(GatewayEvent.MessageMetaChanged(club, "g3", meta = reply)))
+            assertEquals(2, posted.size)
         }
 
     @Test fun withNoUiAttachedThePushServicePostsWhenThereIsOne() =

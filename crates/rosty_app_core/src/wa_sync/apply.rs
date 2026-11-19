@@ -3,8 +3,8 @@
 use rosty_wa_proto::event::ReceiptKind;
 use rosty_wa_proto::{
     ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, EventEnvelope, GatewayEvent,
-    HistorySyncType, Location, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction, RichChat,
-    SharedContact, Unavailable, WaMessage, is_status_chat,
+    HistorySyncType, LinkPreview, Location, MediaMeta, MessageBody, MessageMeta, Quoted, Reaction,
+    RichChat, SharedContact, SystemNote, Unavailable, WaMessage, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -27,6 +27,18 @@ pub(super) struct Extra {
     /// The message reached the gateway as a placeholder only (view once): nothing to show or fetch here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unavailable: Option<Unavailable>,
+    /// How often it was forwarded before it reached this chat (E6-WA R4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarding_score: Option<u32>,
+    /// The card of the link in the text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_preview: Option<LinkPreview>,
+    /// The disappearing timer the message carries, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_s: Option<u32>,
+    /// A line of the conversation, not a message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<SystemNote>,
 }
 
 /// The gateway-owned columns of a message row.
@@ -134,9 +146,9 @@ pub(super) fn write(conn: &Connection, chat: &str, id: &str, row: &Stored) -> Re
     conn.execute(
         "INSERT INTO messages (chat, id, sender, sender_name, from_me, ts, kind, text, mime, size, quoted_id,
             quoted_json, reactions, status, edited_ms, edit_history, deleted, deleted_at, deleted_by, forwarded,
-            starred, media_json, extra_json)
+            starred, media_json, extra_json, expires_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21,
-            ?22, ?23)
+            ?22, ?23, ?24)
          ON CONFLICT (chat, id) DO UPDATE SET
             sender = excluded.sender, sender_name = excluded.sender_name, from_me = excluded.from_me,
             ts = excluded.ts, kind = excluded.kind, text = excluded.text, mime = excluded.mime,
@@ -144,7 +156,7 @@ pub(super) fn write(conn: &Connection, chat: &str, id: &str, row: &Stored) -> Re
             reactions = excluded.reactions, status = excluded.status, edited_ms = excluded.edited_ms,
             edit_history = excluded.edit_history, deleted = excluded.deleted, deleted_at = excluded.deleted_at,
             deleted_by = excluded.deleted_by, forwarded = excluded.forwarded, starred = excluded.starred,
-            media_json = excluded.media_json, extra_json = excluded.extra_json",
+            media_json = excluded.media_json, extra_json = excluded.extra_json, expires_at = excluded.expires_at",
         params![
             chat,
             id,
@@ -171,9 +183,17 @@ pub(super) fn write(conn: &Connection, chat: &str, id: &str, row: &Stored) -> Re
             (row.extra != Extra::default())
                 .then(|| to_json(&row.extra))
                 .transpose()?,
+            row.expires_at(),
         ],
     )?;
     Ok(())
+}
+
+impl Stored {
+    /// When the message disappears (unix ms), from its send time and its timer.
+    pub(super) fn expires_at(&self) -> Option<i64> {
+        rosty_core::wa_actions::expires_at(self.ts, self.extra.expires_s)
+    }
 }
 
 /// One thing the gateway said about a message.
@@ -255,6 +275,7 @@ pub(super) fn merge(existing: Option<Stored>, incoming: &Incoming<'_>) -> Option
         if !meta.mentions.is_empty() {
             row.extra.mentions.clone_from(&meta.mentions);
         }
+        row.extra.link_preview = meta.link_preview.clone().or(row.extra.link_preview.take());
         if !row.content.is_known() {
             row.extra.unavailable = meta.unavailable.or(row.extra.unavailable);
         }
@@ -262,6 +283,9 @@ pub(super) fn merge(existing: Option<Stored>, incoming: &Incoming<'_>) -> Option
     if let Some(meta) = meta {
         row.sender_name = meta.sender_name.clone().or(row.sender_name);
         row.forwarded |= meta.forwarded;
+        row.extra.forwarding_score = meta.forwarding_score.or(row.extra.forwarding_score);
+        row.extra.expires_s = meta.expires_s.or(row.extra.expires_s);
+        row.extra.system = meta.system.clone().or(row.extra.system.take());
         if row.from_me {
             row.status = match (row.status, meta.status) {
                 (Some(stored), new) => Some(stored.merge(new)),
@@ -306,8 +330,14 @@ pub(super) fn upsert(
     let existing = load(conn, chat, id)?;
     let was_new = existing.is_none();
     let Some(mut merged) = merge(existing.clone(), incoming) else {
+        // An edit or delete that came before its message waits for it.
+        keep_pending(conn, chat, id, incoming)?;
         return Ok(Upsert::Unknown);
     };
+    // A disappearing message that is gone already is not stored again (a page of the gateway still has it).
+    if was_new && rosty_core::wa_actions::is_expired(merged.expires_at(), incoming.now_ms) {
+        return Ok(Upsert::Same);
+    }
     // A star still in the outbox holds against what the gateway says until it went out.
     if let Some(was) = &existing
         && merged.starred != was.starred
@@ -327,11 +357,82 @@ pub(super) fn upsert(
         )?;
     }
     bump_cursor(conn, chat, merged.ts, id)?;
+    if was_new {
+        apply_pending(conn, chat, id, incoming.now_ms)?;
+    }
     Ok(if was_new {
         Upsert::New
     } else {
         Upsert::Changed
     })
+}
+
+/// How long a meta-only update waits for its message.
+const PENDING_META_TTL_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+
+/// Keeps a meta-only update of a message the store does not have (an edit or a delete for everyone that came
+/// first, or a page out of order). A later one replaces it: the gateway always sends the whole meta.
+fn keep_pending(conn: &Connection, chat: &str, id: &str, incoming: &Incoming<'_>) -> Result<()> {
+    let Some(meta) = incoming.meta else {
+        return Ok(());
+    };
+    // Only an edit (a new body) or a delete for everyone: ticks and stars of a message never loaded here come
+    // with its page, and a stale one must not undo a newer state.
+    if incoming.body.is_none() && !(meta.deleted || meta.revoked) {
+        return Ok(());
+    }
+    conn.execute(
+        "DELETE FROM pending_meta WHERE at_ms < ?1",
+        [incoming.now_ms.saturating_sub(PENDING_META_TTL_MS)],
+    )?;
+    conn.execute(
+        "INSERT OR REPLACE INTO pending_meta (chat, id, body_json, meta_json, event_ms, at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            chat,
+            id,
+            opt_json(&incoming.body.cloned())?,
+            to_json(meta)?,
+            incoming.event_ms,
+            incoming.now_ms
+        ],
+    )?;
+    Ok(())
+}
+
+/// Applies what waited for message `id` now that it is stored.
+fn apply_pending(conn: &Connection, chat: &str, id: &str, now_ms: i64) -> Result<()> {
+    let waiting: Option<(Option<String>, String, Option<i64>)> = conn
+        .query_row(
+            "SELECT body_json, meta_json, event_ms FROM pending_meta WHERE chat = ?1 AND id = ?2",
+            params![chat, id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((body, meta, event_ms)) = waiting else {
+        return Ok(());
+    };
+    conn.execute(
+        "DELETE FROM pending_meta WHERE chat = ?1 AND id = ?2",
+        params![chat, id],
+    )?;
+    let body: Option<MessageBody> = body.and_then(|b| serde_json::from_str(&b).ok());
+    let Ok(meta) = serde_json::from_str::<MessageMeta>(&meta) else {
+        return Ok(());
+    };
+    upsert(
+        conn,
+        chat,
+        id,
+        &Incoming {
+            base: None,
+            body: body.as_ref(),
+            meta: Some(&meta),
+            event_ms,
+            now_ms,
+        },
+    )?;
+    Ok(())
 }
 
 /// A message as the store keeps it: its chat and every author it names under their canonical keys, and the ids
@@ -499,11 +600,19 @@ pub(super) fn mark_deleted(
     Ok(changed > 0)
 }
 
+/// Deleted for me: the thread leaves the message out from now on. False when it was hidden already or unknown.
+pub(super) fn hide(conn: &Connection, chat: &str, id: &str, at_ms: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE messages SET hidden_ms = ?3 WHERE chat = ?1 AND id = ?2 AND hidden_ms IS NULL",
+        params![chat, id, at_ms],
+    )? > 0)
+}
+
 fn set_chat_meta(conn: &Connection, jid: &str, meta: &ChatMeta) -> Result<()> {
     ensure_chat(conn, jid)?;
     conn.execute(
         "UPDATE chats SET archived = ?2, pinned = ?3, muted_until_ms = ?4, marked_unread = ?5,
-            picture_id = ?6, push_name = COALESCE(?7, push_name)
+            picture_id = ?6, push_name = COALESCE(?7, push_name), ephemeral_s = ?8
          WHERE jid = ?1",
         params![
             jid,
@@ -513,6 +622,7 @@ fn set_chat_meta(conn: &Connection, jid: &str, meta: &ChatMeta) -> Result<()> {
             meta.marked_unread,
             meta.picture_id,
             meta.push_name,
+            meta.ephemeral_s.filter(|s| *s > 0),
         ],
     )?;
     Ok(())
@@ -727,7 +837,11 @@ pub(super) fn apply_event(
             let by = ids
                 .canon(deleted_by.as_deref().unwrap_or(DELETED_BY_ME))?
                 .key;
-            if mark_deleted(conn, &chat, id, deleted_at.or(Some(at_ms)), &by)? {
+            let marked = mark_deleted(conn, &chat, id, deleted_at.or(Some(at_ms)), &by)?;
+            // Deleted on my devices only: the thread no longer shows it, as in WhatsApp.
+            let mine = deleted_by.as_deref().is_none_or(|b| b == DELETED_BY_ME);
+            let hidden = mine && hide(conn, &chat, id, at_ms)?;
+            if marked || hidden {
                 touched(out, &chat);
             }
         }

@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use rosty_wa_proto::{
     ChatMeta, DELETED_BY_ME, DeliveryStatus, EditRecord, KeptContent, MessageBody, MessageMeta,
-    Reaction, RichChat, RichMessage, WaMessage, WaProfile, is_status_chat,
+    MessageReceipts, Reaction, ReceiptMember, RichChat, RichMessage, WaMessage, WaProfile,
+    is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -60,6 +61,55 @@ pub enum MessageChange {
     Status(DeliveryStatus),
 }
 
+/// An edit or delete for everyone that arrived before its message
+/// (`pending_changes`, schema v11).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PendingChange {
+    Edit { body: MessageBody, edited_ms: i64 },
+    Revoke { by: String, at_ms: i64 },
+}
+
+impl PendingChange {
+    fn of(change: &MessageChange) -> Option<Self> {
+        match change {
+            MessageChange::Edit { body, edited_ms } => Some(Self::Edit {
+                body: body.clone(),
+                edited_ms: *edited_ms,
+            }),
+            MessageChange::Revoke { by, at_ms } => Some(Self::Revoke {
+                by: by.clone(),
+                at_ms: *at_ms,
+            }),
+            MessageChange::Star(_) | MessageChange::Status(_) => None,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Edit { .. } => "edit",
+            Self::Revoke { .. } => "revoke",
+        }
+    }
+
+    fn at_ms(&self) -> i64 {
+        match self {
+            Self::Edit { edited_ms, .. } => *edited_ms,
+            Self::Revoke { at_ms, .. } => *at_ms,
+        }
+    }
+
+    fn into_change(self) -> MessageChange {
+        match self {
+            Self::Edit { body, edited_ms } => MessageChange::Edit { body, edited_ms },
+            Self::Revoke { by, at_ms } => MessageChange::Revoke { by, at_ms },
+        }
+    }
+}
+
+/// How long an early edit or delete waits for its message.
+pub const PENDING_CHANGE_TTL_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+
 /// A change to a chat's settings (from this gateway or another device).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChatChange {
@@ -77,6 +127,11 @@ pub struct ChatSettings {
     pub pinned: bool,
     pub muted_until_ms: Option<i64>,
     pub marked_unread: bool,
+    /// The disappearing timer in seconds (`Some(0)`: off) and when it was set
+    /// (unix ms). Written only when `ephemeral_ms` is set and not older than
+    /// what is stored.
+    pub ephemeral_s: Option<u32>,
+    pub ephemeral_ms: Option<i64>,
 }
 
 /// What WhatsApp answered about one JID.
@@ -329,6 +384,7 @@ pub fn present(
         contact: meta.contact.take(),
         mentions: std::mem::take(&mut meta.mentions),
         edit_history: std::mem::take(&mut meta.edit_history),
+        link_preview: meta.link_preview.take(),
         ..MessageMeta::default()
     };
     // An older gateway's revoke kept nothing.
@@ -482,11 +538,13 @@ pub(super) fn insert_row(
         .thumbnail
         .as_ref()
         .filter(|t| !t.is_empty() && t.len() <= MAX_THUMBNAIL_BYTES);
+    let expires_ms =
+        rosty_core::wa_actions::expires_at(message.timestamp_ms, extras.meta.expires_s);
     let n = tx.execute(
         "INSERT OR IGNORE INTO messages
          (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto, meta_json, secret,
-          thumb, wire_chat, wire_sender)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+          thumb, wire_chat, wire_sender, expires_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             instance.as_str(),
             chat,
@@ -500,7 +558,8 @@ pub(super) fn insert_row(
             extras.secret,
             thumb,
             extras.wire_chat,
-            extras.wire_sender
+            extras.wire_sender,
+            expires_ms
         ],
     )?;
     if n > 0 && !message.from_me {
@@ -543,19 +602,28 @@ pub(super) fn write_settings(
     if *s == ChatSettings::default() {
         return Ok(());
     }
+    let timer_ms = s.ephemeral_ms;
+    let timer = s.ephemeral_s.filter(|t| *t > 0);
     conn.execute(
-        "INSERT INTO chat_settings (instance_id, jid, archived, pinned, muted_until_ms, marked_unread)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO chat_settings
+            (instance_id, jid, archived, pinned, muted_until_ms, marked_unread, ephemeral_s, ephemeral_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(instance_id, jid) DO UPDATE SET
             archived = excluded.archived, pinned = excluded.pinned,
-            muted_until_ms = excluded.muted_until_ms, marked_unread = excluded.marked_unread",
+            muted_until_ms = excluded.muted_until_ms, marked_unread = excluded.marked_unread,
+            ephemeral_s = CASE WHEN excluded.ephemeral_ms >= COALESCE(ephemeral_ms, 0)
+                THEN excluded.ephemeral_s ELSE ephemeral_s END,
+            ephemeral_ms = CASE WHEN excluded.ephemeral_ms >= COALESCE(ephemeral_ms, 0)
+                THEN excluded.ephemeral_ms ELSE ephemeral_ms END",
         params![
             instance.as_str(),
             jid,
             s.archived,
             s.pinned,
             s.muted_until_ms,
-            s.marked_unread
+            s.marked_unread,
+            timer.filter(|_| timer_ms.is_some()),
+            timer_ms
         ],
     )?;
     Ok(())
@@ -564,7 +632,7 @@ pub(super) fn write_settings(
 fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<ChatMeta, StoreError> {
     let settings = conn
         .query_row(
-            "SELECT archived, pinned, muted_until_ms, marked_unread FROM chat_settings
+            "SELECT archived, pinned, muted_until_ms, marked_unread, ephemeral_s FROM chat_settings
              WHERE instance_id = ?1 AND jid = ?2",
             params![instance.as_str(), jid],
             |r| {
@@ -573,6 +641,7 @@ fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<Chat
                     r.get::<_, bool>(1)?,
                     r.get::<_, Option<i64>>(2)?,
                     r.get::<_, bool>(3)?,
+                    r.get::<_, Option<u32>>(4)?,
                 ))
             },
         )
@@ -589,7 +658,8 @@ fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<Chat
             },
         )
         .optional()?;
-    let (archived, pinned, muted_until_ms, marked_unread) = settings.unwrap_or_default();
+    let (archived, pinned, muted_until_ms, marked_unread, ephemeral_s) =
+        settings.unwrap_or_default();
     let (picture_id, push_name) = profile.unwrap_or_default();
     Ok(ChatMeta {
         picture_id,
@@ -598,6 +668,7 @@ fn chat_meta(conn: &Connection, instance: &InstanceId, jid: &str) -> Result<Chat
         pinned,
         muted_until_ms,
         marked_unread,
+        ephemeral_s: ephemeral_s.filter(|t| *t > 0),
     })
 }
 
@@ -711,7 +782,7 @@ impl Store {
                     None,
                     message.chat.ends_with("@g.us"),
                     message.timestamp_ms,
-                    u32::from(!message.from_me),
+                    u32::from(!message.from_me && extras.meta.system.is_none()),
                 )?;
             }
             tx.commit()?;
@@ -826,6 +897,11 @@ impl Store {
             let Some((from_me, body, meta, deleted_at, deleted_by)) =
                 change_row(&tx, &instance, &chat, &id)?
             else {
+                // An edit or delete that came before its message waits for it.
+                if let Some(pending) = PendingChange::of(&change) {
+                    keep_pending(&tx, &instance, &chat, &id, &pending)?;
+                    tx.commit()?;
+                }
                 return Ok(None);
             };
             let mut body: MessageBody = serde_json::from_str(&body)?;
@@ -931,6 +1007,19 @@ impl Store {
         chat: String,
         receipt: GroupReceipt,
     ) -> Result<Vec<(String, MessageMeta)>, StoreError> {
+        self.record_group_receipt_at(instance, chat, receipt, crate::now_ms())
+            .await
+    }
+
+    /// [`Self::record_group_receipt`] for a receipt that came at `at_ms`: the
+    /// first time a member reached each state is kept for message info.
+    pub async fn record_group_receipt_at(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        receipt: GroupReceipt,
+        at_ms: i64,
+    ) -> Result<Vec<(String, MessageMeta)>, StoreError> {
         let GroupReceipt {
             participant,
             ids,
@@ -951,13 +1040,7 @@ impl Store {
                 else {
                     continue;
                 };
-                tx.execute(
-                    "INSERT INTO receipts (instance_id, chat, id, participant, status)
-                     VALUES (?1, ?2, ?3, ?4, ?5)
-                     ON CONFLICT (instance_id, chat, id, participant)
-                     DO UPDATE SET status = MAX(status, excluded.status)",
-                    params![instance.as_str(), chat, id, participant, rank],
-                )?;
+                record_receipt(&tx, &instance, (&chat, &id), &participant, rank, at_ms)?;
                 let counts = count_receipts(receipts_by_person(&tx, &instance, &chat, &id)?, &own);
                 let Some(group) = group_status(members, counts) else {
                     continue;
@@ -1141,6 +1224,7 @@ impl Store {
                 pinned: before.pinned,
                 muted_until_ms: before.muted_until_ms,
                 marked_unread: before.marked_unread,
+                ..ChatSettings::default()
             };
             match change {
                 ChatChange::Archived(v) => s.archived = v,
@@ -1149,8 +1233,16 @@ impl Store {
                 ChatChange::MarkedUnread(v) => s.marked_unread = v,
             }
             if s == ChatSettings::default() {
+                // The disappearing timer stays when everything else is cleared.
                 tx.execute(
-                    "DELETE FROM chat_settings WHERE instance_id = ?1 AND jid = ?2",
+                    "UPDATE chat_settings SET archived = 0, pinned = 0, muted_until_ms = NULL,
+                        marked_unread = 0
+                     WHERE instance_id = ?1 AND jid = ?2",
+                    params![instance.as_str(), jid],
+                )?;
+                tx.execute(
+                    "DELETE FROM chat_settings WHERE instance_id = ?1 AND jid = ?2
+                        AND ephemeral_s IS NULL AND ephemeral_ms IS NULL",
                     params![instance.as_str(), jid],
                 )?;
             } else {
@@ -1315,6 +1407,304 @@ impl Store {
             }
             tx.commit()?;
             Ok(())
+        })
+        .await
+    }
+}
+
+/// Keeps an edit or delete for everyone of a message that is not stored yet.
+/// A later edit replaces an earlier one; what waited too long is dropped.
+fn keep_pending(
+    tx: &Transaction<'_>,
+    instance: &InstanceId,
+    chat: &str,
+    id: &str,
+    pending: &PendingChange,
+) -> Result<(), StoreError> {
+    tx.execute(
+        "DELETE FROM pending_changes WHERE instance_id = ?1 AND at_ms < ?2",
+        params![
+            instance.as_str(),
+            crate::now_ms().saturating_sub(PENDING_CHANGE_TTL_MS)
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO pending_changes (instance_id, chat, id, kind, change_json, at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (instance_id, chat, id, kind) DO UPDATE SET
+            change_json = excluded.change_json, at_ms = excluded.at_ms
+         WHERE excluded.at_ms >= at_ms",
+        params![
+            instance.as_str(),
+            chat,
+            id,
+            pending.kind(),
+            serde_json::to_string(pending)?,
+            pending.at_ms()
+        ],
+    )?;
+    Ok(())
+}
+
+/// The receipt columns a state at `at_ms` fills: delivered, read, played
+/// (a read implies delivered, a play implies read).
+fn receipt_times(rank: i64, at_ms: i64) -> (Option<i64>, Option<i64>, Option<i64>) {
+    (
+        (rank >= 1).then_some(at_ms),
+        (rank >= 2).then_some(at_ms),
+        (rank >= 3).then_some(at_ms),
+    )
+}
+
+/// Records how far `participant` got with my message `id`, keeping the
+/// first time each state was reached.
+fn record_receipt(
+    tx: &Transaction<'_>,
+    instance: &InstanceId,
+    target: (&str, &str),
+    participant: &str,
+    rank: i64,
+    at_ms: i64,
+) -> Result<(), StoreError> {
+    let (chat, id) = target;
+    let (delivered, read, played) = receipt_times(rank, at_ms);
+    tx.execute(
+        "INSERT INTO receipts
+            (instance_id, chat, id, participant, status, delivered_ms, read_ms, played_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (instance_id, chat, id, participant) DO UPDATE SET
+            status = MAX(status, excluded.status),
+            delivered_ms = COALESCE(delivered_ms, excluded.delivered_ms),
+            read_ms = COALESCE(read_ms, excluded.read_ms),
+            played_ms = COALESCE(played_ms, excluded.played_ms)",
+        params![
+            instance.as_str(),
+            chat,
+            id,
+            participant,
+            rank,
+            delivered,
+            read,
+            played
+        ],
+    )?;
+    Ok(())
+}
+
+/// One person's receipt times of a message: `(person, delivered, read,
+/// played)`, with a LID already replaced by its number where known. A state
+/// reached by a receipt stored before its time was kept (schema v11) reads
+/// as time 0.
+type PersonTimes = (String, Option<i64>, Option<i64>, Option<i64>);
+
+fn receipt_times_by_person(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+    id: &str,
+) -> Result<Vec<PersonTimes>, StoreError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT COALESCE(p.pn, r.participant) AS person, MAX(r.status),
+                MIN(r.delivered_ms), MIN(r.read_ms), MIN(r.played_ms)
+         FROM receipts r
+         LEFT JOIN identity_pairs p
+           ON p.instance_id = r.instance_id AND p.lid = r.participant
+         WHERE r.instance_id = ?1 AND r.chat = ?2 AND r.id = ?3
+         GROUP BY person ORDER BY person",
+    )?;
+    let rows = stmt.query_map(params![instance.as_str(), chat, id], |r| {
+        let status: i64 = r.get(1)?;
+        let reached = |rank: i64, time: Option<i64>| time.or((status >= rank).then_some(0));
+        Ok((
+            r.get(0)?,
+            reached(1, r.get(2)?),
+            reached(2, r.get(3)?),
+            reached(3, r.get(4)?),
+        ))
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+impl Store {
+    /// The early edits and deletes of message `id`, oldest first, removed
+    /// from the waiting list. The caller applies them now that the message
+    /// is stored.
+    pub async fn take_pending(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        id: String,
+    ) -> Result<Vec<MessageChange>, StoreError> {
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let rows: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT change_json FROM pending_changes
+                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3 ORDER BY at_ms",
+                )?;
+                stmt.query_map(params![instance.as_str(), chat, id], |r| r.get(0))?
+                    .collect::<Result<_, _>>()?
+            };
+            if rows.is_empty() {
+                return Ok(Vec::new());
+            }
+            tx.execute(
+                "DELETE FROM pending_changes WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                params![instance.as_str(), chat, id],
+            )?;
+            tx.commit()?;
+            Ok(rows
+                .iter()
+                .filter_map(|json| serde_json::from_str::<PendingChange>(json).ok())
+                .map(PendingChange::into_change)
+                .collect())
+        })
+        .await
+    }
+
+    /// Like [`Self::set_status`], recording when the receipt came: one row
+    /// per one-to-one message of mine, with the chat as participant, for
+    /// message info.
+    pub async fn set_status_at(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        ids: Vec<String>,
+        status: DeliveryStatus,
+        at_ms: i64,
+    ) -> Result<Vec<(String, MessageMeta)>, StoreError> {
+        let rank = receipt_rank(status);
+        if rank > 0 {
+            let (inst, chat, ids) = (instance.clone(), chat.clone(), ids.clone());
+            self.run(move |conn| {
+                let tx = conn.transaction()?;
+                for id in &ids {
+                    if matches!(change_row(&tx, &inst, &chat, id)?, Some((true, ..))) {
+                        record_receipt(&tx, &inst, (&chat, id), &chat, rank, at_ms)?;
+                    }
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await?;
+        }
+        self.set_status(instance, chat, ids, status).await
+    }
+
+    /// The chat's disappearing timer in seconds; `None` when off or unknown.
+    pub async fn chat_timer(
+        &self,
+        instance: InstanceId,
+        jid: String,
+    ) -> Result<Option<u32>, StoreError> {
+        self.run(move |conn| Ok(chat_meta(conn, &instance, &jid)?.ephemeral_s))
+            .await
+    }
+
+    /// Sets the chat's disappearing timer (`0`: off) as of `at_ms`. A setting
+    /// older than the stored one is ignored. Returns the new [`ChatMeta`]
+    /// when the timer changed.
+    pub async fn set_chat_timer(
+        &self,
+        instance: InstanceId,
+        jid: String,
+        seconds: u32,
+        at_ms: i64,
+    ) -> Result<Option<ChatMeta>, StoreError> {
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let before = chat_meta(&tx, &instance, &jid)?;
+            tx.execute(
+                "INSERT INTO chat_settings (instance_id, jid, ephemeral_s, ephemeral_ms)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(instance_id, jid) DO UPDATE SET
+                    ephemeral_s = excluded.ephemeral_s, ephemeral_ms = excluded.ephemeral_ms
+                 WHERE excluded.ephemeral_ms >= COALESCE(ephemeral_ms, 0)",
+                params![
+                    instance.as_str(),
+                    jid,
+                    (seconds > 0).then_some(seconds),
+                    at_ms
+                ],
+            )?;
+            let after = chat_meta(&tx, &instance, &jid)?;
+            tx.commit()?;
+            Ok((after.ephemeral_s != before.ephemeral_s).then_some(after))
+        })
+        .await
+    }
+
+    /// Who got, read or played my message `id` of `chat`, and when. `members`
+    /// are the group's members today (bare, by number where known; `None`
+    /// when unknown or for a one-to-one chat): a member with no receipt yet
+    /// is listed with no times, and a receipt of someone not among them is
+    /// marked `left`. `own` are this account's ids, never listed. A time of
+    /// 0 is a state reached before the gateway kept times. `None` for an
+    /// unknown message or one that is not mine.
+    pub async fn message_receipts(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        id: String,
+        members: Option<Vec<String>>,
+        own: Vec<String>,
+    ) -> Result<Option<MessageReceipts>, StoreError> {
+        self.run(move |conn| {
+            let Some((true, ..)) = change_row(conn, &instance, &chat, &id)? else {
+                return Ok(None);
+            };
+            let rows = receipt_times_by_person(conn, &instance, &chat, &id)?;
+            let group = chat.ends_with("@g.us");
+            let mut out: Vec<ReceiptMember> = Vec::new();
+            for (person, delivered_ms, read_ms, played_ms) in rows {
+                if own.contains(&person) {
+                    continue;
+                }
+                let left = group
+                    && members
+                        .as_ref()
+                        .is_some_and(|members| !members.contains(&person));
+                out.push(ReceiptMember {
+                    jid: person,
+                    delivered_ms,
+                    read_ms,
+                    played_ms,
+                    left,
+                    ..ReceiptMember::default()
+                });
+            }
+            if group {
+                for member in members.iter().flatten() {
+                    if !own.contains(member) && !out.iter().any(|m| &m.jid == member) {
+                        out.push(ReceiptMember {
+                            jid: member.clone(),
+                            ..ReceiptMember::default()
+                        });
+                    }
+                }
+            } else if out.is_empty() {
+                out.push(ReceiptMember {
+                    jid: chat.clone(),
+                    ..ReceiptMember::default()
+                });
+            }
+            let mut alts = Alts::new(conn, &instance);
+            for member in &mut out {
+                member.jid_alt = alts.of(&member.jid, None)?;
+                member.name = conn
+                    .query_row(
+                        "SELECT push_name FROM profiles WHERE instance_id = ?1 AND jid = ?2",
+                        params![instance.as_str(), member.jid],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten();
+            }
+            Ok(Some(MessageReceipts {
+                chat: chat.clone(),
+                id: id.clone(),
+                members: out,
+            }))
         })
         .await
     }

@@ -16,6 +16,7 @@ pub const ACCOUNT_TABLES: &[&str] = &[
     "reactions",
     "receipts",
     "message_edits",
+    "pending_changes",
     "chat_settings",
     "profiles",
     "statuses",
@@ -494,6 +495,12 @@ mod tests {
         conn.execute(
             "INSERT INTO message_edits (instance_id, chat, id, edited_at, previous_text)
              VALUES (?1, ?2, 'M1', 30, 'before')",
+            params![instance.as_str(), chat],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pending_changes (instance_id, chat, id, kind, change_json, at_ms)
+             VALUES (?1, ?2, 'M9', 'edit', '{}', 30)",
             params![instance.as_str(), chat],
         )
         .unwrap();

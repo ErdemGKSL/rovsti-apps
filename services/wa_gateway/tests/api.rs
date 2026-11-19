@@ -308,6 +308,8 @@ async fn resuming_with_after_replays_only_newer_events() {
             chat: "905321234567@s.whatsapp.net".into(),
             text: "merhaba".into(),
             quoted_id: None,
+            mentions: vec![],
+            link_preview: None,
         })
     })
     .await
@@ -481,6 +483,8 @@ async fn send_text_echoes_and_is_stored() {
             chat: chat.into(),
             text: "selam".into(),
             quoted_id: None,
+            mentions: vec![],
+            link_preview: None,
         })
     })
     .await
@@ -714,6 +718,8 @@ async fn media_round_trip_is_downloaded_once_then_served_from_cache() {
             chat: chat.into(),
             text: "x".into(),
             quoted_id: None,
+            mentions: vec![],
+            link_preview: None,
         })
     })
     .await
@@ -804,6 +810,8 @@ async fn reactions_reach_the_driver_and_update_the_message() {
             chat: chat.into(),
             text: "selam".into(),
             quoted_id: None,
+            mentions: vec![],
+            link_preview: None,
         })
     })
     .await
@@ -1625,6 +1633,8 @@ async fn send(gateway: &Gateway, text: &str, quoted_id: Option<&str>) -> String 
             chat: DM.into(),
             text,
             quoted_id,
+            mentions: vec![],
+            link_preview: None,
         })
     })
     .await
@@ -3180,4 +3190,204 @@ async fn an_outgoing_call_names_the_other_id_of_the_peer() {
     };
     assert_eq!(alt_of(PEER_PN).as_deref(), Some(PEER_LID));
     assert_eq!(alt_of(OTHER_PN), None);
+}
+
+// ---- Message actions (E6-WA R4) ----
+
+const OTHER: &str = "100000000012@s.whatsapp.net";
+
+#[tokio::test]
+async fn a_disappearing_timer_is_set_shown_and_carried_by_sends() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    send(&gateway, "before", None).await;
+
+    let g = gateway.clone();
+    let odd = blocking(move || {
+        g.chat_action(&ChatAction {
+            chat: DM.into(),
+            action: ChatActionKind::Disappearing { seconds: 3600 },
+        })
+    })
+    .await;
+    assert!(is_code(&odd.unwrap_err(), ErrorCode::BadRequest));
+
+    for _ in 0..2 {
+        let g = gateway.clone();
+        blocking(move || {
+            g.chat_action(&ChatAction {
+                chat: DM.into(),
+                action: ChatActionKind::Disappearing { seconds: 86_400 },
+            })
+        })
+        .await
+        .unwrap();
+    }
+    let g = gateway.clone();
+    let chats = blocking(move || g.chats_with_meta()).await.unwrap();
+    assert_eq!(chats[0].meta.ephemeral_s, Some(86_400));
+    // One line for the change (setting it again changed nothing), by me.
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(DM, None, 10))
+        .await
+        .unwrap();
+    let lines: Vec<_> = page.iter().filter(|m| m.meta.system.is_some()).collect();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(
+        lines[0].meta.system,
+        Some(rosty_wa_proto::SystemNote::Disappearing {
+            seconds: 86_400,
+            by: Some(DELETED_BY_ME.into())
+        })
+    );
+    assert!(lines[0].message.from_me);
+    // A line is no unread message.
+    assert_eq!(chats[0].chat.unread, 0);
+
+    // What I send now carries the timer.
+    send(&gateway, "after", None).await;
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(DM, None, 1))
+        .await
+        .unwrap();
+    assert_eq!(page[0].meta.expires_s, Some(86_400));
+    assert!(
+        server
+            .driver
+            .ops()
+            .iter()
+            .any(|op| op.starts_with(&format!("chat {DM} Disappearing")))
+    );
+}
+
+#[tokio::test]
+async fn forwarding_copies_a_message_marked_forwarded() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let original = send(&gateway, "pass it on", None).await;
+
+    let g = gateway.clone();
+    let sent = blocking(move || {
+        g.forward(&rosty_wa_proto::ForwardMessage {
+            chat: DM.into(),
+            message_id: original,
+            to: OTHER.into(),
+        })
+    })
+    .await
+    .unwrap();
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(OTHER, None, 10))
+        .await
+        .unwrap();
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].message.id, sent.message_id);
+    assert_eq!(page[0].message.body, MessageBody::Text("pass it on".into()));
+    assert!(page[0].meta.forwarded);
+
+    let g = gateway.clone();
+    let unknown = blocking(move || {
+        g.forward(&rosty_wa_proto::ForwardMessage {
+            chat: DM.into(),
+            message_id: "NOPE".into(),
+            to: OTHER.into(),
+        })
+    })
+    .await;
+    assert!(is_code(&unknown.unwrap_err(), ErrorCode::NotFound));
+}
+
+#[tokio::test]
+async fn message_info_has_receipt_times_and_early_edits_wait() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mine = send(&gateway, "hello", None).await;
+    let sink = server.driver.sink_of(&instance(&created)).unwrap();
+    sink.set_status_at(
+        DM,
+        vec![mine.clone()],
+        DeliveryStatus::Read,
+        1_700_000_000_500,
+    )
+    .await;
+    let g = gateway.clone();
+    let id = mine.clone();
+    let info = blocking(move || g.message_receipts(DM, &id)).await.unwrap();
+    assert_eq!(info.members.len(), 1);
+    assert_eq!(info.members[0].jid, DM);
+    assert_eq!(info.members[0].read_ms, Some(1_700_000_000_500));
+
+    // Someone else's message has no info.
+    server
+        .driver
+        .deliver(
+            &instance(&created),
+            incoming("THEIRS", DM, None),
+            MessageExtras::default(),
+        )
+        .await;
+    let g = gateway.clone();
+    let theirs = blocking(move || g.message_receipts(DM, "THEIRS")).await;
+    assert!(is_code(&theirs.unwrap_err(), ErrorCode::NotFound));
+
+    // An edit that arrives before its message is applied once it is stored.
+    sink.change_message(
+        DM,
+        "EARLY",
+        wa_gateway::store::MessageChange::Edit {
+            body: MessageBody::Text("edited".into()),
+            edited_ms: 1_700_000_000_900,
+        },
+    )
+    .await;
+    server
+        .driver
+        .deliver(
+            &instance(&created),
+            incoming("EARLY", DM, None),
+            MessageExtras::default(),
+        )
+        .await;
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(DM, None, 10))
+        .await
+        .unwrap();
+    let early = page.iter().find(|m| m.message.id == "EARLY").unwrap();
+    assert_eq!(early.message.body, MessageBody::Text("edited".into()));
+    assert_eq!(early.meta.edited_ms, Some(1_700_000_000_900));
+}
+
+#[tokio::test]
+async fn mentions_and_link_previews_reach_the_meta() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let g = gateway.clone();
+    let mut req = SendText::new(DM, "@100000000012 https://example.com", None);
+    req.mentions = vec![OTHER.into()];
+    req.link_preview = Some(rosty_wa_proto::LinkPreviewOut {
+        url: "https://example.com".into(),
+        title: Some("Example".into()),
+        description: None,
+        thumbnail_b64: Some(encode_b64(&[0xFF, 0xD8, 0xFF, 0xE0, 1])),
+    });
+    blocking(move || g.send_text(&req)).await.unwrap();
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(DM, None, 1))
+        .await
+        .unwrap();
+    assert_eq!(page[0].meta.mentions, vec![OTHER.to_owned()]);
+    let preview = page[0].meta.link_preview.clone().unwrap();
+    assert_eq!(preview.title.as_deref(), Some("Example"));
+    assert!(preview.thumbnail);
+
+    // A preview picture that is not a JPEG never leaves the client.
+    let g = gateway.clone();
+    let mut bad = SendText::new(DM, "https://example.com", None);
+    bad.link_preview = Some(rosty_wa_proto::LinkPreviewOut {
+        url: "https://example.com".into(),
+        thumbnail_b64: Some(encode_b64(b"png")),
+        ..Default::default()
+    });
+    let refused = blocking(move || g.send_text(&bad)).await;
+    assert!(is_code(&refused.unwrap_err(), ErrorCode::BadRequest));
 }

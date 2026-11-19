@@ -177,6 +177,27 @@ answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the hand
 {handle, call_id}` answers an audio handle for `RustNative.audioPush` / `audioPull` (push takes microphone frames of exactly 1 920 bytes and drops any other size; the socket asks for 20 ms speaker frames (`?spk_ms=20`), and pull waits up to 20 ms and answers the frame's bytes: 640 from a gateway that sends 20 ms frames, 1 920 from an older one; 0 when nothing came, -1 when the call ended). Fixtures run against a loopback stub that answers `crates/rosty_ffi/tests/data/wa/<stem>.json` (`tests/support/mod.rs`); each file also states the request
 the client must have sent. Pure: `wa.push_parse` (FCM wake), `wa.link_read` / `wa.link_write` (`whatsapp-link.json`), `wa.avatars_plan` (picture file names and the disk prune plan; the
 `AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up), `wa.settings_apply {model?, link?, app, now_ms, input?}` (the stateless WhatsApp settings state machine: answers `{model, effects, view}`, a render-ready page; the caller keeps `model` as JSON; the gateway URL and `rwk_` key checks run inside it).
+
+Message actions (E6-WA R4, `rosty_core::wa_actions`; every offset is UTF-16). Gateway: `wa.forward {handle, chat, message_id, to}` answers
+`Sent` (an older gateway: `not_found`); `wa.message_receipts {handle, chat, message_id}` answers `MessageReceipts {chat, id, members: [{jid,
+jid_alt?, name?, delivered_ms?, read_ms?, played_ms?, left}]}` (time 0: reached before the gateway kept times; an older gateway: `not_found`).
+`wa.send_text` also takes `mentions` and `link_preview {url, title?, description?, thumbnail_b64?}`; `wa.chat_action` takes
+`{"type": "disappearing", "seconds": N}`. Pure: `wa.mention_query {text, caret}` answers `{query?: {start, query}}` (the `@` the caret is
+typing: at the start or after a space, no space up to the caret); `wa.mention_encode {text, picks: [{start, end, jid}]}` answers `{text,
+mentions}` (each pick's `@Name` becomes `@<digits or LID user>`; an edited, overlapping or non-person pick stays as typed);
+`wa.link_find {text}` answers `{found?: {url, start, end}}` (the first `http(s)://` or `www.` link with a dotted host, trailing punctuation
+left out); `wa.link_parse {html, url}` answers `{title?, description?, image?, url?, host?, max_bytes}` (`og:` before `twitter:` before
+`<title>`/`description`, entities decoded, cut to 200/300 characters, the image made absolute; a URL that is not http(s) is `invalid`;
+`max_bytes` is how much of a page to read, 512 KiB); `wa.receipt_sections {members, voice?}` answers `{sections: [{section: played | read |
+delivered | waiting, rows: [{jid, at_ms?, left?}]}]}` (latest first, members who left last). Store: `wa_sync.outbox_enqueue` takes
+`{kind: "forward", source_chat, message_id}` (the store copies the source into `snapshot`, so the copy shows at once marked forwarded; a
+deleted, view-once or placeholder message is `invalid`), `{kind: "delete_for_me", message_id}` (hidden from the thread at once; a refusal
+shows it again) and `send_text` with `mentions` and `link_preview`; `wa_sync.expire {handle, now_ms}` deletes the disappearing messages that
+are due with their media rows and answers `{removed, files, chats, next_ms?}` (delete `files`; run it when the store opens and again at
+`next_ms`). Rows (schema v7) carry `editable_until_ms?`, `forwarding_score?`, `forwarded_many`, `mention_spans: [{start, end, jid}]`
+(through every id of the person), `link_preview?`, `system?` (`{type: "disappearing", seconds, by?}`, a line, not a message) and
+`expires_at?`; chats carry `ephemeral_s?`. A message deleted for me here or on another device of mine is left out of the thread, the
+starred list and the gallery; an edit or delete for everyone that comes before its message is applied when the message arrives.
 People cache (X.1): `people.upsert {dir?, now_ms, people:[{jid, number?, lid?, push_name?, verified_name?, on_whatsapp?, picture_id?, picture_removed?, picture_file?}]}` writes `people.json` (a changed `picture_id` marks the picture stale and keeps the old file showing; `picture_removed` drops the file; a LID and its number join into one person under the phone JID) and answers `{changed, stale, drop_files}`; `people.lookup {dir?, key, home_cc?}` (a number in any spelling, phone JID, LID JID or bare LID; a number is read by the one number rule, `caller_id::e164_of`, so a national spelling needs the home calling code `home_cc` and `people.upsert` takes `home_cc?` for its `number`s too; offline, a missing or damaged file reads as empty) answers `{person: row|null}`; `people.plan {dir?, now_ms, files, max_bytes}` answers `{refresh:[{jid, picture_id}], remove:[path]}` (orphans of a changed picture, then the oldest over the cap, by the `wa.avatars_plan` rules); `people.snapshot {dir?}` answers `{people: rows}` sorted by name for the Contacts provider.
 
 People sync v2 (`rosty_app_core::people_sync`, plan `_bmad-output/plans/people-sync-v2.md`): `people.sync_begin
@@ -505,6 +526,9 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(wa) wa.status` | - | wa | op | wa.status |
 | `(wa) wa.statuses` | - | wa | op | wa.statuses |
 | `(wa) wa.subscribe_presence` | - | wa | op | wa.subscribe_presence |
+| `(wa) wa.forward` | - | wa | op | wa.forward |
+| `(wa) wa.message_receipts` | - | wa | op | wa.message_receipts |
+| `rosty_core::wa_actions` | messages | wa | op | wa.mention_query, wa.mention_encode, wa.link_find, wa.link_parse, wa.receipt_sections |
 | `rosty_app_core::contacts::prefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
 | `rosty_app_core::contacts::trash_store` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete |
 | `rosty_app_core::contacts::whatsapp` | contacts | wa | op | wa.target, contacts.wa_marks, contacts.wa_card, contacts.wa_profile_lines |
@@ -516,7 +540,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rosty_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rosty_app_core::people` | contacts,phone | people | op | people.upsert, people.lookup, people.plan, people.snapshot |
 | `rosty_app_core::people_sync` | contacts,phone | people | op | people.sync_status, people.sync_begin, people.sync_next, people.sync_report, people.sync_stop |
-| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.history_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
+| `rosty_app_core::wa_sync` | messages | wa | op | wa_sync.open, wa_sync.open_page, wa_sync.focus, wa_sync.cache_save, wa_sync.history_save, wa_sync.close, wa_sync.plan, wa_sync.apply_events, wa_sync.store_chats, wa_sync.store_page, wa_sync.older, wa_sync.chats, wa_sync.thread, wa_sync.message, wa_sync.starred, wa_sync.outbox_enqueue, wa_sync.outbox_due, wa_sync.outbox_settle, wa_sync.outbox_cancel, wa_sync.outbox_edit, wa_sync.outbox_retry, wa_sync.outbox, wa_sync.media_set, wa_sync.media, wa_sync.media_evict, wa_sync.media_policy, wa_sync.media_enqueue, wa_sync.media_due, wa_sync.media_settle, wa_sync.media_keep, wa_sync.media_reconcile, wa_sync.media_stats, wa_sync.media_cap, wa_sync.chat_media, wa_sync.media_viewed, wa_sync.expire, wa_sync.mark_played, wa_sync.note_status, wa_sync.account_changed, wa_sync.history, wa_sync.wipe, wa_sync.identity_resolve, wa_sync.rekeyed_since, wa_sync.identity_numbers, wa_sync.identity_catch_up, wa_sync.identity_observe |
 | `rosty_core::wa_identity::parse` | messages,phone | wa | op | wa_identity.parse |
 | `rosty_app_core::phone::wa_idbook` | phone | wa | op | wa_idbook.snapshot, wa_idbook.catch_up, wa_idbook.learn, wa_idbook.account, wa_idbook.wipe |
 | `rosty_app_core::wa_vault` (WhatsApp vault) | messages,phone,contacts,stops | vault | op | vault.state, vault.create, vault.commit, vault.unlock, vault.unlock_daily, vault.unlock_link, vault.unlock_stay, vault.daily_store, vault.daily_forget, vault.stay_store, vault.stay_forget, vault.stay_prepare, vault.touch, vault.lock, vault.change, vault.export_link, vault.reset, vault.trip_hold, vault.trip_release, vault.wipe_plaintext, vault.pictures, vault.picture_put |

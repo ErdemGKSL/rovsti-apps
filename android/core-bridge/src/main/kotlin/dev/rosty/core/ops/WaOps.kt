@@ -26,6 +26,7 @@ import dev.rosty.core.model.wa.CreateInstance
 import dev.rosty.core.model.wa.CreatedInstance
 import dev.rosty.core.model.wa.DeleteForMe
 import dev.rosty.core.model.wa.EditMessage
+import dev.rosty.core.model.wa.ForwardMessage
 import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.IdBody
@@ -39,12 +40,22 @@ import dev.rosty.core.model.wa.JidsBody
 import dev.rosty.core.model.wa.KeyIdBody
 import dev.rosty.core.model.wa.KeyInfo
 import dev.rosty.core.model.wa.LabelBody
+import dev.rosty.core.model.wa.LinkFindAnswer
+import dev.rosty.core.model.wa.LinkFindRequest
+import dev.rosty.core.model.wa.LinkMeta
+import dev.rosty.core.model.wa.LinkParseRequest
 import dev.rosty.core.model.wa.LinkReadAnswer
 import dev.rosty.core.model.wa.LinkReadRequest
 import dev.rosty.core.model.wa.LinkRequest
 import dev.rosty.core.model.wa.LinkWriteRequest
 import dev.rosty.core.model.wa.MarkRead
+import dev.rosty.core.model.wa.MentionEncodeRequest
+import dev.rosty.core.model.wa.MentionEncoded
+import dev.rosty.core.model.wa.MentionQueryAnswer
+import dev.rosty.core.model.wa.MentionQueryRequest
 import dev.rosty.core.model.wa.MessageIdBody
+import dev.rosty.core.model.wa.MessageReceipts
+import dev.rosty.core.model.wa.MessageReceiptsRequest
 import dev.rosty.core.model.wa.MessagesBody
 import dev.rosty.core.model.wa.PictureAnswer
 import dev.rosty.core.model.wa.PictureBody
@@ -53,6 +64,8 @@ import dev.rosty.core.model.wa.PresenceBody
 import dev.rosty.core.model.wa.PushParseAnswer
 import dev.rosty.core.model.wa.PushParseRequest
 import dev.rosty.core.model.wa.PushRegistration
+import dev.rosty.core.model.wa.ReceiptSectionsAnswer
+import dev.rosty.core.model.wa.ReceiptSectionsRequest
 import dev.rosty.core.model.wa.RevokeMessage
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
@@ -335,6 +348,18 @@ interface WaOps {
         req: DeleteForMe,
     ): Outcome<Empty>
 
+    /** Forwards a stored message to another chat, marked forwarded (E6-WA R4; an older gateway: not found). */
+    suspend fun forward(
+        handle: Long,
+        req: ForwardMessage,
+    ): Outcome<Sent>
+
+    /** Who got, read or played one of my messages, and when (E6-WA R4; an older gateway: not found). */
+    suspend fun messageReceipts(
+        handle: Long,
+        req: MessageReceiptsRequest,
+    ): Outcome<MessageReceipts>
+
     /** Stars or unstars a message. */
     suspend fun starMessage(
         handle: Long,
@@ -417,6 +442,21 @@ interface WaOps {
     /** Where a contact's WhatsApp actions go, and the JIDs to look up. */
     suspend fun target(req: WaTargetRequest): Outcome<WaTargetAnswer>
 
+    /** The `@` the caret is typing (E6-WA R4). */
+    suspend fun mentionQuery(req: MentionQueryRequest): Outcome<MentionQueryAnswer>
+
+    /** The composer's `@Name`s as `@<digits>` tokens and the JIDs they mention. */
+    suspend fun mentionEncode(req: MentionEncodeRequest): Outcome<MentionEncoded>
+
+    /** The first link of a text. */
+    suspend fun linkFind(req: LinkFindRequest): Outcome<LinkFindAnswer>
+
+    /** The preview tags of the head of a page. */
+    suspend fun linkParse(req: LinkParseRequest): Outcome<LinkMeta>
+
+    /** The sections of message info: played, read, delivered, waiting. */
+    suspend fun receiptSections(req: ReceiptSectionsRequest): Outcome<ReceiptSectionsAnswer>
+
     companion object {
         /** The Rust op behind each method. */
         val ops: List<String> =
@@ -465,6 +505,8 @@ interface WaOps {
                 "wa.edit_message",
                 "wa.revoke_message",
                 "wa.delete_for_me",
+                "wa.forward",
+                "wa.message_receipts",
                 "wa.star_message",
                 "wa.chat_action",
                 "wa.place_call",
@@ -483,6 +525,11 @@ interface WaOps {
                 "wa.avatars_plan",
                 "wa.names",
                 "wa.target",
+                "wa.mention_query",
+                "wa.mention_encode",
+                "wa.link_find",
+                "wa.link_parse",
+                "wa.receipt_sections",
             )
     }
 }
@@ -755,6 +802,22 @@ class NativeWaOps(
         req: DeleteForMe,
     ) = gateway("wa.delete_for_me", handle, req, DeleteForMe.serializer(), Empty.serializer())
 
+    override suspend fun forward(
+        handle: Long,
+        req: ForwardMessage,
+    ) = gateway("wa.forward", handle, req, ForwardMessage.serializer(), Sent.serializer())
+
+    override suspend fun messageReceipts(
+        handle: Long,
+        req: MessageReceiptsRequest,
+    ) = gateway(
+        "wa.message_receipts",
+        handle,
+        req,
+        MessageReceiptsRequest.serializer(),
+        MessageReceipts.serializer(),
+    )
+
     override suspend fun starMessage(
         handle: Long,
         req: StarMessage,
@@ -827,6 +890,26 @@ class NativeWaOps(
 
     override suspend fun target(req: WaTargetRequest) =
         core.call("wa.target", req, WaTargetRequest.serializer(), WaTargetAnswer.serializer())
+
+    override suspend fun mentionQuery(req: MentionQueryRequest) =
+        core.call("wa.mention_query", req, MentionQueryRequest.serializer(), MentionQueryAnswer.serializer())
+
+    override suspend fun mentionEncode(req: MentionEncodeRequest) =
+        core.call("wa.mention_encode", req, MentionEncodeRequest.serializer(), MentionEncoded.serializer())
+
+    override suspend fun linkFind(req: LinkFindRequest) =
+        core.call("wa.link_find", req, LinkFindRequest.serializer(), LinkFindAnswer.serializer())
+
+    override suspend fun linkParse(req: LinkParseRequest) =
+        core.call("wa.link_parse", req, LinkParseRequest.serializer(), LinkMeta.serializer())
+
+    override suspend fun receiptSections(req: ReceiptSectionsRequest) =
+        core.call(
+            "wa.receipt_sections",
+            req,
+            ReceiptSectionsRequest.serializer(),
+            ReceiptSectionsAnswer.serializer(),
+        )
 }
 
 /**

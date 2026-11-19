@@ -133,8 +133,9 @@ fn move_chat(
         params![i, from],
     )?;
     tx.execute(
-        "INSERT OR IGNORE INTO receipts (instance_id, chat, id, participant, status)
-         SELECT instance_id, ?3, id, participant, status
+        "INSERT OR IGNORE INTO receipts
+            (instance_id, chat, id, participant, status, delivered_ms, read_ms, played_ms)
+         SELECT instance_id, ?3, id, participant, status, delivered_ms, read_ms, played_ms
          FROM receipts WHERE instance_id = ?1 AND chat = ?2",
         params![i, from, into],
     )?;
@@ -150,6 +151,14 @@ fn move_chat(
     )?;
     tx.execute(
         "DELETE FROM message_edits WHERE instance_id = ?1 AND chat = ?2",
+        params![i, from],
+    )?;
+    tx.execute(
+        "UPDATE OR IGNORE pending_changes SET chat = ?3 WHERE instance_id = ?1 AND chat = ?2",
+        params![i, from, into],
+    )?;
+    tx.execute(
+        "DELETE FROM pending_changes WHERE instance_id = ?1 AND chat = ?2",
         params![i, from],
     )?;
 
@@ -182,8 +191,10 @@ fn move_chat(
     // Settings: the surviving chat's row wins.
     tx.execute(
         "INSERT OR IGNORE INTO chat_settings
-            (instance_id, jid, archived, pinned, muted_until_ms, marked_unread)
-         SELECT instance_id, ?3, archived, pinned, muted_until_ms, marked_unread
+            (instance_id, jid, archived, pinned, muted_until_ms, marked_unread, ephemeral_s,
+             ephemeral_ms)
+         SELECT instance_id, ?3, archived, pinned, muted_until_ms, marked_unread, ephemeral_s,
+             ephemeral_ms
          FROM chat_settings WHERE instance_id = ?1 AND jid = ?2",
         params![i, from, into],
     )?;
@@ -234,11 +245,17 @@ fn rewrite_person(
     // One receipt row per person and message, at the furthest state either
     // id reached.
     rewritten += tx.execute(
-        "INSERT INTO receipts (instance_id, chat, id, participant, status)
-         SELECT instance_id, chat, id, ?3, status FROM receipts
+        "INSERT INTO receipts
+            (instance_id, chat, id, participant, status, delivered_ms, read_ms, played_ms)
+         SELECT instance_id, chat, id, ?3, status, delivered_ms, read_ms, played_ms FROM receipts
          WHERE instance_id = ?1 AND participant = ?2
          ON CONFLICT (instance_id, chat, id, participant)
-         DO UPDATE SET status = MAX(status, excluded.status)",
+         DO UPDATE SET status = MAX(status, excluded.status),
+            delivered_ms = MIN(COALESCE(delivered_ms, excluded.delivered_ms),
+                COALESCE(excluded.delivered_ms, delivered_ms)),
+            read_ms = MIN(COALESCE(read_ms, excluded.read_ms), COALESCE(excluded.read_ms, read_ms)),
+            played_ms = MIN(COALESCE(played_ms, excluded.played_ms),
+                COALESCE(excluded.played_ms, played_ms))",
         params![i, from, into],
     )?;
     tx.execute(

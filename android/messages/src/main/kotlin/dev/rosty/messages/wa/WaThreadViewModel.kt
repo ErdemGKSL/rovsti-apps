@@ -2,13 +2,18 @@ package dev.rosty.messages.wa
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.rosty.core.Outcome
 import dev.rosty.core.getOrNull
 import dev.rosty.core.model.chat.SearchJumpRequest
 import dev.rosty.core.model.chat.SearchJumpStep
+import dev.rosty.core.model.wa.ChatActionKind
+import dev.rosty.core.model.wa.DELETED_BY_ME
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MediaKind
 import dev.rosty.core.model.wa.MediaMeta
 import dev.rosty.core.model.wa.MediaWaveform
+import dev.rosty.core.model.wa.MentionPick
+import dev.rosty.core.model.wa.MentionQuery
 import dev.rosty.core.model.wa.MessageBody
 import dev.rosty.core.model.wa.TypingState
 import dev.rosty.core.model.wa.Unavailable
@@ -32,9 +37,14 @@ import dev.rosty.messages.conversation.ComposerMode
 import dev.rosty.messages.conversation.ConversationEffect
 import dev.rosty.messages.conversation.ConversationUi
 import dev.rosty.messages.conversation.DayLabels
+import dev.rosty.messages.conversation.EditingUi
+import dev.rosty.messages.conversation.LinkCardUi
+import dev.rosty.messages.conversation.LinkChipUi
 import dev.rosty.messages.conversation.MediaAction
+import dev.rosty.messages.conversation.MentionOptionUi
 import dev.rosty.messages.conversation.RecordUi
 import dev.rosty.messages.conversation.ReplyUi
+import dev.rosty.messages.conversation.TextMark
 import dev.rosty.messages.conversation.VoiceUi
 import dev.rosty.messages.conversation.withDays
 import dev.rosty.messages.inbox.InboxWords
@@ -118,7 +128,60 @@ interface WaWords {
 
     /** A bot's or a hosted business's message, which WhatsApp keeps from linked devices. */
     val unavailableOpenPhone: String get() = "This message is not available on this device. Open it on your phone."
+
+    /** "7 Days": a disappearing timer of [seconds] (E6-WA R4). */
+    fun timer(seconds: Long): String =
+        when (seconds) {
+            0L -> "Off"
+            DAY_S -> "24 Hours"
+            WEEK_S -> "7 Days"
+            DAYS_90_S -> "90 Days"
+            else -> "$seconds Seconds"
+        }
+
+    /** The line a timer change leaves: [by] is "you" ([mine]), a name, or null when unknown. */
+    fun timerNotice(
+        seconds: Long,
+        by: String?,
+        mine: Boolean,
+    ): String =
+        when {
+            seconds == 0L && mine -> "You turned off disappearing messages"
+            seconds == 0L && by != null -> "$by turned off disappearing messages"
+            seconds == 0L -> "Disappearing messages turned off"
+            mine -> "You turned on disappearing messages: ${timer(seconds)}"
+            by != null -> "$by turned on disappearing messages: ${timer(seconds)}"
+            else -> "Disappearing messages turned on: ${timer(seconds)}"
+        }
+
+    companion object {
+        const val DAY_S = 86_400L
+        const val WEEK_S = 604_800L
+        const val DAYS_90_S = 7_776_000L
+    }
 }
+
+/** Message info of one of my messages (E6-WA R4), as the sheet shows it. */
+data class WaInfoUi(
+    val sections: List<WaInfoSection>,
+)
+
+/** One section of [WaInfoUi]: who and when. */
+data class WaInfoSection(
+    val section: dev.rosty.core.model.wa.ReceiptSection,
+    val rows: List<WaInfoRow>,
+)
+
+data class WaInfoRow(
+    val jid: String,
+    val name: String,
+    /** "14:05", or null when the time is not known. */
+    val time: String?,
+    val left: Boolean,
+)
+
+/** Why message info has nothing to show. */
+enum class WaInfoProblem { OldGateway, Failed }
 
 /** What a tap on a bubble's media asks the page to do (the page owns the viewer, the pickers and the intents). */
 sealed interface WaMediaEffect {
@@ -220,9 +283,22 @@ class WaThreadSources(
     val recordClock: () -> Long = { System.nanoTime() / NANOS_PER_MS },
     /** Measures a photo or video to send (size, length, preview); null: they go out without them. */
     val probe: MediaProbe? = null,
+    /** The rules of the message actions (E6-WA R4); null: no mentions, no info sections, no link cards. */
+    val rules: WaActionRules? = null,
+    /** Link cards made on the phone (E6-WA R4); null: none. */
+    val links: WaLinkPreviews? = null,
 )
 
 private const val NANOS_PER_MS = 1_000_000L
+
+/** A member picked with `@` in the composer: where its `@Name` begins, the `@Name`, and who it names. */
+private data class Pick(
+    val start: Int,
+    val label: String,
+    val jid: String,
+) {
+    val end: Int get() = start + label.length
+}
 
 /**
  * A WhatsApp conversation (E6.4a) read from the offline store only (E6.4s): `wa_sync.thread` pages, read again when
@@ -329,6 +405,24 @@ class WaThreadViewModel(
      * in this order, with its caption; a photo or video can go as view once.
      */
     val batch: StateFlow<WaSendBatch?> = batchState.asStateFlow()
+
+    /** E6-WA R4: the sent message the composer edits (its key and the text it had). */
+    private var editing: EditingUi? = null
+
+    /** E6-WA R4: the members the composer picked with `@`, by their range in the composer's text. */
+    private val picks = ArrayList<Pick>()
+    private var mentionAt: MentionQuery? = null
+    private var mentionOptions: List<MentionOptionUi> = emptyList()
+    private var members: List<MentionOptionUi>? = null
+
+    /** E6-WA R4: the link card of the next Send, the link it is for, and the link whose card was taken away. */
+    private var linkDraft: LinkDraft? = null
+    private var linkChip: LinkChipUi? = null
+    private var linkRemoved: String? = null
+    private var linkJob: Job? = null
+
+    /** E6-WA R4: the chat's disappearing timer, as the store last said. */
+    val timer: Long? get() = chat?.ephemeralS
 
     /** The message the composer answers (its id), and the file that goes out with the next Send. */
     private var replyTo: String? = null
@@ -477,10 +571,14 @@ class WaThreadViewModel(
         val stored = rows.filter { !it.deleted && it.state !in OUTBOX_STATES }
         val thumbs =
             stored.filter {
-                it.kind in VISUAL_KINDS && media.thumb(
-                    it,
-                ) == null && it.mediaPath == null && placeholderOf(it) == null &&
-                    (it.hasThumbnail || it.media?.thumbnail == true) && it.id !in thumbsTried
+                // A link card's picture is the thumbnail of a text (E6-WA R4).
+                val card = it.linkPreview?.thumbnail == true
+                (it.kind in VISUAL_KINDS || card) &&
+                    media.thumb(it) == null &&
+                    it.mediaPath == null &&
+                    placeholderOf(it) == null &&
+                    (it.hasThumbnail || it.media?.thumbnail == true || card) &&
+                    it.id !in thumbsTried
             }
         val files =
             if (sources.offline.online.value) {
@@ -537,6 +635,9 @@ class WaThreadViewModel(
                 hasOlder = hasStoredOlder || (!reachedStart && rows.isNotEmpty()),
                 composer = ComposerMode.Ready(words.placeholder),
                 reply = replyOf(),
+                editing = editing,
+                linkChip = linkChip,
+                mentionOptions = mentionOptions.toImmutableList(),
                 attachment =
                     attachment?.let {
                         AttachmentUi(it.name, words.size(it.size), it.file.takeIf { _ -> it.mime.startsWith("image/") })
@@ -596,6 +697,18 @@ class WaThreadViewModel(
                 row.editedMs != null && !row.deleted -> words.edited(clock)
                 else -> clock
             }
+        row.system?.let { system ->
+            val mine = row.fromMe || system.by == DELETED_BY_ME
+            val by = if (mine || system.by == null) null else senderOf(system.by, null)
+            return BubbleUi(
+                key = keyOf(row),
+                outgoing = row.fromMe,
+                text = words.timerNotice(system.seconds ?: 0, by, mine),
+                meta = clock,
+                atMs = row.timestampMs,
+                notice = true,
+            )
+        }
         val isMedia = row.kind in MEDIA_KINDS
         val placeholder = if (row.deleted) null else placeholderOf(row)
         val text =
@@ -609,6 +722,13 @@ class WaThreadViewModel(
 
                 else -> waPreview(row.toBody(), row.toMeta(), preview)
             }
+        // Mentions read as names (`@Anna`), never as digits; each name is marked.
+        val (shown, marks) =
+            if (!row.deleted && placeholder == null && row.mentionSpans.isNotEmpty()) {
+                mentionText(text, row)
+            } else {
+                text to emptyList()
+            }
         val media =
             when {
                 placeholder != null -> persistentListOf(placeholder)
@@ -618,7 +738,7 @@ class WaThreadViewModel(
         return BubbleUi(
             key = keyOf(row),
             outgoing = row.fromMe,
-            text = text,
+            text = shown,
             meta = meta,
             state = if (row.fromMe) state else BubbleState.None,
             atMs = row.timestampMs,
@@ -633,7 +753,39 @@ class WaThreadViewModel(
             canReply = !row.deleted && row.state !in OUTBOX_STATES,
             starred = row.starred && !row.deleted,
             markId = row.id.takeIf { it != keyOf(row) },
+            forwardedMany = row.forwardedMany,
+            marks = marks.toImmutableList(),
+            link =
+                row.linkPreview?.let { card ->
+                    LinkCardUi(
+                        url = card.url,
+                        title = card.title,
+                        description = card.description,
+                        host = WaLinkHosts.of(card.url),
+                        picture = sources.media?.thumb(row),
+                    )
+                },
         )
+    }
+
+    /** [text] with each mention of [row] as `@Name`, and where the names are. */
+    private suspend fun mentionText(
+        text: String,
+        row: WaSyncMessage,
+    ): Pair<String, List<TextMark>> {
+        val out = StringBuilder()
+        val marks = ArrayList<TextMark>()
+        var cursor = 0
+        for (span in row.mentionSpans.sortedBy { it.start }) {
+            if (span.start < cursor || span.end > text.length || span.start >= span.end) continue
+            out.append(text, cursor, span.start)
+            val name = "@" + senderOf(span.jid, null)
+            marks += TextMark(out.length, out.length + name.length)
+            out.append(name)
+            cursor = span.end
+        }
+        out.append(text, cursor, text.length)
+        return out.toString() to marks
     }
 
     /**
@@ -968,12 +1120,29 @@ class WaThreadViewModel(
      * composer the file goes out and [text] is its caption; with a quoted bar it is a reply.
      */
     fun send(text: String) {
+        editing?.let { edited ->
+            // Send in the editing bar saves the new text of the message.
+            editing = null
+            edit(edited.key, text)
+            viewModelScope.launch { publish() }
+            return
+        }
         val body = text.trim()
         val file = attachment
         if (body.isEmpty() && file == null) return
         val quoted = replyTo
         attachment = null
         replyTo = null
+        val chosen = picks.toList()
+        picks.clear()
+        mentionAt = null
+        mentionOptions = emptyList()
+        // The card goes only while its link is still in the text.
+        val card = linkDraft?.takeIf { body.contains(it.wire.url) }
+        linkDraft = null
+        linkChip = null
+        linkRemoved = null
+        linkJob?.cancel()
         viewModelScope.launch {
             sources.drafts.put(tag, "")
             lastTypingSentMs = 0
@@ -989,7 +1158,7 @@ class WaThreadViewModel(
                         fileName = file.name,
                     )
                 } else {
-                    WaSyncAction.SendText(body, quoted)
+                    textAction(text, body, quoted, chosen, card)
                 }
             if (!sources.offline.enqueue(jid, action)) {
                 attachment = file
@@ -999,6 +1168,259 @@ class WaThreadViewModel(
             }
             publish()
         }
+    }
+
+    /**
+     * The text send: the picked `@Name`s become wire tokens with their JIDs (Rust's `wa.mention_encode`), and the link
+     * card goes along when there is one.
+     */
+    private suspend fun textAction(
+        raw: String,
+        body: String,
+        quoted: String?,
+        chosen: List<Pick>,
+        card: LinkDraft?,
+    ): WaSyncAction.SendText {
+        val rules = sources.rules
+        if (chosen.isEmpty() || rules == null) return WaSyncAction.SendText(body, quoted, linkPreview = card?.wire)
+        // The picks were made on the untrimmed text: their ranges move with the trim, and a name that moved since it
+        // was picked is found again.
+        val lead = raw.length - raw.trimStart().length
+        val placed =
+            chosen.mapNotNull { pick ->
+                val label = pick.label
+                val at =
+                    (pick.start - lead).takeIf { body.startsWith(label, it.coerceAtLeast(0)) && it >= 0 }
+                        ?: body.indexOf(label).takeIf { it >= 0 }
+                        ?: return@mapNotNull null
+                MentionPick(at, at + label.length, pick.jid)
+            }
+        val encoded = rules.encode(body, placed) ?: return WaSyncAction.SendText(body, quoted, linkPreview = card?.wire)
+        return WaSyncAction.SendText(encoded.text, quoted, encoded.mentions, card?.wire)
+    }
+
+    // ---- message actions (E6-WA R4)
+
+    /** Whether "Edit" is offered for [key]: my sent message within WhatsApp's window. */
+    fun canEdit(key: String): Boolean {
+        val row = rowOf(key) ?: return false
+        return row.state !in OUTBOX_STATES && (row.editableUntilMs ?: 0) > sources.now()
+    }
+
+    /** "Edit" on a sent message of mine: its text goes into the composer; Send saves it. */
+    fun startEdit(key: String) {
+        if (!canEdit(key)) return
+        val row = rowOf(key) ?: return
+        replyTo = null
+        editing = EditingUi(key, row.text.orEmpty())
+        effectChannel.trySend(ConversationEffect.Restore(row.text.orEmpty()))
+        viewModelScope.launch { publish() }
+    }
+
+    /** The × of the editing bar. */
+    fun cancelEdit() {
+        if (editing == null) return
+        editing = null
+        effectChannel.trySend(ConversationEffect.Restore(""))
+        viewModelScope.launch { publish() }
+    }
+
+    /** Whether "Forward" is offered for [key] (a sent, readable message that is not view once or a line). */
+    fun canForward(key: String): Boolean {
+        val row = rowOf(key) ?: return false
+        return row.state !in OUTBOX_STATES && !row.deleted && row.system == null && row.unavailable == null &&
+            row.media?.viewOnce != true && row.kind != WaSyncKind.Unsupported
+    }
+
+    /** The text a forward to an SMS chat keeps. */
+    fun forwardText(key: String): String = rowOf(key)?.text.orEmpty()
+
+    /** Forwards [key] to the WhatsApp chat [target] (queued there, marked forwarded). False: it could not be queued. */
+    suspend fun forwardTo(
+        key: String,
+        target: String,
+    ): Boolean {
+        val row = rowOf(key)?.takeIf { canForward(key) } ?: return false
+        val queued = sources.offline.enqueue(target, WaSyncAction.Forward(jid, row.id))
+        if (!queued) effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_forward_failed)))
+        return queued
+    }
+
+    /** "Delete for Me": hidden at once here, deleted on the account's other devices once it goes out. */
+    fun deleteForMe(key: String) {
+        val row = rowOf(key)?.takeIf { it.state !in OUTBOX_STATES } ?: return
+        viewModelScope.launch { sources.offline.enqueue(jid, WaSyncAction.DeleteForMe(row.id)) }
+    }
+
+    /** Whether "Info" is offered for [key]: a sent message of mine. */
+    fun canInfo(key: String): Boolean {
+        val row = rowOf(key) ?: return false
+        return row.fromMe && row.state !in OUTBOX_STATES && row.system == null
+    }
+
+    /** Message info of [key]: who got, read or played it, and when; or why there is nothing to show. */
+    suspend fun info(key: String): Pair<WaInfoUi?, WaInfoProblem?> {
+        val row = rowOf(key) ?: return null to WaInfoProblem.Failed
+        val rules = sources.rules ?: return null to WaInfoProblem.Failed
+        val answer =
+            when (val got = sources.remote.messageReceipts(jid, row.id)) {
+                is Outcome.Ok -> {
+                    got.value
+                }
+
+                is Outcome.Err -> {
+                    // An older gateway has no receipts route.
+                    val old = got.error is dev.rosty.core.RustError.NotFound
+                    return null to if (old) WaInfoProblem.OldGateway else WaInfoProblem.Failed
+                }
+            }
+        val voice = row.media?.voiceNote == true
+        val names = answer.members.associate { it.jid to it.name }
+        val sections =
+            rules.sections(answer.members, voice).map { section ->
+                WaInfoSection(
+                    section.section,
+                    section.rows.map { r ->
+                        WaInfoRow(
+                            jid = r.jid,
+                            name = senderOf(r.jid, names[r.jid]),
+                            time = r.atMs?.takeIf { it > 0 }?.let(days::clock),
+                            left = r.left,
+                        )
+                    },
+                )
+            }
+        return WaInfoUi(sections) to null
+    }
+
+    /** Sets the chat's disappearing timer through the gateway (one of the four choices). */
+    fun setTimer(seconds: Long) {
+        viewModelScope.launch {
+            if (sources.remote.chatAction(jid, ChatActionKind.Disappearing(seconds)) is Outcome.Err) {
+                effectChannel.trySend(ConversationEffect.Toast(UiText.Res(R.string.wa_timer_failed)))
+            }
+        }
+    }
+
+    /**
+     * The composer changed: the `@` list follows the caret (in a group), and a link in the text gets its card after
+     * [LINK_DEBOUNCE_MS] of quiet.
+     */
+    fun onComposer(
+        text: String,
+        caret: Int,
+    ) {
+        // A pick whose name was edited away is no longer a mention.
+        picks.removeAll { it.end > text.length || !text.startsWith(it.label, it.start) }
+        viewModelScope.launch {
+            val rules = sources.rules
+            val group = chat?.isGroup ?: WaIds.isGroup(jid)
+            val query = if (group && rules != null && text.contains('@')) rules.mentionQuery(text, caret) else null
+            mentionAt = query
+            mentionOptions = query?.let { optionsFor(it.query) }.orEmpty()
+            publish()
+        }
+        if (editing != null) return
+        linkJob?.cancel()
+        linkJob =
+            viewModelScope.launch {
+                delay(LINK_DEBOUNCE_MS)
+                updateLink(text)
+            }
+    }
+
+    private suspend fun optionsFor(query: String): List<MentionOptionUi> {
+        val all =
+            members ?: run {
+                val group = (sources.remote.group(jid) as? Outcome.Ok)?.value ?: return emptyList()
+                group.participants
+                    .map { p ->
+                        // The number when WhatsApp gave one; a member who hides it keeps their LID.
+                        val id = p.pn ?: p.jid
+                        val name = senderOf(id, p.name)
+                        val number = WaIds.number(id)?.let { sources.readable(it) }
+                        MentionOptionUi(id, name, number?.takeIf { it != name })
+                    }.filterNot { it.jid == chat?.jid }
+                    .also { members = it }
+            }
+        val q = query.trim()
+        return all.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) }.take(MAX_MENTION_OPTIONS)
+    }
+
+    /**
+     * A member of the `@` list was picked: the query is replaced by `@Name ` and the pick is kept for Send. Answers
+     * the new text and caret for the composer; null when no `@` is being typed.
+     */
+    fun pickMention(
+        text: String,
+        caret: Int,
+        option: MentionOptionUi,
+    ): Pair<String, Int>? {
+        val at = mentionAt ?: return null
+        val end = caret.coerceIn(at.start, text.length)
+        val label = "@" + option.name
+        val inserted = "$label "
+        val delta = inserted.length - (end - at.start)
+        // Picks after the query move with the text.
+        for (i in picks.indices) {
+            val pick = picks[i]
+            if (pick.start >= end) picks[i] = pick.copy(start = pick.start + delta)
+        }
+        picks += Pick(at.start, label, option.jid)
+        mentionAt = null
+        mentionOptions = emptyList()
+        viewModelScope.launch { publish() }
+        val next = text.substring(0, at.start) + inserted + text.substring(end)
+        return next to at.start + inserted.length
+    }
+
+    private suspend fun updateLink(text: String) {
+        val rules = sources.rules
+        val links = sources.links
+        if (rules == null || links == null || !links.setting.enabled.value) {
+            if (linkChip != null) {
+                linkChip = null
+                linkDraft = null
+                publish()
+            }
+            return
+        }
+        val found = rules.firstLink(text)
+        if (found == null || found.url == linkRemoved) {
+            if (linkChip != null) {
+                linkChip = null
+                linkDraft = null
+                publish()
+            }
+            return
+        }
+        if (linkChip?.url == found.url) return
+        linkChip = LinkChipUi(found.url, null, WaLinkHosts.of(found.url), loading = true)
+        linkDraft = null
+        publish()
+        val draft = links.draft(found.url)
+        // The composer may have moved on while the page was read.
+        if (linkChip?.url != found.url) return
+        linkDraft = draft
+        linkChip =
+            draft?.let {
+                LinkChipUi(
+                    found.url,
+                    it.wire.title ?: it.wire.description,
+                    it.host ?: WaLinkHosts.of(found.url),
+                    it.picture,
+                )
+            }
+        publish()
+    }
+
+    /** The × of the link chip: this message goes without a card for this link. */
+    fun removeLink() {
+        linkRemoved = linkChip?.url ?: linkDraft?.wire?.url
+        linkChip = null
+        linkDraft = null
+        linkJob?.cancel()
+        viewModelScope.launch { publish() }
     }
 
     // ---- replies (M31)
@@ -1493,6 +1915,10 @@ class WaThreadViewModel(
         private const val NOW_MS = 60_000L
         private const val TYPING_EVERY_MS = 5_000L
         const val TYPING_SHOWN_MS = 12_000L
+
+        /** The quiet before a link in the composer gets its card (owner decision: 500 to 800 ms). */
+        const val LINK_DEBOUNCE_MS = 600L
+        private const val MAX_MENTION_OPTIONS = 8
         private val OUTBOX_STATES = setOf(WaSyncRowState.Waiting, WaSyncRowState.Sending, WaSyncRowState.Failed)
         private val MEDIA_KINDS =
             setOf(WaSyncKind.Image, WaSyncKind.Video, WaSyncKind.Audio, WaSyncKind.Document, WaSyncKind.Sticker)

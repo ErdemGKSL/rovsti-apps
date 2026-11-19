@@ -8,6 +8,7 @@ import dev.rosty.core.model.messages.NotifyRequest
 import dev.rosty.core.model.messages.OtpRequest
 import dev.rosty.core.model.wa.GatewayEvent
 import dev.rosty.core.model.wa.MessageBody
+import dev.rosty.core.model.wa.MessageMeta
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.WaIds
 import dev.rosty.core.ops.MessagesOps
@@ -98,6 +99,8 @@ class AnnouncerSources(
     /** True when a push service posts the WhatsApp digest while no UI is attached (the firebase flavor, AD-MSG5). */
     val pushWake: Boolean,
     val now: () -> Long,
+    /** E6-WA R4: the linked account's own ids (number and LID) as last heard; empty when unknown. */
+    val ownIds: () -> List<String> = { emptyList() },
 )
 
 /**
@@ -122,6 +125,9 @@ class MessageAnnouncer(
     private val started = AtomicBoolean(false)
     private val seen = LinkedHashSet<String>()
 
+    /** Messages of WhatsApp-muted chats, until their details say whether they address me (E6-WA R4). */
+    private val held = LinkedHashMap<String, GatewayEvent.Message>()
+
     /** Follows the preferences and the event stream from now on. Idempotent. */
     fun start() {
         if (!started.compareAndSet(false, true)) return
@@ -131,7 +137,13 @@ class MessageAnnouncer(
             sources.prefs.filterNotNull().collect { NotifyPolicy.current = NotifyPolicy.of(it) }
         }
         scope.launch {
-            sources.live.collect { event -> if (event is GatewayEvent.Message) onWhatsApp(event) }
+            sources.live.collect { event ->
+                when (event) {
+                    is GatewayEvent.Message -> onWhatsApp(event)
+                    is GatewayEvent.MessageMetaChanged -> onMeta(event)
+                    else -> Unit
+                }
+            }
         }
     }
 
@@ -159,9 +171,47 @@ class MessageAnnouncer(
         if (OpenConversation.isShowing(tag)) return false
         val chat = sources.chatOf(jid)
         if (chat != null && !chat.isConversation()) return false
-        // Muted in WhatsApp (here or on another device): stay quiet.
+        // Muted in WhatsApp (here or on another device): stay quiet, unless its details (they follow the message)
+        // say it mentions me or answers me (E6-WA R4).
         val mutedUntil = chat?.meta?.mutedUntilMs
-        if (mutedUntil != null && (mutedUntil < 0 || mutedUntil > sources.now())) return false
+        if (mutedUntil != null && (mutedUntil < 0 || mutedUntil > sources.now())) {
+            hold(message)
+            return false
+        }
+        return announce(message, chat)
+    }
+
+    /**
+     * E6-WA R4: the details of a message held back by a WhatsApp mute arrived. WhatsApp lets a message that mentions
+     * me, or quotes one of mine, through a muted chat; so does Rosty.
+     */
+    internal suspend fun onMeta(event: GatewayEvent.MessageMetaChanged): Boolean {
+        val message = synchronized(held) { held.remove(event.id) } ?: return false
+        if (message.chat != event.chat || !addressesMe(event.meta)) return false
+        if (OpenConversation.isShowing(WaRekeys.tagOf(message.chat))) return false
+        return announce(message, sources.chatOf(message.chat))
+    }
+
+    /** `rosty_core::wa_actions::addresses_me`: one of my ids is mentioned, or the quoted message is mine. */
+    private fun addressesMe(meta: MessageMeta): Boolean {
+        val own = sources.ownIds()
+        if (own.isEmpty()) return false
+        val mine = { jid: String? -> own.any { WaIds.same(it, jid) } }
+        return meta.mentions.any(mine) || mine(meta.quoted?.sender)
+    }
+
+    private fun hold(message: GatewayEvent.Message) =
+        synchronized(held) {
+            held[message.id] = message
+            if (held.size > HELD_MAX) held.remove(held.keys.first())
+        }
+
+    private suspend fun announce(
+        message: GatewayEvent.Message,
+        chat: RichChat?,
+    ): Boolean {
+        val jid = message.chat
+        val tag = WaRekeys.tagOf(jid)
         val group = chat?.isGroup ?: WaIds.isGroup(jid)
         val body = sources.preview(message.body)
         val incoming =
@@ -237,5 +287,6 @@ class MessageAnnouncer(
         /** A message older than this when it arrives was missed, not new. */
         const val RECENT_MS = 10 * 60_000L
         private const val SEEN_MAX = 500
+        private const val HELD_MAX = 64
     }
 }

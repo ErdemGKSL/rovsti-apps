@@ -123,14 +123,16 @@ class WaSyncStoreNativeTest {
                 assertEquals(listOf(group, ali), chats.map { it.jid })
                 assertEquals("toplantı 5'te", chats[0].last?.text)
                 val rows = store.thread(ali, 50).getOrOk().items
-                assertEquals(listOf("A2", "A1"), rows.map { it.id })
+                // Deleted for me (E6-WA R4): the thread leaves it out, as WhatsApp does.
+                assertEquals(listOf("A2"), rows.map { it.id })
                 assertEquals("selam!", rows[0].text)
                 assertEquals(listOf("selam"), rows[0].editHistory.map { it.text })
-                // Deleted, shown as deleted, and what it said is still there for "show content".
-                assertTrue(rows[1].deleted)
-                assertEquals("merhaba", rows[1].text)
-                assertEquals(4_500L, rows[1].deletedAt)
-                assertEquals(DELETED_BY_ME, rows[1].deletedBy)
+                // Still stored, marked, with what it said.
+                val deleted = store.message(ali, "A1").getOrOk()
+                assertTrue(deleted!!.deleted)
+                assertEquals("merhaba", deleted.text)
+                assertEquals(4_500L, deleted.deletedAt)
+                assertEquals(DELETED_BY_ME, deleted.deletedBy)
             }
         }
 

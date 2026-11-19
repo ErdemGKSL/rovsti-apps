@@ -1,0 +1,8 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/messages/3EB0B1/receipts?chat=120363041234567890%40g.us"
+ },
+ "status": 404,
+ "body_text": "<html>404 Not Found</html>"
+}

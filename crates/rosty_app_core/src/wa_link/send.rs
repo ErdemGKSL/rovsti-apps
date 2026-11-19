@@ -226,11 +226,7 @@ pub fn send_text_held(_dir: &str, chat: &str, text: &str) -> Result<(), SendFail
         Gateway::new(url, Some(key))
     };
     gateway
-        .send_text(&SendText {
-            chat: chat.to_owned(),
-            text: text.to_owned(),
-            quoted_id: None,
-        })
+        .send_text(&SendText::new(chat, text, None))
         .map(drop)
         .map_err(SendFailure::from)
 }
@@ -239,11 +235,7 @@ pub fn send_text_held(_dir: &str, chat: &str, text: &str) -> Result<(), SendFail
 pub fn send_text_in(dir: &str, chat: &str, text: &str) -> Result<(), SendFailure> {
     let gateway = gateway_in(dir).ok_or(SendFailure::NoLink)?;
     gateway
-        .send_text(&SendText {
-            chat: chat.to_owned(),
-            text: text.to_owned(),
-            quoted_id: None,
-        })
+        .send_text(&SendText::new(chat, text, None))
         .map(drop)
         .map_err(SendFailure::from)
 }

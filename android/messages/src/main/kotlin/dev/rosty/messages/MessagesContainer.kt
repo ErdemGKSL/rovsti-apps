@@ -132,6 +132,30 @@ open class MessagesContainer(
     /** `messages-prefs.json` and `drafts.json`. */
     val store: MessagesStore by lazy { MessagesStore(ops, scope) }
 
+    /** E6-WA R4: the "Link previews" switch of the WhatsApp settings, on by default. */
+    val linkPreviewSetting: dev.rosty.messages.wa.LinkPreviewSetting by lazy { createLinkPreviewSetting() }
+
+    /** E6-WA R4: the message-action rules (mentions, links, message info) in Rust. */
+    val waActionRules: dev.rosty.messages.wa.WaActionRules by lazy { createWaActionRules() }
+
+    /** E6-WA R4: link cards made on the phone (the gateway never fetches a page). */
+    val waLinks: dev.rosty.messages.wa.WaLinkPreviews by lazy {
+        dev.rosty.messages.wa.WaLinkPreviews(
+            dev.rosty.platform.web
+                .HttpPagePreviewFetcher(),
+            waActionRules,
+            linkPreviewSetting,
+        )
+    }
+
+    protected open fun createLinkPreviewSetting(): dev.rosty.messages.wa.LinkPreviewSetting =
+        dev.rosty.messages.wa
+            .PrefsLinkPreviewSetting(context)
+
+    protected open fun createWaActionRules(): dev.rosty.messages.wa.WaActionRules =
+        dev.rosty.messages.wa
+            .NativeWaActionRules(waOps)
+
     /** The home region (SIM, network, locale, else TR) that national numbers are normalized in. */
     val homeRegion: String by lazy { PhoneNumbers.homeRegion(context) }
 
@@ -375,6 +399,12 @@ open class MessagesContainer(
                 preview = { body -> waPreview(body, MessageMeta(), words) },
                 pushWake = context.resources.getBoolean(R.bool.push_wake),
                 now = System::currentTimeMillis,
+                ownIds = {
+                    (wa.linkState.value as? dev.rosty.wa.WaLinkState.Connected)
+                        ?.status
+                        ?.let { listOfNotNull(it.ownJid, it.ownLid) }
+                        .orEmpty()
+                },
             ),
         )
     }

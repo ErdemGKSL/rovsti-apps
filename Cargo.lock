@@ -8644,6 +8644,7 @@ dependencies = [
  "getrandom 0.3.4",
  "log",
  "ring",
+ "rosty_core",
  "rosty_wa_client",
  "rosty_wa_proto",
  "rusqlite",

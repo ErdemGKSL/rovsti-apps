@@ -192,6 +192,7 @@ pub(super) fn wipe_account(conn: &Connection, wipe: &Wipe) -> Result<Vec<String>
         "DELETE FROM chats;
          DELETE FROM chat_sync;
          DELETE FROM messages;
+         DELETE FROM pending_meta;
          DELETE FROM media;
          DELETE FROM person;
          DELETE FROM alias;

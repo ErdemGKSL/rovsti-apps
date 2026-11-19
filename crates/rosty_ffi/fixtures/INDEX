@@ -1124,6 +1124,8 @@ wa.end_call
 wa.events_reconnect_now
 wa.events_start
 wa.events_start.resume
+wa.forward
+wa.forward.old_gateway
 wa.group
 wa.groups
 wa.identity_mappings
@@ -1131,6 +1133,11 @@ wa.identity_mappings.old_gateway
 wa.identity_mappings.since
 wa.identity_mappings.unauthorized
 wa.keys
+wa.link_find
+wa.link_find.none
+wa.link_parse
+wa.link_parse.bare
+wa.link_parse.not_http
 wa.link_read
 wa.link_read.none
 wa.link_write
@@ -1143,6 +1150,12 @@ wa.mark_read
 wa.mark_status_viewed
 wa.media
 wa.media.large
+wa.mention_encode
+wa.mention_encode.edited
+wa.mention_query
+wa.mention_query.email
+wa.message_receipts
+wa.message_receipts.old_gateway
 wa.messages
 wa.messages_with_meta
 wa.mint_key
@@ -1181,6 +1194,8 @@ wa.push_parse.garbage
 wa.push_parse.message
 wa.push_parse.unknown
 wa.react
+wa.receipt_sections
+wa.receipt_sections.voice
 wa.refresh_profiles
 wa.register_push
 wa.register_push.keyed
@@ -1298,6 +1313,8 @@ wa_sync.chats.empty
 wa_sync.chats.merged
 wa_sync.close
 wa_sync.close.not_open
+wa_sync.expire
+wa_sync.expire.nothing
 wa_sync.focus
 wa_sync.focus.none
 wa_sync.history
@@ -1408,11 +1425,15 @@ wa_sync.outbox_edit.gone
 wa_sync.outbox_edit.in_flight
 wa_sync.outbox_enqueue
 wa_sync.outbox_enqueue.bad_waveform
+wa_sync.outbox_enqueue.delete_for_me
 wa_sync.outbox_enqueue.edit
+wa_sync.outbox_enqueue.forward
+wa_sync.outbox_enqueue.forward_deleted
 wa_sync.outbox_enqueue.mark_played
 wa_sync.outbox_enqueue.mark_read
 wa_sync.outbox_enqueue.media
 wa_sync.outbox_enqueue.media_options
+wa_sync.outbox_enqueue.mentions_preview
 wa_sync.outbox_enqueue.no_chat
 wa_sync.outbox_enqueue.react
 wa_sync.outbox_enqueue.revoke

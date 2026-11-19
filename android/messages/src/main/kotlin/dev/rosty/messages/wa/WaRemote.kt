@@ -7,10 +7,14 @@ import dev.rosty.core.model.wa.BytesAnswer
 import dev.rosty.core.model.wa.ChatAction
 import dev.rosty.core.model.wa.ChatActionKind
 import dev.rosty.core.model.wa.ChatState
+import dev.rosty.core.model.wa.DeleteForMe
 import dev.rosty.core.model.wa.EditMessage
+import dev.rosty.core.model.wa.ForwardMessage
+import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.InstanceStatus
 import dev.rosty.core.model.wa.MarkRead
+import dev.rosty.core.model.wa.MessageReceipts
 import dev.rosty.core.model.wa.RevokeMessage
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
@@ -88,6 +92,15 @@ interface WaRemote {
         jid: String,
         kind: ChatActionKind,
     ): Outcome<Unit>
+
+    /** Who got, read or played my message [messageId] of [chat], and when (E6-WA R4). */
+    suspend fun messageReceipts(
+        chat: String,
+        messageId: String,
+    ): Outcome<MessageReceipts> = Outcome.Err(RustError.Unsupported("message receipts"))
+
+    /** A group with its members (the `@` list of the composer). */
+    suspend fun group(jid: String): Outcome<GroupInfo> = Outcome.Err(RustError.Unsupported("group"))
 
     /** "typing…" to the other side; best effort. */
     suspend fun typing(
@@ -214,8 +227,19 @@ class GatewayWaRemote(
             when (action) {
                 is WaSyncAction.SendText -> {
                     gateway
-                        .sendText(SendText(chat, action.text, action.quotedId))
+                        .sendText(SendText(chat, action.text, action.quotedId, action.mentions, action.linkPreview))
                         .map { WaSyncOutcome.Sent(it.messageId, it.timestampMs) }
+                }
+
+                // E6-WA R4: a real forward, marked forwarded; the gateway relays the media.
+                is WaSyncAction.Forward -> {
+                    gateway
+                        .forward(ForwardMessage(action.sourceChat, action.messageId, chat))
+                        .map { WaSyncOutcome.Sent(it.messageId, it.timestampMs) }
+                }
+
+                is WaSyncAction.DeleteForMe -> {
+                    gateway.deleteForMe(DeleteForMe(chat, action.messageId)).map { WaSyncOutcome.Sent() }
                 }
 
                 is WaSyncAction.SendMedia -> {
@@ -273,6 +297,13 @@ class GatewayWaRemote(
         jid: String,
         kind: ChatActionKind,
     ): Outcome<Unit> = call { it.chatAction(ChatAction(jid, kind)).map { } }
+
+    override suspend fun messageReceipts(
+        chat: String,
+        messageId: String,
+    ): Outcome<MessageReceipts> = call { it.messageReceipts(chat, messageId) }
+
+    override suspend fun group(jid: String): Outcome<GroupInfo> = call { it.group(jid) }
 
     override suspend fun typing(
         chat: String,

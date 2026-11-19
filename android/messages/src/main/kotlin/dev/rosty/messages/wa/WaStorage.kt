@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import dev.rosty.core.model.wa.WaSyncMediaStats
 import dev.rosty.design.list.InsetGroupedSection
 import dev.rosty.design.list.ListRow
+import dev.rosty.design.list.ListRowSwitch
 import dev.rosty.design.overlay.LocalOverlayOrNull
 import dev.rosty.design.overlay.MenuItem
 import dev.rosty.design.overlay.menuTrigger
@@ -81,6 +82,7 @@ object WaStorageTags {
     const val Cap = "wa-storage-cap"
     const val Rules = "wa-storage-rules"
     const val HistoryNote = "wa-history-note"
+    const val LinkPreviews = "wa-link-previews"
 }
 
 /**
@@ -208,6 +210,7 @@ fun rememberWaSettingsBlocks(container: MessagesContainer): (LazyListScope.() ->
     val offline = container.waOffline
     val session by offline.session.collectAsState()
     val history by offline.history.collectAsState()
+    val links by container.linkPreviewSetting.enabled.collectAsState()
     var storage by remember { mutableStateOf<WaStorageUi?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
@@ -233,6 +236,29 @@ fun rememberWaSettingsBlocks(container: MessagesContainer): (LazyListScope.() ->
                 )
             }
         }
+        item(key = "wa-links") { WaLinkPreviewSection(links, onChange = container.linkPreviewSetting::set) }
         item(key = "wa-history-note") { WaHistoryNote() }
+    }
+}
+
+/** E6-WA R4: the "Link previews" switch; off, no page is fetched for a card. */
+@Composable
+fun WaLinkPreviewSection(
+    on: Boolean,
+    onChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    InsetGroupedSection(
+        modifier.padding(top = Spacing.sectionGap).testTag(WaStorageTags.LinkPreviews),
+        header = stringResource(R.string.wa_chats_title),
+        footer = stringResource(R.string.wa_link_previews_note),
+    ) {
+        row {
+            ListRowSwitch(
+                title = stringResource(R.string.wa_link_previews),
+                checked = on,
+                onCheckedChange = onChange,
+            )
+        }
     }
 }

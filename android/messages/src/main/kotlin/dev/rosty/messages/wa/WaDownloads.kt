@@ -376,6 +376,9 @@ class WaDownloads(
         return gone.mapTo(HashSet()) { it.chat }
     }
 
+    /** E6-WA R4: deletes the files of disappearing messages the store dropped ([WaSyncStore.expire]). */
+    suspend fun expired(paths: List<String>) = delete(paths)
+
     /** Deletes [paths], only under [dir]: the store never names anything else, but a path is still a path. */
     private suspend fun delete(paths: List<String>) {
         if (paths.isEmpty()) return

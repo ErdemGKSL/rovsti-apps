@@ -8,10 +8,10 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use rosty_wa_client::Picture;
 use rosty_wa_proto::{
     CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, CreateInstance, CreatedInstance,
-    DeleteForMe, EditMessage, GroupInfo, IdentityMappings, InstanceStatus, IssuedKey, KeyInfo,
-    LinkRequest, MarkRead, MediaKind, MediaOptions, PushKeyedRegistration, RevokeMessage, RichChat,
-    RichMessage, ScheduleText, ScheduledText, SendReaction, SendText, Sent, StarMessage,
-    StatusList, WaMessage, WaProfile, WaUser,
+    DeleteForMe, EditMessage, ForwardMessage, GroupInfo, IdentityMappings, InstanceStatus,
+    IssuedKey, KeyInfo, LinkRequest, MarkRead, MediaKind, MediaOptions, MessageReceipts,
+    PushKeyedRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText, ScheduledText,
+    SendReaction, SendText, Sent, StarMessage, StatusList, WaMessage, WaProfile, WaUser,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -258,6 +258,26 @@ pub(super) const OPS: &[OpSpec] = &[
         Empty,
         delete_for_me,
         || vec![case(json!({"chat": CHAT, "message_id": "3EB0A1"}))]
+    ),
+    wa_op!("wa.forward", Call<ForwardMessage>, Sent, forward, || vec![
+        case(json!({"chat": CHAT, "message_id": "3EB0A1", "to": "100000000012@s.whatsapp.net"})),
+        named(
+            "old_gateway",
+            json!({"chat": CHAT, "message_id": "3EB0A1", "to": "100000000012@s.whatsapp.net"})
+        ),
+    ]),
+    wa_op!(
+        "wa.message_receipts",
+        Call<ReceiptsReq>,
+        MessageReceipts,
+        message_receipts,
+        || vec![
+            case(json!({"chat": "120363041234567890@g.us", "message_id": "3EB0B1"})),
+            named(
+                "old_gateway",
+                json!({"chat": "120363041234567890@g.us", "message_id": "3EB0B1"})
+            ),
+        ]
     ),
     wa_op!(
         "wa.star_message",
@@ -675,6 +695,16 @@ gateway_fn!(mark_status_viewed, Ids => Empty, |g, b| done(g.mark_status_viewed(&
 gateway_fn!(edit_message, EditMessage => Empty, |g, b| done(g.edit_message(&b)));
 gateway_fn!(revoke_message, RevokeMessage => Empty, |g, b| done(g.revoke_message(&b)));
 gateway_fn!(delete_for_me, DeleteForMe => Empty, |g, b| done(g.delete_for_me(&b)));
+gateway_fn!(forward, ForwardMessage => Sent, |g, b| g.forward(&b));
+gateway_fn!(message_receipts, ReceiptsReq => MessageReceipts, |g, b| g
+    .message_receipts(&b.chat, &b.message_id));
+
+/// `wa.message_receipts {chat, message_id}`.
+#[derive(Deserialize)]
+pub(super) struct ReceiptsReq {
+    chat: String,
+    message_id: String,
+}
 gateway_fn!(star_message, StarMessage => Empty, |g, b| done(g.star_message(&b)));
 gateway_fn!(chat_action, ChatAction => Empty, |g, b| done(g.chat_action(&b)));
 gateway_fn!(place_call, PlaceTo => CallStarted, |g, b| g.place_call(&b.to));

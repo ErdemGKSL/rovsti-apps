@@ -26,6 +26,7 @@ import dev.rosty.core.model.wa.CreateInstance
 import dev.rosty.core.model.wa.CreatedInstance
 import dev.rosty.core.model.wa.DeleteForMe
 import dev.rosty.core.model.wa.EditMessage
+import dev.rosty.core.model.wa.ForwardMessage
 import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.IdentityMappingsAnswer
 import dev.rosty.core.model.wa.InstanceStatus
@@ -33,6 +34,8 @@ import dev.rosty.core.model.wa.IssuedKey
 import dev.rosty.core.model.wa.KeyInfo
 import dev.rosty.core.model.wa.LinkRequest
 import dev.rosty.core.model.wa.MarkRead
+import dev.rosty.core.model.wa.MessageReceipts
+import dev.rosty.core.model.wa.MessageReceiptsRequest
 import dev.rosty.core.model.wa.PictureAnswer
 import dev.rosty.core.model.wa.PictureBody
 import dev.rosty.core.model.wa.PushRegistration
@@ -236,6 +239,15 @@ class WaGateway internal constructor(
 
     /** Deletes a message on this account's devices. */
     suspend fun deleteForMe(req: DeleteForMe): Outcome<Empty> = guarded { ops.deleteForMe(id, req) }
+
+    /** Forwards a stored message to another chat (E6-WA R4). */
+    suspend fun forward(req: ForwardMessage): Outcome<Sent> = guarded { ops.forward(id, req) }
+
+    /** Who got, read or played one of my messages, and when (E6-WA R4). */
+    suspend fun messageReceipts(
+        chat: String,
+        messageId: String,
+    ): Outcome<MessageReceipts> = guarded { ops.messageReceipts(id, MessageReceiptsRequest(chat, messageId)) }
 
     /** Stars or unstars a message. */
     suspend fun starMessage(req: StarMessage): Outcome<Empty> = guarded { ops.starMessage(id, req) }

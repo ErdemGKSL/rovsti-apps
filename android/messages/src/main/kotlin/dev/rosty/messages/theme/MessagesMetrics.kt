@@ -41,4 +41,11 @@ object MessagesMetrics {
 
     /** The avatar on a shared contact card (M26). */
     val CardAvatar = 72.dp
+
+    /** Link card (WA-R4): the widest its title and description may be, and its picture. */
+    val LinkCardTextMax = 220.dp
+    val LinkPicture = 48.dp
+
+    /** The @ member list above the composer (WA-R4): its tallest. */
+    val MentionListMax = 220.dp
 }

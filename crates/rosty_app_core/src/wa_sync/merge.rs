@@ -176,6 +176,7 @@ fn move_messages(conn: &Connection, from: &str, into: &str) -> Result<bool> {
                 client_id = COALESCE(messages.client_id, f.client_id),
                 viewed_ms = COALESCE(messages.viewed_ms, f.viewed_ms),
                 played_ms = COALESCE(messages.played_ms, f.played_ms),
+                hidden_ms = COALESCE(messages.hidden_ms, f.hidden_ms),
                 wire_sender = COALESCE(messages.wire_sender, f.wire_sender,
                     CASE WHEN f.sender IS NOT messages.sender THEN f.sender END)
              FROM (SELECT * FROM messages WHERE chat = ?1 AND id = ?3) AS f
@@ -191,6 +192,12 @@ fn move_messages(conn: &Connection, from: &str, into: &str) -> Result<bool> {
         "UPDATE messages SET chat = ?2 WHERE chat = ?1",
         params![from, into],
     )?;
+    // What waits for a message of the chat follows it (the merged chat's own wins).
+    conn.execute(
+        "UPDATE OR IGNORE pending_meta SET chat = ?2 WHERE chat = ?1",
+        params![from, into],
+    )?;
+    conn.execute("DELETE FROM pending_meta WHERE chat = ?1", [from])?;
     Ok(moved > 0 || !both.is_empty())
 }
 
@@ -446,6 +453,8 @@ fn rename_sender(action: &mut Action, from: &str, into: &str) -> bool {
         Action::SendText { .. }
         | Action::SendMedia { .. }
         | Action::Edit { .. }
+        | Action::Forward { .. }
+        | Action::DeleteForMe { .. }
         | Action::Star { .. } => return false,
     };
     if sender.as_deref() != Some(from) {

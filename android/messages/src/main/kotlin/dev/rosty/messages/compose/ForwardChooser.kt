@@ -111,6 +111,11 @@ fun OverlayController.presentForward(
     text: String,
     onOpen: (MessagesRoute) -> Unit,
     attach: String? = null,
+    /**
+     * E6-WA R4: a WhatsApp chat picked as the target of a WhatsApp message gets a real forward (marked forwarded,
+     * media relayed) instead of the text in its composer; an SMS target still opens with [text].
+     */
+    onWhatsApp: ((String) -> Unit)? = null,
 ) {
     val controller = this
     present(
@@ -120,7 +125,12 @@ fun OverlayController.presentForward(
         ) { _ ->
             ForwardSheet(c, rows, exclude, whatsAppOnly = attach != null) { target ->
                 controller.dismissAll()
-                onOpen(target.route(text, attach))
+                val jid = target.waJid
+                if (onWhatsApp != null && jid != null && target.channel == Channel.WhatsApp) {
+                    onWhatsApp(jid)
+                } else {
+                    onOpen(target.route(text, attach))
+                }
             }
         },
     )

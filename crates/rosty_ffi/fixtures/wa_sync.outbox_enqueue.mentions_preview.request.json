@@ -1,0 +1,1 @@
+{"handle":7777777777,"now_ms":1790000000000,"client_id":"mentions_preview","chat":"100000000001@s.whatsapp.net","action":{"kind":"send_text","text":"@100000000002 https://example.com","mentions":["100000000002@s.whatsapp.net"],"link_preview":{"url":"https://example.com","title":"Example","thumbnail_b64":"/9j/4A=="}}}

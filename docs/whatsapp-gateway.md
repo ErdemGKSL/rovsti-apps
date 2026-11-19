@@ -412,10 +412,15 @@ A message's `meta` (`MessageMeta`) can hold:
 | `location` | `{latitude, longitude, name, address, live}` (the body stays `unsupported`) |
 | `contact` | a shared contact card `{display_name, vcard}` (body `unsupported`) |
 | `starred` | starred on any device |
+| `forwarding_score` | how often it was forwarded before; from 5 on show "Forwarded many times" (R4) |
+| `link_preview` | `{url, title?, description?, thumbnail}`: the card of the link in the text; `thumbnail` true when `GET /v1/messages/{id}/thumbnail` has its picture (R4) |
+| `expires_s` | the disappearing timer it carries: it disappears that long after it was sent (R4) |
+| `system` | a line of the conversation, not a message: `{"type":"disappearing","seconds":N,"by":"me"\|jid}`; the body is `unsupported` (R4) |
 | `unavailable` | `view_once`, `hosted` or `bot`: a placeholder only, the body is `unsupported` (below) |
 
 A chat's `meta` (`ChatMeta`) holds `picture_id`, the other person's `push_name`,
-`archived`, `pinned`, `muted_until_ms` (`-1` is "until unmuted") and `marked_unread`;
+`archived`, `pinned`, `muted_until_ms` (`-1` is "until unmuted"), `marked_unread` and
+`ephemeral_s` (the disappearing timer in seconds, left out when off; R4);
 `last_meta` is the meta of the newest message.
 
 Live, new event types carry the same data; older clients skip them:
@@ -543,11 +548,39 @@ All need the bearer key and answer 204. Unknown messages are 404, malformed JIDs
 | `POST /v1/messages/delete` | `{chat, message_id}` | delete on my devices only |
 | `POST /v1/messages/star` | `{chat, message_id, starred}` | |
 | `POST /v1/played` | same as `/v1/read` | played receipts for voice and video notes |
-| `POST /v1/chats/action` | `{chat, action}` | `action` is `{"type":"archive","archived":true}`, `{"type":"pin","pinned":true}`, `{"type":"mute","until_ms":null}` (null: forever; else a future unix ms), `{"type":"unmute"}` or `{"type":"mark_read","read":false}` |
+| `POST /v1/chats/action` | `{chat, action}` | `action` is `{"type":"archive","archived":true}`, `{"type":"pin","pinned":true}`, `{"type":"mute","until_ms":null}` (null: forever; else a future unix ms), `{"type":"unmute"}`, `{"type":"mark_read","read":false}` or `{"type":"disappearing","seconds":N}` (0, 86400, 604800 or 7776000; R4) |
+| `POST /v1/messages/forward` | `{chat, message_id, to}` | R4. Answers `Sent`. A copy marked forwarded goes to `to` (score raised, quote and mentions dropped, media relayed from the stored protobuf, `to`'s timer applied) and arrives as a `message` event there. 404 unknown message; 400 deleted, view once, placeholder, a line, or media without its protobuf |
+| `GET /v1/messages/{id}/receipts?chat=` | | R4. `MessageReceipts {chat, id, members: [{jid, jid_alt?, name?, delivered_ms?, read_ms?, played_ms?, left}]}` of my message: per member in a group (today's members with nothing yet too, those who left `left: true`), the one person in a one-to-one chat. A time of 0: reached before the gateway kept times. 404 for an unknown message or someone else's |
 
 Each one is sent to WhatsApp first, then stored and announced (`message_meta`,
 `message_deleted` or `chat_meta`). Client: `edit_message`, `revoke_message`,
 `delete_for_me`, `star_message`, `mark_played`, `chat_action`.
+
+### Message actions (E6-WA R4)
+
+- **Sending text** (`POST /v1/messages/text`) also takes `mentions` (JIDs; the text
+  carries their `@<digits>` tokens) and `link_preview {url, title?, description?,
+  thumbnail_b64?}` (a JPEG of at most 64 KiB; the phone made it, the gateway fetches
+  nothing). In a group that names its members by LID, each mention with a known LID
+  goes out as the LID, token and JID. An older gateway ignores both fields.
+- **Disappearing messages**: the chat's timer comes from the `EPHEMERAL_SETTING`
+  message (one-to-one), the group notification and the group's metadata, a history
+  conversation, and an incoming message that names its timer with the time it was set;
+  an older setting never overrides a newer one. Every send (text, media, forward)
+  carries the timer, and the stored copy its `expires_s`. A change makes a line in the
+  chat (`meta.system`), stored once per change, never counted as unread and never
+  pushed; `chat_meta` follows. Messages keep `expires_ms`; the gateway does not purge
+  them (open owner question, `plans/e6wa-r4.md`).
+- **Receipt times**: each receipt's time is kept per member (and, from now on, for
+  one-to-one chats with the chat as participant) for the receipts route.
+- **Early changes**: an edit or delete for everyone of a message the gateway does not
+  have yet waits in `pending_changes` (14 days) and is applied, with its
+  `message_meta`, right after the message arrives.
+
+Store schema **v11** adds `receipts.delivered_ms`, `read_ms`, `played_ms`,
+`chat_settings.ephemeral_s`, `ephemeral_ms`, `messages.expires_ms` and the table
+`pending_changes`: only new nullable columns and a new table. An older gateway refuses
+a v11 file, so back it up before the deploy (`sqlite3 gateway.db ".backup gateway-v10.db"`).
 
 `POST /v1/messages/media` also takes `quoted_id` (reply), `file_name` (documents;
 no path separators, at most 255 bytes), `seconds` and `voice_note=true` in its query.

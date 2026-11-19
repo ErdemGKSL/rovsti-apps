@@ -170,6 +170,14 @@ class ConversationActions(
     val record: RecordActions? = null,
     /** E6-WA R3: where the pictures on screen are, for the viewer's flight; null: nothing is tracked. */
     val mediaAnchors: MediaAnchors? = null,
+    /** E6-WA R4: the × of the editing bar (the composer goes back to a new message). */
+    val onCancelEdit: () -> Unit = {},
+    /** E6-WA R4: the × of the link chip (this message goes out without its card). */
+    val onRemoveLink: () -> Unit = {},
+    /** E6-WA R4: a member of the `@` list was picked. */
+    val onPickMention: (MentionOptionUi) -> Unit = {},
+    /** E6-WA R4: a tap on a link card. */
+    val onOpenLink: (String) -> Unit = {},
 )
 
 /** The labels of the tools on a conversation page. */
@@ -310,6 +318,10 @@ fun ConversationScreen(
                                 CenteredLabel(item.label, accent = true)
                             }
 
+                            is ConversationItem.Bubble if item.bubble.notice -> {
+                                NoticeLine(item.bubble)
+                            }
+
                             is ConversationItem.Bubble -> {
                                 BubbleRow(
                                     item.bubble,
@@ -404,7 +416,18 @@ fun ConversationScreen(
                                 }
                             }
                         }
+                        if (state.mentionOptions.isNotEmpty()) {
+                            MentionList(state.mentionOptions, actions.onPickMention)
+                        }
+                        state.editing?.let { editing ->
+                            ReplyBar(
+                                ReplyUi(editing.key, stringResource(R.string.wa_editing), editing.text),
+                                actions.onCancelEdit,
+                                Modifier.testTag(ActionTags.Editing),
+                            )
+                        }
                         state.reply?.let { ReplyBar(it, actions.onCancelReply) }
+                        state.linkChip?.let { LinkChip(it, actions.onRemoveLink) }
                         state.attachment?.let {
                             AttachmentBar(
                                 it,
@@ -809,7 +832,9 @@ private fun BubbleBody(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RostyIcon(RostyIcons.Forward, null, tint = secondary, size = MessagesMetrics.TickGlyph)
                 RostyText(
-                    stringResource(R.string.conversation_forwarded),
+                    stringResource(
+                        if (bubble.forwardedMany) R.string.wa_forwarded_many else R.string.conversation_forwarded,
+                    ),
                     modifier = Modifier.padding(start = Spacing.xs),
                     style = RostyTheme.type.caption1.copy(fontStyle = FontStyle.Italic),
                     color = secondary,
@@ -864,7 +889,9 @@ private fun BubbleBody(
                 }
             }
         }
-        if (bubble.text.isNotEmpty()) {
+        if (bubble.text.isNotEmpty() && bubble.marks.isNotEmpty() && !bubble.deleted) {
+            MarkedText(bubble, RostyTheme.type.body.scaledBy(textScale), ink)
+        } else if (bubble.text.isNotEmpty()) {
             RostyText(
                 bubble.text.rtlSafe(),
                 style =
@@ -878,6 +905,7 @@ private fun BubbleBody(
                 color = if (bubble.deleted) RostyTheme.colors.labelSecondary else ink,
             )
         }
+        bubble.link?.takeIf { !bubble.deleted }?.let { LinkCard(it, ink, secondary, actions.onOpenLink) }
         Row(
             Modifier.align(Alignment.End).padding(top = Spacing.textGap),
             verticalAlignment = Alignment.CenterVertically,

@@ -481,6 +481,33 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE push_tokens ADD COLUMN key_version INTEGER;
     ALTER TABLE push_tokens ADD COLUMN public_key BLOB;
     ",
+    // v11: message actions (E6-WA R4). When each member's receipt of my
+    // message arrived (`receipts.*_ms`, NULL for receipts stored before; a
+    // one-to-one chat now keeps its one person's row too, the chat as
+    // participant); the chat's disappearing timer and when it was set
+    // (`chat_settings.ephemeral_*`, NULL: off or unknown); when a message
+    // disappears (`messages.expires_ms`, from its timer); and the edits and
+    // deletes for everyone that arrived before their message
+    // (`pending_changes`, applied when it is stored). Only new nullable
+    // columns, an index and a new table: every row stays.
+    "
+    ALTER TABLE receipts ADD COLUMN delivered_ms INTEGER;
+    ALTER TABLE receipts ADD COLUMN read_ms INTEGER;
+    ALTER TABLE receipts ADD COLUMN played_ms INTEGER;
+    ALTER TABLE chat_settings ADD COLUMN ephemeral_s INTEGER;
+    ALTER TABLE chat_settings ADD COLUMN ephemeral_ms INTEGER;
+    ALTER TABLE messages ADD COLUMN expires_ms INTEGER;
+    CREATE INDEX messages_by_expiry ON messages(expires_ms) WHERE expires_ms IS NOT NULL;
+    CREATE TABLE pending_changes (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        change_json TEXT NOT NULL,
+        at_ms INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, chat, id, kind)
+    );
+    ",
 ];
 
 /// The public half of an app install's push key, as stored (round 7b).
@@ -2788,6 +2815,221 @@ mod tests {
             .unwrap();
         assert_eq!(page[0].meta.status, Some(DeliveryStatus::Delivered));
         assert_eq!(page[1].meta.status, None);
+    }
+
+    #[tokio::test]
+    async fn early_edits_and_deletes_wait_for_their_message() {
+        let store = store_with_instance().await;
+        let chat = "100000000011@s.whatsapp.net";
+        let edit = MessageChange::Edit {
+            body: MessageBody::Text("edited".into()),
+            edited_ms: 50,
+        };
+        // The edit comes first: nothing to change yet, it waits.
+        let none = store
+            .change_message(id(1), chat.into(), "m".into(), edit)
+            .await
+            .unwrap();
+        assert!(none.is_none());
+        // A star of an unknown message is not kept.
+        store
+            .change_message(id(1), chat.into(), "m".into(), MessageChange::Star(true))
+            .await
+            .unwrap();
+        store
+            .insert_message(id(1), text(chat, "m", 10, false), None)
+            .await
+            .unwrap();
+        let pending = store
+            .take_pending(id(1), chat.into(), "m".into())
+            .await
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            &pending[0],
+            MessageChange::Edit { edited_ms: 50, .. }
+        ));
+        // Taken once.
+        assert!(
+            store
+                .take_pending(id(1), chat.into(), "m".into())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn message_info_lists_members_with_times() {
+        use rosty_wa_proto::DeliveryStatus;
+        let store = store_with_instance().await;
+        let group = "120363000000000001@g.us";
+        let (a, b, c, gone, me) = (
+            "100000000011@s.whatsapp.net",
+            "100000000012@s.whatsapp.net",
+            "100000000013@s.whatsapp.net",
+            "100000000019@s.whatsapp.net",
+            "100000000099@s.whatsapp.net",
+        );
+        store
+            .insert_message(id(1), text(group, "m", 1, true), None)
+            .await
+            .unwrap();
+        store
+            .insert_message(id(1), text(group, "t", 2, false), None)
+            .await
+            .unwrap();
+        let receipt = |who: &str, status, at| {
+            store.record_group_receipt_at(
+                id(1),
+                group.into(),
+                GroupReceipt {
+                    participant: who.into(),
+                    ids: vec!["m".into()],
+                    status,
+                    members: Some(3),
+                    own: vec![me.into()],
+                },
+                at,
+            )
+        };
+        receipt(a, DeliveryStatus::Delivered, 100).await.unwrap();
+        receipt(a, DeliveryStatus::Read, 200).await.unwrap();
+        // A later delivered receipt keeps the first time.
+        receipt(a, DeliveryStatus::Delivered, 300).await.unwrap();
+        receipt(gone, DeliveryStatus::Played, 400).await.unwrap();
+        let members = Some(vec![
+            a.to_owned(),
+            b.to_owned(),
+            c.to_owned(),
+            me.to_owned(),
+        ]);
+        let info = store
+            .message_receipts(id(1), group.into(), "m".into(), members, vec![me.into()])
+            .await
+            .unwrap()
+            .expect("mine");
+        let of = |jid: &str| info.members.iter().find(|m| m.jid == jid).cloned();
+        let a_row = of(a).expect("a");
+        assert_eq!(
+            (
+                a_row.delivered_ms,
+                a_row.read_ms,
+                a_row.played_ms,
+                a_row.left
+            ),
+            (Some(100), Some(200), None, false)
+        );
+        let gone_row = of(gone).expect("left member");
+        assert!(gone_row.left);
+        assert_eq!(gone_row.played_ms, Some(400));
+        assert_eq!(gone_row.read_ms, Some(400));
+        // Members with nothing yet are listed; I am not.
+        assert_eq!(of(b).map(|m| m.delivered_ms), Some(None));
+        assert!(of(c).is_some());
+        assert!(of(me).is_none());
+        // Someone else's message has no info.
+        assert!(
+            store
+                .message_receipts(id(1), group.into(), "t".into(), None, Vec::new())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn one_to_one_receipts_keep_their_time() {
+        use rosty_wa_proto::DeliveryStatus;
+        let store = store_with_instance().await;
+        let chat = "100000000011@s.whatsapp.net";
+        store
+            .insert_message(id(1), text(chat, "m", 1, true), None)
+            .await
+            .unwrap();
+        let empty = store
+            .message_receipts(id(1), chat.into(), "m".into(), None, Vec::new())
+            .await
+            .unwrap()
+            .expect("mine");
+        assert_eq!(empty.members.len(), 1);
+        assert_eq!(empty.members[0].jid, chat);
+        assert_eq!(empty.members[0].delivered_ms, None);
+        let moved = store
+            .set_status_at(
+                id(1),
+                chat.into(),
+                vec!["m".into()],
+                DeliveryStatus::Read,
+                70,
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved[0].1.status, Some(DeliveryStatus::Read));
+        let info = store
+            .message_receipts(id(1), chat.into(), "m".into(), None, Vec::new())
+            .await
+            .unwrap()
+            .expect("mine");
+        assert_eq!(info.members[0].read_ms, Some(70));
+        assert_eq!(info.members[0].delivered_ms, Some(70));
+    }
+
+    #[tokio::test]
+    async fn chat_timer_follows_the_newest_setting() {
+        let store = store_with_instance().await;
+        let chat = "100000000011@s.whatsapp.net";
+        let set = |seconds, at| store.set_chat_timer(id(1), chat.into(), seconds, at);
+        let meta = set(86_400, 100).await.unwrap().expect("changed");
+        assert_eq!(meta.ephemeral_s, Some(86_400));
+        // The same timer again is no change; an older setting loses.
+        assert!(set(86_400, 150).await.unwrap().is_none());
+        assert!(set(0, 120).await.unwrap().is_none());
+        assert_eq!(
+            store.chat_timer(id(1), chat.into()).await.unwrap(),
+            Some(86_400)
+        );
+        // Clearing the other settings keeps the timer.
+        store
+            .change_chat(id(1), chat.into(), ChatChange::Pinned(true))
+            .await
+            .unwrap();
+        store
+            .change_chat(id(1), chat.into(), ChatChange::Pinned(false))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.chat_timer(id(1), chat.into()).await.unwrap(),
+            Some(86_400)
+        );
+        // A history sync without a setting time never overrides it.
+        let meta = set(0, 200).await.unwrap().expect("off");
+        assert_eq!(meta.ephemeral_s, None);
+        assert_eq!(store.chat_timer(id(1), chat.into()).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn disappearing_messages_record_when_they_expire() {
+        let store = store_with_instance().await;
+        let chat = "100000000011@s.whatsapp.net";
+        let extras = MessageExtras {
+            meta: rosty_wa_proto::MessageMeta {
+                expires_s: Some(60),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        store
+            .insert_message_full(id(1), text(chat, "m", 1_000, false), extras)
+            .await
+            .unwrap();
+        let conn = lock(&store.conn);
+        let expires: Option<i64> = conn
+            .query_row("SELECT expires_ms FROM messages WHERE id = 'm'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(expires, Some(61_000));
     }
 
     #[tokio::test]

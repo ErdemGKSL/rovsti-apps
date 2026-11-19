@@ -128,6 +128,8 @@ pub mod unread_jump;
 pub mod vault;
 pub mod vcard;
 pub mod voice_player;
+/// WhatsApp message actions: edit, forward, mentions, link previews, message info, disappearing messages.
+pub mod wa_actions;
 /// WhatsApp identity: LID and phone-number ids of one person, the canonical key, the name rule.
 pub mod wa_identity;
 pub mod wire;

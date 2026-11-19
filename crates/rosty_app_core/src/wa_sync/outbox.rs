@@ -10,7 +10,10 @@
 //! * A star shows on the stored message at once and holds against what the gateway still says until it went out. A
 //!   later star of the same message replaces one that has not gone out; a refused one is undone and dropped.
 
-use rosty_wa_proto::{MediaKind, MediaMeta, MediaOptions, MessageBody, Reaction, WaMessage};
+use rosty_wa_proto::{
+    LinkPreview, LinkPreviewOut, MediaKind, MediaMeta, MediaOptions, MessageBody, Reaction,
+    WaMessage,
+};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +60,21 @@ pub struct MediaExtras {
     pub view_once: bool,
 }
 
+/// What a forward sends, copied from its source message when it is queued: the outbox shows the copy before the
+/// gateway has it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardSnapshot {
+    pub kind: Kind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<MediaMeta>,
+}
+
 /// What a queued row does. `chat` is on the row.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -65,6 +83,24 @@ pub enum Action {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         quoted_id: Option<String>,
+        /// The JIDs the text mentions; the text holds their `@<token>`s (`rosty_core::wa_actions::encode`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mentions: Vec<String>,
+        /// The link card made on the phone.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        link_preview: Option<LinkPreviewOut>,
+    },
+    /// Forward the message `message_id` of `source_chat` into the row's chat. `snapshot` is filled when it is
+    /// queued.
+    Forward {
+        source_chat: String,
+        message_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<ForwardSnapshot>,
+    },
+    /// Delete a message on this account's devices only. The thread hides it at once.
+    DeleteForMe {
+        message_id: String,
     },
     SendMedia {
         /// The file to send, already copied into app storage.
@@ -128,6 +164,8 @@ impl Action {
     pub fn kind(&self) -> &'static str {
         match self {
             Action::SendText { .. } => "send_text",
+            Action::Forward { .. } => "forward",
+            Action::DeleteForMe { .. } => "delete_for_me",
             Action::SendMedia { .. } => "send_media",
             Action::Edit { .. } => "edit",
             Action::Revoke { .. } => "revoke",
@@ -193,7 +231,10 @@ impl Action {
     }
 
     pub fn is_send(&self) -> bool {
-        matches!(self, Action::SendText { .. } | Action::SendMedia { .. })
+        matches!(
+            self,
+            Action::SendText { .. } | Action::SendMedia { .. } | Action::Forward { .. }
+        )
     }
 
     /// The stored message this action changes.
@@ -203,8 +244,12 @@ impl Action {
             | Action::Revoke { message_id, .. }
             | Action::React { message_id, .. }
             | Action::Star { message_id, .. }
+            | Action::DeleteForMe { message_id }
             | Action::MarkPlayed { message_id, .. } => Some(message_id),
-            Action::SendText { .. } | Action::SendMedia { .. } | Action::MarkRead { .. } => None,
+            Action::SendText { .. }
+            | Action::SendMedia { .. }
+            | Action::Forward { .. }
+            | Action::MarkRead { .. } => None,
         }
     }
 
@@ -229,7 +274,69 @@ impl Action {
                 mime: Some(mime.clone()),
                 size: Some(*size),
             }),
+            Action::Forward {
+                snapshot: Some(snapshot),
+                ..
+            } => Some(Content {
+                kind: snapshot.kind,
+                text: snapshot.text.clone(),
+                mime: snapshot.mime.clone(),
+                size: snapshot.size,
+            }),
             _ => None,
+        }
+    }
+
+    /// The body of a send as the gateway will describe it.
+    fn body(&self) -> MessageBody {
+        match self {
+            Action::SendText { text, .. } => MessageBody::Text(text.clone()),
+            Action::SendMedia {
+                media,
+                mime,
+                size,
+                caption,
+                ..
+            } => MessageBody::Media {
+                kind: *media,
+                caption: caption.clone(),
+                mime: mime.clone(),
+                size: *size,
+            },
+            Action::Forward {
+                snapshot: Some(snapshot),
+                ..
+            } => match (snapshot.kind, media_kind(snapshot.kind)) {
+                (Kind::Text, _) => MessageBody::Text(snapshot.text.clone().unwrap_or_default()),
+                (_, Some(kind)) => MessageBody::Media {
+                    kind,
+                    caption: snapshot.text.clone(),
+                    mime: snapshot.mime.clone().unwrap_or_default(),
+                    size: snapshot.size.unwrap_or(0),
+                },
+                _ => MessageBody::Unsupported,
+            },
+            _ => MessageBody::Unsupported,
+        }
+    }
+
+    /// The mentions and link card a text send carries.
+    fn text_extras(&self) -> (Vec<String>, Option<LinkPreview>) {
+        match self {
+            Action::SendText {
+                mentions,
+                link_preview,
+                ..
+            } => (
+                mentions.clone(),
+                link_preview.as_ref().map(|p| LinkPreview {
+                    url: p.url.clone(),
+                    title: p.title.clone(),
+                    description: p.description.clone(),
+                    thumbnail: p.thumbnail_b64.is_some(),
+                }),
+            ),
+            _ => (Vec::new(), None),
         }
     }
 
@@ -245,6 +352,23 @@ impl Action {
     /// True when `body` is what this send would arrive as. Media compares kind and caption: the gateway may
     /// re-encode, so MIME type and size can differ.
     fn echoes(&self, body: &MessageBody) -> bool {
+        if let Action::Forward { .. } = self {
+            return match (self.body(), body) {
+                (MessageBody::Text(a), MessageBody::Text(b)) => a == *b,
+                (
+                    MessageBody::Media { kind, caption, .. },
+                    MessageBody::Media {
+                        kind: echo_kind,
+                        caption: echo,
+                        ..
+                    },
+                ) => {
+                    kind == *echo_kind
+                        && caption.as_deref().unwrap_or("") == echo.as_deref().unwrap_or("")
+                }
+                _ => false,
+            };
+        }
         match (self, body) {
             (Action::SendText { text, .. }, MessageBody::Text(echo)) => text == echo,
             (
@@ -487,7 +611,7 @@ fn set_starred(conn: &Connection, chat: &str, id: &str, starred: bool) -> Result
 pub(super) fn pending_rows(conn: &Connection, chat: &str) -> Result<Vec<MessageRow>> {
     let mut rows: Vec<MessageRow> = items_where(
         conn,
-        "chat = ?1 AND kind IN ('send_text', 'send_media')",
+        "chat = ?1 AND kind IN ('send_text', 'send_media', 'forward')",
         Some(chat),
     )?
     .into_iter()
@@ -508,7 +632,15 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         Action::SendMedia { file, .. } => Some(file.clone()),
         _ => None,
     };
-    let media = item.action.media_meta();
+    let media = item.action.media_meta().or_else(|| match &item.action {
+        Action::Forward {
+            snapshot: Some(snapshot),
+            ..
+        } => snapshot.media.clone(),
+        _ => None,
+    });
+    let forwarded = matches!(item.action, Action::Forward { .. });
+    let (mentions, link_preview) = item.action.text_extras();
     Some(MessageRow {
         id: item.client_id.clone(),
         chat: item.chat,
@@ -528,12 +660,12 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         deleted: false,
         deleted_at: None,
         deleted_by: None,
-        forwarded: false,
+        forwarded,
         starred: false,
         media,
         location: None,
         contact: None,
-        mentions: Vec::new(),
+        mentions,
         unavailable: None,
         has_thumbnail: false,
         media_path,
@@ -544,7 +676,26 @@ fn pending_row(item: OutboxItem) -> Option<MessageRow> {
         pending: Vec::new(),
         viewed: false,
         played: false,
+        editable_until_ms: None,
+        forwarding_score: None,
+        forwarded_many: false,
+        mention_spans: Vec::new(),
+        link_preview,
+        system: None,
+        expires_at: None,
     })
+}
+
+/// The media kind of a stored kind.
+fn media_kind(kind: Kind) -> Option<MediaKind> {
+    match kind {
+        Kind::Image => Some(MediaKind::Image),
+        Kind::Video => Some(MediaKind::Video),
+        Kind::Audio => Some(MediaKind::Audio),
+        Kind::Document => Some(MediaKind::Document),
+        Kind::Sticker => Some(MediaKind::Sticker),
+        _ => None,
+    }
 }
 
 /// Edits, deletes and reactions of stored messages of `chat` that wait, as `(message id, op)`.
@@ -554,7 +705,7 @@ pub(super) fn pending_ops(
 ) -> Result<Vec<(String, super::model::PendingOp)>> {
     Ok(items_where(
         conn,
-        "chat = ?1 AND kind IN ('edit', 'revoke', 'react')",
+        "chat = ?1 AND kind IN ('edit', 'revoke', 'react', 'delete_for_me')",
         Some(chat),
     )?
     .into_iter()
@@ -600,7 +751,7 @@ pub(super) fn reconcile_echo(conn: &Connection, message: &WaMessage) -> Result<O
     }
     let candidates = items_where(
         conn,
-        "chat = ?1 AND maybe_sent = 1 AND kind IN ('send_text', 'send_media')",
+        "chat = ?1 AND maybe_sent = 1 AND kind IN ('send_text', 'send_media', 'forward')",
         Some(&message.chat),
     )?;
     for candidate in candidates {
@@ -627,8 +778,11 @@ pub(super) fn reconcile_echo(conn: &Connection, message: &WaMessage) -> Result<O
 
 /// Shows an action on the stored rows at once: a read mark clears the unread count, a reaction replaces mine, a
 /// star sets the flag.
-fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()> {
+fn apply_optimistic(conn: &Connection, chat: &str, action: &Action, now_ms: i64) -> Result<()> {
     match action {
+        Action::DeleteForMe { message_id } => {
+            apply::hide(conn, chat, message_id, now_ms)?;
+        }
         Action::MarkRead { .. } => {
             conn.execute(
                 "UPDATE chats SET unread = 0, marked_unread = 0 WHERE jid = ?1",
@@ -669,11 +823,37 @@ fn apply_optimistic(conn: &Connection, chat: &str, action: &Action) -> Result<()
         } => set_starred(conn, chat, message_id, *starred)?,
         Action::SendText { .. }
         | Action::SendMedia { .. }
+        | Action::Forward { .. }
         | Action::Edit { .. }
         | Action::Revoke { .. }
         | Action::MarkPlayed { .. } => {}
     }
     Ok(())
+}
+
+/// What a forward of `message_id` of `chat` sends; an error when the message cannot be forwarded.
+fn forward_snapshot(conn: &Connection, chat: &str, message_id: &str) -> Result<ForwardSnapshot> {
+    let row = apply::load(conn, chat, message_id)?
+        .ok_or_else(|| Error::NotFound(format!("message {message_id} of {chat}")))?;
+    let source = rosty_core::wa_actions::ForwardSource {
+        sent: true,
+        deleted: row.deleted,
+        view_once: row.media.as_ref().is_some_and(|m| m.view_once),
+        placeholder: row.extra.system.is_some()
+            || row.extra.unavailable.is_some()
+            || !row.content.is_known(),
+        is_media: row.content.kind.is_media(),
+        media_relayable: true,
+    };
+    rosty_core::wa_actions::can_forward(&source)
+        .map_err(|why| Error::Invalid(format!("this message cannot be forwarded ({why:?})")))?;
+    Ok(ForwardSnapshot {
+        kind: row.content.kind,
+        text: row.content.text,
+        mime: row.content.mime,
+        size: row.content.size,
+        media: row.media,
+    })
 }
 
 /// What [`Store::mark_played`] needs to know about its message.
@@ -826,6 +1006,27 @@ impl Store {
         if let Action::Star { message_id, .. } = action {
             supersede_stars(&tx, chat, message_id)?;
         }
+        // A forward keeps what it sends: the source may change or go before the row goes out.
+        let filled;
+        let action = match action {
+            Action::Forward {
+                source_chat,
+                message_id,
+                ..
+            } => {
+                let source_key = self
+                    .identity
+                    .lookup(source_chat)
+                    .map_or_else(|| source_chat.clone(), |r| r.key.as_str().to_owned());
+                filled = Action::Forward {
+                    source_chat: source_key.clone(),
+                    message_id: message_id.clone(),
+                    snapshot: Some(forward_snapshot(&tx, &source_key, message_id)?),
+                };
+                &filled
+            }
+            other => other,
+        };
         tx.execute(
             "INSERT INTO outbox (client_id, chat, kind, payload, created_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![client_id, chat, action.kind(), serde_json::to_string(action)?, now_ms],
@@ -834,7 +1035,7 @@ impl Store {
             apply::ensure_chat(&tx, chat)?;
             tx.execute("UPDATE chats SET hidden = 0 WHERE jid = ?1", [chat])?;
         }
-        apply_optimistic(&tx, chat, action)?;
+        apply_optimistic(&tx, chat, action, now_ms)?;
         let queued = item(&tx, client_id)?
             .ok_or_else(|| Error::NotFound(format!("outbox row {client_id}")))?;
         tx.commit()?;
@@ -974,6 +1175,20 @@ impl Store {
                 }
                 Settled::Failed
             }
+            // A refused delete for me is undone: the message shows again.
+            Outcome::Error {
+                error: ErrorKind::Rejected,
+                ..
+            } if matches!(row.action, Action::DeleteForMe { .. }) => {
+                tx.execute("DELETE FROM outbox WHERE client_id = ?1", [client_id])?;
+                if let Action::DeleteForMe { message_id } = &row.action {
+                    tx.execute(
+                        "UPDATE messages SET hidden_ms = NULL WHERE chat = ?1 AND id = ?2",
+                        params![row.chat, message_id],
+                    )?;
+                }
+                Settled::Failed
+            }
             Outcome::Error {
                 error: ErrorKind::Rejected,
                 message,
@@ -1036,6 +1251,8 @@ impl Store {
             | Action::React { .. }
             | Action::MarkRead { .. }
             | Action::Star { .. }
+            | Action::Forward { .. }
+            | Action::DeleteForMe { .. }
             | Action::MarkPlayed { .. } => {
                 return Err(Error::Invalid("only a message text can be edited".into()));
             }
@@ -1115,6 +1332,8 @@ fn apply_sent(conn: &Connection, row: &OutboxItem, now_ms: i64) -> Result<()> {
         }
         Action::SendText { .. }
         | Action::SendMedia { .. }
+        | Action::Forward { .. }
+        | Action::DeleteForMe { .. }
         | Action::React { .. }
         | Action::MarkRead { .. }
         | Action::MarkPlayed { .. } => {}
@@ -1139,22 +1358,9 @@ fn confirm_send(
     }
     let body = match content.kind {
         Kind::Text => MessageBody::Text(content.text.clone().unwrap_or_default()),
-        _ => match &row.action {
-            Action::SendMedia {
-                media,
-                mime,
-                size,
-                caption,
-                ..
-            } => MessageBody::Media {
-                kind: *media,
-                caption: caption.clone(),
-                mime: mime.clone(),
-                size: *size,
-            },
-            _ => MessageBody::Unsupported,
-        },
+        _ => row.action.body(),
     };
+    let (mentions, link_preview) = row.action.text_extras();
     let message = WaMessage {
         id: message_id.to_owned(),
         chat: row.chat.clone(),
@@ -1174,7 +1380,16 @@ fn confirm_send(
         }),
         status: Some(rosty_wa_proto::DeliveryStatus::Sent),
         // What was sent with the file, until the gateway describes the message itself.
-        media: row.action.media_meta(),
+        media: row.action.media_meta().or_else(|| match &row.action {
+            Action::Forward {
+                snapshot: Some(snapshot),
+                ..
+            } => snapshot.media.clone(),
+            _ => None,
+        }),
+        forwarded: matches!(row.action, Action::Forward { .. }),
+        mentions,
+        link_preview,
         ..Default::default()
     };
     apply::upsert(
@@ -1193,6 +1408,21 @@ fn confirm_send(
         "UPDATE messages SET client_id = ?3 WHERE chat = ?1 AND id = ?2",
         params![row.chat, message_id, row.client_id],
     )?;
+    // The picture of a link card is the message's thumbnail.
+    if let Action::SendText {
+        link_preview: Some(preview),
+        ..
+    } = &row.action
+        && let Some(thumbnail) = preview
+            .thumbnail_b64
+            .as_deref()
+            .and_then(rosty_wa_proto::decode_b64)
+    {
+        conn.execute(
+            "UPDATE messages SET thumb = ?3 WHERE chat = ?1 AND id = ?2 AND thumb IS NULL",
+            params![row.chat, message_id, thumbnail],
+        )?;
+    }
     if let Action::SendMedia {
         file, size, extras, ..
     } = &row.action

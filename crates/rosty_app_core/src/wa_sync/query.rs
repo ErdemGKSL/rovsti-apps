@@ -35,8 +35,25 @@ fn row_columns() -> String {
             AND media.state = 'ready'),
          client_id, wire_sender,
          (SELECT state FROM media WHERE media.chat = messages.chat AND media.id = messages.id),
-         viewed_ms IS NOT NULL, played_ms IS NOT NULL"
+         viewed_ms IS NOT NULL, played_ms IS NOT NULL, messages.expires_at"
     )
+}
+
+/// What the edit rule needs of a stored row.
+fn edit_target(row: &MessageRow) -> rosty_core::wa_actions::EditTarget {
+    rosty_core::wa_actions::EditTarget {
+        from_me: row.from_me,
+        sent: row.client_id.is_some() || row.state != RowState::Received,
+        has_text_slot: matches!(
+            row.kind,
+            Kind::Text | Kind::Image | Kind::Video | Kind::Document
+        ),
+        deleted: row.deleted,
+        special: row.system.is_some()
+            || row.unavailable.is_some()
+            || row.media.as_ref().is_some_and(|m| m.view_once),
+        sent_ms: row.timestamp_ms,
+    }
 }
 
 fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
@@ -80,13 +97,24 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<MessageRow> {
         pending: Vec::new(),
         viewed: row.get(tail + 5)?,
         played: row.get(tail + 6)?,
+        editable_until_ms: None,
+        forwarding_score: stored.extra.forwarding_score,
+        forwarded_many: rosty_core::wa_actions::forwarded_many(stored.extra.forwarding_score),
+        mention_spans: Vec::new(),
+        link_preview: stored.extra.link_preview,
+        system: stored.extra.system,
+        expires_at: row.get(tail + 7)?,
+    })
+    .map(|mut found| {
+        found.editable_until_ms = rosty_core::wa_actions::editable_until(&edit_target(&found));
+        found
     })
 }
 
 /// The newest stored message of `chat` that the thread shows.
 fn newest(conn: &Connection, chat: &str, cleared_ts: Option<i64>) -> Result<Option<MessageRow>> {
     let sql = format!(
-        "SELECT {} FROM messages WHERE chat = ?1 AND ts > ?2 ORDER BY ts DESC, id DESC LIMIT 1",
+        "SELECT {} FROM messages WHERE chat = ?1 AND ts > ?2 AND hidden_ms IS NULL ORDER BY ts DESC, id DESC LIMIT 1",
         row_columns()
     );
     let mut stmt = conn.prepare_cached(&sql)?;
@@ -100,7 +128,7 @@ impl Store {
     pub fn chats(&self, include_archived: bool) -> Result<Vec<ChatRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT jid, name, push_name, is_group, unread, pinned, archived, muted_until_ms, marked_unread,
-                picture_id, cleared_ts, wire_jid
+                picture_id, cleared_ts, wire_jid, ephemeral_s
              FROM chats WHERE hidden = 0 AND (archived = 0 OR ?1)",
         )?;
         let found: Vec<(ChatRow, Option<i64>)> = stmt
@@ -118,6 +146,7 @@ impl Store {
                         muted_until_ms: row.get(7)?,
                         marked_unread: row.get(8)?,
                         picture_id: row.get(9)?,
+                        ephemeral_s: row.get(12)?,
                         last_ms: 0,
                         last: None,
                         waiting: 0,
@@ -168,7 +197,7 @@ impl Store {
         });
         let sql = format!(
             "SELECT {} FROM messages
-             WHERE chat = ?1 AND ts > ?2 AND (?3 OR ts < ?4 OR (ts = ?4 AND id < ?5))
+             WHERE chat = ?1 AND ts > ?2 AND hidden_ms IS NULL AND (?3 OR ts < ?4 OR (ts = ?4 AND id < ?5))
              ORDER BY ts DESC, id DESC LIMIT ?6",
             row_columns()
         );
@@ -203,6 +232,7 @@ impl Store {
                 row.pending = ops;
             }
         }
+        self.fill_mentions(&mut stored);
 
         let mut items = if before.is_none() {
             outbox::pending_rows(&self.conn, chat)?
@@ -233,7 +263,8 @@ impl Store {
         });
         let sql = format!(
             "SELECT {} FROM messages LEFT JOIN chats ON jid = chat
-             WHERE starred = 1 AND deleted = 0 AND COALESCE(hidden, 0) = 0 AND ts > COALESCE(cleared_ts, ?1)
+             WHERE starred = 1 AND deleted = 0 AND COALESCE(chats.hidden, 0) = 0 AND messages.hidden_ms IS NULL
+                AND ts > COALESCE(cleared_ts, ?1)
                 AND (?2 OR ts < ?3 OR (ts = ?3 AND (chat < ?4 OR (chat = ?4 AND id < ?5))))
              ORDER BY ts DESC, chat DESC, id DESC LIMIT ?6",
             row_columns()
@@ -325,7 +356,8 @@ impl Store {
         let order = if upwards { "ASC" } else { "DESC" };
         let sql = format!(
             "SELECT {} FROM messages
-             WHERE chat = ?1 AND {GALLERY_ROWS} AND ts > ?2 AND instr(?3, ',' || kind || ',') > 0
+             WHERE chat = ?1 AND {GALLERY_ROWS} AND ts > ?2 AND hidden_ms IS NULL
+                AND instr(?3, ',' || kind || ',') > 0
                 AND (?4 OR ts < ?5 OR (ts = ?5 AND id < ?6))
                 AND (?7 OR ts > ?8 OR (ts = ?8 AND id > ?9))
              ORDER BY ts {order}, id {order} LIMIT ?10",
@@ -361,7 +393,8 @@ impl Store {
             };
             let sql = format!(
                 "SELECT EXISTS (SELECT 1 FROM messages
-                 WHERE chat = ?1 AND {GALLERY_ROWS} AND ts > ?2 AND instr(?3, ',' || kind || ',') > 0
+                 WHERE chat = ?1 AND {GALLERY_ROWS} AND ts > ?2 AND hidden_ms IS NULL
+                AND instr(?3, ',' || kind || ',') > 0
                     AND {side})"
             );
             let found: bool = self.conn.prepare_cached(&sql)?.query_row(
@@ -397,6 +430,92 @@ impl Store {
         );
         let mut stmt = self.conn.prepare_cached(&sql)?;
         let mut rows = stmt.query_map(params![chat, id], read_row)?;
-        Ok(rows.next().transpose()?)
+        let mut found: Vec<MessageRow> = rows.next().transpose()?.into_iter().collect();
+        drop(rows);
+        self.fill_mentions(&mut found);
+        Ok(found.pop())
+    }
+
+    /// The mention spans of each row that mentions someone: every token the identity layer knows for each person
+    /// (a LID mention of someone whose number is known since reads as that person).
+    pub(super) fn fill_mentions(&self, rows: &mut [MessageRow]) {
+        for row in rows.iter_mut().filter(|row| !row.mentions.is_empty()) {
+            let Some(text) = row.text.as_deref() else {
+                continue;
+            };
+            let targets: Vec<rosty_core::wa_actions::MentionTarget> = row
+                .mentions
+                .iter()
+                .map(|jid| rosty_core::wa_actions::MentionTarget {
+                    jid: jid.clone(),
+                    tokens: self.mention_tokens(jid),
+                })
+                .collect();
+            row.mention_spans = rosty_core::wa_actions::spans(text, &targets);
+        }
+    }
+
+    /// The users of every id of the person behind `jid` (numbers and LIDs), and `jid`'s own.
+    fn mention_tokens(&self, jid: &str) -> Vec<String> {
+        let mut tokens: Vec<String> = rosty_core::wa_actions::mention_token(jid)
+            .into_iter()
+            .collect();
+        if let Some(person) = self.identity.lookup(jid).and_then(|r| r.person_id) {
+            for alias in self.identity.aliases(person) {
+                if !tokens.contains(&alias.user) {
+                    tokens.push(alias.user);
+                }
+            }
+        }
+        tokens
+    }
+
+    /// Deletes the disappearing messages that are due at `now_ms`, with their media rows. Answers the files to
+    /// delete, the chats that changed and when the next one is due. Run it when the store opens (expiry while the
+    /// app was closed) and again at `next_ms`.
+    pub fn expire(&mut self, now_ms: i64) -> Result<super::model::Expired> {
+        let tx = self.conn.transaction()?;
+        let due: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT chat, id FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?1",
+            )?;
+            stmt.query_map([now_ms], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        let mut files = Vec::new();
+        let mut chats: Vec<String> = Vec::new();
+        for (chat, id) in &due {
+            let paths: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT path FROM media WHERE chat = ?1 AND id = ?2 AND path IS NOT NULL",
+                )?;
+                stmt.query_map(params![chat, id], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?
+            };
+            files.extend(paths);
+            tx.execute(
+                "DELETE FROM media WHERE chat = ?1 AND id = ?2",
+                params![chat, id],
+            )?;
+            tx.execute(
+                "DELETE FROM messages WHERE chat = ?1 AND id = ?2",
+                params![chat, id],
+            )?;
+            if !chats.contains(chat) {
+                chats.push(chat.clone());
+            }
+        }
+        let next_ms: Option<i64> = tx.query_row(
+            "SELECT MIN(expires_at) FROM messages WHERE expires_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        tx.commit()?;
+        Ok(super::model::Expired {
+            removed: due.len() as u32,
+            files,
+            chats,
+            next_ms,
+        })
     }
 }

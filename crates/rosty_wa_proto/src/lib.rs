@@ -42,10 +42,11 @@ pub use media::{
     decode_b64, encode_b64,
 };
 pub use meta::{
-    ChatAction, ChatActionKind, ChatMeta, DELETED_BY_ME, DeleteForMe, DeliveryStatus, EditMessage,
-    EditRecord, KeptContent, Location, MAX_PROFILES, MUTED_FOREVER, MediaMeta, MediaOptions,
-    MessageMeta, ProfilesRequest, Quoted, RevokeMessage, RichChat, RichMessage, SharedContact,
-    StarMessage, Unavailable, WaProfile,
+    ChatAction, ChatActionKind, ChatMeta, DELETED_BY_ME, DISAPPEARING_CHOICES, DeleteForMe,
+    DeliveryStatus, EditMessage, EditRecord, FREQUENTLY_FORWARDED_SCORE, ForwardMessage,
+    KeptContent, LinkPreview, Location, MAX_PROFILES, MUTED_FOREVER, MediaMeta, MediaOptions,
+    MessageMeta, MessageReceipts, ProfilesRequest, Quoted, ReceiptMember, RevokeMessage, RichChat,
+    RichMessage, SharedContact, StarMessage, SystemNote, Unavailable, WaProfile,
 };
 pub use people::{
     BundleEnd, BundleError, BundleHeader, BundleWriter, PeopleEntry, PeopleJobError,

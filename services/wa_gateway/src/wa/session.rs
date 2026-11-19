@@ -12,18 +12,21 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 use rosty_wa_proto::meta::body_preview;
 use rosty_wa_proto::{
-    ChatAction, ChatActionKind, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
-    IdentitySource, InstanceState, InstanceStatus, LinkRequest, MarkRead, MessageBody, MessageMeta,
-    Quoted, Reaction, RevokeMessage, SendReaction, SendText, Sent, TypingState, WaMessage, WaUser,
-    event::ReceiptKind,
+    ChatAction, ChatActionKind, ChatState, DeliveryStatus, EditMessage, ForwardMessage,
+    GatewayEvent, GroupInfo, IdentitySource, InstanceState, InstanceStatus, LinkPreview,
+    LinkRequest, MarkRead, MessageBody, MessageMeta, Quoted, Reaction, RevokeMessage, SendReaction,
+    SendText, Sent, TypingState, WaMessage, WaUser, event::ReceiptKind,
 };
 use whatsapp_rust::RevokeType;
 use whatsapp_rust::features::GroupMetadata;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
+use whatsapp_rust::send::SendOptions;
 use whatsapp_rust::upload::UploadOptions;
 use whatsapp_rust::wacore::client::context::GroupInfo as WaGroupInfo;
+use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction;
 use whatsapp_rust::wacore::types::events::{ConnectFailureReason, Receipt};
+use whatsapp_rust::wacore::types::message::AddressingMode;
 use whatsapp_rust::wacore::types::presence::{ChatPresence, ChatPresenceMedia, ReceiptType};
 use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;
@@ -34,7 +37,8 @@ use super::convert;
 use super::lid::{self, LidMap, Pair, Resolver};
 use super::{app_state, groups, history, media, picture, reaction, status};
 use crate::driver::{
-    DriverError, EventSink, MessageRef, PictureFetch, SendMedia, StatusReceipt, WaDriver,
+    DriverError, EventSink, MessageRef, PictureFetch, SendMedia, StatusReceipt, TimerChange,
+    WaDriver,
 };
 use crate::now_ms;
 use crate::store::{
@@ -639,6 +643,16 @@ impl WaRuntime {
                             None => convert::message(&ctx, &map),
                         };
                         app_state::apply_converted(&sink, converted).await;
+                        // A message of a chat with a timer names the timer
+                        // and when it was set.
+                        if let Some((seconds, at_ms)) = convert::timer_hint(&ctx.message) {
+                            let to = convert::addressed(
+                                &ctx.info.source,
+                                ctx.info.peer_recipient_pn.as_ref(),
+                                &map,
+                            );
+                            sink.learn_chat_timer(&to.chat, seconds, at_ms).await;
+                        }
                         // A business names itself in the envelope of its
                         // messages; no profile query is needed for that.
                         if let Some(name) = convert::verified_name(&ctx.info) {
@@ -795,11 +809,16 @@ impl WaRuntime {
         }
         let raw = message.encode_to_vec();
         let mut extras = convert::extras(&message);
-        let result = client.send_message(to, message).await.map_err(failed)?;
+        let timer = sink.chat_timer(&out.chat).await;
+        let result = client
+            .send_message_with_options(to, message, send_options(timer))
+            .await
+            .map_err(failed)?;
 
         let timestamp_ms = now_ms();
         extras.raw_proto = Some(raw);
         extras.meta.status = Some(DeliveryStatus::Sent);
+        extras.meta.expires_s = timer;
         extras.meta.quoted = quoted;
         sink.emit_full(
             out.message(
@@ -916,6 +935,9 @@ impl WaRuntime {
                 .map(str::to_owned);
             info.announce = group.is_announcement;
             sink.rename_chat(&info.jid, &info.subject).await;
+            // The metadata names the timer as it is now (none: off).
+            let timer = group.ephemeral.and_then(|e| e.expiration).unwrap_or(0);
+            sink.learn_chat_timer(&info.jid, timer, now_ms()).await;
             infos.push(info);
         }
         infos.sort_by_key(|g| g.subject.to_lowercase());
@@ -936,38 +958,149 @@ impl WaRuntime {
             status: Some(DeliveryStatus::Sent),
             ..Default::default()
         };
-        let result = match req.quoted_id.as_deref().filter(|id| !id.is_empty()) {
-            None => client.send_text(to, req.text.clone()).await,
-            Some(quoted_id) => {
-                let quoted = sink.find_message(&out.chat, quoted_id).await;
-                let wire = sink.wire_ids(&out.chat, quoted_id).await;
-                let own_jid = out.own_jid.as_deref();
-                meta.quoted = Some(quoted_meta(quoted_id, quoted.as_ref(), own_jid));
-                let context = quote_context(&out.chat, quoted_id, quoted.as_ref(), &wire, own_jid);
-                let message = wa::Message {
-                    extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
-                        text: Some(req.text.clone()),
-                        context_info: MessageField::some(context),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                };
-                client.send_message(to, message).await
-            }
+        let mut context: Option<wa::ContextInfo> = None;
+        if let Some(quoted_id) = req.quoted_id.as_deref().filter(|id| !id.is_empty()) {
+            let quoted = sink.find_message(&out.chat, quoted_id).await;
+            let wire = sink.wire_ids(&out.chat, quoted_id).await;
+            let own_jid = out.own_jid.as_deref();
+            meta.quoted = Some(quoted_meta(quoted_id, quoted.as_ref(), own_jid));
+            context = Some(quote_context(
+                &out.chat,
+                quoted_id,
+                quoted.as_ref(),
+                &wire,
+                own_jid,
+            ));
         }
-        .map_err(failed)?;
+        let mut text = req.text.clone();
+        if !req.mentions.is_empty() {
+            // A group that names its members by LID is told who is meant by
+            // LID too, token and JID.
+            let lid_group = to.is_group()
+                && client
+                    .groups()
+                    .query_info(&to)
+                    .await
+                    .is_ok_and(|g| g.addressing_mode == AddressingMode::Lid);
+            let mut wire_mentions = req.mentions.clone();
+            if lid_group {
+                let mut pairs = Vec::new();
+                for mention in &req.mentions {
+                    if let Some(lid) = sink.lid_of_pn(mention).await {
+                        pairs.push((mention.clone(), lid));
+                    }
+                }
+                (text, wire_mentions) = convert::mentions_by_lid(&text, &req.mentions, &pairs);
+            }
+            context.get_or_insert_with(Default::default).mentioned_jid = wire_mentions;
+            meta.mentions = req.mentions.clone();
+        }
+        let mut thumbnail = None;
+        let mut extended = wa::message::ExtendedTextMessage {
+            text: Some(text.clone()),
+            ..Default::default()
+        };
+        if let Some(preview) = &req.link_preview {
+            let picture = preview
+                .thumbnail()
+                .map_err(|e| DriverError::BadRequest(e.to_string()))?;
+            extended.matched_text = Some(preview.url.clone());
+            extended.title = preview.title.clone();
+            extended.description = preview.description.clone();
+            extended.jpeg_thumbnail = picture.clone();
+            meta.link_preview = Some(LinkPreview {
+                url: preview.url.clone(),
+                title: preview.title.clone(),
+                description: preview.description.clone(),
+                thumbnail: picture.is_some(),
+            });
+            thumbnail = picture;
+        }
+        let message = if context.is_some() || req.link_preview.is_some() {
+            if let Some(context) = context {
+                extended.context_info = MessageField::some(context);
+            }
+            wa::Message {
+                extended_text_message: MessageField::some(extended),
+                ..Default::default()
+            }
+        } else {
+            wa::Message {
+                conversation: Some(text.clone()),
+                ..Default::default()
+            }
+        };
+        let timer = sink.chat_timer(&out.chat).await;
+        meta.expires_s = timer;
+        let result = client
+            .send_message_with_options(to, message, send_options(timer))
+            .await
+            .map_err(failed)?;
 
         let timestamp_ms = now_ms();
         sink.emit_full(
             out.message(
                 result.message_id.clone(),
                 timestamp_ms,
-                MessageBody::Text(req.text),
+                MessageBody::Text(text),
             ),
             MessageExtras {
                 meta,
+                thumbnail,
                 ..Default::default()
             },
+        )
+        .await;
+        Ok(Sent {
+            message_id: result.message_id,
+            timestamp_ms,
+        })
+    }
+}
+
+/// The send options of a message into a chat whose timer is `timer`.
+fn send_options(timer: Option<u32>) -> SendOptions {
+    match timer.filter(|t| *t > 0) {
+        Some(seconds) => SendOptions::default().with_ephemeral_expiration(seconds),
+        None => SendOptions::default(),
+    }
+}
+
+impl WaRuntime {
+    /// Sends a copy of a stored message to `req.to`, marked forwarded
+    /// (`prepare_for_forward`: score raised, quote and mentions dropped), with
+    /// the target chat's timer, and stores the copy.
+    async fn forward_inner(
+        &self,
+        instance: &InstanceId,
+        req: ForwardMessage,
+    ) -> Result<Sent, DriverError> {
+        let (client, sink) = self.client_of(instance)?;
+        let resolver = self.resolver_of(instance)?;
+        let to = convert::parse_jid(&req.to)?;
+        let out = Outgoing::new(&client, &resolver, &to).await;
+        let (source, raw, meta) = sink
+            .forward_source(&req.chat, &req.message_id)
+            .await
+            .ok_or_else(|| DriverError::BadRequest("no such message".into()))?;
+        let original = convert::forwardable(&source.body, raw.as_deref(), &meta)?;
+        let copy = *original.get_base_message().prepare_for_forward();
+        let mut extras = convert::extras(&copy);
+        if matches!(source.body, MessageBody::Media { .. }) {
+            extras.raw_proto = Some(copy.encode_to_vec());
+        }
+        let timer = sink.chat_timer(&out.chat).await;
+        let result = client
+            .send_message_with_options(to, copy, send_options(timer))
+            .await
+            .map_err(failed)?;
+        let timestamp_ms = now_ms();
+        extras.meta.status = Some(DeliveryStatus::Sent);
+        extras.meta.expires_s = timer;
+        extras.meta.mentions.clear();
+        sink.emit_full(
+            out.message(result.message_id.clone(), timestamp_ms, source.body),
+            extras,
         )
         .await;
         Ok(Sent {
@@ -987,6 +1120,8 @@ async fn on_receipt(sink: &EventSink, resolver: &Resolver, receipt: &Receipt) {
     if receipt.message_ids.is_empty() {
         return;
     }
+    // When it reached them, for message info.
+    let at_ms = receipt.timestamp.timestamp_millis();
     let source = &receipt.source;
     // A receipt names its sender by both ids when WhatsApp sends both.
     if let Some(pair) = source
@@ -1059,9 +1194,9 @@ async fn on_receipt(sink: &EventSink, resolver: &Resolver, receipt: &Receipt) {
             members,
             own: own_ids(&own),
         };
-        sink.group_receipt(&chat, receipt).await;
+        sink.group_receipt_at(&chat, receipt, at_ms).await;
     } else {
-        sink.set_status(&chat, ids, status).await;
+        sink.set_status_at(&chat, ids, status, at_ms).await;
     }
 }
 
@@ -1123,6 +1258,28 @@ async fn handle_event(
             let jid = update.group_jid.to_non_ad().to_string();
             if let Some(subject) = groups::new_subject(&update.action) {
                 sink.rename_chat(&jid, subject).await;
+            }
+            // The group's disappearing timer: a line in the chat when it
+            // changed (my own change through the gateway already left one).
+            if let GroupNotificationAction::Ephemeral { expiration, .. } = &update.action {
+                let by = update
+                    .participant_pn
+                    .as_ref()
+                    .or(update.participant.as_ref())
+                    .map(|p| p.to_non_ad().to_string());
+                let at_ms = update.timestamp.timestamp_millis();
+                sink.chat_timer_changed(TimerChange {
+                    chat: jid.clone(),
+                    seconds: *expiration,
+                    at_ms,
+                    by,
+                    note_id: format!(
+                        "{}-{}",
+                        update.notification_id.as_deref().unwrap_or("GTIMER"),
+                        update.action_index
+                    ),
+                })
+                .await;
             }
             sink.publish(GatewayEvent::GroupChanged { jid });
         }
@@ -1648,6 +1805,21 @@ impl WaDriver for WaRuntime {
         Box::pin(async move {
             let chat = convert::parse_jid(&req.chat)?;
             let (client, _) = self.client_of(&instance)?;
+            if let ChatActionKind::Disappearing { seconds } = req.action {
+                return if chat.is_group() {
+                    client
+                        .groups()
+                        .set_ephemeral(chat, seconds)
+                        .await
+                        .map_err(failed)
+                } else {
+                    client
+                        .set_chat_disappearing_timer(chat, seconds)
+                        .await
+                        .map(|_| ())
+                        .map_err(failed)
+                };
+            }
             let actions = client.chat_actions();
             match req.action {
                 ChatActionKind::Archive { archived: true } => {
@@ -1666,9 +1838,19 @@ impl WaDriver for WaRuntime {
                 ChatActionKind::MarkRead { read } => {
                     actions.mark_chat_as_read(&chat, read, None).await
                 }
+                ChatActionKind::Disappearing { .. } => Ok(()),
             }
             .map_err(failed)
         })
+    }
+
+    fn forward_message(
+        &self,
+        instance: &InstanceId,
+        req: ForwardMessage,
+    ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move { self.forward_inner(&instance, req).await })
     }
 
     fn mark_played(

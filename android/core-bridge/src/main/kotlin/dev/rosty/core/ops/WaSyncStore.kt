@@ -30,6 +30,8 @@ import dev.rosty.core.model.wa.WaSyncEvent
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncExpireRequest
+import dev.rosty.core.model.wa.WaSyncExpired
 import dev.rosty.core.model.wa.WaSyncFetch
 import dev.rosty.core.model.wa.WaSyncFetched
 import dev.rosty.core.model.wa.WaSyncFocusRequest
@@ -403,6 +405,12 @@ class WaSyncStore internal constructor(
         messageId: String,
         nowMs: Long,
     ): Outcome<WaSyncPlayed> = live { ops.markPlayed(WaSyncMarkPlayedRequest(id, nowMs, clientId, chat, messageId)) }
+
+    /**
+     * Deletes the disappearing messages due at [nowMs] (E6-WA R4). Delete the answer's `files`; run it when the store
+     * opens (what expired while the app was closed) and again at `nextMs`.
+     */
+    suspend fun expire(nowMs: Long): Outcome<WaSyncExpired> = live { ops.expire(WaSyncExpireRequest(id, nowMs)) }
 
     // ---- the gateway process, the linked account, history progress, unlink
 

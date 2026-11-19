@@ -25,6 +25,8 @@ import dev.rosty.core.model.wa.WaSyncEnqueueRequest
 import dev.rosty.core.model.wa.WaSyncEventsRequest
 import dev.rosty.core.model.wa.WaSyncEvictRequest
 import dev.rosty.core.model.wa.WaSyncEviction
+import dev.rosty.core.model.wa.WaSyncExpireRequest
+import dev.rosty.core.model.wa.WaSyncExpired
 import dev.rosty.core.model.wa.WaSyncFocusRequest
 import dev.rosty.core.model.wa.WaSyncGalleryPage
 import dev.rosty.core.model.wa.WaSyncHandleRequest
@@ -202,6 +204,9 @@ interface WaSyncOps {
     /** Queues the played receipt of a received voice note, once per message. */
     suspend fun markPlayed(req: WaSyncMarkPlayedRequest): Outcome<WaSyncPlayed>
 
+    /** Deletes the disappearing messages that are due, with their media rows (E6-WA R4). */
+    suspend fun expire(req: WaSyncExpireRequest): Outcome<WaSyncExpired>
+
     /** Takes in the gateway's epoch, account epoch, own ids and history progress. */
     suspend fun noteStatus(req: WaSyncNoteStatusRequest): Outcome<WaSyncStatusNoted>
 
@@ -271,6 +276,7 @@ interface WaSyncOps {
                 "wa_sync.media_cap",
                 "wa_sync.chat_media",
                 "wa_sync.media_viewed",
+                "wa_sync.expire",
                 "wa_sync.mark_played",
                 "wa_sync.note_status",
                 "wa_sync.account_changed",
@@ -412,6 +418,9 @@ class NativeWaSyncOps(
 
     override suspend fun markPlayed(req: WaSyncMarkPlayedRequest) =
         core.call("wa_sync.mark_played", req, WaSyncMarkPlayedRequest.serializer(), WaSyncPlayed.serializer())
+
+    override suspend fun expire(req: WaSyncExpireRequest) =
+        core.call("wa_sync.expire", req, WaSyncExpireRequest.serializer(), WaSyncExpired.serializer())
 
     override suspend fun noteStatus(req: WaSyncNoteStatusRequest) =
         core.call("wa_sync.note_status", req, WaSyncNoteStatusRequest.serializer(), WaSyncStatusNoted.serializer())

@@ -284,6 +284,7 @@ fn a_new_file_has_the_identity_tables_and_columns() {
             "merge_log",
             "messages",
             "outbox",
+            "pending_meta",
             "person",
             "sync_state"
         ]
@@ -832,6 +833,8 @@ fn send(text: &str) -> Action {
     Action::SendText {
         text: text.into(),
         quoted_id: None,
+        mentions: Vec::new(),
+        link_preview: None,
     }
 }
 
@@ -1132,6 +1135,7 @@ fn chat_settings_are_combined_as_the_rule_says() {
                     pinned: false,
                     muted_until_ms: Some(50_000),
                     marked_unread: true,
+                    ephemeral_s: None,
                 },
             },
             GatewayEvent::ChatMeta {
@@ -1143,6 +1147,7 @@ fn chat_settings_are_combined_as_the_rule_says() {
                     pinned: true,
                     muted_until_ms: Some(MUTED_FOREVER),
                     marked_unread: false,
+                    ephemeral_s: None,
                 },
             },
             // Cleared on another device while it was still the LID chat.

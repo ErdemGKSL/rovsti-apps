@@ -197,6 +197,57 @@ data class BubbleUi(
     val reminder: String? = null,
     /** E6.13: the id stars and reminders know the message by when it is not [key] (a WhatsApp message I sent). */
     val markId: String? = null,
+    /** E6-WA R4: "Forwarded many times" instead of "Forwarded". */
+    val forwardedMany: Boolean = false,
+    /** E6-WA R4: ranges of [text] drawn as names (`@Anna`), UTF-16. */
+    val marks: ImmutableList<TextMark> = persistentListOf(),
+    /** E6-WA R4: the card of the link in the text. */
+    val link: LinkCardUi? = null,
+    /** E6-WA R4: a line of the conversation ("Disappearing messages turned on"): drawn centred, no bubble, no menu. */
+    val notice: Boolean = false,
+)
+
+/** A range of a bubble's text drawn as a name (a mention). */
+@Immutable
+data class TextMark(
+    val start: Int,
+    val end: Int,
+)
+
+/** The card of a link: its picture (a thumbnail model; null: none), title, description and host. */
+@Immutable
+data class LinkCardUi(
+    val url: String,
+    val title: String?,
+    val description: String?,
+    val host: String?,
+    val picture: Any? = null,
+)
+
+/** The message the composer edits (E6-WA R4): Send saves the new text. */
+@Immutable
+data class EditingUi(
+    val key: String,
+    val text: String,
+)
+
+/** The link card that goes out with the next Send (E6-WA R4); [loading] while the page is read. */
+@Immutable
+data class LinkChipUi(
+    val url: String,
+    val title: String?,
+    val host: String?,
+    val picture: Any? = null,
+    val loading: Boolean = false,
+)
+
+/** A group member the `@` in the composer offers (E6-WA R4). */
+@Immutable
+data class MentionOptionUi(
+    val jid: String,
+    val name: String,
+    /** A readable number, when the member has one that is not the name. */
+    val detail: String? = null,
 )
 
 /** A row of the conversation list: a day separator, the unread divider or a bubble. Newest first (reverse layout). */
@@ -262,6 +313,12 @@ data class ConversationUi(
     val reply: ReplyUi? = null,
     /** The file that goes out with the next Send. */
     val attachment: AttachmentUi? = null,
+    /** E6-WA R4: the sent message the composer edits; null: a new message. */
+    val editing: EditingUi? = null,
+    /** E6-WA R4: the link card of the next Send. */
+    val linkChip: LinkChipUi? = null,
+    /** E6-WA R4: the members the `@` being typed may name (empty: no list). */
+    val mentionOptions: ImmutableList<MentionOptionUi> = persistentListOf(),
     /** The label of the voice speed pill ("1×", "1.5×", "2×"). */
     val voiceSpeed: String = "",
     /**

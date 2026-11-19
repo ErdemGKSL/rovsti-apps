@@ -1,0 +1,1 @@
+{"ok":{"sections":[{"section":"read","rows":[{"jid":"100000000001@s.whatsapp.net","at_ms":2000},{"jid":"100000000004@s.whatsapp.net","at_ms":1200,"left":true}]},{"section":"delivered","rows":[{"jid":"100000000002@s.whatsapp.net","at_ms":1500}]},{"section":"waiting","rows":[{"jid":"100000000003@s.whatsapp.net"}]}]}}

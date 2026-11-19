@@ -24,6 +24,7 @@ import dev.rosty.core.model.wa.CreateInstance
 import dev.rosty.core.model.wa.CreatedInstance
 import dev.rosty.core.model.wa.DeleteForMe
 import dev.rosty.core.model.wa.EditMessage
+import dev.rosty.core.model.wa.ForwardMessage
 import dev.rosty.core.model.wa.GroupInfo
 import dev.rosty.core.model.wa.HandleAnswer
 import dev.rosty.core.model.wa.IdBody
@@ -37,12 +38,22 @@ import dev.rosty.core.model.wa.JidsBody
 import dev.rosty.core.model.wa.KeyIdBody
 import dev.rosty.core.model.wa.KeyInfo
 import dev.rosty.core.model.wa.LabelBody
+import dev.rosty.core.model.wa.LinkFindAnswer
+import dev.rosty.core.model.wa.LinkFindRequest
+import dev.rosty.core.model.wa.LinkMeta
+import dev.rosty.core.model.wa.LinkParseRequest
 import dev.rosty.core.model.wa.LinkReadAnswer
 import dev.rosty.core.model.wa.LinkReadRequest
 import dev.rosty.core.model.wa.LinkRequest
 import dev.rosty.core.model.wa.LinkWriteRequest
 import dev.rosty.core.model.wa.MarkRead
+import dev.rosty.core.model.wa.MentionEncodeRequest
+import dev.rosty.core.model.wa.MentionEncoded
+import dev.rosty.core.model.wa.MentionQueryAnswer
+import dev.rosty.core.model.wa.MentionQueryRequest
 import dev.rosty.core.model.wa.MessageIdBody
+import dev.rosty.core.model.wa.MessageReceipts
+import dev.rosty.core.model.wa.MessageReceiptsRequest
 import dev.rosty.core.model.wa.MessagesBody
 import dev.rosty.core.model.wa.PictureAnswer
 import dev.rosty.core.model.wa.PictureBody
@@ -51,6 +62,8 @@ import dev.rosty.core.model.wa.PresenceBody
 import dev.rosty.core.model.wa.PushParseAnswer
 import dev.rosty.core.model.wa.PushParseRequest
 import dev.rosty.core.model.wa.PushRegistration
+import dev.rosty.core.model.wa.ReceiptSectionsAnswer
+import dev.rosty.core.model.wa.ReceiptSectionsRequest
 import dev.rosty.core.model.wa.RevokeMessage
 import dev.rosty.core.model.wa.RichChat
 import dev.rosty.core.model.wa.RichMessage
@@ -150,6 +163,13 @@ object WaContracts : ContractModels {
             handleOp<EditMessage, Empty>("wa.edit_message")
             handleOp<RevokeMessage, Empty>("wa.revoke_message")
             handleOp<DeleteForMe, Empty>("wa.delete_for_me")
+            handleOp<ForwardMessage, Sent>("wa.forward", err = listOf("old_gateway"))
+            handleOp<MessageReceiptsRequest, MessageReceipts>("wa.message_receipts", err = listOf("old_gateway"))
+            op<MentionQueryRequest, MentionQueryAnswer>("wa.mention_query", ok = listOf("email"))
+            op<MentionEncodeRequest, MentionEncoded>("wa.mention_encode", ok = listOf("edited"))
+            op<LinkFindRequest, LinkFindAnswer>("wa.link_find", ok = listOf("none"))
+            op<LinkParseRequest, LinkMeta>("wa.link_parse", ok = listOf("bare"), err = listOf("not_http"))
+            op<ReceiptSectionsRequest, ReceiptSectionsAnswer>("wa.receipt_sections", ok = listOf("voice"))
             handleOp<StarMessage, Empty>("wa.star_message")
             handleOp<ChatAction, Empty>("wa.chat_action", ok = listOf("mute"))
             handleOp<PlaceCallBody, CallStarted>("wa.place_call", err = listOf("offline"))

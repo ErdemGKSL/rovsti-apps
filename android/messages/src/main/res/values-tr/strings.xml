@@ -645,4 +645,36 @@
         <item quantity="one">%d yeni mesaj</item>
         <item quantity="other">%d yeni mesaj</item>
     </plurals>
+    <!-- E6-WA R4: message actions -->
+    <string name="wa_editing">Mesajı Düzenle</string>
+    <string name="wa_forwarded_many">Birçok kez iletildi</string>
+    <string name="wa_link_loading">Önizleme yükleniyor…</string>
+    <string name="wa_link_remove">Önizlemeyi Kaldır</string>
+    <string name="wa_delete_for_me">Benden Sil</string>
+    <string name="wa_info_title">Mesaj Bilgisi</string>
+    <string name="wa_info_played">Oynatanlar</string>
+    <string name="wa_info_read">Okuyanlar</string>
+    <string name="wa_info_delivered">İletilenler</string>
+    <string name="wa_info_waiting">Bekleniyor</string>
+    <string name="wa_info_left">Gruptan ayrıldı</string>
+    <string name="wa_info_unavailable">Mesaj bilgisi bu geçitte henüz yok.</string>
+    <string name="wa_info_failed">Mesaj bilgisi yüklenemedi.</string>
+    <string name="wa_disappearing">Süreli Mesajlar</string>
+    <string name="wa_disappearing_current">Süreli Mesajlar: %1$s</string>
+    <string name="wa_timer_off">Kapalı</string>
+    <string name="wa_timer_day">24 Saat</string>
+    <string name="wa_timer_week">7 Gün</string>
+    <string name="wa_timer_90">90 Gün</string>
+    <string name="wa_timer_other">%1$d Saniye</string>
+    <string name="wa_timer_failed">Süre değiştirilemedi.</string>
+    <string name="wa_notice_on_you">Süreli mesajları açtınız: %1$s</string>
+    <string name="wa_notice_on_by">%1$s süreli mesajları açtı: %2$s</string>
+    <string name="wa_notice_on">Süreli mesajlar açıldı: %1$s</string>
+    <string name="wa_notice_off_you">Süreli mesajları kapattınız</string>
+    <string name="wa_notice_off_by">%1$s süreli mesajları kapattı</string>
+    <string name="wa_notice_off">Süreli mesajlar kapatıldı</string>
+    <string name="wa_forward_failed">Bu mesaj iletilemez.</string>
+    <string name="wa_chats_title">Sohbetler</string>
+    <string name="wa_link_previews">Bağlantı Önizlemeleri</string>
+    <string name="wa_link_previews_note">Bir bağlantı yazdığınızda önizleme kartını göstermek için sayfayı bu telefon açar. Geçit hiçbir zaman açmaz. Kapalıyken hiçbir şey indirilmez.</string>
 </resources>

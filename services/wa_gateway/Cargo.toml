@@ -20,6 +20,7 @@ futures.workspace = true
 getrandom.workspace = true
 log.workspace = true
 ring = "0.17"
+rosty_core.workspace = true
 rosty_wa_proto.workspace = true
 rusqlite.workspace = true
 rustls-pki-types = { version = "1", features = ["std"] }

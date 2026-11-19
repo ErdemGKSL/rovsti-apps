@@ -10,15 +10,15 @@ use axum::{Json, Router};
 use rosty_wa_proto::api::routes as r;
 use rosty_wa_proto::meta::picture_etag;
 use rosty_wa_proto::{
-    ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, EditMessage, ErrorCode, MAX_PROFILES,
-    MUTED_FOREVER, MarkRead, MessageBody, ProfilesRequest, RevokeMessage, StarMessage, WaMessage,
-    WaProfile,
+    ChatAction, ChatActionKind, DELETED_BY_ME, DeleteForMe, EditMessage, ErrorCode, ForwardMessage,
+    MAX_PROFILES, MUTED_FOREVER, MarkRead, MessageBody, MessageReceipts, ProfilesRequest,
+    RevokeMessage, Sent, StarMessage, WaMessage, WaProfile,
 };
 use serde::Deserialize;
 
 use crate::AppState;
 use crate::auth::Authed;
-use crate::driver::{DriverError, MessageRef, PictureFetch};
+use crate::driver::{DriverError, MessageRef, PictureFetch, TimerChange};
 use crate::error::HttpError;
 use crate::media_cache::MediaCache;
 use crate::now_ms;
@@ -43,6 +43,8 @@ pub fn routes() -> Router<AppState> {
         .route(r::STAR, post(star))
         .route(r::MARK_PLAYED, post(mark_played))
         .route(r::CHAT_ACTION, post(chat_action))
+        .route(r::FORWARD, post(forward))
+        .route(r::MESSAGE_RECEIPTS, get(receipts))
         .route(r::PROFILES, post(profiles))
         .route(r::PICTURE, get(picture))
 }
@@ -235,8 +237,10 @@ async fn mark_played(
 }
 
 /// The stored setting a chat action leads to.
-fn chat_change(action: &ChatActionKind) -> ChatChange {
-    match action {
+/// The stored setting an action changes; `None` for the disappearing timer,
+/// which has its own path ([`TimerChange`]).
+fn chat_change(action: &ChatActionKind) -> Option<ChatChange> {
+    Some(match action {
         ChatActionKind::Archive { archived } => ChatChange::Archived(*archived),
         ChatActionKind::Pin { pinned } => ChatChange::Pinned(*pinned),
         ChatActionKind::Mute { until_ms } => {
@@ -244,7 +248,106 @@ fn chat_change(action: &ChatActionKind) -> ChatChange {
         }
         ChatActionKind::Unmute => ChatChange::Muted(None),
         ChatActionKind::MarkRead { read } => ChatChange::MarkedUnread(!read),
+        ChatActionKind::Disappearing { .. } => return None,
+    })
+}
+
+/// The id of the line a timer change I made through the gateway leaves.
+fn timer_note_id(now: i64) -> String {
+    format!("RTIMER{now:X}")
+}
+
+/// Forwards a stored message to another chat.
+async fn forward(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<ForwardMessage>,
+) -> ApiResult<Json<Sent>> {
+    check_jid(&req.to)?;
+    let message = stored(&state, &auth.instance, &req.chat, &req.message_id).await?;
+    let rich = state
+        .store()
+        .message_rich(
+            auth.instance.clone(),
+            message.chat.clone(),
+            message.id.clone(),
+        )
+        .await?
+        .ok_or_else(|| HttpError::not_found("no such message"))?;
+    let source = rosty_core::wa_actions::ForwardSource {
+        sent: true,
+        deleted: rich.meta.deleted || rich.meta.revoked,
+        view_once: rich.meta.media.as_ref().is_some_and(|m| m.view_once),
+        placeholder: rich.meta.unavailable.is_some()
+            || rich.meta.system.is_some()
+            || rich.message.body == MessageBody::Unsupported,
+        is_media: matches!(rich.message.body, MessageBody::Media { .. }),
+        media_relayable: true,
+    };
+    if let Err(why) = rosty_core::wa_actions::can_forward(&source) {
+        return Err(HttpError::bad_request(format!(
+            "this message cannot be forwarded ({why:?})"
+        )));
     }
+    let to = req.to.trim().to_owned();
+    let sent = state
+        .driver()
+        .forward_message(
+            &auth.instance,
+            ForwardMessage {
+                chat: message.chat,
+                message_id: message.id,
+                to,
+            },
+        )
+        .await?;
+    Ok(Json(sent))
+}
+
+#[derive(Deserialize)]
+struct ReceiptsQuery {
+    chat: String,
+}
+
+/// Who got, read or played one of my messages, and when.
+async fn receipts(
+    State(state): State<AppState>,
+    auth: Authed,
+    Path(message_id): Path<String>,
+    Query(query): Query<ReceiptsQuery>,
+) -> ApiResult<Json<MessageReceipts>> {
+    let message = stored(&state, &auth.instance, &query.chat, &message_id).await?;
+    if !message.from_me {
+        return Err(HttpError::not_found("only your own messages have receipts"));
+    }
+    let members = if message.chat.ends_with("@g.us") {
+        // Today's members, by number where known; unknown when the group
+        // cannot be read (nobody is then marked as having left).
+        state
+            .driver()
+            .group(&auth.instance, message.chat.clone())
+            .await
+            .ok()
+            .map(|group| {
+                group
+                    .participants
+                    .into_iter()
+                    .map(|p| p.pn.unwrap_or(p.jid))
+                    .collect::<Vec<_>>()
+            })
+    } else {
+        None
+    };
+    let status = state.store().instance_status(auth.instance.clone()).await?;
+    let own: Vec<String> = status
+        .map(|s| s.own_jid.into_iter().chain(s.own_lid).collect())
+        .unwrap_or_default();
+    state
+        .store()
+        .message_receipts(auth.instance, message.chat, message.id, members, own)
+        .await?
+        .map(Json)
+        .ok_or_else(|| HttpError::not_found("no such message"))
 }
 
 async fn chat_action(
@@ -260,10 +363,35 @@ async fn chat_action(
     {
         return Err(HttpError::bad_request("until_ms must be in the future"));
     }
+    if let ChatActionKind::Disappearing { seconds } = req.action
+        && !rosty_core::wa_actions::is_disappearing_choice(seconds)
+    {
+        return Err(HttpError::bad_request(
+            "seconds must be 0, 86400, 604800 or 7776000",
+        ));
+    }
     let change = chat_change(&req.action);
+    let timer = match req.action {
+        ChatActionKind::Disappearing { seconds } => Some(seconds),
+        _ => None,
+    };
     let chat = req.chat.trim().to_owned();
     state.driver().chat_action(&auth.instance, req).await?;
-    state.sink(&auth.instance).change_chat(&chat, change).await;
+    let sink = state.sink(&auth.instance);
+    if let Some(change) = change {
+        sink.change_chat(&chat, change).await;
+    }
+    if let Some(seconds) = timer {
+        let now = now_ms();
+        sink.chat_timer_changed(TimerChange {
+            chat,
+            seconds,
+            at_ms: now,
+            by: Some(DELETED_BY_ME.to_owned()),
+            note_id: timer_note_id(now),
+        })
+        .await;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -612,19 +740,23 @@ mod tests {
     fn chat_actions_map_to_settings() {
         assert_eq!(
             chat_change(&ChatActionKind::Mute { until_ms: None }),
-            ChatChange::Muted(Some(MUTED_FOREVER))
+            Some(ChatChange::Muted(Some(MUTED_FOREVER)))
         );
         assert_eq!(
             chat_change(&ChatActionKind::Mute { until_ms: Some(5) }),
-            ChatChange::Muted(Some(5))
+            Some(ChatChange::Muted(Some(5)))
         );
         assert_eq!(
             chat_change(&ChatActionKind::Unmute),
-            ChatChange::Muted(None)
+            Some(ChatChange::Muted(None))
         );
         assert_eq!(
             chat_change(&ChatActionKind::MarkRead { read: true }),
-            ChatChange::MarkedUnread(false)
+            Some(ChatChange::MarkedUnread(false))
+        );
+        assert_eq!(
+            chat_change(&ChatActionKind::Disappearing { seconds: 86_400 }),
+            None
         );
     }
 

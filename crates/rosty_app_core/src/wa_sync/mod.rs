@@ -34,6 +34,8 @@
 //! * The store follows the gateway process and the linked account ([`Store::note_status`]): another gateway
 //!   epoch is a gap, another account empties the store, and unlinking deletes it ([`Store::wipe`]).
 
+#[cfg(test)]
+mod actions_tests;
 mod apply;
 mod authors;
 mod backfill;
@@ -86,12 +88,12 @@ pub use media::{
 };
 pub use merge::ChatRekeyed;
 pub use model::{
-    AppliedEvents, ChatRow, GalleryPage, Kind, MessageRow, PendingOp, RowState, StarredCursor,
-    StarredPage, StoredChats, StoredPage, ThreadCursor, ThreadPage,
+    AppliedEvents, ChatRow, Expired, GalleryPage, Kind, MessageRow, PendingOp, RowState,
+    StarredCursor, StarredPage, StoredChats, StoredPage, ThreadCursor, ThreadPage,
 };
 pub use outbox::{
-    Action, BACKOFF_BASE_MS, BACKOFF_MAX_MS, Due, ErrorKind, MediaExtras, OutboxItem, OutboxState,
-    Outcome, Played, SENDING_LEASE_MS, Settled, backoff_ms,
+    Action, BACKOFF_BASE_MS, BACKOFF_MAX_MS, Due, ErrorKind, ForwardSnapshot, MediaExtras,
+    OutboxItem, OutboxState, Outcome, Played, SENDING_LEASE_MS, Settled, backoff_ms,
 };
 pub use plan::{ChatCursor, FetchPage, Gap, SyncPlan, SyncState};
 pub use schema::SCHEMA_VERSION;

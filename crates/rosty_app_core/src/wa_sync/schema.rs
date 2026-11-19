@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use super::{Error, Result};
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// v1: the instance row, chats, the per-chat cursor and messages.
 const V1: &str = "
@@ -228,7 +228,31 @@ CREATE INDEX messages_gallery ON messages (chat, ts DESC, id DESC)
     WHERE kind IN ('image', 'video', 'audio', 'document') AND deleted = 0;
 ";
 
-const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6];
+/// v7: message actions (E6-WA R4).
+///
+/// `messages.expires_at`: when a disappearing message goes (its send time plus its timer; the timer, the link
+/// preview, the forwarding score and a conversation line live in `extra_json`); [`super::Store::expire`] deletes
+/// the rows that are due, and an expired message is never stored again. `messages.hidden_ms`: deleted for me (here
+/// or on another device of the account): the thread no longer shows it. `chats.ephemeral_s`: the chat's
+/// disappearing timer. `pending_meta`: what the gateway said about a message the store does not have yet (an edit or
+/// delete for everyone that came first), applied when the message arrives. Additive: no stored row changes.
+const V7: &str = "
+ALTER TABLE messages ADD COLUMN expires_at INTEGER;
+ALTER TABLE messages ADD COLUMN hidden_ms INTEGER;
+ALTER TABLE chats ADD COLUMN ephemeral_s INTEGER;
+CREATE INDEX messages_expiry ON messages (expires_at) WHERE expires_at IS NOT NULL;
+CREATE TABLE pending_meta (
+    chat TEXT NOT NULL,
+    id TEXT NOT NULL,
+    body_json TEXT,
+    meta_json TEXT NOT NULL,
+    event_ms INTEGER,
+    at_ms INTEGER NOT NULL,
+    PRIMARY KEY (chat, id)
+) WITHOUT ROWID;
+";
+
+const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [V1, V2, V3, V4, V5, V6, V7];
 
 /// The version of the file.
 pub(super) fn version(conn: &Connection) -> Result<u32> {

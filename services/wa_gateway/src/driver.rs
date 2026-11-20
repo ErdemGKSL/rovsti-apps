@@ -162,6 +162,13 @@ pub enum DriverError {
     /// `backoff` hint, when it sent one.
     #[error("WhatsApp rate limit reached")]
     RateLimited { retry_after_s: Option<u32> },
+    /// WhatsApp refused the change (not an admin, not a member, changed
+    /// elsewhere): the request was fine, the state was not (E6-WA R6).
+    #[error("{0}")]
+    Refused(String),
+    /// WhatsApp does not know it (an unknown or reset invite code, E6-WA R6).
+    #[error("{0}")]
+    NotFound(String),
 }
 
 /// What a driver talks back through. Cloneable and bound to one instance: it
@@ -800,6 +807,64 @@ impl EventSink {
         .await;
     }
 
+    /// A change of a group (E6-WA R6): stores the line `note` as message
+    /// `note_id` of `chat` at `at_ms`, from `by` ([`DELETED_BY_ME`] for me,
+    /// else the JID; `None` when unknown), and announces it. A notification
+    /// seen twice keeps one line (the id is the notification's).
+    pub async fn group_note(
+        &self,
+        chat: String,
+        note_id: String,
+        at_ms: i64,
+        note: rosty_wa_proto::SystemNote,
+    ) {
+        let by = match &note {
+            rosty_wa_proto::SystemNote::Group { by, .. } => by.clone(),
+            _ => None,
+        };
+        let from_me = by.as_deref() == Some(DELETED_BY_ME);
+        let sender = by.filter(|_| !from_me);
+        self.emit_full(
+            WaMessage {
+                id: note_id,
+                chat,
+                sender,
+                from_me,
+                timestamp_ms: at_ms,
+                body: rosty_wa_proto::MessageBody::Unsupported,
+                reactions: Vec::new(),
+                chat_alt: None,
+                sender_alt: None,
+            },
+            MessageExtras {
+                meta: MessageMeta {
+                    system: Some(note),
+                    ..MessageMeta::default()
+                },
+                ..MessageExtras::default()
+            },
+        )
+        .await;
+    }
+
+    /// Records that I left the group `chat` (or was removed), or that I am a
+    /// member again, as of `at_ms`, and announces the chat's meta when it
+    /// changed (E6-WA R6).
+    pub async fn group_left(&self, chat: &str, left: bool, at_ms: i64) {
+        match self
+            .store
+            .set_group_left(self.instance.clone(), chat.to_owned(), left, at_ms)
+            .await
+        {
+            Ok(Some(meta)) => self.publish(GatewayEvent::ChatMeta {
+                jid: chat.to_owned(),
+                meta,
+            }),
+            Ok(None) => {}
+            Err(e) => log::warn!("{}: saving a group membership failed: {e}", self.instance),
+        }
+    }
+
     /// Applies an edit, delete for everyone or star to a stored message and
     /// publishes the new meta. Unknown messages and no-ops publish nothing.
     pub async fn change_message(&self, chat: &str, id: &str, change: MessageChange) {
@@ -1375,6 +1440,61 @@ pub trait WaDriver: Send + Sync + 'static {
         Box::pin(async { Err(DriverError::NotConnected) })
     }
 
+    /// Changes a group (E6-WA R6). `req.action` was checked; a bulk action
+    /// answers one result per person.
+    fn group_action(
+        &self,
+        _instance: &InstanceId,
+        _req: rosty_wa_proto::GroupAction,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupActionDone, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Creates a group (E6-WA R6). `req` was checked.
+    fn create_group(
+        &self,
+        _instance: &InstanceId,
+        _req: rosty_wa_proto::CreateGroup,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupCreated, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// The group an invite code leads to (E6-WA R6).
+    fn invite_preview(
+        &self,
+        _instance: &InstanceId,
+        _code: String,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::InvitePreview, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Joins with an invite code (E6-WA R6).
+    fn join_group(
+        &self,
+        _instance: &InstanceId,
+        _code: String,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupJoined, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// The pending join requests of a group (E6-WA R6).
+    fn join_requests(
+        &self,
+        _instance: &InstanceId,
+        _jid: String,
+    ) -> BoxFuture<'_, Result<Vec<rosty_wa_proto::JoinRequest>, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// The groups of a community (E6-WA R6).
+    fn subgroups(
+        &self,
+        _instance: &InstanceId,
+        _jid: String,
+    ) -> BoxFuture<'_, Result<Vec<rosty_wa_proto::Subgroup>, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
     /// About text, picture id and business details of users and groups.
     fn profiles(
         &self,
@@ -1566,6 +1686,9 @@ mod fake {
         pictures: Mutex<HashMap<String, (String, Vec<u8>)>>,
         lids: Mutex<crate::wa::lid::LidMap>,
         failures: Mutex<HashMap<&'static str, std::collections::VecDeque<DriverError>>>,
+        group_results: Mutex<Vec<rosty_wa_proto::ParticipantResult>>,
+        join_requests: Mutex<Vec<rosty_wa_proto::JoinRequest>>,
+        subgroups: Mutex<Vec<rosty_wa_proto::Subgroup>>,
     }
 
     impl std::fmt::Debug for FakeDriver {
@@ -1597,6 +1720,26 @@ mod fake {
             *self.groups.lock().unwrap_or_else(|e| e.into_inner()) = groups;
         }
 
+        /// What a bulk group action answers for the people named here (the
+        /// rest are done). E6-WA R6.
+        pub fn set_group_results(&self, results: Vec<rosty_wa_proto::ParticipantResult>) {
+            *lock(&self.group_results) = results;
+        }
+
+        /// The join requests `join_requests` lists.
+        pub fn set_join_requests(&self, requests: Vec<rosty_wa_proto::JoinRequest>) {
+            *lock(&self.join_requests) = requests;
+        }
+
+        /// The groups `subgroups` lists.
+        pub fn set_subgroups(&self, groups: Vec<rosty_wa_proto::Subgroup>) {
+            *lock(&self.subgroups) = groups;
+        }
+
+        /// The code of the fake invite link of every group; `invite_preview`
+        /// knows it, every other code is unknown.
+        pub const INVITE_CODE: &'static str = "FakeInviteCode0001";
+
         /// The JIDs `lookup_users` reports as being on WhatsApp.
         pub fn set_registered(&self, jids: Vec<String>) {
             *self.registered.lock().unwrap_or_else(|e| e.into_inner()) = jids;
@@ -1627,8 +1770,8 @@ mod fake {
             lock(&self.profiles).insert(profile.jid.clone(), profile);
         }
 
-        /// Makes the next call of `op` (`"lookup"`, `"profiles"` or
-        /// `"picture"`) fail with `error`; several calls queue up. The call
+        /// Makes the next call of `op` (`"lookup"`, `"profiles"`,
+        /// `"picture"`, `"group"` or `"group_info"`) fail with `error`; several calls queue up. The call
         /// still counts in [`Self::ops`]: it reached "WhatsApp".
         pub fn fail_next(&self, op: &'static str, error: DriverError) {
             lock(&self.failures).entry(op).or_default().push_back(error);
@@ -2065,7 +2208,8 @@ mod fake {
             let result = self
                 .sink(instance)
                 .ok_or(DriverError::NotConnected)
-                .and_then(|_| {
+                .and_then(|_| self.scripted_failure("group_info"))
+                .and_then(|()| {
                     self.groups
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
@@ -2304,6 +2448,140 @@ mod fake {
             jid: String,
         ) -> BoxFuture<'_, Result<(), DriverError>> {
             let result = self.record(instance, format!("unsubscribe {jid}"));
+            Box::pin(async move { result })
+        }
+
+        fn group_action(
+            &self,
+            instance: &InstanceId,
+            req: rosty_wa_proto::GroupAction,
+        ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupActionDone, DriverError>> {
+            use rosty_wa_proto::{GroupActionDone, GroupActionKind as K, ParticipantResult};
+            let op = serde_json::to_string(&req.action).unwrap_or_default();
+            let result = self
+                .record(instance, format!("group {} {op}", req.group))
+                .and_then(|()| self.scripted_failure("group"))
+                .map(|()| match &req.action {
+                    K::Add { participants }
+                    | K::Remove { participants }
+                    | K::Promote { participants }
+                    | K::Demote { participants }
+                    | K::Approve { participants }
+                    | K::Reject { participants } => {
+                        let scripted = lock(&self.group_results);
+                        let results = participants
+                            .iter()
+                            .map(|jid| {
+                                scripted.iter().find(|r| &r.jid == jid).cloned().unwrap_or(
+                                    ParticipantResult {
+                                        jid: jid.clone(),
+                                        error: None,
+                                        invite: None,
+                                    },
+                                )
+                            })
+                            .collect();
+                        GroupActionDone {
+                            results,
+                            link: None,
+                        }
+                    }
+                    K::InviteLink { .. } => GroupActionDone {
+                        results: Vec::new(),
+                        link: Some(format!("https://chat.whatsapp.com/{}", Self::INVITE_CODE)),
+                    },
+                    _ => GroupActionDone::default(),
+                });
+            Box::pin(async move { result })
+        }
+
+        fn create_group(
+            &self,
+            instance: &InstanceId,
+            req: rosty_wa_proto::CreateGroup,
+        ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupCreated, DriverError>> {
+            let result = self
+                .record(
+                    instance,
+                    format!("create {} {}", req.subject, req.participants.len()),
+                )
+                .map(|()| {
+                    let scripted = lock(&self.group_results);
+                    rosty_wa_proto::GroupCreated {
+                        jid: "120363000000000099@g.us".into(),
+                        results: req
+                            .participants
+                            .iter()
+                            .filter_map(|jid| scripted.iter().find(|r| &r.jid == jid).cloned())
+                            .collect(),
+                    }
+                });
+            Box::pin(async move { result })
+        }
+
+        fn invite_preview(
+            &self,
+            instance: &InstanceId,
+            code: String,
+        ) -> BoxFuture<'_, Result<rosty_wa_proto::InvitePreview, DriverError>> {
+            let result = self
+                .record(instance, format!("preview {code}"))
+                .and_then(|()| {
+                    let groups = lock(&self.groups);
+                    match groups.first() {
+                        Some(g) if code == Self::INVITE_CODE => Ok(rosty_wa_proto::InvitePreview {
+                            jid: g.jid.clone(),
+                            subject: g.subject.clone(),
+                            size: Some(g.participants.len() as u32),
+                            description: g.description.clone(),
+                            approval: g.approval,
+                            community: g.community.clone(),
+                        }),
+                        _ => Err(DriverError::NotFound("no group has this invite".into())),
+                    }
+                });
+            Box::pin(async move { result })
+        }
+
+        fn join_group(
+            &self,
+            instance: &InstanceId,
+            code: String,
+        ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupJoined, DriverError>> {
+            let result = self
+                .record(instance, format!("join {code}"))
+                .and_then(|()| {
+                    let groups = lock(&self.groups);
+                    match groups.first() {
+                        Some(g) if code == Self::INVITE_CODE => Ok(rosty_wa_proto::GroupJoined {
+                            jid: g.jid.clone(),
+                            pending: g.approval,
+                        }),
+                        _ => Err(DriverError::NotFound("no group has this invite".into())),
+                    }
+                });
+            Box::pin(async move { result })
+        }
+
+        fn join_requests(
+            &self,
+            instance: &InstanceId,
+            jid: String,
+        ) -> BoxFuture<'_, Result<Vec<rosty_wa_proto::JoinRequest>, DriverError>> {
+            let result = self
+                .record(instance, format!("requests {jid}"))
+                .map(|()| lock(&self.join_requests).clone());
+            Box::pin(async move { result })
+        }
+
+        fn subgroups(
+            &self,
+            instance: &InstanceId,
+            jid: String,
+        ) -> BoxFuture<'_, Result<Vec<rosty_wa_proto::Subgroup>, DriverError>> {
+            let result = self
+                .record(instance, format!("subgroups {jid}"))
+                .map(|()| lock(&self.subgroups).clone());
             Box::pin(async move { result })
         }
 

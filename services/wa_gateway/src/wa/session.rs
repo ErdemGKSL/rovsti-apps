@@ -148,6 +148,66 @@ fn connected(
 }
 
 /// The members of a group as its metadata lists them.
+/// My ids (number and LID) as the library knows them.
+fn own_jids(resolver: &Resolver) -> Vec<Jid> {
+    let own = resolver
+        .client()
+        .persistence_manager()
+        .get_device_snapshot();
+    [own.pn.clone(), own.lid.clone()]
+        .into_iter()
+        .flatten()
+        .map(|j| j.to_non_ad())
+        .collect()
+}
+
+/// The line a group notification leaves (E6-WA R6) and what it says about my
+/// membership: removed (or the group deleted) is left, added back is a
+/// member again.
+async fn group_update_note(
+    sink: &EventSink,
+    resolver: &Resolver,
+    jid: &str,
+    update: &whatsapp_rust::wacore::types::events::GroupUpdate,
+) {
+    let own = own_jids(resolver);
+    let own_refs: Vec<&Jid> = own.iter().collect();
+    let mut unmapped: Vec<&Jid> = groups::named(&update.action);
+    unmapped.extend(update.participant.as_ref());
+    let map = resolver.prefetch(&unmapped).await;
+    let at_ms = update.timestamp.timestamp_millis();
+    let about_me = groups::named(&update.action)
+        .iter()
+        .any(|j| own.iter().any(|o| o.user == j.user && o.server == j.server));
+    match &update.action {
+        GroupNotificationAction::Remove { .. } if about_me => {
+            sink.group_left(jid, true, at_ms).await;
+        }
+        GroupNotificationAction::Delete { .. } => sink.group_left(jid, true, at_ms).await,
+        GroupNotificationAction::Add { .. } if about_me => {
+            sink.group_left(jid, false, at_ms).await;
+        }
+        _ => {}
+    }
+    let by = groups::note_by(
+        update.participant.as_ref(),
+        update.participant_pn.as_ref(),
+        &own_refs,
+        &map,
+    );
+    if let Some(note) = groups::note_of(&update.action, by, &map) {
+        let note_id = format!(
+            "{}-{}",
+            update
+                .notification_id
+                .clone()
+                .unwrap_or_else(|| format!("GNOTE{at_ms}")),
+            update.action_index
+        );
+        sink.group_note(jid.to_owned(), note_id, at_ms, note).await;
+    }
+}
+
 fn members(group: &GroupMetadata) -> Vec<groups::Member<'_>> {
     group
         .participants
@@ -156,7 +216,7 @@ fn members(group: &GroupMetadata) -> Vec<groups::Member<'_>> {
             jid: &p.jid,
             phone_number: p.phone_number.as_ref(),
             lid: p.lid.as_ref(),
-            admin: p.is_admin(),
+            role: groups::role_of(p.participant_type),
         })
         .collect()
 }
@@ -934,6 +994,7 @@ impl WaRuntime {
                 .filter(|d| !d.is_empty())
                 .map(str::to_owned);
             info.announce = group.is_announcement;
+            groups::add_details(&mut info, group, &map);
             sink.rename_chat(&info.jid, &info.subject).await;
             // The metadata names the timer as it is now (none: off).
             let timer = group.ephemeral.and_then(|e| e.expiration).unwrap_or(0);
@@ -1353,6 +1414,7 @@ async fn handle_event(
             if let Some(subject) = groups::new_subject(&update.action) {
                 sink.rename_chat(&jid, subject).await;
             }
+            group_update_note(sink, resolver, &jid, update).await;
             // The group's disappearing timer: a line in the chat when it
             // changed (my own change through the gateway already left one).
             if let GroupNotificationAction::Ephemeral { expiration, .. } = &update.action {
@@ -2162,6 +2224,364 @@ impl WaDriver for WaRuntime {
                 .ok_or_else(|| DriverError::Failed("group query returned nothing".to_owned()))
         })
     }
+
+    fn group_action(
+        &self,
+        instance: &InstanceId,
+        req: rosty_wa_proto::GroupAction,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupActionDone, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let (client, sink) = self.client_of(&instance)?;
+            let resolver = self.resolver_of(&instance)?;
+            let group = convert::parse_jid(&req.group)?;
+            group_action(&client, &sink, &resolver, group, req.action).await
+        })
+    }
+
+    fn create_group(
+        &self,
+        instance: &InstanceId,
+        req: rosty_wa_proto::CreateGroup,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupCreated, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            use whatsapp_rust::features::{GroupCreateOptions, GroupParticipantOptions};
+            let (client, _) = self.client_of(&instance)?;
+            let resolver = self.resolver_of(&instance)?;
+            let people = req
+                .participants
+                .iter()
+                .map(|p| convert::parse_jid(p))
+                .collect::<Result<Vec<_>, _>>()?;
+            let options = GroupCreateOptions::builder()
+                .subject(req.subject.clone())
+                .participants(
+                    people
+                        .iter()
+                        .cloned()
+                        .map(GroupParticipantOptions::new)
+                        .collect(),
+                )
+                .finish();
+            let created = client
+                .groups()
+                .create_group(options)
+                .await
+                .map_err(groups::group_failed)?;
+            let meta = created.metadata;
+            // WhatsApp lists who got in; everyone else asked for did not.
+            let refs: Vec<&Jid> = meta.participants.iter().map(|p| &p.jid).collect();
+            let map = resolver.prefetch(&refs).await;
+            let inside: Vec<String> = meta
+                .participants
+                .iter()
+                .map(|p| groups::participant_jid(&p.jid, p.phone_number.as_ref(), &map))
+                .collect();
+            let results = req
+                .participants
+                .iter()
+                .filter(|asked| !inside.iter().any(|i| i == *asked))
+                .map(|asked| rosty_wa_proto::ParticipantResult {
+                    jid: asked.clone(),
+                    error: Some("403".into()),
+                    invite: None,
+                })
+                .collect();
+            Ok(rosty_wa_proto::GroupCreated {
+                jid: meta.id.to_non_ad().to_string(),
+                results,
+            })
+        })
+    }
+
+    fn invite_preview(
+        &self,
+        instance: &InstanceId,
+        code: String,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::InvitePreview, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let (client, _) = self.client_of(&instance)?;
+            let meta = client
+                .groups()
+                .get_invite_info(&code)
+                .await
+                .map_err(groups::group_failed)?;
+            Ok(groups::preview_of(&meta))
+        })
+    }
+
+    fn join_group(
+        &self,
+        instance: &InstanceId,
+        code: String,
+    ) -> BoxFuture<'_, Result<rosty_wa_proto::GroupJoined, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            use whatsapp_rust::features::JoinGroupResult;
+            let (client, _) = self.client_of(&instance)?;
+            let joined = client
+                .groups()
+                .join_with_invite_code(&code)
+                .await
+                .map_err(groups::group_failed)?;
+            Ok(match joined {
+                JoinGroupResult::Joined(jid) => rosty_wa_proto::GroupJoined {
+                    jid: jid.to_non_ad().to_string(),
+                    pending: false,
+                },
+                JoinGroupResult::PendingApproval(jid) => rosty_wa_proto::GroupJoined {
+                    jid: jid.to_non_ad().to_string(),
+                    pending: true,
+                },
+            })
+        })
+    }
+
+    fn join_requests(
+        &self,
+        instance: &InstanceId,
+        jid: String,
+    ) -> BoxFuture<'_, Result<Vec<rosty_wa_proto::JoinRequest>, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let (client, _) = self.client_of(&instance)?;
+            let resolver = self.resolver_of(&instance)?;
+            let group = convert::parse_jid(&jid)?;
+            let requests = client
+                .groups()
+                .get_membership_requests(&group)
+                .await
+                .map_err(groups::group_failed)?;
+            let refs: Vec<&Jid> = requests.iter().map(|r| &r.jid).collect();
+            let map = resolver.prefetch(&refs).await;
+            Ok(requests
+                .iter()
+                .map(|r| {
+                    let jid = groups::participant_jid(&r.jid, None, &map);
+                    let bare = r.jid.to_non_ad().to_string();
+                    rosty_wa_proto::JoinRequest {
+                        jid_alt: (bare != jid).then_some(bare),
+                        jid,
+                        requested_ms: r
+                            .request_time
+                            .and_then(|t| i64::try_from(t).ok())
+                            .map(|t| t.saturating_mul(1000)),
+                    }
+                })
+                .collect())
+        })
+    }
+
+    fn subgroups(
+        &self,
+        instance: &InstanceId,
+        jid: String,
+    ) -> BoxFuture<'_, Result<Vec<rosty_wa_proto::Subgroup>, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let (client, _) = self.client_of(&instance)?;
+            let parent = convert::parse_jid(&jid)?;
+            let mut list: Vec<rosty_wa_proto::Subgroup> = client
+                .community()
+                .get_subgroups(&parent)
+                .await
+                .map_err(groups::community_failed)?
+                .iter()
+                .map(groups::subgroup_of)
+                .collect();
+            rosty_core::wa_group::arrange_subgroups(&mut list);
+            Ok(list)
+        })
+    }
+}
+
+/// Runs one group action against WhatsApp (E6-WA R6).
+async fn group_action(
+    client: &Arc<Client>,
+    sink: &EventSink,
+    resolver: &Resolver,
+    group: Jid,
+    action: rosty_wa_proto::GroupActionKind,
+) -> Result<rosty_wa_proto::GroupActionDone, DriverError> {
+    use rosty_wa_proto::{GroupActionDone, GroupActionKind as K};
+    use whatsapp_rust::features::{
+        GroupDescription, GroupSubject, MembershipApprovalMode, PreviousDescription,
+    };
+    let groups_api = client.groups();
+    let parse_all = |people: &[String]| {
+        people
+            .iter()
+            .map(|p| convert::parse_jid(p))
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let bulk = |answers: Vec<whatsapp_rust::features::ParticipantChangeResponse>| async move {
+        let refs: Vec<&Jid> = answers.iter().map(|a| &a.jid).collect();
+        let map = resolver.prefetch(&refs).await;
+        GroupActionDone {
+            results: answers.iter().map(|a| groups::result_of(a, &map)).collect(),
+            link: None,
+        }
+    };
+    let none = GroupActionDone::default();
+    let gf = groups::group_failed;
+    Ok(match action {
+        K::Add { participants } => {
+            let people = parse_all(&participants)?;
+            bulk(
+                groups_api
+                    .add_participants(group, &people)
+                    .await
+                    .map_err(gf)?,
+            )
+            .await
+        }
+        K::Remove { participants } => {
+            let people = parse_all(&participants)?;
+            bulk(
+                groups_api
+                    .remove_participants(group, &people)
+                    .await
+                    .map_err(gf)?,
+            )
+            .await
+        }
+        K::Promote { participants } => {
+            let people = parse_all(&participants)?;
+            bulk(
+                groups_api
+                    .promote_participants(group, &people)
+                    .await
+                    .map_err(gf)?,
+            )
+            .await
+        }
+        K::Demote { participants } => {
+            let people = parse_all(&participants)?;
+            bulk(
+                groups_api
+                    .demote_participants(group, &people)
+                    .await
+                    .map_err(gf)?,
+            )
+            .await
+        }
+        K::Approve { participants } => {
+            let people = parse_all(&participants)?;
+            bulk(
+                groups_api
+                    .approve_membership_requests(group, &people)
+                    .await
+                    .map_err(gf)?,
+            )
+            .await
+        }
+        K::Reject { participants } => {
+            let people = parse_all(&participants)?;
+            bulk(
+                groups_api
+                    .reject_membership_requests(group, &people)
+                    .await
+                    .map_err(gf)?,
+            )
+            .await
+        }
+        K::Subject { subject } => {
+            let subject =
+                GroupSubject::new(subject).map_err(|e| DriverError::BadRequest(e.to_string()))?;
+            groups_api.set_subject(group, subject).await.map_err(gf)?;
+            none
+        }
+        K::Description { description } => {
+            let description = if description.is_empty() {
+                None
+            } else {
+                Some(
+                    GroupDescription::new(description)
+                        .map_err(|e| DriverError::BadRequest(e.to_string()))?,
+                )
+            };
+            groups_api
+                .set_description(group, description, PreviousDescription::Resolve)
+                .await
+                .map_err(gf)?;
+            none
+        }
+        K::Picture { jpeg_b64 } => {
+            match jpeg_b64.as_deref().and_then(rosty_wa_proto::decode_b64) {
+                Some(jpeg) => {
+                    groups_api
+                        .set_profile_picture(group, jpeg)
+                        .await
+                        .map_err(gf)?;
+                }
+                None => {
+                    groups_api.remove_profile_picture(group).await.map_err(gf)?;
+                }
+            }
+            none
+        }
+        K::Announce { on } => {
+            groups_api.set_announce(group, on).await.map_err(gf)?;
+            none
+        }
+        K::Locked { on } => {
+            groups_api.set_locked(group, on).await.map_err(gf)?;
+            none
+        }
+        K::Approval { on } => {
+            let mode = if on {
+                MembershipApprovalMode::On
+            } else {
+                MembershipApprovalMode::Off
+            };
+            groups_api
+                .set_membership_approval(group, mode)
+                .await
+                .map_err(gf)?;
+            none
+        }
+        K::InviteLink { reset } => GroupActionDone {
+            results: Vec::new(),
+            link: Some(groups_api.get_invite_link(group, reset).await.map_err(gf)?),
+        },
+        K::SendInvite {
+            to,
+            code,
+            expiration,
+        } => {
+            let to = convert::parse_jid(&to)?;
+            // The invite names the group as its members see it.
+            let subject = groups_api
+                .get_metadata(&group)
+                .await
+                .map(|m| m.subject)
+                .unwrap_or_default();
+            let message = wa::Message {
+                group_invite_message: whatsapp_rust::waproto::buffa::MessageField::some(
+                    wa::message::GroupInviteMessage {
+                        group_jid: Some(group.to_non_ad().to_string()),
+                        invite_code: Some(code),
+                        invite_expiration: Some(expiration),
+                        group_name: Some(subject),
+                        ..Default::default()
+                    },
+                ),
+                ..Default::default()
+            };
+            let timer = sink.chat_timer(&to.to_non_ad().to_string()).await;
+            client
+                .send_message_with_options(to, message, send_options(timer))
+                .await
+                .map_err(|e| DriverError::Failed(e.to_string()))?;
+            none
+        }
+        K::Leave => {
+            groups_api.leave(group).await.map_err(gf)?;
+            none
+        }
+    })
 }
 
 #[cfg(test)]

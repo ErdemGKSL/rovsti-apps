@@ -117,8 +117,9 @@ Library facts (whatsapp-rust 0.7.0 from crates.io, the version `Cargo.lock` pins
   {description}` (empty deletes), `picture {jpeg_b64?}` (none removes), `announce {on}`, `locked {on}`, `approval
   {on}`, `invite_link {reset}`, `approve | reject {participants}`, `send_invite {to, code, expiration}`, `leave`.
   `ParticipantResult {jid, error?, invite?: {code, expiration}}`. 400 for an empty list, a subject over 100 or a
-  description over 2048 characters, a picture over 1 MiB; 403 when WhatsApp refuses (not an admin); 409 for a
-  description changed elsewhere; an older gateway answers 404.
+  description over 2048 characters, a picture over 1 MiB; 409 `conflict` when WhatsApp refuses (not an admin, not a
+  member, a description changed elsewhere: the wire has no `forbidden` code and a new one would not be additive); an
+  older gateway answers 404.
 - `POST /v1/groups {subject, participants}` -> `GroupCreated {jid, results}`.
 - `GET /v1/groups/invite?code=` -> `InvitePreview {jid, subject, size?, description?, approval, community?}`; 404 for
   an unknown or reset code.

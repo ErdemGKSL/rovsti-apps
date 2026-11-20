@@ -625,6 +625,13 @@ to 15); device checks: `_bmad-output/kotlin-ui/plans/wa-vault-device-tests.md`.
   send are `memfd_create` files read through `/proc/self/fd/<n>` (64 MiB LRU); drafts, live names and
   the rekey cursor are in memory. Phone's full-size pictures (`cacheDir/wa-full`, also Contacts') are
   emptied on lock.
+- **Place-card map tiles (trade-off, owner decision 2026-11-20).** The map tiles of shared-place cards
+  are the one thing about WhatsApp chats Messages keeps on disk in plaintext: the `rosty_tiles` LRU disk
+  cache in `cacheDir/wa-place-tiles`, at most 20 MiB, from the default VersaTiles server. They show which
+  areas were shared in chats, which sits against the memory-only rule above; the cap, the cache directory
+  (the system may evict it) and the clean-up bound it: the directory is deleted whenever the WhatsApp data
+  is forgotten, unlinked or wiped (`messagesLinkCleanup`, and "Forgot passphrase" through
+  `forgetWhatsApp`). Locking does not clear it.
 - **Lock lifecycle** (round 7c, `:shell` `VaultUseLifecycle`): no auto-lock delay and no screen-off
   lock. The vault locks on "Lock WhatsApp now" and after 90 days without a use; process death needs
   nothing (the keys only lived in memory; the stay wrap reopens it at the next start). Locking closes the

@@ -14,16 +14,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The map pictures of place cards (E6-WA R5): the tiles `wa.static_map` names, fetched from the tile server through
  * the native tile source and painted by `:map`'s [StaticMapPainter], Stops' tile painting.
  *
- * The source is opened with `memory = true`: the tiles stay in memory and no file is written, so nothing on the phone
- * tells which places were shared (`plans/wa-vault.md` 13.1). The server is the public VersaTiles server, the default
- * of `rosty_geo::tiles` and of Stops (owner question 2 of `plans/e6wa-r5.md`). Pictures are kept for the session.
+ * The tiles go to a small bounded disk cache in [dir] (owner decision of 2026-11-20, `plans/e6wa-r6.md`): the
+ * `rosty_tiles` LRU cache, [CACHE_BYTES] at most, under the app's `cacheDir` so the system may evict it. These
+ * tiles show which areas were shared in chats, which sits against the vault rule (`plans/wa-vault.md` 13.1): the
+ * cap, the cache directory and [forget] (run when the WhatsApp data is forgotten, unlinked or wiped) bound it. A null
+ * [dir] keeps the tiles in memory only (tests). The server is the public VersaTiles server, the default of
+ * `rosty_geo::tiles` and of Stops; Messages has no setting of its own. Pictures are kept for the session.
  */
 class PlaceMaps(
+    private val dir: File?,
     private val open: suspend (TilesOpenRequest) -> Outcome<TileHandle> = { TileHandle.open(it) },
     private val staticMap: suspend (StaticMapRequest) -> Outcome<StaticMap>,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -48,7 +53,7 @@ class PlaceMaps(
         // Where the native library is not there (screenshots, plain tests) there is no map, only its placeholder.
         val opened =
             try {
-                open(TilesOpenRequest(cacheCap = CACHE_BYTES, memory = true))
+                open(openRequest())
             } catch (_: UnsatisfiedLinkError) {
                 null
             }
@@ -86,12 +91,32 @@ class PlaceMaps(
             pictures.evictAll()
         }
 
-    private companion object {
-        /** A tile is drawn this wide, so labels read as they do in Stops. */
-        const val TILE_DP = 256f
+    /** How the tile source opens: the bounded disk cache in [dir], or memory only without one. */
+    internal fun openRequest(): TilesOpenRequest =
+        if (dir == null) {
+            TilesOpenRequest(cacheCap = CACHE_BYTES, memory = true)
+        } else {
+            TilesOpenRequest(cacheCap = CACHE_BYTES, dir = dir.absolutePath)
+        }
 
-        /** The memory cache of tile data: a few dozen city tiles. */
-        const val CACHE_BYTES = 8L * 1024 * 1024
-        const val PICTURES = 24
+    /**
+     * Drops the cached tiles and pictures: the WhatsApp data was forgotten, unlinked or wiped. The source opens again
+     * on the next card, empty.
+     */
+    suspend fun forget() {
+        close()
+        withContext(Dispatchers.IO) { dir?.deleteRecursively() }
+    }
+
+    companion object {
+        /** A tile is drawn this wide, so labels read as they do in Stops. */
+        private const val TILE_DP = 256f
+
+        /** The cap of the tile cache: a few hundred city tiles. */
+        const val CACHE_BYTES = 20L * 1024 * 1024
+
+        /** The cache directory's name under the app's `cacheDir`. */
+        const val DIR = "wa-place-tiles"
+        private const val PICTURES = 24
     }
 }

@@ -2,6 +2,17 @@
 
 Newest round first. Branch `messages-kotlin`; merge it into `ui-overhaul` after a round is closed here.
 
+## E6-WA R5 follow-ups (2026-11-20, owner decisions, done in R6 step 1)
+
+- Place-card map tiles: a small bounded disk cache (the `rosty_tiles` LRU cache, 20 MiB, `cacheDir/wa-place-tiles`)
+  instead of memory only, deleted when the WhatsApp data is forgotten, unlinked or wiped. Trade-off noted in
+  `docs/architecture.md` (vault section). The `CLAUDE.md` line "keeps them in memory only" is left for the owner to
+  change (an agent does not edit `CLAUDE.md`); suggested wording: "keeps them in a small bounded cache (20 MiB in
+  `cacheDir`, deleted on unlink, forget and wipe)".
+- Tile server: Messages keeps the default VersaTiles server; no setting of its own and no sharing of Stops' choice.
+  Follow-up only if the owner asks again.
+- Location permission: unchanged (asked only when sending a place; precise asked, approximate accepted).
+
 ## E6-WA R5 (2026-11-19): rich content and presence
 
 Plan and evidence: `_bmad-output/kotlin-ui/plans/e6wa-r5.md`. Polls (show, vote, change, create), shared places (map

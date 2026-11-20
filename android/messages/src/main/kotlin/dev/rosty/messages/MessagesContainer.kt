@@ -153,14 +153,16 @@ open class MessagesContainer(
             .PrefsLinkPreviewSetting(context)
 
     /**
-     * E6-WA R5: the map pictures of place cards, from tiles kept in memory only; null where no tile source can open
-     * (screenshots, tests).
+     * E6-WA R5: the map pictures of place cards, from tiles in a small bounded cache under `cacheDir` (R6 owner
+     * decision); null where no tile source can open (screenshots, tests).
      */
     val placeMaps: dev.rosty.messages.wa.rich.PlaceMaps? by lazy { createPlaceMaps() }
 
     protected open fun createPlaceMaps(): dev.rosty.messages.wa.rich.PlaceMaps? =
-        dev.rosty.messages.wa.rich
-            .PlaceMaps(staticMap = { waActionRules.staticMap(it) })
+        dev.rosty.messages.wa.rich.PlaceMaps(
+            dir = java.io.File(context.cacheDir, dev.rosty.messages.wa.rich.PlaceMaps.DIR),
+            staticMap = { waActionRules.staticMap(it) },
+        )
 
     protected open fun createWaActionRules(): dev.rosty.messages.wa.WaActionRules =
         dev.rosty.messages.wa
@@ -247,6 +249,8 @@ open class MessagesContainer(
     /** "Forgot passphrase": the link and everything kept for it go, as an unlink does (`plans/wa-vault.md` 5). */
     override suspend fun forgetWhatsApp() {
         UnlinkingWaRepository(wa) { waOffline }.forget()
+        // The cached tiles of place cards go whatever the unlink answered (R6 owner decision).
+        placeMaps?.forget()
         waLinkHandover.onForget()
     }
 

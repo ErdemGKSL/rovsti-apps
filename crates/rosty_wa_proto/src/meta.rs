@@ -278,6 +278,21 @@ pub enum SystemNote {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<String>,
     },
+    /// A change of a group (E6-WA R6): `action` (`add`, `remove`, `leave`,
+    /// `join_link`, `promote`, `demote`, `number`, `subject`, `description`,
+    /// `picture`, `announce`, `locked`, `approval`, `link_reset`, `create`,
+    /// `delete`) by `by` ([`DELETED_BY_ME`] for me) to `participants`, with
+    /// the new subject or description, `on` / `off`, or `removed` as `value`.
+    /// `rosty_core::wa_group::notice` reads it.
+    Group {
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        participants: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
     /// A kind a newer gateway names that this build does not know.
     #[serde(other)]
     Other,
@@ -355,6 +370,10 @@ pub struct ChatMeta {
     /// message sent into the chat carries it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ephemeral_s: Option<u32>,
+    /// A group I left or was removed from (E6-WA R6): it stays readable,
+    /// nothing can be sent. A join or add clears it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub left: bool,
 }
 
 impl ChatMeta {

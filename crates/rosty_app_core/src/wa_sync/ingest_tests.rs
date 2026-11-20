@@ -445,6 +445,7 @@ fn groups_profiles_and_the_instance_are_observed() {
         name: None,
         lid: lid.map(str::to_owned),
         pn: pn.map(str::to_owned),
+        role: None,
     };
     let group = GroupInfo {
         jid: GROUP.into(),
@@ -455,9 +456,8 @@ fn groups_profiles_and_the_instance_are_observed() {
             // Hides the number.
             member(LID3, Some(LID3), None),
         ],
-        description: None,
-        announce: false,
         addressing_mode: Some("lid".into()),
+        ..GroupInfo::default()
     };
     let profile = WaProfile {
         jid: PN2.into(),
